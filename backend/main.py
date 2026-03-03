@@ -1206,7 +1206,7 @@ async def startup():
             print(f"⚠️  {e}")
     else:
         print("✅ Jarvis Backend gestartet")
-        print(f"🌐 https://191.100.144.1:{config.SERVER_PORT}")
+        print(f"🌐 https://{os.getenv('SERVER_IP', '127.0.0.1')}:{config.SERVER_PORT}")
 
 
 # ─── Direkt ausführen ─────────────────────────────────────────────────

@@ -3,7 +3,7 @@
 Jarvis ist ein autonomer KI-Agent fuer Linux-Systeme mit modularem Skill-System und WhatsApp-Integration.
 
 ## Server
-- Server-IP: 191.100.144.1
+- Server-IP: ${SERVER_IP} (aus .env)
 - Betriebssystem: Debian 13 (Trixie)
 - Display: X11, physisches Display :0
 - Services: jarvis.service + whatsapp-bridge.service (systemd)

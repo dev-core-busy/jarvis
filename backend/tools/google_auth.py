@@ -12,6 +12,7 @@ Token wird gespeichert in:
 """
 
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -20,7 +21,7 @@ AUTH_DIR     = PROJECT_ROOT / "data" / "google_auth"
 CREDS_FILE   = AUTH_DIR / "credentials.json"
 TOKEN_FILE   = AUTH_DIR / "token.json"
 
-REDIRECT_URI = "https://191.100.144.1:8000/api/google/callback"
+REDIRECT_URI = f"https://{os.getenv('SERVER_IP', '127.0.0.1')}:8000/api/google/callback"
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",

@@ -149,7 +149,7 @@ if [[ "$PKG_MGR" == "apt-get" ]]; then
     $SUDO apt-get install -y \
         xvfb x11vnc openbox \
         xdotool wmctrl scrot \
-        websockify \
+        websockify novnc \
         xauth x11-utils \
         >/dev/null 2>&1 && success "X11/VNC/Desktop-Pakete installiert" \
         || warn "Einige X11-Pakete konnten nicht installiert werden."

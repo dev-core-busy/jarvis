@@ -256,6 +256,17 @@ else
     warn "WhatsApp Bridge Verzeichnis nicht gefunden: $WA_DIR"
 fi
 
+# ── Jarvis System-Benutzer anlegen ───────────────────────────────────────────
+step "System-Benutzer 'jarvis' anlegen"
+# Das Web-Login nutzt PAM – dafür muss ein Linux-User 'jarvis' existieren
+if id jarvis &>/dev/null; then
+    success "Benutzer 'jarvis' bereits vorhanden"
+else
+    $SUDO useradd -m -s /bin/bash jarvis >/dev/null 2>&1
+    echo "jarvis:jarvis" | $SUDO chpasswd
+    success "Benutzer 'jarvis' angelegt (Web-Login: jarvis / jarvis)"
+fi
+
 # ── .env konfigurieren ────────────────────────────────────────────────────────
 step "Konfiguration"
 

@@ -9,3 +9,4 @@ pillow==11.1.0
 python-multipart==0.0.20
 websockets==14.2
 python-pam>=2.0.2
+six>=1.16.0

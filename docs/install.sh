@@ -302,7 +302,7 @@ if command -v systemctl &>/dev/null; then
 [Unit]
 Description=Jarvis AI Desktop Agent
 Documentation=https://github.com/dev-core-busy/jarvis
-After=network.target
+After=network.target graphical.target
 Wants=network.target
 
 [Service]
@@ -313,7 +313,6 @@ ExecStart=$INSTALL_DIR/start_jarvis.sh
 Restart=on-failure
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
-Environment=DISPLAY=:1
 
 [Install]
 WantedBy=multi-user.target

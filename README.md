@@ -6,17 +6,18 @@
 
 [![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-green?logo=gnu)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.8-orange)](https://github.com/dev-core-busy/jarvix/releases)
+[![Version](https://img.shields.io/badge/Version-0.8-orange)](https://github.com/dev-core-busy/jarvis/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey?logo=linux)](https://www.linux.org/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen)](https://github.com/dev-core-busy/jarvix/pulls)
+[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen)](https://github.com/dev-core-busy/jarvis/pulls)
+[![OpenClaw Compatible](https://img.shields.io/badge/OpenClaw-Compatible-6366f1)](https://github.com/dev-core-busy/jarvis#openclaw-skill-ecosystem)
 
 *Control your Linux desktop with natural language. Receive tasks via WhatsApp. Search your knowledge base. Automate everything.*
 
-[**Live Demo**](https://jarvis-ai.info) · [**Report Bug**](https://github.com/dev-core-busy/jarvix/issues) · [**Request Feature**](https://github.com/dev-core-busy/jarvix/issues) · [**Contribute**](#contributing)
+[**Live Demo**](https://jarvis-ai.info) · [**Report Bug**](https://github.com/dev-core-busy/jarvis/issues) · [**Request Feature**](https://github.com/dev-core-busy/jarvis/issues) · [**Contribute**](#contributing)
 
 ---
 
-![Jarvis Split View](docs/screenshots/split_view.png)
+![Jarvis Split View](https://jarvis-ai.info/img/split_view.png)
 
 </div>
 
@@ -186,11 +187,11 @@ Full browser control via CDP (Chrome DevTools Protocol) and xdotool. The agent c
 ## Screenshots
 
 ### Split View — Chat + Live Desktop
-![Jarvis Split View](docs/screenshots/split_view.png)
+![Jarvis Split View](https://jarvis-ai.info/img/split_view.png)
 *Left panel: LLM conversation with tool call display. Right panel: Live VNC desktop feed.*
 
 ### Settings & Skill Manager
-![Settings](docs/screenshots/settings.png)
+![Settings](https://jarvis-ai.info/img/settings.png)
 *Enable/disable skills, configure providers, manage API keys — all in the UI.*
 
 ### WhatsApp Integration
@@ -376,6 +377,51 @@ def get_tools(config: dict) -> list:
 3. Enable in the web UI under Settings → Skills
 
 > **openclaw compatibility:** Skills built for the [openclaw](https://github.com/steipete/gogcli) ecosystem work with Jarvis's skill loader with minimal adaptation.
+
+---
+
+## 🔌 OpenClaw Skill Ecosystem
+
+> **Jarvis is fully compatible with the [OpenClaw](https://github.com/steipete/gogcli) skill format.**
+
+OpenClaw is a growing ecosystem of AI agent skills. Jarvis can import any OpenClaw skill package directly — just drop the skill folder into `skills/` and it's ready to use.
+
+### Why this matters
+
+| Without OpenClaw | With OpenClaw |
+|---|---|
+| Write every tool from scratch | Reuse existing skills instantly |
+| Limited to built-in capabilities | Access a growing ecosystem |
+| Skills locked to one agent | Skills work across OpenClaw agents |
+
+### Built-in OpenClaw Skills
+
+Jarvis ships with 3 production-ready OpenClaw skills out of the box:
+
+| Skill | Description |
+|---|---|
+| `openclaw_gmail` | Full Gmail integration via gog CLI (send, read, search, manage) |
+| `agent_orchestrator` | Orchestrate multiple sub-agents for complex parallel tasks |
+| `agent_autonomy_kit` | Heartbeat monitoring, task queuing, autonomous operation |
+
+### Importing an OpenClaw Skill
+
+```bash
+# 1. Download any OpenClaw-compatible skill package
+# 2. Drop it into the skills/ directory
+cp -r my_openclaw_skill/ skills/
+
+# 3. Reload via API (no restart needed!)
+curl -X POST https://localhost:8000/api/skills/reload
+
+# 4. Enable in UI: Settings → Skills → toggle ON
+```
+
+Or use the **built-in import workflow** in Jarvis:
+```
+Task: "Import the OpenClaw skill from /path/to/skill_package"
+```
+Jarvis handles the rest automatically.
 
 ---
 

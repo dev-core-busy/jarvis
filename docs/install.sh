@@ -71,7 +71,7 @@ install_pkg curl curl
 # Build-Tools (nötig für Python-Pakete mit C-Erweiterungen)
 if [[ "$PKG_MGR" == "apt-get" ]]; then
     info "Installiere Build-Tools & Python-Dev-Header ..."
-    $SUDO apt-get install -y build-essential python3-dev libssl-dev libffi-dev >/dev/null 2>&1 \
+    $SUDO apt-get install -y build-essential python3-dev libssl-dev libffi-dev libpam0g-dev >/dev/null 2>&1 \
         && success "Build-Tools installiert" \
         || warn "Build-Tools konnten nicht installiert werden – manche pip-Pakete könnten fehlschlagen."
 elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then

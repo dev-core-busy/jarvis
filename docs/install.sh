@@ -298,9 +298,9 @@ Wants=network.target
 Type=simple
 User=$CURRENT_USER
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$PYTHON_BIN backend/main.py
+ExecStart=$INSTALL_DIR/start_jarvis.sh
 Restart=on-failure
-RestartSec=5
+RestartSec=10
 Environment=PYTHONUNBUFFERED=1
 Environment=DISPLAY=:1
 

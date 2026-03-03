@@ -1,0 +1,32 @@
+{
+    "name": "Desktop",
+    "description": "Maus, Tastatur und Fenster-Steuerung (X11)",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["desktop_control"],
+    "category": "system",
+    "icon": "monitor",
+    "system": true,
+    "enabled": true,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": ["desktop"],
+    "help": {
+        "details": "Steuert Maus, Tastatur und Fenster direkt auf dem Linux-Desktop (X11). Jarvis kann damit mit beliebigen grafischen Anwendungen interagieren – genau wie ein menschlicher Benutzer. Grundlage für alle visuellen Automatisierungsaufgaben.",
+        "tools": [
+            {
+                "name": "desktop_control",
+                "label": "Desktop Control",
+                "desc": "Führt Desktop-Aktionen aus: Mausklicks (einfach, doppelt, rechts), Text tippen, Tastenkombinationen drücken (z. B. Ctrl+C), Fenster auflisten/fokussieren/verschieben/schließen, Zwischenablage lesen/setzen, Drag & Drop, Mausrad scrollen."
+            }
+        ],
+        "use_cases": [
+            "Klicke auf den OK-Button im Dialogfenster",
+            "Tippe 'Hallo Welt' in das aktive Textfeld",
+            "Liste alle offenen Fenster auf und fokussiere Firefox"
+        ],
+        "notes": "Erfordert einen laufenden X11-Desktop (DISPLAY=:1). Für präzise Klicks immer zuerst einen Screenshot erstellen, um die Koordinaten zu ermitteln."
+    }
+}

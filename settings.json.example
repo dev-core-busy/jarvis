@@ -1,0 +1,19 @@
+{
+    "version": 2,
+    "active_profile_id": "",
+    "tts_enabled": false,
+    "use_physical_desktop": false,
+    "profiles": [
+        {
+            "id": "example-profile-id",
+            "name": "Google Gemini",
+            "provider": "google",
+            "model": "gemini-2.0-flash",
+            "api_url": "https://api.google.com/genai/v1",
+            "api_key": "",
+            "auth_method": "api_key",
+            "session_key": ""
+        }
+    ],
+    "skills": {}
+}

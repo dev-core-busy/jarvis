@@ -1,0 +1,32 @@
+{
+    "name": "Shell",
+    "description": "Bash-Befehle auf dem System ausführen",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["shell_execute"],
+    "category": "system",
+    "icon": "terminal",
+    "system": true,
+    "enabled": true,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": ["shell"],
+    "help": {
+        "details": "Führt beliebige Bash-Befehle direkt auf dem Linux-Server aus und gibt stdout sowie stderr zurück. Damit lassen sich Programme starten, Systemzustände prüfen, Dateien verwalten, Dienste steuern und nahezu alle Serveraufgaben automatisieren.",
+        "tools": [
+            {
+                "name": "shell_execute",
+                "label": "Shell Execute",
+                "desc": "Führt einen Bash-Befehl aus und gibt die vollständige Ausgabe zurück. Unterstützt Pipes, Umleitungen und alle Standard-Shell-Konstrukte. Timeout konfigurierbar. Gibt Exit-Code, stdout und stderr zurück."
+            }
+        ],
+        "use_cases": [
+            "Zeige alle laufenden Prozesse: 'ps aux | grep python'",
+            "Wie viel Speicherplatz ist noch frei? ('df -h')",
+            "Starte den Dienst neu: 'systemctl restart jarvis.service'"
+        ],
+        "notes": "Befehle laufen als root – mit vollem Systemzugriff. Interaktive Programme (nano, vim, htop) funktionieren nicht. Für Dateioperationen ist der Dateisystem-Skill komfortabler."
+    }
+}

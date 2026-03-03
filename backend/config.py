@@ -1,0 +1,360 @@
+"""Jarvis Konfiguration – lädt Einstellungen aus .env"""
+
+import os
+import json
+import uuid
+from pathlib import Path
+from dotenv import load_dotenv
+
+# .env aus Projektverzeichnis laden
+PROJECT_ROOT = Path(__file__).parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
+
+
+class Config:
+    """Zentrale Konfiguration für Jarvis mit Profil-Verwaltung."""
+
+    # Defaults
+    DEFAULT_PROVIDERS = {
+        "google": {
+            "url": "https://api.google.com/genai/v1",
+            "models": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"],
+        },
+        "openrouter": {
+            "url": "https://openrouter.ai/api/v1/chat/completions",
+            "models": [
+                "google/gemini-2.0-flash-001",
+                "google/gemini-2.0-flash-lite-001",
+                "google/gemini-pro-1.5",
+                "anthropic/claude-3.5-sonnet",
+                "meta-llama/llama-3.1-405b",
+            ],
+        },
+        "anthropic": {
+            "url": "https://api.anthropic.com/v1/messages",
+            "models": [
+                "claude-opus-4-5",
+                "claude-sonnet-4-5",
+                "claude-3-5-sonnet-20241022",
+                "claude-3-5-haiku-20241022",
+                "claude-3-opus-20240229",
+            ],
+        },
+        "openai_compatible": {
+            "url": "http://localhost:11434/v1/chat/completions",
+            "models": [],
+        },
+    }
+
+    # Sicherheit & Server
+    JARVIS_PASSWORD: str = os.getenv("JARVIS_PASSWORD", "jarvis")
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "jarvis-secret-key-change-me")
+    SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0")
+    SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8000"))
+    VNC_PORT: int = int(os.getenv("VNC_PORT", "5900"))
+    WEBSOCKIFY_PORT: int = int(os.getenv("WEBSOCKIFY_PORT", "6080"))
+    MAX_AGENT_STEPS: int = int(os.getenv("MAX_AGENT_STEPS", "50"))
+    COMMAND_TIMEOUT: int = int(os.getenv("COMMAND_TIMEOUT", "120"))
+    SETTINGS_FILE = PROJECT_ROOT / "settings.json"
+
+    # Globale Einstellungen (nicht profil-spezifisch)
+    TTS_ENABLED: bool = False
+    USE_PHYSICAL_DESKTOP: bool = False
+
+    def __init__(self):
+        self.profiles: list[dict] = []
+        self.active_profile_id: str = ""
+        self._skill_states: dict[str, dict] = {}
+
+        # Profile aus ENV-Variablen initialisieren
+        self._init_profiles_from_env()
+
+        # settings.json laden (überschreibt ggf. ENV-Profile)
+        self.load_settings()
+
+        # Fallback: mindestens ein Standard-Profil
+        if not self.profiles:
+            self._create_default_profile()
+
+    def _init_profiles_from_env(self):
+        """Erstellt initiale Profile aus Umgebungsvariablen."""
+        gemini_key = os.getenv("GEMINI_API_KEY", "")
+        if gemini_key:
+            self.profiles.append({
+                "id": str(uuid.uuid4()),
+                "name": "Google Gemini",
+                "provider": "google",
+                "model": self.DEFAULT_PROVIDERS["google"]["models"][0],
+                "api_url": self.DEFAULT_PROVIDERS["google"]["url"],
+                "api_key": gemini_key,
+                "auth_method": "api_key",
+                "session_key": "",
+            })
+
+        or_key = os.getenv("OPENROUTER_API_KEY", "")
+        if or_key:
+            self.profiles.append({
+                "id": str(uuid.uuid4()),
+                "name": "OpenRouter",
+                "provider": "openrouter",
+                "model": self.DEFAULT_PROVIDERS["openrouter"]["models"][0],
+                "api_url": self.DEFAULT_PROVIDERS["openrouter"]["url"],
+                "api_key": or_key,
+                "auth_method": "api_key",
+                "session_key": "",
+            })
+
+        ant_key = os.getenv("ANTHROPIC_API_KEY", "")
+        session_key = os.getenv("ANTHROPIC_SESSION_KEY", "")
+        if ant_key or session_key:
+            self.profiles.append({
+                "id": str(uuid.uuid4()),
+                "name": "Anthropic Claude",
+                "provider": "anthropic",
+                "model": self.DEFAULT_PROVIDERS["anthropic"]["models"][0],
+                "api_url": self.DEFAULT_PROVIDERS["anthropic"]["url"],
+                "api_key": ant_key,
+                "auth_method": "session" if session_key and not ant_key else "api_key",
+                "session_key": session_key,
+            })
+
+        # Erstes Profil als aktiv setzen
+        if self.profiles:
+            self.active_profile_id = self.profiles[0]["id"]
+
+    def _create_default_profile(self):
+        """Erstellt ein leeres Standard-Profil als Fallback."""
+        profile = {
+            "id": str(uuid.uuid4()),
+            "name": "Standard",
+            "provider": "google",
+            "model": self.DEFAULT_PROVIDERS["google"]["models"][0],
+            "api_url": self.DEFAULT_PROVIDERS["google"]["url"],
+            "api_key": "",
+            "auth_method": "api_key",
+            "session_key": "",
+        }
+        self.profiles.append(profile)
+        self.active_profile_id = profile["id"]
+
+    # ─── Laden / Speichern ─────────────────────────────────────────
+
+    def load_settings(self):
+        """Lädt Einstellungen aus settings.json mit Auto-Migration."""
+        if not self.SETTINGS_FILE.exists():
+            return
+        try:
+            data = json.loads(self.SETTINGS_FILE.read_text())
+            if data.get("version") == 2:
+                self._load_v2(data)
+            else:
+                self._migrate_v1_to_v2(data)
+        except Exception as e:
+            print(f"Fehler beim Laden der Einstellungen: {e}")
+
+    def _load_v2(self, data: dict):
+        """Lädt das v2-Format mit Profilen."""
+        self.profiles = data.get("profiles", [])
+        self.active_profile_id = data.get("active_profile_id", "")
+        self.TTS_ENABLED = data.get("tts_enabled", False)
+        self.USE_PHYSICAL_DESKTOP = data.get("use_physical_desktop", False)
+        self._skill_states = data.get("skills", {})
+
+        # Sicherstellen, dass active_profile_id gültig ist
+        if self.profiles and not any(p["id"] == self.active_profile_id for p in self.profiles):
+            self.active_profile_id = self.profiles[0]["id"]
+
+    def _migrate_v1_to_v2(self, data: dict):
+        """Migriert settings.json v1 (flach) nach v2 (Profile)."""
+        self.TTS_ENABLED = data.get("tts_enabled", False)
+        self.USE_PHYSICAL_DESKTOP = data.get("use_physical_desktop", False)
+
+        old_provider = data.get("llm_provider", "google")
+        model_keys = data.get("model_keys", {})
+        api_urls = data.get("api_urls", {})
+
+        provider_configs = {
+            "google": {"model_key": "google_model", "name": "Google Gemini"},
+            "openrouter": {"model_key": "openrouter_model", "name": "OpenRouter"},
+            "anthropic": {"model_key": "anthropic_model", "name": "Anthropic Claude"},
+        }
+
+        self.profiles = []
+        for prov, cfg in provider_configs.items():
+            default_model = self.DEFAULT_PROVIDERS[prov]["models"][0]
+            model = data.get(cfg["model_key"], default_model)
+            key = model_keys.get(model, "")
+            url = api_urls.get(prov, self.DEFAULT_PROVIDERS[prov]["url"])
+
+            if key or prov == old_provider:
+                profile = {
+                    "id": str(uuid.uuid4()),
+                    "name": cfg["name"],
+                    "provider": prov,
+                    "model": model,
+                    "api_url": url,
+                    "api_key": key,
+                    "auth_method": data.get("anthropic_auth_method", "api_key") if prov == "anthropic" else "api_key",
+                    "session_key": data.get("anthropic_session_key", "") if prov == "anthropic" else "",
+                }
+                self.profiles.append(profile)
+                if prov == old_provider:
+                    self.active_profile_id = profile["id"]
+
+        if not self.active_profile_id and self.profiles:
+            self.active_profile_id = self.profiles[0]["id"]
+
+        self._save_to_file()
+        print("Settings von v1 nach v2 migriert.")
+
+    def _save_to_file(self):
+        """Speichert alles im v2-Format."""
+        data = {
+            "version": 2,
+            "active_profile_id": self.active_profile_id,
+            "tts_enabled": self.TTS_ENABLED,
+            "use_physical_desktop": self.USE_PHYSICAL_DESKTOP,
+            "profiles": self.profiles,
+            "skills": self._skill_states,
+        }
+        self.SETTINGS_FILE.write_text(json.dumps(data, indent=4))
+
+    def save_global_settings(self, settings: dict):
+        """Speichert globale Einstellungen (TTS, Desktop etc.)."""
+        if "tts_enabled" in settings:
+            self.TTS_ENABLED = settings["tts_enabled"]
+        if "use_physical_desktop" in settings:
+            self.USE_PHYSICAL_DESKTOP = settings["use_physical_desktop"]
+        self._save_to_file()
+
+    # ─── Skills-Verwaltung ─────────────────────────────────────────
+
+    def get_skill_states(self) -> dict:
+        """Gibt alle Skill-Zustände zurück."""
+        return self._skill_states
+
+    def save_skill_state(self, name: str, state: dict):
+        """Speichert den Zustand eines einzelnen Skills."""
+        if name not in self._skill_states:
+            self._skill_states[name] = {}
+        self._skill_states[name].update(state)
+        self._save_to_file()
+
+    def remove_skill_state(self, name: str):
+        """Entfernt den Zustand eines Skills."""
+        self._skill_states.pop(name, None)
+        self._save_to_file()
+
+    # ─── Profil-CRUD ───────────────────────────────────────────────
+
+    def create_profile(self, data: dict) -> dict:
+        """Erstellt ein neues Profil."""
+        provider = data.get("provider", "google")
+        default_url = self.DEFAULT_PROVIDERS.get(provider, {}).get("url", "")
+        profile = {
+            "id": str(uuid.uuid4()),
+            "name": data.get("name", "Neues Profil"),
+            "provider": provider,
+            "model": data.get("model", ""),
+            "api_url": data.get("api_url", default_url),
+            "api_key": data.get("api_key", ""),
+            "auth_method": data.get("auth_method", "api_key"),
+            "session_key": data.get("session_key", ""),
+        }
+        self.profiles.append(profile)
+        if not self.active_profile_id:
+            self.active_profile_id = profile["id"]
+        self._save_to_file()
+        return profile
+
+    def update_profile(self, profile_id: str, data: dict) -> dict | None:
+        """Aktualisiert ein bestehendes Profil."""
+        for p in self.profiles:
+            if p["id"] == profile_id:
+                for key in ["name", "provider", "model", "api_url", "api_key", "auth_method", "session_key"]:
+                    if key in data:
+                        p[key] = data[key]
+                self._save_to_file()
+                return p
+        return None
+
+    def delete_profile(self, profile_id: str) -> bool:
+        """Löscht ein Profil. Mindestens eines muss bestehen bleiben."""
+        if len(self.profiles) <= 1:
+            return False
+        self.profiles = [p for p in self.profiles if p["id"] != profile_id]
+        if self.active_profile_id == profile_id:
+            self.active_profile_id = self.profiles[0]["id"]
+        self._save_to_file()
+        return True
+
+    def activate_profile(self, profile_id: str) -> bool:
+        """Setzt ein Profil als aktiv."""
+        if any(p["id"] == profile_id for p in self.profiles):
+            self.active_profile_id = profile_id
+            self._save_to_file()
+            return True
+        return False
+
+    # ─── Properties (Fassade für agent.py) ─────────────────────────
+
+    @property
+    def active_profile(self) -> dict | None:
+        """Gibt das aktuell aktive Profil zurück."""
+        for p in self.profiles:
+            if p["id"] == self.active_profile_id:
+                return p
+        return self.profiles[0] if self.profiles else None
+
+    @property
+    def LLM_PROVIDER(self) -> str:
+        p = self.active_profile
+        return p.get("provider", "google") if p else "google"
+
+    @property
+    def current_model(self) -> str:
+        p = self.active_profile
+        return p.get("model", "") if p else ""
+
+    @property
+    def current_api_key(self) -> str:
+        p = self.active_profile
+        return p.get("api_key", "") if p else ""
+
+    @property
+    def current_api_url(self) -> str:
+        p = self.active_profile
+        return p.get("api_url", "") if p else ""
+
+    @property
+    def current_auth_method(self) -> str:
+        p = self.active_profile
+        return p.get("auth_method", "api_key") if p else "api_key"
+
+    @property
+    def current_session_key(self) -> str:
+        p = self.active_profile
+        return p.get("session_key", "") if p else ""
+
+    @property
+    def current_prompt_tool_calling(self) -> bool:
+        p = self.active_profile
+        return bool(p.get("prompt_tool_calling", False)) if p else False
+
+    def validate(self) -> list[str]:
+        """Prüft ob das aktive Profil vollständig konfiguriert ist."""
+        errors = []
+        p = self.active_profile
+        if not p:
+            errors.append("Kein Profil konfiguriert.")
+            return errors
+        if p["provider"] == "anthropic" and p.get("auth_method") == "session":
+            if not p.get("session_key"):
+                errors.append(f"Anthropic Session-Key fehlt im Profil '{p['name']}'.")
+        elif p["provider"] != "openai_compatible":
+            if not p.get("api_key"):
+                errors.append(f"API Key fehlt im Profil '{p['name']}'.")
+        return errors
+
+
+config = Config()

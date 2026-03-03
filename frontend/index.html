@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis – KI Linux Agent</title>
+    <meta name="description" content="Jarvis – Autonomer KI-Agent für Linux-Systeme">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <link rel="stylesheet" href="/static/css/style.css?v=17">
+</head>
+
+<body>
+    <!-- ═══ Security Banner ═══ -->
+    <div id="security-banner" class="security-banner" hidden>
+        <div class="banner-content">
+            <span class="banner-icon">⚠️</span>
+            <span class="banner-text" id="security-banner-text">Verbindung unsicher</span>
+            <button class="btn-banner-action" id="btn-banner-help">Zertifikat installieren</button>
+            <button class="btn-close-banner" id="btn-close-banner">&times;</button>
+        </div>
+    </div>
+
+    <!-- ═══ Login Screen ═══ -->
+    <div id="login-screen" class="screen active">
+        <div class="login-container">
+            <div class="jarvis-logo">
+                <div class="logo-ring">
+                    <div class="logo-ring-inner"></div>
+                    <div class="logo-core">J</div>
+                </div>
+            </div>
+            <h1 class="login-title">JARVIS</h1>
+            <p class="login-subtitle">KI Linux Agent</p>
+            <form id="login-form" class="login-form">
+                <div class="input-group" style="flex-direction: column; gap: 0;">
+                    <input type="text" id="login-username" placeholder="Benutzername"
+                        autocomplete="username" required>
+                    <input type="password" id="login-password" placeholder="Passwort"
+                        autocomplete="current-password" required>
+                    <button type="submit" class="btn-login" id="login-btn">
+                        <span class="btn-text">ANMELDEN</span>
+                    </button>
+                </div>
+                <p id="login-error" class="login-error" hidden></p>
+
+                <div class="login-extras">
+                    <button type="button" class="btn-link" id="btn-cert-help">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                            <path d="M12 8v4"></path>
+                            <path d="M12 16h.01"></path>
+                        </svg>
+                        SSL Zertifikat & Verbindung Hilfe
+                    </button>
+                </div>
+            </form>
+        </div>
+        <div class="login-particles" id="particles"></div>
+    </div>
+
+    <!-- ═══ Cert Help Modal ═══ -->
+    <div id="cert-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🔒 Sichere Verbindung einrichten</h2>
+                <button class="btn-icon" id="btn-close-modal">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="cert-download-section">
+                    <div class="cert-icon">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="1.5">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                            <path d="M9 12l2 2 4-4"></path>
+                        </svg>
+                    </div>
+                    <div class="cert-info">
+                        <h3>SSL-Zertifikat installieren</h3>
+                        <p>Damit Browser diese Verbindung als sicher einstufen, muss das Zertifikat importiert werden.
+                        </p>
+                        <a href="/api/cert" class="btn-primary btn-download">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            Zertifikat herunterladen (jarvis.cer)
+                        </a>
+                    </div>
+                </div>
+
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="windows">Windows</button>
+                    <button class="tab-btn" data-tab="linux">Linux</button>
+                    <button class="tab-btn" data-tab="browser">Browser-Import</button>
+                </div>
+
+                <div class="tab-content active" id="tab-windows">
+                    <ol class="steps-list">
+                        <li>Lade die Datei <code>jarvis.cer</code> herunter.</li>
+                        <li>Rechtsklick auf die Datei → <strong>"Zertifikat installieren"</strong>.</li>
+                        <li>Wähle <strong>"Lokaler Computer"</strong> (nicht "Aktueller Benutzer").</li>
+                        <li>Wähle <strong>"Alle Zertifikate in folgendem Speicher speichern"</strong>.</li>
+                        <li>Klicke auf "Durchsuchen" und wähle <strong>"Vertrauenswürdige
+                                Stammzertifizierungsstellen"</strong>.</li>
+                        <li>Bestätigen und Fertigstellen.</li>
+                        <li><strong>Browser komplett neu starten</strong> (alle Tabs schließen).</li>
+                    </ol>
+                </div>
+
+                <div class="tab-content" id="tab-linux">
+                    <div class="code-block">
+                        <pre><code># Zertifikat kopieren
+sudo cp jarvis.crt /usr/local/share/ca-certificates/jarvis.crt
+
+# Store aktualisieren
+sudo update-ca-certificates</code></pre>
+                    </div>
+                    <p class="tab-note">Für Chromium/Chrome unter Linux muss oft zusätzlich der Browser-Import (siehe
+                        Tab "Browser-Import") durchgeführt werden, da diese eigene Stores nutzen.</p>
+                </div>
+
+                <div class="tab-content" id="tab-browser">
+                    <p>Falls die System-Installation nicht greift (z.B. Firefox):</p>
+                    <ol class="steps-list">
+                        <li>Öffne die Einstellungen deines Browsers.</li>
+                        <li>Suche nach <strong>"Zertifikate"</strong> oder <strong>"Zertifikate verwalten"</strong>.
+                        </li>
+                        <li>Klicke auf <strong>"Importieren..."</strong> im Reiter "Zertifizierungsstellen"
+                            (Authorities).</li>
+                        <li>Wähle die Datei <code>jarvis.cer</code> aus.</li>
+                        <li>Setze den Haken bei <strong>"Dieser CA vertrauen, um Websites zu identifizieren"</strong>.
+                        </li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Hauptansicht ═══ -->
+    <div id="main-screen" class="screen">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="header-logo">
+                    <div class="logo-mini-ring">
+                        <div class="logo-mini-core">J</div>
+                    </div>
+                </div>
+                <div class="header-info">
+                    <h1 class="header-title">JARVIS</h1>
+                    <div id="agent-state-badge" class="header-status">Bereit</div>
+                    <div id="security-indicator" class="security-badge" title="Sicherheitsstatus">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.5">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            <div class="header-center" style="flex: 1; display: flex; justify-content: center; max-width: 50%;">
+                <div class="cpu-bar" id="cpu-bar" style="width: 100%; max-width: 400px; margin: 0 1rem;">
+                    <div class="cpu-bar-fill" id="cpu-bar-fill" style="width: 0%"></div>
+                    <span class="cpu-bar-label" id="cpu-bar-label">CPU: 0%</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="connection-indicator" id="connection-dot" title="Verbindungsstatus"></div>
+                <button class="btn-icon" id="btn-settings" title="KI-Einstellungen">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1 2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                        </path>
+                    </svg>
+                </button>
+                <button class="btn-icon" id="btn-logout" title="Abmelden">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                        <polyline points="16 17 21 12 16 7" />
+                        <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Hauptbereich -->
+        <main class="main-content">
+            <section class="panel panel-left" id="panel-left">
+                <div class="panel-header">
+                    <h2 class="panel-title">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M12 20h9" />
+                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                        </svg>
+                        Aktivitätslog
+                    </h2>
+
+                    <!-- Fenster-Steuerung -->
+                    <div class="window-controls"
+                        style="display: flex; gap: 4px; margin-left: auto; margin-right: 1rem;">
+                        <button class="btn-icon btn-small btn-window btn-win-minimize" title="Minimieren">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+                        <button class="btn-icon btn-small btn-window btn-win-maximize" title="Maximieren">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            </svg>
+                        </button>
+                        <button class="btn-icon btn-small btn-window btn-win-restore" title="Wiederherstellen">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <rect x="4" y="8" width="12" height="12" rx="1" ry="1"></rect>
+                                <path d="M8 8V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-4"></path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <button class="btn-icon btn-small" id="btn-clear-log" title="Log leeren">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="log-container" id="log-container">
+                    <div class="log-welcome">
+                        <p>👋 Willkommen bei Jarvis!</p>
+                        <p class="log-hint">Gib unten eine Aufgabe ein, um loszulegen.</p>
+                    </div>
+                </div>
+
+                <!-- Steuerung -->
+                <div class="control-bar" id="control-bar">
+                    <button class="btn-control" id="btn-pause" title="Pausieren" disabled>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="6" y="4" width="4" height="16" />
+                            <rect x="14" y="4" width="4" height="16" />
+                        </svg>
+                    </button>
+                    <button class="btn-control" id="btn-resume" title="Fortsetzen" disabled hidden>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                    </button>
+                    <button class="btn-control btn-danger" id="btn-stop" title="Stoppen" disabled>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="4" y="4" width="16" height="16" rx="2" />
+                        </svg>
+                    </button>
+                    <div class="speed-control">
+                        <label class="speed-label">Tempo</label>
+                        <input type="range" id="speed-slider" min="0.1" max="3" step="0.1" value="1"
+                            class="speed-slider">
+                        <span class="speed-value" id="speed-value">1.0x</span>
+                    </div>
+                </div>
+
+                <!-- Eingabe -->
+                <div class="input-bar">
+                    <textarea id="task-input" placeholder="Aufgabe für Jarvis eingeben..." rows="2"></textarea>
+                    <button class="btn-mic" id="btn-mic" title="Spracheingabe">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                            <line x1="12" y1="19" x2="12" y2="23"></line>
+                            <line x1="8" y1="23" x2="16" y2="23"></line>
+                        </svg>
+                    </button>
+                    <button class="btn-send" id="btn-send" title="Absenden">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13" />
+                            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                        </svg>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Resize Handle -->
+            <div class="resize-handle" id="resize-handle"></div>
+
+            <!-- Rechte Spalte: Desktop-Vorschau -->
+            <section class="panel panel-right" id="panel-right">
+                <div class="panel-header">
+                    <h2 class="panel-title">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                            <line x1="8" y1="21" x2="16" y2="21" />
+                            <line x1="12" y1="17" x2="12" y2="21" />
+                        </svg>
+                        Live Desktop
+                    </h2>
+
+                    <!-- Fenster-Steuerung -->
+                    <div class="window-controls" style="display: flex; gap: 4px; margin-left: auto;">
+                        <button class="btn-icon btn-small btn-window btn-win-minimize" title="Minimieren">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+                        <button class="btn-icon btn-small btn-window btn-win-maximize" title="Maximieren">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            </svg>
+                        </button>
+                        <button class="btn-icon btn-small btn-window btn-win-restore" title="Wiederherstellen">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <rect x="4" y="8" width="12" height="12" rx="1" ry="1"></rect>
+                                <path d="M8 8V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-4"></path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="panel-actions">
+                        <span class="vnc-status" id="vnc-status">Nicht verbunden</span>
+                    </div>
+                </div>
+                <div class="desktop-preview" id="desktop-preview">
+                    <div class="desktop-placeholder" id="desktop-placeholder">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="1.5" opacity="0.3">
+                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                            <line x1="8" y1="21" x2="16" y2="21" />
+                            <line x1="12" y1="17" x2="12" y2="21" />
+                        </svg>
+                        <p>Desktop-Vorschau wird geladen...</p>
+                    </div>
+                    <iframe id="vnc-iframe" class="vnc-iframe" hidden></iframe>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- ═══ Settings Modal ═══ -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h2 id="settings-title">Einstellungen</h2>
+                <button class="btn-close-modal" id="btn-close-settings">&times;</button>
+            </div>
+
+            <!-- Settings Tabs -->
+            <div class="settings-tabs">
+                <button class="settings-tab-btn active" data-settings-tab="profiles">KI-Profile</button>
+                <button class="settings-tab-btn" data-settings-tab="skills">Skills</button>
+                <button class="settings-tab-btn" data-settings-tab="whatsapp">WhatsApp</button>
+                <button class="settings-tab-btn" data-settings-tab="knowledge">Wissen</button>
+                <button class="settings-tab-btn" data-settings-tab="google" id="settings-tab-btn-google" style="display:none;">Google</button>
+            </div>
+
+            <div class="modal-body">
+
+                <!-- ═══ Tab: KI-Profile ═══ -->
+                <div id="settings-tab-profiles" class="settings-tab-content active">
+
+                <!-- ── Ansicht 1: Profilliste ── -->
+                <div id="profiles-list-view">
+                    <div id="profiles-container" class="profiles-list">
+                        <!-- Profil-Cards werden via JS erzeugt -->
+                    </div>
+                    <button class="btn-add-profile" id="btn-add-profile">+ Neues Profil</button>
+
+                    <hr class="settings-divider">
+
+                    <div class="form-group">
+                        <label>Sprachausgabe (TTS)</label>
+                        <label class="checkbox-group">
+                            <input type="checkbox" id="setting-tts">
+                            <span>Aktiviere Sprachausgabe</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- ── Ansicht 2: Profil bearbeiten/erstellen ── -->
+                <div id="profile-edit-view" style="display: none;">
+                    <div class="form-group">
+                        <label>Profilname</label>
+                        <div class="input-group">
+                            <input type="text" id="profile-name" placeholder="z.B. Google Standard">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>LLM Anbieter</label>
+                        <div class="input-group">
+                            <select id="profile-provider" class="select-field">
+                                <option value="google">Google Gemini</option>
+                                <option value="openrouter">OpenRouter</option>
+                                <option value="anthropic">Anthropic Claude</option>
+                                <option value="openai_compatible">OpenAI-Kompatibel (Lokal)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>API Base URL</label>
+                        <div class="input-group">
+                            <input type="text" id="profile-api-url" placeholder="https://api.example.com">
+                        </div>
+                    </div>
+
+                    <!-- Modell: Dropdown für bekannte Provider -->
+                    <div class="form-group" id="model-select-group">
+                        <label>KI-Modell</label>
+                        <div class="input-group">
+                            <select id="profile-model-select" class="select-field">
+                                <!-- Wird via JS befüllt -->
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Modell: Freitext für openai_compatible -->
+                    <div class="form-group" id="model-input-group" style="display: none;">
+                        <label>Modellname</label>
+                        <div class="input-group">
+                            <input type="text" id="profile-model-input" placeholder="z.B. llama3:8b, mistral, codellama">
+                        </div>
+                        <small class="tab-note" style="margin-top: 5px; opacity: 0.7;">
+                            Modellname wie vom Server erwartet (z.B. Ollama: llama3:8b)
+                        </small>
+                    </div>
+
+                    <!-- Prompt-Tool-Calling (nur openai_compatible) -->
+                    <div class="form-group" id="prompt-tool-group" style="display: none;">
+                        <label class="checkbox-group" style="cursor: pointer;">
+                            <input type="checkbox" id="profile-prompt-tool-calling">
+                            <span>Prompt-basiertes Tool-Calling</span>
+                        </label>
+                        <small class="tab-note" style="margin-top: 4px; opacity: 0.7; display: block;">
+                            Für Modelle ohne native Function-Calling-API (z.B. Liquid LFM2, Phi-3).
+                            Tools werden im System-Prompt beschrieben, Aufrufe per &lt;tool_call&gt;-Tag geparst.
+                        </small>
+                    </div>
+
+                    <!-- Zugangsart (nur bei Anthropic sichtbar) -->
+                    <div class="form-group" id="auth-method-group" style="display: none;">
+                        <label>Zugangsart</label>
+                        <div class="input-group" style="display: flex; gap: 1rem;">
+                            <label class="checkbox-group" style="flex: 1; cursor: pointer;">
+                                <input type="radio" name="auth-method" id="auth-apikey" value="api_key" checked>
+                                <span>API Key</span>
+                            </label>
+                            <label class="checkbox-group" style="flex: 1; cursor: pointer;">
+                                <input type="radio" name="auth-method" id="auth-session" value="session">
+                                <span>Session (Pro-Abo)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- API Key -->
+                    <div class="form-group" id="apikey-group">
+                        <label>API Key</label>
+                        <div class="input-group">
+                            <input type="password" id="profile-api-key" placeholder="AIza... / sk-or-... / sk-ant-...">
+                        </div>
+                        <small class="tab-note apikey-hint" style="margin-top: 5px; opacity: 0.7;"></small>
+                    </div>
+
+                    <!-- Session Key (nur bei Anthropic Session) -->
+                    <div class="form-group" id="session-group" style="display: none;">
+                        <label>Session Key</label>
+                        <div class="input-group">
+                            <input type="password" id="profile-session-key" placeholder="sk-ant-sid01-...">
+                        </div>
+                        <small class="tab-note" style="margin-top: 5px; opacity: 0.7;">
+                            Aus dem Browser-Cookie <code>sessionKey</code> auf
+                            <a href="https://claude.ai" target="_blank" style="color: #818cf8;">claude.ai</a> kopieren.
+                            <br>Chrome: F12 &rarr; Application &rarr; Cookies &rarr; sessionKey
+                        </small>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button class="btn-primary" id="btn-save-profile">Speichern</button>
+                        <button class="btn-secondary" id="btn-cancel-profile">Abbrechen</button>
+                    </div>
+                </div>
+
+                </div><!-- /settings-tab-profiles -->
+
+                <!-- ═══ Tab: Skills ═══ -->
+                <div id="settings-tab-skills" class="settings-tab-content" style="display: none;">
+                    <div class="kb-container">
+
+                        <!-- Benachrichtigung -->
+                        <div id="sk-notification" class="kb-notification" style="display: none;"></div>
+
+                        <!-- Mögliche Skills (aufklappbar) -->
+                        <div class="sk-openclaw-section" id="sk-available-section">
+                            <div class="sk-openclaw-header" id="sk-available-header">
+                                <span class="sk-openclaw-title">📦 Mögliche Skills</span>
+                                <span class="sk-openclaw-toggle" id="sk-available-toggle">▼</span>
+                            </div>
+                            <div class="sk-openclaw-body" id="sk-available-body">
+                                <p class="kb-hint" style="margin: 0 0 0.5rem 0;">Skill auswählen und per <strong>Hinzufügen</strong> aktivieren.</p>
+                                <div class="sk-search-row">
+                                    <input type="text" id="sk-search" class="kb-input sk-search-input"
+                                        placeholder="Skills durchsuchen…" />
+                                </div>
+                                <div id="sk-available-list" class="sk-list">
+                                    <div class="kb-loading">Lade...</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Installierte Skills (aufklappbar) -->
+                        <div class="sk-openclaw-section" id="sk-installed-section">
+                            <div class="sk-openclaw-header" id="sk-installed-header">
+                                <span class="sk-openclaw-title">✅ Installierte Skills</span>
+                                <span class="sk-openclaw-toggle" id="sk-installed-toggle">▼</span>
+                            </div>
+                            <div class="sk-openclaw-body" id="sk-installed-body">
+                                <div id="sk-installed-list" class="sk-list">
+                                    <div class="kb-loading">Lade...</div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- ═══ Tab: WhatsApp ═══ -->
+                <div id="settings-tab-whatsapp" class="settings-tab-content" style="display: none;">
+                    <div class="wa-container">
+                        <!-- Status-Bereich -->
+                        <div class="wa-status-card glass">
+                            <div class="wa-status-header">
+                                <div class="wa-status-icon" id="wa-status-icon">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+                                    </svg>
+                                </div>
+                                <div class="wa-status-info">
+                                    <h3 id="wa-status-text">WhatsApp Status</h3>
+                                    <p id="wa-status-detail" class="wa-status-detail">Lade...</p>
+                                </div>
+                                <div class="wa-status-badge" id="wa-status-badge">--</div>
+                            </div>
+                            <div class="wa-status-stats">
+                                <div class="wa-stat">
+                                    <span class="wa-stat-label">Nummer</span>
+                                    <span class="wa-stat-value" id="wa-connected-number">--</span>
+                                </div>
+                                <div class="wa-stat">
+                                    <span class="wa-stat-label">Nachrichten</span>
+                                    <span class="wa-stat-value" id="wa-msg-count">0</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- QR-Code-Bereich -->
+                        <div class="wa-qr-section" id="wa-qr-section">
+                            <h3>QR-Code scannen</h3>
+                            <p class="wa-qr-hint">Oeffne WhatsApp auf deinem Handy &rarr; Einstellungen &rarr; Verknuepfte Geraete &rarr; Geraet verknuepfen</p>
+                            <div class="wa-qr-box" id="wa-qr-box">
+                                <div class="wa-qr-loading">Warte auf QR-Code...</div>
+                            </div>
+                        </div>
+
+                        <!-- Aktionen -->
+                        <div class="wa-actions">
+                            <button class="btn-wa-action" id="btn-wa-reconnect" title="Verbindung neu herstellen">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                                Reconnect
+                            </button>
+                            <button class="btn-wa-action btn-wa-danger" id="btn-wa-logout" title="WhatsApp abmelden">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                                Abmelden
+                            </button>
+                        </div>
+
+                        <!-- Debug & Logs -->
+                        <div class="wa-logs-section">
+                            <div class="wa-logs-header">
+                                <h3>Logs & Debug</h3>
+                                <div class="wa-logs-controls">
+                                    <label class="wa-debug-toggle" title="Debug-Modus aktivieren">
+                                        <input type="checkbox" id="wa-debug-toggle">
+                                        <span>Debug</span>
+                                    </label>
+                                    <select id="wa-log-filter" class="wa-log-select">
+                                        <option value="">Alle</option>
+                                        <option value="ERROR">Fehler</option>
+                                        <option value="WARN">Warnungen</option>
+                                        <option value="INFO">Info</option>
+                                        <option value="DEBUG">Debug</option>
+                                    </select>
+                                    <select id="wa-log-source" class="wa-log-select">
+                                        <option value="">Backend+Bridge</option>
+                                        <option value="backend">Backend</option>
+                                        <option value="bridge">Bridge</option>
+                                    </select>
+                                    <button class="btn-wa-action btn-wa-sm" id="btn-wa-logs-refresh" title="Logs neu laden">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                                    </button>
+                                    <button class="btn-wa-action btn-wa-sm btn-wa-danger" id="btn-wa-logs-clear" title="Logs loeschen">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="wa-logs-container" id="wa-logs-container">
+                                <div class="wa-logs-empty">Keine Logs vorhanden</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ═══ Tab: Wissen ═══ -->
+                <div id="settings-tab-knowledge" class="settings-tab-content" style="display: none;">
+                    <div class="kb-container">
+
+                        <!-- Benachrichtigung -->
+                        <div id="kb-notification" class="kb-notification" style="display: none;"></div>
+
+                        <!-- Statistiken -->
+                        <div class="kb-section">
+                            <div class="kb-section-header">
+                                <h3>Statistiken</h3>
+                                <button class="kb-btn-action" id="btn-kb-reindex">Index neu aufbauen</button>
+                            </div>
+                            <div id="kb-stats-container" class="kb-stats-container">
+                                <div class="kb-loading">Lade...</div>
+                            </div>
+                        </div>
+
+                        <!-- Ordner-Verwaltung -->
+                        <div class="kb-section">
+                            <h3>Ordner</h3>
+                            <p class="kb-hint">Pfade relativ zum Projektroot (z.B. <code>data/knowledge</code>) oder absolut (z.B. <code>/home/jarvis/docs</code>).</p>
+                            <div id="kb-folder-list" class="kb-folder-list">
+                                <div class="kb-loading">Lade...</div>
+                            </div>
+                            <div class="kb-add-folder">
+                                <input type="text" id="kb-folder-input" class="kb-input"
+                                    placeholder="Pfad zum Ordner (z.B. data/knowledge)" />
+                                <button class="kb-btn-action" id="btn-kb-add-folder">Hinzufügen</button>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- ═══ Tab: Google ═══ -->
+                <div id="settings-tab-google" class="settings-tab-content" style="display: none;">
+                    <div class="kb-container">
+                        <div id="google-status-container">
+                            <div class="kb-loading">Lade...</div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/websocket.js?v=6"></script>
+    <script src="/static/js/vnc.js?v=8"></script>
+    <script src="/static/js/skills.js?v=14"></script>
+    <script src="/static/js/whatsapp.js?v=7"></script>
+    <script src="/static/js/knowledge.js?v=2"></script>
+    <script src="/static/js/google.js?v=4"></script>
+    <script src="/static/js/app.js?v=12"></script>
+</body>
+
+</html>

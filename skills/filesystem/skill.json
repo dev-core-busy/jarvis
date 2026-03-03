@@ -1,0 +1,32 @@
+{
+    "name": "Dateisystem",
+    "description": "Dateien lesen, schreiben und verwalten",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["filesystem"],
+    "category": "system",
+    "icon": "folder",
+    "system": true,
+    "enabled": true,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": ["filesystem"],
+    "help": {
+        "details": "Ermöglicht das Lesen, Schreiben, Anhängen und Verwalten von Dateien und Verzeichnissen auf dem Server. Von einfachen Textdateien über Konfigurationsdateien bis hin zu Logs – der vollständige Dateisystemzugriff ist verfügbar.",
+        "tools": [
+            {
+                "name": "filesystem",
+                "label": "Filesystem",
+                "desc": "Dateisystem-Operationen: 'read' (Datei lesen), 'write' (Datei erstellen/überschreiben), 'append' (Text anhängen), 'list' (Verzeichnis auflisten), 'exists' (Existenz prüfen), 'mkdir' (Verzeichnis anlegen)."
+            }
+        ],
+        "use_cases": [
+            "Lese den Inhalt von /etc/hosts",
+            "Erstelle eine Datei ~/notizen.txt mit folgendem Inhalt: ...",
+            "Liste alle Dateien im Verzeichnis /home/jarvis"
+        ],
+        "notes": "Zugriff als root – alle Dateien auf dem System sind lesbar und schreibbar. Kritische Systemdateien immer erst lesen, bevor sie überschrieben werden."
+    }
+}

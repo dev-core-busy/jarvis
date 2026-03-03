@@ -1,0 +1,32 @@
+{
+    "name": "Memory",
+    "description": "Persistenter Speicher für Fakten und Präferenzen",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["memory_manage"],
+    "category": "wissen",
+    "icon": "brain",
+    "system": true,
+    "enabled": true,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "Persistenter Schlüssel-Wert-Speicher, der Server-Neustarts überlebt. Jarvis kann wichtige Informationen dauerhaft ablegen und jederzeit abrufen – Benutzerpräferenzen, häufig genutzte Befehle, Projektdetails oder beliebige Notizen.",
+        "tools": [
+            {
+                "name": "memory_manage",
+                "label": "Memory verwalten",
+                "desc": "Verwaltet den persistenten Speicher (data/memory.json): 'set' (Schlüssel-Wert speichern), 'get' (Wert abrufen), 'list' (alle Einträge anzeigen), 'delete' (einzelnen Eintrag löschen), 'clear' (alles löschen). Werte sind über alle Gespräche hinweg verfügbar."
+            }
+        ],
+        "use_cases": [
+            "Merke dir, dass meine E-Mail-Adresse max@firma.de ist",
+            "Was weißt du noch alles über mich und meine Präferenzen?",
+            "Lösche den gespeicherten Eintrag 'server_ip'"
+        ],
+        "notes": "Memory-Einträge bleiben über Gespräche und Neustarts hinweg erhalten. Sensible Informationen (Passwörter, API-Keys) sollten als Hinweis gespeichert werden, nicht im Klartext."
+    }
+}

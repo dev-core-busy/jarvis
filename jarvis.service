@@ -1,0 +1,17 @@
+[Unit]
+Description=Jarvis KI Linux Agent
+After=network-online.target lightdm.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/jarvis
+Environment=DISPLAY=:0
+ExecStart=/opt/jarvis/start_jarvis.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

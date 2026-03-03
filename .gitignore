@@ -1,0 +1,73 @@
+# ─── Secrets & Konfiguration ────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+settings.json
+
+# ─── SSL-Zertifikate (werden beim Start auto-generiert) ─────────────────────
+certs/
+*.key
+*.pem
+*.crt
+*.cer
+
+# ─── Google Auth & OAuth-Tokens ─────────────────────────────────────────────
+data/google_auth/*.json
+!data/google_auth/credentials.json.example
+/root/.config/gogcli/
+
+# ─── WhatsApp Bridge Auth ───────────────────────────────────────────────────
+services/whatsapp-bridge/auth/
+services/whatsapp-bridge/.wwebjs_auth/
+
+# ─── Daten & Logs ───────────────────────────────────────────────────────────
+data/logs/
+data/memory.json
+data/knowledge_index.json
+*.log
+
+# ─── Python ─────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+venv/
+env/
+.venv/
+.Python
+
+# ─── Node.js ────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── IDEs & Editoren ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── Binaries (separat installieren) ────────────────────────────────────────
+skills/openclaw_gmail/gog
+skills_from_openclaw/
+
+# ─── Claude Code interne Dateien ─────────────────────────────────────────────
+.claude/
+
+# ─── Temp & Entwicklungsdateien ─────────────────────────────────────────────
+patch_main.py
+todo.txt
+=0.39.0
+verhalte_dich_wie_claude.md
+implementation_plan.md
+CLAUDE.md
+test_agent.py
+*.tmp

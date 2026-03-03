@@ -1,0 +1,45 @@
+{
+    "name": "Google Apps",
+    "version": "1.0.0",
+    "description": "Gmail lesen/senden, Google Drive verwalten, Kalender-Termine via OAuth2.",
+    "category": "kommunikation",
+    "icon": "globe",
+    "system": false,
+    "enabled": false,
+    "tools": ["google_gmail", "google_drive", "google_calendar"],
+    "dependencies": [
+        "google-api-python-client",
+        "google-auth-httplib2",
+        "google-auth-oauthlib"
+    ],
+    "config_schema": {},
+    "knowledge_docs": [],
+    "permissions": ["network", "filesystem"],
+    "help": {
+        "details": "Direkter Zugriff auf Gmail, Google Drive und Google Kalender über das offizielle Google OAuth2 Device-Flow-Verfahren. Nach einmaliger Autorisierung (ohne Browser auf dem Server) dauerhaft nutzbar. Tokens werden sicher lokal gespeichert.",
+        "tools": [
+            {
+                "name": "google_gmail",
+                "label": "Gmail",
+                "desc": "E-Mails im Gmail-Postfach lesen, durchsuchen und senden. Unterstützt Labels, Threads und Anhänge."
+            },
+            {
+                "name": "google_drive",
+                "label": "Google Drive",
+                "desc": "Dateien in Google Drive auflisten, herunterladen, hochladen und verwalten. Unterstützt Google Docs, Sheets, Präsentationen und beliebige Dateitypen."
+            },
+            {
+                "name": "google_calendar",
+                "label": "Google Kalender",
+                "desc": "Kalendertermine auflisten, erstellen, bearbeiten und löschen. Unterstützt mehrere Kalender und Terminserien."
+            }
+        ],
+        "use_cases": [
+            "Lese meine letzten 5 ungelesenen E-Mails",
+            "Welche Termine habe ich morgen im Kalender?",
+            "Zeige die zuletzt geänderten Dateien in meinem Google Drive"
+        ],
+        "setup": "Im Google-Reiter der Einstellungen: (1) Google Cloud Console → neues Projekt → gewünschte APIs aktivieren (Gmail, Drive, Calendar). (2) OAuth 2.0 Client-ID für 'Desktop-App' erstellen. (3) Client-ID und Client-Secret in den Einstellungen eingeben. (4) Über 'Mit Google verbinden' den Device-Flow starten und den angezeigten Code auf accounts.google.com/device eingeben.",
+        "notes": "Der Device-Flow funktioniert ohne Browser auf dem Server – der Code wird im Jarvis-UI angezeigt und muss einmalig auf einem beliebigen Gerät eingegeben werden."
+    }
+}

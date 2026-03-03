@@ -1,0 +1,69 @@
+{
+    "name": "Agent Autonomy Kit",
+    "description": "Proaktives Aufgaben-Management via QUEUE.md (High/Medium/Low-Priorität, Ready/InProgress/Blocked/Done) und tägliche Aktivitätslogs. Ermöglicht dem Agenten selbstständiges Arbeiten ohne Nutzer-Prompts.",
+    "version": "1.0.0",
+    "author": "ryancampbell (via OpenClaw, Wrapper: Jarvis)",
+    "module": "main",
+    "tools": [
+        "queue_add",
+        "queue_list",
+        "queue_next",
+        "queue_complete",
+        "heartbeat_log"
+    ],
+    "category": "automation",
+    "icon": "brain",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "queue_file": {
+            "type": "string",
+            "default": "data/tasks/QUEUE.md",
+            "label": "Pfad zur QUEUE.md (relativ zu Jarvis)"
+        },
+        "memory_dir": {
+            "type": "string",
+            "default": "data/memory",
+            "label": "Verzeichnis für tägliche Aktivitätslogs"
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": ["filesystem"],
+    "help": {
+        "details": "Ermöglicht proaktives Aufgaben-Management über eine dateibasierte Task-Queue (QUEUE.md). Jarvis kann eigenständig Aufgaben hinzufügen, priorisieren, die nächste Aufgabe nehmen und abschließen – ohne auf neue Prompts zu warten. Tagesabschlussberichte werden in data/memory/ gespeichert.",
+        "tools": [
+            {
+                "name": "queue_add",
+                "label": "Aufgabe hinzufügen",
+                "desc": "Fügt eine neue Aufgabe zur Queue hinzu. Priorität: high (sofort), medium (normal), low (irgendwann). Sektion wählbar: Ready (Standard), Ideas (noch keine Aufgabe), Blocked (mit Angabe des Blockers), In Progress."
+            },
+            {
+                "name": "queue_list",
+                "label": "Queue anzeigen",
+                "desc": "Zeigt die komplette Task-Queue mit allen Sektionen: 🔴 Ready (High/Medium/Low), 🟡 In Progress, 🔵 Blocked, ✅ Done Today, 💡 Ideas. Optional: nur eine bestimmte Sektion anzeigen."
+            },
+            {
+                "name": "queue_next",
+                "label": "Nächste Aufgabe",
+                "desc": "Holt die nächste bereite Aufgabe mit höchster Priorität aus der Queue und verschiebt sie automatisch nach 'In Progress'. Gibt die Aufgabenbeschreibung zurück, damit Jarvis direkt damit beginnen kann."
+            },
+            {
+                "name": "queue_complete",
+                "label": "Aufgabe abschließen",
+                "desc": "Markiert eine laufende Aufgabe als erledigt (Checkbox [x]). Verschiebt sie von 'In Progress' nach 'Done Today'. Optional: kurze Ergebniszusammenfassung hinzufügen."
+            },
+            {
+                "name": "heartbeat_log",
+                "label": "Tageslog schreiben",
+                "desc": "Schreibt einen täglichen Aktivitätslog in data/memory/YYYY-MM-DD.md. Dokumentiert erledigte Aufgaben, neu entdeckte Aufgaben (werden automatisch der Queue hinzugefügt) und Erkenntnisse. Für den Tagesabschluss verwenden."
+            }
+        ],
+        "use_cases": [
+            "Füge 'Backup des Servers erstellen' als wichtige Aufgabe hinzu",
+            "Was ist meine nächste Aufgabe mit höchster Priorität?",
+            "Schreibe den heutigen Abschlussbericht mit erledigten Aufgaben"
+        ],
+        "notes": "Die Queue wird als Markdown-Datei (QUEUE.md) gespeichert und ist direkt lesbar. Pfade sind in den Einstellungen konfigurierbar."
+    }
+}

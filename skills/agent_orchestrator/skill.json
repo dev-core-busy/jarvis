@@ -1,0 +1,58 @@
+{
+    "name": "Agent Orchestrator",
+    "description": "Zerlegt große Aufgaben in koordinierte Sub-Agenten (Research, Code, Analysis, Writer, Review, Integration) via Dateisystem-Protokoll (inbox/outbox/status.json).",
+    "version": "1.0.0",
+    "author": "aatmaan1 (via OpenClaw, Wrapper: Jarvis)",
+    "module": "main",
+    "tools": [
+        "orchestrate_task",
+        "agent_status",
+        "agent_collect",
+        "agent_list"
+    ],
+    "category": "automation",
+    "icon": "brain",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "workspace_root": {
+            "type": "string",
+            "default": "data/agent-workspaces",
+            "label": "Workspace-Verzeichnis (relativ zu Jarvis)"
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": ["filesystem"],
+    "help": {
+        "details": "Koordiniert mehrere spezialisierte Sub-Agenten für komplexe, mehrstufige Aufgaben. Jeder Sub-Agent bekommt eine eigene Arbeitsumgebung mit Aufgabenbeschreibung (inbox), Ergebnis-Ablage (outbox) und Statusverfolgung (status.json). Ermöglicht parallele oder sequentielle Verarbeitung mit Abhängigkeitsverwaltung.",
+        "tools": [
+            {
+                "name": "orchestrate_task",
+                "label": "Aufgabe orchestrieren",
+                "desc": "Zerlegt eine komplexe Aufgabe in Sub-Agenten und erstellt für jeden eine Arbeitsumgebung (inbox/outbox/workspace/status.json). Agent-Typen: research (Recherche), code (Programmierung), analysis (Datenanalyse), writer (Texterstellung), review (Qualitätsprüfung), integration (Ergebnisse zusammenführen)."
+            },
+            {
+                "name": "agent_status",
+                "label": "Agenten-Status",
+                "desc": "Zeigt den aktuellen Status aller Sub-Agenten einer Session: ⏸ pending, 🔄 running, ✅ completed, ❌ failed. Gibt auch Fortschritt, Anzahl der Ausgabedateien und Fehlermeldungen aus."
+            },
+            {
+                "name": "agent_collect",
+                "label": "Ergebnisse einsammeln",
+                "desc": "Liest alle Ergebnisdateien (outbox/) aus abgeschlossenen Sub-Agenten einer Session ein und gibt sie gesammelt zurück. Optional: nur einen bestimmten Agenten auslesen."
+            },
+            {
+                "name": "agent_list",
+                "label": "Sessions auflisten",
+                "desc": "Listet alle vorhandenen Orchestrierungs-Sessions mit Anzahl der Agenten und Abschlussgrad auf."
+            }
+        ],
+        "use_cases": [
+            "Analysiere die Verkaufszahlen aus Q4 und erstelle einen strukturierten Bericht mit Empfehlungen",
+            "Recherchiere aktuelle Python-Best-Practices, implementiere sie im Projekt und überprüfe das Ergebnis",
+            "Was ist der Status der laufenden Agent-Session 'marktanalyse-2024'?"
+        ],
+        "notes": "Die Workspaces liegen unter data/agent-workspaces/<session>/<agent>/. Jarvis bearbeitet jeden Sub-Agenten selbst: inbox lesen → Arbeit ausführen → outbox befüllen → status=completed setzen."
+    }
+}

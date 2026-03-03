@@ -1,0 +1,77 @@
+{
+    "name": "WhatsApp",
+    "description": "WhatsApp-Integration: Nachrichten senden, Status abfragen, Sprachnachrichten empfangen und transkribieren",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": [
+        "whatsapp_send",
+        "whatsapp_status"
+    ],
+    "category": "kommunikation",
+    "icon": "message",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "auto_reply": {
+            "type": "boolean",
+            "default": true,
+            "label": "Automatische Antworten"
+        },
+        "allowed_numbers": {
+            "type": "string",
+            "default": "",
+            "label": "Erlaubte Nummern (kommagetrennt, leer = nur eigene)"
+        },
+        "process_voice": {
+            "type": "boolean",
+            "default": true,
+            "label": "Sprachnachrichten verarbeiten"
+        },
+        "process_text": {
+            "type": "boolean",
+            "default": true,
+            "label": "Textnachrichten verarbeiten"
+        },
+        "whisper_model": {
+            "type": "string",
+            "default": "small",
+            "label": "Whisper-Modell (tiny/base/small/medium/large)"
+        },
+        "debug_mode": {
+            "type": "boolean",
+            "default": false,
+            "label": "Debug-Modus (ausfuehrliches Logging)"
+        },
+        "log_level": {
+            "type": "string",
+            "default": "INFO",
+            "label": "Log-Level (DEBUG/INFO/WARN/ERROR)"
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": ["faster-whisper", "httpx"],
+    "permissions": ["network"],
+    "help": {
+        "details": "Verbindet Jarvis mit WhatsApp über die Baileys-Bridge (Node.js). Nachrichten können gesendet und empfangen werden. Eingehende Sprachnachrichten werden automatisch per faster-whisper transkribiert und stehen als Text zur Verfügung.",
+        "tools": [
+            {
+                "name": "whatsapp_send",
+                "label": "WhatsApp senden",
+                "desc": "Sendet eine WhatsApp-Textnachricht an eine Telefonnummer (internationales Format, z. B. +49123456789) oder an Gruppen-IDs. Gibt den Sendestatus zurück."
+            },
+            {
+                "name": "whatsapp_status",
+                "label": "WhatsApp Status",
+                "desc": "Gibt den aktuellen Status der WhatsApp-Bridge zurück: verbunden/getrennt, verbundene Nummer, Anzahl verarbeiteter Nachrichten, QR-Code-Status beim ersten Start."
+            }
+        ],
+        "use_cases": [
+            "Sende eine WhatsApp an +49123456789: 'Meeting um 14 Uhr nicht vergessen'",
+            "Ist die WhatsApp-Bridge gerade verbunden und aktiv?",
+            "Antworte auf die letzte Sprachnachricht von Kontakt X"
+        ],
+        "setup": "Beim ersten Start der Bridge den QR-Code mit der WhatsApp-App auf dem Smartphone scannen (Einstellungen → Verknüpfte Geräte). Die Verbindung bleibt danach dauerhaft bestehen.",
+        "notes": "Eingehende Nachrichten von nicht in 'Erlaubte Nummern' eingetragenen Kontakten werden ignoriert (leer = nur eigene Nummer). Sprachtranskription läuft lokal via faster-whisper (CPU, int8)."
+    }
+}

@@ -1,0 +1,48 @@
+{
+    "name": "Wissensdatenbank",
+    "description": "Lokale Dokumente durchsuchen (RAG) – Text, PDF, DOCX aus mehreren Ordnern",
+    "version": "2.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["knowledge_search", "knowledge_manage"],
+    "category": "wissen",
+    "icon": "book",
+    "system": true,
+    "enabled": true,
+    "config_schema": {
+        "folders": {
+            "type": "string",
+            "default": "data/knowledge",
+            "label": "Ordner (kommagetrennt, relativ zum Projektroot)"
+        },
+        "max_file_size_mb": {
+            "type": "number",
+            "default": 50,
+            "label": "Max. Dateigröße (MB)"
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": ["pdfplumber", "python-docx"],
+    "permissions": [],
+    "help": {
+        "details": "Durchsucht lokale Dokumente (Plaintext, Markdown, PDF, DOCX) per TF-IDF-Volltextsuche nach relevanten Inhalten – wie eine persönliche Suchmaschine. Mehrere Ordner können gleichzeitig indiziert werden. Der Index wird mtime-basiert automatisch aktuell gehalten.",
+        "tools": [
+            {
+                "name": "knowledge_search",
+                "label": "Wissensdatenbank durchsuchen",
+                "desc": "Sucht in allen indizierten Dokumenten nach der übergebenen Anfrage. Gibt die relevantesten Textabschnitte mit Quelldatei und Relevanzscore zurück. Unterstützt natürlichsprachige Anfragen und Schlüsselwortsuche."
+            },
+            {
+                "name": "knowledge_manage",
+                "label": "Wissensdatenbank verwalten",
+                "desc": "Verwaltet den Dokumentenindex: 'list_folders' (konfigurierte Ordner anzeigen), 'add_folder' (Ordner hinzufügen), 'remove_folder' (Ordner entfernen), 'reindex' (Index neu aufbauen), 'list_docs' (alle indizierten Dokumente), 'stats' (Statistiken anzeigen)."
+            }
+        ],
+        "use_cases": [
+            "Suche in meinen Dokumenten nach Informationen zu Projekt Alpha",
+            "Welche Dateien handeln vom Thema Buchhaltung oder Rechnungen?",
+            "Füge den Ordner /home/jarvis/docs zur Wissensdatenbank hinzu"
+        ],
+        "notes": "Nach dem Hinzufügen neuer Dateien den Index mit 'reindex' aktualisieren. Unterstützte Formate: .txt, .md, .pdf, .docx. Ordner werden kommagetrennt in den Einstellungen angegeben."
+    }
+}

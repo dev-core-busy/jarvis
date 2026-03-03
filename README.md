@@ -611,4 +611,6 @@ See [LICENSE](LICENSE) for the full text.
 
 *"The best way to predict the future is to automate it."*
 
+© 2026 Andreas Bender · Licensed under [AGPL-3.0](LICENSE)
+
 </div>

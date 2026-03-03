@@ -302,7 +302,7 @@ if command -v systemctl &>/dev/null; then
 [Unit]
 Description=Jarvis AI Desktop Agent
 Documentation=https://github.com/dev-core-busy/jarvis
-After=network.target graphical.target
+After=network.target
 Wants=network.target
 
 [Service]

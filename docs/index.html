@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="de" class="lang-de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis – Autonomer KI Desktop-Agent | Open Source AI Agent für Linux</title>
+    <meta name="description" content="Jarvis ist ein autonomer Open-Source KI-Agent für Linux – Desktop-Steuerung via VNC, Multi-LLM (Gemini, Claude, Ollama), WhatsApp-Integration, RAG-Wissensdatenbank und das OpenClaw Skill-Ökosystem. Selbst gehostet, lokal, erweiterbar.">
+    <meta name="keywords" content="AI Agent, KI Agent, autonomous agent, desktop automation, LLM, Gemini, Claude, Anthropic, OpenAI, Ollama, RAG, WhatsApp Bot, Python, FastAPI, Linux, self-hosted, open source, VNC, multi-agent, skill system, chatbot, voice assistant, AGPL, jarvis">
+    <meta name="author" content="Andreas Bender">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://jarvis-ai.info/">
+
+    <!-- Open Graph / Social Media -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://jarvis-ai.info/">
+    <meta property="og:title" content="Jarvis – Autonomous AI Desktop Agent">
+    <meta property="og:description" content="Open-source autonomous AI agent for Linux. Controls desktop via VNC, supports Gemini/Claude/Ollama, WhatsApp integration, RAG knowledge base, extensible via OpenClaw skills.">
+    <meta property="og:image" content="https://jarvis-ai.info/img/split_view.png">
+    <meta property="og:image:width" content="1920">
+    <meta property="og:image:height" content="1080">
+    <meta property="og:locale" content="de_DE">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:site_name" content="Jarvis AI">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Jarvis – Autonomous AI Desktop Agent">
+    <meta name="twitter:description" content="Open-source autonomous AI agent for Linux. VNC desktop control, multi-LLM, WhatsApp, RAG, OpenClaw skills.">
+    <meta name="twitter:image" content="https://jarvis-ai.info/img/split_view.png">
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Jarvis AI Desktop Agent",
+      "description": "Autonomous open-source AI agent for Linux with desktop control, multi-LLM support, WhatsApp integration and RAG knowledge base.",
+      "url": "https://jarvis-ai.info",
+      "downloadUrl": "https://github.com/dev-core-busy/jarvis",
+      "operatingSystem": "Linux",
+      "applicationCategory": "DeveloperApplication",
+      "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+      "softwareVersion": "0.8",
+      "programmingLanguage": ["Python", "JavaScript"],
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+    }
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg:            #0d0d1a;
+            --bg-secondary:  #111827;
+            --bg-glass:      rgba(255,255,255,0.04);
+            --bg-glass-med:  rgba(255,255,255,0.08);
+            --border:        rgba(255,255,255,0.08);
+            --border-hover:  rgba(255,255,255,0.20);
+            --text-primary:  #e8eaf6;
+            --text-secondary:rgba(255,255,255,0.55);
+            --text-muted:    rgba(255,255,255,0.30);
+            --accent:        #6366f1;
+            --accent-glow:   rgba(99,102,241,0.45);
+            --accent-hover:  #818cf8;
+            --accent-light:  rgba(99,102,241,0.12);
+            --cyan:          #06b6d4;
+            --cyan-glow:     rgba(6,182,212,0.35);
+            --success:       #10b981;
+            --warning:       #f59e0b;
+            --danger:        #ef4444;
+            --radius-sm:  8px; --radius-md: 12px; --radius-lg: 16px; --radius-xl: 24px;
+            --font-body:  'Inter', -apple-system, sans-serif;
+            --font-title: 'Orbitron', sans-serif;
+            --font-mono:  'JetBrains Mono', monospace;
+            --transition: 0.2s cubic-bezier(0.4,0,0.2,1);
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body { font-family: var(--font-body); background: var(--bg); color: var(--text-primary); line-height: 1.6; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+        a { color: inherit; text-decoration: none; }
+        ul { list-style: none; }
+        img { max-width: 100%; display: block; }
+
+        /* Language */
+        html.lang-de .t-en { display: none !important; }
+        html.lang-en .t-de { display: none !important; }
+
+        /* Nav */
+        nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; display: flex; align-items: center; justify-content: space-between; padding: 0 32px; height: 60px; background: rgba(13,13,26,0.85); backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); }
+        .nav-logo { font-family: var(--font-title); font-size: 1.4rem; font-weight: 900; letter-spacing: 4px; background: linear-gradient(135deg, var(--accent), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .nav-links { display: flex; gap: 28px; align-items: center; }
+        .nav-links a { font-size: 0.875rem; color: var(--text-secondary); transition: color var(--transition); }
+        .nav-links a:hover { color: var(--text-primary); }
+        .nav-right { display: flex; align-items: center; gap: 12px; }
+        .lang-btn { display: flex; background: var(--bg-glass-med); border: 1px solid var(--border); border-radius: 20px; overflow: hidden; }
+        .lang-btn button { background: none; border: none; cursor: pointer; padding: 4px 12px; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); transition: all var(--transition); }
+        .lang-btn button.active { background: var(--accent); color: #fff; }
+        .btn-github { display: flex; align-items: center; gap: 6px; padding: 6px 14px; background: var(--bg-glass-med); border: 1px solid var(--border); border-radius: 20px; font-size: 0.8rem; color: var(--text-secondary); transition: all var(--transition); }
+        .btn-github:hover { border-color: var(--border-hover); color: var(--text-primary); }
+
+        /* Hero */
+        .hero { position: relative; min-height: 100vh; display: flex; align-items: center; justify-content: center; text-align: center; overflow: hidden; }
+        .hero-bg { position: absolute; inset: 0; background-image: url('https://jarvis-ai.info/img/jarvis.jpg'); background-size: cover; background-position: center top; filter: brightness(0.35) saturate(0.8); z-index: 0; }
+        .hero-overlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(13,13,26,0.3) 0%, rgba(13,13,26,0.15) 40%, rgba(13,13,26,0.65) 80%, rgba(13,13,26,1) 100%); z-index: 1; }
+        .hero-content { position: relative; z-index: 2; max-width: 780px; padding: 0 24px; }
+        .hero-eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.35); border-radius: 20px; font-size: 0.8rem; font-weight: 600; color: var(--accent-hover); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 28px; }
+        .hero-eyebrow span.dot { width: 6px; height: 6px; background: var(--success); border-radius: 50%; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.85); } }
+        .hero-title { font-family: var(--font-title); font-size: clamp(3.5rem, 10vw, 7rem); font-weight: 900; letter-spacing: 12px; line-height: 1; background: linear-gradient(135deg, #e8eaf6 0%, var(--accent-hover) 40%, var(--cyan) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 20px; }
+        .hero-tagline { font-size: clamp(1rem, 2.5vw, 1.35rem); color: var(--text-secondary); margin-bottom: 12px; font-weight: 300; }
+        .hero-tagline strong { color: var(--text-primary); font-weight: 600; }
+        .hero-sub { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 40px; }
+        .hero-actions { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; align-items: center; }
+        .btn-primary { display: inline-flex; align-items: center; gap: 8px; padding: 13px 28px; background: linear-gradient(135deg, var(--accent), #4f46e5); border: none; border-radius: var(--radius-md); color: #fff; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all var(--transition); box-shadow: 0 0 24px var(--accent-glow); }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 0 36px var(--accent-glow); }
+        .btn-secondary { display: inline-flex; align-items: center; gap: 8px; padding: 13px 28px; background: var(--bg-glass-med); border: 1px solid var(--border-hover); border-radius: var(--radius-md); color: var(--text-primary); font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all var(--transition); }
+        .btn-secondary:hover { background: rgba(255,255,255,0.10); transform: translateY(-2px); }
+        .hero-badges { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 36px; }
+        .badge { padding: 4px 12px; background: var(--bg-glass); border: 1px solid var(--border); border-radius: 12px; font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono); }
+
+        /* Manifesto / Description */
+        .manifesto { background: linear-gradient(180deg, rgba(13,13,26,0) 0%, rgba(99,102,241,0.04) 50%, rgba(13,13,26,0) 100%); border-top: 1px solid rgba(99,102,241,0.12); border-bottom: 1px solid rgba(99,102,241,0.12); padding: 72px 24px; }
+        .manifesto-inner { max-width: 740px; margin: 0 auto; text-align: center; }
+        .manifesto-lead { font-size: clamp(1rem, 2vw, 1.15rem); color: var(--text-secondary); line-height: 1.85; }
+        .manifesto-lead p { margin-bottom: 1.2em; }
+        .manifesto-lead p:last-child { margin-bottom: 0; }
+        .manifesto-lead strong { color: var(--text-primary); }
+        .manifesto-lead em { color: var(--accent-hover); font-style: normal; font-weight: 600; }
+
+        /* Contribute */
+        .contribute { background: rgba(99,102,241,0.04); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+        .contribute-inner { max-width: 760px; margin: 0 auto; text-align: center; }
+        .contribute-headline { font-size: clamp(1.5rem, 3.5vw, 2.1rem); font-weight: 700; margin-bottom: 16px; }
+        .contribute-text { color: var(--text-secondary); font-size: 1rem; line-height: 1.8; max-width: 600px; margin: 0 auto 36px; }
+        .contribute-text strong { color: var(--text-primary); }
+        .contribute-actions { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+        .btn-contribute { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: var(--radius-md); font-size: 0.9rem; font-weight: 600; transition: all var(--transition); }
+        .btn-contribute-primary { background: linear-gradient(135deg, var(--accent), #4f46e5); color: #fff; border: none; box-shadow: 0 0 20px var(--accent-glow); }
+        .btn-contribute-primary:hover { transform: translateY(-2px); box-shadow: 0 0 32px var(--accent-glow); }
+        .btn-contribute-secondary { background: var(--bg-glass-med); border: 1px solid var(--border-hover); color: var(--text-primary); }
+        .btn-contribute-secondary:hover { background: rgba(255,255,255,0.08); transform: translateY(-2px); }
+
+        /* Sections */
+        section { padding: 80px 24px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .section-title { text-align: center; font-size: clamp(1.6rem, 4vw, 2.4rem); font-weight: 700; margin-bottom: 12px; }
+        .section-sub { text-align: center; color: var(--text-secondary); font-size: 1rem; max-width: 620px; margin: 0 auto 52px; }
+        .section-sub strong { color: var(--text-primary); }
+        .accent-text { background: linear-gradient(135deg, var(--accent), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+        /* Features */
+        .features-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .feature-card { padding: 28px; background: var(--bg-glass); border: 1px solid var(--border); border-radius: var(--radius-lg); transition: all var(--transition); }
+        .feature-card:hover { border-color: var(--border-hover); background: var(--bg-glass-med); transform: translateY(-3px); }
+        .feature-icon { font-size: 2rem; margin-bottom: 14px; }
+        .feature-title { font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; }
+        .feature-desc { font-size: 0.875rem; color: var(--text-secondary); line-height: 1.6; }
+
+        /* OpenClaw */
+        .openclaw-section { background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(6,182,212,0.08) 100%); border-top: 1px solid rgba(99,102,241,0.2); border-bottom: 1px solid rgba(6,182,212,0.2); }
+        .openclaw-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+        @media (max-width: 768px) { .openclaw-inner { grid-template-columns: 1fr; gap: 32px; } }
+        .openclaw-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(6,182,212,0.25)); border: 1px solid rgba(99,102,241,0.4); border-radius: 20px; font-size: 0.78rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--accent-hover); margin-bottom: 20px; }
+        .openclaw-title { font-size: clamp(1.6rem, 3.5vw, 2.2rem); font-weight: 700; margin-bottom: 16px; }
+        .openclaw-desc { color: var(--text-secondary); font-size: 0.975rem; line-height: 1.75; margin-bottom: 24px; }
+        .openclaw-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .compare-card { padding: 18px; border-radius: var(--radius-md); border: 1px solid var(--border); }
+        .compare-card.before { background: rgba(239,68,68,0.06); border-color: rgba(239,68,68,0.2); }
+        .compare-card.after  { background: rgba(16,185,129,0.06); border-color: rgba(16,185,129,0.2); }
+        .compare-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+        .compare-card.before .compare-label { color: var(--danger); }
+        .compare-card.after  .compare-label { color: var(--success); }
+        .compare-card ul { display: flex; flex-direction: column; gap: 6px; }
+        .compare-card li { font-size: 0.82rem; color: var(--text-secondary); display: flex; align-items: flex-start; gap: 6px; }
+        .compare-card li::before { content: "•"; flex-shrink: 0; margin-top: 1px; }
+        .compare-card.before li::before { color: var(--danger); }
+        .compare-card.after  li::before { color: var(--success); }
+        .openclaw-skills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+        .skill-pill { display: flex; align-items: center; gap: 6px; padding: 6px 14px; background: var(--bg-glass-med); border: 1px solid var(--border); border-radius: 20px; font-size: 0.8rem; color: var(--text-secondary); transition: all var(--transition); }
+        .skill-pill:hover { border-color: var(--accent); color: var(--text-primary); }
+
+        /* Screenshots */
+        .screenshots-section { background: var(--bg-secondary); }
+        .screenshot-tabs { display: flex; gap: 8px; justify-content: center; margin-bottom: 32px; }
+        .tab-btn { padding: 8px 20px; background: var(--bg-glass); border: 1px solid var(--border); border-radius: 20px; color: var(--text-secondary); font-size: 0.875rem; cursor: pointer; transition: all var(--transition); }
+        .tab-btn.active, .tab-btn:hover { background: var(--accent-light); border-color: var(--accent); color: var(--text-primary); }
+        .screenshot-panels > div { display: none; }
+        .screenshot-panels > div.active { display: block; }
+        .screenshot-frame { border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border); box-shadow: 0 24px 64px rgba(0,0,0,0.6); }
+        .screenshot-frame img { width: 100%; height: auto; display: block; }
+        .screenshot-caption { text-align: center; color: var(--text-muted); font-size: 0.85rem; margin-top: 16px; }
+
+        /* LLM */
+        .llm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-top: 32px; }
+        .llm-card { padding: 20px; background: var(--bg-glass); border: 1px solid var(--border); border-radius: var(--radius-md); text-align: center; transition: all var(--transition); }
+        .llm-card:hover { border-color: var(--border-hover); background: var(--bg-glass-med); }
+        .llm-icon { font-size: 2rem; margin-bottom: 8px; }
+        .llm-name { font-size: 0.9rem; font-weight: 600; }
+        .llm-models { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+
+        /* Install */
+        .install-card { background: var(--bg-glass); border: 1px solid var(--border); border-radius: var(--radius-xl); padding: 40px; max-width: 720px; margin: 0 auto; }
+        .code-block { background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px 22px; margin: 16px 0; overflow-x: auto; }
+        .code-block code { font-family: var(--font-mono); font-size: 0.85rem; color: var(--cyan); white-space: pre; display: block; }
+        .code-block .comment { color: var(--text-muted); font-style: italic; }
+        .step-num { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; background: var(--accent); border-radius: 50%; font-size: 0.8rem; font-weight: 700; flex-shrink: 0; margin-right: 10px; }
+        .install-step { display: flex; align-items: flex-start; margin-bottom: 10px; }
+        .install-step-label { font-size: 0.95rem; font-weight: 600; padding-top: 2px; }
+
+        /* Footer */
+        footer { background: var(--bg-secondary); border-top: 1px solid var(--border); padding: 40px 24px; text-align: center; }
+        .footer-logo { font-family: var(--font-title); font-size: 1.8rem; font-weight: 900; letter-spacing: 8px; background: linear-gradient(135deg, var(--accent), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+        .footer-links { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; margin-bottom: 20px; }
+        .footer-links a { font-size: 0.875rem; color: var(--text-secondary); transition: color var(--transition); }
+        .footer-links a:hover { color: var(--text-primary); }
+        .footer-copy { font-size: 0.8rem; color: var(--text-muted); }
+
+        /* Reveal */
+        .reveal { opacity: 0; transform: translateY(28px); transition: opacity 0.6s ease, transform 0.6s ease; }
+        .reveal.visible { opacity: 1; transform: translateY(0); }
+
+        @media (max-width: 768px) {
+            nav { padding: 0 16px; }
+            .nav-links { display: none; }
+            section { padding: 56px 16px; }
+            .hero-title { letter-spacing: 6px; }
+        }
+    </style>
+</head>
+<body>
+
+<nav>
+    <div class="nav-logo">JARVIS</div>
+    <div class="nav-links">
+        <a href="#features"    class="t-de">Funktionen</a>
+        <a href="#features"    class="t-en">Features</a>
+        <a href="#openclaw">OpenClaw</a>
+        <a href="#screenshots" class="t-de">Screenshots</a>
+        <a href="#screenshots" class="t-en">Screenshots</a>
+        <a href="#install"     class="t-de">Installation</a>
+        <a href="#install"     class="t-en">Install</a>
+    </div>
+    <div class="nav-right">
+        <div class="lang-btn">
+            <button id="btn-de" class="active" onclick="setLang('de')">DE</button>
+            <button id="btn-en"               onclick="setLang('en')">EN</button>
+        </div>
+        <a href="https://github.com/dev-core-busy/jarvis" target="_blank" class="btn-github">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.268 2.75 1.026A9.578 9.578 0 0112 6.836a9.59 9.59 0 012.504.337c1.909-1.294 2.747-1.026 2.747-1.026.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+            GitHub
+        </a>
+    </div>
+</nav>
+
+<section class="hero">
+    <div class="hero-bg"></div>
+    <div class="hero-overlay"></div>
+    <div class="hero-content">
+        <div class="hero-eyebrow">
+            <span class="dot"></span>
+            <span>Open Source · AGPL-3.0</span>
+        </div>
+        <h1 class="hero-title">JARVIS</h1>
+        <p class="hero-tagline t-de">Dein <strong>autonomer KI-Agent</strong> für den Linux-Desktop</p>
+        <p class="hero-tagline t-en">Your <strong>autonomous AI agent</strong> for the Linux desktop</p>
+        <p class="hero-sub t-de">Steuert Desktop, Browser &amp; Shell · RAG auf eigenen Dokumenten · Multi-Agenten · lokal &amp; erweiterbar</p>
+        <p class="hero-sub t-en">Controls desktop, browser &amp; shell · RAG on your own documents · multi-agent · local &amp; extensible</p>
+        <div class="hero-actions">
+            <a href="#install" class="btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                <span class="t-de">Schnellstart</span>
+                <span class="t-en">Quick Start</span>
+            </a>
+            <a href="https://github.com/dev-core-busy/jarvis" target="_blank" class="btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.268 2.75 1.026A9.578 9.578 0 0112 6.836a9.59 9.59 0 012.504.337c1.909-1.294 2.747-1.026 2.747-1.026.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+                <span class="t-de">Auf GitHub ansehen</span>
+                <span class="t-en">View on GitHub</span>
+            </a>
+        </div>
+        <div class="hero-badges">
+            <span class="badge">Python 3.13</span>
+            <span class="badge">FastAPI</span>
+            <span class="badge">AGPL-3.0</span>
+            <span class="badge">v0.8</span>
+            <span class="badge">OpenClaw-Compatible</span>
+        </div>
+    </div>
+</section>
+
+<section class="manifesto">
+    <div class="manifesto-inner">
+        <div class="manifesto-lead reveal">
+            <p class="t-de">Die meisten KI-Assistenten sind Chatboxen: Du tippst, sie antworten – und das war's. <strong>Jarvis ist anders.</strong></p>
+            <p class="t-en">Most AI assistants are chat boxes: you type, they respond – that's it. <strong>Jarvis is different.</strong></p>
+
+            <p class="t-de">Jarvis ist ein <em>autonomer KI-Agent</em>, der auf deinem Linux-Server läuft und dort wirklich handelt. Er sieht deinen Desktop per Screenshot, bewegt die Maus, tippt Text, öffnet Programme und führt Bash-Befehle aus – genau wie ein Mensch, der vor dem Rechner sitzt. Kein Simulieren, kein „ich kann das leider nicht" – Jarvis arbeitet direkt auf deinem System.</p>
+            <p class="t-en">Jarvis is an <em>autonomous AI agent</em> that runs on your Linux server and truly acts there. It sees your desktop via screenshot, moves the mouse, types text, opens programs and executes bash commands – just like a person sitting at the computer. No simulating, no "I'm sorry, I can't do that" – Jarvis works directly on your system.</p>
+
+            <p class="t-de">Du gibst eine Aufgabe per Browser, WhatsApp oder API – Jarvis plant die Schritte, wählt die richtigen Werkzeuge und führt sie der Reihe nach aus. Schreibt Dateien, durchsucht deine Dokumente per <strong>RAG-Wissensdatenbank</strong>, steuert den Browser bis auf DOM-Ebene, sendet WhatsApp-Nachrichten und koordiniert bei komplexen Aufgaben mehrere spezialisierte Sub-Agenten gleichzeitig.</p>
+            <p class="t-en">You give a task via browser, WhatsApp or API – Jarvis plans the steps, selects the right tools and executes them in sequence. Writes files, searches your documents via <strong>RAG knowledge base</strong>, controls the browser down to DOM level, sends WhatsApp messages and coordinates multiple specialized sub-agents simultaneously for complex tasks.</p>
+
+            <p class="t-de">Welches KI-Modell dahintersteckt, bestimmst du. Gemini, Claude, OpenRouter, Ollama – oder jeder andere OpenAI-kompatible Anbieter. <strong>Lokale Modelle bleiben vollständig auf deiner Maschine</strong>; kein Byte deiner Daten verlässt den Server.</p>
+            <p class="t-en">You decide which AI model powers it. Gemini, Claude, OpenRouter, Ollama – or any other OpenAI-compatible provider. <strong>Local models stay completely on your machine</strong>; not a single byte of your data leaves the server.</p>
+
+            <p class="t-de">Das Skill-System macht Jarvis erweiterbar: Neue Fähigkeiten lassen sich als Python-Module nachladen, ohne den Core anzufassen. Das OpenClaw-Ökosystem liefert fertige Skills für Gmail, Google Drive, Kalender und mehr – einfach importieren, aktivieren, nutzen.</p>
+            <p class="t-en">The skill system makes Jarvis extensible: new capabilities can be loaded as Python modules without touching the core. The OpenClaw ecosystem delivers ready-made skills for Gmail, Google Drive, calendar and more – just import, enable, use.</p>
+
+            <p class="t-de"><strong>Jarvis ist kein Produkt, das du abonnierst.</strong> Es ist deine Infrastruktur, auf deinem Server, unter deiner Kontrolle.</p>
+            <p class="t-en"><strong>Jarvis is not a product you subscribe to.</strong> It's your infrastructure, on your server, under your control.</p>
+        </div>
+    </div>
+</section>
+
+<section id="features">
+    <div class="container">
+        <h2 class="section-title reveal">
+            <span class="t-de">Was Jarvis kann</span>
+            <span class="t-en">What Jarvis can do</span>
+        </h2>
+        <p class="section-sub reveal">
+            <span class="t-de">Ein vollständiger KI-Agent, der wirklich auf deinem System arbeitet – kein Cloud-Wrapper.</span>
+            <span class="t-en">A fully autonomous AI agent that actually works on your system – not a cloud wrapper.</span>
+        </p>
+        <div class="features-grid">
+            <div class="feature-card reveal">
+                <div class="feature-icon">🖥️</div>
+                <div class="feature-title t-de">Desktop-Steuerung</div>
+                <div class="feature-title t-en">Desktop Control</div>
+                <div class="feature-desc t-de">Steuert Maus, Tastatur und Fenster direkt via X11/VNC. Jarvis sieht und bedient beliebige GUI-Anwendungen wie ein echter Benutzer.</div>
+                <div class="feature-desc t-en">Controls mouse, keyboard and windows directly via X11/VNC. Jarvis sees and operates any GUI application like a real user.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🤖</div>
+                <div class="feature-title t-de">Multi-LLM Unterstützung</div>
+                <div class="feature-title t-en">Multi-LLM Support</div>
+                <div class="feature-desc t-de">Gemini, Claude, OpenRouter, Ollama, LM Studio – und jedes weitere Modell mit OpenAI-kompatibler API. Kein Vendor-Lock-in.</div>
+                <div class="feature-desc t-en">Gemini, Claude, OpenRouter, Ollama, LM Studio – and any model with an OpenAI-compatible API. No vendor lock-in.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🔌</div>
+                <div class="feature-title t-de">Skill-System</div>
+                <div class="feature-title t-en">Skill System</div>
+                <div class="feature-desc t-de">Erweiterbar durch Skills: Shell, Dateisystem, Browser-CDP, WhatsApp, Gmail, Google Drive – und viele mehr über OpenClaw.</div>
+                <div class="feature-desc t-en">Extendable via skills: Shell, filesystem, Browser-CDP, WhatsApp, Gmail, Google Drive – and many more via OpenClaw.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">💬</div>
+                <div class="feature-title t-de">WhatsApp-Integration</div>
+                <div class="feature-title t-en">WhatsApp Integration</div>
+                <div class="feature-desc t-de">Sendet und empfängt WhatsApp-Nachrichten via Baileys. Sprachnachrichten werden automatisch per Whisper transkribiert.</div>
+                <div class="feature-desc t-en">Sends and receives WhatsApp messages via Baileys. Voice messages are auto-transcribed with Whisper.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🌐</div>
+                <div class="feature-title t-de">Browser-Automatisierung</div>
+                <div class="feature-title t-en">Browser Automation</div>
+                <div class="feature-desc t-de">Vollständige Browsersteuerung via xdotool (UI-Ebene) und Chrome DevTools Protocol (DOM-Ebene). Formulare ausfüllen, Seiten scrapen, JS ausführen.</div>
+                <div class="feature-desc t-en">Full browser control via xdotool (UI layer) and Chrome DevTools Protocol (DOM layer). Fill forms, scrape pages, execute JS.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🧠</div>
+                <div class="feature-title t-de">Persistentes Gedächtnis</div>
+                <div class="feature-title t-en">Persistent Memory</div>
+                <div class="feature-desc t-de">Jarvis merkt sich Präferenzen, Zugangsdaten, Projektzustand und mehr – dauerhaft in einem Schlüssel-Wert-Speicher, der Neustarts überlebt.</div>
+                <div class="feature-desc t-en">Jarvis remembers preferences, credentials, project state and more – permanently in a key-value store that survives restarts.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">📚</div>
+                <div class="feature-title t-de">Wissensdatenbank (RAG)</div>
+                <div class="feature-title t-en">Knowledge Base (RAG)</div>
+                <div class="feature-desc t-de">Eigene Dokumente (PDF, DOCX, TXT) per TF-IDF durchsuchen – Retrieval-Augmented Generation direkt auf deinen Daten. Keine Cloud, kein Datenleck.</div>
+                <div class="feature-desc t-en">Search your own documents (PDF, DOCX, TXT) with TF-IDF – Retrieval-Augmented Generation directly on your data. No cloud, no data leak.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🎭</div>
+                <div class="feature-title t-de">Multi-Agenten-Orchestrierung</div>
+                <div class="feature-title t-en">Multi-Agent Orchestration</div>
+                <div class="feature-desc t-de">Komplexe Aufgaben auf mehrere spezialisierte Sub-Agenten aufteilen. Jeder Agent hat eigene Werkzeuge, Ziele und Ergebnisse – koordiniert über Dateisystem-Protokoll.</div>
+                <div class="feature-desc t-en">Split complex tasks across multiple specialized sub-agents. Each agent has its own tools, goals and results – coordinated via file-system protocol.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="openclaw" class="openclaw-section">
+    <div class="container">
+        <div class="openclaw-inner">
+            <div class="reveal">
+                <div class="openclaw-badge">
+                    🛒
+                    <span class="t-de">OpenClaw Skill-Ökosystem</span>
+                    <span class="t-en">OpenClaw Skill Ecosystem</span>
+                </div>
+                <h2 class="openclaw-title">
+                    <span class="t-de">Skills importieren,<br><span class="accent-text">nicht neu erfinden</span></span>
+                    <span class="t-en">Import skills,<br><span class="accent-text">don't reinvent them</span></span>
+                </h2>
+                <p class="openclaw-desc t-de">
+                    Jarvis ist vollständig kompatibel mit dem <strong>OpenClaw Skill-Marktplatz</strong>.
+                    Bestehende Skills können direkt importiert und als native Jarvis-Tools verwendet werden –
+                    kein manuelles Schreiben von Boilerplate, kein Vendor-Lock-in.
+                </p>
+                <p class="openclaw-desc t-en">
+                    Jarvis is fully compatible with the <strong>OpenClaw skill marketplace</strong>.
+                    Existing skills can be imported directly and used as native Jarvis tools –
+                    no manual boilerplate writing, no vendor lock-in.
+                </p>
+                <div class="openclaw-skills">
+                    <div class="skill-pill"><span>📧</span> openclaw_gmail</div>
+                    <div class="skill-pill"><span>🎭</span> agent_orchestrator</div>
+                    <div class="skill-pill"><span>⚡</span> agent_autonomy_kit</div>
+                    <div class="skill-pill">
+                        <span>📦</span>
+                        <span class="t-de">+ eigene Skills</span>
+                        <span class="t-en">+ custom skills</span>
+                    </div>
+                </div>
+            </div>
+            <div class="openclaw-compare reveal">
+                <div class="compare-card before">
+                    <div class="compare-label t-de">❌ Ohne OpenClaw</div>
+                    <div class="compare-label t-en">❌ Without OpenClaw</div>
+                    <ul>
+                        <li class="t-de">Jedes Tool von Null schreiben</li>
+                        <li class="t-en">Write every tool from scratch</li>
+                        <li class="t-de">API-Docs manuell lesen</li>
+                        <li class="t-en">Manually read API docs</li>
+                        <li class="t-de">Auth-Flows selbst implementieren</li>
+                        <li class="t-en">Implement auth flows yourself</li>
+                        <li class="t-de">Fehlerbehandlung neu erfinden</li>
+                        <li class="t-en">Reinvent error handling</li>
+                    </ul>
+                </div>
+                <div class="compare-card after">
+                    <div class="compare-label t-de">✅ Mit OpenClaw</div>
+                    <div class="compare-label t-en">✅ With OpenClaw</div>
+                    <ul>
+                        <li class="t-de">Skill suchen &amp; in Sekunden importieren</li>
+                        <li class="t-en">Search &amp; import skill in seconds</li>
+                        <li class="t-de">Sofort einsatzbereit</li>
+                        <li class="t-en">Ready to use immediately</li>
+                        <li class="t-de">Community-getestete Qualität</li>
+                        <li class="t-en">Community-tested quality</li>
+                        <li class="t-de">Jarvis konvertiert automatisch</li>
+                        <li class="t-en">Jarvis auto-converts skills</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="screenshots" class="screenshots-section">
+    <div class="container">
+        <h2 class="section-title reveal">
+            <span class="t-de">In Aktion</span>
+            <span class="t-en">In Action</span>
+        </h2>
+        <p class="section-sub reveal">
+            <span class="t-de">Sieh selbst, wie Jarvis mit deinem Desktop und LLM zusammenarbeitet.</span>
+            <span class="t-en">See how Jarvis works together with your desktop and LLM.</span>
+        </p>
+        <div class="screenshot-tabs">
+            <button class="tab-btn active" onclick="showTab('split', this)">
+                <span class="t-de">Split-Ansicht</span>
+                <span class="t-en">Split View</span>
+            </button>
+            <button class="tab-btn" onclick="showTab('settings', this)">
+                <span class="t-de">Einstellungen</span>
+                <span class="t-en">Settings</span>
+            </button>
+            <button class="tab-btn" onclick="showTab('main', this)">
+                <span class="t-de">Haupt-UI</span>
+                <span class="t-en">Main UI</span>
+            </button>
+        </div>
+        <div class="screenshot-panels">
+            <div id="tab-split" class="active">
+                <div class="screenshot-frame">
+                    <img src="https://jarvis-ai.info/img/split_view.png" alt="Jarvis Split View" loading="lazy">
+                </div>
+                <p class="screenshot-caption t-de">Split-Ansicht: KI-Chat (links) und Live-Desktop via VNC (rechts) – Jarvis beobachtet &amp; steuert den Desktop in Echtzeit</p>
+                <p class="screenshot-caption t-en">Split view: AI chat (left) and live desktop via VNC (right) – Jarvis watches &amp; controls the desktop in real time</p>
+            </div>
+            <div id="tab-settings">
+                <div class="screenshot-frame">
+                    <img src="https://jarvis-ai.info/img/settings.png" alt="Jarvis Settings" loading="lazy">
+                </div>
+                <p class="screenshot-caption t-de">Einstellungen: LLM-Profile, Skills aktivieren/deaktivieren, WhatsApp-Konfiguration</p>
+                <p class="screenshot-caption t-en">Settings: LLM profiles, enable/disable skills, WhatsApp configuration</p>
+            </div>
+            <div id="tab-main">
+                <div class="screenshot-frame">
+                    <img src="https://jarvis-ai.info/img/main_ui.png" alt="Jarvis Main UI" loading="lazy">
+                </div>
+                <p class="screenshot-caption t-de">Haupt-Interface: Modernes Glassmorphism-Design mit Echtzeit-Chat und Agentensteuerung</p>
+                <p class="screenshot-caption t-en">Main interface: Modern glassmorphism design with real-time chat and agent control</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="llm">
+    <div class="container">
+        <h2 class="section-title reveal">
+            <span class="t-de">LLM-Unterstützung – offen &amp; erweiterbar</span>
+            <span class="t-en">LLM Support – open &amp; extensible</span>
+        </h2>
+        <p class="section-sub reveal">
+            <span class="t-de">Jarvis unterstützt alle gängigen Cloud-Anbieter und lokale Modelle. Durch die OpenAI-kompatible Schnittstelle lässt sich <strong>jeder beliebige Anbieter</strong> in wenigen Zeilen integrieren – heute und in Zukunft.</span>
+            <span class="t-en">Jarvis supports all major cloud providers and local models. Via the OpenAI-compatible interface, <strong>any provider</strong> can be integrated in just a few lines – today and in the future.</span>
+        </p>
+        <div class="llm-grid reveal">
+            <div class="llm-card">
+                <div class="llm-icon">🧠</div>
+                <div class="llm-name">Google Gemini</div>
+                <div class="llm-models">2.5 Flash · 2.0 Flash · 1.5 Pro</div>
+            </div>
+            <div class="llm-card">
+                <div class="llm-icon">🤖</div>
+                <div class="llm-name">Anthropic Claude</div>
+                <div class="llm-models">Claude 4 · 3.5 Sonnet · 3.5 Haiku</div>
+            </div>
+            <div class="llm-card">
+                <div class="llm-icon">🌐</div>
+                <div class="llm-name">OpenRouter</div>
+                <div class="llm-models t-de">300+ Modelle – ein API-Key</div>
+                <div class="llm-models t-en">300+ models – one API key</div>
+            </div>
+            <div class="llm-card">
+                <div class="llm-icon">🏠</div>
+                <div class="llm-name t-de">Lokal (Ollama / LM Studio)</div>
+                <div class="llm-name t-en">Local (Ollama / LM Studio)</div>
+                <div class="llm-models t-de">OpenAI-kompatibel · privat · kostenlos</div>
+                <div class="llm-models t-en">OpenAI-compatible · private · free</div>
+            </div>
+            <div class="llm-card" style="border-style: dashed; border-color: rgba(99,102,241,0.35);">
+                <div class="llm-icon">➕</div>
+                <div class="llm-name t-de">Dein Anbieter</div>
+                <div class="llm-name t-en">Your Provider</div>
+                <div class="llm-models t-de">OpenAI-API → sofort kompatibel</div>
+                <div class="llm-models t-en">OpenAI-API → works right away</div>
+            </div>
+        </div>
+        <p class="reveal" style="text-align:center; margin-top:24px; font-size:0.85rem; color:var(--text-muted);">
+            <span class="t-de">💡 Weitere Anbieter, die sofort funktionieren: <strong style="color:var(--text-secondary)">Mistral · Together AI · Groq · DeepSeek · xAI Grok · Perplexity · Fireworks AI · … und viele mehr</strong></span>
+            <span class="t-en">💡 More providers that work right away: <strong style="color:var(--text-secondary)">Mistral · Together AI · Groq · DeepSeek · xAI Grok · Perplexity · Fireworks AI · … and many more</strong></span>
+        </p>
+    </div>
+</section>
+
+<section id="install">
+    <div class="container">
+        <h2 class="section-title reveal">
+            <span class="t-de">Schnellstart</span>
+            <span class="t-en">Quick Start</span>
+        </h2>
+        <p class="section-sub reveal">
+            <span class="t-de">Ein Befehl – der Rest läuft automatisch. Funktioniert auf Debian, Ubuntu, Fedora, Arch und mehr.</span>
+            <span class="t-en">One command – the rest runs automatically. Works on Debian, Ubuntu, Fedora, Arch and more.</span>
+        </p>
+        <div class="install-card reveal">
+
+            <!-- Hauptbefehl -->
+            <div style="margin-bottom: 28px;">
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; font-weight:600;">
+                    <span class="t-de">▶ Im Terminal ausführen</span>
+                    <span class="t-en">▶ Run in your terminal</span>
+                </div>
+                <div class="code-block" style="border-color: rgba(99,102,241,0.4); background: rgba(99,102,241,0.06); display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                    <code style="color: #a5b4fc; font-size: 0.95rem;">curl -fsSL https://jarvis-ai.info/install.sh | bash</code>
+                    <button onclick="(function(btn){navigator.clipboard.writeText('curl -fsSL https://jarvis-ai.info/install.sh | bash').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="In Zwischenablage kopieren" style="background:none;border:1px solid rgba(165,180,252,0.3);color:#a5b4fc;cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;" onmouseover="this.style.background='rgba(99,102,241,0.2)'" onmouseout="this.style.background='none'">⧉</button>
+                </div>
+            </div>
+
+            <!-- Was das Skript macht -->
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px;">
+                <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
+                    <div style="font-size:0.75rem; font-weight:700; color:var(--accent-hover); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
+                        <span class="t-de">Das Skript erledigt automatisch:</span>
+                        <span class="t-en">The script does automatically:</span>
+                    </div>
+                    <ul style="display:flex; flex-direction:column; gap:5px; list-style:none;">
+                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">OS erkennen (Debian/Ubuntu/Fedora/Arch)</span><span class="t-en">Detect OS (Debian/Ubuntu/Fedora/Arch)</span></li>
+                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">git, Python 3, pip, Node.js installieren</span><span class="t-en">Install git, Python 3, pip, Node.js</span></li>
+                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Jarvis klonen &amp; Python-venv einrichten</span><span class="t-en">Clone Jarvis &amp; set up Python venv</span></li>
+                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">.env aus Vorlage erstellen</span><span class="t-en">Create .env from template</span></li>
+                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">systemd-Service einrichten &amp; starten</span><span class="t-en">Set up &amp; start systemd service</span></li>
+                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Autostart beim Systemstart aktivieren</span><span class="t-en">Enable autostart on system boot</span></li>
+                    </ul>
+                </div>
+                <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
+                    <div style="font-size:0.75rem; font-weight:700; color:var(--cyan); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
+                        <span class="t-de">Nach der Installation:</span>
+                        <span class="t-en">After installation:</span>
+                    </div>
+                    <div class="code-block" style="margin:0; padding: 10px 14px;">
+                        <code style="font-size:0.78rem;">cd ~/jarvis
+source venv/bin/activate
+python backend/main.py</code>
+                    </div>
+                    <div style="margin-top:10px; padding:10px 14px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px;">
+                        <span style="font-size:0.8rem; color:var(--success); font-weight:600;">🌐 </span>
+                        <a href="https://localhost:8000" style="font-size:0.82rem; color:var(--cyan); font-family:var(--font-mono);">https://localhost:8000</a>
+                        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
+                            <span class="t-de">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>
+                            <span class="t-en">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Skript ansehen -->
+            <p style="font-size:0.82rem; color:var(--text-muted); text-align:center;">
+                <span class="t-de">🔍 Skript vorher ansehen: </span>
+                <span class="t-en">🔍 Inspect script first: </span>
+                <a href="https://jarvis-ai.info/install.sh" target="_blank" style="color:var(--accent);">jarvis-ai.info/install.sh</a>
+                &nbsp;·&nbsp;
+                <a href="https://github.com/dev-core-busy/jarvis" style="color:var(--accent)">GitHub</a>
+            </p>
+        </div>
+    </div>
+</section>
+
+<section class="contribute">
+    <div class="contribute-inner">
+        <h2 class="contribute-headline reveal">
+            <span class="t-de">🤝 Mach mit – Jarvis lebt von der Community</span>
+            <span class="t-en">🤝 Join in – Jarvis thrives on community</span>
+        </h2>
+        <p class="contribute-text reveal">
+            <span class="t-de">
+                Jarvis ist ein <strong>Open-Source-Projekt</strong> – und soll es bleiben. Ob du einen Bug gefunden hast, eine neue Skill-Idee mitbringst, die Dokumentation verbessern möchtest oder einfach neugierig bist wie alles funktioniert: jede Beteiligung ist willkommen.<br><br>
+                Fork das Repo, öffne einen Issue oder schreib direkt einen Pull Request. Die Architektur ist bewusst modular gehalten – neue Skills lassen sich in wenigen Zeilen Python ergänzen, ohne den Core zu berühren. Lass uns gemeinsam etwas Großartiges bauen.
+            </span>
+            <span class="t-en">
+                Jarvis is an <strong>open-source project</strong> – and will stay that way. Whether you've found a bug, have a new skill idea, want to improve the docs, or are simply curious how it all works: every contribution is welcome.<br><br>
+                Fork the repo, open an issue, or write a pull request directly. The architecture is intentionally modular – new skills can be added in just a few lines of Python without touching the core. Let's build something great together.
+            </span>
+        </p>
+        <div class="contribute-actions reveal">
+            <a href="https://github.com/dev-core-busy/jarvis/fork" target="_blank" class="btn-contribute btn-contribute-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9"/><line x1="12" y1="12" x2="12" y2="15"/></svg>
+                <span class="t-de">Repo forken</span>
+                <span class="t-en">Fork the repo</span>
+            </a>
+            <a href="https://github.com/dev-core-busy/jarvis/issues/new" target="_blank" class="btn-contribute btn-contribute-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span class="t-de">Issue melden</span>
+                <span class="t-en">Report an issue</span>
+            </a>
+            <a href="https://github.com/dev-core-busy/jarvis/pulls" target="_blank" class="btn-contribute btn-contribute-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                <span>Pull Requests</span>
+            </a>
+            <a href="https://github.com/dev-core-busy/jarvis/blob/master/README.md" target="_blank" class="btn-contribute btn-contribute-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                <span class="t-de">Dokumentation</span>
+                <span class="t-en">Documentation</span>
+            </a>
+        </div>
+    </div>
+</section>
+
+<footer>
+    <div class="footer-logo">JARVIS</div>
+    <div class="footer-links">
+        <a href="https://github.com/dev-core-busy/jarvis" target="_blank">GitHub</a>
+        <a href="https://github.com/dev-core-busy/jarvis/issues" target="_blank" class="t-de">Issues / Bugs</a>
+        <a href="https://github.com/dev-core-busy/jarvis/issues" target="_blank" class="t-en">Issues / Bugs</a>
+        <a href="https://github.com/dev-core-busy/jarvis/blob/master/LICENSE" target="_blank">AGPL-3.0</a>
+        <a href="https://github.com/dev-core-busy/jarvis/blob/master/README.md" target="_blank" class="t-de">Dokumentation</a>
+        <a href="https://github.com/dev-core-busy/jarvis/blob/master/README.md" target="_blank" class="t-en">Documentation</a>
+    </div>
+    <p class="footer-copy">
+        &copy; 2026 Andreas Bender &middot; AGPL-3.0 &middot;
+        <span class="t-de">Made with ❤ für die Open-Source-Community</span>
+        <span class="t-en">Made with ❤ for the open-source community</span>
+    </p>
+</footer>
+
+<script>
+    function setLang(lang) {
+        document.documentElement.className = 'lang-' + lang;
+        document.documentElement.lang = lang;
+        document.getElementById('btn-de').classList.toggle('active', lang === 'de');
+        document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+        try { localStorage.setItem('jarvis-lang', lang); } catch(e) {}
+        document.title = lang === 'de'
+            ? 'Jarvis – Autonomer KI Desktop-Agent'
+            : 'Jarvis – Autonomous AI Desktop Agent';
+    }
+    (function() {
+        try { const s = localStorage.getItem('jarvis-lang'); if (s === 'en') setLang('en'); } catch(e) {}
+    })();
+
+    function showTab(name, btn) {
+        document.querySelectorAll('.screenshot-panels > div').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('tab-' + name).classList.add('active');
+        btn.classList.add('active');
+    }
+
+    const observer = new IntersectionObserver(entries => {
+        entries.forEach(e => {
+            if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); }
+        });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>

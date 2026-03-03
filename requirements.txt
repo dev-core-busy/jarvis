@@ -8,3 +8,4 @@ pyautogui==0.9.54
 pillow==11.1.0
 python-multipart==0.0.20
 websockets==14.2
+python-pam>=2.0.2

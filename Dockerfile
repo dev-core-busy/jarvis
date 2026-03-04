@@ -16,10 +16,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Python
     python3 python3-venv python3-pip \
-    # Build-Tools (für python-pam kompilierung – nicht im Docker-Modus nötig, aber sauber halten)
+    # Build-Tools (für python-pam Kompilierung)
     build-essential libpam0g-dev \
-    # X11 / virtueller Desktop
-    xvfb x11vnc openbox xterm \
+    # X11 / virtueller Desktop (XFCE4)
+    xvfb x11vnc xterm \
+    xfce4 xfce4-terminal dbus-x11 at-spi2-core \
     # noVNC / websockify
     novnc websockify \
     # System-Tools
@@ -47,7 +48,10 @@ COPY data/       ./data/
 # ── Daten-Volume vorbereiten ───────────────────────────────────────────────────
 RUN mkdir -p /app/data/logs /app/data/knowledge /app/certs
 
-# ── Docker-spezifischer Entrypoint ─────────────────────────────────────────────
+# ── Wallpaper ────────────────────────────────────────────────────────────────
+COPY docker/jarvis-wallpaper.jpg /usr/share/backgrounds/jarvis.jpg
+
+# ── Docker-spezifischer Entrypoint ─────────────────────────────────────────
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────────────────────────
 # Jarvis Docker Entrypoint
-# Startet: Xvfb → Openbox → x11vnc → websockify/noVNC → Jarvis FastAPI
+# Startet: Xvfb → XFCE4 → x11vnc → websockify/noVNC → Jarvis FastAPI
 # ──────────────────────────────────────────────────────────────────────────────
 set -e
 
@@ -13,17 +13,11 @@ CERT_DIR="/app/certs"
 
 log() { echo "[Jarvis] $*"; }
 
-# ── 1. SSL-Zertifikat ─────────────────────────────────────────────────────────
-# security.py erwartet: server.crt, server.key, jarvis.cer
+# ── 1. SSL-Zertifikat (via security.py – inkl. SAN für Windows) ──────────────
 if [[ ! -f "$CERT_DIR/server.crt" ]]; then
     log "Erstelle selbstsigniertes SSL-Zertifikat..."
-    openssl req -x509 -newkey rsa:2048 -nodes \
-        -keyout "$CERT_DIR/server.key" \
-        -out    "$CERT_DIR/server.crt" \
-        -days 3650 \
-        -subj "/C=DE/ST=Berlin/L=Berlin/O=Jarvis/CN=jarvis"
-    # DER-Format für Windows-Download
-    openssl x509 -in "$CERT_DIR/server.crt" -outform DER -out "$CERT_DIR/jarvis.cer"
+    cd /app
+    /venv/bin/python -c "from backend.security import ensure_certificates; ensure_certificates()"
     log "SSL-Zertifikat erstellt."
 fi
 
@@ -34,11 +28,40 @@ XVFB_PID=$!
 sleep 1
 
 export DISPLAY="$DISPLAY_NUM"
+export HOME="/root"
 
-# ── 3. Openbox Fenstermanager ─────────────────────────────────────────────────
-log "Starte Openbox..."
-openbox &
-sleep 1
+# ── 3. D-Bus + XFCE4 Desktop ────────────────────────────────────────────────
+log "Starte D-Bus..."
+eval "$(dbus-launch --sh-syntax)" || true
+export DBUS_SESSION_BUS_ADDRESS
+
+# XFCE4 Wallpaper konfigurieren
+mkdir -p /root/.config/xfce4/xfconf/xfce-perchannel-xml
+cat > /root/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml << 'XFCEEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-desktop" version="1.0">
+  <property name="backdrop" type="empty">
+    <property name="screen0" type="empty">
+      <property name="monitorscreen" type="empty">
+        <property name="workspace0" type="empty">
+          <property name="last-image" type="string" value="/usr/share/backgrounds/jarvis.jpg"/>
+          <property name="image-style" type="int" value="5"/>
+        </property>
+      </property>
+      <property name="monitorVNC-0" type="empty">
+        <property name="workspace0" type="empty">
+          <property name="last-image" type="string" value="/usr/share/backgrounds/jarvis.jpg"/>
+          <property name="image-style" type="int" value="5"/>
+        </property>
+      </property>
+    </property>
+  </property>
+</channel>
+XFCEEOF
+
+log "Starte XFCE4 Desktop..."
+startxfce4 &
+sleep 3
 
 # ── 4. x11vnc ─────────────────────────────────────────────────────────────────
 log "Starte x11vnc auf Port $VNC_PORT..."
@@ -54,7 +77,7 @@ x11vnc -display "$DISPLAY_NUM" \
 
 sleep 1
 
-# ── 5. websockify / noVNC ─────────────────────────────────────────────────────
+# ── 5. websockify / noVNC ───────────────────────────────────────────────────
 NOVNC_DIR=""
 for d in /usr/share/novnc /usr/share/novnc/utils /usr/local/share/novnc; do
     [[ -d "$d" ]] && NOVNC_DIR="$d" && break
@@ -72,7 +95,7 @@ else
     log "WARNUNG: noVNC nicht gefunden – VNC-Streaming deaktiviert."
 fi
 
-# ── 6. Jarvis FastAPI ─────────────────────────────────────────────────────────
+# ── 6. Jarvis FastAPI ───────────────────────────────────────────────────────
 log "Starte Jarvis auf Port $JARVIS_PORT (HTTPS)..."
 cd /app
 exec /venv/bin/uvicorn backend.main:app \

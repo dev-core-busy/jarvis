@@ -14,13 +14,16 @@ CERT_DIR="/app/certs"
 log() { echo "[Jarvis] $*"; }
 
 # ── 1. SSL-Zertifikat ─────────────────────────────────────────────────────────
-if [[ ! -f "$CERT_DIR/cert.pem" ]]; then
+# security.py erwartet: server.crt, server.key, jarvis.cer
+if [[ ! -f "$CERT_DIR/server.crt" ]]; then
     log "Erstelle selbstsigniertes SSL-Zertifikat..."
     openssl req -x509 -newkey rsa:2048 -nodes \
-        -keyout "$CERT_DIR/key.pem" \
-        -out    "$CERT_DIR/cert.pem" \
+        -keyout "$CERT_DIR/server.key" \
+        -out    "$CERT_DIR/server.crt" \
         -days 3650 \
         -subj "/C=DE/ST=Berlin/L=Berlin/O=Jarvis/CN=jarvis"
+    # DER-Format für Windows-Download
+    openssl x509 -in "$CERT_DIR/server.crt" -outform DER -out "$CERT_DIR/jarvis.cer"
     log "SSL-Zertifikat erstellt."
 fi
 
@@ -61,8 +64,8 @@ if [[ -n "$NOVNC_DIR" ]]; then
     log "Starte websockify/noVNC auf Port $NOVNC_PORT → VNC $VNC_PORT..."
     websockify --web="$NOVNC_DIR" \
         --ssl-only \
-        --cert="$CERT_DIR/cert.pem" \
-        --key="$CERT_DIR/key.pem" \
+        --cert="$CERT_DIR/server.crt" \
+        --key="$CERT_DIR/server.key" \
         "$NOVNC_PORT" \
         "localhost:$VNC_PORT" &
 else
@@ -75,6 +78,6 @@ cd /app
 exec /venv/bin/uvicorn backend.main:app \
     --host 0.0.0.0 \
     --port "$JARVIS_PORT" \
-    --ssl-keyfile  "$CERT_DIR/key.pem" \
-    --ssl-certfile "$CERT_DIR/cert.pem" \
+    --ssl-keyfile  "$CERT_DIR/server.key" \
+    --ssl-certfile "$CERT_DIR/server.crt" \
     --workers 1

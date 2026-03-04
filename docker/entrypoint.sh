@@ -42,12 +42,12 @@ log "Starte x11vnc auf Port $VNC_PORT..."
 x11vnc -display "$DISPLAY_NUM" \
     -nopw \
     -listen 0.0.0.0 \
-    -port "$VNC_PORT" \
+    -rfbport "$VNC_PORT" \
     -forever \
     -shared \
     -bg \
-    -quiet \
-    -logfile /dev/null
+    -noxdamage \
+    -logfile /dev/null || true
 
 sleep 1
 

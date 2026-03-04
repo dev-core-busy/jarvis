@@ -44,9 +44,6 @@ agent_instance = None  # wird lazy initialisiert
 # Erlaubte Linux-Benutzer für Web-Login
 ALLOWED_USERS = {"jarvis"}
 
-# PAM-Instanz
-_pam = pam.pam()
-
 
 # ─── Hilfsfunktionen ─────────────────────────────────────────────────
 def generate_token(username: str) -> str:

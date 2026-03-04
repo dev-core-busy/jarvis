@@ -2,10 +2,61 @@
 
 import subprocess
 import os
+import socket
 import secrets
 from pathlib import Path
 
 CERTS_DIR = Path(__file__).parent.parent / "certs"
+
+
+def _collect_server_ips():
+    """Sammelt alle relevanten IPs für das SSL-Zertifikat (SAN)."""
+    ips = set()
+
+    # 1. Explizit gesetzte SERVER_IP
+    server_ip = os.getenv("SERVER_IP", "")
+    if server_ip and server_ip != "127.0.0.1":
+        ips.add(server_ip)
+
+    # 2. Alle lokalen Netzwerk-Interfaces
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127."):
+                ips.add(ip)
+    except Exception:
+        pass
+
+    # 3. Externe IP ermitteln (für Docker-Container wichtig)
+    try:
+        result = subprocess.run(
+            ["curl", "-s", "--max-time", "3", "http://ifconfig.me"],
+            capture_output=True, text=True, timeout=5
+        )
+        ext_ip = result.stdout.strip()
+        if ext_ip and all(part.isdigit() for part in ext_ip.split(".")) and len(ext_ip.split(".")) == 4:
+            ips.add(ext_ip)
+    except Exception:
+        pass
+
+    # 4. Default Gateway (Docker Host)
+    try:
+        result = subprocess.run(
+            ["ip", "route"], capture_output=True, text=True, timeout=3
+        )
+        for line in result.stdout.splitlines():
+            if line.startswith("default"):
+                gw = line.split()[2]
+                if not gw.startswith("127."):
+                    ips.add(gw)
+    except Exception:
+        pass
+
+    # 127.0.0.1 immer dabei
+    ips.add("127.0.0.1")
+
+    return sorted(ips)
 CERT_FILE = CERTS_DIR / "server.crt"
 KEY_FILE = CERTS_DIR / "server.key"
 CERT_DER_FILE = CERTS_DIR / "jarvis.cer"  # DER-Format für Windows
@@ -20,8 +71,12 @@ def ensure_certificates():
 
     print("🔒 Generiere SSL-Zertifikate (Windows 11 kompatibel)...")
 
-    # Server-IP aus Umgebungsvariable lesen (Fallback: 127.0.0.1)
-    server_ip = os.getenv("SERVER_IP", "127.0.0.1")
+    # Alle relevanten IPs sammeln
+    ips = _collect_server_ips()
+    print(f"   IPs im Zertifikat: {', '.join(ips)}")
+
+    # IP-Einträge für OpenSSL SAN generieren
+    ip_lines = "\n".join(f"IP.{i+1} = {ip}" for i, ip in enumerate(ips))
 
     # OpenSSL Konfigurationsdatei mit allen nötigen Extensions
     ext_file = CERTS_DIR / "openssl.cnf"
@@ -52,8 +107,7 @@ subjectAltName = @alt_names
 DNS.1 = jarvis
 DNS.2 = jarvis.local
 DNS.3 = localhost
-IP.1 = {server_ip}
-IP.2 = 127.0.0.1
+{ip_lines}
 """)
 
     # PEM-Zertifikat generieren

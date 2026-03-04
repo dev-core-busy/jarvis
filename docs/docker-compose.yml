@@ -1,0 +1,70 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Jarvis AI Desktop Agent – Docker Compose
+# Startet Jarvis Web-UI + VNC-Desktop (+ optional WhatsApp-Bridge)
+#
+# Schnellstart:
+#   docker compose up -d
+#   Browser: https://localhost:8000  (SSL-Warnung bestätigen)
+#   Login:   jarvis / jarvis
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Jarvis Haupt-Container ──────────────────────────────────────────────────
+  jarvis:
+    image: ghcr.io/dev-core-busy/jarvis:latest
+    container_name: jarvis
+    restart: unless-stopped
+    ports:
+      - "8000:8000"   # Web-UI (HTTPS)
+      - "6080:6080"   # noVNC Desktop-Streaming
+    environment:
+      # Docker-Modus aktivieren (deaktiviert PAM-Authentifizierung)
+      JARVIS_DOCKER: "1"
+      # Web-Login Passwort (Benutzername ist immer "jarvis")
+      JARVIS_PASSWORD: "${JARVIS_PASSWORD:-jarvis}"
+      # LLM API-Keys (alternativ im Web-UI unter Einstellungen eintragen)
+      # GEMINI_API_KEY: "..."
+      # ANTHROPIC_API_KEY: "..."
+      # OPENROUTER_API_KEY: "..."
+    volumes:
+      # Persistente Daten (Memory, Wissensdatenbank, Logs)
+      - jarvis-data:/app/data
+      # SSL-Zertifikate (werden beim ersten Start automatisch erstellt)
+      - jarvis-certs:/app/certs
+    shm_size: "256mb"   # Für Browser-Automation empfohlen
+
+  # ── WhatsApp Bridge (optional) ──────────────────────────────────────────────
+  # Einkommentieren für WhatsApp-Integration:
+  #
+  # whatsapp-bridge:
+  #   image: ghcr.io/dev-core-busy/jarvis-wa:latest
+  #   container_name: jarvis-whatsapp
+  #   restart: unless-stopped
+  #   # Port nur intern erreichbar (kein externes Expose nötig)
+  #   expose:
+  #     - "3001"
+  #   volumes:
+  #     - wa-session:/app/session
+  #   networks:
+  #     - jarvis-net
+  #
+  # Dann bei jarvis hinzufügen:
+  #   networks:
+  #     - jarvis-net
+  #   environment:
+  #     WA_BRIDGE_URL: "http://whatsapp-bridge:3001"
+
+# ── Volumes ────────────────────────────────────────────────────────────────────
+volumes:
+  jarvis-data:
+    driver: local
+  jarvis-certs:
+    driver: local
+  # wa-session:
+  #   driver: local
+
+# ── Netzwerk (für WhatsApp-Bridge-Kommunikation) ───────────────────────────────
+# networks:
+#   jarvis-net:
+#     driver: bridge

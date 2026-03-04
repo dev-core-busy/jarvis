@@ -201,6 +201,12 @@
 
         /* Install */
         .install-card { background: var(--bg-glass); border: 1px solid var(--border); border-radius: var(--radius-xl); padding: 40px; max-width: 720px; margin: 0 auto; }
+        .install-tabs { display: flex; gap: 8px; margin-bottom: 28px; background: rgba(0,0,0,0.3); border-radius: var(--radius-md); padding: 5px; }
+        .install-tab { flex: 1; padding: 10px 16px; background: none; border: none; border-radius: calc(var(--radius-md) - 3px); color: var(--text-muted); font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all var(--transition); font-family: var(--font-body); }
+        .install-tab.active { background: var(--accent); color: #fff; }
+        .install-tab:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+        .install-panel { display: none; }
+        .install-panel.active { display: block; }
         .code-block { background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px 22px; margin: 16px 0; overflow-x: auto; }
         .code-block code { font-family: var(--font-mono); font-size: 0.85rem; color: var(--cyan); white-space: pre; display: block; }
         .code-block .comment { color: var(--text-muted); font-style: italic; }
@@ -562,63 +568,147 @@
         </p>
         <div class="install-card reveal">
 
-            <!-- Hauptbefehl -->
-            <div style="margin-bottom: 28px;">
-                <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; font-weight:600;">
-                    <span class="t-de">▶ Im Terminal ausführen</span>
-                    <span class="t-en">▶ Run in your terminal</span>
-                </div>
-                <div class="code-block" style="border-color: rgba(99,102,241,0.4); background: rgba(99,102,241,0.06); display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                    <code style="color: #a5b4fc; font-size: 0.95rem;">curl -fsSL https://jarvis-ai.info/install.sh | bash</code>
-                    <button onclick="(function(btn){navigator.clipboard.writeText('curl -fsSL https://jarvis-ai.info/install.sh | bash').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="In Zwischenablage kopieren" style="background:none;border:1px solid rgba(165,180,252,0.3);color:#a5b4fc;cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;" onmouseover="this.style.background='rgba(99,102,241,0.2)'" onmouseout="this.style.background='none'">⧉</button>
-                </div>
+            <!-- Tab-Umschalter -->
+            <div class="install-tabs">
+                <button class="install-tab active" onclick="switchInstallTab('script', this)">
+                    🐧 <span class="t-de">Install-Skript</span><span class="t-en">Install Script</span>
+                </button>
+                <button class="install-tab" onclick="switchInstallTab('docker', this)">
+                    🐳 Docker
+                </button>
             </div>
 
-            <!-- Was das Skript macht -->
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px;">
-                <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
-                    <div style="font-size:0.75rem; font-weight:700; color:var(--accent-hover); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
-                        <span class="t-de">Das Skript erledigt automatisch:</span>
-                        <span class="t-en">The script does automatically:</span>
+            <!-- ── Panel: Install-Skript ── -->
+            <div id="install-panel-script" class="install-panel active">
+
+                <!-- Hauptbefehl -->
+                <div style="margin-bottom: 28px;">
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; font-weight:600;">
+                        <span class="t-de">▶ Im Terminal ausführen</span>
+                        <span class="t-en">▶ Run in your terminal</span>
                     </div>
-                    <ul style="display:flex; flex-direction:column; gap:5px; list-style:none;">
-                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">OS erkennen (Debian/Ubuntu/Fedora/Arch)</span><span class="t-en">Detect OS (Debian/Ubuntu/Fedora/Arch)</span></li>
-                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">git, Python 3, pip, Node.js installieren</span><span class="t-en">Install git, Python 3, pip, Node.js</span></li>
-                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Jarvis klonen &amp; Python-venv einrichten</span><span class="t-en">Clone Jarvis &amp; set up Python venv</span></li>
-                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">.env aus Vorlage erstellen</span><span class="t-en">Create .env from template</span></li>
-                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">systemd-Service einrichten &amp; starten</span><span class="t-en">Set up &amp; start systemd service</span></li>
-                        <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Autostart beim Systemstart aktivieren</span><span class="t-en">Enable autostart on system boot</span></li>
-                    </ul>
+                    <div class="code-block" style="border-color: rgba(99,102,241,0.4); background: rgba(99,102,241,0.06); display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                        <code style="color: #a5b4fc; font-size: 0.95rem;">curl -fsSL https://jarvis-ai.info/install.sh | bash</code>
+                        <button onclick="(function(btn){navigator.clipboard.writeText('curl -fsSL https://jarvis-ai.info/install.sh | bash').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="In Zwischenablage kopieren" style="background:none;border:1px solid rgba(165,180,252,0.3);color:#a5b4fc;cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;" onmouseover="this.style.background='rgba(99,102,241,0.2)'" onmouseout="this.style.background='none'">⧉</button>
+                    </div>
                 </div>
-                <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
-                    <div style="font-size:0.75rem; font-weight:700; color:var(--cyan); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
-                        <span class="t-de">Nach der Installation:</span>
-                        <span class="t-en">After installation:</span>
+
+                <!-- Was das Skript macht -->
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px;">
+                    <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
+                        <div style="font-size:0.75rem; font-weight:700; color:var(--accent-hover); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
+                            <span class="t-de">Das Skript erledigt automatisch:</span>
+                            <span class="t-en">The script does automatically:</span>
+                        </div>
+                        <ul style="display:flex; flex-direction:column; gap:5px; list-style:none;">
+                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">OS erkennen (Debian/Ubuntu/Fedora/Arch)</span><span class="t-en">Detect OS (Debian/Ubuntu/Fedora/Arch)</span></li>
+                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">git, Python 3, pip, Node.js installieren</span><span class="t-en">Install git, Python 3, pip, Node.js</span></li>
+                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Jarvis klonen &amp; Python-venv einrichten</span><span class="t-en">Clone Jarvis &amp; set up Python venv</span></li>
+                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">.env aus Vorlage erstellen</span><span class="t-en">Create .env from template</span></li>
+                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">systemd-Service einrichten &amp; starten</span><span class="t-en">Set up &amp; start systemd service</span></li>
+                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Autostart beim Systemstart aktivieren</span><span class="t-en">Enable autostart on system boot</span></li>
+                        </ul>
                     </div>
-                    <div class="code-block" style="margin:0; padding: 10px 14px;">
-                        <code style="font-size:0.78rem;">cd ~/jarvis
-source venv/bin/activate
-python backend/main.py</code>
-                    </div>
-                    <div style="margin-top:10px; padding:10px 14px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px;">
-                        <span style="font-size:0.8rem; color:var(--success); font-weight:600;">🌐 </span>
-                        <a href="https://localhost:8000" style="font-size:0.82rem; color:var(--cyan); font-family:var(--font-mono);">https://localhost:8000</a>
-                        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
-                            <span class="t-de">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>
-                            <span class="t-en">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>
+                    <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
+                        <div style="font-size:0.75rem; font-weight:700; color:var(--cyan); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
+                            <span class="t-de">Danach im Browser:</span>
+                            <span class="t-en">Then open in browser:</span>
+                        </div>
+                        <div style="padding:10px 14px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px;">
+                            <span style="font-size:0.8rem; color:var(--success); font-weight:600;">🌐 </span>
+                            <a href="https://localhost:8000" style="font-size:0.82rem; color:var(--cyan); font-family:var(--font-mono);">https://localhost:8000</a>
+                            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
+                                <span class="t-de">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>
+                                <span class="t-en">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>
+                            </div>
+                        </div>
+                        <div style="margin-top:10px; font-size:0.75rem; color:var(--text-muted);">
+                            <span class="t-de">Voraussetzung: Linux-Server mit root-Zugriff</span>
+                            <span class="t-en">Requires: Linux server with root access</span>
                         </div>
                     </div>
                 </div>
+
+                <p style="font-size:0.82rem; color:var(--text-muted); text-align:center;">
+                    <span class="t-de">🔍 Skript vorher ansehen: </span>
+                    <span class="t-en">🔍 Inspect script first: </span>
+                    <a href="https://jarvis-ai.info/install.sh" target="_blank" style="color:var(--accent);">jarvis-ai.info/install.sh</a>
+                    &nbsp;·&nbsp;
+                    <a href="https://github.com/dev-core-busy/jarvis" style="color:var(--accent)">GitHub</a>
+                </p>
             </div>
 
-            <!-- Skript ansehen -->
-            <p style="font-size:0.82rem; color:var(--text-muted); text-align:center;">
-                <span class="t-de">🔍 Skript vorher ansehen: </span>
-                <span class="t-en">🔍 Inspect script first: </span>
-                <a href="https://jarvis-ai.info/install.sh" target="_blank" style="color:var(--accent);">jarvis-ai.info/install.sh</a>
-                &nbsp;·&nbsp;
-                <a href="https://github.com/dev-core-busy/jarvis" style="color:var(--accent)">GitHub</a>
-            </p>
+            <!-- ── Panel: Docker ── -->
+            <div id="install-panel-docker" class="install-panel">
+
+                <!-- Schritt 1 -->
+                <div style="margin-bottom:20px;">
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; font-weight:600;">
+                        <span class="t-de">▶ Schritt 1 – docker-compose.yml herunterladen</span>
+                        <span class="t-en">▶ Step 1 – Download docker-compose.yml</span>
+                    </div>
+                    <div class="code-block" style="border-color: rgba(6,182,212,0.35); background: rgba(6,182,212,0.05); display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                        <code style="color: var(--cyan); font-size: 0.88rem;">curl -fsSL https://jarvis-ai.info/docker-compose.yml -o docker-compose.yml</code>
+                        <button onclick="(function(btn){navigator.clipboard.writeText('curl -fsSL https://jarvis-ai.info/docker-compose.yml -o docker-compose.yml').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="Kopieren" style="background:none;border:1px solid rgba(6,182,212,0.3);color:var(--cyan);cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;" onmouseover="this.style.background='rgba(6,182,212,0.15)'" onmouseout="this.style.background='none'">⧉</button>
+                    </div>
+                </div>
+
+                <!-- Schritt 2 -->
+                <div style="margin-bottom:24px;">
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; font-weight:600;">
+                        <span class="t-de">▶ Schritt 2 – Starten</span>
+                        <span class="t-en">▶ Step 2 – Start</span>
+                    </div>
+                    <div class="code-block" style="border-color: rgba(6,182,212,0.35); background: rgba(6,182,212,0.05); display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                        <code style="color: var(--cyan); font-size: 0.88rem;">docker compose up -d</code>
+                        <button onclick="(function(btn){navigator.clipboard.writeText('docker compose up -d').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="Kopieren" style="background:none;border:1px solid rgba(6,182,212,0.3);color:var(--cyan);cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;" onmouseover="this.style.background='rgba(6,182,212,0.15)'" onmouseout="this.style.background='none'">⧉</button>
+                    </div>
+                </div>
+
+                <!-- Vorteile -->
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px;">
+                    <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
+                        <div style="font-size:0.75rem; font-weight:700; color:#22d3ee; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
+                            <span class="t-de">🐳 Vorteile:</span>
+                            <span class="t-en">🐳 Advantages:</span>
+                        </div>
+                        <ul style="display:flex; flex-direction:column; gap:5px; list-style:none;">
+                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Keine Abhängigkeits-Konflikte</span><span class="t-en">No dependency conflicts</span></li>
+                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Läuft auf jedem Docker-Host</span><span class="t-en">Runs on any Docker host</span></li>
+                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Updates: <code style="font-size:0.78rem;">docker compose pull</code></span><span class="t-en">Updates via <code style="font-size:0.78rem;">docker compose pull</code></span></li>
+                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Vollständig isoliert</span><span class="t-en">Fully isolated</span></li>
+                        </ul>
+                    </div>
+                    <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
+                        <div style="font-size:0.75rem; font-weight:700; color:var(--cyan); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
+                            <span class="t-de">Danach im Browser:</span>
+                            <span class="t-en">Then open in browser:</span>
+                        </div>
+                        <div style="padding:10px 14px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px;">
+                            <span style="font-size:0.8rem; color:var(--success); font-weight:600;">🌐 </span>
+                            <a href="https://localhost:8000" style="font-size:0.82rem; color:var(--cyan); font-family:var(--font-mono);">https://localhost:8000</a>
+                            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
+                                <span class="t-de">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>
+                                <span class="t-en">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>
+                            </div>
+                        </div>
+                        <div style="margin-top:10px; font-size:0.75rem; color:var(--text-muted);">
+                            <span class="t-de">Voraussetzung: Docker + Docker Compose</span>
+                            <span class="t-en">Requires: Docker + Docker Compose</span>
+                        </div>
+                    </div>
+                </div>
+
+                <p style="font-size:0.82rem; color:var(--text-muted); text-align:center;">
+                    <a href="https://github.com/dev-core-busy/jarvis/blob/master/docker-compose.yml" target="_blank" style="color:var(--accent);">
+                        <span class="t-de">🔍 docker-compose.yml ansehen</span>
+                        <span class="t-en">🔍 View docker-compose.yml</span>
+                    </a>
+                    &nbsp;·&nbsp;
+                    <a href="https://github.com/dev-core-busy/jarvis" style="color:var(--accent)">GitHub</a>
+                </p>
+            </div>
+
         </div>
     </div>
 </section>
@@ -699,6 +789,13 @@ python backend/main.py</code>
         document.querySelectorAll('.screenshot-panels > div').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.getElementById('tab-' + name).classList.add('active');
+        btn.classList.add('active');
+    }
+
+    function switchInstallTab(name, btn) {
+        document.querySelectorAll('.install-panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.install-tab').forEach(b => b.classList.remove('active'));
+        document.getElementById('install-panel-' + name).classList.add('active');
         btn.classList.add('active');
     }
 

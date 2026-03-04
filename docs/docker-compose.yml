@@ -23,6 +23,8 @@ services:
       JARVIS_DOCKER: "1"
       # Web-Login Passwort (Benutzername ist immer "jarvis")
       JARVIS_PASSWORD: "${JARVIS_PASSWORD:-jarvis}"
+      # Server-IP für SSL-Zertifikat (WICHTIG: Auf eigene IP anpassen!)
+      SERVER_IP: "${SERVER_IP:-127.0.0.1}"
       # LLM API-Keys (alternativ im Web-UI unter Einstellungen eintragen)
       # GEMINI_API_KEY: "..."
       # ANTHROPIC_API_KEY: "..."

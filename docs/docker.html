@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jarvis – Docker Installation &amp; Konfiguration</title>
-    <meta name="robots" content="noindex, nofollow">
+    <meta name="robots" content="index, follow">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -49,12 +49,14 @@
         .nav-back { font-size: 0.85rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; transition: color var(--transition); }
         .nav-back:hover { color: var(--text-primary); text-decoration: none; }
 
-        /* Layout */
-        .page-wrap { max-width: 900px; margin: 0 auto; padding: 48px 24px 96px; }
+        /* Layout – Zweispaltig: TOC links, Content rechts */
+        .page-outer { max-width: 1140px; margin: 0 auto; padding: 48px 24px 96px; display: flex; gap: 40px; align-items: flex-start; }
+        .toc-wrap { width: 190px; flex-shrink: 0; }
+        .toc-sticky { position: sticky; top: 80px; }
+        .page-wrap { flex: 1; min-width: 0; }
+        @media (max-width: 900px) { .toc-wrap { display: none; } .page-outer { padding: 32px 16px 64px; } }
 
         /* Sidebar TOC */
-        .toc-wrap { position: fixed; left: calc(50% - 670px); top: 80px; width: 180px; display: none; }
-        @media (min-width: 1500px) { .toc-wrap { display: block; } }
         .toc { background: var(--bg-glass); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; }
         .toc-title { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
         .toc a { display: block; font-size: 0.8rem; color: var(--text-secondary); padding: 4px 0; border-left: 2px solid transparent; padding-left: 10px; transition: all var(--transition); }
@@ -134,22 +136,26 @@
     <a href="/" class="nav-back">← Zurück zur Hauptseite</a>
 </nav>
 
+<div class="page-outer">
+
 <!-- Inhaltsverzeichnis (Desktop) -->
 <div class="toc-wrap">
-    <div class="toc">
-        <div class="toc-title">Inhalt</div>
-        <a href="#voraussetzungen">Voraussetzungen</a>
-        <a href="#quickstart">Quick Start</a>
-        <a href="#konfiguration">Konfiguration</a>
-        <a class="sub" href="#env-variablen">ENV-Variablen</a>
-        <a class="sub" href="#volumes">Volumes</a>
-        <a class="sub" href="#ports">Ports</a>
-        <a href="#passwort">Passwort ändern</a>
-        <a href="#api-key">API-Key einrichten</a>
-        <a href="#whatsapp">WhatsApp Bridge</a>
-        <a href="#updates">Updates</a>
-        <a href="#befehle">Nützliche Befehle</a>
-        <a href="#troubleshooting">Troubleshooting</a>
+    <div class="toc-sticky">
+        <div class="toc">
+            <div class="toc-title">Inhalt</div>
+            <a href="#voraussetzungen">Voraussetzungen</a>
+            <a href="#quickstart">Quick Start</a>
+            <a href="#konfiguration">Konfiguration</a>
+            <a class="sub" href="#env-variablen">ENV-Variablen</a>
+            <a class="sub" href="#volumes">Volumes</a>
+            <a class="sub" href="#ports">Ports</a>
+            <a href="#passwort">Passwort ändern</a>
+            <a href="#api-key">API-Key einrichten</a>
+            <a href="#whatsapp">WhatsApp Bridge</a>
+            <a href="#updates">Updates</a>
+            <a href="#befehle">Nützliche Befehle</a>
+            <a href="#troubleshooting">Troubleshooting</a>
+        </div>
     </div>
 </div>
 
@@ -194,7 +200,7 @@ systemctl enable --now docker</code>
     <!-- ── 2. Quick Start ── -->
     <div class="doc-section" id="quickstart">
         <h2><span class="h-icon">🚀</span> Quick Start</h2>
-        <p style="color:var(--text-secondary); margin-bottom:24px;">In vier Schritten startklar:</p>
+        <p style="color:var(--text-secondary); margin-bottom:24px;">In drei Schritten startklar:</p>
 
         <div class="steps">
             <div class="step">
@@ -222,19 +228,8 @@ systemctl enable --now docker</code>
             <div class="step">
                 <div class="step-num">3</div>
                 <div class="step-content">
-                    <div class="step-title">Docker Image herunterladen (~600 MB)</div>
-                    <div class="step-desc">Lädt das Jarvis-Image von der GitHub Container Registry herunter. Nur beim ersten Mal nötig – bei Updates ebenfalls ausführen.</div>
-                    <div class="code-block cyan">
-                        <button class="copy-btn" onclick="copyCode(this)">⧉ Kopieren</button>
-                        <code>docker compose pull</code>
-                    </div>
-                </div>
-            </div>
-            <div class="step">
-                <div class="step-num">4</div>
-                <div class="step-content">
                     <div class="step-title">Starten</div>
-                    <div class="step-desc">Startet alle Container im Hintergrund. Das Image muss dafür bereits heruntergeladen sein (Schritt 3).</div>
+                    <div class="step-desc">Lädt das Image automatisch herunter (~600 MB beim ersten Mal) und startet den Container.</div>
                     <div class="code-block highlight">
                         <button class="copy-btn" onclick="copyCode(this)">⧉ Kopieren</button>
                         <code>docker compose up -d</code>
@@ -604,7 +599,8 @@ ss -tlnp | grep 8000
         <p>© 2026 Andreas Bender · <a href="https://github.com/dev-core-busy/jarvis">GitHub</a> · <a href="/">jarvis-ai.info</a> · Lizenz: <a href="https://github.com/dev-core-busy/jarvis/blob/master/LICENSE">AGPL-3.0</a></p>
     </div>
 
-</div>
+</div><!-- /page-wrap -->
+</div><!-- /page-outer -->
 
 <script>
 function copyCode(btn) {

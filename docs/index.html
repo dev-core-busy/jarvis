@@ -563,23 +563,23 @@
             <span class="t-en">Quick Start</span>
         </h2>
         <p class="section-sub reveal">
-            <span class="t-de">Ein Befehl – der Rest läuft automatisch. Funktioniert auf Debian, Ubuntu, Fedora, Arch und mehr.</span>
-            <span class="t-en">One command – the rest runs automatically. Works on Debian, Ubuntu, Fedora, Arch and more.</span>
+            <span class="t-de">Docker oder Install-Skript – in Minuten einsatzbereit auf jedem Linux-Server.</span>
+            <span class="t-en">Docker or install script – ready in minutes on any Linux server.</span>
         </p>
         <div class="install-card reveal">
 
             <!-- Tab-Umschalter -->
             <div class="install-tabs">
-                <button class="install-tab active" onclick="switchInstallTab('script', this)">
-                    🐧 <span class="t-de">Install-Skript</span><span class="t-en">Install Script</span>
+                <button class="install-tab active" onclick="switchInstallTab('docker', this)">
+                    🐳 Docker <span class="t-de">(Empfohlen)</span><span class="t-en">(Recommended)</span>
                 </button>
-                <button class="install-tab" onclick="switchInstallTab('docker', this)">
-                    🐳 Docker
+                <button class="install-tab" onclick="switchInstallTab('script', this)">
+                    🐧 <span class="t-de">Install-Skript</span><span class="t-en">Install Script</span>
                 </button>
             </div>
 
             <!-- ── Panel: Install-Skript ── -->
-            <div id="install-panel-script" class="install-panel active">
+            <div id="install-panel-script" class="install-panel">
 
                 <!-- Hauptbefehl -->
                 <div style="margin-bottom: 28px;">
@@ -639,7 +639,7 @@
             </div>
 
             <!-- ── Panel: Docker ── -->
-            <div id="install-panel-docker" class="install-panel">
+            <div id="install-panel-docker" class="install-panel active">
 
                 <!-- Schritt 1 -->
                 <div style="margin-bottom:20px;">
@@ -700,9 +700,14 @@
                 </div>
 
                 <p style="font-size:0.82rem; color:var(--text-muted); text-align:center;">
+                    <a href="docker.html" style="color:var(--accent);">
+                        <span class="t-de">📖 Ausführliche Docker-Anleitung</span>
+                        <span class="t-en">📖 Detailed Docker Guide</span>
+                    </a>
+                    &nbsp;·&nbsp;
                     <a href="https://github.com/dev-core-busy/jarvis/blob/master/docker-compose.yml" target="_blank" style="color:var(--accent);">
-                        <span class="t-de">🔍 docker-compose.yml ansehen</span>
-                        <span class="t-en">🔍 View docker-compose.yml</span>
+                        <span class="t-de">🔍 docker-compose.yml</span>
+                        <span class="t-en">🔍 docker-compose.yml</span>
                     </a>
                     &nbsp;·&nbsp;
                     <a href="https://github.com/dev-core-busy/jarvis" style="color:var(--accent)">GitHub</a>

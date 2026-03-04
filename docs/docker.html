@@ -53,8 +53,8 @@
         .page-wrap { max-width: 900px; margin: 0 auto; padding: 48px 24px 96px; }
 
         /* Sidebar TOC */
-        .toc-wrap { position: fixed; left: max(20px, calc(50% - 560px)); top: 80px; width: 200px; display: none; }
-        @media (min-width: 1220px) { .toc-wrap { display: block; } }
+        .toc-wrap { position: fixed; left: calc(50% - 670px); top: 80px; width: 180px; display: none; }
+        @media (min-width: 1500px) { .toc-wrap { display: block; } }
         .toc { background: var(--bg-glass); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; }
         .toc-title { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
         .toc a { display: block; font-size: 0.8rem; color: var(--text-secondary); padding: 4px 0; border-left: 2px solid transparent; padding-left: 10px; transition: all var(--transition); }
@@ -194,7 +194,7 @@ systemctl enable --now docker</code>
     <!-- ── 2. Quick Start ── -->
     <div class="doc-section" id="quickstart">
         <h2><span class="h-icon">🚀</span> Quick Start</h2>
-        <p style="color:var(--text-secondary); margin-bottom:24px;">In drei Schritten startklar:</p>
+        <p style="color:var(--text-secondary); margin-bottom:24px;">In vier Schritten startklar:</p>
 
         <div class="steps">
             <div class="step">
@@ -222,8 +222,19 @@ systemctl enable --now docker</code>
             <div class="step">
                 <div class="step-num">3</div>
                 <div class="step-content">
+                    <div class="step-title">Docker Image herunterladen (~600 MB)</div>
+                    <div class="step-desc">Lädt das Jarvis-Image von der GitHub Container Registry herunter. Nur beim ersten Mal nötig – bei Updates ebenfalls ausführen.</div>
+                    <div class="code-block cyan">
+                        <button class="copy-btn" onclick="copyCode(this)">⧉ Kopieren</button>
+                        <code>docker compose pull</code>
+                    </div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">4</div>
+                <div class="step-content">
                     <div class="step-title">Starten</div>
-                    <div class="step-desc">Lädt das Image (~600 MB) herunter und startet alle Services im Hintergrund.</div>
+                    <div class="step-desc">Startet alle Container im Hintergrund. Das Image muss dafür bereits heruntergeladen sein (Schritt 3).</div>
                     <div class="code-block highlight">
                         <button class="copy-btn" onclick="copyCode(this)">⧉ Kopieren</button>
                         <code>docker compose up -d</code>

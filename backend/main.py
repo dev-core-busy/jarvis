@@ -8,8 +8,19 @@ import subprocess
 import time
 from pathlib import Path
 
-import pam
+import os
+
 import psutil
+
+# ─── Docker-Modus: PAM durch ENV-Variable ersetzen ───────────────────
+_DOCKER_MODE = os.getenv("JARVIS_DOCKER", "0") == "1"
+_JARVIS_PASSWORD = os.getenv("JARVIS_PASSWORD", "jarvis")
+
+if not _DOCKER_MODE:
+    import pam as _pam_module
+    _pam = _pam_module.pam()
+else:
+    _pam = None
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -69,9 +80,12 @@ def verify_token(token: str) -> str | None:
 
 
 def authenticate_linux_user(username: str, password: str) -> bool:
-    """Authentifiziert einen Linux-Benutzer via PAM."""
+    """Authentifiziert einen Benutzer – via PAM (Linux) oder ENV-Variable (Docker)."""
     if username not in ALLOWED_USERS:
         return False
+    if _DOCKER_MODE:
+        # Im Docker-Modus: simplen Passwort-Vergleich via ENV-Variable
+        return password == _JARVIS_PASSWORD
     return _pam.authenticate(username, password, service="login")
 
 
@@ -232,8 +246,9 @@ async def login(request: Request):
 
     if authenticate_linux_user(username, password):
         token = generate_token(username)
-        # Desktop-Session im Hintergrund wechseln
-        asyncio.get_event_loop().run_in_executor(None, switch_desktop_session, username)
+        # Desktop-Session im Hintergrund wechseln (nur im Nicht-Docker-Modus)
+        if not _DOCKER_MODE:
+            asyncio.get_event_loop().run_in_executor(None, switch_desktop_session, username)
         return JSONResponse({"success": True, "token": token, "username": username})
 
     return JSONResponse(

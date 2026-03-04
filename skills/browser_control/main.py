@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import shutil
 
 from backend.tools.base import BaseTool
 
@@ -13,7 +14,13 @@ def _get_env() -> dict:
 class BrowserControlTool(BaseTool):
     """Steuert den Webbrowser (Chrome/Firefox) auf dem Linux-Desktop."""
 
-    BROWSER_CMD = "google-chrome --no-sandbox --remote-debugging-port=9222 --user-data-dir=/tmp/jarvis-chrome"
+    # Browser-Erkennung: chromium → google-chrome → firefox
+    BROWSER_CMD = next(
+        (f"{b} --no-sandbox --remote-debugging-port=9222 --user-data-dir=/tmp/jarvis-chrome"
+         for b in ("chromium", "google-chrome", "google-chrome-stable")
+         if shutil.which(b)),
+        "firefox-esr --new-instance"
+    )
 
     @property
     def name(self) -> str:

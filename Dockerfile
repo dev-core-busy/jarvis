@@ -21,8 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # X11 / virtueller Desktop (XFCE4)
     xvfb x11vnc xterm \
     xfce4 xfce4-terminal dbus-x11 at-spi2-core \
-    # Browser (für Desktop-Automation)
-    firefox-esr \
+    # Browser (für Desktop-Automation, CDP via --remote-debugging-port)
+    chromium \
     # noVNC / websockify
     novnc websockify \
     # System-Tools

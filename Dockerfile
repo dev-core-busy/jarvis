@@ -21,10 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # X11 / virtueller Desktop (XFCE4)
     xvfb x11vnc xterm \
     xfce4 xfce4-terminal dbus-x11 at-spi2-core \
+    # Browser (für Desktop-Automation)
+    firefox-esr \
     # noVNC / websockify
     novnc websockify \
     # System-Tools
-    curl wget ca-certificates procps \
+    curl wget ca-certificates procps xdotool \
     # SSL
     openssl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*

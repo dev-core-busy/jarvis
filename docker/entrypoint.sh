@@ -100,6 +100,8 @@ WA_BRIDGE_DIR="/app/services/whatsapp-bridge"
 if [[ -f "$WA_BRIDGE_DIR/index.js" ]] && command -v node &>/dev/null; then
     log "Starte WhatsApp-Bridge auf Port 3001..."
     cd "$WA_BRIDGE_DIR"
+    export JARVIS_WEBHOOK="https://localhost:${JARVIS_PORT}/api/whatsapp/incoming"
+    export NODE_TLS_REJECT_UNAUTHORIZED=0
     node index.js &
     WA_PID=$!
     sleep 1

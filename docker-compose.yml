@@ -21,6 +21,9 @@ services:
     environment:
       # Docker-Modus aktivieren (deaktiviert PAM-Authentifizierung)
       JARVIS_DOCKER: "1"
+      # WhatsApp-Bridge Webhook (HTTPS wegen self-signed cert im Container)
+      JARVIS_WEBHOOK: "https://localhost:8000/api/whatsapp/incoming"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
       # Web-Login Passwort (Benutzername ist immer "jarvis")
       JARVIS_PASSWORD: "${JARVIS_PASSWORD:-jarvis}"
       # Server-IP für SSL-Zertifikat (WICHTIG: Auf eigene IP anpassen!)

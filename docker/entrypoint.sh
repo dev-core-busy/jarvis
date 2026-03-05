@@ -13,6 +13,14 @@ CERT_DIR="/app/certs"
 
 log() { echo "[Jarvis] $*"; }
 
+# ── Container-Shutdown-Befehle bereitstellen ──────────────────────────────────
+# Leitet shutdown/poweroff/halt an kill -SIGTERM 1 weiter → stoppt den Container
+for cmd in shutdown poweroff halt; do
+    printf '#!/bin/sh\necho "[Jarvis] Container wird beendet..."\nkill -SIGTERM 1\n' > "/usr/local/bin/$cmd"
+    chmod +x "/usr/local/bin/$cmd"
+done
+
+
 # ── 1. SSL-Zertifikat (via security.py – inkl. SAN für Windows) ──────────────
 if [[ ! -f "$CERT_DIR/server.crt" ]]; then
     log "Erstelle selbstsigniertes SSL-Zertifikat..."

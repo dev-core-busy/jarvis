@@ -1,6 +1,6 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Jarvis AI Desktop Agent – Docker Compose
-# Startet Jarvis Web-UI + VNC-Desktop (+ optional WhatsApp-Bridge)
+# Startet Jarvis Web-UI + VNC-Desktop + WhatsApp-Bridge (alles in einem Container)
 #
 # Schnellstart:
 #   docker compose up -d
@@ -10,7 +10,7 @@
 
 services:
 
-  # ── Jarvis Haupt-Container ──────────────────────────────────────────────────
+  # ── Jarvis Haupt-Container (inkl. WhatsApp-Bridge) ────────────────────────
   jarvis:
     image: ghcr.io/dev-core-busy/jarvis:latest
     container_name: jarvis
@@ -30,32 +30,13 @@ services:
       # ANTHROPIC_API_KEY: "..."
       # OPENROUTER_API_KEY: "..."
     volumes:
-      # Persistente Daten (Memory, Wissensdatenbank, Logs)
+      # Persistente Daten (Memory, Wissensdatenbank, Logs, WhatsApp-Session)
       - jarvis-data:/app/data
       # SSL-Zertifikate (werden beim ersten Start automatisch erstellt)
       - jarvis-certs:/app/certs
+      # WhatsApp-Session (Baileys Auth-Daten persistent)
+      - wa-session:/app/services/whatsapp-bridge/auth
     shm_size: "256mb"   # Für Browser-Automation empfohlen
-
-  # ── WhatsApp Bridge (optional) ──────────────────────────────────────────────
-  # Einkommentieren für WhatsApp-Integration:
-  #
-  # whatsapp-bridge:
-  #   image: ghcr.io/dev-core-busy/jarvis-wa:latest
-  #   container_name: jarvis-whatsapp
-  #   restart: unless-stopped
-  #   # Port nur intern erreichbar (kein externes Expose nötig)
-  #   expose:
-  #     - "3001"
-  #   volumes:
-  #     - wa-session:/app/session
-  #   networks:
-  #     - jarvis-net
-  #
-  # Dann bei jarvis hinzufügen:
-  #   networks:
-  #     - jarvis-net
-  #   environment:
-  #     WA_BRIDGE_URL: "http://whatsapp-bridge:3001"
 
 # ── Volumes ────────────────────────────────────────────────────────────────────
 volumes:
@@ -63,10 +44,5 @@ volumes:
     driver: local
   jarvis-certs:
     driver: local
-  # wa-session:
-  #   driver: local
-
-# ── Netzwerk (für WhatsApp-Bridge-Kommunikation) ───────────────────────────────
-# networks:
-#   jarvis-net:
-#     driver: bridge
+  wa-session:
+    driver: local

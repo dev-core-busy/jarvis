@@ -26,9 +26,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # noVNC / websockify
     novnc websockify \
     # System-Tools
-    curl wget ca-certificates procps xdotool \
+    curl wget ca-certificates procps xdotool gnupg \
     # SSL
     openssl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# ── Node.js 20 (für WhatsApp-Bridge / Baileys v7) ───────────────────────────
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ── Python venv + Abhängigkeiten ───────────────────────────────────────────────
@@ -46,6 +51,10 @@ COPY backend/    ./backend/
 COPY frontend/   ./frontend/
 COPY skills/     ./skills/
 COPY data/       ./data/
+COPY services/   ./services/
+
+# ── WhatsApp-Bridge Node-Abhängigkeiten installieren ─────────────────────────
+RUN cd /app/services/whatsapp-bridge && npm install --omit=dev
 
 # ── Daten-Volume vorbereiten ───────────────────────────────────────────────────
 RUN mkdir -p /app/data/logs /app/data/knowledge /app/certs

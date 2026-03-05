@@ -19,6 +19,8 @@ for cmd in shutdown poweroff halt; do
     printf '#!/bin/sh\necho "[Jarvis] Container wird beendet..."\nkill -SIGTERM 1\n' > "/usr/local/bin/$cmd"
     chmod +x "/usr/local/bin/$cmd"
 done
+printf '#!/bin/sh\necho "[Jarvis] Container wird neugestartet..."\nkill -SIGTERM 1\n' > /usr/local/bin/reboot
+chmod +x /usr/local/bin/reboot
 
 
 # ── 1. SSL-Zertifikat (via security.py – inkl. SAN für Windows) ──────────────

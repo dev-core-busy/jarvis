@@ -95,7 +95,20 @@ else
     log "WARNUNG: noVNC nicht gefunden – VNC-Streaming deaktiviert."
 fi
 
-# ── 6. Jarvis FastAPI ───────────────────────────────────────────────────────
+# ── 6. WhatsApp-Bridge (Node.js + Baileys) ──────────────────────────────────
+WA_BRIDGE_DIR="/app/services/whatsapp-bridge"
+if [[ -f "$WA_BRIDGE_DIR/index.js" ]] && command -v node &>/dev/null; then
+    log "Starte WhatsApp-Bridge auf Port 3001..."
+    cd "$WA_BRIDGE_DIR"
+    node index.js &
+    WA_PID=$!
+    sleep 1
+    log "WhatsApp-Bridge gestartet (PID $WA_PID)."
+else
+    log "HINWEIS: WhatsApp-Bridge nicht gefunden oder Node.js fehlt – übersprungen."
+fi
+
+# ── 7. Jarvis FastAPI ───────────────────────────────────────────────────────
 log "Starte Jarvis auf Port $JARVIS_PORT (HTTPS)..."
 cd /app
 exec /venv/bin/uvicorn backend.main:app \

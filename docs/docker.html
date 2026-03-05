@@ -284,6 +284,7 @@ Login: jarvis / jarvis</code>
             <tbody>
                 <tr><td>jarvis-data</td><td>/app/data</td><td><strong>Memory, Wissensdatenbank, Logs</strong> – bitte regelmäßig sichern</td></tr>
                 <tr><td>jarvis-certs</td><td>/app/certs</td><td>SSL-Zertifikate (werden beim ersten Start automatisch erstellt)</td></tr>
+                <tr><td>wa-session</td><td>/app/services/whatsapp-bridge/auth</td><td><strong>WhatsApp-Session</strong> (Baileys Auth-Daten, bleibt bei Updates erhalten)</td></tr>
             </tbody>
         </table>
 
@@ -424,55 +425,49 @@ Modell:   llama3.2</code>
 
     <!-- ── 6. WhatsApp Bridge ── -->
     <div class="doc-section" id="whatsapp">
-        <h2><span class="h-icon">💬</span> WhatsApp-Bridge aktivieren</h2>
+        <h2><span class="h-icon">💬</span> WhatsApp-Integration</h2>
 
-        <p style="color:var(--text-secondary); margin-bottom:16px;">Die WhatsApp-Bridge läuft als separater Container. In der <span class="code-inline">docker-compose.yml</span> ist sie auskommentiert vorbereitet:</p>
+        <p style="color:var(--text-secondary); margin-bottom:16px;">Die WhatsApp-Bridge (Node.js + Baileys) ist <strong>im Jarvis-Container integriert</strong> und startet automatisch mit. Es ist kein separater Container nötig.</p>
 
-        <div class="code-block">
-            <button class="copy-btn" onclick="copyCode(this)">⧉ Kopieren</button>
-            <code><span class="comment"># docker-compose.yml – WhatsApp-Abschnitt einkommentieren:</span>
-
-services:
-  jarvis:
-    image: ghcr.io/dev-core-busy/jarvis:latest
-    <span class="comment">... (wie bisher) ...</span>
-    <span class="key">networks</span>:
-      - jarvis-net
-    <span class="key">environment</span>:
-      <span class="key">JARVIS_DOCKER</span>: <span class="str">"1"</span>
-      <span class="key">WA_BRIDGE_URL</span>: <span class="str">"http://whatsapp-bridge:3001"</span>
-
-  <span class="key">whatsapp-bridge</span>:
-    <span class="key">image</span>: <span class="str">ghcr.io/dev-core-busy/jarvis-wa:latest</span>
-    <span class="key">container_name</span>: jarvis-whatsapp
-    <span class="key">restart</span>: unless-stopped
-    <span class="key">expose</span>:
-      - <span class="str">"3001"</span>
-    <span class="key">volumes</span>:
-      - wa-session:/app/session
-    <span class="key">networks</span>:
-      - jarvis-net
-
-<span class="key">networks</span>:
-  jarvis-net:
-    driver: bridge
-
-<span class="key">volumes</span>:
-  jarvis-data:
-  jarvis-certs:
-  <span class="key">wa-session</span>:    <span class="comment"># neu hinzufügen</span></code>
+        <div class="info-box tip">
+            <span class="icon">✅</span>
+            <div>WhatsApp ist sofort einsatzbereit – einfach den WhatsApp-Skill in den Einstellungen aktivieren und den QR-Code scannen.</div>
         </div>
 
         <h3>WhatsApp verbinden (QR-Code scannen)</h3>
-        <div class="code-block">
-            <button class="copy-btn" onclick="copyCode(this)">⧉ Kopieren</button>
-            <code><span class="comment"># Bridge-Logs anzeigen – QR-Code erscheint hier</span>
-docker compose logs -f whatsapp-bridge</code>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-content">
+                    <div class="step-title">WhatsApp-Skill aktivieren</div>
+                    <div class="step-desc">Im Web-UI: <strong>Einstellungen (⚙) → Skills → WhatsApp → Hinzufügen</strong></div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-content">
+                    <div class="step-title">QR-Code scannen</div>
+                    <div class="step-desc">Im WhatsApp-Tab erscheint der QR-Code. In der WhatsApp-App auf dem Smartphone: <strong>Einstellungen → Verknüpfte Geräte → Gerät hinzufügen</strong> → QR-Code scannen.</div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-content">
+                    <div class="step-title">Fertig!</div>
+                    <div class="step-desc">Die Session bleibt im Volume <span class="code-inline">wa-session</span> dauerhaft erhalten – auch bei Container-Neustarts und Updates.</div>
+                </div>
+            </div>
         </div>
 
-        <div class="info-box info">
-            <span class="icon">📱</span>
-            <div>Im Log erscheint ein QR-Code. In WhatsApp: <strong>Einstellungen → Verknüpfte Geräte → Gerät hinzufügen</strong> → QR-Code scannen. Nach dem Scannen bleibt die Session im Volume <span class="code-inline">wa-session</span> erhalten.</div>
+        <h3>Bridge-Status prüfen</h3>
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)">⧉ Kopieren</button>
+            <code><span class="comment"># Bridge-Logs im Container anzeigen</span>
+docker compose logs jarvis | grep "WA-Bridge"
+
+<span class="comment"># Status per API abfragen</span>
+docker exec jarvis curl -s http://127.0.0.1:3001/status</code>
         </div>
     </div>
 
@@ -494,7 +489,7 @@ docker image prune -f</code>
 
         <div class="info-box tip">
             <span class="icon">✅</span>
-            <div>Die Volumes (<span class="code-inline">jarvis-data</span>, <span class="code-inline">jarvis-certs</span>) bleiben bei Updates erhalten – Einstellungen, Memory und Wissensdatenbank gehen nicht verloren.</div>
+            <div>Alle Volumes (<span class="code-inline">jarvis-data</span>, <span class="code-inline">jarvis-certs</span>, <span class="code-inline">wa-session</span>) bleiben bei Updates erhalten – Einstellungen, Memory, Wissensdatenbank und WhatsApp-Session gehen nicht verloren.</div>
         </div>
     </div>
 
@@ -509,7 +504,7 @@ docker image prune -f</code>
                 <tr><td>docker compose down</td><td><strong>Stoppen</strong> (Volumes bleiben erhalten)</td></tr>
                 <tr><td>docker compose restart jarvis</td><td>Nur Jarvis neu starten</td></tr>
                 <tr><td>docker compose logs -f jarvis</td><td>Live-Logs von Jarvis</td></tr>
-                <tr><td>docker compose logs -f whatsapp-bridge</td><td>Live-Logs der WA-Bridge</td></tr>
+                <tr><td>docker compose logs jarvis | grep WA-Bridge</td><td>WhatsApp-Bridge-Logs</td></tr>
                 <tr><td>docker compose ps</td><td>Status aller Container</td></tr>
                 <tr><td>docker compose pull && docker compose up -d</td><td>Update auf neueste Version</td></tr>
                 <tr><td>docker exec -it jarvis bash</td><td>Shell im Container öffnen</td></tr>
@@ -566,7 +561,7 @@ ufw allow 6080/tcp</code>
         <h3>VNC (noVNC) zeigt schwarzen Bildschirm</h3>
         <div class="code-block">
             <code><span class="comment"># Xvfb/x11vnc-Status im Container prüfen</span>
-docker exec jarvis ps aux | grep -E "Xvfb|x11vnc|openbox"
+docker exec jarvis ps aux | grep -E "Xvfb|x11vnc|xfce"
 
 <span class="comment"># Container neu starten</span>
 docker compose restart jarvis</code>
@@ -578,7 +573,7 @@ docker compose restart jarvis</code>
             <tbody>
                 <tr><td>Jarvis (Minimum)</td><td><strong>~512 MB</strong></td></tr>
                 <tr><td>Jarvis (empfohlen)</td><td><strong>~1 GB</strong></td></tr>
-                <tr><td>+ WhatsApp Bridge</td><td>+ ~200 MB</td></tr>
+                <tr><td>+ WhatsApp Bridge (integriert)</td><td>+ ~100 MB</td></tr>
                 <tr><td>+ Browser-Automation</td><td>+ ~1 GB</td></tr>
             </tbody>
         </table>

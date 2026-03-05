@@ -26,7 +26,8 @@ services:
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
       # Web-Login Passwort (Benutzername ist immer "jarvis")
       JARVIS_PASSWORD: "${JARVIS_PASSWORD:-jarvis}"
-      # Server-IP für SSL-Zertifikat (WICHTIG: Auf eigene IP anpassen!)
+      # !! WICHTIG: Auf die eigene Server-IP setzen – sonst wird das SSL-Zertifikat
+      # !! von Windows abgelehnt! Beispiel: SERVER_IP: "1.2.3.4"
       SERVER_IP: "${SERVER_IP:-127.0.0.1}"
       # LLM API-Keys (alternativ im Web-UI unter Einstellungen eintragen)
       # GEMINI_API_KEY: "..."

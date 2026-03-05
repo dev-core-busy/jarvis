@@ -28,19 +28,21 @@ def _collect_server_ips():
     except Exception:
         pass
 
-    # 3. Externe IP ermitteln (für Docker-Container wichtig)
+    # 3. Alle IPs aller lokalen Netzwerk-Interfaces (via ip addr)
     try:
         result = subprocess.run(
-            ["curl", "-s", "--max-time", "3", "http://ifconfig.me"],
-            capture_output=True, text=True, timeout=5
+            ["ip", "-4", "addr", "show"], capture_output=True, text=True, timeout=3
         )
-        ext_ip = result.stdout.strip()
-        if ext_ip and all(part.isdigit() for part in ext_ip.split(".")) and len(ext_ip.split(".")) == 4:
-            ips.add(ext_ip)
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("inet "):
+                ip = line.split()[1].split("/")[0]
+                if not ip.startswith("127."):
+                    ips.add(ip)
     except Exception:
         pass
 
-    # 4. Default Gateway (Docker Host)
+    # 4. Default Gateway (Docker Host IP)
     try:
         result = subprocess.run(
             ["ip", "route"], capture_output=True, text=True, timeout=3
@@ -52,6 +54,20 @@ def _collect_server_ips():
                     ips.add(gw)
     except Exception:
         pass
+
+    # 5. Externe IP (mehrere Dienste versuchen)
+    for url in ["http://ifconfig.me", "http://api.ipify.org", "http://checkip.amazonaws.com"]:
+        try:
+            result = subprocess.run(
+                ["curl", "-s", "--max-time", "3", url],
+                capture_output=True, text=True, timeout=5
+            )
+            ext_ip = result.stdout.strip()
+            if ext_ip and all(part.isdigit() for part in ext_ip.split(".")) and len(ext_ip.split(".")) == 4:
+                ips.add(ext_ip)
+                break
+        except Exception:
+            pass
 
     # 127.0.0.1 immer dabei
     ips.add("127.0.0.1")

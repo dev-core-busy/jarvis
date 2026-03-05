@@ -55,7 +55,9 @@ class Config:
     WEBSOCKIFY_PORT: int = int(os.getenv("WEBSOCKIFY_PORT", "6080"))
     MAX_AGENT_STEPS: int = int(os.getenv("MAX_AGENT_STEPS", "50"))
     COMMAND_TIMEOUT: int = int(os.getenv("COMMAND_TIMEOUT", "120"))
-    SETTINGS_FILE = PROJECT_ROOT / "settings.json"
+    # Im Docker-Modus settings.json im persistenten Data-Volume speichern
+    _data_dir = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data")))
+    SETTINGS_FILE = _data_dir / "settings.json"
 
     # Globale Einstellungen (nicht profil-spezifisch)
     TTS_ENABLED: bool = False

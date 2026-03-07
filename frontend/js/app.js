@@ -484,8 +484,9 @@
         const tabWhatsApp = document.getElementById('settings-tab-whatsapp');
         const tabKnowledge = document.getElementById('settings-tab-knowledge');
         const tabGoogle = document.getElementById('settings-tab-google');
+        const tabVision = document.getElementById('settings-tab-vision');
 
-        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle];
+        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -517,6 +518,15 @@
                     tabGoogle.style.display = '';
                     tabGoogle.classList.add('active');
                     if (window.googleManager) window.googleManager.init();
+                } else if (target === 'vision' && tabVision) {
+                    tabVision.style.display = '';
+                    tabVision.classList.add('active');
+                    if (window.visionManager) window.visionManager.refresh();
+                }
+
+                // Vision-Polling stoppen wenn weg-navigiert
+                if (target !== 'vision' && window.visionManager) {
+                    window.visionManager.stop();
                 }
             });
         });
@@ -551,10 +561,41 @@
             }
         }
 
+        // ── Vision-Tab-Button: nur sichtbar wenn 'vision'-Skill aktiviert ──
+        const visionTabBtn = document.getElementById('settings-tab-btn-vision');
+
+        window.updateVisionTabVisibility = async function updateVisionTabVisibility() {
+            if (!visionTabBtn) return;
+            try {
+                const token = localStorage.getItem('jarvis_token') || '';
+                const resp = await fetch('/api/skills', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json();
+                const skills = data.skills || data || [];
+                const visionSkill = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'vision')
+                    : null;
+                const isEnabled = visionSkill && visionSkill.enabled;
+                visionTabBtn.style.display = isEnabled ? '' : 'none';
+                // Falls Vision-Tab aktiv war und Skill nun deaktiviert → zu Profilen wechseln
+                if (!isEnabled && tabVision && tabVision.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                    if (window.visionManager) window.visionManager.stop();
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
         // ── Modal öffnen/schließen ──
         const openModal = async () => {
             await loadProfiles();
             await updateGoogleTabVisibility();
+            await updateVisionTabVisibility();
             showListView();
             // Ersten Tab aktivieren
             settingsTabs.forEach(t => t.classList.remove('active'));
@@ -564,9 +605,13 @@
             if (tabWhatsApp) { tabWhatsApp.style.display = 'none'; tabWhatsApp.classList.remove('active'); }
             if (tabKnowledge) { tabKnowledge.style.display = 'none'; tabKnowledge.classList.remove('active'); }
             if (tabGoogle) { tabGoogle.style.display = 'none'; tabGoogle.classList.remove('active'); }
+            if (tabVision) { tabVision.style.display = 'none'; tabVision.classList.remove('active'); }
             modal.classList.add('open');
         };
-        const closeModal = () => modal.classList.remove('open');
+        const closeModal = () => {
+            modal.classList.remove('open');
+            if (window.visionManager) window.visionManager.stop();
+        };
 
         btnOpen.addEventListener('click', openModal);
         btnClose.addEventListener('click', closeModal);

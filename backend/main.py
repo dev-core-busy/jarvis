@@ -23,7 +23,7 @@ else:
     _pam = None
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import config
@@ -780,6 +780,245 @@ Ziel-Verzeichnis für importierte Skills: {target_dir}
 Starte jetzt mit Schritt 1 (Skill-Entdeckung und Websuche)."""
 
     return JSONResponse({"task": task_text})
+
+
+# ─── Vision (Gesichtserkennung) ──────────────────────────────────────
+
+def _get_vision_engine():
+    """Gibt die VisionEngine-Singleton-Instanz zurueck (lazy import)."""
+    try:
+        from skills.vision.main import get_engine
+        return get_engine()
+    except Exception:
+        return None
+
+
+@app.get("/api/vision/status")
+async def vision_status(request: Request):
+    """Vision-Engine-Status + aktuelle Gesichter."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+    return JSONResponse(engine.get_status())
+
+
+@app.post("/api/vision/control")
+async def vision_control(request: Request):
+    """Kamera starten/stoppen. Body: {action: 'start'|'stop', source: '0'}."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+
+    body = await request.json()
+    action = body.get("action", "start")
+    source = body.get("source", "0")
+
+    if action == "start":
+        # Config-Werte anwenden
+        sm = _get_skill_manager()
+        cfg = sm.get_skill_config("vision")
+        engine.configure(
+            tolerance=cfg.get("tolerance", 0.6),
+            interval=cfg.get("recognition_interval", 1.0),
+            detection_model=cfg.get("detection_model", "hog"),
+        )
+        msg = engine.start(source)
+    elif action == "stop":
+        msg = engine.stop()
+    else:
+        msg = f"Unbekannte Aktion: {action}"
+    return JSONResponse({"message": msg})
+
+
+@app.get("/api/vision/snapshot")
+async def vision_snapshot(request: Request):
+    """Aktuelles Kamerabild als JPEG (mit Annotationen)."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+
+    jpeg = engine.get_snapshot(annotate=True)
+    if jpeg is None:
+        return JSONResponse({"error": "Kein Kamerabild verfuegbar"}, status_code=404)
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
+@app.get("/api/vision/cameras")
+async def vision_cameras(request: Request):
+    """Verfuegbare Kameras auflisten."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+
+    import asyncio as _aio
+    cameras = await _aio.to_thread(engine.list_cameras)
+    return JSONResponse({"cameras": cameras})
+
+
+@app.get("/api/vision/preview/{index}")
+async def vision_preview(index: int, request: Request):
+    """Einzelbild einer bestimmten Kamera (fuer Preview)."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+
+    import asyncio as _aio
+    jpeg = await _aio.to_thread(engine.get_preview, index)
+    if jpeg is None:
+        return JSONResponse({"error": "Kamera nicht verfuegbar"}, status_code=404)
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
+@app.get("/api/vision/profiles")
+async def vision_profiles(request: Request):
+    """Alle Profile mit Aktionen auflisten."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+
+    profiles = engine.list_profiles()
+    actions = engine.get_available_actions()
+    return JSONResponse({"profiles": profiles, "actions": actions})
+
+
+@app.post("/api/vision/profiles")
+async def vision_profile_update(request: Request):
+    """Profil aktualisieren (Name, Aktion, Aktions-Wert)."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+
+    body = await request.json()
+    name = body.get("name", "")
+    if not name:
+        return JSONResponse({"error": "name erforderlich"}, status_code=400)
+
+    msg = engine.update_profile(
+        name,
+        display_name=body.get("display_name"),
+        action=body.get("action"),
+        action_value=body.get("action_value"),
+    )
+    return JSONResponse({"message": msg})
+
+
+@app.delete("/api/vision/profile/{name}")
+async def vision_profile_delete(name: str, request: Request):
+    """Profil loeschen."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+    msg = engine.delete_profile(name)
+    return JSONResponse({"message": msg})
+
+
+@app.get("/api/vision/thumbnail/{name}")
+async def vision_thumbnail(name: str, request: Request):
+    """Profilbild (erstes Trainingsfoto) als JPEG."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+
+    jpeg = engine.get_thumbnail(name)
+    if jpeg is None:
+        return JSONResponse({"error": "Kein Thumbnail verfuegbar"}, status_code=404)
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
+@app.post("/api/vision/training/start")
+async def vision_training_start(request: Request):
+    """Training starten. Body: {name: '...', samples: 30}."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+
+    body = await request.json()
+    name = body.get("name", "")
+    samples = body.get("samples", 30)
+    if not name:
+        return JSONResponse({"error": "name erforderlich"}, status_code=400)
+    msg = engine.start_training(name, samples)
+    return JSONResponse({"message": msg})
+
+
+@app.post("/api/vision/training/stop")
+async def vision_training_stop(request: Request):
+    """Training stoppen + Modell neu berechnen."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+    msg = engine.stop_training()
+    return JSONResponse({"message": msg})
+
+
+@app.get("/api/vision/training/status")
+async def vision_training_status(request: Request):
+    """Training-Fortschritt abfragen."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+    return JSONResponse(engine.get_training_status())
+
+
+@app.get("/api/vision/events")
+async def vision_events(request: Request, limit: int = 50):
+    """Letzte Erkennungs-Events."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+    return JSONResponse({"events": engine.get_recent_events(limit)})
+
+
+@app.post("/api/vision/cleanup")
+async def vision_cleanup(request: Request):
+    """Alle Vision-Daten zuruecksetzen."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+    msg = engine.cleanup()
+    return JSONResponse({"message": msg})
 
 
 # ─── WhatsApp Integration ────────────────────────────────────────────

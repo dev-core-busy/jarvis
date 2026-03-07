@@ -3923,3 +3923,536 @@ select.input-field {
     font-size: 0.8rem;
     padding: 0.35rem 0.75rem;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Vision Tab – Gesichtserkennung
+   ═══════════════════════════════════════════════════════════════════ */
+
+.vis-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+/* Notification-Banner */
+.vis-notification {
+    padding: 0.6rem 1rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    border: 1px solid var(--border);
+    background: var(--bg-glass);
+}
+
+.vis-notification.success { border-color: var(--success); color: var(--success); }
+.vis-notification.error   { border-color: var(--danger);  color: var(--danger); }
+
+/* Sektionen */
+.vis-section {
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: var(--bg-glass);
+}
+
+.vis-section-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.75rem;
+}
+
+.vis-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.vis-section-header h3 {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+/* Status-Punkt (Dashboard) */
+.vis-status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.vis-dot-off  { background: var(--text-muted); }
+.vis-dot-on   { background: var(--success); box-shadow: 0 0 6px var(--success); }
+
+.vis-status-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* Dashboard-Layout */
+.vis-dashboard {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.vis-feed-wrap {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    aspect-ratio: 4/3;
+}
+
+.vis-feed-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    border-radius: var(--radius-md);
+}
+
+.vis-feed-placeholder {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    text-align: center;
+    pointer-events: none;
+}
+
+.vis-detected-panel {
+    width: 220px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.vis-detected-panel h4 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.vis-no-faces {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Erkannte Gesichter */
+.vis-face-card {
+    padding: 0.5rem 0.65rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.vis-face-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.vis-face-conf {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* Buttons */
+.vis-controls {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.vis-btn {
+    padding: 0.45rem 0.9rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-glass);
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.vis-btn:hover { border-color: var(--border-hover); background: rgba(255,255,255,0.06); }
+
+.vis-btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.vis-btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+.vis-btn-danger {
+    border-color: var(--danger);
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.vis-btn-danger:hover { background: rgba(239, 68, 68, 0.2); }
+
+.vis-btn-sm {
+    padding: 0.35rem 0.6rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-glass);
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.vis-btn-sm:hover { border-color: var(--border-hover); }
+.vis-btn-sm.vis-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.vis-btn-sm.vis-btn-primary:hover { background: var(--accent-hover); }
+
+/* Inputs */
+.vis-input {
+    padding: 0.45rem 0.65rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-input, rgba(255,255,255,0.04));
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    outline: none;
+    transition: var(--transition);
+}
+
+.vis-input:focus { border-color: var(--accent); }
+
+.vis-input-sm { width: 80px; }
+
+.vis-select {
+    padding: 0.45rem 0.65rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-input, rgba(255,255,255,0.04));
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    outline: none;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.vis-select:focus { border-color: var(--accent); }
+
+.vis-select option { background: var(--bg-secondary); color: var(--text-primary); }
+
+/* Training */
+.vis-train-form {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.vis-progress-wrap {
+    margin: 0.5rem 0;
+}
+
+.vis-progress-bar {
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+}
+
+.vis-progress-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: var(--accent);
+    transition: width 0.3s ease;
+}
+
+.vis-progress-text {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    display: inline-block;
+    margin-top: 0.25rem;
+}
+
+.vis-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+/* Profile-Liste */
+.vis-profiles-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.vis-profile-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.02);
+    transition: var(--transition);
+}
+
+.vis-profile-item:hover { border-color: var(--border-hover); }
+
+.vis-profile-thumb {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-sm);
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.05);
+    flex-shrink: 0;
+}
+
+.vis-profile-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.vis-profile-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.vis-profile-detail {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.vis-profile-actions {
+    display: flex;
+    gap: 0.35rem;
+    flex-shrink: 0;
+}
+
+.vis-profile-actions button {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+
+.vis-profile-actions button:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.vis-profile-actions button.vis-btn-del:hover { color: var(--danger); border-color: var(--danger); }
+
+/* Aktionen-Liste */
+.vis-actions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.vis-action-item {
+    padding: 0.65rem 0.75rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.vis-action-header {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.4rem;
+}
+
+.vis-action-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.vis-action-value {
+    flex: 1;
+    min-width: 120px;
+}
+
+.vis-action-value input,
+.vis-action-value textarea {
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-input, rgba(255,255,255,0.04));
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    resize: vertical;
+    outline: none;
+}
+
+.vis-action-value input:focus,
+.vis-action-value textarea:focus { border-color: var(--accent); }
+
+/* Einstellungen */
+.vis-settings-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.vis-setting-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.vis-setting-row label:first-child {
+    width: 140px;
+    flex-shrink: 0;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.vis-setting-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex: 1;
+}
+
+.vis-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.vis-checkbox input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 16px;
+    height: 16px;
+}
+
+.vis-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0.75rem 0;
+}
+
+.vis-danger-zone {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.vis-empty {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 0.25rem 0;
+}
+
+/* Modal (Profil bearbeiten) */
+.vis-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10100;
+}
+
+.vis-modal-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    width: min(400px, 90vw);
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+}
+
+.vis-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.vis-modal-header h3 {
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.vis-modal-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.3rem;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.vis-modal-close:hover { color: var(--text-primary); }
+
+.vis-modal-body {
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.vis-modal-body label {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.vis-modal-footer {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--border);
+}
+
+/* Responsive: Kamerabild und erkannte Gesichter untereinander */
+@media (max-width: 700px) {
+    .vis-dashboard {
+        flex-direction: column;
+    }
+    .vis-detected-panel {
+        width: 100%;
+    }
+    .vis-setting-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.25rem;
+    }
+    .vis-setting-row label:first-child {
+        width: auto;
+    }
+}

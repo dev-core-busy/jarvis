@@ -12,7 +12,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=17">
+    <link rel="stylesheet" href="/static/css/style.css?v=18">
 </head>
 
 <body>
@@ -371,6 +371,7 @@ sudo update-ca-certificates</code></pre>
                 <button class="settings-tab-btn" data-settings-tab="whatsapp">WhatsApp</button>
                 <button class="settings-tab-btn" data-settings-tab="knowledge">Wissen</button>
                 <button class="settings-tab-btn" data-settings-tab="google" id="settings-tab-btn-google" style="display:none;">Google</button>
+                <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;">Vision</button>
             </div>
 
             <div class="modal-body">
@@ -673,6 +674,145 @@ sudo update-ca-certificates</code></pre>
                     </div>
                 </div>
 
+                <!-- ═══ Tab: Vision ═══ -->
+                <div id="settings-tab-vision" class="settings-tab-content" style="display: none;">
+                    <div class="vis-container">
+
+                        <!-- Benachrichtigung -->
+                        <div id="vis-notification" class="vis-notification" style="display:none;"></div>
+
+                        <!-- ── Dashboard ─────────────────────────────────────── -->
+                        <div class="vis-section">
+                            <div class="vis-section-header">
+                                <h3>
+                                    <span class="vis-status-dot vis-dot-off" id="vis-status-dot"></span>
+                                    Kamera-Feed
+                                </h3>
+                                <span class="vis-status-label" id="vis-status-text">Gestoppt</span>
+                            </div>
+                            <div class="vis-dashboard">
+                                <div class="vis-feed-wrap">
+                                    <img id="vis-feed-img" class="vis-feed-img" alt="Kamerabild"
+                                        src="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480'><rect fill='%23111' width='640' height='480'/><text x='320' y='250' text-anchor='middle' fill='%23555' font-size='18'>Kamera nicht aktiv</text></svg>" />
+                                </div>
+                                <div class="vis-detected-panel">
+                                    <h4>Erkannt:</h4>
+                                    <div id="vis-detected-faces">
+                                        <span class="vis-no-faces">Keine Gesichter erkannt</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="vis-controls">
+                                <button class="vis-btn vis-btn-primary" id="vis-btn-start">Erkennung starten</button>
+                                <button class="vis-btn" id="vis-btn-stop">Stoppen</button>
+                            </div>
+                        </div>
+
+                        <!-- ── Training ──────────────────────────────────────── -->
+                        <div class="vis-section">
+                            <h3>Training</h3>
+                            <div class="vis-train-form">
+                                <input type="text" class="vis-input" id="vis-train-name" placeholder="Name der Person" />
+                                <input type="number" class="vis-input vis-input-sm" id="vis-train-samples" value="30" min="5" max="100" title="Anzahl Aufnahmen" />
+                                <button class="vis-btn vis-btn-primary" id="vis-btn-train-start">Training starten</button>
+                                <button class="vis-btn" id="vis-btn-train-stop">Stoppen</button>
+                            </div>
+                            <div class="vis-progress-wrap" style="display:none;">
+                                <div class="vis-progress-bar">
+                                    <div class="vis-progress-fill" id="vis-train-progress" style="width:0%"></div>
+                                </div>
+                                <span class="vis-progress-text" id="vis-train-progress-text"></span>
+                            </div>
+                            <p class="vis-hint">Gesicht in verschiedenen Winkeln und Positionen vor die Kamera halten.</p>
+                        </div>
+
+                        <!-- ── Bekannte Gesichter ────────────────────────────── -->
+                        <div class="vis-section">
+                            <h3>Bekannte Gesichter</h3>
+                            <div id="vis-profiles-list" class="vis-profiles-list">
+                                <div class="vis-empty">Noch keine Gesichter trainiert.</div>
+                            </div>
+                        </div>
+
+                        <!-- ── Aktionen pro Gesicht ──────────────────────────── -->
+                        <div class="vis-section">
+                            <h3>Aktionen pro Gesicht</h3>
+                            <p class="vis-hint">Lege fest, was passiert, wenn ein Gesicht erkannt wird.</p>
+                            <div id="vis-actions-list" class="vis-actions-list">
+                                <div class="vis-empty">Zuerst Gesichter trainieren.</div>
+                            </div>
+                        </div>
+
+                        <!-- ── Einstellungen ─────────────────────────────────── -->
+                        <div class="vis-section">
+                            <h3>Kamera-Einstellungen</h3>
+                            <div class="vis-settings-grid">
+                                <div class="vis-setting-row">
+                                    <label>Kamera</label>
+                                    <div class="vis-setting-controls">
+                                        <select class="vis-select" id="vis-cam-select">
+                                            <option value="0">USB Camera 0</option>
+                                        </select>
+                                        <button class="vis-btn-sm" id="vis-btn-cam-load" title="Kameras laden">&#x1F504;</button>
+                                        <button class="vis-btn-sm vis-btn-primary" id="vis-btn-cam-apply">Kamera uebernehmen</button>
+                                    </div>
+                                </div>
+                                <div class="vis-setting-row">
+                                    <label>Erkennungsmodell</label>
+                                    <select class="vis-select" id="vis-set-model">
+                                        <option value="hog">HOG (schnell, CPU)</option>
+                                        <option value="cnn">CNN (genau, GPU)</option>
+                                    </select>
+                                </div>
+                                <div class="vis-setting-row">
+                                    <label>Toleranz (0.0-1.0)</label>
+                                    <input type="number" class="vis-input vis-input-sm" id="vis-set-tolerance" value="0.6" min="0.1" max="1.0" step="0.05" />
+                                </div>
+                                <div class="vis-setting-row">
+                                    <label>Intervall (Sek.)</label>
+                                    <input type="number" class="vis-input vis-input-sm" id="vis-set-interval" value="1.0" min="0.1" max="10" step="0.1" />
+                                </div>
+                                <div class="vis-setting-row">
+                                    <label>Training-Samples</label>
+                                    <input type="number" class="vis-input vis-input-sm" id="vis-set-samples" value="30" min="5" max="200" />
+                                </div>
+                                <div class="vis-setting-row">
+                                    <label>Auto-Start</label>
+                                    <label class="vis-checkbox"><input type="checkbox" id="vis-set-autostart"> <span>Bei Skill-Aktivierung starten</span></label>
+                                </div>
+                            </div>
+                            <div class="vis-controls" style="margin-top:0.75rem;">
+                                <button class="vis-btn vis-btn-primary" id="vis-btn-save-settings">Einstellungen speichern</button>
+                            </div>
+
+                            <hr class="vis-divider">
+                            <div class="vis-danger-zone">
+                                <button class="vis-btn vis-btn-danger" id="vis-btn-cleanup">Alle Daten zuruecksetzen</button>
+                                <small>Loescht alle Profile, Bilder und Events unwiderruflich.</small>
+                            </div>
+                        </div>
+
+                    </div><!-- /vis-container -->
+                </div><!-- /settings-tab-vision -->
+
+                <!-- ── Profil-bearbeiten-Modal ──────────────────────── -->
+                <div id="vis-profile-modal" class="vis-modal" style="display:none;">
+                    <div class="vis-modal-panel">
+                        <div class="vis-modal-header">
+                            <h3>Profil bearbeiten</h3>
+                            <button class="vis-modal-close" id="vis-modal-close">&times;</button>
+                        </div>
+                        <div class="vis-modal-body">
+                            <label>Name</label>
+                            <input type="text" class="vis-input" id="vis-modal-name" />
+                        </div>
+                        <div class="vis-modal-footer">
+                            <button class="vis-btn vis-btn-primary" id="vis-modal-save">Speichern</button>
+                            <button class="vis-btn" id="vis-modal-cancel">Abbrechen</button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
@@ -683,7 +823,8 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/whatsapp.js?v=7"></script>
     <script src="/static/js/knowledge.js?v=2"></script>
     <script src="/static/js/google.js?v=4"></script>
-    <script src="/static/js/app.js?v=12"></script>
+    <script src="/static/js/vision.js?v=1"></script>
+    <script src="/static/js/app.js?v=13"></script>
 </body>
 
 </html>

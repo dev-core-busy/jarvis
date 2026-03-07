@@ -1,0 +1,68 @@
+{
+  "name": "Vision",
+  "description": "Gesichtserkennung mit USB-/IP-Kamera und DNN-basierter Erkennung",
+  "version": "1.0.0",
+  "author": "Jarvis",
+  "module": "main",
+  "tools": ["vision_control", "vision_status", "vision_snapshot", "vision_train", "vision_profiles"],
+  "category": "system",
+  "icon": "eye",
+  "system": false,
+  "enabled": false,
+  "config_schema": {
+    "camera_source": {
+      "type": "string",
+      "default": "0",
+      "title": "Kamera-Quelle",
+      "description": "0 = erste USB-Kamera, oder RTSP/HTTP-URL fuer IP-Kamera"
+    },
+    "detection_model": {
+      "type": "string",
+      "default": "hog",
+      "title": "Erkennungsmodell (hog/cnn)",
+      "description": "hog = schnell (CPU), cnn = genauer (GPU empfohlen)"
+    },
+    "tolerance": {
+      "type": "number",
+      "default": 0.6,
+      "title": "Erkennungs-Toleranz (0.0-1.0)",
+      "description": "Niedriger = strenger, weniger False Positives"
+    },
+    "recognition_interval": {
+      "type": "number",
+      "default": 1.0,
+      "title": "Erkennungsintervall (Sek.)",
+      "description": "Zeit zwischen Erkennungs-Zyklen"
+    },
+    "training_samples": {
+      "type": "number",
+      "default": 30,
+      "title": "Training-Samples pro Gesicht",
+      "description": "Anzahl Fotos fuer das Training einer Person"
+    },
+    "auto_start": {
+      "type": "boolean",
+      "default": false,
+      "title": "Auto-Start",
+      "description": "Erkennung automatisch beim Skill-Laden starten"
+    }
+  },
+  "permissions": ["desktop"],
+  "help": {
+    "details": "DNN-basierte Gesichtserkennung ueber die face_recognition-Bibliothek (dlib). Laeuft als dauerhafter Hintergrund-Feed und erkennt bekannte Personen in Echtzeit. Pro Profil koennen Aktionen festgelegt werden: Webhook, LLM-Prompt oder Logging.",
+    "tools": [
+      {"name": "vision_control", "label": "Steuerung", "desc": "Kamera-Feed starten, stoppen oder Kamera-Quelle wechseln"},
+      {"name": "vision_status", "label": "Status", "desc": "Aktuellen Zustand, erkannte Gesichter und letzte Events abfragen"},
+      {"name": "vision_snapshot", "label": "Foto", "desc": "Aktuelles Kamerabild mit Gesichts-Markierungen aufnehmen"},
+      {"name": "vision_train", "label": "Training", "desc": "Neues Gesicht einlernen (mehrere Aufnahmen + Encoding)"},
+      {"name": "vision_profiles", "label": "Profile", "desc": "Bekannte Gesichter auflisten, umbenennen oder loeschen"}
+    ],
+    "use_cases": [
+      "Starte die Kamera und sage mir, wer gerade vor dem Bildschirm sitzt",
+      "Trainiere mein Gesicht als 'Andreas'",
+      "Wenn du Andreas erkennst, begruesse ihn per WhatsApp"
+    ],
+    "setup": "USB-Kamera anschliessen. Fuer IP-Kameras die RTSP/HTTP-URL in den Skill-Einstellungen eintragen.",
+    "notes": "Die Erkennung laeuft als Hintergrund-Thread und bleibt auch zwischen Agent-Tasks aktiv. HOG-Modell ist schnell auf CPU, CNN-Modell braucht GPU fuer Echtzeit."
+  }
+}

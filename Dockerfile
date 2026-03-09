@@ -16,8 +16,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Python
     python3 python3-venv python3-pip \
-    # Build-Tools (für python-pam Kompilierung)
-    build-essential libpam0g-dev \
+    # Build-Tools (für python-pam + dlib/face_recognition Kompilierung)
+    build-essential libpam0g-dev cmake libboost-all-dev \
     # X11 / virtueller Desktop (XFCE4)
     xvfb x11vnc xterm \
     xfce4 xfce4-terminal dbus-x11 at-spi2-core \
@@ -42,6 +42,7 @@ COPY requirements.txt .
 
 RUN python3 -m venv /venv \
     && /venv/bin/pip install --upgrade pip \
+    && /venv/bin/pip install --no-cache-dir 'setuptools<75' \
     && /venv/bin/pip install --no-cache-dir -r requirements.txt
 
 ENV PATH="/venv/bin:$PATH"
@@ -57,7 +58,7 @@ COPY services/   ./services/
 RUN cd /app/services/whatsapp-bridge && npm install --omit=dev
 
 # ── Daten-Volume vorbereiten ───────────────────────────────────────────────────
-RUN mkdir -p /app/data/logs /app/data/knowledge /app/certs
+RUN mkdir -p /app/data/logs /app/data/knowledge /app/data/vision/faces /app/certs
 
 # ── Wallpaper ────────────────────────────────────────────────────────────────
 COPY docker/jarvis-wallpaper.jpg /usr/share/backgrounds/jarvis.jpg

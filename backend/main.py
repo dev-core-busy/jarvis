@@ -366,13 +366,25 @@ async def verify_token_endpoint(request: Request):
 
 
 # ─── Skills-Verwaltung ────────────────────────────────────────────
+_standalone_skill_manager = None
+
 def _get_skill_manager():
-    """Gibt den SkillManager des Agents zurück (lazy init)."""
-    global agent_instance
-    if agent_instance is None:
+    """Gibt den SkillManager zurueck – nutzt Agent-Instanz falls vorhanden,
+    sonst eigenstaendigen SkillManager (z.B. wenn kein API-Key gesetzt)."""
+    global agent_instance, _standalone_skill_manager
+    if agent_instance is not None:
+        return agent_instance.skill_manager
+    # Versuche Agent zu erstellen (braucht API-Key)
+    try:
         from backend.agent import JarvisAgent
         agent_instance = JarvisAgent()
-    return agent_instance.skill_manager
+        return agent_instance.skill_manager
+    except Exception:
+        # Fallback: SkillManager ohne Agent (Skills browsen/aktivieren geht trotzdem)
+        if _standalone_skill_manager is None:
+            from backend.skills.manager import SkillManager
+            _standalone_skill_manager = SkillManager()
+        return _standalone_skill_manager
 
 
 @app.get("/api/skills")

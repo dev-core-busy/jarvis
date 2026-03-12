@@ -32,10 +32,22 @@ if [[ ! -f "$CERT_DIR/server.crt" ]]; then
 fi
 
 # ── 2. Xvfb (virtueller Framebuffer) ─────────────────────────────────────────
+# Stale Lock-Dateien von vorherigem Container-Run entfernen
+rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null || true
+
 log "Starte Xvfb auf $DISPLAY_NUM..."
 Xvfb "$DISPLAY_NUM" -screen 0 1280x800x24 -ac +extension GLX +render -noreset &
 XVFB_PID=$!
 sleep 1
+
+# Pruefen ob Xvfb laeuft
+if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+    log "FEHLER: Xvfb konnte nicht gestartet werden – zweiter Versuch..."
+    rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null || true
+    Xvfb "$DISPLAY_NUM" -screen 0 1280x800x24 -ac +extension GLX +render -noreset &
+    XVFB_PID=$!
+    sleep 1
+fi
 
 export DISPLAY="$DISPLAY_NUM"
 export HOME="/root"

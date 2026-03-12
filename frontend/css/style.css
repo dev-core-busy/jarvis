@@ -4009,13 +4009,11 @@ select.input-field {
     background: rgba(0, 0, 0, 0.3);
     border-radius: var(--radius-md);
     overflow: hidden;
-    aspect-ratio: 4/3;
 }
 
 .vis-feed-img {
     width: 100%;
-    height: 100%;
-    object-fit: contain;
+    height: auto;
     display: block;
     border-radius: var(--radius-md);
 }
@@ -4050,6 +4048,32 @@ select.input-field {
     font-size: 0.8rem;
     color: var(--text-muted);
     font-style: italic;
+}
+
+.vis-face-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 0.82rem;
+    color: var(--text-primary);
+}
+
+.vis-face-badge small {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.vis-face-crop {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-sm);
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.05);
 }
 
 /* Erkannte Gesichter */
@@ -4138,6 +4162,14 @@ select.input-field {
 
 .vis-input-sm { width: 80px; }
 
+.vis-hint {
+    display: block;
+    margin-top: 0.2rem;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
 .vis-select {
     padding: 0.45rem 0.65rem;
     border-radius: var(--radius-sm);
@@ -4155,12 +4187,112 @@ select.input-field {
 .vis-select option { background: var(--bg-secondary); color: var(--text-primary); }
 
 /* Training */
-.vis-train-form {
+/* ─── Training Wizard ───────────────────────────────────────────── */
+
+.vis-wizard {
+    margin-top: 0.75rem;
+    padding: 1rem;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+}
+
+.vis-wizard-step {
+    text-align: center;
+}
+
+.vis-wizard-step p {
+    margin: 0.5rem 0 0.25rem;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.vis-wizard-spinner {
+    width: 40px;
+    height: 40px;
+    margin: 0 auto;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: visSpinner 0.8s linear infinite;
+}
+
+@keyframes visSpinner {
+    to { transform: rotate(360deg); }
+}
+
+.vis-wizard-face-row {
     display: flex;
     align-items: center;
+    gap: 1rem;
+    text-align: left;
+}
+
+.vis-wizard-crop {
+    width: 80px;
+    height: 80px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 2px solid var(--accent);
+    flex-shrink: 0;
+}
+
+.vis-wizard-name-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.vis-wizard-name-col p {
+    margin: 0;
+}
+
+.vis-wizard-name-col .vis-input {
+    width: 100%;
+}
+
+.vis-wizard-name-col .vis-btn {
+    align-self: flex-start;
+}
+
+.vis-wizard-name-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0.75rem 0;
+}
+
+.vis-wizard-name-row label,
+.vis-wizard-action-row label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.vis-wizard-action-row {
+    display: flex;
+    flex-direction: column;
     gap: 0.5rem;
-    flex-wrap: wrap;
-    margin-bottom: 0.5rem;
+    margin: 0.75rem 0;
+}
+
+.vis-wizard-action-row .vis-select,
+.vis-wizard-action-row .vis-input {
+    width: 100%;
+}
+
+#vis-wizard-step-action h4 {
+    color: var(--accent);
+    margin: 0 0 0.25rem;
+}
+
+#vis-wizard-cancel {
+    margin-top: 0.75rem;
+    opacity: 0.6;
+}
+
+#vis-wizard-cancel:hover {
+    opacity: 1;
 }
 
 .vis-progress-wrap {
@@ -4187,6 +4319,16 @@ select.input-field {
     color: var(--text-secondary);
     display: inline-block;
     margin-top: 0.25rem;
+}
+
+/* Pulsierende Animation waehrend Encoding-Berechnung */
+.vis-progress-fill.vis-progress-pulse {
+    animation: visPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes visPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
 }
 
 .vis-hint {

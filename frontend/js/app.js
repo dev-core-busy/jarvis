@@ -531,35 +531,8 @@
             });
         });
 
-        // ── Google-Tab-Button: nur sichtbar wenn 'google'-Skill aktiviert ──
-        const googleTabBtn = document.getElementById('settings-tab-btn-google');
-
-        window.updateGoogleTabVisibility = async function updateGoogleTabVisibility() {
-            if (!googleTabBtn) return;
-            try {
-                const token = localStorage.getItem('jarvis_token') || '';
-                const resp = await fetch('/api/skills', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await resp.json();
-                const skills = data.skills || data || [];
-                const googleSkill = Array.isArray(skills)
-                    ? skills.find(s => s.dir_name === 'google')
-                    : null;
-                // Tab-Button anzeigen wenn Skill aktiviert, sonst verstecken
-                const isEnabled = googleSkill && googleSkill.enabled;
-                googleTabBtn.style.display = isEnabled ? '' : 'none';
-                // Falls Google-Tab aktiv war und Skill nun deaktiviert → zu Profilen wechseln
-                if (!isEnabled && tabGoogle && tabGoogle.classList.contains('active')) {
-                    settingsTabs.forEach(t => t.classList.remove('active'));
-                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
-                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
-                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
-                }
-            } catch (e) {
-                // Fehler ignorieren – Tab bleibt versteckt
-            }
-        }
+        // ── Google-Tab entfernt – Config erfolgt über Skill-Einstellungen ──
+        window.updateGoogleTabVisibility = function() {}; // No-Op (Rückwärtskompatibilität)
 
         // ── Vision-Tab-Button: nur sichtbar wenn 'vision'-Skill aktiviert ──
         const visionTabBtn = document.getElementById('settings-tab-btn-vision');

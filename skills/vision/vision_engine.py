@@ -10,11 +10,14 @@ import logging
 import os
 import pickle
 import shutil
+import ssl
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
+
+import urllib.request
 
 import cv2
 import numpy as np
@@ -24,10 +27,97 @@ try:
 except ImportError:
     face_recognition = None
 
+
+class MjpegStreamReader:
+    """Liest MJPEG-Frames direkt per HTTP – umgeht OpenCV's Buffer-Problem.
+
+    OpenCV's VideoCapture puffert MJPEG-Streams intern und liefert
+    immer denselben (alten) Frame. Dieser Reader parst den Multipart-
+    Stream manuell und liefert immer den neuesten Frame.
+    """
+
+    def __init__(self, url: str, timeout: float = 10):
+        self._url = url
+        self._timeout = timeout
+        self._stream = None
+        self._buffer = b""
+
+    def open(self) -> bool:
+        """Verbindung herstellen (unterstuetzt HTTPS mit self-signed Zertifikaten)."""
+        try:
+            ctx = None
+            if self._url.startswith("https"):
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            self._stream = urllib.request.urlopen(
+                self._url, timeout=self._timeout, context=ctx
+            )
+            return True
+        except Exception as e:
+            log.warning("MJPEG-Stream Verbindungsfehler: %s", e)
+            return False
+
+    def read(self) -> tuple:
+        """Nächsten Frame lesen. Gibt (True, np.ndarray) oder (False, None) zurück."""
+        if not self._stream:
+            return False, None
+
+        try:
+            # Daten lesen bis wir einen vollstaendigen JPEG-Frame haben
+            while True:
+                chunk = self._stream.read(4096)
+                if not chunk:
+                    return False, None
+                self._buffer += chunk
+
+                # JPEG Start (FFD8) und Ende (FFD9) suchen
+                start = self._buffer.find(b"\xff\xd8")
+                if start == -1:
+                    # Kein JPEG-Start gefunden – alten Muell wegwerfen
+                    self._buffer = self._buffer[-2:]
+                    continue
+
+                end = self._buffer.find(b"\xff\xd9", start + 2)
+                if end == -1:
+                    # Noch nicht komplett – weiter lesen
+                    # Buffer nicht zu gross werden lassen
+                    if len(self._buffer) > 2_000_000:
+                        self._buffer = self._buffer[start:]
+                    continue
+
+                # Vollstaendiger JPEG-Frame gefunden
+                jpeg_data = self._buffer[start:end + 2]
+                self._buffer = self._buffer[end + 2:]
+
+                # JPEG zu numpy-Array dekodieren
+                arr = np.frombuffer(jpeg_data, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if frame is not None:
+                    return True, frame
+                # Dekodierung fehlgeschlagen – naechsten Frame versuchen
+
+        except Exception as e:
+            log.warning("MJPEG-Stream Lesefehler: %s", e)
+            return False, None
+
+    def release(self):
+        """Verbindung schliessen."""
+        try:
+            if self._stream:
+                self._stream.close()
+        except Exception:
+            pass
+        self._stream = None
+        self._buffer = b""
+
+    def isOpened(self) -> bool:
+        return self._stream is not None
+
 log = logging.getLogger("jarvis.vision")
 
 # ── Konstanten ────────────────────────────────────────────────────────────────
-MAX_EVENTS = 100           # Ring-Buffer fuer Erkennungs-Events
+MAX_EVENTS = 100           # Ring-Buffer für Erkennungs-Events
 DEFAULT_TOLERANCE = 0.6    # face_recognition Toleranz (niedriger = strenger)
 DEFAULT_INTERVAL = 1.0     # Erkennungsintervall in Sekunden
 DEFAULT_SAMPLES = 30       # Trainingsbilder pro Person
@@ -37,7 +127,7 @@ FRAME_HEIGHT = 480
 
 
 class VisionEngine:
-    """Singleton-Engine fuer Kamera-Capture + Gesichtserkennung."""
+    """Singleton-Engine für Kamera-Capture + Gesichtserkennung."""
 
     def __init__(self, data_dir: str = "data/vision"):
         self.data_dir = Path(data_dir)
@@ -57,10 +147,12 @@ class VisionEngine:
         self._lock = threading.Lock()
         self._frame: Optional[np.ndarray] = None
         self._fps: float = 0.0
+        self._last_frame_time: float = 0.0  # Zeitpunkt des letzten guten Frames
 
         # Erkennung
         self._known_encodings: dict[str, list] = {}  # {name: [encoding, ...]}
         self._current_faces: list[dict] = []
+        self._current_face_crops: list[bytes] = []  # JPEG-Crops der erkannten Gesichter
         self._recent_events: list[dict] = []
         self._last_action_time: dict[str, float] = {}  # Cooldown pro Person
         self._tolerance = DEFAULT_TOLERANCE
@@ -72,6 +164,8 @@ class VisionEngine:
         self._training_name = ""
         self._training_target = DEFAULT_SAMPLES
         self._training_count = 0
+        self._training_phase = "idle"  # idle, capturing, encoding, done
+        self._training_result = ""     # Encoding-Ergebnis für Status-Anzeige
 
         # Config + Daten laden
         self._config = self._load_config()
@@ -94,8 +188,10 @@ class VisionEngine:
         return {
             "profiles": {},
             "actions": [
-                {"id": "webhook", "label": "Webhook senden", "type": "url"},
-                {"id": "llm", "label": "LLM informieren", "type": "prompt"},
+                {"id": "greet", "label": "Begrüßung (Lautsprecher)", "type": "prompt"},
+                {"id": "llm", "label": "An LLM senden", "type": "prompt"},
+                {"id": "door", "label": "Tür öffnen", "type": "none"},
+                {"id": "webhook", "label": "Webhook aufrufen", "type": "url"},
                 {"id": "log", "label": "Nur Loggen", "type": "none"},
             ],
         }
@@ -189,26 +285,33 @@ class VisionEngine:
     def start(self, source: Union[int, str] = 0) -> str:
         """Starte den Kamera-Feed und die Erkennung."""
         if face_recognition is None:
-            return "Fehler: face_recognition nicht installiert. Bitte 'pip install face-recognition' ausfuehren."
+            return "Fehler: face_recognition nicht installiert. Bitte 'pip install face-recognition' ausführen."
 
         if self._running:
-            return "Erkennung laeuft bereits."
+            return "Erkennung läuft bereits."
 
-        # Quelle parsen (int fuer USB, str fuer RTSP/HTTP)
+        # Quelle parsen (int für USB, str für RTSP/HTTP)
         try:
             source = int(source)
         except (ValueError, TypeError):
             pass
 
         self._source = source
-        self._cap = cv2.VideoCapture(source)
-        if not self._cap.isOpened():
-            self._cap = None
-            return f"Fehler: Kamera '{source}' konnte nicht geoeffnet werden."
-
-        # Aufloesung setzen
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+        if isinstance(source, str):
+            # URL-Stream: Eigener MJPEG-Reader (umgeht OpenCV Buffer-Bug)
+            reader = MjpegStreamReader(source)
+            if not reader.open():
+                return f"Fehler: Stream '{source}' konnte nicht geöffnet werden."
+            self._cap = reader
+            log.info("URL-Stream via MjpegStreamReader geöffnet")
+        else:
+            # USB-Kamera: OpenCV VideoCapture
+            self._cap = cv2.VideoCapture(source)
+            if not self._cap.isOpened():
+                self._cap = None
+                return f"Fehler: Kamera '{source}' konnte nicht geöffnet werden."
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
 
         self._running = True
         self._thread = threading.Thread(target=self._recognition_loop, daemon=True)
@@ -257,48 +360,92 @@ class VisionEngine:
         last_recognition = 0
         frame_count = 0
         fps_start = time.time()
+        fail_count = 0
+        MAX_FAILS = 50  # Nach 50 Fehlern (ca. 5s) Reconnect versuchen
 
         while self._running:
-            if not self._cap or not self._cap.isOpened():
-                time.sleep(0.1)
-                continue
+            try:
+                if not self._cap or not self._cap.isOpened():
+                    # Reconnect-Versuch bei URL-Quellen
+                    if isinstance(self._source, str) and fail_count < 3:
+                        log.warning("Kamera nicht offen – Reconnect in 3s (Versuch %d)...", fail_count + 1)
+                        time.sleep(3)
+                        reader = MjpegStreamReader(self._source)
+                        if reader.open():
+                            self._cap = reader
+                        fail_count += 1
+                        continue
+                    time.sleep(0.5)
+                    continue
 
-            ret, frame = self._cap.read()
-            if not ret:
-                time.sleep(0.1)
-                continue
+                ret, frame = self._cap.read()
 
-            # Frame speichern (Thread-sicher)
-            with self._lock:
-                self._frame = frame.copy()
+                if not ret:
+                    fail_count += 1
+                    # FPS auf 0 setzen wenn keine Frames kommen
+                    if fail_count >= 5:
+                        self._fps = 0.0
+                    if fail_count >= MAX_FAILS and isinstance(self._source, str):
+                        # Reconnect bei URL-Streams
+                        log.warning("Kein Frame seit %d Versuchen – Reconnect...", fail_count)
+                        try:
+                            self._cap.release()
+                        except Exception:
+                            pass
+                        time.sleep(2)
+                        reader = MjpegStreamReader(self._source)
+                        if reader.open():
+                            self._cap = reader
+                            log.info("Stream-Reconnect erfolgreich: %s", self._source)
+                        else:
+                            log.warning("Stream-Reconnect fehlgeschlagen: %s", self._source)
+                        fail_count = 0
+                    elif fail_count >= MAX_FAILS:
+                        time.sleep(1)
+                    else:
+                        time.sleep(0.1)
+                    continue
 
-            # FPS berechnen
-            frame_count += 1
-            elapsed = time.time() - fps_start
-            if elapsed >= 1.0:
-                self._fps = frame_count / elapsed
-                frame_count = 0
-                fps_start = time.time()
+                # Erfolgreicher Frame – Fail-Counter zurücksetzen
+                fail_count = 0
+                self._last_frame_time = time.time()
 
-            # Training-Modus: Bilder sammeln
-            if self._training_active:
-                self._capture_training_frame(frame)
+                # Frame speichern (Thread-sicher)
+                with self._lock:
+                    self._frame = frame.copy()
 
-            # Erkennungs-Zyklus
-            now = time.time()
-            if now - last_recognition >= self._interval:
-                last_recognition = now
-                self._detect_and_recognize(frame)
+                # FPS berechnen
+                frame_count += 1
+                elapsed = time.time() - fps_start
+                if elapsed >= 1.0:
+                    self._fps = frame_count / elapsed
+                    frame_count = 0
+                    fps_start = time.time()
 
-            # Kurze Pause (ca. 30 FPS Capture)
-            time.sleep(0.033)
+                # Training-Modus: Bilder sammeln
+                if self._training_active:
+                    self._capture_training_frame(frame)
+
+                # Erkennungs-Zyklus (NICHT waehrend Encoding – Segfault-Gefahr)
+                now = time.time()
+                if now - last_recognition >= self._interval and self._training_phase != "encoding":
+                    last_recognition = now
+                    self._detect_and_recognize(frame)
+
+                # Pause: URL-Streams brauchen keine, USB-Kameras kurze Pause
+                if isinstance(self._source, int):
+                    time.sleep(0.033)
+
+            except Exception as e:
+                log.error("Fehler im Erkennungs-Loop: %s", e, exc_info=True)
+                time.sleep(1)
 
     def _detect_and_recognize(self, frame: np.ndarray):
         """Gesichter im Frame erkennen und abgleichen."""
         if face_recognition is None:
             return
 
-        # Frame verkleinern fuer Geschwindigkeit
+        # Frame verkleinern für Geschwindigkeit
         small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
         rgb_small = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
 
@@ -307,12 +454,11 @@ class VisionEngine:
         encodings = face_recognition.face_encodings(rgb_small, locations)
 
         detected = []
+        crops = []
         for (top, right, bottom, left), encoding in zip(locations, encodings):
-            # Koordinaten zurueck auf Original-Groesse
-            bbox = {
-                "top": top * 2, "right": right * 2,
-                "bottom": bottom * 2, "left": left * 2,
-            }
+            # Koordinaten zurück auf Original-Größe
+            ot, or_, ob, ol = top * 2, right * 2, bottom * 2, left * 2
+            bbox = {"top": ot, "right": or_, "bottom": ob, "left": ol}
 
             name = "Unbekannt"
             confidence = 0.0
@@ -345,11 +491,28 @@ class VisionEngine:
                 "bbox": bbox,
             })
 
+            # Face-Crop für Vorschau (kleines JPEG)
+            try:
+                h, w = frame.shape[:2]
+                margin = 15
+                ct, cl = max(0, ot - margin), max(0, ol - margin)
+                cb, cr = min(h, ob + margin), min(w, or_ + margin)
+                crop = frame[ct:cb, cl:cr]
+                if crop.size > 0:
+                    crop_resized = cv2.resize(crop, (80, 80))
+                    _, jpeg = cv2.imencode(".jpg", crop_resized, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    crops.append(jpeg.tobytes())
+                else:
+                    crops.append(b"")
+            except Exception:
+                crops.append(b"")
+
         with self._lock:
             self._current_faces = detected
+            self._current_face_crops = crops
 
     def _trigger_action(self, name: str, confidence: float):
-        """Aktion fuer erkannte Person ausfuehren (mit Cooldown)."""
+        """Aktion für erkannte Person ausführen (mit Cooldown)."""
         now = time.time()
         last = self._last_action_time.get(name, 0)
         if now - last < COOLDOWN_SECONDS:
@@ -368,6 +531,10 @@ class VisionEngine:
             self._execute_webhook(action_value, name, confidence)
         elif action_type == "llm" and action_value:
             self._execute_llm_action(action_value, name, confidence)
+        elif action_type == "greet":
+            self._execute_greet(action_value, name, confidence)
+        elif action_type == "door":
+            self._execute_door(name, confidence)
 
         self._add_event(name, confidence, action_taken)
 
@@ -389,7 +556,7 @@ class VisionEngine:
             log.warning("Webhook fehlgeschlagen: %s", e)
 
     def _execute_llm_action(self, prompt: str, name: str, confidence: float):
-        """LLM-Aktion ausfuehren (via Callback)."""
+        """LLM-Aktion ausführen (via Callback)."""
         # Platzhalter im Prompt ersetzen
         filled = prompt.replace("{name}", name).replace(
             "{confidence}", f"{confidence:.1%}"
@@ -402,14 +569,27 @@ class VisionEngine:
         else:
             log.info("LLM-Aktion (kein Callback): %s", filled)
 
+    def _execute_greet(self, text: str, name: str, confidence: float):
+        """Begrüßung über Lautsprecher (Dummy – TODO: TTS-Integration)."""
+        display_name = name.replace("_", " ").title()
+        greeting = text.replace("{name}", display_name) if text else f"Hallo {display_name}!"
+        log.info("Begrüßung (Dummy): '%s' (Konfidenz: %.0f%%)", greeting, confidence * 100)
+        # TODO: espeak/piper TTS o.ä. für echte Sprachausgabe
+        #   subprocess.run(["espeak", "-vde", greeting])
+
+    def _execute_door(self, name: str, confidence: float):
+        """Tür öffnen (Dummy – TODO: GPIO/Relay/API-Integration)."""
+        log.info("Tür öffnen (Dummy) für '%s' (Konfidenz: %.0f%%)", name, confidence * 100)
+        # TODO: GPIO-Pin setzen, Relay-API aufrufen, etc.
+
     # ── Training ──────────────────────────────────────────────────────────
 
     def start_training(self, name: str, num_samples: int = DEFAULT_SAMPLES) -> str:
-        """Starte Training fuer ein neues Gesicht."""
+        """Starte Training für ein neues Gesicht."""
         if not self._running:
             return "Fehler: Kamera-Feed muss zuerst gestartet werden."
         if self._training_active:
-            return f"Fehler: Training fuer '{self._training_name}' laeuft bereits."
+            return f"Fehler: Training für '{self._training_name}' läuft bereits."
         if not name or not name.strip():
             return "Fehler: Name darf nicht leer sein."
 
@@ -421,9 +601,11 @@ class VisionEngine:
         self._training_target = max(5, num_samples)
         self._training_count = 0
         self._training_active = True
+        self._training_phase = "capturing"
+        self._training_result = ""
 
         log.info("Training gestartet: '%s' (%d Samples)", name, num_samples)
-        return f"Training gestartet fuer '{name}' ({num_samples} Aufnahmen)."
+        return f"Training gestartet für '{name}' ({num_samples} Aufnahmen)."
 
     def stop_training(self) -> str:
         """Stoppe Training und trainiere Modell neu."""
@@ -435,11 +617,13 @@ class VisionEngine:
         self._training_active = False
         self._training_name = ""
         self._training_count = 0
+        self._training_phase = "idle"
+        self._training_result = ""
 
         if count == 0:
             return "Training abgebrochen – keine Bilder aufgenommen."
 
-        # Encodings fuer die neuen Bilder berechnen
+        # Encodings für die neuen Bilder berechnen
         result = self._compute_encodings(name)
         return f"Training beendet: {count} Bilder aufgenommen. {result}"
 
@@ -450,14 +634,21 @@ class VisionEngine:
             "name": self._training_name,
             "progress": self._training_count,
             "total": self._training_target,
+            "phase": self._training_phase,
+            "result": self._training_result,
         }
 
     def _capture_training_frame(self, frame: np.ndarray):
         """Ein Trainingsbild aufnehmen (Gesicht im Frame erkennen + speichern)."""
         if not self._training_active:
             return
+        # Nur waehrend Capturing-Phase Bilder aufnehmen
+        if self._training_phase != "capturing":
+            return
         if self._training_count >= self._training_target:
-            # Automatisch Training beenden
+            # Sofort Phase wechseln um Race-Condition zu vermeiden
+            # (sonst spawnt jeder Frame einen neuen Thread → Segfault)
+            self._training_phase = "encoding"
             threading.Thread(target=self._finish_training, daemon=True).start()
             return
 
@@ -498,22 +689,34 @@ class VisionEngine:
     def _finish_training(self):
         """Training automatisch beenden wenn genug Samples."""
         name = self._training_name
+        count = self._training_count
+
+        # Phase "encoding" ist bereits in _capture_training_frame gesetzt
+        log.info("Training-Aufnahme fertig: '%s' (%d Bilder), berechne Encodings...", name, count)
+
+        result = self._compute_encodings(name)
+
+        # Phase: Fertig
+        self._training_phase = "done"
+        self._training_result = result
+        log.info("Training komplett: '%s' – %s", name, result)
+
+        # Nach 5 Sekunden Status zurücksetzen
+        time.sleep(5)
         self._training_active = False
         self._training_name = ""
-        count = self._training_count
         self._training_count = 0
-
-        self._compute_encodings(name)
-        log.info("Training automatisch beendet: '%s' (%d Bilder)", name, count)
+        self._training_phase = "idle"
+        self._training_result = ""
 
     def _compute_encodings(self, name: str) -> str:
-        """Encodings fuer eine Person aus den Trainingsbildern berechnen."""
+        """Encodings für eine Person aus den Trainingsbildern berechnen."""
         if face_recognition is None:
-            return "face_recognition nicht verfuegbar."
+            return "face_recognition nicht verfügbar."
 
         person_dir = self.faces_dir / name
         if not person_dir.exists():
-            return f"Keine Trainingsbilder fuer '{name}' gefunden."
+            return f"Keine Trainingsbilder für '{name}' gefunden."
 
         encodings = []
         image_files = sorted(person_dir.glob("*.jpg"))
@@ -525,10 +728,10 @@ class VisionEngine:
                 if encs:
                     encodings.append(encs[0])
             except Exception as e:
-                log.warning("Encoding fuer %s fehlgeschlagen: %s", img_path.name, e)
+                log.warning("Encoding für %s fehlgeschlagen: %s", img_path.name, e)
 
         if not encodings:
-            return f"Keine Gesichts-Encodings aus Bildern extrahiert fuer '{name}'."
+            return f"Keine Gesichts-Encodings aus Bildern extrahiert für '{name}'."
 
         self._known_encodings[name] = encodings
         self._save_encodings()
@@ -584,7 +787,7 @@ class VisionEngine:
         return f"Profil '{name}' aktualisiert."
 
     def delete_profile(self, name: str) -> str:
-        """Profil komplett loeschen (Bilder + Encodings + Config)."""
+        """Profil komplett löschen (Bilder + Encodings + Config)."""
         # Config
         profiles = self._config.get("profiles", {})
         if name in profiles:
@@ -634,7 +837,7 @@ class VisionEngine:
         return f"Profil '{old_name}' umbenannt zu '{new_name}'."
 
     def get_thumbnail(self, name: str) -> Optional[bytes]:
-        """Erstes Trainingsbild als JPEG zurueckgeben."""
+        """Erstes Trainingsbild als JPEG zurückgeben."""
         person_dir = self.faces_dir / name
         if not person_dir.exists():
             return None
@@ -705,7 +908,8 @@ class VisionEngine:
 
         # Training-Indikator
         if self._training_active:
-            text = f"TRAINING: {self._training_name} ({self._training_count}/{self._training_target})"
+            tname = self._training_name if not self._training_name.startswith("_training_") else "Neues Gesicht"
+            text = f"TRAINING: {tname} ({self._training_count}/{self._training_target})"
             cv2.putText(frame, text, (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
@@ -714,7 +918,7 @@ class VisionEngine:
         return jpeg.tobytes()
 
     def get_preview(self, camera_index: int) -> Optional[bytes]:
-        """Einzelbild von einer bestimmten Kamera (fuer Preview in Einstellungen)."""
+        """Einzelbild von einer bestimmten Kamera (für Preview in Einstellungen)."""
         try:
             cap = cv2.VideoCapture(camera_index)
             if not cap.isOpened():
@@ -739,28 +943,28 @@ class VisionEngine:
     # ── System ────────────────────────────────────────────────────────────
 
     def cleanup(self) -> str:
-        """Alle Daten zuruecksetzen (Profile, Encodings, Events)."""
+        """Alle Daten zurücksetzen (Profile, Encodings, Events)."""
         # Erkennung stoppen
         if self._running:
             self.stop()
 
-        # Bilder loeschen
+        # Bilder löschen
         if self.faces_dir.exists():
             shutil.rmtree(self.faces_dir)
             self.faces_dir.mkdir(parents=True, exist_ok=True)
 
-        # Encodings loeschen
+        # Encodings löschen
         if self.encodings_path.exists():
             self.encodings_path.unlink()
         self._known_encodings = {}
 
-        # Config zuruecksetzen
+        # Config zurücksetzen
         self._config["profiles"] = {}
         self._save_config()
 
-        # Events loeschen
+        # Events löschen
         self._recent_events = []
         self._save_events()
 
-        log.info("Vision-System zurueckgesetzt.")
-        return "Alle Vision-Daten zurueckgesetzt."
+        log.info("Vision-System zurückgesetzt.")
+        return "Alle Vision-Daten zurückgesetzt."

@@ -74,8 +74,8 @@
             this.searchVal       = '';
             this.categoryFilter  = 'all';
             this._ocCollapsed    = true;   // OpenClaw initial zugeklappt
-            this._availCollapsed = false;  // Mögliche Skills initial offen
-            this._instCollapsed  = false;  // Installierte Skills initial offen
+            this._availCollapsed = true;   // Mögliche Skills initial zugeklappt
+            this._instCollapsed  = true;   // Installierte Skills initial zugeklappt
         }
 
         // ─── Init ─────────────────────────────────────────────────────
@@ -663,6 +663,7 @@
                 this._notify(`"${name}" aktiviert`, 'success');
                 await this.loadSkills();
                 if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
+                if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
             } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
         }
 
@@ -676,6 +677,7 @@
                 this._notify(`"${name}" deinstalliert`, 'success');
                 await this.loadSkills();
                 if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
+                if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
             } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
         }
 
@@ -692,8 +694,9 @@
                     method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
                 });
                 await this.loadSkills();
-                // Google-Tab-Sichtbarkeit nach Skill-Änderung aktualisieren
-                if (typeof updateGoogleTabVisibility === 'function') updateGoogleTabVisibility();
+                // Tab-Sichtbarkeit nach Skill-Änderung aktualisieren
+                if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
+                if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
             } catch (e) { console.error('Toggle fehlgeschlagen:', e); }
         }
 

@@ -23,7 +23,7 @@ else:
     _pam = None
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import config
@@ -32,8 +32,19 @@ from backend.security import get_certificate_path
 # ─── App erstellen ────────────────────────────────────────────────────
 app = FastAPI(title="Jarvis", version="1.0.0")
 
-# Statische Dateien servieren
+# Statische Dateien servieren (mit Cache-Busting Header)
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
+
+@app.middleware("http")
+async def no_cache_static(request: Request, call_next):
+    """JS/CSS-Dateien ohne Browser-Cache ausliefern."""
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 
@@ -223,9 +234,12 @@ def switch_desktop_session(username: str):
 # ─── HTTP Routes ──────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    """Hauptseite ausliefern."""
+    """Hauptseite ausliefern (kein Browser-Cache)."""
     index_file = FRONTEND_DIR / "index.html"
-    return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        content=index_file.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 @app.post("/api/login")
@@ -419,6 +433,12 @@ async def get_skill_config(name: str):
     """Gibt die Konfiguration eines Skills zurück."""
     sm = _get_skill_manager()
     cfg = sm.get_skill_config(name)
+
+    # Google: Aktuelle Werte aus Umgebung einblenden
+    if name == "google":
+        cfg.setdefault("client_id", os.environ.get("GOOGLE_OAUTH_CLIENT_ID", ""))
+        cfg.setdefault("client_secret", os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", ""))
+
     return JSONResponse({"config": cfg})
 
 
@@ -428,6 +448,14 @@ async def update_skill_config(name: str, request: Request):
     body = await request.json()
     sm = _get_skill_manager()
     success = sm.update_skill_config(name, body)
+
+    # Google-Spezialfall: Client-ID/Secret in .env schreiben
+    if name == "google" and success:
+        cid = body.get("client_id", "")
+        csecret = body.get("client_secret", "")
+        if cid or csecret:
+            _update_env_google(cid, csecret)
+
     return JSONResponse({"success": success})
 
 
@@ -532,6 +560,42 @@ async def open_knowledge_folder(request: Request):
         stderr=subprocess.DEVNULL,
     )
     return JSONResponse({"ok": True})
+
+
+# ─── Google: .env-Helper ──────────────────────────────────────────────
+
+def _update_env_google(client_id: str, client_secret: str):
+    """Schreibt Google-OAuth-Werte in die .env und aktualisiert google_auth."""
+    env_path = Path(__file__).parent.parent / ".env"
+    lines = []
+    if env_path.exists():
+        lines = env_path.read_text().splitlines()
+
+    # Bestehende Zeilen aktualisieren oder neue anhängen
+    found_id, found_secret = False, False
+    for i, line in enumerate(lines):
+        if line.startswith("GOOGLE_OAUTH_CLIENT_ID="):
+            lines[i] = f"GOOGLE_OAUTH_CLIENT_ID={client_id}"
+            found_id = True
+        elif line.startswith("GOOGLE_OAUTH_CLIENT_SECRET="):
+            lines[i] = f"GOOGLE_OAUTH_CLIENT_SECRET={client_secret}"
+            found_secret = True
+    if not found_id:
+        lines.append(f"GOOGLE_OAUTH_CLIENT_ID={client_id}")
+    if not found_secret:
+        lines.append(f"GOOGLE_OAUTH_CLIENT_SECRET={client_secret}")
+
+    env_path.write_text("\n".join(lines) + "\n")
+
+    # Auch die laufenden Modul-Variablen aktualisieren
+    os.environ["GOOGLE_OAUTH_CLIENT_ID"] = client_id
+    os.environ["GOOGLE_OAUTH_CLIENT_SECRET"] = client_secret
+    try:
+        import backend.google_auth as _ga
+        _ga.GOOGLE_CLIENT_ID = client_id
+        _ga.GOOGLE_CLIENT_SECRET = client_secret
+    except Exception:
+        pass
 
 
 # ─── Google OAuth2 (Device Flow) ─────────────────────────────────────
@@ -840,6 +904,9 @@ async def vision_control(request: Request):
             interval=cfg.get("recognition_interval", 1.0),
             detection_model=cfg.get("detection_model", "hog"),
         )
+        # Fallback: Gespeicherte camera_source verwenden wenn Frontend Default '0' schickt
+        if source == "0" and cfg.get("camera_source", "0") != "0":
+            source = cfg["camera_source"]
         msg = engine.start(source)
     elif action == "stop":
         msg = engine.stop()
@@ -850,8 +917,11 @@ async def vision_control(request: Request):
 
 @app.get("/api/vision/snapshot")
 async def vision_snapshot(request: Request):
-    """Aktuelles Kamerabild als JPEG (mit Annotationen)."""
+    """Aktuelles Kamerabild als JPEG (mit Annotationen). Token via Header ODER ?token= Query."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        # Fallback: Token als Query-Parameter (fuer <img src="..."> ohne Auth-Header)
+        token = request.query_params.get("token", "")
     if not verify_token(token):
         return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
@@ -862,6 +932,57 @@ async def vision_snapshot(request: Request):
     if jpeg is None:
         return JSONResponse({"error": "Kein Kamerabild verfuegbar"}, status_code=404)
     return Response(content=jpeg, media_type="image/jpeg")
+
+
+@app.get("/api/vision/stream")
+async def vision_mjpeg_stream(request: Request):
+    """MJPEG-Relay-Stream – erlaubt mehreren Clients den Zugriff auf den Kamera-Feed.
+
+    Auth via ?token= Query ODER ?key=jarvis-stream (fuer Server-zu-Server).
+    Nutzung: Als Kamera-Quelle auf anderen Jarvis-Instanzen eintragen.
+    """
+    # Auth: normaler Token ODER fester Stream-Key
+    token = request.query_params.get("token", "")
+    stream_key = request.query_params.get("key", "")
+    if not verify_token(token) and stream_key != "jarvis-stream":
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+
+    async def generate():
+        while True:
+            jpeg = engine.get_snapshot(annotate=False)
+            if jpeg:
+                yield (b"--frame\r\n"
+                       b"Content-Type: image/jpeg\r\n"
+                       b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n"
+                       + jpeg + b"\r\n")
+            await asyncio.sleep(0.066)  # ~15 FPS
+
+    return StreamingResponse(
+        generate(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@app.get("/api/vision/face-crop/{index}")
+async def vision_face_crop(index: int, request: Request):
+    """Aktuellen Face-Crop als JPEG. Token via Header ODER ?token= Query."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        token = request.query_params.get("token", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+
+    with engine._lock:
+        crops = list(engine._current_face_crops)
+    if index < 0 or index >= len(crops) or not crops[index]:
+        return JSONResponse({"error": "Kein Face-Crop verfuegbar"}, status_code=404)
+    return Response(content=crops[index], media_type="image/jpeg")
 
 
 @app.get("/api/vision/cameras")
@@ -935,6 +1056,26 @@ async def vision_profile_update(request: Request):
     return JSONResponse({"message": msg})
 
 
+@app.post("/api/vision/profiles/rename")
+async def vision_profile_rename(request: Request):
+    """Profil umbenennen (z.B. nach Training mit Temp-Name)."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    engine = _get_vision_engine()
+    if not engine:
+        return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
+
+    body = await request.json()
+    old_name = body.get("old_name", "")
+    new_name = body.get("new_name", "")
+    if not old_name or not new_name:
+        return JSONResponse({"error": "old_name und new_name erforderlich"}, status_code=400)
+
+    msg = engine.rename_profile(old_name, new_name)
+    return JSONResponse({"message": msg})
+
+
 @app.delete("/api/vision/profile/{name}")
 async def vision_profile_delete(name: str, request: Request):
     """Profil loeschen."""
@@ -950,8 +1091,10 @@ async def vision_profile_delete(name: str, request: Request):
 
 @app.get("/api/vision/thumbnail/{name}")
 async def vision_thumbnail(name: str, request: Request):
-    """Profilbild (erstes Trainingsfoto) als JPEG."""
+    """Profilbild (erstes Trainingsfoto) als JPEG. Token via Header ODER ?token= Query."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        token = request.query_params.get("token", "")
     if not verify_token(token):
         return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
@@ -1470,6 +1613,26 @@ async def startup():
     else:
         print("✅ Jarvis Backend gestartet")
         print(f"🌐 https://{os.getenv('SERVER_IP', '127.0.0.1')}:{config.SERVER_PORT}")
+
+    # Vision auto_start: Kamera automatisch starten wenn konfiguriert
+    try:
+        import threading
+        sm = _get_skill_manager()
+        if sm:
+            states = config.get_skill_states()
+            vis_cfg = states.get("vision", {}).get("config", {})
+            if vis_cfg.get("auto_start") and vis_cfg.get("camera_source", "0") != "0":
+                source = vis_cfg["camera_source"]
+                def _auto_start_vision():
+                    import time
+                    time.sleep(2)  # Kurz warten bis alles initialisiert
+                    engine = _get_vision_engine()
+                    if engine and not engine._running:
+                        engine.start(source)
+                        print(f"📷 Vision auto-start: {source}")
+                threading.Thread(target=_auto_start_vision, daemon=True).start()
+    except Exception as e:
+        print(f"⚠️  Vision auto-start fehlgeschlagen: {e}")
 
 
 # ─── Direkt ausführen ─────────────────────────────────────────────────

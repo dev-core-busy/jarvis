@@ -12,7 +12,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=18">
+    <link rel="stylesheet" href="/static/css/style.css?v=26">
 </head>
 
 <body>
@@ -370,7 +370,7 @@ sudo update-ca-certificates</code></pre>
                 <button class="settings-tab-btn" data-settings-tab="skills">Skills</button>
                 <button class="settings-tab-btn" data-settings-tab="whatsapp">WhatsApp</button>
                 <button class="settings-tab-btn" data-settings-tab="knowledge">Wissen</button>
-                <button class="settings-tab-btn" data-settings-tab="google" id="settings-tab-btn-google" style="display:none;">Google</button>
+                <!-- Google-Tab entfernt – Config erfolgt über Skill-Einstellungen -->
                 <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;">Vision</button>
             </div>
 
@@ -514,9 +514,9 @@ sudo update-ca-certificates</code></pre>
                         <div class="sk-openclaw-section" id="sk-available-section">
                             <div class="sk-openclaw-header" id="sk-available-header">
                                 <span class="sk-openclaw-title">📦 Mögliche Skills</span>
-                                <span class="sk-openclaw-toggle" id="sk-available-toggle">▼</span>
+                                <span class="sk-openclaw-toggle" id="sk-available-toggle">▶</span>
                             </div>
-                            <div class="sk-openclaw-body" id="sk-available-body">
+                            <div class="sk-openclaw-body" id="sk-available-body" style="display:none;">
                                 <p class="kb-hint" style="margin: 0 0 0.5rem 0;">Skill auswählen und per <strong>Hinzufügen</strong> aktivieren.</p>
                                 <div class="sk-search-row">
                                     <input type="text" id="sk-search" class="kb-input sk-search-input"
@@ -532,9 +532,9 @@ sudo update-ca-certificates</code></pre>
                         <div class="sk-openclaw-section" id="sk-installed-section">
                             <div class="sk-openclaw-header" id="sk-installed-header">
                                 <span class="sk-openclaw-title">✅ Installierte Skills</span>
-                                <span class="sk-openclaw-toggle" id="sk-installed-toggle">▼</span>
+                                <span class="sk-openclaw-toggle" id="sk-installed-toggle">▶</span>
                             </div>
-                            <div class="sk-openclaw-body" id="sk-installed-body">
+                            <div class="sk-openclaw-body" id="sk-installed-body" style="display:none;">
                                 <div id="sk-installed-list" class="sk-list">
                                     <div class="kb-loading">Lade...</div>
                                 </div>
@@ -576,7 +576,7 @@ sudo update-ca-certificates</code></pre>
                         <!-- QR-Code-Bereich -->
                         <div class="wa-qr-section" id="wa-qr-section">
                             <h3>QR-Code scannen</h3>
-                            <p class="wa-qr-hint">Oeffne WhatsApp auf deinem Handy &rarr; Einstellungen &rarr; Verknuepfte Geraete &rarr; Geraet verknuepfen</p>
+                            <p class="wa-qr-hint">Öffne WhatsApp auf deinem Handy &rarr; Einstellungen &rarr; Verknüpfte Geräte &rarr; Gerät verknüpfen</p>
                             <div class="wa-qr-box" id="wa-qr-box">
                                 <div class="wa-qr-loading">Warte auf QR-Code...</div>
                             </div>
@@ -618,7 +618,7 @@ sudo update-ca-certificates</code></pre>
                                     <button class="btn-wa-action btn-wa-sm" id="btn-wa-logs-refresh" title="Logs neu laden">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
                                     </button>
-                                    <button class="btn-wa-action btn-wa-sm btn-wa-danger" id="btn-wa-logs-clear" title="Logs loeschen">
+                                    <button class="btn-wa-action btn-wa-sm btn-wa-danger" id="btn-wa-logs-clear" title="Logs löschen">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                                     </button>
                                 </div>
@@ -665,14 +665,7 @@ sudo update-ca-certificates</code></pre>
                     </div>
                 </div>
 
-                <!-- ═══ Tab: Google ═══ -->
-                <div id="settings-tab-google" class="settings-tab-content" style="display: none;">
-                    <div class="kb-container">
-                        <div id="google-status-container">
-                            <div class="kb-loading">Lade...</div>
-                        </div>
-                    </div>
-                </div>
+                <!-- Google-Tab entfernt – Config erfolgt über Skill-Einstellungen -->
 
                 <!-- ═══ Tab: Vision ═══ -->
                 <div id="settings-tab-vision" class="settings-tab-content" style="display: none;">
@@ -689,6 +682,7 @@ sudo update-ca-certificates</code></pre>
                                     Kamera-Feed
                                 </h3>
                                 <span class="vis-status-label" id="vis-status-text">Gestoppt</span>
+                                <button class="vis-btn vis-btn-sm" id="vis-btn-toggle">Starten</button>
                             </div>
                             <div class="vis-dashboard">
                                 <div class="vis-feed-wrap">
@@ -702,28 +696,73 @@ sudo update-ca-certificates</code></pre>
                                     </div>
                                 </div>
                             </div>
-                            <div class="vis-controls">
-                                <button class="vis-btn vis-btn-primary" id="vis-btn-start">Erkennung starten</button>
-                                <button class="vis-btn" id="vis-btn-stop">Stoppen</button>
-                            </div>
                         </div>
 
-                        <!-- ── Training ──────────────────────────────────────── -->
+                        <!-- ── Training Wizard ──────────────────────────────── -->
                         <div class="vis-section">
                             <h3>Training</h3>
-                            <div class="vis-train-form">
-                                <input type="text" class="vis-input" id="vis-train-name" placeholder="Name der Person" />
-                                <input type="number" class="vis-input vis-input-sm" id="vis-train-samples" value="30" min="5" max="100" title="Anzahl Aufnahmen" />
-                                <button class="vis-btn vis-btn-primary" id="vis-btn-train-start">Training starten</button>
-                                <button class="vis-btn" id="vis-btn-train-stop">Stoppen</button>
-                            </div>
-                            <div class="vis-progress-wrap" style="display:none;">
-                                <div class="vis-progress-bar">
-                                    <div class="vis-progress-fill" id="vis-train-progress" style="width:0%"></div>
+                            <button class="vis-btn vis-btn-primary" id="vis-btn-train-new">Neues Gesicht trainieren</button>
+
+                            <!-- Wizard (versteckt bis Klick) -->
+                            <div id="vis-wizard" class="vis-wizard" style="display:none;">
+
+                                <!-- Schritt 1: Gesicht suchen -->
+                                <div id="vis-wizard-step-detect" class="vis-wizard-step">
+                                    <div class="vis-wizard-spinner"></div>
+                                    <p>Bitte schauen Sie in die Kamera...</p>
+                                    <small class="vis-hint">Gesicht wird gesucht. Halten Sie den Kopf ruhig.</small>
                                 </div>
-                                <span class="vis-progress-text" id="vis-train-progress-text"></span>
+
+                                <!-- Schritt 2: Gesicht erkannt – Training starten -->
+                                <div id="vis-wizard-step-name" class="vis-wizard-step" style="display:none;">
+                                    <div class="vis-wizard-face-row">
+                                        <img id="vis-wizard-crop" class="vis-wizard-crop" alt="Erkanntes Gesicht" />
+                                        <div class="vis-wizard-name-col">
+                                            <p>Gesicht erkannt! Klicke auf Training starten.</p>
+                                            <button class="vis-btn vis-btn-primary" id="vis-wizard-confirm"
+                                                    onclick="if(window.visionManager){window.visionManager._confirmWizardTraining().catch(e=>alert('Fehler: '+e.message))}else{alert('visionManager nicht geladen')}">Training starten</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Schritt 3: Fortschritt -->
+                                <div id="vis-wizard-step-progress" class="vis-wizard-step" style="display:none;">
+                                    <div class="vis-progress-wrap">
+                                        <div class="vis-progress-bar">
+                                            <div class="vis-progress-fill" id="vis-train-progress" style="width:0%"></div>
+                                        </div>
+                                        <span class="vis-progress-text" id="vis-train-progress-text"></span>
+                                    </div>
+                                    <p class="vis-hint">Gesicht in verschiedenen Winkeln vor die Kamera halten.</p>
+                                </div>
+
+                                <!-- Schritt 4: Name + Aktion konfigurieren -->
+                                <div id="vis-wizard-step-action" class="vis-wizard-step" style="display:none;">
+                                    <h4 id="vis-wizard-done-title">Training abgeschlossen!</h4>
+                                    <div class="vis-wizard-name-row">
+                                        <label>Wie heißt diese Person?</label>
+                                        <input type="text" class="vis-input" id="vis-wizard-name" placeholder="Name eingeben..." />
+                                    </div>
+                                    <div class="vis-wizard-action-row">
+                                        <label>Was soll bei Erkennung passieren?</label>
+                                        <select class="vis-select" id="vis-wizard-action">
+                                            <option value="greet">Begrüßung (Lautsprecher)</option>
+                                            <option value="llm">An LLM senden</option>
+                                            <option value="door">Tür öffnen</option>
+                                            <option value="webhook">Webhook aufrufen</option>
+                                            <option value="log" selected>Nur Loggen</option>
+                                        </select>
+                                        <div id="vis-wizard-action-value-wrap" style="display:none;">
+                                            <input type="text" class="vis-input" id="vis-wizard-action-value"
+                                                   placeholder="z.B. Hallo {name}!" />
+                                        </div>
+                                    </div>
+                                    <button class="vis-btn vis-btn-primary" id="vis-wizard-save"
+                                            onclick="if(window.visionManager){window.visionManager._saveWizardAction().catch(e=>alert('Fehler: '+e.message))}else{alert('visionManager nicht geladen')}">Speichern</button>
+                                </div>
+
+                                <button class="vis-btn vis-btn-sm" id="vis-wizard-cancel">Abbrechen</button>
                             </div>
-                            <p class="vis-hint">Gesicht in verschiedenen Winkeln und Positionen vor die Kamera halten.</p>
                         </div>
 
                         <!-- ── Bekannte Gesichter ────────────────────────────── -->
@@ -748,14 +787,18 @@ sudo update-ca-certificates</code></pre>
                             <h3>Kamera-Einstellungen</h3>
                             <div class="vis-settings-grid">
                                 <div class="vis-setting-row">
-                                    <label>Kamera</label>
+                                    <label>USB-Kamera</label>
                                     <div class="vis-setting-controls">
                                         <select class="vis-select" id="vis-cam-select">
                                             <option value="0">USB Camera 0</option>
                                         </select>
                                         <button class="vis-btn-sm" id="vis-btn-cam-load" title="Kameras laden">&#x1F504;</button>
-                                        <button class="vis-btn-sm vis-btn-primary" id="vis-btn-cam-apply">Kamera uebernehmen</button>
                                     </div>
+                                </div>
+                                <div class="vis-setting-row">
+                                    <label>Netzwerk-Kamera</label>
+                                    <input type="text" class="vis-input" id="vis-cam-url" placeholder="http://192.168.1.100:8090/feed" />
+                                    <small class="vis-hint">URL hat Vorrang vor USB-Kamera</small>
                                 </div>
                                 <div class="vis-setting-row">
                                     <label>Erkennungsmodell</label>
@@ -787,13 +830,28 @@ sudo update-ca-certificates</code></pre>
 
                             <hr class="vis-divider">
                             <div class="vis-danger-zone">
-                                <button class="vis-btn vis-btn-danger" id="vis-btn-cleanup">Alle Daten zuruecksetzen</button>
-                                <small>Loescht alle Profile, Bilder und Events unwiderruflich.</small>
+                                <button class="vis-btn vis-btn-danger" id="vis-btn-cleanup">Alle Daten zurücksetzen</button>
+                                <small>Löscht alle Profile, Bilder und Events unwiderruflich.</small>
                             </div>
                         </div>
 
                     </div><!-- /vis-container -->
                 </div><!-- /settings-tab-vision -->
+
+                <!-- Inline-Feed: Laeuft unabhaengig von vision.js (kein Cache-Problem) -->
+                <script>
+                (function(){
+                    setInterval(function(){
+                        var tab = document.getElementById('settings-tab-vision');
+                        if (!tab || tab.style.display === 'none' || !tab.classList.contains('active')) return;
+                        var img = document.getElementById('vis-feed-img');
+                        var tok = localStorage.getItem('jarvis_token');
+                        if (img && tok) {
+                            img.src = '/api/vision/snapshot?t=' + Date.now() + '&token=' + encodeURIComponent(tok);
+                        }
+                    }, 500);
+                })();
+                </script>
 
                 <!-- ── Profil-bearbeiten-Modal ──────────────────────── -->
                 <div id="vis-profile-modal" class="vis-modal" style="display:none;">
@@ -819,12 +877,11 @@ sudo update-ca-certificates</code></pre>
 
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/vnc.js?v=8"></script>
-    <script src="/static/js/skills.js?v=14"></script>
-    <script src="/static/js/whatsapp.js?v=7"></script>
-    <script src="/static/js/knowledge.js?v=2"></script>
-    <script src="/static/js/google.js?v=4"></script>
-    <script src="/static/js/vision.js?v=1"></script>
-    <script src="/static/js/app.js?v=13"></script>
+    <script src="/static/js/skills.js?v=15"></script>
+    <script src="/static/js/whatsapp.js?v=8"></script>
+    <script src="/static/js/knowledge.js?v=3"></script>
+    <script src="/static/js/vision.js?v=19"></script>
+    <script src="/static/js/app.js?v=14"></script>
 </body>
 
 </html>

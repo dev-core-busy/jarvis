@@ -12,7 +12,18 @@
         "google-auth-httplib2",
         "google-auth-oauthlib"
     ],
-    "config_schema": {},
+    "config_schema": {
+        "client_id": {
+            "type": "string",
+            "label": "Google OAuth Client-ID",
+            "default": ""
+        },
+        "client_secret": {
+            "type": "string",
+            "label": "Google OAuth Client-Secret",
+            "default": ""
+        }
+    },
     "knowledge_docs": [],
     "permissions": ["network", "filesystem"],
     "help": {
@@ -39,7 +50,7 @@
             "Welche Termine habe ich morgen im Kalender?",
             "Zeige die zuletzt geänderten Dateien in meinem Google Drive"
         ],
-        "setup": "Im Google-Reiter der Einstellungen: (1) Google Cloud Console → neues Projekt → gewünschte APIs aktivieren (Gmail, Drive, Calendar). (2) OAuth 2.0 Client-ID für 'Desktop-App' erstellen. (3) Client-ID und Client-Secret in den Einstellungen eingeben. (4) Über 'Mit Google verbinden' den Device-Flow starten und den angezeigten Code auf accounts.google.com/device eingeben.",
+        "setup": "(1) Google Cloud Console → neues Projekt → APIs aktivieren (Gmail, Drive, Calendar). (2) OAuth 2.0 Client-ID für 'TV und eingeschränkte Eingabegeräte' erstellen. (3) Client-ID und Client-Secret hier über das ⚙-Icon eingeben und speichern. (4) Jarvis neu starten – danach Device-Flow über Chat starten.",
         "notes": "Der Device-Flow funktioniert ohne Browser auf dem Server – der Code wird im Jarvis-UI angezeigt und muss einmalig auf einem beliebigen Gerät eingegeben werden."
     }
 }

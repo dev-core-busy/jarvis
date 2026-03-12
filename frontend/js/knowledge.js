@@ -1,5 +1,5 @@
 /**
- * Jarvis Knowledge Manager – Frontend-Steuerung fuer Wissen-Tab
+ * Jarvis Knowledge Manager – Frontend-Steuerung für Wissen-Tab
  */
 
 class JarvisKnowledgeManager {

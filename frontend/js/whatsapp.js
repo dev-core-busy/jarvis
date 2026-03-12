@@ -1,5 +1,5 @@
 /**
- * Jarvis WhatsApp Manager – Frontend-Steuerung fuer WhatsApp-Tab
+ * Jarvis WhatsApp Manager – Frontend-Steuerung für WhatsApp-Tab
  */
 
 class JarvisWhatsAppManager {
@@ -124,7 +124,7 @@ class JarvisWhatsAppManager {
             if (lastError) {
                 detail.textContent = lastError;
             } else if (state === 'connected') {
-                detail.textContent = 'Bereit fuer Nachrichten';
+                detail.textContent = 'Bereit für Nachrichten';
             } else if (state === 'qr_pending') {
                 detail.textContent = 'Scanne den QR-Code mit deinem Handy';
             } else {

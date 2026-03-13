@@ -163,13 +163,16 @@
             const catLabel  = CATEGORY_LABELS[skill.category] || skill.category || '';
             const toolCount = (skill.tools || []).length;
 
+            const isOpenClaw = skill.source === 'openclaw';
+
             const item = document.createElement('div');
-            item.className = 'sk-item';
+            item.className = isOpenClaw ? 'sk-item sk-item-oc' : 'sk-item';
             item.innerHTML = `
                 <span class="sk-item-icon">${icon}</span>
                 <div class="sk-item-info">
                     <span class="sk-item-name">${skill.name}</span>
                     ${isSystem ? '<span class="sk-badge-sys">System</span>' : ''}
+                    ${isOpenClaw ? '<span class="sk-badge-oc">OpenClaw</span>' : ''}
                     <span class="sk-item-cat">${catLabel}</span>
                     <span class="sk-item-tools">${toolCount} Tool${toolCount !== 1 ? 's' : ''}</span>
                     <span class="sk-item-desc">${skill.description || ''}</span>

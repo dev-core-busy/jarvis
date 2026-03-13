@@ -13,6 +13,7 @@
     ],
     "category": "automation",
     "icon": "brain",
+    "source": "openclaw",
     "system": false,
     "enabled": false,
     "config_schema": {

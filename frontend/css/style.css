@@ -1767,6 +1767,28 @@ select.input-field {
     border-color: rgba(255, 255, 255, 0.08);
 }
 
+/* OpenClaw Marketplace Skills – deutlich markiert */
+.sk-item.sk-item-oc {
+    background: rgba(234, 179, 8, 0.06);
+    border-left: 3px solid rgba(234, 179, 8, 0.5);
+}
+.sk-item.sk-item-oc:hover {
+    background: rgba(234, 179, 8, 0.12);
+    border-color: rgba(255, 255, 255, 0.08);
+    border-left-color: rgba(234, 179, 8, 0.7);
+}
+.sk-badge-oc {
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+    background: rgba(234, 179, 8, 0.18);
+    color: #eab308;
+    border: 1px solid rgba(234, 179, 8, 0.35);
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
 .sk-avail-item {
     background: rgba(255, 255, 255, 0.01);
     border-color: rgba(255, 255, 255, 0.04);

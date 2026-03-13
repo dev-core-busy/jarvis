@@ -12,6 +12,7 @@
     ],
     "category": "kommunikation",
     "icon": "mail",
+    "source": "openclaw",
     "system": false,
     "enabled": false,
     "config_schema": {

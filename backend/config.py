@@ -49,6 +49,7 @@ class Config:
     # Sicherheit & Server
     JARVIS_PASSWORD: str = os.getenv("JARVIS_PASSWORD", "jarvis")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "jarvis-secret-key-change-me")
+    AGENT_API_KEY: str = os.getenv("AGENT_API_KEY", "")  # API-Key für externen Agent-Task-Zugriff
     SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8000"))
     VNC_PORT: int = int(os.getenv("VNC_PORT", "5900"))

@@ -487,6 +487,69 @@ async def reload_skills():
     return JSONResponse({"success": True})
 
 
+# ─── Agent Task API (extern, z.B. für Vision-Aktionen) ───────────────
+
+def _verify_agent_api_key(request: Request) -> bool:
+    """Prüft API-Key aus X-API-Key Header oder Bearer Token."""
+    agent_key = config.AGENT_API_KEY
+    if not agent_key:
+        return False  # Kein Key konfiguriert → Endpunkt gesperrt
+
+    # X-API-Key Header (bevorzugt)
+    header_key = request.headers.get("X-API-Key", "")
+    if header_key and hmac.compare_digest(header_key, agent_key):
+        return True
+
+    # Fallback: Bearer Token
+    bearer = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if bearer and hmac.compare_digest(bearer, agent_key):
+        return True
+
+    return False
+
+
+@app.post("/api/agent/task")
+async def agent_task(request: Request):
+    """Führt eine Aufgabe headless über den Agenten aus.
+
+    Auth: X-API-Key Header oder Bearer Token mit AGENT_API_KEY.
+    Body: {"text": "Andreas auf Kamera erkannt"}
+    Response: {"success": true, "result": "..."}
+
+    Typischer Einsatz: Vision-Kamera auf Raspberry Pi erkennt Gesicht
+    und informiert den Jarvis-Agenten via HTTP POST.
+    """
+    if not _verify_agent_api_key(request):
+        return JSONResponse(
+            {"success": False, "error": "Ungültiger oder fehlender API-Key"},
+            status_code=401,
+        )
+
+    body = await request.json()
+    task_text = body.get("text", "").strip()
+    if not task_text:
+        return JSONResponse(
+            {"success": False, "error": "Kein Task-Text angegeben"},
+            status_code=400,
+        )
+
+    global agent_instance
+    try:
+        from backend.agent import JarvisAgent
+
+        if agent_instance is None:
+            agent_instance = JarvisAgent()
+
+        result = await agent_instance.run_task_headless(task_text)
+        return JSONResponse({"success": True, "result": result or ""})
+
+    except Exception as e:
+        return JSONResponse(
+            {"success": False, "error": f"Agent-Fehler: {str(e)[:500]}"},
+            status_code=500,
+        )
+
+
 # ─── Knowledge Base API ───────────────────────────────────────────────
 
 @app.get("/api/knowledge/stats")

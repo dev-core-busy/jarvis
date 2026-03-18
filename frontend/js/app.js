@@ -171,6 +171,34 @@
             addLogEntry(`❌ ${data.message || 'Fehler'}`, 'error');
         });
 
+        // TTS-Event: Browser Speech Synthesis fuer Vision-Begruessungen
+        ws.on('tts', (data) => {
+            const text = data.text || '';
+            const name = data.name || '';
+            if (text && window.speechSynthesis) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'de-DE';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                window.speechSynthesis.speak(utterance);
+                addLogEntry(`🔊 TTS: "${text}"`);
+            } else {
+                addLogEntry(`🔊 Begrüßung (kein TTS verfügbar): ${text}`);
+            }
+        });
+
+        // Vorgerenderte Audio-Begruessungen abspielen
+        ws.on('greet_audio', (data) => {
+            const url = data.url || '';
+            const name = data.name || '';
+            if (url) {
+                const t = localStorage.getItem('jarvis_token') || '';
+                const audio = new Audio(`${url}?token=${t}`);
+                audio.play().catch(e => console.warn('Audio playback failed:', e));
+                addLogEntry(`🔊 Begrüßung: ${name}`);
+            }
+        });
+
         // Alle Nachrichten als DOM-Event weitersenden (für OpenClaw Import-Modal etc.)
         ws.on('message', (data) => {
             window.dispatchEvent(new CustomEvent('jarvis-ws-message', { detail: data }));
@@ -447,6 +475,12 @@
         const inputSessionKey = document.getElementById('profile-session-key');
         const apikeyHint = document.querySelector('.apikey-hint');
         const checkTts = document.getElementById('setting-tts');
+        const inputAgentKey = document.getElementById('setting-agent-api-key');
+        const btnGenKey = document.getElementById('btn-generate-apikey');
+        const btnCopyKey = document.getElementById('btn-copy-apikey');
+        const btnToggleKey = document.getElementById('btn-toggle-apikey');
+        let _agentKeyVisible = false;
+        let _agentKeyValue = '';
         const authMethodGroup = document.getElementById('auth-method-group');
         const apikeyGroup = document.getElementById('apikey-group');
         const sessionGroup = document.getElementById('session-group');
@@ -616,6 +650,13 @@
                 activeProfileId = data.active_profile_id || '';
                 defaults = data.defaults || {};
                 if (checkTts) checkTts.checked = data.tts_enabled || false;
+                // Agent API Key laden
+                _agentKeyValue = data.agent_api_key || '';
+                if (inputAgentKey) {
+                    inputAgentKey.value = _agentKeyValue ? '••••••••••••••••••••••' : '';
+                    inputAgentKey.readOnly = true;
+                    _agentKeyVisible = false;
+                }
                 renderProfileList();
             } catch (err) {
                 console.error('Fehler beim Laden der Profile:', err);
@@ -893,6 +934,76 @@
                     });
                 } catch (err) {
                     console.error('Fehler beim Speichern der TTS-Einstellung:', err);
+                }
+            });
+        }
+
+        // ── Agent API Key: Generieren ──
+        if (btnGenKey) {
+            btnGenKey.addEventListener('click', async () => {
+                // Kryptographisch sicheren Key generieren (Browser Crypto API)
+                const buf = new Uint8Array(32);
+                crypto.getRandomValues(buf);
+                const newKey = btoa(String.fromCharCode(...buf))
+                    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                _agentKeyValue = newKey;
+                _agentKeyVisible = true;
+                if (inputAgentKey) {
+                    inputAgentKey.value = newKey;
+                    inputAgentKey.readOnly = false;
+                }
+                // Sofort speichern
+                try {
+                    await fetch('/api/settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ agent_api_key: newKey })
+                    });
+                } catch (err) {
+                    console.error('Fehler beim Speichern des Agent API Keys:', err);
+                }
+            });
+        }
+
+        // ── Agent API Key: Kopieren ──
+        if (btnCopyKey) {
+            btnCopyKey.addEventListener('click', () => {
+                if (_agentKeyValue) {
+                    navigator.clipboard.writeText(_agentKeyValue).then(() => {
+                        btnCopyKey.title = 'Kopiert!';
+                        setTimeout(() => { btnCopyKey.title = 'Kopieren'; }, 2000);
+                    });
+                }
+            });
+        }
+
+        // ── Agent API Key: Anzeigen/Verbergen ──
+        if (btnToggleKey) {
+            btnToggleKey.addEventListener('click', () => {
+                _agentKeyVisible = !_agentKeyVisible;
+                if (inputAgentKey) {
+                    inputAgentKey.value = _agentKeyVisible ? _agentKeyValue : (_agentKeyValue ? '••••••••••••••••••••••' : '');
+                    inputAgentKey.readOnly = !_agentKeyVisible;
+                }
+            });
+        }
+
+        // ── Agent API Key: Manuelle Eingabe speichern (bei blur) ──
+        if (inputAgentKey) {
+            inputAgentKey.addEventListener('blur', async () => {
+                if (!_agentKeyVisible) return; // Nur speichern wenn sichtbar (editierbar)
+                const val = inputAgentKey.value.trim();
+                if (val && val !== _agentKeyValue) {
+                    _agentKeyValue = val;
+                    try {
+                        await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({ agent_api_key: val })
+                        });
+                    } catch (err) {
+                        console.error('Fehler beim Speichern des Agent API Keys:', err);
+                    }
                 }
             });
         }

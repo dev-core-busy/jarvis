@@ -300,6 +300,7 @@ async def get_settings():
         "profiles": config.profiles,
         "tts_enabled": config.TTS_ENABLED,
         "use_physical_desktop": config.USE_PHYSICAL_DESKTOP,
+        "agent_api_key": config.AGENT_API_KEY,
         "defaults": config.DEFAULT_PROVIDERS,
     })
 
@@ -513,8 +514,12 @@ async def agent_task(request: Request):
     """Führt eine Aufgabe headless über den Agenten aus.
 
     Auth: X-API-Key Header oder Bearer Token mit AGENT_API_KEY.
-    Body: {"text": "Andreas auf Kamera erkannt"}
+    Body: {"text": "Andreas auf Kamera erkannt", "source": "Raspberry Pi Vision"}
     Response: {"success": true, "result": "..."}
+
+    Der optionale 'source'-Parameter benennt das sendende System.
+    Der Task-Text wird automatisch mit Kontext gewrappt, damit das LLM
+    weiß, dass die Nachricht extern kommt und NICHT lokale Tools nutzt.
 
     Typischer Einsatz: Vision-Kamera auf Raspberry Pi erkennt Gesicht
     und informiert den Jarvis-Agenten via HTTP POST.
@@ -525,13 +530,39 @@ async def agent_task(request: Request):
             status_code=401,
         )
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"success": False, "error": "Ungültiger JSON-Body. Tipp für Windows CMD: Doppelte Anführungszeichen escapen, z.B. {\\\"text\\\": \\\"...\\\"}"},
+            status_code=400,
+        )
+
     task_text = body.get("text", "").strip()
     if not task_text:
         return JSONResponse(
             {"success": False, "error": "Kein Task-Text angegeben"},
             status_code=400,
         )
+
+    # Quelle des Aufrufs (optional, z.B. "Raspberry Pi Vision")
+    source = body.get("source", "Externes System").strip()
+
+    # Task-Text mit Kontext wrappen, damit das LLM weiß:
+    # 1. Die Nachricht kommt von einem EXTERNEN System (nicht lokal)
+    # 2. Es soll NICHT die lokale Kamera/Vision verwenden
+    # 3. Es soll angemessen reagieren (Begrüßung, Benachrichtigung etc.)
+    wrapped_task = (
+        f"[Externe Benachrichtigung von: {source}]\n"
+        f"{task_text}\n\n"
+        f"WICHTIG: Diese Nachricht kommt von einem externen Gerät via API. "
+        f"Verwende NICHT die lokale Kamera oder lokale Vision-Tools. "
+        f"Reagiere angemessen auf die Benachrichtigung (z.B. Begrüßung, "
+        f"Bestätigung, oder die im Profil hinterlegte Aktion ausführen)."
+    )
+
+    # Eingehende Benachrichtigung an alle verbundenen WebSocket-Clients senden
+    await _broadcast_ws({"type": "status", "message": f"📡 Externe Nachricht von {source}: {task_text}"})
 
     global agent_instance
     try:
@@ -540,14 +571,29 @@ async def agent_task(request: Request):
         if agent_instance is None:
             agent_instance = JarvisAgent()
 
-        result = await agent_instance.run_task_headless(task_text)
+        result = await agent_instance.run_task_headless(wrapped_task)
+
+        # Ergebnis an Frontend broadcasten
+        if result:
+            await _broadcast_ws({"type": "status", "message": f"🤖 Antwort: {result[:500]}"})
+
         return JSONResponse({"success": True, "result": result or ""})
 
     except Exception as e:
+        await _broadcast_ws({"type": "status", "message": f"❌ Agent-Fehler: {str(e)[:200]}"})
         return JSONResponse(
             {"success": False, "error": f"Agent-Fehler: {str(e)[:500]}"},
             status_code=500,
         )
+
+
+async def _broadcast_ws(message: dict):
+    """Sendet eine Nachricht an alle verbundenen WebSocket-Clients."""
+    for session_id, ws in list(active_sessions.items()):
+        try:
+            await ws.send_json(message)
+        except Exception:
+            pass
 
 
 # ─── Knowledge Base API ───────────────────────────────────────────────
@@ -923,11 +969,45 @@ Starte jetzt mit Schritt 1 (Skill-Entdeckung und Websuche)."""
 
 # ─── Vision (Gesichtserkennung) ──────────────────────────────────────
 
+def _vision_action_callback(action_type: str, text: str, name: str):
+    """Callback fuer Vision-Aktionen (greet, llm) → WebSocket-Broadcast."""
+    import asyncio
+
+    if action_type == "greet_audio":
+        # Vorgerenderte Audio-Datei abspielen (text = URL-Pfad)
+        msg = {"type": "greet_audio", "url": text, "name": name}
+    elif action_type == "greet":
+        # Live-TTS Fallback
+        msg = {"type": "tts", "text": text, "name": name}
+    elif action_type == "llm":
+        msg = {"type": "status", "message": f"🧠 Vision LLM-Aktion für {name}: {text[:200]}"}
+    else:
+        return
+
+    # Broadcast an alle WebSocket-Clients (aus Background-Thread heraus)
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.run_coroutine_threadsafe(_broadcast_ws(msg), loop)
+        else:
+            loop.run_until_complete(_broadcast_ws(msg))
+    except Exception:
+        # Fallback: neuen Loop erstellen
+        try:
+            asyncio.run(_broadcast_ws(msg))
+        except Exception:
+            pass
+
+
 def _get_vision_engine():
     """Gibt die VisionEngine-Singleton-Instanz zurueck (lazy import)."""
     try:
         from skills.vision.main import get_engine
-        return get_engine()
+        engine = get_engine()
+        # Callback registrieren falls noch nicht gesetzt
+        if engine and engine.on_action is None:
+            engine.on_action = _vision_action_callback
+        return engine
     except Exception:
         return None
 
@@ -1115,7 +1195,17 @@ async def vision_profile_update(request: Request):
         display_name=body.get("display_name"),
         action=body.get("action"),
         action_value=body.get("action_value"),
+        greet_target=body.get("greet_target"),
     )
+
+    # Bei Begruessungs-Aktion: Audio vorrendern
+    action = body.get("action")
+    if action == "greet":
+        action_value = body.get("action_value", "")
+        audio_path = engine.generate_greet_audio(name, action_value)
+        if audio_path:
+            msg += " Audio generiert."
+
     return JSONResponse({"message": msg})
 
 
@@ -1237,6 +1327,59 @@ async def vision_cleanup(request: Request):
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
     msg = engine.cleanup()
     return JSONResponse({"message": msg})
+
+
+@app.get("/api/vision/greet-audio/{name}")
+async def vision_greet_audio(name: str, request: Request):
+    """Vorgerenderte Begruessungs-Audio (MP3 bevorzugt, WAV Fallback). Token via Header ODER ?token= Query."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        token = request.query_params.get("token", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+
+    from pathlib import Path as _Path
+    audio_dir = _Path(__file__).parent.parent / "data" / "vision" / "audio"
+    # MP3 bevorzugt (edge-tts), WAV als Fallback (espeak-ng)
+    # Leere Dateien ignorieren (fehlgeschlagene Generierung)
+    mp3_path = audio_dir / f"greet_{name}.mp3"
+    wav_path = audio_dir / f"greet_{name}.wav"
+    if mp3_path.exists() and mp3_path.stat().st_size > 0:
+        audio_path = mp3_path
+        media_type = "audio/mpeg"
+    elif wav_path.exists() and wav_path.stat().st_size > 0:
+        audio_path = wav_path
+        media_type = "audio/wav"
+    else:
+        return JSONResponse({"error": "Keine Audio-Datei vorhanden"}, status_code=404)
+    return Response(
+        content=audio_path.read_bytes(),
+        media_type=media_type,
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/api/vision/download/stream-tools")
+async def vision_download_stream_tools(request: Request):
+    """ZIP-Download: ffmpeg.exe + ffmpeg_stream.ps1 fuer Windows-Kamera-Streaming."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        token = request.query_params.get("token", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+
+    from pathlib import Path as _Path
+    zip_path = _Path(__file__).parent.parent / "data" / "downloads" / "jarvis_cam_stream.zip"
+    if not zip_path.exists():
+        return JSONResponse({"error": "Download nicht verfuegbar"}, status_code=404)
+    return Response(
+        content=zip_path.read_bytes(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": "attachment; filename=jarvis_cam_stream.zip",
+            "Cache-Control": "no-cache",
+        },
+    )
 
 
 # ─── WhatsApp Integration ────────────────────────────────────────────

@@ -3956,17 +3956,28 @@ select.input-field {
     gap: 1.25rem;
 }
 
-/* Notification-Banner */
+/* Notification-Banner (Toast-Style) */
 .vis-notification {
-    padding: 0.6rem 1rem;
+    padding: 0.75rem 1.5rem;
     border-radius: var(--radius-sm);
-    font-size: 0.85rem;
+    font-size: 0.9rem;
+    font-weight: 500;
     border: 1px solid var(--border);
     background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    text-align: center;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    min-width: 200px;
+    max-width: 400px;
 }
 
-.vis-notification.success { border-color: var(--success); color: var(--success); }
-.vis-notification.error   { border-color: var(--danger);  color: var(--danger); }
+.vis-notification-success { border-color: var(--success); color: var(--success); background: rgba(46, 204, 113, 0.15); }
+.vis-notification-error   { border-color: var(--danger);  color: var(--danger);  background: rgba(231, 76, 60, 0.15); }
 
 /* Sektionen */
 .vis-section {
@@ -4167,6 +4178,11 @@ select.input-field {
 .vis-btn-sm:hover { border-color: var(--border-hover); }
 .vis-btn-sm.vis-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .vis-btn-sm.vis-btn-primary:hover { background: var(--accent-hover); }
+.vis-btn-sm.vis-btn-test { border-color: var(--success); color: var(--success); }
+.vis-btn-sm.vis-btn-test:hover { background: rgba(16, 185, 129, 0.15); border-color: var(--success); }
+.vis-btn-sm.vis-btn-test:disabled { opacity: 0.5; cursor: wait; }
+.vis-btn-sm.vis-btn-download { border-color: var(--info); color: var(--info); }
+.vis-btn-sm.vis-btn-download:hover { background: rgba(59, 130, 246, 0.15); border-color: var(--info); }
 
 /* Inputs */
 .vis-input {
@@ -4368,8 +4384,8 @@ select.input-field {
 
 .vis-profile-item {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
+    flex-direction: column;
+    gap: 0.5rem;
     padding: 0.6rem 0.75rem;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
@@ -4378,6 +4394,12 @@ select.input-field {
 }
 
 .vis-profile-item:hover { border-color: var(--border-hover); }
+
+.vis-profile-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
 
 .vis-profile-thumb {
     width: 44px;
@@ -4428,18 +4450,28 @@ select.input-field {
 .vis-profile-actions button:hover { border-color: var(--border-hover); color: var(--text-primary); }
 .vis-profile-actions button.vis-btn-del:hover { color: var(--danger); border-color: var(--danger); }
 
-/* Aktionen-Liste */
-.vis-actions-list {
+/* Aktions-Konfiguration inline beim Profil */
+.vis-profile-action-config {
     display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    flex-wrap: wrap;
 }
 
-.vis-action-item {
-    padding: 0.65rem 0.75rem;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.02);
+.vis-profile-action-config .vis-select {
+    flex-shrink: 0;
+}
+
+.vis-profile-action-config .vis-action-value-wrap {
+    flex: 1;
+    min-width: 120px;
+}
+
+.vis-profile-action-config .vis-btn-sm {
+    align-self: flex-start;
+    margin-top: 2px;
 }
 
 .vis-action-header {

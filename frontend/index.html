@@ -12,7 +12,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=28">
+    <link rel="stylesheet" href="/static/css/style.css?v=32">
 </head>
 
 <body>
@@ -395,6 +395,26 @@ sudo update-ca-certificates</code></pre>
                             <span>Aktiviere Sprachausgabe</span>
                         </label>
                     </div>
+
+                    <hr class="settings-divider">
+
+                    <div class="form-group">
+                        <label>Agent API Key</label>
+                        <div class="input-group" style="display: flex; gap: 8px; align-items: center;">
+                            <input type="text" id="setting-agent-api-key" placeholder="Noch kein Key generiert" style="flex: 1;" readonly>
+                            <button class="btn-icon btn-small" id="btn-toggle-apikey" title="Anzeigen/Verbergen" style="flex-shrink: 0;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            </button>
+                            <button class="btn-icon btn-small" id="btn-copy-apikey" title="Kopieren" style="flex-shrink: 0;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                            </button>
+                            <button class="btn-secondary btn-small" id="btn-generate-apikey" style="flex-shrink: 0; padding: 4px 10px; font-size: 0.75rem;">Generieren</button>
+                        </div>
+                        <small class="tab-note" style="margin-top: 5px; opacity: 0.7;">
+                            Für externen Zugriff auf <code>POST /api/agent/task</code> (z.B. Vision auf Raspberry Pi).
+                            <br>Header: <code>X-API-Key: &lt;key&gt;</code>
+                        </small>
+                    </div>
                 </div>
 
                 <!-- ── Ansicht 2: Profil bearbeiten/erstellen ── -->
@@ -773,15 +793,6 @@ sudo update-ca-certificates</code></pre>
                             </div>
                         </div>
 
-                        <!-- ── Aktionen pro Gesicht ──────────────────────────── -->
-                        <div class="vis-section">
-                            <h3>Aktionen pro Gesicht</h3>
-                            <p class="vis-hint">Lege fest, was passiert, wenn ein Gesicht erkannt wird.</p>
-                            <div id="vis-actions-list" class="vis-actions-list">
-                                <div class="vis-empty">Zuerst Gesichter trainieren.</div>
-                            </div>
-                        </div>
-
                         <!-- ── Einstellungen ─────────────────────────────────── -->
                         <div class="vis-section">
                             <h3>Kamera-Einstellungen</h3>
@@ -790,15 +801,18 @@ sudo update-ca-certificates</code></pre>
                                     <label>USB-Kamera</label>
                                     <div class="vis-setting-controls">
                                         <select class="vis-select" id="vis-cam-select">
-                                            <option value="0">USB Camera 0</option>
+                                            <option value="0">– Kameras laden (🔄) –</option>
                                         </select>
                                         <button class="vis-btn-sm" id="vis-btn-cam-load" title="Kameras laden">&#x1F504;</button>
                                     </div>
                                 </div>
                                 <div class="vis-setting-row">
                                     <label>Netzwerk-Kamera</label>
-                                    <input type="text" class="vis-input" id="vis-cam-url" placeholder="http://192.168.1.100:8090/feed" />
-                                    <small class="vis-hint">URL hat Vorrang vor USB-Kamera</small>
+                                    <div class="vis-setting-controls">
+                                        <input type="text" class="vis-input" id="vis-cam-url" placeholder="http://192.168.1.100:8090/feed" style="flex:1" />
+                                        <button class="vis-btn-sm vis-btn-download" id="vis-btn-stream-tools" onclick="visionManager._downloadStreamTools()" title="Windows Stream-Tools (ffmpeg) herunterladen">&#x2B07;</button>
+                                    </div>
+                                    <small class="vis-hint">URL hat Vorrang vor USB-Kamera &middot; &#x2B07; = FFmpeg Stream-Tools f&uuml;r Windows</small>
                                 </div>
                                 <div class="vis-setting-row">
                                     <label>Erkennungsmodell</label>
@@ -880,8 +894,8 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/skills.js?v=17"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
     <script src="/static/js/knowledge.js?v=3"></script>
-    <script src="/static/js/vision.js?v=19"></script>
-    <script src="/static/js/app.js?v=14"></script>
+    <script src="/static/js/vision.js?v=23"></script>
+    <script src="/static/js/app.js?v=17"></script>
 </body>
 
 </html>

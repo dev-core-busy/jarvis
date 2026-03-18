@@ -230,13 +230,27 @@ class JarvisVisionManager {
             const cfg = data.config || {};
 
             const urlInput = document.getElementById('vis-cam-url');
-            if (urlInput && cfg.camera_source && cfg.camera_source !== '0') {
+            const camSelect = document.getElementById('vis-cam-select');
+            if (cfg.camera_source && cfg.camera_source !== '0') {
                 if (cfg.camera_source.startsWith('http') || cfg.camera_source.startsWith('rtsp')) {
-                    urlInput.value = cfg.camera_source;
+                    if (urlInput) urlInput.value = cfg.camera_source;
+                    // Dropdown deaktivieren wenn URL gesetzt (URL hat Vorrang)
+                    if (camSelect) {
+                        camSelect.disabled = true;
+                        camSelect.title = 'URL-Feld hat Vorrang';
+                    }
                 } else {
-                    const select = document.getElementById('vis-cam-select');
-                    if (select) select.value = cfg.camera_source;
+                    if (camSelect) camSelect.value = cfg.camera_source;
                 }
+            }
+
+            // URL-Feld Listener: Dropdown deaktivieren wenn URL eingegeben
+            if (urlInput && camSelect) {
+                urlInput.addEventListener('input', () => {
+                    const hasUrl = urlInput.value.trim().length > 0;
+                    camSelect.disabled = hasUrl;
+                    camSelect.title = hasUrl ? 'URL-Feld hat Vorrang' : '';
+                });
             }
 
             const model = document.getElementById('vis-set-model');
@@ -545,12 +559,11 @@ class JarvisVisionManager {
     async _fetchProfiles() {
         const data = await this._api('/profiles');
         if (data.error) return;
-        this._renderProfilesList(data.profiles || []);
-        this._renderActionsList(data.profiles || [], data.actions || []);
         this._availableActions = data.actions || [];
+        this._renderProfilesList(data.profiles || [], data.actions || []);
     }
 
-    _renderProfilesList(profiles) {
+    _renderProfilesList(profiles, actions) {
         const el = document.getElementById('vis-profiles-list');
         if (!el) return;
 
@@ -559,40 +572,18 @@ class JarvisVisionManager {
             return;
         }
 
+        actions = actions || this._availableActions || [];
+        const token = encodeURIComponent(this._token());
+
         el.innerHTML = profiles.map(p => {
             const date = p.created_at ? new Date(p.created_at).toLocaleDateString('de-DE') : '';
-            const actionLabel = this._actionLabel(p.action);
-            return `
-                <div class="vis-profile-item">
-                    <img class="vis-profile-thumb" src="/api/vision/thumbnail/${encodeURIComponent(p.id)}?t=${Date.now()}&token=${encodeURIComponent(this._token())}"
-                         onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect fill=%22%23333%22 width=%2250%22 height=%2250%22/><text x=%2225%22 y=%2232%22 text-anchor=%22middle%22 fill=%22%23888%22 font-size=%2220%22>?</text></svg>'" />
-                    <div class="vis-profile-info">
-                        <strong>${this._esc(p.name)}</strong>
-                        <small>${p.num_images} Bilder · ${date}</small>
-                        <small>Aktion: ${actionLabel}</small>
-                    </div>
-                    <div class="vis-profile-actions">
-                        <button class="vis-btn-sm" onclick="visionManager._editProfile('${p.id}')" title="Bearbeiten">✏</button>
-                        <button class="vis-btn-sm vis-btn-danger" onclick="visionManager._deleteProfile('${p.id}')" title="Löschen">✕</button>
-                    </div>
-                </div>`;
-        }).join('');
-    }
 
-    _renderActionsList(profiles, actions) {
-        const el = document.getElementById('vis-actions-list');
-        if (!el) return;
-
-        if (!profiles.length) {
-            el.innerHTML = '<div class="vis-empty">Zuerst Gesichter trainieren, dann Aktionen festlegen.</div>';
-            return;
-        }
-
-        el.innerHTML = profiles.map(p => {
+            // Aktions-Dropdown
             const options = actions.map(a =>
                 `<option value="${a.id}" ${a.id === p.action ? 'selected' : ''}>${this._esc(a.label)}</option>`
             ).join('');
 
+            // Aktions-Wert (URL/Prompt/nichts)
             const valueType = this._actionValueType(p.action);
             const valueField = valueType === 'url'
                 ? `<input type="url" class="vis-input vis-action-value" data-profile="${p.id}" value="${this._esc(p.action_value || '')}" placeholder="https://example.com/webhook" />`
@@ -600,21 +591,54 @@ class JarvisVisionManager {
                 ? `<textarea class="vis-input vis-action-value" data-profile="${p.id}" rows="2" placeholder="z.B. Hallo {name}! oder LLM-Prompt...">${this._esc(p.action_value || '')}</textarea>`
                 : '';
 
+            // Lautsprecher-Auswahl bei "greet"
+            const greetTarget = p.greet_target || 'browser';
+            const greetSelect = p.action === 'greet'
+                ? `<div class="vis-greet-target-wrap" id="vis-gt-${p.id}">
+                       <label style="font-size:0.8rem;color:var(--text-secondary);">Ausgabe:</label>
+                       <select class="vis-select vis-greet-target" data-profile="${p.id}">
+                           <option value="browser" ${greetTarget === 'browser' ? 'selected' : ''}>🔊 Browser (TTS)</option>
+                           <option value="server" ${greetTarget === 'server' ? 'selected' : ''}>🖥️ Server (espeak)</option>
+                       </select>
+                   </div>`
+                : '';
+
+            // Test-Button nur bei greet-Aktion
+            const testBtn = p.action === 'greet'
+                ? `<button class="vis-btn-sm vis-btn-test" id="vis-test-${p.id}" onclick="visionManager._testGreetAudio('${p.id}')" title="Audio testen">🔊</button>`
+                : `<button class="vis-btn-sm vis-btn-test" id="vis-test-${p.id}" onclick="visionManager._testGreetAudio('${p.id}')" title="Audio testen" style="display:none">🔊</button>`;
+
             return `
-                <div class="vis-action-item">
-                    <strong>${this._esc(p.name)}</strong>
-                    <select class="vis-select vis-action-select" data-profile="${p.id}" onchange="visionManager._onInlineActionChange(this)">
-                        ${options}
-                    </select>
-                    <div class="vis-action-value-wrap" id="vis-av-${p.id}">${valueField}</div>
-                    <button class="vis-btn-sm vis-btn-primary" onclick="visionManager._saveInlineAction('${p.id}')">Speichern</button>
+                <div class="vis-profile-item">
+                    <div class="vis-profile-header">
+                        <img class="vis-profile-thumb" src="/api/vision/thumbnail/${encodeURIComponent(p.id)}?t=${Date.now()}&token=${token}"
+                             onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect fill=%22%23333%22 width=%2250%22 height=%2250%22/><text x=%2225%22 y=%2232%22 text-anchor=%22middle%22 fill=%22%23888%22 font-size=%2220%22>?</text></svg>'" />
+                        <div class="vis-profile-info">
+                            <strong>${this._esc(p.name)}</strong>
+                            <small>${p.num_images} Bilder · ${date}</small>
+                        </div>
+                        <div class="vis-profile-actions">
+                            <button class="vis-btn-sm" onclick="visionManager._editProfile('${p.id}')" title="Bearbeiten">✏</button>
+                            <button class="vis-btn-sm vis-btn-danger" onclick="visionManager._deleteProfile('${p.id}')" title="Löschen">✕</button>
+                        </div>
+                    </div>
+                    <div class="vis-profile-action-config">
+                        <select class="vis-select vis-action-select" data-profile="${p.id}" onchange="visionManager._onInlineActionChange(this)">
+                            ${options}
+                        </select>
+                        <div class="vis-action-value-wrap" id="vis-av-${p.id}">${valueField}</div>
+                        ${greetSelect}
+                        ${testBtn}
+                        <button class="vis-btn-sm vis-btn-primary" onclick="visionManager._saveInlineAction('${p.id}')">💾</button>
+                    </div>
                 </div>`;
         }).join('');
     }
 
     _onInlineActionChange(selectEl) {
         const pid = selectEl.dataset.profile;
-        const type = this._actionValueType(selectEl.value);
+        const action = selectEl.value;
+        const type = this._actionValueType(action);
         const wrap = document.getElementById(`vis-av-${pid}`);
         if (!wrap) return;
         if (type === 'url') {
@@ -624,19 +648,74 @@ class JarvisVisionManager {
         } else {
             wrap.innerHTML = '';
         }
+
+        // Lautsprecher-Auswahl: anzeigen/verbergen bei greet
+        let gtWrap = document.getElementById(`vis-gt-${pid}`);
+        if (action === 'greet') {
+            if (!gtWrap) {
+                gtWrap = document.createElement('div');
+                gtWrap.className = 'vis-greet-target-wrap';
+                gtWrap.id = `vis-gt-${pid}`;
+                gtWrap.innerHTML = `
+                    <label style="font-size:0.8rem;color:var(--text-secondary);">Ausgabe:</label>
+                    <select class="vis-select vis-greet-target" data-profile="${pid}">
+                        <option value="browser" selected>🔊 Browser (TTS)</option>
+                        <option value="server">🖥️ Server (espeak)</option>
+                    </select>`;
+                wrap.parentNode.insertBefore(gtWrap, wrap.nextSibling?.nextSibling || null);
+            }
+        } else if (gtWrap) {
+            gtWrap.remove();
+        }
+
+        // Test-Button: anzeigen/verbergen bei greet
+        const testBtn = document.getElementById(`vis-test-${pid}`);
+        if (testBtn) {
+            testBtn.style.display = action === 'greet' ? '' : 'none';
+        }
     }
 
     async _saveInlineAction(profileId) {
         const select = document.querySelector(`.vis-action-select[data-profile="${profileId}"]`);
         const valueEl = document.querySelector(`.vis-action-value[data-profile="${profileId}"]`);
+        const greetTargetEl = document.querySelector(`.vis-greet-target[data-profile="${profileId}"]`);
         const action = select?.value || 'log';
         const actionValue = valueEl?.value || '';
+        const greetTarget = greetTargetEl?.value || 'browser';
+
+        const payload = { name: profileId, action, action_value: actionValue };
+        if (action === 'greet') {
+            payload.greet_target = greetTarget;
+        }
 
         const data = await this._api('/profiles', {
             method: 'POST',
-            body: JSON.stringify({ name: profileId, action, action_value: actionValue }),
+            body: JSON.stringify(payload),
         });
         this._notify(data.message || data.error || 'Gespeichert');
+    }
+
+    async _testGreetAudio(profileId) {
+        const token = encodeURIComponent(this._token());
+        const url = `/api/vision/greet-audio/${encodeURIComponent(profileId)}?token=${token}`;
+
+        // Button visuell als "ladend" markieren
+        const btn = document.getElementById(`vis-test-${profileId}`);
+        const resetBtn = () => { if (btn) { btn.disabled = false; btn.textContent = '🔊'; } };
+        if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+
+        try {
+            const audio = new Audio(url);
+            audio.onended = resetBtn;
+            audio.onerror = () => {
+                this._notify('Keine Audio-Datei – bitte erst speichern.', 'error');
+                resetBtn();
+            };
+            await audio.play();
+        } catch (e) {
+            this._notify('Keine Audio-Datei – bitte erst speichern.', 'error');
+            resetBtn();
+        }
     }
 
     _actionLabel(actionId) {
@@ -767,6 +846,20 @@ class JarvisVisionManager {
         });
         const data = await resp.json();
         this._notify(data.success ? 'Einstellungen gespeichert.' : (data.error || 'Fehler'));
+    }
+
+    /* ── Stream-Tools Download ─────────────────────────────────────── */
+
+    _downloadStreamTools() {
+        const token = encodeURIComponent(this._token());
+        const url = `/api/vision/download/stream-tools?token=${token}`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'jarvis_cam_stream.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        this._notify('Download gestartet – ZIP enthält ffmpeg.exe + ffmpeg_stream.ps1');
     }
 
     /* ── System-Reset ───────────────────────────────────────────────── */

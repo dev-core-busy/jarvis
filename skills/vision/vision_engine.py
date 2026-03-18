@@ -155,6 +155,8 @@ class VisionEngine:
         self._current_face_crops: list[bytes] = []  # JPEG-Crops der erkannten Gesichter
         self._recent_events: list[dict] = []
         self._last_action_time: dict[str, float] = {}  # Cooldown pro Person
+        self._last_seen_time: dict[str, float] = {}    # Wann Person zuletzt gesehen wurde
+        self._action_fired: dict[str, bool] = {}       # Aktion fuer Person bereits gefeuert?
         self._tolerance = DEFAULT_TOLERANCE
         self._interval = DEFAULT_INTERVAL
         self._detection_model = "hog"  # "hog" oder "cnn"
@@ -482,8 +484,16 @@ class VisionEngine:
                         name = all_names[best_idx]
                         confidence = round(1.0 - best_dist, 3)
 
-                        # Event + Aktion (mit Cooldown)
-                        self._trigger_action(name, confidence)
+                        # Presence-Tracking: Aktion nur bei Neuerkennung
+                        now = time.time()
+                        last_seen = self._last_seen_time.get(name, 0)
+                        was_gone = (now - last_seen) > COOLDOWN_SECONDS
+                        self._last_seen_time[name] = now
+
+                        if was_gone or not self._action_fired.get(name, False):
+                            # Person neu erkannt (war weg oder erstmalig)
+                            self._action_fired[name] = True
+                            self._trigger_action(name, confidence)
 
             detected.append({
                 "name": name,
@@ -511,14 +521,17 @@ class VisionEngine:
             self._current_faces = detected
             self._current_face_crops = crops
 
-    def _trigger_action(self, name: str, confidence: float):
-        """Aktion für erkannte Person ausführen (mit Cooldown)."""
+        # Presence-Reset: Personen die > COOLDOWN_SECONDS nicht mehr im Bild sind
         now = time.time()
-        last = self._last_action_time.get(name, 0)
-        if now - last < COOLDOWN_SECONDS:
-            return
+        current_names = {d["name"] for d in detected if d["name"] != "Unbekannt"}
+        for tracked_name in list(self._last_seen_time.keys()):
+            if tracked_name not in current_names:
+                if now - self._last_seen_time[tracked_name] > COOLDOWN_SECONDS:
+                    self._action_fired.pop(tracked_name, None)
+                    self._last_seen_time.pop(tracked_name, None)
 
-        self._last_action_time[name] = now
+    def _trigger_action(self, name: str, confidence: float):
+        """Aktion für erkannte Person ausführen (nur bei Neuerkennung)."""
 
         # Profil-Aktion holen
         profiles = self._config.get("profiles", {})
@@ -569,13 +582,119 @@ class VisionEngine:
         else:
             log.info("LLM-Aktion (kein Callback): %s", filled)
 
-    def _execute_greet(self, text: str, name: str, confidence: float):
-        """Begrüßung über Lautsprecher (Dummy – TODO: TTS-Integration)."""
+    def generate_greet_audio(self, name: str, text: str = "") -> str:
+        """Generiert Audio-Datei fuer Begruessungs-Text. Versucht edge-tts, Fallback auf espeak-ng."""
         display_name = name.replace("_", " ").title()
         greeting = text.replace("{name}", display_name) if text else f"Hallo {display_name}!"
-        log.info("Begrüßung (Dummy): '%s' (Konfidenz: %.0f%%)", greeting, confidence * 100)
-        # TODO: espeak/piper TTS o.ä. für echte Sprachausgabe
-        #   subprocess.run(["espeak", "-vde", greeting])
+
+        audio_dir = self.data_dir / "audio"
+        audio_dir.mkdir(exist_ok=True)
+        mp3_path = audio_dir / f"greet_{name}.mp3"
+        wav_path = audio_dir / f"greet_{name}.wav"
+
+        # 1) Versuch: edge-tts (natuerliche Stimme)
+        try:
+            import asyncio
+            import edge_tts
+
+            voice = "de-DE-SeraphinaMultilingualNeural"
+            communicate = edge_tts.Communicate(
+                greeting, voice, pitch="-8Hz", rate="-5%"
+            )
+
+            loop = None
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+
+            if loop and loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, communicate.save(str(mp3_path)))
+                    future.result(timeout=30)
+            else:
+                asyncio.run(communicate.save(str(mp3_path)))
+
+            # Pruefen ob Datei tatsaechlich Inhalt hat
+            if mp3_path.exists() and mp3_path.stat().st_size > 0:
+                # Alte WAV aufräumen falls vorhanden
+                if wav_path.exists():
+                    wav_path.unlink()
+                log.info("Audio generiert (edge-tts Seraphina): %s -> %s", greeting, mp3_path)
+                return str(mp3_path)
+            else:
+                # Leere Datei entfernen
+                if mp3_path.exists():
+                    mp3_path.unlink()
+                log.warning("edge-tts erzeugte leere Datei – Fallback auf espeak-ng")
+        except ImportError:
+            log.info("edge-tts nicht installiert – Fallback auf espeak-ng")
+        except Exception as e:
+            log.warning("edge-tts fehlgeschlagen: %s – Fallback auf espeak-ng", e)
+            # Leere/kaputte Datei aufräumen
+            if mp3_path.exists() and mp3_path.stat().st_size == 0:
+                mp3_path.unlink()
+
+        # 2) Fallback: espeak-ng (WAV)
+        try:
+            import subprocess as _sp
+            result = _sp.run(
+                ["espeak-ng", "-v", "de", "-s", "140", "-w", str(wav_path), greeting],
+                capture_output=True, timeout=15
+            )
+            if wav_path.exists() and wav_path.stat().st_size > 0:
+                log.info("Audio generiert (espeak-ng Fallback): %s -> %s", greeting, wav_path)
+                return str(wav_path)
+            else:
+                log.warning("espeak-ng erzeugte keine Datei")
+        except Exception as e:
+            log.warning("espeak-ng Fallback fehlgeschlagen: %s", e)
+
+        return ""
+
+    def _execute_greet(self, text: str, name: str, confidence: float):
+        """Begruessung: Vorgerenderte Audio-Datei abspielen oder Fallback auf TTS."""
+        profiles = self._config.get("profiles", {})
+        profile = profiles.get(name, {})
+        target = profile.get("greet_target", "browser")
+
+        # Pruefen ob vorgerenderte Audio-Datei existiert (MP3 bevorzugt, WAV als Fallback)
+        audio_path = self.data_dir / "audio" / f"greet_{name}.mp3"
+        if not audio_path.exists():
+            audio_path = self.data_dir / "audio" / f"greet_{name}.wav"
+
+        if audio_path.exists():
+            if target == "server":
+                # Server-seitig abspielen (mpv fuer MP3, aplay fuer WAV)
+                try:
+                    import subprocess as _sp
+                    player = "mpv" if audio_path.suffix == ".mp3" else "aplay"
+                    cmd = [player, "--no-video", str(audio_path)] if player == "mpv" else [player, str(audio_path)]
+                    _sp.Popen(cmd, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                    log.info("Begruessung (Server/%s): %s", player, audio_path.name)
+                except Exception as e:
+                    log.warning("Server-Playback fehlgeschlagen: %s – Fallback auf Browser", e)
+                    target = "browser"
+
+            if target == "browser":
+                # Audio-URL an Browser senden
+                if self.on_action:
+                    try:
+                        self.on_action("greet_audio", f"/api/vision/greet-audio/{name}", name)
+                    except Exception as e:
+                        log.warning("Browser-Audio Broadcast fehlgeschlagen: %s", e)
+        else:
+            # Kein vorgerendertes Audio → Live-TTS als Fallback
+            display_name = name.replace("_", " ").title()
+            greeting = text.replace("{name}", display_name) if text else f"Hallo {display_name}!"
+            log.info("Kein Audio-Cache fuer '%s', Live-TTS: '%s'", name, greeting)
+
+            if self.on_action:
+                try:
+                    self.on_action("greet", greeting, name)
+                except Exception as e:
+                    log.warning("Live-TTS Broadcast fehlgeschlagen: %s", e)
 
     def _execute_door(self, name: str, confidence: float):
         """Tür öffnen (Dummy – TODO: GPIO/Relay/API-Integration)."""
@@ -763,6 +882,7 @@ class VisionEngine:
                 "name": data.get("name", name),
                 "action": data.get("action", "log"),
                 "action_value": data.get("action_value", ""),
+                "greet_target": data.get("greet_target", "browser"),
                 "created_at": data.get("created_at", ""),
                 "num_images": num_images,
                 "num_encodings": num_encodings,
@@ -770,7 +890,8 @@ class VisionEngine:
         return profiles
 
     def update_profile(self, name: str, display_name: str = None,
-                       action: str = None, action_value: str = None) -> str:
+                       action: str = None, action_value: str = None,
+                       greet_target: str = None) -> str:
         """Profil-Daten aktualisieren."""
         profiles = self._config.setdefault("profiles", {})
         if name not in profiles:
@@ -782,6 +903,8 @@ class VisionEngine:
             profiles[name]["action"] = action
         if action_value is not None:
             profiles[name]["action_value"] = action_value
+        if greet_target is not None:
+            profiles[name]["greet_target"] = greet_target
 
         self._save_config()
         return f"Profil '{name}' aktualisiert."

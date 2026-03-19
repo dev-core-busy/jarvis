@@ -67,6 +67,7 @@ step "Basis-Abhängigkeiten prüfen & installieren"
 
 install_pkg git git
 install_pkg curl curl
+install_pkg ffmpeg ffmpeg
 
 # Build-Tools (nötig für Python-Pakete mit C-Erweiterungen)
 if [[ "$PKG_MGR" == "apt-get" ]]; then
@@ -147,12 +148,18 @@ step "Desktop-Steuerung & VNC einrichten"
 if [[ "$PKG_MGR" == "apt-get" ]]; then
     info "Installiere X11/VNC/Desktop-Pakete ..."
     $SUDO apt-get install -y \
-        xvfb x11vnc openbox \
+        xvfb x11vnc openbox xterm \
         xdotool wmctrl scrot \
-        websockify novnc \
+        python3-websockify novnc \
         xauth x11-utils \
         >/dev/null 2>&1 && success "X11/VNC/Desktop-Pakete installiert" \
         || warn "Einige X11-Pakete konnten nicht installiert werden."
+    # Fallback falls python3-websockify nicht verfügbar
+    if ! command -v websockify &>/dev/null; then
+        $SUDO apt-get install -y websockify >/dev/null 2>&1 || \
+        pip install websockify >/dev/null 2>&1 || \
+        warn "websockify nicht installiert – noVNC Desktop-Vorschau nicht verfügbar."
+    fi
 elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
     $SUDO $INSTALL xorg-x11-server-Xvfb x11vnc openbox xdotool wmctrl scrot python3-websockify >/dev/null 2>&1 || true
     success "X11-Pakete installiert (ggf. unvollständig – bitte manuell prüfen)"

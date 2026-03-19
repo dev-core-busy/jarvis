@@ -68,7 +68,7 @@ COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # ── Ports ─────────────────────────────────────────────────────────────────────
-EXPOSE 8000 6080
+EXPOSE 80 443 6080
 
 # ── Volumes für persistente Daten ─────────────────────────────────────────────
 VOLUME ["/app/data", "/app/certs"]

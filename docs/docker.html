@@ -236,7 +236,7 @@ systemctl enable --now docker</code>
                     </div>
                     <div class="step-desc" style="margin-top:10px;">Danach im Browser öffnen:</div>
                     <div class="code-block" style="margin-top:8px;">
-                        <code>https://&lt;server-ip&gt;:8000   <span class="comment"># Web-UI (HTTPS)</span>
+                        <code>https://&lt;server-ip&gt;         <span class="comment"># Web-UI (HTTPS)</span>
 https://&lt;server-ip&gt;:6080   <span class="comment"># VNC Desktop (HTTPS)</span>
 
 Login: jarvis / jarvis</code>
@@ -299,15 +299,16 @@ Login: jarvis / jarvis</code>
         <table class="doc-table">
             <thead><tr><th>Host-Port</th><th>Container-Port</th><th>Service</th></tr></thead>
             <tbody>
-                <tr><td><span class="port-badge">8000</span></td><td>8000</td><td><strong>Jarvis Web-UI</strong> (HTTPS/FastAPI)</td></tr>
+                <tr><td><span class="port-badge">443</span></td><td>443</td><td><strong>Jarvis Web-UI</strong> (HTTPS/FastAPI)</td></tr>
+                <tr><td><span class="port-badge">80</span></td><td>80</td><td><strong>HTTP → HTTPS Redirect</strong></td></tr>
                 <tr><td><span class="port-badge">6080</span></td><td>6080</td><td><strong>noVNC Desktop</strong> (HTTPS/WebSocket)</td></tr>
             </tbody>
         </table>
 
-        <p style="color:var(--text-secondary); font-size:0.88rem; margin-top:8px;">Anderen Port verwenden (z.B. wenn 8000 belegt ist):</p>
+        <p style="color:var(--text-secondary); font-size:0.88rem; margin-top:8px;">Anderen Port verwenden (z.B. wenn 443 belegt ist):</p>
         <div class="code-block">
             <code><span class="key">ports</span>:
-  - <span class="str">"9000:8000"</span>   <span class="comment"># Jarvis dann auf Port 9000 erreichbar</span>
+  - <span class="str">"9443:443"</span>    <span class="comment"># Jarvis dann auf Port 9443 erreichbar</span>
   - <span class="str">"9080:6080"</span>   <span class="comment"># VNC dann auf Port 9080</span></code>
         </div>
 
@@ -321,7 +322,7 @@ Login: jarvis / jarvis</code>
 
 <span class="comment"># nginx Beispiel-Config:</span>
 location / {
-    proxy_pass         http://127.0.0.1:8000;
+    proxy_pass         https://127.0.0.1:443;
     proxy_http_version 1.1;
     proxy_set_header   Upgrade $http_upgrade;
     proxy_set_header   Connection "upgrade";
@@ -378,7 +379,7 @@ echo "GEMINI_API_KEY=AIza..." >> .env
                 <div class="step-num">1</div>
                 <div class="step-content">
                     <div class="step-title">Web-UI öffnen und einloggen</div>
-                    <div class="step-desc"><span class="code-inline">https://&lt;server-ip&gt;:8000</span> → Login: jarvis / jarvis</div>
+                    <div class="step-desc"><span class="code-inline">https://&lt;server-ip&gt;</span> → Login: jarvis / jarvis</div>
                 </div>
             </div>
             <div class="step">
@@ -545,10 +546,11 @@ docker compose logs jarvis | tail -50</code>
 docker compose ps
 
 <span class="comment"># Prüfen ob Ports gebunden sind</span>
-ss -tlnp | grep -E "8000|6080"
+ss -tlnp | grep -E "443|6080"
 
 <span class="comment"># Firewall-Ports freigeben (ufw)</span>
-ufw allow 8000/tcp
+ufw allow 443/tcp
+ufw allow 80/tcp
 ufw allow 6080/tcp</code>
         </div>
 
@@ -578,14 +580,14 @@ docker compose restart jarvis</code>
             </tbody>
         </table>
 
-        <h3>Portkonflikt – Port 8000 bereits belegt</h3>
+        <h3>Portkonflikt – Port 443 bereits belegt</h3>
         <div class="code-block">
-            <code><span class="comment"># Welcher Prozess nutzt Port 8000?</span>
-ss -tlnp | grep 8000
+            <code><span class="comment"># Welcher Prozess nutzt Port 443?</span>
+ss -tlnp | grep 443
 
 <span class="comment"># Anderen Host-Port in docker-compose.yml eintragen:</span>
 <span class="key">ports</span>:
-  - <span class="str">"8080:8000"</span>   <span class="comment"># Jarvis dann auf Port 8080</span></code>
+  - <span class="str">"8443:443"</span>   <span class="comment"># Jarvis dann auf Port 8443</span></code>
         </div>
     </div>
 

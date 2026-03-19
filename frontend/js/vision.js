@@ -851,14 +851,8 @@ class JarvisVisionManager {
     /* ── Stream-Tools Download ─────────────────────────────────────── */
 
     _downloadStreamTools() {
-        const token = encodeURIComponent(this._token());
-        const url = `/api/vision/download/stream-tools?token=${token}`;
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'jarvis_cam_stream.zip';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        // Direkt von jarvis-ai.info herunterladen (kein Backend-Proxy noetig)
+        window.open('https://jarvis-ai.info/downloads/jarvis_cam_stream.zip', '_blank');
         this._notify('Download gestartet – ZIP enthält ffmpeg.exe + ffmpeg_stream.ps1');
     }
 

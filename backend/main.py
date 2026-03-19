@@ -22,7 +22,7 @@ if not _DOCKER_MODE:
 else:
     _pam = None
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -736,6 +736,276 @@ async def open_knowledge_folder(request: Request):
         stderr=subprocess.DEVNULL,
     )
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/knowledge/upload")
+async def upload_knowledge_files(
+    files: list[UploadFile] = File(...),
+    folder: str = Form("data/knowledge"),
+):
+    """Dateien per Browser-Upload in einen Knowledge-Ordner hochladen."""
+    from backend.tools.knowledge import (
+        _get_folders, PROJECT_ROOT,
+        EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,
+        EXTENSIONS_XLSX, EXTENSIONS_PPTX, EXTENSIONS_VIDEO, EXTENSIONS_AUDIO,
+    )
+
+    all_exts = (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX |
+                EXTENSIONS_XLSX | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO)
+
+    # Zielordner validieren
+    target = None
+    for f in _get_folders():
+        try:
+            rel = str(f.relative_to(PROJECT_ROOT))
+        except ValueError:
+            rel = str(f)
+        if rel == folder or str(f) == folder:
+            target = f
+            break
+
+    if not target:
+        return JSONResponse({"error": f"Ordner '{folder}' nicht konfiguriert"}, status_code=400)
+
+    target.mkdir(parents=True, exist_ok=True)
+
+    saved = []
+    rejected = []
+    for file in files:
+        suffix = Path(file.filename).suffix.lower()
+        if suffix not in all_exts:
+            rejected.append({"name": file.filename, "reason": f"Format '{suffix}' nicht unterstuetzt"})
+            continue
+
+        dest = target / file.filename
+        # Dateiname-Kollision: Nummer anhaengen
+        counter = 1
+        while dest.exists():
+            stem = Path(file.filename).stem
+            dest = target / f"{stem}_{counter}{suffix}"
+            counter += 1
+
+        content = await file.read()
+        dest.write_bytes(content)
+        size_str = f"{len(content)/1024:.1f} KB" if len(content) >= 1024 else f"{len(content)} B"
+        saved.append({"name": dest.name, "size": size_str})
+
+    return JSONResponse({
+        "saved": saved,
+        "rejected": rejected,
+        "total_saved": len(saved),
+        "total_rejected": len(rejected),
+    })
+
+
+# ─── Netzwerk-Freigaben (Mounts) ─────────────────────────────────────
+
+_MOUNT_BASE = Path("/mnt/jarvis-kb")
+
+
+def _get_mounts_config() -> list:
+    try:
+        states = config.get_skill_states()
+        return states.get("knowledge", {}).get("config", {}).get("mounts", [])
+    except Exception:
+        return []
+
+
+def _save_mounts_config(mounts: list):
+    states = config.get_skill_states()
+    kb_state = states.get("knowledge", {})
+    kb_cfg = kb_state.get("config", {})
+    kb_cfg["mounts"] = mounts
+    kb_state["config"] = kb_cfg
+    config.save_skill_state("knowledge", kb_state)
+
+
+def _mount_path(idx: int) -> Path:
+    return _MOUNT_BASE / f"share_{idx}"
+
+
+@app.get("/api/knowledge/mounts")
+async def list_mounts():
+    mounts = _get_mounts_config()
+    result = []
+    for i, m in enumerate(mounts):
+        mp = _mount_path(i)
+        result.append({
+            "type": m.get("type", "smb"),
+            "source": m.get("source", ""),
+            "active": mp.is_mount(),
+            "mountpoint": str(mp),
+        })
+    return JSONResponse(result)
+
+
+@app.post("/api/knowledge/mounts")
+async def add_mount(request: Request):
+    data = await request.json()
+    source = data.get("source", "").strip()
+    mount_type = data.get("type", "smb")
+    if not source:
+        return JSONResponse({"error": "Quelle fehlt"}, status_code=400)
+
+    mounts = _get_mounts_config()
+    mount_entry = {
+        "type": mount_type,
+        "source": source,
+        "username": data.get("username", ""),
+        "password": data.get("password", ""),
+    }
+    mounts.append(mount_entry)
+    _save_mounts_config(mounts)
+
+    idx = len(mounts) - 1
+    mp = _mount_path(idx)
+    mp.mkdir(parents=True, exist_ok=True)
+
+    # Ordner automatisch zur Knowledge-Liste hinzufuegen
+    kb_state = config.get_skill_states().get("knowledge", {})
+    kb_cfg = kb_state.get("config", {})
+    folders = kb_cfg.get("folders", "data/knowledge")
+    if str(mp) not in folders:
+        folders = folders + "," + str(mp) if folders else str(mp)
+        kb_cfg["folders"] = folders
+        kb_state["config"] = kb_cfg
+        config.save_skill_state("knowledge", kb_state)
+
+    return JSONResponse({"ok": True, "index": idx})
+
+
+@app.delete("/api/knowledge/mounts/{idx}")
+async def remove_mount(idx: int):
+    mounts = _get_mounts_config()
+    if idx < 0 or idx >= len(mounts):
+        return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
+
+    mp = _mount_path(idx)
+    # Unmounten falls aktiv
+    if mp.is_mount():
+        await asyncio.to_thread(subprocess.run, ["umount", str(mp)], capture_output=True, timeout=10)
+
+    # Ordner aus Knowledge-Liste entfernen
+    kb_state = config.get_skill_states().get("knowledge", {})
+    kb_cfg = kb_state.get("config", {})
+    folders = kb_cfg.get("folders", "data/knowledge")
+    folder_list = [f.strip() for f in folders.split(",") if f.strip() and f.strip() != str(mp)]
+    kb_cfg["folders"] = ",".join(folder_list) if folder_list else "data/knowledge"
+    kb_state["config"] = kb_cfg
+
+    mounts.pop(idx)
+    kb_cfg["mounts"] = mounts
+    config.save_skill_state("knowledge", kb_state)
+
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/knowledge/mounts/{idx}/mount")
+async def mount_share(idx: int):
+    mounts = _get_mounts_config()
+    if idx < 0 or idx >= len(mounts):
+        return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
+
+    m = mounts[idx]
+    mp = _mount_path(idx)
+    mp.mkdir(parents=True, exist_ok=True)
+
+    mount_type = m.get("type", "smb")
+    source = m["source"]
+    username = m.get("username", "")
+    password = m.get("password", "")
+
+    if mount_type == "smb":
+        opts = "ro"
+        if username:
+            opts += f",username={username},password={password}"
+        else:
+            opts += ",guest"
+        cmd = ["mount", "-t", "cifs", source, str(mp), "-o", opts]
+    elif mount_type == "nfs":
+        cmd = ["mount", "-t", "nfs", "-o", "ro", source, str(mp)]
+    elif mount_type == "webdav":
+        # davfs2: Credentials in Datei schreiben
+        secrets = Path("/etc/davfs2/secrets")
+        secrets.parent.mkdir(parents=True, exist_ok=True)
+        line = f"{str(mp)} {username} {password}\n"
+        if secrets.exists():
+            content = secrets.read_text()
+            if str(mp) not in content:
+                secrets.write_text(content + line)
+        else:
+            secrets.write_text(line)
+        secrets.chmod(0o600)
+        cmd = ["mount", "-t", "davfs", "-o", "ro", source, str(mp)]
+    else:
+        return JSONResponse({"error": f"Unbekannter Typ: {mount_type}"}, status_code=400)
+
+    result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=15)
+    if result.returncode != 0:
+        return JSONResponse({"error": f"Mount fehlgeschlagen: {result.stderr.strip()}"}, status_code=500)
+
+    return JSONResponse({"ok": True, "mountpoint": str(mp)})
+
+
+@app.post("/api/knowledge/mounts/{idx}/unmount")
+async def unmount_share(idx: int):
+    mp = _mount_path(idx)
+    if not mp.is_mount():
+        return JSONResponse({"ok": True, "hint": "War nicht gemountet"})
+
+    result = await asyncio.to_thread(subprocess.run, ["umount", str(mp)], capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        return JSONResponse({"error": f"Unmount fehlgeschlagen: {result.stderr.strip()}"}, status_code=500)
+
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/knowledge/webdav/status")
+async def webdav_status():
+    """WebDAV-Status und Verbindungsdetails."""
+    from backend.webdav import _get_webdav_config, is_webdav_enabled
+    from backend.tools.knowledge import _get_folders, PROJECT_ROOT
+    cfg = _get_webdav_config()
+    enabled = is_webdav_enabled()
+    folders = _get_folders()
+    shares = []
+    for f in folders:
+        try:
+            name = str(f.relative_to(PROJECT_ROOT)).replace("/", "_")
+        except ValueError:
+            name = f.name
+        shares.append(name)
+    host = os.getenv("SERVER_IP", "127.0.0.1")
+    return JSONResponse({
+        "enabled": enabled,
+        "url": f"https://{host}/webdav/" if enabled else None,
+        "shares": shares if enabled else [],
+        "username": cfg.get("username", "jarvis"),
+    })
+
+
+@app.post("/api/knowledge/webdav/config")
+async def webdav_config(request: Request):
+    """WebDAV aktivieren/deaktivieren + Credentials setzen."""
+    data = await request.json()
+    states = config.get_skill_states()
+    kb_state = states.get("knowledge", {})
+    kb_cfg = kb_state.get("config", {})
+    webdav = kb_cfg.get("webdav", {})
+
+    if "enabled" in data:
+        webdav["enabled"] = bool(data["enabled"])
+    if "username" in data:
+        webdav["username"] = data["username"]
+    if "password" in data and data["password"]:
+        webdav["password"] = data["password"]
+
+    kb_cfg["webdav"] = webdav
+    kb_state["config"] = kb_cfg
+    config.save_skill_state("knowledge", kb_state)
+
+    return JSONResponse({"ok": True, "enabled": webdav.get("enabled", False),
+                         "hint": "Server-Neustart noetig fuer WebDAV-Aenderungen"})
 
 
 # ─── Google: .env-Helper ──────────────────────────────────────────────
@@ -1890,6 +2160,18 @@ async def startup():
         port_info = f":{config.SERVER_PORT}" if config.SERVER_PORT != 443 else ""
         print("✅ Jarvis Backend gestartet")
         print(f"🌐 https://{os.getenv('SERVER_IP', '127.0.0.1')}{port_info}")
+
+    # WebDAV-Server mounten (wenn aktiviert)
+    try:
+        from backend.webdav import get_webdav_app, is_webdav_enabled
+        if is_webdav_enabled():
+            dav_app = get_webdav_app()
+            if dav_app:
+                from starlette.middleware.wsgi import WSGIMiddleware
+                app.mount("/webdav", WSGIMiddleware(dav_app))
+                print("📁 WebDAV-Server aktiv unter /webdav/")
+    except Exception as e:
+        print(f"⚠️  WebDAV konnte nicht gestartet werden: {e}")
 
     # HTTP→HTTPS Redirect-Server auf Port 80 starten
     if config.SERVER_PORT == 443:

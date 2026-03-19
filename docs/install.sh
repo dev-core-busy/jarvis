@@ -153,6 +153,7 @@ if [[ "$PKG_MGR" == "apt-get" ]]; then
         xdotool wmctrl scrot \
         python3-websockify novnc \
         xauth x11-utils xterm \
+        cifs-utils nfs-common davfs2 \
         >/dev/null 2>&1 && success "X11/VNC/Desktop-Pakete + Cinnamon installiert" \
         || warn "Einige X11/Desktop-Pakete konnten nicht installiert werden."
     # Fallback falls python3-websockify nicht verfügbar

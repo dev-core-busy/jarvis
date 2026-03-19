@@ -2,10 +2,11 @@
  * Jarvis VNC/noVNC Integration
  *
  * Verbindungsstrategie:
+ *  - noVNC wird über Same-Origin (/novnc/) geladen → kein separates SSL-Zertifikat
+ *  - WebSocket-Proxy über /ws/vnc → FastAPI proxied direkt zu x11vnc (TCP 5900)
  *  - Sofortversuch beim Laden (initVNC in app.js)
  *  - startProbing(): zyklische Verfügbarkeitsprüfung via /api/config,
  *    verbindet automatisch sobald noVNC erreichbar — kein fixer Countdown
- *  - Wird bei WS-Disconnect gestartet, bei WS-Reconnect fortgesetzt/neu gestartet
  */
 class JarvisVNC {
     constructor() {
@@ -27,9 +28,12 @@ class JarvisVNC {
         this._probingActive = false;
         this._clearTimers();
 
-        const host     = window.location.hostname || 'localhost';
-        const protocol = window.location.protocol;
-        const vncUrl   = `${protocol}//${host}:${websockifyPort}/vnc.html?autoconnect=true&resize=scale&view_only=false`;
+        const host = window.location.hostname || 'localhost';
+        const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+
+        // noVNC über Same-Origin laden (kein separates SSL-Zertifikat nötig)
+        // WebSocket-Pfad: /ws/vnc → FastAPI proxied zu x11vnc TCP 5900
+        const vncUrl = `/novnc/vnc.html?autoconnect=true&resize=scale&view_only=false&host=${host}&port=${port}&path=ws/vnc&encrypt=1`;
 
         this.iframe.src    = vncUrl;
         this.iframe.hidden = false;
@@ -75,7 +79,7 @@ class JarvisVNC {
                     this._probingActive = false;
                     this._clearTimers();
                     this._removeOverlay();
-                    // Kurze Pause damit x11vnc/websockify vollständig gestartet ist
+                    // Kurze Pause damit x11vnc vollständig gestartet ist
                     setTimeout(() => this.connect(data.websockify_port), 400);
                     return;
                 }
@@ -165,7 +169,7 @@ class JarvisVNC {
             </svg>
             <p style="margin-top:1rem;color:#64748b;font-size:0.85rem;">
                 Desktop-Vorschau nicht verfügbar.<br>
-                <small>Starte: <code>x11vnc</code> + <code>websockify</code></small>
+                <small>Prüfe: <code>x11vnc</code> auf Port 5900</small>
             </p>`;
         this.statusEl.textContent = 'Nicht verfügbar';
         this.statusEl.style.color = '#f59e0b';

@@ -55,8 +55,14 @@ class JarvisKnowledgeManager {
         const sizeMb = (stats.total_size_bytes / (1024 * 1024)).toFixed(1);
         const pdfIcon = stats.pdf_support ? '✅' : '⚠️';
         const docxIcon = stats.docx_support ? '✅' : '⚠️';
+        const xlsxIcon = stats.xlsx_support ? '✅' : '⚠️';
+        const pptxIcon = stats.pptx_support ? '✅' : '⚠️';
         const pdfTitle = stats.pdf_support ? 'PDF-Support aktiv' : 'pdfplumber nicht installiert';
         const docxTitle = stats.docx_support ? 'DOCX-Support aktiv' : 'python-docx nicht installiert';
+        const xlsxTitle = stats.xlsx_support ? 'Excel-Support aktiv' : 'openpyxl nicht installiert';
+        const pptxTitle = stats.pptx_support ? 'PowerPoint-Support aktiv' : 'python-pptx nicht installiert';
+        const videoIcon = stats.video_support ? '✅' : '⚠️';
+        const videoTitle = stats.video_support ? 'Video/Audio-Support aktiv (ffmpeg + faster-whisper)' : 'ffmpeg oder faster-whisper fehlt';
 
         el.innerHTML = `
             <div class="kb-stat-grid">
@@ -81,6 +87,9 @@ class JarvisKnowledgeManager {
                 <span class="kb-format-badge" title="Text-Formate immer aktiv">✅ Text/Markdown</span>
                 <span class="kb-format-badge" title="${pdfTitle}">${pdfIcon} PDF</span>
                 <span class="kb-format-badge" title="${docxTitle}">${docxIcon} DOCX</span>
+                <span class="kb-format-badge" title="${xlsxTitle}">${xlsxIcon} Excel</span>
+                <span class="kb-format-badge" title="${pptxTitle}">${pptxIcon} PowerPoint</span>
+                <span class="kb-format-badge" title="${videoTitle}">${videoIcon} Video/Audio</span>
             </div>
         `;
     }

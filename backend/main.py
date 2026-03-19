@@ -47,6 +47,73 @@ async def no_cache_static(request: Request, call_next):
 
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
+# noVNC-Dateien über Port 443 servieren (verhindert separates SSL-Zertifikat auf Port 6080)
+_NOVNC_DIRS = ["/usr/share/novnc", "/usr/share/noVNC", "/snap/novnc/current/usr/share/novnc"]
+for _nvdir in _NOVNC_DIRS:
+    if Path(_nvdir).is_dir():
+        app.mount("/novnc", StaticFiles(directory=_nvdir, html=True), name="novnc")
+        break
+
+
+# ─── WebSocket VNC-Proxy (Same-Origin, kein separates SSL nötig) ──────
+@app.websocket("/ws/vnc")
+async def vnc_websocket_proxy(websocket: WebSocket):
+    """Proxy: Browser-WebSocket → TCP VNC (x11vnc auf Port 5900).
+
+    noVNC sendet Daten über wss://host:443/ws/vnc (gleicher Port/Cert wie UI).
+    So entfällt das Problem mit dem separaten SSL-Zertifikat auf Port 6080.
+    """
+    # Subprotocol nur setzen wenn Client es anbietet (noVNC kann "binary" senden oder nicht)
+    requested = websocket.headers.get("sec-websocket-protocol", "")
+    subproto = "binary" if "binary" in requested else None
+    await websocket.accept(subprotocol=subproto)
+
+    try:
+        reader, writer = await asyncio.open_connection("localhost", 5900)
+    except (ConnectionRefusedError, OSError):
+        await websocket.close(code=1011, reason="VNC nicht erreichbar")
+        return
+
+    async def ws_to_tcp():
+        """WebSocket-Frames → TCP."""
+        try:
+            while True:
+                msg = await websocket.receive()
+                if msg.get("type") == "websocket.receive":
+                    data = msg.get("bytes") or (msg.get("text", "").encode())
+                    if data:
+                        writer.write(data)
+                        await writer.drain()
+                elif msg.get("type") == "websocket.disconnect":
+                    break
+        except Exception:
+            pass
+        finally:
+            writer.close()
+
+    async def tcp_to_ws():
+        """TCP → WebSocket-Frames."""
+        try:
+            while True:
+                data = await reader.read(65536)
+                if not data:
+                    break
+                await websocket.send_bytes(data)
+        except Exception:
+            pass
+
+    done, pending = await asyncio.wait(
+        [asyncio.create_task(ws_to_tcp()), asyncio.create_task(tcp_to_ws())],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    for task in pending:
+        task.cancel()
+
+    try:
+        await websocket.close()
+    except Exception:
+        pass
+
 
 # ─── State ────────────────────────────────────────────────────────────
 active_sessions: dict[str, WebSocket] = {}

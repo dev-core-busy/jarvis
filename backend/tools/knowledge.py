@@ -1,10 +1,14 @@
-"""Knowledge Base Tool – Multi-Folder RAG mit PDF/DOCX Support und Index-Cache."""
+"""Knowledge Base Tool – Multi-Folder RAG mit PDF/DOCX/XLSX/PPTX/Video Support und Index-Cache."""
 
 import asyncio
 import json
+import logging
 import math
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import threading
 from collections import Counter
 from pathlib import Path
@@ -23,8 +27,13 @@ EXTENSIONS_TEXT = {
 }
 EXTENSIONS_PDF = {".pdf"}
 EXTENSIONS_DOCX = {".docx", ".doc"}
+EXTENSIONS_XLSX = {".xlsx", ".xls"}
+EXTENSIONS_PPTX = {".pptx"}
+EXTENSIONS_VIDEO = {".mp4", ".mkv", ".avi", ".webm", ".mov", ".m4v", ".flv", ".wmv"}
+EXTENSIONS_AUDIO = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".opus"}
 
 _cache_lock = threading.Lock()
+_log = logging.getLogger("jarvis.knowledge")
 
 
 def _get_skill_config() -> dict:
@@ -57,8 +66,69 @@ def _get_max_bytes() -> int:
     return int(mb * 1024 * 1024)
 
 
+def _transcribe_media(filepath: Path) -> str | None:
+    """Transkribiert Audio/Video via ffmpeg + faster-whisper."""
+    if not shutil.which("ffmpeg"):
+        _log.warning("ffmpeg nicht gefunden – Video/Audio-Support deaktiviert")
+        return None
+
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        _log.warning("faster-whisper nicht installiert – Video/Audio-Support deaktiviert")
+        return None
+
+    tmpdir = None
+    try:
+        # Audio aus Video/Audio extrahieren → WAV (16kHz mono, optimal für Whisper)
+        tmpdir = tempfile.mkdtemp(prefix="jarvis_kb_")
+        wav_path = os.path.join(tmpdir, "audio.wav")
+
+        cmd = [
+            "ffmpeg", "-i", str(filepath),
+            "-vn",                    # kein Video
+            "-acodec", "pcm_s16le",   # PCM 16-bit
+            "-ar", "16000",           # 16kHz
+            "-ac", "1",               # Mono
+            "-y",                     # Überschreiben
+            wav_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=300)
+        if result.returncode != 0 or not os.path.exists(wav_path):
+            _log.error(f"ffmpeg fehlgeschlagen für {filepath}: {result.stderr[:200]}")
+            return None
+
+        # Whisper-Modell laden (eigene Instanz, nicht die aus main.py)
+        # Nutze "small" als Default – guter Kompromiss aus Geschwindigkeit und Qualität
+        cfg = _get_skill_config()
+        model_name = cfg.get("whisper_model", "small")
+        model = WhisperModel(model_name, device="cpu", compute_type="int8")
+
+        segments, info = model.transcribe(wav_path, language="de")
+        text = " ".join([seg.text for seg in segments]).strip()
+
+        if text:
+            # Dateiname + erkannte Sprache als Kontext
+            header = f"[Transkription: {filepath.name} | Sprache: {info.language}]"
+            _log.info(f"Transkription OK für {filepath.name}: {len(text)} Zeichen")
+            return f"{header}\n{text}"
+
+        _log.warning(f"Keine Sprache erkannt in {filepath.name}")
+        return None
+
+    except subprocess.TimeoutExpired:
+        _log.error(f"ffmpeg Timeout für {filepath}")
+        return None
+    except Exception as e:
+        _log.error(f"Transkription fehlgeschlagen für {filepath}: {e}")
+        return None
+    finally:
+        if tmpdir and os.path.exists(tmpdir):
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def _extract_text(filepath: Path, max_bytes: int) -> str | None:
-    """Extrahiert Text aus einer Datei (Text/PDF/DOCX)."""
+    """Extrahiert Text aus einer Datei (Text/PDF/DOCX/XLSX/PPTX/Video/Audio)."""
     try:
         if filepath.stat().st_size > max_bytes:
             return None
@@ -94,6 +164,64 @@ def _extract_text(filepath: Path, max_bytes: int) -> str | None:
             return None
         except Exception:
             return None
+
+    if suffix in EXTENSIONS_XLSX:
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(str(filepath), read_only=True, data_only=True)
+            sheets_text = []
+            for ws in wb.worksheets:
+                rows = []
+                for row in ws.iter_rows(values_only=True):
+                    cells = [str(c) if c is not None else "" for c in row]
+                    if any(c.strip() for c in cells):
+                        rows.append("\t".join(cells))
+                if rows:
+                    header = f"[Sheet: {ws.title}]"
+                    sheets_text.append(header + "\n" + "\n".join(rows))
+            wb.close()
+            return "\n\n".join(sheets_text) or None
+        except ImportError:
+            return None
+        except Exception:
+            return None
+
+    if suffix in EXTENSIONS_PPTX:
+        try:
+            from pptx import Presentation
+            prs = Presentation(str(filepath))
+            slides_text = []
+            for i, slide in enumerate(prs.slides, 1):
+                texts = []
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        for para in shape.text_frame.paragraphs:
+                            t = para.text.strip()
+                            if t:
+                                texts.append(t)
+                    if shape.has_table:
+                        for row in shape.table.rows:
+                            cells = [cell.text.strip() for cell in row.cells]
+                            if any(cells):
+                                texts.append("\t".join(cells))
+                if texts:
+                    slides_text.append(f"[Folie {i}]\n" + "\n".join(texts))
+            return "\n\n".join(slides_text) or None
+        except ImportError:
+            return None
+        except Exception:
+            return None
+
+    if suffix in EXTENSIONS_VIDEO | EXTENSIONS_AUDIO:
+        # Video/Audio: max_bytes-Check großzügiger (200MB Default für Medien)
+        media_max = max(max_bytes, 200 * 1024 * 1024)
+        try:
+            if filepath.stat().st_size > media_max:
+                _log.warning(f"Mediendatei zu groß: {filepath} ({filepath.stat().st_size / 1024 / 1024:.0f} MB)")
+                return None
+        except Exception:
+            return None
+        return _transcribe_media(filepath)
 
     return None
 
@@ -138,7 +266,7 @@ def _save_cache(cache: dict):
 
 def _all_files(folders: list[Path]) -> list[Path]:
     """Gibt alle unterstützten Dateien in den konfigurierten Ordnern zurück."""
-    all_exts = EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX
+    all_exts = EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO
     files = []
     for folder in folders:
         if not folder.exists():
@@ -252,6 +380,8 @@ def get_stats() -> dict:
 
     has_pdf = False
     has_docx = False
+    has_xlsx = False
+    has_pptx = False
     try:
         import pdfplumber
         has_pdf = True
@@ -260,6 +390,24 @@ def get_stats() -> dict:
     try:
         import docx
         has_docx = True
+    except ImportError:
+        pass
+    try:
+        import openpyxl
+        has_xlsx = True
+    except ImportError:
+        pass
+    try:
+        from pptx import Presentation
+        has_pptx = True
+    except ImportError:
+        pass
+
+    has_video = False
+    try:
+        from faster_whisper import WhisperModel
+        if shutil.which("ffmpeg"):
+            has_video = True
     except ImportError:
         pass
 
@@ -271,6 +419,9 @@ def get_stats() -> dict:
         "total_size_bytes": total_size,
         "pdf_support": has_pdf,
         "docx_support": has_docx,
+        "xlsx_support": has_xlsx,
+        "pptx_support": has_pptx,
+        "video_support": has_video,
     }
 
 
@@ -298,7 +449,7 @@ class KnowledgeTool(BaseTool):
     def description(self) -> str:
         return (
             "Durchsucht die lokale Knowledge Base nach relevanten Dokumenten. "
-            "Unterstützt Text-, Markdown-, PDF- und DOCX-Dateien aus konfigurierten Ordnern. "
+            "Unterstützt Text-, Markdown-, PDF-, DOCX-, Excel-, PowerPoint- und Video/Audio-Dateien aus konfigurierten Ordnern. "
             "Nutze dieses Tool wenn du Informationen zu einem Thema brauchst, "
             "die der Benutzer hinterlegt hat."
         )
@@ -463,6 +614,18 @@ class KnowledgeManageTool(BaseTool):
                 formats.append("DOCX")
             else:
                 formats.append("DOCX ⚠️ (python-docx fehlt)")
+            if stats["xlsx_support"]:
+                formats.append("Excel")
+            else:
+                formats.append("Excel ⚠️ (openpyxl fehlt)")
+            if stats["pptx_support"]:
+                formats.append("PowerPoint")
+            else:
+                formats.append("PowerPoint ⚠️ (python-pptx fehlt)")
+            if stats["video_support"]:
+                formats.append("Video/Audio")
+            else:
+                formats.append("Video/Audio ⚠️ (ffmpeg + faster-whisper nötig)")
             size_mb = stats["total_size_bytes"] / (1024 * 1024)
             return (
                 f"📊 Knowledge Base Statistiken:\n"

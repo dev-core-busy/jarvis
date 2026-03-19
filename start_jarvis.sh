@@ -90,11 +90,38 @@ if ! pgrep -x "x11vnc" > /dev/null; then
     fi
 fi
 
-# 4. Starte websockify
-pkill -f "websockify.*6080" || true
-echo "Starte websockify (HTTPS)..."
-/usr/bin/websockify --web=/usr/share/novnc --cert=./certs/server.crt --key=./certs/server.key 6080 localhost:5900 > /var/log/jarvis-websockify.log 2>&1 &
-sleep 1
+# 4. Websockify ist nicht mehr nötig – VNC läuft über FastAPI WebSocket-Proxy (/ws/vnc)
+# noVNC-Dateien werden über FastAPI /novnc/ serviert (Same-Origin, kein separates SSL)
+pkill -f "websockify.*6080" 2>/dev/null || true
+echo "VNC-Proxy läuft über FastAPI (Port 443, /ws/vnc)"
+
+# Legacy-websockify als optionaler Fallback (ohne SSL, nur localhost)
+NOVNC_DIR=""
+for dir in /usr/share/novnc /usr/share/noVNC /snap/novnc/current/usr/share/novnc; do
+    [ -d "$dir" ] && NOVNC_DIR="$dir" && break
+done
+
+if [ -n "$NOVNC_DIR" ]; then
+    WSOCK_CMD=""
+    if command -v /usr/bin/websockify &>/dev/null; then
+        WSOCK_CMD="/usr/bin/websockify"
+    elif command -v websockify &>/dev/null; then
+        WSOCK_CMD="$(command -v websockify)"
+    fi
+
+    if [ -n "$WSOCK_CMD" ]; then
+        "$WSOCK_CMD" --web="$NOVNC_DIR" 6080 localhost:5900 > /var/log/jarvis-websockify.log 2>&1 &
+    else
+        ./venv/bin/python -m websockify --web="$NOVNC_DIR" 6080 localhost:5900 > /var/log/jarvis-websockify.log 2>&1 &
+    fi
+    WSOCK_PID=$!
+    sleep 1
+    if kill -0 "$WSOCK_PID" 2>/dev/null; then
+        echo "websockify Fallback gestartet (PID: $WSOCK_PID, Port 6080, kein SSL)"
+    else
+        echo "⚠ websockify konnte nicht gestartet werden – prüfe /var/log/jarvis-websockify.log"
+    fi
+fi
 
 # 5. Starte das Backend
 echo "Starte Backend (HTTPS)..."

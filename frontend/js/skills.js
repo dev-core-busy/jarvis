@@ -159,7 +159,11 @@
             const dirName   = skill.dir_name || skill.path?.split('/').pop() || skill.name;
             const icon      = ICON_MAP[skill.icon] || ICON_MAP.puzzle;
             const isSystem  = skill.system || false;
-            const hasConfig = skill.config_schema && Object.keys(skill.config_schema).length > 0;
+            // Skills mit eigenem Settings-Tab brauchen keinen generischen Config-Button
+            const CUSTOM_TAB_SKILLS = ['vision'];
+            const hasConfig = skill.config_schema
+                && Object.keys(skill.config_schema).length > 0
+                && !CUSTOM_TAB_SKILLS.includes(dirName);
             const catLabel  = CATEGORY_LABELS[skill.category] || skill.category || '';
             const toolCount = (skill.tools || []).length;
 
@@ -706,6 +710,17 @@
         // ─── Konfiguration ────────────────────────────────────────────
 
         async _openConfig(name) {
+            // Skills mit eigenem Settings-Tab: direkt dorthin wechseln
+            const CUSTOM_TABS = { vision: 'vision' };
+            if (CUSTOM_TABS[name]) {
+                const tabBtn = document.querySelector(
+                    `.settings-tab-btn[data-settings-tab="${CUSTOM_TABS[name]}"]`);
+                if (tabBtn && tabBtn.style.display !== 'none') {
+                    tabBtn.click();
+                    return;
+                }
+            }
+
             const token = localStorage.getItem('jarvis_token') || '';
             try {
                 const resp  = await fetch(`/api/skills/${name}/config`, {

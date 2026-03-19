@@ -98,4 +98,4 @@ sleep 1
 
 # 5. Starte das Backend
 echo "Starte Backend (HTTPS)..."
-exec ./venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile ./certs/server.key --ssl-certfile ./certs/server.crt
+exec ./venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 443 --ssl-keyfile ./certs/server.key --ssl-certfile ./certs/server.crt

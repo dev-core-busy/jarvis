@@ -8,7 +8,7 @@ set -e
 DISPLAY_NUM=":1"
 VNC_PORT=5900
 NOVNC_PORT=6080
-JARVIS_PORT=8000
+JARVIS_PORT=443
 CERT_DIR="/app/certs"
 
 log() { echo "[Jarvis] $*"; }

@@ -33,7 +33,7 @@ class JarvisVNC {
 
         // noVNC über Same-Origin laden (kein separates SSL-Zertifikat nötig)
         // WebSocket-Pfad: /ws/vnc → FastAPI proxied zu x11vnc TCP 5900
-        const vncUrl = `/novnc/vnc_lite.html?autoconnect=true&resize=scale&view_only=false&host=${host}&port=${port}&path=ws/vnc&encrypt=1`;
+        const vncUrl = `/novnc/vnc.html?autoconnect=true&resize=scale&view_only=false&host=${host}&port=${port}&path=ws/vnc&encrypt=1`;
 
         this.iframe.src    = vncUrl;
         this.iframe.hidden = false;

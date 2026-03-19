@@ -12,7 +12,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=32">
+    <link rel="stylesheet" href="/static/css/style.css?v=33">
 </head>
 
 <body>
@@ -668,6 +668,24 @@ sudo update-ca-certificates</code></pre>
                             </div>
                         </div>
 
+                        <!-- Datei-Upload -->
+                        <div class="kb-section">
+                            <h3>Dateien hochladen</h3>
+                            <div id="kb-drop-zone" class="kb-drop-zone">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                    <polyline points="17 8 12 3 7 8"/>
+                                    <line x1="12" y1="3" x2="12" y2="15"/>
+                                </svg>
+                                <p>Dateien hierher ziehen oder <label for="kb-file-input" class="kb-upload-link">durchsuchen</label></p>
+                                <input type="file" id="kb-file-input" multiple style="display:none" />
+                            </div>
+                            <div class="kb-upload-row">
+                                <select id="kb-upload-target" class="kb-input kb-upload-select"></select>
+                                <div id="kb-upload-status" class="kb-upload-status"></div>
+                            </div>
+                        </div>
+
                         <!-- Ordner-Verwaltung -->
                         <div class="kb-section">
                             <h3>Ordner</h3>
@@ -679,6 +697,49 @@ sudo update-ca-certificates</code></pre>
                                 <input type="text" id="kb-folder-input" class="kb-input"
                                     placeholder="Pfad zum Ordner (z.B. data/knowledge)" />
                                 <button class="kb-btn-action" id="btn-kb-add-folder">Hinzufügen</button>
+                            </div>
+                        </div>
+
+                        <!-- WebDAV-Server -->
+                        <div class="kb-section">
+                            <div class="kb-section-header">
+                                <h3>WebDAV-Server</h3>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="kb-webdav-toggle" />
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <p class="kb-hint">Wissensdatenbank als Netzlaufwerk einbinden (Windows/Mac/Linux Dateimanager).</p>
+                            <div id="kb-webdav-details" style="display:none;">
+                                <div class="kb-webdav-info">
+                                    <div class="kb-info-row"><span class="kb-info-label">URL:</span> <code id="kb-webdav-url"></code></div>
+                                    <div class="kb-info-row"><span class="kb-info-label">Benutzer:</span> <code id="kb-webdav-user"></code></div>
+                                    <div class="kb-info-row"><span class="kb-info-label">Passwort:</span> <span class="kb-info-hint">Jarvis-Login Passwort</span></div>
+                                    <div class="kb-info-row"><span class="kb-info-label">Shares:</span> <span id="kb-webdav-shares"></span></div>
+                                </div>
+                                <p class="kb-hint">Aenderungen erfordern einen Server-Neustart.</p>
+                            </div>
+                        </div>
+
+                        <!-- Netzwerk-Freigaben -->
+                        <div class="kb-section">
+                            <h3>Netzwerk-Freigaben</h3>
+                            <p class="kb-hint">Externe SMB/NFS/WebDAV-Freigaben als Wissensquellen einbinden.</p>
+                            <div id="kb-mount-list" class="kb-mount-list"></div>
+                            <button class="kb-btn-action" id="btn-kb-add-mount">+ Freigabe hinzufuegen</button>
+                            <div id="kb-mount-form" class="kb-mount-form" style="display:none;">
+                                <select id="kb-mount-type" class="kb-input">
+                                    <option value="smb">SMB/CIFS (Windows-Freigabe)</option>
+                                    <option value="nfs">NFS</option>
+                                    <option value="webdav">WebDAV</option>
+                                </select>
+                                <input type="text" id="kb-mount-source" class="kb-input" placeholder="//server/freigabe oder server:/pfad" />
+                                <input type="text" id="kb-mount-user" class="kb-input" placeholder="Benutzername (optional)" />
+                                <input type="password" id="kb-mount-pass" class="kb-input" placeholder="Passwort (optional)" />
+                                <div class="kb-mount-actions">
+                                    <button class="kb-btn-action" onclick="window.knowledgeManager.saveMount()">Verbinden</button>
+                                    <button class="kb-btn-secondary" onclick="document.getElementById('kb-mount-form').style.display='none'">Abbrechen</button>
+                                </div>
                             </div>
                         </div>
 
@@ -893,7 +954,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/vnc.js?v=11"></script>
     <script src="/static/js/skills.js?v=19"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
-    <script src="/static/js/knowledge.js?v=6"></script>
+    <script src="/static/js/knowledge.js?v=7"></script>
     <script src="/static/js/vision.js?v=24"></script>
     <script src="/static/js/app.js?v=18"></script>
 </body>

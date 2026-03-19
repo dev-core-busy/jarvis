@@ -51,15 +51,15 @@ if [ "$DISPLAY" == ":10" ]; then
         sleep 2
     fi
 
-    if ! pgrep -x "openbox" > /dev/null; then
-        echo "Starte Openbox..."
-        openbox --sm-disable &
-        sleep 1
-    fi
-
-    if ! pgrep -x "xterm" > /dev/null; then
-        echo "Starte Initial-Terminal..."
-        xterm -geometry 80x24+10+10 -e "echo 'Jarvis Desktop bereit.'; bash" &
+    if ! pgrep -f "cinnamon-session" > /dev/null; then
+        echo "Starte Cinnamon Desktop..."
+        # dbus-Session fuer Cinnamon
+        if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+            eval $(dbus-launch --sh-syntax)
+            export DBUS_SESSION_BUS_ADDRESS
+        fi
+        XDG_SESSION_TYPE=x11 cinnamon-session &
+        sleep 3
     fi
 fi
 

@@ -18,9 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv python3-pip \
     # Build-Tools (für python-pam + dlib/face_recognition Kompilierung)
     build-essential libpam0g-dev cmake libboost-all-dev \
-    # X11 / virtueller Desktop (XFCE4)
+    # X11 / virtueller Desktop (Cinnamon)
     xvfb x11vnc xterm \
-    xfce4 xfce4-terminal dbus-x11 at-spi2-core \
+    cinnamon-core cinnamon-session dbus-x11 at-spi2-core \
     # Browser (für Desktop-Automation, CDP via --remote-debugging-port)
     chromium \
     # noVNC / websockify

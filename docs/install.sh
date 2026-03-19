@@ -148,12 +148,13 @@ step "Desktop-Steuerung & VNC einrichten"
 if [[ "$PKG_MGR" == "apt-get" ]]; then
     info "Installiere X11/VNC/Desktop-Pakete ..."
     $SUDO apt-get install -y \
-        xvfb x11vnc openbox xterm \
+        xvfb x11vnc \
+        cinnamon-core cinnamon-session dbus-x11 at-spi2-core \
         xdotool wmctrl scrot \
         python3-websockify novnc \
-        xauth x11-utils \
-        >/dev/null 2>&1 && success "X11/VNC/Desktop-Pakete installiert" \
-        || warn "Einige X11-Pakete konnten nicht installiert werden."
+        xauth x11-utils xterm \
+        >/dev/null 2>&1 && success "X11/VNC/Desktop-Pakete + Cinnamon installiert" \
+        || warn "Einige X11/Desktop-Pakete konnten nicht installiert werden."
     # Fallback falls python3-websockify nicht verfügbar
     if ! command -v websockify &>/dev/null; then
         $SUDO apt-get install -y websockify >/dev/null 2>&1 || \

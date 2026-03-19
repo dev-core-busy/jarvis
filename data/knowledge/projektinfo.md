@@ -9,7 +9,7 @@ Jarvis ist ein autonomer KI-Agent fuer Linux-Systeme mit modularem Skill-System 
 - Services: jarvis.service + whatsapp-bridge.service (systemd)
 
 ## Technologie-Stack
-- Backend: Python 3.13, FastAPI, Uvicorn (HTTPS Port 8000)
+- Backend: Python 3.13, FastAPI, Uvicorn (HTTPS Port 443)
 - Frontend: HTML/CSS/JS (kein Framework), Dark Glassmorphism Theme
 - LLM: Multi-Provider (Google Gemini, OpenRouter, Anthropic, OpenAI-compatible)
 - VNC: x11vnc + websockify + noVNC (Port 5900 / 6080)
@@ -73,7 +73,7 @@ Smartphone → WhatsApp Server → Baileys Bridge (:3001) → Jarvis Backend (:4
 - Settings: /opt/jarvis/data/settings.json
 
 ## Zugang
-- HTTPS Port: 8000 (Backend + Frontend)
+- HTTPS Port: 443 (Backend + Frontend)
 - VNC Port: 5900
 - Websockify Port: 6080
 - WhatsApp Bridge Port: 3001 (nur localhost)

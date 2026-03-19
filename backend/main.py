@@ -1361,24 +1361,9 @@ async def vision_greet_audio(name: str, request: Request):
 
 @app.get("/api/vision/download/stream-tools")
 async def vision_download_stream_tools(request: Request):
-    """ZIP-Download: ffmpeg.exe + ffmpeg_stream.ps1 fuer Windows-Kamera-Streaming."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        token = request.query_params.get("token", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
-
-    from pathlib import Path as _Path
-    zip_path = _Path(__file__).parent.parent / "data" / "downloads" / "jarvis_cam_stream.zip"
-    if not zip_path.exists():
-        return JSONResponse({"error": "Download nicht verfuegbar"}, status_code=404)
-    return Response(
-        content=zip_path.read_bytes(),
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": "attachment; filename=jarvis_cam_stream.zip",
-            "Cache-Control": "no-cache",
-        },
+    """Redirect zu jarvis-ai.info fuer Stream-Tools ZIP-Download."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("https://jarvis-ai.info/downloads/jarvis_cam_stream.zip"
     )
 
 
@@ -1808,6 +1793,24 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         await ws.send_json({"type": "pong"})
 
 
+# ─── HTTP → HTTPS Redirect (Port 80 → 443) ──────────────────────────
+async def _start_http_redirect():
+    """Startet einen leichten HTTP-Server auf Port 80, der alles auf HTTPS umleitet."""
+    from starlette.applications import Starlette
+    from starlette.responses import RedirectResponse as _RR
+    from starlette.routing import Route
+
+    async def _redirect(request):
+        target = str(request.url).replace("http://", "https://", 1)
+        return _RR(target, status_code=301)
+
+    redirect_app = Starlette(routes=[Route("/{path:path}", _redirect)])
+    redirect_cfg = uvicorn.Config(redirect_app, host="0.0.0.0", port=80, log_level="warning")
+    server = uvicorn.Server(redirect_cfg)
+    asyncio.create_task(server.serve())
+    print("🔀 HTTP→HTTPS Redirect aktiv (Port 80 → 443)")
+
+
 # ─── Startup ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
@@ -1817,8 +1820,16 @@ async def startup():
         for e in errors:
             print(f"⚠️  {e}")
     else:
+        port_info = f":{config.SERVER_PORT}" if config.SERVER_PORT != 443 else ""
         print("✅ Jarvis Backend gestartet")
-        print(f"🌐 https://{os.getenv('SERVER_IP', '127.0.0.1')}:{config.SERVER_PORT}")
+        print(f"🌐 https://{os.getenv('SERVER_IP', '127.0.0.1')}{port_info}")
+
+    # HTTP→HTTPS Redirect-Server auf Port 80 starten
+    if config.SERVER_PORT == 443:
+        try:
+            await _start_http_redirect()
+        except Exception as e:
+            print(f"⚠️  HTTP-Redirect (Port 80) konnte nicht gestartet werden: {e}")
 
     # Vision auto_start: Kamera automatisch starten wenn konfiguriert
     try:

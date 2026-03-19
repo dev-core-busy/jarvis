@@ -40,7 +40,7 @@ Jarvis kann ueber WhatsApp gesteuert werden. Sprachnachrichten werden automatisc
 
 ### Architektur
 ```
-Smartphone → WhatsApp Server → Baileys Bridge (:3001) → Jarvis Backend (:8000)
+Smartphone → WhatsApp Server → Baileys Bridge (:3001) → Jarvis Backend (:443)
                                                          ↓
                                                     faster-whisper (falls Voice)
                                                          ↓

@@ -4,7 +4,7 @@
 #
 # Schnellstart:
 #   docker compose up -d
-#   Browser: https://localhost:8000  (SSL-Warnung bestätigen)
+#   Browser: https://localhost  (SSL-Warnung bestätigen)
 #   Login:   jarvis / jarvis
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -16,7 +16,8 @@ services:
     container_name: jarvis
     restart: unless-stopped
     ports:
-      - "8000:8000"   # Web-UI (HTTPS)
+      - "80:80"       # HTTP → HTTPS Redirect
+      - "443:443"     # Web-UI (HTTPS)
       - "6080:6080"   # noVNC Desktop-Streaming
     environment:
       # Docker-Modus aktivieren (deaktiviert PAM-Authentifizierung)

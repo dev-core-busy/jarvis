@@ -374,11 +374,13 @@ fi
 step "Firewall-Hinweis"
 echo -e "
 ${YELLOW}Falls eine Firewall aktiv ist, folgende Ports freigeben:${RESET}
-  ${BOLD}8000${RESET}  – Jarvis Web-Interface (HTTPS)
+  ${BOLD}443${RESET}   – Jarvis Web-Interface (HTTPS)
+  ${BOLD}80${RESET}    – HTTP → HTTPS Redirect
   ${BOLD}6080${RESET}  – noVNC Desktop-Streaming (HTTPS/WSS)
 
   Beispiel (ufw):
-    ${CYAN}ufw allow 8000/tcp${RESET}
+    ${CYAN}ufw allow 443/tcp${RESET}
+    ${CYAN}ufw allow 80/tcp${RESET}
     ${CYAN}ufw allow 6080/tcp${RESET}
 "
 
@@ -406,8 +408,8 @@ ${BOLD}Status:${RESET}
   ${CYAN}systemctl status jarvis.service${RESET}
 
 ${BOLD}Jetzt im Browser öffnen:${RESET}
-  ${CYAN}https://localhost:8000${RESET}         ${YELLOW}← lokal auf diesem Rechner${RESET}
-  ${CYAN}https://${SERVER_IP}:8000${RESET}   ${YELLOW}← im Netzwerk / von außen${RESET}
+  ${CYAN}https://localhost${RESET}         ${YELLOW}← lokal auf diesem Rechner${RESET}
+  ${CYAN}https://${SERVER_IP}${RESET}   ${YELLOW}← im Netzwerk / von außen${RESET}
   Login: ${BOLD}jarvis / jarvis${RESET}
   ${YELLOW}(SSL-Warnung beim ersten Aufruf einfach bestätigen)${RESET}
 

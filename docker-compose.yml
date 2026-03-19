@@ -4,7 +4,7 @@
 #
 # Schnellstart:
 #   docker compose up -d
-#   Browser: https://localhost:8000  (SSL-Warnung bestätigen)
+#   Browser: https://localhost  (SSL-Warnung bestätigen)
 #   Login:   jarvis / jarvis
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -16,13 +16,14 @@ services:
     container_name: jarvis
     restart: unless-stopped
     ports:
-      - "8000:8000"   # Web-UI (HTTPS)
+      - "80:80"       # HTTP → HTTPS Redirect
+      - "443:443"     # Web-UI (HTTPS)
       - "6080:6080"   # noVNC Desktop-Streaming
     environment:
       # Docker-Modus aktivieren (deaktiviert PAM-Authentifizierung)
       JARVIS_DOCKER: "1"
       # WhatsApp-Bridge Webhook (HTTPS wegen self-signed cert im Container)
-      JARVIS_WEBHOOK: "https://localhost:8000/api/whatsapp/incoming"
+      JARVIS_WEBHOOK: "https://localhost/api/whatsapp/incoming"
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
       # Web-Login Passwort (Benutzername ist immer "jarvis")
       JARVIS_PASSWORD: "${JARVIS_PASSWORD:-jarvis}"

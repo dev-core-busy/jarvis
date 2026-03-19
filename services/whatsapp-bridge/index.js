@@ -15,7 +15,7 @@ const http = require('http');
 
 // ─── Konfiguration ───────────────────────────────────────────────
 const PORT = parseInt(process.env.WA_BRIDGE_PORT || '3001');
-const JARVIS_WEBHOOK = process.env.JARVIS_WEBHOOK || 'http://localhost:8000/api/whatsapp/incoming';
+const JARVIS_WEBHOOK = process.env.JARVIS_WEBHOOK || 'https://localhost/api/whatsapp/incoming';
 const AUTH_DIR = path.join(__dirname, 'auth');
 const VOICE_DIR = '/tmp/jarvis_wa_voice';
 const LOG_LEVEL = process.env.LOG_LEVEL || 'warn';

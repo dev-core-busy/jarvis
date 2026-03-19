@@ -107,7 +107,7 @@ Full browser control via CDP (Chrome DevTools Protocol) and xdotool. The agent c
            │ WSS/HTTPS       │ WSS                │ HTTPS
            ▼                 ▼                    ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   FastAPI Backend :8000                       │
+│                   FastAPI Backend :443                        │
 │   ┌─────────────┐  ┌────────────┐  ┌──────────────────────┐  │
 │   │ JarvisAgent │  │ Skills API │  │  WhatsApp Proxy      │  │
 │   │  (agent.py) │  │ /api/skills│  │  _wa_bridge_async()  │  │
@@ -245,7 +245,7 @@ nano .env   # Add your API keys (see Configuration section)
 ./start_jarvis.sh
 ```
 
-Open your browser at `https://your-server-ip:8000` and log in with `jarvis/jarvis`.
+Open your browser at `https://your-server-ip` and log in with `jarvis/jarvis`.
 
 > **Self-signed certificate:** Your browser will warn about the certificate on first visit. This is expected — accept the exception.
 
@@ -269,7 +269,8 @@ sudo journalctl -u jarvis.service -f
 
 | Port | Service | Access |
 |------|---------|--------|
-| 8000 | FastAPI (HTTPS) | External |
+| 443 | FastAPI (HTTPS) | External |
+| 80 | HTTP → HTTPS Redirect | External |
 | 6080 | noVNC (WSS) | External |
 | 5900 | x11vnc | Local only |
 | 3001 | WhatsApp Bridge | Local only |
@@ -412,7 +413,7 @@ Jarvis ships with 3 production-ready OpenClaw skills out of the box:
 cp -r my_openclaw_skill/ skills/
 
 # 3. Reload via API (no restart needed!)
-curl -X POST https://localhost:8000/api/skills/reload
+curl -X POST https://localhost/api/skills/reload
 
 # 4. Enable in UI: Settings → Skills → toggle ON
 ```
@@ -432,7 +433,7 @@ Jarvis uses [Baileys v7](https://github.com/WhiskeySockets/Baileys) to connect t
 ### Setup
 
 1. Start the WhatsApp bridge: `systemctl start whatsapp-bridge.service`
-2. Open `https://your-server:8000` → Settings → WhatsApp
+2. Open `https://your-server` → Settings → WhatsApp
 3. Scan the QR code with your WhatsApp app
 4. Add your number to `WA_ALLOWED_NUMBERS` in `.env`
 
@@ -480,7 +481,7 @@ Or configure via the Settings UI. Files are indexed automatically when changed (
 
 ## API Reference
 
-The FastAPI backend exposes a REST + WebSocket API. Interactive docs available at `https://your-server:8000/docs`.
+The FastAPI backend exposes a REST + WebSocket API. Interactive docs available at `https://your-server/docs`.
 
 ### Key Endpoints
 
@@ -501,7 +502,7 @@ The FastAPI backend exposes a REST + WebSocket API. Interactive docs available a
 
 ```javascript
 // Connect
-const ws = new WebSocket('wss://your-server:8000/ws');
+const ws = new WebSocket('wss://your-server/ws');
 
 // Send a task
 ws.send(JSON.stringify({

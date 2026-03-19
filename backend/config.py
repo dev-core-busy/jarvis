@@ -51,7 +51,7 @@ class Config:
     SECRET_KEY: str = os.getenv("SECRET_KEY", "jarvis-secret-key-change-me")
     AGENT_API_KEY: str = os.getenv("AGENT_API_KEY", "")  # API-Key für externen Agent-Task-Zugriff
     SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0")
-    SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8000"))
+    SERVER_PORT: int = int(os.getenv("SERVER_PORT", "443"))
     VNC_PORT: int = int(os.getenv("VNC_PORT", "5900"))
     WEBSOCKIFY_PORT: int = int(os.getenv("WEBSOCKIFY_PORT", "6080"))
     MAX_AGENT_STEPS: int = int(os.getenv("MAX_AGENT_STEPS", "50"))
@@ -162,6 +162,9 @@ class Config:
         self.TTS_ENABLED = data.get("tts_enabled", False)
         self.USE_PHYSICAL_DESKTOP = data.get("use_physical_desktop", False)
         self._skill_states = data.get("skills", {})
+        # AGENT_API_KEY: aus settings.json laden, ENV hat Vorrang
+        if not os.getenv("AGENT_API_KEY") and data.get("agent_api_key"):
+            self.AGENT_API_KEY = data["agent_api_key"]
 
         # Sicherstellen, dass active_profile_id gültig ist
         if self.profiles and not any(p["id"] == self.active_profile_id for p in self.profiles):
@@ -217,17 +220,20 @@ class Config:
             "active_profile_id": self.active_profile_id,
             "tts_enabled": self.TTS_ENABLED,
             "use_physical_desktop": self.USE_PHYSICAL_DESKTOP,
+            "agent_api_key": self.AGENT_API_KEY,
             "profiles": self.profiles,
             "skills": self._skill_states,
         }
         self.SETTINGS_FILE.write_text(json.dumps(data, indent=4))
 
     def save_global_settings(self, settings: dict):
-        """Speichert globale Einstellungen (TTS, Desktop etc.)."""
+        """Speichert globale Einstellungen (TTS, Desktop, Agent-API-Key etc.)."""
         if "tts_enabled" in settings:
             self.TTS_ENABLED = settings["tts_enabled"]
         if "use_physical_desktop" in settings:
             self.USE_PHYSICAL_DESKTOP = settings["use_physical_desktop"]
+        if "agent_api_key" in settings:
+            self.AGENT_API_KEY = settings["agent_api_key"]
         self._save_to_file()
 
     # ─── Skills-Verwaltung ─────────────────────────────────────────

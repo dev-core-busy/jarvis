@@ -12,7 +12,7 @@ Autonomer KI-Agent auf einem Linux-Server (Debian 13) mit Web-Frontend, Desktop-
 
 ## Architektur
 ```
-Frontend (Vanilla JS)  ─HTTPS─>  FastAPI (Port 8000)  ──>  JarvisAgent
+Frontend (Vanilla JS)  ─HTTPS─>  FastAPI (Port 443)  ──>  JarvisAgent
      │                                │                        │
      ├─ WebSocket (Agent-Steuerung)   ├─ LLM (Gemini/etc.)    ├─ SkillManager
      ├─ noVNC (Port 6080)            ├─ Skills API             ├─ Tools (shell, desktop, fs, ...)
@@ -116,7 +116,8 @@ data/
 ## Ports
 | Port | Service | Zugriff |
 |------|---------|---------|
-| 8000 | FastAPI (HTTPS) | Extern |
+| 443 | FastAPI (HTTPS) | Extern |
+| 80 | HTTP → HTTPS Redirect | Extern |
 | 6080 | noVNC (WSS) | Extern |
 | 5900 | x11vnc | Nur lokal |
 | 3001 | WhatsApp Bridge | Nur lokal |

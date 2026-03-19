@@ -60,7 +60,7 @@ source .env 2>/dev/null
 
 VNC_PORT="${VNC_PORT:-5900}"
 WEBSOCKIFY_PORT="${WEBSOCKIFY_PORT:-6080}"
-SERVER_PORT="${SERVER_PORT:-8000}"
+SERVER_PORT="${SERVER_PORT:-443}"
 
 # Display automatisch erkennen
 XDISPLAY="${DISPLAY:-:0}"
@@ -139,7 +139,8 @@ trap cleanup INT TERM
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}🚀 Jarvis wird gestartet...${NC}"
-echo -e "${GREEN}🌐 Öffne im Browser: ${CYAN}https://$(hostname -I | awk '{print $1}'):${SERVER_PORT}${NC}"
+PORT_SUFFIX=""; [ "$SERVER_PORT" != "443" ] && PORT_SUFFIX=":${SERVER_PORT}"
+echo -e "${GREEN}🌐 Öffne im Browser: ${CYAN}https://$(hostname -I | awk '{print $1}')${PORT_SUFFIX}${NC}"
 echo -e "${GREEN}🔑 Standard-Passwort: jarvis${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
 echo ""

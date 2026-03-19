@@ -200,39 +200,18 @@ systemctl enable --now docker</code>
     <!-- ── 2. Quick Start ── -->
     <div class="doc-section" id="quickstart">
         <h2><span class="h-icon">🚀</span> Quick Start</h2>
-        <p style="color:var(--text-secondary); margin-bottom:24px;">In drei Schritten startklar:</p>
+        <p style="color:var(--text-secondary); margin-bottom:24px;">In zwei Schritten startklar:</p>
 
         <div class="steps">
             <div class="step">
                 <div class="step-num">1</div>
                 <div class="step-content">
-                    <div class="step-title">docker-compose.yml herunterladen</div>
-                    <div class="step-desc">Legt die Datei im aktuellen Verzeichnis ab. Du kannst es in ein beliebiges Verzeichnis deiner Wahl legen.</div>
-                    <div class="code-block cyan">
-                        <button class="copy-btn" onclick="copyCode(this)">⧉ Kopieren</button>
-                        <code>curl -fsSL https://jarvis-ai.info/docker-compose.yml -o docker-compose.yml</code>
-                    </div>
-                </div>
-            </div>
-            <div class="step">
-                <div class="step-num">2</div>
-                <div class="step-content">
-                    <div class="step-title">(Optional) Passwort anpassen</div>
-                    <div class="step-desc">Standard-Login ist <span class="code-inline">jarvis / jarvis</span>. Zum Ändern vor dem ersten Start:</div>
-                    <div class="code-block">
-                        <code><span class="comment"># In docker-compose.yml die Zeile anpassen:</span>
-<span class="key">JARVIS_PASSWORD</span>: <span class="str">"mein-sicheres-passwort"</span></code>
-                    </div>
-                </div>
-            </div>
-            <div class="step">
-                <div class="step-num">3</div>
-                <div class="step-content">
-                    <div class="step-title">Starten</div>
-                    <div class="step-desc">Lädt das Image automatisch herunter (~600 MB beim ersten Mal) und startet den Container.</div>
+                    <div class="step-title">Herunterladen &amp; Starten</div>
+                    <div class="step-desc">Lädt die <span class="code-inline">docker-compose.yml</span> herunter und startet Jarvis. Das Docker-Image (~600 MB) wird beim ersten Mal automatisch gezogen.</div>
                     <div class="code-block highlight">
                         <button class="copy-btn" onclick="copyCode(this)">⧉ Kopieren</button>
-                        <code>docker compose up -d</code>
+                        <code>curl -fsSL https://jarvis-ai.info/docker-compose.yml -o docker-compose.yml
+docker compose up -d</code>
                     </div>
                     <div class="step-desc" style="margin-top:10px;">Danach im Browser öffnen:</div>
                     <div class="code-block" style="margin-top:8px;">
@@ -244,6 +223,17 @@ Login: jarvis / jarvis</code>
                     <div class="info-box tip" style="margin-top:12px;">
                         <span class="icon">🔐</span>
                         <div>Beim ersten Aufruf erscheint eine SSL-Warnung (selbstsigniertes Zertifikat). Einfach <strong>„Trotzdem fortfahren"</strong> klicken – das ist normal und sicher im lokalen Netz.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-content">
+                    <div class="step-title">Update auf neueste Version</div>
+                    <div class="step-desc">Holt das neueste Image und startet den Container neu. Alle Daten (Settings, Memory, WhatsApp-Session) bleiben erhalten.</div>
+                    <div class="code-block cyan">
+                        <button class="copy-btn" onclick="copyCode(this)">⧉ Kopieren</button>
+                        <code>docker compose pull && docker compose down && docker compose up -d</code>
                     </div>
                 </div>
             </div>

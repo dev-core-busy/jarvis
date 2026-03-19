@@ -4,7 +4,7 @@
 #
 # Schnellstart:
 #   docker compose up -d
-#   Browser: https://localhost  (SSL-Warnung bestätigen)
+#   Browser: https://<server-ip>  (SSL-Warnung bestätigen)
 #   Login:   jarvis / jarvis
 # ──────────────────────────────────────────────────────────────────────────────
 

@@ -661,9 +661,9 @@ docker compose up -d</code>
                         <span class="t-de">▶ Update auf neueste Version</span>
                         <span class="t-en">▶ Update to latest version</span>
                     </div>
-                    <div class="code-block" style="border-color: rgba(6,182,212,0.35); background: rgba(6,182,212,0.05); display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                    <div class="code-block" style="border-color: rgba(6,182,212,0.35); background: rgba(6,182,212,0.05); display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
                         <code style="color: var(--cyan); font-size: 0.88rem;">docker compose pull && docker compose down && docker compose up -d</code>
-                        <button onclick="(function(btn){navigator.clipboard.writeText('docker compose pull && docker compose down && docker compose up -d').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="Kopieren" style="background:none;border:1px solid rgba(6,182,212,0.3);color:var(--cyan);cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;" onmouseover="this.style.background='rgba(6,182,212,0.15)'" onmouseout="this.style.background='none'">⧉</button>
+                        <button onclick="(function(btn){navigator.clipboard.writeText('docker compose pull && docker compose down && docker compose up -d').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="Kopieren" style="background:none;border:1px solid rgba(6,182,212,0.3);color:var(--cyan);cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;position:sticky;right:0;" onmouseover="this.style.background='rgba(6,182,212,0.15)'" onmouseout="this.style.background='none'">⧉</button>
                     </div>
                 </div>
 

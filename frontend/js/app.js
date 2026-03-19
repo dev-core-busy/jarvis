@@ -568,6 +568,35 @@
         // ── Google-Tab entfernt – Config erfolgt über Skill-Einstellungen ──
         window.updateGoogleTabVisibility = function() {}; // No-Op (Rückwärtskompatibilität)
 
+        // ── WhatsApp-Tab-Button: nur sichtbar wenn 'whatsapp'-Skill aktiviert ──
+        const waTabBtn = document.getElementById('settings-tab-btn-whatsapp');
+
+        window.updateWhatsAppTabVisibility = async function updateWhatsAppTabVisibility() {
+            if (!waTabBtn) return;
+            try {
+                const token = localStorage.getItem('jarvis_token') || '';
+                const resp = await fetch('/api/skills', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json();
+                const skills = data.skills || data || [];
+                const waSkill = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'whatsapp')
+                    : null;
+                const isEnabled = waSkill && waSkill.enabled;
+                waTabBtn.style.display = isEnabled ? '' : 'none';
+                // Falls WhatsApp-Tab aktiv war und Skill deaktiviert → zu Profilen wechseln
+                if (!isEnabled && tabWhatsApp && tabWhatsApp.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
         // ── Vision-Tab-Button: nur sichtbar wenn 'vision'-Skill aktiviert ──
         const visionTabBtn = document.getElementById('settings-tab-btn-vision');
 
@@ -602,6 +631,7 @@
         const openModal = async () => {
             await loadProfiles();
             await updateGoogleTabVisibility();
+            await updateWhatsAppTabVisibility();
             await updateVisionTabVisibility();
             showListView();
             // Ersten Tab aktivieren

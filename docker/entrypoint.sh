@@ -1,7 +1,7 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────────────────────────
 # Jarvis Docker Entrypoint
-# Startet: Xvfb → XFCE4 → x11vnc → websockify/noVNC → Jarvis FastAPI
+# Startet: Xvfb → Cinnamon → x11vnc → websockify/noVNC → Jarvis FastAPI
 # ──────────────────────────────────────────────────────────────────────────────
 set -e
 
@@ -52,37 +52,18 @@ fi
 export DISPLAY="$DISPLAY_NUM"
 export HOME="/root"
 
-# ── 3. D-Bus + XFCE4 Desktop ────────────────────────────────────────────────
+# ── 3. D-Bus + Cinnamon Desktop ──────────────────────────────────────────────
 log "Starte D-Bus..."
 eval "$(dbus-launch --sh-syntax)" || true
 export DBUS_SESSION_BUS_ADDRESS
 
-# XFCE4 Wallpaper konfigurieren
-mkdir -p /root/.config/xfce4/xfconf/xfce-perchannel-xml
-cat > /root/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml << 'XFCEEOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfce4-desktop" version="1.0">
-  <property name="backdrop" type="empty">
-    <property name="screen0" type="empty">
-      <property name="monitorscreen" type="empty">
-        <property name="workspace0" type="empty">
-          <property name="last-image" type="string" value="/usr/share/backgrounds/jarvis.jpg"/>
-          <property name="image-style" type="int" value="5"/>
-        </property>
-      </property>
-      <property name="monitorVNC-0" type="empty">
-        <property name="workspace0" type="empty">
-          <property name="last-image" type="string" value="/usr/share/backgrounds/jarvis.jpg"/>
-          <property name="image-style" type="int" value="5"/>
-        </property>
-      </property>
-    </property>
-  </property>
-</channel>
-XFCEEOF
+# Wallpaper fuer Cinnamon konfigurieren
+mkdir -p /root/.config/cinnamon
+dconf write /org/cinnamon/desktop/background/picture-uri "'file:///usr/share/backgrounds/jarvis.jpg'" 2>/dev/null || true
+gsettings set org.cinnamon.desktop.background picture-uri "file:///usr/share/backgrounds/jarvis.jpg" 2>/dev/null || true
 
-log "Starte XFCE4 Desktop..."
-startxfce4 &
+log "Starte Cinnamon Desktop..."
+XDG_SESSION_TYPE=x11 cinnamon-session &
 sleep 3
 
 # ── 4. x11vnc ─────────────────────────────────────────────────────────────────

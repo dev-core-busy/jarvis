@@ -2641,6 +2641,107 @@ select.input-field {
     cursor: default;
 }
 
+/* Upload Drop-Zone */
+.kb-drop-zone {
+    border: 2px dashed var(--border-color);
+    border-radius: 10px;
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+}
+.kb-drop-zone:hover,
+.kb-drop-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(99, 102, 241, 0.08);
+}
+.kb-drop-zone p { margin: 0.5rem 0 0; font-size: 0.85rem; }
+.kb-upload-link {
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: underline;
+}
+.kb-upload-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+.kb-upload-select { flex: 1; max-width: 250px; }
+.kb-upload-status {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    flex: 1;
+}
+
+/* WebDAV / Mount Info */
+.kb-webdav-info {
+    background: rgba(255,255,255,0.04);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin-top: 0.5rem;
+}
+.kb-info-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+    font-size: 0.85rem;
+}
+.kb-info-label { color: var(--text-secondary); min-width: 70px; }
+.kb-info-hint { color: var(--text-secondary); font-size: 0.8rem; font-style: italic; }
+
+/* Netzwerk-Freigaben */
+.kb-mount-list { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; }
+.kb-mount-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(255,255,255,0.04);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    font-size: 0.85rem;
+}
+.kb-mount-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.kb-mount-status.active { background: #10b981; }
+.kb-mount-status.inactive { background: #6b7280; }
+.kb-mount-source { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-mount-type { color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; }
+.kb-mount-form {
+    display: flex; flex-direction: column; gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    background: rgba(255,255,255,0.04);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+.kb-mount-actions { display: flex; gap: 0.5rem; }
+.kb-btn-secondary {
+    padding: 0.4rem 1rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+.toggle-switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+    position: absolute; inset: 0; cursor: pointer;
+    background: rgba(255,255,255,0.15); border-radius: 22px;
+    transition: 0.3s;
+}
+.toggle-slider::before {
+    content: ''; position: absolute; width: 16px; height: 16px;
+    left: 3px; bottom: 3px; background: white; border-radius: 50%;
+    transition: 0.3s;
+}
+.toggle-switch input:checked + .toggle-slider { background: var(--accent); }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(18px); }
+
 /* Ordner-Liste */
 .kb-folder-list {
     display: flex;

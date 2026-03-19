@@ -20,12 +20,101 @@ class JarvisKnowledgeManager {
                 if (e.key === 'Enter') this.addFolder();
             });
         }
+
+        // Drag & Drop Upload
+        this._initDropZone();
     }
 
     // ─── Init (wird beim Tab-Wechsel aufgerufen) ──────────────────────
 
     async init() {
         await this.fetchStats();
+        await this.initWebDAV();
+        await this.initMounts();
+    }
+
+    // ─── Drag & Drop Upload ──────────────────────────────────────────
+
+    _initDropZone() {
+        const zone = document.getElementById('kb-drop-zone');
+        const input = document.getElementById('kb-file-input');
+        if (!zone || !input) return;
+
+        // Drag Events
+        zone.addEventListener('dragenter', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+        zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+        zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            zone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) this._uploadFiles(e.dataTransfer.files);
+        });
+
+        // Klick auf Zone oeffnet Datei-Dialog
+        zone.addEventListener('click', (e) => {
+            if (e.target.tagName !== 'LABEL') input.click();
+        });
+
+        // Datei-Input
+        input.addEventListener('change', () => {
+            if (input.files.length) this._uploadFiles(input.files);
+            input.value = '';
+        });
+    }
+
+    _getUploadTarget() {
+        const sel = document.getElementById('kb-upload-target');
+        return sel ? sel.value : 'data/knowledge';
+    }
+
+    _populateUploadTargets(folders) {
+        const sel = document.getElementById('kb-upload-target');
+        if (!sel || !folders) return;
+        sel.innerHTML = folders.map(f =>
+            `<option value="${f.path}" ${f.path === 'data/knowledge' ? 'selected' : ''}>${f.path}</option>`
+        ).join('');
+    }
+
+    async _uploadFiles(fileList) {
+        const status = document.getElementById('kb-upload-status');
+        const folder = this._getUploadTarget();
+
+        if (status) status.textContent = `${fileList.length} Datei(en) werden hochgeladen...`;
+
+        const formData = new FormData();
+        formData.append('folder', folder);
+        for (const f of fileList) {
+            formData.append('files', f);
+        }
+
+        try {
+            const resp = await fetch('/api/knowledge/upload', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') },
+                body: formData,
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const result = await resp.json();
+
+            let msg = `${result.total_saved} Datei(en) hochgeladen`;
+            if (result.total_rejected > 0) {
+                const names = result.rejected.map(r => r.name).join(', ');
+                msg += ` | ${result.total_rejected} abgelehnt: ${names}`;
+            }
+            if (status) {
+                status.textContent = msg;
+                status.style.color = result.total_rejected > 0 ? '#f59e0b' : '#10b981';
+                setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 5000);
+            }
+            this._showNotification(msg, result.total_rejected > 0 ? 'warning' : 'success');
+            await this.fetchStats();
+        } catch (e) {
+            if (status) {
+                status.textContent = 'Upload fehlgeschlagen: ' + e.message;
+                status.style.color = '#ef4444';
+            }
+            this._showNotification('Upload fehlgeschlagen: ' + e.message, 'error');
+        }
     }
 
     // ─── Stats laden ──────────────────────────────────────────────────
@@ -43,6 +132,7 @@ class JarvisKnowledgeManager {
 
             this._renderStats(stats);
             this._renderFolders(stats.folders);
+            this._populateUploadTargets(stats.folders);
         } catch (e) {
             if (container) container.innerHTML = `<div class="kb-error">Fehler beim Laden: ${e.message}</div>`;
         }
@@ -262,6 +352,173 @@ class JarvisKnowledgeManager {
                 btn.disabled = false;
                 btn.textContent = 'Index neu aufbauen';
             }
+        }
+    }
+
+    // ─── WebDAV ───────────────────────────────────────────────────────
+
+    async initWebDAV() {
+        const toggle = document.getElementById('kb-webdav-toggle');
+        const details = document.getElementById('kb-webdav-details');
+        if (!toggle) return;
+
+        toggle.addEventListener('change', () => this.toggleWebDAV(toggle.checked));
+
+        try {
+            const resp = await fetch('/api/knowledge/webdav/status', {
+                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+            });
+            const data = await resp.json();
+            toggle.checked = data.enabled;
+            if (details) details.style.display = data.enabled ? '' : 'none';
+            if (data.enabled) {
+                const urlEl = document.getElementById('kb-webdav-url');
+                const userEl = document.getElementById('kb-webdav-user');
+                const sharesEl = document.getElementById('kb-webdav-shares');
+                if (urlEl) urlEl.textContent = data.url || '';
+                if (userEl) userEl.textContent = data.username || 'jarvis';
+                if (sharesEl) sharesEl.textContent = (data.shares || []).join(', ');
+            }
+        } catch (e) {}
+    }
+
+    async toggleWebDAV(enabled) {
+        const details = document.getElementById('kb-webdav-details');
+        try {
+            await fetch('/api/knowledge/webdav/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (window.authToken || '')
+                },
+                body: JSON.stringify({ enabled })
+            });
+            if (details) details.style.display = enabled ? '' : 'none';
+            this._showNotification(
+                enabled ? 'WebDAV aktiviert (Server-Neustart noetig)' : 'WebDAV deaktiviert',
+                'success'
+            );
+            if (enabled) await this.initWebDAV();
+        } catch (e) {
+            this._showNotification('WebDAV-Fehler: ' + e.message, 'error');
+        }
+    }
+
+    // ─── Netzwerk-Freigaben ──────────────────────────────────────────
+
+    async initMounts() {
+        const addBtn = document.getElementById('btn-kb-add-mount');
+        if (addBtn) {
+            addBtn.addEventListener('click', () => {
+                const form = document.getElementById('kb-mount-form');
+                if (form) form.style.display = form.style.display === 'none' ? '' : 'none';
+            });
+        }
+        await this.fetchMounts();
+    }
+
+    async fetchMounts() {
+        const list = document.getElementById('kb-mount-list');
+        if (!list) return;
+        try {
+            const resp = await fetch('/api/knowledge/mounts', {
+                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+            });
+            const mounts = await resp.json();
+            this._renderMounts(mounts);
+        } catch (e) {
+            list.innerHTML = '';
+        }
+    }
+
+    _renderMounts(mounts) {
+        const list = document.getElementById('kb-mount-list');
+        if (!list) return;
+        if (!mounts || mounts.length === 0) {
+            list.innerHTML = '<div class="kb-hint" style="margin:0;">Keine Freigaben konfiguriert</div>';
+            return;
+        }
+        list.innerHTML = mounts.map((m, i) => `
+            <div class="kb-mount-item">
+                <span class="kb-mount-status ${m.active ? 'active' : 'inactive'}"></span>
+                <span class="kb-mount-type">${m.type}</span>
+                <span class="kb-mount-source">${m.source}</span>
+                <button class="btn-icon btn-small" title="${m.active ? 'Trennen' : 'Verbinden'}"
+                    onclick="window.knowledgeManager.toggleMount(${i}, ${!m.active})">
+                    ${m.active ? '⏏' : '▶'}
+                </button>
+                <button class="btn-icon btn-small" title="Entfernen"
+                    onclick="window.knowledgeManager.removeMount(${i})">✕</button>
+            </div>
+        `).join('');
+    }
+
+    async saveMount() {
+        const type = document.getElementById('kb-mount-type')?.value;
+        const source = document.getElementById('kb-mount-source')?.value?.trim();
+        const username = document.getElementById('kb-mount-user')?.value?.trim();
+        const password = document.getElementById('kb-mount-pass')?.value;
+
+        if (!source) {
+            this._showNotification('Bitte Quelle angeben', 'error');
+            return;
+        }
+
+        try {
+            const resp = await fetch('/api/knowledge/mounts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (window.authToken || '')
+                },
+                body: JSON.stringify({ type, source, username, password })
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.error || 'Fehler');
+            }
+            document.getElementById('kb-mount-form').style.display = 'none';
+            document.getElementById('kb-mount-source').value = '';
+            document.getElementById('kb-mount-user').value = '';
+            document.getElementById('kb-mount-pass').value = '';
+            this._showNotification('Freigabe hinzugefuegt', 'success');
+            await this.fetchMounts();
+            await this.fetchStats();
+        } catch (e) {
+            this._showNotification('Fehler: ' + e.message, 'error');
+        }
+    }
+
+    async toggleMount(idx, mount) {
+        try {
+            const action = mount ? 'mount' : 'unmount';
+            const resp = await fetch(`/api/knowledge/mounts/${idx}/${action}`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.error || 'Fehler');
+            }
+            this._showNotification(mount ? 'Freigabe verbunden' : 'Freigabe getrennt', 'success');
+            await this.fetchMounts();
+            await this.fetchStats();
+        } catch (e) {
+            this._showNotification('Fehler: ' + e.message, 'error');
+        }
+    }
+
+    async removeMount(idx) {
+        if (!confirm('Freigabe entfernen?')) return;
+        try {
+            await fetch(`/api/knowledge/mounts/${idx}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+            });
+            this._showNotification('Freigabe entfernt', 'success');
+            await this.fetchMounts();
+        } catch (e) {
+            this._showNotification('Fehler: ' + e.message, 'error');
         }
     }
 

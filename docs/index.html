@@ -617,7 +617,7 @@
                         </div>
                         <div style="padding:10px 14px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px;">
                             <span style="font-size:0.8rem; color:var(--success); font-weight:600;">🌐 </span>
-                            <a href="https://localhost" style="font-size:0.82rem; color:var(--cyan); font-family:var(--font-mono);">https://localhost</a>
+                            <span style="font-size:0.82rem; color:var(--cyan); font-family:var(--font-mono);">https://&lt;server-ip&gt;</span>
                             <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
                                 <span class="t-de">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>
                                 <span class="t-en">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>
@@ -642,27 +642,28 @@
             <!-- ── Panel: Docker ── -->
             <div id="install-panel-docker" class="install-panel active">
 
-                <!-- Schritt 1 -->
+                <!-- Schritt 1: Herunterladen & Starten -->
                 <div style="margin-bottom:20px;">
                     <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; font-weight:600;">
-                        <span class="t-de">▶ Schritt 1 – docker-compose.yml herunterladen</span>
-                        <span class="t-en">▶ Step 1 – Download docker-compose.yml</span>
+                        <span class="t-de">▶ Herunterladen &amp; Starten</span>
+                        <span class="t-en">▶ Download &amp; Start</span>
                     </div>
                     <div class="code-block" style="border-color: rgba(6,182,212,0.35); background: rgba(6,182,212,0.05); display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                        <code style="color: var(--cyan); font-size: 0.88rem;">curl -fsSL https://jarvis-ai.info/docker-compose.yml -o docker-compose.yml</code>
-                        <button onclick="(function(btn){navigator.clipboard.writeText('curl -fsSL https://jarvis-ai.info/docker-compose.yml -o docker-compose.yml').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="Kopieren" style="background:none;border:1px solid rgba(6,182,212,0.3);color:var(--cyan);cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;" onmouseover="this.style.background='rgba(6,182,212,0.15)'" onmouseout="this.style.background='none'">⧉</button>
+                        <code style="color: var(--cyan); font-size: 0.88rem;">curl -fsSL https://jarvis-ai.info/docker-compose.yml -o docker-compose.yml
+docker compose up -d</code>
+                        <button onclick="(function(btn){navigator.clipboard.writeText('curl -fsSL https://jarvis-ai.info/docker-compose.yml -o docker-compose.yml\ndocker compose up -d').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="Kopieren" style="background:none;border:1px solid rgba(6,182,212,0.3);color:var(--cyan);cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;" onmouseover="this.style.background='rgba(6,182,212,0.15)'" onmouseout="this.style.background='none'">⧉</button>
                     </div>
                 </div>
 
-                <!-- Schritt 2 -->
+                <!-- Update -->
                 <div style="margin-bottom:24px;">
                     <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; font-weight:600;">
-                        <span class="t-de">▶ Schritt 2 – Starten</span>
-                        <span class="t-en">▶ Step 2 – Start</span>
+                        <span class="t-de">▶ Update auf neueste Version</span>
+                        <span class="t-en">▶ Update to latest version</span>
                     </div>
                     <div class="code-block" style="border-color: rgba(6,182,212,0.35); background: rgba(6,182,212,0.05); display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                        <code style="color: var(--cyan); font-size: 0.88rem;">docker compose up -d</code>
-                        <button onclick="(function(btn){navigator.clipboard.writeText('docker compose up -d').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="Kopieren" style="background:none;border:1px solid rgba(6,182,212,0.3);color:var(--cyan);cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;" onmouseover="this.style.background='rgba(6,182,212,0.15)'" onmouseout="this.style.background='none'">⧉</button>
+                        <code style="color: var(--cyan); font-size: 0.88rem;">docker compose pull && docker compose down && docker compose up -d</code>
+                        <button onclick="(function(btn){navigator.clipboard.writeText('docker compose pull && docker compose down && docker compose up -d').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="Kopieren" style="background:none;border:1px solid rgba(6,182,212,0.3);color:var(--cyan);cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;" onmouseover="this.style.background='rgba(6,182,212,0.15)'" onmouseout="this.style.background='none'">⧉</button>
                     </div>
                 </div>
 
@@ -687,7 +688,7 @@
                         </div>
                         <div style="padding:10px 14px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px;">
                             <span style="font-size:0.8rem; color:var(--success); font-weight:600;">🌐 </span>
-                            <a href="https://localhost" style="font-size:0.82rem; color:var(--cyan); font-family:var(--font-mono);">https://localhost</a>
+                            <span style="font-size:0.82rem; color:var(--cyan); font-family:var(--font-mono);">https://&lt;server-ip&gt;</span>
                             <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
                                 <span class="t-de">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>
                                 <span class="t-en">Login: <strong style="color:var(--text-secondary)">jarvis / jarvis</strong></span>

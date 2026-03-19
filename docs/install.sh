@@ -71,11 +71,11 @@ install_pkg curl curl
 # Build-Tools (nötig für Python-Pakete mit C-Erweiterungen)
 if [[ "$PKG_MGR" == "apt-get" ]]; then
     info "Installiere Build-Tools & Python-Dev-Header ..."
-    $SUDO apt-get install -y build-essential python3-dev libssl-dev libffi-dev libpam0g-dev >/dev/null 2>&1 \
+    $SUDO apt-get install -y build-essential python3-dev libssl-dev libffi-dev libpam0g-dev cmake libboost-all-dev >/dev/null 2>&1 \
         && success "Build-Tools installiert" \
         || warn "Build-Tools konnten nicht installiert werden – manche pip-Pakete könnten fehlschlagen."
 elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
-    $SUDO $INSTALL gcc gcc-c++ python3-devel openssl-devel libffi-devel >/dev/null 2>&1 || true
+    $SUDO $INSTALL gcc gcc-c++ python3-devel openssl-devel libffi-devel cmake boost-devel >/dev/null 2>&1 || true
 elif [[ "$PKG_MGR" == "pacman" ]]; then
     $SUDO pacman -S --noconfirm base-devel python-pip >/dev/null 2>&1 || true
 fi
@@ -231,7 +231,7 @@ info "Installiere Python-Pakete (dauert ~1–2 min) ..."
 # Erst still versuchen – bei Fehler Ausgabe anzeigen für Diagnose
 if ! pip install -r requirements.txt >/dev/null 2>&1; then
     warn "Stiller Durchlauf fehlgeschlagen – zeige Fehlerausgabe:"
-    pip install -r requirements.txt || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev)."
+    pip install -r requirements.txt || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
 fi
 success "Python-Pakete installiert"
 
@@ -408,8 +408,7 @@ ${BOLD}Status:${RESET}
   ${CYAN}systemctl status jarvis.service${RESET}
 
 ${BOLD}Jetzt im Browser öffnen:${RESET}
-  ${CYAN}https://localhost${RESET}         ${YELLOW}← lokal auf diesem Rechner${RESET}
-  ${CYAN}https://${SERVER_IP}${RESET}   ${YELLOW}← im Netzwerk / von außen${RESET}
+  ${CYAN}https://${SERVER_IP}${RESET}   ${YELLOW}← im Browser öffnen${RESET}
   Login: ${BOLD}jarvis / jarvis${RESET}
   ${YELLOW}(SSL-Warnung beim ersten Aufruf einfach bestätigen)${RESET}
 

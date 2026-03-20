@@ -76,7 +76,7 @@ class GeminiProvider(LLMProvider):
         )
 
         parts = []
-        if response.candidates:
+        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
             for p in response.candidates[0].content.parts:
                 parts.append(LLMPart(text=p.text, function_call=p.function_call))
 

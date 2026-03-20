@@ -2843,6 +2843,32 @@ select.input-field {
     flex-shrink: 0;
 }
 
+.kb-btn-delete-file {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.kb-file-item:hover .kb-btn-delete-file {
+    opacity: 1;
+}
+
+.kb-btn-delete-file:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.15);
+}
+
 .kb-files-loading, .kb-files-empty, .kb-files-error {
     font-size: 0.82rem;
     font-style: italic;

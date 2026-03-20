@@ -8,14 +8,149 @@ set -euo pipefail
 
 # ── Farben ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 
 info()    { echo -e "${CYAN}[Jarvis]${RESET} $*"; }
 success() { echo -e "${GREEN}[✓]${RESET} $*"; }
 warn()    { echo -e "${YELLOW}[!]${RESET} $*"; }
 error()   { echo -e "${RED}[✗]${RESET} $*"; exit 1; }
-step()    { echo -e "\n${BOLD}${CYAN}━━ $* ━━${RESET}"; }
 optional(){ echo -e "${YELLOW}[~]${RESET} $* ${YELLOW}(optional)${RESET}"; }
+
+# ── Fortschrittsanzeige ────────────────────────────────────────────────────
+TOTAL_STEPS=10
+CURRENT_STEP=0
+INSTALL_START=$(date +%s)
+
+# Geschaetzte Dauer pro Schritt in Sekunden (realistisch fuer Erstinstallation)
+#   1=OS-Erkennung, 2=Basis, 3=Python/Node, 4=Desktop/VNC, 5=Chrome,
+#   6=Git clone, 7=pip install, 8=WhatsApp Bridge, 9=Benutzer/Config, 10=systemd
+STEP_ESTIMATES=(0 3 45 40 180 45 15 150 20 5 10)
+STEP_NAMES=("" "Betriebssystem" "Basis-Abhaengigkeiten" "Python & Node.js"
+             "Desktop & VNC" "Chrome/Chromium" "Jarvis klonen"
+             "Python-Pakete" "WhatsApp Bridge" "Konfiguration" "Autostart")
+# Tatsaechliche Dauer pro Schritt (wird waehrend Installation gefuellt)
+declare -a STEP_ACTUAL=()
+
+# Gesamtschaetzung berechnen
+_total_estimate() {
+    local sum=0
+    for ((i=1; i<=TOTAL_STEPS; i++)); do sum=$((sum + STEP_ESTIMATES[i])); done
+    echo $sum
+}
+
+# Verbleibende Zeit schaetzen
+_eta() {
+    local now=$(date +%s)
+    local elapsed=$((now - INSTALL_START))
+    local remaining=0
+    # Bereits abgeschlossene Schritte: tatsaechliche Dauer bekannt
+    # Noch offene Schritte: Schaetzung verwenden
+    for ((i=CURRENT_STEP+1; i<=TOTAL_STEPS; i++)); do
+        remaining=$((remaining + STEP_ESTIMATES[i]))
+    done
+    echo $remaining
+}
+
+# Formatiert Sekunden zu lesbarem String
+_fmt_time() {
+    local secs=$1
+    if [[ $secs -lt 5 ]]; then
+        echo "<5s"
+    elif [[ $secs -lt 60 ]]; then
+        echo "~${secs}s"
+    else
+        local m=$((secs / 60))
+        local s=$((secs % 60))
+        if [[ $s -eq 0 ]]; then
+            echo "~${m} Min"
+        else
+            echo "~${m} Min ${s}s"
+        fi
+    fi
+}
+
+progress_bar() {
+    local current=$1
+    local total=$2
+    local label="$3"
+    local step_est="${4:-0}"
+    local bar_width=40
+    local filled=$(( current * bar_width / total ))
+    local empty=$(( bar_width - filled ))
+    local bar=""
+    for ((i=0; i<filled; i++)); do bar+="█"; done
+    for ((i=0; i<empty; i++)); do bar+="░"; done
+    local pct=$(( current * 100 / total ))
+    local elapsed=$(( $(date +%s) - INSTALL_START ))
+    local elapsed_str=$(printf "%d:%02d" $((elapsed/60)) $((elapsed%60)))
+    local eta=$(_eta)
+    local eta_str=$(_fmt_time $eta)
+
+    # Fortschrittszeile
+    echo ""
+    echo -e "${BOLD}${CYAN}  [${bar}] ${pct}%  (${current}/${total})${RESET}"
+    echo -e "  ${BOLD}▸ ${label}${RESET}  ${DIM}│ Schritt: $(_fmt_time $step_est) │ Vergangen: ${elapsed_str} │ Verbleibend: ${eta_str}${RESET}"
+}
+
+step() {
+    # Vorherigen Schritt als erledigt markieren + tatsaechliche Dauer speichern
+    if [[ $CURRENT_STEP -gt 0 ]]; then
+        local now=$(date +%s)
+        local prev_start=${STEP_START:-$INSTALL_START}
+        STEP_ACTUAL[$CURRENT_STEP]=$((now - prev_start))
+    fi
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+    STEP_START=$(date +%s)
+    local est=${STEP_ESTIMATES[$CURRENT_STEP]:-0}
+    progress_bar "$CURRENT_STEP" "$TOTAL_STEPS" "$1" "$est"
+}
+
+# Spinner fuer lang laufende Befehle (mit Schaetzung)
+spinner() {
+    local pid=$1
+    local label="${2:-Bitte warten}"
+    local est_secs="${3:-0}"
+    local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+    local start=$(date +%s)
+    local cols=$(tput cols 2>/dev/null || echo 80)
+
+    while kill -0 "$pid" 2>/dev/null; do
+        local elapsed=$(( $(date +%s) - start ))
+        local elapsed_str=$(printf "%d:%02d" $((elapsed/60)) $((elapsed%60)))
+        local char="${spin_chars:i++%${#spin_chars}:1}"
+
+        # Mini-Fortschrittsbalken innerhalb des Spinners
+        if [[ $est_secs -gt 0 ]]; then
+            local sub_pct=$((elapsed * 100 / est_secs))
+            [[ $sub_pct -gt 99 ]] && sub_pct=99
+            local sub_width=20
+            local sub_filled=$((sub_pct * sub_width / 100))
+            local sub_empty=$((sub_width - sub_filled))
+            local sub_bar=""
+            for ((j=0; j<sub_filled; j++)); do sub_bar+="▓"; done
+            for ((j=0; j<sub_empty; j++)); do sub_bar+="░"; done
+            printf "\r  ${CYAN}${char}${RESET} ${label} ${DIM}[${sub_bar}] ${elapsed_str}${RESET}  " >&2
+        else
+            printf "\r  ${CYAN}${char}${RESET} ${label} ${DIM}[${elapsed_str}]${RESET}  " >&2
+        fi
+        sleep 0.1
+    done
+    printf "\r\033[K" >&2
+    wait "$pid"
+    return $?
+}
+
+# Wrapper: Befehl mit Spinner ausfuehren (mit optionaler Schaetzung)
+run_with_spinner() {
+    local label="$1"
+    local est="${2:-0}"
+    shift 2
+    "$@" >/dev/null 2>&1 &
+    local pid=$!
+    spinner "$pid" "$label" "$est"
+    return $?
+}
 
 # ── Banner ───────────────────────────────────────────────────────────────────
 echo -e "
@@ -29,6 +164,9 @@ ${CYAN}${BOLD}
 ${RESET}
   Autonomous AI Desktop Agent  |  v0.8  |  AGPL-3.0
   ${CYAN}https://jarvis-ai.info${RESET}
+
+  ${DIM}Geschaetzte Installationsdauer: $(_fmt_time $(_total_estimate))${RESET}
+  ${DIM}(abhaengig von Internetgeschwindigkeit und Hardware)${RESET}
 "
 
 # ── Root-Check ───────────────────────────────────────────────────────────────
@@ -39,8 +177,11 @@ else
     SUDO=""
 fi
 
-# ── OS-Erkennung ─────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Schritt 1: OS-Erkennung
+# ══════════════════════════════════════════════════════════════════════════════
 step "Betriebssystem erkennen"
+
 if   command -v apt-get &>/dev/null; then PKG_MGR="apt-get"; INSTALL="apt-get install -y"
 elif command -v dnf     &>/dev/null; then PKG_MGR="dnf";     INSTALL="dnf install -y"
 elif command -v yum     &>/dev/null; then PKG_MGR="yum";     INSTALL="yum install -y"
@@ -58,12 +199,14 @@ install_pkg() {
         info "Installiere $pkg ..."
         $SUDO $INSTALL "$pkg" >/dev/null 2>&1 || warn "Konnte $pkg nicht automatisch installieren – bitte manuell nachinstallieren."
     else
-        success "$name bereits vorhanden ($(command -v "$name"))"
+        success "$name bereits vorhanden"
     fi
 }
 
-# ── Basis-Abhängigkeiten ──────────────────────────────────────────────────────
-step "Basis-Abhängigkeiten prüfen & installieren"
+# ══════════════════════════════════════════════════════════════════════════════
+# Schritt 2: Basis-Abhängigkeiten
+# ══════════════════════════════════════════════════════════════════════════════
+step "Basis-Abhaengigkeiten"
 
 install_pkg git git
 install_pkg curl curl
@@ -71,15 +214,24 @@ install_pkg ffmpeg ffmpeg
 
 # Build-Tools (nötig für Python-Pakete mit C-Erweiterungen)
 if [[ "$PKG_MGR" == "apt-get" ]]; then
-    info "Installiere Build-Tools & Python-Dev-Header ..."
-    $SUDO apt-get install -y build-essential python3-dev libssl-dev libffi-dev libpam0g-dev cmake libboost-all-dev >/dev/null 2>&1 \
-        && success "Build-Tools installiert" \
-        || warn "Build-Tools konnten nicht installiert werden – manche pip-Pakete könnten fehlschlagen."
+    if run_with_spinner "Build-Tools & Dev-Header installieren" 30 \
+        $SUDO apt-get install -y build-essential python3-dev libssl-dev libffi-dev libpam0g-dev cmake libboost-all-dev; then
+        success "Build-Tools installiert"
+    else
+        warn "Build-Tools konnten nicht installiert werden – manche pip-Pakete könnten fehlschlagen."
+    fi
 elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
-    $SUDO $INSTALL gcc gcc-c++ python3-devel openssl-devel libffi-devel cmake boost-devel >/dev/null 2>&1 || true
+    run_with_spinner "Build-Tools installieren" 30 \
+        $SUDO $INSTALL gcc gcc-c++ python3-devel openssl-devel libffi-devel cmake boost-devel || true
 elif [[ "$PKG_MGR" == "pacman" ]]; then
-    $SUDO pacman -S --noconfirm base-devel python-pip >/dev/null 2>&1 || true
+    run_with_spinner "Build-Tools installieren" 20 \
+        $SUDO pacman -S --noconfirm base-devel python-pip || true
 fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Schritt 3: Python & Node.js
+# ══════════════════════════════════════════════════════════════════════════════
+step "Python & Node.js einrichten"
 
 # Python 3.10+
 if command -v python3 &>/dev/null; then
@@ -103,7 +255,7 @@ else
     success "Python 3 installiert"
 fi
 
-# python3-venv (wird immer benötigt – auch wenn python3 bereits vorhanden ist)
+# python3-venv
 if [[ "$PKG_MGR" == "apt-get" ]]; then
     $SUDO apt-get install -y python3-venv >/dev/null 2>&1 || true
 elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
@@ -142,20 +294,24 @@ else
     success "Node.js $(node --version) vorhanden"
 fi
 
-# ── Desktop / VNC / X11 Pakete ───────────────────────────────────────────────
-step "Desktop-Steuerung & VNC einrichten"
+# ══════════════════════════════════════════════════════════════════════════════
+# Schritt 4: Desktop / VNC / Cinnamon
+# ══════════════════════════════════════════════════════════════════════════════
+step "Desktop-Umgebung & VNC"
 
 if [[ "$PKG_MGR" == "apt-get" ]]; then
-    info "Installiere X11/VNC/Desktop-Pakete ..."
-    $SUDO apt-get install -y \
-        xvfb x11vnc \
-        cinnamon-core cinnamon-session dbus-x11 at-spi2-core \
-        xdotool wmctrl scrot \
-        python3-websockify novnc \
-        xauth x11-utils xterm \
-        cifs-utils nfs-common davfs2 \
-        >/dev/null 2>&1 && success "X11/VNC/Desktop-Pakete + Cinnamon installiert" \
-        || warn "Einige X11/Desktop-Pakete konnten nicht installiert werden."
+    if run_with_spinner "Cinnamon Desktop + X11/VNC-Pakete installieren" 150 \
+        $SUDO apt-get install -y \
+            xvfb x11vnc \
+            cinnamon-core cinnamon-session dbus-x11 at-spi2-core \
+            xdotool wmctrl scrot \
+            python3-websockify novnc \
+            xauth x11-utils xterm \
+            cifs-utils nfs-common davfs2; then
+        success "Cinnamon Desktop + X11/VNC-Pakete installiert"
+    else
+        warn "Einige X11/Desktop-Pakete konnten nicht installiert werden."
+    fi
     # Fallback falls python3-websockify nicht verfügbar
     if ! command -v websockify &>/dev/null; then
         $SUDO apt-get install -y websockify >/dev/null 2>&1 || \
@@ -163,33 +319,39 @@ if [[ "$PKG_MGR" == "apt-get" ]]; then
         warn "websockify nicht installiert – noVNC Desktop-Vorschau nicht verfügbar."
     fi
 elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
-    $SUDO $INSTALL xorg-x11-server-Xvfb x11vnc openbox xdotool wmctrl scrot python3-websockify >/dev/null 2>&1 || true
-    success "X11-Pakete installiert (ggf. unvollständig – bitte manuell prüfen)"
+    run_with_spinner "X11/VNC-Pakete installieren" 120 \
+        $SUDO $INSTALL xorg-x11-server-Xvfb x11vnc openbox xdotool wmctrl scrot python3-websockify || true
+    success "X11-Pakete installiert (ggf. unvollstaendig – bitte manuell pruefen)"
 elif [[ "$PKG_MGR" == "pacman" ]]; then
-    $SUDO pacman -S --noconfirm xorg-server-xvfb x11vnc openbox xdotool wmctrl scrot python-websockify >/dev/null 2>&1 || true
+    run_with_spinner "X11/VNC-Pakete installieren" 60 \
+        $SUDO pacman -S --noconfirm xorg-server-xvfb x11vnc openbox xdotool wmctrl scrot python-websockify || true
     success "X11-Pakete installiert"
 else
     warn "X11-Pakete bitte manuell installieren: xvfb x11vnc openbox xdotool wmctrl scrot websockify"
 fi
 
-# ── Chrome / Chromium (für Browser-Automatisierung via CDP) ──────────────────
-step "Chrome / Chromium installieren"
+# ══════════════════════════════════════════════════════════════════════════════
+# Schritt 5: Chrome / Chromium
+# ══════════════════════════════════════════════════════════════════════════════
+step "Chrome / Chromium"
 
 if command -v google-chrome &>/dev/null || command -v chromium &>/dev/null || command -v chromium-browser &>/dev/null; then
     CHROME_CMD="$(command -v google-chrome 2>/dev/null || command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)"
     success "Browser vorhanden: $CHROME_CMD"
 else
     if [[ "$PKG_MGR" == "apt-get" ]]; then
-        # Versuche zuerst Google Chrome (DEB), Fallback auf Chromium aus Paketquellen
         info "Versuche Google Chrome zu installieren ..."
         if curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
                -o /tmp/chrome.deb 2>/dev/null; then
-            $SUDO apt-get install -y /tmp/chrome.deb >/dev/null 2>&1 \
-                && success "Google Chrome installiert" \
-                || { warn "Chrome-DEB fehlgeschlagen – installiere Chromium aus Repos ...";
-                     $SUDO apt-get install -y chromium chromium-browser 2>/dev/null \
-                         || $SUDO apt-get install -y chromium >/dev/null 2>&1 \
-                         || warn "Chromium nicht gefunden – Browser-Automatisierung (CDP) nicht verfügbar."; }
+            if run_with_spinner "Google Chrome installieren" 30 \
+                $SUDO apt-get install -y /tmp/chrome.deb; then
+                success "Google Chrome installiert"
+            else
+                warn "Chrome-DEB fehlgeschlagen – installiere Chromium aus Repos ..."
+                $SUDO apt-get install -y chromium chromium-browser 2>/dev/null \
+                    || $SUDO apt-get install -y chromium >/dev/null 2>&1 \
+                    || warn "Chromium nicht gefunden – Browser-Automatisierung (CDP) nicht verfügbar."
+            fi
             rm -f /tmp/chrome.deb
         else
             info "Chrome-Download nicht möglich – installiere Chromium ..."
@@ -198,18 +360,23 @@ else
                 || warn "Chromium nicht installiert – Browser-Automatisierung (CDP) nicht verfügbar."
         fi
     elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
-        $SUDO $INSTALL chromium >/dev/null 2>&1 && success "Chromium installiert" \
-            || warn "Chromium nicht installiert – Browser-Automatisierung (CDP) nicht verfügbar."
+        run_with_spinner "Chromium installieren" 30 \
+            $SUDO $INSTALL chromium && success "Chromium installiert" \
+            || warn "Chromium nicht installiert – Browser-Automatisierung (CDP) nicht verfuegbar."
     elif [[ "$PKG_MGR" == "pacman" ]]; then
-        $SUDO pacman -S --noconfirm chromium >/dev/null 2>&1 && success "Chromium installiert" \
+        run_with_spinner "Chromium installieren" 20 \
+            $SUDO pacman -S --noconfirm chromium && success "Chromium installiert" \
             || warn "Chromium nicht installiert – Browser-Automatisierung (CDP) nicht verfügbar."
     else
         warn "Bitte Chrome oder Chromium manuell installieren für Browser-Automatisierung (CDP)."
     fi
 fi
 
-# ── Jarvis klonen ─────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Schritt 6: Jarvis klonen
+# ══════════════════════════════════════════════════════════════════════════════
 step "Jarvis klonen"
+
 INSTALL_DIR="${JARVIS_DIR:-$HOME/jarvis}"
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
@@ -220,54 +387,67 @@ else
 fi
 success "Jarvis in: $INSTALL_DIR"
 
-# ── Daten-Verzeichnisse anlegen ───────────────────────────────────────────────
-step "Daten-Verzeichnisse anlegen"
+# Daten-Verzeichnisse anlegen
 mkdir -p "$INSTALL_DIR/data/logs" \
          "$INSTALL_DIR/data/knowledge" \
          "$INSTALL_DIR/data/google_auth" \
          "$INSTALL_DIR/data/workflows"
 success "Daten-Verzeichnisse angelegt"
 
-# ── Python venv + Abhängigkeiten ──────────────────────────────────────────────
-step "Python-Umgebung einrichten"
-cd "$INSTALL_DIR"
+# ══════════════════════════════════════════════════════════════════════════════
+# Schritt 7: Python-Pakete (pip install)
+# ══════════════════════════════════════════════════════════════════════════════
+step "Python-Pakete installieren"
 
+cd "$INSTALL_DIR"
 python3 -m venv venv
 source venv/bin/activate
 
-pip install --upgrade pip wheel >/dev/null 2>&1 || true
-info "Installiere Python-Pakete (dauert ~1–2 min) ..."
-# Erst still versuchen – bei Fehler Ausgabe anzeigen für Diagnose
-if ! pip install -r requirements.txt >/dev/null 2>&1; then
+run_with_spinner "pip aktualisieren" 10 pip install --upgrade pip wheel || true
+
+info "Installiere Abhängigkeiten aus requirements.txt ..."
+if run_with_spinner "Python-Pakete installieren (face_recognition, FastAPI, ...)" 120 \
+    pip install -r requirements.txt; then
+    success "Python-Pakete installiert"
+else
     warn "Stiller Durchlauf fehlgeschlagen – zeige Fehlerausgabe:"
     pip install -r requirements.txt || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
 fi
-success "Python-Pakete installiert"
 
-# faster-whisper (optional – für WhatsApp Sprach-Transkription)
-info "Installiere faster-whisper für Sprach-Transkription (optional) ..."
-pip install faster-whisper "numpy<2.1" >/dev/null 2>&1 \
-    && success "faster-whisper installiert (Sprach-Transkription aktiv)" \
-    || optional "faster-whisper konnte nicht installiert werden – Sprach-Transkription nicht verfügbar."
+# faster-whisper (optional)
+if run_with_spinner "faster-whisper installieren (Sprach-Transkription)" 30 \
+    pip install faster-whisper "numpy<2.1"; then
+    success "faster-whisper installiert (Sprach-Transkription aktiv)"
+else
+    optional "faster-whisper konnte nicht installiert werden – Sprach-Transkription nicht verfügbar."
+fi
 
-# ── WhatsApp Bridge: npm install ─────────────────────────────────────────────
-step "WhatsApp Bridge einrichten"
+# ══════════════════════════════════════════════════════════════════════════════
+# Schritt 8: WhatsApp Bridge
+# ══════════════════════════════════════════════════════════════════════════════
+step "WhatsApp Bridge"
+
 WA_DIR="$INSTALL_DIR/services/whatsapp-bridge"
 
 if [[ -d "$WA_DIR" ]] && command -v npm &>/dev/null; then
-    info "Installiere Node.js-Abhängigkeiten für WhatsApp Bridge ..."
-    ( cd "$WA_DIR" && npm install --silent 2>/dev/null ) \
-        && success "WhatsApp Bridge Abhängigkeiten installiert" \
-        || warn "npm install in $WA_DIR fehlgeschlagen – WhatsApp Bridge ggf. nicht funktionsfähig."
+    if run_with_spinner "Node.js-Abhaengigkeiten installieren" 15 \
+        bash -c "cd '$WA_DIR' && npm install --silent 2>/dev/null"; then
+        success "WhatsApp Bridge Abhängigkeiten installiert"
+    else
+        warn "npm install in $WA_DIR fehlgeschlagen – WhatsApp Bridge ggf. nicht funktionsfähig."
+    fi
 elif ! command -v npm &>/dev/null; then
     warn "npm nicht gefunden – WhatsApp Bridge Abhängigkeiten nicht installiert."
 else
     warn "WhatsApp Bridge Verzeichnis nicht gefunden: $WA_DIR"
 fi
 
-# ── Jarvis System-Benutzer anlegen ───────────────────────────────────────────
-step "System-Benutzer 'jarvis' anlegen"
-# Das Web-Login nutzt PAM – dafür muss ein Linux-User 'jarvis' existieren
+# ══════════════════════════════════════════════════════════════════════════════
+# Schritt 9: System-Benutzer & Konfiguration
+# ══════════════════════════════════════════════════════════════════════════════
+step "System-Benutzer & Konfiguration"
+
+# Jarvis-Benutzer anlegen (PAM-Login)
 if id jarvis &>/dev/null; then
     success "Benutzer 'jarvis' bereits vorhanden"
 else
@@ -276,9 +456,7 @@ else
     success "Benutzer 'jarvis' angelegt (Web-Login: jarvis / jarvis)"
 fi
 
-# ── .env konfigurieren ────────────────────────────────────────────────────────
-step "Konfiguration"
-
+# .env konfigurieren
 if [[ ! -f "$INSTALL_DIR/.env" ]]; then
     cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
     success ".env aus Vorlage erstellt"
@@ -296,11 +474,12 @@ ${CYAN}ℹ  Hinweis zu API-Keys:${RESET}
    Die .env-Datei enthält nur Server-Einstellungen wie Port und Passwort.
 "
 
-# ── Autostart via systemd ──────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Schritt 10: Autostart & Abschluss
+# ══════════════════════════════════════════════════════════════════════════════
 step "Autostart einrichten (systemd)"
 
 CURRENT_USER="${SUDO_USER:-$(whoami)}"
-# Explizit python3 verwenden – python-Symlink existiert nicht auf allen Systemen
 PYTHON_BIN="$INSTALL_DIR/venv/bin/python3"
 
 if command -v systemctl &>/dev/null; then
@@ -379,8 +558,42 @@ else
     WA_SERVICE_OK=0
 fi
 
+# ── Letzten Schritt abschliessen ──────────────────────────────────────────────
+if [[ $CURRENT_STEP -gt 0 ]]; then
+    STEP_ACTUAL[$CURRENT_STEP]=$(( $(date +%s) - ${STEP_START:-$INSTALL_START} ))
+fi
+
+# ── Installationsdauer berechnen ─────────────────────────────────────────────
+INSTALL_END=$(date +%s)
+INSTALL_DURATION=$(( INSTALL_END - INSTALL_START ))
+INSTALL_MIN=$(( INSTALL_DURATION / 60 ))
+INSTALL_SEC=$(( INSTALL_DURATION % 60 ))
+DURATION_STR="${INSTALL_MIN} Min ${INSTALL_SEC} Sek"
+
+# ── Schrittweise Zusammenfassung ─────────────────────────────────────────────
+echo -e "\n${BOLD}${CYAN}  [████████████████████████████████████████] 100%  Installation abgeschlossen!${RESET}\n"
+echo -e "${BOLD}  Installationsbericht:${RESET}"
+echo -e "  ${DIM}─────────────────────────────────────────────────────────${RESET}"
+printf "  ${BOLD}%-4s %-28s %10s %10s${RESET}\n" "#" "Schritt" "Geschaetzt" "Tatsaechl."
+echo -e "  ${DIM}─────────────────────────────────────────────────────────${RESET}"
+for ((i=1; i<=TOTAL_STEPS; i++)); do
+    local_est=${STEP_ESTIMATES[$i]:-0}
+    local_act=${STEP_ACTUAL[$i]:-0}
+    local_name=${STEP_NAMES[$i]:-"Schritt $i"}
+    # Farbkodierung: gruen wenn schneller, gelb wenn langsamer
+    if [[ $local_act -le $local_est ]]; then
+        color="${GREEN}"
+    else
+        color="${YELLOW}"
+    fi
+    printf "  %-4s %-28s %10s ${color}%10s${RESET}\n" \
+        "$i." "$local_name" "$(_fmt_time $local_est)" "$(_fmt_time $local_act)"
+done
+echo -e "  ${DIM}─────────────────────────────────────────────────────────${RESET}"
+printf "  ${BOLD}%-4s %-28s %10s %10s${RESET}\n" "" "GESAMT" "$(_fmt_time $(_total_estimate))" "${DURATION_STR}"
+echo -e "  ${DIM}─────────────────────────────────────────────────────────${RESET}"
+
 # ── Firewall-Hinweis ──────────────────────────────────────────────────────────
-step "Firewall-Hinweis"
 echo -e "
 ${YELLOW}Falls eine Firewall aktiv ist, folgende Ports freigeben:${RESET}
   ${BOLD}443${RESET}   – Jarvis Web-Interface (HTTPS)
@@ -394,11 +607,8 @@ ${YELLOW}Falls eine Firewall aktiv ist, folgende Ports freigeben:${RESET}
 "
 
 # ── Fertig ─────────────────────────────────────────────────────────────────────
-# Eigene IP(s) ermitteln – für Remote-SSH-Nutzer hilfreich
 SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-# Falls hostname -I nicht verfügbar, via ip-Befehl
 [[ -z "$SERVER_IP" ]] && SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1); exit}')
-# Letzter Fallback
 [[ -z "$SERVER_IP" ]] && SERVER_IP="<server-ip>"
 
 WA_NOTE=""
@@ -411,6 +621,8 @@ echo -e "
 ${GREEN}${BOLD}╔══════════════════════════════════════════════════════════╗
 ║            🤖  JARVIS erfolgreich installiert!           ║
 ╚══════════════════════════════════════════════════════════╝${RESET}
+
+  ${DIM}Installation abgeschlossen in ${BOLD}${DURATION_STR}${RESET}
 
 ${BOLD}Status:${RESET}
   ${AUTOSTART_MSG}

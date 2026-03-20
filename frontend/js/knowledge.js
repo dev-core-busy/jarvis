@@ -244,14 +244,45 @@ class JarvisKnowledgeManager {
             }
 
             filesEl.innerHTML = folderData.files.map(f => `
-                <div class="kb-file-item">
+                <div class="kb-file-item" id="kb-file-${btoa(f.path).replace(/[^a-zA-Z0-9]/g, '')}">
                     <span class="kb-file-icon">📄</span>
                     <span class="kb-file-name" title="${f.path}">${f.name}</span>
                     <span class="kb-file-size">${f.size}</span>
+                    <button class="kb-btn-delete-file" title="Datei löschen"
+                        onclick="window.knowledgeManager.deleteFile('${f.path.replace(/'/g, "\\'")}', ${idx}, '${folderPath}')">✕</button>
                 </div>
             `).join('');
         } catch (e) {
             filesEl.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
+        }
+    }
+
+    // ─── Datei löschen ──────────────────────────────────────────────
+
+    async deleteFile(filePath, folderIdx, folderPath) {
+        if (!confirm(`Datei "${filePath.split('/').pop()}" wirklich löschen?`)) return;
+
+        try {
+            const resp = await fetch('/api/knowledge/files', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (window.authToken || '')
+                },
+                body: JSON.stringify({ path: filePath })
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.error || 'HTTP ' + resp.status);
+            }
+            this._showNotification('Datei gelöscht', 'success');
+            // Ordner-Inhalt neu laden
+            const filesEl = document.getElementById(`kb-files-${folderIdx}`);
+            if (filesEl) filesEl.style.display = 'none';
+            await this.toggleFolder(folderIdx, folderPath);
+            await this.fetchStats();
+        } catch (e) {
+            this._showNotification('Fehler: ' + e.message, 'error');
         }
     }
 

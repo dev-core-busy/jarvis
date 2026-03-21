@@ -29,8 +29,10 @@
     const btnClearLog = document.getElementById('btn-clear-log');
     const btnLogout = document.getElementById('btn-logout');
     const btnMic = document.getElementById('btn-mic');
-    const speedSlider = document.getElementById('speed-slider');
-    const speedValue = document.getElementById('speed-value');
+    const btnZoomIn = document.getElementById('btn-zoom-in');
+    const btnZoomOut = document.getElementById('btn-zoom-out');
+    const btnZoomReset = document.getElementById('btn-zoom-reset');
+    let logZoom = 100; // Zoom-Stufe in Prozent
 
     const cpuBarFill = document.getElementById('cpu-bar-fill');
     const cpuBarLabel = document.getElementById('cpu-bar-label');
@@ -161,7 +163,7 @@
         });
 
         ws.on('status', (data) => {
-            addLogEntry(data.message);
+            addLogEntry(data.message, 'info', data.highlight);
             if (data.state) {
                 updateAgentState(data.state);
             }
@@ -212,7 +214,7 @@
     window.sendJarvisTask = function (text) {
         if (!ws) return false;
         ws.send({ type: 'task', text, token });
-        addLogEntry(`📝 Aufgabe: ${text.substring(0, 80)}…`, 'task');
+        addLogEntry(`📝 Aufgabe: ${text.substring(0, 80)}…`, 'task', true);
         return true;
     };
 
@@ -236,7 +238,7 @@
         if (!text || !ws) return;
 
         ws.send({ type: 'task', text, token });
-        addLogEntry(`📝 Aufgabe: ${text}`, 'task');
+        addLogEntry(`📝 Aufgabe: ${text}`, 'task', true);
         taskInput.value = '';
         taskInput.style.height = 'auto';
 
@@ -336,10 +338,21 @@
         btnPause.hidden = false;
     });
 
-    speedSlider.addEventListener('input', () => {
-        const val = parseFloat(speedSlider.value);
-        speedValue.textContent = val.toFixed(1) + 'x';
-        ws.send({ type: 'control', action: 'speed', value: val, token });
+    function applyLogZoom() {
+        logContainer.style.fontSize = (logZoom / 100 * 0.84).toFixed(3) + 'rem';
+        btnZoomReset.textContent = logZoom + '%';
+    }
+
+    btnZoomIn.addEventListener('click', () => {
+        if (logZoom < 200) { logZoom += 10; applyLogZoom(); }
+    });
+
+    btnZoomOut.addEventListener('click', () => {
+        if (logZoom > 50) { logZoom -= 10; applyLogZoom(); }
+    });
+
+    btnZoomReset.addEventListener('click', () => {
+        logZoom = 100; applyLogZoom();
     });
 
     btnClearLog.addEventListener('click', () => {
@@ -374,7 +387,7 @@
     }
 
     // ─── Log ────────────────────────────────────────────────────
-    function addLogEntry(message, type = 'info') {
+    function addLogEntry(message, type = 'info', highlight = false) {
         if (type === 'system' || type === 'info') {
             // Bereinige Nachricht von Emojis für sauberere Aussprache
             const cleanMessage = message.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
@@ -385,7 +398,7 @@
         if (welcome) welcome.remove();
 
         const entry = document.createElement('div');
-        entry.className = 'log-entry';
+        entry.className = 'log-entry' + (highlight ? ' log-highlight' : '');
 
         const now = new Date();
         const time = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });

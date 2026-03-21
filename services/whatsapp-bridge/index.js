@@ -17,6 +17,7 @@ const http = require('http');
 const PORT = parseInt(process.env.WA_BRIDGE_PORT || '3001');
 const JARVIS_WEBHOOK = process.env.JARVIS_WEBHOOK || 'https://localhost/api/whatsapp/incoming';
 const AUTH_DIR = path.join(__dirname, 'auth');
+const CONTACTS_FILE = path.join(__dirname, 'contacts.json');
 const VOICE_DIR = '/tmp/jarvis_wa_voice';
 const LOG_LEVEL = process.env.LOG_LEVEL || 'warn';
 
@@ -38,6 +39,76 @@ let connectedLid = null;  // Linked ID fuer Self-Chat Erkennung
 let lastError = null;
 let messageCount = 0;
 const sentByBridge = new Set();  // Nachrichten-IDs die wir selbst gesendet haben (Feedback-Loop Schutz)
+const contacts = new Map();  // Kontakt-Cache: JID → {id, name, notify, verifiedName, phone}
+
+// Kontakt-Cache von Disk laden
+function loadContacts() {
+    try {
+        if (fs.existsSync(CONTACTS_FILE)) {
+            const data = JSON.parse(fs.readFileSync(CONTACTS_FILE, 'utf-8'));
+            for (const [k, v] of Object.entries(data)) {
+                contacts.set(k, v);
+            }
+            bridgeLog('INFO', 'contacts', `${contacts.size} Kontakte von Disk geladen`);
+        }
+    } catch (e) {
+        bridgeLog('WARN', 'contacts', `Fehler beim Laden: ${e.message}`);
+    }
+}
+
+// Kontakt-Cache auf Disk speichern (debounced)
+let saveContactsTimer = null;
+function saveContacts() {
+    if (saveContactsTimer) clearTimeout(saveContactsTimer);
+    saveContactsTimer = setTimeout(() => {
+        try {
+            const obj = Object.fromEntries(contacts);
+            fs.writeFileSync(CONTACTS_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+        } catch (e) {
+            bridgeLog('WARN', 'contacts', `Fehler beim Speichern: ${e.message}`);
+        }
+    }, 2000);
+}
+
+// LID-Mapping-Dateien einlesen → Telefonnummern im Cache registrieren
+function loadLIDMappings() {
+    try {
+        const files = fs.readdirSync(AUTH_DIR).filter(f => f.startsWith('lid-mapping-') && f.endsWith('_reverse.json'));
+        let count = 0;
+        for (const file of files) {
+            const lid = file.replace('lid-mapping-', '').replace('_reverse.json', '');
+            const phone = JSON.parse(fs.readFileSync(path.join(AUTH_DIR, file), 'utf-8'));
+            if (phone && typeof phone === 'string') {
+                const jid = phone + '@s.whatsapp.net';
+                const lidJid = lid + '@lid';
+                // Nur eintragen wenn noch nicht vorhanden
+                if (!contacts.has(jid)) {
+                    contacts.set(jid, { id: jid, phoneNumber: jid });
+                }
+                // LID → Telefonnummer Mapping merken
+                if (contacts.has(lidJid)) {
+                    const lidEntry = contacts.get(lidJid);
+                    if (!contacts.get(jid).name && lidEntry.name) {
+                        contacts.get(jid).name = lidEntry.name;
+                    }
+                    if (!contacts.get(jid).notify && lidEntry.notify) {
+                        contacts.get(jid).notify = lidEntry.notify;
+                    }
+                }
+                count++;
+            }
+        }
+        if (count > 0) {
+            bridgeLog('INFO', 'contacts', `${count} Nummern aus LID-Mappings geladen`);
+        }
+    } catch (e) {
+        bridgeLog('WARN', 'contacts', `LID-Mapping Fehler: ${e.message}`);
+    }
+}
+
+loadContacts();
+loadLIDMappings();
+if (contacts.size > 0) saveContacts();
 
 // ─── Logger ──────────────────────────────────────────────────────
 const logger = pino({ level: LOG_LEVEL });
@@ -156,6 +227,74 @@ app.post('/reconnect', async (req, res) => {
         setTimeout(startConnection, 1000);
         res.json({ success: true });
     } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Kontakte durchsuchen
+app.get('/contacts', (req, res) => {
+    const search = (req.query.search || '').toLowerCase().trim();
+    let results = [];
+
+    for (const [jid, c] of contacts) {
+        // Nur echte Kontakte (keine Gruppen, keine Status)
+        if (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@lid')) continue;
+
+        // Telefonnummer: direkt aus JID oder ueber phoneNumber-Feld
+        let phone = c.phoneNumber
+            ? c.phoneNumber.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '')
+            : jid.replace('@s.whatsapp.net', '').replace('@lid', '');
+
+        // LID-Mappings: versuche echte Nummer aus Auth-Dateien zu lesen
+        if (jid.endsWith('@lid') && phone && !/^[0-9]{6,}$/.test(phone)) {
+            phone = null;  // LID ohne Nummer ueberspringen
+        }
+
+        const entry = {
+            phone: phone,
+            name: c.name || null,
+            notify: c.notify || null,
+            verified_name: c.verifiedName || null,
+        };
+
+        if (!search) {
+            results.push(entry);
+            continue;
+        }
+
+        // Suche in allen Namensfeldern und Telefonnummer
+        const haystack = [entry.name, entry.notify, entry.verified_name, phone]
+            .filter(Boolean).join(' ').toLowerCase();
+        if (haystack.includes(search)) {
+            results.push(entry);
+        }
+    }
+
+    // Sortieren: Kontakte mit gespeichertem Namen zuerst
+    results.sort((a, b) => {
+        const aName = a.name || a.notify || a.verified_name || '';
+        const bName = b.name || b.notify || b.verified_name || '';
+        return aName.localeCompare(bName);
+    });
+
+    res.json({ contacts: results, total: results.length });
+});
+
+// Kontakte synchronisieren (App-State resync)
+app.post('/contacts/sync', async (req, res) => {
+    if (!sock || connectionState !== 'connected') {
+        return res.status(503).json({ error: 'WhatsApp nicht verbunden' });
+    }
+    try {
+        bridgeLog('INFO', 'contacts', 'Starte App-State Resync...');
+        const before = contacts.size;
+        await sock.resyncAppState(['regular', 'regular_high', 'regular_low'], false);
+        // Kurz warten bis Events verarbeitet sind
+        await new Promise(r => setTimeout(r, 3000));
+        bridgeLog('INFO', 'contacts', `Resync abgeschlossen: ${before} → ${contacts.size} Kontakte`);
+        res.json({ success: true, contacts_before: before, contacts_after: contacts.size });
+    } catch (e) {
+        bridgeLog('ERROR', 'contacts', `Resync fehlgeschlagen: ${e.message}`);
         res.status(500).json({ error: e.message });
     }
 });
@@ -300,6 +439,34 @@ async function startConnection() {
             }
         });
 
+        // ── Kontakte cachen ──
+        sock.ev.on('contacts.upsert', (newContacts) => {
+            for (const c of newContacts) {
+                contacts.set(c.id, { ...contacts.get(c.id), ...c });
+            }
+            bridgeLog('INFO', 'contacts', `contacts.upsert: ${newContacts.length} Kontakte (gesamt: ${contacts.size})`);
+            saveContacts();
+        });
+
+        sock.ev.on('contacts.update', (updates) => {
+            for (const u of updates) {
+                const existing = contacts.get(u.id) || {};
+                contacts.set(u.id, { ...existing, ...u });
+            }
+            saveContacts();
+        });
+
+        // History-Sync liefert Kontakte beim ersten Verbinden
+        sock.ev.on('messaging-history.set', ({ contacts: histContacts }) => {
+            if (histContacts && histContacts.length) {
+                for (const c of histContacts) {
+                    contacts.set(c.id, { ...contacts.get(c.id), ...c });
+                }
+                bridgeLog('INFO', 'contacts', `History-Sync: ${histContacts.length} Kontakte (gesamt: ${contacts.size})`);
+                saveContacts();
+            }
+        });
+
     } catch (e) {
         lastError = e.message;
         bridgeLog('ERROR', 'connection', `Startfehler: ${e.message}`);
@@ -317,6 +484,15 @@ async function handleIncomingMessage(msg) {
     }
     const pushName = msg.pushName || '';
     const timestamp = new Date((msg.messageTimestamp || 0) * 1000).toISOString();
+
+    // pushName im Kontakt-Cache speichern
+    if (pushName && from) {
+        const jid = from + '@s.whatsapp.net';
+        const existing = contacts.get(jid) || { id: jid };
+        existing.notify = pushName;
+        contacts.set(jid, existing);
+        saveContacts();
+    }
 
     let payload = {
         from: from,

@@ -3,6 +3,7 @@
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 
 from backend.tools.base import BaseTool
 
@@ -43,6 +44,9 @@ class WhatsAppSendTool(BaseTool):
 
     async def execute(self, to: str = "", message: str = "", **kwargs) -> str:
         """Sendet eine WhatsApp-Nachricht."""
+        # LLMs verwenden manchmal 'phone_number' statt 'to'
+        if not to:
+            to = kwargs.get("phone_number", "")
         if not to or not message:
             return "Fehler: 'to' und 'message' sind Pflichtfelder."
 
@@ -68,6 +72,73 @@ class WhatsAppSendTool(BaseTool):
                 return f"Fehler ({e.code}): {body}"
         except urllib.error.URLError as e:
             return f"WhatsApp Bridge nicht erreichbar: {e.reason}"
+        except Exception as e:
+            return f"Fehler: {str(e)}"
+
+
+class WhatsAppContactsTool(BaseTool):
+    """Durchsucht das WhatsApp-Adressbuch nach Kontakten."""
+
+    @property
+    def name(self) -> str:
+        return "whatsapp_contacts"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Durchsucht das WhatsApp-Adressbuch nach einem Kontakt anhand des Namens. "
+            "Gibt Telefonnummer, gespeicherten Namen und Anzeigenamen zurueck. "
+            "Nutze dieses Tool, wenn der Benutzer eine WhatsApp-Nachricht an einen "
+            "Namen statt an eine Telefonnummer senden will."
+        )
+
+    def parameters_schema(self) -> dict:
+        return {
+            "type": "OBJECT",
+            "properties": {
+                "search": {
+                    "type": "STRING",
+                    "description": "Suchbegriff: Name oder Telefonnummer (teilweise genuegt)",
+                },
+            },
+            "required": ["search"],
+        }
+
+    async def execute(self, search: str = "", **kwargs) -> str:
+        """Durchsucht die Kontaktliste."""
+        if not search:
+            return "Fehler: 'search' ist ein Pflichtfeld."
+
+        try:
+            url = f"{BRIDGE_URL}/contacts?search={urllib.parse.quote(search)}"
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+
+            results = data.get("contacts", [])
+            if not results:
+                return f"Kein Kontakt gefunden fuer '{search}'."
+
+            lines = [f"{len(results)} Kontakt(e) gefunden:"]
+            for c in results[:10]:  # Max 10 Ergebnisse
+                name = c.get("name") or c.get("notify") or c.get("verified_name") or "Unbekannt"
+                phone = c.get("phone", "")
+                extra = []
+                if c.get("name"):
+                    extra.append(f"Gespeichert: {c['name']}")
+                if c.get("notify") and c.get("notify") != c.get("name"):
+                    extra.append(f"Anzeigename: {c['notify']}")
+                info = f"  +{phone} – {name}"
+                if extra:
+                    info += f" ({', '.join(extra)})"
+                lines.append(info)
+
+            if len(results) > 10:
+                lines.append(f"  ... und {len(results) - 10} weitere")
+
+            return "\n".join(lines)
+        except urllib.error.URLError:
+            return "WhatsApp Bridge nicht erreichbar. Ist der Service gestartet?"
         except Exception as e:
             return f"Fehler: {str(e)}"
 

@@ -1,4 +1,4 @@
-from backend.tools.whatsapp import WhatsAppSendTool, WhatsAppStatusTool
+from backend.tools.whatsapp import WhatsAppSendTool, WhatsAppContactsTool, WhatsAppStatusTool
 
 def get_tools():
-    return [WhatsAppSendTool(), WhatsAppStatusTool()]
+    return [WhatsAppSendTool(), WhatsAppContactsTool(), WhatsAppStatusTool()]

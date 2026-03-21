@@ -778,6 +778,7 @@ body {
     overflow-y: auto;
     padding: 0.75rem 1rem;
     scroll-behavior: smooth;
+    font-size: 0.84rem;
 }
 
 .log-container::-webkit-scrollbar {
@@ -813,13 +814,18 @@ body {
 }
 
 .log-entry {
-    padding: 0.35rem 0;
-    font-size: 0.84rem;
-    line-height: 1.5;
-    color: var(--text-secondary);
+    padding: 0.15rem 0;
+    font-size: inherit;
+    line-height: 1.15;
+    color: rgba(255, 255, 255, 0.55);
     border-bottom: 1px solid rgba(99, 102, 241, 0.05);
     animation: fadeIn 0.3s ease-out;
     word-break: break-word;
+}
+
+.log-entry.log-highlight {
+    color: #ffffff;
+    font-weight: 600;
 }
 
 .log-entry:last-child {
@@ -887,11 +893,43 @@ body {
     background: rgba(239, 68, 68, 0.1);
 }
 
-.speed-control {
+.zoom-control {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.25rem;
     margin-left: auto;
+}
+
+.btn-zoom {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition);
+    padding: 0;
+}
+
+.btn-zoom:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-light);
+}
+
+.btn-zoom-reset {
+    width: auto;
+    padding: 0 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--text-muted);
 }
 
 .form-group label {
@@ -922,46 +960,6 @@ body {
     cursor: pointer;
 }
 
-.speed-label {
-    font-size: 0.72rem;
-    font-weight: 500;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.speed-slider {
-    width: 80px;
-    height: 4px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: var(--bg-input);
-    border-radius: 2px;
-    outline: none;
-    cursor: pointer;
-}
-
-.speed-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--accent);
-    cursor: pointer;
-    box-shadow: 0 0 6px var(--accent-glow);
-    transition: transform var(--transition);
-}
-
-.speed-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.2);
-}
-
-.speed-value {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    min-width: 32px;
-}
 
 /* ─── Input Bar ─────────────────────────────────────────────────── */
 .input-bar {
@@ -2841,6 +2839,32 @@ select.input-field {
     font-size: 0.75rem;
     color: var(--text-secondary);
     flex-shrink: 0;
+}
+
+.kb-btn-delete-file {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.kb-file-item:hover .kb-btn-delete-file {
+    opacity: 1;
+}
+
+.kb-btn-delete-file:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.15);
 }
 
 .kb-files-loading, .kb-files-empty, .kb-files-error {

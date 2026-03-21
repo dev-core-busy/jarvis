@@ -706,6 +706,35 @@ async def get_knowledge_files():
     return JSONResponse(result)
 
 
+@app.delete("/api/knowledge/files")
+async def delete_knowledge_file(request: Request):
+    """Löscht eine einzelne Datei aus einem Knowledge-Ordner."""
+    from backend.tools.knowledge import _get_folders, PROJECT_ROOT
+    data = await request.json()
+    file_path = data.get("path", "").strip()
+    if not file_path:
+        return JSONResponse({"error": "Kein Dateipfad angegeben"}, status_code=400)
+
+    # Sicherheitscheck: Datei muss in einem konfigurierten Knowledge-Ordner liegen
+    resolved = (PROJECT_ROOT / file_path).resolve()
+    allowed = False
+    for folder in _get_folders():
+        try:
+            resolved.relative_to(folder.resolve())
+            allowed = True
+            break
+        except ValueError:
+            continue
+
+    if not allowed:
+        return JSONResponse({"error": "Datei liegt nicht in einem Knowledge-Ordner"}, status_code=403)
+    if not resolved.is_file():
+        return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
+
+    resolved.unlink()
+    return JSONResponse({"ok": True, "deleted": file_path})
+
+
 @app.post("/api/knowledge/open-folder")
 async def open_knowledge_folder(request: Request):
     """Öffnet einen Knowledge-Ordner im Dateimanager des Server-Desktops."""

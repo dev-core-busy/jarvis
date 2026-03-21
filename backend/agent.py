@@ -92,18 +92,20 @@ class JarvisAgent:
 Du kannst Aufgaben eigenständig lösen, indem du die verfügbaren Tools nutzt.
 
 Regeln:
-1. Arbeite Schritt für Schritt und erkläre kurz, was du tust.
-2. Nutze shell_execute für Kommandozeilen-Befehle.
-3. Nutze desktop_* Tools um Programme auf dem Desktop zu bedienen.
-4. Nutze filesystem_* Tools um Dateien zu lesen/schreiben.
-5. Mache Screenshots um den Desktop-Zustand zu prüfen.
-6. Wenn eine Aufgabe erledigt ist, sage es klar und deutlich.
-7. Wenn du unsicher bist, erkläre was du vorhast bevor du handelst.
-8. Bei Fehlern: analysiere, versuche eine Alternative.
-9. Antworte immer auf Deutsch.
-10. Nutze knowledge_search um in der Wissensdatenbank nach relevanten Informationen zu suchen.
-11. Nutze memory_manage um wichtige Fakten dauerhaft zu speichern (z.B. Benutzerpräferenzen, Projektnamen, häufige Befehle). Prüfe zu Beginn den Memory.
-12. WICHTIG: Bevor du versuchst, eine Webseite, Internetseite oder einen Browser aufzurufen, MUSST du zwingend knowledge_search (z.B. query="webseite öffnen") nutzen, um die exakten Vorgaben zu lesen!
+1. WISSENSFRAGEN DIREKT BEANTWORTEN: Wenn du die Antwort sicher aus deinem Wissen kennst (Allgemeinwissen, Mathematik, Fakten, Definitionen, Sprachen), antworte SOFORT ohne Tool-Aufruf. Beispiele: "Was ist Pi?", "Übersetze X", "Wer war Einstein?", "Was ist die Hauptstadt von Frankreich?". Nutze Tools nur wenn du etwas auf dem System tun, nachschlagen oder berechnen musst, das dein Wissen übersteigt.
+2. WISSENS-CACHE: Wenn du etwas über ein Tool nachgeschlagen oder berechnet hast (z.B. eine Formel, ein Fakt, ein Ergebnis), speichere es mit memory_manage (key mit Prefix "wissen_", z.B. "wissen_pi_50stellen"). Beim nächsten Mal kannst du es direkt aus dem Memory beantworten statt erneut nachzuschlagen.
+3. Arbeite Schritt für Schritt und erkläre kurz, was du tust.
+4. Nutze shell_execute für Kommandozeilen-Befehle.
+5. Nutze desktop_* Tools um Programme auf dem Desktop zu bedienen.
+6. Nutze filesystem_* Tools um Dateien zu lesen/schreiben.
+7. Mache Screenshots um den Desktop-Zustand zu prüfen.
+8. Wenn eine Aufgabe erledigt ist, sage es klar und deutlich.
+9. Wenn du unsicher bist, erkläre was du vorhast bevor du handelst.
+10. Bei Fehlern: analysiere, versuche eine Alternative.
+11. Antworte immer auf Deutsch.
+12. Nutze knowledge_search um in der Wissensdatenbank nach relevanten Informationen zu suchen.
+13. Nutze memory_manage um wichtige Fakten dauerhaft zu speichern (z.B. Benutzerpräferenzen, Projektnamen, häufige Befehle). Prüfe zu Beginn den Memory.
+14. WICHTIG: Bevor du versuchst, eine Webseite, Internetseite oder einen Browser aufzurufen, MUSST du zwingend knowledge_search (z.B. query="webseite öffnen") nutzen, um die exakten Vorgaben zu lesen!
 """
 
     def __init__(self):
@@ -184,7 +186,7 @@ Regeln:
 
             # Modus-Hinweis (hilfreich bei langsamen lokalen Modellen)
             mode_hint = " [Prompt-Tool-Modus]" if getattr(self.provider, "prompt_tool_calling", False) else ""
-            await self._send_status(ws, f"⏳ Warte auf LLM-Antwort…{mode_hint}")
+            await self._send_status(ws, f"⏳ Warte auf LLM-Antwort…{mode_hint}", highlight=True)
 
             # Initial-Nachricht senden
             response = await self.provider.generate_response(
@@ -219,7 +221,7 @@ Regeln:
                 # Text-Antworten senden
                 for text in text_parts:
                     if text.strip():
-                        await self._send_status(ws, text.strip())
+                        await self._send_status(ws, text.strip(), highlight=True)
 
                 # Wenn keine Function Calls → fertig
                 if not function_calls:
@@ -426,14 +428,17 @@ Regeln:
             await self._send_status(ws, "⏸️ Pausiert – warte auf Fortsetzen...")
             await self._pause_event.wait()
 
-    async def _send_status(self, ws: WebSocket, message: str):
+    async def _send_status(self, ws: WebSocket, message: str, highlight: bool = False):
         """Sendet Status-Update an Frontend."""
         try:
-            await ws.send_json({
+            msg = {
                 "type": "status",
                 "message": message,
                 "state": self.state.value,
-            })
+            }
+            if highlight:
+                msg["highlight"] = True
+            await ws.send_json(msg)
         except Exception:
             pass
 

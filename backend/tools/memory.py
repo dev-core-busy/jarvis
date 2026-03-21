@@ -143,8 +143,23 @@ def load_memory_context() -> str:
     if not memory:
         return ""
 
-    lines = ["Bekannte Fakten aus dem Memory:"]
+    # Wissens-Cache und normale Einträge trennen
+    wissen = []
+    fakten = []
     for key, entry in sorted(memory.items()):
-        lines.append(f"- {key}: {entry['value']}")
+        if key.startswith("wissen_"):
+            wissen.append(f"- {key[7:]}: {entry['value']}")
+        else:
+            fakten.append(f"- {key}: {entry['value']}")
+
+    lines = []
+    if wissen:
+        lines.append("Gelerntes Wissen (direkt nutzen, NICHT erneut nachschlagen):")
+        lines.extend(wissen)
+    if fakten:
+        if lines:
+            lines.append("")
+        lines.append("Gespeicherte Fakten:")
+        lines.extend(fakten)
 
     return "\n".join(lines)

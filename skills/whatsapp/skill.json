@@ -6,6 +6,7 @@
     "module": "main",
     "tools": [
         "whatsapp_send",
+        "whatsapp_contacts",
         "whatsapp_status"
     ],
     "category": "kommunikation",
@@ -61,12 +62,18 @@
                 "desc": "Sendet eine WhatsApp-Textnachricht an eine Telefonnummer (internationales Format, z. B. +49123456789) oder an Gruppen-IDs. Gibt den Sendestatus zurück."
             },
             {
+                "name": "whatsapp_contacts",
+                "label": "WhatsApp Kontakte",
+                "desc": "Durchsucht das WhatsApp-Adressbuch nach Name oder Telefonnummer. Gibt passende Kontakte mit Nummer zurueck."
+            },
+            {
                 "name": "whatsapp_status",
                 "label": "WhatsApp Status",
                 "desc": "Gibt den aktuellen Status der WhatsApp-Bridge zurück: verbunden/getrennt, verbundene Nummer, Anzahl verarbeiteter Nachrichten, QR-Code-Status beim ersten Start."
             }
         ],
         "use_cases": [
+            "Sende eine WhatsApp an Eva Dauber mit einem Herz",
             "Sende eine WhatsApp an +49123456789: 'Meeting um 14 Uhr nicht vergessen'",
             "Ist die WhatsApp-Bridge gerade verbunden und aktiv?",
             "Antworte auf die letzte Sprachnachricht von Kontakt X"

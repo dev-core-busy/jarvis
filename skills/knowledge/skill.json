@@ -19,6 +19,12 @@
             "type": "number",
             "default": 50,
             "label": "Max. Dateigröße (MB)"
+        },
+        "search_mode": {
+            "type": "string",
+            "default": "auto",
+            "label": "Suchmodus",
+            "enum": ["auto", "tfidf", "vector"]
         }
     },
     "knowledge_docs": [],

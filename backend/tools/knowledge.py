@@ -1,4 +1,4 @@
-"""Knowledge Base Tool – Multi-Folder RAG mit PDF/DOCX/XLSX/PPTX/Video Support und Index-Cache."""
+"""Knowledge Base Tool – Multi-Folder RAG mit Vektor-Suche (ChromaDB) und TF-IDF Fallback."""
 
 import asyncio
 import json
@@ -34,6 +34,88 @@ EXTENSIONS_AUDIO = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".o
 
 _cache_lock = threading.Lock()
 _log = logging.getLogger("jarvis.knowledge")
+
+# ─── Vector Store (optional, Fallback auf TF-IDF) ────────────────
+_vector_store = None
+_vector_store_checked = False
+
+
+def _get_vector_store():
+    """Gibt VectorStore-Singleton zurueck oder None wenn Dependencies fehlen."""
+    global _vector_store, _vector_store_checked
+    if _vector_store_checked:
+        return _vector_store
+    _vector_store_checked = True
+    try:
+        from backend.tools.vector_store import VectorStore
+        vs = VectorStore(PROJECT_ROOT / "data" / "vector_store")
+        _vector_store = vs
+        _log.info("VectorStore verfuegbar – semantische Suche aktiv")
+        return vs
+    except ImportError as e:
+        _log.info(f"VectorStore nicht verfuegbar (chromadb/sentence-transformers fehlt): {e}")
+        return None
+    except Exception as e:
+        _log.warning(f"VectorStore Initialisierung fehlgeschlagen: {e}")
+        return None
+
+
+def _rebuild_vector_index(folders: list[Path], max_bytes: int) -> bool:
+    """Inkrementeller Vektor-Index Aufbau. Gibt True zurueck wenn verfuegbar."""
+    vs = _get_vector_store()
+    if vs is None:
+        return False
+
+    files = _all_files(folders)
+    current_paths = {str(f) for f in files}
+    indexed = vs.get_indexed_files()
+
+    # Geloeschte Dateien entfernen
+    for path_str in indexed:
+        if path_str not in current_paths:
+            vs.remove_file(path_str)
+
+    # Neue/geaenderte Dateien indexieren
+    changed = 0
+    for filepath in files:
+        path_str = str(filepath)
+        try:
+            mtime = filepath.stat().st_mtime
+        except Exception:
+            continue
+        if indexed.get(path_str) == mtime:
+            continue
+
+        text = _extract_text(filepath, max_bytes)
+        if text and text.strip():
+            chunks = _chunk_text(text)
+            vs.add_chunks(path_str, chunks, mtime)
+            changed += 1
+        else:
+            vs.remove_file(path_str)
+
+    if changed:
+        _log.info(f"Vektor-Index aktualisiert: {changed} Datei(en)")
+    return True
+
+
+def _vector_search(query: str, max_results: int) -> list[tuple[float, str, str]] | None:
+    """Semantische Suche via VectorStore. Gibt None zurueck wenn nicht verfuegbar."""
+    vs = _get_vector_store()
+    if vs is None:
+        return None
+    results = vs.search(query, max_results)
+    if not results:
+        return None
+    # Relative Pfade berechnen
+    converted = []
+    for score, file_path, chunk in results:
+        try:
+            rel = str(Path(file_path).relative_to(PROJECT_ROOT))
+        except ValueError:
+            rel = file_path
+        converted.append((score, rel, chunk))
+    return converted
 
 
 def _get_skill_config() -> dict:
@@ -411,6 +493,12 @@ def get_stats() -> dict:
     except ImportError:
         pass
 
+    # Vektor-Suche Status
+    vs = _get_vector_store()
+    has_vector = vs is not None
+    vector_chunks = vs.chunk_count() if vs else 0
+    vector_files = vs.file_count() if vs else 0
+
     return {
         "folders": folder_list,
         "total_files": len(files),
@@ -422,20 +510,36 @@ def get_stats() -> dict:
         "xlsx_support": has_xlsx,
         "pptx_support": has_pptx,
         "video_support": has_video,
+        "vector_search": has_vector,
+        "vector_files": vector_files,
+        "vector_chunks": vector_chunks,
+        "search_mode": _get_skill_config().get("search_mode", "auto"),
     }
 
 
 def force_reindex() -> dict:
-    """Erzwingt vollständigen Neuaufbau des Index."""
+    """Erzwingt vollstaendigen Neuaufbau des Index (TF-IDF + Vektor)."""
     with _cache_lock:
         try:
             INDEX_CACHE_PATH.unlink(missing_ok=True)
         except Exception:
             pass
+
+    # Vektor-Index ebenfalls leeren
+    vs = _get_vector_store()
+    if vs:
+        vs.clear()
+
     folders = _get_folders()
-    cache = _rebuild_cache(folders, _get_max_bytes())
+    max_bytes = _get_max_bytes()
+    cache = _rebuild_cache(folders, max_bytes)
+    _rebuild_vector_index(folders, max_bytes)
+
     total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
-    return {"indexed_files": len(cache["files"]), "total_chunks": total_chunks}
+    vector_info = ""
+    if vs:
+        vector_info = f", Vektor: {vs.chunk_count()} Chunks"
+    return {"indexed_files": len(cache["files"]), "total_chunks": total_chunks, "vector_info": vector_info}
 
 
 class KnowledgeTool(BaseTool):
@@ -481,7 +585,14 @@ class KnowledgeTool(BaseTool):
         (PROJECT_ROOT / DEFAULT_FOLDER).mkdir(parents=True, exist_ok=True)
 
         folders = _get_folders()
-        cache = await asyncio.to_thread(_rebuild_cache, folders, _get_max_bytes())
+        max_bytes = _get_max_bytes()
+
+        # Suchmodus aus Config: "auto" (default), "tfidf", "vector"
+        cfg = _get_skill_config()
+        search_mode_cfg = cfg.get("search_mode", "auto")
+
+        # TF-IDF Cache immer aufbauen (wird fuer Stats/Management gebraucht)
+        cache = await asyncio.to_thread(_rebuild_cache, folders, max_bytes)
 
         if not cache["files"]:
             folder_display = ", ".join(
@@ -490,13 +601,27 @@ class KnowledgeTool(BaseTool):
             )
             return f"📂 Knowledge Base ist leer. Lege Dateien in einen der Ordner ab: {folder_display}"
 
-        results = _search(query, cache, max_results)
+        results = None
+        search_mode = "TF-IDF"
+
+        # Vektor-Suche wenn gewuenscht
+        if search_mode_cfg in ("auto", "vector"):
+            has_vector = await asyncio.to_thread(_rebuild_vector_index, folders, max_bytes)
+            if has_vector:
+                results = await asyncio.to_thread(_vector_search, query, max_results)
+                if results:
+                    search_mode = "Vektor"
+
+        # TF-IDF wenn gewuenscht oder als Fallback
+        if not results and search_mode_cfg in ("auto", "tfidf"):
+            results = _search(query, cache, max_results)
+            search_mode = "TF-IDF"
 
         if not results:
             total = sum(len(d.get("chunks", [])) for d in cache["files"].values())
             return f"🔍 Keine Treffer für '{query}' ({len(cache['files'])} Dateien, {total} Chunks)."
 
-        output = f"🔍 {len(results)} Treffer für '{query}':\n\n"
+        output = f"🔍 {len(results)} Treffer für '{query}' ({search_mode}):\n\n"
         for i, (score, filename, chunk) in enumerate(results, 1):
             output += f"--- [{i}] {filename} (Relevanz: {score:.2f}) ---\n"
             output += chunk.strip()[:1000] + "\n\n"
@@ -585,7 +710,7 @@ class KnowledgeManageTool(BaseTool):
 
         elif action == "reindex":
             result = await asyncio.to_thread(force_reindex)
-            return f"✅ Index neu aufgebaut: {result['indexed_files']} Dateien, {result['total_chunks']} Chunks."
+            return f"✅ Index neu aufgebaut: {result['indexed_files']} Dateien, {result['total_chunks']} Chunks{result.get('vector_info', '')}."
 
         elif action == "list_docs":
             folders = _get_folders()
@@ -627,10 +752,18 @@ class KnowledgeManageTool(BaseTool):
             else:
                 formats.append("Video/Audio ⚠️ (ffmpeg + faster-whisper nötig)")
             size_mb = stats["total_size_bytes"] / (1024 * 1024)
+
+            # Vektor-Info
+            if stats.get("vector_search"):
+                vector_line = f"\n  🧠 Vektor-Suche: aktiv ({stats['vector_files']} Dateien, {stats['vector_chunks']} Chunks)"
+            else:
+                vector_line = "\n  🧠 Vektor-Suche: inaktiv (chromadb/sentence-transformers fehlt)"
+
             return (
                 f"📊 Knowledge Base Statistiken:\n"
                 f"  Dateien: {stats['total_files']} ({size_mb:.1f} MB)\n"
-                f"  Im Index: {stats['indexed_files']} Dateien, {stats['total_chunks']} Chunks\n"
+                f"  TF-IDF Index: {stats['indexed_files']} Dateien, {stats['total_chunks']} Chunks"
+                f"{vector_line}\n"
                 f"  Formate: {', '.join(formats)}"
             )
 

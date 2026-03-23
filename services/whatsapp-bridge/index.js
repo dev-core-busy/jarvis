@@ -38,6 +38,7 @@ let connectedNumber = null;
 let connectedLid = null;  // Linked ID fuer Self-Chat Erkennung
 let lastError = null;
 let messageCount = 0;
+let reconnectAttempts = 0;  // Zaehler fuer Backoff bei connectionReplaced
 const sentByBridge = new Set();  // Nachrichten-IDs die wir selbst gesendet haben (Feedback-Loop Schutz)
 const contacts = new Map();  // Kontakt-Cache: JID → {id, name, notify, verifiedName, phone}
 
@@ -373,6 +374,7 @@ async function startConnection() {
                 connectionState = 'connected';
                 currentQR = null;
                 lastError = null;
+                reconnectAttempts = 0;  // Reset bei erfolgreicher Verbindung
 
                 // Eigene Nummer + LID ermitteln
                 if (sock.user) {
@@ -393,8 +395,21 @@ async function startConnection() {
 
                 // Automatisch reconnecten (ausser bei Logout)
                 if (statusCode !== DisconnectReason.loggedOut) {
-                    bridgeLog('INFO', 'connection', 'Reconnect in 5s...');
-                    setTimeout(startConnection, 5000);
+                    // connectionReplaced (440): Exponentielles Backoff, max 5 Versuche
+                    if (statusCode === 440) {
+                        reconnectAttempts++;
+                        if (reconnectAttempts > 5) {
+                            bridgeLog('ERROR', 'connection', `connectionReplaced ${reconnectAttempts}x – stoppe Reconnect. Manueller Neustart noetig.`);
+                            return;
+                        }
+                        const delay = Math.min(5000 * Math.pow(2, reconnectAttempts), 300000); // 10s, 20s, 40s, 80s, 160s
+                        bridgeLog('WARN', 'connection', `connectionReplaced – Reconnect ${reconnectAttempts}/5 in ${Math.round(delay/1000)}s...`);
+                        setTimeout(startConnection, delay);
+                    } else {
+                        reconnectAttempts = 0;
+                        bridgeLog('INFO', 'connection', 'Reconnect in 5s...');
+                        setTimeout(startConnection, 5000);
+                    }
                 } else {
                     bridgeLog('INFO', 'connection', 'Ausgeloggt. Warte auf neuen QR-Scan.');
                     // Auth loeschen bei Logout

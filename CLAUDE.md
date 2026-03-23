@@ -12,13 +12,14 @@ Autonomer KI-Agent auf einem Linux-Server (Debian 13) mit Web-Frontend, Desktop-
 
 ## Architektur
 ```
-Frontend (Vanilla JS)  ─HTTPS─>  FastAPI (Port 443)  ──>  JarvisAgent
+Frontend (Vanilla JS)  ─HTTPS─>  FastAPI (Port 443)  ──>  AgentManager
      │                                │                        │
-     ├─ WebSocket (Agent-Steuerung)   ├─ LLM (Gemini/etc.)    ├─ SkillManager
-     ├─ noVNC (Port 6080)            ├─ Skills API             ├─ Tools (shell, desktop, fs, ...)
-     └─ Settings (Profile/Skills/WA)  └─ WhatsApp Proxy        └─ Memory (data/memory.json)
-                                           │
-                                    WhatsApp Bridge (Node.js, Port 3001, localhost)
+     ├─ WebSocket (Agent-Steuerung)   ├─ LLM (Gemini/etc.)    ├─ Hauptagent (JarvisAgent)
+     ├─ Agent-Sidebar (Multi-Agent)   ├─ Skills API            │   ├─ SkillManager + Tools
+     ├─ noVNC (Port 6080)            ├─ WhatsApp Proxy        │   └─ spawn_agent → Sub-Agents
+     └─ Settings (Profile/Skills/WA)  └─ Debug-Toggle          ├─ Sub-Agent 1 (autonom)
+                                           │                    ├─ Sub-Agent 2 (autonom)
+                                    WhatsApp Bridge             └─ Memory (data/memory.json)
 ```
 
 ## Tech Stack
@@ -33,7 +34,7 @@ Frontend (Vanilla JS)  ─HTTPS─>  FastAPI (Port 443)  ──>  JarvisAgent
 ```
 backend/
   main.py          – FastAPI Server, alle HTTP/WS Endpoints
-  agent.py         – Agent-Loop (run_task, run_task_headless)
+  agent.py         – Agent-Loop (run_task, run_task_headless) + AgentManager + Multi-Agent
   llm.py           – Multi-Provider LLM Client
   config.py        – Konfiguration (env + settings.json)
   security.py      – SSL-Zertifikate
@@ -42,7 +43,10 @@ backend/
     loader.py      – Dynamisches Skill-Loading
   tools/
     base.py        – BaseTool Klasse
-    shell.py, desktop.py, filesystem.py, screenshot.py, knowledge.py, memory.py
+    shell.py       – Shell-Ausfuehrung mit Live-Streaming (stdout zeilenweise via WebSocket)
+    subagent.py    – spawn_agent Tool (Hauptagent startet Sub-Agents)
+    vector_store.py – ChromaDB Vektor-Datenbank fuer Wissenssuche
+    desktop.py, filesystem.py, screenshot.py, knowledge.py, memory.py
     whatsapp.py    – WhatsApp Send/Status Tools
     wa_logger.py   – Strukturiertes WhatsApp-Logging (JSON-Lines)
 frontend/
@@ -62,11 +66,39 @@ skills/
 services/
   whatsapp-bridge/index.js – Baileys Bridge mit Express API
 data/
-  knowledge/       – Wissensdatenbank (TF-IDF Suche)
+  knowledge/       – Wissensdatenbank (TF-IDF + ChromaDB Vektor-Suche)
+  chroma_db/       – ChromaDB Persistenz (sentence-transformers Embeddings)
   memory.json      – Persistenter Key-Value Speicher
   logs/            – WhatsApp-Logs (JSON-Lines)
   vision/          – Gesichtserkennung (faces/, encodings.pkl, config.json, events.json)
 ```
+
+## Multi-Agent System
+- **AgentManager** in `agent.py`: Verwaltet Haupt- und Sub-Agents
+  - `get_or_create_main()`: Erstellt/gibt Hauptagent zurueck
+  - `spawn_sub_agent(label, task)`: Erstellt autonomen Sub-Agent
+  - `run_sub_agent(agent, task, ws)`: Startet Sub-Agent als async Task
+- **spawn_agent Tool** (`tools/subagent.py`): Hauptagent kann Sub-Agents starten
+  - `label` optional (wird auto-generiert), `task` Pflicht
+  - Tolerant: akzeptiert `code`, `name` als alternative Parameter
+  - Sub-Agents arbeiten VOLLSTAENDIG AUTONOM (kein Rueckfragen)
+- **Shell-Streaming** (`tools/shell.py`): stdout wird zeilenweise live via WebSocket gesendet
+  - `PYTHONUNBUFFERED=1` in env fuer sofortige Ausgabe
+  - Python-Code wird in Temp-Datei geschrieben (vermeidet Quoting-Probleme)
+- **Frontend-Sidebar** (`app.js`): Agent-Karten rechts im LLM-Fenster
+  - Hauptagent (gruen), Sub-Agents (lila), Klick wechselt Ansicht
+  - X-Button zum manuellen Entfernen, Auto-Cleanup nach 8s bei Fertigstellung
+  - Drag-Resize der Sidebar-Breite
+- **Debug-Toggle**: Pill-Button blendet nicht-highlight Zeilen aus (nur LLM-Dialog sichtbar)
+- **WebSocket-Protokoll**: `agent_event` (started/spawned/finished/paused), `agent_list`, `status` mit `agent_id`
+
+## Vektor-Datenbank (Wissenssuche)
+- **ChromaDB** + **sentence-transformers** (`paraphrase-multilingual-MiniLM-L12-v2`)
+- **vector_store.py**: PersistentClient, lazy-loaded Embedding-Singleton
+- **Suchmodi** (konfigurierbar in Knowledge-Skill): Auto, TF-IDF, Vektor
+  - Auto: versucht Vektor zuerst, Fallback auf TF-IDF
+- **Frontend**: Toggle-Buttons (Auto/TF-IDF/Vektor) im Knowledge-Settings-Tab
+- **numpy**: Muss < 2.1 bleiben (VM hat kein SSE4.2)
 
 ## Skill-System
 - Skills liegen unter `skills/<name>/` mit `skill.json` (Manifest) + `main.py` (get_tools())
@@ -112,6 +144,10 @@ data/
 - **Self-Chat Feedback-Loop:** Bridge trackt gesendete Message-IDs in `sentByBridge` Set
 - **Browser-Cache:** Bei Frontend-Aenderungen Cache-Buster in index.html hochzaehlen (`?v=N`)
 - **SSH Heredocs:** Quoting-Probleme mit Python f-strings. Besser: lokal schreiben + `scp`
+- **Python-Code via Shell:** NIEMALS `python3 -c "..."` mit verschachtelten Quotes. Code in Temp-Datei schreiben (`_code_to_command()` in shell.py)
+- **Shell-Streaming:** `PYTHONUNBUFFERED=1` muss gesetzt sein, sonst kein Live-Output
+- **Sub-Agent 0 Parts:** Wenn LLM leere Antwort liefert, pruefen ob Task-Text korrekt uebergeben wird
+- **Doppelter Hauptagent:** Frontend resettet `_agentInfos` bei `started`-Event des Hauptagents
 
 ## Ports
 | Port | Service | Zugriff |

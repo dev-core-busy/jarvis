@@ -12,7 +12,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=36">
+    <link rel="stylesheet" href="/static/css/style.css?v=45">
 </head>
 
 <body>
@@ -242,10 +242,18 @@ sudo update-ca-certificates</code></pre>
                         </svg>
                     </button>
                 </div>
-                <div class="log-container" id="log-container">
-                    <div class="log-welcome">
-                        <p>👋 Willkommen bei Jarvis!</p>
-                        <p class="log-hint">Gib unten eine Aufgabe ein, um loszulegen.</p>
+                <div class="log-wrapper" id="log-wrapper">
+                    <div class="log-container" id="log-container">
+                        <div class="log-welcome">
+                            <p>👋 Willkommen bei Jarvis!</p>
+                            <p class="log-hint">Gib unten eine Aufgabe ein, um loszulegen.</p>
+                        </div>
+                    </div>
+                    <!-- Multi-Agent Sidebar -->
+                    <div class="agent-sidebar-resize" id="agent-sidebar-resize" style="display: none;"></div>
+                    <div class="agent-sidebar" id="agent-sidebar" style="display: none;">
+                        <div class="agent-sidebar-header">Agents</div>
+                        <div class="agent-sidebar-list" id="agent-sidebar-list"></div>
                     </div>
                 </div>
 
@@ -267,6 +275,7 @@ sudo update-ca-certificates</code></pre>
                             <rect x="4" y="4" width="16" height="16" rx="2" />
                         </svg>
                     </button>
+                    <button class="btn-debug active" id="btn-debug" title="Debug-Ausgaben ein/ausblenden">Debug</button>
                     <div class="zoom-control">
                         <button class="btn-zoom" id="btn-zoom-out" title="Verkleinern">−</button>
                         <button class="btn-zoom btn-zoom-reset" id="btn-zoom-reset" title="Zurücksetzen">100%</button>
@@ -766,8 +775,8 @@ sudo update-ca-certificates</code></pre>
                             </div>
                             <div class="vis-dashboard">
                                 <div class="vis-feed-wrap">
-                                    <img id="vis-feed-img" class="vis-feed-img" alt="Kamerabild"
-                                        src="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480'><rect fill='%23111' width='640' height='480'/><text x='320' y='250' text-anchor='middle' fill='%23555' font-size='18'>Kamera nicht aktiv</text></svg>" />
+                                    <div id="vis-feed-placeholder" class="vis-feed-placeholder">Kamera nicht aktiv</div>
+                                    <img id="vis-feed-img" class="vis-feed-img" style="display:none;" />
                                 </div>
                                 <div class="vis-detected-panel">
                                     <h4>Erkannt:</h4>
@@ -775,6 +784,15 @@ sudo update-ca-certificates</code></pre>
                                         <span class="vis-no-faces">Keine Gesichter erkannt</span>
                                     </div>
                                 </div>
+                            </div>
+
+                            <!-- Vision Log -->
+                            <div class="vis-log-section">
+                                <div class="vis-log-header">
+                                    <h4>Log</h4>
+                                    <button class="vis-btn vis-btn-sm" id="vis-btn-clear-log" title="Log leeren">Leeren</button>
+                                </div>
+                                <div id="vis-log" class="vis-log"></div>
                             </div>
                         </div>
 
@@ -953,9 +971,9 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/vnc.js?v=11"></script>
     <script src="/static/js/skills.js?v=19"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
-    <script src="/static/js/knowledge.js?v=8"></script>
-    <script src="/static/js/vision.js?v=24"></script>
-    <script src="/static/js/app.js?v=21"></script>
+    <script src="/static/js/knowledge.js?v=9"></script>
+    <script src="/static/js/vision.js?v=26"></script>
+    <script src="/static/js/app.js?v=27"></script>
 </body>
 
 </html>

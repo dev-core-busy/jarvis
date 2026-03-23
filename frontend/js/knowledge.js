@@ -153,6 +153,13 @@ class JarvisKnowledgeManager {
         const pptxTitle = stats.pptx_support ? 'PowerPoint-Support aktiv' : 'python-pptx nicht installiert';
         const videoIcon = stats.video_support ? '✅' : '⚠️';
         const videoTitle = stats.video_support ? 'Video/Audio-Support aktiv (ffmpeg + faster-whisper)' : 'ffmpeg oder faster-whisper fehlt';
+        const vectorIcon = stats.vector_search ? '✅' : '⚠️';
+        const vectorTitle = stats.vector_search
+            ? `Vektor-Suche aktiv (${stats.vector_files} Dateien, ${stats.vector_chunks} Chunks)`
+            : 'chromadb/sentence-transformers nicht installiert';
+
+        // Aktueller Suchmodus
+        const mode = stats.search_mode || 'auto';
 
         el.innerHTML = `
             <div class="kb-stat-grid">
@@ -173,6 +180,20 @@ class JarvisKnowledgeManager {
                     <span class="kb-stat-label">Gesamt</span>
                 </div>
             </div>
+            <div class="kb-search-mode">
+                <span class="kb-search-mode-label">Suchmodus:</span>
+                <div class="kb-toggle-group">
+                    <button class="kb-toggle-btn ${mode === 'auto' ? 'active' : ''}"
+                        data-mode="auto" onclick="window.knowledgeManager.setSearchMode('auto')"
+                        title="Vektor-Suche bevorzugt, TF-IDF als Fallback">Auto</button>
+                    <button class="kb-toggle-btn ${mode === 'tfidf' ? 'active' : ''}"
+                        data-mode="tfidf" onclick="window.knowledgeManager.setSearchMode('tfidf')"
+                        title="Nur Keyword-basierte Suche (schnell, exakt)">Dateiinhalt</button>
+                    <button class="kb-toggle-btn ${mode === 'vector' ? 'active' : ''} ${!stats.vector_search ? 'disabled' : ''}"
+                        data-mode="vector" onclick="window.knowledgeManager.setSearchMode('vector')"
+                        title="Nur semantische Vektor-Suche (Bedeutung, Synonyme)" ${!stats.vector_search ? 'disabled' : ''}>Datenbank</button>
+                </div>
+            </div>
             <div class="kb-formats">
                 <span class="kb-format-badge" title="Text-Formate immer aktiv">✅ Text/Markdown</span>
                 <span class="kb-format-badge" title="${pdfTitle}">${pdfIcon} PDF</span>
@@ -180,8 +201,30 @@ class JarvisKnowledgeManager {
                 <span class="kb-format-badge" title="${xlsxTitle}">${xlsxIcon} Excel</span>
                 <span class="kb-format-badge" title="${pptxTitle}">${pptxIcon} PowerPoint</span>
                 <span class="kb-format-badge" title="${videoTitle}">${videoIcon} Video/Audio</span>
+                <span class="kb-format-badge" title="${vectorTitle}">${vectorIcon} Vektor-DB</span>
             </div>
         `;
+    }
+
+    async setSearchMode(mode) {
+        try {
+            const resp = await fetch('/api/skills/knowledge/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (window.authToken || '')
+                },
+                body: JSON.stringify({ search_mode: mode })
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+            // Toggle-Buttons aktualisieren
+            document.querySelectorAll('.kb-toggle-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+        } catch (e) {
+            console.error('Suchmodus setzen fehlgeschlagen:', e);
+        }
     }
 
     _renderFolders(folders) {

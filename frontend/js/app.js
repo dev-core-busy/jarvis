@@ -163,10 +163,33 @@
         });
 
         ws.on('status', (data) => {
-            addLogEntry(data.message, 'info', data.highlight);
-            if (data.state) {
+            const agentId = data.agent_id || '_main';
+            addLogEntry(data.message, 'info', data.highlight, agentId);
+            // Agent-State in Sidebar aktualisieren
+            if (data.agent_id) {
+                _updateAgentCard(data.agent_id, data.agent_label, data.state, data.is_sub_agent);
+            }
+            // Hauptagent-State im Header nur wenn aktiver Agent
+            if (agentId === _activeAgentId && data.state) {
                 updateAgentState(data.state);
             }
+        });
+
+        ws.on('agent_event', (data) => {
+            _handleAgentEvent(data);
+        });
+
+        ws.on('agent_list', (data) => {
+            for (const a of (data.agents || [])) {
+                _agentInfos[a.agent_id] = {
+                    label: a.label,
+                    state: a.state,
+                    is_sub_agent: a.is_sub_agent,
+                };
+                _ensureAgentLog(a.agent_id);
+            }
+            _renderAgentCards();
+            _updateSidebarVisibility();
         });
 
         ws.on('error', (data) => {
@@ -237,8 +260,13 @@
         const text = taskInput.value.trim();
         if (!text || !ws) return;
 
-        ws.send({ type: 'task', text, token });
-        addLogEntry(`📝 Aufgabe: ${text}`, 'task', true);
+        // Aufgabe an den aktiven Agent senden
+        const msg = { type: 'task', text, token };
+        if (_activeAgentId && _activeAgentId !== '_main') {
+            msg.agent_id = _activeAgentId;
+        }
+        ws.send(msg);
+        addLogEntry(`📝 Aufgabe: ${text}`, 'task', true, _activeAgentId);
         taskInput.value = '';
         taskInput.style.height = 'auto';
 
@@ -316,26 +344,64 @@
     });
 
     // ─── Steuerung ──────────────────────────────────────────────
+    // Steuerungs-Befehle an den aktiven Agent senden
+    function _controlMsg(action) {
+        const msg = { type: 'control', action, token };
+        // Wenn ein bestimmter Agent aktiv ist, gezielt steuern
+        if (_activeAgentId && _activeAgentId !== '_main') {
+            msg.agent_id = _activeAgentId;
+        }
+        return msg;
+    }
+
     btnPause.addEventListener('click', () => {
-        ws.send({ type: 'control', action: 'pause', token });
+        ws.send(_controlMsg('pause'));
         btnPause.hidden = true;
         btnResume.hidden = false;
         btnResume.disabled = false;
     });
 
     btnResume.addEventListener('click', () => {
-        ws.send({ type: 'control', action: 'resume', token });
+        ws.send(_controlMsg('resume'));
         btnResume.hidden = true;
         btnPause.hidden = false;
         btnPause.disabled = false;
     });
 
     btnStop.addEventListener('click', () => {
-        ws.send({ type: 'control', action: 'stop', token });
+        ws.send(_controlMsg('stop'));
         btnPause.disabled = true;
         btnStop.disabled = true;
         btnResume.hidden = true;
         btnPause.hidden = false;
+
+        // Bei Stop: zurueck zum Hauptagent wechseln
+        const mainId = Object.keys(_agentInfos).find(id => !_agentInfos[id].is_sub_agent);
+        if (mainId && _activeAgentId !== mainId) {
+            _switchToAgent(mainId);
+        } else if (!mainId) {
+            _switchToAgent('_main');
+        }
+    });
+
+    // ─── Debug-Toggle ──────────────────────────────────────────
+    const btnDebug = document.getElementById('btn-debug');
+    let _debugMode = localStorage.getItem('jarvis_debug') !== 'false'; // Default: an
+    // Initialzustand setzen
+    if (_debugMode) {
+        btnDebug.classList.add('active');
+    } else {
+        btnDebug.classList.remove('active');
+        logContainer.classList.add('hide-debug');
+    }
+
+    btnDebug.addEventListener('click', () => {
+        _debugMode = !_debugMode;
+        localStorage.setItem('jarvis_debug', _debugMode);
+        btnDebug.classList.toggle('active', _debugMode);
+        logContainer.classList.toggle('hide-debug', !_debugMode);
+        // Zum Ende scrollen
+        logContainer.scrollTop = logContainer.scrollHeight;
     });
 
     function applyLogZoom() {
@@ -356,7 +422,12 @@
     });
 
     btnClearLog.addEventListener('click', () => {
-        logContainer.innerHTML = '';
+        // Nur Eintraege des aktiven Agents entfernen
+        const entries = logContainer.querySelectorAll(`.log-entry[data-agent-id="${_activeAgentId}"]`);
+        entries.forEach(e => e.remove());
+        if (_agentLogs[_activeAgentId]) {
+            _agentLogs[_activeAgentId] = [];
+        }
     });
 
     btnLogout.addEventListener('click', () => {
@@ -386,10 +457,237 @@
         window.speechSynthesis.speak(utterance);
     }
 
+    // ─── Multi-Agent State ──────────────────────────────────────
+    const _agentLogs = {};        // agent_id → [DOM-Elemente]
+    let _activeAgentId = '_main'; // Aktuell angezeigter Agent
+    const _agentInfos = {};       // agent_id → {label, state, is_sub_agent}
+
+    function _ensureAgentLog(agentId) {
+        if (!_agentLogs[agentId]) {
+            _agentLogs[agentId] = [];
+        }
+    }
+
+    function _switchToAgent(agentId) {
+        if (_activeAgentId === agentId) return;
+        _activeAgentId = agentId;
+
+        // Alle Log-Eintraege im Container ausblenden
+        const entries = logContainer.querySelectorAll('.log-entry');
+        entries.forEach(e => {
+            e.style.display = (e.dataset.agentId === agentId || !e.dataset.agentId) ? '' : 'none';
+        });
+
+        // Active-Klasse in Sidebar setzen
+        document.querySelectorAll('.agent-card').forEach(c => {
+            c.classList.toggle('active', c.dataset.agentId === agentId);
+        });
+
+        // Placeholder im Eingabefeld aktualisieren
+        const info = _agentInfos[agentId];
+        if (info && info.is_sub_agent) {
+            taskInput.placeholder = `Nachricht an ${info.label}...`;
+        } else {
+            taskInput.placeholder = 'Aufgabe eingeben...';
+        }
+
+        // Zum Ende scrollen
+        logContainer.scrollTop = logContainer.scrollHeight;
+    }
+
+    function _updateAgentCard(agentId, label, state, isSubAgent) {
+        _agentInfos[agentId] = { label: label || agentId, state: state || 'idle', is_sub_agent: isSubAgent };
+        _renderAgentCards();
+    }
+
+    function _handleAgentEvent(data) {
+        const event = data.event;
+        const agent = data.agent || {};
+        const agents = data.agents || [];
+
+        if (event === 'started' && !agent.is_sub_agent) {
+            // Neuer Hauptagent gestartet – alte Agent-Infos zuruecksetzen
+            // (z.B. nach Service-Restart oder neuem Task)
+            const oldIds = Object.keys(_agentInfos);
+            for (const oldId of oldIds) {
+                delete _agentInfos[oldId];
+            }
+            _activeAgentId = agent.agent_id;
+        }
+
+        if (event === 'started' || event === 'spawned') {
+            _agentInfos[agent.agent_id] = {
+                label: agent.label,
+                state: agent.state,
+                is_sub_agent: agent.is_sub_agent,
+            };
+            _ensureAgentLog(agent.agent_id);
+        }
+
+        if (event === 'finished' && agent.is_sub_agent) {
+            // Sub-Agent fertig – State aktualisieren
+            if (_agentInfos[agent.agent_id]) {
+                _agentInfos[agent.agent_id].state = 'idle';
+            }
+            // Wenn der beendete Sub-Agent aktiv war: zurueck zum Hauptagent
+            if (_activeAgentId === agent.agent_id) {
+                const mainId = Object.keys(_agentInfos).find(id => !_agentInfos[id].is_sub_agent);
+                if (mainId) _switchToAgent(mainId);
+            }
+            // Auto-Cleanup: Sub-Agent nach 8 Sekunden entfernen (nur wenn nicht pausiert)
+            const removeId = agent.agent_id;
+            setTimeout(() => {
+                const info = _agentInfos[removeId];
+                if (info && info.state !== 'paused') {
+                    window._removeAgent(removeId);
+                }
+            }, 8000);
+        }
+
+        if (event === 'paused' && agent.is_sub_agent) {
+            // Sub-Agent pausiert – State aktualisieren, NICHT entfernen
+            if (_agentInfos[agent.agent_id]) {
+                _agentInfos[agent.agent_id].state = 'paused';
+            }
+        }
+
+        // Alle Agent-Infos aktualisieren
+        for (const a of agents) {
+            _agentInfos[a.agent_id] = {
+                label: a.label,
+                state: a.state,
+                is_sub_agent: a.is_sub_agent,
+            };
+        }
+
+        _renderAgentCards();
+        _updateSidebarVisibility();
+    }
+
+    function _renderAgentCards() {
+        const list = document.getElementById('agent-sidebar-list');
+        if (!list) return;
+
+        const ids = Object.keys(_agentInfos);
+        // Hauptagent zuerst, dann Sub-Agents
+        ids.sort((a, b) => {
+            const aMain = !_agentInfos[a].is_sub_agent;
+            const bMain = !_agentInfos[b].is_sub_agent;
+            if (aMain !== bMain) return aMain ? -1 : 1;
+            return 0;
+        });
+
+        list.innerHTML = ids.map(id => {
+            const info = _agentInfos[id];
+            const isActive = id === _activeAgentId;
+            const typeClass = info.is_sub_agent ? 'sub-agent' : 'main-agent';
+            const stateLabel = { running: 'Läuft', idle: 'Bereit', paused: 'Pause', stopped: 'Stopp' };
+            const closeBtn = info.is_sub_agent
+                ? `<span class="agent-card-close" onclick="event.stopPropagation(); window._removeAgent('${id}')" title="Entfernen">×</span>`
+                : '';
+            return `<div class="agent-card ${typeClass} ${isActive ? 'active' : ''}"
+                         data-agent-id="${id}"
+                         onclick="window._switchAgent('${id}')">
+                <div class="agent-card-header">
+                    <div class="agent-card-label" title="${escapeHtml(info.label)}">${escapeHtml(info.label)}</div>
+                    ${closeBtn}
+                </div>
+                <div class="agent-card-state">
+                    <span class="state-dot ${info.state}"></span>
+                    ${stateLabel[info.state] || info.state}
+                </div>
+            </div>`;
+        }).join('');
+
+        _updateSidebarVisibility();
+    }
+
+    function _updateSidebarVisibility() {
+        const sidebar = document.getElementById('agent-sidebar');
+        const resizeHandle = document.getElementById('agent-sidebar-resize');
+        if (!sidebar) return;
+
+        // Sidebar nur zeigen wenn Sub-Agents existieren
+        const hasSubAgents = Object.values(_agentInfos).some(a => a.is_sub_agent);
+        sidebar.style.display = hasSubAgents ? '' : 'none';
+        if (resizeHandle) resizeHandle.style.display = hasSubAgents ? '' : 'none';
+    }
+
+    // ─── Sidebar Drag-Resize ─────────────────────────────────────
+    (function initSidebarResize() {
+        const handle = document.getElementById('agent-sidebar-resize');
+        const sidebar = document.getElementById('agent-sidebar');
+        if (!handle || !sidebar) return;
+
+        let dragging = false;
+        let startX = 0;
+        let startW = 0;
+
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            dragging = true;
+            startX = e.clientX;
+            startW = sidebar.offsetWidth;
+            handle.classList.add('dragging');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!dragging) return;
+            // Sidebar ist rechts, also: Maus nach links = breiter
+            const diff = startX - e.clientX;
+            const newW = Math.max(100, Math.min(350, startW + diff));
+            sidebar.style.width = newW + 'px';
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!dragging) return;
+            dragging = false;
+            handle.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        });
+    })();
+
+    // Global erreichbar fuer onclick
+    window._switchAgent = function(agentId) {
+        _switchToAgent(agentId);
+    };
+
+    // Sub-Agent entfernen (X-Button oder Auto-Cleanup)
+    window._removeAgent = function(agentId) {
+        const info = _agentInfos[agentId];
+        if (!info) return;
+
+        // Falls dieser Agent gerade aktiv: zurueck zum Hauptagent
+        if (_activeAgentId === agentId) {
+            const mainId = Object.keys(_agentInfos).find(id => !_agentInfos[id].is_sub_agent);
+            if (mainId) _switchToAgent(mainId);
+        }
+
+        // Agent-Eintraege aus DOM entfernen
+        if (_agentLogs[agentId]) {
+            _agentLogs[agentId].forEach(el => { if (el.parentNode) el.parentNode.removeChild(el); });
+            delete _agentLogs[agentId];
+        }
+
+        // Agent-Info entfernen
+        delete _agentInfos[agentId];
+
+        // Sidebar aktualisieren
+        _renderAgentCards();
+        _updateSidebarVisibility();
+
+        // Backend informieren (Agent stoppen falls noch laufend)
+        if (info.state === 'running') {
+            ws.send(JSON.stringify({ type: 'control', action: 'stop', agent_id: agentId, token }));
+        }
+    };
+
     // ─── Log ────────────────────────────────────────────────────
-    function addLogEntry(message, type = 'info', highlight = false) {
+    function addLogEntry(message, type = 'info', highlight = false, agentId = null) {
         if (type === 'system' || type === 'info') {
-            // Bereinige Nachricht von Emojis für sauberere Aussprache
             const cleanMessage = message.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
             speak(cleanMessage);
         }
@@ -400,6 +698,19 @@
         const entry = document.createElement('div');
         entry.className = 'log-entry' + (highlight ? ' log-highlight' : '');
 
+        // Agent-ID zuordnen
+        const effectiveAgentId = agentId || '_main';
+        entry.dataset.agentId = effectiveAgentId;
+
+        // Nur anzeigen wenn dieser Agent aktiv ist
+        if (effectiveAgentId !== _activeAgentId) {
+            entry.style.display = 'none';
+        }
+
+        // In per-Agent Log-Buffer speichern
+        _ensureAgentLog(effectiveAgentId);
+        _agentLogs[effectiveAgentId].push(entry);
+
         const now = new Date();
         const time = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
@@ -407,12 +718,16 @@
 
         logContainer.appendChild(entry);
 
-        // Auto-Scroll nach unten
-        logContainer.scrollTop = logContainer.scrollHeight;
+        // Auto-Scroll nur wenn aktiver Agent
+        if (effectiveAgentId === _activeAgentId) {
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
 
-        // Max 500 Einträge behalten
-        while (logContainer.children.length > 500) {
-            logContainer.removeChild(logContainer.firstChild);
+        // Max 500 Eintraege pro Agent behalten
+        const agentEntries = _agentLogs[effectiveAgentId];
+        while (agentEntries.length > 500) {
+            const old = agentEntries.shift();
+            if (old.parentNode) old.parentNode.removeChild(old);
         }
     }
 

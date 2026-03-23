@@ -117,7 +117,8 @@ async def vnc_websocket_proxy(websocket: WebSocket):
 
 # ─── State ────────────────────────────────────────────────────────────
 active_sessions: dict[str, WebSocket] = {}
-agent_instance = None  # wird lazy initialisiert
+agent_instance = None  # wird lazy initialisiert (Kompatibilitaet)
+agent_manager = None  # AgentManager fuer Multi-Agent Support
 
 # Erlaubte Linux-Benutzer für Web-Login
 ALLOWED_USERS = {"jarvis"}
@@ -2108,11 +2109,11 @@ async def cpu_broadcast(ws: WebSocket):
 
 async def handle_ws_message(ws: WebSocket, msg: dict):
     """Verarbeitet eingehende WebSocket-Nachrichten."""
-    global agent_instance
+    global agent_instance, agent_manager
 
     msg_type = msg.get("type", "")
 
-    # Token prüfen
+    # Token pruefen
     token = msg.get("token", "")
     if msg_type != "ping" and verify_token(token) is None:
         await ws.send_json({"type": "error", "message": "Nicht autorisiert"})
@@ -2125,35 +2126,90 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             await ws.send_json({"type": "error", "message": "Keine Aufgabe angegeben"})
             return
 
-        # Agent-Import und Start
-        from backend.agent import JarvisAgent
+        target_agent_id = msg.get("agent_id", "")
 
-        if agent_instance is None:
-            agent_instance = JarvisAgent()
+        from backend.agent import JarvisAgent, AgentManager
+
+        # AgentManager initialisieren
+        if agent_manager is None:
+            agent_manager = AgentManager()
+
+        # Wenn agent_id angegeben und es ein existierender Sub-Agent ist:
+        # Nachricht als Follow-Up an den Sub-Agent senden (neuer Task)
+        if target_agent_id and agent_manager.get_agent(target_agent_id):
+            target = agent_manager.get_agent(target_agent_id)
+            if target.is_sub_agent:
+                asyncio.create_task(target.run_task(task_text, ws))
+                return
+
+        agent = agent_manager.get_or_create_main()
+        agent_instance = agent  # Kompatibilitaet
+
+        # Agent-Liste ans Frontend senden
+        await ws.send_json({
+            "type": "agent_event",
+            "event": "started",
+            "agent": agent.get_info(),
+            "agents": agent_manager.get_all_info(),
+        })
 
         # Aufgabe im Hintergrund starten
-        asyncio.create_task(agent_instance.run_task(task_text, ws))
+        asyncio.create_task(agent.run_task(task_text, ws))
+
+    elif msg_type == "spawn_agent":
+        # Sub-Agent starten (vom Frontend oder Hauptagent)
+        from backend.agent import AgentManager
+
+        if agent_manager is None:
+            await ws.send_json({"type": "error", "message": "Kein AgentManager aktiv"})
+            return
+
+        label = msg.get("label", "Sub-Agent")
+        task_text = msg.get("text", "").strip()
+        if not task_text:
+            await ws.send_json({"type": "error", "message": "Keine Aufgabe fuer Sub-Agent"})
+            return
+
+        sub = agent_manager.spawn_sub_agent(label, task_text)
+        asyncio.create_task(agent_manager.run_sub_agent(sub, task_text, ws))
 
     elif msg_type == "control":
         # Steuerungsbefehle
         action = msg.get("action", "")
-        if agent_instance is None:
+        target_id = msg.get("agent_id", "")
+
+        # Ziel-Agent bestimmen
+        target = None
+        if agent_manager and target_id:
+            target = agent_manager.get_agent(target_id)
+        if target is None:
+            target = agent_instance
+
+        if target is None:
             await ws.send_json({"type": "error", "message": "Kein Agent aktiv"})
             return
 
         if action == "pause":
-            agent_instance.pause()
-            await ws.send_json({"type": "status", "message": "⏸️ Agent pausiert"})
+            target.pause()
+            await ws.send_json({"type": "status", "message": "⏸️ Agent pausiert",
+                                "agent_id": target.agent_id})
         elif action == "resume":
-            agent_instance.resume()
-            await ws.send_json({"type": "status", "message": "▶️ Agent fortgesetzt"})
+            target.resume()
+            await ws.send_json({"type": "status", "message": "▶️ Agent fortgesetzt",
+                                "agent_id": target.agent_id})
         elif action == "stop":
-            agent_instance.stop()
-            await ws.send_json({"type": "status", "message": "⏹️ Agent gestoppt"})
-        elif action == "speed":
-            speed = msg.get("value", 1.0)
-            agent_instance.set_speed(speed)
-            await ws.send_json({"type": "status", "message": f"⚡ Geschwindigkeit: {speed}x"})
+            target.stop()
+            await ws.send_json({"type": "status", "message": "⏹️ Agent gestoppt",
+                                "agent_id": target.agent_id})
+        elif action == "stop_all":
+            if agent_manager:
+                agent_manager.stop_all()
+            await ws.send_json({"type": "status", "message": "⏹️ Alle Agents gestoppt"})
+
+    elif msg_type == "get_agents":
+        # Agent-Liste anfordern
+        agents = agent_manager.get_all_info() if agent_manager else []
+        await ws.send_json({"type": "agent_list", "agents": agents})
 
     elif msg_type == "ping":
         await ws.send_json({"type": "pong"})

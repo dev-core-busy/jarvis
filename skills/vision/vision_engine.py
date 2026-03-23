@@ -153,6 +153,8 @@ class VisionEngine:
         self._known_encodings: dict[str, list] = {}  # {name: [encoding, ...]}
         self._current_faces: list[dict] = []
         self._current_face_crops: list[bytes] = []  # JPEG-Crops der erkannten Gesichter
+        self._faces_last_seen: float = 0.0  # Wann zuletzt Gesichter erkannt wurden
+        self._face_grace_period: float = 3.0  # Sekunden Karenz bevor Faces als "weg" gelten
         self._recent_events: list[dict] = []
         self._last_action_time: dict[str, float] = {}  # Cooldown pro Person
         self._last_seen_time: dict[str, float] = {}    # Wann Person zuletzt gesehen wurde
@@ -384,9 +386,12 @@ class VisionEngine:
 
                 if not ret:
                     fail_count += 1
-                    # FPS auf 0 setzen wenn keine Frames kommen
+                    # FPS auf 0 setzen und Frame/Gesichter leeren wenn keine Frames kommen
                     if fail_count >= 5:
                         self._fps = 0.0
+                        with self._lock:
+                            self._frame = None
+                            self._current_faces = []
                     if fail_count >= MAX_FAILS and isinstance(self._source, str):
                         # Reconnect bei URL-Streams
                         log.warning("Kein Frame seit %d Versuchen – Reconnect...", fail_count)
@@ -439,7 +444,12 @@ class VisionEngine:
                     time.sleep(0.033)
 
             except Exception as e:
-                log.error("Fehler im Erkennungs-Loop: %s", e, exc_info=True)
+                log.error("Fehler im Erkennungs-Loop: %s", e)
+                fail_count += 1
+                self._fps = 0.0
+                with self._lock:
+                    self._frame = None
+                    self._current_faces = []
                 time.sleep(1)
 
     def _detect_and_recognize(self, frame: np.ndarray):
@@ -518,8 +528,15 @@ class VisionEngine:
                 crops.append(b"")
 
         with self._lock:
-            self._current_faces = detected
-            self._current_face_crops = crops
+            if detected:
+                # Gesichter erkannt – sofort aktualisieren
+                self._current_faces = detected
+                self._current_face_crops = crops
+                self._faces_last_seen = time.time()
+            elif time.time() - self._faces_last_seen > self._face_grace_period:
+                # Keine Gesichter UND Karenzzeit abgelaufen – erst jetzt leeren
+                self._current_faces = []
+                self._current_face_crops = []
 
         # Presence-Reset: Personen die > COOLDOWN_SECONDS nicht mehr im Bild sind
         now = time.time()

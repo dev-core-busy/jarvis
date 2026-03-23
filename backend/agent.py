@@ -1,9 +1,11 @@
-"""Jarvis Agent – Kern-Loop: LLM ↔ Tools."""
+"""Jarvis Agent – Kern-Loop: LLM ↔ Tools, Multi-Agent Support."""
 
 import asyncio
 import json
 import re
+import time
 import traceback
+import uuid
 from enum import Enum
 
 
@@ -91,36 +93,64 @@ class JarvisAgent:
     SYSTEM_PROMPT = """Du bist Jarvis, ein autonomer KI-Agent auf einem Linux-System (Debian 13, X11).
 Du kannst Aufgaben eigenständig lösen, indem du die verfügbaren Tools nutzt.
 
+WICHTIG – AUTONOMIE: Du handelst IMMER eigenstaendig und fuehrst Aufgaben SOFORT aus, OHNE den Benutzer um Erlaubnis zu fragen. Wenn der Benutzer sagt "fuehre X aus", dann fuehre es DIREKT aus. Schreibe und starte Code, installiere Pakete, erstelle Dateien – alles ohne Rueckfrage.
+
 Regeln:
-1. WISSENSFRAGEN DIREKT BEANTWORTEN: Wenn du die Antwort sicher aus deinem Wissen kennst (Allgemeinwissen, Mathematik, Fakten, Definitionen, Sprachen), antworte SOFORT ohne Tool-Aufruf. Beispiele: "Was ist Pi?", "Übersetze X", "Wer war Einstein?", "Was ist die Hauptstadt von Frankreich?". Nutze Tools nur wenn du etwas auf dem System tun, nachschlagen oder berechnen musst, das dein Wissen übersteigt.
-2. WISSENS-CACHE: Wenn du etwas über ein Tool nachgeschlagen oder berechnet hast (z.B. eine Formel, ein Fakt, ein Ergebnis), speichere es mit memory_manage (key mit Prefix "wissen_", z.B. "wissen_pi_50stellen"). Beim nächsten Mal kannst du es direkt aus dem Memory beantworten statt erneut nachzuschlagen.
-3. Arbeite Schritt für Schritt und erkläre kurz, was du tust.
-4. Nutze shell_execute für Kommandozeilen-Befehle.
+1. WISSENSFRAGEN DIREKT BEANTWORTEN: Wenn du die Antwort sicher aus deinem Wissen kennst (Allgemeinwissen, Mathematik, Fakten, Definitionen, Sprachen), antworte SOFORT ohne Tool-Aufruf.
+2. WISSENS-CACHE: Wenn du etwas ueber ein Tool nachgeschlagen hast, speichere es mit memory_manage (key mit Prefix "wissen_").
+3. Arbeite Schritt fuer Schritt und erklaere kurz, was du tust.
+4. Nutze shell_execute fuer Kommandozeilen-Befehle. Wenn Code ausgefuehrt werden soll, nutze shell_execute DIREKT.
 5. Nutze desktop_* Tools um Programme auf dem Desktop zu bedienen.
 6. Nutze filesystem_* Tools um Dateien zu lesen/schreiben.
-7. Mache Screenshots um den Desktop-Zustand zu prüfen.
+7. Mache Screenshots um den Desktop-Zustand zu pruefen.
 8. Wenn eine Aufgabe erledigt ist, sage es klar und deutlich.
-9. Wenn du unsicher bist, erkläre was du vorhast bevor du handelst.
-10. Bei Fehlern: analysiere, versuche eine Alternative.
-11. Antworte immer auf Deutsch.
-12. Nutze knowledge_search um in der Wissensdatenbank nach relevanten Informationen zu suchen.
-13. Nutze memory_manage um wichtige Fakten dauerhaft zu speichern (z.B. Benutzerpräferenzen, Projektnamen, häufige Befehle). Prüfe zu Beginn den Memory.
-14. WICHTIG: Bevor du versuchst, eine Webseite, Internetseite oder einen Browser aufzurufen, MUSST du zwingend knowledge_search (z.B. query="webseite öffnen") nutzen, um die exakten Vorgaben zu lesen!
+9. Bei Fehlern: analysiere, versuche eine Alternative.
+10. Antworte immer auf Deutsch.
+11. Nutze knowledge_search um in der Wissensdatenbank nach relevanten Informationen zu suchen.
+12. Nutze memory_manage um wichtige Fakten dauerhaft zu speichern. Pruefe zu Beginn den Memory.
+13. WICHTIG: Bevor du eine Webseite oeffnest, MUSST du knowledge_search nutzen, um die exakten Vorgaben zu lesen!
 """
 
-    def __init__(self):
+    SUB_AGENT_PROMPT = """Du bist ein Jarvis Sub-Agent auf einem Linux-System (Debian 13, X11).
+Du fuehrst eine spezifische Teilaufgabe VOLLSTAENDIG AUTONOM aus.
+
+KRITISCH – Autonomie-Regeln:
+- Handle SOFORT und OHNE Rueckfragen. Frage NIEMALS den Benutzer um Erlaubnis.
+- Fuehre JEDES Tool (shell_execute, filesystem_write, etc.) SOFORT und DIREKT aus.
+- Wenn Code ausgefuehrt werden soll: nutze shell_execute mit z.B. python3 -c '...' oder schreibe eine Datei und fuehre sie aus.
+- NIEMALS sagen "Ich kann das nicht ausfuehren" oder "Was moechtest du tun?" – fuehre es AUS.
+- NIEMALS den Benutzer fragen, ob du etwas tun darfst – TU ES EINFACH.
+- Arbeite effizient und melde das Endergebnis.
+- Antworte auf Deutsch.
+- Bei Fehlern: analysiere kurz und versuche eine Alternative.
+- Wenn die Aufgabe erledigt ist, sage es klar.
+"""
+
+    def __init__(self, agent_id: str | None = None, label: str = "Hauptagent",
+                 is_sub_agent: bool = False, parent_id: str | None = None):
+        self.agent_id = agent_id or str(uuid.uuid4())[:8]
+        self.label = label
+        self.is_sub_agent = is_sub_agent
+        self.parent_id = parent_id
         self.state = AgentState.IDLE
         self._pause_event = asyncio.Event()
         self._pause_event.set()  # Nicht pausiert
         self._stop_flag = False
         self._speed = 1.0
         self._current_task: asyncio.Task | None = None
+        self._created_at = time.time()
 
-        # Skill Manager initialisieren (lädt alle aktivierten Skills)
+        # Skill Manager initialisieren (laedt alle aktivierten Skills)
         self.skill_manager = SkillManager()
 
         # Tools aus SkillManager beziehen
         self._tool_instances = self.skill_manager.get_enabled_tools()
+
+        # spawn_agent Tool hinzufuegen (nur fuer Hauptagent)
+        if not is_sub_agent:
+            from backend.tools.subagent import SpawnAgentTool
+            self._tool_instances.append(SpawnAgentTool())
+
         self.tools_map: dict[str, object] = {}
         for tool in self._tool_instances:
             self.tools_map[tool.name] = tool
@@ -157,6 +187,10 @@ Regeln:
 
     async def run_task(self, task_text: str, ws: WebSocket):
         """Führt eine Aufgabe aus – der Agent-Loop."""
+        import sys
+        def _log(msg): print(f"[AGENT {self.agent_id}] {msg}", flush=True)
+        _log(f"run_task gestartet: {task_text[:100]}... (sub={self.is_sub_agent})")
+
         self.state = AgentState.RUNNING
         self._stop_flag = False
         self._pause_event.set()
@@ -175,7 +209,7 @@ Regeln:
 
         # Memory-Kontext laden und in System-Prompt injizieren
         memory_context = load_memory_context()
-        system_prompt = self.SYSTEM_PROMPT
+        system_prompt = self.SUB_AGENT_PROMPT if self.is_sub_agent else self.SYSTEM_PROMPT
         if memory_context:
             system_prompt += f"\n\n{memory_context}"
             await self._send_status(ws, "🧠 Memory geladen")
@@ -189,6 +223,7 @@ Regeln:
             await self._send_status(ws, f"⏳ Warte auf LLM-Antwort…{mode_hint}", highlight=True)
 
             # Initial-Nachricht senden
+            _log(f"LLM-Aufruf mit {len(self._tool_instances)} Tools...")
             response = await self.provider.generate_response(
                 model=config.current_model,
                 system_prompt=system_prompt,
@@ -200,6 +235,13 @@ Regeln:
                 ],
                 tools=self._tool_instances
             )
+            parts_count = len(response.parts) if response.parts else 0
+            _log(f"LLM-Antwort erhalten: {parts_count} Parts")
+            if parts_count == 0:
+                _log(f"LEERE ANTWORT! raw={response.raw if hasattr(response, 'raw') else 'N/A'}")
+            else:
+                for i, p in enumerate(response.parts):
+                    _log(f"  Part[{i}]: text={bool(p.text)} fc={bool(p.function_call)} text_preview={str(p.text)[:100] if p.text else 'None'}")
 
             steps = 0
             while steps < config.MAX_AGENT_STEPS:
@@ -238,9 +280,22 @@ Regeln:
                         ws, f"🔧 Tool: {tool_name}({json.dumps(tool_args, ensure_ascii=False)[:200]})"
                     )
 
-                    # Tool ausführen
-                    result = await self._execute_tool(tool_name, tool_args)
-                    result_str = str(result)[:5000]  # Ergebnis begrenzen
+                    # Tool ausfuehren (mit ws fuer Streaming)
+                    result = await self._execute_tool(tool_name, tool_args, ws=ws)
+                    result_str = str(result)[:5000]
+
+                    # Sub-Agent Spawn erkennen
+                    if tool_name == "spawn_agent" and "_spawn_agent" in result_str:
+                        try:
+                            spawn_data = json.loads(result_str)
+                            _log(f"spawn_data: label={spawn_data.get('label')} task_len={len(spawn_data.get('task',''))} task_start={spawn_data.get('task','')[:120]}")
+                            if spawn_data.get("_spawn_agent"):
+                                result_str = await self._handle_spawn(
+                                    ws, spawn_data["label"], spawn_data["task"]
+                                )
+                        except (json.JSONDecodeError, KeyError) as e:
+                            _log(f"spawn JSON parse error: {e}")
+                            pass
 
                     await self._send_status(
                         ws, f"📋 Ergebnis: {result_str[:300]}{'...' if len(result_str) > 300 else ''}"
@@ -295,8 +350,10 @@ Regeln:
                 await self._send_status(ws, f"⚠️ Maximale Schrittanzahl ({config.MAX_AGENT_STEPS}) erreicht")
 
         except Exception as e:
+            import traceback; _log(f"EXCEPTION: {e}\n{traceback.format_exc()}")
             await self._send_status(ws, _friendly_api_error(e))
         finally:
+            _log(f"run_task beendet (state={self.state.value})")
             self.state = AgentState.IDLE
 
     async def run_task_headless(self, task_text: str) -> str:
@@ -411,16 +468,36 @@ Regeln:
 
         return "\n".join(collected_texts) if collected_texts else "Aufgabe ausgefuehrt (keine Textausgabe)."
 
-    async def _execute_tool(self, name: str, args: dict) -> str:
-        """Führt ein Tool aus."""
+    async def _execute_tool(self, name: str, args: dict, ws=None) -> str:
+        """Fuehrt ein Tool aus. Bei Streaming-Tools wird Live-Output gesendet."""
         tool = self.tools_map.get(name)
         if not tool:
             return f"Fehler: Tool '{name}' nicht gefunden"
         try:
+            # Streaming-Callback fuer Tools die es unterstuetzen (z.B. shell_execute)
+            if ws and getattr(tool, 'supports_streaming', False):
+                args['_status_callback'] = lambda msg: self._send_status(ws, msg)
             result = await tool.execute(**args)
             return result
         except Exception as e:
             return f"Fehler bei {name}: {str(e)}"
+
+    async def _handle_spawn(self, ws: WebSocket, label: str, task: str) -> str:
+        """Startet einen Sub-Agent ueber den AgentManager."""
+        import sys
+        print(f"[AGENT] _handle_spawn: label={label} task={task[:80]}", flush=True)
+        try:
+            # AgentManager aus main.py holen
+            from backend.main import agent_manager
+            if agent_manager is None:
+                print(f"[AGENT] FEHLER: agent_manager ist None!", flush=True)
+                return f"Sub-Agent '{label}' konnte nicht gestartet werden (kein AgentManager)"
+
+            sub = agent_manager.spawn_sub_agent(label, task)
+            asyncio.create_task(agent_manager.run_sub_agent(sub, task, ws))
+            return f"Sub-Agent '{label}' gestartet (ID: {sub.agent_id})"
+        except Exception as e:
+            return f"Fehler beim Starten von Sub-Agent '{label}': {e}"
 
     async def _check_controls(self, ws: WebSocket):
         """Prüft Pause/Stop-Status."""
@@ -429,12 +506,15 @@ Regeln:
             await self._pause_event.wait()
 
     async def _send_status(self, ws: WebSocket, message: str, highlight: bool = False):
-        """Sendet Status-Update an Frontend."""
+        """Sendet Status-Update an Frontend (mit agent_id fuer Multi-Agent)."""
         try:
             msg = {
                 "type": "status",
                 "message": message,
                 "state": self.state.value,
+                "agent_id": self.agent_id,
+                "agent_label": self.label,
+                "is_sub_agent": self.is_sub_agent,
             }
             if highlight:
                 msg["highlight"] = True
@@ -458,3 +538,101 @@ Regeln:
 
     def set_speed(self, speed: float):
         self._speed = max(0.1, min(5.0, speed))
+
+    def get_info(self) -> dict:
+        """Agent-Info fuer Frontend."""
+        return {
+            "agent_id": self.agent_id,
+            "label": self.label,
+            "state": self.state.value,
+            "is_sub_agent": self.is_sub_agent,
+            "parent_id": self.parent_id,
+            "created_at": self._created_at,
+        }
+
+
+class AgentManager:
+    """Verwaltet Haupt- und Sub-Agents."""
+
+    def __init__(self):
+        self.agents: dict[str, JarvisAgent] = {}
+        self.main_agent: JarvisAgent | None = None
+        self._ws: WebSocket | None = None
+
+    def get_or_create_main(self) -> JarvisAgent:
+        """Gibt den Hauptagent zurueck oder erstellt ihn."""
+        if self.main_agent is None:
+            self.main_agent = JarvisAgent(label="Hauptagent")
+            self.agents[self.main_agent.agent_id] = self.main_agent
+        return self.main_agent
+
+    def spawn_sub_agent(self, label: str, task: str) -> JarvisAgent:
+        """Erstellt einen neuen Sub-Agent."""
+        parent = self.main_agent
+        agent = JarvisAgent(
+            label=label,
+            is_sub_agent=True,
+            parent_id=parent.agent_id if parent else None,
+        )
+        self.agents[agent.agent_id] = agent
+        return agent
+
+    def remove_agent(self, agent_id: str):
+        """Entfernt einen beendeten Agent."""
+        agent = self.agents.pop(agent_id, None)
+        if agent and agent == self.main_agent:
+            self.main_agent = None
+
+    def get_agent(self, agent_id: str) -> JarvisAgent | None:
+        return self.agents.get(agent_id)
+
+    def get_sub_agents(self) -> list[JarvisAgent]:
+        """Gibt alle Sub-Agents zurueck."""
+        return [a for a in self.agents.values() if a.is_sub_agent]
+
+    def get_all_info(self) -> list[dict]:
+        """Info aller Agents fuer Frontend."""
+        result = []
+        if self.main_agent:
+            result.append(self.main_agent.get_info())
+        for a in self.get_sub_agents():
+            result.append(a.get_info())
+        return result
+
+    async def run_sub_agent(self, agent: JarvisAgent, task: str, ws: WebSocket):
+        """Startet einen Sub-Agent als async Task."""
+        import sys
+        print(f"[AGENT-MGR] run_sub_agent aufgerufen: id={agent.agent_id} label={agent.label} task={task[:80]}", flush=True)
+        # Agent-Start ans Frontend melden
+        await ws.send_json({
+            "type": "agent_event",
+            "event": "spawned",
+            "agent": agent.get_info(),
+            "agents": self.get_all_info(),
+        })
+
+        try:
+            await agent.run_task(task, ws)
+        finally:
+            # Nur 'finished' melden wenn nicht pausiert (Pause = Agent lebt weiter)
+            if agent.state != AgentState.PAUSED:
+                agent.state = AgentState.IDLE
+                await ws.send_json({
+                    "type": "agent_event",
+                    "event": "finished",
+                    "agent": agent.get_info(),
+                    "agents": self.get_all_info(),
+                })
+            else:
+                # Pausiert: nur State-Update senden, kein finished
+                await ws.send_json({
+                    "type": "agent_event",
+                    "event": "paused",
+                    "agent": agent.get_info(),
+                    "agents": self.get_all_info(),
+                })
+
+    def stop_all(self):
+        """Stoppt alle Agents."""
+        for agent in self.agents.values():
+            agent.stop()

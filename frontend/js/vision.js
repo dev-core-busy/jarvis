@@ -20,6 +20,8 @@ class JarvisVisionManager {
         this._feedInterval = null;  // Feed setInterval-Handle
         this._editProfileId = null;
         this._wizardDetectPoll = null;  // Polling: Gesicht suchen im Wizard
+        this._lastLogState = null;      // Letzter Log-Status (Duplikat-Vermeidung)
+        this._lastFaceKey = '';         // Letzte erkannte Gesichter (Duplikat-Vermeidung)
     }
 
     /* ── Lifecycle ──────────────────────────────────────────────────── */
@@ -58,6 +60,7 @@ class JarvisVisionManager {
         console.log('[Vision] _startFeed()');
         this._feedActive = true;
         this._feedFrame = 0;
+        this._showFeedImage(true);
         clearInterval(this._feedInterval);
         this._feedInterval = setInterval(() => this._feedTick(), 300);
         this._feedTick();
@@ -68,6 +71,14 @@ class JarvisVisionManager {
         this._feedActive = false;
         clearInterval(this._feedInterval);
         this._feedInterval = null;
+        this._showFeedImage(false);
+    }
+
+    _showFeedImage(show) {
+        const img = document.getElementById('vis-feed-img');
+        const ph = document.getElementById('vis-feed-placeholder');
+        if (img) img.style.display = show ? 'block' : 'none';
+        if (ph) ph.style.display = show ? 'none' : 'flex';
     }
 
     _feedTick() {
@@ -76,8 +87,39 @@ class JarvisVisionManager {
         if (!img) return;
         const token = encodeURIComponent(this._token());
         if (!token) return;
-        img.src = `/api/vision/snapshot?t=${Date.now()}&token=${token}`;
-        this._feedFrame++;
+        const newImg = new Image();
+        newImg.onload = () => {
+            img.src = newImg.src;
+            this._showFeedImage(true);
+            this._feedFrame++;
+        };
+        newImg.onerror = () => {
+            // Kein Frame verfuegbar – Platzhalter zeigen
+            this._showFeedImage(false);
+            const ph = document.getElementById('vis-feed-placeholder');
+            if (ph) ph.textContent = 'Kein Kamerabild verfügbar';
+        };
+        newImg.src = `/api/vision/snapshot?t=${Date.now()}&token=${token}`;
+    }
+
+    /* ── Log ──────────────────────────────────────────────────────── */
+
+    _visLog(msg, level = 'info') {
+        const el = document.getElementById('vis-log');
+        if (!el) return;
+        const now = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const entry = document.createElement('div');
+        entry.className = `vis-log-entry ${level}`;
+        entry.innerHTML = `<span class="vis-log-time">${now}</span>${msg}`;
+        el.appendChild(entry);
+        // Max 100 Eintraege
+        while (el.children.length > 100) el.removeChild(el.firstChild);
+        el.scrollTop = el.scrollHeight;
+    }
+
+    _clearVisLog() {
+        const el = document.getElementById('vis-log');
+        if (el) el.innerHTML = '';
     }
 
     /* ── Event-Binding ──────────────────────────────────────────────── */
@@ -86,6 +128,10 @@ class JarvisVisionManager {
         // Start / Stop Toggle
         const btnToggle = document.getElementById('vis-btn-toggle');
         if (btnToggle) btnToggle.onclick = () => this._toggleEngine();
+
+        // Log leeren
+        const btnClearLog = document.getElementById('vis-btn-clear-log');
+        if (btnClearLog) btnClearLog.onclick = () => this._clearVisLog();
 
         // Training Wizard
         const btnTrainNew = document.getElementById('vis-btn-train-new');
@@ -155,13 +201,31 @@ class JarvisVisionManager {
     async _fetchStatus() {
         const data = await this._api('/status');
         if (data.error) {
+            if (this._lastLogState !== 'error') {
+                this._visLog('Engine nicht erreichbar: ' + data.error, 'error');
+                this._lastLogState = 'error';
+            }
             this._setStatusBadge('offline', 'Nicht verfuegbar');
             return;
         }
 
         if (data.running) {
+            const fps = data.fps || 0;
             const extra = this._feedFrame > 0 ? ` · F:${this._feedFrame}` : '';
-            this._setStatusBadge('live', `Live · ${data.fps || 0} FPS${extra}`);
+            this._setStatusBadge('live', `Live · ${fps} FPS${extra}`);
+
+            if (this._lastLogState !== 'running') {
+                this._visLog(`Engine gestartet (${fps} FPS)`, 'success');
+                this._lastLogState = 'running';
+            }
+
+            // Kein Frame verfuegbar (Kamera offline)
+            if (fps === 0 && this._lastLogState !== 'no_frame') {
+                this._visLog('Kein Kamerabild – Stream nicht erreichbar', 'warn');
+                this._lastLogState = 'no_frame';
+            } else if (fps > 0) {
+                this._lastLogState = 'running';
+            }
 
             // Fallback: Bild direkt setzen
             if (this._feedActive) {
@@ -173,11 +237,29 @@ class JarvisVisionManager {
                 }
             }
         } else {
+            if (this._lastLogState !== 'stopped') {
+                this._visLog('Engine gestoppt', 'info');
+                this._lastLogState = 'stopped';
+            }
             this._setStatusBadge('offline', 'Gestoppt');
+            this._showFeedImage(false);
         }
 
-        // Erkannte Gesichter
-        this._renderDetectedFaces(data.current_faces || []);
+        // Erkannte Gesichter – Änderungen loggen
+        const faces = data.current_faces || [];
+        const faceKey = faces.map(f => f.name).sort().join(',');
+        if (faceKey !== this._lastFaceKey && faceKey) {
+            const names = faces.map(f => {
+                const conf = f.confidence ? ` (${(f.confidence * 100).toFixed(0)}%)` : '';
+                return f.name + conf;
+            }).join(', ');
+            this._visLog(`Erkannt: ${names}`, 'success');
+        } else if (!faceKey && this._lastFaceKey) {
+            this._visLog('Keine Gesichter mehr erkannt', 'info');
+        }
+        this._lastFaceKey = faceKey;
+
+        this._renderDetectedFaces(faces);
 
         // Training-Fortschritt (falls aktiv)
         if (data.training && data.training.active) {
@@ -285,10 +367,16 @@ class JarvisVisionManager {
 
     async _controlEngine(action) {
         const source = this._getActiveSource();
+        this._visLog(`${action === 'start' ? 'Starte' : 'Stoppe'} Engine...`, 'info');
         const data = await this._api('/control', {
             method: 'POST',
             body: JSON.stringify({ action, source }),
         });
+        if (data.error) {
+            this._visLog(`Fehler: ${data.error}`, 'error');
+        } else {
+            this._visLog(data.message || `Engine ${action}`, 'success');
+        }
         this._notify(data.message || data.error || action);
         await this._fetchStatus();
     }

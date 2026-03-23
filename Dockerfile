@@ -1,6 +1,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Jarvis AI Desktop Agent – Docker Image
 # Basis: Debian Bookworm Slim
+# Schneller Start mit Openbox, optionales Cinnamon-Upgrade beim ersten Start
 # ──────────────────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 
@@ -10,18 +11,18 @@ LABEL org.opencontainers.image.title="Jarvis AI Desktop Agent" \
       org.opencontainers.image.licenses="AGPL-3.0" \
       org.opencontainers.image.authors="Andreas Bender"
 
-# ── System-Pakete ──────────────────────────────────────────────────────────────
+# ── System-Pakete (Openbox statt Cinnamon fuer schnellen Build) ──────────────
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Python
     python3 python3-venv python3-pip \
-    # Build-Tools (für python-pam + dlib/face_recognition Kompilierung)
+    # Build-Tools (fuer python-pam + dlib/face_recognition Kompilierung)
     build-essential libpam0g-dev cmake libboost-all-dev \
-    # X11 / virtueller Desktop (Cinnamon)
+    # X11 / Leichtgewichtiger Desktop (Openbox)
     xvfb x11vnc xterm \
-    cinnamon-core cinnamon-session dbus-x11 at-spi2-core \
-    # Browser (für Desktop-Automation, CDP via --remote-debugging-port)
+    openbox obconf dbus-x11 at-spi2-core feh \
+    # Browser (fuer Desktop-Automation, CDP via --remote-debugging-port)
     chromium \
     # noVNC / websockify
     novnc websockify \
@@ -31,12 +32,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# ── Node.js 20 (für WhatsApp-Bridge / Baileys v7) ───────────────────────────
+# ── Node.js 20 (fuer WhatsApp-Bridge / Baileys v7) ──────────────────────────
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# ── Python venv + Abhängigkeiten ───────────────────────────────────────────────
+# ── Python venv + Abhaengigkeiten ────────────────────────────────────────────
 WORKDIR /app
 COPY requirements.txt .
 
@@ -47,33 +48,37 @@ RUN python3 -m venv /venv \
 
 ENV PATH="/venv/bin:$PATH"
 
-# ── App-Code kopieren ──────────────────────────────────────────────────────────
+# ── App-Code kopieren ────────────────────────────────────────────────────────
 COPY backend/    ./backend/
 COPY frontend/   ./frontend/
 COPY skills/     ./skills/
 COPY data/       ./data/
 COPY services/   ./services/
 
-# ── WhatsApp-Bridge Node-Abhängigkeiten installieren ─────────────────────────
+# ── WhatsApp-Bridge Node-Abhaengigkeiten installieren ────────────────────────
 RUN cd /app/services/whatsapp-bridge && npm install --omit=dev
 
-# ── Daten-Volume vorbereiten ───────────────────────────────────────────────────
+# ── Daten-Volume vorbereiten ─────────────────────────────────────────────────
 RUN mkdir -p /app/data/logs /app/data/knowledge /app/data/vision/faces /app/certs
 
 # ── Wallpaper ────────────────────────────────────────────────────────────────
 COPY docker/jarvis-wallpaper.jpg /usr/share/backgrounds/jarvis.jpg
 
-# ── Docker-spezifischer Entrypoint ─────────────────────────────────────────
+# ── Cinnamon-Upgrade-Skript (wird beim ersten Start ausgefuehrt) ─────────────
+COPY docker/install-cinnamon.sh /usr/local/bin/install-cinnamon.sh
+RUN chmod +x /usr/local/bin/install-cinnamon.sh
+
+# ── Docker-spezifischer Entrypoint ──────────────────────────────────────────
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# ── Ports ─────────────────────────────────────────────────────────────────────
+# ── Ports ────────────────────────────────────────────────────────────────────
 EXPOSE 80 443 6080
 
-# ── Volumes für persistente Daten ─────────────────────────────────────────────
+# ── Volumes fuer persistente Daten ───────────────────────────────────────────
 VOLUME ["/app/data", "/app/certs"]
 
-# ── Umgebungsvariablen (Defaults) ──────────────────────────────────────────────
+# ── Umgebungsvariablen (Defaults) ────────────────────────────────────────────
 ENV JARVIS_DOCKER=1 \
     JARVIS_PASSWORD=jarvis \
     DISPLAY=:1 \

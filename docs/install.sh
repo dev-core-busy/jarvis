@@ -22,9 +22,9 @@ CURRENT_STEP=0
 INSTALL_START=$(date +%s)
 
 # Geschaetzte Dauer pro Schritt in Sekunden (realistisch fuer Erstinstallation)
-#   1=OS-Erkennung, 2=Basis, 3=Python/Node, 4=Desktop/VNC, 5=Chrome,
+#   1=OS-Erkennung, 2=Basis, 3=Python/Node, 4=Desktop/VNC (Openbox+Cinnamon), 5=Chrome,
 #   6=Git clone, 7=pip install, 8=WhatsApp Bridge, 9=Benutzer/Config, 10=systemd
-STEP_ESTIMATES=(0 3 45 40 180 45 15 150 20 5 10)
+STEP_ESTIMATES=(0 3 45 40 240 45 15 150 20 5 10)
 STEP_NAMES=("" "Betriebssystem" "Basis-Abhaengigkeiten" "Python & Node.js"
              "Desktop & VNC" "Chrome/Chromium" "Jarvis klonen"
              "Python-Pakete" "WhatsApp Bridge" "Konfiguration" "Autostart")
@@ -295,28 +295,39 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Schritt 4: Desktop / VNC / Cinnamon
+# Schritt 4: Desktop / VNC (Openbox schnell, Cinnamon optional nachgelagert)
 # ══════════════════════════════════════════════════════════════════════════════
 step "Desktop-Umgebung & VNC"
 
 if [[ "$PKG_MGR" == "apt-get" ]]; then
-    if run_with_spinner "Cinnamon Desktop + X11/VNC-Pakete installieren" 150 \
+    # Openbox als leichtgewichtigen Desktop installieren (schnell)
+    if run_with_spinner "Openbox Desktop + X11/VNC-Pakete installieren" 60 \
         $SUDO apt-get install -y \
             xvfb x11vnc \
-            cinnamon-core cinnamon-session dbus-x11 at-spi2-core \
+            openbox obconf feh dbus-x11 at-spi2-core \
             xdotool wmctrl scrot \
             python3-websockify novnc \
             xauth x11-utils xterm \
             cifs-utils nfs-common davfs2; then
-        success "Cinnamon Desktop + X11/VNC-Pakete installiert"
+        success "Openbox Desktop + X11/VNC-Pakete installiert"
     else
         warn "Einige X11/Desktop-Pakete konnten nicht installiert werden."
     fi
-    # Fallback falls python3-websockify nicht verfügbar
+
+    # Cinnamon nachgelagert installieren (optional, dauert laenger)
+    info "Installiere Cinnamon Desktop im Hintergrund (kann einige Minuten dauern)..."
+    if run_with_spinner "Cinnamon Desktop installieren" 180 \
+        $SUDO apt-get install -y cinnamon-core cinnamon-session; then
+        success "Cinnamon Desktop installiert"
+    else
+        warn "Cinnamon konnte nicht installiert werden – Openbox wird als Fallback genutzt."
+    fi
+
+    # Fallback falls python3-websockify nicht verfuegbar
     if ! command -v websockify &>/dev/null; then
         $SUDO apt-get install -y websockify >/dev/null 2>&1 || \
         pip install websockify >/dev/null 2>&1 || \
-        warn "websockify nicht installiert – noVNC Desktop-Vorschau nicht verfügbar."
+        warn "websockify nicht installiert – noVNC Desktop-Vorschau nicht verfuegbar."
     fi
 elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
     run_with_spinner "X11/VNC-Pakete installieren" 120 \

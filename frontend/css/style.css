@@ -556,6 +556,39 @@ body {
     color: var(--text-primary);
 }
 
+/* Version als Pill neben Status */
+.header-version-pill {
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.06);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    cursor: default;
+    user-select: none;
+}
+
+/* Version im Settings-Modal Footer */
+.settings-version-footer {
+    padding: 0.6rem 2rem;
+    text-align: center;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    opacity: 0.5;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Version neben dem Titel – nicht mehr verwendet */
+.version-title {
+    font-size: 0.6rem;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    opacity: 0.6;
+}
+
+
 .header-status {
     font-size: 0.75rem;
     font-weight: 500;
@@ -1316,6 +1349,7 @@ body {
     padding: 2rem;
     overflow-y: auto;
 }
+
 
 .cert-download-section {
     display: flex;

@@ -6,6 +6,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+# ── Interaktive Dialoge unterdruecken (davfs2, etc.) ─────────────────────
+export DEBIAN_FRONTEND=noninteractive
+
 # ── Farben ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
@@ -24,7 +27,7 @@ INSTALL_START=$(date +%s)
 # Geschaetzte Dauer pro Schritt in Sekunden (realistisch fuer Erstinstallation)
 #   1=OS-Erkennung, 2=Basis, 3=Python/Node, 4=Desktop/VNC (Openbox+Cinnamon), 5=Chrome,
 #   6=Git clone, 7=pip install, 8=WhatsApp Bridge, 9=Benutzer/Config, 10=systemd
-STEP_ESTIMATES=(0 3 45 40 240 45 15 150 20 5 10)
+STEP_ESTIMATES=(0 3 45 40 240 45 15 900 20 5 10)
 STEP_NAMES=("" "Betriebssystem" "Basis-Abhaengigkeiten" "Python & Node.js"
              "Desktop & VNC" "Chrome/Chromium" "Jarvis klonen"
              "Python-Pakete" "WhatsApp Bridge" "Konfiguration" "Autostart")
@@ -295,32 +298,22 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Schritt 4: Desktop / VNC (Openbox schnell, Cinnamon optional nachgelagert)
+# Schritt 4: Desktop / VNC (Cinnamon + X11/VNC)
 # ══════════════════════════════════════════════════════════════════════════════
 step "Desktop-Umgebung & VNC"
 
 if [[ "$PKG_MGR" == "apt-get" ]]; then
-    # Openbox als leichtgewichtigen Desktop installieren (schnell)
-    if run_with_spinner "Openbox Desktop + X11/VNC-Pakete installieren" 60 \
+    if run_with_spinner "Cinnamon Desktop + X11/VNC-Pakete installieren" 300 \
         $SUDO apt-get install -y \
             xvfb x11vnc \
-            openbox obconf feh dbus-x11 at-spi2-core \
+            cinnamon-core cinnamon-session dbus-x11 at-spi2-core \
             xdotool wmctrl scrot \
             python3-websockify novnc \
             xauth x11-utils xterm \
             cifs-utils nfs-common davfs2; then
-        success "Openbox Desktop + X11/VNC-Pakete installiert"
+        success "Cinnamon Desktop + X11/VNC-Pakete installiert"
     else
-        warn "Einige X11/Desktop-Pakete konnten nicht installiert werden."
-    fi
-
-    # Cinnamon nachgelagert installieren (optional, dauert laenger)
-    info "Installiere Cinnamon Desktop im Hintergrund (kann einige Minuten dauern)..."
-    if run_with_spinner "Cinnamon Desktop installieren" 180 \
-        $SUDO apt-get install -y cinnamon-core cinnamon-session; then
-        success "Cinnamon Desktop installiert"
-    else
-        warn "Cinnamon konnte nicht installiert werden – Openbox wird als Fallback genutzt."
+        warn "Einige Desktop/X11-Pakete konnten nicht installiert werden."
     fi
 
     # Fallback falls python3-websockify nicht verfuegbar
@@ -416,18 +409,45 @@ source venv/bin/activate
 
 run_with_spinner "pip aktualisieren" 10 pip install --upgrade pip wheel || true
 
-info "Installiere Abhängigkeiten aus requirements.txt ..."
-if run_with_spinner "Python-Pakete installieren (face_recognition, FastAPI, ...)" 120 \
-    pip install -r requirements.txt; then
-    success "Python-Pakete installiert"
+# Cache leeren und TMPDIR auf echte Disk legen (PyTorch etc. sprengen sonst /tmp bei tmpfs)
+pip cache purge >/dev/null 2>&1 || true
+mkdir -p /var/tmp/pip
+export TMPDIR=/var/tmp/pip
+
+# Phase 1: Schnelle Pakete (ohne dlib/face-recognition/chromadb/sentence-transformers)
+info "Installiere Kern-Abhängigkeiten ..."
+if run_with_spinner "Kern-Pakete installieren (FastAPI, Pillow, ...)" 60 \
+    pip install --no-cache-dir fastapi==0.115.6 "uvicorn[standard]==0.34.0" google-genai==1.5.0 "anthropic>=0.39.0" \
+    python-dotenv==1.0.1 psutil==6.1.1 pyautogui==0.9.54 pillow==11.1.0 python-multipart==0.0.20 \
+    websockets==14.2 "python-pam>=2.0.2" "six>=1.16.0" "pdfplumber>=0.10.0" "python-docx>=1.0.0" \
+    "openpyxl>=3.1.0" "python-pptx>=0.6.23" "wsgidav>=4.3.0" "numpy<2.1"; then
+    success "Kern-Pakete installiert"
 else
     warn "Stiller Durchlauf fehlgeschlagen – zeige Fehlerausgabe:"
-    pip install -r requirements.txt || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
+    pip install --no-cache-dir -r requirements.txt || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
 fi
 
-# faster-whisper (optional)
-if run_with_spinner "faster-whisper installieren (Sprach-Transkription)" 30 \
-    pip install faster-whisper "numpy<2.1"; then
+# Phase 2: dlib + face-recognition (wird kompiliert – dauert 10-20 Min!)
+info "Kompiliere dlib + face-recognition (dauert 10-20 Min auf kleinen VMs) ..."
+if run_with_spinner "dlib + face-recognition kompilieren" 900 \
+    pip install --no-cache-dir "face-recognition>=1.3.0" "opencv-python-headless>=4.8.0"; then
+    success "face-recognition installiert (Gesichtserkennung aktiv)"
+else
+    optional "face-recognition konnte nicht kompiliert werden – Gesichtserkennung nicht verfügbar."
+fi
+
+# Phase 3: ChromaDB + Sentence-Transformers (Vektor-Datenbank)
+info "Installiere ChromaDB + Sentence-Transformers ..."
+if run_with_spinner "Vektor-Datenbank installieren" 120 \
+    pip install --no-cache-dir "chromadb>=0.4.0,<1.0" "sentence-transformers>=2.2.0,<4.0"; then
+    success "Vektor-Datenbank installiert (Wissenssuche aktiv)"
+else
+    optional "ChromaDB/Sentence-Transformers konnte nicht installiert werden – Wissenssuche nutzt TF-IDF Fallback."
+fi
+
+# Phase 4: faster-whisper (optional)
+if run_with_spinner "faster-whisper installieren (Sprach-Transkription)" 60 \
+    pip install --no-cache-dir faster-whisper "numpy<2.1"; then
     success "faster-whisper installiert (Sprach-Transkription aktiv)"
 else
     optional "faster-whisper konnte nicht installiert werden – Sprach-Transkription nicht verfügbar."

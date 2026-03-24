@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Jarvis AI Desktop Agent – Installer
+# Jarvis AI Desktop Agent – Installer & Updater
 # Copyright (C) 2026 Andreas Bender · AGPL-3.0
 # https://jarvis-ai.info  |  https://github.com/dev-core-busy/jarvis
 # ─────────────────────────────────────────────────────────────────────────────
@@ -8,6 +8,20 @@ set -euo pipefail
 
 # ── Interaktive Dialoge unterdruecken (davfs2, etc.) ─────────────────────
 export DEBIAN_FRONTEND=noninteractive
+
+# ── Update-Erkennung ────────────────────────────────────────────────────────
+# Automatisch: wenn /opt/jarvis oder ~/jarvis mit .git existiert → Update-Modus
+UPDATE_MODE=0
+INSTALL_DIR="${JARVIS_DIR:-}"
+if [[ -n "$INSTALL_DIR" && -d "$INSTALL_DIR/.git" ]]; then
+    UPDATE_MODE=1
+elif [[ -d "/opt/jarvis/.git" ]]; then
+    INSTALL_DIR="/opt/jarvis"
+    UPDATE_MODE=1
+elif [[ -d "$HOME/jarvis/.git" ]]; then
+    INSTALL_DIR="$HOME/jarvis"
+    UPDATE_MODE=1
+fi
 
 # ── Farben ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -24,10 +38,16 @@ TOTAL_STEPS=10
 CURRENT_STEP=0
 INSTALL_START=$(date +%s)
 
-# Geschaetzte Dauer pro Schritt in Sekunden (realistisch fuer Erstinstallation)
-#   1=OS-Erkennung, 2=Basis, 3=Python/Node, 4=Desktop/VNC (Openbox+Cinnamon), 5=Chrome,
-#   6=Git clone, 7=pip install, 8=WhatsApp Bridge, 9=Benutzer/Config, 10=systemd
-STEP_ESTIMATES=(0 3 45 40 240 45 15 900 20 5 10)
+# Geschaetzte Dauer pro Schritt in Sekunden
+#   1=OS-Erkennung, 2=Basis, 3=Python/Node, 4=Desktop/VNC, 5=Chrome,
+#   6=Git clone/pull, 7=pip install, 8=WhatsApp Bridge, 9=Benutzer/Config, 10=systemd
+if [[ $UPDATE_MODE -eq 1 ]]; then
+    # Update: System-Pakete ueberspringen, nur git pull + pip upgrade
+    STEP_ESTIMATES=(0 2 5 5 5 5 10 120 10 3 5)
+else
+    # Erstinstallation: volle Dauer
+    STEP_ESTIMATES=(0 3 45 40 240 45 15 900 20 5 10)
+fi
 STEP_NAMES=("" "Betriebssystem" "Basis-Abhaengigkeiten" "Python & Node.js"
              "Desktop & VNC" "Chrome/Chromium" "Jarvis klonen"
              "Python-Pakete" "WhatsApp Bridge" "Konfiguration" "Autostart")
@@ -167,10 +187,18 @@ ${CYAN}${BOLD}
 ${RESET}
   Autonomous AI Desktop Agent  |  v0.8  |  AGPL-3.0
   ${CYAN}https://jarvis-ai.info${RESET}
+"
 
-  ${DIM}Geschaetzte Installationsdauer: $(_fmt_time $(_total_estimate))${RESET}
+if [[ $UPDATE_MODE -eq 1 ]]; then
+    echo -e "  ${GREEN}${BOLD}🔄 UPDATE-MODUS${RESET} – bestehende Installation erkannt: ${CYAN}$INSTALL_DIR${RESET}
+  ${DIM}Geschaetzte Update-Dauer: $(_fmt_time $(_total_estimate))${RESET}
+  ${DIM}(System-Pakete werden uebersprungen, nur Code + Python-Pakete aktualisiert)${RESET}
+"
+else
+    echo -e "  ${DIM}Geschaetzte Installationsdauer: $(_fmt_time $(_total_estimate))${RESET}
   ${DIM}(abhaengig von Internetgeschwindigkeit und Hardware)${RESET}
 "
+fi
 
 # ── Root-Check ───────────────────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
@@ -211,24 +239,28 @@ install_pkg() {
 # ══════════════════════════════════════════════════════════════════════════════
 step "Basis-Abhaengigkeiten"
 
-install_pkg git git
-install_pkg curl curl
-install_pkg ffmpeg ffmpeg
+if [[ $UPDATE_MODE -eq 1 ]]; then
+    success "Update-Modus – System-Pakete uebersprungen"
+else
+    install_pkg git git
+    install_pkg curl curl
+    install_pkg ffmpeg ffmpeg
 
-# Build-Tools (nötig für Python-Pakete mit C-Erweiterungen)
-if [[ "$PKG_MGR" == "apt-get" ]]; then
-    if run_with_spinner "Build-Tools & Dev-Header installieren" 30 \
-        $SUDO apt-get install -y build-essential python3-dev libssl-dev libffi-dev libpam0g-dev cmake libboost-all-dev; then
-        success "Build-Tools installiert"
-    else
-        warn "Build-Tools konnten nicht installiert werden – manche pip-Pakete könnten fehlschlagen."
+    # Build-Tools (nötig für Python-Pakete mit C-Erweiterungen)
+    if [[ "$PKG_MGR" == "apt-get" ]]; then
+        if run_with_spinner "Build-Tools & Dev-Header installieren" 30 \
+            $SUDO apt-get install -y build-essential python3-dev libssl-dev libffi-dev libpam0g-dev cmake libboost-all-dev; then
+            success "Build-Tools installiert"
+        else
+            warn "Build-Tools konnten nicht installiert werden – manche pip-Pakete könnten fehlschlagen."
+        fi
+    elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
+        run_with_spinner "Build-Tools installieren" 30 \
+            $SUDO $INSTALL gcc gcc-c++ python3-devel openssl-devel libffi-devel cmake boost-devel || true
+    elif [[ "$PKG_MGR" == "pacman" ]]; then
+        run_with_spinner "Build-Tools installieren" 20 \
+            $SUDO pacman -S --noconfirm base-devel python-pip || true
     fi
-elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
-    run_with_spinner "Build-Tools installieren" 30 \
-        $SUDO $INSTALL gcc gcc-c++ python3-devel openssl-devel libffi-devel cmake boost-devel || true
-elif [[ "$PKG_MGR" == "pacman" ]]; then
-    run_with_spinner "Build-Tools installieren" 20 \
-        $SUDO pacman -S --noconfirm base-devel python-pip || true
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -236,65 +268,69 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 step "Python & Node.js einrichten"
 
-# Python 3.10+
-if command -v python3 &>/dev/null; then
-    PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    PY_MAJOR=$(echo "$PY_VER" | cut -d. -f1)
-    PY_MINOR=$(echo "$PY_VER" | cut -d. -f2)
-    if [[ "$PY_MAJOR" -ge 3 && "$PY_MINOR" -ge 10 ]]; then
-        success "Python $PY_VER vorhanden"
-    else
-        warn "Python $PY_VER zu alt (mind. 3.10 nötig)"
-        if [[ "$PKG_MGR" == "apt-get" ]]; then
-            $SUDO apt-get install -y python3.12 python3.12-venv >/dev/null 2>&1 || true
+if [[ $UPDATE_MODE -eq 1 ]]; then
+    success "Update-Modus – Python $(python3 --version 2>&1 | awk '{print $2}'), Node $(node --version 2>/dev/null || echo 'n/a') vorhanden"
+else
+    # Python 3.10+
+    if command -v python3 &>/dev/null; then
+        PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+        PY_MAJOR=$(echo "$PY_VER" | cut -d. -f1)
+        PY_MINOR=$(echo "$PY_VER" | cut -d. -f2)
+        if [[ "$PY_MAJOR" -ge 3 && "$PY_MINOR" -ge 10 ]]; then
+            success "Python $PY_VER vorhanden"
+        else
+            warn "Python $PY_VER zu alt (mind. 3.10 nötig)"
+            if [[ "$PKG_MGR" == "apt-get" ]]; then
+                $SUDO apt-get install -y python3.12 python3.12-venv >/dev/null 2>&1 || true
+            fi
         fi
-    fi
-else
-    info "Installiere Python 3 ..."
-    if   [[ "$PKG_MGR" == "apt-get" ]]; then $SUDO apt-get install -y python3 python3-venv python3-pip >/dev/null 2>&1
-    elif [[ "$PKG_MGR" == "dnf"     ]]; then $SUDO dnf install -y python3 python3-pip >/dev/null 2>&1
-    elif [[ "$PKG_MGR" == "pacman"  ]]; then $SUDO pacman -S --noconfirm python python-pip >/dev/null 2>&1
-    else $SUDO $INSTALL python3 >/dev/null 2>&1; fi
-    success "Python 3 installiert"
-fi
-
-# python3-venv
-if [[ "$PKG_MGR" == "apt-get" ]]; then
-    $SUDO apt-get install -y python3-venv >/dev/null 2>&1 || true
-elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
-    $SUDO $INSTALL python3-venv >/dev/null 2>&1 || true
-fi
-
-# pip
-if ! command -v pip3 &>/dev/null && ! python3 -m pip --version &>/dev/null 2>&1; then
-    info "Installiere pip ..."
-    if [[ "$PKG_MGR" == "apt-get" ]]; then
-        $SUDO apt-get install -y python3-pip >/dev/null 2>&1
     else
-        curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3 - >/dev/null 2>&1
+        info "Installiere Python 3 ..."
+        if   [[ "$PKG_MGR" == "apt-get" ]]; then $SUDO apt-get install -y python3 python3-venv python3-pip >/dev/null 2>&1
+        elif [[ "$PKG_MGR" == "dnf"     ]]; then $SUDO dnf install -y python3 python3-pip >/dev/null 2>&1
+        elif [[ "$PKG_MGR" == "pacman"  ]]; then $SUDO pacman -S --noconfirm python python-pip >/dev/null 2>&1
+        else $SUDO $INSTALL python3 >/dev/null 2>&1; fi
+        success "Python 3 installiert"
     fi
-    success "pip installiert"
-else
-    success "pip vorhanden"
-fi
 
-# Node.js (für WhatsApp Bridge)
-if ! command -v node &>/dev/null; then
-    info "Installiere Node.js (für WhatsApp Bridge) ..."
+    # python3-venv
     if [[ "$PKG_MGR" == "apt-get" ]]; then
-        curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO bash - >/dev/null 2>&1
-        $SUDO apt-get install -y nodejs >/dev/null 2>&1
+        $SUDO apt-get install -y python3-venv >/dev/null 2>&1 || true
     elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
-        curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO bash - >/dev/null 2>&1
-        $SUDO $INSTALL nodejs >/dev/null 2>&1
-    elif [[ "$PKG_MGR" == "pacman" ]]; then
-        $SUDO pacman -S --noconfirm nodejs npm >/dev/null 2>&1
-    else
-        warn "Node.js nicht installiert – WhatsApp Bridge nicht verfügbar."
+        $SUDO $INSTALL python3-venv >/dev/null 2>&1 || true
     fi
-    command -v node &>/dev/null && success "Node.js $(node --version) installiert" || warn "Node.js konnte nicht installiert werden"
-else
-    success "Node.js $(node --version) vorhanden"
+
+    # pip
+    if ! command -v pip3 &>/dev/null && ! python3 -m pip --version &>/dev/null 2>&1; then
+        info "Installiere pip ..."
+        if [[ "$PKG_MGR" == "apt-get" ]]; then
+            $SUDO apt-get install -y python3-pip >/dev/null 2>&1
+        else
+            curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3 - >/dev/null 2>&1
+        fi
+        success "pip installiert"
+    else
+        success "pip vorhanden"
+    fi
+
+    # Node.js (für WhatsApp Bridge)
+    if ! command -v node &>/dev/null; then
+        info "Installiere Node.js (für WhatsApp Bridge) ..."
+        if [[ "$PKG_MGR" == "apt-get" ]]; then
+            curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO bash - >/dev/null 2>&1
+            $SUDO apt-get install -y nodejs >/dev/null 2>&1
+        elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
+            curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO bash - >/dev/null 2>&1
+            $SUDO $INSTALL nodejs >/dev/null 2>&1
+        elif [[ "$PKG_MGR" == "pacman" ]]; then
+            $SUDO pacman -S --noconfirm nodejs npm >/dev/null 2>&1
+        else
+            warn "Node.js nicht installiert – WhatsApp Bridge nicht verfügbar."
+        fi
+        command -v node &>/dev/null && success "Node.js $(node --version) installiert" || warn "Node.js konnte nicht installiert werden"
+    else
+        success "Node.js $(node --version) vorhanden"
+    fi
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -302,7 +338,9 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 step "Desktop-Umgebung & VNC"
 
-if [[ "$PKG_MGR" == "apt-get" ]]; then
+if [[ $UPDATE_MODE -eq 1 ]]; then
+    success "Update-Modus – Desktop-Pakete uebersprungen"
+elif [[ "$PKG_MGR" == "apt-get" ]]; then
     if run_with_spinner "Cinnamon Desktop + X11/VNC-Pakete installieren" 300 \
         $SUDO apt-get install -y \
             xvfb x11vnc \
@@ -339,7 +377,9 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 step "Chrome / Chromium"
 
-if command -v google-chrome &>/dev/null || command -v chromium &>/dev/null || command -v chromium-browser &>/dev/null; then
+if [[ $UPDATE_MODE -eq 1 ]]; then
+    success "Update-Modus – Browser uebersprungen"
+elif command -v google-chrome &>/dev/null || command -v chromium &>/dev/null || command -v chromium-browser &>/dev/null; then
     CHROME_CMD="$(command -v google-chrome 2>/dev/null || command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)"
     success "Browser vorhanden: $CHROME_CMD"
 else
@@ -404,8 +444,14 @@ success "Daten-Verzeichnisse angelegt"
 step "Python-Pakete installieren"
 
 cd "$INSTALL_DIR"
-python3 -m venv venv
-source venv/bin/activate
+
+if [[ $UPDATE_MODE -eq 1 && -d "venv" ]]; then
+    source venv/bin/activate
+    success "Bestehendes venv aktiviert"
+else
+    python3 -m venv venv
+    source venv/bin/activate
+fi
 
 run_with_spinner "pip aktualisieren" 10 pip install --upgrade pip wheel || true
 
@@ -414,43 +460,56 @@ pip cache purge >/dev/null 2>&1 || true
 mkdir -p /var/tmp/pip
 export TMPDIR=/var/tmp/pip
 
-# Phase 1: Schnelle Pakete (ohne dlib/face-recognition/chromadb/sentence-transformers)
-info "Installiere Kern-Abhängigkeiten ..."
-if run_with_spinner "Kern-Pakete installieren (FastAPI, Pillow, ...)" 60 \
-    pip install --no-cache-dir fastapi==0.115.6 "uvicorn[standard]==0.34.0" google-genai==1.5.0 "anthropic>=0.39.0" \
-    python-dotenv==1.0.1 psutil==6.1.1 pyautogui==0.9.54 pillow==11.1.0 python-multipart==0.0.20 \
-    websockets==14.2 "python-pam>=2.0.2" "six>=1.16.0" "pdfplumber>=0.10.0" "python-docx>=1.0.0" \
-    "openpyxl>=3.1.0" "python-pptx>=0.6.23" "wsgidav>=4.3.0" "numpy<2.1"; then
-    success "Kern-Pakete installiert"
+if [[ $UPDATE_MODE -eq 1 ]]; then
+    # ── Update: nur requirements.txt upgraden ────────────────────────────────
+    info "Aktualisiere Python-Pakete ..."
+    if run_with_spinner "Python-Pakete aktualisieren" 90 \
+        pip install --no-cache-dir --upgrade -r requirements.txt; then
+        success "Python-Pakete aktualisiert"
+    else
+        warn "Upgrade fehlgeschlagen – zeige Fehlerausgabe:"
+        pip install --no-cache-dir --upgrade -r requirements.txt || warn "Einige Pakete konnten nicht aktualisiert werden."
+    fi
 else
-    warn "Stiller Durchlauf fehlgeschlagen – zeige Fehlerausgabe:"
-    pip install --no-cache-dir -r requirements.txt || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
-fi
+    # ── Erstinstallation: 4 Phasen ──────────────────────────────────────────
+    # Phase 1: Schnelle Pakete (ohne dlib/face-recognition/chromadb/sentence-transformers)
+    info "Installiere Kern-Abhängigkeiten ..."
+    if run_with_spinner "Kern-Pakete installieren (FastAPI, Pillow, ...)" 60 \
+        pip install --no-cache-dir fastapi==0.115.6 "uvicorn[standard]==0.34.0" google-genai==1.5.0 "anthropic>=0.39.0" \
+        python-dotenv==1.0.1 psutil==6.1.1 pyautogui==0.9.54 pillow==11.1.0 python-multipart==0.0.20 \
+        websockets==14.2 "python-pam>=2.0.2" "six>=1.16.0" "pdfplumber>=0.10.0" "python-docx>=1.0.0" \
+        "openpyxl>=3.1.0" "python-pptx>=0.6.23" "wsgidav>=4.3.0" "numpy<2.1"; then
+        success "Kern-Pakete installiert"
+    else
+        warn "Stiller Durchlauf fehlgeschlagen – zeige Fehlerausgabe:"
+        pip install --no-cache-dir -r requirements.txt || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
+    fi
 
-# Phase 2: dlib + face-recognition (wird kompiliert – dauert 10-20 Min!)
-info "Kompiliere dlib + face-recognition (dauert 10-20 Min auf kleinen VMs) ..."
-if run_with_spinner "dlib + face-recognition kompilieren" 900 \
-    pip install --no-cache-dir "face-recognition>=1.3.0" "opencv-python-headless>=4.8.0"; then
-    success "face-recognition installiert (Gesichtserkennung aktiv)"
-else
-    optional "face-recognition konnte nicht kompiliert werden – Gesichtserkennung nicht verfügbar."
-fi
+    # Phase 2: dlib + face-recognition (wird kompiliert – dauert 10-20 Min!)
+    info "Kompiliere dlib + face-recognition (dauert 10-20 Min auf kleinen VMs) ..."
+    if run_with_spinner "dlib + face-recognition kompilieren" 900 \
+        pip install --no-cache-dir "face-recognition>=1.3.0" "opencv-python-headless>=4.8.0"; then
+        success "face-recognition installiert (Gesichtserkennung aktiv)"
+    else
+        optional "face-recognition konnte nicht kompiliert werden – Gesichtserkennung nicht verfügbar."
+    fi
 
-# Phase 3: ChromaDB + Sentence-Transformers (Vektor-Datenbank)
-info "Installiere ChromaDB + Sentence-Transformers ..."
-if run_with_spinner "Vektor-Datenbank installieren" 120 \
-    pip install --no-cache-dir "chromadb>=0.4.0,<1.0" "sentence-transformers>=2.2.0,<4.0"; then
-    success "Vektor-Datenbank installiert (Wissenssuche aktiv)"
-else
-    optional "ChromaDB/Sentence-Transformers konnte nicht installiert werden – Wissenssuche nutzt TF-IDF Fallback."
-fi
+    # Phase 3: ChromaDB + Sentence-Transformers (Vektor-Datenbank)
+    info "Installiere ChromaDB + Sentence-Transformers ..."
+    if run_with_spinner "Vektor-Datenbank installieren" 120 \
+        pip install --no-cache-dir "chromadb>=0.4.0,<1.0" "sentence-transformers>=2.2.0,<4.0"; then
+        success "Vektor-Datenbank installiert (Wissenssuche aktiv)"
+    else
+        optional "ChromaDB/Sentence-Transformers konnte nicht installiert werden – Wissenssuche nutzt TF-IDF Fallback."
+    fi
 
-# Phase 4: faster-whisper (optional)
-if run_with_spinner "faster-whisper installieren (Sprach-Transkription)" 60 \
-    pip install --no-cache-dir faster-whisper "numpy<2.1"; then
-    success "faster-whisper installiert (Sprach-Transkription aktiv)"
-else
-    optional "faster-whisper konnte nicht installiert werden – Sprach-Transkription nicht verfügbar."
+    # Phase 4: faster-whisper (optional)
+    if run_with_spinner "faster-whisper installieren (Sprach-Transkription)" 60 \
+        pip install --no-cache-dir faster-whisper "numpy<2.1"; then
+        success "faster-whisper installiert (Sprach-Transkription aktiv)"
+    else
+        optional "faster-whisper konnte nicht installiert werden – Sprach-Transkription nicht verfügbar."
+    fi
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -649,9 +708,15 @@ if [[ "${WA_SERVICE_OK:-0}" == "1" ]]; then
 fi
 
 echo -e "
-${GREEN}${BOLD}╔══════════════════════════════════════════════════════════╗
+$(if [[ $UPDATE_MODE -eq 1 ]]; then
+echo "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════╗
+║            🔄  JARVIS erfolgreich aktualisiert!          ║
+╚══════════════════════════════════════════════════════════╝${RESET}"
+else
+echo "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════╗
 ║            🤖  JARVIS erfolgreich installiert!           ║
-╚══════════════════════════════════════════════════════════╝${RESET}
+╚══════════════════════════════════════════════════════════╝${RESET}"
+fi)
 
   ${DIM}Installation abgeschlossen in ${BOLD}${DURATION_STR}${RESET}
 

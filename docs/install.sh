@@ -630,10 +630,17 @@ WA_UNIT
 
     $SUDO systemctl daemon-reload
     $SUDO systemctl enable jarvis.service >/dev/null 2>&1
-    $SUDO systemctl start  jarvis.service 2>/dev/null || true
+
+    if [[ $UPDATE_MODE -eq 1 ]]; then
+        info "Starte Services neu ..."
+        $SUDO systemctl restart jarvis.service 2>/dev/null || true
+        [[ "${WA_SERVICE_OK:-0}" == "1" ]] && $SUDO systemctl restart whatsapp-bridge.service 2>/dev/null || true
+    else
+        $SUDO systemctl start jarvis.service 2>/dev/null || true
+    fi
 
     # Status prüfen
-    sleep 2
+    sleep 3
     if systemctl is-active --quiet jarvis.service; then
         success "Jarvis läuft als systemd-Service (jarvis.service)"
         AUTOSTART_MSG="${GREEN}✓ Autostart aktiv${RESET} – Jarvis startet automatisch beim Systemstart."

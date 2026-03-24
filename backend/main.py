@@ -30,7 +30,8 @@ from backend.config import config
 from backend.security import get_certificate_path
 
 # ─── App erstellen ────────────────────────────────────────────────────
-app = FastAPI(title="Jarvis", version="1.0.0")
+JARVIS_VERSION = "0.8.0"
+app = FastAPI(title="Jarvis", version=JARVIS_VERSION)
 
 # Statische Dateien servieren (mit Cache-Busting Header)
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
@@ -335,6 +336,11 @@ async def login(request: Request):
         status_code=401,
     )
 
+
+@app.get("/api/version")
+async def get_version():
+    """Jarvis-Version für Frontend-Anzeige."""
+    return JSONResponse({"version": JARVIS_VERSION})
 
 @app.get("/api/config")
 async def get_config():

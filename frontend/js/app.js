@@ -37,7 +37,6 @@
     const cpuBarFill = document.getElementById('cpu-bar-fill');
     const cpuBarLabel = document.getElementById('cpu-bar-label');
     const connectionDot = document.getElementById('connection-dot');
-    const agentStateBadge = document.getElementById('agent-state-badge');
 
     // ─── Partikel-Hintergrund (Login) ───────────────────────────
     function initParticles() {
@@ -117,6 +116,22 @@
         mainScreen.classList.add('active');
         connectWebSocket();
         initVNC();
+        loadVersion();
+    }
+
+    // ─── Version laden und anzeigen ─────────────────────────────
+    async function loadVersion() {
+        try {
+            const res = await fetch('/api/version');
+            const data = await res.json();
+            const v = data.version || '?';
+            // Pill im Header
+            const pill = document.getElementById('version-pill');
+            if (pill) pill.textContent = 'v' + v;
+            // Footer im Settings-Modal
+            const footer = document.getElementById('version-modal-footer');
+            if (footer) footer.textContent = 'Jarvis v' + v;
+        } catch (e) { /* Version nicht verfuegbar */ }
     }
 
     function showLoginScreen() {
@@ -750,26 +765,18 @@
 
     // ─── Agent State ────────────────────────────────────────────
     function updateAgentState(state) {
-        agentStateBadge.className = 'header-status';
         switch (state) {
             case 'running':
-                agentStateBadge.textContent = 'Läuft';
-                agentStateBadge.classList.add('running');
                 btnPause.disabled = false;
                 btnStop.disabled = false;
                 break;
             case 'paused':
-                agentStateBadge.textContent = 'Pausiert';
-                agentStateBadge.classList.add('paused');
                 break;
             case 'stopped':
-                agentStateBadge.textContent = 'Gestoppt';
-                agentStateBadge.classList.add('stopped');
                 btnPause.disabled = true;
                 btnStop.disabled = true;
                 break;
             case 'idle':
-                agentStateBadge.textContent = 'Bereit';
                 btnPause.disabled = true;
                 btnStop.disabled = true;
                 btnResume.hidden = true;

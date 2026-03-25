@@ -342,6 +342,117 @@ async def get_version():
     """Jarvis-Version für Frontend-Anzeige."""
     return JSONResponse({"version": JARVIS_VERSION})
 
+
+# ─── MCP Server Verwaltung ─────────────────────────────────────────────────
+from backend.mcp_client import mcp_manager
+
+@app.on_event("startup")
+async def startup_mcp():
+    """MCP-Server beim Start verbinden."""
+    try:
+        await mcp_manager.connect_all()
+    except Exception as e:
+        print(f"[MCP] Startup-Fehler: {e}", flush=True)
+
+@app.on_event("shutdown")
+async def shutdown_mcp():
+    """MCP-Server beim Herunterfahren trennen."""
+    await mcp_manager.disconnect_all()
+
+@app.get("/api/mcp/servers")
+async def get_mcp_servers(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    return JSONResponse(mcp_manager.get_status())
+
+@app.post("/api/mcp/servers")
+async def add_mcp_server(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    data = await request.json()
+    server = config.add_mcp_server(data)
+    if data.get("enabled", True):
+        await mcp_manager.connect_server(server["id"])
+    return JSONResponse(server)
+
+@app.put("/api/mcp/servers/{server_id}")
+async def update_mcp_server(server_id: str, request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    data = await request.json()
+    result = config.update_mcp_server(server_id, data)
+    if not result:
+        return JSONResponse({"detail": "Server nicht gefunden"}, status_code=404)
+    # Neu verbinden wenn aktiviert
+    if result.get("enabled"):
+        await mcp_manager.connect_server(server_id)
+    else:
+        await mcp_manager.disconnect_server(server_id)
+    return JSONResponse(result)
+
+@app.delete("/api/mcp/servers/{server_id}")
+async def remove_mcp_server(server_id: str, request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    await mcp_manager.disconnect_server(server_id)
+    if config.remove_mcp_server(server_id):
+        return JSONResponse({"ok": True})
+    return JSONResponse({"detail": "Server nicht gefunden"}, status_code=404)
+
+@app.post("/api/mcp/servers/{server_id}/toggle")
+async def toggle_mcp_server(server_id: str, request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    data = await request.json()
+    enabled = data.get("enabled", True)
+    config.toggle_mcp_server(server_id, enabled)
+    if enabled:
+        await mcp_manager.connect_server(server_id)
+    else:
+        await mcp_manager.disconnect_server(server_id)
+    return JSONResponse({"ok": True, "enabled": enabled})
+
+@app.post("/api/mcp/servers/{server_id}/reconnect")
+async def reconnect_mcp_server(server_id: str, request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    success = await mcp_manager.connect_server(server_id)
+    return JSONResponse({"ok": success})
+
+
+# ─── Telemetry API ─────────────────────────────────────────────────────────
+from backend.telemetry import tracer
+
+@app.get("/api/telemetry/stats")
+async def get_telemetry_stats(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    return JSONResponse(tracer.get_stats())
+
+@app.get("/api/telemetry/spans")
+async def get_telemetry_spans(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    limit = int(request.query_params.get("limit", "50"))
+    return JSONResponse(tracer.get_recent_spans(limit))
+
+@app.delete("/api/telemetry")
+async def clear_telemetry(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    tracer.clear()
+    return JSONResponse({"ok": True})
+
+
 @app.get("/api/config")
 async def get_config():
     """Öffentliche Konfiguration für Frontend."""

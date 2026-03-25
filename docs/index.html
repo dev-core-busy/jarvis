@@ -369,15 +369,15 @@
                 <div class="feature-icon">🧠</div>
                 <div class="feature-title t-de">Persistentes Gedächtnis</div>
                 <div class="feature-title t-en">Persistent Memory</div>
-                <div class="feature-desc t-de">Jarvis merkt sich Präferenzen, Zugangsdaten, Projektzustand und mehr – dauerhaft in einem Schlüssel-Wert-Speicher, der Neustarts überlebt.</div>
-                <div class="feature-desc t-en">Jarvis remembers preferences, credentials, project state and more – permanently in a key-value store that survives restarts.</div>
+                <div class="feature-desc t-de">Jarvis merkt sich Präferenzen, Zugangsdaten, Projektzustand und mehr – mit Auto-Backup, Token-Monitoring und intelligenter Kompression. Der Memory überlebt Neustarts und wächst mit deinen Aufgaben.</div>
+                <div class="feature-desc t-en">Jarvis remembers preferences, credentials, project state and more – with auto-backup, token monitoring and intelligent compression. Memory survives restarts and grows with your tasks.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">📚</div>
                 <div class="feature-title t-de">Wissensdatenbank (RAG)</div>
                 <div class="feature-title t-en">Knowledge Base (RAG)</div>
-                <div class="feature-desc t-de">Eigene Dokumente (PDF, DOCX, TXT) per TF-IDF durchsuchen – Retrieval-Augmented Generation direkt auf deinen Daten. Keine Cloud, kein Datenleck.</div>
-                <div class="feature-desc t-en">Search your own documents (PDF, DOCX, TXT) with TF-IDF – Retrieval-Augmented Generation directly on your data. No cloud, no data leak.</div>
+                <div class="feature-desc t-de">Eigene Dokumente (PDF, DOCX, TXT, Excel, PPTX) durchsuchen – TF-IDF für kleine Bestände, automatischer Wechsel auf ChromaDB-Vektordatenbank bei wachsenden Datenmengen. RAG direkt auf deinen Daten, keine Cloud, kein Datenleck.</div>
+                <div class="feature-desc t-en">Search your own documents (PDF, DOCX, TXT, Excel, PPTX) – TF-IDF for small collections, automatic switch to ChromaDB vector database as data grows. RAG directly on your data, no cloud, no data leak.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🎭</div>
@@ -385,6 +385,13 @@
                 <div class="feature-title t-en">Multi-Agent Orchestration</div>
                 <div class="feature-desc t-de">Komplexe Aufgaben auf mehrere spezialisierte Sub-Agenten aufteilen. Jeder Agent hat eigene Werkzeuge, Ziele und Ergebnisse – koordiniert über Dateisystem-Protokoll.</div>
                 <div class="feature-desc t-en">Split complex tasks across multiple specialized sub-agents. Each agent has its own tools, goals and results – coordinated via file-system protocol.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🔄</div>
+                <div class="feature-title t-de">Einfaches Update</div>
+                <div class="feature-title t-en">Easy Updates</div>
+                <div class="feature-desc t-de">Install-Skript erneut ausführen – fertig. Erkennt automatisch eine bestehende Installation und aktualisiert nur Code und Abhängigkeiten. Einstellungen und .env bleiben erhalten.</div>
+                <div class="feature-desc t-en">Just re-run the install script – done. Automatically detects an existing installation and only updates code and dependencies. Settings and .env are preserved.</div>
             </div>
         </div>
     </div>
@@ -627,6 +634,23 @@
                             <span class="t-de">Voraussetzung: Linux-Server mit root-Zugriff</span>
                             <span class="t-en">Requires: Linux server with root access</span>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Update -->
+                <div style="margin-bottom: 24px;">
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; font-weight:600;">
+                        <span class="t-de">▶ Update auf neueste Version</span>
+                        <span class="t-en">▶ Update to latest version</span>
+                    </div>
+                    <div class="code-block" style="border-color: rgba(16,185,129,0.4); background: rgba(16,185,129,0.06); display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+                        <code style="color: #6ee7b7; font-size: 0.95rem;">curl -fsSL https://jarvis-ai.info/install.sh | bash</code>
+                        <button onclick="(function(btn){navigator.clipboard.writeText('curl -fsSL https://jarvis-ai.info/install.sh | bash').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="In Zwischenablage kopieren" style="background:rgba(13,13,26,0.5);border:1px solid rgba(110,231,183,0.3);color:#6ee7b7;cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;position:sticky;right:0;" onmouseover="this.style.background='rgba(16,185,129,0.25)'" onmouseout="this.style.background='rgba(13,13,26,0.5)'">⧉</button>
+                    </div>
+                    <div style="font-size:0.78rem; color:var(--text-muted); margin-top:8px; display:flex; align-items:center; gap:6px;">
+                        <span style="color:#6ee7b7;">🔄</span>
+                        <span class="t-de">Gleicher Befehl – erkennt automatisch eine bestehende Installation und führt nur ein Update durch (git pull + pip upgrade, ~3 Min). Einstellungen und .env bleiben erhalten.</span>
+                        <span class="t-en">Same command – automatically detects an existing installation and performs an update only (git pull + pip upgrade, ~3 min). Settings and .env are preserved.</span>
                     </div>
                 </div>
 

@@ -12,7 +12,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=49">
+    <link rel="stylesheet" href="/static/css/style.css?v=50">
 </head>
 
 <body>
@@ -379,6 +379,7 @@ sudo update-ca-certificates</code></pre>
                 <button class="settings-tab-btn" data-settings-tab="whatsapp" id="settings-tab-btn-whatsapp" style="display:none">WhatsApp</button>
                 <button class="settings-tab-btn" data-settings-tab="knowledge">Wissen</button>
                 <!-- Google-Tab entfernt – Config erfolgt über Skill-Einstellungen -->
+                <button class="settings-tab-btn" data-settings-tab="mcp">MCP</button>
                 <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;">Vision</button>
             </div>
 
@@ -757,6 +758,18 @@ sudo update-ca-certificates</code></pre>
                 <!-- Google-Tab entfernt – Config erfolgt über Skill-Einstellungen -->
 
                 <!-- ═══ Tab: Vision ═══ -->
+                <!-- ═══ Tab: MCP Server ═══ -->
+                <div id="settings-tab-mcp" class="settings-tab-content" style="display: none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">MCP-Server verbinden externe Tools mit Jarvis (Model Context Protocol).
+                            Server werden als Subprozesse (stdio) oder über HTTP/SSE angebunden.</p>
+                        <button class="kb-btn" id="mcp-add-btn" style="margin-bottom: 1rem;">
+                            + MCP-Server hinzufügen
+                        </button>
+                        <div id="mcp-server-list"></div>
+                    </div>
+                </div>
+
                 <div id="settings-tab-vision" class="settings-tab-content" style="display: none;">
                     <div class="vis-container">
 
@@ -973,8 +986,9 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/skills.js?v=20"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
     <script src="/static/js/knowledge.js?v=9"></script>
+    <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
-    <script src="/static/js/app.js?v=31"></script>
+    <script src="/static/js/app.js?v=32"></script>
 </body>
 
 </html>

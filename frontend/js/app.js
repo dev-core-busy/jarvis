@@ -854,8 +854,9 @@
         const tabKnowledge = document.getElementById('settings-tab-knowledge');
         const tabGoogle = document.getElementById('settings-tab-google');
         const tabVision = document.getElementById('settings-tab-vision');
+        const tabMcp = document.getElementById('settings-tab-mcp');
 
-        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision];
+        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -887,6 +888,10 @@
                     tabGoogle.style.display = '';
                     tabGoogle.classList.add('active');
                     if (window.googleManager) window.googleManager.init();
+                } else if (target === 'mcp' && tabMcp) {
+                    tabMcp.style.display = '';
+                    tabMcp.classList.add('active');
+                    if (window.mcpManager) window.mcpManager.refresh();
                 } else if (target === 'vision' && tabVision) {
                     tabVision.style.display = '';
                     tabVision.classList.add('active');

@@ -321,12 +321,8 @@
 
             const bodyHTML = this._ocCollapsed ? '' : `
                 <div class="sk-openclaw-body">
-                    <div id="sk-oc-llm-status" class="sk-openclaw-llm-status sk-openclaw-llm-checking">
-                        ⏳ Prüfe LLM-Verbindung…
-                    </div>
                     <p class="sk-openclaw-hint">
-                        Skills werden gesucht, sicherheitsgeprüft und lokal eingebunden.<br>
-                        <small>Nur mit lokalem LLM verfügbar – kein Cloud-Anbieter.</small>
+                        Skills werden gesucht, sicherheitsgeprüft und lokal eingebunden.
                     </p>
                     <label class="sk-openclaw-label">Welchen Skill suchst du?
                         <small>(leer = populäre Skills anzeigen)</small>
@@ -334,7 +330,7 @@
                     <textarea id="sk-oc-description" class="sk-openclaw-textarea"
                         placeholder='z. B. "Skill für Telegram" oder "PDF-Analyse"'
                         rows="2"></textarea>
-                    <button id="sk-oc-import-btn" class="sk-openclaw-btn" disabled>
+                    <button id="sk-oc-import-btn" class="sk-openclaw-btn">
                         🔍 Skill suchen &amp; importieren
                     </button>
                 </div>`;
@@ -351,7 +347,7 @@
                 this._ocCollapsed = !this._ocCollapsed;
                 this._renderOpenClawSection();
                 if (!this._ocCollapsed) {
-                    this._checkLLM();
+                    // Marketplace aufgeklappt
                 }
             });
 
@@ -396,27 +392,8 @@
 
         async _openClawImport(descriptionText) {
             const token    = localStorage.getItem('jarvis_token') || '';
-            const statusEl = document.getElementById('sk-oc-llm-status');
 
-            // 1. LLM-Check
-            try {
-                const checkResp = await fetch('/api/openclaw/llm-check', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const checkData = await checkResp.json();
-                if (!checkData.local) {
-                    if (statusEl) {
-                        statusEl.className = 'sk-openclaw-llm-status sk-openclaw-llm-cloud';
-                        statusEl.textContent = '⚠ ' + checkData.reason;
-                    }
-                    return;
-                }
-            } catch (e) {
-                if (statusEl) statusEl.textContent = '❌ LLM-Check fehlgeschlagen';
-                return;
-            }
-
-            // 2. Workflow-Task zusammenbauen
+            // 1. Workflow-Task zusammenbauen
             let taskText = '';
             try {
                 const desc     = encodeURIComponent(descriptionText.trim() || '');
@@ -426,7 +403,7 @@
                 const taskData = await taskResp.json();
                 taskText = taskData.task || '';
             } catch (e) {
-                if (statusEl) statusEl.textContent = '❌ Workflow-Task konnte nicht geladen werden';
+                console.error('Workflow-Task Fehler:', e);
                 return;
             }
 

@@ -570,6 +570,137 @@ body {
 }
 
 /* Version im Settings-Modal Footer */
+/* ─── MCP Settings ──────────────────────────────────────────────── */
+.mcp-card {
+    background: var(--bg-glass);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    backdrop-filter: blur(10px);
+}
+.mcp-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+}
+.mcp-card-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.95rem;
+}
+.mcp-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.mcp-card-status {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.4rem;
+}
+.mcp-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+}
+.mcp-dot-on { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+.mcp-dot-off { background: #666; }
+.mcp-badge {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.08);
+    color: var(--text-muted);
+}
+.mcp-toggle {
+    display: flex; align-items: center; gap: 0.3rem;
+    font-size: 0.8rem; color: var(--text-secondary);
+    cursor: pointer;
+}
+.mcp-toggle input { cursor: pointer; }
+.mcp-btn-sm {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.mcp-btn-sm:hover { background: rgba(255,255,255,0.1); }
+.mcp-btn-danger:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
+.mcp-btn-primary {
+    background: var(--accent-primary);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 0.5rem 1.2rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+.mcp-btn-primary:hover { filter: brightness(1.15); }
+.mcp-tools-list {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+}
+.mcp-tools-list details summary {
+    cursor: pointer;
+    color: var(--text-muted);
+}
+.mcp-tools-list ul {
+    list-style: none;
+    padding: 0.3rem 0 0 0.5rem;
+    color: var(--text-secondary);
+}
+.mcp-tools-list li {
+    padding: 0.15rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.mcp-empty {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 2rem 1rem;
+}
+.mcp-hint { font-size: 0.8rem; margin-top: 0.3rem; }
+.mcp-form {
+    background: var(--bg-glass);
+    border: 1px solid var(--accent-primary);
+    border-radius: 12px;
+    padding: 1.2rem;
+    margin-bottom: 1rem;
+}
+.mcp-form h4 { margin: 0 0 0.8rem; color: var(--text-primary); }
+.mcp-form-row {
+    margin-bottom: 0.6rem;
+}
+.mcp-form-row label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.2rem;
+}
+.mcp-input {
+    width: 100%;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+.mcp-input:focus { border-color: var(--accent-primary); outline: none; }
+.mcp-form-buttons {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+}
+
 .settings-version-footer {
     padding: 0.6rem 2rem;
     text-align: center;

@@ -68,6 +68,7 @@ class Config:
         self.profiles: list[dict] = []
         self.active_profile_id: str = ""
         self._skill_states: dict[str, dict] = {}
+        self._mcp_servers: list[dict] = []
 
         # Profile aus ENV-Variablen initialisieren
         self._init_profiles_from_env()
@@ -162,6 +163,7 @@ class Config:
         self.TTS_ENABLED = data.get("tts_enabled", False)
         self.USE_PHYSICAL_DESKTOP = data.get("use_physical_desktop", False)
         self._skill_states = data.get("skills", {})
+        self._mcp_servers = data.get("mcp_servers", [])
         # AGENT_API_KEY: aus settings.json laden, ENV hat Vorrang
         if not os.getenv("AGENT_API_KEY") and data.get("agent_api_key"):
             self.AGENT_API_KEY = data["agent_api_key"]
@@ -223,6 +225,7 @@ class Config:
             "agent_api_key": self.AGENT_API_KEY,
             "profiles": self.profiles,
             "skills": self._skill_states,
+            "mcp_servers": self._mcp_servers,
         }
         self.SETTINGS_FILE.write_text(json.dumps(data, indent=4))
 
@@ -253,6 +256,57 @@ class Config:
         """Entfernt den Zustand eines Skills."""
         self._skill_states.pop(name, None)
         self._save_to_file()
+
+    # ─── MCP-Server-Verwaltung ───────────────────────────────────────
+
+    def get_mcp_servers(self) -> list[dict]:
+        """Gibt alle MCP-Server zurueck."""
+        return self._mcp_servers
+
+    def add_mcp_server(self, data: dict) -> dict:
+        """Fuegt einen neuen MCP-Server hinzu."""
+        server = {
+            "id": str(uuid.uuid4()),
+            "name": data.get("name", "Neuer Server"),
+            "enabled": data.get("enabled", True),
+            "transport": data.get("transport", "stdio"),
+            "command": data.get("command", ""),
+            "args": data.get("args", []),
+            "url": data.get("url", ""),
+            "env": data.get("env", {}),
+        }
+        self._mcp_servers.append(server)
+        self._save_to_file()
+        return server
+
+    def update_mcp_server(self, server_id: str, data: dict) -> dict | None:
+        """Aktualisiert einen MCP-Server."""
+        for srv in self._mcp_servers:
+            if srv["id"] == server_id:
+                for key in ["name", "enabled", "transport", "command", "args", "url", "env"]:
+                    if key in data:
+                        srv[key] = data[key]
+                self._save_to_file()
+                return srv
+        return None
+
+    def remove_mcp_server(self, server_id: str) -> bool:
+        """Entfernt einen MCP-Server."""
+        before = len(self._mcp_servers)
+        self._mcp_servers = [s for s in self._mcp_servers if s["id"] != server_id]
+        if len(self._mcp_servers) < before:
+            self._save_to_file()
+            return True
+        return False
+
+    def toggle_mcp_server(self, server_id: str, enabled: bool) -> bool:
+        """Aktiviert/deaktiviert einen MCP-Server."""
+        for srv in self._mcp_servers:
+            if srv["id"] == server_id:
+                srv["enabled"] = enabled
+                self._save_to_file()
+                return True
+        return False
 
     # ─── Profil-CRUD ───────────────────────────────────────────────
 

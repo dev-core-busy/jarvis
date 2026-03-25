@@ -153,6 +153,16 @@ KRITISCH – Autonomie-Regeln:
             from backend.tools.subagent import SpawnAgentTool
             self._tool_instances.append(SpawnAgentTool())
 
+        # MCP-Tools laden (externe Tool-Server)
+        try:
+            from backend.mcp_client import mcp_manager
+            mcp_tools = mcp_manager.get_all_tools()
+            if mcp_tools:
+                self._tool_instances.extend(mcp_tools)
+                print(f"[AGENT {self.agent_id}] {len(mcp_tools)} MCP-Tools geladen", flush=True)
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] MCP-Tools konnten nicht geladen werden: {e}", flush=True)
+
         self.tools_map: dict[str, object] = {}
         for tool in self._tool_instances:
             self.tools_map[tool.name] = tool
@@ -170,6 +180,14 @@ KRITISCH – Autonomie-Regeln:
         """Hot-Reload: Lädt Skills neu und aktualisiert die Tool-Liste."""
         self.skill_manager.reload_all()
         self._tool_instances = self.skill_manager.get_enabled_tools()
+        # MCP-Tools neu laden
+        try:
+            from backend.mcp_client import mcp_manager
+            mcp_tools = mcp_manager.get_all_tools()
+            if mcp_tools:
+                self._tool_instances.extend(mcp_tools)
+        except Exception:
+            pass
         self.tools_map.clear()
         for tool in self._tool_instances:
             self.tools_map[tool.name] = tool
@@ -190,8 +208,13 @@ KRITISCH – Autonomie-Regeln:
     async def run_task(self, task_text: str, ws: WebSocket):
         """Führt eine Aufgabe aus – der Agent-Loop."""
         import sys
+        from backend.telemetry import tracer
         def _log(msg): print(f"[AGENT {self.agent_id}] {msg}", flush=True)
         _log(f"run_task gestartet: {task_text[:100]}... (sub={self.is_sub_agent})")
+        agent_span = tracer.start_span(f"agent:{self.label}", kind="agent")
+        agent_span.attributes["agent.id"] = self.agent_id
+        agent_span.attributes["agent.is_sub"] = self.is_sub_agent
+        agent_span.attributes["task"] = task_text[:200]
 
         self.state = AgentState.RUNNING
         self._stop_flag = False
@@ -226,6 +249,8 @@ KRITISCH – Autonomie-Regeln:
 
             # Initial-Nachricht senden
             _log(f"LLM-Aufruf mit {len(self._tool_instances)} Tools...")
+            llm_span = tracer.start_span("llm:initial", kind="llm", parent_id=self.agent_id)
+            llm_span.attributes["model"] = config.current_model
             response = await self.provider.generate_response(
                 model=config.current_model,
                 system_prompt=system_prompt,
@@ -237,6 +262,7 @@ KRITISCH – Autonomie-Regeln:
                 ],
                 tools=self._tool_instances
             )
+            tracer.end_span(llm_span)
             parts_count = len(response.parts) if response.parts else 0
             _log(f"LLM-Antwort erhalten: {parts_count} Parts")
             if parts_count == 0:
@@ -333,6 +359,8 @@ KRITISCH – Autonomie-Regeln:
                     )
                 )
 
+                llm_span = tracer.start_span(f"llm:step_{steps+1}", kind="llm", parent_id=self.agent_id)
+                llm_span.attributes["model"] = config.current_model
                 response = await self.provider.generate_response(
                     model=config.current_model,
                     system_prompt=system_prompt,
@@ -345,6 +373,7 @@ KRITISCH – Autonomie-Regeln:
                     ],
                     tools=self._tool_instances
                 )
+                tracer.end_span(llm_span)
 
                 steps += 1
 
@@ -354,8 +383,12 @@ KRITISCH – Autonomie-Regeln:
         except Exception as e:
             import traceback; _log(f"EXCEPTION: {e}\n{traceback.format_exc()}")
             await self._send_status(ws, _friendly_api_error(e))
+            tracer.end_span(agent_span, status="error", error=str(e))
+            agent_span = None  # Verhindern, dass finally nochmal beendet
         finally:
             _log(f"run_task beendet (state={self.state.value})")
+            if agent_span:
+                tracer.end_span(agent_span)
             self.state = AgentState.IDLE
 
     async def run_task_headless(self, task_text: str) -> str:
@@ -472,16 +505,23 @@ KRITISCH – Autonomie-Regeln:
 
     async def _execute_tool(self, name: str, args: dict, ws=None) -> str:
         """Fuehrt ein Tool aus. Bei Streaming-Tools wird Live-Output gesendet."""
+        from backend.telemetry import tracer
         tool = self.tools_map.get(name)
         if not tool:
             return f"Fehler: Tool '{name}' nicht gefunden"
+
+        span = tracer.start_span(name, kind="tool", parent_id=self.agent_id)
+        span.attributes["tool.name"] = name
+        span.attributes["agent.id"] = self.agent_id
         try:
             # Streaming-Callback fuer Tools die es unterstuetzen (z.B. shell_execute)
             if ws and getattr(tool, 'supports_streaming', False):
                 args['_status_callback'] = lambda msg: self._send_status(ws, msg)
             result = await tool.execute(**args)
+            tracer.end_span(span, status="ok")
             return result
         except Exception as e:
+            tracer.end_span(span, status="error", error=str(e))
             return f"Fehler bei {name}: {str(e)}"
 
     async def _handle_spawn(self, ws: WebSocket, label: str, task: str) -> str:

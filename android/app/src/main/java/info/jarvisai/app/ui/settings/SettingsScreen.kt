@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -27,9 +28,14 @@ fun SettingsScreen(
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
+    val context = LocalContext.current
     val settings by viewModel.settings.collectAsState()
     val saved by viewModel.saved.collectAsState()
     var apiKeyVisible by remember { mutableStateOf(false) }
+    val packageInfo = remember {
+        context.packageManager.getPackageInfo(context.packageName, 0)
+    }
+    val versionLabel = "v${packageInfo.versionName} (Build ${packageInfo.versionCode})"
 
     LaunchedEffect(saved) {
         if (saved) {
@@ -122,6 +128,13 @@ fun SettingsScreen(
             ) {
                 Text(if (saved) "✓ Gespeichert" else stringResource(R.string.settings_save))
             }
+
+            // Versions-Info
+            Text(
+                versionLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             // Info-Box
             Card(

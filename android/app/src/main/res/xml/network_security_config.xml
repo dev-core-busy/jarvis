@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Tailscale-IPs (100.x.x.x) nutzen self-signed Zertifikate von Jarvis.
+    Wir deaktivieren die Zertifikatsprüfung für diesen IP-Bereich.
+    Im Code wird zusätzlich ein Trust-Manager gesetzt (OkHttp).
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">100.0.0.0/8</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

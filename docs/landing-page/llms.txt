@@ -1,0 +1,52 @@
+# Jarvis AI Desktop Agent
+
+> Autonomous open-source AI desktop agent for Linux with multi-LLM support, desktop control via VNC, WhatsApp integration, and extensible skill system.
+
+## Overview
+
+Jarvis is a self-hosted AI agent that runs on any Linux server. It provides a full desktop environment accessible via web browser, controlled by LLMs like Google Gemini, Anthropic Claude, or local models via Ollama. Built with Python/FastAPI backend and vanilla JavaScript frontend.
+
+## Key Features
+
+- **Desktop Control**: Full Linux desktop via Xvfb/VNC, controlled by the AI agent in real-time
+- **Multi-LLM Support**: Google Gemini, Anthropic Claude, OpenRouter (300+ models), any OpenAI-compatible API, local models via Ollama/LM Studio
+- **Multi-Agent Orchestration**: Main agent can spawn autonomous sub-agents for parallel task execution
+- **RAG Knowledge Base**: Document search (PDF, DOCX, TXT, Excel, PPTX) with TF-IDF and ChromaDB vector database (automatic scaling with sentence-transformer embeddings)
+- **MCP Integration**: Model Context Protocol support for external tool servers via stdio or HTTP/SSE transport
+- **WhatsApp Integration**: Bidirectional messaging via Baileys, voice transcription with faster-whisper
+- **OpenClaw Skill Marketplace**: Import community skills from ClawHub, auto-convert to native Jarvis tools
+- **Face Recognition**: Real-time face detection and recognition using dlib/face_recognition with configurable actions
+- **Browser Automation**: CDP-based browser control with xdotool fallback
+- **Telemetry & Tracing**: Built-in OpenTelemetry tracing for agent runs, tool calls, and LLM interactions
+
+## Tech Stack
+
+- Backend: Python 3.13, FastAPI, uvicorn, HTTPS
+- Frontend: Vanilla JavaScript, Dark Glassmorphism Theme, WebSocket
+- Desktop: Xvfb, Cinnamon/Openbox, x11vnc, noVNC
+- Database: ChromaDB (vector), JSON (memory/settings)
+- WhatsApp: Node.js, Baileys v7, faster-whisper
+
+## Installation
+
+Docker:
+```
+docker pull ghcr.io/dev-core-busy/jarvis:master
+```
+
+Install script (Debian/Ubuntu/Fedora/Arch):
+```
+curl -fsSL https://jarvis-ai.info/install.sh | bash
+```
+
+Updates: Re-run the same install script – it auto-detects existing installations.
+
+## Links
+
+- Website: https://jarvis-ai.info
+- GitHub: https://github.com/dev-core-busy/jarvis
+- License: AGPL-3.0
+
+## Credits
+
+Developed by Andreas Bender with Claude (Anthropic) – code, architecture, and landing page.

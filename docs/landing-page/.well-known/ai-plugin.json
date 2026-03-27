@@ -1,0 +1,12 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "Jarvis AI Desktop Agent",
+  "name_for_model": "jarvis_ai_agent",
+  "description_for_human": "Autonomous open-source AI desktop agent for Linux with multi-LLM support, VNC desktop control, WhatsApp integration, RAG knowledge base, and MCP tool server integration.",
+  "description_for_model": "Jarvis is a self-hosted autonomous AI agent that controls a full Linux desktop environment via VNC. It supports multiple LLM providers (Google Gemini, Anthropic Claude, OpenRouter, Ollama), multi-agent orchestration, RAG with ChromaDB vector database, MCP tool servers, WhatsApp messaging, face recognition, and an extensible skill system via OpenClaw marketplace. Install via Docker or curl script. AGPL-3.0 licensed.",
+  "auth": { "type": "none" },
+  "api": { "type": "none" },
+  "logo_url": "https://jarvis-ai.info/favicon.png",
+  "contact_email": "dev-core-busy@github.com",
+  "legal_info_url": "https://github.com/dev-core-busy/jarvis/blob/master/LICENSE"
+}

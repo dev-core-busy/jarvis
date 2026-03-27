@@ -608,9 +608,11 @@ See [LICENSE](LICENSE) for the full text.
 
 **Built with ❤️ for the open-source community**
 
-[jarvis-ai.info](https://jarvis-ai.info) · [GitHub](https://github.com/dev-core-busy/jarvix) · [Issues](https://github.com/dev-core-busy/jarvix/issues)
+[jarvis-ai.info](https://jarvis-ai.info) · [GitHub](https://github.com/dev-core-busy/jarvis) · [Issues](https://github.com/dev-core-busy/jarvis/issues)
 
 *"The best way to predict the future is to automate it."*
+
+Developed by Andreas Bender with [Claude](https://claude.ai) (Anthropic) – code, architecture & landing page.
 
 © 2026 Andreas Bender · Licensed under [AGPL-3.0](LICENSE)
 

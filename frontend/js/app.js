@@ -130,7 +130,7 @@
             if (pill) pill.textContent = 'v' + v;
             // Footer im Settings-Modal
             const footer = document.getElementById('version-modal-footer');
-            if (footer) footer.textContent = 'Jarvis v' + v;
+            if (footer) footer.innerHTML = 'Jarvis v' + v + ' · Developed by Andreas Bender with <a href="https://claude.ai" target="_blank" style="color:var(--accent-hover);text-decoration:none;">Claude</a> (Anthropic)';
         } catch (e) { /* Version nicht verfuegbar */ }
     }
 

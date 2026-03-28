@@ -7,6 +7,7 @@ import time
 import traceback
 import uuid
 from enum import Enum
+from pathlib import Path
 
 
 def _friendly_api_error(exc: Exception) -> str:
@@ -77,7 +78,43 @@ from fastapi import WebSocket
 from backend.config import config
 from backend.llm import get_provider
 from backend.skills.manager import SkillManager
-from backend.tools.memory import load_memory_context
+from backend.tools.memory import load_memory_context, load_selective_memory
+
+# ── Instructions aus data/instructions/*.md laden ─────────────────────────
+INSTRUCTIONS_DIR = Path(__file__).parent.parent / "data" / "instructions"
+
+
+def load_instructions() -> str:
+    """Laedt alle .md Dateien aus data/instructions/ als System-Prompt-Erweiterung."""
+    if not INSTRUCTIONS_DIR.exists():
+        INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        # Beispiel-Datei anlegen
+        example = INSTRUCTIONS_DIR / "beispiel.md.disabled"
+        if not example.exists():
+            example.write_text(
+                "# Beispiel-Instruktion\n\n"
+                "Hier kannst du dem LLM Anweisungen geben, die bei JEDEM Gespraech gelten.\n"
+                "Benenne die Datei in beispiel.md um, damit sie geladen wird.\n\n"
+                "Beispiele:\n"
+                "- Antworte immer formal/informell\n"
+                "- Nutze bestimmte Tools bevorzugt\n"
+                "- Beachte bestimmte Sicherheitsregeln\n",
+                encoding="utf-8"
+            )
+        return ""
+
+    sections = []
+    for md_file in sorted(INSTRUCTIONS_DIR.glob("*.md")):
+        try:
+            content = md_file.read_text(encoding="utf-8").strip()
+            if content:
+                sections.append(f"[Instruktion: {md_file.stem}]\n{content}")
+        except Exception as e:
+            print(f"[INSTRUCTIONS] Fehler beim Laden von {md_file.name}: {e}", flush=True)
+
+    if not sections:
+        return ""
+    return "Benutzer-Instruktionen (IMMER befolgen):\n\n" + "\n\n".join(sections)
 
 
 class AgentState(Enum):
@@ -109,6 +146,18 @@ Regeln:
 11. Nutze knowledge_search um in der Wissensdatenbank nach relevanten Informationen zu suchen.
 12. Nutze memory_manage um wichtige Fakten dauerhaft zu speichern. Pruefe zu Beginn den Memory.
 13. WICHTIG: Bevor du eine Webseite oeffnest, MUSST du knowledge_search nutzen, um die exakten Vorgaben zu lesen!
+
+AUTO-LEARNING – Lerne aus Erfahrung:
+- Wenn du fuer eine Aufgabe MEHRERE Versuche brauchst (z.B. verschiedene Tools oder Quellen probierst), speichere den ERFOLGREICHEN Weg:
+  memory_manage(action='save', key='strategie_<thema>', value='<was funktioniert hat>')
+  Beispiel: strategie_wetter → "curl wttr.in/<ort> liefert zuverlaessig Wetterdaten"
+- Wenn ein Tool fuer eine bestimmte Aufgabenart besonders gut funktioniert, speichere das:
+  memory_manage(action='save', key='tool_tipp_<aufgabe>', value='<tool + parameter>')
+  Beispiel: tool_tipp_websuche → "shell_execute mit curl und jq fuer API-Abfragen"
+- BEVOR du eine Aufgabe startest, pruefe ob es bereits eine gespeicherte Strategie gibt:
+  memory_manage(action='search', query='strategie_') oder memory_manage(action='search', query='tool_tipp_')
+- Speichere auch Fehlschlaege um sie kuenftig zu vermeiden:
+  memory_manage(action='save', key='fehler_<thema>', value='<was NICHT funktioniert hat und warum>')
 """
 
     SUB_AGENT_PROMPT = """Du bist ein Jarvis Sub-Agent auf einem Linux-System (Debian 13, X11).
@@ -141,6 +190,7 @@ KRITISCH – Autonomie-Regeln:
         self._speed = 1.0
         self._current_task: asyncio.Task | None = None
         self._created_at = time.time()
+        self._tool_stats: list[dict] = []  # Tool-Ausfuehrungslog fuer Auto-Learning
 
         # Skill Manager initialisieren (laedt alle aktivierten Skills)
         self.skill_manager = SkillManager()
@@ -232,9 +282,17 @@ KRITISCH – Autonomie-Regeln:
 
         await self._send_status(ws, f"🚀 Starte Aufgabe: {task_text}")
 
-        # Memory-Kontext laden und in System-Prompt injizieren
-        memory_context = load_memory_context()
+        # System-Prompt zusammenbauen
         system_prompt = self.SUB_AGENT_PROMPT if self.is_sub_agent else self.SYSTEM_PROMPT
+
+        # Benutzer-Instruktionen laden (data/instructions/*.md)
+        instructions = load_instructions()
+        if instructions:
+            system_prompt += f"\n\n{instructions}"
+            await self._send_status(ws, "📋 Instruktionen geladen")
+
+        # Memory-Kontext laden (selektiv nach Aufgabe + Strategien/Tipps)
+        memory_context = load_selective_memory(task_text)
         if memory_context:
             system_prompt += f"\n\n{memory_context}"
             await self._send_status(ws, "🧠 Memory geladen")
@@ -312,6 +370,14 @@ KRITISCH – Autonomie-Regeln:
                     result = await self._execute_tool(tool_name, tool_args, ws=ws)
                     result_str = str(result)[:5000]
 
+                    # Tool-Statistik tracken
+                    is_error = any(marker in result_str[:200].lower() for marker in
+                                   ['fehler', 'error', '❌', 'traceback', 'exception', 'not found', 'failed'])
+                    self._tool_stats.append({
+                        "tool": tool_name, "step": steps,
+                        "success": not is_error, "args_preview": json.dumps(tool_args, ensure_ascii=False)[:100]
+                    })
+
                     # Sub-Agent Spawn erkennen
                     if tool_name == "spawn_agent" and "_spawn_agent" in result_str:
                         try:
@@ -380,6 +446,43 @@ KRITISCH – Autonomie-Regeln:
             if steps >= config.MAX_AGENT_STEPS:
                 await self._send_status(ws, f"⚠️ Maximale Schrittanzahl ({config.MAX_AGENT_STEPS}) erreicht")
 
+            # Auto-Learning: Bei mehrstufigen Aufgaben den Loesungsweg speichern
+            if steps >= 3 and self._tool_stats:
+                failed = [s for s in self._tool_stats if not s["success"]]
+                succeeded = [s for s in self._tool_stats if s["success"]]
+                if failed and succeeded:
+                    # Es gab Fehlversuche gefolgt von Erfolg → lernenswert
+                    _log(f"Auto-Learning: {len(failed)} Fehlversuche, {len(succeeded)} Erfolge bei {steps} Steps")
+                    # Dem LLM den Auftrag geben, den Weg zu speichern
+                    learning_hint = (
+                        f"\n\nWICHTIG – AUTO-LEARNING: Du hast fuer diese Aufgabe {steps} Schritte gebraucht "
+                        f"mit {len(failed)} Fehlversuchen. Speichere JETZT den erfolgreichen Loesungsweg "
+                        f"mit memory_manage(action='save', key='strategie_...', value='...'), "
+                        f"damit du es beim naechsten Mal schneller schaffst."
+                    )
+                    # Letzten LLM-Aufruf mit Learning-Hint
+                    try:
+                        chat_history.append(
+                            types.Content(role="user", parts=[types.Part.from_text(text=learning_hint)])
+                        )
+                        learn_response = await self.provider.generate_response(
+                            model=config.current_model,
+                            system_prompt=system_prompt,
+                            contents=[
+                                types.Content(role="user", parts=[types.Part.from_text(text=task_text)]),
+                                *chat_history,
+                            ],
+                            tools=self._tool_instances
+                        )
+                        # Tool-Calls aus der Learning-Antwort ausfuehren (memory_manage)
+                        if learn_response.parts:
+                            for p in learn_response.parts:
+                                if p.function_call and p.function_call.name == "memory_manage":
+                                    await self._execute_tool("memory_manage", dict(p.function_call.args))
+                                    await self._send_status(ws, "🧠 Strategie gelernt und gespeichert")
+                    except Exception as le:
+                        _log(f"Auto-Learning fehlgeschlagen: {le}")
+
         except Exception as e:
             import traceback; _log(f"EXCEPTION: {e}\n{traceback.format_exc()}")
             await self._send_status(ws, _friendly_api_error(e))
@@ -410,9 +513,12 @@ KRITISCH – Autonomie-Regeln:
             prompt_tool_calling=config.current_prompt_tool_calling,
         )
 
-        # Memory-Kontext laden
-        memory_context = load_memory_context()
+        # System-Prompt zusammenbauen
         system_prompt = self.SYSTEM_PROMPT
+        instructions = load_instructions()
+        if instructions:
+            system_prompt += f"\n\n{instructions}"
+        memory_context = load_selective_memory(task_text)
         if memory_context:
             system_prompt += f"\n\n{memory_context}"
 

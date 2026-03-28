@@ -22,7 +22,7 @@ if not _DOCKER_MODE:
 else:
     _pam = None
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, UploadFile, File, Form
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -124,6 +124,47 @@ agent_manager = None  # AgentManager fuer Multi-Agent Support
 # Erlaubte Linux-Benutzer für Web-Login
 ALLOWED_USERS = {"jarvis"}
 
+# ─── CPU-Polling (zentralisiert, 1x pro 2s statt pro Client) ─────────
+_cached_cpu_percent: float = 0.0
+
+async def _cpu_poll_task():
+    """Background-Task: CPU-Auslastung alle 2s aktualisieren."""
+    global _cached_cpu_percent
+    while True:
+        _cached_cpu_percent = await asyncio.to_thread(psutil.cpu_percent, interval=1)
+        await asyncio.sleep(2)
+
+@app.on_event("startup")
+async def startup_cpu_poll():
+    asyncio.create_task(_cpu_poll_task())
+
+# ─── Rate-Limiting (Login-Schutz) ────────────────────────────────────
+_login_attempts: dict[str, list[float]] = {}
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW = 300  # 5 Minuten
+
+def _check_rate_limit(ip: str) -> bool:
+    """Prueft ob IP zu viele Login-Versuche hat. True = erlaubt."""
+    now = time.time()
+    attempts = _login_attempts.get(ip, [])
+    # Alte Eintraege entfernen
+    attempts = [t for t in attempts if now - t < _LOGIN_WINDOW]
+    _login_attempts[ip] = attempts
+    return len(attempts) < _LOGIN_MAX_ATTEMPTS
+
+def _record_login_attempt(ip: str):
+    """Zeichnet einen Login-Versuch auf."""
+    _login_attempts.setdefault(ip, []).append(time.time())
+
+def _wa_bridge_request_safe(path: str) -> dict:
+    """Sichere Bridge-Anfrage fuer Health-Check (faengt alle Fehler)."""
+    try:
+        import urllib.request as _ur
+        with _ur.urlopen(f"http://127.0.0.1:3001{path}", timeout=2) as resp:
+            return json.loads(resp.read().decode())
+    except Exception:
+        return {"error": "nicht erreichbar"}
+
 
 # ─── Hilfsfunktionen ─────────────────────────────────────────────────
 def generate_token(username: str) -> str:
@@ -154,6 +195,34 @@ def verify_token(token: str) -> str | None:
         return None
     except Exception:
         return None
+
+
+async def require_auth(request: Request) -> str:
+    """FastAPI Dependency: Prueft Bearer-Token und gibt Username zurueck."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = verify_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Nicht authentifiziert")
+    return username
+
+
+async def require_auth_or_query(request: Request) -> str:
+    """Auth via Header ODER ?token= Query-Parameter (fuer img/audio Tags)."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = verify_token(token)
+    if not username:
+        token = request.query_params.get("token", "")
+        username = verify_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Nicht authentifiziert")
+    return username
+
+
+def _mask_key(key: str) -> str:
+    """Maskiert einen API-Key fuer sichere Anzeige (nur letzte 4 Zeichen sichtbar)."""
+    if not key or len(key) < 8:
+        return "***" if key else ""
+    return "***" + key[-4:]
 
 
 def authenticate_linux_user(username: str, password: str) -> bool:
@@ -314,6 +383,15 @@ async def index():
 @app.post("/api/login")
 async def login(request: Request):
     """Multi-User Login via Linux PAM → Token + Desktop-Session-Wechsel."""
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Rate-Limiting
+    if not _check_rate_limit(client_ip):
+        return JSONResponse(
+            {"success": False, "error": "Zu viele Login-Versuche. Bitte warte 5 Minuten."},
+            status_code=429,
+        )
+
     body = await request.json()
     username = body.get("username", "").strip().lower()
     password = body.get("password", "")
@@ -331,6 +409,7 @@ async def login(request: Request):
             asyncio.get_event_loop().run_in_executor(None, switch_desktop_session, username)
         return JSONResponse({"success": True, "token": token, "username": username})
 
+    _record_login_attempt(client_ip)
     return JSONResponse(
         {"success": False, "error": "Benutzername oder Passwort falsch"},
         status_code=401,
@@ -360,17 +439,11 @@ async def shutdown_mcp():
     await mcp_manager.disconnect_all()
 
 @app.get("/api/mcp/servers")
-async def get_mcp_servers(request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+async def get_mcp_servers(user: str = Depends(require_auth)):
     return JSONResponse(mcp_manager.get_status())
 
 @app.post("/api/mcp/servers")
-async def add_mcp_server(request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+async def add_mcp_server(request: Request, user: str = Depends(require_auth)):
     data = await request.json()
     server = config.add_mcp_server(data)
     if data.get("enabled", True):
@@ -378,10 +451,7 @@ async def add_mcp_server(request: Request):
     return JSONResponse(server)
 
 @app.put("/api/mcp/servers/{server_id}")
-async def update_mcp_server(server_id: str, request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+async def update_mcp_server(server_id: str, request: Request, user: str = Depends(require_auth)):
     data = await request.json()
     result = config.update_mcp_server(server_id, data)
     if not result:
@@ -394,20 +464,14 @@ async def update_mcp_server(server_id: str, request: Request):
     return JSONResponse(result)
 
 @app.delete("/api/mcp/servers/{server_id}")
-async def remove_mcp_server(server_id: str, request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+async def remove_mcp_server(server_id: str, user: str = Depends(require_auth)):
     await mcp_manager.disconnect_server(server_id)
     if config.remove_mcp_server(server_id):
         return JSONResponse({"ok": True})
     return JSONResponse({"detail": "Server nicht gefunden"}, status_code=404)
 
 @app.post("/api/mcp/servers/{server_id}/toggle")
-async def toggle_mcp_server(server_id: str, request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+async def toggle_mcp_server(server_id: str, request: Request, user: str = Depends(require_auth)):
     data = await request.json()
     enabled = data.get("enabled", True)
     config.toggle_mcp_server(server_id, enabled)
@@ -418,10 +482,7 @@ async def toggle_mcp_server(server_id: str, request: Request):
     return JSONResponse({"ok": True, "enabled": enabled})
 
 @app.post("/api/mcp/servers/{server_id}/reconnect")
-async def reconnect_mcp_server(server_id: str, request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+async def reconnect_mcp_server(server_id: str, user: str = Depends(require_auth)):
     success = await mcp_manager.connect_server(server_id)
     return JSONResponse({"ok": success})
 
@@ -430,25 +491,16 @@ async def reconnect_mcp_server(server_id: str, request: Request):
 from backend.telemetry import tracer
 
 @app.get("/api/telemetry/stats")
-async def get_telemetry_stats(request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+async def get_telemetry_stats(user: str = Depends(require_auth)):
     return JSONResponse(tracer.get_stats())
 
 @app.get("/api/telemetry/spans")
-async def get_telemetry_spans(request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+async def get_telemetry_spans(request: Request, user: str = Depends(require_auth)):
     limit = int(request.query_params.get("limit", "50"))
     return JSONResponse(tracer.get_recent_spans(limit))
 
 @app.delete("/api/telemetry")
-async def clear_telemetry(request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+async def clear_telemetry(user: str = Depends(require_auth)):
     tracer.clear()
     return JSONResponse({"ok": True})
 
@@ -478,20 +530,26 @@ async def download_cert():
 
 
 @app.get("/api/settings")
-async def get_settings():
+async def get_settings(user: str = Depends(require_auth)):
     """Gibt aktuelle Einstellungen, Profile und Provider-Optionen zurück."""
+    # API-Keys maskiert zurueckgeben
+    safe_profiles = []
+    for p in config.profiles:
+        sp = {**p, "api_key": _mask_key(p.get("api_key", "")),
+              "session_key": _mask_key(p.get("session_key", ""))}
+        safe_profiles.append(sp)
     return JSONResponse({
         "active_profile_id": config.active_profile_id,
-        "profiles": config.profiles,
+        "profiles": safe_profiles,
         "tts_enabled": config.TTS_ENABLED,
         "use_physical_desktop": config.USE_PHYSICAL_DESKTOP,
-        "agent_api_key": config.AGENT_API_KEY,
+        "agent_api_key": _mask_key(config.AGENT_API_KEY),
         "defaults": config.DEFAULT_PROVIDERS,
     })
 
 
 @app.post("/api/settings")
-async def save_settings(request: Request):
+async def save_settings(request: Request, user: str = Depends(require_auth)):
     """Speichert globale Einstellungen (TTS, Desktop etc.)."""
     body = await request.json()
     config.save_global_settings(body)
@@ -500,17 +558,22 @@ async def save_settings(request: Request):
 
 # ─── Profil-Verwaltung ─────────────────────────────────────────────
 @app.get("/api/profiles")
-async def get_profiles():
+async def get_profiles(user: str = Depends(require_auth)):
     """Gibt alle Profile und das aktive Profil zurück."""
+    safe_profiles = []
+    for p in config.profiles:
+        sp = {**p, "api_key": _mask_key(p.get("api_key", "")),
+              "session_key": _mask_key(p.get("session_key", ""))}
+        safe_profiles.append(sp)
     return JSONResponse({
-        "profiles": config.profiles,
+        "profiles": safe_profiles,
         "active_profile_id": config.active_profile_id,
         "defaults": config.DEFAULT_PROVIDERS,
     })
 
 
 @app.post("/api/profiles")
-async def create_profile(request: Request):
+async def create_profile(request: Request, user: str = Depends(require_auth)):
     """Erstellt ein neues Profil."""
     body = await request.json()
     profile = config.create_profile(body)
@@ -518,7 +581,7 @@ async def create_profile(request: Request):
 
 
 @app.put("/api/profiles/{profile_id}")
-async def update_profile(profile_id: str, request: Request):
+async def update_profile(profile_id: str, request: Request, user: str = Depends(require_auth)):
     """Aktualisiert ein bestehendes Profil."""
     body = await request.json()
     profile = config.update_profile(profile_id, body)
@@ -528,7 +591,7 @@ async def update_profile(profile_id: str, request: Request):
 
 
 @app.delete("/api/profiles/{profile_id}")
-async def delete_profile(profile_id: str):
+async def delete_profile(profile_id: str, user: str = Depends(require_auth)):
     """Löscht ein Profil (mindestens eines muss bestehen bleiben)."""
     if config.delete_profile(profile_id):
         return JSONResponse({"success": True})
@@ -536,7 +599,7 @@ async def delete_profile(profile_id: str):
 
 
 @app.post("/api/profiles/{profile_id}/activate")
-async def activate_profile(profile_id: str):
+async def activate_profile(profile_id: str, user: str = Depends(require_auth)):
     """Setzt ein Profil als aktiv."""
     if config.activate_profile(profile_id):
         return JSONResponse({"success": True})
@@ -545,23 +608,56 @@ async def activate_profile(profile_id: str):
 
 @app.get("/api/health")
 async def health():
-    """Health-Check."""
+    """Erweiterter Health-Check mit System- und Service-Status."""
     errors = config.validate()
+
+    # System-Infos
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+
+    # Service-Checks
+    services = {}
+    # VNC
+    try:
+        r, _ = await asyncio.open_connection("localhost", 5900)
+        r.close()
+        services["vnc"] = "ok"
+    except Exception:
+        services["vnc"] = "down"
+
+    # WhatsApp Bridge
+    try:
+        result = await asyncio.to_thread(_wa_bridge_request_safe, "/status")
+        services["whatsapp_bridge"] = "ok" if "error" not in result else "down"
+    except Exception:
+        services["whatsapp_bridge"] = "down"
+
+    # LLM konfiguriert?
+    services["llm"] = "ok" if config.active_profile.get("api_key") else "no_key"
+
     return JSONResponse({
         "status": "ok" if not errors else "warning",
         "errors": errors,
-        "cpu_percent": psutil.cpu_percent(interval=0.1),
+        "cpu_percent": _cached_cpu_percent,
+        "memory_percent": mem.percent,
+        "disk_percent": disk.percent,
+        "services": services,
     })
 
 
 @app.post("/api/verify-token")
 async def verify_token_endpoint(request: Request):
-    """Prüft ob ein Token noch gültig ist."""
+    """Prüft ob ein Token noch gültig ist. Gibt verbleibende Sekunden zurueck."""
     body = await request.json()
     tok = body.get("token", "")
     username = verify_token(tok)
     if username:
-        return JSONResponse({"valid": True, "username": username})
+        try:
+            _, ts, _ = tok.split(":", 2)
+            remaining = 86400 - (time.time() - int(ts))
+        except Exception:
+            remaining = 0
+        return JSONResponse({"valid": True, "username": username, "remaining_seconds": int(remaining)})
     return JSONResponse({"valid": False}, status_code=401)
 
 
@@ -588,14 +684,14 @@ def _get_skill_manager():
 
 
 @app.get("/api/skills")
-async def get_skills():
+async def get_skills(user: str = Depends(require_auth)):
     """Gibt alle Skills mit Status zurück."""
     sm = _get_skill_manager()
     return JSONResponse({"skills": sm.list_skills()})
 
 
 @app.post("/api/skills/{name}/enable")
-async def enable_skill(name: str):
+async def enable_skill(name: str, user: str = Depends(require_auth)):
     """Aktiviert einen Skill."""
     sm = _get_skill_manager()
     success = sm.enable_skill(name)
@@ -605,7 +701,7 @@ async def enable_skill(name: str):
 
 
 @app.post("/api/skills/{name}/disable")
-async def disable_skill(name: str):
+async def disable_skill(name: str, user: str = Depends(require_auth)):
     """Deaktiviert einen Skill."""
     sm = _get_skill_manager()
     success = sm.disable_skill(name)
@@ -615,7 +711,7 @@ async def disable_skill(name: str):
 
 
 @app.get("/api/skills/{name}/config")
-async def get_skill_config(name: str):
+async def get_skill_config(name: str, user: str = Depends(require_auth)):
     """Gibt die Konfiguration eines Skills zurück."""
     sm = _get_skill_manager()
     cfg = sm.get_skill_config(name)
@@ -629,7 +725,7 @@ async def get_skill_config(name: str):
 
 
 @app.post("/api/skills/{name}/config")
-async def update_skill_config(name: str, request: Request):
+async def update_skill_config(name: str, request: Request, user: str = Depends(require_auth)):
     """Aktualisiert die Konfiguration eines Skills."""
     body = await request.json()
     sm = _get_skill_manager()
@@ -646,7 +742,7 @@ async def update_skill_config(name: str, request: Request):
 
 
 @app.post("/api/skills/{name}/install")
-async def install_skill_deps(name: str):
+async def install_skill_deps(name: str, user: str = Depends(require_auth)):
     """Installiert die Abhängigkeiten eines Skills."""
     sm = _get_skill_manager()
     result = sm.install_dependencies(name)
@@ -654,7 +750,7 @@ async def install_skill_deps(name: str):
 
 
 @app.delete("/api/skills/{name}")
-async def uninstall_skill(name: str):
+async def uninstall_skill(name: str, user: str = Depends(require_auth)):
     """Entfernt einen Skill (nur nicht-system Skills)."""
     sm = _get_skill_manager()
     success = sm.uninstall_skill(name)
@@ -666,7 +762,7 @@ async def uninstall_skill(name: str):
 
 
 @app.post("/api/skills/reload")
-async def reload_skills():
+async def reload_skills(user: str = Depends(require_auth)):
     """Lädt alle Skills neu (Hot-Reload)."""
     if agent_instance:
         agent_instance.reload_skills()
@@ -784,14 +880,14 @@ async def _broadcast_ws(message: dict):
 # ─── Knowledge Base API ───────────────────────────────────────────────
 
 @app.get("/api/knowledge/stats")
-async def get_knowledge_stats():
+async def get_knowledge_stats(user: str = Depends(require_auth)):
     """Gibt Statistiken der Knowledge Base zurück."""
     from backend.tools.knowledge import get_stats
     return JSONResponse(get_stats())
 
 
 @app.post("/api/knowledge/reindex")
-async def reindex_knowledge():
+async def reindex_knowledge(user: str = Depends(require_auth)):
     """Erzwingt vollständigen Neuaufbau des Knowledge-Index."""
     import asyncio as _asyncio
     from backend.tools.knowledge import force_reindex
@@ -800,7 +896,7 @@ async def reindex_knowledge():
 
 
 @app.get("/api/knowledge/files")
-async def get_knowledge_files():
+async def get_knowledge_files(user: str = Depends(require_auth)):
     """Gibt alle indizierten Dateien gruppiert nach Ordner zurück."""
     from backend.tools.knowledge import _get_folders, _all_files, PROJECT_ROOT
     folders = _get_folders()
@@ -825,7 +921,7 @@ async def get_knowledge_files():
 
 
 @app.delete("/api/knowledge/files")
-async def delete_knowledge_file(request: Request):
+async def delete_knowledge_file(request: Request, user: str = Depends(require_auth)):
     """Löscht eine einzelne Datei aus einem Knowledge-Ordner."""
     from backend.tools.knowledge import _get_folders, PROJECT_ROOT
     data = await request.json()
@@ -854,7 +950,7 @@ async def delete_knowledge_file(request: Request):
 
 
 @app.post("/api/knowledge/open-folder")
-async def open_knowledge_folder(request: Request):
+async def open_knowledge_folder(request: Request, user: str = Depends(require_auth)):
     """Öffnet einen Knowledge-Ordner im Dateimanager des Server-Desktops."""
     import subprocess, os
     from backend.tools.knowledge import _get_folders, PROJECT_ROOT
@@ -889,6 +985,7 @@ async def open_knowledge_folder(request: Request):
 async def upload_knowledge_files(
     files: list[UploadFile] = File(...),
     folder: str = Form("data/knowledge"),
+    user: str = Depends(require_auth),
 ):
     """Dateien per Browser-Upload in einen Knowledge-Ordner hochladen."""
     from backend.tools.knowledge import (
@@ -972,7 +1069,7 @@ def _mount_path(idx: int) -> Path:
 
 
 @app.get("/api/knowledge/mounts")
-async def list_mounts():
+async def list_mounts(user: str = Depends(require_auth)):
     mounts = _get_mounts_config()
     result = []
     for i, m in enumerate(mounts):
@@ -987,7 +1084,7 @@ async def list_mounts():
 
 
 @app.post("/api/knowledge/mounts")
-async def add_mount(request: Request):
+async def add_mount(request: Request, user: str = Depends(require_auth)):
     data = await request.json()
     source = data.get("source", "").strip()
     mount_type = data.get("type", "smb")
@@ -1022,7 +1119,7 @@ async def add_mount(request: Request):
 
 
 @app.delete("/api/knowledge/mounts/{idx}")
-async def remove_mount(idx: int):
+async def remove_mount(idx: int, user: str = Depends(require_auth)):
     mounts = _get_mounts_config()
     if idx < 0 or idx >= len(mounts):
         return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
@@ -1048,7 +1145,7 @@ async def remove_mount(idx: int):
 
 
 @app.post("/api/knowledge/mounts/{idx}/mount")
-async def mount_share(idx: int):
+async def mount_share(idx: int, user: str = Depends(require_auth)):
     mounts = _get_mounts_config()
     if idx < 0 or idx >= len(mounts):
         return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
@@ -1095,7 +1192,7 @@ async def mount_share(idx: int):
 
 
 @app.post("/api/knowledge/mounts/{idx}/unmount")
-async def unmount_share(idx: int):
+async def unmount_share(idx: int, user: str = Depends(require_auth)):
     mp = _mount_path(idx)
     if not mp.is_mount():
         return JSONResponse({"ok": True, "hint": "War nicht gemountet"})
@@ -1108,7 +1205,7 @@ async def unmount_share(idx: int):
 
 
 @app.get("/api/knowledge/webdav/status")
-async def webdav_status():
+async def webdav_status(user: str = Depends(require_auth)):
     """WebDAV-Status und Verbindungsdetails."""
     from backend.webdav import _get_webdav_config, is_webdav_enabled
     from backend.tools.knowledge import _get_folders, PROJECT_ROOT
@@ -1132,7 +1229,7 @@ async def webdav_status():
 
 
 @app.post("/api/knowledge/webdav/config")
-async def webdav_config(request: Request):
+async def webdav_config(request: Request, user: str = Depends(require_auth)):
     """WebDAV aktivieren/deaktivieren + Credentials setzen."""
     data = await request.json()
     states = config.get_skill_states()
@@ -1161,7 +1258,7 @@ INSTRUCTIONS_DIR = Path(__file__).parent.parent / "data" / "instructions"
 
 
 @app.get("/api/instructions")
-async def list_instructions():
+async def list_instructions(user: str = Depends(require_auth)):
     """Listet alle Instruction-Dateien auf."""
     INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
     files = []
@@ -1172,7 +1269,7 @@ async def list_instructions():
 
 
 @app.get("/api/instructions/{name}")
-async def get_instruction(name: str):
+async def get_instruction(name: str, user: str = Depends(require_auth)):
     """Liest eine einzelne Instruction-Datei."""
     filepath = INSTRUCTIONS_DIR / f"{name}.md"
     if not filepath.exists():
@@ -1182,7 +1279,7 @@ async def get_instruction(name: str):
 
 
 @app.post("/api/instructions/{name}")
-async def save_instruction(name: str, request: Request):
+async def save_instruction(name: str, request: Request, user: str = Depends(require_auth)):
     """Erstellt oder aktualisiert eine Instruction-Datei."""
     data = await request.json()
     content = data.get("content", "")
@@ -1199,7 +1296,7 @@ async def save_instruction(name: str, request: Request):
 
 
 @app.delete("/api/instructions/{name}")
-async def delete_instruction(name: str):
+async def delete_instruction(name: str, user: str = Depends(require_auth)):
     """Loescht eine Instruction-Datei."""
     filepath = INSTRUCTIONS_DIR / f"{name}.md"
     if filepath.exists():
@@ -1247,7 +1344,7 @@ def _update_env_google(client_id: str, client_secret: str):
 # ─── Google OAuth2 (Device Flow) ─────────────────────────────────────
 
 @app.get("/api/google/status")
-async def google_status():
+async def google_status(user: str = Depends(require_auth)):
     """Gibt den aktuellen Google-Auth-Status zurück."""
     from backend.google_auth import get_status
     import asyncio as _aio
@@ -1256,7 +1353,7 @@ async def google_status():
 
 
 @app.post("/api/google/device-start")
-async def google_device_start():
+async def google_device_start(user: str = Depends(require_auth)):
     """Startet den Device Flow – gibt user_code + verification_url zurück."""
     from backend.google_auth import start_device_flow
     import asyncio as _aio
@@ -1267,14 +1364,14 @@ async def google_device_start():
 
 
 @app.get("/api/google/device-status")
-async def google_device_status():
+async def google_device_status(user: str = Depends(require_auth)):
     """Polling-Endpoint: Status des laufenden Device Flows."""
     from backend.google_auth import get_flow_status
     return JSONResponse(get_flow_status())
 
 
 @app.post("/api/google/revoke")
-async def google_revoke():
+async def google_revoke(user: str = Depends(require_auth)):
     """Widerruft den Google-Zugriff und löscht das Token."""
     from backend.google_auth import revoke
     import asyncio as _aio
@@ -1324,7 +1421,7 @@ def _run_gog(*args, timeout: int = 10) -> dict:
 
 
 @app.get("/api/google/gog-status")
-async def gog_status():
+async def gog_status(user: str = Depends(require_auth)):
     """Gibt verbundene gog-Konten zurück."""
     import asyncio as _aio
     result = await _aio.to_thread(_run_gog, "auth", "list")
@@ -1332,7 +1429,7 @@ async def gog_status():
 
 
 @app.post("/api/google/gog-setup")
-async def gog_setup(request: Request):
+async def gog_setup(request: Request, user: str = Depends(require_auth)):
     """Speichert OAuth-Credentials als client_secret.json + registriert bei gog."""
     import asyncio as _aio, json as _json
     body = await request.json()
@@ -1375,7 +1472,7 @@ async def gog_setup(request: Request):
 
 
 @app.post("/api/google/gog-auth-url")
-async def gog_get_auth_url(request: Request):
+async def gog_get_auth_url(request: Request, user: str = Depends(require_auth)):
     """Remote-Flow Schritt 1: Gibt die Google-Auth-URL zurück (kein Browser auf Server nötig)."""
     import asyncio as _aio
     body  = await request.json()
@@ -1411,7 +1508,7 @@ async def gog_get_auth_url(request: Request):
 
 
 @app.post("/api/google/gog-auth-exchange")
-async def gog_auth_exchange(request: Request):
+async def gog_auth_exchange(request: Request, user: str = Depends(require_auth)):
     """Remote-Flow Schritt 2: Tauscht Redirect-URL gegen Token."""
     import asyncio as _aio
     body         = await request.json()
@@ -1432,7 +1529,7 @@ async def gog_auth_exchange(request: Request):
 
 
 @app.delete("/api/google/gog-account")
-async def gog_remove_account(request: Request):
+async def gog_remove_account(request: Request, user: str = Depends(require_auth)):
     """Entfernt ein gog-Konto."""
     import asyncio as _aio
     body  = await request.json()
@@ -1446,13 +1543,10 @@ async def gog_remove_account(request: Request):
 # ─── OpenClaw Marketplace ─────────────────────────────────────────────
 
 @app.get("/api/openclaw/search")
-async def openclaw_search(request: Request, q: str = ""):
+async def openclaw_search(q: str = "", user: str = Depends(require_auth)):
     """Sucht Skills auf OpenClaw Marketplace.
     Gibt Ergebnisliste zurück – Import erfolgt separat.
     """
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
 
     import urllib.request, json as _json
     query = q.strip() or "popular"
@@ -1482,15 +1576,12 @@ async def openclaw_search(request: Request, q: str = ""):
 
 @app.get("/api/openclaw/workflow-task")
 async def openclaw_workflow_task(
-    request: Request,
     description: str = "",
+    user: str = Depends(require_auth),
 ):
     """Gibt den fertigen Agent-Task-Text zurück, der den Import-Workflow ausführt.
     Liest data/workflows/import_openclaw_skill.md und bettet ihn in den Task ein.
     """
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     workflow_path = _Path(__file__).parent.parent / "data" / "workflows" / "import_openclaw_skill.md"
     if workflow_path.exists():
         workflow_md = workflow_path.read_text(encoding="utf-8", errors="replace")
@@ -1560,11 +1651,8 @@ def _get_vision_engine():
 
 
 @app.get("/api/vision/status")
-async def vision_status(request: Request):
+async def vision_status(user: str = Depends(require_auth)):
     """Vision-Engine-Status + aktuelle Gesichter."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1572,11 +1660,8 @@ async def vision_status(request: Request):
 
 
 @app.post("/api/vision/control")
-async def vision_control(request: Request):
+async def vision_control(request: Request, user: str = Depends(require_auth)):
     """Kamera starten/stoppen. Body: {action: 'start'|'stop', source: '0'}."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1606,14 +1691,8 @@ async def vision_control(request: Request):
 
 
 @app.get("/api/vision/snapshot")
-async def vision_snapshot(request: Request):
+async def vision_snapshot(user: str = Depends(require_auth_or_query)):
     """Aktuelles Kamerabild als JPEG (mit Annotationen). Token via Header ODER ?token= Query."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        # Fallback: Token als Query-Parameter (fuer <img src="..."> ohne Auth-Header)
-        token = request.query_params.get("token", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1628,14 +1707,15 @@ async def vision_snapshot(request: Request):
 async def vision_mjpeg_stream(request: Request):
     """MJPEG-Relay-Stream – erlaubt mehreren Clients den Zugriff auf den Kamera-Feed.
 
-    Auth via ?token= Query ODER ?key=jarvis-stream (fuer Server-zu-Server).
+    Auth via ?token= Query ODER ?key=<stream_key> (fuer Server-zu-Server).
     Nutzung: Als Kamera-Quelle auf anderen Jarvis-Instanzen eintragen.
     """
-    # Auth: normaler Token ODER fester Stream-Key
+    # Auth: normaler Token ODER konfigurierbarer Stream-Key
     token = request.query_params.get("token", "")
     stream_key = request.query_params.get("key", "")
-    if not verify_token(token) and stream_key != "jarvis-stream":
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    expected_key = config.get_skill_states().get("vision", {}).get("config", {}).get("stream_key", "jarvis-stream")
+    if not verify_token(token) and stream_key != expected_key:
+        raise HTTPException(status_code=401, detail="Nicht authentifiziert")
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1657,13 +1737,8 @@ async def vision_mjpeg_stream(request: Request):
 
 
 @app.get("/api/vision/face-crop/{index}")
-async def vision_face_crop(index: int, request: Request):
+async def vision_face_crop(index: int, user: str = Depends(require_auth_or_query)):
     """Aktuellen Face-Crop als JPEG. Token via Header ODER ?token= Query."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        token = request.query_params.get("token", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1676,11 +1751,8 @@ async def vision_face_crop(index: int, request: Request):
 
 
 @app.get("/api/vision/cameras")
-async def vision_cameras(request: Request):
+async def vision_cameras(user: str = Depends(require_auth)):
     """Verfuegbare Kameras auflisten."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1691,11 +1763,8 @@ async def vision_cameras(request: Request):
 
 
 @app.get("/api/vision/preview/{index}")
-async def vision_preview(index: int, request: Request):
+async def vision_preview(index: int, user: str = Depends(require_auth_or_query)):
     """Einzelbild einer bestimmten Kamera (fuer Preview)."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1708,11 +1777,8 @@ async def vision_preview(index: int, request: Request):
 
 
 @app.get("/api/vision/profiles")
-async def vision_profiles(request: Request):
+async def vision_profiles(user: str = Depends(require_auth)):
     """Alle Profile mit Aktionen auflisten."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1723,11 +1789,8 @@ async def vision_profiles(request: Request):
 
 
 @app.post("/api/vision/profiles")
-async def vision_profile_update(request: Request):
+async def vision_profile_update(request: Request, user: str = Depends(require_auth)):
     """Profil aktualisieren (Name, Aktion, Aktions-Wert)."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1757,11 +1820,8 @@ async def vision_profile_update(request: Request):
 
 
 @app.post("/api/vision/profiles/rename")
-async def vision_profile_rename(request: Request):
+async def vision_profile_rename(request: Request, user: str = Depends(require_auth)):
     """Profil umbenennen (z.B. nach Training mit Temp-Name)."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1777,11 +1837,8 @@ async def vision_profile_rename(request: Request):
 
 
 @app.delete("/api/vision/profile/{name}")
-async def vision_profile_delete(name: str, request: Request):
+async def vision_profile_delete(name: str, user: str = Depends(require_auth)):
     """Profil loeschen."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1790,13 +1847,8 @@ async def vision_profile_delete(name: str, request: Request):
 
 
 @app.get("/api/vision/thumbnail/{name}")
-async def vision_thumbnail(name: str, request: Request):
+async def vision_thumbnail(name: str, user: str = Depends(require_auth_or_query)):
     """Profilbild (erstes Trainingsfoto) als JPEG. Token via Header ODER ?token= Query."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        token = request.query_params.get("token", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1808,11 +1860,8 @@ async def vision_thumbnail(name: str, request: Request):
 
 
 @app.post("/api/vision/training/start")
-async def vision_training_start(request: Request):
+async def vision_training_start(request: Request, user: str = Depends(require_auth)):
     """Training starten. Body: {name: '...', samples: 30}."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1827,11 +1876,8 @@ async def vision_training_start(request: Request):
 
 
 @app.post("/api/vision/training/stop")
-async def vision_training_stop(request: Request):
+async def vision_training_stop(user: str = Depends(require_auth)):
     """Training stoppen + Modell neu berechnen."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1840,11 +1886,8 @@ async def vision_training_stop(request: Request):
 
 
 @app.get("/api/vision/training/status")
-async def vision_training_status(request: Request):
+async def vision_training_status(user: str = Depends(require_auth)):
     """Training-Fortschritt abfragen."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1852,11 +1895,8 @@ async def vision_training_status(request: Request):
 
 
 @app.get("/api/vision/events")
-async def vision_events(request: Request, limit: int = 50):
+async def vision_events(limit: int = 50, user: str = Depends(require_auth)):
     """Letzte Erkennungs-Events."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1864,11 +1904,8 @@ async def vision_events(request: Request, limit: int = 50):
 
 
 @app.post("/api/vision/cleanup")
-async def vision_cleanup(request: Request):
+async def vision_cleanup(user: str = Depends(require_auth)):
     """Alle Vision-Daten zuruecksetzen."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -1877,13 +1914,8 @@ async def vision_cleanup(request: Request):
 
 
 @app.get("/api/vision/greet-audio/{name}")
-async def vision_greet_audio(name: str, request: Request):
+async def vision_greet_audio(name: str, user: str = Depends(require_auth_or_query)):
     """Vorgerenderte Begruessungs-Audio (MP3 bevorzugt, WAV Fallback). Token via Header ODER ?token= Query."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        token = request.query_params.get("token", "")
-    if not verify_token(token):
-        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
 
     from pathlib import Path as _Path
     audio_dir = _Path(__file__).parent.parent / "data" / "vision" / "audio"
@@ -2015,59 +2047,50 @@ async def _wa_bridge_async(path: str, method: str = "GET", data: dict = None) ->
 
 
 @app.get("/api/whatsapp/status")
-async def wa_status():
+async def wa_status(user: str = Depends(require_auth)):
     """WhatsApp Bridge Status (Proxy)."""
     result = await _wa_bridge_async("/status")
     return JSONResponse(result)
 
 
 @app.get("/api/whatsapp/qr")
-async def wa_qr():
+async def wa_qr(user: str = Depends(require_auth)):
     """WhatsApp QR-Code zum Scannen (Proxy)."""
     result = await _wa_bridge_async("/qr")
     return JSONResponse(result)
 
 
 @app.post("/api/whatsapp/logout")
-async def wa_logout():
+async def wa_logout(user: str = Depends(require_auth)):
     """WhatsApp abmelden (Proxy)."""
     result = await _wa_bridge_async("/logout", method="POST")
     return JSONResponse(result)
 
 
 @app.post("/api/whatsapp/reconnect")
-async def wa_reconnect():
+async def wa_reconnect(user: str = Depends(require_auth)):
     """WhatsApp Reconnect erzwingen (Proxy)."""
     result = await _wa_bridge_async("/reconnect", method="POST")
     return JSONResponse(result)
 
 
 @app.get("/api/whatsapp/logs")
-async def wa_logs(request: Request, lines: int = 100, level: str = None, category: str = None):
+async def wa_logs(lines: int = 100, level: str = None, category: str = None, user: str = Depends(require_auth)):
     """WhatsApp-Logs abrufen (gefiltert)."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"error": "Nicht autorisiert"}, status_code=401)
     entries = wa_get_logs(lines=lines, level=level, category=category)
     return JSONResponse({"logs": entries, "total": len(entries)})
 
 
 @app.delete("/api/whatsapp/logs")
-async def wa_logs_clear(request: Request):
+async def wa_logs_clear(user: str = Depends(require_auth)):
     """WhatsApp-Logs loeschen."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"error": "Nicht autorisiert"}, status_code=401)
     wa_clear_logs()
     return JSONResponse({"status": "ok", "message": "Logs geloescht"})
 
 
 @app.get("/api/whatsapp/bridge-logs")
-async def wa_bridge_logs(request: Request, lines: int = 100, level: str = None, category: str = None):
+async def wa_bridge_logs(lines: int = 100, level: str = None, category: str = None, user: str = Depends(require_auth)):
     """Bridge-Logs abrufen (Proxy zum Bridge-Service)."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"error": "Nicht autorisiert"}, status_code=401)
     params = f"?lines={lines}"
     if level:
         params += f"&level={level}"
@@ -2078,11 +2101,8 @@ async def wa_bridge_logs(request: Request, lines: int = 100, level: str = None, 
 
 
 @app.delete("/api/whatsapp/bridge-logs")
-async def wa_bridge_logs_clear(request: Request):
+async def wa_bridge_logs_clear(user: str = Depends(require_auth)):
     """Bridge-Logs loeschen (Proxy zum Bridge-Service + lokaler Fallback)."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        return JSONResponse({"error": "Nicht autorisiert"}, status_code=401)
     # Versuche ueber Bridge-API
     result = await _wa_bridge_async("/logs", method="DELETE")
     # Fallback: Falls Bridge nicht erreichbar, Datei direkt loeschen

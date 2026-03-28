@@ -1,5 +1,6 @@
 """Jarvis LLM Provider Abstraktionsschicht."""
 
+import asyncio
 import json
 import re
 import httpx
@@ -36,6 +37,48 @@ class LLMProvider(ABC):
         pass
 
 
+# Shared httpx.AsyncClient mit Connection-Pooling (vermeidet neue Verbindung pro Request)
+_shared_client: httpx.AsyncClient | None = None
+_client_lock = asyncio.Lock()
+
+
+async def _get_shared_client() -> httpx.AsyncClient:
+    """Gibt den shared AsyncClient zurueck (lazy init, thread-safe)."""
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        async with _client_lock:
+            if _shared_client is None or _shared_client.is_closed:
+                _shared_client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(300.0, connect=10.0),
+                    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                    follow_redirects=True,
+                )
+    return _shared_client
+
+
+async def _retry_with_backoff(coro_fn, max_retries: int = 3, base_delay: float = 1.0):
+    """Fuehrt eine Coroutine mit exponentiellem Backoff bei Retry-faehigen Fehlern aus."""
+    for attempt in range(max_retries + 1):
+        try:
+            return await coro_fn()
+        except (httpx.HTTPStatusError, httpx.ConnectError, httpx.ReadTimeout, ValueError) as e:
+            # Nur bei 429/503/Timeout/Connect-Fehlern erneut versuchen
+            retryable = False
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code in (429, 503, 502):
+                retryable = True
+            elif isinstance(e, (httpx.ConnectError, httpx.ReadTimeout)):
+                retryable = True
+            elif isinstance(e, ValueError) and ("429" in str(e) or "503" in str(e) or "502" in str(e)):
+                retryable = True
+
+            if not retryable or attempt >= max_retries:
+                raise
+            delay = base_delay * (2 ** attempt)
+            print(f"[LLM] Retry {attempt + 1}/{max_retries} nach {delay}s: {e}", flush=True)
+            await asyncio.sleep(delay)
+    raise RuntimeError("Retry-Limit erreicht")
+
+
 def _normalize_schema(schema: dict) -> dict:
     """Konvertiert Gemini-Style Typen (OBJECT, STRING) zu JSON-Schema (object, string)."""
     if not isinstance(schema, dict):
@@ -65,22 +108,24 @@ class GeminiProvider(LLMProvider):
     async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
         gemini_tools = [types.Tool(function_declarations=tools)] if tools else None
 
-        response = self.client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                tools=gemini_tools,
-                temperature=0.2,
-            ),
-        )
+        async def _call():
+            resp = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    tools=gemini_tools,
+                    temperature=0.2,
+                ),
+            )
+            parts = []
+            if resp.candidates and resp.candidates[0].content and resp.candidates[0].content.parts:
+                for p in resp.candidates[0].content.parts:
+                    parts.append(LLMPart(text=p.text, function_call=p.function_call))
+            return LLMResponse(parts=parts, raw=resp)
 
-        parts = []
-        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
-            for p in response.candidates[0].content.parts:
-                parts.append(LLMPart(text=p.text, function_call=p.function_call))
-
-        return LLMResponse(parts=parts, raw=response)
+        return await _retry_with_backoff(_call)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -119,10 +164,12 @@ class OpenAICompatibleProvider(LLMProvider):
         return 300.0
 
     async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
-        """Wählt zwischen nativem und Prompt-basiertem Tool-Calling."""
-        if self.prompt_tool_calling:
-            return await self._generate_prompt_mode(model, system_prompt, contents, tools or [])
-        return await self._generate_native(model, system_prompt, contents, tools)
+        """Wählt zwischen nativem und Prompt-basiertem Tool-Calling (mit Retry bei 429/503)."""
+        async def _call():
+            if self.prompt_tool_calling:
+                return await self._generate_prompt_mode(model, system_prompt, contents, tools or [])
+            return await self._generate_native(model, system_prompt, contents, tools)
+        return await _retry_with_backoff(_call)
 
     # ── Nativer Modus (OpenAI tool_calls API) ────────────────────────
 
@@ -167,72 +214,72 @@ class OpenAICompatibleProvider(LLMProvider):
                 })
             payload["tools"] = openai_tools
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(self.base_url, headers=self._build_headers(), json=payload, timeout=self._get_timeout())
-            if not resp.is_success:
-                # Fehlerdetails aus der Response-Body zeigen (z.B. Open WebUI Fehlermeldung)
-                try:
-                    err_body = resp.json()
-                    err_detail = err_body.get("detail") or err_body.get("message") or err_body.get("error") or resp.text[:300]
-                except Exception:
-                    err_detail = resp.text[:300]
-                raise ValueError(f"HTTP {resp.status_code} von {self.base_url}: {err_detail}")
-
+        client = await _get_shared_client()
+        resp = await client.post(self.base_url, headers=self._build_headers(), json=payload, timeout=self._get_timeout())
+        if not resp.is_success:
+            # Fehlerdetails aus der Response-Body zeigen (z.B. Open WebUI Fehlermeldung)
             try:
-                data = resp.json()
+                err_body = resp.json()
+                err_detail = err_body.get("detail") or err_body.get("message") or err_body.get("error") or resp.text[:300]
+            except Exception:
+                err_detail = resp.text[:300]
+            raise ValueError(f"HTTP {resp.status_code} von {self.base_url}: {err_detail}")
+
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+
+        # Modell unterstützt keine Tool-Calls → Fallback ohne Tools + Hinweis
+        if not isinstance(data, dict) and "tools" in payload:
+            payload_no_tools = {k: v for k, v in payload.items() if k != "tools"}
+            resp2 = await client.post(self.base_url, headers=self._build_headers(), json=payload_no_tools, timeout=self._get_timeout())
+            resp2.raise_for_status()
+            try:
+                data = resp2.json()
             except Exception:
                 data = {}
+            if isinstance(data, dict):
+                warn = (f"⚠️ Modell '{model}' unterstützt keine nativen Tool-Calls. "
+                        "Aktiviere 'Prompt-basiertes Tool-Calling' im Profil oder wähle ein "
+                        "anderes Modell (llama3.1, qwen2.5, mistral-nemo).")
+                choices = data.get("choices") or []
+                if choices:
+                    choices[0].setdefault("message", {})
+                    existing = choices[0]["message"].get("content") or ""
+                    choices[0]["message"]["content"] = warn + "\n\n" + existing
+                else:
+                    data["choices"] = [{"message": {"content": warn}}]
 
-            # Modell unterstützt keine Tool-Calls → Fallback ohne Tools + Hinweis
-            if not isinstance(data, dict) and "tools" in payload:
-                payload_no_tools = {k: v for k, v in payload.items() if k != "tools"}
-                resp2 = await client.post(self.base_url, headers=self._build_headers(), json=payload_no_tools, timeout=self._get_timeout())
-                resp2.raise_for_status()
-                try:
-                    data = resp2.json()
-                except Exception:
-                    data = {}
-                if isinstance(data, dict):
-                    warn = (f"⚠️ Modell '{model}' unterstützt keine nativen Tool-Calls. "
-                            "Aktiviere 'Prompt-basiertes Tool-Calling' im Profil oder wähle ein "
-                            "anderes Modell (llama3.1, qwen2.5, mistral-nemo).")
-                    choices = data.get("choices") or []
-                    if choices:
-                        choices[0].setdefault("message", {})
-                        existing = choices[0]["message"].get("content") or ""
-                        choices[0]["message"]["content"] = warn + "\n\n" + existing
-                    else:
-                        data["choices"] = [{"message": {"content": warn}}]
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"LLM-Antwort ist kein JSON-Objekt ('{resp.text[:100]}'). "
+                "Prüfe ob das Modell geladen ist – oder aktiviere 'Prompt-basiertes Tool-Calling'."
+            )
 
-            if not isinstance(data, dict):
-                raise ValueError(
-                    f"LLM-Antwort ist kein JSON-Objekt ('{resp.text[:100]}'). "
-                    "Prüfe ob das Modell geladen ist – oder aktiviere 'Prompt-basiertes Tool-Calling'."
-                )
+        if "error" in data:
+            err = data["error"]
+            msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+            raise ValueError(f"LLM-Fehler: {msg}")
 
-            if "error" in data:
-                err = data["error"]
-                msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-                raise ValueError(f"LLM-Fehler: {msg}")
+        parts = []
+        if "choices" in data and len(data["choices"]) > 0:
+            choice = data["choices"][0]
+            message = choice.get("message", {})
 
-            parts = []
-            if "choices" in data and len(data["choices"]) > 0:
-                choice = data["choices"][0]
-                message = choice.get("message", {})
+            if message.get("content"):
+                parts.append(LLMPart(text=message["content"]))
 
-                if message.get("content"):
-                    parts.append(LLMPart(text=message["content"]))
+            if message.get("tool_calls"):
+                for tc in message["tool_calls"]:
+                    fn = tc.get("function", {})
+                    try:
+                        args = json.loads(fn.get("arguments", "{}"))
+                    except Exception:
+                        args = {}
+                    parts.append(LLMPart(function_call=MockFC(fn.get("name"), args)))
 
-                if message.get("tool_calls"):
-                    for tc in message["tool_calls"]:
-                        fn = tc.get("function", {})
-                        try:
-                            args = json.loads(fn.get("arguments", "{}"))
-                        except Exception:
-                            args = {}
-                        parts.append(LLMPart(function_call=MockFC(fn.get("name"), args)))
-
-            return LLMResponse(parts=parts, raw=data)
+        return LLMResponse(parts=parts, raw=data)
 
     # ── Prompt-Modus (Tools im System-Prompt, XML-Tag-Parsing) ───────
 
@@ -294,13 +341,13 @@ class OpenAICompatibleProvider(LLMProvider):
 
         payload = {"model": model, "messages": messages, "temperature": 0.2, "stream": False}
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(self.base_url, headers=self._build_headers(), json=payload, timeout=self._get_timeout())
-            resp.raise_for_status()
-            try:
-                data = resp.json()
-            except Exception:
-                data = {}
+        client = await _get_shared_client()
+        resp = await client.post(self.base_url, headers=self._build_headers(), json=payload, timeout=self._get_timeout())
+        resp.raise_for_status()
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
 
         if not isinstance(data, dict):
             raise ValueError(f"LLM-Antwort ist kein JSON-Objekt: {resp.text[:200]}")
@@ -503,32 +550,32 @@ class AnthropicSessionProvider(LLMProvider):
         """Holt die Organisations-ID vom claude.ai Account."""
         if self.org_id:
             return
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{self.BASE_URL}/api/organizations",
-                headers=self._headers(),
-                timeout=30.0,
-            )
-            resp.raise_for_status()
-            orgs = resp.json()
-            if not orgs:
-                raise ValueError("Keine Organisation gefunden. Session-Key ungültig oder abgelaufen?")
-            self.org_id = orgs[0]["uuid"]
+        client = await _get_shared_client()
+        resp = await client.get(
+            f"{self.BASE_URL}/api/organizations",
+            headers=self._headers(),
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        orgs = resp.json()
+        if not orgs:
+            raise ValueError("Keine Organisation gefunden. Session-Key ungültig oder abgelaufen?")
+        self.org_id = orgs[0]["uuid"]
 
     async def _create_conversation(self, model: str) -> str:
         """Erstellt eine neue claude.ai Konversation."""
         import uuid as uuid_lib
         conv_uuid = str(uuid_lib.uuid4())
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.BASE_URL}/api/organizations/{self.org_id}/chat_conversations",
-                headers=self._headers(),
-                json={"name": "", "uuid": conv_uuid, "model": model},
-                timeout=30.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["uuid"]
+        client = await _get_shared_client()
+        resp = await client.post(
+            f"{self.BASE_URL}/api/organizations/{self.org_id}/chat_conversations",
+            headers=self._headers(),
+            json={"name": "", "uuid": conv_uuid, "model": model},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["uuid"]
 
     async def _send_message(self, model: str, message: str) -> str:
         """Sendet eine Nachricht und sammelt die SSE-Antwort."""
@@ -544,24 +591,24 @@ class AnthropicSessionProvider(LLMProvider):
         }
 
         full_response = ""
-        async with httpx.AsyncClient() as client:
-            async with client.stream(
-                "POST",
-                f"{self.BASE_URL}/api/organizations/{self.org_id}/"
-                f"chat_conversations/{self.conversation_id}/completion",
-                headers=headers,
-                json=payload,
-                timeout=120.0,
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if line.startswith("data: "):
-                        try:
-                            data = json.loads(line[6:])
-                            if data.get("type") == "completion":
-                                full_response += data.get("completion", "")
-                        except json.JSONDecodeError:
-                            pass
+        client = await _get_shared_client()
+        async with client.stream(
+            "POST",
+            f"{self.BASE_URL}/api/organizations/{self.org_id}/"
+            f"chat_conversations/{self.conversation_id}/completion",
+            headers=headers,
+            json=payload,
+            timeout=120.0,
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if line.startswith("data: "):
+                    try:
+                        data = json.loads(line[6:])
+                        if data.get("type") == "completion":
+                            full_response += data.get("completion", "")
+                    except json.JSONDecodeError:
+                        pass
 
         return full_response
 

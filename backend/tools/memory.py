@@ -255,8 +255,8 @@ def load_selective_memory(task_text: str = "") -> str:
         'the', 'a', 'an', 'and', 'or', 'in', 'of', 'to', 'for', 'is', 'was', 'wie',
         'was', 'ich', 'du', 'wir', 'mir', 'mich', 'bitte', 'kannst', 'mache', 'zeige'}
 
-    # Immer laden: Strategien, Tool-Tipps, Fehler-Wissen
-    always_prefixes = ('strategie_', 'tool_tipp_', 'fehler_')
+    # Immer laden: Strategien, Tool-Tipps, Fehler-Wissen, Praeferenzen
+    always_prefixes = ('strategie_', 'tool_tipp_', 'fehler_', 'praeferenz_')
 
     strategien = []
     relevante = []

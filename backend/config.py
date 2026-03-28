@@ -48,7 +48,18 @@ class Config:
 
     # Sicherheit & Server
     JARVIS_PASSWORD: str = os.getenv("JARVIS_PASSWORD", "jarvis")
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "jarvis-secret-key-change-me")
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "")
+    if not SECRET_KEY:
+        # Auto-generieren und in Datei persistieren
+        _secret_file = Path(__file__).parent.parent / "data" / ".secret_key"
+        if _secret_file.exists():
+            SECRET_KEY = _secret_file.read_text().strip()
+        if not SECRET_KEY:
+            import secrets as _secrets
+            SECRET_KEY = _secrets.token_hex(32)
+            _secret_file.parent.mkdir(parents=True, exist_ok=True)
+            _secret_file.write_text(SECRET_KEY)
+            print(f"[SECURITY] SECRET_KEY auto-generiert und in {_secret_file} gespeichert", flush=True)
     AGENT_API_KEY: str = os.getenv("AGENT_API_KEY", "")  # API-Key für externen Agent-Task-Zugriff
     SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT: int = int(os.getenv("SERVER_PORT", "443"))

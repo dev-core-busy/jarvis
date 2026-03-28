@@ -232,3 +232,85 @@ def load_memory_context() -> str:
         )
 
     return context
+
+
+def load_selective_memory(task_text: str = "") -> str:
+    """Laedt Memory selektiv: Strategien/Tipps immer, Rest nur wenn relevant.
+
+    Bei kleinem Memory (<50 Eintraege) wird alles geladen.
+    Bei grossem Memory werden nur relevante Eintraege + Strategien geladen.
+    """
+    memory = _load_memory_dict()
+    if not memory:
+        return ""
+
+    # Bei kleinem Memory: alles laden (alter Weg)
+    if len(memory) < 50:
+        return load_memory_context()
+
+    # Bei grossem Memory: selektiv laden
+    task_lower = task_text.lower() if task_text else ""
+    task_words = set(re.split(r'\W+', task_lower)) - {'', 'der', 'die', 'das', 'und', 'oder',
+        'in', 'von', 'zu', 'mit', 'auf', 'fuer', 'ist', 'ein', 'eine', 'den', 'dem',
+        'the', 'a', 'an', 'and', 'or', 'in', 'of', 'to', 'for', 'is', 'was', 'wie',
+        'was', 'ich', 'du', 'wir', 'mir', 'mich', 'bitte', 'kannst', 'mache', 'zeige'}
+
+    # Immer laden: Strategien, Tool-Tipps, Fehler-Wissen
+    always_prefixes = ('strategie_', 'tool_tipp_', 'fehler_')
+
+    strategien = []
+    relevante = []
+    rest_count = 0
+
+    for key, entry in sorted(memory.items()):
+        val = entry.get("value", "") if isinstance(entry, dict) else str(entry)
+        key_lower = key.lower()
+        val_lower = val.lower()
+
+        # Strategien und Tool-Tipps immer laden
+        if any(key_lower.startswith(p) for p in always_prefixes):
+            prefix_label = key.split('_', 1)[0]
+            strategien.append(f"- [{prefix_label}] {key}: {val}")
+            continue
+
+        # Relevanz pruefen: Ueberlappung zwischen Task-Woertern und Key/Value
+        combined = key_lower + " " + val_lower
+        matches = sum(1 for w in task_words if len(w) > 2 and w in combined)
+        if matches > 0:
+            relevante.append((matches, f"- {key}: {val}"))
+        else:
+            rest_count += 1
+
+    # Sortiere relevante nach Anzahl Matches (absteigend)
+    relevante.sort(key=lambda x: -x[0])
+
+    lines = []
+    if strategien:
+        lines.append("Gelernte Strategien & Tipps (ZUERST pruefen, bevor du loslegst):")
+        lines.extend(strategien)
+    if relevante:
+        if lines:
+            lines.append("")
+        lines.append("Relevanter Memory-Kontext:")
+        lines.extend(entry for _, entry in relevante[:20])  # Max 20 relevante
+    if rest_count > 0:
+        lines.append(f"\n({rest_count} weitere Memory-Eintraege verfuegbar – nutze memory_manage(action='search') bei Bedarf)")
+
+    # Wissen immer mit laden (kompakt)
+    wissen = []
+    for key, entry in sorted(memory.items()):
+        if key.startswith("wissen_"):
+            val = entry.get("value", "") if isinstance(entry, dict) else str(entry)
+            wissen.append(f"- {key[7:]}: {val}")
+    if wissen:
+        if lines:
+            lines.append("")
+        lines.append("Gelerntes Wissen:")
+        lines.extend(wissen)
+
+    context = "\n".join(lines)
+    tokens = _estimate_tokens(context)
+    if tokens > TOKEN_LIMIT:
+        context += f"\n\n⚠️ Memory gross (~{tokens} Tokens) – memory_manage(action='compress') empfohlen."
+
+    return context

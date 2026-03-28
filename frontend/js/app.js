@@ -917,9 +917,9 @@
         const tabGoogle = document.getElementById('settings-tab-google');
         const tabVision = document.getElementById('settings-tab-vision');
         const tabMcp = document.getElementById('settings-tab-mcp');
-        const tabInstructions = document.getElementById('settings-tab-instructions');
+        const instrSection = document.getElementById('profiles-instructions-section');
 
-        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabInstructions];
+        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -935,6 +935,8 @@
                 if (target === 'profiles' && tabProfiles) {
                     tabProfiles.style.display = '';
                     tabProfiles.classList.add('active');
+                    // Instruktionen-Sektion im Profile-Tab anzeigen + laden
+                    if (instrSection) { instrSection.style.display = ''; _loadInstructions(); }
                 } else if (target === 'skills' && tabSkills) {
                     tabSkills.style.display = '';
                     tabSkills.classList.add('active');
@@ -951,10 +953,6 @@
                     tabGoogle.style.display = '';
                     tabGoogle.classList.add('active');
                     if (window.googleManager) window.googleManager.init();
-                } else if (target === 'instructions' && tabInstructions) {
-                    tabInstructions.style.display = '';
-                    tabInstructions.classList.add('active');
-                    _loadInstructions();
                 } else if (target === 'mcp' && tabMcp) {
                     tabMcp.style.display = '';
                     tabMcp.classList.add('active');
@@ -1050,6 +1048,8 @@
             if (tabKnowledge) { tabKnowledge.style.display = 'none'; tabKnowledge.classList.remove('active'); }
             if (tabGoogle) { tabGoogle.style.display = 'none'; tabGoogle.classList.remove('active'); }
             if (tabVision) { tabVision.style.display = 'none'; tabVision.classList.remove('active'); }
+            // Instruktionen im Profile-Tab laden
+            if (instrSection) { instrSection.style.display = ''; _loadInstructions(); }
             modal.classList.add('open');
         };
         const closeModal = () => {
@@ -1456,12 +1456,30 @@
             if (data.valid) {
                 currentUser = data.username || currentUser;
                 showMainScreen();
+                // Token-Expiry Warnung einrichten
+                if (data.remaining_seconds && data.remaining_seconds < 3600) {
+                    _showTokenExpiryWarning(data.remaining_seconds);
+                } else if (data.remaining_seconds) {
+                    // Timer fuer Warnung 1h vor Ablauf
+                    const warnIn = (data.remaining_seconds - 3600) * 1000;
+                    if (warnIn > 0) setTimeout(() => _showTokenExpiryWarning(3600), warnIn);
+                }
             } else {
                 showLoginScreen();
             }
         }).catch(() => {
             showLoginScreen();
         });
+    }
+    function _showTokenExpiryWarning(remainingSec) {
+        const mins = Math.round(remainingSec / 60);
+        const bar = document.createElement('div');
+        bar.className = 'token-expiry-bar';
+        bar.innerHTML = `⏱ Sitzung laeuft in ${mins} Min. ab. <button onclick="this.parentElement.remove();showLoginScreen()">Neu anmelden</button>`;
+        bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:var(--accent-warning,#f0ad4e);color:#000;text-align:center;padding:8px;font-size:14px;';
+        document.body.appendChild(bar);
+        // Auto-Logout bei Ablauf
+        setTimeout(() => { showLoginScreen(); }, remainingSec * 1000);
     }
     function setupModal() {
         const modal = document.getElementById('cert-modal');

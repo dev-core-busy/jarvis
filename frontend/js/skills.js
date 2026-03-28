@@ -4,7 +4,7 @@
  * Layout orientiert an KI-Profile + Wissen:
  *  - "Installierte Skills"  = enabled:true  → profile-card-Stil, Toggle + Config + Info + Entfernen
  *  - "Mögliche Skills"      = enabled:false → durchsuchbare Liste mit Kategorie-Pills
- *  - "OpenClaw Marketplace" = aufklappbare Sektion unterhalb (nur lokales LLM)
+ *  - "OpenClaw Marketplace" = aufklappbare Sektion unterhalb (alle LLM-Provider)
  *
  * API:
  *  GET  /api/skills                → { skills: [...] }
@@ -322,7 +322,7 @@
             const bodyHTML = this._ocCollapsed ? '' : `
                 <div class="sk-openclaw-body">
                     <p class="sk-openclaw-hint">
-                        Skills werden gesucht, sicherheitsgeprüft und lokal eingebunden.
+                        Skills durchsuchen, prüfen und bei Bedarf importieren.
                     </p>
                     <label class="sk-openclaw-label">Welchen Skill suchst du?
                         <small>(leer = populäre Skills anzeigen)</small>
@@ -330,9 +330,10 @@
                     <textarea id="sk-oc-description" class="sk-openclaw-textarea"
                         placeholder='z. B. "Skill für Telegram" oder "PDF-Analyse"'
                         rows="2"></textarea>
-                    <button id="sk-oc-import-btn" class="sk-openclaw-btn">
-                        🔍 Skill suchen &amp; importieren
+                    <button id="sk-oc-search-btn" class="sk-openclaw-btn">
+                        🔍 Skills suchen
                     </button>
+                    <div id="sk-oc-results" class="sk-oc-results"></div>
                 </div>`;
 
             ocEl.innerHTML = `
@@ -351,13 +352,23 @@
                 }
             });
 
-            // Import-Button nur wenn aufgeklappt
+            // Such-Button nur wenn aufgeklappt
             if (!this._ocCollapsed) {
-                const importBtn = ocEl.querySelector('#sk-oc-import-btn');
-                if (importBtn) {
-                    importBtn.addEventListener('click', () => {
+                const searchBtn = ocEl.querySelector('#sk-oc-search-btn');
+                if (searchBtn) {
+                    searchBtn.addEventListener('click', () => {
                         const desc = ocEl.querySelector('#sk-oc-description')?.value || '';
-                        this._openClawImport(desc);
+                        this._openClawSearch(desc);
+                    });
+                }
+                // Enter in Textarea löst Suche aus
+                const textarea = ocEl.querySelector('#sk-oc-description');
+                if (textarea) {
+                    textarea.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            searchBtn?.click();
+                        }
                     });
                 }
             }
@@ -390,13 +401,64 @@
             }
         }
 
-        async _openClawImport(descriptionText) {
-            const token    = localStorage.getItem('jarvis_token') || '';
+        async _openClawSearch(descriptionText) {
+            const token = localStorage.getItem('jarvis_token') || '';
+            const resultsEl = document.getElementById('sk-oc-results');
+            const searchBtn = document.getElementById('sk-oc-search-btn');
+            if (!resultsEl) return;
 
-            // 1. Workflow-Task zusammenbauen
+            // Such-Feedback
+            if (searchBtn) { searchBtn.disabled = true; searchBtn.textContent = '⏳ Suche läuft…'; }
+            resultsEl.innerHTML = '<div class="sk-oc-loading">🔍 Suche auf OpenClaw…</div>';
+
+            try {
+                const desc = encodeURIComponent(descriptionText.trim() || '');
+                const resp = await fetch(`/api/openclaw/search?q=${desc}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json();
+                const skills = data.results || [];
+
+                if (skills.length === 0) {
+                    resultsEl.innerHTML = '<div class="sk-oc-empty">Keine Skills gefunden. Versuche andere Suchbegriffe.</div>';
+                    return;
+                }
+
+                resultsEl.innerHTML = skills.map((s, i) => `
+                    <div class="sk-oc-card">
+                        <div class="sk-oc-card-info">
+                            <strong>${s.name || 'Unbenannt'}</strong>
+                            <span class="sk-oc-card-desc">${s.description || ''}</span>
+                            ${s.author ? `<span class="sk-oc-card-meta">von ${s.author}</span>` : ''}
+                            ${s.stars != null ? `<span class="sk-oc-card-meta">⭐ ${s.stars}</span>` : ''}
+                        </div>
+                        <button class="sk-oc-import-btn" data-idx="${i}">📥 Importieren</button>
+                    </div>`).join('');
+
+                // Import-Buttons
+                resultsEl.querySelectorAll('.sk-oc-import-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const idx = parseInt(btn.dataset.idx);
+                        const skill = skills[idx];
+                        btn.disabled = true;
+                        btn.textContent = '⏳ Import…';
+                        this._openClawImport(skill);
+                    });
+                });
+            } catch (e) {
+                console.error('OpenClaw Suche Fehler:', e);
+                resultsEl.innerHTML = '<div class="sk-oc-empty">❌ Suche fehlgeschlagen.</div>';
+            } finally {
+                if (searchBtn) { searchBtn.disabled = false; searchBtn.textContent = '🔍 Skills suchen'; }
+            }
+        }
+
+        async _openClawImport(skillInfo) {
+            const token = localStorage.getItem('jarvis_token') || '';
+
             let taskText = '';
             try {
-                const desc     = encodeURIComponent(descriptionText.trim() || '');
+                const desc = encodeURIComponent(skillInfo.name || skillInfo.description || '');
                 const taskResp = await fetch(`/api/openclaw/workflow-task?description=${desc}`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
@@ -407,8 +469,7 @@
                 return;
             }
 
-            // 3. Import-Modal öffnen (startet Task)
-            this._showImportModal(taskText, descriptionText || 'OpenClaw Skill-Import');
+            this._showImportModal(taskText, skillInfo.name || 'OpenClaw Skill-Import');
         }
 
         // ── Import-Modal mit Mini-Chat ────────────────────────────────

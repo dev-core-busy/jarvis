@@ -379,7 +379,6 @@ sudo update-ca-certificates</code></pre>
                 <button class="settings-tab-btn" data-settings-tab="whatsapp" id="settings-tab-btn-whatsapp" style="display:none">WhatsApp</button>
                 <button class="settings-tab-btn" data-settings-tab="knowledge">Wissen</button>
                 <!-- Google-Tab entfernt – Config erfolgt über Skill-Einstellungen -->
-                <button class="settings-tab-btn" data-settings-tab="instructions">Instruktionen</button>
                 <button class="settings-tab-btn" data-settings-tab="mcp">MCP</button>
                 <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;">Vision</button>
             </div>
@@ -528,6 +527,28 @@ sudo update-ca-certificates</code></pre>
                     <div class="modal-actions">
                         <button class="btn-primary" id="btn-save-profile">Speichern</button>
                         <button class="btn-secondary" id="btn-cancel-profile">Abbrechen</button>
+                    </div>
+                </div>
+
+                <!-- ── Instruktionen (innerhalb KI-Profile) ── -->
+                <div id="profiles-instructions-section" style="display:none;">
+                    <hr class="settings-divider">
+                    <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:8px;">Instruktionen</h3>
+                    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px; line-height: 1.5;">
+                        Dauerhafte Anweisungen, die bei <strong style="color: var(--text-primary);">jedem Gespräch</strong> automatisch geladen werden.
+                        Beispiele: Kommunikationsstil, bevorzugte Tools, Sicherheitsregeln oder projektspezifische Vorgaben.
+                    </p>
+
+                    <div style="display: flex; gap: 10px; margin-bottom: 16px; align-items: center;">
+                        <input type="text" id="instr-new-name" placeholder="Name der neuen Instruktion"
+                               style="flex:1; padding:8px 12px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-size:0.85rem;">
+                        <button id="btn-instr-new" class="btn-primary" style="padding:8px 16px; font-size:0.85rem; white-space:nowrap;">
+                            + Neue Instruktion
+                        </button>
+                    </div>
+
+                    <div id="instr-list" style="display: flex; flex-direction: column; gap: 10px;">
+                        <!-- Wird dynamisch befuellt -->
                     </div>
                 </div>
 
@@ -758,28 +779,7 @@ sudo update-ca-certificates</code></pre>
 
                 <!-- Google-Tab entfernt – Config erfolgt über Skill-Einstellungen -->
 
-                <!-- ═══ Tab: Instruktionen ═══ -->
-                <div id="settings-tab-instructions" class="settings-tab-content" style="display: none;">
-                    <div class="kb-container">
-                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px; line-height: 1.5;">
-                            Hier kannst du dem KI-Agenten dauerhafte Anweisungen geben, die bei <strong style="color: var(--text-primary);">jedem Gespräch</strong> automatisch geladen werden.
-                            Beispiele: Kommunikationsstil, bevorzugte Tools, Sicherheitsregeln oder projektspezifische Vorgaben.
-                            Jede Datei wird als eigenständiger Instruktionsblock in den System-Prompt eingefügt.
-                        </p>
-
-                        <div style="display: flex; gap: 10px; margin-bottom: 16px; align-items: center;">
-                            <input type="text" id="instr-new-name" placeholder="Name der neuen Instruktion"
-                                   style="flex:1; padding:8px 12px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-size:0.85rem;">
-                            <button id="btn-instr-new" class="btn-primary" style="padding:8px 16px; font-size:0.85rem; white-space:nowrap;">
-                                + Neue Instruktion
-                            </button>
-                        </div>
-
-                        <div id="instr-list" style="display: flex; flex-direction: column; gap: 10px;">
-                            <!-- Wird dynamisch befuellt -->
-                        </div>
-                    </div>
-                </div>
+                <!-- Instruktionen-Tab entfernt – Inhalt ist jetzt im KI-Profile Tab -->
 
                 <!-- ═══ Tab: Vision ═══ -->
                 <!-- ═══ Tab: MCP Server ═══ -->
@@ -1012,7 +1012,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/knowledge.js?v=9"></script>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
-    <script src="/static/js/app.js?v=34"></script>
+    <script src="/static/js/app.js?v=35"></script>
 </body>
 
 </html>

@@ -13,8 +13,11 @@ from backend.tools.base import BaseTool
 # Memory-Datei
 MEMORY_FILE = Path(__file__).parent.parent.parent / "data" / "memory.json"
 
-# Thread-Lock fuer parallelen Zugriff (Sub-Agents)
+# Thread-Lock fuer parallelen Zugriff (Sub-Agents laufen in Threads)
 _lock = threading.Lock()
+
+# In-Memory Cache (vermeidet Disk-Reads bei jedem Zugriff)
+_cache: dict | None = None
 
 # Token-Limits
 TOKEN_LIMIT = 2000       # Warnung im System-Prompt
@@ -27,11 +30,16 @@ def _estimate_tokens(text: str) -> int:
 
 
 def _load_memory_dict() -> dict:
-    """Laedt Memory aus JSON-Datei mit Backup-Recovery."""
+    """Laedt Memory aus Cache oder JSON-Datei mit Backup-Recovery."""
+    global _cache
+    if _cache is not None:
+        return _cache
+
     MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
     if MEMORY_FILE.exists():
         try:
-            return json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
+            _cache = json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
+            return _cache
         except (json.JSONDecodeError, ValueError) as e:
             print(f"[MEMORY] WARNUNG: memory.json korrupt ({e}), versuche Backup...", flush=True)
             bak = MEMORY_FILE.with_suffix(".json.bak")
@@ -39,22 +47,26 @@ def _load_memory_dict() -> dict:
                 try:
                     data = json.loads(bak.read_text(encoding="utf-8"))
                     print(f"[MEMORY] Backup geladen ({len(data)} Eintraege)", flush=True)
-                    # Backup wiederherstellen
                     MEMORY_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-                    return data
+                    _cache = data
+                    return _cache
                 except Exception:
                     pass
             print("[MEMORY] Kein nutzbares Backup gefunden, starte mit leerem Memory", flush=True)
-            return {}
-    return {}
+            _cache = {}
+            return _cache
+    _cache = {}
+    return _cache
 
 
 def _save_memory_dict(memory: dict):
-    """Speichert Memory mit Backup der vorherigen Version."""
+    """Speichert Memory mit Backup der vorherigen Version und aktualisiert Cache."""
+    global _cache
     MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
     if MEMORY_FILE.exists():
         shutil.copy2(MEMORY_FILE, MEMORY_FILE.with_suffix(".json.bak"))
     MEMORY_FILE.write_text(json.dumps(memory, indent=2, ensure_ascii=False), encoding="utf-8")
+    _cache = memory
 
 
 class MemoryTool(BaseTool):

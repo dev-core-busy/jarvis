@@ -575,6 +575,14 @@ KRITISCH – Autonomie-Regeln:
                     result = await self._execute_tool(tool_name, tool_args)
                     result_str = str(result)[:5000]
 
+                    # Tool-Statistik tracken
+                    is_error = any(marker in result_str[:200].lower() for marker in
+                                   ['fehler', 'error', '❌', 'traceback', 'exception', 'not found', 'failed'])
+                    self._tool_stats.append({
+                        "tool": tool_name, "step": steps,
+                        "success": not is_error, "args_preview": json.dumps(tool_args, ensure_ascii=False)[:100]
+                    })
+
                     function_response_parts.append(
                         types.Part.from_function_response(
                             name=tool_name,
@@ -612,6 +620,36 @@ KRITISCH – Autonomie-Regeln:
                 )
 
                 steps += 1
+
+            # Auto-Learning (gleiche Logik wie in run_task)
+            if steps >= 3 and self._tool_stats:
+                failed = [s for s in self._tool_stats if not s["success"]]
+                succeeded = [s for s in self._tool_stats if s["success"]]
+                if failed and succeeded:
+                    _log(f"Auto-Learning (headless): {len(failed)} Fehlversuche, {len(succeeded)} Erfolge")
+                    learning_hint = (
+                        f"\n\nWICHTIG – AUTO-LEARNING: Du hast {steps} Schritte gebraucht "
+                        f"mit {len(failed)} Fehlversuchen. Speichere den erfolgreichen Loesungsweg "
+                        f"mit memory_manage(action='save', key='strategie_...', value='...')."
+                    )
+                    try:
+                        chat_history.append(
+                            types.Content(role="user", parts=[types.Part.from_text(text=learning_hint)])
+                        )
+                        learn_response = await self.provider.generate_response(
+                            model=config.current_model, system_prompt=system_prompt,
+                            contents=[
+                                types.Content(role="user", parts=[types.Part.from_text(text=task_text)]),
+                                *chat_history,
+                            ],
+                            tools=self._tool_instances
+                        )
+                        if learn_response.parts:
+                            for p in learn_response.parts:
+                                if p.function_call and p.function_call.name == "memory_manage":
+                                    await self._execute_tool("memory_manage", dict(p.function_call.args))
+                    except Exception as le:
+                        _log(f"Auto-Learning (headless) fehlgeschlagen: {le}")
 
         except Exception as e:
             collected_texts.append(f"Fehler: {str(e)}")

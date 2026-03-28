@@ -4262,6 +4262,54 @@ select.input-field {
     transform: none;
 }
 
+/* ── OpenClaw Suchergebnisse ───────────────────────────────────── */
+.sk-oc-results {
+    margin-top: 0.8rem;
+    display: flex; flex-direction: column; gap: 0.5rem;
+}
+.sk-oc-loading, .sk-oc-empty {
+    padding: 1rem; text-align: center;
+    color: var(--text-secondary); font-size: 0.9rem;
+}
+.sk-oc-card {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.6rem 0.8rem; gap: 0.8rem;
+    background: var(--bg-glass, rgba(255,255,255,0.04));
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    transition: border-color 0.2s;
+}
+.sk-oc-card:hover { border-color: var(--accent-primary, #7c6af7); }
+.sk-oc-card-info {
+    display: flex; flex-direction: column; gap: 0.15rem;
+    min-width: 0; flex: 1;
+}
+.sk-oc-card-info strong {
+    color: var(--text-primary); font-size: 0.95rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sk-oc-card-desc {
+    color: var(--text-secondary); font-size: 0.8rem;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.sk-oc-card-meta {
+    color: var(--text-muted, #666); font-size: 0.75rem;
+}
+.sk-oc-import-btn {
+    flex-shrink: 0;
+    padding: 0.35rem 0.8rem; border-radius: 6px;
+    border: 1px solid var(--accent-primary, #7c6af7);
+    background: transparent; color: var(--accent-primary, #7c6af7);
+    font-size: 0.8rem; cursor: pointer;
+    transition: all 0.2s;
+}
+.sk-oc-import-btn:hover:not(:disabled) {
+    background: var(--accent-primary, #7c6af7); color: #fff;
+}
+.sk-oc-import-btn:disabled {
+    opacity: 0.4; cursor: not-allowed;
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    OpenClaw Import-Modal (Mini-Chat)
    ═══════════════════════════════════════════════════════════════════ */

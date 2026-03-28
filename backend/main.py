@@ -2313,11 +2313,14 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
 
     msg_type = msg.get("type", "")
 
-    # Token pruefen
+    # Token pruefen: Login-Token ODER Agent API Key akzeptieren
     token = msg.get("token", "")
-    if msg_type != "ping" and verify_token(token) is None:
-        await ws.send_json({"type": "error", "message": "Nicht autorisiert"})
-        return
+    if msg_type != "ping":
+        is_login_token = verify_token(token) is not None
+        is_api_key = bool(config.AGENT_API_KEY) and hmac.compare_digest(token, config.AGENT_API_KEY)
+        if not is_login_token and not is_api_key:
+            await ws.send_json({"type": "error", "message": "Nicht autorisiert"})
+            return
 
     if msg_type == "task":
         # Neue Aufgabe starten

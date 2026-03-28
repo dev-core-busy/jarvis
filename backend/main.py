@@ -1155,6 +1155,59 @@ async def webdav_config(request: Request):
                          "hint": "Server-Neustart noetig fuer WebDAV-Aenderungen"})
 
 
+# ─── Instructions API ─────────────────────────────────────────────────
+
+INSTRUCTIONS_DIR = Path(__file__).parent.parent / "data" / "instructions"
+
+
+@app.get("/api/instructions")
+async def list_instructions():
+    """Listet alle Instruction-Dateien auf."""
+    INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    files = []
+    for f in sorted(INSTRUCTIONS_DIR.glob("*.md")):
+        content = f.read_text(encoding="utf-8")
+        files.append({"name": f.stem, "filename": f.name, "content": content})
+    return JSONResponse({"files": files})
+
+
+@app.get("/api/instructions/{name}")
+async def get_instruction(name: str):
+    """Liest eine einzelne Instruction-Datei."""
+    filepath = INSTRUCTIONS_DIR / f"{name}.md"
+    if not filepath.exists():
+        return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
+    return JSONResponse({"name": name, "filename": filepath.name,
+                         "content": filepath.read_text(encoding="utf-8")})
+
+
+@app.post("/api/instructions/{name}")
+async def save_instruction(name: str, request: Request):
+    """Erstellt oder aktualisiert eine Instruction-Datei."""
+    data = await request.json()
+    content = data.get("content", "")
+    if not name or not name.strip():
+        return JSONResponse({"error": "Name darf nicht leer sein"}, status_code=400)
+    # Sicherheitscheck: kein Path-Traversal
+    safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+    if not safe_name:
+        return JSONResponse({"error": "Ungueltiger Name"}, status_code=400)
+    INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    filepath = INSTRUCTIONS_DIR / f"{safe_name}.md"
+    filepath.write_text(content, encoding="utf-8")
+    return JSONResponse({"ok": True, "filename": filepath.name})
+
+
+@app.delete("/api/instructions/{name}")
+async def delete_instruction(name: str):
+    """Loescht eine Instruction-Datei."""
+    filepath = INSTRUCTIONS_DIR / f"{name}.md"
+    if filepath.exists():
+        filepath.unlink()
+        return JSONResponse({"ok": True})
+    return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
+
+
 # ─── Google: .env-Helper ──────────────────────────────────────────────
 
 def _update_env_google(client_id: str, client_secret: str):
@@ -1392,29 +1445,39 @@ async def gog_remove_account(request: Request):
 
 # ─── OpenClaw Marketplace ─────────────────────────────────────────────
 
-@app.get("/api/openclaw/llm-check")
-async def openclaw_llm_check(request: Request):
-    """Prüft ob das aktuelle LLM eine lokale Verbindung ist.
-    Lokal = openai_compatible + localhost/127.0.0.1 URL.
+@app.get("/api/openclaw/search")
+async def openclaw_search(request: Request, q: str = ""):
+    """Sucht Skills auf OpenClaw Marketplace.
+    Gibt Ergebnisliste zurück – Import erfolgt separat.
     """
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     if not verify_token(token):
         return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
-    profile  = config.active_profile or {}
-    provider = profile.get("provider", "")
-    api_url  = profile.get("api_url", "")
-    is_local = (
-        provider == "openai_compatible"
-        and ("localhost" in api_url or "127.0.0.1" in api_url)
-    )
-    if is_local:
-        reason = f"Lokales LLM erkannt ({api_url})"
-    else:
-        reason = (
-            f"Cloud-LLM aktiv: Provider '{provider}' – "
-            "OpenClaw-Import nur mit lokalem LLM verfügbar."
-        )
-    return JSONResponse({"local": is_local, "provider": provider, "reason": reason})
+
+    import urllib.request, json as _json
+    query = q.strip() or "popular"
+    search_url = f"https://clawhub.ai/api/search?q={urllib.parse.quote(query)}"
+    try:
+        req = urllib.request.Request(search_url, headers={"User-Agent": "Jarvis/0.8"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read().decode())
+            raw = data.get("results", data if isinstance(data, list) else [])
+            # Einheitliches Format fuer Frontend
+            results = []
+            for s in raw[:20]:
+                results.append({
+                    "name": s.get("displayName") or s.get("name") or s.get("slug", ""),
+                    "slug": s.get("slug", ""),
+                    "description": s.get("summary") or s.get("description", ""),
+                    "stars": round(s.get("score", 0), 1) if s.get("score") else None,
+                    "author": s.get("author", ""),
+                    "url": f"https://clawhub.ai/skills/{s.get('slug', '')}",
+                })
+    except Exception as e:
+        results = []
+        _log(f"ClawHub API nicht erreichbar ({e})")
+
+    return JSONResponse({"results": results, "query": query})
 
 
 @app.get("/api/openclaw/workflow-task")

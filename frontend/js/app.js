@@ -134,6 +134,68 @@
         } catch (e) { /* Version nicht verfuegbar */ }
     }
 
+    // ─── Instructions Editor ─────────────────────────────────────
+    async function _loadInstructions() {
+        const list = document.getElementById('instr-list');
+        if (!list) return;
+        try {
+            const res = await fetch('/api/instructions');
+            const data = await res.json();
+            list.innerHTML = '';
+            if (!data.files || data.files.length === 0) {
+                list.innerHTML = '<p style="color:var(--text-muted); font-size:0.85rem;">Noch keine Instruktionen vorhanden. Erstelle eine neue über das Feld oben.</p>';
+                return;
+            }
+            data.files.forEach(f => {
+                const card = document.createElement('div');
+                card.style.cssText = 'background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px;';
+                card.innerHTML = `
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <strong style="color:var(--accent-hover);font-size:0.9rem;">${f.name}.md</strong>
+                        <div style="display:flex;gap:6px;">
+                            <button class="btn-instr-save" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;">Speichern</button>
+                            <button class="btn-instr-del" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:var(--radius-sm);cursor:pointer;">Löschen</button>
+                        </div>
+                    </div>
+                    <textarea class="instr-editor" data-name="${f.name}" style="width:100%;min-height:120px;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;resize:vertical;line-height:1.5;">${f.content}</textarea>
+                `;
+                list.appendChild(card);
+            });
+            // Event-Handler
+            list.querySelectorAll('.btn-instr-save').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const name = btn.dataset.name;
+                    const textarea = list.querySelector(`.instr-editor[data-name="${name}"]`);
+                    const res = await fetch(`/api/instructions/${name}`, {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({content: textarea.value})
+                    });
+                    if (res.ok) { btn.textContent = '✓'; btn.style.background = '#10b981'; setTimeout(() => { btn.textContent = 'Speichern'; btn.style.background = ''; }, 1500); }
+                });
+            });
+            list.querySelectorAll('.btn-instr-del').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    if (!confirm(`Instruktion "${btn.dataset.name}" wirklich löschen?`)) return;
+                    await fetch(`/api/instructions/${btn.dataset.name}`, {method: 'DELETE'});
+                    _loadInstructions();
+                });
+            });
+        } catch (e) { list.innerHTML = '<p style="color:var(--danger);">Fehler beim Laden der Instruktionen.</p>'; }
+    }
+
+    // Neue Instruktion erstellen
+    document.getElementById('btn-instr-new')?.addEventListener('click', async () => {
+        const nameInput = document.getElementById('instr-new-name');
+        const name = nameInput.value.trim();
+        if (!name) { nameInput.style.borderColor = 'var(--danger)'; setTimeout(() => nameInput.style.borderColor = '', 2000); return; }
+        await fetch(`/api/instructions/${name}`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({content: `# ${name}\n\nDeine Anweisungen hier eingeben...\n`})
+        });
+        nameInput.value = '';
+        _loadInstructions();
+    });
+
     function showLoginScreen() {
         mainScreen.classList.remove('active');
         loginScreen.classList.add('active');
@@ -855,8 +917,9 @@
         const tabGoogle = document.getElementById('settings-tab-google');
         const tabVision = document.getElementById('settings-tab-vision');
         const tabMcp = document.getElementById('settings-tab-mcp');
+        const tabInstructions = document.getElementById('settings-tab-instructions');
 
-        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp];
+        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabInstructions];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -888,6 +951,10 @@
                     tabGoogle.style.display = '';
                     tabGoogle.classList.add('active');
                     if (window.googleManager) window.googleManager.init();
+                } else if (target === 'instructions' && tabInstructions) {
+                    tabInstructions.style.display = '';
+                    tabInstructions.classList.add('active');
+                    _loadInstructions();
                 } else if (target === 'mcp' && tabMcp) {
                     tabMcp.style.display = '';
                     tabMcp.classList.add('active');

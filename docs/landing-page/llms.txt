@@ -18,6 +18,8 @@ Jarvis is a self-hosted AI agent that runs on any Linux server. It provides a fu
 - **Face Recognition**: Real-time face detection and recognition using dlib/face_recognition with configurable actions
 - **Browser Automation**: CDP-based browser control with xdotool fallback
 - **Telemetry & Tracing**: Built-in OpenTelemetry tracing for agent runs, tool calls, and LLM interactions
+- **Auto-Learning**: Automatically saves successful strategies after trial-and-error, learns user preferences from corrections
+- **Custom Instructions**: User-defined Markdown files loaded into every conversation as system prompt extensions, editable via web UI
 
 ## Tech Stack
 

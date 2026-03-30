@@ -1,8 +1,11 @@
 package info.jarvisai.app.ui.chat
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -18,6 +21,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -27,9 +37,20 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import info.jarvisai.app.R
 import info.jarvisai.app.data.model.AgentInfo
+import info.jarvisai.app.data.prefs.BG_COLOR
+import info.jarvisai.app.data.prefs.BG_DEFAULT_URI
+import info.jarvisai.app.data.prefs.BG_GRADIENT
+import info.jarvisai.app.data.prefs.BG_PHOTO
+import info.jarvisai.app.data.prefs.SettingsDataStore
 import info.jarvisai.app.data.model.ChatMessage
 import info.jarvisai.app.data.model.ConnectionState
 import info.jarvisai.app.data.model.MessageRole
+import info.jarvisai.app.data.model.SegmentType
+import android.app.DownloadManager
+import android.content.Intent
+import info.jarvisai.app.update.DownloadPhase
+import androidx.compose.ui.draw.alpha
+import info.jarvisai.app.ui.avatar.JarvisAvatar
 import info.jarvisai.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,7 +66,34 @@ fun ChatScreen(
     val voiceState by viewModel.voiceState.collectAsState()
     val quickActions by viewModel.quickActions.collectAsState()
     val showAgentPanel by viewModel.showAgentPanel.collectAsState()
+    val updateState by viewModel.updateState.collectAsState()
+    val settings by viewModel.settings.collectAsState(initial = info.jarvisai.app.data.prefs.JarvisSettings())
+    val selectionMode by viewModel.selectionMode.collectAsState()
+    val selectedIds by viewModel.selectedIds.collectAsState()
+    val isSpeaking by viewModel.isSpeaking.collectAsState()
+    val avatarMouth by viewModel.avatarMouthState.collectAsState()
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+
+    // Hintergrundbild laden: eingebettetes Drawable oder lokales Foto
+    val bgBitmap: ImageBitmap? = remember(settings.backgroundImageUri) {
+        if (settings.backgroundType == BG_PHOTO && settings.backgroundImageUri.isNotBlank()) {
+            runCatching {
+                if (settings.backgroundImageUri == BG_DEFAULT_URI) {
+                    // Eingebettetes Jarvis-Standardbild aus Drawable-Ressourcen
+                    val resId = context.resources.getIdentifier("bg_jarvis", "drawable", context.packageName)
+                    context.resources.openRawResource(resId).use {
+                        android.graphics.BitmapFactory.decodeStream(it)?.asImageBitmap()
+                    }
+                } else {
+                    val uri = android.net.Uri.parse(settings.backgroundImageUri)
+                    context.contentResolver.openInputStream(uri)?.use {
+                        android.graphics.BitmapFactory.decodeStream(it)?.asImageBitmap()
+                    }
+                }
+            }.getOrNull()
+        } else null
+    }
 
     // Automatisch zum Ende scrollen wenn neue Nachricht
     LaunchedEffect(messages.size) {
@@ -54,22 +102,150 @@ fun ChatScreen(
         }
     }
 
+    // Zurück-Taste beendet Auswahl-Modus statt App zu verlassen
+    BackHandler(enabled = selectionMode) { viewModel.exitSelectionMode() }
+
     // Manuelles Layout ohne Scaffold – vermeidet Inset-Doppelverarbeitung
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding(),
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // TopBar
-            JarvisTopBar(
-                connectionState = connectionState,
-                agentCount = agents.count { it.status == "running" },
-                onOpenSettings = onOpenSettings,
-                onToggleAgents = viewModel::toggleAgentPanel,
-                onReconnect = viewModel::reconnect,
+        // ── Hintergrund ───────────────────────────────────────────────
+        when (settings.backgroundType) {
+            BG_PHOTO -> if (bgBitmap != null) {
+                Box(modifier = Modifier.fillMaxSize().background(Color(0xFF060A12)))
+                androidx.compose.foundation.Image(
+                    painter = BitmapPainter(bgBitmap),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    alpha = settings.backgroundAlpha,
+                )
+            } else {
+                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+            }
+            BG_COLOR -> Box(
+                modifier = Modifier.fillMaxSize().background(Color(settings.backgroundColorArgb))
             )
+            else -> {
+                // BG_GRADIENT — Jarvis radiale Farbverläufe wie im Web-UI
+                Box(modifier = Modifier.fillMaxSize().background(Color(0xFF060A12)))
+                Box(modifier = Modifier
+                    .fillMaxSize()
+                    .drawBehind {
+                        // Lila Glow oben-mitte
+                        drawRect(brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF6366F1).copy(alpha = 0.40f), Color.Transparent),
+                            center = Offset(size.width * 0.5f, 0f),
+                            radius = size.width * 1.1f,
+                        ))
+                        // Grüner Glow unten-rechts
+                        drawRect(brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF10B981).copy(alpha = 0.28f), Color.Transparent),
+                            center = Offset(size.width * 0.9f, size.height),
+                            radius = size.width * 0.9f,
+                        ))
+                    }
+                )
+            }
+        }
+
+        // ── Anime-Avatar (zwischen Hintergrund und Chat-Inhalt) ───────
+        if (settings.avatarEnabled) {
+            JarvisAvatar(
+                isSpeaking   = isSpeaking,
+                mouthState   = avatarMouth,
+                modifier     = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 88.dp, end = 10.dp)
+                    .size(width = 130.dp, height = 160.dp)
+                    .alpha(if (isSpeaking) 0.92f else 0.70f),
+            )
+        }
+
+        Column(modifier = Modifier.fillMaxSize().imePadding()) {
+            // TopBar – normal oder Auswahl-Modus
+            if (selectionMode) {
+                SelectionTopBar(
+                    selectedCount = selectedIds.size,
+                    totalCount = messages.size,
+                    onSelectAll = viewModel::selectAll,
+                    onDelete = viewModel::deleteSelected,
+                    onExit = viewModel::exitSelectionMode,
+                )
+            } else {
+                JarvisTopBar(
+                    connectionState = connectionState,
+                    agentCount = agents.count { it.status == "running" },
+                    onOpenSettings = onOpenSettings,
+                    onToggleAgents = viewModel::toggleAgentPanel,
+                    onReconnect = viewModel::reconnect,
+                )
+            }
+
+            // Update-Banner: auto-Install wenn Download fertig
+            LaunchedEffect(updateState.phase) {
+                if (updateState.phase == DownloadPhase.READY) {
+                    val dm = context.getSystemService(DownloadManager::class.java)
+                    val uri = dm.getUriForDownloadedFile(updateState.downloadId)
+                    if (uri != null) {
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, "application/vnd.android.package-archive")
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        }
+                        context.startActivity(intent)
+                    }
+                }
+            }
+
+            if (updateState.available || updateState.phase != DownloadPhase.IDLE) {
+                Surface(
+                    color = when (updateState.phase) {
+                        DownloadPhase.ERROR -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
+                        else -> JarvisGreen.copy(alpha = 0.12f)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = when (updateState.phase) {
+                                    DownloadPhase.IDLE     -> "Update ${updateState.versionName} verfügbar"
+                                    DownloadPhase.DOWNLOADING -> "Lade herunter… ${updateState.progress} %"
+                                    DownloadPhase.READY    -> "Download abgeschlossen – Installation startet…"
+                                    DownloadPhase.ERROR    -> "Download fehlgeschlagen"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (updateState.phase == DownloadPhase.ERROR)
+                                    MaterialTheme.colorScheme.error else JarvisGreen,
+                            )
+                            when (updateState.phase) {
+                                DownloadPhase.IDLE -> TextButton(onClick = viewModel::downloadUpdate) {
+                                    Text("Installieren", color = JarvisGreen, fontWeight = FontWeight.Bold)
+                                }
+                                DownloadPhase.ERROR -> TextButton(onClick = viewModel::dismissUpdate) {
+                                    Text("Schließen", color = MaterialTheme.colorScheme.error)
+                                }
+                                else -> {}
+                            }
+                        }
+                        if (updateState.phase == DownloadPhase.DOWNLOADING) {
+                            Spacer(Modifier.height(4.dp))
+                            LinearProgressIndicator(
+                                progress = { updateState.progress / 100f },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = JarvisGreen,
+                                trackColor = JarvisGreen.copy(alpha = 0.2f),
+                            )
+                        }
+                    }
+                }
+            }
 
             // Nachrichtenliste füllt verfügbaren Platz
             LazyColumn(
@@ -81,12 +257,16 @@ fun ChatScreen(
                 contentPadding = PaddingValues(vertical = 12.dp),
             ) {
                 items(messages, key = { it.id }) { msg ->
-                    MessageBubble(msg)
+                    MessageBubble(
+                        msg = msg,
+                        debugMode = settings.debugMode,
+                        selectionMode = selectionMode,
+                        selected = msg.id in selectedIds,
+                        onLongPress = { viewModel.enterSelectionMode(msg.id) },
+                        onTap = { viewModel.toggleSelection(msg.id) },
+                    )
                 }
             }
-
-            // Quick-Actions direkt über der Eingabeleiste
-            QuickActionRow(quickActions) { viewModel.sendQuickAction(it) }
 
             // Eingabeleiste mit Navigation-Bar-Inset
             ChatInputBar(
@@ -114,6 +294,53 @@ fun ChatScreen(
             )
         }
     }
+}
+
+// ─── TopBar (Auswahl-Modus) ───────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SelectionTopBar(
+    selectedCount: Int,
+    totalCount: Int,
+    onSelectAll: () -> Unit,
+    onDelete: () -> Unit,
+    onExit: () -> Unit,
+) {
+    TopAppBar(
+        navigationIcon = {
+            IconButton(onClick = onExit) {
+                Icon(Icons.Filled.Close, contentDescription = "Auswahl beenden")
+            }
+        },
+        title = {
+            Text(
+                text = if (selectedCount == 0) "Auswählen" else "$selectedCount ausgewählt",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        actions = {
+            TextButton(onClick = onSelectAll) {
+                Text(
+                    text = if (selectedCount == totalCount) "Keine" else "Alle",
+                    color = JarvisPurple,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            IconButton(onClick = onDelete, enabled = selectedCount > 0) {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = "Löschen",
+                    tint = if (selectedCount > 0) JarvisError
+                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                )
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    )
 }
 
 // ─── TopBar ───────────────────────────────────────────────────────────
@@ -190,22 +417,96 @@ private fun JarvisTopBar(
 
 // ─── Nachrichten-Bubble ───────────────────────────────────────────────
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MessageBubble(msg: ChatMessage) {
+fun MessageBubble(
+    msg: ChatMessage,
+    debugMode: Boolean = false,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onLongPress: () -> Unit = {},
+    onTap: () -> Unit = {},
+) {
     val isUser = msg.role == MessageRole.USER
+
+    // Auswahl-Hintergrund wenn markiert
+    val rowBg = if (selected) JarvisPurple.copy(alpha = 0.15f) else Color.Transparent
+
+    if (debugMode) {
+        // Debug: alles sichtbar, STATUS grau, ANSWER weiß-fett, monospace
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(rowBg)
+                .combinedClickable(onClick = { if (selectionMode) onTap() }, onLongClick = onLongPress)
+                .padding(vertical = 2.dp, horizontal = 4.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            if (selectionMode) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = { onTap() },
+                    colors = CheckboxDefaults.colors(checkedColor = JarvisPurple, checkmarkColor = Color.White),
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isUser) "▶ Du:" else "◀ Jarvis:",
+                    color = if (isUser) JarvisGreen else JarvisPurple,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                )
+                if (isUser || msg.segments.isEmpty()) {
+                    Text(
+                        text = msg.text,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    )
+                } else {
+                    msg.segments.forEach { seg ->
+                        Text(
+                            text = seg.text,
+                            color = if (seg.type == SegmentType.ANSWER) Color.White
+                                    else Color.White.copy(alpha = 0.40f),
+                            fontWeight = if (seg.type == SegmentType.ANSWER) FontWeight.Bold
+                                         else FontWeight.Normal,
+                            fontSize = 13.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            lineHeight = if (seg.type == SegmentType.ANSWER) 20.sp else 17.sp,
+                        )
+                    }
+                }
+                if (msg.isStreaming) StreamingDots()
+            }
+        }
+        return
+    }
+
+    // ── Normal-Modus ─────────────────────────────────────────────────
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(rowBg)
+            .combinedClickable(onClick = { if (selectionMode) onTap() }, onLongClick = onLongPress),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Checkbox links (auch bei User-Nachrichten)
+        if (selectionMode) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onTap() },
+                colors = CheckboxDefaults.colors(checkedColor = JarvisPurple, checkmarkColor = Color.White),
+            )
+        }
         if (!isUser) {
-            // Jarvis-Avatar
             Box(
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(listOf(JarvisPurple, Color(0xFF6A0DAD)))
-                    ),
+                    .background(Brush.linearGradient(listOf(JarvisPurple, Color(0xFF6A0DAD)))),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("J", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
@@ -221,20 +522,39 @@ fun MessageBubble(msg: ChatMessage) {
                     bottomStart = 18.dp,
                     bottomEnd = 18.dp,
                 ),
-                color = if (isUser) JarvisPurple.copy(alpha = 0.85f)
-                        else MaterialTheme.colorScheme.surfaceVariant,
-                tonalElevation = 2.dp,
+                color = if (isUser) JarvisPurple.copy(alpha = 0.45f)
+                        else Color.White.copy(alpha = 0.07f),
+                tonalElevation = 0.dp,
                 modifier = Modifier.widthIn(max = 300.dp),
             ) {
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    Text(
-                        text = msg.text,
-                        color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    if (msg.isStreaming) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        StreamingDots()
+                    if (isUser || msg.segments.isEmpty()) {
+                        // User-Nachricht oder Legacy ohne Segmente
+                        Text(
+                            text = msg.text,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    } else {
+                        // Jarvis-Nachricht: nur ANSWER-Segmente anzeigen, STATUS unsichtbar
+                        val answerText = msg.segments
+                            .filter { it.type == SegmentType.ANSWER }
+                            .joinToString("\n") { it.text }
+                        if (answerText.isNotBlank()) {
+                            // Antwort vorhanden → anzeigen, KEINE Punkte
+                            Text(
+                                text = answerText,
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 15.sp,
+                                lineHeight = 22.sp,
+                            )
+                        } else if (msg.isStreaming) {
+                            // Noch keine Antwort → Punkte als Platzhalter
+                            Spacer(modifier = Modifier.height(4.dp))
+                            StreamingDots()
+                        }
                     }
                 }
             }

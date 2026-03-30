@@ -498,6 +498,214 @@ async def save_settings(request: Request):
     return JSONResponse({"success": True})
 
 
+# ─── SSL / Let's Encrypt Endpoints ────────────────────────────────────
+@app.get("/api/settings/ssl")
+async def get_ssl_info():
+    """Gibt aktuelle SSL-Zertifikat-Infos zurück: Domain, Ablaufdatum, Is-Let's-Encrypt."""
+    import ssl as _ssl
+    import datetime
+
+    # Prüfen ob Let's Encrypt Zertifikat aktiv ist
+    le_live_dir = Path("/etc/letsencrypt/live")
+    is_letsencrypt = False
+    domain = ""
+    expiry = ""
+
+    # Aktuell verwendete Zertifikatspfade ermitteln
+    cert_file = Path("/opt/jarvis/certs/server.crt")
+    if not cert_file.exists():
+        cert_file = Path(__file__).parent.parent / "certs" / "server.crt"
+
+    try:
+        # Prüfen ob cert ein Symlink auf letsencrypt ist
+        resolved = cert_file.resolve()
+        if "letsencrypt" in str(resolved):
+            is_letsencrypt = True
+            # Domain aus Pfad extrahieren
+            parts = resolved.parts
+            if "live" in parts:
+                idx = parts.index("live")
+                if idx + 1 < len(parts):
+                    domain = parts[idx + 1]
+
+        # Ablaufdatum aus Zertifikat lesen
+        if cert_file.exists():
+            cert_bytes = cert_file.read_bytes()
+            x509 = _ssl._ssl._test_decode_cert  # type: ignore
+            # openssl x509 -noout -enddate nutzen (robuster)
+            result = subprocess.run(
+                ["openssl", "x509", "-noout", "-enddate", "-subject", "-in", str(cert_file)],
+                capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.splitlines():
+                if line.startswith("notAfter="):
+                    expiry_str = line.split("=", 1)[1].strip()
+                    # Format: "Dec 31 23:59:59 2025 GMT"
+                    try:
+                        dt = datetime.datetime.strptime(expiry_str, "%b %d %H:%M:%S %Y %Z")
+                        expiry = dt.strftime("%d.%m.%Y")
+                    except Exception:
+                        expiry = expiry_str
+                if "CN=" in line and not domain:
+                    for part in line.split("/"):
+                        if part.startswith("CN="):
+                            domain = part[3:].strip()
+
+    except Exception as e:
+        pass
+
+    return JSONResponse({
+        "is_letsencrypt": is_letsencrypt,
+        "domain": domain,
+        "expiry": expiry,
+        "cert_path": str(cert_file),
+    })
+
+
+@app.post("/api/settings/letsencrypt")
+async def request_letsencrypt(request: Request):
+    """Beantragt ein Let's Encrypt Zertifikat via certbot (standalone).
+    Streamt den Fortschritt als Textzeilen zurück."""
+    body = await request.json()
+    domain = body.get("domain", "").strip()
+    email = body.get("email", "").strip()
+
+    if not domain or not email:
+        return JSONResponse({"error": "Domain und E-Mail erforderlich"}, status_code=400)
+
+    # Einfache Validierung
+    import re as _re
+    if not _re.match(r'^[a-zA-Z0-9][a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}$', domain):
+        return JSONResponse({"error": "Ungültige Domain"}, status_code=400)
+    if not _re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
+        return JSONResponse({"error": "Ungültige E-Mail-Adresse"}, status_code=400)
+
+    async def _stream():
+        yield f"🔍 Starte Let's Encrypt Zertifikatsanfrage für {domain}...\n"
+
+        # 1. certbot installieren falls nicht vorhanden
+        certbot_path = None
+        for cp in ["/usr/bin/certbot", "/usr/local/bin/certbot"]:
+            if Path(cp).exists():
+                certbot_path = cp
+                break
+
+        if not certbot_path:
+            yield "📦 certbot nicht gefunden – installiere...\n"
+            proc = await asyncio.create_subprocess_exec(
+                "apt-get", "install", "-y", "certbot",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            async for line in proc.stdout:
+                yield line.decode(errors="replace")
+            await proc.wait()
+            if Path("/usr/bin/certbot").exists():
+                certbot_path = "/usr/bin/certbot"
+                yield "✅ certbot installiert\n"
+            else:
+                yield "❌ certbot konnte nicht installiert werden\n"
+                return
+
+        # 2. Port-80-Redirect pausieren (damit certbot standalone Port 80 nutzen kann)
+        yield "⏸️  Pausiere HTTP-Redirect für certbot-Challenge...\n"
+
+        # 3. certbot standalone ausführen
+        yield f"🌐 Führe certbot aus: {certbot_path} certonly --standalone -d {domain}\n"
+        cmd = [
+            certbot_path, "certonly",
+            "--standalone",
+            "--non-interactive",
+            "--agree-tos",
+            "-m", email,
+            "-d", domain,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        async for line in proc.stdout:
+            yield line.decode(errors="replace")
+        rc = await proc.wait()
+
+        if rc != 0:
+            yield f"\n❌ certbot fehlgeschlagen (Exit-Code {rc})\n"
+            return
+
+        yield "\n✅ Let's Encrypt Zertifikat erfolgreich erhalten!\n"
+
+        # 4. Symlinks in certs/ setzen
+        le_fullchain = Path(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
+        le_privkey = Path(f"/etc/letsencrypt/live/{domain}/privkey.pem")
+
+        if not le_fullchain.exists() or not le_privkey.exists():
+            yield f"❌ Zertifikatsdateien nicht gefunden unter /etc/letsencrypt/live/{domain}/\n"
+            return
+
+        for certs_dir in [Path("/opt/jarvis/certs"), Path(__file__).parent.parent / "certs"]:
+            certs_dir.mkdir(parents=True, exist_ok=True)
+            cert_dst = certs_dir / "server.crt"
+            key_dst = certs_dir / "server.key"
+            # Backup der alten Zertifikate
+            for f in [cert_dst, key_dst]:
+                if f.exists() and not f.is_symlink():
+                    f.rename(f.with_suffix(".bak"))
+            # Symlinks setzen
+            try:
+                if cert_dst.is_symlink():
+                    cert_dst.unlink()
+                if key_dst.is_symlink():
+                    key_dst.unlink()
+                cert_dst.symlink_to(le_fullchain)
+                key_dst.symlink_to(le_privkey)
+                yield f"🔗 Symlinks gesetzt: {certs_dir}/server.crt → {le_fullchain}\n"
+            except Exception as e:
+                yield f"⚠️  Symlink-Fehler in {certs_dir}: {e}\n"
+                # Fallback: Kopieren
+                import shutil
+                shutil.copy2(str(le_fullchain), str(cert_dst))
+                shutil.copy2(str(le_privkey), str(key_dst))
+                os.chmod(str(key_dst), 0o600)
+                yield f"📋 Zertifikat kopiert nach {certs_dir}/\n"
+
+        yield "\n✅ Fertig! Bitte starten Sie den Jarvis-Service neu:\n"
+        yield "   systemctl restart jarvis.service\n"
+
+    return StreamingResponse(_stream(), media_type="text/plain")
+
+
+@app.post("/api/settings/ssl/custom")
+async def upload_custom_cert(request: Request):
+    """Lädt ein eigenes SSL-Zertifikat hoch (PEM-Format)."""
+    body = await request.json()
+    cert_pem = body.get("cert", "").strip()
+    key_pem = body.get("key", "").strip()
+
+    if not cert_pem or not key_pem:
+        return JSONResponse({"error": "cert und key erforderlich"}, status_code=400)
+
+    if "BEGIN CERTIFICATE" not in cert_pem:
+        return JSONResponse({"error": "Ungültiges Zertifikat (kein PEM-Format)"}, status_code=400)
+    if "BEGIN" not in key_pem or "PRIVATE KEY" not in key_pem:
+        return JSONResponse({"error": "Ungültiger Private Key (kein PEM-Format)"}, status_code=400)
+
+    for certs_dir in [Path("/opt/jarvis/certs"), Path(__file__).parent.parent / "certs"]:
+        certs_dir.mkdir(parents=True, exist_ok=True)
+        cert_dst = certs_dir / "server.crt"
+        key_dst = certs_dir / "server.key"
+        # Backup
+        for f in [cert_dst, key_dst]:
+            if f.exists():
+                f.rename(f.with_suffix(".bak"))
+        cert_dst.write_text(cert_pem)
+        key_dst.write_text(key_pem)
+        os.chmod(str(key_dst), 0o600)
+
+    return JSONResponse({"success": True, "message": "Zertifikat gespeichert. Bitte Service neu starten."})
+
+
+
 # ─── Profil-Verwaltung ─────────────────────────────────────────────
 @app.get("/api/profiles")
 async def get_profiles():

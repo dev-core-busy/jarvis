@@ -4,12 +4,25 @@ import kotlinx.serialization.Serializable
 
 // ─── Chat ─────────────────────────────────────────────────────────────
 
+@Serializable
 enum class MessageRole { USER, JARVIS }
 
+/** STATUS = Agenten-Statuszeile (🚀🧠⏳✅), ANSWER = eigentliche LLM-Antwort */
+@Serializable
+enum class SegmentType { STATUS, ANSWER }
+
+/** Mundposition des Avatars für Lip-Sync-Animation */
+enum class AvatarMouthState { CLOSED, SMALL, OPEN }
+
+@Serializable
+data class MessageSegment(val type: SegmentType, val text: String)
+
+@Serializable
 data class ChatMessage(
     val id: String = java.util.UUID.randomUUID().toString(),
     val role: MessageRole,
-    val text: String,
+    val text: String = "",                          // User-Nachricht oder Legacy-Text
+    val segments: List<MessageSegment> = emptyList(), // Jarvis-Nachricht mit Styling-Info
     val isStreaming: Boolean = false,
     val timestamp: Long = System.currentTimeMillis(),
 )

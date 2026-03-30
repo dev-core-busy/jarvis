@@ -40,6 +40,34 @@ class SettingsViewModel @Inject constructor(
         _settings.value = _settings.value.copy(autoSendVoice = enabled)
     }
 
+    fun onBackgroundTypeChange(type: Int) {
+        _settings.value = _settings.value.copy(backgroundType = type)
+    }
+
+    fun onBackgroundImageUriChange(uri: String) {
+        _settings.value = _settings.value.copy(backgroundImageUri = uri, backgroundType = 1)
+    }
+
+    fun onBackgroundColorChange(argb: Int) {
+        _settings.value = _settings.value.copy(backgroundColorArgb = argb, backgroundType = 2)
+    }
+
+    fun onBackgroundAlphaChange(alpha: Float) {
+        _settings.value = _settings.value.copy(backgroundAlpha = alpha)
+    }
+
+    fun onDebugModeChange(enabled: Boolean) {
+        _settings.value = _settings.value.copy(debugMode = enabled)
+    }
+
+    fun onVoiceSilenceChange(ms: Int) {
+        _settings.value = _settings.value.copy(voiceSilenceMs = ms)
+    }
+
+    fun onAvatarEnabledChange(enabled: Boolean) {
+        _settings.value = _settings.value.copy(avatarEnabled = enabled)
+    }
+
     fun save() {
         viewModelScope.launch {
             store.save(_settings.value)

@@ -15,13 +15,24 @@ android {
         applicationId = "info.jarvisai.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.2"
+        versionCode = 8
+        versionName = "0.8"
+
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("../jarvis-release.jks")
+            storePassword = "jarvis2024"
+            keyAlias = "jarvis"
+            keyPassword = "jarvis2024"
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -37,6 +48,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

@@ -967,12 +967,75 @@
             }
         }
 
+        // ── SSL-Status laden ──
+        async function loadSslStatus() {
+            try {
+                const r = await fetch('/api/settings/ssl', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const d = await r.json();
+                const el = document.getElementById('ssl-status-text');
+                if (!el) return;
+                if (d.is_letsencrypt) {
+                    el.innerHTML = `\u2705 Let's Encrypt: <strong>${d.domain}</strong> \u2013 g\u00fcltig bis ${d.expiry}`;
+                } else if (d.expiry) {
+                    el.innerHTML = `\u26a0\ufe0f Self-signed Zertifikat aktiv (g\u00fcltig bis ${d.expiry})`;
+                } else {
+                    el.innerHTML = '\u26a0\ufe0f Self-signed Zertifikat aktiv';
+                }
+            } catch (e) { /* ignorieren */ }
+        }
+
+        // ── Let's Encrypt Zertifikat beantragen ──
+        async function requestLetsEncrypt() {
+            const domain = (document.getElementById('le-domain') || {}).value?.trim();
+            const email = (document.getElementById('le-email') || {}).value?.trim();
+            if (!domain || !email) { alert('Domain und E-Mail erforderlich'); return; }
+
+            const btn = document.getElementById('btn-request-letsencrypt');
+            const progress = document.getElementById('le-progress');
+            if (btn) { btn.disabled = true; btn.textContent = 'L\u00e4uft...'; }
+            if (progress) { progress.style.display = 'block'; progress.textContent = ''; }
+
+            try {
+                const resp = await fetch('/api/settings/letsencrypt', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ domain, email })
+                });
+
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    if (progress) {
+                        progress.textContent += decoder.decode(value);
+                        progress.scrollTop = progress.scrollHeight;
+                    }
+                }
+            } catch (e) {
+                if (progress) progress.textContent += `\nFehler: ${e.message}\n`;
+            }
+
+            if (btn) { btn.disabled = false; btn.textContent = 'Zertifikat beantragen'; }
+            loadSslStatus();
+        }
+
+        // Button-Handler registrieren
+        const btnLE = document.getElementById('btn-request-letsencrypt');
+        if (btnLE) btnLE.addEventListener('click', requestLetsEncrypt);
+
         // ── Modal öffnen/schließen ──
         const openModal = async () => {
             await loadProfiles();
             await updateGoogleTabVisibility();
             await updateWhatsAppTabVisibility();
             await updateVisionTabVisibility();
+            loadSslStatus();
             showListView();
             // Ersten Tab aktivieren
             settingsTabs.forEach(t => t.classList.remove('active'));

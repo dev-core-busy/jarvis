@@ -424,6 +424,26 @@ sudo update-ca-certificates</code></pre>
                             <br>Header: <code>X-API-Key: &lt;key&gt;</code>
                         </small>
                     </div>
+
+                    <hr class="settings-divider">
+                    <div class="form-group">
+                        <label>HTTPS / SSL-Zertifikat</label>
+                        <div id="ssl-status" style="margin-bottom:12px; padding:10px; border-radius:8px; background:var(--bg-glass); border:1px solid var(--border); font-size:0.85rem;">
+                            <span id="ssl-status-text">Lade...</span>
+                        </div>
+
+                        <!-- Let's Encrypt -->
+                        <div style="background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md); padding:14px; margin-bottom:10px;">
+                            <div style="font-size:0.8rem; font-weight:600; color:var(--accent-hover); margin-bottom:10px;">Let's Encrypt (kostenlos, automatisch)</div>
+                            <div class="form-row" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                                <input type="text" id="le-domain" placeholder="meinserver.example.com" style="width:100%">
+                                <input type="email" id="le-email" placeholder="email@example.com" style="width:100%">
+                            </div>
+                            <small style="color:var(--text-muted); display:block; margin-bottom:10px;">Port 80 muss vom Internet erreichbar sein. Die Domain muss auf diesen Server zeigen.</small>
+                            <button class="btn-secondary btn-small" id="btn-request-letsencrypt">Zertifikat beantragen</button>
+                            <div id="le-progress" style="display:none; margin-top:10px; padding:10px; background:var(--bg-glass-heavy); border-radius:8px; font-family:monospace; font-size:0.78rem; max-height:150px; overflow-y:auto; color:var(--text-secondary);"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- ── Ansicht 2: Profil bearbeiten/erstellen ── -->

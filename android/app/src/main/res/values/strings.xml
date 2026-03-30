@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">jarvis-ai.info</string>
+    <string name="settings_title">Einstellungen</string>
+    <string name="settings_server_url">Server-URL (Tailscale)</string>
+    <string name="settings_server_url_hint">z.B. https://100.x.x.x</string>
+    <string name="settings_api_key">Agent API-Key</string>
+    <string name="settings_api_key_hint">AGENT_API_KEY aus Jarvis-Einstellungen</string>
+    <string name="settings_save">Speichern</string>
+    <string name="settings_auto_send_voice">Sprache automatisch senden</string>
+    <string name="settings_background">Hintergrund</string>
+    <string name="settings_bg_gradient">Gradient</string>
+    <string name="settings_bg_photo">Foto</string>
+    <string name="settings_bg_color">Farbe</string>
+    <string name="chat_hint">Nachricht an Jarvis…</string>
+    <string name="chat_send">Senden</string>
+    <string name="chat_mic">Spracheingabe</string>
+    <string name="notif_channel_name">Jarvis Antworten</string>
+    <string name="notif_channel_desc">Benachrichtigungen wenn Jarvis eine Aufgabe abgeschlossen hat</string>
+    <string name="notif_finished_title">Jarvis fertig</string>
+    <string name="connecting">Verbinde…</string>
+    <string name="connected">Verbunden</string>
+    <string name="disconnected">Getrennt</string>
+    <string name="error_no_config">Bitte zuerst Server-URL und API-Key in den Einstellungen eintragen.</string>
+</resources>

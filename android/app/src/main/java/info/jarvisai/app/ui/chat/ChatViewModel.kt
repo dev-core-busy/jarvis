@@ -81,7 +81,7 @@ class ChatViewModel @Inject constructor(
     private var autoSendVoice = false
     private var voiceSilenceMs = 1500
     private val _avatarEnabled = MutableStateFlow(true)
-    private val _avatarType    = MutableStateFlow(info.jarvisai.app.data.model.AvatarType.KARIKATUR)
+    private val _avatarType    = MutableStateFlow(info.jarvisai.app.data.model.AvatarType.IRONMAN)
 
     init {
         // Alle Settings-Änderungen live übernehmen
@@ -93,6 +93,7 @@ class ChatViewModel @Inject constructor(
                 _avatarEnabled.value = s.avatarEnabled
                 _avatarType.value    = s.avatarType
                 ttsManager.setVoiceProfile(s.avatarType)
+                if (s.ttsVoiceName.isNotBlank()) ttsManager.applyVoiceName(s.ttsVoiceName)
                 if (!s.avatarEnabled) ttsManager.stop()
             }
         }

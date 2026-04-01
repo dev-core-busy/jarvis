@@ -75,22 +75,33 @@ class TtsManager @Inject constructor(
     }
 
     /**
+     * Alle verfügbaren deutschen Offline-Stimmen zurückgeben (für Voice-Picker in Settings).
+     * Gibt eine leere Liste zurück wenn TTS noch nicht bereit ist.
+     */
+    fun getAvailableVoices(): List<android.speech.tts.Voice> {
+        if (!initialized) return emptyList()
+        val deLocale = Locale("de", "DE")
+        return (tts?.voices ?: emptySet())
+            .filter { v -> !v.isNetworkConnectionRequired && v.locale.language == deLocale.language }
+            .sortedWith(compareByDescending<android.speech.tts.Voice> { it.quality }.thenBy { it.name })
+    }
+
+    /**
      * Stimmprofil je nach Avatar-Typ anpassen.
-     * IronMan: beste verfügbare männliche de-DE Offline-Stimme, falls vorhanden.
-     * Pitch/Rate werden nur gesetzt wenn keine dedizierte Männer-Stimme gefunden wurde.
+     * IronMan: erst konfigurierte Stimme, dann beste männliche Offline-Stimme.
      */
     fun setVoiceProfile(type: AvatarType) {
         when (type) {
             AvatarType.IRONMAN -> {
                 speechRate  = 1.10f
-                speechPitch = 0.80f  // leicht tiefer, aber nicht blechern
+                speechPitch = 0.80f
                 if (initialized) applyIronManVoice()
             }
-            AvatarType.KARIKATUR, AvatarType.NONE -> {
+            AvatarType.NONE -> {
                 speechRate  = 1.00f
                 speechPitch = 1.00f
                 if (initialized) {
-                    tts?.voice = null  // Standard-Stimme zurücksetzen
+                    tts?.voice = null
                     tts?.setSpeechRate(1.00f)
                     tts?.setPitch(1.00f)
                 }
@@ -99,8 +110,25 @@ class TtsManager @Inject constructor(
     }
 
     /**
+     * Explizit gewählte Stimme aus den Settings anwenden.
+     * Wird zusätzlich zu setVoiceProfile() aufgerufen wenn der User eine Stimme gewählt hat.
+     */
+    fun applyVoiceName(voiceName: String) {
+        if (!initialized || voiceName.isBlank()) return
+        val voice = tts?.voices?.find { it.name == voiceName }
+        if (voice != null) {
+            tts?.voice = voice
+            tts?.setSpeechRate(speechRate)
+            tts?.setPitch(1.00f)
+            Log.i(TAG, "Konfigurierte Stimme angewendet: $voiceName")
+        } else {
+            Log.w(TAG, "Konfigurierte Stimme nicht gefunden: $voiceName")
+        }
+    }
+
+    /**
      * Versucht die beste verfügbare männliche deutsche Offline-Stimme zu setzen.
-     * Kriterien: de-DE, nicht netzwerkabhängig, männlich (Name enthält "male" oder "m_" o.ä.).
+     * Kriterien: de-DE, nicht netzwerkabhängig, männlich (Name enthält "male"/"m_" o.ä.).
      * Fallback: nur Rate/Pitch anpassen wenn keine männliche Stimme verfügbar.
      */
     private fun applyIronManVoice() {

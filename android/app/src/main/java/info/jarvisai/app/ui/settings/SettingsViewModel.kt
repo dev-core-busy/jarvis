@@ -1,11 +1,13 @@
 package info.jarvisai.app.ui.settings
 
+import android.speech.tts.Voice
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import info.jarvisai.app.data.model.AvatarType
 import info.jarvisai.app.data.prefs.JarvisSettings
 import info.jarvisai.app.data.prefs.SettingsDataStore
+import info.jarvisai.app.service.TtsManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -15,6 +17,7 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val store: SettingsDataStore,
+    private val ttsManager: TtsManager,
 ) : ViewModel() {
 
     private val _settings = MutableStateFlow(JarvisSettings())
@@ -23,10 +26,18 @@ class SettingsViewModel @Inject constructor(
     private val _saved = MutableStateFlow(false)
     val saved: StateFlow<Boolean> = _saved
 
+    /** Verfügbare TTS-Stimmen (de-DE, offline) – wird beim Öffnen des Voice-Pickers geladen */
+    private val _availableVoices = MutableStateFlow<List<Voice>>(emptyList())
+    val availableVoices: StateFlow<List<Voice>> = _availableVoices
+
     init {
         viewModelScope.launch {
             _settings.value = store.settings.first()
         }
+    }
+
+    fun loadAvailableVoices() {
+        _availableVoices.value = ttsManager.getAvailableVoices()
     }
 
     fun onServerUrlChange(url: String) {
@@ -65,8 +76,14 @@ class SettingsViewModel @Inject constructor(
         _settings.value = _settings.value.copy(voiceSilenceMs = ms)
     }
 
-    fun onAvatarTypeChange(type: AvatarType) {
-        _settings.value = _settings.value.copy(avatarType = type)
+    fun onAvatarEnabledChange(enabled: Boolean) {
+        _settings.value = _settings.value.copy(
+            avatarType = if (enabled) AvatarType.IRONMAN else AvatarType.NONE
+        )
+    }
+
+    fun onTtsVoiceChange(voiceName: String) {
+        _settings.value = _settings.value.copy(ttsVoiceName = voiceName)
     }
 
     fun save() {

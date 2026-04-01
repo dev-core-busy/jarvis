@@ -56,7 +56,6 @@ import info.jarvisai.app.update.DownloadPhase
 import androidx.compose.ui.draw.alpha
 import info.jarvisai.app.data.model.AvatarType
 import info.jarvisai.app.ui.avatar.IronManAvatar
-import info.jarvisai.app.ui.avatar.JarvisAvatar
 import info.jarvisai.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -150,27 +149,17 @@ fun ChatScreen(
             }
         }
 
-        // ── Anime-Avatar (zwischen Hintergrund und Chat-Inhalt) ───────
-        when (avatarType) {
-            AvatarType.KARIKATUR -> JarvisAvatar(
+        // ── Iron Man Avatar (zwischen Hintergrund und Chat-Inhalt) ────
+        if (avatarType == AvatarType.IRONMAN) {
+            IronManAvatar(
                 isSpeaking = isSpeaking,
                 mouthState = avatarMouth,
                 modifier   = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(bottom = avatarBottomPadding, end = 10.dp)
-                    .size(width = 130.dp, height = 160.dp)
-                    .alpha(if (isSpeaking) 0.92f else 0.72f),
+                    .size(width = 170.dp, height = 200.dp)   // 30% größer als vorher
+                    .alpha(if (isSpeaking) 0.97f else 0.90f),
             )
-            AvatarType.IRONMAN -> IronManAvatar(
-                isSpeaking = isSpeaking,
-                mouthState = avatarMouth,
-                modifier   = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(bottom = avatarBottomPadding, end = 10.dp)
-                    .size(width = 130.dp, height = 155.dp)
-                    .alpha(if (isSpeaking) 0.96f else 0.80f),
-            )
-            AvatarType.NONE -> Unit
         }
 
         Column(modifier = Modifier.fillMaxSize().imePadding()) {

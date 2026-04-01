@@ -35,7 +35,6 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import info.jarvisai.app.BuildConfig
 import info.jarvisai.app.R
-import info.jarvisai.app.data.model.AvatarType
 import info.jarvisai.app.data.prefs.BG_COLOR
 import info.jarvisai.app.data.prefs.BG_DEFAULT_URI
 import info.jarvisai.app.data.prefs.BG_GRADIENT
@@ -341,45 +340,109 @@ fun SettingsScreen(
             // ── Anzeige ───────────────────────────────────────────────────
             SectionHeader("Anzeige")
 
-            // ── Avatar-Auswahl ─────────────────────────────────────────────
-            Text(
-                text = "Avatar & Stimme",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(bottom = 4.dp),
-            )
-            Text(
-                text = "Animierter Charakter mit Sprachausgabe im Hintergrund",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            // ── Avatar & Stimme ────────────────────────────────────────────
+            val availableVoices by viewModel.availableVoices.collectAsState()
+            var voicePickerOpen by remember { mutableStateOf(false) }
+
+            SettingRow(
+                label = "Avatar verwenden",
+                description = "Iron Man Helm mit Sprachausgabe im Chat-Hintergrund",
             ) {
-                listOf(
-                    AvatarType.NONE      to "Kein Avatar",
-                    AvatarType.KARIKATUR to "Karikatur",
-                    AvatarType.IRONMAN   to "Iron Man",
-                ).forEach { (type, label) ->
-                    val selected = settings.avatarType == type
+                Switch(
+                    checked = settings.avatarEnabled,
+                    onCheckedChange = viewModel::onAvatarEnabledChange,
+                )
+            }
+
+            if (settings.avatarEnabled) {
+                // ── TTS-Stimme ─────────────────────────────────────────────
+                val currentVoiceName = settings.ttsVoiceName.ifBlank { "Automatisch (beste männliche Stimme)" }
+                SettingRow(
+                    label = "Sprachausgabe-Stimme",
+                    description = currentVoiceName,
+                ) {
                     OutlinedButton(
-                        onClick = { viewModel.onAvatarTypeChange(type) },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = if (selected) JarvisPurple.copy(alpha = 0.22f)
-                                             else Color.Transparent,
-                            contentColor   = if (selected) JarvisPurple else Color.White,
-                        ),
-                        border = androidx.compose.foundation.BorderStroke(
-                            width = if (selected) 2.dp else 1.dp,
-                            color = if (selected) JarvisPurple else Color.White.copy(alpha = 0.30f),
-                        ),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+                        onClick = {
+                            viewModel.loadAvailableVoices()
+                            voicePickerOpen = true
+                        },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     ) {
-                        Text(label, fontSize = 12.sp, maxLines = 1)
+                        Text("Wählen", fontSize = 12.sp)
                     }
                 }
+            }
+
+            // ── Voice-Picker Dialog ────────────────────────────────────────
+            if (voicePickerOpen) {
+                AlertDialog(
+                    onDismissRequest = { voicePickerOpen = false },
+                    title = { Text("Stimme auswählen") },
+                    text = {
+                        Column(
+                            modifier = Modifier.verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            // Option: Automatisch
+                            val autoSelected = settings.ttsVoiceName.isBlank()
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.onTtsVoiceChange("")
+                                    voicePickerOpen = false
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (autoSelected) JarvisPurple.copy(alpha = 0.22f) else Color.Transparent,
+                                    contentColor   = if (autoSelected) JarvisPurple else Color.White,
+                                ),
+                                border = BorderStroke(
+                                    width = if (autoSelected) 2.dp else 1.dp,
+                                    color = if (autoSelected) JarvisPurple else Color.White.copy(alpha = 0.30f),
+                                ),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                            ) {
+                                Text("Automatisch (beste männliche Stimme)", fontSize = 12.sp, maxLines = 1)
+                            }
+                            if (availableVoices.isEmpty()) {
+                                Text(
+                                    text = "Keine deutschen Offline-Stimmen gefunden.\nInstalliere Google TTS → Einstellungen → Sprache → Text-in-Sprache → Google → Stimmen herunterladen",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
+                            }
+                            availableVoices.forEach { voice ->
+                                val selected = settings.ttsVoiceName == voice.name
+                                OutlinedButton(
+                                    onClick = {
+                                        viewModel.onTtsVoiceChange(voice.name)
+                                        voicePickerOpen = false
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (selected) JarvisPurple.copy(alpha = 0.22f) else Color.Transparent,
+                                        contentColor   = if (selected) JarvisPurple else Color.White,
+                                    ),
+                                    border = BorderStroke(
+                                        width = if (selected) 2.dp else 1.dp,
+                                        color = if (selected) JarvisPurple else Color.White.copy(alpha = 0.30f),
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                ) {
+                                    Text(
+                                        text = voice.name.replace(Regex("^de-DE-language#"), "")
+                                                         .replace("-local", ""),
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { voicePickerOpen = false }) { Text("Schließen") }
+                    },
+                )
             }
 
             SettingRow(

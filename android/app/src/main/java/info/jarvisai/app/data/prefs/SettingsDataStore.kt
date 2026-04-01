@@ -37,7 +37,8 @@ data class JarvisSettings(
     val backgroundAlpha: Float = 0.5f,
     val debugMode: Boolean = false,
     val voiceSilenceMs: Int = 1500,
-    val avatarType: AvatarType = AvatarType.KARIKATUR,
+    val avatarType: AvatarType = AvatarType.IRONMAN,
+    val ttsVoiceName: String = "",          // leer = automatisch beste Stimme
 ) {
     /** Abwärtskompatibilität – Avatar ist aktiv wenn nicht NONE */
     val avatarEnabled: Boolean get() = avatarType != AvatarType.NONE
@@ -66,6 +67,7 @@ class SettingsDataStore @Inject constructor(
     private val KEY_VOICE_SILENCE = intPreferencesKey("voice_silence_ms")
     private val KEY_AVATAR        = booleanPreferencesKey("avatar_enabled")   // legacy
     private val KEY_AVATAR_TYPE   = stringPreferencesKey("avatar_type")
+    private val KEY_TTS_VOICE     = stringPreferencesKey("tts_voice_name")
 
     val settings: Flow<JarvisSettings> = context.dataStore.data.map { prefs ->
         JarvisSettings(
@@ -83,7 +85,8 @@ class SettingsDataStore @Inject constructor(
             voiceSilenceMs = prefs[KEY_VOICE_SILENCE] ?: 1500,
             avatarType     = prefs[KEY_AVATAR_TYPE]
                 ?.let { runCatching { AvatarType.valueOf(it) }.getOrNull() }
-                ?: if (prefs[KEY_AVATAR] == false) AvatarType.NONE else AvatarType.KARIKATUR,
+                ?: if (prefs[KEY_AVATAR] == false) AvatarType.NONE else AvatarType.IRONMAN,
+            ttsVoiceName   = prefs[KEY_TTS_VOICE] ?: "",
         )
     }
 
@@ -103,6 +106,7 @@ class SettingsDataStore @Inject constructor(
             prefs[KEY_DEBUG_MODE]    = settings.debugMode
             prefs[KEY_VOICE_SILENCE] = settings.voiceSilenceMs
             prefs[KEY_AVATAR_TYPE]   = settings.avatarType.name
+            prefs[KEY_TTS_VOICE]     = settings.ttsVoiceName
         }
     }
 }

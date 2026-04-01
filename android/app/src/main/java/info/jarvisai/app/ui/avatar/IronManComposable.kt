@@ -17,14 +17,23 @@ import androidx.compose.ui.unit.dp
 import info.jarvisai.app.R
 import info.jarvisai.app.data.model.AvatarMouthState
 
-// ─── Augenpositionen (pixel-kalibriert auf 512×512 Quellbild) ────────────────
-// Rechtes Auge: cols 307–373, rows 209–248
-// Linkes Auge:  cols 145–211, rows 209–248
-private const val EYE_W     = 0.130f   // Breite je Auge (66/512)
-private const val EYE_H_R   = 0.60f    // Höhe als Anteil von EYE_W (40/66)
-private const val RIGHT_X   = 0.600f   // Linke Kante rechtes Auge (307/512)
-private const val LEFT_X    = 0.283f   // Linke Kante linkes Auge  (145/512)
-private const val EYE_Y     = 0.408f   // Oberkante der Augenlinie (209/512)
+// ─── Augenpositionen – pixel-kalibriert am 512×512 Quellbild ─────────────────
+//
+// Das Bild ist 512×512 (quadratisch). Der Composable ist 170×200dp (hochformatig).
+// ContentScale.Fit skaliert das Bild auf die Breite (170dp) → Bildhöhe = 170dp,
+// vertikal zentriert → Offset oben = (200-170)/2 = 15dp.
+//
+// Formel: eyeY = (h - w) / 2  +  w * EYE_Y_REL
+//         eyeX =                  w * EYE_X_REL
+//
+// Gemessene Schlitzpositionen im Quellbild (weiß/teal-leuchtende Pixel):
+//   Linkes Auge:  cols 149–215, rows 252–274
+//   Rechtes Auge: cols 310–376, rows 252–274
+private const val EYE_Y   = 252f / 512f   // = 0.4922
+private const val EYE_W   = 66f  / 512f   // = 0.1289  (Breite je Auge)
+private const val EYE_H_R = 22f  / 66f    // = 0.333   (Schlitz-Verhältnis)
+private const val LEFT_X  = 149f / 512f   // = 0.2910
+private const val RIGHT_X = 310f / 512f   // = 0.6055
 
 @Composable
 fun IronManAvatar(
@@ -34,30 +43,19 @@ fun IronManAvatar(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "ironman_anim")
 
-    // Langsames Schweben
     val bob by infiniteTransition.animateFloat(
         initialValue = 0f, targetValue = 5f,
-        animationSpec = infiniteRepeatable(
-            tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse,
-        ),
+        animationSpec = infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "bob",
     )
-
-    // Augenglow pulsiert
     val eyePulse by infiniteTransition.animateFloat(
         initialValue = 0.55f, targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse,
-        ),
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "eye",
     )
-
-    // Äußerer Glow-Ring wenn sprechend
     val outerGlow by infiniteTransition.animateFloat(
         initialValue = 0.0f, targetValue = if (isSpeaking) 0.40f else 0.0f,
-        animationSpec = infiniteRepeatable(
-            tween(500, easing = FastOutSlowInEasing), RepeatMode.Reverse,
-        ),
+        animationSpec = infiniteRepeatable(tween(500, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "glow",
     )
 
@@ -74,37 +72,43 @@ fun IronManAvatar(
                     val w = size.width
                     val h = size.height
 
-                    val eyeW = w * EYE_W
-                    val eyeH = eyeW * EYE_H_R
-                    val eyeY = h * EYE_Y
+                    // Bild ist quadratisch → ContentScale.Fit füllt die Breite.
+                    // Vertikaler Offset: (h - w) / 2 (Leerraum oben/unten).
+                    val imgW      = w
+                    val imgOffY   = (h - imgW) / 2f
 
-                    // Rechtes und linkes Auge
-                    listOf(w * RIGHT_X, w * LEFT_X).forEach { ex ->
-                        val eyeCx = ex + eyeW / 2f
-                        val eyeCy = eyeY + eyeH / 2f
+                    val eyeW  = imgW * EYE_W
+                    val eyeH  = eyeW * EYE_H_R
+                    val eyeY  = imgOffY + imgW * EYE_Y
+                    val leftX = imgW * LEFT_X
+                    val rightX= imgW * RIGHT_X
+
+                    listOf(leftX, rightX).forEach { ex ->
+                        val cx = ex + eyeW / 2f
+                        val cy = eyeY + eyeH / 2f
 
                         // Weicher goldener Außen-Glow
                         drawOval(
                             brush = Brush.radialGradient(
                                 colors = listOf(
-                                    Color(0xFFFFCC44).copy(alpha = eyePulse * 0.50f),
+                                    Color(0xFFFFCC44).copy(alpha = eyePulse * 0.55f),
                                     Color.Transparent,
                                 ),
-                                center = Offset(eyeCx, eyeCy),
-                                radius = eyeW * 0.95f,
+                                center = Offset(cx, cy),
+                                radius = eyeW * 1.0f,
                             ),
-                            topLeft = Offset(ex - eyeW * 0.40f, eyeY - eyeH * 1.2f),
-                            size = Size(eyeW * 1.80f, eyeH * 3.4f),
+                            topLeft = Offset(ex - eyeW * 0.35f, eyeY - eyeH * 1.5f),
+                            size    = Size(eyeW * 1.7f, eyeH * 4.0f),
                         )
                         // Harter goldener Kern
                         drawOval(
-                            color = Color(0xFFFFEE88).copy(alpha = eyePulse * 0.92f),
+                            color   = Color(0xFFFFEE88).copy(alpha = eyePulse * 0.95f),
                             topLeft = Offset(ex, eyeY),
-                            size = Size(eyeW, eyeH),
+                            size    = Size(eyeW, eyeH),
                         )
                     }
 
-                    // Sprechender Glow-Ring
+                    // Sprechender Glow
                     if (outerGlow > 0.01f) {
                         drawCircle(
                             brush = Brush.radialGradient(
@@ -112,7 +116,7 @@ fun IronManAvatar(
                                     Color(0xFFFFAA00).copy(alpha = outerGlow * 0.45f),
                                     Color.Transparent,
                                 ),
-                                center = Offset(w / 2f, h * 0.42f),
+                                center = Offset(w / 2f, imgOffY + imgW * 0.50f),
                                 radius = w * 0.55f,
                             ),
                         )

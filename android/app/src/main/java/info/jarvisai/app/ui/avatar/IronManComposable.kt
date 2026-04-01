@@ -17,15 +17,14 @@ import androidx.compose.ui.unit.dp
 import info.jarvisai.app.R
 import info.jarvisai.app.data.model.AvatarMouthState
 
-// ─── Augenpositionen (kalibriert auf das 512×512 Quellbild) ──────────────────
-// Bildinhalt: Cols 95–414, Rows 13–500
-// Rechtes Auge (hellstes, goldfarbenes Leuchten): cols 306–373, rows 160–235
-// Linkes Auge (gespiegelt um Bildmitte col 254): cols 135–202, rows 160–235
-private const val EYE_W     = 0.130f   // Breite je Auge (relativ zur Canvas-Breite)
-private const val EYE_H_R   = 0.55f    // Höhe als Anteil von EYE_W (0.28 war zu flach)
-private const val RIGHT_X   = 0.598f   // Linke Kante rechtes Auge (306/512)
-private const val LEFT_X    = 0.264f   // Linke Kante linkes Auge (135/512)
-private const val EYE_Y     = 0.313f   // Oberkante der Augenlinie (160/512)
+// ─── Augenpositionen (pixel-kalibriert auf 512×512 Quellbild) ────────────────
+// Rechtes Auge: cols 307–373, rows 209–248
+// Linkes Auge:  cols 145–211, rows 209–248
+private const val EYE_W     = 0.130f   // Breite je Auge (66/512)
+private const val EYE_H_R   = 0.60f    // Höhe als Anteil von EYE_W (40/66)
+private const val RIGHT_X   = 0.600f   // Linke Kante rechtes Auge (307/512)
+private const val LEFT_X    = 0.283f   // Linke Kante linkes Auge  (145/512)
+private const val EYE_Y     = 0.408f   // Oberkante der Augenlinie (209/512)
 
 @Composable
 fun IronManAvatar(

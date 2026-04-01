@@ -16,6 +16,8 @@ import info.jarvisai.app.data.model.AvatarMouthState
 import info.jarvisai.app.data.model.ChatMessage
 import info.jarvisai.app.data.model.ConnectionState
 import info.jarvisai.app.data.model.MessageRole
+import android.media.MediaPlayer
+import info.jarvisai.app.service.ServerTtsPlayer
 import info.jarvisai.app.service.TtsManager
 import info.jarvisai.app.data.prefs.DEFAULT_QUICK_ACTIONS
 import info.jarvisai.app.data.prefs.SettingsDataStore
@@ -43,6 +45,7 @@ class ChatViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val updateChecker: UpdateChecker,
     private val ttsManager: TtsManager,
+    private val serverTtsPlayer: ServerTtsPlayer,
 ) : AndroidViewModel(application) {
 
     val messages: StateFlow<List<ChatMessage>> = repo.messages
@@ -83,25 +86,44 @@ class ChatViewModel @Inject constructor(
     private val _avatarEnabled = MutableStateFlow(true)
     private val _avatarType    = MutableStateFlow(info.jarvisai.app.data.model.AvatarType.IRONMAN)
 
+    private var serverTtsEnabled = false
+    private var serverTtsVoice   = "de-DE-ConradNeural"
+    private var serverUrl        = ""
+    private var apiKey           = ""
+    private var mediaPlayer: MediaPlayer? = null
+
     init {
         // Alle Settings-Änderungen live übernehmen
         viewModelScope.launch {
             settingsDataStore.settings.collect { s ->
                 _quickActions.value = s.quickActions
-                autoSendVoice = s.autoSendVoice
-                voiceSilenceMs = s.voiceSilenceMs
+                autoSendVoice    = s.autoSendVoice
+                voiceSilenceMs   = s.voiceSilenceMs
                 _avatarEnabled.value = s.avatarEnabled
                 _avatarType.value    = s.avatarType
-                ttsManager.setVoiceProfile(s.avatarType)
-                if (s.ttsVoiceName.isNotBlank()) ttsManager.applyVoiceName(s.ttsVoiceName)
-                if (!s.avatarEnabled) ttsManager.stop()
+                serverTtsEnabled = s.serverTtsEnabled
+                serverTtsVoice   = s.serverTtsVoice
+                serverUrl        = s.serverUrl
+                apiKey           = s.apiKey
+                if (!s.serverTtsEnabled) {
+                    ttsManager.setVoiceProfile(s.avatarType)
+                    if (s.ttsVoiceName.isNotBlank()) ttsManager.applyVoiceName(s.ttsVoiceName)
+                }
+                if (!s.avatarEnabled) {
+                    ttsManager.stop()
+                    stopMediaPlayer()
+                }
             }
         }
         // TTS über SharedFlow – kein StateFlow-Conflate, jede Antwort wird genau einmal gelesen
         viewModelScope.launch {
             repo.speakText.collect { text ->
                 if (!_avatarEnabled.value) return@collect
-                ttsManager.speak(text)
+                if (serverTtsEnabled && serverUrl.isNotBlank() && apiKey.isNotBlank()) {
+                    speakViaServer(text)
+                } else {
+                    ttsManager.speak(text)
+                }
             }
         }
         // Neu verbinden nur wenn URL oder Key sich ändert
@@ -285,10 +307,39 @@ class ChatViewModel @Inject constructor(
         _voiceState.value = VoiceState.IDLE
     }
 
+    private fun speakViaServer(text: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                ttsManager.startMouthAnimationPublic()
+                val file = serverTtsPlayer.fetchAudio(serverUrl, apiKey, text, serverTtsVoice)
+                stopMediaPlayer()
+                mediaPlayer = MediaPlayer().apply {
+                    setDataSource(file.absolutePath)
+                    prepare()
+                    setOnCompletionListener {
+                        ttsManager.stopMouthAnimationPublic()
+                        file.delete()
+                    }
+                    start()
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ChatViewModel", "Server-TTS fehlgeschlagen, Fallback auf Android-TTS: $e")
+                ttsManager.stopMouthAnimationPublic()
+                ttsManager.speak(text)
+            }
+        }
+    }
+
+    private fun stopMediaPlayer() {
+        mediaPlayer?.runCatching { stop(); release() }
+        mediaPlayer = null
+    }
+
     override fun onCleared() {
         super.onCleared()
         speechRecognizer?.destroy()
         speechRecognizer = null
         ttsManager.stop()
+        stopMediaPlayer()
     }
 }

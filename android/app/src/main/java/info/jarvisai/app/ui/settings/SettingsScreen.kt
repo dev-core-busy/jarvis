@@ -341,8 +341,11 @@ fun SettingsScreen(
             SectionHeader("Anzeige")
 
             // ── Avatar & Stimme ────────────────────────────────────────────
-            val availableVoices by viewModel.availableVoices.collectAsState()
-            var voicePickerOpen by remember { mutableStateOf(false) }
+            val availableVoices    by viewModel.availableVoices.collectAsState()
+            val serverVoices       by viewModel.serverVoices.collectAsState()
+            val serverVoicesLoading by viewModel.serverVoicesLoading.collectAsState()
+            var voicePickerOpen    by remember { mutableStateOf(false) }
+            var serverVoicePickerOpen by remember { mutableStateOf(false) }
 
             SettingRow(
                 label = "Avatar verwenden",
@@ -355,22 +358,104 @@ fun SettingsScreen(
             }
 
             if (settings.avatarEnabled) {
-                // ── TTS-Stimme ─────────────────────────────────────────────
-                val currentVoiceName = settings.ttsVoiceName.ifBlank { "Automatisch (beste männliche Stimme)" }
+                // ── Server-TTS Toggle ──────────────────────────────────────
                 SettingRow(
-                    label = "Sprachausgabe-Stimme",
-                    description = currentVoiceName,
+                    label = "Server-Stimme (edge-tts)",
+                    description = "Hochwertige Microsoft Neural Voice vom Jarvis-Server statt Android-TTS",
                 ) {
-                    OutlinedButton(
-                        onClick = {
-                            viewModel.loadAvailableVoices()
-                            voicePickerOpen = true
-                        },
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    Switch(
+                        checked = settings.serverTtsEnabled,
+                        onCheckedChange = viewModel::onServerTtsEnabledChange,
+                    )
+                }
+
+                if (settings.serverTtsEnabled) {
+                    // Server-Stimme auswählen
+                    SettingRow(
+                        label = "Server-Stimme",
+                        description = settings.serverTtsVoice,
                     ) {
-                        Text("Wählen", fontSize = 12.sp)
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.loadServerVoices()
+                                serverVoicePickerOpen = true
+                            },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        ) {
+                            Text("Wählen", fontSize = 12.sp)
+                        }
+                    }
+                } else {
+                    // Android-Stimme auswählen
+                    val currentVoiceName = settings.ttsVoiceName.ifBlank { "Automatisch (beste männliche Stimme)" }
+                    SettingRow(
+                        label = "Android-Stimme",
+                        description = currentVoiceName,
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.loadAvailableVoices()
+                                voicePickerOpen = true
+                            },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        ) {
+                            Text("Wählen", fontSize = 12.sp)
+                        }
                     }
                 }
+            }
+
+            // ── Server-Stimmen Dialog ──────────────────────────────────────
+            if (serverVoicePickerOpen) {
+                AlertDialog(
+                    onDismissRequest = { serverVoicePickerOpen = false },
+                    title = { Text("Server-Stimme (edge-tts)") },
+                    text = {
+                        if (serverVoicesLoading) {
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator()
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier.verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                if (serverVoices.isEmpty()) {
+                                    Text(
+                                        "Keine Stimmen geladen. Server erreichbar?",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                serverVoices.forEach { voice ->
+                                    val selected = settings.serverTtsVoice == voice.name
+                                    OutlinedButton(
+                                        onClick = {
+                                            viewModel.onServerTtsVoiceChange(voice.name)
+                                            serverVoicePickerOpen = false
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            containerColor = if (selected) JarvisPurple.copy(alpha = 0.22f) else Color.Transparent,
+                                            contentColor   = if (selected) JarvisPurple else Color.White,
+                                        ),
+                                        border = BorderStroke(
+                                            if (selected) 2.dp else 1.dp,
+                                            if (selected) JarvisPurple else Color.White.copy(alpha = 0.30f),
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                    ) {
+                                        val genderIcon = if (voice.gender.lowercase() == "male") "♂ " else "♀ "
+                                        Text(genderIcon + voice.name, fontSize = 12.sp, maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { serverVoicePickerOpen = false }) { Text("Schließen") }
+                    },
+                )
             }
 
             // ── Voice-Picker Dialog ────────────────────────────────────────

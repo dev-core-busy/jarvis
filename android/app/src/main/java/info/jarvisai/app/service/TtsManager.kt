@@ -195,6 +195,18 @@ class TtsManager @Inject constructor(
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
     }
 
+    /** Mund-Animation extern starten (für Server-TTS) */
+    fun startMouthAnimationPublic() {
+        _isSpeaking.value = true
+        startMouthAnimation()
+    }
+
+    /** Mund-Animation extern stoppen (für Server-TTS) */
+    fun stopMouthAnimationPublic() {
+        _isSpeaking.value = false
+        stopMouthAnimation()
+    }
+
     /** Aktuelle Sprachausgabe sofort abbrechen */
     fun stop() {
         tts?.stop()

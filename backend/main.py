@@ -2051,6 +2051,64 @@ async def vision_greet_audio(name: str, request: Request):
     )
 
 
+@app.post("/api/tts")
+async def tts_synthesize(request: Request):
+    """Text-to-Speech via edge-tts. Gibt MP3-Audio zurück."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+
+    body = await request.json()
+    text  = body.get("text", "").strip()
+    voice = body.get("voice", "de-DE-ConradNeural")
+
+    if not text:
+        return JSONResponse({"error": "Kein Text angegeben"}, status_code=400)
+
+    try:
+        import edge_tts
+        communicate = edge_tts.Communicate(text, voice)
+        chunks = []
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                chunks.append(chunk["data"])
+        audio_bytes = b"".join(chunks)
+        if not audio_bytes:
+            return JSONResponse({"error": "Keine Audiodaten generiert"}, status_code=500)
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "no-cache"},
+        )
+    except ImportError:
+        return JSONResponse({"error": "edge-tts nicht installiert (pip install edge-tts)"}, status_code=503)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/tts/voices")
+async def tts_voices(request: Request):
+    """Verfügbare edge-tts Stimmen (gefiltert nach Sprache, Standard: de-)."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+
+    locale = request.query_params.get("locale", "de-")
+    try:
+        import edge_tts
+        all_voices = await edge_tts.list_voices()
+        voices = [
+            {"name": v["ShortName"], "gender": v["Gender"], "locale": v["Locale"],
+             "display": v.get("FriendlyName", v["ShortName"])}
+            for v in all_voices if v["Locale"].startswith(locale)
+        ]
+        return JSONResponse(voices)
+    except ImportError:
+        return JSONResponse({"error": "edge-tts nicht installiert"}, status_code=503)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/api/vision/download/stream-tools")
 async def vision_download_stream_tools(request: Request):
     """Redirect zu jarvis-ai.info fuer Stream-Tools ZIP-Download."""

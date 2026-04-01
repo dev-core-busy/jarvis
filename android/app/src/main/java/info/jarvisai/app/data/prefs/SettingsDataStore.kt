@@ -38,7 +38,9 @@ data class JarvisSettings(
     val debugMode: Boolean = false,
     val voiceSilenceMs: Int = 1500,
     val avatarType: AvatarType = AvatarType.IRONMAN,
-    val ttsVoiceName: String = "",          // leer = automatisch beste Stimme
+    val ttsVoiceName: String = "",          // leer = automatisch beste Android-Stimme
+    val serverTtsEnabled: Boolean = false,  // Server-TTS via edge-tts statt Android-TTS
+    val serverTtsVoice: String = "de-DE-ConradNeural",
 ) {
     /** Abwärtskompatibilität – Avatar ist aktiv wenn nicht NONE */
     val avatarEnabled: Boolean get() = avatarType != AvatarType.NONE
@@ -67,7 +69,9 @@ class SettingsDataStore @Inject constructor(
     private val KEY_VOICE_SILENCE = intPreferencesKey("voice_silence_ms")
     private val KEY_AVATAR        = booleanPreferencesKey("avatar_enabled")   // legacy
     private val KEY_AVATAR_TYPE   = stringPreferencesKey("avatar_type")
-    private val KEY_TTS_VOICE     = stringPreferencesKey("tts_voice_name")
+    private val KEY_TTS_VOICE        = stringPreferencesKey("tts_voice_name")
+    private val KEY_SERVER_TTS       = booleanPreferencesKey("server_tts_enabled")
+    private val KEY_SERVER_TTS_VOICE = stringPreferencesKey("server_tts_voice")
 
     val settings: Flow<JarvisSettings> = context.dataStore.data.map { prefs ->
         JarvisSettings(
@@ -86,7 +90,9 @@ class SettingsDataStore @Inject constructor(
             avatarType     = prefs[KEY_AVATAR_TYPE]
                 ?.let { runCatching { AvatarType.valueOf(it) }.getOrNull() }
                 ?: if (prefs[KEY_AVATAR] == false) AvatarType.NONE else AvatarType.IRONMAN,
-            ttsVoiceName   = prefs[KEY_TTS_VOICE] ?: "",
+            ttsVoiceName      = prefs[KEY_TTS_VOICE] ?: "",
+            serverTtsEnabled  = prefs[KEY_SERVER_TTS] ?: false,
+            serverTtsVoice    = prefs[KEY_SERVER_TTS_VOICE] ?: "de-DE-ConradNeural",
         )
     }
 
@@ -106,7 +112,9 @@ class SettingsDataStore @Inject constructor(
             prefs[KEY_DEBUG_MODE]    = settings.debugMode
             prefs[KEY_VOICE_SILENCE] = settings.voiceSilenceMs
             prefs[KEY_AVATAR_TYPE]   = settings.avatarType.name
-            prefs[KEY_TTS_VOICE]     = settings.ttsVoiceName
+            prefs[KEY_TTS_VOICE]        = settings.ttsVoiceName
+            prefs[KEY_SERVER_TTS]       = settings.serverTtsEnabled
+            prefs[KEY_SERVER_TTS_VOICE] = settings.serverTtsVoice
         }
     }
 }

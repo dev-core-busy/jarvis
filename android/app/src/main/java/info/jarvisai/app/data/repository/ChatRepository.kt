@@ -11,10 +11,15 @@ import info.jarvisai.app.data.model.MessageSegment
 import info.jarvisai.app.data.model.SegmentType
 import info.jarvisai.app.data.model.WsEvent
 import info.jarvisai.app.data.prefs.SettingsDataStore
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -23,6 +28,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -42,11 +48,21 @@ class ChatRepository @Inject constructor(
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
 
-    // ID der aktuell streamenden Jarvis-Nachricht (null = keine)
-    private var streamingMsgId: String? = null
+    // SharedFlow für TTS-Events: KEIN Conflate – jede Antwort wird exakt einmal gesendet,
+    // unabhängig davon ob der Collector gerade beschäftigt ist oder andere StateFlow-Updates kommen.
+    private val _speakText = MutableSharedFlow<String>(extraBufferCapacity = 5)
+    val speakText: SharedFlow<String> = _speakText
 
-    // STATUS-Segmente die vor der ersten Antwort gepuffert werden
-    private val pendingStatus = mutableListOf<MessageSegment>()
+    // ID der aktuell streamenden Jarvis-Nachricht (null = keine)
+    // @Volatile: sicher lesbar vom Main-Thread (sendMessage) und Dispatchers.Default (handleEvent)
+    @Volatile private var streamingMsgId: String? = null
+
+    // Fallback-Timer: falls server kein agent_event:finished schickt, nach 5s auto-finalize
+    private var finalizeTimeoutJob: Job? = null
+
+    // STATUS-Segmente vor der ersten Antwort gepuffert.
+    // CopyOnWriteArrayList: thread-sicher für gleichzeitigen Zugriff von Main-Thread und Default-Dispatcher
+    private val pendingStatus = CopyOnWriteArrayList<MessageSegment>()
 
     init {
         loadMessages()
@@ -71,7 +87,14 @@ class ChatRepository @Inject constructor(
     }
 
     private suspend fun collectEvents() {
-        ws.events.collect { event -> handleEvent(event) }
+        ws.events.collect { event ->
+            try {
+                handleEvent(event)
+            } catch (e: Exception) {
+                // Exception darf collectEvents NICHT beenden – sonst kommen keine Antworten mehr
+                Log.e("ChatRepository", "handleEvent Fehler: ${e.message}", e)
+            }
+        }
     }
 
     private fun handleEvent(event: WsEvent) {
@@ -145,9 +168,25 @@ class ChatRepository @Inject constructor(
                 }
             }
         }
+        // Synchron schreiben – läuft auf Dispatchers.Default, kein Main-Thread-Block.
+        // Async-Coroutine würde bei Prozess-Kill (Wischen in Recents) nie ausgeführt.
+        writeMessagesToDisk()
+
+        // Fallback: falls server kein agent_event:finished schickt, nach 5s auto-finalize
+        // Jeder neue Chunk setzt den Timer zurück – TTS feuert 5s nach letztem Segment.
+        finalizeTimeoutJob?.cancel()
+        finalizeTimeoutJob = scope.launch {
+            delay(5_000)
+            if (streamingMsgId != null) {
+                Log.d("ChatRepository", "finalizeStream via 5s-Timeout-Fallback")
+                finalizeStream()
+            }
+        }
     }
 
     private fun finalizeStream() {
+        finalizeTimeoutJob?.cancel()
+        finalizeTimeoutJob = null
         pendingStatus.clear() // Post-run STATUS-Events (✅ etc.) verwerfen
         val id = streamingMsgId ?: return
         streamingMsgId = null
@@ -156,7 +195,20 @@ class ChatRepository @Inject constructor(
                 if (msg.id == id) msg.copy(isStreaming = false) else msg
             }
         }
-        saveMessages()
+        // TTS-Event über SharedFlow senden – nicht conflated, wird garantiert zugestellt
+        // Fallback: wenn keine ANSWER-Segmente vorhanden, gesamten Text nehmen
+        val finalMsg = _messages.value.find { it.id == id }
+        val speakText = finalMsg?.segments
+            ?.filter { it.type == SegmentType.ANSWER }
+            ?.joinToString(" ") { it.text.trim() }
+            ?.trim()
+            ?.takeUnless { it.isBlank() }
+            ?: finalMsg?.text?.trim()
+            ?: ""
+        if (speakText.isNotBlank()) {
+            scope.launch { _speakText.emit(speakText) }
+        }
+        writeMessagesToDisk() // Synchron – läuft auf Dispatchers.Default
     }
 
     fun deleteMessages(ids: Set<String>) {
@@ -171,15 +223,28 @@ class ChatRepository @Inject constructor(
 
     // ── Disk-Persistenz ───────────────────────────────────────────────
 
+    /**
+     * Synchroner Schreibvorgang – darf NUR vom Dispatchers.Default/IO aufgerufen werden,
+     * nie vom Main-Thread (würde UI blockieren).
+     */
+    private fun writeMessagesToDisk() {
+        runCatching {
+            val data = json.encodeToString(
+                ListSerializer(ChatMessage.serializer()),
+                _messages.value.takeLast(100),
+            )
+            msgFile.writeText(data)
+        }.onFailure { e ->
+            Log.e("ChatRepository", "Nachrichten speichern fehlgeschlagen: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Asynchroner Speicheraufruf vom Main-Thread (z.B. sendMessage).
+     */
     private fun saveMessages() {
         scope.launch(Dispatchers.IO) {
-            runCatching {
-                val data = json.encodeToString(
-                    ListSerializer(ChatMessage.serializer()),
-                    _messages.value.takeLast(100),
-                )
-                msgFile.writeText(data)
-            }
+            writeMessagesToDisk()
         }
     }
 

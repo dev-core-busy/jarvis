@@ -3,9 +3,11 @@ package info.jarvisai.app.service
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import info.jarvisai.app.data.model.AvatarMouthState
+import info.jarvisai.app.data.model.AvatarType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -28,8 +30,11 @@ class TtsManager @Inject constructor(
 ) {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var tts: TextToSpeech? = null
-    private var initialized = false
-    private var pendingText: String? = null
+    @Volatile private var initialized = false
+    @Volatile private var pendingText: String? = null
+
+    @Volatile private var speechRate  = 1.00f
+    @Volatile private var speechPitch = 1.00f
 
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking
@@ -48,8 +53,16 @@ class TtsManager @Inject constructor(
                 if (!initialized) {
                     Log.w(TAG, "Deutsche TTS-Stimme nicht verfügbar (result=$result)")
                 } else {
-                    Log.i(TAG, "TTS initialisiert (de-DE)")
-                    // Ausstehenden Text sprechen falls vorhanden
+                    // Stimmprofil anwenden (wurde ggf. schon via setVoiceProfile voreingestellt)
+                    if (speechPitch != 1.00f || speechRate != 1.00f) {
+                        applyIronManVoice()
+                    } else {
+                        tts?.setSpeechRate(speechRate)
+                        tts?.setPitch(speechPitch)
+                    }
+                    Log.i(TAG, "TTS initialisiert (de-DE, rate=$speechRate, pitch=$speechPitch)")
+                    // Engine vorwärmen: stiller Utterance → reduziert Startup-Latenz beim ersten speak()
+                    tts?.speak(" ", TextToSpeech.QUEUE_FLUSH, null, "warmup")
                     pendingText?.let { text ->
                         pendingText = null
                         speak(text)
@@ -62,13 +75,77 @@ class TtsManager @Inject constructor(
     }
 
     /**
+     * Stimmprofil je nach Avatar-Typ anpassen.
+     * IronMan: beste verfügbare männliche de-DE Offline-Stimme, falls vorhanden.
+     * Pitch/Rate werden nur gesetzt wenn keine dedizierte Männer-Stimme gefunden wurde.
+     */
+    fun setVoiceProfile(type: AvatarType) {
+        when (type) {
+            AvatarType.IRONMAN -> {
+                speechRate  = 1.10f
+                speechPitch = 0.80f  // leicht tiefer, aber nicht blechern
+                if (initialized) applyIronManVoice()
+            }
+            AvatarType.KARIKATUR, AvatarType.NONE -> {
+                speechRate  = 1.00f
+                speechPitch = 1.00f
+                if (initialized) {
+                    tts?.voice = null  // Standard-Stimme zurücksetzen
+                    tts?.setSpeechRate(1.00f)
+                    tts?.setPitch(1.00f)
+                }
+            }
+        }
+    }
+
+    /**
+     * Versucht die beste verfügbare männliche deutsche Offline-Stimme zu setzen.
+     * Kriterien: de-DE, nicht netzwerkabhängig, männlich (Name enthält "male" oder "m_" o.ä.).
+     * Fallback: nur Rate/Pitch anpassen wenn keine männliche Stimme verfügbar.
+     */
+    private fun applyIronManVoice() {
+        val voices = tts?.voices ?: return
+        val deLocale = Locale("de", "DE")
+
+        // Beste männliche deutsche Offline-Stimme suchen
+        val maleVoice = voices
+            .filter { v ->
+                !v.isNetworkConnectionRequired &&
+                v.locale.language == deLocale.language &&
+                (v.name.contains("male", ignoreCase = true) ||
+                 v.name.contains("m_", ignoreCase = true) ||
+                 v.name.contains("-m-", ignoreCase = true) ||
+                 v.name.contains("_m_", ignoreCase = true))
+            }
+            .maxByOrNull { v ->
+                when {
+                    v.quality >= Voice.QUALITY_HIGH   -> 2
+                    v.quality >= Voice.QUALITY_NORMAL -> 1
+                    else -> 0
+                }
+            }
+
+        if (maleVoice != null) {
+            tts?.voice = maleVoice
+            tts?.setSpeechRate(speechRate)
+            tts?.setPitch(1.00f)  // Stimme ist bereits männlich, kein künstliches Pitch-Absenken
+            Log.i(TAG, "Männliche Stimme: ${maleVoice.name} (quality=${maleVoice.quality})")
+        } else {
+            // Keine dedizierte männliche Stimme → nur Rate/Pitch
+            tts?.setSpeechRate(speechRate)
+            tts?.setPitch(speechPitch)
+            Log.i(TAG, "Keine männliche Stimme gefunden, verwende Pitch=$speechPitch")
+        }
+    }
+
+    /**
      * Text sprechen. Falls TTS noch nicht bereit, wird der Text gepuffert
      * und nach Initialisierung automatisch gesprochen.
      */
     fun speak(text: String) {
         if (text.isBlank()) return
         if (!initialized) {
-            pendingText = text   // Puffern bis TTS bereit
+            pendingText = text
             return
         }
         val utteranceId = "jarvis_${System.currentTimeMillis()}"
@@ -104,18 +181,23 @@ class TtsManager @Inject constructor(
     private fun startMouthAnimation() {
         mouthJob?.cancel()
         mouthJob = scope.launch {
-            // Unregelmäßiges Muster wirkt natürlicher als gleichmäßiger Takt
             val pattern = listOf(
-                AvatarMouthState.CLOSED to 85L,
-                AvatarMouthState.SMALL  to 75L,
-                AvatarMouthState.OPEN   to 115L,
-                AvatarMouthState.SMALL  to 70L,
-                AvatarMouthState.OPEN   to 90L,
+                AvatarMouthState.CLOSED to 180L,
                 AvatarMouthState.SMALL  to 80L,
-                AvatarMouthState.CLOSED to 95L,
-                AvatarMouthState.SMALL  to 65L,
-                AvatarMouthState.OPEN   to 100L,
+                AvatarMouthState.OPEN   to 110L,
+                AvatarMouthState.SMALL  to 70L,
+                AvatarMouthState.CLOSED to 220L,
+                AvatarMouthState.OPEN   to 120L,
                 AvatarMouthState.SMALL  to 75L,
+                AvatarMouthState.CLOSED to 160L,
+                AvatarMouthState.SMALL  to 65L,
+                AvatarMouthState.OPEN   to 95L,
+                AvatarMouthState.SMALL  to 80L,
+                AvatarMouthState.CLOSED to 320L,
+                AvatarMouthState.SMALL  to 70L,
+                AvatarMouthState.OPEN   to 105L,
+                AvatarMouthState.SMALL  to 75L,
+                AvatarMouthState.CLOSED to 190L,
             )
             var i = 0
             while (isActive) {

@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import info.jarvisai.app.data.model.AvatarType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -36,8 +37,11 @@ data class JarvisSettings(
     val backgroundAlpha: Float = 0.5f,
     val debugMode: Boolean = false,
     val voiceSilenceMs: Int = 1500,
-    val avatarEnabled: Boolean = true,    // Anime-Avatar standardmäßig aktiv
-)
+    val avatarType: AvatarType = AvatarType.KARIKATUR,
+) {
+    /** Abwärtskompatibilität – Avatar ist aktiv wenn nicht NONE */
+    val avatarEnabled: Boolean get() = avatarType != AvatarType.NONE
+}
 
 val DEFAULT_QUICK_ACTIONS = listOf(
     "Screenshot machen",
@@ -60,7 +64,8 @@ class SettingsDataStore @Inject constructor(
     private val KEY_BG_ALPHA      = floatPreferencesKey("bg_alpha")
     private val KEY_DEBUG_MODE    = booleanPreferencesKey("debug_mode")
     private val KEY_VOICE_SILENCE = intPreferencesKey("voice_silence_ms")
-    private val KEY_AVATAR        = booleanPreferencesKey("avatar_enabled")
+    private val KEY_AVATAR        = booleanPreferencesKey("avatar_enabled")   // legacy
+    private val KEY_AVATAR_TYPE   = stringPreferencesKey("avatar_type")
 
     val settings: Flow<JarvisSettings> = context.dataStore.data.map { prefs ->
         JarvisSettings(
@@ -74,9 +79,11 @@ class SettingsDataStore @Inject constructor(
             backgroundImageUri  = prefs[KEY_BG_IMAGE_URI] ?: BG_DEFAULT_URI,
             backgroundColorArgb = prefs[KEY_BG_COLOR] ?: 0xFF0A0E17.toInt(),
             backgroundAlpha     = prefs[KEY_BG_ALPHA] ?: 0.5f,
-            debugMode           = prefs[KEY_DEBUG_MODE] ?: false,
-            voiceSilenceMs      = prefs[KEY_VOICE_SILENCE] ?: 1500,
-            avatarEnabled       = prefs[KEY_AVATAR] ?: true,
+            debugMode      = prefs[KEY_DEBUG_MODE] ?: false,
+            voiceSilenceMs = prefs[KEY_VOICE_SILENCE] ?: 1500,
+            avatarType     = prefs[KEY_AVATAR_TYPE]
+                ?.let { runCatching { AvatarType.valueOf(it) }.getOrNull() }
+                ?: if (prefs[KEY_AVATAR] == false) AvatarType.NONE else AvatarType.KARIKATUR,
         )
     }
 
@@ -95,7 +102,7 @@ class SettingsDataStore @Inject constructor(
             prefs[KEY_BG_ALPHA]      = settings.backgroundAlpha
             prefs[KEY_DEBUG_MODE]    = settings.debugMode
             prefs[KEY_VOICE_SILENCE] = settings.voiceSilenceMs
-            prefs[KEY_AVATAR]        = settings.avatarEnabled
+            prefs[KEY_AVATAR_TYPE]   = settings.avatarType.name
         }
     }
 }

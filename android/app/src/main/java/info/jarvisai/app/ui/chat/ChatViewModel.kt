@@ -16,7 +16,6 @@ import info.jarvisai.app.data.model.AvatarMouthState
 import info.jarvisai.app.data.model.ChatMessage
 import info.jarvisai.app.data.model.ConnectionState
 import info.jarvisai.app.data.model.MessageRole
-import info.jarvisai.app.data.model.SegmentType
 import info.jarvisai.app.service.TtsManager
 import info.jarvisai.app.data.prefs.DEFAULT_QUICK_ACTIONS
 import info.jarvisai.app.data.prefs.SettingsDataStore
@@ -52,8 +51,9 @@ class ChatViewModel @Inject constructor(
     val settings = settingsDataStore.settings
 
     // Avatar / TTS
-    val isSpeaking: StateFlow<Boolean> = ttsManager.isSpeaking
+    val isSpeaking: StateFlow<Boolean>       = ttsManager.isSpeaking
     val avatarMouthState: StateFlow<AvatarMouthState> = ttsManager.mouthState
+    val avatarType: StateFlow<info.jarvisai.app.data.model.AvatarType> get() = _avatarType
 
     private val _inputText = MutableStateFlow("")
     val inputText: StateFlow<String> = _inputText
@@ -80,8 +80,8 @@ class ChatViewModel @Inject constructor(
     private var speechRecognizer: SpeechRecognizer? = null
     private var autoSendVoice = false
     private var voiceSilenceMs = 1500
-    private var avatarEnabled = true   // Spiegelt settings.avatarEnabled live
-    private var lastSpokenMsgId = ""   // Verhindert doppeltes Sprechen derselben Nachricht
+    private val _avatarEnabled = MutableStateFlow(true)
+    private val _avatarType    = MutableStateFlow(info.jarvisai.app.data.model.AvatarType.KARIKATUR)
 
     init {
         // Alle Settings-Änderungen live übernehmen
@@ -90,23 +90,17 @@ class ChatViewModel @Inject constructor(
                 _quickActions.value = s.quickActions
                 autoSendVoice = s.autoSendVoice
                 voiceSilenceMs = s.voiceSilenceMs
-                avatarEnabled = s.avatarEnabled
+                _avatarEnabled.value = s.avatarEnabled
+                _avatarType.value    = s.avatarType
+                ttsManager.setVoiceProfile(s.avatarType)
+                if (!s.avatarEnabled) ttsManager.stop()
             }
         }
-        // Fertige Jarvis-Antworten vorlesen wenn Avatar aktiv
+        // TTS über SharedFlow – kein StateFlow-Conflate, jede Antwort wird genau einmal gelesen
         viewModelScope.launch {
-            repo.messages.collect { msgs ->
-                val last = msgs.lastOrNull() ?: return@collect
-                if (last.role != MessageRole.JARVIS) return@collect
-                if (last.isStreaming) return@collect
-                if (last.id == lastSpokenMsgId) return@collect
-                if (!avatarEnabled) return@collect
-                val answerText = last.segments
-                    .filter { it.type == SegmentType.ANSWER }
-                    .joinToString(" ") { it.text.trim() }
-                if (answerText.isBlank()) return@collect
-                lastSpokenMsgId = last.id
-                ttsManager.speak(answerText)
+            repo.speakText.collect { text ->
+                if (!_avatarEnabled.value) return@collect
+                ttsManager.speak(text)
             }
         }
         // Neu verbinden nur wenn URL oder Key sich ändert
@@ -121,9 +115,13 @@ class ChatViewModel @Inject constructor(
                     }
                 }
         }
-        // Update-Check beim Start
+        // Update-Check beim Start (Fehler ignorieren – kein Crash bei fehlender Netzverbindung)
         viewModelScope.launch {
-            _updateState.value = updateChecker.check()
+            try {
+                _updateState.value = updateChecker.check()
+            } catch (e: Exception) {
+                android.util.Log.w("ChatViewModel", "Update-Check fehlgeschlagen: ${e.message}")
+            }
         }
         // Notifications wenn Agent fertig
         viewModelScope.launch {

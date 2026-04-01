@@ -3,6 +3,7 @@ package info.jarvisai.app.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import info.jarvisai.app.data.model.AvatarType
 import info.jarvisai.app.data.prefs.JarvisSettings
 import info.jarvisai.app.data.prefs.SettingsDataStore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,8 +65,8 @@ class SettingsViewModel @Inject constructor(
         _settings.value = _settings.value.copy(voiceSilenceMs = ms)
     }
 
-    fun onAvatarEnabledChange(enabled: Boolean) {
-        _settings.value = _settings.value.copy(avatarEnabled = enabled)
+    fun onAvatarTypeChange(type: AvatarType) {
+        _settings.value = _settings.value.copy(avatarType = type)
     }
 
     fun save() {

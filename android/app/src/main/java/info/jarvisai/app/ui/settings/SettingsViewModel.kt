@@ -51,13 +51,18 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun loadServerVoices() {
+        // Bekannte Stimmen sofort anzeigen (kein Server nötig)
+        _serverVoices.value = KNOWN_EDGE_TTS_VOICES
+
+        // Dann Server-Abfrage für aktualisierte Liste
         val s = _settings.value
         if (s.serverUrl.isBlank() || s.apiKey.isBlank()) return
         viewModelScope.launch {
             _serverVoicesLoading.value = true
-            _serverVoices.value = try {
+            val fetched = try {
                 serverTtsPlayer.fetchVoices(s.serverUrl, s.apiKey)
             } catch (_: Exception) { emptyList() }
+            if (fetched.isNotEmpty()) _serverVoices.value = fetched
             _serverVoicesLoading.value = false
         }
     }
@@ -127,3 +132,21 @@ class SettingsViewModel @Inject constructor(
         _saved.value = false
     }
 }
+
+/** Bekannte deutsche edge-tts Stimmen – immer verfügbar ohne Server-Verbindung */
+private val KNOWN_EDGE_TTS_VOICES = listOf(
+    ServerVoice("de-DE-ConradNeural",              "Male",   "de-DE", "de-DE Conrad (männlich)"),
+    ServerVoice("de-DE-KillianNeural",             "Male",   "de-DE", "de-DE Killian (männlich)"),
+    ServerVoice("de-DE-BerndNeural",               "Male",   "de-DE", "de-DE Bernd (männlich)"),
+    ServerVoice("de-DE-ChristophNeural",           "Male",   "de-DE", "de-DE Christoph (männlich)"),
+    ServerVoice("de-DE-KasperNeural",              "Male",   "de-DE", "de-DE Kasper (männlich)"),
+    ServerVoice("de-DE-RalfNeural",                "Male",   "de-DE", "de-DE Ralf (männlich)"),
+    ServerVoice("de-DE-FlorianMultilingualNeural", "Male",   "de-DE", "de-DE Florian Multilingual (männlich)"),
+    ServerVoice("de-DE-KatjaNeural",               "Female", "de-DE", "de-DE Katja (weiblich)"),
+    ServerVoice("de-DE-AmalaNeural",               "Female", "de-DE", "de-DE Amala (weiblich)"),
+    ServerVoice("de-DE-MajaNeural",                "Female", "de-DE", "de-DE Maja (weiblich)"),
+    ServerVoice("de-DE-LouisaNeural",              "Female", "de-DE", "de-DE Louisa (weiblich)"),
+    ServerVoice("de-DE-SeraphinaMultilingualNeural","Female","de-DE", "de-DE Seraphina Multilingual (weiblich)"),
+    ServerVoice("de-AT-JonasNeural",               "Male",   "de-AT", "de-AT Jonas / Österreich (männlich)"),
+    ServerVoice("de-CH-JanNeural",                 "Male",   "de-CH", "de-CH Jan / Schweiz (männlich)"),
+)

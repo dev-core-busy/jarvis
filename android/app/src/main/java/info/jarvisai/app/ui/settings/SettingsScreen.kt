@@ -422,7 +422,7 @@ fun SettingsScreen(
                             ) {
                                 if (serverVoices.isEmpty()) {
                                     Text(
-                                        "Keine Stimmen geladen. Server erreichbar?",
+                                        "Keine Stimmen von ${settings.serverUrl.ifBlank { "(kein Server konfiguriert)" }} geladen.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )

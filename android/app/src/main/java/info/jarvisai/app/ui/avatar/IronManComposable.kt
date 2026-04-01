@@ -33,7 +33,7 @@ private const val EYE_Y   = 252f / 512f   // = 0.4922
 private const val EYE_W   = 66f  / 512f   // = 0.1289  (Breite je Auge)
 private const val EYE_H_R = 22f  / 66f    // = 0.333   (Schlitz-Verhältnis)
 private const val LEFT_X  = 149f / 512f   // = 0.2910
-private const val RIGHT_X = 310f / 512f   // = 0.6055
+private const val RIGHT_X = 290f / 512f   // = 0.5664
 
 @Composable
 fun IronManAvatar(

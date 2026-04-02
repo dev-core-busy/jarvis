@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -407,34 +408,37 @@ fun SettingsScreen(
 
             // ── Server-Stimmen Dialog ──────────────────────────────────────
             if (serverVoicePickerOpen) {
+                val previewingVoice by viewModel.previewingVoice.collectAsState()
                 AlertDialog(
                     onDismissRequest = { serverVoicePickerOpen = false },
                     title = { Text("Server-Stimme (edge-tts)") },
                     text = {
-                        if (serverVoicesLoading) {
-                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator()
+                        Column(modifier = Modifier.verticalScroll(rememberScrollState()),
+                               verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (serverVoicesLoading) {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                             }
-                        } else {
-                            Column(
-                                modifier = Modifier.verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                if (serverVoices.isEmpty()) {
-                                    Text(
-                                        "Keine Stimmen von ${settings.serverUrl.ifBlank { "(kein Server konfiguriert)" }} geladen.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                serverVoices.forEach { voice ->
-                                    val selected = settings.serverTtsVoice == voice.name
+                            if (serverVoices.isEmpty()) {
+                                Text(
+                                    "Keine Stimmen von ${settings.serverUrl.ifBlank { "(kein Server konfiguriert)" }} geladen.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            serverVoices.forEach { voice ->
+                                val selected   = settings.serverTtsVoice == voice.name
+                                val previewing = previewingVoice == voice.name
+                                val genderIcon = if (voice.gender.lowercase() == "male") "♂" else "♀"
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
                                     OutlinedButton(
                                         onClick = {
                                             viewModel.onServerTtsVoiceChange(voice.name)
                                             serverVoicePickerOpen = false
                                         },
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier.weight(1f),
                                         colors = ButtonDefaults.outlinedButtonColors(
                                             containerColor = if (selected) JarvisPurple.copy(alpha = 0.22f) else Color.Transparent,
                                             contentColor   = if (selected) JarvisPurple else Color.White,
@@ -445,8 +449,23 @@ fun SettingsScreen(
                                         ),
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                     ) {
-                                        val genderIcon = if (voice.gender.lowercase() == "male") "♂ " else "♀ "
-                                        Text(genderIcon + voice.name, fontSize = 12.sp, maxLines = 1)
+                                        Text("$genderIcon ${voice.name}", fontSize = 12.sp, maxLines = 1)
+                                    }
+                                    IconButton(onClick = { viewModel.previewVoice(voice.name) }) {
+                                        if (previewing) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                strokeWidth = 2.dp,
+                                                color = JarvisPurple,
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Filled.VolumeUp,
+                                                contentDescription = "Vorschau",
+                                                tint = Color.White.copy(alpha = 0.70f),
+                                                modifier = Modifier.size(20.dp),
+                                            )
+                                        }
                                     }
                                 }
                             }

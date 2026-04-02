@@ -1,5 +1,6 @@
 package info.jarvisai.app.ui.settings
 
+import android.media.MediaPlayer
 import android.speech.tts.Voice
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -40,6 +41,12 @@ class SettingsViewModel @Inject constructor(
     private val _serverVoicesLoading = MutableStateFlow(false)
     val serverVoicesLoading: StateFlow<Boolean> = _serverVoicesLoading
 
+    /** Name der aktuell abgespielten Vorschau-Stimme (leer = keine) */
+    private val _previewingVoice = MutableStateFlow("")
+    val previewingVoice: StateFlow<String> = _previewingVoice
+
+    private var previewPlayer: MediaPlayer? = null
+
     init {
         viewModelScope.launch {
             _settings.value = store.settings.first()
@@ -65,6 +72,49 @@ class SettingsViewModel @Inject constructor(
             if (fetched.isNotEmpty()) _serverVoices.value = fetched
             _serverVoicesLoading.value = false
         }
+    }
+
+    fun previewVoice(voiceName: String) {
+        val s = _settings.value
+        if (s.serverUrl.isBlank() || s.apiKey.isBlank()) return
+        // Läuft gerade dieselbe Stimme → stoppen
+        if (_previewingVoice.value == voiceName) {
+            stopPreview()
+            return
+        }
+        stopPreview()
+        _previewingVoice.value = voiceName
+        viewModelScope.launch {
+            try {
+                val file = serverTtsPlayer.fetchAudio(
+                    s.serverUrl, s.apiKey,
+                    text = "Hallo, ich bin Jarvis, dein persönlicher Assistent.",
+                    voice = voiceName,
+                )
+                previewPlayer = MediaPlayer().apply {
+                    setDataSource(file.absolutePath)
+                    prepare()
+                    setOnCompletionListener {
+                        _previewingVoice.value = ""
+                        file.delete()
+                    }
+                    start()
+                }
+            } catch (_: Exception) {
+                _previewingVoice.value = ""
+            }
+        }
+    }
+
+    private fun stopPreview() {
+        previewPlayer?.runCatching { stop(); release() }
+        previewPlayer = null
+        _previewingVoice.value = ""
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopPreview()
     }
 
     fun onServerTtsEnabledChange(enabled: Boolean) {

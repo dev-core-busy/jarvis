@@ -72,9 +72,11 @@ class SettingsViewModel @Inject constructor(
 
         // Dann Server-Abfrage für aktualisierte Liste
         viewModelScope.launch {
-            // Sicherstellen dass Settings geladen sind
-            val s = store.settings.first()
-            _settings.value = s
+            // Aktuelle Settings lesen – OHNE _settings.value zu überschreiben!
+            val s = _settings.value.let {
+                // Falls noch leer (Initialisierung läuft noch), aus Store laden
+                if (it.serverUrl.isBlank() && it.apiKey.isBlank()) store.settings.first() else it
+            }
             if (s.serverUrl.isBlank() || s.apiKey.isBlank()) {
                 Log.d(TAG, "loadServerVoices: serverUrl/apiKey fehlt, nur Known-Voices")
                 return@launch
@@ -101,9 +103,10 @@ class SettingsViewModel @Inject constructor(
         _previewingVoice.value = voiceName
         viewModelScope.launch {
             try {
-                // Settings frisch laden (sicher falls init-Coroutine noch nicht fertig war)
-                val s = store.settings.first()
-                _settings.value = s
+                // Settings lesen – OHNE _settings.value zu überschreiben (würde Auswahl löschen!)
+                val s = _settings.value.let {
+                    if (it.serverUrl.isBlank() && it.apiKey.isBlank()) store.settings.first() else it
+                }
                 Log.d(TAG, "previewVoice: voice=$voiceName serverUrl='${s.serverUrl}' apiKey=${if (s.apiKey.isBlank()) "LEER" else "gesetzt"}")
 
                 if (s.serverUrl.isBlank()) {

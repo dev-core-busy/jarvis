@@ -436,6 +436,7 @@ fun SettingsScreen(
                                     OutlinedButton(
                                         onClick = {
                                             viewModel.onServerTtsVoiceChange(voice.name)
+                                            viewModel.save()   // sofort persistieren
                                             serverVoicePickerOpen = false
                                         },
                                         modifier = Modifier.weight(1f),

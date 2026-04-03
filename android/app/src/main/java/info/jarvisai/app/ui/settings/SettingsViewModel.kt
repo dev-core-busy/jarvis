@@ -2,6 +2,7 @@ package info.jarvisai.app.ui.settings
 
 import android.media.MediaPlayer
 import android.speech.tts.Voice
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -16,6 +17,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+private const val TAG = "SettingsVM"
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -62,21 +65,27 @@ class SettingsViewModel @Inject constructor(
         _serverVoices.value = KNOWN_EDGE_TTS_VOICES
 
         // Dann Server-Abfrage für aktualisierte Liste
-        val s = _settings.value
-        if (s.serverUrl.isBlank() || s.apiKey.isBlank()) return
         viewModelScope.launch {
+            // Sicherstellen dass Settings geladen sind
+            val s = store.settings.first()
+            _settings.value = s
+            if (s.serverUrl.isBlank() || s.apiKey.isBlank()) {
+                Log.d(TAG, "loadServerVoices: serverUrl/apiKey fehlt, nur Known-Voices")
+                return@launch
+            }
             _serverVoicesLoading.value = true
             val fetched = try {
                 serverTtsPlayer.fetchVoices(s.serverUrl, s.apiKey)
-            } catch (_: Exception) { emptyList() }
+            } catch (e: Exception) {
+                Log.w(TAG, "fetchVoices Fehler: ${e.message}")
+                emptyList()
+            }
             if (fetched.isNotEmpty()) _serverVoices.value = fetched
             _serverVoicesLoading.value = false
         }
     }
 
     fun previewVoice(voiceName: String) {
-        val s = _settings.value
-        if (s.serverUrl.isBlank() || s.apiKey.isBlank()) return
         // Läuft gerade dieselbe Stimme → stoppen
         if (_previewingVoice.value == voiceName) {
             stopPreview()
@@ -86,21 +95,35 @@ class SettingsViewModel @Inject constructor(
         _previewingVoice.value = voiceName
         viewModelScope.launch {
             try {
+                // Settings frisch laden (sicher falls init-Coroutine noch nicht fertig war)
+                val s = store.settings.first()
+                _settings.value = s
+                Log.d(TAG, "previewVoice: voice=$voiceName serverUrl='${s.serverUrl}' apiKey=${if (s.apiKey.isBlank()) "LEER" else "gesetzt (${s.apiKey.length} Zeichen)"}")
+                if (s.serverUrl.isBlank() || s.apiKey.isBlank()) {
+                    Log.w(TAG, "previewVoice: serverUrl oder apiKey fehlt → abgebrochen")
+                    _previewingVoice.value = ""
+                    return@launch
+                }
+                Log.d(TAG, "fetchAudio: starte für $voiceName …")
                 val file = serverTtsPlayer.fetchAudio(
                     s.serverUrl, s.apiKey,
                     text = "Hallo, ich bin Jarvis, dein persönlicher Assistent.",
                     voice = voiceName,
                 )
+                Log.d(TAG, "fetchAudio: erhalten ${file.length()} B → ${file.absolutePath}")
                 previewPlayer = MediaPlayer().apply {
                     setDataSource(file.absolutePath)
                     prepare()
                     setOnCompletionListener {
+                        Log.d(TAG, "Vorschau beendet für $voiceName")
                         _previewingVoice.value = ""
                         file.delete()
                     }
                     start()
+                    Log.d(TAG, "MediaPlayer.start() aufgerufen")
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.e(TAG, "previewVoice FEHLER: ${e.javaClass.simpleName}: ${e.message}", e)
                 _previewingVoice.value = ""
             }
         }

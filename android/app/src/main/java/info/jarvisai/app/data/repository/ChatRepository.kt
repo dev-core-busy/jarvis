@@ -172,11 +172,11 @@ class ChatRepository @Inject constructor(
         // Async-Coroutine würde bei Prozess-Kill (Wischen in Recents) nie ausgeführt.
         writeMessagesToDisk()
 
-        // Fallback: falls server kein agent_event:finished schickt, nach 5s auto-finalize
-        // Jeder neue Chunk setzt den Timer zurück – TTS feuert 5s nach letztem Segment.
+        // Fallback: falls server kein agent_event:finished schickt, nach 1.5s auto-finalize
+        // Jeder neue Chunk setzt den Timer zurück – TTS feuert 1.5s nach letztem Segment.
         finalizeTimeoutJob?.cancel()
         finalizeTimeoutJob = scope.launch {
-            delay(5_000)
+            delay(1_500)
             if (streamingMsgId != null) {
                 Log.d("ChatRepository", "finalizeStream via 5s-Timeout-Fallback")
                 finalizeStream()

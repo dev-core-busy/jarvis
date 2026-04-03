@@ -26,7 +26,9 @@ import info.jarvisai.app.service.JarvisNotificationService
 import info.jarvisai.app.update.DownloadPhase
 import info.jarvisai.app.update.UpdateChecker
 import info.jarvisai.app.update.UpdateState
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +36,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 enum class VoiceState { IDLE, LISTENING, ERROR }
@@ -92,6 +95,10 @@ class ChatViewModel @Inject constructor(
     private var apiKey           = ""
     private var mediaPlayer: MediaPlayer? = null
 
+    // Prefetch: Audio-Download startet während LLM noch streamt
+    private var prefetchJob: Deferred<File>? = null
+    private var prefetchText: String = ""
+
     init {
         // Alle Settings-Änderungen live übernehmen
         viewModelScope.launch {
@@ -146,6 +153,30 @@ class ChatViewModel @Inject constructor(
                 android.util.Log.w("ChatViewModel", "Update-Check fehlgeschlagen: ${e.message}")
             }
         }
+        // Prefetch: Audio-Download starten während LLM noch streamt (reduziert Verzögerung)
+        viewModelScope.launch {
+            repo.messages
+                .map { msgs -> msgs.lastOrNull()?.takeIf { it.isStreaming && it.role == MessageRole.JARVIS } }
+                .distinctUntilChanged { old, new -> old?.text == new?.text }
+                .collect { streamingMsg ->
+                    if (streamingMsg == null || !serverTtsEnabled || serverUrl.isBlank() || apiKey.isBlank()) return@collect
+                    val answerText = streamingMsg.segments
+                        .filter { it.type == info.jarvisai.app.data.model.SegmentType.ANSWER }
+                        .joinToString(" ") { it.text.trim() }
+                        .trim()
+                        .ifBlank { streamingMsg.text.trim() }
+                    // Erst ab 40 Zeichen prefetchen – zu kurze Texte lohnen sich nicht
+                    if (answerText.length < 40) return@collect
+                    // Nur neuen Fetch starten wenn Text sich wesentlich geändert hat
+                    if (answerText == prefetchText) return@collect
+                    prefetchJob?.cancel()
+                    prefetchText = answerText
+                    prefetchJob = viewModelScope.async(Dispatchers.IO) {
+                        serverTtsPlayer.fetchAudio(serverUrl, apiKey, answerText, serverTtsVoice)
+                    }
+                }
+        }
+
         // Notifications wenn Agent fertig
         viewModelScope.launch {
             repo.messages.collect { msgs ->
@@ -311,7 +342,18 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 ttsManager.startMouthAnimationPublic()
-                val file = serverTtsPlayer.fetchAudio(serverUrl, apiKey, text, serverTtsVoice)
+                // Prefetch nutzen wenn vorhanden und Text stimmt überein
+                val job = prefetchJob
+                val file = if (job != null && !job.isCancelled && prefetchText == text) {
+                    android.util.Log.d("ChatViewModel", "TTS: nutze Prefetch-Audio")
+                    job.await()
+                } else {
+                    android.util.Log.d("ChatViewModel", "TTS: kein Prefetch verfügbar, fetche neu")
+                    prefetchJob?.cancel()
+                    serverTtsPlayer.fetchAudio(serverUrl, apiKey, text, serverTtsVoice)
+                }
+                prefetchJob = null
+                prefetchText = ""
                 stopMediaPlayer()
                 mediaPlayer = MediaPlayer().apply {
                     setDataSource(file.absolutePath)
@@ -325,6 +367,8 @@ class ChatViewModel @Inject constructor(
             } catch (e: Exception) {
                 android.util.Log.w("ChatViewModel", "Server-TTS fehlgeschlagen, Fallback auf Android-TTS: $e")
                 ttsManager.stopMouthAnimationPublic()
+                prefetchJob = null
+                prefetchText = ""
                 ttsManager.speak(text)
             }
         }

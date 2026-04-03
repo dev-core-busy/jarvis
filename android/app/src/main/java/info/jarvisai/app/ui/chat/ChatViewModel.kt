@@ -33,7 +33,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.io.File
@@ -153,22 +155,27 @@ class ChatViewModel @Inject constructor(
                 android.util.Log.w("ChatViewModel", "Update-Check fehlgeschlagen: ${e.message}")
             }
         }
-        // Prefetch: Audio-Download starten während LLM noch streamt (reduziert Verzögerung)
+        // Prefetch: Audio-Download starten wenn LLM 400ms nichts mehr schickt
+        // → Fetch läuft 400ms vor Finalisierung an, hat ~1100ms Vorsprung auf den 1500ms-Timeout
         viewModelScope.launch {
             repo.messages
-                .map { msgs -> msgs.lastOrNull()?.takeIf { it.isStreaming && it.role == MessageRole.JARVIS } }
-                .distinctUntilChanged { old, new -> old?.text == new?.text }
-                .collect { streamingMsg ->
-                    if (streamingMsg == null || !serverTtsEnabled || serverUrl.isBlank() || apiKey.isBlank()) return@collect
-                    val answerText = streamingMsg.segments
+                .map { msgs ->
+                    val msg = msgs.lastOrNull()?.takeIf { it.isStreaming && it.role == MessageRole.JARVIS }
+                        ?: return@map null
+                    msg.segments
                         .filter { it.type == info.jarvisai.app.data.model.SegmentType.ANSWER }
                         .joinToString(" ") { it.text.trim() }
                         .trim()
-                        .ifBlank { streamingMsg.text.trim() }
-                    // Erst ab 40 Zeichen prefetchen – zu kurze Texte lohnen sich nicht
-                    if (answerText.length < 40) return@collect
-                    // Nur neuen Fetch starten wenn Text sich wesentlich geändert hat
-                    if (answerText == prefetchText) return@collect
+                        .ifBlank { msg.text.trim() }
+                        .takeIf { it.length >= 30 }
+                }
+                .filterNotNull()
+                .distinctUntilChanged()
+                .debounce(400)               // erst nach 400ms Stille starten
+                .collect { answerText ->
+                    if (!serverTtsEnabled || serverUrl.isBlank() || apiKey.isBlank()) return@collect
+                    if (answerText == prefetchText && prefetchJob?.isActive == true) return@collect
+                    android.util.Log.d("ChatViewModel", "TTS-Prefetch startet (${answerText.length} Zeichen)")
                     prefetchJob?.cancel()
                     prefetchText = answerText
                     prefetchJob = viewModelScope.async(Dispatchers.IO) {
@@ -342,13 +349,16 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 ttsManager.startMouthAnimationPublic()
-                // Prefetch nutzen wenn vorhanden und Text stimmt überein
+                // Prefetch nutzen wenn Text übereinstimmt ODER Prefetch-Text Anfang des finalen Texts ist
+                // (LLM kann nach Prefetch-Start noch wenige Wörter hinzugefügt haben)
                 val job = prefetchJob
-                val file = if (job != null && !job.isCancelled && prefetchText == text) {
-                    android.util.Log.d("ChatViewModel", "TTS: nutze Prefetch-Audio")
-                    job.await()
+                val prefetchUsable = job != null && !job.isCancelled &&
+                    (prefetchText == text || text.startsWith(prefetchText) && (text.length - prefetchText.length) < 80)
+                val file = if (prefetchUsable) {
+                    android.util.Log.d("ChatViewModel", "TTS: Prefetch genutzt (${prefetchText.length}→${text.length} Zeichen)")
+                    job!!.await()
                 } else {
-                    android.util.Log.d("ChatViewModel", "TTS: kein Prefetch verfügbar, fetche neu")
+                    android.util.Log.d("ChatViewModel", "TTS: Prefetch nicht nutzbar, fetche neu")
                     prefetchJob?.cancel()
                     serverTtsPlayer.fetchAudio(serverUrl, apiKey, text, serverTtsVoice)
                 }

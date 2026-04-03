@@ -1,27 +1,33 @@
 package info.jarvisai.app.ui.settings
 
+import android.content.Context
 import android.media.MediaPlayer
 import android.speech.tts.Voice
 import android.util.Log
+import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import info.jarvisai.app.data.model.AvatarType
 import info.jarvisai.app.data.prefs.JarvisSettings
 import info.jarvisai.app.data.prefs.SettingsDataStore
 import info.jarvisai.app.service.ServerTtsPlayer
 import info.jarvisai.app.service.ServerVoice
 import info.jarvisai.app.service.TtsManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 private const val TAG = "SettingsVM"
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val store: SettingsDataStore,
     private val ttsManager: TtsManager,
     private val serverTtsPlayer: ServerTtsPlayer,
@@ -98,34 +104,54 @@ class SettingsViewModel @Inject constructor(
                 // Settings frisch laden (sicher falls init-Coroutine noch nicht fertig war)
                 val s = store.settings.first()
                 _settings.value = s
-                Log.d(TAG, "previewVoice: voice=$voiceName serverUrl='${s.serverUrl}' apiKey=${if (s.apiKey.isBlank()) "LEER" else "gesetzt (${s.apiKey.length} Zeichen)"}")
-                if (s.serverUrl.isBlank() || s.apiKey.isBlank()) {
-                    Log.w(TAG, "previewVoice: serverUrl oder apiKey fehlt → abgebrochen")
+                Log.d(TAG, "previewVoice: voice=$voiceName serverUrl='${s.serverUrl}' apiKey=${if (s.apiKey.isBlank()) "LEER" else "gesetzt"}")
+
+                if (s.serverUrl.isBlank()) {
+                    toast("⚠ Kein Server konfiguriert")
                     _previewingVoice.value = ""
                     return@launch
                 }
-                Log.d(TAG, "fetchAudio: starte für $voiceName …")
+                if (s.apiKey.isBlank()) {
+                    toast("⚠ Kein API-Key konfiguriert")
+                    _previewingVoice.value = ""
+                    return@launch
+                }
+
+                Log.d(TAG, "fetchAudio: starte …")
                 val file = serverTtsPlayer.fetchAudio(
                     s.serverUrl, s.apiKey,
                     text = "Hallo, ich bin Jarvis, dein persönlicher Assistent.",
                     voice = voiceName,
                 )
-                Log.d(TAG, "fetchAudio: erhalten ${file.length()} B → ${file.absolutePath}")
+                Log.d(TAG, "fetchAudio: ${file.length()} B")
+
+                if (file.length() == 0L) {
+                    toast("⚠ Server lieferte leere Audiodatei")
+                    _previewingVoice.value = ""
+                    return@launch
+                }
+
                 previewPlayer = MediaPlayer().apply {
                     setDataSource(file.absolutePath)
                     prepare()
                     setOnCompletionListener {
-                        Log.d(TAG, "Vorschau beendet für $voiceName")
                         _previewingVoice.value = ""
                         file.delete()
                     }
                     start()
-                    Log.d(TAG, "MediaPlayer.start() aufgerufen")
+                    Log.d(TAG, "MediaPlayer gestartet")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "previewVoice FEHLER: ${e.javaClass.simpleName}: ${e.message}", e)
+                Log.e(TAG, "previewVoice FEHLER: ${e.message}", e)
+                toast("⚠ Fehler: ${e.message?.take(80)}")
                 _previewingVoice.value = ""
             }
+        }
+    }
+
+    private fun toast(msg: String) {
+        viewModelScope.launch(Dispatchers.Main) {
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
         }
     }
 

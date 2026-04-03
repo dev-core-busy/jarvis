@@ -15,7 +15,13 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Serializable
-data class VersionInfo(val versionCode: Int, val versionName: String)
+data class VersionInfo(
+    val version: Int = 0,       // Kurzform in version.json
+    val versionCode: Int = 0,   // Langform (Fallback)
+    val notes: String = "",
+) {
+    val effectiveCode: Int get() = if (versionCode > 0) versionCode else version
+}
 
 enum class DownloadPhase { IDLE, DOWNLOADING, READY, ERROR }
 
@@ -41,8 +47,8 @@ class UpdateChecker @Inject constructor(
             val req = Request.Builder().url(versionUrl).build()
             val body = okHttpClient.newCall(req).execute().use { it.body?.string() ?: return@withContext UpdateState() }
             val info = json.decodeFromString<VersionInfo>(body)
-            if (info.versionCode > BuildConfig.VERSION_CODE) {
-                UpdateState(available = true, versionName = info.versionName, versionCode = info.versionCode)
+            if (info.effectiveCode > BuildConfig.VERSION_CODE) {
+                UpdateState(available = true, versionName = info.notes.ifBlank { "v${info.effectiveCode}" }, versionCode = info.effectiveCode)
             } else {
                 UpdateState()
             }

@@ -2054,8 +2054,9 @@ async def vision_greet_audio(name: str, request: Request):
 @app.post("/api/tts")
 async def tts_synthesize(request: Request):
     """Text-to-Speech via edge-tts. Gibt MP3-Audio zurück."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
+    # Akzeptiert Session-Token ODER AGENT_API_KEY (Bearer oder X-API-Key)
+    if not (verify_token(request.headers.get("Authorization", "").replace("Bearer ", ""))
+            or _verify_agent_api_key(request)):
         return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
 
     body = await request.json()
@@ -2089,8 +2090,8 @@ async def tts_synthesize(request: Request):
 @app.get("/api/tts/voices")
 async def tts_voices(request: Request):
     """Verfügbare edge-tts Stimmen (gefiltert nach Sprache, Standard: de-)."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
+    if not (verify_token(request.headers.get("Authorization", "").replace("Bearer ", ""))
+            or _verify_agent_api_key(request)):
         return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
 
     locale = request.query_params.get("locale", "de-")

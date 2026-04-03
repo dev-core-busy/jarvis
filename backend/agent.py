@@ -93,7 +93,7 @@ class JarvisAgent:
     SYSTEM_PROMPT = """Du bist Jarvis, ein autonomer KI-Agent auf einem Linux-System (Debian 13, X11).
 Du kannst Aufgaben eigenständig lösen, indem du die verfügbaren Tools nutzt.
 
-AKTUELLES DATUM: {current_date}
+AKTUELLES DATUM & UHRZEIT: {current_date}
 
 WICHTIG – AUTONOMIE: Du handelst IMMER eigenstaendig und fuehrst Aufgaben SOFORT aus, OHNE den Benutzer um Erlaubnis zu fragen. Wenn der Benutzer sagt "fuehre X aus", dann fuehre es DIREKT aus. Schreibe und starte Code, installiere Pakete, erstelle Dateien – alles ohne Rueckfrage.
 
@@ -116,7 +116,7 @@ Regeln:
     SUB_AGENT_PROMPT = """Du bist ein Jarvis Sub-Agent auf einem Linux-System (Debian 13, X11).
 Du fuehrst eine spezifische Teilaufgabe VOLLSTAENDIG AUTONOM aus.
 
-AKTUELLES DATUM: {current_date}
+AKTUELLES DATUM & UHRZEIT: {current_date}
 
 KRITISCH – Autonomie-Regeln:
 - Handle SOFORT und OHNE Rueckfragen. Frage NIEMALS den Benutzer um Erlaubnis.
@@ -239,7 +239,7 @@ KRITISCH – Autonomie-Regeln:
         # Memory-Kontext laden und in System-Prompt injizieren
         memory_context = load_memory_context()
         from datetime import datetime
-        current_date = datetime.now().strftime("%A, %d. %B %Y")  # z.B. "Donnerstag, 03. April 2026"
+        current_date = datetime.now().strftime("%A, %d. %B %Y, %H:%M Uhr")  # z.B. "Donnerstag, 03. April 2026, 21:26 Uhr"
         system_prompt = (self.SUB_AGENT_PROMPT if self.is_sub_agent else self.SYSTEM_PROMPT).format(
             current_date=current_date
         )

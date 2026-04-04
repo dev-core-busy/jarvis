@@ -728,12 +728,11 @@ func PlayTestVoice(voiceID string) {
 	}
 	text := "Hallo, ich bin Jarvis."
 	voicePart := ""
-	if voiceID != "" && !strings.HasPrefix(voiceID, "sapi:") {
-		safe := strings.ReplaceAll(voiceID, "'", "")
-		voicePart = `$v.SelectVoice('` + safe + `'); `
-	} else if strings.HasPrefix(voiceID, "sapi:") {
+	if strings.HasPrefix(voiceID, "sapi:") {
 		safe := strings.ReplaceAll(voiceID[5:], "'", "")
-		voicePart = `$v.SelectVoice('` + safe + `'); `
+		if safe != "" {
+			voicePart = `try { $v.SelectVoice('` + safe + `') } catch {}; `
+		}
 	}
 	script := `Add-Type -AssemblyName System.Speech -EA SilentlyContinue; ` +
 		`$v=New-Object System.Speech.Synthesis.SpeechSynthesizer; $v.Rate=1; ` +
@@ -786,14 +785,15 @@ func SpeakText(text string) {
 	escaped = strings.ReplaceAll(escaped, "\n", " ")
 	escaped = strings.Join(strings.Fields(escaped), " ")
 
+	// Nur SAPI-Stimmen (sapi: Präfix) für SelectVoice verwenden.
+	// Backend-Voice-IDs (de-DE-KatjaNeural) funktionieren nicht mit SAPI.
 	voicePart := ""
-	v := currentTTSVoice
-	if strings.HasPrefix(v, "sapi:") {
-		v = v[5:]
-	}
-	if v != "" && !isBackendVoice(v) {
-		safe := strings.ReplaceAll(v, "'", "")
-		voicePart = `$v.SelectVoice('` + safe + `'); `
+	if strings.HasPrefix(currentTTSVoice, "sapi:") {
+		safe := strings.ReplaceAll(currentTTSVoice[5:], "'", "")
+		if safe != "" {
+			// Try-Catch: SelectVoice schlägt fehl wenn Stimme nicht installiert
+			voicePart = `try { $v.SelectVoice('` + safe + `') } catch {}; `
+		}
 	}
 	script := `Add-Type -AssemblyName System.Speech -ErrorAction SilentlyContinue; ` +
 		`$v = New-Object System.Speech.Synthesis.SpeechSynthesizer; ` +

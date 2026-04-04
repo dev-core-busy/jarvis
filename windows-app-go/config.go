@@ -59,6 +59,10 @@ func LoadConfig() *Config {
 		return &cfg
 	}
 	_ = json.Unmarshal(data, &cfg)
+	// Migration: alter VAD-Schwellwert 400 war zu hoch → auf 50 setzen
+	if cfg.VADThreshold == 0 || cfg.VADThreshold >= 400 {
+		cfg.VADThreshold = 50
+	}
 	return &cfg
 }
 

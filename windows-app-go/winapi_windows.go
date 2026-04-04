@@ -30,6 +30,9 @@ var (
 	winmm    = syscall.MustLoadDLL("winmm.dll")
 
 	pMciSendStringW = winmm.MustFindProc("mciSendStringW")
+	pCreateMutexW   = kernel32.MustFindProc("CreateMutexW")
+	pGetLastError   = kernel32.MustFindProc("GetLastError")
+
 	// Fenster-Hilfsfunktionen (Frameless-Avatar)
 	pFindWindowW                = user32.MustFindProc("FindWindowW")
 	pGetWindowLongPtrW          = user32.MustFindProc("GetWindowLongPtrW")
@@ -868,4 +871,14 @@ func MoveAvatarWindow(dx, dy float64) {
 		uintptr(avatarCachedX), uintptr(avatarCachedY), 0, 0,
 		swpNosize|swpNozorder|swpNoActivate,
 	)
+}
+
+// EnsureSingleInstance prüft via benanntem Mutex ob eine Instanz bereits läuft.
+// Gibt false zurück wenn eine zweite Instanz erkannt wird – die App soll dann beenden.
+func EnsureSingleInstance() bool {
+	const errorAlreadyExists = uintptr(183)
+	namePtr, _ := syscall.UTF16PtrFromString("Local\\JarvisAppMutex")
+	pCreateMutexW.Call(0, 1, uintptr(unsafe.Pointer(namePtr)))
+	lastErr, _, _ := pGetLastError.Call()
+	return lastErr != errorAlreadyExists
 }

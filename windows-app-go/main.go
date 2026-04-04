@@ -64,6 +64,10 @@ func urlToHost(url string) string {
 // ── Einstiegspunkt ────────────────────────────────────────────────────────────
 
 func main() {
+	if !EnsureSingleInstance() {
+		return // Bereits eine Instanz aktiv – still beenden
+	}
+
 	a := app.NewWithID("com.jarvis.app")
 	a.Settings().SetTheme(JarvisTheme{})
 

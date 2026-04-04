@@ -9,23 +9,39 @@ import (
 type Config struct {
 	ServerURL   string `json:"server_url"`
 	APIKey      string `json:"api_key"`
-	DialogMode  bool   `json:"dialog_mode"`  // true = Mikrofon+Audio, false = Text
+	DialogMode  bool   `json:"dialog_mode"`
 	WindowW     int    `json:"window_w"`
 	WindowH     int    `json:"window_h"`
 	SpeakerID   string `json:"speaker_id"`
 	MicID       string `json:"mic_id"`
 	SpeakerName string `json:"speaker_name"`
 	MicName     string `json:"mic_name"`
+	// Avatar-Fenster Position (beim Beenden gespeichert)
+	AvatarX int `json:"avatar_x"`
+	AvatarY int `json:"avatar_y"`
+	// Wake-Word Einstellungen
+	WakeWordEnabled bool   `json:"wakeword_enabled"`
+	WakeWord        string `json:"wakeword"`
+	SilenceMs       int    `json:"silence_ms"`
+	MinSpeechMs     int    `json:"min_speech_ms"`
+	VADThreshold    int    `json:"vad_threshold"`
+	// TTS-Stimme (Windows SAPI Stimmenname, "" = Standard)
+	TTSVoice string `json:"tts_voice"`
 }
 
 var defaultConfig = Config{
-	ServerURL:  "wss://191.100.144.1/ws",
-	APIKey:     "",
-	DialogMode: true, // Standard: Dialogmodus
-	WindowW:    420,
-	WindowH:    650,
-	SpeakerID:  "",
-	MicID:      "",
+	ServerURL:       "wss://191.100.144.1/ws",
+	APIKey:          "",
+	DialogMode:      true,
+	WindowW:         420,
+	WindowH:         650,
+	SpeakerID:       "",
+	MicID:           "",
+	WakeWordEnabled: false,
+	WakeWord:        "hallo jarvis",
+	SilenceMs:       900,
+	MinSpeechMs:     200,
+	VADThreshold:    150,
 }
 
 func configPath() string {

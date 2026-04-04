@@ -7,7 +7,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/driver/desktop"
 )
 
 // ── Zentrale App-Struktur ─────────────────────────────────────────────────────
@@ -25,11 +24,13 @@ type JarvisApp struct {
 	chatWin   fyne.Window
 	chatMu    sync.Mutex
 
-	// Tray-Menü-Items (für dynamische Updates)
-	modeItem    *fyne.MenuItem
-	trayMenu    *fyne.Menu
-
 	connected bool
+	debugMode bool // Zeigt alle Backend-Status-Nachrichten (nicht nur highlight)
+
+	ttsBuf strings.Builder // Sammelt LLM-Text für TTS-Ausgabe
+
+	textDictating bool             // Diktat läuft im Text-Modus
+	textDictCtrl  *DialogController // Diktat-Controller (One-Shot)
 }
 
 // ── URL-Hilfsfunktionen ───────────────────────────────────────────────────────
@@ -63,10 +64,14 @@ func urlToHost(url string) string {
 // ── Einstiegspunkt ────────────────────────────────────────────────────────────
 
 func main() {
-	a := app.New()
+	a := app.NewWithID("com.jarvis.app")
 	a.Settings().SetTheme(JarvisTheme{})
 
 	cfg := LoadConfig()
+
+	// Gespeicherte TTS-Stimme aktivieren
+	SetTTSVoice(cfg.TTSVoice)
+	SetTTSServer(cfg.ServerURL, cfg.APIKey)
 
 	ja := &JarvisApp{
 		fyneApp: a,
@@ -89,8 +94,31 @@ func main() {
 	ja.chat = NewChatWidget()
 	ja.chat.SetInputEnabled(false)
 
-	// System-Tray einrichten
-	ja.setupTray()
+	// Natives Win32 System-Tray starten (kein externes Paket)
+	StartNativeSysTray(
+		func() { // Modus umschalten
+			if ja.cfg.DialogMode {
+				ja.switchToTextMode()
+			} else {
+				ja.switchToDialogMode()
+			}
+		},
+		func() { // Einstellungen
+			showSettingsWindow(ja.fyneApp, ja, func() { ja.reconnect() })
+		},
+		func() { // Debug umschalten
+			ja.toggleDebug()
+			// Chat-Fenster öffnen damit Debug-Meldungen sichtbar sind
+			if !ja.cfg.DialogMode {
+				ja.openChatWindow()
+			}
+		},
+		func() { // Beenden
+			ja.shutdown()
+		},
+		func() bool { return ja.cfg.DialogMode },
+		func() bool { return ja.debugMode },
+	)
 
 	// Beim ersten Start sofort Einstellungen zeigen
 	if cfg.IsFirstStart() {
@@ -106,61 +134,19 @@ func main() {
 	a.Run()
 }
 
-// ── System-Tray ───────────────────────────────────────────────────────────────
+// refreshTray – kein Update nötig: Menü liest cfg.DialogMode beim Öffnen live.
+func (ja *JarvisApp) refreshTray() {}
 
-func (ja *JarvisApp) setupTray() {
-	desk, ok := ja.fyneApp.(desktop.App)
-	if !ok {
-		log.Println("[tray] System-Tray nicht verfügbar auf dieser Plattform")
-		return
+// toggleDebug schaltet den Debug-Modus um.
+func (ja *JarvisApp) toggleDebug() {
+	ja.debugMode = !ja.debugMode
+	if ja.debugMode {
+		ja.chat.AddMessage(RoleStatus, "🔍 Debug-Modus AN – alle Agent-Nachrichten sichtbar")
+		ja.chat.AddMessage(RoleStatus,
+			"Avatar-Farben: 🟡 Gold = Bereit  🟢 Grün = Hört  🔵 Cyan = Spricht")
+	} else {
+		ja.chat.AddMessage(RoleStatus, "🔍 Debug-Modus AUS")
 	}
-
-	// Tray-Icon
-	icon := newTrayIcon(false, ja.cfg.DialogMode)
-	desk.SetSystemTrayIcon(icon)
-
-	// Modus-Item (Toggle)
-	ja.modeItem = ja.buildModeItem()
-
-	// Menü
-	ja.trayMenu = fyne.NewMenu("Jarvis",
-		ja.modeItem,
-		fyne.NewMenuItem("Einstellungen", func() {
-			showSettingsWindow(ja.fyneApp, ja, func() {
-				ja.reconnect()
-			})
-		}),
-		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem("Beenden", func() {
-			ja.shutdown()
-		}),
-	)
-	desk.SetSystemTrayMenu(ja.trayMenu)
-}
-
-func (ja *JarvisApp) buildModeItem() *fyne.MenuItem {
-	if ja.cfg.DialogMode {
-		return fyne.NewMenuItem("🎤 Dialogmodus  →  zu Textmodus wechseln", func() {
-			ja.switchToTextMode()
-		})
-	}
-	return fyne.NewMenuItem("⌨  Textmodus  →  zu Dialogmodus wechseln", func() {
-		ja.switchToDialogMode()
-	})
-}
-
-func (ja *JarvisApp) refreshTray() {
-	if desk, ok := ja.fyneApp.(desktop.App); ok {
-		icon := newTrayIcon(ja.connected, ja.cfg.DialogMode)
-		desk.SetSystemTrayIcon(icon)
-	}
-	if ja.trayMenu == nil {
-		return
-	}
-	newItem := ja.buildModeItem()
-	ja.modeItem.Label = newItem.Label
-	ja.modeItem.Action = newItem.Action
-	ja.trayMenu.Refresh()
 }
 
 // ── Modus-Wechsel ─────────────────────────────────────────────────────────────
@@ -168,15 +154,13 @@ func (ja *JarvisApp) refreshTray() {
 func (ja *JarvisApp) switchToDialogMode() {
 	ja.cfg.DialogMode = true
 	_ = ja.cfg.Save()
-	// Chat-Fenster schließen – im Dialogmodus nicht sichtbar
+	// ERST Avatar zeigen, DANN Chat verstecken – verhindert Fyne-Exit bei 0 Fenstern
+	ja.showAvatarWindow()
 	ja.chatMu.Lock()
 	if ja.chatWin != nil {
-		ja.chatWin.Close()
-		ja.chatWin = nil
+		ja.chatWin.Hide()
 	}
 	ja.chatMu.Unlock()
-	// Avatar-Fenster öffnen
-	ja.showAvatarWindow()
 	ja.startDialogIfNeeded()
 	ja.refreshTray()
 }
@@ -184,30 +168,53 @@ func (ja *JarvisApp) switchToDialogMode() {
 func (ja *JarvisApp) switchToTextMode() {
 	ja.cfg.DialogMode = false
 	_ = ja.cfg.Save()
-	// Mikrofon + Dialogmodus stoppen
 	if ja.dialog != nil {
 		ja.dialog.Stop()
 	}
-	// Avatar-Fenster schließen – im Textmodus nicht sichtbar
-	if ja.avatarWin != nil {
-		ja.avatarWin.Close()
-		ja.avatarWin = nil
-	}
 	ja.avatar.SetMode(ModeIdle)
 	ja.refreshTray()
-	// Chat-Fenster öffnen (wie Android App)
+	// ERST Chat öffnen, DANN Avatar verstecken – verhindert Fyne-Exit bei 0 Fenstern
 	ja.openChatWindow()
+	if ja.avatarWin != nil {
+		ja.avatarWin.Hide()
+	}
 }
 
 func (ja *JarvisApp) startDialogIfNeeded() {
-	if !ja.cfg.DialogMode || ja.audio == nil {
+	if !ja.cfg.DialogMode {
+		return
+	}
+	if ja.audio == nil {
+		ja.chat.AddMessage(RoleStatus, "❌ Audio nicht verfügbar – Mikrofon konnte nicht initialisiert werden")
 		return
 	}
 	if ja.dialog == nil {
 		ja.dialog = NewDialogController(ja.audio, ja.ws, ja)
+		ja.dialog.OnRMSLevel = func(rms float64) {
+			// Mikrofon-Pegel als Balken anzeigen (max ~3000 typisch)
+			bars := int(rms / 100)
+			if bars > 20 {
+				bars = 20
+			}
+			bar := ""
+			for i := 0; i < bars; i++ {
+				bar += "█"
+			}
+			ja.chat.SetStatus("🎤 " + bar)
+		}
 	}
-	ja.dialog.Start()
-	ja.avatar.SetMode(ModeListening)
+	if err := ja.dialog.Start(); err != nil {
+		ja.chat.AddMessage(RoleStatus,
+			"❌ Mikrofon-Fehler: "+err.Error()+
+				"\n→ Bitte Mikrofonzugriff in den Windows-Datenschutzeinstellungen prüfen")
+		return
+	}
+	// Im Wake-Word-Modus: Avatar zeigt Gold/Idle (wartet), nicht Grün
+	if ja.cfg.WakeWordEnabled {
+		ja.avatar.SetMode(ModeIdle)
+	} else {
+		ja.avatar.SetMode(ModeListening)
+	}
 }
 
 // ── Verbindung ────────────────────────────────────────────────────────────────
@@ -220,9 +227,22 @@ func (ja *JarvisApp) reconnect() {
 	ja.ws.OnConnected = ja.onConnected
 	ja.ws.OnMessage = ja.onMessage
 	ja.ws.OnTTSAudio = ja.onTTSAudio
+	ja.ws.OnWakeWordResult = func(transcript string, detected bool) {
+		log.Printf("[wakeword] transcript=%q detected=%v", transcript, detected)
+		if detected && ja.dialog != nil {
+			ja.dialog.OnWakeWordDetected()
+		}
+	}
 	ja.chat.OnSend = func(text string) {
 		ja.chat.AddMessage(RoleUser, text)
 		ja.ws.SendTask(text)
+	}
+	ja.chat.OnMicButton = func() {
+		if ja.textDictating {
+			ja.stopTextDictation()
+		} else {
+			ja.startTextDictation()
+		}
 	}
 	if ja.dialog != nil {
 		ja.dialog.ws = ja.ws
@@ -234,7 +254,6 @@ func (ja *JarvisApp) reconnect() {
 
 func (ja *JarvisApp) onConnected(connected bool) {
 	ja.connected = connected
-	ja.refreshTray()
 	if connected {
 		ja.chat.SetInputEnabled(true)
 		ja.chat.AddMessage(RoleStatus, "✓ Verbunden mit Jarvis")
@@ -251,17 +270,26 @@ func (ja *JarvisApp) onConnected(connected bool) {
 
 func (ja *JarvisApp) onMessage(msg WSMessage) {
 	switch msg.Type {
-	case "highlight":
+	case "status":
 		if msg.Message == "" {
 			return
 		}
-		ja.chat.AppendToLast(msg.Message)
-		ja.avatar.SetMode(ModeSpeaking)
-		if ja.dialog != nil {
-			ja.dialog.MuteWhileSpeaking(true) // Mic stumm während Jarvis spricht
+		if msg.Highlight {
+			// LLM-Streaming-Antwort: als Jarvis-Bubble anzeigen + für TTS sammeln
+			ja.chat.AppendToLast(msg.Message)
+			ja.ttsBuf.WriteString(msg.Message)
+			ja.ttsBuf.WriteString(" ")
+			ja.avatar.SetMode(ModeSpeaking)
+			if ja.dialog != nil {
+				ja.dialog.MuteWhileSpeaking(true)
+			}
+		} else if ja.debugMode {
+			// Debug-Modus: Agent-Denk-Nachrichten klein/gedimmt zeigen
+			ja.chat.AddDebugMessage(msg.Message)
 		}
 
 	case "error":
+		ja.ttsBuf.Reset()
 		ja.chat.AddMessage(RoleStatus, "⚠ "+msg.Message)
 		ja.avatar.SetMode(ModeIdle)
 		if ja.dialog != nil {
@@ -269,17 +297,30 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 		}
 
 	case "agent_event":
-		if msg.Event == "finished" {
+		if msg.Event == "started" {
+			// Neuer Durchlauf: TTS-Puffer zurücksetzen
+			ja.ttsBuf.Reset()
+		} else if msg.Event == "finished" {
 			ja.avatar.SetMode(ModeIdle)
-			if ja.dialog != nil {
-				// Kurze Pause, dann Mic wieder aktiv
-				go func() {
+			ttsText := ja.ttsBuf.String()
+			ja.ttsBuf.Reset()
+			go func() {
+				// TTS nur im Dialogmodus sprechen
+				if ttsText != "" && ja.cfg.DialogMode {
+					SpeakText(ttsText)
+				}
+				if ja.dialog != nil {
 					ja.dialog.MuteWhileSpeaking(false)
 					if ja.cfg.DialogMode {
 						ja.avatar.SetMode(ModeListening)
 					}
-				}()
-			}
+				}
+			}()
+		}
+
+	case "wakeword_result":
+		if msg.Highlight && ja.dialog != nil {
+			ja.dialog.OnWakeWordDetected()
 		}
 	}
 }
@@ -292,7 +333,6 @@ func (ja *JarvisApp) onTTSAudio(data []byte) {
 
 // ── Fenster-Management ────────────────────────────────────────────────────────
 
-// showStartUI öffnet je nach Modus das passende Fenster beim Start.
 func (ja *JarvisApp) showStartUI() {
 	if ja.cfg.DialogMode {
 		ja.showAvatarWindow()
@@ -301,8 +341,7 @@ func (ja *JarvisApp) showStartUI() {
 	}
 }
 
-// showAvatarWindow zeigt den Jarvis-Kopf (nur im Dialogmodus).
-// Kein Chat-Fenster, kein Klick-Handler – nur der Kopf reagiert auf Audio.
+// showAvatarWindow zeigt den rahmenlosen Iron Man Kopf (nur im Dialogmodus).
 func (ja *JarvisApp) showAvatarWindow() {
 	if ja.avatarWin != nil {
 		ja.avatarWin.Show()
@@ -310,19 +349,29 @@ func (ja *JarvisApp) showAvatarWindow() {
 	}
 	win := ja.fyneApp.NewWindow("Jarvis")
 	win.SetFixedSize(true)
-	win.Resize(fyne.NewSize(200, 210))
+	win.Resize(fyne.NewSize(260, 260))
 	ja.avatarWin = win
 
-	// Nur der Avatar – kein Button, kein Toolbar
+	win.SetPadded(false) // kein Fyne-Innenrahmen um den Avatar
 	win.SetContent(ja.avatar)
+
+	// Fenster verstecken statt schließen → App bleibt im Tray am Leben
+	win.SetCloseIntercept(func() {
+		win.Hide()
+	})
 	win.SetOnClosed(func() {
 		ja.avatarWin = nil
-		// Schließen des Avatar-Fensters = App beenden (nur im Dialogmodus)
-		if ja.cfg.DialogMode {
-			ja.shutdown()
-		}
 	})
 	win.Show()
+
+	// Nach dem Anzeigen: Rahmen entfernen + transparent + gespeicherte Position
+	savedX, savedY := ja.cfg.AvatarX, ja.cfg.AvatarY
+	go func() {
+		MakeAvatarWindowFrameless()
+		if savedX != 0 || savedY != 0 {
+			SetAvatarPosition(savedX, savedY)
+		}
+	}()
 }
 
 func (ja *JarvisApp) openChatWindow() {
@@ -339,6 +388,11 @@ func (ja *JarvisApp) openChatWindowLocked() {
 	win := ja.fyneApp.NewWindow("Jarvis – Chat")
 	win.Resize(fyne.NewSize(float32(ja.cfg.WindowW), float32(ja.cfg.WindowH)))
 	win.SetContent(ja.chat.Layout())
+
+	// Fenster verstecken statt schließen → App bleibt im Tray am Leben
+	win.SetCloseIntercept(func() {
+		win.Hide()
+	})
 	win.SetOnClosed(func() {
 		ja.chatMu.Lock()
 		ja.chatWin = nil
@@ -346,6 +400,56 @@ func (ja *JarvisApp) openChatWindowLocked() {
 	})
 	ja.chatWin = win
 	win.Show()
+}
+
+// startTextDictation startet die Spracheingabe im Text-Modus (einmalig).
+func (ja *JarvisApp) startTextDictation() {
+	if ja.audio == nil {
+		ja.chat.AddMessage(RoleStatus, "❌ Audio nicht verfügbar")
+		return
+	}
+	if ja.cfg.DialogMode {
+		return // Im Dialogmodus läuft die Spracherkennung bereits dauerhaft
+	}
+	ja.textDictating = true
+	ja.chat.SetMicActive(true)
+	ja.chat.AddMessage(RoleStatus, "🎤 Sprechen Sie jetzt…")
+
+	dc := NewDialogController(ja.audio, ja.ws, ja)
+	dc.StopAfterFirstUtterance = true
+	dc.OnStop = func() {
+		ja.textDictating = false
+		ja.chat.SetMicActive(false)
+		ja.chat.SetStatus("")
+	}
+	dc.OnRMSLevel = func(rms float64) {
+		bars := int(rms / 100)
+		if bars > 20 {
+			bars = 20
+		}
+		bar := ""
+		for i := 0; i < bars; i++ {
+			bar += "█"
+		}
+		ja.chat.SetStatus("🎤 " + bar)
+	}
+	ja.textDictCtrl = dc
+	if err := dc.Start(); err != nil {
+		ja.chat.AddMessage(RoleStatus, "❌ Mikrofon-Fehler: "+err.Error())
+		ja.textDictating = false
+		ja.chat.SetMicActive(false)
+		ja.textDictCtrl = nil
+	}
+}
+
+// stopTextDictation beendet die laufende Spracheingabe im Text-Modus.
+func (ja *JarvisApp) stopTextDictation() {
+	if ja.textDictCtrl != nil {
+		ja.textDictCtrl.Stop()
+		ja.textDictCtrl = nil
+	}
+	ja.textDictating = false
+	ja.chat.SetMicActive(false)
 }
 
 // ── App beenden ───────────────────────────────────────────────────────────────
@@ -362,6 +466,14 @@ func (ja *JarvisApp) shutdown() {
 	}
 	if ja.avatar != nil {
 		ja.avatar.Stop()
+	}
+	// Avatar-Position vor dem Beenden speichern
+	if ja.cfg.DialogMode && ja.avatarWin != nil {
+		x, y := GetAvatarPosition()
+		if x != 0 || y != 0 {
+			ja.cfg.AvatarX = x
+			ja.cfg.AvatarY = y
+		}
 	}
 	_ = ja.cfg.Save()
 	ja.fyneApp.Quit()

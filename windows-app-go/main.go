@@ -229,8 +229,16 @@ func (ja *JarvisApp) reconnect() {
 	ja.ws.OnTTSAudio = ja.onTTSAudio
 	ja.ws.OnWakeWordResult = func(transcript string, detected bool) {
 		log.Printf("[wakeword] transcript=%q detected=%v", transcript, detected)
+		ja.chat.SetStatus("")
 		if detected && ja.dialog != nil {
-			ja.dialog.OnWakeWordDetected()
+			ja.dialog.OnWakeWordDetected() // → setzt Avatar auf Grün
+		} else {
+			ja.avatar.SetMode(ModeIdle) // zurück auf Gold
+			if transcript != "" {
+				ja.fyneApp.SendNotification(fyne.NewNotification(
+					"Jarvis – nicht erkannt",
+					"Gehört: \""+transcript+"\""))
+			}
 		}
 	}
 	ja.chat.OnSend = func(text string) {

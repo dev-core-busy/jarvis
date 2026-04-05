@@ -50,6 +50,10 @@ func (t JarvisTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) 
 		return jc.accent
 	case theme.ColorNameButton:
 		return jc.surface
+	case theme.ColorNameDisabledButton:
+		return color.RGBA{0x1E, 0x29, 0x3B, 0xFF}
+	case theme.ColorNameDisabled:
+		return jc.muted
 	case theme.ColorNameInputBackground:
 		return color.RGBA{0xFF, 0xFF, 0xFF, 0x0F}
 	case theme.ColorNameInputBorder:
@@ -60,6 +64,21 @@ func (t JarvisTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) 
 		return color.RGBA{0x63, 0x66, 0xF1, 0x66}
 	case theme.ColorNameSeparator:
 		return color.RGBA{0xFF, 0xFF, 0xFF, 0x14}
+	// Dropdown / Popup / Menü – verhindert weißen Hintergrund
+	case theme.ColorNameOverlayBackground:
+		return color.RGBA{0x11, 0x18, 0x27, 0xFF}
+	case theme.ColorNameMenuBackground:
+		return color.RGBA{0x11, 0x18, 0x27, 0xFF}
+	case theme.ColorNameHeaderBackground:
+		return color.RGBA{0x0F, 0x17, 0x2A, 0xFF}
+	case theme.ColorNameHover:
+		return color.RGBA{0x63, 0x66, 0xF1, 0x30}
+	case theme.ColorNameSelection:
+		return color.RGBA{0x63, 0x66, 0xF1, 0x55}
+	case theme.ColorNameFocus:
+		return jc.accent
+	case theme.ColorNameShadow:
+		return color.RGBA{0x00, 0x00, 0x00, 0x80}
 	}
 	return theme.DefaultTheme().Color(name, variant)
 }

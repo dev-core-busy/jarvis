@@ -12,7 +12,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=51">
+    <link rel="stylesheet" href="/static/css/style.css?v=55">
 </head>
 
 <body>
@@ -275,7 +275,7 @@ sudo update-ca-certificates</code></pre>
                             <rect x="4" y="4" width="16" height="16" rx="2" />
                         </svg>
                     </button>
-                    <button class="btn-debug active" id="btn-debug" title="Debug-Ausgaben ein/ausblenden">Debug</button>
+                    <button class="btn-debug active" id="btn-debug" title="Debug-Ausgaben ein/ausblenden">debug aktiv</button>
                     <div class="zoom-control">
                         <button class="btn-zoom" id="btn-zoom-out" title="Verkleinern">−</button>
                         <button class="btn-zoom btn-zoom-reset" id="btn-zoom-reset" title="Zurücksetzen">100%</button>
@@ -381,6 +381,7 @@ sudo update-ca-certificates</code></pre>
                 <!-- Google-Tab entfernt – Config erfolgt über Skill-Einstellungen -->
                 <button class="settings-tab-btn" data-settings-tab="mcp">MCP</button>
                 <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;">Vision</button>
+                <button class="settings-tab-btn" data-settings-tab="telemetry">Telemetry</button>
             </div>
 
             <div class="modal-body">
@@ -1020,6 +1021,42 @@ sudo update-ca-certificates</code></pre>
                     </div>
                 </div>
 
+
+                <!-- ═══ Tab: Telemetry ═══ -->
+                <div id="settings-tab-telemetry" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <div id="tele-stat-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:20px;"></div>
+                        <div class="sk-openclaw-section" id="tele-tool-section">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('.kb-folder-arrow').textContent=this.nextElementSibling.style.display==='none'?'▶':'▼'">
+                                <span class="kb-folder-icon">🔧</span>
+                                <span class="kb-folder-path" style="font-weight:600;">Tool-Statistiken</span>
+                                <span class="kb-folder-arrow">▼</span>
+                            </div>
+                            <div id="tele-tool-body"><div class="kb-loading">Lade…</div></div>
+                        </div>
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('.kb-folder-arrow').textContent=this.nextElementSibling.style.display==='none'?'▶':'▼'">
+                                <span class="kb-folder-icon">🧠</span>
+                                <span class="kb-folder-path" style="font-weight:600;">LLM-Statistiken</span>
+                                <span class="kb-folder-arrow">▼</span>
+                            </div>
+                            <div id="tele-llm-body"><div class="kb-loading">Lade…</div></div>
+                        </div>
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('.kb-folder-arrow').textContent=this.nextElementSibling.style.display==='none'?'▶':'▼'">
+                                <span class="kb-folder-icon">📋</span>
+                                <span class="kb-folder-path" style="font-weight:600;">Letzte Spans</span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="tele-spans-body" style="display:none;"><div class="kb-loading">Lade…</div></div>
+                        </div>
+                        <div style="display:flex;gap:10px;margin-top:16px;">
+                            <button class="vis-btn vis-btn-primary" id="btn-tele-refresh">↻ Aktualisieren</button>
+                            <button class="vis-btn" id="btn-tele-clear" style="color:#ef4444;border-color:rgba(239,68,68,0.4);">Zurücksetzen</button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
             <div id="version-modal-footer" class="settings-version-footer"></div>
         </div>
@@ -1032,7 +1069,8 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/knowledge.js?v=9"></script>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
-    <script src="/static/js/app.js?v=35"></script>
+    <script src="/static/js/telemetry.js?v=1"></script>
+    <script src="/static/js/app.js?v=38"></script>
 </body>
 
 </html>

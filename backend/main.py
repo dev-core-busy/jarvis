@@ -120,6 +120,17 @@ async def vnc_websocket_proxy(websocket: WebSocket):
 active_sessions: dict[str, WebSocket] = {}
 agent_instance = None  # wird lazy initialisiert (Kompatibilitaet)
 agent_manager = None  # AgentManager fuer Multi-Agent Support
+_whisper_model = None  # lazy-geladen fuer Wake-Word-Erkennung
+
+
+def _get_whisper_model():
+    """Gibt das Whisper-Modell zurück (lädt es beim ersten Aufruf)."""
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        _whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
+        print("[whisper] Modell geladen (small, cpu, int8)", flush=True)
+    return _whisper_model
 
 # Erlaubte Linux-Benutzer für Web-Login
 ALLOWED_USERS = {"jarvis"}
@@ -2154,6 +2165,80 @@ async def vision_download_stream_tools(request: Request):
     )
 
 
+# ─── TTS API ─────────────────────────────────────────────────────────────────
+
+@app.post("/api/tts")
+async def tts_synthesize(request: Request):
+    """Text-to-Speech via edge-tts. Gibt MP3-Audio zurück."""
+    if not (verify_token(request.headers.get("Authorization", "").replace("Bearer ", ""))
+            or _verify_agent_api_key(request)):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+
+    body = await request.json()
+    text  = body.get("text", "").strip()
+    voice = body.get("voice", "de-DE-ConradNeural")
+
+    if not text:
+        return JSONResponse({"error": "Kein Text angegeben"}, status_code=400)
+
+    try:
+        import edge_tts
+        communicate = edge_tts.Communicate(text, voice)
+        chunks = []
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                chunks.append(chunk["data"])
+        audio_bytes = b"".join(chunks)
+        if not audio_bytes:
+            return JSONResponse({"error": "Keine Audiodaten generiert"}, status_code=500)
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "no-cache"},
+        )
+    except ImportError:
+        return JSONResponse({"error": "edge-tts nicht installiert"}, status_code=503)
+    except Exception as e:
+        # Fallback auf Standardstimme wenn Voice ungültig
+        if "voice" in str(e).lower() or "invalid" in str(e).lower():
+            try:
+                import edge_tts as _et
+                communicate = _et.Communicate(text, "de-DE-KatjaNeural")
+                chunks = []
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        chunks.append(chunk["data"])
+                audio_bytes = b"".join(chunks)
+                return Response(content=audio_bytes, media_type="audio/mpeg",
+                                headers={"Cache-Control": "no-cache"})
+            except Exception as e2:
+                return JSONResponse({"error": str(e2)}, status_code=500)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/tts/voices")
+async def tts_voices(request: Request):
+    """Verfügbare edge-tts Stimmen (gefiltert nach Sprache, Standard: de-)."""
+    if not (verify_token(request.headers.get("Authorization", "").replace("Bearer ", ""))
+            or _verify_agent_api_key(request)):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+
+    locale = request.query_params.get("locale", "de-")
+    try:
+        import edge_tts
+        all_voices = await edge_tts.list_voices()
+        voices = [
+            {"name": v["ShortName"], "gender": v["Gender"], "locale": v["Locale"],
+             "display": v.get("FriendlyName", v["ShortName"])}
+            for v in all_voices if v["Locale"].startswith(locale)
+        ]
+        return JSONResponse(voices)
+    except ImportError:
+        return JSONResponse({"error": "edge-tts nicht installiert"}, status_code=503)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 # ─── WhatsApp Integration ────────────────────────────────────────────
 import urllib.request
 import urllib.error
@@ -2625,6 +2710,41 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
     elif msg_type == "ping":
         await ws.send_json({"type": "pong"})
 
+    elif msg_type == "wakeword_check":
+        # Wake-Word-Erkennung via Whisper: Audio transkribieren + Phrase prüfen
+        import base64, tempfile, os
+        audio_b64 = msg.get("audio", "")
+        phrase = msg.get("phrase", "").strip().lower()
+        if not audio_b64 or not phrase:
+            await ws.send_json({"type": "wakeword_result", "text": "", "data": "false"})
+            return
+        try:
+            wav_bytes = base64.b64decode(audio_b64)
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                f.write(wav_bytes)
+                tmp_path = f.name
+            def _transcribe():
+                model = _get_whisper_model()
+                segments, _ = model.transcribe(tmp_path, language="de", beam_size=3,
+                                               without_timestamps=True)
+                return " ".join(s.text for s in segments).strip()
+            transcript = await asyncio.to_thread(_transcribe)
+            os.unlink(tmp_path)
+            # Satzzeichen entfernen für Vergleich (Whisper schreibt "Hallo, Jarvis.")
+            import re
+            clean = re.sub(r'[^\w\s]', '', transcript.lower())
+            detected = phrase in clean
+            print(f"[wakeword] '{transcript}' → {'JA' if detected else 'nein'}", flush=True)
+            await ws.send_json({
+                "type": "wakeword_result",
+                "text": transcript,
+                "data": "true" if detected else "false",
+                "highlight": detected,
+            })
+        except Exception as e:
+            print(f"[wakeword] Fehler: {e}", flush=True)
+            await ws.send_json({"type": "wakeword_result", "text": "", "data": "false"})
+
 
 # ─── HTTP → HTTPS Redirect (Port 80 → 443) ──────────────────────────
 async def _start_http_redirect():
@@ -2656,6 +2776,15 @@ async def startup():
         port_info = f":{config.SERVER_PORT}" if config.SERVER_PORT != 443 else ""
         print("✅ Jarvis Backend gestartet")
         print(f"🌐 https://{os.getenv('SERVER_IP', '127.0.0.1')}{port_info}")
+
+    # Whisper-Modell im Hintergrund vorladen (für Wake-Word-Erkennung)
+    import threading
+    def _preload_whisper():
+        try:
+            _get_whisper_model()
+        except Exception as e:
+            print(f"[whisper] Vorladen fehlgeschlagen: {e}", flush=True)
+    threading.Thread(target=_preload_whisper, daemon=True).start()
 
     # WebDAV-Server mounten (wenn aktiviert)
     try:

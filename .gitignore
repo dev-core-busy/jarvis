@@ -75,3 +75,7 @@ implementation_plan.md
 CLAUDE.md
 test_agent.py
 *.tmp
+windows-app-go/Jarvis.exe
+windows-app-go/dist/
+windows-app/
+windows-app-go/jarvis-windows

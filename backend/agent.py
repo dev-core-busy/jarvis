@@ -670,9 +670,11 @@ KRITISCH – Autonomie-Regeln:
         span.attributes["agent.id"] = self.agent_id
         try:
             # Streaming-Callback fuer Tools die es unterstuetzen (z.B. shell_execute)
+            # Kopie anlegen um den Original-Dict nicht zu mutieren (json.dumps wuerde sonst scheitern)
+            exec_args = dict(args)
             if ws and getattr(tool, 'supports_streaming', False):
-                args['_status_callback'] = lambda msg: self._send_status(ws, msg)
-            result = await tool.execute(**args)
+                exec_args['_status_callback'] = lambda msg: self._send_status(ws, msg)
+            result = await tool.execute(**exec_args)
             tracer.end_span(span, status="ok")
             return result
         except Exception as e:

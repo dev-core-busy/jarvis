@@ -465,18 +465,17 @@
     const btnDebug = document.getElementById('btn-debug');
     let _debugMode = localStorage.getItem('jarvis_debug') !== 'false'; // Default: an
     // Initialzustand setzen
-    if (_debugMode) {
-        btnDebug.classList.add('active');
-    } else {
-        btnDebug.classList.remove('active');
-        logContainer.classList.add('hide-debug');
-    }
+    const _updateDebugBtn = () => {
+        btnDebug.textContent = _debugMode ? 'debug aktiv' : 'debug aktivieren';
+        btnDebug.classList.toggle('active', _debugMode);
+        logContainer.classList.toggle('hide-debug', !_debugMode);
+    };
+    _updateDebugBtn();
 
     btnDebug.addEventListener('click', () => {
         _debugMode = !_debugMode;
         localStorage.setItem('jarvis_debug', _debugMode);
-        btnDebug.classList.toggle('active', _debugMode);
-        logContainer.classList.toggle('hide-debug', !_debugMode);
+        _updateDebugBtn();
         // Zum Ende scrollen
         logContainer.scrollTop = logContainer.scrollHeight;
     });
@@ -917,9 +916,10 @@
         const tabGoogle = document.getElementById('settings-tab-google');
         const tabVision = document.getElementById('settings-tab-vision');
         const tabMcp = document.getElementById('settings-tab-mcp');
+        const tabTelemetry = document.getElementById('settings-tab-telemetry');
         const instrSection = document.getElementById('profiles-instructions-section');
 
-        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp];
+        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -961,6 +961,10 @@
                     tabVision.style.display = '';
                     tabVision.classList.add('active');
                     if (window.visionManager) window.visionManager.refresh();
+                } else if (target === 'telemetry' && tabTelemetry) {
+                    tabTelemetry.style.display = '';
+                    tabTelemetry.classList.add('active');
+                    if (window.telemetryManager) window.telemetryManager.init();
                 }
 
                 // Vision-Polling stoppen wenn weg-navigiert
@@ -1111,6 +1115,7 @@
             if (tabKnowledge) { tabKnowledge.style.display = 'none'; tabKnowledge.classList.remove('active'); }
             if (tabGoogle) { tabGoogle.style.display = 'none'; tabGoogle.classList.remove('active'); }
             if (tabVision) { tabVision.style.display = 'none'; tabVision.classList.remove('active'); }
+            if (tabTelemetry) { tabTelemetry.style.display = 'none'; tabTelemetry.classList.remove('active'); }
             // Instruktionen im Profile-Tab laden
             if (instrSection) { instrSection.style.display = ''; _loadInstructions(); }
             modal.classList.add('open');

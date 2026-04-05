@@ -271,6 +271,28 @@
         .install-step { display: flex; align-items: flex-start; margin-bottom: 10px; }
         .install-step-label { font-size: 0.95rem; font-weight: 600; padding-top: 2px; }
 
+        /* Windows Desktop Agent Section */
+        .windows-section { background: linear-gradient(135deg, rgba(59,130,246,0.06) 0%, rgba(99,102,241,0.08) 100%); border-top: 1px solid rgba(59,130,246,0.2); border-bottom: 1px solid rgba(99,102,241,0.2); }
+        .windows-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+        @media (max-width: 768px) { .windows-inner { grid-template-columns: 1fr; gap: 32px; } }
+        .windows-badge-new { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px; background: linear-gradient(135deg, rgba(59,130,246,0.3), rgba(99,102,241,0.3)); border: 1px solid rgba(59,130,246,0.5); border-radius: 20px; font-size: 0.75rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #60a5fa; margin-bottom: 18px; animation: pulse 2s infinite; }
+        .windows-title { font-size: clamp(1.6rem, 3.5vw, 2.4rem); font-weight: 700; margin-bottom: 12px; line-height: 1.25; }
+        .windows-desc { color: var(--text-secondary); font-size: 0.975rem; line-height: 1.75; margin-bottom: 20px; }
+        .windows-features { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; }
+        .windows-features li { display: flex; align-items: center; gap: 10px; font-size: 0.875rem; color: var(--text-secondary); }
+        .windows-features li span.check { color: #60a5fa; font-size: 1rem; flex-shrink: 0; }
+        .btn-windows { display: inline-flex; align-items: center; gap: 10px; padding: 14px 32px; background: linear-gradient(135deg, #3b82f6, #6366f1); border: none; border-radius: var(--radius-md); color: #fff; font-size: 1rem; font-weight: 700; cursor: pointer; transition: all var(--transition); box-shadow: 0 0 28px rgba(59,130,246,0.4); text-decoration: none; }
+        .btn-windows:hover { transform: translateY(-2px); box-shadow: 0 0 44px rgba(59,130,246,0.6); }
+        .btn-windows-note { display: block; margin-top: 10px; font-size: 0.78rem; color: var(--text-muted); }
+        .windows-mockup { position: relative; display: flex; justify-content: center; align-items: center; }
+        .desktop-frame { width: 340px; height: 220px; background: linear-gradient(180deg, #1a1a2e 0%, #0a0e17 100%); border-radius: 10px 10px 4px 4px; border: 2px solid rgba(59,130,246,0.4); box-shadow: 0 0 60px rgba(59,130,246,0.2), 0 24px 64px rgba(0,0,0,0.6); overflow: hidden; position: relative; }
+        .desktop-titlebar { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(59,130,246,0.15); border-bottom: 1px solid rgba(59,130,246,0.2); }
+        .desktop-title-text { font-size: 0.65rem; font-weight: 600; color: #60a5fa; letter-spacing: 1px; }
+        .desktop-controls { display: flex; gap: 5px; }
+        .desktop-ctrl { width: 8px; height: 8px; border-radius: 50%; }
+        .desktop-content { padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; }
+        .desktop-stand { width: 60px; height: 12px; background: rgba(59,130,246,0.2); margin: 0 auto; border-radius: 0 0 6px 6px; border: 2px solid rgba(59,130,246,0.3); border-top: none; }
+
         /* Android App Section */
         .android-section { background: linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(99,102,241,0.08) 100%); border-top: 1px solid rgba(16,185,129,0.2); border-bottom: 1px solid rgba(99,102,241,0.2); }
         .android-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
@@ -308,11 +330,15 @@
         .reveal { opacity: 0; transform: translateY(28px); transition: opacity 0.6s ease, transform 0.6s ease; }
         .reveal.visible { opacity: 1; transform: translateY(0); }
 
+        .grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+
         @media (max-width: 768px) {
             nav { padding: 0 16px; }
             .nav-links { display: none; }
             section { padding: 56px 16px; }
             .hero-title { letter-spacing: 6px; }
+            .grid-2col { grid-template-columns: 1fr; }
+            .openclaw-compare { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -327,6 +353,7 @@
         <a href="#screenshots" class="t-de">Screenshots</a>
         <a href="#screenshots" class="t-en">Screenshots</a>
         <a href="#android" style="color:var(--success);font-weight:600;">📱 Android</a>
+        <a href="#windows" style="color:#60a5fa;font-weight:600;">🖥️ Windows</a>
         <a href="#install"     class="t-de">Installation</a>
         <a href="#install"     class="t-en">Install</a>
     </div>
@@ -705,7 +732,7 @@
                 </div>
 
                 <!-- Was das Skript macht -->
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px;">
+                <div class="grid-2col">
                     <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
                         <div style="font-size:0.75rem; font-weight:700; color:var(--accent-hover); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
                             <span class="t-de">Das Skript erledigt automatisch:</span>
@@ -795,7 +822,7 @@ docker compose up -d</code>
                 </div>
 
                 <!-- Vorteile -->
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px;">
+                <div class="grid-2col">
                     <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
                         <div style="font-size:0.75rem; font-weight:700; color:#22d3ee; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
                             <span class="t-de">🐳 Vorteile:</span>
@@ -902,6 +929,72 @@ docker compose up -d</code>
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+</section>
+
+<section id="windows" class="windows-section">
+    <div class="container">
+        <div class="windows-inner">
+
+            <!-- Desktop Mockup -->
+            <div class="windows-mockup reveal visible">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:0;">
+                    <div class="desktop-frame">
+                        <div class="desktop-titlebar">
+                            <span class="desktop-title-text">JARVIS · Windows Desktop Agent</span>
+                            <div class="desktop-controls">
+                                <div class="desktop-ctrl" style="background:#f59e0b;"></div>
+                                <div class="desktop-ctrl" style="background:#10b981;"></div>
+                                <div class="desktop-ctrl" style="background:#ef4444;"></div>
+                            </div>
+                        </div>
+                        <div class="desktop-content">
+                            <div class="phone-msg bot t-de" style="font-size:0.7rem;padding:5px 8px;">🚀 Starte Aufgabe: Erstelle einen Bericht…</div>
+                            <div class="phone-msg bot t-en" style="font-size:0.7rem;padding:5px 8px;">🚀 Starting task: Create a report…</div>
+                            <div class="phone-msg bot t-de" style="font-size:0.7rem;padding:5px 8px;">🔧 Tool: shell_execute<br>📋 Word-Dokument erstellt</div>
+                            <div class="phone-msg bot t-en" style="font-size:0.7rem;padding:5px 8px;">🔧 Tool: shell_execute<br>📋 Word document created</div>
+                            <div class="phone-msg bot t-de" style="font-size:0.7rem;padding:5px 8px;">✅ Aufgabe abgeschlossen</div>
+                            <div class="phone-msg bot t-en" style="font-size:0.7rem;padding:5px 8px;">✅ Task completed</div>
+                            <div class="phone-msg user t-de" style="font-size:0.7rem;padding:5px 8px;">Super – schick mir die Zusammenfassung.</div>
+                            <div class="phone-msg user t-en" style="font-size:0.7rem;padding:5px 8px;">Great – send me the summary.</div>
+                        </div>
+                    </div>
+                    <div class="desktop-stand"></div>
+                </div>
+            </div>
+
+            <div class="reveal visible">
+                <div class="windows-badge-new">🖥️ Windows</div>
+                <h2 class="windows-title">
+                    <span class="t-de">Jarvis als nativer <span class="accent-text">Desktop&nbsp;Agent</span></span>
+                    <span class="t-en">Jarvis as native <span class="accent-text">Desktop&nbsp;Agent</span></span>
+                </h2>
+                <p class="windows-desc t-de">
+                    Nativer Windows-Agent – verbinde dich mit deinem Jarvis-Server direkt vom Desktop.
+                    Kein Browser nötig. System-Tray-Integration, Hotkeys und Push-Benachrichtigungen.
+                </p>
+                <p class="windows-desc t-en">
+                    Native Windows agent – connect to your Jarvis server directly from the desktop.
+                    No browser needed. System tray integration, hotkeys and push notifications.
+                </p>
+                <ul class="windows-features">
+                    <li><span class="check">✅</span> <span class="t-de">Nativer Windows-Agent – kein Browser erforderlich</span><span class="t-en">Native Windows agent – no browser required</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">System-Tray-Integration &amp; globale Hotkeys</span><span class="t-en">System tray integration &amp; global hotkeys</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Sicherer Zugriff via Tailscale VPN</span><span class="t-en">Secure access via Tailscale VPN</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Push-Benachrichtigungen bei fertigem Task</span><span class="t-en">Push notifications on task completion</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Agent-Status &amp; Multi-Agent Übersicht</span><span class="t-en">Agent status &amp; multi-agent overview</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Dark Glassmorphism UI – wie die Web-Oberfläche</span><span class="t-en">Dark glassmorphism UI – matches the web interface</span></li>
+                </ul>
+                <a href="https://jarvis-ai.info/downloads/jarvis.exe" class="btn-windows">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+                    <span class="t-de">Download · Portable EXE</span>
+                    <span class="t-en">Download · Portable EXE</span>
+                </a>
+                <span class="btn-windows-note t-de">Windows 10/11 · 64-bit · Portable – kein Setup nötig</span>
+                <span class="btn-windows-note t-en">Windows 10/11 · 64-bit · Portable – no installer needed</span>
+            </div>
+
         </div>
     </div>
 </section>

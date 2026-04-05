@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"log"
+	"math"
 	"sync"
+	"time"
 
 	"github.com/gen2brain/malgo"
 )
@@ -175,7 +177,7 @@ func (am *AudioManager) StartRecording() error {
 	cfg.SampleRate = 16000 // Whisper bevorzugt 16kHz
 
 	callbacks := malgo.DeviceCallbacks{
-		Data: func(pInput, _ []byte, _ uint32) {
+		Data: func(_, pInput []byte, _ uint32) {
 			if am.OnMicData != nil && len(pInput) > 0 {
 				cp := make([]byte, len(pInput))
 				copy(cp, pInput)
@@ -202,6 +204,52 @@ func (am *AudioManager) StopRecording() {
 	if dev != nil {
 		dev.Uninit()
 	}
+}
+
+// IsRecording gibt zurück ob das Mikrofon gerade aktiv ist.
+func (am *AudioManager) IsRecording() bool {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	return am.recDev != nil
+}
+
+// TestMicLevel nimmt für `seconds` Sekunden auf und gibt den maximalen RMS-Pegel zurück.
+// Wenn bereits eine Aufnahme läuft, wird der Callback vorübergehend überschrieben.
+// Gibt (maxRMS, datenEmpfangen, fehler) zurück.
+func (am *AudioManager) TestMicLevel(seconds int) (maxRMS float64, dataReceived bool, err error) {
+	var mu sync.Mutex
+	var count int
+
+	prevCallback := am.OnMicData
+	am.OnMicData = func(pcm []byte) {
+		rms := calcRMS(pcm)
+		mu.Lock()
+		count++
+		if rms > maxRMS {
+			maxRMS = rms
+		}
+		mu.Unlock()
+	}
+
+	wasRecording := am.IsRecording()
+	if !wasRecording {
+		if err = am.StartRecording(); err != nil {
+			am.OnMicData = prevCallback
+			return
+		}
+	}
+
+	time.Sleep(time.Duration(seconds) * time.Second)
+
+	if !wasRecording {
+		am.StopRecording()
+	}
+	am.OnMicData = prevCallback
+
+	mu.Lock()
+	dataReceived = count > 0
+	mu.Unlock()
+	return
 }
 
 // ── WAV-Hilfsfunktionen ───────────────────────────────────────────────────────
@@ -255,4 +303,28 @@ func BuildWAVHeader(pcmLen int) []byte {
 	buf.WriteString("data")
 	_ = binary.Write(buf, binary.LittleEndian, dataLen)
 	return buf.Bytes()
+}
+
+// generateTestTone erzeugt einen 440Hz Sinus-Ton (0.6s, 44100Hz, Stereo, 16-bit PCM).
+func generateTestTone() []byte {
+	const sampleRate = 44100
+	const nSamples = int(44100 * 0.6)
+	const freq = 440.0
+	const twoPi = 6.28318530718
+	pcm := make([]byte, nSamples*4)
+	for i := 0; i < nSamples; i++ {
+		t := float64(i) / sampleRate
+		fade := 1.0
+		if i < 4410 {
+			fade = float64(i) / 4410.0
+		} else if i > nSamples-4410 {
+			fade = float64(nSamples-i) / 4410.0
+		}
+		val := int16(20000.0 * fade * math.Sin(t*freq*twoPi))
+		pcm[i*4+0] = byte(val)
+		pcm[i*4+1] = byte(val >> 8)
+		pcm[i*4+2] = byte(val)
+		pcm[i*4+3] = byte(val >> 8)
+	}
+	return pcm
 }

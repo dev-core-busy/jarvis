@@ -171,8 +171,8 @@ func (d *DialogController) handleUtterance(pcm []byte, durationMs int, state Dia
 	b64 := encodeBase64(wav)
 
 	if state == StateWaitWakeWord {
-		// Wake-Word-Prüfung: kurze Anfrage ans Backend, kein LLM
-		d.app.avatar.SetMode(ModeIdle)
+		// Wake-Word-Prüfung: Avatar blau = "habe etwas gehört, prüfe…"
+		d.app.avatar.SetMode(ModeChecking)
 		d.ws.SendWakeWordCheck(b64, d.app.cfg.WakeWord)
 		return
 	}

@@ -27,6 +27,9 @@ var (
 	user32   = syscall.MustLoadDLL("user32.dll")
 	shell32  = syscall.MustLoadDLL("shell32.dll")
 	kernel32 = syscall.MustLoadDLL("kernel32.dll")
+	winmm    = syscall.MustLoadDLL("winmm.dll")
+
+	pMciSendStringW = winmm.MustFindProc("mciSendStringW")
 	// Fenster-Hilfsfunktionen (Frameless-Avatar)
 	pFindWindowW                = user32.MustFindProc("FindWindowW")
 	pGetWindowLongPtrW          = user32.MustFindProc("GetWindowLongPtrW")
@@ -512,6 +515,24 @@ func SetAvatarPosition(x, y int) {
 	}
 }
 
+// ShowTrayBalloon zeigt eine Windows-Tray-Balloon-Benachrichtigung.
+func ShowTrayBalloon(title, text string) {
+	if trayHWnd == 0 {
+		return
+	}
+	var nid notifyIconData
+	nid.Size = uint32(unsafe.Sizeof(nid))
+	nid.Wnd = trayHWnd
+	nid.ID = 1
+	nid.Flags = nifInfo
+	t, _ := syscall.UTF16FromString(title)
+	copy(nid.InfoTitle[:], t)
+	m, _ := syscall.UTF16FromString(text)
+	copy(nid.Info[:], m)
+	nid.InfoFlags = niifInfo
+	pShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&nid)))
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TTS-Stimmen – Windows SAPI + Backend (edge-tts)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -543,9 +564,10 @@ func isBackendVoice(voice string) bool {
 // ── Backend-Stimmen ───────────────────────────────────────────────────────────
 
 type ttsVoiceEntry struct {
-	Name   string `json:"name"`
-	ID     string `json:"id"`
-	Locale string `json:"locale"`
+	Name    string `json:"name"`    // Voice-ID (z.B. "de-DE-KatjaNeural")
+	Display string `json:"display"` // Anzeigename
+	Gender  string `json:"gender"`
+	Locale  string `json:"locale"`
 }
 
 // jarvisHTTP führt einen einfachen HTTP-Request gegen den Jarvis-Backend durch.
@@ -605,10 +627,36 @@ func FetchBackendVoices(serverURL, apiKey string) (names []string, ids []string)
 		return nil, nil
 	}
 	for _, v := range voices {
-		names = append(names, v.Name)
-		ids = append(ids, v.ID)
+		display := v.Display
+		if display == "" {
+			display = v.Name
+		}
+		names = append(names, display)
+		ids = append(ids, v.Name) // Name = Voice-ID (z.B. "de-DE-KatjaNeural")
 	}
 	return names, ids
+}
+
+// mciSend sendet einen MCI-Befehl via winmm.dll.
+func mciSend(cmd string) {
+	ptr, _ := syscall.UTF16PtrFromString(cmd)
+	pMciSendStringW.Call(uintptr(unsafe.Pointer(ptr)), 0, 0, 0)
+}
+
+// playMP3Bytes schreibt MP3-Daten in eine Temp-Datei und spielt sie via mciSendString ab.
+func playMP3Bytes(data []byte) {
+	f, err := os.CreateTemp("", "jarvis_tts_*.mp3")
+	if err != nil {
+		return
+	}
+	path := f.Name()
+	_, _ = f.Write(data)
+	f.Close()
+	defer os.Remove(path)
+	path = strings.ReplaceAll(path, "/", "\\")
+	mciSend(fmt.Sprintf(`open "%s" type mpegvideo alias jarvis_tts`, path))
+	mciSend(`play jarvis_tts wait`)
+	mciSend(`close jarvis_tts`)
 }
 
 // PlayWAVBytes schreibt WAV-Daten in eine Temp-Datei und spielt sie via PowerShell ab.
@@ -630,7 +678,7 @@ func PlayWAVBytes(data []byte) {
 
 // PlayBackendTTS generiert TTS-Audio über das Backend und spielt es ab (blockierend).
 func PlayBackendTTS(serverURL, apiKey, text, voiceID string) error {
-	url := wsURLToHTTPS(serverURL) + "/api/tts/speak"
+	url := wsURLToHTTPS(serverURL) + "/api/tts"
 	data, err := jarvisHTTP("POST", url, apiKey, map[string]string{
 		"text":  text,
 		"voice": voiceID,
@@ -638,7 +686,7 @@ func PlayBackendTTS(serverURL, apiKey, text, voiceID string) error {
 	if err != nil {
 		return err
 	}
-	PlayWAVBytes(data)
+	playMP3Bytes(data)
 	return nil
 }
 

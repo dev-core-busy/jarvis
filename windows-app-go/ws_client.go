@@ -13,10 +13,12 @@ import (
 )
 
 type WSMessage struct {
-	Type    string `json:"type"`
-	Message string `json:"message,omitempty"`
-	Event   string `json:"event,omitempty"`
-	Data    string `json:"data,omitempty"`
+	Type      string `json:"type"`
+	Message   string `json:"message,omitempty"`
+	Event     string `json:"event,omitempty"`
+	Data      string `json:"data,omitempty"`
+	Highlight bool   `json:"highlight,omitempty"`
+	Text      string `json:"text,omitempty"`
 }
 
 type WSClient struct {
@@ -27,9 +29,10 @@ type WSClient struct {
 	stopCh    chan struct{}
 	sendCh    chan []byte
 
-	OnMessage    func(WSMessage)
-	OnConnected  func(bool)
-	OnTTSAudio   func([]byte)
+	OnMessage       func(WSMessage)
+	OnConnected     func(bool)
+	OnTTSAudio      func([]byte)
+	OnWakeWordResult func(transcript string, detected bool)
 }
 
 func NewWSClient(cfg *Config) *WSClient {
@@ -75,6 +78,21 @@ func (c *WSClient) SendScreenResult(action, data string) {
 	b, _ := json.Marshal(payload)
 	select {
 	case c.sendCh <- b:
+	default:
+	}
+}
+
+// SendWakeWordCheck sendet Audio zur Wake-Word-Erkennung (kein LLM).
+func (c *WSClient) SendWakeWordCheck(audioB64, phrase string) {
+	payload := map[string]string{
+		"type":   "wakeword_check",
+		"audio":  audioB64,
+		"phrase": phrase,
+		"token":  c.cfg.APIKey,
+	}
+	data, _ := json.Marshal(payload)
+	select {
+	case c.sendCh <- data:
 	default:
 	}
 }
@@ -162,6 +180,12 @@ func (c *WSClient) runConn() error {
 			continue
 		}
 		if msg.Type == "ping" {
+			continue
+		}
+		if msg.Type == "wakeword_result" {
+			if c.OnWakeWordResult != nil {
+				c.OnWakeWordResult(msg.Text, msg.Data == "true" || msg.Highlight)
+			}
 			continue
 		}
 		if c.OnMessage != nil {

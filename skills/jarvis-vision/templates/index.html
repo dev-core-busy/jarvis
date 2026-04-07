@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Vision | Facial Recognition</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="logo">
+                <div class="logo-icon"></div>
+                <h1>JARVIS<span>VISION</span></h1>
+            </div>
+            <nav>
+                <ul>
+                    <li class="active" onclick="showSection('dashboard')"><i class="icon-dashboard"></i> Dashboard</li>
+                    <li onclick="showSection('profiles')"><i class="icon-users"></i> Gesichter</li>
+                    <li onclick="showSection('actions')"><i class="icon-actions"></i> Aktionen</li>
+                    <li onclick="showSection('logs')"><i class="icon-logs"></i> Logs</li>
+                    <li onclick="showSection('settings')"><i class="icon-settings"></i> Einstellungen</li>
+                </ul>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="status-item">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">Verbunden</span>
+                    <span id="status-info" style="margin-left: 5px; opacity: 0.7; font-size: 0.7rem;"></span>
+                </div>
+                <div class="camera-info" id="camera-info">
+                    Kamera: <span id="current-camera">Suche...</span>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header>
+                <h2>Live Recognition Dashboard</h2>
+                <div class="status-badge" id="app-status">System Online</div>
+            </header>
+
+            <section id="section-dashboard">
+                <div class="dashboard-grid">
+                    <div class="video-card card glass">
+                        <div class="card-header">
+                            <h3>Live Feed</h3>
+                            <div class="rec-indicator" id="rec-dot">REC</div>
+                        </div>
+                        <div class="video-container">
+                            <img src="{{ url_for('video_feed') }}" alt="Video Feed">
+                            <div class="scan-line"></div>
+                        </div>
+                        <div class="video-footer">
+                            <span id="detected-name">Warten...</span>
+                            <div class="controls">
+                                <button id="btn-train-start" class="btn primary">Training Start</button>
+                                <button id="btn-train-stop" class="btn secondary hidden">Training Stopp</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="info-card card glass" id="dashboard-instructions">
+                        <div class="card-header">
+                            <h3>Trainings-Anweisungen</h3>
+                        </div>
+                        <div class="instruction-box"
+                            style="margin-top: 1rem; border: none; background: transparent; padding: 0;">
+                            <ul class="instruction-list">
+                                <li>Schauen Sie direkt in die Kamera.</li>
+                                <li>Bewegen Sie Ihren Kopf leicht in alle Richtungen.</li>
+                                <li>Achten Sie auf gute, gleichmäßige Beleuchtung.</li>
+                                <li>Abstand zur Kamera: ca. 60-80 cm.</li>
+                            </ul>
+                        </div>
+                        <div id="training-active-indicator" class="hidden"
+                            style="margin-top: 1.5rem; text-align: center; color: var(--accent); font-weight: bold; padding: 1rem; background: rgba(52, 152, 219, 0.1); border-radius: 8px; border: 1px solid var(--accent);">
+                            Training läuft... Bitte bewegen Sie den Kopf.
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="section-profiles" class="hidden">
+                <div class="card glass">
+                    <h2>Gesichts-Verwaltung</h2>
+                    <p class="subtitle">Hier kannst du neue Personen benennen und unerwünschte Gesichtsmodelle löschen.
+                    </p>
+                    <div id="profile-list-full" class="profile-list">
+                    </div>
+                </div>
+            </section>
+
+            <section id="section-actions" class="hidden">
+                <div class="card glass">
+                    <h2>System-Aktionen</h2>
+                    <p class="subtitle">Verknüpfe hier benannte Personen mit System-Aktionen (z.B. Log, Webhook, LLM).
+                    </p>
+                    <div id="action-list-full" class="profile-list">
+                    </div>
+                </div>
+            </section>
+
+            <section id="section-logs" class="hidden">
+                <div class="card glass">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h2 style="margin: 0;">System Logs</h2>
+                        <button id="btn-refresh-logs" class="btn small secondary">Aktualisieren</button>
+                    </div>
+                    <div id="log-container" class="scroll-area"
+                        style="height: 400px; font-family: monospace; font-size: 0.8rem; background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px;">
+                        Warte auf Logs...
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sektion: Einstellungen -->
+            <section id="section-settings" class="hidden">
+                <div class="card">
+                    <h2>Kamera-Einstellungen</h2>
+                    <p class="subtitle">Wähle die aktive Kamera-Quelle aus.</p>
+
+                    <!-- NEU: Kamera-Vorschau -->
+                    <div class="preview-container" style="margin-bottom: 1.5rem; text-align: center;">
+                        <img id="camera-preview-img" src="" alt="Kamera Vorschau"
+                            style="width: 100%; max-width: 320px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: #000; display: none; margin: 0 auto;">
+                        <div id="preview-placeholder"
+                            style="width: 100%; max-width: 320px; height: 180px; background: #000; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 0.8rem; margin: 0 auto;">
+                            Wählen Sie eine Kamera für die Vorschau
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Verfügbare Kameras</label>
+                        <select id="camera-select">
+                            <!-- Dynamisch befüllt -->
+                        </select>
+                    </div>
+                    <div class="settings-actions" style="display: flex; gap: 1rem; margin-top: 1rem;">
+                        <button class="btn primary" onclick="changeCamera()">Kamera übernehmen</button>
+                        <button class="btn secondary" onclick="refreshCameras(true)">Liste laden</button>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 2rem;">
+                    <h2>System-Wartung</h2>
+                    <p class="subtitle">Vorsicht: Diese Aktion löscht alle gelernten Gesichter.</p>
+                    <button class="btn danger" onclick="cleanupSystem()">System zurücksetzen</button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modal für Name-Edit -->
+    <div id="modal-edit-name" class="modal hidden">
+        <div class="modal-content glass">
+            <h3>Gesicht <span id="modal-name-id-text"></span> benennen</h3>
+            <div class="form-group">
+                <label>Name (z.B. Max Mustermann)</label>
+                <input type="text" id="edit-name-input" placeholder="Name">
+            </div>
+            <div class="modal-footer">
+                <button id="btn-cancel-name" class="btn">Abbrechen</button>
+                <button id="btn-save-name" class="btn primary">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal für Action-Edit -->
+    <div id="modal-edit-action" class="modal hidden">
+        <div class="modal-content glass">
+            <h3>Aktion für <span id="modal-action-name-text" style="color:var(--accent);"></span> festlegen</h3>
+            <div class="form-group">
+                <label>System-Aktion</label>
+                <select id="edit-action">
+                    <!-- Aktionen dynamisch -->
+                </select>
+            </div>
+            <div class="form-group hidden" id="action-value-group">
+                <label id="action-value-label">URL / Prompt</label>
+                <input type="text" id="edit-action-value">
+            </div>
+            <div class="modal-footer">
+                <button id="btn-cancel-action" class="btn">Abbrechen</button>
+                <button id="btn-save-action" class="btn primary">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}?v=6"></script>
+</body>
+
+</html>

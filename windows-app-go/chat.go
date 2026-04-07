@@ -638,6 +638,71 @@ func newJAvatarSmall() fyne.CanvasObject {
 		container.NewStack(outer, inner, container.NewCenter(letter)))
 }
 
+// ── selCheckbox – eigene Checkbox ohne Fokusring ──────────────────────────────
+
+type selCheckbox struct {
+	widget.BaseWidget
+	checked  bool
+	onChange func(bool)
+}
+
+func newSelCheckbox(checked bool, onChange func(bool)) *selCheckbox {
+	c := &selCheckbox{checked: checked, onChange: onChange}
+	c.ExtendBaseWidget(c)
+	return c
+}
+
+func (c *selCheckbox) Tapped(_ *fyne.PointEvent) {
+	c.checked = !c.checked
+	c.Refresh()
+	if c.onChange != nil {
+		c.onChange(c.checked)
+	}
+}
+
+func (c *selCheckbox) MinSize() fyne.Size { return fyne.NewSize(24, 24) }
+
+func (c *selCheckbox) CreateRenderer() fyne.WidgetRenderer {
+	border := canvas.NewRectangle(colorTransparent)
+	border.StrokeColor = jc.accent
+	border.StrokeWidth = 2
+	border.CornerRadius = 3
+	check := canvas.NewImageFromResource(theme.ConfirmIcon())
+	check.FillMode = canvas.ImageFillContain
+	return &selCheckboxRenderer{cb: c, border: border, check: check}
+}
+
+type selCheckboxRenderer struct {
+	cb     *selCheckbox
+	border *canvas.Rectangle
+	check  *canvas.Image
+}
+
+func (r *selCheckboxRenderer) Layout(size fyne.Size) {
+	r.border.Resize(size)
+	pad := float32(3)
+	r.check.Move(fyne.NewPos(pad, pad))
+	r.check.Resize(fyne.NewSize(size.Width-pad*2, size.Height-pad*2))
+}
+func (r *selCheckboxRenderer) MinSize() fyne.Size { return fyne.NewSize(24, 24) }
+func (r *selCheckboxRenderer) Refresh() {
+	if r.cb.checked {
+		r.border.FillColor = jc.accent
+		r.check.Hidden = false
+	} else {
+		r.border.FillColor = colorTransparent
+		r.check.Hidden = true
+	}
+	r.border.Refresh()
+	r.check.Refresh()
+}
+func (r *selCheckboxRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.border, r.check}
+}
+func (r *selCheckboxRenderer) Destroy() {}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 func (c *ChatWidget) buildRow(msg ChatMessage) fyne.CanvasObject {
 	return c.buildRowAt(msg, -1)
 }
@@ -665,7 +730,7 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 		}
 	}
 
-	// Linksklick: Auswahl umschalten (nur im Selektionsmodus sinnvoll).
+	// Linksklick auf Bubble: Auswahl umschalten (nur im Selektionsmodus).
 	var leftClickFn func()
 	if c.selMode {
 		leftClickFn = func() {
@@ -676,16 +741,22 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 		}
 	}
 
-	// Checkbox-Kreis links (nur im Selektionsmodus sichtbar).
+	// Eigene Checkbox ohne Fokusring (nur im Selektionsmodus sichtbar).
 	var checkBox fyne.CanvasObject
 	if c.selMode {
-		circle := canvas.NewCircle(colorTransparent)
-		circle.StrokeColor = jc.accent
-		circle.StrokeWidth = 2
-		if c.selSet[idx] {
-			circle.FillColor = jc.accent
-		}
-		checkBox = container.NewGridWrap(fyne.NewSize(24, 24), circle)
+		cb := newSelCheckbox(c.selSet[idx], func(checked bool) {
+			cur := resolveIdx()
+			if cur < 0 {
+				return
+			}
+			if checked {
+				c.selSet[cur] = true
+			} else {
+				delete(c.selSet, cur)
+			}
+			c.updateSelCount()
+		})
+		checkBox = container.NewCenter(container.NewGridWrap(fyne.NewSize(28, 28), cb))
 	}
 
 	switch msg.Role {

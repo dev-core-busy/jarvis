@@ -1,0 +1,8 @@
+{
+    "profiles": {},
+    "actions": [
+        {"id": "webhook", "label": "Webhook senden", "type": "url"},
+        {"id": "llm", "label": "LLM informieren", "type": "prompt"},
+        {"id": "log", "label": "Nur Loggen", "type": "none"}
+    ]
+}

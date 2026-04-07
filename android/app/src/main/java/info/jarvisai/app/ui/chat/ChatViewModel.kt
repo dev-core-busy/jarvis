@@ -91,6 +91,13 @@ class ChatViewModel @Inject constructor(
                 autoSendVoice = s.autoSendVoice
                 voiceSilenceMs = s.voiceSilenceMs
                 avatarEnabled = s.avatarEnabled
+                ttsManager.configure(
+                    serverTtsEnabled = s.serverTtsEnabled,
+                    serverUrl        = s.serverUrl,
+                    apiKey           = s.apiKey,
+                    serverVoice      = s.serverTtsVoice,
+                    androidVoice     = s.androidTtsVoice,
+                )
             }
         }
         // Fertige Jarvis-Antworten vorlesen wenn Avatar aktiv

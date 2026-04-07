@@ -36,7 +36,10 @@ data class JarvisSettings(
     val backgroundAlpha: Float = 0.5f,
     val debugMode: Boolean = false,
     val voiceSilenceMs: Int = 1500,
-    val avatarEnabled: Boolean = true,    // Anime-Avatar standardmäßig aktiv
+    val avatarEnabled: Boolean = true,
+    val serverTtsEnabled: Boolean = false,
+    val serverTtsVoice: String = "de-DE-ConradNeural",
+    val androidTtsVoice: String = "",     // "" = Automatisch
 )
 
 val DEFAULT_QUICK_ACTIONS = listOf(
@@ -59,8 +62,11 @@ class SettingsDataStore @Inject constructor(
     private val KEY_BG_COLOR      = intPreferencesKey("bg_color")
     private val KEY_BG_ALPHA      = floatPreferencesKey("bg_alpha")
     private val KEY_DEBUG_MODE    = booleanPreferencesKey("debug_mode")
-    private val KEY_VOICE_SILENCE = intPreferencesKey("voice_silence_ms")
-    private val KEY_AVATAR        = booleanPreferencesKey("avatar_enabled")
+    private val KEY_VOICE_SILENCE      = intPreferencesKey("voice_silence_ms")
+    private val KEY_AVATAR             = booleanPreferencesKey("avatar_enabled")
+    private val KEY_SERVER_TTS_ENABLED = booleanPreferencesKey("server_tts_enabled")
+    private val KEY_SERVER_TTS_VOICE   = stringPreferencesKey("server_tts_voice")
+    private val KEY_ANDROID_TTS_VOICE  = stringPreferencesKey("android_tts_voice")
 
     val settings: Flow<JarvisSettings> = context.dataStore.data.map { prefs ->
         JarvisSettings(
@@ -77,6 +83,9 @@ class SettingsDataStore @Inject constructor(
             debugMode           = prefs[KEY_DEBUG_MODE] ?: false,
             voiceSilenceMs      = prefs[KEY_VOICE_SILENCE] ?: 1500,
             avatarEnabled       = prefs[KEY_AVATAR] ?: true,
+            serverTtsEnabled    = prefs[KEY_SERVER_TTS_ENABLED] ?: false,
+            serverTtsVoice      = prefs[KEY_SERVER_TTS_VOICE] ?: "de-DE-ConradNeural",
+            androidTtsVoice     = prefs[KEY_ANDROID_TTS_VOICE] ?: "",
         )
     }
 
@@ -94,8 +103,11 @@ class SettingsDataStore @Inject constructor(
             prefs[KEY_BG_COLOR]      = settings.backgroundColorArgb
             prefs[KEY_BG_ALPHA]      = settings.backgroundAlpha
             prefs[KEY_DEBUG_MODE]    = settings.debugMode
-            prefs[KEY_VOICE_SILENCE] = settings.voiceSilenceMs
-            prefs[KEY_AVATAR]        = settings.avatarEnabled
+            prefs[KEY_VOICE_SILENCE]      = settings.voiceSilenceMs
+            prefs[KEY_AVATAR]             = settings.avatarEnabled
+            prefs[KEY_SERVER_TTS_ENABLED] = settings.serverTtsEnabled
+            prefs[KEY_SERVER_TTS_VOICE]   = settings.serverTtsVoice
+            prefs[KEY_ANDROID_TTS_VOICE]  = settings.androidTtsVoice
         }
     }
 }

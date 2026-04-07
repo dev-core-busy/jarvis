@@ -340,7 +340,7 @@ fun SettingsScreen(
             SectionHeader("Anzeige")
 
             SettingRow(
-                label = "Anime-Avatar",
+                label = "Ironman-Avatar",
                 description = "Animierter Charakter mit Sprachausgabe (Deutsch) im Hintergrund",
             ) {
                 Switch(

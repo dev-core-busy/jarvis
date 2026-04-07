@@ -37,6 +37,46 @@ class LLMProvider(ABC):
         pass
 
 
+def _parse_sse_to_completion(sse_text: str) -> dict:
+    """Konvertiert einen SSE (Server-Sent Events)-Stream in ein synthetisches non-stream JSON-Objekt.
+    Open WebUI antwortet manchmal als Stream auch wenn stream:false gesetzt ist."""
+    content = ""
+    tool_calls: dict = {}
+    finish_reason = "stop"
+    for line in sse_text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        raw = line[5:].strip()
+        if raw == "[DONE]":
+            break
+        try:
+            chunk = json.loads(raw)
+        except Exception:
+            continue
+        choice = (chunk.get("choices") or [{}])[0]
+        delta = choice.get("delta", {})
+        if delta.get("content"):
+            content += delta["content"]
+        finish_reason = choice.get("finish_reason") or finish_reason
+        # Tool-Call-Deltas zusammensetzen
+        for tc in delta.get("tool_calls") or []:
+            idx = tc.get("index", 0)
+            if idx not in tool_calls:
+                tool_calls[idx] = {"id": tc.get("id", ""), "type": "function",
+                                   "function": {"name": "", "arguments": ""}}
+            if tc.get("id"):
+                tool_calls[idx]["id"] = tc["id"]
+            fn = tc.get("function", {})
+            if fn.get("name"):
+                tool_calls[idx]["function"]["name"] += fn["name"]
+            if fn.get("arguments"):
+                tool_calls[idx]["function"]["arguments"] += fn["arguments"]
+    message: dict = {"role": "assistant", "content": content or None}
+    if tool_calls:
+        message["tool_calls"] = list(tool_calls.values())
+    return {"choices": [{"message": message, "finish_reason": finish_reason}]}
+
+
 # Shared httpx.AsyncClient mit Connection-Pooling (vermeidet neue Verbindung pro Request)
 _shared_client: httpx.AsyncClient | None = None
 _client_lock = asyncio.Lock()
@@ -49,7 +89,7 @@ async def _get_shared_client() -> httpx.AsyncClient:
         async with _client_lock:
             if _shared_client is None or _shared_client.is_closed:
                 _shared_client = httpx.AsyncClient(
-                    timeout=httpx.Timeout(300.0, connect=10.0),
+                    timeout=httpx.Timeout(180.0, connect=10.0, read=180.0, write=30.0),
                     limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
                     follow_redirects=True,
                 )
@@ -62,11 +102,12 @@ async def _retry_with_backoff(coro_fn, max_retries: int = 3, base_delay: float =
         try:
             return await coro_fn()
         except (httpx.HTTPStatusError, httpx.ConnectError, httpx.ReadTimeout, ValueError) as e:
-            # Nur bei 429/503/Timeout/Connect-Fehlern erneut versuchen
+            # Nur bei 429/503/502 und ConnectError erneut versuchen
+            # ReadTimeout NICHT retrien – bei langsamen lokalen Modellen würde das die Wartezeit vervielfachen
             retryable = False
             if isinstance(e, httpx.HTTPStatusError) and e.response.status_code in (429, 503, 502):
                 retryable = True
-            elif isinstance(e, (httpx.ConnectError, httpx.ReadTimeout)):
+            elif isinstance(e, httpx.ConnectError):
                 retryable = True
             elif isinstance(e, ValueError) and ("429" in str(e) or "503" in str(e) or "502" in str(e)):
                 retryable = True
@@ -159,9 +200,9 @@ class OpenAICompatibleProvider(LLMProvider):
             headers["Authorization"] = f"Bearer {clean_key}"
         return headers
 
-    def _get_timeout(self) -> float:
-        # Lokale Modelle (z.B. 24B+) brauchen deutlich länger als Cloud-APIs
-        return 300.0
+    def _get_timeout(self) -> httpx.Timeout:
+        # Lokale Modelle brauchen mehr Zeit als Cloud-APIs (Application Programming Interfaces)
+        return httpx.Timeout(180.0, connect=10.0, read=180.0, write=30.0)
 
     async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
         """Wählt zwischen nativem und Prompt-basiertem Tool-Calling (mit Retry bei 429/503)."""
@@ -214,10 +255,10 @@ class OpenAICompatibleProvider(LLMProvider):
                 })
             payload["tools"] = openai_tools
 
+        payload["stream"] = False
         client = await _get_shared_client()
         resp = await client.post(self.base_url, headers=self._build_headers(), json=payload, timeout=self._get_timeout())
         if not resp.is_success:
-            # Fehlerdetails aus der Response-Body zeigen (z.B. Open WebUI Fehlermeldung)
             try:
                 err_body = resp.json()
                 err_detail = err_body.get("detail") or err_body.get("message") or err_body.get("error") or resp.text[:300]

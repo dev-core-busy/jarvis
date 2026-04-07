@@ -205,18 +205,74 @@ type msg struct {
 
 var (
 	avatarOrigWndProc  uintptr
-	// Callback MUSS global bleiben (kein GC!)
-	avatarSubclassProc = syscall.NewCallback(avatarSubclassFn)
+	avatarSubclassProc = syscall.NewCallback(avatarSubclassFn) // Callback MUSS global bleiben (kein GC!)
 )
 
-// avatarSubclassFn: gibt HTCAPTION für WM_NCHITTEST zurück → Windows zieht das
-// Fenster nativ ohne jeglichen Go-Code (ruckelfrei, DPI-korrekt).
 func avatarSubclassFn(hwnd, msg, wp, lp uintptr) uintptr {
 	if msg == wmNcHitTest {
 		return htCaption
 	}
 	ret, _, _ := pCallWindowProcW.Call(avatarOrigWndProc, hwnd, msg, wp, lp)
 	return ret
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chat-Fenster: Rahmenlos mit nativem Drag (WM_NCHITTEST → HTCAPTION)
+// ─────────────────────────────────────────────────────────────────────────────
+
+var (
+	chatOrigWndProc  uintptr
+	chatSubclassProc = syscall.NewCallback(chatSubclassFn) // Callback MUSS global bleiben (kein GC!)
+)
+
+// chatSubclassFn: Nur ein schmaler Drag-Streifen ganz oben (20px) gibt HTCAPTION zurück.
+// Der Rest bleibt HTCLIENT → Fyne-Buttons/-Eingaben funktionieren normal.
+func chatSubclassFn(hwnd, msg, wp, lp uintptr) uintptr {
+	if msg == wmNcHitTest {
+		ret, _, _ := pCallWindowProcW.Call(chatOrigWndProc, hwnd, msg, wp, lp)
+		if ret == htClient {
+			var r winRECT
+			pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+			screenY := int32(int16((lp >> 16) & 0xFFFF))
+			relY := screenY - r.Top
+			// Nur die obersten 20px sind Drag-Bereich (schmaler Streifen über dem Header)
+			if relY >= 0 && relY <= 20 {
+				return htCaption
+			}
+		}
+		return ret
+	}
+	ret, _, _ := pCallWindowProcW.Call(chatOrigWndProc, hwnd, msg, wp, lp)
+	return ret
+}
+
+// MakeChatWindowFrameless entfernt den Titelrahmen des Chat-Fensters.
+// Das Fenster bleibt normal bedienbar (kein TopMost, kein ToolWindow).
+func MakeChatWindowFrameless() {
+	var hwnd uintptr
+	for i := 0; i < 30; i++ {
+		time.Sleep(100 * time.Millisecond)
+		hwnd = findHWND("Jarvis – Chat")
+		if hwnd != 0 {
+			break
+		}
+	}
+	if hwnd == 0 {
+		return
+	}
+
+	// Titelleiste + Rahmen entfernen, aber Größenänderung beibehalten
+	style, _, _ := pGetWindowLongPtrW.Call(hwnd, gwlStyle)
+	style &^= wsCaption | wsSysMenu | wsMinimizeBox | wsMaximizeBox
+	// wsThickFrame beibehalten → Größenänderung an den Kanten weiterhin möglich
+	pSetWindowLongPtrW.Call(hwnd, gwlStyle, style)
+
+	// Rahmen neu berechnen lassen
+	pSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0,
+		swpNomove|swpNosize|swpNozorder|swpFrameChanged|swpShowWindow)
+
+	// WndProc subclassen für Drag + Eingabefeld-Schutz
+	chatOrigWndProc, _, _ = pSetWindowLongPtrW.Call(hwnd, gwlWndProc, chatSubclassProc)
 }
 
 var (

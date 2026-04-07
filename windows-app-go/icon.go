@@ -9,3 +9,9 @@ var jarvisTrayICO []byte
 
 //go:embed ironman_avatar.png
 var ironManAvatarBytes []byte
+
+//go:embed jarvis_icon.png
+var jarvisIconPNG []byte
+
+//go:embed bg_jarvis.jpg
+var bgJarvisJPG []byte

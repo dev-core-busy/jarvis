@@ -38,15 +38,32 @@
             <h1 class="login-title">JARVIS</h1>
             <p class="login-subtitle">KI Linux Agent</p>
             <form id="login-form" class="login-form">
-                <div class="input-group" style="flex-direction: column; gap: 0;">
+                <div class="form-group" style="text-align:left;margin-bottom:14px;">
+                    <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;">BENUTZERNAME</label>
                     <input type="text" id="login-username" placeholder="Benutzername"
-                        autocomplete="username" required>
-                    <input type="password" id="login-password" placeholder="Passwort"
-                        autocomplete="current-password" required>
-                    <button type="submit" class="btn-login" id="login-btn">
-                        <span class="btn-text">ANMELDEN</span>
-                    </button>
+                        autocomplete="username" required
+                        style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
+                        onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(99,102,241,0.2)'"
+                        onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
                 </div>
+                <div class="form-group" style="text-align:left;margin-bottom:20px;">
+                    <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;">KENNWORT</label>
+                    <div style="position:relative;">
+                        <input type="password" id="login-password" placeholder="Kennwort"
+                            autocomplete="current-password" required
+                            style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 42px 11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
+                            onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(99,102,241,0.2)'"
+                            onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
+                        <button type="button" id="btn-toggle-login-pw"
+                            style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;transition:color 0.2s;"
+                            onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-muted)'">
+                            <svg id="ico-login-pw" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <button type="submit" class="btn-login" id="login-btn" style="width:100%;">
+                    <span class="btn-text">ANMELDEN</span>
+                </button>
                 <p id="login-error" class="login-error" hidden></p>
 
                 <div class="login-extras">
@@ -63,6 +80,56 @@
             </form>
         </div>
         <div class="login-particles" id="particles"></div>
+    </div>
+
+    <!-- ═══ Change-Password Modal (Erstes Login / manuell) ═══ -->
+    <div id="change-password-modal" class="modal" style="display:none; z-index:9999;">
+        <div class="modal-content glass" style="max-width:420px;">
+            <div class="modal-header">
+                <h2 id="change-pw-title">🔒 Kennwort ändern</h2>
+            </div>
+            <div class="modal-body">
+                <p id="change-pw-hint" style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:16px;line-height:1.5;">
+                    Bitte setze ein neues Kennwort. Es muss mindestens 8 Zeichen, einen Großbuchstaben, einen Kleinbuchstaben und eine Ziffer enthalten.
+                </p>
+                <div class="form-group">
+                    <label>Aktuelles Kennwort</label>
+                    <div style="position:relative;">
+                        <input type="password" id="cpw-old" placeholder="Aktuelles Kennwort" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                        <button type="button" id="btn-eye-cpw-old" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
+                            <svg id="ico-eye-cpw-old" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Neues Kennwort</label>
+                    <div style="position:relative;">
+                        <input type="password" id="cpw-new" placeholder="Neues Kennwort" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                        <button type="button" id="btn-eye-cpw-new" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
+                            <svg id="ico-eye-cpw-new" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;margin-top:5px;">
+                        <button type="button" id="cpw-suggest" class="kb-btn-action" style="font-size:0.78rem;padding:3px 10px;">🔑 Generieren</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Kennwort bestätigen</label>
+                    <div style="position:relative;">
+                        <input type="password" id="cpw-confirm" placeholder="Kennwort wiederholen" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                        <button type="button" id="btn-eye-cpw-confirm" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
+                            <svg id="ico-eye-cpw-confirm" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div id="cpw-strength" style="margin-bottom:8px;font-size:0.8rem;min-height:18px;"></div>
+                <div id="cpw-error" style="display:none;color:#ff6b6b;font-size:0.85rem;margin-bottom:10px;"></div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button class="btn-secondary" id="cpw-cancel" style="display:none;">Abbrechen</button>
+                    <button class="kb-btn-action" id="cpw-submit">Kennwort speichern</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- ═══ Cert Help Modal ═══ -->
@@ -382,6 +449,7 @@ sudo update-ca-certificates</code></pre>
                 <button class="settings-tab-btn" data-settings-tab="mcp">MCP</button>
                 <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;">Vision</button>
                 <button class="settings-tab-btn" data-settings-tab="telemetry">Telemetry</button>
+                <button class="settings-tab-btn" data-settings-tab="security">Sicherheit</button>
             </div>
 
             <div class="modal-body">
@@ -411,9 +479,9 @@ sudo update-ca-certificates</code></pre>
                     <div class="form-group">
                         <label>Agent API Key</label>
                         <div class="input-group" style="display: flex; gap: 8px; align-items: center;">
-                            <input type="text" id="setting-agent-api-key" placeholder="Noch kein Key generiert" style="flex: 1;" readonly>
+                            <input type="password" id="setting-agent-api-key" placeholder="Noch kein Key generiert" style="flex: 1;" readonly>
                             <button class="btn-icon btn-small" id="btn-toggle-apikey" title="Anzeigen/Verbergen" style="flex-shrink: 0;">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                <svg id="ico-agent-apikey" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                             </button>
                             <button class="btn-icon btn-small" id="btn-copy-apikey" title="Kopieren" style="flex-shrink: 0;">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
@@ -463,7 +531,7 @@ sudo update-ca-certificates</code></pre>
                                 <option value="google">Google Gemini</option>
                                 <option value="openrouter">OpenRouter</option>
                                 <option value="anthropic">Anthropic Claude</option>
-                                <option value="openai_compatible">OpenAI-Kompatibel (Lokal)</option>
+                                <option value="openai_compatible">OpenAI-Kompatibel</option>
                             </select>
                         </div>
                     </div>
@@ -528,6 +596,9 @@ sudo update-ca-certificates</code></pre>
                         <label>API Key</label>
                         <div class="input-group">
                             <input type="password" id="profile-api-key" placeholder="AIza... / sk-or-... / sk-ant-...">
+                            <button type="button" id="btn-toggle-profile-apikey" title="Key anzeigen/verbergen" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                <svg id="ico-profile-apikey" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
                         </div>
                         <small class="tab-note apikey-hint" style="margin-top: 5px; opacity: 0.7;"></small>
                     </div>
@@ -537,6 +608,9 @@ sudo update-ca-certificates</code></pre>
                         <label>Session Key</label>
                         <div class="input-group">
                             <input type="password" id="profile-session-key" placeholder="sk-ant-sid01-...">
+                            <button type="button" id="btn-toggle-profile-sessionkey" title="Key anzeigen/verbergen" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                <svg id="ico-profile-sessionkey" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
                         </div>
                         <small class="tab-note" style="margin-top: 5px; opacity: 0.7;">
                             Aus dem Browser-Cookie <code>sessionKey</code> auf
@@ -548,7 +622,12 @@ sudo update-ca-certificates</code></pre>
                     <div class="modal-actions">
                         <button class="btn-primary" id="btn-save-profile">Speichern</button>
                         <button class="btn-secondary" id="btn-cancel-profile">Abbrechen</button>
+                        <button class="btn-secondary" id="btn-test-profile" style="margin-left:auto;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                            Verbindung testen
+                        </button>
                     </div>
+                    <div id="profile-test-result" style="display:none;margin-top:10px;padding:10px 14px;border-radius:8px;font-size:0.88rem;line-height:1.5;"></div>
                 </div>
 
                 <!-- ── Instruktionen (innerhalb KI-Profile) ── -->
@@ -1057,6 +1136,54 @@ sudo update-ca-certificates</code></pre>
                     </div>
                 </div>
 
+                <!-- ═══ Tab: Sicherheit ═══ -->
+                <div id="settings-tab-security" class="settings-tab-content" style="display:none;">
+                    <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:16px;">🔒 Kennwort ändern</h3>
+                    <div class="form-group">
+                        <label>Aktuelles Kennwort</label>
+                        <div style="position:relative;width:25%;">
+                            <input type="password" id="sec-cpw-old" placeholder="Aktuelles Kennwort" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                            <button type="button" id="btn-eye-sec-old" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
+                                <svg id="ico-eye-sec-old" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Neues Kennwort</label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <div style="position:relative;width:25%;flex-shrink:0;">
+                                <input type="password" id="sec-cpw-new" placeholder="Neues Kennwort" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                                <button type="button" id="btn-eye-sec-new" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
+                                    <svg id="ico-eye-sec-new" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                </button>
+                            </div>
+                            <button type="button" id="sec-cpw-suggest" class="kb-btn-action" style="font-size:0.78rem;padding:3px 10px;flex-shrink:0;">🔑 Generieren</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Kennwort bestätigen</label>
+                        <div style="position:relative;width:25%;">
+                            <input type="password" id="sec-cpw-confirm" placeholder="Kennwort wiederholen" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                            <button type="button" id="btn-eye-sec-confirm" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
+                                <svg id="ico-eye-sec-confirm" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="sec-cpw-strength" style="font-size:0.8rem;min-height:18px;margin-bottom:8px;width:25%;"></div>
+                    <div id="sec-cpw-error" style="display:none;color:#ff6b6b;font-size:0.85rem;margin-bottom:10px;"></div>
+                    <div id="sec-cpw-success" style="display:none;color:#4ade80;font-size:0.85rem;margin-bottom:10px;"></div>
+                    <button class="kb-btn-action" id="sec-cpw-submit">Kennwort speichern</button>
+
+                    <hr class="settings-divider" style="margin-top:24px;">
+                    <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:8px;">🔑 Zwei-Faktor-Authentifizierung (2FA)</h3>
+                    <p style="color:var(--text-secondary);font-size:0.85rem;line-height:1.5;margin-bottom:10px;">
+                        Die Zwei-Faktor-Authentifizierung (2FA) ist noch nicht aktiviert. Diese Funktion wird in einer zukünftigen Version verfügbar sein.
+                    </p>
+                    <div style="padding:10px 14px;border-radius:8px;background:var(--bg-glass);border:1px solid var(--border);font-size:0.85rem;color:var(--text-muted);">
+                        ⏳ In Vorbereitung – TOTP (Time-based One-Time Password)-Unterstützung ist geplant.
+                    </div>
+                </div>
+
             </div>
             <div id="version-modal-footer" class="settings-version-footer"></div>
         </div>
@@ -1070,7 +1197,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=1"></script>
-    <script src="/static/js/app.js?v=38"></script>
+    <script src="/static/js/app.js?v=47"></script>
 </body>
 
 </html>

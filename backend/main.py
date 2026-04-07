@@ -2787,6 +2787,13 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         cpu_task.cancel()
         active_sessions.pop(session_id, None)
+        # Windows-Client abmelden falls diese Verbindung es war
+        try:
+            from backend.tools.windows_desktop import set_windows_ws, _windows_ws
+            if _windows_ws is ws:
+                set_windows_ws(None)
+        except Exception:
+            pass
 
 
 async def cpu_broadcast(ws: WebSocket):
@@ -2908,6 +2915,19 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Agent-Liste anfordern
         agents = agent_manager.get_all_info() if agent_manager else []
         await ws.send_json({"type": "agent_list", "agents": agents})
+
+    elif msg_type == "register":
+        # Windows-Client registriert sich als Desktop-Agent
+        client_type = msg.get("client_type", "")
+        if client_type == "windows_desktop":
+            from backend.tools.windows_desktop import set_windows_ws
+            set_windows_ws(ws)
+            await ws.send_json({"type": "status", "message": "✅ Windows Desktop-Agent registriert"})
+
+    elif msg_type == "desktop_result":
+        # Ergebnis eines Desktop-Befehls von der Windows App
+        from backend.tools.windows_desktop import on_desktop_result
+        on_desktop_result(msg)
 
     elif msg_type == "ping":
         await ws.send_json({"type": "pong"})

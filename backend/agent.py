@@ -214,6 +214,13 @@ KRITISCH – Autonomie-Regeln:
             from backend.tools.subagent import SpawnAgentTool
             self._tool_instances.append(SpawnAgentTool())
 
+        # Windows Desktop Tool (immer verfügbar; gibt Fehler wenn kein Client verbunden)
+        try:
+            from backend.tools.windows_desktop import WindowsDesktopTool
+            self._tool_instances.append(WindowsDesktopTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] WindowsDesktopTool nicht geladen: {e}", flush=True)
+
         # MCP-Tools laden (externe Tool-Server)
         try:
             from backend.mcp_client import mcp_manager

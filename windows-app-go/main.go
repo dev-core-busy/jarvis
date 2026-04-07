@@ -260,6 +260,11 @@ func (ja *JarvisApp) reconnect() {
 	ja.chat.OnSettings = func() {
 		showSettingsWindow(ja.fyneApp, ja, func() { ja.reconnect(); ja.refreshChatWindow() })
 	}
+	// Desktop-Steuerung: Backend kann Windows-Desktop steuern
+	ja.ws.OnDesktopCommand = func(cmd DesktopCommand) {
+		res := DesktopExecute(cmd)
+		ja.ws.SendDesktopResult(res)
+	}
 	if ja.dialog != nil {
 		ja.dialog.ws = ja.ws
 	}

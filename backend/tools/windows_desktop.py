@@ -96,7 +96,7 @@ class WindowsDesktopTool(BaseTool):
             "required": ["action"],
         }
 
-    async def run(
+    async def execute(
         self,
         action: str,
         x: float = 0,

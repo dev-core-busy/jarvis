@@ -94,13 +94,14 @@ func (c *WSClient) SendScreenResult(action, data string) {
 // SendDesktopResult sendet das Ergebnis eines Desktop-Befehls ans Backend.
 func (c *WSClient) SendDesktopResult(res DesktopResult) {
 	b, _ := json.Marshal(map[string]interface{}{
-		"type":      "desktop_result",
-		"action":    res.Action,
+		"type":       "desktop_result",
+		"token":      c.cfg.APIKey,
+		"action":     res.Action,
 		"request_id": res.RequestID,
-		"output":    res.Output,
-		"data":      res.Data,
-		"error":     res.Error,
-		"exit_code": res.ExitCode,
+		"output":     res.Output,
+		"data":       res.Data,
+		"error":      res.Error,
+		"exit_code":  res.ExitCode,
 	})
 	select {
 	case c.sendCh <- b:

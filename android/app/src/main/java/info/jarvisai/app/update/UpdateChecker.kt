@@ -15,7 +15,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Serializable
-data class VersionInfo(val versionCode: Int, val versionName: String)
+data class VersionInfo(
+    val versionCode: Int,
+    val versionName: String,
+    val downloadUrl: String = "https://jarvis-ai.info/downloads/jarvis.apk",
+)
 
 enum class DownloadPhase { IDLE, DOWNLOADING, READY, ERROR }
 
@@ -33,8 +37,9 @@ class UpdateChecker @Inject constructor(
     private val okHttpClient: OkHttpClient,
 ) {
     private val versionUrl = "https://jarvis-ai.info/version.json"
-    val apkUrl = "https://jarvis-ai.info/downloads/jarvis.apk"
     private val json = Json { ignoreUnknownKeys = true }
+    private var _apkUrl = "https://jarvis-ai.info/downloads/jarvis.apk?v=0"
+    val apkUrl get() = _apkUrl
 
     suspend fun check(): UpdateState = withContext(Dispatchers.IO) {
         try {
@@ -47,6 +52,7 @@ class UpdateChecker @Inject constructor(
                 .build()
             val body = client.newCall(req).execute().use { it.body?.string() ?: return@withContext UpdateState() }
             val info = json.decodeFromString<VersionInfo>(body)
+            _apkUrl = info.downloadUrl
             if (info.versionCode > BuildConfig.VERSION_CODE) {
                 UpdateState(available = true, versionName = info.versionName, versionCode = info.versionCode)
             } else {

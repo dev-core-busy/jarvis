@@ -38,8 +38,14 @@ class UpdateChecker @Inject constructor(
 
     suspend fun check(): UpdateState = withContext(Dispatchers.IO) {
         try {
-            val req = Request.Builder().url(versionUrl).build()
-            val body = okHttpClient.newCall(req).execute().use { it.body?.string() ?: return@withContext UpdateState() }
+            val req = Request.Builder()
+                .url("$versionUrl?t=${System.currentTimeMillis()}")
+                .header("Cache-Control", "no-cache")
+                .build()
+            val client = okHttpClient.newBuilder()
+                .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            val body = client.newCall(req).execute().use { it.body?.string() ?: return@withContext UpdateState() }
             val info = json.decodeFromString<VersionInfo>(body)
             if (info.versionCode > BuildConfig.VERSION_CODE) {
                 UpdateState(available = true, versionName = info.versionName, versionCode = info.versionCode)

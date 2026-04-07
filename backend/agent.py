@@ -319,9 +319,12 @@ KRITISCH – Autonomie-Regeln:
         elif client_type == "android":
             system_prompt += (
                 "\n\nWICHTIG – DU LÄUFST ALS ANDROID AGENT: "
-                "Der Benutzer schickt Befehle von der Jarvis Android App. "
-                "Desktop-Steuerung für Android ist noch nicht implementiert. "
-                "Antworte dem Benutzer, dass Android-Desktop-Steuerung noch nicht verfügbar ist."
+                "Der Benutzer schickt Befehle von der Jarvis Android App auf einem Android-Smartphone. "
+                "NIEMALS 'desktop_control', 'shell_execute', 'screenshot' oder andere Linux-Desktop-Tools verwenden – "
+                "diese steuern den Linux-Server, NICHT das Android-Gerät des Benutzers. "
+                "Android-Desktop-Steuerung (App öffnen, tippen, scrollen) ist noch nicht implementiert. "
+                "Wenn der Benutzer etwas auf seinem Gerät öffnen oder steuern möchte, antworte klar: "
+                "'Android-Desktop-Steuerung ist noch nicht verfügbar. Du kannst mich aber für andere Aufgaben nutzen (Wissen, Web, Shell auf dem Jarvis-Server etc.).'"
             )
         else:
             # Browser: Linux-Desktop ist der richtige Kontext (Standard)

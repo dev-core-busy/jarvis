@@ -1,0 +1,44 @@
+{
+    "name": "Claude Bridge",
+    "description": "Sendet Anweisungen an die Claude Desktop-App auf dem Linux-Desktop (xdotool + Zwischenablage). Ermöglicht Jarvis, Aufgaben an Claude zu delegieren.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["claude_send"],
+    "category": "automation",
+    "icon": "cpu",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "send_delay": {
+            "type": "number",
+            "default": 1.0,
+            "label": "Fokus-Verzögerung (Sekunden)"
+        },
+        "send_return": {
+            "type": "boolean",
+            "default": true,
+            "label": "Enter nach Einfügen drücken"
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": ["desktop"],
+    "help": {
+        "details": "Nutzt xdotool, um die Claude Desktop-App auf dem Linux-Desktop zu finden, zu aktivieren und eine Anweisung per Zwischenablage zu übertragen. Die Suche erfolgt ausschließlich über die Fensterklasse der App – Browser-Fenster werden ignoriert. Abhängigkeiten (xdotool, xclip) werden beim ersten Aufruf automatisch installiert. Funktioniert nur auf dem Jarvis-Desktop (X11). Die Claude Desktop-App muss geöffnet und sichtbar sein.",
+        "tools": [
+            {
+                "name": "claude_send",
+                "label": "Anweisung an Claude senden",
+                "desc": "Sendet eine Anweisung an die Claude Desktop-App. Installiert fehlende Abhängigkeiten automatisch. Sucht die App ausschließlich über die Fensterklasse – kein Browser-Fallback. Parameter: 'instruction' (Pflicht), 'send_return' (optional, Standard true)."
+            }
+        ],
+        "use_cases": [
+            "Instruiere Claude mit: Erstelle eine Python-Funktion für Fibonacci",
+            "Frage Claude: Was ist der Unterschied zwischen TCP und UDP?",
+            "Delegiere diese Aufgabe an Claude: Analysiere den folgenden Code ..."
+        ],
+        "setup": "Keine manuelle Installation nötig. xdotool und xclip werden beim ersten Aufruf automatisch installiert. Die Claude Desktop-App muss auf dem Jarvis-Desktop geöffnet und sichtbar sein.",
+        "notes": "Benötigt X11-Umgebung (kein Wayland). Bei Fokus-Problemen die 'send_delay' in den Einstellungen erhöhen (z.B. auf 1.5 oder 2.0)."
+    }
+}

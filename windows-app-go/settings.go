@@ -448,18 +448,29 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	// ── LAYOUT: scrollbare Einzelspalte (Android-Stil) ────────────────────────
 	content := container.NewVBox(
 		// — Verbindung —
-		sectionHeader("VERBINDUNG"),
-		labelAbove("Server-Adresse", hostEntry),
+		sectionHeader("Verbindung"),
+		labelAbove("Server-URL", hostEntry),
+		vSpacer(2),
+		func() fyne.CanvasObject {
+			l := widget.NewLabel("Tailscale- oder lokale Adresse des Jarvis-Servers")
+			l.Importance = widget.LowImportance
+			return l
+		}(),
 		vSpacer(8),
-		labelAbove("API-Schlüssel", keyEntry),
+		labelAbove("Agent API-Key", keyEntry),
+		vSpacer(2),
+		func() fyne.CanvasObject {
+			l := widget.NewLabel("Einstellungen → Agent API-Key in der Jarvis Web-UI")
+			l.Importance = widget.LowImportance
+			return l
+		}(),
 		vSpacer(4),
 		container.NewHBox(testBtn, connStatusLbl),
 
-
 		widget.NewSeparator(),
 
-		// — Audio — (Label fett links, Dropdown + Test rechts – analog Android SettingRow)
-		sectionHeader("AUDIO"),
+		// — Audio —
+		sectionHeader("Audio"),
 		audioFieldRow("Lautsprecher", speakerSel, speakerTestBtn, speakerTestLbl),
 		vSpacer(8),
 		audioFieldRow("Mikrofon", micSel, micTestBtn, micTestLbl),
@@ -469,20 +480,20 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 		widget.NewSeparator(),
 
 		// — Hintergrund —
-		sectionHeader("HINTERGRUND"),
+		sectionHeader("Hintergrund"),
 		bgTypeRadio,
 		bgExtraBox,
 
 		widget.NewSeparator(),
 
-		// — Sprachsteuerung —
-		sectionHeader("SPRACHSTEUERUNG"),
+		// — Spracheingabe —
+		sectionHeader("Spracheingabe"),
 		settingRow("Automatisch senden",
-			"Transkribierte Sprache wird direkt gesendet",
+			"Transkribierter Text wird nach der Sprech-Pause direkt gesendet",
 			autoSendCheck),
 		vSpacer(8),
 		settingRow("Aktivierungswort verwenden",
-			"Mikrofon hört passiv zu bis das Wort erkannt wird",
+			"Mikrofon hört passiv zu bis das Aktivierungswort erkannt wird",
 			wakeCheck),
 		vSpacer(8),
 		wakeFormBox,
@@ -490,9 +501,9 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 		widget.NewSeparator(),
 
 		// — Anzeige —
-		sectionHeader("ANZEIGE"),
+		sectionHeader("Anzeige"),
 		settingRow("Debug-Modus",
-			"Alle Agent-Nachrichten sichtbar — zeigt LLM-Details",
+			"Nachrichten als Volltext, fett/weiß — zeigt alle LLM-Details",
 			debugCheck),
 		vSpacer(8),
 		settingRow("Dialog-Modus",
@@ -501,8 +512,7 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 
 		widget.NewSeparator(),
 
-		// — Info & Version (Android Info-Card) —
-		sectionHeader("INFO"),
+		// — Info & Version —
 		buildInfoCard(),
 	)
 
@@ -511,7 +521,7 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	// Speichern-Button volle Breite (Android-Stil)
 	saveBtn := widget.NewButton("Speichern", func() {
 		if hostEntry.Text == "" || keyEntry.Text == "" {
-			dialog.ShowError(fmt.Errorf("Bitte Server-Adresse und API-Key eingeben"), win)
+			dialog.ShowError(fmt.Errorf("Bitte Server-URL und Agent API-Key eingeben"), win)
 			return
 		}
 		app.cfg.ServerURL = serverToURL(hostEntry.Text)

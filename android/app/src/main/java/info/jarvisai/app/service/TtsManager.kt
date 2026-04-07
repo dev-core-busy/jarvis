@@ -194,6 +194,12 @@ class TtsManager @Inject constructor(
         _mouthState.value = AvatarMouthState.CLOSED
     }
 
+    /** Testvorschau einer Android-Stimme (setzt Stimme temporär und spricht). */
+    fun previewAndroidVoice(voiceId: String) {
+        applyAndroidVoice(voiceId)
+        speakAndroid("Hallo, ich bin Jarvis.")
+    }
+
     /** Alle deutschen Android-TTS-Stimmen zurückgeben (id to displayName). */
     fun getAvailableAndroidVoices(): List<Pair<String, String>> =
         tts?.voices

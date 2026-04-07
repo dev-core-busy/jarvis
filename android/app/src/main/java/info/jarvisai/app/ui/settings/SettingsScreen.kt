@@ -122,6 +122,7 @@ private fun AndroidVoicePickerDialog(
     currentVoice: String,
     voices: List<Pair<String, String>>,
     onSelect: (String) -> Unit,
+    onPreview: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -149,6 +150,10 @@ private fun AndroidVoicePickerDialog(
                             color = if (isAuto) JarvisPurple else Color.Unspecified,
                             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                         )
+                        TextButton(
+                            onClick = { onPreview("") },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                        ) { Text("►", fontSize = 14.sp) }
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 }
@@ -182,6 +187,10 @@ private fun AndroidVoicePickerDialog(
                             color = if (isSelected) JarvisPurple else Color.Unspecified,
                             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                         )
+                        TextButton(
+                            onClick = { onPreview(id) },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                        ) { Text("►", fontSize = 14.sp) }
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 }
@@ -346,6 +355,7 @@ fun SettingsScreen(
                 currentVoice = settings.androidTtsVoice,
                 voices       = androidVoices,
                 onSelect     = { voice -> viewModel.onAndroidTtsVoiceChange(voice); showAndroidVoicePicker = false },
+                onPreview    = viewModel::previewAndroidVoice,
                 onDismiss    = { showAndroidVoicePicker = false },
             )
         }

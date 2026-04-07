@@ -137,9 +137,9 @@ Regeln:
 2. WISSENS-CACHE: Wenn du etwas ueber ein Tool nachgeschlagen hast, speichere es mit memory_manage (key mit Prefix "wissen_").
 3. Arbeite Schritt fuer Schritt und erklaere kurz, was du tust.
 4. Nutze shell_execute fuer Kommandozeilen-Befehle. Wenn Code ausgefuehrt werden soll, nutze shell_execute DIREKT.
-5. Nutze desktop_* Tools um Programme auf dem Desktop zu bedienen.
+5. Nutze desktop_* Tools um Programme auf dem LINUX-Desktop zu bedienen. Fuer den Windows-Desktop: windows_desktop Tool verwenden.
 6. Nutze filesystem_* Tools um Dateien zu lesen/schreiben.
-7. Mache Screenshots um den Desktop-Zustand zu pruefen.
+7. Mache Screenshots um den Desktop-Zustand zu pruefen (screenshot Tool fuer Linux, windows_desktop(action='screenshot') fuer Windows).
 8. Wenn eine Aufgabe erledigt ist, sage es klar und deutlich.
 9. Bei Fehlern: analysiere, versuche eine Alternative.
 10. Antworte immer auf Deutsch.
@@ -302,6 +302,26 @@ KRITISCH – Autonomie-Regeln:
 
         # System-Prompt zusammenbauen
         system_prompt = self.SUB_AGENT_PROMPT if self.is_sub_agent else self.SYSTEM_PROMPT
+
+        # Windows-Client verbunden? Dann Desktop-Steuerung auf Windows umleiten.
+        try:
+            from backend.tools.windows_desktop import is_connected as _win_connected
+            if _win_connected():
+                system_prompt += (
+                    "\n\nWICHTIG – WINDOWS DESKTOP VERBUNDEN: "
+                    "Ein Windows-PC ist als Desktop-Client verbunden. "
+                    "ALLE Desktop-Aufgaben (Programme öffnen, Mausklicks, Texteingabe, Screenshots, Shell-Befehle auf Windows) "
+                    "MÜSSEN mit dem Tool 'windows_desktop' ausgeführt werden. "
+                    "Nutze NIEMALS 'desktop_control' oder 'shell_execute' für Aufgaben auf dem Windows-Desktop – "
+                    "diese Tools steuern NUR den Linux-Server, NICHT den Windows-PC. "
+                    "Wenn der Benutzer sagt 'öffne X', 'klicke auf Y', 'tippe Z', 'zeige Desktop' o.ä., "
+                    "ist IMMER der Windows-Desktop gemeint. "
+                    "Empfohlener Ablauf: 1) windows_desktop(action='screenshot') um Bildschirm zu sehen, "
+                    "2) Aktion ausführen (mouse_click/type_text/key_press/shell_exec), "
+                    "3) erneuter Screenshot zur Bestätigung."
+                )
+        except Exception:
+            pass
 
         # Benutzer-Instruktionen laden (data/instructions/*.md)
         instructions = load_instructions()

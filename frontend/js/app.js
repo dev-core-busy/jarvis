@@ -96,7 +96,11 @@
                 currentUser = data.username || username;
                 localStorage.setItem('jarvis_token', token);
                 localStorage.setItem('jarvis_user', currentUser);
-                showMainScreen(); // initVNC() übernimmt sofortigen VNC-Verbindungsaufbau
+                if (data.must_change_password) {
+                    showChangePwModal(true); // Pflicht beim ersten Login
+                } else {
+                    showMainScreen(); // initVNC() übernimmt sofortigen VNC-Verbindungsaufbau
+                }
             } else {
                 loginError.textContent = data.error || 'Anmeldung fehlgeschlagen';
                 loginError.hidden = false;
@@ -110,6 +114,23 @@
         }
     });
 
+    // ─── Eye-Toggle Hilfsfunktion (global im IIFE) ──────────────
+    const _SVG_EYE_OPEN   = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+    const _SVG_EYE_CLOSED = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+
+    function _wireEyeBtn(btnId, inputEl) {
+        const btn = document.getElementById(btnId);
+        if (!btn || !inputEl) return;
+        btn.addEventListener('click', () => {
+            const isHidden = inputEl.type === 'password';
+            inputEl.type = isHidden ? 'text' : 'password';
+            btn.innerHTML = isHidden ? _SVG_EYE_CLOSED : _SVG_EYE_OPEN;
+        });
+    }
+
+    // Login-Kennwort Eye-Toggle
+    _wireEyeBtn('btn-toggle-login-pw', document.getElementById('login-password'));
+
     // ─── Screen-Wechsel ─────────────────────────────────────────
     function showMainScreen() {
         loginScreen.classList.remove('active');
@@ -117,6 +138,134 @@
         connectWebSocket();
         initVNC();
         loadVersion();
+    }
+
+    // ─── Kennwort-Änderungs-Modal ────────────────────────────────
+    const changePwModal = document.getElementById('change-password-modal');
+    const cpwOld     = document.getElementById('cpw-old');
+    const cpwNew     = document.getElementById('cpw-new');
+    const cpwConfirm = document.getElementById('cpw-confirm');
+    const cpwError   = document.getElementById('cpw-error');
+    const cpwStrength = document.getElementById('cpw-strength');
+    const cpwSubmit  = document.getElementById('cpw-submit');
+    const cpwCancel  = document.getElementById('cpw-cancel');
+    let _cpwMandatory = false; // true = Pflicht (erstes Login)
+
+    // Eye-Buttons im Change-Password-Modal verdrahten
+    _wireEyeBtn('btn-eye-cpw-old',     document.getElementById('cpw-old'));
+    _wireEyeBtn('btn-eye-cpw-new',     document.getElementById('cpw-new'));
+    _wireEyeBtn('btn-eye-cpw-confirm', document.getElementById('cpw-confirm'));
+
+    function showChangePwModal(mandatory) {
+        _cpwMandatory = mandatory;
+        if (changePwModal) changePwModal.classList.add('open');
+        if (cpwCancel) cpwCancel.style.display = mandatory ? 'none' : '';
+        if (cpwOld) cpwOld.value = '';
+        if (cpwNew) { cpwNew.type = 'password'; cpwNew.value = ''; cpwNew.removeEventListener('input', _cpwStrengthCheck); cpwNew.addEventListener('input', _cpwStrengthCheck); }
+        if (cpwConfirm) { cpwConfirm.type = 'password'; cpwConfirm.value = ''; }
+        if (cpwOld) cpwOld.type = 'password';
+        // Eye-Icons zurücksetzen
+        ['btn-eye-cpw-old','btn-eye-cpw-new','btn-eye-cpw-confirm'].forEach(id => {
+            const b = document.getElementById(id); if (b) b.innerHTML = _SVG_EYE_OPEN;
+        });
+        if (cpwError) cpwError.style.display = 'none';
+        if (cpwStrength) cpwStrength.textContent = '';
+    }
+
+    function hideChangePwModal() {
+        if (changePwModal) changePwModal.classList.remove('open');
+    }
+
+    function _cpwStrengthCheck() {
+        if (!cpwStrength || !cpwNew) return;
+        const pw = cpwNew.value;
+        const checks = [
+            pw.length >= 8,
+            /[A-Z]/.test(pw),
+            /[a-z]/.test(pw),
+            /[0-9]/.test(pw),
+        ];
+        const score = checks.filter(Boolean).length;
+        const labels = ['Sehr schwach', 'Schwach', 'Mittel', 'Stark', 'Sehr stark'];
+        const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#16a34a'];
+        if (pw.length === 0) { cpwStrength.textContent = ''; return; }
+        cpwStrength.innerHTML = `<span style="color:${colors[score]}">● ${labels[score]}</span>`;
+    }
+
+    // Sicheres zufälliges Kennwort generieren (mittlere+ Stärke)
+    function _generateStrongPassword() {
+        const upper  = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        const lower  = 'abcdefghjkmnpqrstuvwxyz';
+        const digits = '23456789';
+        const special = '!@#$%&*+-?';
+        const all = upper + lower + digits + special;
+        const arr = new Uint8Array(14);
+        crypto.getRandomValues(arr);
+        let pw = '';
+        // Mindestens je 1 aus jeder Gruppe sicherstellen
+        pw += upper[arr[0] % upper.length];
+        pw += lower[arr[1] % lower.length];
+        pw += digits[arr[2] % digits.length];
+        pw += special[arr[3] % special.length];
+        for (let i = 4; i < 14; i++) pw += all[arr[i] % all.length];
+        // Mischen
+        pw = pw.split('').sort(() => (crypto.getRandomValues(new Uint8Array(1))[0] % 3) - 1).join('');
+        return pw;
+    }
+
+    const cpwSuggest = document.getElementById('cpw-suggest');
+    if (cpwSuggest && cpwNew && cpwConfirm) {
+        cpwSuggest.addEventListener('click', () => {
+            const pw = _generateStrongPassword();
+            cpwNew.type = 'text';
+            cpwNew.value = pw;
+            cpwConfirm.value = pw;
+            _cpwStrengthCheck();
+        });
+    }
+
+    if (cpwCancel) {
+        cpwCancel.addEventListener('click', () => {
+            hideChangePwModal();
+        });
+    }
+
+    if (cpwSubmit) {
+        cpwSubmit.addEventListener('click', async () => {
+            if (cpwError) cpwError.style.display = 'none';
+            const old_pw = cpwOld ? cpwOld.value : '';
+            const new_pw = cpwNew ? cpwNew.value : '';
+            const conf_pw = cpwConfirm ? cpwConfirm.value : '';
+            if (!old_pw || !new_pw || !conf_pw) {
+                if (cpwError) { cpwError.textContent = 'Alle Felder ausfüllen.'; cpwError.style.display = ''; }
+                return;
+            }
+            cpwSubmit.disabled = true;
+            cpwSubmit.textContent = 'Speichere...';
+            try {
+                const res = await fetch('/api/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ old_password: old_pw, new_password: new_pw, confirm_password: conf_pw }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    hideChangePwModal();
+                    if (_cpwMandatory) {
+                        showMainScreen();
+                    } else {
+                        addLogEntry('✅ Kennwort erfolgreich geändert.', 'system');
+                    }
+                } else {
+                    if (cpwError) { cpwError.textContent = data.error || 'Fehler beim Ändern.'; cpwError.style.display = ''; }
+                }
+            } catch (e) {
+                if (cpwError) { cpwError.textContent = 'Server nicht erreichbar.'; cpwError.style.display = ''; }
+            } finally {
+                cpwSubmit.disabled = false;
+                cpwSubmit.textContent = 'Kennwort speichern';
+            }
+        });
     }
 
     // ─── Version laden und anzeigen ─────────────────────────────
@@ -241,7 +390,9 @@
 
         ws.on('status', (data) => {
             const agentId = data.agent_id || '_main';
-            addLogEntry(data.message, 'info', data.highlight, agentId);
+            // Fehlermeldungen (❌/🔴/⚠️) immer als highlight anzeigen, unabhängig vom Debug-Modus
+            const isError = data.message && (data.message.startsWith('❌') || data.message.startsWith('🔴') || data.message.startsWith('⚠️'));
+            addLogEntry(data.message, 'info', data.highlight || isError, agentId);
             // Agent-State in Sidebar aktualisieren
             if (data.agent_id) {
                 _updateAgentCard(data.agent_id, data.agent_label, data.state, data.is_sub_agent);
@@ -270,7 +421,8 @@
         });
 
         ws.on('error', (data) => {
-            addLogEntry(`❌ ${data.message || 'Fehler'}`, 'error');
+            const msg = data.message || data.error || data.detail || JSON.stringify(data);
+            addLogEntry(`❌ Fehler: ${msg}`, 'error');
         });
 
         // TTS-Event: Browser Speech Synthesis fuer Vision-Begruessungen
@@ -498,12 +650,11 @@
     });
 
     btnClearLog.addEventListener('click', () => {
-        // Nur Eintraege des aktiven Agents entfernen
-        const entries = logContainer.querySelectorAll(`.log-entry[data-agent-id="${_activeAgentId}"]`);
+        // Eintraege des aktiven Agents + pre-agent Eintraege ('_main') entfernen
+        const entries = logContainer.querySelectorAll(`.log-entry[data-agent-id="${_activeAgentId}"], .log-entry[data-agent-id="_main"]`);
         entries.forEach(e => e.remove());
-        if (_agentLogs[_activeAgentId]) {
-            _agentLogs[_activeAgentId] = [];
-        }
+        if (_agentLogs[_activeAgentId]) _agentLogs[_activeAgentId] = [];
+        if (_agentLogs['_main']) _agentLogs['_main'] = [];
     });
 
     btnLogout.addEventListener('click', () => {
@@ -847,6 +998,9 @@
     }
 
     function setupSettings() {
+        const SVG_EYE_OPEN   = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+        const SVG_EYE_CLOSED = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+
         const modal = document.getElementById('settings-modal');
         const btnOpen = document.getElementById('btn-settings');
         const btnClose = document.getElementById('btn-close-settings');
@@ -875,6 +1029,8 @@
         const btnGenKey = document.getElementById('btn-generate-apikey');
         const btnCopyKey = document.getElementById('btn-copy-apikey');
         const btnToggleKey = document.getElementById('btn-toggle-apikey');
+        const btnToggleProfileApiKey = document.getElementById('btn-toggle-profile-apikey');
+        const btnToggleProfileSessionKey = document.getElementById('btn-toggle-profile-sessionkey');
         let _agentKeyVisible = false;
         let _agentKeyValue = '';
         const authMethodGroup = document.getElementById('auth-method-group');
@@ -886,6 +1042,8 @@
         const btnAddProfile = document.getElementById('btn-add-profile');
         const btnSaveProfile = document.getElementById('btn-save-profile');
         const btnCancelProfile = document.getElementById('btn-cancel-profile');
+        const btnTestProfile = document.getElementById('btn-test-profile');
+        const profileTestResult = document.getElementById('profile-test-result');
 
         let profiles = [];
         let activeProfileId = '';
@@ -917,9 +1075,10 @@
         const tabVision = document.getElementById('settings-tab-vision');
         const tabMcp = document.getElementById('settings-tab-mcp');
         const tabTelemetry = document.getElementById('settings-tab-telemetry');
+        const tabSecurity = document.getElementById('settings-tab-security');
         const instrSection = document.getElementById('profiles-instructions-section');
 
-        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry];
+        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -965,6 +1124,10 @@
                     tabTelemetry.style.display = '';
                     tabTelemetry.classList.add('active');
                     if (window.telemetryManager) window.telemetryManager.init();
+                } else if (target === 'security' && tabSecurity) {
+                    tabSecurity.style.display = '';
+                    tabSecurity.classList.add('active');
+                    _initSecurityTab();
                 }
 
                 // Vision-Polling stoppen wenn weg-navigiert
@@ -1127,9 +1290,7 @@
 
         btnOpen.addEventListener('click', openModal);
         btnClose.addEventListener('click', closeModal);
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) closeModal();
-        });
+        // Kein Schließen bei Klick außerhalb oder versehentlichem Drag – nur explizit via X-Button
 
         // ── Ansicht wechseln ──
         function showListView() {
@@ -1155,12 +1316,17 @@
                 activeProfileId = data.active_profile_id || '';
                 defaults = data.defaults || {};
                 if (checkTts) checkTts.checked = data.tts_enabled || false;
-                // Agent API Key laden
-                _agentKeyValue = data.agent_api_key || '';
+                // Agent API Key: vollen Key vom Server holen → type=password zeigt korrekte Sternanzahl
                 if (inputAgentKey) {
-                    inputAgentKey.value = _agentKeyValue ? '••••••••••••••••••••••' : '';
-                    inputAgentKey.readOnly = true;
-                    _agentKeyVisible = false;
+                    fetch('/api/settings/agentkey', { headers: { 'Authorization': `Bearer ${token}` } })
+                        .then(r => r.json()).then(d => {
+                            _agentKeyValue = d.agent_api_key || '';
+                            inputAgentKey.value = _agentKeyValue;
+                            inputAgentKey.type = 'password';
+                            inputAgentKey.readOnly = true;
+                            _agentKeyVisible = false;
+                            if (btnToggleKey) btnToggleKey.innerHTML = SVG_EYE_OPEN;
+                        }).catch(() => {});
                 }
                 renderProfileList();
             } catch (err) {
@@ -1251,20 +1417,37 @@
             editingProfileId = id || null;
             const profile = id ? profiles.find(p => p.id === id) : null;
 
-            // Felder befüllen
+            // Felder befüllen (zunächst mit maskierten Werten)
             inputName.value = profile ? profile.name : '';
             selectProvider.value = profile ? profile.provider : 'google';
             inputUrl.value = profile ? profile.api_url : '';
-            inputKey.value = profile ? profile.api_key : '';
+            inputKey.value = '';
+            if (inputSessionKey) inputSessionKey.value = '';
+
+            // Eye-Icons zurücksetzen (Auge-auf = verborgen)
+            inputKey.type = 'password';
+            if (btnToggleProfileApiKey) btnToggleProfileApiKey.innerHTML = SVG_EYE_OPEN;
+            if (inputSessionKey) inputSessionKey.type = 'password';
+            if (btnToggleProfileSessionKey) btnToggleProfileSessionKey.innerHTML = SVG_EYE_OPEN;
+
+            // Test-Ergebnis zurücksetzen
+            if (profileTestResult) { profileTestResult.style.display = 'none'; profileTestResult.textContent = ''; }
+
+            // Vollen Key vom Server laden und als Sternchen anzeigen (korrekte Anzahl)
+            if (id) {
+                fetch(`/api/profiles/${id}/key`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }).then(r => r.json()).then(data => {
+                    inputKey.value = data.api_key || '';
+                    if (inputSessionKey) inputSessionKey.value = data.session_key || '';
+                }).catch(() => {});
+            }
 
             // Auth-Methode
             if (profile && profile.auth_method === 'session') {
                 radioSession.checked = true;
             } else {
                 radioApiKey.checked = true;
-            }
-            if (inputSessionKey) {
-                inputSessionKey.value = profile ? (profile.session_key || '') : '';
             }
 
             // Provider-abhängige Felder initialisieren
@@ -1408,7 +1591,7 @@
                 }
                 const data = await res.json();
                 if (data.success) {
-                    addLogEntry('Profil gespeichert: ' + profileData.name, 'system');
+                    addLogEntry('Profil gespeichert: ' + profileData.name + (profileData.model ? ' (' + profileData.model + ')' : ''), 'system');
                     await loadProfiles();
                     showListView();
                 } else {
@@ -1424,6 +1607,55 @@
 
         // ── Abbrechen (zurück zur Liste) ──
         btnCancelProfile.addEventListener('click', showListView);
+
+        // ── Verbindung testen ──
+        if (btnTestProfile) {
+            btnTestProfile.addEventListener('click', async () => {
+                btnTestProfile.disabled = true;
+                btnTestProfile.textContent = 'Teste…';
+                profileTestResult.style.display = '';
+                profileTestResult.style.background = 'rgba(255,255,255,0.05)';
+                profileTestResult.style.border = '1px solid rgba(255,255,255,0.1)';
+                profileTestResult.style.color = 'var(--text-muted)';
+                profileTestResult.textContent = '⏳ Verbindung wird geprüft…';
+                try {
+                    // Aktuelle Formularwerte verwenden (nicht die gespeicherten)
+                    const testPayload = {
+                        provider: selectProvider.value,
+                        api_url: inputUrl.value.trim(),
+                        api_key: inputKey.value.trim(),
+                        model: (selectProvider.value === 'openai_compatible' ? inputModel.value : selectModel.value) || '',
+                        auth_method: (radioSession && radioSession.checked) ? 'session' : 'api_key',
+                        session_key: inputSessionKey ? inputSessionKey.value.trim() : '',
+                    };
+                    const res = await fetch(`/api/profiles/test`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(testPayload),
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        profileTestResult.style.background = 'rgba(46,204,113,0.15)';
+                        profileTestResult.style.border = '1px solid rgba(46,204,113,0.4)';
+                        profileTestResult.style.color = '#2ecc71';
+                        profileTestResult.textContent = `✓ ${data.message}${data.latency_ms ? ` (${data.latency_ms} ms)` : ''}`;
+                    } else {
+                        profileTestResult.style.background = 'rgba(231,76,60,0.15)';
+                        profileTestResult.style.border = '1px solid rgba(231,76,60,0.4)';
+                        profileTestResult.style.color = '#e74c3c';
+                        profileTestResult.textContent = `✗ ${data.error}${data.latency_ms ? ` (${data.latency_ms} ms)` : ''}`;
+                    }
+                } catch (e) {
+                    profileTestResult.style.background = 'rgba(231,76,60,0.15)';
+                    profileTestResult.style.border = '1px solid rgba(231,76,60,0.4)';
+                    profileTestResult.style.color = '#e74c3c';
+                    profileTestResult.textContent = `✗ Fehler: ${e.message}`;
+                } finally {
+                    btnTestProfile.disabled = false;
+                    btnTestProfile.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Verbindung testen';
+                }
+            });
+        }
 
         // ── TTS-Checkbox speichern ──
         if (checkTts) {
@@ -1482,15 +1714,21 @@
             });
         }
 
-        // ── Agent API Key: Anzeigen/Verbergen ──
-        if (btnToggleKey) {
-            btnToggleKey.addEventListener('click', () => {
-                _agentKeyVisible = !_agentKeyVisible;
-                if (inputAgentKey) {
-                    inputAgentKey.value = _agentKeyVisible ? _agentKeyValue : (_agentKeyValue ? '••••••••••••••••••••••' : '');
-                    inputAgentKey.readOnly = !_agentKeyVisible;
-                }
-            });
+        // ── Einheitliche Eye-Toggle-Logik für alle Key-Felder ──
+        function toggleKeyField(inputEl, btnEl) {
+            const isHidden = inputEl.type === 'password';
+            inputEl.type = isHidden ? 'text' : 'password';
+            btnEl.innerHTML = isHidden ? SVG_EYE_CLOSED : SVG_EYE_OPEN;
+        }
+
+        if (btnToggleKey && inputAgentKey) {
+            btnToggleKey.addEventListener('click', () => toggleKeyField(inputAgentKey, btnToggleKey));
+        }
+        if (btnToggleProfileApiKey && inputKey) {
+            btnToggleProfileApiKey.addEventListener('click', () => toggleKeyField(inputKey, btnToggleProfileApiKey));
+        }
+        if (btnToggleProfileSessionKey && inputSessionKey) {
+            btnToggleProfileSessionKey.addEventListener('click', () => toggleKeyField(inputSessionKey, btnToggleProfileSessionKey));
         }
 
         // ── Agent API Key: Manuelle Eingabe speichern (bei blur) ──
@@ -1511,6 +1749,94 @@
                     }
                 }
             });
+        }
+
+        // ── Sicherheits-Tab: Kennwort-Änderung ──
+        function _initSecurityTab() {
+            const oldEl    = document.getElementById('sec-cpw-old');
+            const newEl    = document.getElementById('sec-cpw-new');
+            const confEl   = document.getElementById('sec-cpw-confirm');
+            const errEl    = document.getElementById('sec-cpw-error');
+            const okEl     = document.getElementById('sec-cpw-success');
+            const strengthEl = document.getElementById('sec-cpw-strength');
+            const submitEl = document.getElementById('sec-cpw-submit');
+            if (!submitEl) return;
+
+            // Eye-Buttons einmalig verdrahten (idempotent via flag)
+            if (!tabSecurity._eyesWired) {
+                tabSecurity._eyesWired = true;
+                _wireEyeBtn('btn-eye-sec-old',     document.getElementById('sec-cpw-old'));
+                _wireEyeBtn('btn-eye-sec-new',     document.getElementById('sec-cpw-new'));
+                _wireEyeBtn('btn-eye-sec-confirm', document.getElementById('sec-cpw-confirm'));
+            }
+
+            // Felder leeren beim Öffnen
+            if (oldEl) { oldEl.type = 'password'; oldEl.value = ''; }
+            if (newEl) { newEl.type = 'password'; newEl.value = ''; newEl.oninput = () => _secStrengthCheck(newEl, strengthEl); }
+            if (confEl) { confEl.type = 'password'; confEl.value = ''; }
+            // Eye-Icons zurücksetzen
+            ['btn-eye-sec-old','btn-eye-sec-new','btn-eye-sec-confirm'].forEach(id => {
+                const b = document.getElementById(id); if (b) b.innerHTML = _SVG_EYE_OPEN;
+            });
+            if (errEl) errEl.style.display = 'none';
+            if (okEl) okEl.style.display = 'none';
+
+            // Vorschlagen-Button verdrahten
+            const suggestEl = document.getElementById('sec-cpw-suggest');
+            if (suggestEl && newEl && confEl) {
+                suggestEl.onclick = () => {
+                    const pw = _generateStrongPassword();
+                    newEl.type = 'text';
+                    newEl.value = pw;
+                    confEl.value = pw;
+                    _secStrengthCheck(newEl, strengthEl);
+                };
+            }
+
+            submitEl.onclick = async () => {
+                if (errEl) errEl.style.display = 'none';
+                if (okEl) okEl.style.display = 'none';
+                const old_pw  = oldEl ? oldEl.value : '';
+                const new_pw  = newEl ? newEl.value : '';
+                const conf_pw = confEl ? confEl.value : '';
+                if (!old_pw || !new_pw || !conf_pw) {
+                    if (errEl) { errEl.textContent = 'Alle Felder ausfüllen.'; errEl.style.display = ''; }
+                    return;
+                }
+                submitEl.disabled = true;
+                submitEl.textContent = 'Speichere...';
+                try {
+                    const res = await fetch('/api/change-password', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ old_password: old_pw, new_password: new_pw, confirm_password: conf_pw }),
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        if (oldEl) oldEl.value = '';
+                        if (newEl) newEl.value = '';
+                        if (confEl) confEl.value = '';
+                        if (strengthEl) strengthEl.textContent = '';
+                        if (okEl) { okEl.textContent = '✅ Kennwort erfolgreich geändert.'; okEl.style.display = ''; }
+                    } else {
+                        if (errEl) { errEl.textContent = data.error || 'Fehler.'; errEl.style.display = ''; }
+                    }
+                } catch (e) {
+                    if (errEl) { errEl.textContent = 'Server nicht erreichbar.'; errEl.style.display = ''; }
+                } finally {
+                    submitEl.disabled = false;
+                    submitEl.textContent = 'Kennwort speichern';
+                }
+            };
+        }
+
+        function _secStrengthCheck(inputEl, outputEl) {
+            if (!outputEl) return;
+            const pw = inputEl.value;
+            const score = [pw.length >= 8, /[A-Z]/.test(pw), /[a-z]/.test(pw), /[0-9]/.test(pw)].filter(Boolean).length;
+            const labels = ['Sehr schwach', 'Schwach', 'Mittel', 'Stark', 'Sehr stark'];
+            const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#16a34a'];
+            outputEl.innerHTML = pw.length ? `<span style="color:${colors[score]}">● ${labels[score]}</span>` : '';
         }
     }
 

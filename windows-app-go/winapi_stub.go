@@ -4,6 +4,7 @@ package main
 
 func EnsureSingleInstance() bool                                             { return true }
 func MakeAvatarWindowFrameless()                                            {}
+func MakeChatWindowFrameless()                                              {}
 func MoveAvatarWindow(dx, dy float64)                                       {}
 func ClearAvatarHWND()                                                      {}
 func GetAvatarPosition() (x, y int)                                         { return 0, 0 }

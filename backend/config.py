@@ -347,7 +347,11 @@ class Config:
             if p["id"] == profile_id:
                 for key in ["name", "provider", "model", "api_url", "api_key", "auth_method", "session_key"]:
                     if key in data:
-                        p[key] = data[key]
+                        val = data[key]
+                        # Maskierte Keys (***...) nicht überschreiben – Wert unverändert lassen
+                        if key in ("api_key", "session_key") and isinstance(val, str) and val.startswith("***"):
+                            continue
+                        p[key] = val
                 self._save_to_file()
                 return p
         return None

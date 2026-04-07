@@ -7,31 +7,35 @@ import (
 	"fyne.io/fyne/v2/theme"
 )
 
-// Jarvis-Farbpalette (aus frontend/css/style.css und Android-Theme)
+// Jarvis-Farbpalette – identisch mit Android-Theme (Theme.kt / JarvisColorScheme)
 type jarvisColors struct {
-	bg          color.Color
-	bgSecondary color.Color
-	surface     color.Color
-	accent      color.Color
-	userBubble  color.Color
-	jarvisBubble color.Color
-	textPrimary color.Color
-	muted       color.Color
-	success     color.Color
-	danger      color.Color
+	bg             color.Color
+	bgSecondary    color.Color
+	surface        color.Color
+	surfaceVariant color.Color
+	accent         color.Color // JarvisPurple #9B59B6
+	accentDark     color.Color // Gradient-Endpunkt #6A0DAD
+	userBubble     color.Color // JarvisPurple @ 45% alpha
+	jarvisBubble   color.Color // White @ 7% alpha
+	textPrimary    color.Color
+	muted          color.Color // JarvisMuted #888899
+	success        color.Color // JarvisGreen #2ECC71
+	danger         color.Color // JarvisError #E74C3C
 }
 
 var jc = jarvisColors{
-	bg:           color.RGBA{0x0A, 0x0A, 0x0F, 0xFF},
-	bgSecondary:  color.RGBA{0x11, 0x18, 0x27, 0xFF},
-	surface:      color.RGBA{0x0F, 0x17, 0x2A, 0xC0},
-	accent:       color.RGBA{0x63, 0x66, 0xF1, 0xFF},
-	userBubble:   color.RGBA{0x63, 0x66, 0xF1, 0x48}, // rgba(99,102,241,0.28)
-	jarvisBubble: color.RGBA{0x0F, 0x17, 0x2A, 0xCC}, // rgba(15,23,42,0.80)
-	textPrimary:  color.RGBA{0xF8, 0xFA, 0xFC, 0xFF},
-	muted:        color.RGBA{0x64, 0x74, 0x8B, 0xFF},
-	success:      color.RGBA{0x10, 0xB9, 0x81, 0xFF},
-	danger:       color.RGBA{0xEF, 0x44, 0x44, 0xFF},
+	bg:             color.RGBA{0x0A, 0x0A, 0x0F, 0xFF}, // JarvisBackground
+	bgSecondary:    color.RGBA{0x1A, 0x1A, 0x2E, 0xFF}, // JarvisSurface
+	surface:        color.RGBA{0x1A, 0x1A, 0x2E, 0xFF}, // JarvisSurface
+	surfaceVariant: color.RGBA{0x16, 0x21, 0x3E, 0xFF}, // JarvisSurfaceVariant
+	accent:         color.RGBA{0x9B, 0x59, 0xB6, 0xFF}, // JarvisPurple
+	accentDark:     color.RGBA{0x6A, 0x0D, 0xAD, 0xFF}, // Gradient-End
+	userBubble:     color.RGBA{0x9B, 0x59, 0xB6, 0x73}, // JarvisPurple @ 45%
+	jarvisBubble:   color.RGBA{0xFF, 0xFF, 0xFF, 0x30}, // White @ 19% (Fyne hat kein Material-Elevation wie Android)
+	textPrimary:    color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}, // Weiß
+	muted:          color.RGBA{0x88, 0x88, 0x99, 0xFF}, // JarvisMuted
+	success:        color.RGBA{0x2E, 0xCC, 0x71, 0xFF}, // JarvisGreen
+	danger:         color.RGBA{0xE7, 0x4C, 0x3C, 0xFF}, // JarvisError
 }
 
 var colorTransparent = color.RGBA{0, 0, 0, 0}
@@ -49,32 +53,32 @@ func (t JarvisTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) 
 	case theme.ColorNamePrimary:
 		return jc.accent
 	case theme.ColorNameButton:
-		return jc.surface
+		return jc.surfaceVariant
 	case theme.ColorNameDisabledButton:
-		return color.RGBA{0x1E, 0x29, 0x3B, 0xFF}
+		return color.RGBA{0x16, 0x21, 0x3E, 0xFF}
 	case theme.ColorNameDisabled:
 		return jc.muted
 	case theme.ColorNameInputBackground:
 		return color.RGBA{0xFF, 0xFF, 0xFF, 0x0F}
 	case theme.ColorNameInputBorder:
-		return color.RGBA{0xFF, 0xFF, 0xFF, 0x1A}
+		return color.RGBA{0x33, 0x33, 0x55, 0xFF} // outline #333355
 	case theme.ColorNamePlaceHolder:
 		return jc.muted
 	case theme.ColorNameScrollBar:
-		return color.RGBA{0x63, 0x66, 0xF1, 0x66}
+		return color.RGBA{0x9B, 0x59, 0xB6, 0x66}
 	case theme.ColorNameSeparator:
 		return color.RGBA{0xFF, 0xFF, 0xFF, 0x14}
 	// Dropdown / Popup / Menü – verhindert weißen Hintergrund
 	case theme.ColorNameOverlayBackground:
-		return color.RGBA{0x11, 0x18, 0x27, 0xFF}
+		return jc.surface
 	case theme.ColorNameMenuBackground:
-		return color.RGBA{0x11, 0x18, 0x27, 0xFF}
+		return jc.surface
 	case theme.ColorNameHeaderBackground:
-		return color.RGBA{0x0F, 0x17, 0x2A, 0xFF}
+		return jc.surfaceVariant
 	case theme.ColorNameHover:
-		return color.RGBA{0x63, 0x66, 0xF1, 0x30}
+		return color.RGBA{0x9B, 0x59, 0xB6, 0x30}
 	case theme.ColorNameSelection:
-		return color.RGBA{0x63, 0x66, 0xF1, 0x55}
+		return color.RGBA{0x9B, 0x59, 0xB6, 0x55}
 	case theme.ColorNameFocus:
 		return jc.accent
 	case theme.ColorNameShadow:
@@ -100,7 +104,7 @@ func (t JarvisTheme) Size(name fyne.ThemeSizeName) float32 {
 	case theme.SizeNameText:
 		return 13
 	case theme.SizeNameInputRadius:
-		return 8
+		return 24 // wie Android OutlinedTextField (24dp)
 	}
 	return theme.DefaultTheme().Size(name)
 }

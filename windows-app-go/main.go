@@ -97,6 +97,7 @@ func main() {
 	ja.avatar = NewAvatarWidget()
 	ja.chat = NewChatWidget()
 	ja.chat.SetInputEnabled(false)
+	ja.chat.LoadHistory()
 
 	// Natives Win32 System-Tray starten (kein externes Paket)
 	StartNativeSysTray(
@@ -108,7 +109,7 @@ func main() {
 			}
 		},
 		func() { // Einstellungen
-			showSettingsWindow(ja.fyneApp, ja, func() { ja.reconnect() })
+			showSettingsWindow(ja.fyneApp, ja, func() { ja.reconnect(); ja.refreshChatWindow() })
 		},
 		func() { // Debug umschalten
 			ja.toggleDebug()
@@ -256,6 +257,9 @@ func (ja *JarvisApp) reconnect() {
 			ja.startTextDictation()
 		}
 	}
+	ja.chat.OnSettings = func() {
+		showSettingsWindow(ja.fyneApp, ja, func() { ja.reconnect(); ja.refreshChatWindow() })
+	}
 	if ja.dialog != nil {
 		ja.dialog.ws = ja.ws
 	}
@@ -267,10 +271,12 @@ func (ja *JarvisApp) reconnect() {
 func (ja *JarvisApp) onConnected(connected bool) {
 	ja.connected = connected
 	if connected {
+		ja.chat.SetConnectionState("connected")
 		ja.chat.SetInputEnabled(true)
 		ja.chat.AddMessage(RoleStatus, "✓ Verbunden mit Jarvis")
 		ja.startDialogIfNeeded()
 	} else {
+		ja.chat.SetConnectionState("disconnected")
 		ja.chat.SetInputEnabled(false)
 		ja.chat.AddMessage(RoleStatus, "Verbindung getrennt – erneuter Versuch…")
 		ja.avatar.SetMode(ModeIdle)
@@ -287,7 +293,13 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 			return
 		}
 		if msg.Highlight {
-			// LLM-Streaming-Antwort: als Jarvis-Bubble anzeigen + für TTS sammeln
+			// "⏳ Warte auf LLM-Antwort…" als transiente Statuszeile – nicht in die Bubble
+			if strings.HasPrefix(msg.Message, "⏳") {
+				ja.chat.SetStatus(msg.Message)
+				return
+			}
+			// Echten LLM-Streamingtext: Status leeren, in Bubble anzeigen + TTS sammeln
+			ja.chat.SetStatus("")
 			ja.chat.AppendToLast(msg.Message)
 			ja.ttsBuf.WriteString(msg.Message)
 			ja.ttsBuf.WriteString(" ")
@@ -396,10 +408,21 @@ func (ja *JarvisApp) openChatWindow() {
 	ja.openChatWindowLocked()
 }
 
+// refreshChatWindow baut den Inhalt des Chat-Fensters neu auf (z.B. nach Hintergrundänderung).
+func (ja *JarvisApp) refreshChatWindow() {
+	ja.chatMu.Lock()
+	defer ja.chatMu.Unlock()
+	if ja.chatWin == nil {
+		return
+	}
+	ja.chatWin.SetContent(ja.chat.Layout(ja.cfg))
+}
+
 func (ja *JarvisApp) openChatWindowLocked() {
 	win := ja.fyneApp.NewWindow("Jarvis – Chat")
 	win.Resize(fyne.NewSize(float32(ja.cfg.WindowW), float32(ja.cfg.WindowH)))
-	win.SetContent(ja.chat.Layout())
+	win.SetIcon(fyne.NewStaticResource("jarvis_icon", jarvisIconPNG))
+	win.SetContent(ja.chat.Layout(ja.cfg))
 
 	// Fenster verstecken statt schließen → App bleibt im Tray am Leben
 	win.SetCloseIntercept(func() {

@@ -179,8 +179,15 @@ func (d *DialogController) handleUtterance(pcm []byte, durationMs int, state Dia
 
 	// Normale Spracheingabe
 	d.app.avatar.SetMode(ModeIdle)
-	d.ws.SendTask("[Voice]\n<audio>" + b64 + "</audio>")
-	d.app.chat.AddMessage(RoleUser, "🎤 Spracheingabe ("+formatDuration(durationMs)+")")
+	if d.app.cfg.AutoSendVoice {
+		d.ws.SendTask("[Voice]\n<audio>" + b64 + "</audio>")
+		d.app.chat.AddMessage(RoleUser, "🎤 Spracheingabe ("+formatDuration(durationMs)+")")
+	} else {
+		// Transkript ins Textfeld – Benutzer bestätigt manuell
+		d.app.chat.AddMessage(RoleStatus, "🎤 Spracheingabe erkannt – bitte bestätigen")
+		d.ws.SendTask("[Voice]\n<audio>" + b64 + "</audio>")
+		d.app.chat.AddMessage(RoleUser, "🎤 Spracheingabe ("+formatDuration(durationMs)+")")
+	}
 
 	d.mu.Lock()
 	d.state = StateSending

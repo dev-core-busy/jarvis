@@ -8,6 +8,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import httpx
+
 import os
 
 import psutil
@@ -246,6 +248,83 @@ def authenticate_linux_user(username: str, password: str) -> bool:
     return _pam.authenticate(username, password, service="login")
 
 
+# ─── Auth-State (Kennwort-Änderung / 2FA-Vorbereitung) ───────────────
+_AUTH_STATE_FILE = Path(__file__).parent.parent / "data" / "auth_state.json"
+
+def _load_auth_state() -> dict:
+    """Lädt den Auth-State aus der JSON-Datei."""
+    try:
+        if _AUTH_STATE_FILE.exists():
+            return json.loads(_AUTH_STATE_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+def _save_auth_state(state: dict):
+    """Speichert den Auth-State in die JSON-Datei."""
+    _AUTH_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _AUTH_STATE_FILE.write_text(json.dumps(state, indent=4))
+
+def _get_user_auth_state(username: str) -> dict:
+    """Gibt den Auth-State eines Benutzers zurück (Defaults: must_change_password=True)."""
+    state = _load_auth_state()
+    users = state.get("users", {})
+    return users.get(username, {
+        "must_change_password": True,
+        "totp_enabled": False,
+        "totp_secret": None,
+    })
+
+def _set_user_auth_state(username: str, updates: dict):
+    """Aktualisiert den Auth-State eines Benutzers."""
+    state = _load_auth_state()
+    if "users" not in state:
+        state["users"] = {}
+    if username not in state["users"]:
+        state["users"][username] = {
+            "must_change_password": True,
+            "totp_enabled": False,
+            "totp_secret": None,
+        }
+    state["users"][username].update(updates)
+    _save_auth_state(state)
+
+def _validate_password_strength(password: str, username: str) -> list[str]:
+    """Prüft Kennwort-Stärke (mittlere Sicherheit). Gibt Fehlerliste zurück."""
+    import re
+    errors = []
+    if len(password) < 8:
+        errors.append("Mindestens 8 Zeichen erforderlich.")
+    if len(password) > 128:
+        errors.append("Maximal 128 Zeichen erlaubt.")
+    if not re.search(r'[A-Z]', password):
+        errors.append("Mindestens ein Großbuchstabe erforderlich.")
+    if not re.search(r'[a-z]', password):
+        errors.append("Mindestens ein Kleinbuchstabe erforderlich.")
+    if not re.search(r'[0-9]', password):
+        errors.append("Mindestens eine Ziffer erforderlich.")
+    if password.lower() == username.lower():
+        errors.append("Kennwort darf nicht mit dem Benutzernamen identisch sein.")
+    if password.lower() in ("jarvis", "password", "passwort", "12345678", "123456789"):
+        errors.append("Kennwort zu einfach – bitte ein sichereres Kennwort wählen.")
+    return errors
+
+def _change_linux_password(username: str, new_password: str) -> bool:
+    """Setzt das Linux-Kennwort via chpasswd (läuft als root). Gibt True bei Erfolg zurück."""
+    try:
+        proc = subprocess.run(
+            ['chpasswd'],
+            input=f'{username}:{new_password}\n',
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return proc.returncode == 0
+    except Exception as e:
+        print(f"[AUTH] chpasswd Fehler: {e}", flush=True)
+        return False
+
+
 def switch_desktop_session(username: str):
     """Wechselt die aktive Desktop-Session zum angegebenen Benutzer via LightDM-Autologin."""
     import os
@@ -415,16 +494,59 @@ async def login(request: Request):
 
     if authenticate_linux_user(username, password):
         token = generate_token(username)
+        must_change = _get_user_auth_state(username).get("must_change_password", True)
         # Desktop-Session im Hintergrund wechseln (nur im Nicht-Docker-Modus)
         if not _DOCKER_MODE:
             asyncio.get_event_loop().run_in_executor(None, switch_desktop_session, username)
-        return JSONResponse({"success": True, "token": token, "username": username})
+        return JSONResponse({"success": True, "token": token, "username": username,
+                             "must_change_password": must_change})
 
     _record_login_attempt(client_ip)
     return JSONResponse(
         {"success": False, "error": "Benutzername oder Passwort falsch"},
         status_code=401,
     )
+
+
+@app.post("/api/change-password")
+async def change_password(request: Request, username: str = Depends(require_auth)):
+    """Kennwort ändern – benötigt altes Kennwort zur Verifikation."""
+    body = await request.json()
+    old_password = body.get("old_password", "")
+    new_password = body.get("new_password", "")
+    confirm_password = body.get("confirm_password", "")
+
+    if not old_password or not new_password or not confirm_password:
+        return JSONResponse({"success": False, "error": "Alle Felder müssen ausgefüllt sein."}, status_code=400)
+
+    if new_password != confirm_password:
+        return JSONResponse({"success": False, "error": "Neues Kennwort und Bestätigung stimmen nicht überein."}, status_code=400)
+
+    # Altes Kennwort prüfen
+    if not authenticate_linux_user(username, old_password):
+        return JSONResponse({"success": False, "error": "Aktuelles Kennwort ist falsch."}, status_code=403)
+
+    # Kennwort-Stärke prüfen
+    errors = _validate_password_strength(new_password, username)
+    if errors:
+        return JSONResponse({"success": False, "error": " ".join(errors)}, status_code=400)
+
+    # Neues Kennwort muss sich vom alten unterscheiden
+    if old_password == new_password:
+        return JSONResponse({"success": False, "error": "Neues Kennwort muss sich vom aktuellen unterscheiden."}, status_code=400)
+
+    # Kennwort setzen
+    if _DOCKER_MODE:
+        return JSONResponse({"success": False, "error": "Kennwort-Änderung im Docker-Modus nicht unterstützt."}, status_code=400)
+
+    ok = await asyncio.to_thread(_change_linux_password, username, new_password)
+    if not ok:
+        return JSONResponse({"success": False, "error": "Kennwort konnte nicht gesetzt werden."}, status_code=500)
+
+    # must_change_password Flag löschen
+    _set_user_auth_state(username, {"must_change_password": False})
+    print(f"[AUTH] Kennwort für '{username}' erfolgreich geändert.", flush=True)
+    return JSONResponse({"success": True})
 
 
 @app.get("/api/version")
@@ -815,6 +937,86 @@ async def delete_profile(profile_id: str, user: str = Depends(require_auth)):
     if config.delete_profile(profile_id):
         return JSONResponse({"success": True})
     return JSONResponse({"success": False, "error": "Letztes Profil kann nicht gelöscht werden"}, status_code=400)
+
+
+@app.get("/api/settings/agentkey")
+async def get_agent_key(user: str = Depends(require_auth)):
+    """Gibt den unmasked Agent API Key zurück (für Eye-Button)."""
+    return JSONResponse({"agent_api_key": config.AGENT_API_KEY or ""})
+
+
+@app.get("/api/profiles/{profile_id}/key")
+async def get_profile_key(profile_id: str, user: str = Depends(require_auth)):
+    """Gibt die unmasked API- und Session-Keys eines Profils zurück (für Eye-Button)."""
+    for p in config.profiles:
+        if p["id"] == profile_id:
+            return JSONResponse({
+                "api_key": p.get("api_key", ""),
+                "session_key": p.get("session_key", ""),
+            })
+    return JSONResponse({"error": "Profil nicht gefunden"}, status_code=404)
+
+
+@app.post("/api/profiles/test")
+async def test_profile_connection(request: Request, user: str = Depends(require_auth)):
+    """Testet die Verbindung mit den aktuellen Formularwerten (nicht gespeicherten)."""
+    body = await request.json()
+    provider    = body.get("provider", "")
+    api_url     = body.get("api_url", "").rstrip("/")
+    api_key     = body.get("api_key", "")
+    model       = body.get("model", "")
+    auth_method = body.get("auth_method", "api_key")
+
+    session_key = body.get("session_key", "")
+    headers = {"Content-Type": "application/json"}
+    if auth_method == "session" and session_key:
+        headers["Authorization"] = f"Bearer {session_key}"
+    elif api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+            # Schritt 1: Models-Endpoint (schnell)
+            if provider == "openai_compatible":
+                models_url = f"{api_url}/models"
+            elif provider == "google":
+                return JSONResponse({"success": True, "message": "Google Gemini – kein lokaler Endpunkt prüfbar", "latency_ms": 0})
+            elif provider in ("anthropic", "anthropic_session"):
+                return JSONResponse({"success": True, "message": "Anthropic – kein lokaler Endpunkt prüfbar", "latency_ms": 0})
+            elif provider == "openrouter":
+                models_url = "https://openrouter.ai/api/v1/models"
+            else:
+                return JSONResponse({"success": False, "error": f"Unbekannter Provider: {provider}"})
+
+            t0 = time.monotonic()
+            resp = await client.get(models_url, headers=headers)
+            latency = int((time.monotonic() - t0) * 1000)
+
+            if resp.status_code == 401:
+                return JSONResponse({"success": False, "error": "API (Application Programming Interface)-Key ungültig (401 Unauthorized)", "latency_ms": latency})
+            if resp.status_code == 404:
+                return JSONResponse({"success": False, "error": f"Endpunkt nicht gefunden: {models_url}", "latency_ms": latency})
+            if resp.status_code >= 400:
+                return JSONResponse({"success": False, "error": f"HTTP (Hypertext Transfer Protocol) {resp.status_code}: {resp.text[:100]}", "latency_ms": latency})
+
+            data = resp.json()
+            model_ids = [m["id"] for m in data.get("data", [])]
+            model_found = model in model_ids
+
+            return JSONResponse({
+                "success": True,
+                "message": f"Verbindung OK – {len(model_ids)} Modell(e) verfügbar" + (f", Modell '{model}' gefunden ✓" if model_found else f" – Modell '{model}' NICHT gefunden!"),
+                "latency_ms": latency,
+                "model_found": model_found,
+                "models": model_ids[:10],
+            })
+
+    except httpx.ConnectError as e:
+        return JSONResponse({"success": False, "error": f"Verbindung fehlgeschlagen: {e}"})
+    except httpx.TimeoutException:
+        return JSONResponse({"success": False, "error": "Timeout (Zeitüberschreitung) – Server antwortet nicht innerhalb von 15s"})
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)})
 
 
 @app.post("/api/profiles/{profile_id}/activate")

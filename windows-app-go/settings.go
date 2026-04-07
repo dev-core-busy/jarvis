@@ -2,20 +2,118 @@ package main
 
 import (
 	"fmt"
-	"strconv"
+	"net/url"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 )
 
-// showSettingsWindow öffnet das Einstellungs-Fenster mit Tabs.
+// ── tightVBox: VBox mit 2px Abstand (statt Fyne-Standard ~4px) ───────────────
+// Wird verwendet wo Label direkt über dem zugehörigen Control sitzt (Android-Stil).
+
+type tightVBoxLayout struct{ gap float32 }
+
+func (t *tightVBoxLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	y := float32(0)
+	for _, o := range objects {
+		h := o.MinSize().Height
+		o.Move(fyne.NewPos(0, y))
+		o.Resize(fyne.NewSize(size.Width, h))
+		y += h + t.gap
+	}
+}
+
+func (t *tightVBoxLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	w, h := float32(0), float32(0)
+	for i, o := range objects {
+		ms := o.MinSize()
+		if ms.Width > w {
+			w = ms.Width
+		}
+		if i > 0 {
+			h += t.gap
+		}
+		h += ms.Height
+	}
+	return fyne.NewSize(w, h)
+}
+
+func tightVBox(objects ...fyne.CanvasObject) *fyne.Container {
+	return container.New(&tightVBoxLayout{gap: 2}, objects...)
+}
+
+// vSpacer erzeugt einen unsichtbaren vertikalen Abstandshalter (in Pixeln).
+func vSpacer(h float32) fyne.CanvasObject {
+	r := widget.NewSeparator()
+	_ = r
+	// Leeres MinSize-Objekt via GridWrap
+	return container.NewGridWrap(fyne.NewSize(1, h))
+}
+
+// ── Wiederverwendbare Layout-Bausteine (analog Android) ──────────────────────
+
+// sectionHeader: Abschnitts-Titel, fett, mit Trennlinie darunter (Android SectionHeader).
+func sectionHeader(text string) fyne.CanvasObject {
+	lbl := widget.NewLabel(text)
+	lbl.TextStyle = fyne.TextStyle{Bold: true}
+	return tightVBox(lbl, widget.NewSeparator())
+}
+
+// settingRow: Label + optionale Beschreibung links, Control rechts (Android SettingRow).
+func settingRow(label, description string, control fyne.CanvasObject) fyne.CanvasObject {
+	title := widget.NewLabel(label)
+	if description == "" {
+		return container.NewBorder(nil, nil, nil, control, title)
+	}
+	desc := widget.NewLabel(description)
+	desc.Importance = widget.LowImportance
+	return container.NewBorder(nil, nil, nil, control,
+		tightVBox(title, desc))
+}
+
+// labelAbove: Label direkt über einem Eingabefeld (2px Abstand, Android-Stil).
+func labelAbove(text string, field fyne.CanvasObject) fyne.CanvasObject {
+	lbl := widget.NewLabel(text)
+	return tightVBox(lbl, field)
+}
+
+// audioFieldRow: Label (fett) direkt über Dropdown + Test-Button rechts.
+func audioFieldRow(label string, sel *widget.Select, testBtn *widget.Button, statusLbl *widget.Label) fyne.CanvasObject {
+	lbl := widget.NewLabel(label)
+	lbl.TextStyle = fyne.TextStyle{Bold: true}
+	return tightVBox(
+		lbl,
+		container.NewBorder(nil, nil, nil, container.NewHBox(testBtn, statusLbl), sel),
+	)
+}
+
+// sliderRow: Label + Wert-Anzeige direkt über Slider (2px Abstand).
+func sliderRow(label string, min, max, step, initial float64, unit string, onChange func(float64)) (*widget.Slider, fyne.CanvasObject) {
+	valLbl := widget.NewLabel(fmt.Sprintf("%.0f %s", initial, unit))
+	valLbl.Importance = widget.LowImportance
+	slider := widget.NewSlider(min, max)
+	slider.Step = step
+	slider.Value = initial
+	slider.OnChanged = func(v float64) {
+		valLbl.SetText(fmt.Sprintf("%.0f %s", v, unit))
+		if onChange != nil {
+			onChange(v)
+		}
+	}
+	header := container.NewBorder(nil, nil, nil, valLbl, widget.NewLabel(label))
+	return slider, tightVBox(header, slider)
+}
+
+// showSettingsWindow öffnet Einstellungen als scrollbare Einzelspalte (Android-Stil).
 func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	win := a.NewWindow("Jarvis – Einstellungen")
 	win.SetFixedSize(false)
 
-	// ── Tab 1: Verbindung ─────────────────────────────────────────────────────
+	// ── VERBINDUNG ────────────────────────────────────────────────────────────
 	hostEntry := widget.NewEntry()
 	hostEntry.SetText(urlToHost(app.cfg.ServerURL))
 	hostEntry.SetPlaceHolder("IP oder Hostname  z.B.  191.100.144.1")
@@ -24,25 +122,20 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	keyEntry.SetText(app.cfg.APIKey)
 	keyEntry.SetPlaceHolder("API-Schlüssel")
 
-	statusLbl := widget.NewLabel("")
+	connStatusLbl := widget.NewLabel("")
 	testBtn := widget.NewButton("Verbindung testen", func() {
-		statusLbl.SetText("Verbinde…")
+		connStatusLbl.SetText("Verbinde…")
 		go func() {
 			if err := testConnection(serverToURL(hostEntry.Text), keyEntry.Text); err != nil {
-				statusLbl.SetText("✗ " + err.Error())
+				connStatusLbl.SetText("✗ " + err.Error())
 			} else {
-				statusLbl.SetText("✓ Verbindung erfolgreich!")
+				connStatusLbl.SetText("✓ Verbunden!")
 			}
 		}()
 	})
+	testBtn.Importance = widget.MediumImportance
 
-	connForm := widget.NewForm(
-		widget.NewFormItem("Server-Adresse", hostEntry),
-		widget.NewFormItem("API-Key", keyEntry),
-	)
-	connTab := container.NewVBox(connForm, testBtn, statusLbl)
-
-	// ── Tab 2: Audio-Geräte ───────────────────────────────────────────────────
+	// ── AUDIO ─────────────────────────────────────────────────────────────────
 	speakerSel := widget.NewSelect([]string{"Standard"}, nil)
 	micSel := widget.NewSelect([]string{"Standard"}, nil)
 	speakerIDs := []string{""}
@@ -59,8 +152,6 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 			speakerSel.Options = spNames
 			if app.cfg.SpeakerName != "" {
 				speakerSel.SetSelected(app.cfg.SpeakerName)
-			} else {
-				speakerSel.SetSelected("Standard")
 			}
 		}
 		mics := app.audio.ListMics()
@@ -73,30 +164,23 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 			micSel.Options = micNames
 			if app.cfg.MicName != "" {
 				micSel.SetSelected(app.cfg.MicName)
-			} else {
-				micSel.SetSelected("Standard")
 			}
 		}
 	}
 
-	// ── Lautsprecher-Test ─────────────────────────────────────────────────────
 	speakerTestLbl := widget.NewLabel("")
-	speakerTestBtn := widget.NewButton("🔊  Testen", func() {
+	speakerTestBtn := widget.NewButton("🔊 Testen", func() {
 		speakerTestLbl.SetText("♪")
-		go func() {
-			PlayTestTone()
-			speakerTestLbl.SetText("✓")
-		}()
+		go func() { PlayTestTone(); speakerTestLbl.SetText("✓") }()
 	})
-	speakerTestBtn.Importance = widget.MediumImportance
+	speakerTestBtn.Importance = widget.LowImportance
 
-	// ── Mikrofon-Test ─────────────────────────────────────────────────────────
 	micTestLbl := widget.NewLabel("")
-	micTestBtn := widget.NewButton("🎤  Testen", func() {
-		micTestLbl.SetText("Aufnahme 3s…")
+	micTestBtn := widget.NewButton("🎤 Testen", func() {
+		micTestLbl.SetText("3s…")
 		go func() {
 			if app.audio == nil {
-				micTestLbl.SetText("✗ Audio N/A")
+				micTestLbl.SetText("✗ N/A")
 				return
 			}
 			maxRMS, got, err := app.audio.TestMicLevel(3)
@@ -105,35 +189,29 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 			} else if !got {
 				micTestLbl.SetText("✗ Kein Signal!")
 			} else {
-				micTestLbl.SetText(fmt.Sprintf("✓ Pegel: %.0f", maxRMS))
+				micTestLbl.SetText(fmt.Sprintf("✓ %.0f", maxRMS))
 			}
 		}()
 	})
-	micTestBtn.Importance = widget.MediumImportance
+	micTestBtn.Importance = widget.LowImportance
 
-	// ── TTS-Antwortstimme ─────────────────────────────────────────────────────
-	// voiceIDList wird async befüllt; Closure im Save-Handler nutzt es.
 	voiceIDList := []string{""}
 	voiceSel := widget.NewSelect([]string{"Standard (Windows SAPI)"}, nil)
 	voiceSel.SetSelected("Standard (Windows SAPI)")
 
-	// Gespeicherte Stimme vorselektieren sobald Liste geladen
 	restoreVoiceSel := func() {
 		if app.cfg.TTSVoice == "" {
 			voiceSel.SetSelected("Standard (Windows SAPI)")
 			return
 		}
 		for i, id := range voiceIDList {
-			if id == app.cfg.TTSVoice {
-				if i < len(voiceSel.Options) {
-					voiceSel.SetSelected(voiceSel.Options[i])
-				}
+			if id == app.cfg.TTSVoice && i < len(voiceSel.Options) {
+				voiceSel.SetSelected(voiceSel.Options[i])
 				return
 			}
 		}
 	}
 
-	// Stimmen laden: zuerst SAPI (sofort), dann Backend-Stimmen (async via Netzwerk)
 	sapiVoices := ListTTSVoices()
 	{
 		names := []string{"Standard (Windows SAPI)"}
@@ -146,14 +224,11 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 		voiceSel.Options = names
 		restoreVoiceSel()
 	}
-
-	// Backend-Stimmen asynchron laden und in die Liste einpflegen
 	go func() {
 		bkNames, bkIDs := FetchBackendVoices(app.cfg.ServerURL, app.cfg.APIKey)
 		if len(bkNames) == 0 {
 			return
 		}
-		// Backend-Stimmen zuerst (bessere Qualität), dann SAPI
 		names := []string{"Standard (Windows SAPI)"}
 		ids := []string{""}
 		for i, n := range bkNames {
@@ -171,7 +246,7 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	}()
 
 	voiceTestLbl := widget.NewLabel("")
-	voiceTestBtn := widget.NewButton("🔊  Stimme testen", func() {
+	voiceTestBtn := widget.NewButton("🔊 Testen", func() {
 		voiceTestLbl.SetText("Spreche…")
 		go func() {
 			selIdx := -1
@@ -189,82 +264,251 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 			voiceTestLbl.SetText("✓")
 		}()
 	})
-	voiceTestBtn.Importance = widget.MediumImportance
+	voiceTestBtn.Importance = widget.LowImportance
 
-	// Layout: je Zeile [Dropdown | Test-Button | Status-Label]
-	audioTab := container.NewVBox(
-		widget.NewForm(
-			widget.NewFormItem("🔊 Lautsprecher", container.NewBorder(nil, nil, nil,
-				container.NewHBox(speakerTestBtn, speakerTestLbl), speakerSel)),
-			widget.NewFormItem("🎤 Mikrofon", container.NewBorder(nil, nil, nil,
-				container.NewHBox(micTestBtn, micTestLbl), micSel)),
-			widget.NewFormItem("🗣 Antwortstimme", container.NewBorder(nil, nil, nil,
-				container.NewHBox(voiceTestBtn, voiceTestLbl), voiceSel)),
-		),
-	)
+	// ── HINTERGRUND ───────────────────────────────────────────────────────────
+	// Dynamischer Bereich: wird je nach Typ-Auswahl neu befüllt
+	bgExtraBox := container.NewVBox()
 
-	// ── Tab 3: Sprachsteuerung (Wake-Word) ────────────────────────────────────
-	// Eindeutiges Label: Haken gesetzt = Wake-Word IST aktiv
-	wakeCheck := widget.NewCheck("Aktivierungswort verwenden (Haken = aktiv)", nil)
+	bgType := app.cfg.BackgroundType
+	if bgType == "" {
+		bgType = "gradient"
+	}
+	bgColorIdx := app.cfg.BackgroundColor
+	bgImagePath := app.cfg.BackgroundImagePath
+	bgAlpha := app.cfg.BackgroundAlpha
+	if bgAlpha == 0 {
+		bgAlpha = 0.5
+	}
+	if bgImagePath == "" {
+		bgImagePath = BG_DEFAULT_URI
+	}
+
+	// Farbauswahl-Dropdown (für Typ "color")
+	colorSel := widget.NewSelect(BgColorNames, func(s string) {
+		for i, n := range BgColorNames {
+			if n == s {
+				bgColorIdx = i
+				break
+			}
+		}
+	})
+	if bgColorIdx >= 0 && bgColorIdx < len(BgColorNames) {
+		colorSel.SetSelected(BgColorNames[bgColorIdx])
+	}
+
+	// Foto-Widgets (für Typ "photo")
+	imagePathLbl := widget.NewLabel("")
+	imagePathLbl.Importance = widget.LowImportance
+
+	// "Standard"-Button – setzt zurück auf eingebettetes Jarvis-Bild
+	var imageResetBtn *widget.Button
+	var imagePickBtn *widget.Button
+
+	refreshImageWidgets := func() {
+		if bgImagePath == BG_DEFAULT_URI || bgImagePath == "" {
+			imagePathLbl.SetText("Jarvis Standard-Bild")
+			if imageResetBtn != nil {
+				imageResetBtn.Hide()
+			}
+		} else {
+			imagePathLbl.SetText(bgImagePath)
+			if imageResetBtn != nil {
+				imageResetBtn.Show()
+			}
+		}
+	}
+
+	imageResetBtn = widget.NewButton("Standard", func() {
+		bgImagePath = BG_DEFAULT_URI
+		refreshImageWidgets()
+	})
+	imageResetBtn.Importance = widget.LowImportance
+
+	imagePickBtn = widget.NewButton("📂 Foto auswählen", func() {
+		fd := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil || reader == nil {
+				return
+			}
+			bgImagePath = reader.URI().Path()
+			reader.Close()
+			refreshImageWidgets()
+		}, win)
+		fd.SetFilter(storage.NewExtensionFileFilter([]string{".jpg", ".jpeg", ".png", ".bmp"}))
+		fd.Show()
+	})
+	imagePickBtn.Importance = widget.MediumImportance
+
+	refreshImageWidgets() // initialen Zustand setzen
+
+	alphaSlider, alphaRow := sliderRow("Helligkeit", 10, 100, 5, float64(bgAlpha*100), "%",
+		func(v float64) { bgAlpha = float32(v / 100) })
+
+	// updateBgExtra: befüllt bgExtraBox je nach gewähltem Hintergrundtyp
+	updateBgExtra := func(t string) {
+		bgExtraBox.Objects = nil
+		switch t {
+		case "color":
+			bgExtraBox.Objects = []fyne.CanvasObject{
+				labelAbove("Hintergrundfarbe", colorSel),
+			}
+		case "photo":
+			bgExtraBox.Objects = []fyne.CanvasObject{
+				container.NewHBox(imagePickBtn, imageResetBtn),
+				imagePathLbl,
+				alphaRow,
+			}
+			alphaSlider.Value = float64(bgAlpha * 100)
+			alphaSlider.Refresh()
+			refreshImageWidgets()
+		}
+		bgExtraBox.Refresh()
+	}
+
+	bgTypeRadio := widget.NewRadioGroup([]string{"Gradient", "Farbe", "Foto"}, func(s string) {
+		switch s {
+		case "Farbe":
+			bgType = "color"
+		case "Foto":
+			bgType = "photo"
+		default:
+			bgType = "gradient"
+		}
+		updateBgExtra(bgType)
+	})
+	bgTypeRadio.Horizontal = true
+	switch bgType {
+	case "color":
+		bgTypeRadio.SetSelected("Farbe")
+	case "photo":
+		bgTypeRadio.SetSelected("Foto")
+	default:
+		bgTypeRadio.SetSelected("Gradient")
+	}
+	updateBgExtra(bgType)
+
+	// ── SPRACHSTEUERUNG ───────────────────────────────────────────────────────
+	autoSendCheck := widget.NewCheck("", nil)
+	autoSendCheck.SetChecked(app.cfg.AutoSendVoice)
+
+	wakeCheck := widget.NewCheck("", nil)
 	wakeCheck.SetChecked(app.cfg.WakeWordEnabled)
 
 	wakeEntry := widget.NewEntry()
 	wakeEntry.SetText(app.cfg.WakeWord)
 	wakeEntry.SetPlaceHolder("z.B. hallo jarvis")
 
-	silenceEntry := widget.NewEntry()
-	silenceEntry.SetText(strconv.Itoa(app.cfg.SilenceMs))
-	silenceEntry.SetPlaceHolder("ms  (Standard: 900)")
+	silenceVal := float64(app.cfg.SilenceMs)
+	minSpeechVal := float64(app.cfg.MinSpeechMs)
+	vadVal := float64(app.cfg.VADThreshold)
 
-	minSpeechEntry := widget.NewEntry()
-	minSpeechEntry.SetText(strconv.Itoa(app.cfg.MinSpeechMs))
-	minSpeechEntry.SetPlaceHolder("ms  (Standard: 200)")
+	silenceSlider, silenceRow := sliderRow(
+		"Sprech-Pause", 300, 3000, 100, silenceVal, "ms",
+		func(v float64) { silenceVal = v })
+	minSpeechSlider, minSpeechRow := sliderRow(
+		"Mindest-Sprechzeit", 100, 1000, 50, minSpeechVal, "ms",
+		func(v float64) { minSpeechVal = v })
+	vadSlider, vadRow := sliderRow(
+		"Mikrofon-Schwellwert (VAD)", 0, 500, 10, vadVal, "",
+		func(v float64) { vadVal = v })
 
-	vadEntry := widget.NewEntry()
-	vadEntry.SetText(strconv.Itoa(app.cfg.VADThreshold))
-	vadEntry.SetPlaceHolder("0–32767  (Standard: 400)")
-
-	voiceForm := widget.NewForm(
-		widget.NewFormItem("Aktivierungswort", wakeEntry),
-		widget.NewFormItem("Stille-Erkennungs-Dauer (ms)", silenceEntry),
-		widget.NewFormItem("Mindest-Sprechzeit (ms)", minSpeechEntry),
-		widget.NewFormItem("Lautstärke-Schwellwert (VAD)", vadEntry),
+	wakeFormBox := container.NewVBox(
+		labelAbove("Aktivierungswort", wakeEntry),
+		vSpacer(8),
+		silenceRow,
+		vSpacer(8),
+		minSpeechRow,
+		vSpacer(8),
+		vadRow,
 	)
 
-	// Form-Felder de/aktivieren je nach Checkbox
-	setVoiceFormEnabled := func(enabled bool) {
+	setWakeFormEnabled := func(enabled bool) {
 		if enabled {
 			wakeEntry.Enable()
-			silenceEntry.Enable()
-			minSpeechEntry.Enable()
-			vadEntry.Enable()
+			silenceSlider.Enable()
+			minSpeechSlider.Enable()
+			vadSlider.Enable()
 		} else {
 			wakeEntry.Disable()
-			silenceEntry.Disable()
-			minSpeechEntry.Disable()
-			vadEntry.Disable()
+			silenceSlider.Disable()
+			minSpeechSlider.Disable()
+			vadSlider.Disable()
 		}
 	}
-	setVoiceFormEnabled(app.cfg.WakeWordEnabled)
-	wakeCheck.OnChanged = setVoiceFormEnabled
+	setWakeFormEnabled(app.cfg.WakeWordEnabled)
+	wakeCheck.OnChanged = setWakeFormEnabled
 
-	voiceInfo := widget.NewLabel(
-		"Wenn aktiviert: Mikrofon hört passiv zu und startet\n" +
-			"die Aufnahme erst nach Erkennung des Aktivierungsworts.\n" +
-			"Das Aktivierungswort wird per Whisper (Backend) erkannt.")
-	voiceInfo.Wrapping = fyne.TextWrapWord
+	// ── ANZEIGE ───────────────────────────────────────────────────────────────
+	debugCheck := widget.NewCheck("", nil)
+	debugCheck.SetChecked(app.debugMode)
 
-	voiceTab := container.NewVBox(wakeCheck, widget.NewSeparator(), voiceForm, widget.NewSeparator(), voiceInfo)
+	dialogCheck := widget.NewCheck("", nil)
+	dialogCheck.SetChecked(app.cfg.DialogMode)
 
-	// ── Tabs zusammenbauen ────────────────────────────────────────────────────
-	tabs := container.NewAppTabs(
-		container.NewTabItem("🔗 Verbindung", container.NewPadded(connTab)),
-		container.NewTabItem("🔊 Audio", container.NewPadded(audioTab)),
-		container.NewTabItem("🎤 Sprachsteuerung", container.NewPadded(voiceTab)),
+	// ── LAYOUT: scrollbare Einzelspalte (Android-Stil) ────────────────────────
+	content := container.NewVBox(
+		// — Verbindung —
+		sectionHeader("VERBINDUNG"),
+		labelAbove("Server-Adresse", hostEntry),
+		vSpacer(8),
+		labelAbove("API-Schlüssel", keyEntry),
+		vSpacer(4),
+		container.NewHBox(testBtn, connStatusLbl),
+
+
+		widget.NewSeparator(),
+
+		// — Audio — (Label fett links, Dropdown + Test rechts – analog Android SettingRow)
+		sectionHeader("AUDIO"),
+		audioFieldRow("Lautsprecher", speakerSel, speakerTestBtn, speakerTestLbl),
+		vSpacer(8),
+		audioFieldRow("Mikrofon", micSel, micTestBtn, micTestLbl),
+		vSpacer(8),
+		audioFieldRow("Antwortstimme", voiceSel, voiceTestBtn, voiceTestLbl),
+
+		widget.NewSeparator(),
+
+		// — Hintergrund —
+		sectionHeader("HINTERGRUND"),
+		bgTypeRadio,
+		bgExtraBox,
+
+		widget.NewSeparator(),
+
+		// — Sprachsteuerung —
+		sectionHeader("SPRACHSTEUERUNG"),
+		settingRow("Automatisch senden",
+			"Transkribierte Sprache wird direkt gesendet",
+			autoSendCheck),
+		vSpacer(8),
+		settingRow("Aktivierungswort verwenden",
+			"Mikrofon hört passiv zu bis das Wort erkannt wird",
+			wakeCheck),
+		vSpacer(8),
+		wakeFormBox,
+
+		widget.NewSeparator(),
+
+		// — Anzeige —
+		sectionHeader("ANZEIGE"),
+		settingRow("Debug-Modus",
+			"Alle Agent-Nachrichten sichtbar — zeigt LLM-Details",
+			debugCheck),
+		vSpacer(8),
+		settingRow("Dialog-Modus",
+			"Avatar-Fenster mit Sprachdialog statt Chat-Fenster",
+			dialogCheck),
+
+		widget.NewSeparator(),
+
+		// — Info & Version (Android Info-Card) —
+		sectionHeader("INFO"),
+		buildInfoCard(),
 	)
-	tabs.SetTabLocation(container.TabLocationTop)
 
-	// ── Buttons ───────────────────────────────────────────────────────────────
+	scroll := container.NewVScroll(content)
+
+	// Speichern-Button volle Breite (Android-Stil)
 	saveBtn := widget.NewButton("Speichern", func() {
 		if hostEntry.Text == "" || keyEntry.Text == "" {
 			dialog.ShowError(fmt.Errorf("Bitte Server-Adresse und API-Key eingeben"), win)
@@ -289,8 +533,6 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 				break
 			}
 		}
-
-		// TTS-Antwortstimme – ID (nicht Anzeigename) speichern
 		{
 			selIdx := -1
 			for i, n := range voiceSel.Options {
@@ -308,17 +550,32 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 			SetTTSServer(app.cfg.ServerURL, app.cfg.APIKey)
 		}
 
+		// Hintergrund
+		app.cfg.BackgroundType = bgType
+		app.cfg.BackgroundColor = bgColorIdx
+		app.cfg.BackgroundImagePath = bgImagePath
+		app.cfg.BackgroundAlpha = bgAlpha
+
+		// Sprache
+		app.cfg.AutoSendVoice = autoSendCheck.Checked
+
 		// Wake-Word
 		app.cfg.WakeWordEnabled = wakeCheck.Checked
 		app.cfg.WakeWord = wakeEntry.Text
-		if v, err := strconv.Atoi(silenceEntry.Text); err == nil && v > 0 {
-			app.cfg.SilenceMs = v
+		app.cfg.SilenceMs = int(silenceVal)
+		app.cfg.MinSpeechMs = int(minSpeechVal)
+		app.cfg.VADThreshold = int(vadVal)
+
+		// Anzeige
+		if debugCheck.Checked != app.debugMode {
+			app.toggleDebug()
 		}
-		if v, err := strconv.Atoi(minSpeechEntry.Text); err == nil && v > 0 {
-			app.cfg.MinSpeechMs = v
-		}
-		if v, err := strconv.Atoi(vadEntry.Text); err == nil && v >= 0 {
-			app.cfg.VADThreshold = v
+		if dialogCheck.Checked != app.cfg.DialogMode {
+			if dialogCheck.Checked {
+				go app.switchToDialogMode()
+			} else {
+				go app.switchToTextMode()
+			}
 		}
 
 		_ = app.cfg.Save()
@@ -327,18 +584,29 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 			onSave()
 		}
 	})
-	// Buttons – Android-Stil: Primär=Lila (HighImportance), Sekundär=gedimmt
-	saveBtn.Importance = widget.HighImportance // lila #6366F1
-	cancelBtn := widget.NewButton("Abbrechen", func() { win.Close() })
-	cancelBtn.Importance = widget.LowImportance
+	saveBtn.Importance = widget.HighImportance
 
-	// Verbindungstest-Button ebenfalls stylen
-	testBtn.Importance = widget.MediumImportance
-
-	btnRow := container.NewGridWithColumns(2, cancelBtn, saveBtn)
-	content := container.NewBorder(nil, container.NewPadded(btnRow), nil, nil, tabs)
-
-	win.SetContent(content)
-	win.Resize(fyne.NewSize(480, 440))
+	win.SetContent(container.NewBorder(nil,
+		container.NewPadded(saveBtn), nil, nil, scroll))
+	win.Resize(fyne.NewSize(440, 620))
 	win.Show()
+}
+
+// buildInfoCard erstellt die Info-Karte am Ende der Einstellungen (analog Android).
+func buildInfoCard() fyne.CanvasObject {
+	link, _ := url.Parse("https://jarvis-ai.info")
+	hyperlink := widget.NewHyperlink("jarvis-ai.info", link)
+
+	verLbl := widget.NewLabel("v" + AppVersion)
+	verLbl.Importance = widget.LowImportance
+
+	infoLbl := widget.NewLabel("Verbindet sich über verschlüsselte WebSocket-Verbindung\nmit dem Jarvis-Backend. Mikrofon wird lokal verarbeitet.")
+	infoLbl.Importance = widget.LowImportance
+	infoLbl.Wrapping = fyne.TextWrapWord
+
+	return container.NewVBox(
+		container.NewBorder(nil, nil, nil, verLbl, hyperlink),
+		infoLbl,
+		layout.NewSpacer(),
+	)
 }

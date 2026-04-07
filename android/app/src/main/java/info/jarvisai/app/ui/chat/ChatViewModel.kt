@@ -81,7 +81,9 @@ class ChatViewModel @Inject constructor(
     private var autoSendVoice = false
     private var voiceSilenceMs = 1500
     private var avatarEnabled = true   // Spiegelt settings.avatarEnabled live
-    private var lastSpokenMsgId = ""   // Verhindert doppeltes Sprechen derselben Nachricht
+    // Vorgeladene Nachrichten beim Start nicht erneut sprechen
+    private var lastSpokenMsgId = repo.messages.value
+        .lastOrNull { it.role == MessageRole.JARVIS }?.id ?: ""
 
     init {
         // Alle Settings-Änderungen live übernehmen
@@ -256,6 +258,7 @@ class ChatViewModel @Inject constructor(
                     _voiceState.value = VoiceState.IDLE
                     if (text.isNotBlank()) {
                         if (autoSendVoice) {
+                            _inputText.value = ""
                             repo.sendMessage(text)
                         } else {
                             _inputText.value = text

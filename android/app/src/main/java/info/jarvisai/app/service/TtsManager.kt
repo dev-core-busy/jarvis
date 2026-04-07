@@ -25,11 +25,51 @@ private const val TAG = "TtsManager"
 @Singleton
 class TtsManager @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val serverTtsPlayer: ServerTtsPlayer,
 ) {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var tts: TextToSpeech? = null
     private var initialized = false
     private var pendingText: String? = null
+
+    // Server-TTS Konfiguration (live aus Settings)
+    private var serverTtsEnabled = false
+    private var serverUrl = ""
+    private var apiKey = ""
+    private var serverVoice = "de-DE-ConradNeural"
+    private var androidVoice = ""   // "" = Automatisch
+
+    /** Konfiguration aus Settings übernehmen (wird vom ChatViewModel aufgerufen). */
+    fun configure(
+        serverTtsEnabled: Boolean,
+        serverUrl: String,
+        apiKey: String,
+        serverVoice: String,
+        androidVoice: String,
+    ) {
+        this.serverTtsEnabled = serverTtsEnabled
+        this.serverUrl = serverUrl
+        this.apiKey = apiKey
+        this.serverVoice = serverVoice
+        this.androidVoice = androidVoice
+        // Android-Stimme sofort anwenden
+        if (!serverTtsEnabled) applyAndroidVoice(androidVoice)
+    }
+
+    private fun applyAndroidVoice(voiceId: String) {
+        if (!initialized) return
+        if (voiceId.isBlank()) {
+            // Automatisch: beste männliche deutsche Stimme
+            val male = tts?.voices?.filter {
+                it.locale.language == "de" && it.name.contains("male", ignoreCase = true)
+            }?.minByOrNull { it.quality }
+            if (male != null) tts?.voice = male
+            else tts?.setLanguage(Locale.GERMAN)
+        } else {
+            val v = tts?.voices?.firstOrNull { it.name == voiceId }
+            if (v != null) tts?.voice = v
+        }
+    }
 
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking
@@ -49,6 +89,7 @@ class TtsManager @Inject constructor(
                     Log.w(TAG, "Deutsche TTS-Stimme nicht verfügbar (result=$result)")
                 } else {
                     Log.i(TAG, "TTS initialisiert (de-DE)")
+                    applyAndroidVoice(androidVoice)
                     // Ausstehenden Text sprechen falls vorhanden
                     pendingText?.let { text ->
                         pendingText = null
@@ -67,8 +108,28 @@ class TtsManager @Inject constructor(
      */
     fun speak(text: String) {
         if (text.isBlank()) return
+        // Server-TTS (edge-tts)
+        if (serverTtsEnabled && serverUrl.isNotBlank() && apiKey.isNotBlank()) {
+            scope.launch {
+                _isSpeaking.value = true
+                startMouthAnimation()
+                val ok = serverTtsPlayer.speak(serverUrl, apiKey, text, serverVoice)
+                if (!ok) {
+                    // Fallback auf Android-TTS
+                    speakAndroid(text)
+                } else {
+                    _isSpeaking.value = false
+                    stopMouthAnimation()
+                }
+            }
+            return
+        }
+        speakAndroid(text)
+    }
+
+    private fun speakAndroid(text: String) {
         if (!initialized) {
-            pendingText = text   // Puffern bis TTS bereit
+            pendingText = text
             return
         }
         val utteranceId = "jarvis_${System.currentTimeMillis()}"
@@ -132,6 +193,20 @@ class TtsManager @Inject constructor(
         mouthJob = null
         _mouthState.value = AvatarMouthState.CLOSED
     }
+
+    /** Alle deutschen Android-TTS-Stimmen zurückgeben (id to displayName). */
+    fun getAvailableAndroidVoices(): List<Pair<String, String>> =
+        tts?.voices
+            ?.filter { it.locale.language == "de" }
+            ?.sortedBy { it.name }
+            ?.map { v ->
+                val g = when {
+                    v.name.contains("female", ignoreCase = true) -> "♀ "
+                    v.name.contains("male",   ignoreCase = true) -> "♂ "
+                    else -> ""
+                }
+                v.name to "$g${v.name}"
+            } ?: emptyList()
 
     fun shutdown() {
         stop()

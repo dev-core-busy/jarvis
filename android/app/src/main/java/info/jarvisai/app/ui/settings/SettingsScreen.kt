@@ -8,6 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -34,12 +36,163 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import info.jarvisai.app.BuildConfig
 import info.jarvisai.app.R
+import info.jarvisai.app.service.TtsVoice
 import info.jarvisai.app.data.prefs.BG_COLOR
 import info.jarvisai.app.data.prefs.BG_DEFAULT_URI
 import info.jarvisai.app.data.prefs.BG_GRADIENT
 import info.jarvisai.app.data.prefs.BG_PHOTO
 import info.jarvisai.app.ui.theme.JarvisGreen
 import info.jarvisai.app.ui.theme.JarvisPurple
+
+// ─── Stimmen-Auswahl-Dialoge ──────────────────────────────────────────────────
+
+@Composable
+private fun ServerVoicePickerDialog(
+    currentVoice: String,
+    voices: List<TtsVoice>,
+    loadingVoices: Boolean,
+    onSelect: (String) -> Unit,
+    onPreview: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Server-Stimme (edge-tts)") },
+        text = {
+            when {
+                loadingVoices -> Box(
+                    modifier = Modifier.fillMaxWidth().height(180.dp),
+                    contentAlignment = Alignment.Center,
+                ) { CircularProgressIndicator() }
+                voices.isEmpty() -> Text(
+                    "Keine Stimmen verfügbar.\nServer-URL und API-Key prüfen.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                else -> LazyColumn(modifier = Modifier.height(360.dp)) {
+                    items(voices) { voice ->
+                        val isSelected = voice.id == currentVoice
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isSelected) JarvisPurple.copy(alpha = 0.25f) else Color.Transparent)
+                                .clickable { onSelect(voice.id) }
+                                .padding(horizontal = 8.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = when (voice.gender.lowercase()) {
+                                    "male"   -> "♂"
+                                    "female" -> "♀"
+                                    else     -> "  "
+                                },
+                                color = if (voice.gender.lowercase() == "female")
+                                    Color(0xFFFF69B4) else Color(0xFF64B5F6),
+                                fontSize = 14.sp,
+                                modifier = Modifier.width(20.dp),
+                            )
+                            Text(
+                                text = voice.display.ifBlank { voice.id },
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) JarvisPurple else Color.Unspecified,
+                                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                            )
+                            TextButton(
+                                onClick = { onPreview(voice.id) },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            ) {
+                                Text("►", fontSize = 14.sp)
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Schließen") }
+        },
+    )
+}
+
+@Composable
+private fun AndroidVoicePickerDialog(
+    currentVoice: String,
+    voices: List<Pair<String, String>>,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Android-Stimme") },
+        text = {
+            LazyColumn(modifier = Modifier.height(360.dp)) {
+                item {
+                    val isAuto = currentVoice.isBlank()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isAuto) JarvisPurple.copy(alpha = 0.25f) else Color.Transparent)
+                            .clickable { onSelect("") }
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("♂", color = Color(0xFF64B5F6), fontSize = 14.sp,
+                            modifier = Modifier.width(20.dp))
+                        Text(
+                            text = "Automatisch (beste männliche Stimme)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (isAuto) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isAuto) JarvisPurple else Color.Unspecified,
+                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                }
+                items(voices) { (id, display) ->
+                    val isSelected = id == currentVoice
+                    val genderIcon = when {
+                        display.startsWith("♀") -> "♀"
+                        display.startsWith("♂") -> "♂"
+                        else -> "  "
+                    }
+                    val voiceName = display.removePrefix("♀ ").removePrefix("♂ ")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isSelected) JarvisPurple.copy(alpha = 0.25f) else Color.Transparent)
+                            .clickable { onSelect(id) }
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = genderIcon,
+                            color = if (genderIcon == "♀") Color(0xFFFF69B4) else Color(0xFF64B5F6),
+                            fontSize = 14.sp,
+                            modifier = Modifier.width(20.dp),
+                        )
+                        Text(
+                            text = voiceName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) JarvisPurple else Color.Unspecified,
+                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Schließen") }
+        },
+    )
+}
 
 // ─── Wiederverwendbare Bausteine ──────────────────────────────────────────────
 
@@ -141,7 +294,19 @@ fun SettingsScreen(
     val context = LocalContext.current
     val settings by viewModel.settings.collectAsState()
     val saved by viewModel.saved.collectAsState()
+    val serverVoices by viewModel.serverVoices.collectAsState()
+    val androidVoices by viewModel.androidVoices.collectAsState()
+    val loadingVoices by viewModel.loadingVoices.collectAsState()
     var apiKeyVisible by remember { mutableStateOf(false) }
+    var showServerVoicePicker by remember { mutableStateOf(false) }
+    var showAndroidVoicePicker by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showServerVoicePicker) {
+        if (showServerVoicePicker) viewModel.fetchServerVoices()
+    }
+    LaunchedEffect(showAndroidVoicePicker) {
+        if (showAndroidVoicePicker) viewModel.loadAndroidVoices()
+    }
 
     LaunchedEffect(saved) {
         if (saved) {
@@ -166,6 +331,24 @@ fun SettingsScreen(
             )
         },
     ) { padding ->
+        if (showServerVoicePicker) {
+            ServerVoicePickerDialog(
+                currentVoice  = settings.serverTtsVoice,
+                voices        = serverVoices,
+                loadingVoices = loadingVoices,
+                onSelect      = { voice -> viewModel.onServerTtsVoiceChange(voice); showServerVoicePicker = false },
+                onPreview     = viewModel::previewServerVoice,
+                onDismiss     = { showServerVoicePicker = false },
+            )
+        }
+        if (showAndroidVoicePicker) {
+            AndroidVoicePickerDialog(
+                currentVoice = settings.androidTtsVoice,
+                voices       = androidVoices,
+                onSelect     = { voice -> viewModel.onAndroidTtsVoiceChange(voice); showAndroidVoicePicker = false },
+                onDismiss    = { showAndroidVoicePicker = false },
+            )
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -347,6 +530,56 @@ fun SettingsScreen(
                     checked = settings.avatarEnabled,
                     onCheckedChange = viewModel::onAvatarEnabledChange,
                 )
+            }
+
+            SettingRow(
+                label = "Server-Stimme (edge-tts)",
+                description = "Sprachausgabe via Jarvis-Server (höhere Qualität)",
+            ) {
+                Switch(
+                    checked = settings.serverTtsEnabled,
+                    onCheckedChange = viewModel::onServerTtsEnabledChange,
+                )
+            }
+
+            if (settings.serverTtsEnabled) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text("Server-Stimme", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            settings.serverTtsVoice.ifBlank { "de-DE-ConradNeural" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = JarvisGreen,
+                        )
+                    }
+                    OutlinedButton(onClick = { showServerVoicePicker = true }) {
+                        Text("Wählen")
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text("Android-Stimme", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (settings.androidTtsVoice.isBlank())
+                                "Automatisch (beste männliche Stimme)"
+                            else settings.androidTtsVoice,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedButton(onClick = { showAndroidVoicePicker = true }) {
+                        Text("Wählen")
+                    }
+                }
             }
 
             SettingRow(

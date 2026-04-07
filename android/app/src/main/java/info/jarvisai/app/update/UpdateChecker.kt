@@ -33,7 +33,7 @@ class UpdateChecker @Inject constructor(
     private val okHttpClient: OkHttpClient,
 ) {
     private val versionUrl = "https://jarvis-ai.info/version.json"
-    val apkUrl = "https://jarvis-ai.info/jarvis.apk"
+    val apkUrl = "https://jarvis-ai.info/downloads/jarvis.apk"
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun check(): UpdateState = withContext(Dispatchers.IO) {

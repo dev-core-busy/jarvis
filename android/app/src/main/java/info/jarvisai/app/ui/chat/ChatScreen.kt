@@ -153,12 +153,16 @@ fun ChatScreen(
 
         // ── Anime-Avatar (zwischen Hintergrund und Chat-Inhalt) ───────
         if (settings.avatarEnabled) {
+            // Tastatur- und Navigationsleisten-Inset berücksichtigen, damit
+            // der Avatar immer im sichtbaren Bereich schwebt
+            val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+            val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             JarvisAvatar(
-                isSpeaking   = isSpeaking,
-                mouthState   = avatarMouth,
-                modifier     = Modifier
+                isSpeaking = isSpeaking,
+                mouthState = avatarMouth,
+                modifier   = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 88.dp, end = 10.dp)
+                    .padding(bottom = 64.dp + maxOf(imeBottom, navBottom), end = 10.dp)
                     .size(width = 130.dp, height = 160.dp)
                     .alpha(if (isSpeaking) 0.92f else 0.70f),
             )

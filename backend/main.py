@@ -124,6 +124,13 @@ agent_instance = None  # wird lazy initialisiert (Kompatibilitaet)
 agent_manager = None  # AgentManager fuer Multi-Agent Support
 _whisper_model = None  # lazy-geladen fuer Wake-Word-Erkennung
 
+# Client-Typ pro WebSocket-Verbindung
+# Schlüssel: id(ws), Wert: "browser" | "windows_desktop" | "android"
+_ws_client_types: dict[int, str] = {}
+
+def _get_client_type(ws) -> str:
+    return _ws_client_types.get(id(ws), "browser")
+
 
 def _get_whisper_model():
     """Gibt das Whisper-Modell zurück (lädt es beim ersten Aufruf)."""
@@ -2787,13 +2794,15 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         cpu_task.cancel()
         active_sessions.pop(session_id, None)
+        # Client-Typ entfernen
+        ct = _ws_client_types.pop(id(ws), "browser")
         # Windows-Client abmelden falls diese Verbindung es war
-        try:
-            from backend.tools.windows_desktop import set_windows_ws, _windows_ws
-            if _windows_ws is ws:
+        if ct == "windows_desktop":
+            try:
+                from backend.tools.windows_desktop import set_windows_ws
                 set_windows_ws(None)
-        except Exception:
-            pass
+            except Exception:
+                pass
 
 
 async def cpu_broadcast(ws: WebSocket):
@@ -2833,6 +2842,9 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
 
         target_agent_id = msg.get("agent_id", "")
 
+        # Client-Typ bestimmen: wer hat diese WS-Verbindung aufgebaut?
+        client_type = _get_client_type(ws)
+
         from backend.agent import JarvisAgent, AgentManager
 
         # AgentManager initialisieren
@@ -2844,7 +2856,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         if target_agent_id and agent_manager.get_agent(target_agent_id):
             target = agent_manager.get_agent(target_agent_id)
             if target.is_sub_agent:
-                asyncio.create_task(target.run_task(task_text, ws))
+                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type))
                 return
 
         agent = agent_manager.get_or_create_main()
@@ -2859,7 +2871,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         })
 
         # Aufgabe im Hintergrund starten
-        asyncio.create_task(agent.run_task(task_text, ws))
+        asyncio.create_task(agent.run_task(task_text, ws, client_type=client_type))
 
     elif msg_type == "spawn_agent":
         # Sub-Agent starten (vom Frontend oder Hauptagent)
@@ -2917,12 +2929,15 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         await ws.send_json({"type": "agent_list", "agents": agents})
 
     elif msg_type == "register":
-        # Windows-Client registriert sich als Desktop-Agent
-        client_type = msg.get("client_type", "")
+        # Client registriert sich mit seinem Typ
+        client_type = msg.get("client_type", "browser")
+        _ws_client_types[id(ws)] = client_type
         if client_type == "windows_desktop":
             from backend.tools.windows_desktop import set_windows_ws
             set_windows_ws(ws)
             await ws.send_json({"type": "status", "message": "✅ Windows Desktop-Agent registriert"})
+        elif client_type == "android":
+            await ws.send_json({"type": "status", "message": "✅ Android-Client registriert"})
 
     elif msg_type == "desktop_result":
         # Ergebnis eines Desktop-Befehls von der Windows App

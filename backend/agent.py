@@ -273,7 +273,7 @@ KRITISCH – Autonomie-Regeln:
             )
         return declarations
 
-    async def run_task(self, task_text: str, ws: WebSocket):
+    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser"):
         """Führt eine Aufgabe aus – der Agent-Loop."""
         import sys
         from backend.telemetry import tracer
@@ -303,24 +303,28 @@ KRITISCH – Autonomie-Regeln:
         # System-Prompt zusammenbauen
         system_prompt = self.SUB_AGENT_PROMPT if self.is_sub_agent else self.SYSTEM_PROMPT
 
-        # Windows-Client verbunden? Dann Desktop-Steuerung auf Windows umleiten.
-        try:
-            from backend.tools.windows_desktop import is_connected as _win_connected
-            if _win_connected():
-                system_prompt += (
-                    "\n\nWICHTIG – WINDOWS DESKTOP VERBUNDEN: "
-                    "Ein Windows-PC ist als Desktop-Client verbunden. "
-                    "ALLE Desktop-Aufgaben (Programme öffnen, Mausklicks, Texteingabe, Screenshots, Shell-Befehle auf Windows) "
-                    "MÜSSEN mit dem Tool 'windows_desktop' ausgeführt werden. "
-                    "Nutze NIEMALS 'desktop_control' oder 'shell_execute' für Aufgaben auf dem Windows-Desktop – "
-                    "diese Tools steuern NUR den Linux-Server, NICHT den Windows-PC. "
-                    "Wenn der Benutzer sagt 'öffne X', 'klicke auf Y', 'tippe Z', 'zeige Desktop' o.ä., "
-                    "ist IMMER der Windows-Desktop gemeint. "
-                    "Empfohlener Ablauf: 1) windows_desktop(action='screenshot') um Bildschirm zu sehen, "
-                    "2) Aktion ausführen (mouse_click/type_text/key_press/shell_exec), "
-                    "3) erneuter Screenshot zur Bestätigung."
-                )
-        except Exception:
+        # Desktop-Kontext je nach Client-Typ setzen
+        if client_type == "windows_desktop":
+            system_prompt += (
+                "\n\nWICHTIG – DU LÄUFST ALS WINDOWS DESKTOP AGENT: "
+                "Der Benutzer schickt Befehle von der Jarvis Windows App. "
+                "ALLE Desktop-Aufgaben (Programme öffnen, Mausklicks, Texteingabe, Screenshots, "
+                "Shell-Befehle) MÜSSEN mit dem Tool 'windows_desktop' ausgeführt werden. "
+                "Nutze NIEMALS 'desktop_control' oder 'shell_execute' für Aufgaben auf dem Windows-Desktop – "
+                "diese Tools steuern NUR den Linux-Server, NICHT den Windows-PC. "
+                "Empfohlener Ablauf: 1) windows_desktop(action='screenshot') um den Bildschirm zu sehen, "
+                "2) Aktion ausführen (mouse_click/type_text/key_press/shell_exec), "
+                "3) erneuter Screenshot zur Bestätigung."
+            )
+        elif client_type == "android":
+            system_prompt += (
+                "\n\nWICHTIG – DU LÄUFST ALS ANDROID AGENT: "
+                "Der Benutzer schickt Befehle von der Jarvis Android App. "
+                "Desktop-Steuerung für Android ist noch nicht implementiert. "
+                "Antworte dem Benutzer, dass Android-Desktop-Steuerung noch nicht verfügbar ist."
+            )
+        else:
+            # Browser: Linux-Desktop ist der richtige Kontext (Standard)
             pass
 
         # Benutzer-Instruktionen laden (data/instructions/*.md)

@@ -221,6 +221,13 @@ KRITISCH – Autonomie-Regeln:
         except Exception as e:
             print(f"[AGENT {self.agent_id}] WindowsDesktopTool nicht geladen: {e}", flush=True)
 
+        # Android Desktop Tool (immer verfügbar; gibt Fehler wenn kein Client verbunden)
+        try:
+            from backend.tools.android_desktop import AndroidDesktopTool
+            self._tool_instances.append(AndroidDesktopTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] AndroidDesktopTool nicht geladen: {e}", flush=True)
+
         # MCP-Tools laden (externe Tool-Server)
         try:
             from backend.mcp_client import mcp_manager
@@ -319,12 +326,15 @@ KRITISCH – Autonomie-Regeln:
         elif client_type == "android":
             system_prompt += (
                 "\n\nWICHTIG – DU LÄUFST ALS ANDROID AGENT: "
-                "Der Benutzer schickt Befehle von der Jarvis Android App auf einem Android-Smartphone. "
+                "Der Benutzer schickt Befehle von der Jarvis Android App auf seinem Android-Smartphone. "
                 "NIEMALS 'desktop_control', 'shell_execute', 'screenshot' oder andere Linux-Desktop-Tools verwenden – "
                 "diese steuern den Linux-Server, NICHT das Android-Gerät des Benutzers. "
-                "Android-Desktop-Steuerung (App öffnen, tippen, scrollen) ist noch nicht implementiert. "
-                "Wenn der Benutzer etwas auf seinem Gerät öffnen oder steuern möchte, antworte klar: "
-                "'Android-Desktop-Steuerung ist noch nicht verfügbar. Du kannst mich aber für andere Aufgaben nutzen (Wissen, Web, Shell auf dem Jarvis-Server etc.).'"
+                "Für ALLE Aktionen auf dem Android-Gerät (App starten, Shell-Befehle, Gerätinfo) "
+                "das Tool 'android_desktop' verwenden. "
+                "Verfügbare Aktionen: shell_exec (Shell-Befehl), launch_app (App starten per Name), "
+                "list_apps (installierte Apps anzeigen), get_info (Gerätinformationen). "
+                "Empfohlener Ablauf: 1) get_info um Gerät zu identifizieren, "
+                "2) list_apps wenn App-Name unklar, 3) launch_app um App zu starten."
             )
         else:
             # Browser: Linux-Desktop ist der richtige Kontext (Standard)

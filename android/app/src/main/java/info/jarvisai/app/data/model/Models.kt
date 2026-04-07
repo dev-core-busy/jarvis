@@ -39,6 +39,12 @@ data class WsEvent(
     val label: String = "",
     val event: String = "",           // agent_event sub-type
     val agents: List<AgentInfo> = emptyList(),
+    // Desktop-Steuerung
+    val action: String = "",
+    val request_id: String = "",
+    val text: String = "",
+    val cmd: String = "",
+    val pkg: String = "",
 )
 
 // ─── Agent-Status ─────────────────────────────────────────────────────

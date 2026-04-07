@@ -102,6 +102,13 @@ class JarvisWebSocket @Inject constructor(
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "Verbunden mit $wsUrl")
                 _connectionState.value = ConnectionState.CONNECTED
+                // Als Android-Client registrieren
+                val reg = json.encodeToString(mapOf(
+                    "type" to "register",
+                    "client_type" to "android",
+                    "token" to apiKey,
+                ))
+                webSocket.send(reg)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {

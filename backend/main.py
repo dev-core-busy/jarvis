@@ -2796,11 +2796,17 @@ async def websocket_endpoint(ws: WebSocket):
         active_sessions.pop(session_id, None)
         # Client-Typ entfernen
         ct = _ws_client_types.pop(id(ws), "browser")
-        # Windows-Client abmelden falls diese Verbindung es war
+        # Desktop-Client abmelden falls diese Verbindung es war
         if ct == "windows_desktop":
             try:
                 from backend.tools.windows_desktop import set_windows_ws
                 set_windows_ws(None)
+            except Exception:
+                pass
+        elif ct == "android":
+            try:
+                from backend.tools.android_desktop import set_android_ws
+                set_android_ws(None)
             except Exception:
                 pass
 
@@ -2937,12 +2943,19 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             set_windows_ws(ws)
             await ws.send_json({"type": "status", "message": "✅ Windows Desktop-Agent registriert"})
         elif client_type == "android":
+            from backend.tools.android_desktop import set_android_ws
+            set_android_ws(ws)
             await ws.send_json({"type": "status", "message": "✅ Android-Client registriert"})
 
     elif msg_type == "desktop_result":
-        # Ergebnis eines Desktop-Befehls von der Windows App
-        from backend.tools.windows_desktop import on_desktop_result
-        on_desktop_result(msg)
+        # Ergebnis eines Desktop-Befehls – an richtiges Tool weiterleiten
+        ct = _get_client_type(ws)
+        if ct == "android":
+            from backend.tools.android_desktop import on_android_result
+            on_android_result(msg)
+        else:
+            from backend.tools.windows_desktop import on_desktop_result
+            on_desktop_result(msg)
 
     elif msg_type == "ping":
         await ws.send_json({"type": "pong"})

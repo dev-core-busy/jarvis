@@ -16,6 +16,8 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -50,6 +52,9 @@ class JarvisWebSocket @Inject constructor(
     private val _events = MutableSharedFlow<WsEvent>(extraBufferCapacity = 64)
     val events: SharedFlow<WsEvent> = _events
 
+    private val _desktopCommands = MutableSharedFlow<WsEvent>(extraBufferCapacity = 16)
+    val desktopCommands: SharedFlow<WsEvent> = _desktopCommands
+
     private val _agents = MutableStateFlow<List<AgentInfo>>(emptyList())
     val agents: StateFlow<List<AgentInfo>> = _agents
 
@@ -83,6 +88,19 @@ class JarvisWebSocket @Inject constructor(
         ws?.send("""{"type":"ping"}""")
     }
 
+    fun sendDesktopResult(requestId: String, action: String, output: String, error: String = "", exitCode: Int = 0) {
+        val payload = buildJsonObject {
+            put("type", "desktop_result")
+            put("token", apiKey)
+            put("request_id", requestId)
+            put("action", action)
+            put("output", output)
+            put("error", error)
+            put("exit_code", exitCode)
+        }.toString()
+        ws?.send(payload) ?: Log.w(TAG, "sendDesktopResult: WebSocket nicht verbunden")
+    }
+
     private fun buildWsUrl(url: String): String {
         val base = when {
             url.startsWith("wss://") || url.startsWith("ws://") -> url
@@ -114,6 +132,11 @@ class JarvisWebSocket @Inject constructor(
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
                     val event = json.decodeFromString<WsEvent>(text)
+                    // Desktop-Befehle separat weiterleiten
+                    if (event.type == "desktop_command") {
+                        scope.launch { _desktopCommands.emit(event) }
+                        return
+                    }
                     scope.launch { _events.emit(event) }
                     // Agent-Liste aktualisieren
                     if (event.type == "agent_list" && event.agents.isNotEmpty()) {

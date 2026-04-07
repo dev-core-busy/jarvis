@@ -109,6 +109,10 @@ class SettingsViewModel @Inject constructor(
         _androidVoices.value = ttsManager.getAvailableAndroidVoices()
     }
 
+    fun previewAndroidVoice(voice: String) {
+        ttsManager.previewAndroidVoice(voice)
+    }
+
     fun previewServerVoice(voice: String) {
         val s = _settings.value
         if (s.serverUrl.isBlank() || s.apiKey.isBlank()) return

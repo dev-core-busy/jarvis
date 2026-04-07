@@ -3,6 +3,7 @@ package info.jarvisai.app.data.repository
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import info.jarvisai.app.data.api.JarvisWebSocket
+import info.jarvisai.app.desktop.AndroidDesktopExecutor
 import info.jarvisai.app.data.model.AgentInfo
 import info.jarvisai.app.data.model.ChatMessage
 import info.jarvisai.app.data.model.ConnectionState
@@ -39,6 +40,8 @@ class ChatRepository @Inject constructor(
     val connectionState: StateFlow<ConnectionState> = ws.connectionState
     val agents: StateFlow<List<AgentInfo>> = ws.agents
 
+    private val desktopExecutor = AndroidDesktopExecutor(context)
+
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
 
@@ -51,6 +54,7 @@ class ChatRepository @Inject constructor(
     init {
         loadMessages()
         scope.launch { collectEvents() }
+        scope.launch { collectDesktopCommands() }
     }
 
     suspend fun connect() {
@@ -72,6 +76,13 @@ class ChatRepository @Inject constructor(
 
     private suspend fun collectEvents() {
         ws.events.collect { event -> handleEvent(event) }
+    }
+
+    private suspend fun collectDesktopCommands() {
+        ws.desktopCommands.collect { event ->
+            val (output, error, exitCode) = desktopExecutor.execute(event)
+            ws.sendDesktopResult(event.request_id, event.action, output, error, exitCode)
+        }
     }
 
     private fun handleEvent(event: WsEvent) {

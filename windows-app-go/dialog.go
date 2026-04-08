@@ -43,8 +43,8 @@ type DialogController struct {
 	app   *JarvisApp
 
 	StopAfterFirstUtterance bool
-	OnStop                  func()              // Callback nach erster Äußerung (Diktat-Modus)
-	OnRMSLevel              func(rms float64)   // Callback für Live-Pegelanzeige
+	OnStop                  func()                              // Callback nach erster Äußerung (Diktat-Modus)
+	OnRMSLevel              func(rms float64, frameMs int)     // Callback für Live-Pegelanzeige
 }
 
 func NewDialogController(audio *AudioManager, ws *WSClient, app *JarvisApp) *DialogController {
@@ -151,7 +151,7 @@ func (d *DialogController) processMicFrame(pcm []byte) {
 	frameDurationMs := len(pcm) / 2 * 1000 / vadSampleRate
 
 	if d.OnRMSLevel != nil {
-		d.OnRMSLevel(rms)
+		d.OnRMSLevel(rms, frameDurationMs)
 	}
 
 	d.mu.Lock()

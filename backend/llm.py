@@ -101,7 +101,7 @@ async def _retry_with_backoff(coro_fn, max_retries: int = 3, base_delay: float =
     for attempt in range(max_retries + 1):
         try:
             return await coro_fn()
-        except (httpx.HTTPStatusError, httpx.ConnectError, httpx.ReadTimeout, ValueError) as e:
+        except Exception as e:
             # Nur bei 429/503/502 und ConnectError erneut versuchen
             # ReadTimeout NICHT retrien – bei langsamen lokalen Modellen würde das die Wartezeit vervielfachen
             retryable = False
@@ -109,13 +109,16 @@ async def _retry_with_backoff(coro_fn, max_retries: int = 3, base_delay: float =
                 retryable = True
             elif isinstance(e, httpx.ConnectError):
                 retryable = True
-            elif isinstance(e, ValueError) and ("429" in str(e) or "503" in str(e) or "502" in str(e)):
-                retryable = True
+            else:
+                # Gemini SDK wirft google.genai.errors.ServerError (kein httpx) – per String prüfen
+                msg = str(e)
+                if any(code in msg for code in ("503", "429", "502", "UNAVAILABLE", "RESOURCE_EXHAUSTED")):
+                    retryable = True
 
             if not retryable or attempt >= max_retries:
                 raise
             delay = base_delay * (2 ** attempt)
-            print(f"[LLM] Retry {attempt + 1}/{max_retries} nach {delay}s: {e}", flush=True)
+            print(f"[LLM] Retry {attempt + 1}/{max_retries} nach {delay}s ({type(e).__name__}): {e}", flush=True)
             await asyncio.sleep(delay)
     raise RuntimeError("Retry-Limit erreicht")
 

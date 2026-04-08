@@ -517,33 +517,27 @@ func (ja *JarvisApp) startTextDictation() {
 		header := BuildWAVHeader(len(utt.pcm))
 		wav := append(header, utt.pcm...)
 
-		if ja.cfg.WhisperExe != "" && ja.cfg.WhisperModel != "" {
-			// Lokale STT: direkt transkribieren, kein Server-Roundtrip
-			ja.chat.SetStatus("🎤 Transkribiere…")
-			go func() {
-				transcript, err := TranscribeLocal(wav, ja.cfg.WhisperExe, ja.cfg.WhisperModel)
-				ja.chat.SetStatus("")
-				if err != nil {
-					ja.chat.AddMessage(RoleStatus, "❌ STT-Fehler: "+err.Error())
-					return
-				}
-				if transcript == "" {
-					ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
-					return
-				}
-				if ja.cfg.AutoSendVoice {
-					ja.chat.AddMessage(RoleUser, transcript)
-					ja.ws.SendTask(transcript)
-				} else {
-					ja.chat.SetInput(transcript)
-				}
-			}()
-		} else {
-			// Server-STT: Base64 an Backend senden, Antwort kommt via OnVoiceTranscript
-			b64 := encodeBase64(wav)
-			ja.chat.SetStatus("🎤 Transkribiere…")
-			ja.ws.SendTranscribeOnly(b64)
-		}
+		// Lokale STT via Windows SAPI – kein Server-Roundtrip, kein AutoSend-Race
+		ja.chat.SetStatus("🎤 Transkribiere…")
+		autoSend := ja.cfg.AutoSendVoice
+		go func() {
+			transcript, err := TranscribeLocal(wav)
+			ja.chat.SetStatus("")
+			if err != nil {
+				ja.chat.AddMessage(RoleStatus, "❌ STT-Fehler: "+err.Error())
+				return
+			}
+			if transcript == "" {
+				ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
+				return
+			}
+			if autoSend {
+				ja.chat.AddMessage(RoleUser, transcript)
+				ja.ws.SendTask(transcript)
+			} else {
+				ja.chat.SetInput(transcript)
+			}
+		}()
 	}()
 }
 

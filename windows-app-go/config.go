@@ -34,6 +34,9 @@ type Config struct {
 	BackgroundAlpha     float32 `json:"background_alpha"`  // 0.0–1.0, Helligkeit Foto
 	// Sprache
 	AutoSendVoice bool `json:"auto_send_voice"` // Spracheingabe direkt senden (kein Tipp-Bestätigen)
+	// Lokale Spracherkennung (STT) via whisper.cpp – leer = Server-STT
+	WhisperExe   string `json:"whisper_exe"`   // Pfad zu whisper.exe
+	WhisperModel string `json:"whisper_model"` // Pfad zur .bin Modelldatei
 }
 
 // AppVersion wird beim Build via -ldflags="-X main.AppVersion=0.8xx" gesetzt.

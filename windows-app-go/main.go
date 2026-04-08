@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -77,14 +78,13 @@ func main() {
 	SetTTSVoice(cfg.TTSVoice)
 	SetTTSServer(cfg.ServerURL, cfg.APIKey)
 
-	// Whisper-Server im Hintergrund starten (Modell in RAM laden)
-	if WhisperReady() {
-		go StartWhisperServer()
-	}
+	// Whisper-Server im Hintergrund starten – immer versuchen (Funktion prüft selbst)
+	go StartWhisperServer()
 
 	ja := &JarvisApp{
-		fyneApp: a,
-		cfg:     cfg,
+		fyneApp:   a,
+		cfg:       cfg,
+		debugMode: cfg.DebugMode,
 	}
 
 	// Audio initialisieren
@@ -150,6 +150,8 @@ func (ja *JarvisApp) refreshTray() {}
 // toggleDebug schaltet den Debug-Modus um.
 func (ja *JarvisApp) toggleDebug() {
 	ja.debugMode = !ja.debugMode
+	ja.cfg.DebugMode = ja.debugMode
+	_ = ja.cfg.Save()
 	if ja.debugMode {
 		ja.chat.AddMessage(RoleStatus, "🔍 Debug-Modus AN – alle Agent-Nachrichten sichtbar")
 		ja.chat.AddMessage(RoleStatus,
@@ -537,27 +539,26 @@ func (ja *JarvisApp) startTextDictation() {
 		header := BuildWAVHeader(len(utt.pcm))
 		wav := append(header, utt.pcm...)
 
-		// Lokale STT – kein AutoSend-Race
+		// Lokale STT – direkt im Watcher-Goroutine (kein nested go func, kein UI-Deadlock)
 		ja.chat.SetStatus("🎤 Transkribiere…")
+		transcript, err := TranscribeLocal(wav)
 		autoSend := ja.cfg.AutoSendVoice
-		go func() {
-			transcript, err := TranscribeLocal(wav)
-			ja.chat.SetStatus("")
-			if err != nil {
-				ja.chat.AddMessage(RoleStatus, "❌ STT-Fehler: "+err.Error())
-				return
-			}
-			if transcript == "" {
-				ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
-				return
-			}
-			if autoSend {
-				ja.chat.AddMessage(RoleUser, transcript)
-				ja.ws.SendTask(transcript)
-			} else {
-				ja.chat.SetInput(transcript)
-			}
-		}()
+		ja.chat.SetStatus("")
+		ja.chat.AddMessage(RoleStatus, fmt.Sprintf("🔍 STT: %s | AutoSend=%v", sttLastMode, autoSend))
+		if err != nil {
+			ja.chat.AddMessage(RoleStatus, "❌ STT-Fehler: "+err.Error())
+			return
+		}
+		if transcript == "" {
+			ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
+			return
+		}
+		if autoSend {
+			ja.chat.AddMessage(RoleUser, transcript)
+			ja.ws.SendTask(transcript)
+		} else {
+			ja.chat.SetInput(transcript)
+		}
 	}()
 }
 

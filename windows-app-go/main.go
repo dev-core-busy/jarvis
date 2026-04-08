@@ -196,8 +196,7 @@ func (ja *JarvisApp) startDialogIfNeeded() {
 	}
 	if ja.dialog == nil {
 		ja.dialog = NewDialogController(ja.audio, ja.ws, ja)
-		ja.dialog.OnRMSLevel = func(rms float64) {
-			// Mikrofon-Pegel als Balken anzeigen (max ~3000 typisch)
+		ja.dialog.OnRMSLevel = func(rms float64, frameMs int) {
 			bars := int(rms / 100)
 			if bars > 20 {
 				bars = 20
@@ -478,13 +477,13 @@ func (ja *JarvisApp) startTextDictation() {
 		ja.chat.SetMicActive(false)
 		ja.chat.SetStatus("")
 	}
-	dc.OnRMSLevel = func(rms float64) {
+	dc.OnRMSLevel = func(rms float64, frameMs int) {
 		thresh := ja.cfg.VADThreshold
 		indicator := "·"
 		if rms > float64(thresh) {
 			indicator = "█"
 		}
-		ja.chat.SetStatus(fmt.Sprintf("🎤 %s RMS:%.0f Thresh:%d", indicator, rms, thresh))
+		ja.chat.SetStatus(fmt.Sprintf("🎤 %s RMS:%.0f T:%d F:%dms", indicator, rms, thresh, frameMs))
 	}
 	ja.textDictCtrl = dc
 	if err := dc.Start(); err != nil {

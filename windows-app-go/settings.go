@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -387,6 +388,41 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	}
 	updateBgExtra(bgType)
 
+	// ── LOKALE STT (Whisper.cpp) ──────────────────────────────────────────────
+	whisperExeEntry := widget.NewEntry()
+	whisperExeEntry.SetText(app.cfg.WhisperExe)
+	whisperExeEntry.SetPlaceHolder("Pfad zu whisper.exe (leer = Server-STT)")
+
+	whisperExeBtn := widget.NewButton("📂", func() {
+		fd := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
+			if err != nil || r == nil {
+				return
+			}
+			whisperExeEntry.SetText(r.URI().Path())
+			r.Close()
+		}, win)
+		fd.SetFilter(storage.NewExtensionFileFilter([]string{".exe"}))
+		fd.Show()
+	})
+	whisperExeBtn.Importance = widget.LowImportance
+
+	whisperModelEntry := widget.NewEntry()
+	whisperModelEntry.SetText(app.cfg.WhisperModel)
+	whisperModelEntry.SetPlaceHolder("Pfad zur ggml-*.bin Modelldatei")
+
+	whisperModelBtn := widget.NewButton("📂", func() {
+		fd := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
+			if err != nil || r == nil {
+				return
+			}
+			whisperModelEntry.SetText(r.URI().Path())
+			r.Close()
+		}, win)
+		fd.SetFilter(storage.NewExtensionFileFilter([]string{".bin"}))
+		fd.Show()
+	})
+	whisperModelBtn.Importance = widget.LowImportance
+
 	// ── SPRACHSTEUERUNG ───────────────────────────────────────────────────────
 	autoSendCheck := widget.NewCheck("", nil)
 	autoSendCheck.SetChecked(app.cfg.AutoSendVoice)
@@ -486,6 +522,20 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 
 		widget.NewSeparator(),
 
+		// — Lokale STT —
+		sectionHeader("Lokale Spracherkennung (whisper.cpp)"),
+		func() fyne.CanvasObject {
+			l := widget.NewLabel("Leer lassen = Spracherkennung über den Server")
+			l.Importance = widget.LowImportance
+			return l
+		}(),
+		vSpacer(4),
+		labelAbove("whisper.exe", container.NewBorder(nil, nil, nil, whisperExeBtn, whisperExeEntry)),
+		vSpacer(4),
+		labelAbove("Modelldatei (.bin)", container.NewBorder(nil, nil, nil, whisperModelBtn, whisperModelEntry)),
+
+		widget.NewSeparator(),
+
 		// — Spracheingabe —
 		sectionHeader("Spracheingabe"),
 		settingRow("Automatisch senden",
@@ -565,6 +615,10 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 		app.cfg.BackgroundColor = bgColorIdx
 		app.cfg.BackgroundImagePath = bgImagePath
 		app.cfg.BackgroundAlpha = bgAlpha
+
+		// Lokale STT
+		app.cfg.WhisperExe = strings.TrimSpace(whisperExeEntry.Text)
+		app.cfg.WhisperModel = strings.TrimSpace(whisperModelEntry.Text)
 
 		// Sprache
 		app.cfg.AutoSendVoice = autoSendCheck.Checked

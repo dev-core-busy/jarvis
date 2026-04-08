@@ -148,6 +148,13 @@ func main() {
 // refreshTray – kein Update nötig: Menü liest cfg.DialogMode beim Öffnen live.
 func (ja *JarvisApp) refreshTray() {}
 
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
 // toggleDebug schaltet den Debug-Modus um.
 func (ja *JarvisApp) toggleDebug() {
 	ja.debugMode = !ja.debugMode
@@ -332,6 +339,7 @@ func (ja *JarvisApp) reconnect() {
 	}
 	ja.chat.OnSend = func(text string) {
 		ja.chat.AddMessage(RoleUser, text)
+		ja.chat.AddMessage(RoleStatus, fmt.Sprintf("📤 SendTask: %q", text))
 		ja.ws.SendTask(text)
 	}
 	ja.chat.OnMicButton = func() {
@@ -376,6 +384,10 @@ func (ja *JarvisApp) onConnected(connected bool) {
 }
 
 func (ja *JarvisApp) onMessage(msg WSMessage) {
+	// Debug: jeden eingehenden WS-Message-Typ im Chat anzeigen
+	ja.chat.AddMessage(RoleStatus, fmt.Sprintf("📨 WS←: type=%q highlight=%v msg=%q",
+		msg.Type, msg.Highlight, truncate(msg.Message, 60)))
+
 	switch msg.Type {
 	case "status":
 		if msg.Message == "" {

@@ -315,13 +315,16 @@ KRITISCH – Autonomie-Regeln:
             system_prompt += (
                 "\n\nWICHTIG – DU LÄUFST ALS WINDOWS DESKTOP AGENT: "
                 "Der Benutzer schickt Befehle von der Jarvis Windows App. "
-                "ALLE Desktop-Aufgaben (Programme öffnen, Mausklicks, Texteingabe, Screenshots, "
-                "Shell-Befehle) MÜSSEN mit dem Tool 'windows_desktop' ausgeführt werden. "
+                "ALLE Desktop-Aufgaben (Programme öffnen, Webseiten öffnen, Mausklicks, "
+                "Texteingabe, Screenshots, Shell-Befehle) MÜSSEN mit dem Tool 'windows_desktop' ausgeführt werden. "
                 "Nutze NIEMALS 'desktop_control' oder 'shell_execute' für Aufgaben auf dem Windows-Desktop – "
                 "diese Tools steuern NUR den Linux-Server, NICHT den Windows-PC. "
+                "Wichtige Aktionen:\n"
+                "- Webseite öffnen: windows_desktop(action='open_url', url='https://example.com')\n"
+                "- Programm starten: windows_desktop(action='open_app', text='notepad')\n"
+                "- Shell-Befehl: windows_desktop(action='shell_exec', cmd='dir C:\\\\')\n"
                 "Empfohlener Ablauf: 1) windows_desktop(action='screenshot') um den Bildschirm zu sehen, "
-                "2) Aktion ausführen (mouse_click/type_text/key_press/shell_exec), "
-                "3) erneuter Screenshot zur Bestätigung."
+                "2) Aktion ausführen, 3) erneuter Screenshot zur Bestätigung."
             )
         elif client_type == "android":
             system_prompt += (

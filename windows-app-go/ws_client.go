@@ -26,6 +26,7 @@ type WSMessage struct {
 	Button    string  `json:"button,omitempty"`
 	Key       string  `json:"key,omitempty"`
 	Cmd       string  `json:"cmd,omitempty"`
+	URL       string  `json:"url,omitempty"`
 }
 
 type WSClient struct {
@@ -259,6 +260,7 @@ func (c *WSClient) runConn() error {
 					Text:      msg.Text,
 					Key:       msg.Key,
 					Cmd:       msg.Cmd,
+					URL:       msg.URL,
 				}
 				go c.OnDesktopCommand(cmd)
 			}

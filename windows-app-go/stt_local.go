@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -156,7 +157,7 @@ func transcribeViaServer(wavData []byte) (string, error) {
 	w.Close()
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/inference", sttServerPort)
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 6 * time.Second}
 	resp, err := client.Post(url, w.FormDataContentType(), &buf) //nolint:gosec
 	if err != nil {
 		return "", err
@@ -186,22 +187,53 @@ func TranscribeLocal(wavData []byte) (string, error) {
 	ready := sttServerReady
 	sttServerMu.Unlock()
 
+	// Fallback-Check: Port direkt testen falls sttServerReady noch nicht gesetzt wurde
+	if !ready {
+		addr := fmt.Sprintf("127.0.0.1:%d", sttServerPort)
+		if conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
+			conn.Close()
+			sttServerMu.Lock()
+			sttServerReady = true
+			sttServerMu.Unlock()
+			ready = true
+			sttLastMode = "server (live-check)"
+		}
+	}
+
 	if ready {
+		t0 := time.Now()
 		sttLastMode = "server"
 		text, err := transcribeViaServer(wavData)
+		elapsed := time.Since(t0).Round(time.Millisecond)
 		if err == nil {
+			sttLastMode = fmt.Sprintf("server (%dms)", elapsed.Milliseconds())
 			return text, nil
 		}
-		sttLastMode = "server-fehler: " + err.Error()
+		sttLastMode = fmt.Sprintf("server-fehler (%dms): %v", elapsed.Milliseconds(), err)
 		// Server-Fehler → CLI-Fallback
-	} else {
-		sttLastMode = "cli (server nicht bereit)"
 	}
+
 	if bin, model, ok := findWhisper(); ok {
-		return transcribeWhisperCLI(wavData, bin, model)
+		t0 := time.Now()
+		text, err := transcribeWhisperCLI(wavData, bin, model)
+		elapsed := time.Since(t0).Round(time.Millisecond)
+		if err == nil {
+			sttLastMode = fmt.Sprintf("cli (%dms)", elapsed.Milliseconds())
+		} else {
+			sttLastMode = fmt.Sprintf("cli-fehler (%dms): %v", elapsed.Milliseconds(), err)
+		}
+		return text, err
 	}
-	sttLastMode = "sapi"
-	return transcribeSAPI(wavData)
+
+	t0 := time.Now()
+	text, err := transcribeSAPI(wavData)
+	elapsed := time.Since(t0).Round(time.Millisecond)
+	if err == nil {
+		sttLastMode = fmt.Sprintf("sapi (%dms)", elapsed.Milliseconds())
+	} else {
+		sttLastMode = fmt.Sprintf("sapi-fehler (%dms): %v", elapsed.Milliseconds(), err)
+	}
+	return text, err
 }
 
 func transcribeWhisperCLI(wavData []byte, binPath, modelPath string) (string, error) {
@@ -217,7 +249,9 @@ func transcribeWhisperCLI(wavData []byte, binPath, modelPath string) (string, er
 	}
 	f.Close()
 
-	cmd := exec.Command(binPath,
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binPath,
 		"-m", modelPath,
 		"-l", "de",
 		"--no-timestamps",
@@ -225,6 +259,9 @@ func transcribeWhisperCLI(wavData []byte, binPath, modelPath string) (string, er
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("whisper-cli Timeout (>60s)")
+	}
 	if err != nil {
 		return "", err
 	}
@@ -260,11 +297,16 @@ try {
 } catch {}
 $rec.Dispose()
 `
-	cmd := exec.Command("powershell.exe",
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell.exe",
 		"-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
 		"-Command", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("SAPI Timeout (>20s)")
+	}
 	if err != nil {
 		return "", err
 	}

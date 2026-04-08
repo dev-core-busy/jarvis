@@ -435,10 +435,11 @@ func (c *ChatWidget) rebuildAll() {
 	c.mu.Lock()
 	msgs := append([]ChatMessage(nil), c.messages...)
 	c.mu.Unlock()
-	c.MsgBox.Objects = nil
+	objs := make([]fyne.CanvasObject, len(msgs))
 	for i, m := range msgs {
-		c.MsgBox.Add(c.buildRowAt(m, i))
+		objs[i] = c.buildRowAt(m, i)
 	}
+	c.MsgBox.Objects = objs
 	c.MsgBox.Refresh()
 }
 
@@ -472,9 +473,14 @@ func (c *ChatWidget) AddMessage(role MessageRole, text string) {
 	snap := append([]ChatMessage(nil), c.messages...)
 	c.mu.Unlock()
 
-	row := c.buildRow(msg)
-	c.MsgBox.Add(row)
+	// Komplett neu aufbauen (verhindert Race auf Objects-Slice, erzwingt korrektes Layout)
+	objs := make([]fyne.CanvasObject, len(snap))
+	for i, m := range snap {
+		objs[i] = c.buildRowAt(m, i)
+	}
+	c.MsgBox.Objects = objs
 	c.MsgBox.Refresh()
+	canvas.Refresh(c.Scroll) // Scroll über neue Content-Größe informieren
 	c.scrollToBottom()
 	go SaveHistory(snap)
 }
@@ -557,9 +563,11 @@ func (c *ChatWidget) LoadHistory() {
 	c.mu.Lock()
 	c.messages = msgs
 	c.mu.Unlock()
-	for _, m := range msgs {
-		c.MsgBox.Add(c.buildRow(m))
+	objs := make([]fyne.CanvasObject, len(msgs))
+	for i, m := range msgs {
+		objs[i] = c.buildRow(m)
 	}
+	c.MsgBox.Objects = objs
 	c.MsgBox.Refresh()
 	c.scrollToBottom()
 }
@@ -828,7 +836,11 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 
 func (c *ChatWidget) scrollToBottom() {
 	go func() {
-		time.Sleep(60 * time.Millisecond)
+		time.Sleep(80 * time.Millisecond)
+		c.Scroll.Refresh()
+		c.Scroll.ScrollToBottom()
+		time.Sleep(80 * time.Millisecond)
+		c.Scroll.Refresh()
 		c.Scroll.ScrollToBottom()
 	}()
 }

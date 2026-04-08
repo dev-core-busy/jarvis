@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import info.jarvisai.app.data.model.AgentInfo
 import info.jarvisai.app.data.model.AvatarMouthState
+import info.jarvisai.app.data.model.AvatarType
 import info.jarvisai.app.data.model.ChatMessage
 import info.jarvisai.app.data.model.ConnectionState
 import info.jarvisai.app.data.model.MessageRole
@@ -67,6 +68,9 @@ class ChatViewModel @Inject constructor(
     private val _showAgentPanel = MutableStateFlow(false)
     val showAgentPanel: StateFlow<Boolean> = _showAgentPanel
 
+    private val _avatarType = MutableStateFlow(AvatarType.IRONMAN)
+    val avatarType: StateFlow<AvatarType> = _avatarType
+
     // ─── Nachrichtenauswahl (Long-Press) ──────────────────────────────
     private val _selectionMode = MutableStateFlow(false)
     val selectionMode: StateFlow<Boolean> = _selectionMode
@@ -80,7 +84,6 @@ class ChatViewModel @Inject constructor(
     private var speechRecognizer: SpeechRecognizer? = null
     private var autoSendVoice = false
     private var voiceSilenceMs = 1500
-    private var avatarEnabled = true   // Spiegelt settings.avatarEnabled live
     // Vorgeladene Nachrichten beim Start nicht erneut sprechen
     private var lastSpokenMsgId = repo.messages.value
         .lastOrNull { it.role == MessageRole.JARVIS }?.id ?: ""
@@ -92,7 +95,7 @@ class ChatViewModel @Inject constructor(
                 _quickActions.value = s.quickActions
                 autoSendVoice = s.autoSendVoice
                 voiceSilenceMs = s.voiceSilenceMs
-                avatarEnabled = s.avatarEnabled
+                _avatarType.value = s.avatarType
                 ttsManager.configure(
                     serverTtsEnabled = s.serverTtsEnabled,
                     serverUrl        = s.serverUrl,
@@ -109,7 +112,7 @@ class ChatViewModel @Inject constructor(
                 if (last.role != MessageRole.JARVIS) return@collect
                 if (last.isStreaming) return@collect
                 if (last.id == lastSpokenMsgId) return@collect
-                if (!avatarEnabled) return@collect
+                if (_avatarType.value == AvatarType.NONE) return@collect
                 val answerText = last.segments
                     .filter { it.type == SegmentType.ANSWER }
                     .joinToString(" ") { it.text.trim() }

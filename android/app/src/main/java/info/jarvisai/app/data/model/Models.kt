@@ -14,6 +14,9 @@ enum class SegmentType { STATUS, ANSWER }
 /** Mundposition des Avatars für Lip-Sync-Animation */
 enum class AvatarMouthState { CLOSED, SMALL, OPEN }
 
+/** Avatar-Typ: Iron Man Helm oder deaktiviert */
+enum class AvatarType { NONE, IRONMAN }
+
 @Serializable
 data class MessageSegment(val type: SegmentType, val text: String)
 

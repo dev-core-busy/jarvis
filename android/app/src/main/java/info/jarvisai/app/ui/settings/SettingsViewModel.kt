@@ -3,6 +3,7 @@ package info.jarvisai.app.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import info.jarvisai.app.data.model.AvatarType
 import info.jarvisai.app.data.prefs.JarvisSettings
 import info.jarvisai.app.data.prefs.SettingsDataStore
 import info.jarvisai.app.service.ServerTtsPlayer
@@ -80,7 +81,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun onAvatarEnabledChange(enabled: Boolean) {
-        _settings.value = _settings.value.copy(avatarEnabled = enabled)
+        _settings.value = _settings.value.copy(
+            avatarType = if (enabled) AvatarType.IRONMAN else AvatarType.NONE
+        )
     }
 
     fun onServerTtsEnabledChange(enabled: Boolean) {

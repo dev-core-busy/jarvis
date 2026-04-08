@@ -244,7 +244,6 @@ func (ja *JarvisApp) reconnect() {
 		}
 	}
 	ja.ws.OnVoiceTranscript = func(transcript string) {
-		log.Printf("[voice] Transkript: %q", transcript)
 		ja.chat.SetStatus("")
 		ja.chat.SetMicActive(false)
 		ja.textDictating = false
@@ -256,6 +255,7 @@ func (ja *JarvisApp) reconnect() {
 		if ja.cfg.AutoSendVoice {
 			ja.chat.AddMessage(RoleUser, transcript)
 			ja.ws.SendTask(transcript)
+			ja.chat.AddMessage(RoleStatus, "📤 Gesendet: "+transcript)
 		} else {
 			ja.chat.SetInput(transcript)
 		}

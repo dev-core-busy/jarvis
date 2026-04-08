@@ -2846,6 +2846,32 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             await ws.send_json({"type": "error", "message": "Keine Aufgabe angegeben"})
             return
 
+        # Spracheingabe von Windows/Desktop-Client: [Voice]\n<audio>BASE64</audio>
+        # → Whisper transkribiert das Audio, task_text wird durch das Transkript ersetzt
+        if task_text.startswith("[Voice]") and "<audio>" in task_text:
+            import base64, tempfile, os, re as _re
+            m = _re.search(r"<audio>(.*?)</audio>", task_text, _re.DOTALL)
+            if m:
+                await ws.send_json({"type": "status", "message": "🎤 Transkribiere Spracheingabe…"})
+                try:
+                    wav_bytes = base64.b64decode(m.group(1).strip())
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                        f.write(wav_bytes)
+                        tmp_path = f.name
+                    transcript = await asyncio.to_thread(_transcribe_audio, tmp_path)
+                    os.unlink(tmp_path)
+                    print(f"[voice-task] Transkript: {transcript!r}", flush=True)
+                    if not transcript:
+                        await ws.send_json({"type": "error", "message": "Spracheingabe nicht erkannt"})
+                        return
+                    # Transkript ans Frontend zurückmelden (erscheint als User-Nachricht)
+                    await ws.send_json({"type": "voice_transcript", "text": transcript})
+                    task_text = transcript
+                except Exception as e:
+                    print(f"[voice-task] Transkription fehlgeschlagen: {e}", flush=True)
+                    await ws.send_json({"type": "error", "message": f"Sprachtranskription fehlgeschlagen: {e}"})
+                    return
+
         target_agent_id = msg.get("agent_id", "")
 
         # Client-Typ bestimmen: wer hat diese WS-Verbindung aufgebaut?
@@ -2956,6 +2982,27 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         else:
             from backend.tools.windows_desktop import on_desktop_result
             on_desktop_result(msg)
+
+    elif msg_type == "transcribe_only":
+        # Nur Transkription (kein Agent): Audio → Whisper → voice_transcript zurück
+        # Wird von der Windows-App verwendet wenn AutoSend deaktiviert ist
+        import base64, tempfile, os
+        audio_b64 = msg.get("audio", "")
+        if not audio_b64:
+            await ws.send_json({"type": "error", "message": "Kein Audio angegeben"})
+            return
+        try:
+            wav_bytes = base64.b64decode(audio_b64)
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                f.write(wav_bytes)
+                tmp_path = f.name
+            transcript = await asyncio.to_thread(_transcribe_audio, tmp_path)
+            os.unlink(tmp_path)
+            print(f"[transcribe_only] Transkript: {transcript!r}", flush=True)
+            await ws.send_json({"type": "voice_transcript", "text": transcript})
+        except Exception as e:
+            print(f"[transcribe_only] Fehler: {e}", flush=True)
+            await ws.send_json({"type": "error", "message": f"Transkription fehlgeschlagen: {e}"})
 
     elif msg_type == "ping":
         await ws.send_json({"type": "pong"})

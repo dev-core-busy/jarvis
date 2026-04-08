@@ -246,15 +246,20 @@ func (ja *JarvisApp) reconnect() {
 	ja.ws.OnVoiceTranscript = func(transcript string) {
 		log.Printf("[voice] Transkript: %q", transcript)
 		ja.chat.SetStatus("")
+		// Mic-Button deaktivieren (Diktat beendet)
+		ja.textDictating = false
+		ja.chat.SetMicActive(false)
+		if ja.textDictCtrl != nil {
+			ja.textDictCtrl = nil
+		}
 		if transcript == "" {
 			ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
 			return
 		}
 		if ja.cfg.AutoSendVoice {
-			// AutoSend: User-Nachricht mit dem echten Transkript hinzufügen
 			ja.chat.AddMessage(RoleUser, transcript)
+			ja.ws.SendTask(transcript)
 		} else {
-			// Manuell: Transkript ins Eingabefeld setzen, Nutzer bestätigt mit Senden
 			ja.chat.SetInput(transcript)
 		}
 	}

@@ -493,6 +493,46 @@ func DesktopExecute(cmd DesktopCommand) DesktopResult {
 			res.Output = fmt.Sprintf("Taste gedrückt: %s", cmd.Key)
 		}
 
+	case "open_url":
+		url := cmd.URL
+		if url == "" {
+			url = cmd.Text // Fallback falls Backend url in text schickt
+		}
+		if url == "" {
+			res.Error = "keine URL angegeben"
+			break
+		}
+		// http/https Präfix sicherstellen
+		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+			url = "https://" + url
+		}
+		out, code, err := desktopShellExec(`start "" "` + url + `"`)
+		res.ExitCode = code
+		if err != nil {
+			res.Error = err.Error()
+		} else {
+			res.Output = "Browser geöffnet: " + url
+			_ = out
+		}
+
+	case "open_app":
+		app := cmd.Text
+		if app == "" {
+			app = cmd.Cmd
+		}
+		if app == "" {
+			res.Error = "kein Programmname angegeben"
+			break
+		}
+		out, code, err := desktopShellExec(`start "" ` + app)
+		res.ExitCode = code
+		if err != nil {
+			res.Error = err.Error()
+		} else {
+			res.Output = "Gestartet: " + app
+			_ = out
+		}
+
 	case "shell_exec":
 		out, code, err := desktopShellExec(cmd.Cmd)
 		res.ExitCode = code

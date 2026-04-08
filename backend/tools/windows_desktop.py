@@ -64,6 +64,8 @@ class WindowsDesktopTool(BaseTool):
             "Steuert den Windows-Desktop des verbundenen Windows-Clients. "
             "Aktionen:\n"
             "- 'screenshot': Bildschirmaufnahme (gibt Dateiname zurück)\n"
+            "- 'open_url': Webseite im Standard-Browser öffnen (url z.B. 'https://insv3.de')\n"
+            "- 'open_app': Programm starten (text = Programmname, z.B. 'notepad', 'explorer')\n"
             "- 'mouse_move': Maus bewegen (x, y)\n"
             "- 'mouse_click': Mausklick (x, y, button: left/right/middle)\n"
             "- 'mouse_double_click': Doppelklick (x, y)\n"
@@ -82,14 +84,16 @@ class WindowsDesktopTool(BaseTool):
                 "action": {
                     "type": "STRING",
                     "description": (
-                        "Aktion: screenshot, mouse_move, mouse_click, mouse_double_click, "
-                        "type_text, key_press, shell_exec, clipboard_get, clipboard_set"
+                        "Aktion: screenshot, open_url, open_app, mouse_move, mouse_click, "
+                        "mouse_double_click, type_text, key_press, shell_exec, "
+                        "clipboard_get, clipboard_set"
                     ),
                 },
+                "url": {"type": "STRING", "description": "URL für open_url (z.B. 'https://insv3.de')"},
                 "x": {"type": "NUMBER", "description": "X-Koordinate (Pixel)"},
                 "y": {"type": "NUMBER", "description": "Y-Koordinate (Pixel)"},
                 "button": {"type": "STRING", "description": "Maustaste: left, right, middle"},
-                "text": {"type": "STRING", "description": "Text zum Tippen oder in Zwischenablage"},
+                "text": {"type": "STRING", "description": "Text zum Tippen, Programmname oder Clipboard-Inhalt"},
                 "key": {"type": "STRING", "description": "Taste(n), z.B. 'ctrl+c', 'alt+F4'"},
                 "cmd": {"type": "STRING", "description": "Windows-Shell-Befehl (cmd.exe /C ...)"},
             },
@@ -105,6 +109,7 @@ class WindowsDesktopTool(BaseTool):
         text: str = "",
         key: str = "",
         cmd: str = "",
+        url: str = "",
     ) -> str:
         if _windows_ws is None:
             return "❌ Kein Windows-Client verbunden. Bitte die Jarvis Windows App starten."
@@ -124,6 +129,7 @@ class WindowsDesktopTool(BaseTool):
             "text": text,
             "key": key,
             "cmd": cmd,
+            "url": url,
         }
 
         try:

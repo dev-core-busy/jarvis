@@ -496,7 +496,7 @@ func (ja *JarvisApp) startTextDictation() {
 
 	ja.textDictating = true
 	ja.chat.SetMicActive(true)
-	ja.chat.AddMessage(RoleStatus, "🎤 Sprechen Sie jetzt…")
+	ja.chat.AddMessage(RoleStatus, "🎤 [1] Mikrofon gestartet – sprechen Sie jetzt…")
 
 	dc := NewDialogController(ja.audio, ja.ws, ja)
 	dc.OnRMSLevel = func(rms float64, frameMs int) {
@@ -512,20 +512,27 @@ func (ja *JarvisApp) startTextDictation() {
 	}
 	ja.textDictCtrl = dc
 	if err := dc.Start(); err != nil {
-		ja.chat.AddMessage(RoleStatus, "❌ Mikrofon-Fehler: "+err.Error())
+		ja.chat.AddMessage(RoleStatus, "❌ [1] Mikrofon-Fehler: "+err.Error())
 		ja.textDictating = false
 		ja.chat.SetMicActive(false)
 		ja.textDictCtrl = nil
 		return
 	}
+	ja.chat.AddMessage(RoleStatus, fmt.Sprintf("🎤 [2] VAD aktiv – SilenceMs=%d MinSpeechMs=%d VADThresh=%d",
+		ja.cfg.SilenceMs, ja.cfg.MinSpeechMs, ja.cfg.VADThreshold))
 
 	// Watcher-Goroutine: wartet auf erkannte Äußerung aus dem VAD-Channel,
 	// stoppt dann Mic und sendet – alles von DIESER Goroutine, nie aus dem Audio-Callback
 	go func() {
+		ja.chat.AddMessage(RoleStatus, "🎤 [3] Warte auf Äußerung im Channel…")
 		utt, ok := <-dc.utteranceCh
 		if !ok {
+			ja.chat.AddMessage(RoleStatus, "❌ [3] utteranceCh geschlossen – kein Audio")
 			return
 		}
+		ja.chat.AddMessage(RoleStatus, fmt.Sprintf("🎤 [4] Äußerung empfangen: %dms, %d Bytes, state=%d",
+			utt.durationMs, len(utt.pcm), utt.state))
+
 		// Mic stoppen
 		dc.Stop()
 		ja.textDictating = false
@@ -534,6 +541,7 @@ func (ja *JarvisApp) startTextDictation() {
 		ja.textDictCtrl = nil
 
 		if utt.state == StateWaitWakeWord {
+			ja.chat.AddMessage(RoleStatus, "🎤 [5] Wake-Word-Check → sende an Server")
 			header := BuildWAVHeader(len(utt.pcm))
 			wav := append(header, utt.pcm...)
 			b64 := encodeBase64(wav)
@@ -545,24 +553,31 @@ func (ja *JarvisApp) startTextDictation() {
 		ja.avatar.SetMode(ModeIdle)
 		header := BuildWAVHeader(len(utt.pcm))
 		wav := append(header, utt.pcm...)
+		ja.chat.AddMessage(RoleStatus, fmt.Sprintf("🎤 [5] WAV gebaut: %d Bytes – starte STT…", len(wav)))
 
 		// Lokale STT – TranscribeLocalSafe hat harten 25s-Timeout (Windows-Pipe-Bug)
 		ja.chat.SetStatus("🎤 Transkribiere…")
 		transcript, err := TranscribeLocalSafe(wav)
 		autoSend := ja.cfg.AutoSendVoice
 		ja.chat.SetStatus("")
-		ja.chat.AddMessage(RoleStatus, fmt.Sprintf("🔍 STT: %s | AutoSend=%v", getSttLastMode(), autoSend))
+		ja.chat.AddMessage(RoleStatus, fmt.Sprintf("🔍 [6] STT fertig: Modus=%s AutoSend=%v Fehler=%v",
+			getSttLastMode(), autoSend, err))
 		if err != nil {
-			ja.chat.AddMessage(RoleStatus, "❌ STT-Fehler: "+err.Error())
+			ja.chat.AddMessage(RoleStatus, "❌ [6] STT-Fehler: "+err.Error())
 			return
 		}
 		if transcript == "" {
-			ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
+			ja.chat.AddMessage(RoleStatus, "🎤 [7] Transkript leer – nichts erkannt")
 			return
 		}
+		ja.chat.AddMessage(RoleStatus, fmt.Sprintf("✓ [7] Transkript: %q", transcript))
 		ja.chat.SetInput(transcript)
+		ja.chat.AddMessage(RoleStatus, "✓ [8] Text ins Eingabefeld gesetzt")
 		if autoSend {
+			ja.chat.AddMessage(RoleStatus, "✓ [9] AutoSend: sende…")
 			ja.chat.TriggerSend()
+		} else {
+			ja.chat.AddMessage(RoleStatus, "✓ [9] Kein AutoSend – bitte manuell senden")
 		}
 	}()
 }

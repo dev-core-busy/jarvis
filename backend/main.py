@@ -137,8 +137,8 @@ def _get_whisper_model():
     global _whisper_model
     if _whisper_model is None:
         from faster_whisper import WhisperModel
-        _whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
-        print("[whisper] Modell geladen (small, cpu, int8)", flush=True)
+        _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+        print("[whisper] Modell geladen (tiny, cpu, int8)", flush=True)
     return _whisper_model
 
 # Erlaubte Linux-Benutzer für Web-Login

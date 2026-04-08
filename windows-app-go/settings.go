@@ -500,6 +500,12 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 
 		widget.NewSeparator(),
 
+		// — Spracherkennung (Whisper) —
+		sectionHeader("Spracherkennung (Whisper)"),
+		buildWhisperSection(win),
+
+		widget.NewSeparator(),
+
 		// — Anzeige —
 		sectionHeader("Anzeige"),
 		settingRow("Debug-Modus",
@@ -600,6 +606,118 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 		container.NewPadded(saveBtn), nil, nil, scroll))
 	win.Resize(fyne.NewSize(440, 620))
 	win.Show()
+}
+
+// buildWhisperSection zeigt Whisper-Status und ermöglicht Download direkt aus den Einstellungen.
+func buildWhisperSection(win fyne.Window) fyne.CanvasObject {
+	exeLbl := widget.NewLabel("")
+	modelLbl := widget.NewLabel("")
+	statusLbl := widget.NewLabel("")
+	statusLbl.Importance = widget.LowImportance
+
+	progress := widget.NewProgressBar()
+	progress.Hide()
+
+	var dlBtn *widget.Button
+
+	refresh := func() {
+		hasExe, hasModel := WhisperStatus()
+		if hasExe {
+			exeLbl.SetText("✓  whisper-cli.exe")
+			exeLbl.Importance = widget.SuccessImportance
+		} else {
+			exeLbl.SetText("✗  whisper-cli.exe  (fehlt)")
+			exeLbl.Importance = widget.DangerImportance
+		}
+		if hasModel {
+			modelLbl.SetText("✓  ggml-small.bin")
+			modelLbl.Importance = widget.SuccessImportance
+		} else {
+			modelLbl.SetText("✗  ggml-small.bin  (466 MB)")
+			modelLbl.Importance = widget.DangerImportance
+		}
+		exeLbl.Refresh()
+		modelLbl.Refresh()
+		if hasExe && hasModel {
+			dlBtn.SetText("Alles vorhanden ✓")
+			dlBtn.Disable()
+			statusLbl.SetText("")
+		} else {
+			dlBtn.SetText("Herunterladen")
+			dlBtn.Enable()
+		}
+	}
+
+	dlBtn = widget.NewButton("Herunterladen", func() {
+		dlBtn.Disable()
+		progress.SetValue(0)
+		progress.Show()
+
+		go func() {
+			defer func() {
+				progress.Hide()
+				refresh()
+			}()
+
+			hasExe, hasModel := WhisperStatus()
+			// Anzahl fehlender Komponenten für Fortschrittsberechnung
+			steps := 0
+			if !hasExe {
+				steps++
+			}
+			if !hasModel {
+				steps++
+			}
+			if steps == 0 {
+				return
+			}
+			stepSize := 1.0 / float64(steps)
+			offset := 0.0
+
+			if !hasExe {
+				statusLbl.SetText("Lade whisper-cli.exe …")
+				if err := DownloadWhisperExe(func(p float64) {
+					progress.SetValue(offset + p*stepSize)
+				}); err != nil {
+					statusLbl.SetText("✗ " + err.Error())
+					dlBtn.Enable()
+					return
+				}
+				offset += stepSize
+			}
+
+			if !hasModel {
+				statusLbl.SetText("Lade ggml-small.bin (466 MB) …")
+				if err := DownloadWhisperModel(func(p float64) {
+					progress.SetValue(offset + p*stepSize)
+				}); err != nil {
+					statusLbl.SetText("✗ " + err.Error())
+					dlBtn.Enable()
+					return
+				}
+			}
+
+			statusLbl.SetText("✓ Whisper einsatzbereit")
+		}()
+	})
+	dlBtn.Importance = widget.HighImportance
+
+	refresh()
+
+	infoLbl := widget.NewLabel(
+		"Whisper bietet deutlich bessere Erkennungsqualität als Windows SAPI.\n" +
+			"Die Dateien werden neben jarvis.exe gespeichert (~500 MB).")
+	infoLbl.Importance = widget.LowImportance
+	infoLbl.Wrapping = fyne.TextWrapWord
+
+	return container.NewVBox(
+		container.NewGridWithColumns(2, exeLbl, modelLbl),
+		vSpacer(4),
+		container.NewHBox(dlBtn, statusLbl),
+		progress,
+		vSpacer(4),
+		infoLbl,
+	)
 }
 
 // buildInfoCard erstellt die Info-Karte am Ende der Einstellungen (analog Android).

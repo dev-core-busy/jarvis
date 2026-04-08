@@ -77,6 +77,11 @@ func main() {
 	SetTTSVoice(cfg.TTSVoice)
 	SetTTSServer(cfg.ServerURL, cfg.APIKey)
 
+	// Whisper-Server im Hintergrund starten (Modell in RAM laden)
+	if WhisperReady() {
+		go StartWhisperServer()
+	}
+
 	ja := &JarvisApp{
 		fyneApp: a,
 		cfg:     cfg,
@@ -244,7 +249,6 @@ func (ja *JarvisApp) reconnect() {
 		}
 	}
 	ja.ws.OnVoiceTranscript = func(transcript string) {
-		// Server-STT Ergebnis (nur wenn kein lokales Whisper konfiguriert)
 		ja.chat.SetStatus("")
 		ja.chat.SetMicActive(false)
 		ja.textDictating = false
@@ -465,6 +469,22 @@ func (ja *JarvisApp) startTextDictation() {
 	if ja.cfg.DialogMode {
 		return
 	}
+
+	// Beim ersten Klick: Hinweis dass Whisper-Komponenten fehlen und Download anbieten
+	if !WhisperReady() {
+		hasExe, hasModel := WhisperStatus()
+		missing := ""
+		if !hasExe && !hasModel {
+			missing = "whisper-cli.exe und ggml-small.bin (~500 MB)"
+		} else if !hasExe {
+			missing = "whisper-cli.exe"
+		} else {
+			missing = "ggml-small.bin (~466 MB)"
+		}
+		showWhisperDownloadDialog(ja.fyneApp, missing, ja.chatWin)
+		return
+	}
+
 	ja.textDictating = true
 	ja.chat.SetMicActive(true)
 	ja.chat.AddMessage(RoleStatus, "🎤 Sprechen Sie jetzt…")
@@ -517,7 +537,7 @@ func (ja *JarvisApp) startTextDictation() {
 		header := BuildWAVHeader(len(utt.pcm))
 		wav := append(header, utt.pcm...)
 
-		// Lokale STT via Windows SAPI – kein Server-Roundtrip, kein AutoSend-Race
+		// Lokale STT – kein AutoSend-Race
 		ja.chat.SetStatus("🎤 Transkribiere…")
 		autoSend := ja.cfg.AutoSendVoice
 		go func() {
@@ -575,5 +595,6 @@ func (ja *JarvisApp) shutdown() {
 		}
 	}
 	_ = ja.cfg.Save()
+	StopWhisperServer()
 	ja.fyneApp.Quit()
 }

@@ -11,26 +11,19 @@ from backend.tools.base import BaseTool
 
 # ─── Verbindungs-State ───────────────────────────────────────────────────────
 
-# Aktuelle Windows-Client WebSocket-Verbindung (gesetzt von main.py bei register)
 _windows_ws = None
 _windows_ws_lock = asyncio.Lock()
-
-# Offene Anfragen: request_id → asyncio.Future
 _pending: dict[str, asyncio.Future] = {}
-
-# Pfad für gespeicherte Screenshots
 _SCREENSHOT_PATH = Path("/tmp/jarvis_winscreen.png")
 
 
 def set_windows_ws(ws):
-    """Wird von main.py aufgerufen wenn ein Windows-Client sich registriert/trennt."""
     global _windows_ws
     _windows_ws = ws
     if ws is not None:
         print("[windows_desktop] Windows-Client verbunden", flush=True)
     else:
         print("[windows_desktop] Windows-Client getrennt", flush=True)
-        # Alle wartenden Requests mit Fehler abbrechen
         for fut in list(_pending.values()):
             if not fut.done():
                 fut.set_exception(ConnectionError("Windows-Client getrennt"))
@@ -38,7 +31,6 @@ def set_windows_ws(ws):
 
 
 def on_desktop_result(result: dict):
-    """Wird von main.py aufgerufen wenn desktop_result ankommt."""
     req_id = result.get("request_id", "")
     fut = _pending.pop(req_id, None)
     if fut and not fut.done():
@@ -63,15 +55,29 @@ class WindowsDesktopTool(BaseTool):
         return (
             "Steuert den Windows-Desktop des verbundenen Windows-Clients. "
             "Aktionen:\n"
-            "- 'screenshot': Bildschirmaufnahme (gibt Dateiname zurück)\n"
+            "- 'screenshot': Bildschirmaufnahme\n"
             "- 'open_url': Webseite im Standard-Browser öffnen (url z.B. 'https://insv3.de')\n"
             "- 'open_app': Programm starten (text = Programmname, z.B. 'notepad', 'explorer')\n"
             "- 'mouse_move': Maus bewegen (x, y)\n"
             "- 'mouse_click': Mausklick (x, y, button: left/right/middle)\n"
+            "- 'right_click': Rechtsklick (x, y)\n"
+            "- 'middle_click': Mittelklick (x, y)\n"
             "- 'mouse_double_click': Doppelklick (x, y)\n"
+            "- 'triple_click': Dreifachklick – z.B. Zeile markieren (x, y)\n"
+            "- 'drag_and_drop': Drag & Drop von (x,y) nach (x2,y2)\n"
+            "- 'scroll': Mausrad scrollen (x, y, direction: up/down/left/right, amount: Klicks)\n"
             "- 'type_text': Text tippen (text) – unterstützt Unicode/Umlaute\n"
             "- 'key_press': Tastenkombination (key, z.B. 'ctrl+c', 'alt+F4', 'win+d', 'Return')\n"
-            "- 'shell_exec': Windows-Befehl ausführen (cmd), gibt stdout+stderr zurück\n"
+            "- 'shell_exec': Windows-Shell-Befehl ausführen (cmd), gibt stdout+stderr zurück\n"
+            "- 'get_active_window': Info über das aktive Fenster (Titel, Klasse, Position, Größe)\n"
+            "- 'list_windows': Alle sichtbaren Fenster auflisten (Handle + Titel)\n"
+            "- 'focus_window': Fenster in den Vordergrund bringen (text = Teiltitel)\n"
+            "- 'close_window': Fenster schließen (text = Teiltitel oder aktives Fenster)\n"
+            "- 'minimize_window': Fenster minimieren (text = Teiltitel oder aktives Fenster)\n"
+            "- 'maximize_window': Fenster maximieren (text = Teiltitel oder aktives Fenster)\n"
+            "- 'restore_window': Fenster wiederherstellen/normalisieren\n"
+            "- 'resize_window': Fenstergröße ändern (text = Teiltitel, width, height)\n"
+            "- 'move_window': Fenster verschieben (text = Teiltitel, x, y)\n"
             "- 'clipboard_get': Zwischenablage lesen\n"
             "- 'clipboard_set': Text in Zwischenablage setzen (text)\n"
             "Voraussetzung: Windows App muss verbunden und aktiv sein."
@@ -84,18 +90,29 @@ class WindowsDesktopTool(BaseTool):
                 "action": {
                     "type": "STRING",
                     "description": (
-                        "Aktion: screenshot, open_url, open_app, mouse_move, mouse_click, "
-                        "mouse_double_click, type_text, key_press, shell_exec, "
-                        "clipboard_get, clipboard_set"
+                        "Aktion: screenshot, open_url, open_app, "
+                        "mouse_move, mouse_click, right_click, middle_click, "
+                        "mouse_double_click, triple_click, drag_and_drop, scroll, "
+                        "type_text, key_press, shell_exec, "
+                        "get_active_window, list_windows, focus_window, close_window, "
+                        "minimize_window, maximize_window, restore_window, "
+                        "resize_window, move_window, clipboard_get, clipboard_set"
                     ),
                 },
-                "url": {"type": "STRING", "description": "URL für open_url (z.B. 'https://insv3.de')"},
-                "x": {"type": "NUMBER", "description": "X-Koordinate (Pixel)"},
-                "y": {"type": "NUMBER", "description": "Y-Koordinate (Pixel)"},
-                "button": {"type": "STRING", "description": "Maustaste: left, right, middle"},
-                "text": {"type": "STRING", "description": "Text zum Tippen, Programmname oder Clipboard-Inhalt"},
-                "key": {"type": "STRING", "description": "Taste(n), z.B. 'ctrl+c', 'alt+F4'"},
-                "cmd": {"type": "STRING", "description": "Windows-Shell-Befehl (cmd.exe /C ...)"},
+                "url":       {"type": "STRING",  "description": "URL für open_url (z.B. 'https://insv3.de')"},
+                "x":         {"type": "NUMBER",  "description": "X-Koordinate (Pixel)"},
+                "y":         {"type": "NUMBER",  "description": "Y-Koordinate (Pixel)"},
+                "x2":        {"type": "NUMBER",  "description": "Ziel-X für drag_and_drop / move_window"},
+                "y2":        {"type": "NUMBER",  "description": "Ziel-Y für drag_and_drop"},
+                "button":    {"type": "STRING",  "description": "Maustaste: left, right, middle"},
+                "direction": {"type": "STRING",  "description": "Scroll-Richtung: up, down, left, right"},
+                "amount":    {"type": "INTEGER", "description": "Scroll-Klicks (Standard: 3)"},
+                "text":      {"type": "STRING",  "description": "Text tippen / Fenstertitel (Teilstring) / Programmname"},
+                "key":       {"type": "STRING",  "description": "Taste(n), z.B. 'ctrl+c', 'alt+F4', 'win+d'"},
+                "cmd":       {"type": "STRING",  "description": "Windows-Shell-Befehl"},
+                "width":     {"type": "INTEGER", "description": "Fensterbreite (px) für resize_window"},
+                "height":    {"type": "INTEGER", "description": "Fensterhöhe (px) für resize_window"},
+                "window_id": {"type": "STRING",  "description": "Fenster-Handle als String (alternativ zu text)"},
             },
             "required": ["action"],
         }
@@ -105,11 +122,19 @@ class WindowsDesktopTool(BaseTool):
         action: str,
         x: float = 0,
         y: float = 0,
+        x2: float = 0,
+        y2: float = 0,
         button: str = "left",
         text: str = "",
         key: str = "",
         cmd: str = "",
         url: str = "",
+        direction: str = "down",
+        amount: int = 3,
+        width: int = 0,
+        height: int = 0,
+        window_id: str = "",
+        **kwargs,
     ) -> str:
         if _windows_ws is None:
             return "❌ Kein Windows-Client verbunden. Bitte die Jarvis Windows App starten."
@@ -120,16 +145,23 @@ class WindowsDesktopTool(BaseTool):
         _pending[req_id] = fut
 
         payload = {
-            "type": "desktop_command",
+            "type":       "desktop_command",
             "request_id": req_id,
-            "action": action,
-            "x": x,
-            "y": y,
-            "button": button,
-            "text": text,
-            "key": key,
-            "cmd": cmd,
-            "url": url,
+            "action":     action,
+            "x":          x,
+            "y":          y,
+            "x2":         x2,
+            "y2":         y2,
+            "button":     button,
+            "text":       text,
+            "key":        key,
+            "cmd":        cmd,
+            "url":        url,
+            "direction":  direction,
+            "amount":     amount,
+            "width":      width,
+            "height":     height,
+            "window_id":  window_id,
         }
 
         try:
@@ -149,7 +181,6 @@ class WindowsDesktopTool(BaseTool):
         if result.get("error"):
             return f"❌ {result['error']}"
 
-        # Screenshot: base64 PNG → Datei speichern
         if action == "screenshot" and result.get("data"):
             try:
                 png_bytes = base64.b64decode(result["data"])
@@ -157,7 +188,7 @@ class WindowsDesktopTool(BaseTool):
                 size_kb = len(png_bytes) // 1024
                 return (
                     f"✅ Screenshot gespeichert: {_SCREENSHOT_PATH} ({size_kb} KB). "
-                    f"Verwende shell_exec mit 'dir' oder andere Tools um den Desktop-Zustand zu beschreiben."
+                    f"Nutze das screenshot Tool um den Screenshot anzuzeigen."
                 )
             except Exception as e:
                 return f"❌ Screenshot-Dekodierung fehlgeschlagen: {e}"

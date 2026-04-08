@@ -126,7 +126,8 @@ func (d *DialogController) processMicFrame(pcm []byte) {
 	}
 
 	rms := calcRMS(pcm)
-	frameDurationMs := (vadFrameSize * 1000) / vadSampleRate
+	// Tatsächliche Frame-Dauer aus Byte-Länge berechnen (16-bit = 2 Bytes/Sample, mono)
+	frameDurationMs := len(pcm) / 2 * 1000 / vadSampleRate
 
 	if d.OnRMSLevel != nil {
 		d.OnRMSLevel(rms)

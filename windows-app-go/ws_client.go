@@ -23,10 +23,17 @@ type WSMessage struct {
 	RequestID string  `json:"request_id,omitempty"`
 	X         float64 `json:"x,omitempty"`
 	Y         float64 `json:"y,omitempty"`
+	X2        float64 `json:"x2,omitempty"`
+	Y2        float64 `json:"y2,omitempty"`
 	Button    string  `json:"button,omitempty"`
 	Key       string  `json:"key,omitempty"`
 	Cmd       string  `json:"cmd,omitempty"`
 	URL       string  `json:"url,omitempty"`
+	Amount    int     `json:"amount,omitempty"`
+	Direction string  `json:"direction,omitempty"`
+	Width     int     `json:"width,omitempty"`
+	Height    int     `json:"height,omitempty"`
+	WindowID  string  `json:"window_id,omitempty"`
 }
 
 type WSClient struct {
@@ -256,11 +263,18 @@ func (c *WSClient) runConn() error {
 					RequestID: msg.RequestID,
 					X:         msg.X,
 					Y:         msg.Y,
+					X2:        msg.X2,
+					Y2:        msg.Y2,
 					Button:    msg.Button,
 					Text:      msg.Text,
 					Key:       msg.Key,
 					Cmd:       msg.Cmd,
 					URL:       msg.URL,
+					Amount:    msg.Amount,
+					Direction: msg.Direction,
+					Width:     msg.Width,
+					Height:    msg.Height,
+					WindowID:  msg.WindowID,
 				}
 				go c.OnDesktopCommand(cmd)
 			}

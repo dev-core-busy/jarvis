@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/png"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -43,46 +44,74 @@ var (
 	procGetClipboardData = deskUser32.NewProc("GetClipboardData")
 	procSetClipboardData = deskUser32.NewProc("SetClipboardData")
 
+	// User32 – Fensterverwaltung
+	procGetForegroundWindow = deskUser32.NewProc("GetForegroundWindow")
+	procSetForegroundWindow = deskUser32.NewProc("SetForegroundWindow")
+	procGetWindowTextW      = deskUser32.NewProc("GetWindowTextW")
+	procGetClassNameW       = deskUser32.NewProc("GetClassNameW")
+	procEnumWindows         = deskUser32.NewProc("EnumWindows")
+	procIsWindowVisible     = deskUser32.NewProc("IsWindowVisible")
+	procShowWindow          = deskUser32.NewProc("ShowWindow")
+	procSetWindowPos        = deskUser32.NewProc("SetWindowPos")
+	procPostMessageW        = deskUser32.NewProc("PostMessageW")
+	procGetWindowRect       = deskUser32.NewProc("GetWindowRect")
+
 	// Kernel32 – Clipboard-Speicher
-	procGlobalAlloc     = deskKernel32.NewProc("GlobalAlloc")
-	procGlobalLock      = deskKernel32.NewProc("GlobalLock")
-	procGlobalUnlock    = deskKernel32.NewProc("GlobalUnlock")
-	procRtlMoveMemory   = deskKernel32.NewProc("RtlMoveMemory")
+	procGlobalAlloc   = deskKernel32.NewProc("GlobalAlloc")
+	procGlobalLock    = deskKernel32.NewProc("GlobalLock")
+	procGlobalUnlock  = deskKernel32.NewProc("GlobalUnlock")
+	procRtlMoveMemory = deskKernel32.NewProc("RtlMoveMemory")
 )
 
 // ─── Konstanten ───────────────────────────────────────────────────────────────
 
 const (
-	smCxScreen    = 0
-	smCyScreen    = 1
-	srccopy       = 0x00CC0020
-	dibRgbColors  = 0
-	biRgb         = 0
-	gmemMoveable  = 0x0002
+	smCxScreen   = 0
+	smCyScreen   = 1
+	srccopy      = 0x00CC0020
+	dibRgbColors = 0
+	biRgb        = 0
+	gmemMoveable = 0x0002
 	cfUnicodeText = 13
 
 	inputMouse    uint32 = 0
 	inputKeyboard uint32 = 1
 
 	// Maus-Event-Flags
-	mouseeventfMove      = 0x0001
-	mouseeventfLeftDown  = 0x0002
-	mouseeventfLeftUp    = 0x0004
-	mouseeventfRightDown = 0x0008
-	mouseeventfRightUp   = 0x0010
-	mouseeventfMiddleDown = 0x0020
-	mouseeventfMiddleUp  = 0x0040
-	mouseeventfWheel     = 0x0800
-	mouseeventfAbsolute  = 0x8000
+	mouseeventfMove        = 0x0001
+	mouseeventfLeftDown    = 0x0002
+	mouseeventfLeftUp      = 0x0004
+	mouseeventfRightDown   = 0x0008
+	mouseeventfRightUp     = 0x0010
+	mouseeventfMiddleDown  = 0x0020
+	mouseeventfMiddleUp    = 0x0040
+	mouseeventfWheel       = 0x0800
+	mouseeventfHWheel      = 0x1000
+	mouseeventfAbsolute    = 0x8000
 
 	// Tastatur-Event-Flags
 	keyeventfKeyDown = uint32(0x0000)
 	keyeventfKeyUp   = uint32(0x0002)
 	keyeventfUnicode = uint32(0x0004)
+
+	// ShowWindow-Kommandos
+	swHide     = 0
+	swNormal   = 1
+	swMinimize = 6
+	swMaximize = 3
+	swRestore  = 9
+
+	// SetWindowPos-Flags (desktop-lokal, unterschiedliche Typen zu winapi_windows.go)
+	deskSwpNoZOrder   = uintptr(0x0004)
+	deskSwpNoActivate = uintptr(0x0010)
+	deskSwpNoSize     = uintptr(0x0001)
+	deskSwpNoMove     = uintptr(0x0002)
+
+	// Nachrichten
+	wmClose = 0x0010
 )
 
 // ─── INPUT-Struktur (40 Byte auf 64-bit Windows) ─────────────────────────────
-// type(4) + padding(4) + union(32) = 40
 
 type winInput struct {
 	inputType uint32
@@ -90,9 +119,6 @@ type winInput struct {
 	union     [32]byte
 }
 
-// setKeyboard befüllt die KEYBDINPUT-Union:
-// offset 0: wVk(2), offset 2: wScan(2), offset 4: dwFlags(4), offset 8: time(4)
-// offset 12: padding(4), offset 16: dwExtraInfo(8)
 func (i *winInput) setKeyboard(vk, scan uint16, flags uint32) {
 	i.inputType = inputKeyboard
 	*(*uint16)(unsafe.Pointer(&i.union[0])) = vk
@@ -100,9 +126,6 @@ func (i *winInput) setKeyboard(vk, scan uint16, flags uint32) {
 	*(*uint32)(unsafe.Pointer(&i.union[4])) = flags
 }
 
-// setMouse befüllt die MOUSEINPUT-Union:
-// offset 0: dx(4), offset 4: dy(4), offset 8: mouseData(4), offset 12: dwFlags(4)
-// offset 16: time(4), offset 20: padding(4), offset 24: dwExtraInfo(8)
 func (i *winInput) setMouse(dx, dy int32, mouseData, flags uint32) {
 	i.inputType = inputMouse
 	*(*int32)(unsafe.Pointer(&i.union[0])) = dx
@@ -122,7 +145,11 @@ func sendInputs(inputs []winInput) {
 	)
 }
 
-// ─── BITMAPINFOHEADER ─────────────────────────────────────────────────────────
+// ─── RECT und Bitmap ─────────────────────────────────────────────────────────
+
+type RECT struct {
+	Left, Top, Right, Bottom int32
+}
 
 type bitmapInfoHeader struct {
 	BiSize          uint32
@@ -181,7 +208,7 @@ func desktopScreenshot() (string, error) {
 	bmi := bitmapInfo{}
 	bmi.BmiHeader.BiSize = uint32(unsafe.Sizeof(bmi.BmiHeader))
 	bmi.BmiHeader.BiWidth = int32(w)
-	bmi.BmiHeader.BiHeight = -int32(h) // negativ = top-down
+	bmi.BmiHeader.BiHeight = -int32(h)
 	bmi.BmiHeader.BiPlanes = 1
 	bmi.BmiHeader.BiBitCount = 32
 	bmi.BmiHeader.BiCompression = biRgb
@@ -189,8 +216,7 @@ func desktopScreenshot() (string, error) {
 	stride := w * 4
 	pixels := make([]byte, stride*h)
 	r, _, _ = procGetDIBits.Call(
-		mdc, bmp,
-		0, uintptr(h),
+		mdc, bmp, 0, uintptr(h),
 		uintptr(unsafe.Pointer(&pixels[0])),
 		uintptr(unsafe.Pointer(&bmi)),
 		dibRgbColors,
@@ -199,13 +225,12 @@ func desktopScreenshot() (string, error) {
 		return "", fmt.Errorf("GetDIBits fehlgeschlagen")
 	}
 
-	// BGRA → RGBA
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for i := 0; i < len(pixels); i += 4 {
-		img.Pix[i+0] = pixels[i+2] // R
-		img.Pix[i+1] = pixels[i+1] // G
-		img.Pix[i+2] = pixels[i+0] // B
-		img.Pix[i+3] = 255          // A
+		img.Pix[i+0] = pixels[i+2]
+		img.Pix[i+1] = pixels[i+1]
+		img.Pix[i+2] = pixels[i+0]
+		img.Pix[i+3] = 255
 	}
 
 	var buf bytes.Buffer
@@ -225,7 +250,7 @@ func desktopMouseMove(x, y int) error {
 	return nil
 }
 
-func desktopMouseClick(x, y int, button string, double bool) error {
+func desktopMouseClick(x, y int, button string, count int) error {
 	if err := desktopMouseMove(x, y); err != nil {
 		return err
 	}
@@ -241,33 +266,66 @@ func desktopMouseClick(x, y int, button string, double bool) error {
 		downFlag, upFlag = mouseeventfLeftDown, mouseeventfLeftUp
 	}
 
-	click := func() {
+	for i := 0; i < count; i++ {
 		var down, up winInput
 		down.setMouse(0, 0, 0, downFlag)
 		up.setMouse(0, 0, 0, upFlag)
 		sendInputs([]winInput{down, up})
-		time.Sleep(50 * time.Millisecond)
-	}
-	click()
-	if double {
-		click()
+		if count > 1 {
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 	return nil
 }
 
-func desktopScroll(x, y, amount int) error {
+func desktopScroll(x, y, amount int, direction string) error {
 	if err := desktopMouseMove(x, y); err != nil {
 		return err
 	}
+	if amount <= 0 {
+		amount = 3
+	}
 	var inp winInput
-	inp.setMouse(0, 0, uint32(amount*120), mouseeventfWheel)
+	switch strings.ToLower(direction) {
+	case "left":
+		inp.setMouse(0, 0, uint32(int32(-amount*120)), mouseeventfHWheel)
+	case "right":
+		inp.setMouse(0, 0, uint32(int32(amount*120)), mouseeventfHWheel)
+	case "up":
+		inp.setMouse(0, 0, uint32(int32(amount*120)), mouseeventfWheel)
+	default: // "down"
+		inp.setMouse(0, 0, uint32(int32(-amount*120)), mouseeventfWheel)
+	}
 	sendInputs([]winInput{inp})
+	return nil
+}
+
+func desktopDragAndDrop(x1, y1, x2, y2 int) error {
+	if err := desktopMouseMove(x1, y1); err != nil {
+		return err
+	}
+	time.Sleep(50 * time.Millisecond)
+	var down winInput
+	down.setMouse(0, 0, 0, mouseeventfLeftDown)
+	sendInputs([]winInput{down})
+	time.Sleep(100 * time.Millisecond)
+	// Stufenweise Bewegung für zuverlässiges Drag
+	steps := 15
+	for i := 1; i <= steps; i++ {
+		ix := x1 + (x2-x1)*i/steps
+		iy := y1 + (y2-y1)*i/steps
+		_ = desktopMouseMove(ix, iy)
+		time.Sleep(15 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	var up winInput
+	up.setMouse(0, 0, 0, mouseeventfLeftUp)
+	sendInputs([]winInput{up})
 	return nil
 }
 
 // ─── Tastatur ─────────────────────────────────────────────────────────────────
 
-// VK-Code-Tabelle für benannte Tasten
 var vkNames = map[string]uint16{
 	"ctrl": 0x11, "control": 0x11, "strg": 0x11,
 	"alt": 0x12,
@@ -294,7 +352,6 @@ func nameToVK(name string) uint16 {
 	if vk, ok := vkNames[name]; ok {
 		return vk
 	}
-	// Einzelnes Zeichen: A-Z → 0x41-0x5A, 0-9 → 0x30-0x39
 	if len(name) == 1 {
 		c := rune(name[0])
 		if c >= 'a' && c <= 'z' {
@@ -419,21 +476,84 @@ func desktopShellExec(cmd string) (string, int, error) {
 		}
 	}
 	output := strings.TrimRight(out.String(), "\r\n")
-	// Ausgabe auf 8000 Zeichen begrenzen (Token-Schutz)
 	if len(output) > 8000 {
 		output = output[:8000] + "\n[... abgeschnitten]"
 	}
 	return output, exitCode, nil
 }
 
+// ─── Fensterverwaltung ────────────────────────────────────────────────────────
+
+func getWindowTitle(hwnd uintptr) string {
+	buf := make([]uint16, 512)
+	procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	return syscall.UTF16ToString(buf)
+}
+
+func getWindowClass(hwnd uintptr) string {
+	buf := make([]uint16, 256)
+	procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	return syscall.UTF16ToString(buf)
+}
+
+// enumWindowsList: temporäre Liste für den EnumWindows-Callback
+var enumWindowsList []string
+
+func enumWindowsCallback(hwnd, _ uintptr) uintptr {
+	vis, _, _ := procIsWindowVisible.Call(hwnd)
+	if vis == 0 {
+		return 1
+	}
+	title := getWindowTitle(hwnd)
+	if title == "" {
+		return 1
+	}
+	enumWindowsList = append(enumWindowsList, fmt.Sprintf("%d\t%s", hwnd, title))
+	return 1 // weitermachen
+}
+
+func enumVisibleWindows() []string {
+	enumWindowsList = nil
+	cb := syscall.NewCallback(enumWindowsCallback)
+	procEnumWindows.Call(cb, 0)
+	return enumWindowsList
+}
+
+// findWindow sucht ein sichtbares Fenster dessen Titel den Suchtext enthält.
+// Gibt als erstes Ergebnis das aktive Fenster zurück, falls es passt.
+func findWindow(title string) uintptr {
+	needle := strings.ToLower(strings.TrimSpace(title))
+	for _, entry := range enumVisibleWindows() {
+		parts := strings.SplitN(entry, "\t", 2)
+		if len(parts) == 2 && strings.Contains(strings.ToLower(parts[1]), needle) {
+			n, err := strconv.ParseUint(parts[0], 10, 64)
+			if err == nil {
+				return uintptr(n)
+			}
+		}
+	}
+	return 0
+}
+
+func getWindowInfo(hwnd uintptr) string {
+	title := getWindowTitle(hwnd)
+	class := getWindowClass(hwnd)
+	var rect RECT
+	procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rect)))
+	w := rect.Right - rect.Left
+	h := rect.Bottom - rect.Top
+	return fmt.Sprintf("Handle: %d\nTitel: %s\nKlasse: %s\nPosition: %d,%d  Größe: %dx%d",
+		hwnd, title, class, rect.Left, rect.Top, w, h)
+}
+
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 
-// DesktopExecute verarbeitet einen DesktopCommand und gibt das Ergebnis zurück.
 func DesktopExecute(cmd DesktopCommand) DesktopResult {
 	res := DesktopResult{Action: cmd.Action, RequestID: cmd.RequestID}
 
 	switch cmd.Action {
 
+	// ── Screenshot ──────────────────────────────────────────────────────────────
 	case "screenshot":
 		data, err := desktopScreenshot()
 		if err != nil {
@@ -442,43 +562,83 @@ func DesktopExecute(cmd DesktopCommand) DesktopResult {
 			res.Data = data
 		}
 
-	case "mouse_move":
+	// ── Maus: Bewegen ───────────────────────────────────────────────────────────
+	case "mouse_move", "move_mouse":
 		if err := desktopMouseMove(int(cmd.X), int(cmd.Y)); err != nil {
 			res.Error = err.Error()
 		} else {
-			res.Output = fmt.Sprintf("Maus bewegt zu (%d, %d)", int(cmd.X), int(cmd.Y))
+			res.Output = fmt.Sprintf("Maus → (%d,%d)", int(cmd.X), int(cmd.Y))
 		}
 
-	case "mouse_click":
+	// ── Maus: Klicks ────────────────────────────────────────────────────────────
+	case "mouse_click", "click":
 		btn := cmd.Button
 		if btn == "" {
 			btn = "left"
 		}
-		if err := desktopMouseClick(int(cmd.X), int(cmd.Y), btn, false); err != nil {
+		if err := desktopMouseClick(int(cmd.X), int(cmd.Y), btn, 1); err != nil {
 			res.Error = err.Error()
 		} else {
-			res.Output = fmt.Sprintf("%s-Klick bei (%d, %d)", btn, int(cmd.X), int(cmd.Y))
+			res.Output = fmt.Sprintf("%s-Klick @ (%d,%d)", btn, int(cmd.X), int(cmd.Y))
 		}
 
-	case "mouse_double_click":
+	case "mouse_double_click", "double_click":
 		btn := cmd.Button
 		if btn == "" {
 			btn = "left"
 		}
-		if err := desktopMouseClick(int(cmd.X), int(cmd.Y), btn, true); err != nil {
+		if err := desktopMouseClick(int(cmd.X), int(cmd.Y), btn, 2); err != nil {
 			res.Error = err.Error()
 		} else {
-			res.Output = fmt.Sprintf("Doppelklick bei (%d, %d)", int(cmd.X), int(cmd.Y))
+			res.Output = fmt.Sprintf("Doppelklick @ (%d,%d)", int(cmd.X), int(cmd.Y))
 		}
 
+	case "triple_click":
+		if err := desktopMouseClick(int(cmd.X), int(cmd.Y), "left", 3); err != nil {
+			res.Error = err.Error()
+		} else {
+			res.Output = fmt.Sprintf("Dreifachklick @ (%d,%d)", int(cmd.X), int(cmd.Y))
+		}
+
+	case "right_click":
+		if err := desktopMouseClick(int(cmd.X), int(cmd.Y), "right", 1); err != nil {
+			res.Error = err.Error()
+		} else {
+			res.Output = fmt.Sprintf("Rechtsklick @ (%d,%d)", int(cmd.X), int(cmd.Y))
+		}
+
+	case "middle_click":
+		if err := desktopMouseClick(int(cmd.X), int(cmd.Y), "middle", 1); err != nil {
+			res.Error = err.Error()
+		} else {
+			res.Output = fmt.Sprintf("Mittelklick @ (%d,%d)", int(cmd.X), int(cmd.Y))
+		}
+
+	// ── Maus: Scrollen ──────────────────────────────────────────────────────────
 	case "scroll":
-		amount := int(cmd.X) // X-Feld zweckentfremdet für Betrag (positiv=up, negativ=down)
-		if err := desktopScroll(int(cmd.X), int(cmd.Y), amount); err != nil {
+		dir := cmd.Direction
+		if dir == "" {
+			dir = "down"
+		}
+		amount := cmd.Amount
+		if amount <= 0 {
+			amount = 3
+		}
+		if err := desktopScroll(int(cmd.X), int(cmd.Y), amount, dir); err != nil {
 			res.Error = err.Error()
 		} else {
-			res.Output = fmt.Sprintf("Scroll %d bei (%d,%d)", amount, int(cmd.X), int(cmd.Y))
+			res.Output = fmt.Sprintf("Scroll %s ×%d @ (%d,%d)", dir, amount, int(cmd.X), int(cmd.Y))
 		}
 
+	// ── Maus: Drag & Drop ───────────────────────────────────────────────────────
+	case "drag_and_drop":
+		if err := desktopDragAndDrop(int(cmd.X), int(cmd.Y), int(cmd.X2), int(cmd.Y2)); err != nil {
+			res.Error = err.Error()
+		} else {
+			res.Output = fmt.Sprintf("Drag (%d,%d) → (%d,%d)", int(cmd.X), int(cmd.Y), int(cmd.X2), int(cmd.Y2))
+		}
+
+	// ── Tastatur ────────────────────────────────────────────────────────────────
 	case "type_text":
 		if err := desktopTypeText(cmd.Text); err != nil {
 			res.Error = err.Error()
@@ -490,29 +650,37 @@ func DesktopExecute(cmd DesktopCommand) DesktopResult {
 		if err := desktopKeyPress(cmd.Key); err != nil {
 			res.Error = err.Error()
 		} else {
-			res.Output = fmt.Sprintf("Taste gedrückt: %s", cmd.Key)
+			res.Output = fmt.Sprintf("Taste: %s", cmd.Key)
 		}
 
+	// ── Shell ───────────────────────────────────────────────────────────────────
+	case "shell_exec":
+		out, code, err := desktopShellExec(cmd.Cmd)
+		res.ExitCode = code
+		if err != nil {
+			res.Error = err.Error()
+		} else {
+			res.Output = out
+		}
+
+	// ── URL / App öffnen ────────────────────────────────────────────────────────
 	case "open_url":
 		url := cmd.URL
 		if url == "" {
-			url = cmd.Text // Fallback falls Backend url in text schickt
+			url = cmd.Text
 		}
 		if url == "" {
 			res.Error = "keine URL angegeben"
 			break
 		}
-		// http/https Präfix sicherstellen
 		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 			url = "https://" + url
 		}
-		out, code, err := desktopShellExec(`start "" "` + url + `"`)
-		res.ExitCode = code
+		_, _, err := desktopShellExec(`start "" "` + url + `"`)
 		if err != nil {
 			res.Error = err.Error()
 		} else {
 			res.Output = "Browser geöffnet: " + url
-			_ = out
 		}
 
 	case "open_app":
@@ -524,24 +692,14 @@ func DesktopExecute(cmd DesktopCommand) DesktopResult {
 			res.Error = "kein Programmname angegeben"
 			break
 		}
-		out, code, err := desktopShellExec(`start "" ` + app)
-		res.ExitCode = code
+		_, _, err := desktopShellExec(`start "" ` + app)
 		if err != nil {
 			res.Error = err.Error()
 		} else {
 			res.Output = "Gestartet: " + app
-			_ = out
 		}
 
-	case "shell_exec":
-		out, code, err := desktopShellExec(cmd.Cmd)
-		res.ExitCode = code
-		if err != nil {
-			res.Error = err.Error()
-		} else {
-			res.Output = out
-		}
-
+	// ── Zwischenablage ──────────────────────────────────────────────────────────
 	case "clipboard_get":
 		text, err := desktopClipboardGet()
 		if err != nil {
@@ -556,6 +714,131 @@ func DesktopExecute(cmd DesktopCommand) DesktopResult {
 		} else {
 			res.Output = "Zwischenablage gesetzt"
 		}
+
+	// ── Fensterverwaltung ───────────────────────────────────────────────────────
+	case "get_active_window":
+		hwnd, _, _ := procGetForegroundWindow.Call()
+		if hwnd == 0 {
+			res.Error = "kein aktives Fenster"
+			break
+		}
+		res.Output = getWindowInfo(hwnd)
+
+	case "list_windows":
+		windows := enumVisibleWindows()
+		if len(windows) == 0 {
+			res.Output = "(keine sichtbaren Fenster)"
+		} else {
+			res.Output = strings.Join(windows, "\n")
+		}
+
+	case "focus_window":
+		needle := cmd.Text
+		if needle == "" {
+			needle = cmd.WindowID
+		}
+		if needle == "" {
+			res.Error = "kein Fenstername (text) angegeben"
+			break
+		}
+		hwnd := findWindow(needle)
+		if hwnd == 0 {
+			res.Error = "Fenster nicht gefunden: " + needle
+			break
+		}
+		procShowWindow.Call(hwnd, swRestore)
+		procSetForegroundWindow.Call(hwnd)
+		res.Output = fmt.Sprintf("Fenster fokussiert: %s", getWindowTitle(hwnd))
+
+	case "close_window":
+		var hwnd uintptr
+		if cmd.Text != "" {
+			hwnd = findWindow(cmd.Text)
+			if hwnd == 0 {
+				res.Error = "Fenster nicht gefunden: " + cmd.Text
+				break
+			}
+		} else {
+			hwnd, _, _ = procGetForegroundWindow.Call()
+		}
+		procPostMessageW.Call(hwnd, wmClose, 0, 0)
+		res.Output = fmt.Sprintf("Fenster geschlossen: %s", getWindowTitle(hwnd))
+
+	case "minimize_window":
+		var hwnd uintptr
+		if cmd.Text != "" {
+			hwnd = findWindow(cmd.Text)
+			if hwnd == 0 {
+				res.Error = "Fenster nicht gefunden: " + cmd.Text
+				break
+			}
+		} else {
+			hwnd, _, _ = procGetForegroundWindow.Call()
+		}
+		procShowWindow.Call(hwnd, swMinimize)
+		res.Output = "Fenster minimiert"
+
+	case "maximize_window":
+		var hwnd uintptr
+		if cmd.Text != "" {
+			hwnd = findWindow(cmd.Text)
+			if hwnd == 0 {
+				res.Error = "Fenster nicht gefunden: " + cmd.Text
+				break
+			}
+		} else {
+			hwnd, _, _ = procGetForegroundWindow.Call()
+		}
+		procShowWindow.Call(hwnd, swMaximize)
+		res.Output = "Fenster maximiert"
+
+	case "restore_window":
+		var hwnd uintptr
+		if cmd.Text != "" {
+			hwnd = findWindow(cmd.Text)
+			if hwnd == 0 {
+				res.Error = "Fenster nicht gefunden: " + cmd.Text
+				break
+			}
+		} else {
+			hwnd, _, _ = procGetForegroundWindow.Call()
+		}
+		procShowWindow.Call(hwnd, swNormal)
+		res.Output = "Fenster wiederhergestellt"
+
+	case "resize_window":
+		if cmd.Width == 0 || cmd.Height == 0 {
+			res.Error = "width und height müssen angegeben werden"
+			break
+		}
+		var hwnd uintptr
+		if cmd.Text != "" {
+			hwnd = findWindow(cmd.Text)
+			if hwnd == 0 {
+				res.Error = "Fenster nicht gefunden: " + cmd.Text
+				break
+			}
+		} else {
+			hwnd, _, _ = procGetForegroundWindow.Call()
+		}
+		// SWP_NOMOVE: Position beibehalten, nur Größe ändern
+		procSetWindowPos.Call(hwnd, 0, 0, 0, uintptr(cmd.Width), uintptr(cmd.Height), deskSwpNoZOrder|deskSwpNoMove|deskSwpNoActivate)
+		res.Output = fmt.Sprintf("Fenstergröße: %dx%d", cmd.Width, cmd.Height)
+
+	case "move_window":
+		var hwnd uintptr
+		if cmd.Text != "" {
+			hwnd = findWindow(cmd.Text)
+			if hwnd == 0 {
+				res.Error = "Fenster nicht gefunden: " + cmd.Text
+				break
+			}
+		} else {
+			hwnd, _, _ = procGetForegroundWindow.Call()
+		}
+		// SWP_NOSIZE: Größe beibehalten, nur Position ändern
+		procSetWindowPos.Call(hwnd, 0, uintptr(int(cmd.X)), uintptr(int(cmd.Y)), 0, 0, deskSwpNoZOrder|deskSwpNoSize|deskSwpNoActivate)
+		res.Output = fmt.Sprintf("Fenster verschoben → (%d,%d)", int(cmd.X), int(cmd.Y))
 
 	default:
 		res.Error = "unbekannte Aktion: " + cmd.Action

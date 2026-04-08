@@ -17,7 +17,6 @@ import info.jarvisai.app.data.model.AvatarType
 import info.jarvisai.app.data.model.ChatMessage
 import info.jarvisai.app.data.model.ConnectionState
 import info.jarvisai.app.data.model.MessageRole
-import info.jarvisai.app.data.model.SegmentType
 import info.jarvisai.app.service.TtsManager
 import info.jarvisai.app.data.prefs.DEFAULT_QUICK_ACTIONS
 import info.jarvisai.app.data.prefs.SettingsDataStore
@@ -84,9 +83,6 @@ class ChatViewModel @Inject constructor(
     private var speechRecognizer: SpeechRecognizer? = null
     private var autoSendVoice = false
     private var voiceSilenceMs = 1500
-    // Vorgeladene Nachrichten beim Start nicht erneut sprechen
-    private var lastSpokenMsgId = repo.messages.value
-        .lastOrNull { it.role == MessageRole.JARVIS }?.id ?: ""
 
     init {
         // Alle Settings-Änderungen live übernehmen
@@ -105,20 +101,11 @@ class ChatViewModel @Inject constructor(
                 )
             }
         }
-        // Fertige Jarvis-Antworten vorlesen wenn Avatar aktiv
+        // Fertige Jarvis-Antworten vorlesen – SharedFlow garantiert einmalige Zustellung
         viewModelScope.launch {
-            repo.messages.collect { msgs ->
-                val last = msgs.lastOrNull() ?: return@collect
-                if (last.role != MessageRole.JARVIS) return@collect
-                if (last.isStreaming) return@collect
-                if (last.id == lastSpokenMsgId) return@collect
+            repo.speakText.collect { text ->
                 if (_avatarType.value == AvatarType.NONE) return@collect
-                val answerText = last.segments
-                    .filter { it.type == SegmentType.ANSWER }
-                    .joinToString(" ") { it.text.trim() }
-                if (answerText.isBlank()) return@collect
-                lastSpokenMsgId = last.id
-                ttsManager.speak(answerText)
+                ttsManager.speak(text)
             }
         }
         // Neu verbinden nur wenn URL oder Key sich ändert

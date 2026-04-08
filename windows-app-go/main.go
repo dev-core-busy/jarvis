@@ -460,19 +460,13 @@ func (ja *JarvisApp) startTextDictation() {
 		return
 	}
 	if ja.cfg.DialogMode {
-		return // Im Dialogmodus läuft die Spracherkennung bereits dauerhaft
+		return
 	}
 	ja.textDictating = true
 	ja.chat.SetMicActive(true)
 	ja.chat.AddMessage(RoleStatus, "🎤 Sprechen Sie jetzt…")
 
 	dc := NewDialogController(ja.audio, ja.ws, ja)
-	dc.StopAfterFirstUtterance = true
-	dc.OnStop = func() {
-		ja.textDictating = false
-		ja.chat.SetMicActive(false)
-		ja.chat.SetStatus("")
-	}
 	dc.OnRMSLevel = func(rms float64, frameMs int) {
 		bars := int(rms / 100)
 		if bars > 20 {
@@ -490,14 +484,51 @@ func (ja *JarvisApp) startTextDictation() {
 		ja.textDictating = false
 		ja.chat.SetMicActive(false)
 		ja.textDictCtrl = nil
+		return
 	}
+
+	// Watcher-Goroutine: wartet auf erkannte Äußerung aus dem VAD-Channel,
+	// stoppt dann Mic und sendet – alles von DIESER Goroutine, nie aus dem Audio-Callback
+	go func() {
+		utt, ok := <-dc.utteranceCh
+		if !ok {
+			return
+		}
+		// Mic stoppen
+		dc.Stop()
+		ja.textDictating = false
+		ja.chat.SetMicActive(false)
+		ja.chat.SetStatus("")
+		ja.textDictCtrl = nil
+
+		if utt.state == StateWaitWakeWord {
+			header := BuildWAVHeader(len(utt.pcm))
+			wav := append(header, utt.pcm...)
+			b64 := encodeBase64(wav)
+			ja.ws.SendWakeWordCheck(b64, ja.cfg.WakeWord)
+			return
+		}
+
+		// Spracheingabe verarbeiten
+		ja.avatar.SetMode(ModeIdle)
+		header := BuildWAVHeader(len(utt.pcm))
+		wav := append(header, utt.pcm...)
+		b64 := encodeBase64(wav)
+
+		ja.chat.SetStatus("🎤 Transkribiere…")
+		if ja.cfg.AutoSendVoice {
+			ja.ws.SendTask("[Voice]\n<audio>" + b64 + "</audio>")
+		} else {
+			ja.ws.SendTranscribeOnly(b64)
+		}
+	}()
 }
 
 // stopTextDictation beendet die laufende Spracheingabe im Text-Modus.
 func (ja *JarvisApp) stopTextDictation() {
 	if ja.textDictCtrl != nil {
 		ja.textDictCtrl.FlushAndStop()
-		ja.textDictCtrl = nil
+		// FlushAndStop sendet ggf. noch in den Channel – Watcher-Goroutine verarbeitet es
 	}
 	ja.textDictating = false
 	ja.chat.SetMicActive(false)

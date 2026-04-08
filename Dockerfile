@@ -19,9 +19,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv python3-pip \
     # Build-Tools (fuer python-pam + dlib/face_recognition Kompilierung)
     build-essential libpam0g-dev cmake libboost-all-dev \
-    # X11 / Leichtgewichtiger Desktop (Openbox)
+    # X11 / Cinnamon Desktop
     xvfb x11vnc xterm \
-    openbox obconf dbus-x11 at-spi2-core feh \
+    cinnamon-core cinnamon-session \
+    dbus-x11 at-spi2-core feh \
+    # Openbox als Fallback
+    openbox \
     # Browser (fuer Desktop-Automation, CDP via --remote-debugging-port)
     chromium \
     # noVNC / websockify

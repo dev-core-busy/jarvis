@@ -16,10 +16,14 @@ import javax.inject.Singleton
 
 @Serializable
 data class VersionInfo(
-    val versionCode: Int,
-    val versionName: String,
-    val downloadUrl: String = "https://jarvis-ai.info/downloads/jarvis.apk",
-)
+    val versionCode: Int = 0,
+    val version: Int = 0,       // Kompatibilität mit PR5-Schema
+    val versionName: String = "",
+    val downloadUrl: String = "https://jarvis-ai.info/jarvis.apk",
+) {
+    // Nimmt das größere der beiden Felder (robust gegen beide Formate)
+    val effectiveCode: Int get() = maxOf(versionCode, version)
+}
 
 enum class DownloadPhase { IDLE, DOWNLOADING, READY, ERROR }
 
@@ -53,8 +57,8 @@ class UpdateChecker @Inject constructor(
             val body = client.newCall(req).execute().use { it.body?.string() ?: return@withContext UpdateState() }
             val info = json.decodeFromString<VersionInfo>(body)
             _apkUrl = info.downloadUrl
-            if (info.versionCode > BuildConfig.VERSION_CODE) {
-                UpdateState(available = true, versionName = info.versionName, versionCode = info.versionCode)
+            if (info.effectiveCode > BuildConfig.VERSION_CODE) {
+                UpdateState(available = true, versionName = info.versionName, versionCode = info.effectiveCode)
             } else {
                 UpdateState()
             }

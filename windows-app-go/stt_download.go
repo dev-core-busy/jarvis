@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -22,10 +24,10 @@ const (
 	whisperModelName = "ggml-small.bin"
 )
 
-// WhisperStatus prüft ob whisper-cli.exe und ein Sprachmodell im Unterordner speech-to-text vorhanden sind.
+// WhisperStatus prüft ob whisper-cli.exe/whisper-server.exe und ein Sprachmodell vorhanden sind.
 func WhisperStatus() (hasExe, hasModel bool) {
 	dir := sttDir()
-	for _, name := range []string{"whisper-cli.exe", "whisper.exe", "main.exe"} {
+	for _, name := range []string{"whisper-cli.exe", "whisper-server.exe", "whisper.exe", "main.exe"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
 			hasExe = true
 			break
@@ -44,8 +46,14 @@ func WhisperStatus() (hasExe, hasModel bool) {
 	return
 }
 
-// WhisperReady gibt true zurück wenn sowohl Binary als auch Modell vorhanden sind.
+// WhisperReady gibt true zurück wenn STT verfügbar ist:
+// entweder Binary+Modell vorhanden, oder der whisper-server läuft bereits.
 func WhisperReady() bool {
+	// Server läuft bereits → sofort bereit
+	if conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", sttServerPort), 300*time.Millisecond); err == nil {
+		conn.Close()
+		return true
+	}
 	hasExe, hasModel := WhisperStatus()
 	return hasExe && hasModel
 }
@@ -139,7 +147,8 @@ func showWhisperDownloadDialog(a fyne.App, missing string, parent fyne.Window) {
 
 // downloadWithProgress lädt eine URL herunter und ruft progress(0..1) regelmäßig auf.
 func downloadWithProgress(url, dest string, progress func(float64)) error {
-	resp, err := http.Get(url) //nolint:gosec
+	client := &http.Client{Timeout: 30 * time.Minute} // großes Modell kann lange dauern
+	resp, err := client.Get(url)                       //nolint:gosec
 	if err != nil {
 		return err
 	}

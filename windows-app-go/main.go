@@ -28,7 +28,8 @@ type JarvisApp struct {
 	connected bool
 	debugMode bool // Zeigt alle Backend-Status-Nachrichten (nicht nur highlight)
 
-	ttsBuf strings.Builder // Sammelt LLM-Text für TTS-Ausgabe
+	ttsBuf   strings.Builder // Sammelt LLM-Text für TTS-Ausgabe
+	ttsBufMu sync.Mutex      // Schützt ttsBuf gegen Race zwischen WS- und TTS-Goroutine
 
 	textDictating bool             // Diktat läuft im Text-Modus
 	textDictCtrl  *DialogController // Diktat-Controller (One-Shot)
@@ -326,8 +327,10 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 			// Echten LLM-Streamingtext: Status leeren, in Bubble anzeigen + TTS sammeln
 			ja.chat.SetStatus("")
 			ja.chat.AppendToLast(msg.Message)
+			ja.ttsBufMu.Lock()
 			ja.ttsBuf.WriteString(msg.Message)
 			ja.ttsBuf.WriteString(" ")
+			ja.ttsBufMu.Unlock()
 			ja.avatar.SetMode(ModeSpeaking)
 			if ja.dialog != nil {
 				ja.dialog.MuteWhileSpeaking(true)
@@ -338,7 +341,9 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 		}
 
 	case "error":
+		ja.ttsBufMu.Lock()
 		ja.ttsBuf.Reset()
+		ja.ttsBufMu.Unlock()
 		ja.chat.AddMessage(RoleStatus, "⚠ "+msg.Message)
 		ja.avatar.SetMode(ModeIdle)
 		if ja.dialog != nil {
@@ -348,11 +353,15 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 	case "agent_event":
 		if msg.Event == "started" {
 			// Neuer Durchlauf: TTS-Puffer zurücksetzen
+			ja.ttsBufMu.Lock()
 			ja.ttsBuf.Reset()
+			ja.ttsBufMu.Unlock()
 		} else if msg.Event == "finished" {
 			ja.avatar.SetMode(ModeIdle)
+			ja.ttsBufMu.Lock()
 			ttsText := ja.ttsBuf.String()
 			ja.ttsBuf.Reset()
+			ja.ttsBufMu.Unlock()
 			go func() {
 				// TTS nur im Dialogmodus sprechen
 				if ttsText != "" && ja.cfg.DialogMode {
@@ -544,7 +553,7 @@ func (ja *JarvisApp) startTextDictation() {
 		transcript, err := TranscribeLocalSafe(wav)
 		autoSend := ja.cfg.AutoSendVoice
 		ja.chat.SetStatus("")
-		ja.chat.AddMessage(RoleStatus, fmt.Sprintf("🔍 STT: %s | AutoSend=%v", sttLastMode, autoSend))
+		ja.chat.AddMessage(RoleStatus, fmt.Sprintf("🔍 STT: %s | AutoSend=%v", getSttLastMode(), autoSend))
 		if err != nil {
 			ja.chat.AddMessage(RoleStatus, "❌ STT-Fehler: "+err.Error())
 			return

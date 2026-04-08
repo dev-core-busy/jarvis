@@ -405,25 +405,15 @@ func (c *ChatWidget) deleteSelected() {
 	if len(c.selSet) == 0 {
 		return
 	}
-	// Indices absteigend löschen damit Verschiebungen korrekt sind
 	c.mu.Lock()
-	indices := make([]int, 0, len(c.selSet))
-	for i := range c.selSet {
-		indices = append(indices, i)
-	}
-	// Sortieren absteigend
-	for i := 0; i < len(indices)-1; i++ {
-		for j := i + 1; j < len(indices); j++ {
-			if indices[j] > indices[i] {
-				indices[i], indices[j] = indices[j], indices[i]
-			}
+	// Neue messages-Liste ohne die ausgewählten Indizes aufbauen
+	newMsgs := make([]ChatMessage, 0, len(c.messages))
+	for i, m := range c.messages {
+		if !c.selSet[i] {
+			newMsgs = append(newMsgs, m)
 		}
 	}
-	for _, idx := range indices {
-		if idx < len(c.messages) {
-			c.messages = append(c.messages[:idx], c.messages[idx+1:]...)
-		}
-	}
+	c.messages = newMsgs
 	snap := append([]ChatMessage(nil), c.messages...)
 	c.mu.Unlock()
 	go SaveHistory(snap)
@@ -435,11 +425,10 @@ func (c *ChatWidget) rebuildAll() {
 	c.mu.Lock()
 	msgs := append([]ChatMessage(nil), c.messages...)
 	c.mu.Unlock()
-	objs := make([]fyne.CanvasObject, len(msgs))
+	c.MsgBox.Objects = nil
 	for i, m := range msgs {
-		objs[i] = c.buildRowAt(m, i)
+		c.MsgBox.Add(c.buildRowAt(m, i))
 	}
-	c.MsgBox.Objects = objs
 	c.MsgBox.Refresh()
 }
 
@@ -473,14 +462,9 @@ func (c *ChatWidget) AddMessage(role MessageRole, text string) {
 	snap := append([]ChatMessage(nil), c.messages...)
 	c.mu.Unlock()
 
-	// Komplett neu aufbauen (verhindert Race auf Objects-Slice, erzwingt korrektes Layout)
-	objs := make([]fyne.CanvasObject, len(snap))
-	for i, m := range snap {
-		objs[i] = c.buildRowAt(m, i)
-	}
-	c.MsgBox.Objects = objs
+	row := c.buildRow(msg)
+	c.MsgBox.Add(row)
 	c.MsgBox.Refresh()
-	canvas.Refresh(c.Scroll) // Scroll über neue Content-Größe informieren
 	c.scrollToBottom()
 	go SaveHistory(snap)
 }
@@ -563,11 +547,9 @@ func (c *ChatWidget) LoadHistory() {
 	c.mu.Lock()
 	c.messages = msgs
 	c.mu.Unlock()
-	objs := make([]fyne.CanvasObject, len(msgs))
-	for i, m := range msgs {
-		objs[i] = c.buildRow(m)
+	for _, m := range msgs {
+		c.MsgBox.Add(c.buildRow(m))
 	}
-	c.MsgBox.Objects = objs
 	c.MsgBox.Refresh()
 	c.scrollToBottom()
 }
@@ -582,7 +564,8 @@ func (c *ChatWidget) ClearMessages() {
 	DeleteHistory()
 }
 
-// deleteMessageAt löscht die Nachricht an Index idx (MsgBox-Index entspricht messages-Index).
+// deleteMessageAt löscht die Nachricht an Index idx und baut die MsgBox komplett neu auf.
+// Direkter Slice-Zugriff auf Objects ist falsch da AddDebugMessage Objects aber nicht messages befüllt.
 func (c *ChatWidget) deleteMessageAt(idx int) {
 	c.mu.Lock()
 	if idx < 0 || idx >= len(c.messages) {
@@ -591,10 +574,7 @@ func (c *ChatWidget) deleteMessageAt(idx int) {
 	}
 	c.messages = append(c.messages[:idx], c.messages[idx+1:]...)
 	c.mu.Unlock()
-	if idx < len(c.MsgBox.Objects) {
-		c.MsgBox.Objects = append(c.MsgBox.Objects[:idx], c.MsgBox.Objects[idx+1:]...)
-		c.MsgBox.Refresh()
-	}
+	c.rebuildAll()
 }
 
 // newBoldWhiteText erstellt einen fett-weißen Textblock mit Zeilenumbruch.
@@ -836,11 +816,7 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 
 func (c *ChatWidget) scrollToBottom() {
 	go func() {
-		time.Sleep(80 * time.Millisecond)
-		c.Scroll.Refresh()
-		c.Scroll.ScrollToBottom()
-		time.Sleep(80 * time.Millisecond)
-		c.Scroll.Refresh()
+		time.Sleep(60 * time.Millisecond)
 		c.Scroll.ScrollToBottom()
 	}()
 }

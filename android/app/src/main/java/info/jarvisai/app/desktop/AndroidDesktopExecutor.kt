@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import info.jarvisai.app.data.model.WsEvent
 import kotlinx.coroutines.Dispatchers
@@ -18,11 +19,12 @@ class AndroidDesktopExecutor(private val context: Context) {
                 when (event.action) {
                     "shell_exec" -> shellExec(event)
                     "launch_app" -> launchApp(event)
+                    "open_url"   -> openUrl(event)
                     "list_apps"  -> listApps()
                     "get_info"   -> getInfo()
                     else -> Triple(
                         "",
-                        "Unbekannte Aktion: '${event.action}'. Verfügbar: shell_exec, launch_app, list_apps, get_info",
+                        "Unbekannte Aktion: '${event.action}'. Verfügbar: shell_exec, launch_app, open_url, list_apps, get_info",
                         1,
                     )
                 }
@@ -72,6 +74,22 @@ class AndroidDesktopExecutor(private val context: Context) {
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(launchIntent)
         return Triple("${pm.getApplicationLabel(match)} gestartet (${match.packageName})", "", 0)
+    }
+
+    private fun openUrl(event: WsEvent): Triple<String, String, Int> {
+        var url = event.text.ifBlank { event.cmd }.trim()
+        if (url.isBlank()) return Triple("", "Keine URL angegeben (text)", 1)
+        // Schema ergänzen falls fehlend
+        if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://$url"
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            Triple("Browser geöffnet: $url", "", 0)
+        } catch (e: Exception) {
+            Triple("", "Browser öffnen fehlgeschlagen: ${e.message}", 1)
+        }
     }
 
     private fun listApps(): Triple<String, String, Int> {

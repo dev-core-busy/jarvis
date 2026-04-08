@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -141,6 +142,15 @@ func main() {
 		ja.reconnect()
 		ja.showStartUI()
 	}
+
+	// Update-Check im Hintergrund (nicht blockierend)
+	go func() {
+		time.Sleep(5 * time.Second) // kurz warten bis UI fertig geladen
+		if info := CheckForUpdate(); info != nil {
+			ja.chat.AddMessage(RoleStatus,
+				fmt.Sprintf("🔄 Update verfügbar: v%s – jarvis-ai.info/downloads/jarvis.exe", info.VersionName))
+		}
+	}()
 
 	a.Run()
 }

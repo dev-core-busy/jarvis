@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -240,9 +239,7 @@ func (ja *JarvisApp) reconnect() {
 		} else {
 			ja.avatar.SetMode(ModeIdle) // zurück auf Gold
 			if transcript != "" {
-				ja.fyneApp.SendNotification(fyne.NewNotification(
-					"Jarvis – nicht erkannt",
-					"Gehört: \""+transcript+"\""))
+				ja.chat.SetInput(transcript)
 			}
 		}
 	}
@@ -478,12 +475,15 @@ func (ja *JarvisApp) startTextDictation() {
 		ja.chat.SetStatus("")
 	}
 	dc.OnRMSLevel = func(rms float64, frameMs int) {
-		thresh := ja.cfg.VADThreshold
-		indicator := "·"
-		if rms > float64(thresh) {
-			indicator = "█"
+		bars := int(rms / 100)
+		if bars > 20 {
+			bars = 20
 		}
-		ja.chat.SetStatus(fmt.Sprintf("🎤 %s RMS:%.0f T:%d F:%dms", indicator, rms, thresh, frameMs))
+		bar := ""
+		for i := 0; i < bars; i++ {
+			bar += "█"
+		}
+		ja.chat.SetStatus("🎤 " + bar)
 	}
 	ja.textDictCtrl = dc
 	if err := dc.Start(); err != nil {

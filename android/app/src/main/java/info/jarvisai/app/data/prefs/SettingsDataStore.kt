@@ -29,18 +29,18 @@ const val BG_DEFAULT_URI = "res://bg_jarvis"
 data class JarvisSettings(
     val serverUrl: String = "",
     val apiKey: String = "",
-    val autoSendVoice: Boolean = false,
+    val autoSendVoice: Boolean = true,
     val quickActions: List<String> = DEFAULT_QUICK_ACTIONS,
     val backgroundType: Int = BG_PHOTO,
     val backgroundImageUri: String = BG_DEFAULT_URI,
     val backgroundColorArgb: Int = 0xFF0A0E17.toInt(),
-    val backgroundAlpha: Float = 0.5f,
+    val backgroundAlpha: Float = 0.25f,
     val debugMode: Boolean = false,
-    val voiceSilenceMs: Int = 1500,
+    val voiceSilenceMs: Int = 800,
     val avatarType: AvatarType = AvatarType.IRONMAN,
     val serverTtsEnabled: Boolean = false,
     val serverTtsVoice: String = "de-DE-ConradNeural",
-    val androidTtsVoice: String = "",     // "" = Automatisch
+    val androidTtsVoice: String = "de-de-x-deb-network",
 )
 
 val DEFAULT_QUICK_ACTIONS = listOf(
@@ -74,22 +74,22 @@ class SettingsDataStore @Inject constructor(
         JarvisSettings(
             serverUrl = prefs[KEY_SERVER_URL] ?: "",
             apiKey    = prefs[KEY_API_KEY] ?: "",
-            autoSendVoice = prefs[KEY_AUTO_SEND] ?: false,
+            autoSendVoice = prefs[KEY_AUTO_SEND] ?: true,
             quickActions = prefs[KEY_QUICK_ACTIONS]
                 ?.split("||")?.filter { it.isNotBlank() }
                 ?: DEFAULT_QUICK_ACTIONS,
             backgroundType      = prefs[KEY_BG_TYPE] ?: BG_PHOTO,
             backgroundImageUri  = prefs[KEY_BG_IMAGE_URI] ?: BG_DEFAULT_URI,
             backgroundColorArgb = prefs[KEY_BG_COLOR] ?: 0xFF0A0E17.toInt(),
-            backgroundAlpha     = prefs[KEY_BG_ALPHA] ?: 0.5f,
+            backgroundAlpha     = prefs[KEY_BG_ALPHA] ?: 0.25f,
             debugMode           = prefs[KEY_DEBUG_MODE] ?: false,
-            voiceSilenceMs = prefs[KEY_VOICE_SILENCE] ?: 1500,
+            voiceSilenceMs = prefs[KEY_VOICE_SILENCE] ?: 800,
             avatarType     = prefs[KEY_AVATAR_TYPE]
                 ?.let { runCatching { AvatarType.valueOf(it) }.getOrNull() }
                 ?: if (prefs[KEY_AVATAR] == false) AvatarType.NONE else AvatarType.IRONMAN,
             serverTtsEnabled    = prefs[KEY_SERVER_TTS_ENABLED] ?: false,
             serverTtsVoice      = prefs[KEY_SERVER_TTS_VOICE] ?: "de-DE-ConradNeural",
-            androidTtsVoice     = prefs[KEY_ANDROID_TTS_VOICE] ?: "",
+            androidTtsVoice     = prefs[KEY_ANDROID_TTS_VOICE] ?: "de-de-x-deb-network",
         )
     }
 

@@ -4,12 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
-// TranscribeLocal transkribiert WAV-Daten lokal mit whisper.cpp.
-// Gibt das Transkript oder einen Fehler zurück.
-func TranscribeLocal(wavData []byte, exePath, modelPath string) (string, error) {
-	// WAV in Temp-Datei schreiben
+// TranscribeLocal transkribiert WAV-Daten über Windows SAPI (System.Speech.Recognition).
+// Kein externes Tool nötig – läuft auf jedem Windows ohne Installation.
+func TranscribeLocal(wavData []byte) (string, error) {
 	f, err := os.CreateTemp("", "jarvis-stt-*.wav")
 	if err != nil {
 		return "", err
@@ -22,30 +22,31 @@ func TranscribeLocal(wavData []byte, exePath, modelPath string) (string, error) 
 	}
 	f.Close()
 
-	// whisper.cpp aufrufen:
-	//   -m  Modelldatei
-	//   -l  Sprache
-	//   -f  Eingabedatei
-	//   -nt keine Zeitstempel in der Ausgabe
-	cmd := exec.Command(exePath,
-		"-m", modelPath,
-		"-l", "de",
-		"-f", tmpPath,
-		"-nt",
-	)
+	winPath := strings.ReplaceAll(tmpPath, "/", "\\")
+
+	// System.Speech.Recognition: WAV-Datei einlesen, offline erkennen
+	script := `
+Add-Type -AssemblyName System.Speech
+$rec = New-Object System.Speech.Recognition.SpeechRecognitionEngine
+$rec.SetInputToWaveFile('` + winPath + `')
+$g = New-Object System.Speech.Recognition.DictationGrammar
+$rec.LoadGrammar($g)
+$rec.BabbleTimeout = [TimeSpan]::FromSeconds(0)
+$rec.InitialSilenceTimeout = [TimeSpan]::FromSeconds(10)
+$rec.EndSilenceTimeout = [TimeSpan]::FromSeconds(1)
+try {
+    $r = $rec.Recognize()
+    if ($r -ne $null) { Write-Output $r.Text }
+} catch {}
+$rec.Dispose()
+`
+	cmd := exec.Command("powershell.exe",
+		"-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+		"-Command", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
-
-	// Ausgabe bereinigen: leere Zeilen und Zeitstempel-Zeilen entfernen
-	var parts []string
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "[") {
-			continue
-		}
-		parts = append(parts, line)
-	}
-	return strings.Join(parts, " "), nil
+	return strings.TrimSpace(string(out)), nil
 }

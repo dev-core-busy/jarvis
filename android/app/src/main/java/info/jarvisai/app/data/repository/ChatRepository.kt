@@ -15,7 +15,9 @@ import info.jarvisai.app.data.prefs.SettingsDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -44,6 +46,11 @@ class ChatRepository @Inject constructor(
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
+
+    // SharedFlow: jede fertige Antwort wird exakt einmal zum Vorlesen emittiert.
+    // Kein StateFlow/conflate – damit wird keine Antwort übersprungen.
+    private val _speakText = MutableSharedFlow<String>(extraBufferCapacity = 5)
+    val speakText: SharedFlow<String> = _speakText
 
     // ID der aktuell streamenden Jarvis-Nachricht (null = keine)
     private var streamingMsgId: String? = null
@@ -166,6 +173,18 @@ class ChatRepository @Inject constructor(
             msgs.map { msg ->
                 if (msg.id == id) msg.copy(isStreaming = false) else msg
             }
+        }
+        // TTS-Event über SharedFlow senden – garantiert einmalig zugestellt
+        val finalMsg = _messages.value.find { it.id == id }
+        val speakText = finalMsg?.segments
+            ?.filter { it.type == SegmentType.ANSWER }
+            ?.joinToString(" ") { it.text.trim() }
+            ?.trim()
+            ?.takeUnless { it.isBlank() }
+            ?: finalMsg?.text?.trim()
+            ?: ""
+        if (speakText.isNotBlank()) {
+            scope.launch { _speakText.emit(speakText) }
         }
         saveMessages()
     }

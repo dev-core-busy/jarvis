@@ -534,8 +534,8 @@ fun SettingsScreen(
             SectionHeader("Anzeige")
 
             SettingRow(
-                label = "Ironman-Avatar",
-                description = "Animierter Iron Man Helm mit leuchtenden Augen im Hintergrund",
+                label = "Avatar verwenden",
+                description = "Iron Man Helm mit Sprachausgabe im Chat-Hintergrund",
             ) {
                 Switch(
                     checked = settings.avatarType == AvatarType.IRONMAN,

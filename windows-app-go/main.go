@@ -240,10 +240,24 @@ func (ja *JarvisApp) reconnect() {
 		} else {
 			ja.avatar.SetMode(ModeIdle) // zurück auf Gold
 			if transcript != "" {
-				ja.fyneApp.SendNotification(fyne.NewNotification(
-					"Jarvis – nicht erkannt",
-					"Gehört: \""+transcript+"\""))
+				// Debug: zeigen was gehört wurde (Wake-Word nicht erkannt)
+				ja.chat.AddMessage(RoleStatus, "🎤 Nicht erkannt: \""+transcript+"\"")
 			}
+		}
+	}
+	ja.ws.OnVoiceTranscript = func(transcript string) {
+		log.Printf("[voice] Transkript: %q", transcript)
+		ja.chat.SetStatus("")
+		if transcript == "" {
+			ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
+			return
+		}
+		if ja.cfg.AutoSendVoice {
+			// AutoSend: User-Nachricht mit dem echten Transkript hinzufügen
+			ja.chat.AddMessage(RoleUser, transcript)
+		} else {
+			// Manuell: Transkript ins Eingabefeld setzen, Nutzer bestätigt mit Senden
+			ja.chat.SetInput(transcript)
 		}
 	}
 	ja.chat.OnSend = func(text string) {

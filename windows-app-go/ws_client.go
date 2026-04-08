@@ -37,11 +37,12 @@ type WSClient struct {
 	stopCh    chan struct{}
 	sendCh    chan []byte
 
-	OnMessage        func(WSMessage)
-	OnConnected      func(bool)
-	OnTTSAudio       func([]byte)
-	OnWakeWordResult func(transcript string, detected bool)
-	OnDesktopCommand func(DesktopCommand) // Desktop-Steuerungsbefehle vom Backend
+	OnMessage          func(WSMessage)
+	OnConnected        func(bool)
+	OnTTSAudio         func([]byte)
+	OnWakeWordResult   func(transcript string, detected bool)
+	OnVoiceTranscript  func(transcript string) // Transkript einer Spracheingabe
+	OnDesktopCommand   func(DesktopCommand)    // Desktop-Steuerungsbefehle vom Backend
 }
 
 func NewWSClient(cfg *Config) *WSClient {
@@ -119,6 +120,21 @@ func (c *WSClient) sendRegister() {
 	b, _ := json.Marshal(payload)
 	select {
 	case c.sendCh <- b:
+	default:
+	}
+}
+
+// SendTranscribeOnly sendet Audio zur reinen Transkription (kein Agent).
+// Das Backend antwortet mit voice_transcript. Wird bei deaktiviertem AutoSend verwendet.
+func (c *WSClient) SendTranscribeOnly(audioB64 string) {
+	payload := map[string]string{
+		"type":  "transcribe_only",
+		"audio": audioB64,
+		"token": c.cfg.APIKey,
+	}
+	data, _ := json.Marshal(payload)
+	select {
+	case c.sendCh <- data:
 	default:
 	}
 }
@@ -229,6 +245,12 @@ func (c *WSClient) runConn() error {
 		if msg.Type == "wakeword_result" {
 			if c.OnWakeWordResult != nil {
 				c.OnWakeWordResult(msg.Text, msg.Data == "true" || msg.Highlight)
+			}
+			continue
+		}
+		if msg.Type == "voice_transcript" {
+			if c.OnVoiceTranscript != nil {
+				c.OnVoiceTranscript(msg.Text)
 			}
 			continue
 		}

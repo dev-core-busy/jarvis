@@ -175,12 +175,33 @@ func transcribeViaServer(wavData []byte) (string, error) {
 
 // ── Transkription ─────────────────────────────────────────────────────────────
 
-// TranscribeLocal transkribiert WAV-Daten:
-//  1. Whisper-Server (Modell im RAM, < 1s nach erstem Start)
-//  2. Whisper-CLI (langsamer, lädt Modell jedes Mal neu)
-//  3. Windows SAPI via PowerShell (Fallback, keine Installation nötig)
-// sttLastMode enthält die zuletzt verwendete STT-Methode für Diagnose-Anzeige.
+// TranscribeLocalSafe ist der sichere Einstiegspunkt mit hartem 25s-Timeout.
+// Auf Windows blockiert cmd.Output() dauerhaft wenn ein Prozess gekillt wird
+// (bekannter Go-Bug: Pipes werden beim Kill nicht geschlossen).
+// Die innere Goroutine kann hängen – der Aufrufer wird nach 25s trotzdem fortgesetzt.
 var sttLastMode string
+
+func TranscribeLocalSafe(wavData []byte) (string, error) {
+	type result struct {
+		text string
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		t, e := TranscribeLocal(wavData)
+		select {
+		case ch <- result{t, e}:
+		default:
+		}
+	}()
+	select {
+	case r := <-ch:
+		return r.text, r.err
+	case <-time.After(25 * time.Second):
+		sttLastMode = "hard-timeout (25s)"
+		return "", fmt.Errorf("STT Timeout nach 25s – whisper hängt")
+	}
+}
 
 func TranscribeLocal(wavData []byte) (string, error) {
 	sttServerMu.Lock()
@@ -258,14 +279,20 @@ func transcribeWhisperCLI(wavData []byte, binPath, modelPath string) (string, er
 		"-f", tmpPath,
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	out, err := cmd.Output()
-	if ctx.Err() != nil {
-		return "", fmt.Errorf("whisper-cli Timeout (>60s)")
-	}
+	// StdoutPipe statt cmd.Output() – vermeidet Windows-Pipe-Hang nach Kill
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+	outBytes, _ := io.ReadAll(stdout)
+	_ = cmd.Wait()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("whisper-cli Timeout (>20s)")
+	}
+	return strings.TrimSpace(string(outBytes)), nil
 }
 
 func transcribeSAPI(wavData []byte) (string, error) {
@@ -303,12 +330,18 @@ $rec.Dispose()
 		"-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
 		"-Command", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	out, err := cmd.Output()
-	if ctx.Err() != nil {
-		return "", fmt.Errorf("SAPI Timeout (>20s)")
-	}
+	// StdoutPipe statt cmd.Output() – vermeidet Windows-Pipe-Hang nach Kill
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+	outBytes, _ := io.ReadAll(stdout)
+	_ = cmd.Wait()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("SAPI Timeout (>10s)")
+	}
+	return strings.TrimSpace(string(outBytes)), nil
 }

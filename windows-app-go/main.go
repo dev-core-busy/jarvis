@@ -539,9 +539,9 @@ func (ja *JarvisApp) startTextDictation() {
 		header := BuildWAVHeader(len(utt.pcm))
 		wav := append(header, utt.pcm...)
 
-		// Lokale STT – direkt im Watcher-Goroutine (kein nested go func, kein UI-Deadlock)
+		// Lokale STT – TranscribeLocalSafe hat harten 25s-Timeout (Windows-Pipe-Bug)
 		ja.chat.SetStatus("🎤 Transkribiere…")
-		transcript, err := TranscribeLocal(wav)
+		transcript, err := TranscribeLocalSafe(wav)
 		autoSend := ja.cfg.AutoSendVoice
 		ja.chat.SetStatus("")
 		ja.chat.AddMessage(RoleStatus, fmt.Sprintf("🔍 STT: %s | AutoSend=%v", sttLastMode, autoSend))

@@ -110,12 +110,6 @@ OBMENU
     if [[ -f /usr/share/backgrounds/jarvis.jpg ]]; then
         feh --bg-fill /usr/share/backgrounds/jarvis.jpg 2>/dev/null || true
     fi
-
-    # Cinnamon im Hintergrund installieren (wenn noch nicht geschehen)
-    if [[ ! -f /app/data/.cinnamon-installed ]]; then
-        log "Starte Cinnamon-Installation im Hintergrund..."
-        nohup /usr/local/bin/install-cinnamon.sh &>/dev/null &
-    fi
 fi
 
 # ── 4. x11vnc ──────────────────────────────────────────────────────────────

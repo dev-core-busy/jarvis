@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -93,17 +94,23 @@ private fun ServerVoicePickerDialog(
                                 modifier = Modifier.width(20.dp),
                             )
                             Text(
-                                text = voice.display.ifBlank { voice.id },
+                                text = voice.id,
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isSelected) JarvisPurple else Color.Unspecified,
                                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             )
-                            TextButton(
+                            IconButton(
                                 onClick = { onPreview(voice.id) },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier.size(32.dp),
                             ) {
-                                Text("►", fontSize = 14.sp)
+                                Icon(
+                                    imageVector = Icons.Filled.VolumeUp,
+                                    contentDescription = "Vorschau",
+                                    modifier = Modifier.size(18.dp),
+                                )
                             }
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
@@ -151,10 +158,16 @@ private fun AndroidVoicePickerDialog(
                             color = if (isAuto) JarvisPurple else Color.Unspecified,
                             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                         )
-                        TextButton(
+                        IconButton(
                             onClick = { onPreview("") },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                        ) { Text("►", fontSize = 14.sp) }
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.VolumeUp,
+                                contentDescription = "Vorschau",
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 }
@@ -187,11 +200,19 @@ private fun AndroidVoicePickerDialog(
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSelected) JarvisPurple else Color.Unspecified,
                             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         )
-                        TextButton(
+                        IconButton(
                             onClick = { onPreview(id) },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                        ) { Text("►", fontSize = 14.sp) }
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.VolumeUp,
+                                contentDescription = "Vorschau",
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 }

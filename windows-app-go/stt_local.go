@@ -179,7 +179,22 @@ func transcribeViaServer(wavData []byte) (string, error) {
 // Auf Windows blockiert cmd.Output() dauerhaft wenn ein Prozess gekillt wird
 // (bekannter Go-Bug: Pipes werden beim Kill nicht geschlossen).
 // Die innere Goroutine kann hängen – der Aufrufer wird nach 25s trotzdem fortgesetzt.
-var sttLastMode string
+var (
+	sttLastMode   string
+	sttLastModeMu sync.Mutex
+)
+
+func getSttLastMode() string {
+	sttLastModeMu.Lock()
+	defer sttLastModeMu.Unlock()
+	return sttLastMode
+}
+
+func setSttLastMode(s string) {
+	sttLastModeMu.Lock()
+	sttLastMode = s
+	sttLastModeMu.Unlock()
+}
 
 func TranscribeLocalSafe(wavData []byte) (string, error) {
 	type result struct {
@@ -198,7 +213,7 @@ func TranscribeLocalSafe(wavData []byte) (string, error) {
 	case r := <-ch:
 		return r.text, r.err
 	case <-time.After(25 * time.Second):
-		sttLastMode = "hard-timeout (25s)"
+		setSttLastMode("hard-timeout (25s)")
 		return "", fmt.Errorf("STT Timeout nach 25s – whisper hängt")
 	}
 }
@@ -217,20 +232,20 @@ func TranscribeLocal(wavData []byte) (string, error) {
 			sttServerReady = true
 			sttServerMu.Unlock()
 			ready = true
-			sttLastMode = "server (live-check)"
+			setSttLastMode("server (live-check)")
 		}
 	}
 
 	if ready {
 		t0 := time.Now()
-		sttLastMode = "server"
+		setSttLastMode("server")
 		text, err := transcribeViaServer(wavData)
 		elapsed := time.Since(t0).Round(time.Millisecond)
 		if err == nil {
-			sttLastMode = fmt.Sprintf("server (%dms)", elapsed.Milliseconds())
+			setSttLastMode(fmt.Sprintf("server (%dms)", elapsed.Milliseconds()))
 			return text, nil
 		}
-		sttLastMode = fmt.Sprintf("server-fehler (%dms): %v", elapsed.Milliseconds(), err)
+		setSttLastMode(fmt.Sprintf("server-fehler (%dms): %v", elapsed.Milliseconds(), err))
 		// Server-Fehler → CLI-Fallback
 	}
 
@@ -239,9 +254,9 @@ func TranscribeLocal(wavData []byte) (string, error) {
 		text, err := transcribeWhisperCLI(wavData, bin, model)
 		elapsed := time.Since(t0).Round(time.Millisecond)
 		if err == nil {
-			sttLastMode = fmt.Sprintf("cli (%dms)", elapsed.Milliseconds())
+			setSttLastMode(fmt.Sprintf("cli (%dms)", elapsed.Milliseconds()))
 		} else {
-			sttLastMode = fmt.Sprintf("cli-fehler (%dms): %v", elapsed.Milliseconds(), err)
+			setSttLastMode(fmt.Sprintf("cli-fehler (%dms): %v", elapsed.Milliseconds(), err))
 		}
 		return text, err
 	}
@@ -250,9 +265,9 @@ func TranscribeLocal(wavData []byte) (string, error) {
 	text, err := transcribeSAPI(wavData)
 	elapsed := time.Since(t0).Round(time.Millisecond)
 	if err == nil {
-		sttLastMode = fmt.Sprintf("sapi (%dms)", elapsed.Milliseconds())
+		setSttLastMode(fmt.Sprintf("sapi (%dms)", elapsed.Milliseconds()))
 	} else {
-		sttLastMode = fmt.Sprintf("sapi-fehler (%dms): %v", elapsed.Milliseconds(), err)
+		setSttLastMode(fmt.Sprintf("sapi-fehler (%dms): %v", elapsed.Milliseconds(), err))
 	}
 	return text, err
 }
@@ -316,8 +331,8 @@ $rec.SetInputToWaveFile('` + winPath + `')
 $g = New-Object System.Speech.Recognition.DictationGrammar
 $rec.LoadGrammar($g)
 $rec.BabbleTimeout = [TimeSpan]::FromSeconds(0)
-$rec.InitialSilenceTimeout = [TimeSpan]::FromSeconds(10)
-$rec.EndSilenceTimeout = [TimeSpan]::FromSeconds(1)
+$rec.InitialSilenceTimeout = [TimeSpan]::FromSeconds(1)
+$rec.EndSilenceTimeout = [TimeSpan]::FromSeconds(0)
 try {
     $r = $rec.Recognize()
     if ($r -ne $null) { Write-Output $r.Text }

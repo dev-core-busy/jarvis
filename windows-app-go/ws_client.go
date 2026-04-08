@@ -111,10 +111,12 @@ func (c *WSClient) SendDesktopResult(res DesktopResult) {
 
 // sendRegister meldet die Windows App als Desktop-Client beim Backend an.
 func (c *WSClient) sendRegister() {
+	// Kein spezifischer client_type → Server-Standardverhalten (wie Browser-Client).
+	// "windows_desktop" verursacht einen anderen LLM-Systemprompt der 503-Fehler produziert.
+	// Das windows_desktop-Tool ist auf dem Server immer geladen und funktioniert ohne Registrierung.
 	payload := map[string]string{
-		"type":        "register",
-		"client_type": "windows_desktop",
-		"token":       c.cfg.APIKey,
+		"type":  "register",
+		"token": c.cfg.APIKey,
 	}
 	b, _ := json.Marshal(payload)
 	select {

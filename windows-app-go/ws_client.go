@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/tls"
 	"encoding/json"
-	"log"
 	"math"
 	"strings"
 	"sync"
@@ -155,7 +154,6 @@ func (c *WSClient) SendWakeWordCheck(audioB64, phrase string) {
 }
 
 func (c *WSClient) connectLoop() {
-	const maxAttempts = 20
 	attempt := 0
 	for {
 		select {
@@ -167,10 +165,6 @@ func (c *WSClient) connectLoop() {
 		err := c.runConn()
 		if err != nil {
 			attempt++
-			if attempt >= maxAttempts {
-				log.Printf("ws: max reconnect attempts reached")
-				return
-			}
 			delay := time.Duration(math.Min(float64(int(3)<<minInt(attempt, 6)), 60)) * time.Second
 			select {
 			case <-c.stopCh:

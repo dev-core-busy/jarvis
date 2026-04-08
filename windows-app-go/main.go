@@ -246,19 +246,13 @@ func (ja *JarvisApp) reconnect() {
 	ja.ws.OnVoiceTranscript = func(transcript string) {
 		log.Printf("[voice] Transkript: %q", transcript)
 		ja.chat.SetStatus("")
-		// Mic-Button deaktivieren (Diktat beendet)
-		ja.textDictating = false
-		ja.chat.SetMicActive(false)
-		if ja.textDictCtrl != nil {
-			ja.textDictCtrl = nil
-		}
 		if transcript == "" {
 			ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
 			return
 		}
 		if ja.cfg.AutoSendVoice {
+			// Agent läuft bereits (via [Voice]-Task) – nur Nachricht anzeigen
 			ja.chat.AddMessage(RoleUser, transcript)
-			ja.ws.SendTask(transcript)
 		} else {
 			ja.chat.SetInput(transcript)
 		}
@@ -500,7 +494,6 @@ func (ja *JarvisApp) startTextDictation() {
 }
 
 // stopTextDictation beendet die laufende Spracheingabe im Text-Modus.
-// Gepufferte Sprache wird noch verarbeitet (FlushAndStop).
 func (ja *JarvisApp) stopTextDictation() {
 	if ja.textDictCtrl != nil {
 		ja.textDictCtrl.FlushAndStop()

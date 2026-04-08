@@ -148,12 +148,6 @@ func main() {
 // refreshTray – kein Update nötig: Menü liest cfg.DialogMode beim Öffnen live.
 func (ja *JarvisApp) refreshTray() {}
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
-}
 
 // toggleDebug schaltet den Debug-Modus um.
 func (ja *JarvisApp) toggleDebug() {
@@ -339,7 +333,6 @@ func (ja *JarvisApp) reconnect() {
 	}
 	ja.chat.OnSend = func(text string) {
 		ja.chat.AddMessage(RoleUser, text)
-		ja.chat.AddMessage(RoleStatus, fmt.Sprintf("📤 SendTask: %q", text))
 		ja.ws.SendTask(text)
 	}
 	ja.chat.OnMicButton = func() {
@@ -384,9 +377,10 @@ func (ja *JarvisApp) onConnected(connected bool) {
 }
 
 func (ja *JarvisApp) onMessage(msg WSMessage) {
-	// Debug: jeden eingehenden WS-Message-Typ im Chat anzeigen
-	ja.chat.AddMessage(RoleStatus, fmt.Sprintf("📨 WS←: type=%q highlight=%v msg=%q",
-		msg.Type, msg.Highlight, truncate(msg.Message, 60)))
+	// cpu-Nachrichten ignorieren (Server-Metriken, kein Inhalt)
+	if msg.Type == "cpu" {
+		return
+	}
 
 	switch msg.Type {
 	case "status":
@@ -410,6 +404,9 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 			if ja.dialog != nil {
 				ja.dialog.MuteWhileSpeaking(true)
 			}
+		} else if strings.HasPrefix(msg.Message, "❌") || strings.HasPrefix(msg.Message, "⚠") {
+			// Fehler und Warnungen immer zeigen – unabhängig vom Debug-Modus
+			ja.chat.AddMessage(RoleStatus, msg.Message)
 		} else if ja.debugMode {
 			// Debug-Modus: Agent-Denk-Nachrichten klein/gedimmt zeigen
 			ja.chat.AddDebugMessage(msg.Message)

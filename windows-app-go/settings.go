@@ -138,8 +138,8 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	// ── AUDIO ─────────────────────────────────────────────────────────────────
 	speakerSel := widget.NewSelect([]string{"Standard"}, nil)
 	micSel := widget.NewSelect([]string{"Standard"}, nil)
-	speakerIDs := []string{""}
-	micIDs := []string{""}
+	speakerIDs := []string{}
+	micIDs := []string{}
 
 	if app.audio != nil {
 		speakers := app.audio.ListSpeakers()

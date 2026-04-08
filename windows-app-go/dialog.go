@@ -35,9 +35,10 @@ type utteranceData struct {
 // ── Dialog-Controller ─────────────────────────────────────────────────────────
 
 type DialogController struct {
-	mu    sync.Mutex
-	state DialogState
-	muted bool
+	mu       sync.Mutex
+	doneOnce sync.Once
+	state    DialogState
+	muted    bool
 
 	speechBuf []byte
 	silenceMs int
@@ -50,6 +51,8 @@ type DialogController struct {
 
 	// Äußerungen werden über diesen Channel kommuniziert (nie direkt verarbeitet)
 	utteranceCh chan utteranceData
+	// doneCh signalisiert Watcher-Goroutinen dass der Controller beendet wird
+	doneCh chan struct{}
 
 	OnRMSLevel func(rms float64, frameMs int)
 }
@@ -60,10 +63,11 @@ func NewDialogController(audio *AudioManager, ws *WSClient, app *JarvisApp) *Dia
 		ws:          ws,
 		app:         app,
 		utteranceCh: make(chan utteranceData, 4),
+		doneCh:      make(chan struct{}),
 	}
 }
 
-// Start aktiviert den Dialogmodus.
+// Start aktiviert den Dialogmodus (mit Wake-Word falls konfiguriert).
 func (d *DialogController) Start() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -72,6 +76,19 @@ func (d *DialogController) Start() error {
 	} else {
 		d.state = StateListening
 	}
+	return d.startLocked()
+}
+
+// StartListening aktiviert direkt das Zuhören – kein Wake-Word-Check.
+// Wird für manuell ausgelöstes Diktat (Mikrofon-Button) verwendet.
+func (d *DialogController) StartListening() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.state = StateListening
+	return d.startLocked()
+}
+
+func (d *DialogController) startLocked() error {
 	d.audio.SetOnMicData(d.processMicFrame)
 	if !d.audio.IsRecording() {
 		if err := d.audio.StartRecording(); err != nil {
@@ -88,12 +105,14 @@ func (d *DialogController) Stop() {
 	d.mu.Lock()
 	d.state = StateSending
 	d.mu.Unlock()
+	d.doneOnce.Do(func() { close(d.doneCh) })
 	d.audio.StopRecording()
 	log.Println("[dialog] Beendet")
 }
 
 // FlushAndStop: gepufferte Sprache in Channel senden, dann stoppen.
 func (d *DialogController) FlushAndStop() {
+	d.doneOnce.Do(func() { close(d.doneCh) })
 	d.mu.Lock()
 	buf := d.speechBuf
 	sm := d.speechMs

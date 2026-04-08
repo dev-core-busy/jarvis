@@ -221,11 +221,76 @@ func (ja *JarvisApp) startDialogIfNeeded() {
 				"\n→ Bitte Mikrofonzugriff in den Windows-Datenschutzeinstellungen prüfen")
 		return
 	}
+
+	// Dialog-Watcher: liest utteranceCh in Schleife, alles lokal verarbeitet
+	go ja.runDialogLoop(ja.dialog)
+
 	// Im Wake-Word-Modus: Avatar zeigt Gold/Idle (wartet), nicht Grün
 	if ja.cfg.WakeWordEnabled {
 		ja.avatar.SetMode(ModeIdle)
 	} else {
 		ja.avatar.SetMode(ModeListening)
+	}
+}
+
+// runDialogLoop verarbeitet erkannte Äußerungen im Dialog-Modus (lokal, keine Server-STT).
+// Wake-Word-Erkennung: lokale STT → containsWakeWord() → OnWakeWordDetected()
+// Spracheingabe: lokale STT → Text ins Eingabefeld + ggf. senden
+func (ja *JarvisApp) runDialogLoop(d *DialogController) {
+	for {
+		select {
+		case <-d.doneCh:
+			return
+		case utt, ok := <-d.utteranceCh:
+			if !ok {
+				return
+			}
+			header := BuildWAVHeader(len(utt.pcm))
+			wav := append(header, utt.pcm...)
+
+			if utt.state == StateWaitWakeWord {
+				// Wake-Word lokal prüfen
+				transcript, err := TranscribeLocalSafe(wav)
+				if err != nil || transcript == "" {
+					continue
+				}
+				if containsWakeWord(transcript, ja.cfg.WakeWord) {
+					d.OnWakeWordDetected()
+				}
+				continue
+			}
+
+			// Spracheingabe → lokal transkribieren
+			ja.avatar.SetMode(ModeIdle)
+			ja.chat.SetStatus("🎤 Transkribiere…")
+			transcript, err := TranscribeLocalSafe(wav)
+			ja.chat.SetStatus("")
+			if err != nil || transcript == "" {
+				if ja.cfg.WakeWordEnabled {
+					d.mu.Lock()
+					d.state = StateWaitWakeWord
+					d.mu.Unlock()
+					ja.avatar.SetMode(ModeIdle)
+				} else {
+					ja.avatar.SetMode(ModeListening)
+				}
+				continue
+			}
+			ja.chat.SetInput(transcript)
+			if ja.cfg.AutoSendVoice {
+				ja.chat.TriggerSend()
+			}
+			// Nach Spracheingabe: zurück auf Zuhören / Wake-Word warten
+			if ja.cfg.WakeWordEnabled {
+				d.mu.Lock()
+				d.state = StateWaitWakeWord
+				d.mu.Unlock()
+				ja.avatar.SetMode(ModeIdle)
+			} else {
+				d.MuteWhileSpeaking(false)
+				ja.avatar.SetMode(ModeListening)
+			}
+		}
 	}
 }
 
@@ -511,7 +576,8 @@ func (ja *JarvisApp) startTextDictation() {
 		ja.chat.SetStatus("🎤 " + bar)
 	}
 	ja.textDictCtrl = dc
-	if err := dc.Start(); err != nil {
+	// StartListening: nie Wake-Word-Check, immer direkt transkribieren
+	if err := dc.StartListening(); err != nil {
 		ja.chat.AddMessage(RoleStatus, "❌ [1] Mikrofon-Fehler: "+err.Error())
 		ja.textDictating = false
 		ja.chat.SetMicActive(false)

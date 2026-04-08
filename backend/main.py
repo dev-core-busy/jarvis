@@ -2488,7 +2488,7 @@ def _get_whisper_model():
             return None
 
 
-def _transcribe_audio(filepath: str, language: str = "de") -> str:
+def _transcribe_audio(filepath: str, language: str = "de", initial_prompt: str = None) -> str:
     """Transkribiert eine Audiodatei mit faster-whisper."""
     import time as _time
     model = _get_whisper_model()
@@ -2498,7 +2498,11 @@ def _transcribe_audio(filepath: str, language: str = "de") -> str:
 
     try:
         t0 = _time.time()
-        segments, info = model.transcribe(filepath, language=language)
+        kwargs = dict(language=language, beam_size=5, no_speech_threshold=0.5,
+                      condition_on_previous_text=False)
+        if initial_prompt:
+            kwargs["initial_prompt"] = initial_prompt
+        segments, info = model.transcribe(filepath, **kwargs)
         text = " ".join([seg.text for seg in segments]).strip()
         duration = round(_time.time() - t0, 2)
         if text:
@@ -2858,7 +2862,8 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                         f.write(wav_bytes)
                         tmp_path = f.name
-                    transcript = await asyncio.to_thread(_transcribe_audio, tmp_path)
+                    transcript = await asyncio.to_thread(
+                        _transcribe_audio, tmp_path, "de", "Jarvis Sprachsteuerung:")
                     os.unlink(tmp_path)
                     print(f"[voice-task] Transkript: {transcript!r}", flush=True)
                     if not transcript:
@@ -2996,7 +3001,8 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 f.write(wav_bytes)
                 tmp_path = f.name
-            transcript = await asyncio.to_thread(_transcribe_audio, tmp_path)
+            transcript = await asyncio.to_thread(
+                _transcribe_audio, tmp_path, "de", "Jarvis Sprachsteuerung:")
             os.unlink(tmp_path)
             print(f"[transcribe_only] Transkript: {transcript!r}", flush=True)
             await ws.send_json({"type": "voice_transcript", "text": transcript})

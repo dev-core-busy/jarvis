@@ -10,6 +10,7 @@ type DesktopCommand struct {
 	Text      string  `json:"text,omitempty"`
 	Key       string  `json:"key,omitempty"` // z.B. "ctrl+c", "alt+F4"
 	Cmd       string  `json:"cmd,omitempty"`
+	URL       string  `json:"url,omitempty"` // für open_url Aktion
 }
 
 // DesktopResult: Windows App → Backend (desktop_result Nachricht)

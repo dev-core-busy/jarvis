@@ -82,6 +82,27 @@ func (d *DialogController) Stop() {
 	log.Println("[dialog] Dialogmodus beendet")
 }
 
+// FlushAndStop verarbeitet noch gepufferte Sprache und beendet dann den Dialogmodus.
+// Wird beim manuellen Mic-Stop aufgerufen (zweiter Klick auf Mikrofon-Button).
+func (d *DialogController) FlushAndStop() {
+	d.mu.Lock()
+	buf := d.speechBuf
+	sm := d.speechMs
+	state := d.state
+	d.speechBuf = nil
+	d.silenceMs = 0
+	d.speechMs = 0
+	d.inSpeech = false
+	d.state = StateSending
+	d.mu.Unlock()
+	d.audio.StopRecording()
+	if len(buf) > 0 && sm >= d.app.cfg.MinSpeechMs {
+		log.Printf("[dialog] FlushAndStop: verarbeite %dms gepufferte Sprache", sm)
+		go d.handleUtterance(buf, sm, state)
+	}
+	log.Println("[dialog] Dialogmodus beendet (flush)")
+}
+
 // MuteWhileSpeaking stummt das Mikrofon während Jarvis spricht.
 func (d *DialogController) MuteWhileSpeaking(muted bool) {
 	d.mu.Lock()

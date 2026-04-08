@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -240,8 +241,9 @@ func (ja *JarvisApp) reconnect() {
 		} else {
 			ja.avatar.SetMode(ModeIdle) // zurück auf Gold
 			if transcript != "" {
-				// Debug: zeigen was gehört wurde (Wake-Word nicht erkannt)
-				ja.chat.AddMessage(RoleStatus, "🎤 Nicht erkannt: \""+transcript+"\"")
+				ja.fyneApp.SendNotification(fyne.NewNotification(
+					"Jarvis – nicht erkannt",
+					"Gehört: \""+transcript+"\""))
 			}
 		}
 	}
@@ -477,15 +479,12 @@ func (ja *JarvisApp) startTextDictation() {
 		ja.chat.SetStatus("")
 	}
 	dc.OnRMSLevel = func(rms float64) {
-		bars := int(rms / 100)
-		if bars > 20 {
-			bars = 20
+		thresh := ja.cfg.VADThreshold
+		indicator := "·"
+		if rms > float64(thresh) {
+			indicator = "█"
 		}
-		bar := ""
-		for i := 0; i < bars; i++ {
-			bar += "█"
-		}
-		ja.chat.SetStatus("🎤 " + bar)
+		ja.chat.SetStatus(fmt.Sprintf("🎤 %s RMS:%.0f Thresh:%d", indicator, rms, thresh))
 	}
 	ja.textDictCtrl = dc
 	if err := dc.Start(); err != nil {
@@ -497,9 +496,10 @@ func (ja *JarvisApp) startTextDictation() {
 }
 
 // stopTextDictation beendet die laufende Spracheingabe im Text-Modus.
+// Gepufferte Sprache wird noch verarbeitet (FlushAndStop).
 func (ja *JarvisApp) stopTextDictation() {
 	if ja.textDictCtrl != nil {
-		ja.textDictCtrl.Stop()
+		ja.textDictCtrl.FlushAndStop()
 		ja.textDictCtrl = nil
 	}
 	ja.textDictating = false

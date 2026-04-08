@@ -13,7 +13,6 @@ import (
 
 const (
 	vadSampleRate = 16000 // Hz
-	vadFrameSize  = 160   // Samples pro Frame (~10ms)
 )
 
 // ── Dialog-Zustands-Maschine ──────────────────────────────────────────────────
@@ -26,12 +25,19 @@ const (
 	StateSending                          // Sendet gerade (Mic stumm)
 )
 
+// utteranceData enthält eine abgeschlossene Äußerung aus der VAD.
+type utteranceData struct {
+	pcm       []byte
+	durationMs int
+	state     DialogState
+}
+
 // ── Dialog-Controller ─────────────────────────────────────────────────────────
 
 type DialogController struct {
 	mu    sync.Mutex
 	state DialogState
-	muted bool // Mic stumm (während Jarvis spricht)
+	muted bool
 
 	speechBuf []byte
 	silenceMs int
@@ -42,25 +48,29 @@ type DialogController struct {
 	ws    *WSClient
 	app   *JarvisApp
 
-	StopAfterFirstUtterance bool
-	OnStop                  func()                              // Callback nach erster Äußerung (Diktat-Modus)
-	OnRMSLevel              func(rms float64, frameMs int)     // Callback für Live-Pegelanzeige
+	// Äußerungen werden über diesen Channel kommuniziert (nie direkt verarbeitet)
+	utteranceCh chan utteranceData
+
+	OnRMSLevel func(rms float64, frameMs int)
 }
 
 func NewDialogController(audio *AudioManager, ws *WSClient, app *JarvisApp) *DialogController {
-	return &DialogController{audio: audio, ws: ws, app: app}
+	return &DialogController{
+		audio:       audio,
+		ws:          ws,
+		app:         app,
+		utteranceCh: make(chan utteranceData, 4),
+	}
 }
 
-// Start aktiviert den Dialogmodus. Gibt nil zurück wenn OK, sonst den Mic-Fehler.
+// Start aktiviert den Dialogmodus.
 func (d *DialogController) Start() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.state != StateSending || !d.audio.IsRecording() {
-		if d.app.cfg.WakeWordEnabled {
-			d.state = StateWaitWakeWord
-		} else {
-			d.state = StateListening
-		}
+	if d.app.cfg.WakeWordEnabled {
+		d.state = StateWaitWakeWord
+	} else {
+		d.state = StateListening
 	}
 	d.audio.OnMicData = d.processMicFrame
 	if !d.audio.IsRecording() {
@@ -69,21 +79,20 @@ func (d *DialogController) Start() error {
 			return err
 		}
 	}
-	log.Printf("[dialog] Dialogmodus gestartet (WakeWord=%v, State=%v)", d.app.cfg.WakeWordEnabled, d.state)
+	log.Printf("[dialog] Gestartet (WakeWord=%v)", d.app.cfg.WakeWordEnabled)
 	return nil
 }
 
 // Stop beendet den Dialogmodus.
 func (d *DialogController) Stop() {
 	d.mu.Lock()
-	d.state = StateSending // temporärer Stop-Marker
+	d.state = StateSending
 	d.mu.Unlock()
 	d.audio.StopRecording()
-	log.Println("[dialog] Dialogmodus beendet")
+	log.Println("[dialog] Beendet")
 }
 
-// FlushAndStop verarbeitet noch gepufferte Sprache und beendet dann den Dialogmodus.
-// Wird beim manuellen Mic-Stop aufgerufen (zweiter Klick auf Mikrofon-Button).
+// FlushAndStop: gepufferte Sprache in Channel senden, dann stoppen.
 func (d *DialogController) FlushAndStop() {
 	d.mu.Lock()
 	buf := d.speechBuf
@@ -97,10 +106,12 @@ func (d *DialogController) FlushAndStop() {
 	d.mu.Unlock()
 	d.audio.StopRecording()
 	if len(buf) > 0 && sm >= d.app.cfg.MinSpeechMs {
-		log.Printf("[dialog] FlushAndStop: verarbeite %dms gepufferte Sprache", sm)
-		go d.handleUtterance(buf, sm, state)
+		select {
+		case d.utteranceCh <- utteranceData{buf, sm, state}:
+		default:
+		}
 	}
-	log.Println("[dialog] Dialogmodus beendet (flush)")
+	log.Println("[dialog] Beendet (flush)")
 }
 
 // MuteWhileSpeaking stummt das Mikrofon während Jarvis spricht.
@@ -108,7 +119,6 @@ func (d *DialogController) MuteWhileSpeaking(muted bool) {
 	d.mu.Lock()
 	d.muted = muted
 	if !muted && d.app.cfg.WakeWordEnabled {
-		// Nach TTS: zurück in Wake-Word-Modus
 		d.state = StateWaitWakeWord
 		d.speechBuf = nil
 		d.silenceMs = 0
@@ -118,7 +128,7 @@ func (d *DialogController) MuteWhileSpeaking(muted bool) {
 	d.mu.Unlock()
 }
 
-// OnWakeWordDetected wird vom WS-Client aufgerufen wenn Backend Wake-Word bestätigt.
+// OnWakeWordDetected wird aufgerufen wenn das Backend Wake-Word bestätigt.
 func (d *DialogController) OnWakeWordDetected() {
 	d.mu.Lock()
 	d.state = StateListening
@@ -129,10 +139,10 @@ func (d *DialogController) OnWakeWordDetected() {
 	d.mu.Unlock()
 	d.app.avatar.SetMode(ModeListening)
 	d.app.chat.AddMessage(RoleStatus, "🎤 Jarvis hört…")
-	log.Println("[dialog] Wake-Word erkannt – warte auf Befehl")
+	log.Println("[dialog] Wake-Word erkannt")
 }
 
-// processMicFrame verarbeitet einen eingehenden PCM-Frame (VAD).
+// processMicFrame verarbeitet einen PCM-Frame (VAD).
 func (d *DialogController) processMicFrame(pcm []byte) {
 	d.mu.Lock()
 	state := d.state
@@ -147,8 +157,11 @@ func (d *DialogController) processMicFrame(pcm []byte) {
 	}
 
 	rms := calcRMS(pcm)
-	// Tatsächliche Frame-Dauer aus Byte-Länge berechnen (16-bit = 2 Bytes/Sample, mono)
+	// Tatsächliche Frame-Dauer aus Byte-Länge (16-bit mono = 2 Bytes/Sample)
 	frameDurationMs := len(pcm) / 2 * 1000 / vadSampleRate
+	if frameDurationMs == 0 {
+		frameDurationMs = 10
+	}
 
 	if d.OnRMSLevel != nil {
 		d.OnRMSLevel(rms, frameDurationMs)
@@ -162,63 +175,28 @@ func (d *DialogController) processMicFrame(pcm []byte) {
 		d.silenceMs = 0
 		d.speechMs += frameDurationMs
 		d.speechBuf = append(d.speechBuf, pcm...)
-	} else {
-		if d.inSpeech {
-			d.silenceMs += frameDurationMs
-			d.speechBuf = append(d.speechBuf, pcm...)
+	} else if d.inSpeech {
+		d.silenceMs += frameDurationMs
+		d.speechBuf = append(d.speechBuf, pcm...)
 
-			if d.silenceMs >= silenceMs {
-				if d.speechMs >= minSpeechMs {
-					buf := make([]byte, len(d.speechBuf))
-					copy(buf, d.speechBuf)
-					sm := d.speechMs
-					curState := d.state
-					go d.handleUtterance(buf, sm, curState)
+		if d.silenceMs >= silenceMs {
+			if d.speechMs >= minSpeechMs {
+				buf := make([]byte, len(d.speechBuf))
+				copy(buf, d.speechBuf)
+				utt := utteranceData{buf, d.speechMs, d.state}
+				// Nicht-blockierend senden – Audio-Callback darf nie blockieren
+				select {
+				case d.utteranceCh <- utt:
+					log.Printf("[dialog] Äußerung erkannt: %dms, %d bytes", d.speechMs, len(buf))
+				default:
+					log.Println("[dialog] utteranceCh voll – Äußerung verworfen")
 				}
-				d.speechBuf = nil
-				d.silenceMs = 0
-				d.speechMs = 0
-				d.inSpeech = false
 			}
+			d.speechBuf = nil
+			d.silenceMs = 0
+			d.speechMs = 0
+			d.inSpeech = false
 		}
-	}
-}
-
-// handleUtterance verarbeitet eine abgeschlossene Äußerung.
-func (d *DialogController) handleUtterance(pcm []byte, durationMs int, state DialogState) {
-	log.Printf("[dialog] Äußerung: state=%v, %dms, %d bytes", state, durationMs, len(pcm))
-
-	header := BuildWAVHeader(len(pcm))
-	wav := append(header, pcm...)
-	b64 := encodeBase64(wav)
-
-	if state == StateWaitWakeWord {
-		// Wake-Word-Prüfung: Avatar blau = "habe etwas gehört, prüfe…"
-		d.app.avatar.SetMode(ModeChecking)
-		d.ws.SendWakeWordCheck(b64, d.app.cfg.WakeWord)
-		return
-	}
-
-	// Normale Spracheingabe – Mic sofort stoppen, dann senden
-	d.app.avatar.SetMode(ModeIdle)
-	d.app.chat.SetStatus("🎤 Transkribiere…")
-
-	// Mic-Hardware stoppen bevor wir senden (kein Race mit weiteren Frames)
-	d.mu.Lock()
-	d.state = StateSending
-	d.mu.Unlock()
-	d.audio.StopRecording()
-	if d.OnStop != nil {
-		d.OnStop()
-	}
-
-	if d.app.cfg.AutoSendVoice {
-		// AutoSend: direkt als [Voice]-Task senden – Backend transkribiert + startet Agent
-		// voice_transcript kommt zurück und zeigt den Text als User-Nachricht
-		d.ws.SendTask("[Voice]\n<audio>" + b64 + "</audio>")
-	} else {
-		// Manuell: nur transkribieren, Ergebnis ins Eingabefeld
-		d.ws.SendTranscribeOnly(b64)
 	}
 }
 
@@ -267,7 +245,6 @@ func encodeBase64(data []byte) string {
 	return string(result)
 }
 
-// containsWakeWord prüft ob der Transkript das Wake-Word enthält.
 func containsWakeWord(transcript, wakeWord string) bool {
 	return strings.Contains(
 		strings.ToLower(strings.TrimSpace(transcript)),

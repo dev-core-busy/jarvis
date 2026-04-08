@@ -250,7 +250,11 @@ def authenticate_linux_user(username: str, password: str) -> bool:
     if username not in ALLOWED_USERS:
         return False
     if _DOCKER_MODE:
-        # Im Docker-Modus: simplen Passwort-Vergleich via ENV-Variable
+        # Im Docker-Modus: gespeichertes Passwort aus auth_state hat Vorrang vor ENV-Variable
+        state = _load_auth_state()
+        docker_pw = state.get("docker_password", {}).get(username)
+        if docker_pw is not None:
+            return password == docker_pw
         return password == _JARVIS_PASSWORD
     return _pam.authenticate(username, password, service="login")
 
@@ -544,7 +548,15 @@ async def change_password(request: Request, username: str = Depends(require_auth
 
     # Kennwort setzen
     if _DOCKER_MODE:
-        return JSONResponse({"success": False, "error": "Kennwort-Änderung im Docker-Modus nicht unterstützt."}, status_code=400)
+        # Im Docker-Modus: Passwort in data/auth_state.json speichern (persistentes Volume)
+        state = _load_auth_state()
+        if "docker_password" not in state:
+            state["docker_password"] = {}
+        state["docker_password"][username] = new_password
+        _save_auth_state(state)
+        _set_user_auth_state(username, {"must_change_password": False})
+        print(f"[AUTH] Docker-Kennwort für '{username}' erfolgreich geändert.", flush=True)
+        return JSONResponse({"success": True})
 
     ok = await asyncio.to_thread(_change_linux_password, username, new_password)
     if not ok:

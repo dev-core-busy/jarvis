@@ -453,6 +453,16 @@ func (c *ChatWidget) submit() {
 	}
 }
 
+// Submit sendet Text direkt über OnSend – kein Umweg über das Input-Widget.
+func (c *ChatWidget) Submit(text string) {
+	if text == "" {
+		return
+	}
+	if c.OnSend != nil {
+		c.OnSend(text)
+	}
+}
+
 // ── Nachrichten hinzufügen ────────────────────────────────────────────────────
 
 func (c *ChatWidget) AddMessage(role MessageRole, text string) {

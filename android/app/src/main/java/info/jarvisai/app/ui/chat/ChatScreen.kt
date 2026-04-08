@@ -21,15 +21,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -49,8 +47,12 @@ import info.jarvisai.app.data.model.SegmentType
 import android.app.DownloadManager
 import android.content.Intent
 import info.jarvisai.app.update.DownloadPhase
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.alpha
-import info.jarvisai.app.ui.avatar.JarvisAvatar
+import androidx.compose.ui.platform.LocalDensity
+import info.jarvisai.app.data.model.AvatarType
+import info.jarvisai.app.ui.avatar.IronManAvatar
 import info.jarvisai.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,8 +74,18 @@ fun ChatScreen(
     val selectedIds by viewModel.selectedIds.collectAsState()
     val isSpeaking by viewModel.isSpeaking.collectAsState()
     val avatarMouth by viewModel.avatarMouthState.collectAsState()
+    val avatarType by viewModel.avatarType.collectAsState()
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    val density = LocalDensity.current
+
+    // IME-Höhe reaktiv → Avatar schiebt sich animiert nach oben wenn Tastatur einfährt
+    val imeBottomDp = with(density) { WindowInsets.ime.getBottom(density).toDp() }
+    val avatarBottomPadding by animateDpAsState(
+        targetValue = 88.dp + imeBottomDp,
+        animationSpec = tween(durationMillis = 280),
+        label = "avatarIme",
+    )
 
     // Hintergrundbild laden: eingebettetes Drawable oder lokales Foto
     val bgBitmap: ImageBitmap? = remember(settings.backgroundImageUri) {
@@ -95,8 +107,8 @@ fun ChatScreen(
         } else null
     }
 
-    // Automatisch zum Ende scrollen wenn neue Nachricht
-    LaunchedEffect(messages.size) {
+    // Automatisch zum Ende scrollen: neue Nachricht UND wenn Tastatur einfährt
+    LaunchedEffect(messages.size, imeBottomDp) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
         }
@@ -129,42 +141,21 @@ fun ChatScreen(
                 modifier = Modifier.fillMaxSize().background(Color(settings.backgroundColorArgb))
             )
             else -> {
-                // BG_GRADIENT — Jarvis radiale Farbverläufe wie im Web-UI
-                Box(modifier = Modifier.fillMaxSize().background(Color(0xFF060A12)))
-                Box(modifier = Modifier
-                    .fillMaxSize()
-                    .drawBehind {
-                        // Lila Glow oben-mitte
-                        drawRect(brush = Brush.radialGradient(
-                            colors = listOf(Color(0xFF6366F1).copy(alpha = 0.40f), Color.Transparent),
-                            center = Offset(size.width * 0.5f, 0f),
-                            radius = size.width * 1.1f,
-                        ))
-                        // Grüner Glow unten-rechts
-                        drawRect(brush = Brush.radialGradient(
-                            colors = listOf(Color(0xFF10B981).copy(alpha = 0.28f), Color.Transparent),
-                            center = Offset(size.width * 0.9f, size.height),
-                            radius = size.width * 0.9f,
-                        ))
-                    }
-                )
+                // BG_GRADIENT — Jarvis HUD (animiertes Hexagon-Gitter + Scan-Linie)
+                JarvisHudBackground()
             }
         }
 
-        // ── Anime-Avatar (zwischen Hintergrund und Chat-Inhalt) ───────
-        if (settings.avatarEnabled) {
-            // Tastatur- und Navigationsleisten-Inset berücksichtigen, damit
-            // der Avatar immer im sichtbaren Bereich schwebt
-            val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
-            val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-            JarvisAvatar(
+        // ── Iron Man Avatar (zwischen Hintergrund und Chat-Inhalt) ───
+        if (avatarType == AvatarType.IRONMAN) {
+            IronManAvatar(
                 isSpeaking = isSpeaking,
                 mouthState = avatarMouth,
                 modifier   = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 64.dp + maxOf(imeBottom, navBottom), end = 10.dp)
-                    .size(width = 130.dp, height = 160.dp)
-                    .alpha(if (isSpeaking) 0.92f else 0.70f),
+                    .padding(bottom = avatarBottomPadding, end = 10.dp)
+                    .size(width = 170.dp, height = 200.dp)
+                    .alpha(if (isSpeaking) 0.97f else 0.90f),
             )
         }
 

@@ -201,16 +201,9 @@ func (d *DialogController) handleUtterance(pcm []byte, durationMs int, state Dia
 
 	// Normale Spracheingabe
 	d.app.avatar.SetMode(ModeIdle)
-	if d.app.cfg.AutoSendVoice {
-		// AutoSend: Backend transkribiert + startet Agent direkt.
-		// User-Nachricht erscheint erst wenn voice_transcript zurückkommt (echter Text).
-		d.app.chat.SetStatus("🎤 Transkribiere…")
-		d.ws.SendTask("[Voice]\n<audio>" + b64 + "</audio>")
-	} else {
-		// Manuell bestätigen: nur transkribieren, Ergebnis landet im Eingabefeld.
-		d.app.chat.SetStatus("🎤 Transkribiere…")
-		d.ws.SendTranscribeOnly(b64)
-	}
+	// Immer erst nur transkribieren – voice_transcript-Callback entscheidet dann ob gesendet wird
+	d.app.chat.SetStatus("🎤 Transkribiere…")
+	d.ws.SendTranscribeOnly(b64)
 
 	d.mu.Lock()
 	d.state = StateSending

@@ -37,6 +37,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import info.jarvisai.app.BuildConfig
 import info.jarvisai.app.R
 import info.jarvisai.app.service.TtsVoice
+import info.jarvisai.app.data.model.AvatarType
 import info.jarvisai.app.data.prefs.BG_COLOR
 import info.jarvisai.app.data.prefs.BG_DEFAULT_URI
 import info.jarvisai.app.data.prefs.BG_GRADIENT
@@ -534,11 +535,11 @@ fun SettingsScreen(
 
             SettingRow(
                 label = "Ironman-Avatar",
-                description = "Animierter Charakter mit Sprachausgabe (Deutsch) im Hintergrund",
+                description = "Animierter Iron Man Helm mit leuchtenden Augen im Hintergrund",
             ) {
                 Switch(
-                    checked = settings.avatarEnabled,
-                    onCheckedChange = viewModel::onAvatarEnabledChange,
+                    checked = settings.avatarType == AvatarType.IRONMAN,
+                    onCheckedChange = { viewModel.onAvatarEnabledChange(it) },
                 )
             }
 

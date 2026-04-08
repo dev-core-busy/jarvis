@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import info.jarvisai.app.data.model.AvatarType
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -36,7 +37,7 @@ data class JarvisSettings(
     val backgroundAlpha: Float = 0.5f,
     val debugMode: Boolean = false,
     val voiceSilenceMs: Int = 1500,
-    val avatarEnabled: Boolean = true,
+    val avatarType: AvatarType = AvatarType.IRONMAN,
     val serverTtsEnabled: Boolean = false,
     val serverTtsVoice: String = "de-DE-ConradNeural",
     val androidTtsVoice: String = "",     // "" = Automatisch
@@ -63,7 +64,8 @@ class SettingsDataStore @Inject constructor(
     private val KEY_BG_ALPHA      = floatPreferencesKey("bg_alpha")
     private val KEY_DEBUG_MODE    = booleanPreferencesKey("debug_mode")
     private val KEY_VOICE_SILENCE      = intPreferencesKey("voice_silence_ms")
-    private val KEY_AVATAR             = booleanPreferencesKey("avatar_enabled")
+    private val KEY_AVATAR             = booleanPreferencesKey("avatar_enabled")  // Legacy-Key
+    private val KEY_AVATAR_TYPE        = stringPreferencesKey("avatar_type")
     private val KEY_SERVER_TTS_ENABLED = booleanPreferencesKey("server_tts_enabled")
     private val KEY_SERVER_TTS_VOICE   = stringPreferencesKey("server_tts_voice")
     private val KEY_ANDROID_TTS_VOICE  = stringPreferencesKey("android_tts_voice")
@@ -81,8 +83,10 @@ class SettingsDataStore @Inject constructor(
             backgroundColorArgb = prefs[KEY_BG_COLOR] ?: 0xFF0A0E17.toInt(),
             backgroundAlpha     = prefs[KEY_BG_ALPHA] ?: 0.5f,
             debugMode           = prefs[KEY_DEBUG_MODE] ?: false,
-            voiceSilenceMs      = prefs[KEY_VOICE_SILENCE] ?: 1500,
-            avatarEnabled       = prefs[KEY_AVATAR] ?: true,
+            voiceSilenceMs = prefs[KEY_VOICE_SILENCE] ?: 1500,
+            avatarType     = prefs[KEY_AVATAR_TYPE]
+                ?.let { runCatching { AvatarType.valueOf(it) }.getOrNull() }
+                ?: if (prefs[KEY_AVATAR] == false) AvatarType.NONE else AvatarType.IRONMAN,
             serverTtsEnabled    = prefs[KEY_SERVER_TTS_ENABLED] ?: false,
             serverTtsVoice      = prefs[KEY_SERVER_TTS_VOICE] ?: "de-DE-ConradNeural",
             androidTtsVoice     = prefs[KEY_ANDROID_TTS_VOICE] ?: "",
@@ -104,7 +108,7 @@ class SettingsDataStore @Inject constructor(
             prefs[KEY_BG_ALPHA]      = settings.backgroundAlpha
             prefs[KEY_DEBUG_MODE]    = settings.debugMode
             prefs[KEY_VOICE_SILENCE]      = settings.voiceSilenceMs
-            prefs[KEY_AVATAR]             = settings.avatarEnabled
+            prefs[KEY_AVATAR_TYPE]        = settings.avatarType.name
             prefs[KEY_SERVER_TTS_ENABLED] = settings.serverTtsEnabled
             prefs[KEY_SERVER_TTS_VOICE]   = settings.serverTtsVoice
             prefs[KEY_ANDROID_TTS_VOICE]  = settings.androidTtsVoice

@@ -520,11 +520,16 @@ func (c *ChatWidget) SetMicActive(active bool) {
 	c.MicBtn.Refresh()
 }
 
-// SetInput setzt den Text im Eingabefeld (z.B. nach Spracheingabe ohne AutoSend).
+// SetInput setzt den Text im Eingabefeld (z.B. nach Spracheingabe).
 func (c *ChatWidget) SetInput(text string) {
 	c.Input.SetText(text)
 	c.Input.CursorRow = 0
 	c.Input.Refresh()
+}
+
+// TriggerSend sendet den aktuellen Inhalt des Eingabefelds (wie Enter-Taste).
+func (c *ChatWidget) TriggerSend() {
+	c.submit()
 }
 
 

@@ -260,11 +260,9 @@ func (ja *JarvisApp) reconnect() {
 			ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
 			return
 		}
+		ja.chat.SetInput(transcript)
 		if ja.cfg.AutoSendVoice {
-			ja.chat.AddMessage(RoleUser, transcript)
-			ja.ws.SendTask(transcript)
-		} else {
-			ja.chat.SetInput(transcript)
+			ja.chat.TriggerSend()
 		}
 	}
 	ja.chat.OnSend = func(text string) {
@@ -562,11 +560,9 @@ func (ja *JarvisApp) startTextDictation() {
 			ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
 			return
 		}
+		ja.chat.SetInput(transcript)
 		if autoSend {
-			ja.chat.AddMessage(RoleUser, transcript)
-			ja.ws.SendTask(transcript)
-		} else {
-			ja.chat.SetInput(transcript)
+			ja.chat.TriggerSend()
 		}
 	}()
 }

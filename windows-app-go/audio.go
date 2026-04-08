@@ -14,21 +14,29 @@ import (
 // ── Audio-Manager ─────────────────────────────────────────────────────────────
 
 type AudioManager struct {
-	mu      sync.Mutex
-	ctx     *malgo.AllocatedContext
-	playDev *malgo.Device
-	recDev  *malgo.Device
+	mu         sync.Mutex
+	micDataMu  sync.RWMutex
+	ctx        *malgo.AllocatedContext
+	playDev    *malgo.Device
+	recDev     *malgo.Device
 
 	// Konfigurierte Geräte-IDs (leer = Standard)
 	SpeakerID string
 	MicID     string
 
-	// Callback wenn Mikrofon-Daten verfügbar sind
+	// Callback wenn Mikrofon-Daten verfügbar sind (geschützt durch micDataMu)
 	OnMicData func(pcm []byte)
 
 	// Interne Playback-Queue
 	playQueue chan []byte
 	stopCh    chan struct{}
+}
+
+// SetOnMicData setzt den Mikrofon-Callback thread-safe.
+func (am *AudioManager) SetOnMicData(fn func([]byte)) {
+	am.micDataMu.Lock()
+	am.OnMicData = fn
+	am.micDataMu.Unlock()
 }
 
 func NewAudioManager() (*AudioManager, error) {
@@ -178,10 +186,16 @@ func (am *AudioManager) StartRecording() error {
 
 	callbacks := malgo.DeviceCallbacks{
 		Data: func(_, pInput []byte, _ uint32) {
-			if am.OnMicData != nil && len(pInput) > 0 {
+			if len(pInput) == 0 {
+				return
+			}
+			am.micDataMu.RLock()
+			fn := am.OnMicData
+			am.micDataMu.RUnlock()
+			if fn != nil {
 				cp := make([]byte, len(pInput))
 				copy(cp, pInput)
-				am.OnMicData(cp)
+				fn(cp)
 			}
 		},
 	}
@@ -220,6 +234,7 @@ func (am *AudioManager) TestMicLevel(seconds int) (maxRMS float64, dataReceived 
 	var mu sync.Mutex
 	var count int
 
+	am.micDataMu.Lock()
 	prevCallback := am.OnMicData
 	am.OnMicData = func(pcm []byte) {
 		rms := calcRMS(pcm)
@@ -230,11 +245,14 @@ func (am *AudioManager) TestMicLevel(seconds int) (maxRMS float64, dataReceived 
 		}
 		mu.Unlock()
 	}
+	am.micDataMu.Unlock()
 
 	wasRecording := am.IsRecording()
 	if !wasRecording {
 		if err = am.StartRecording(); err != nil {
+			am.micDataMu.Lock()
 			am.OnMicData = prevCallback
+			am.micDataMu.Unlock()
 			return
 		}
 	}
@@ -244,7 +262,9 @@ func (am *AudioManager) TestMicLevel(seconds int) (maxRMS float64, dataReceived 
 	if !wasRecording {
 		am.StopRecording()
 	}
+	am.micDataMu.Lock()
 	am.OnMicData = prevCallback
+	am.micDataMu.Unlock()
 
 	mu.Lock()
 	dataReceived = count > 0

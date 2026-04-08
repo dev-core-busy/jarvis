@@ -72,7 +72,7 @@ func (d *DialogController) Start() error {
 	} else {
 		d.state = StateListening
 	}
-	d.audio.OnMicData = d.processMicFrame
+	d.audio.SetOnMicData(d.processMicFrame)
 	if !d.audio.IsRecording() {
 		if err := d.audio.StartRecording(); err != nil {
 			log.Printf("[dialog] Mic-Start Fehler: %v", err)

@@ -519,11 +519,7 @@ func (ja *JarvisApp) startTextDictation() {
 		b64 := encodeBase64(wav)
 
 		ja.chat.SetStatus("🎤 Transkribiere…")
-		if ja.cfg.AutoSendVoice {
-			ja.ws.SendTask("[Voice]\n<audio>" + b64 + "</audio>")
-		} else {
-			ja.ws.SendTranscribeOnly(b64)
-		}
+		ja.ws.SendTranscribeOnly(b64)
 	}()
 }
 

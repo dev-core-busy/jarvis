@@ -3,7 +3,6 @@ package info.jarvisai.app.data.repository
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import info.jarvisai.app.data.api.JarvisWebSocket
-import info.jarvisai.app.desktop.AndroidDesktopExecutor
 import info.jarvisai.app.data.model.AgentInfo
 import info.jarvisai.app.data.model.ChatMessage
 import info.jarvisai.app.data.model.ConnectionState
@@ -12,9 +11,13 @@ import info.jarvisai.app.data.model.MessageSegment
 import info.jarvisai.app.data.model.SegmentType
 import info.jarvisai.app.data.model.WsEvent
 import info.jarvisai.app.data.prefs.SettingsDataStore
+import info.jarvisai.app.desktop.AndroidDesktopExecutor
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -26,6 +29,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -42,21 +46,23 @@ class ChatRepository @Inject constructor(
     val connectionState: StateFlow<ConnectionState> = ws.connectionState
     val agents: StateFlow<List<AgentInfo>> = ws.agents
 
-    private val desktopExecutor = AndroidDesktopExecutor(context)
-
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
 
-    // SharedFlow: jede fertige Antwort wird exakt einmal zum Vorlesen emittiert.
-    // Kein StateFlow/conflate – damit wird keine Antwort übersprungen.
+    // SharedFlow für TTS-Events: KEIN Conflate – jede Antwort wird exakt einmal gesendet
     private val _speakText = MutableSharedFlow<String>(extraBufferCapacity = 5)
     val speakText: SharedFlow<String> = _speakText
 
-    // ID der aktuell streamenden Jarvis-Nachricht (null = keine)
-    private var streamingMsgId: String? = null
+    // @Volatile: sicher lesbar vom Main-Thread (sendMessage) und Dispatchers.Default (handleEvent)
+    @Volatile private var streamingMsgId: String? = null
 
-    // STATUS-Segmente die vor der ersten Antwort gepuffert werden
-    private val pendingStatus = mutableListOf<MessageSegment>()
+    // Fallback-Timer: falls server kein agent_event:finished schickt, nach 1.5s auto-finalize
+    private var finalizeTimeoutJob: Job? = null
+
+    // CopyOnWriteArrayList: thread-sicher für gleichzeitigen Zugriff
+    private val pendingStatus = CopyOnWriteArrayList<MessageSegment>()
+
+    private val desktopExecutor = AndroidDesktopExecutor(context)
 
     init {
         loadMessages()
@@ -72,7 +78,6 @@ class ChatRepository @Inject constructor(
     fun disconnect() = ws.disconnect()
 
     fun sendMessage(text: String) {
-        // Laufenden Stream + Puffer abschliessen bevor neue Anfrage gesendet wird
         pendingStatus.clear()
         finalizeStream()
         val userMsg = ChatMessage(role = MessageRole.USER, text = text)
@@ -82,7 +87,13 @@ class ChatRepository @Inject constructor(
     }
 
     private suspend fun collectEvents() {
-        ws.events.collect { event -> handleEvent(event) }
+        ws.events.collect { event ->
+            try {
+                handleEvent(event)
+            } catch (e: Exception) {
+                Log.e("ChatRepository", "handleEvent Fehler: ${e.message}", e)
+            }
+        }
     }
 
     private suspend fun collectDesktopCommands() {
@@ -94,9 +105,6 @@ class ChatRepository @Inject constructor(
 
     private fun handleEvent(event: WsEvent) {
         when (event.type) {
-            // highlight=false → Statuszeile versteckt
-            // highlight=true + beginnt mit ⏳ → Wartemeldung, ebenfalls versteckt
-            // highlight=true + sonstiger Text → eigentliche LLM-Antwort, sichtbar
             "status" -> {
                 val type = when {
                     !event.highlight                          -> SegmentType.STATUS
@@ -120,10 +128,10 @@ class ChatRepository @Inject constructor(
             "agent_event" -> {
                 when (event.event) {
                     "finished" -> finalizeStream()
-                    else -> { /* started/spawned – kein Chat-Text nötig */ }
+                    else -> { }
                 }
             }
-            "ping", "cpu", "agent_list" -> { /* ignorieren */ }
+            "ping", "cpu", "agent_list" -> { }
         }
     }
 
@@ -134,11 +142,9 @@ class ChatRepository @Inject constructor(
 
         if (id == null) {
             if (type == SegmentType.STATUS) {
-                // STATUS vor erster Antwort puffern – noch keine sichtbare Bubble erstellen
                 pendingStatus.add(segment)
                 return
             }
-            // Erste ANSWER: Bubble mit allen gepufferten STATUS-Segmenten + ANSWER erstellen
             val newId = UUID.randomUUID().toString()
             streamingMsgId = newId
             val allSegments = pendingStatus.toList() + segment
@@ -153,7 +159,6 @@ class ChatRepository @Inject constructor(
                 )
             }
         } else {
-            // Segment zur bestehenden Streaming-Nachricht hinzufügen
             _messages.update { msgs ->
                 msgs.map { msg ->
                     if (msg.id == id) msg.copy(
@@ -163,10 +168,23 @@ class ChatRepository @Inject constructor(
                 }
             }
         }
+        writeMessagesToDisk()
+
+        // Fallback: 1.5s nach letztem Chunk auto-finalize (falls kein agent_event:finished kommt)
+        finalizeTimeoutJob?.cancel()
+        finalizeTimeoutJob = scope.launch {
+            delay(1_500)
+            if (streamingMsgId != null) {
+                Log.d("ChatRepository", "finalizeStream via Timeout-Fallback")
+                finalizeStream()
+            }
+        }
     }
 
     private fun finalizeStream() {
-        pendingStatus.clear() // Post-run STATUS-Events (✅ etc.) verwerfen
+        finalizeTimeoutJob?.cancel()
+        finalizeTimeoutJob = null
+        pendingStatus.clear()
         val id = streamingMsgId ?: return
         streamingMsgId = null
         _messages.update { msgs ->
@@ -174,7 +192,7 @@ class ChatRepository @Inject constructor(
                 if (msg.id == id) msg.copy(isStreaming = false) else msg
             }
         }
-        // TTS-Event über SharedFlow senden – garantiert einmalig zugestellt
+        // TTS via SharedFlow – garantiert einmalig zugestellt
         val finalMsg = _messages.value.find { it.id == id }
         val speakText = finalMsg?.segments
             ?.filter { it.type == SegmentType.ANSWER }
@@ -186,7 +204,7 @@ class ChatRepository @Inject constructor(
         if (speakText.isNotBlank()) {
             scope.launch { _speakText.emit(speakText) }
         }
-        saveMessages()
+        writeMessagesToDisk()
     }
 
     fun deleteMessages(ids: Set<String>) {
@@ -199,18 +217,20 @@ class ChatRepository @Inject constructor(
         runCatching { msgFile.delete() }
     }
 
-    // ── Disk-Persistenz ───────────────────────────────────────────────
+    private fun writeMessagesToDisk() {
+        runCatching {
+            val data = json.encodeToString(
+                ListSerializer(ChatMessage.serializer()),
+                _messages.value.takeLast(100),
+            )
+            msgFile.writeText(data)
+        }.onFailure { e ->
+            Log.e("ChatRepository", "Speichern fehlgeschlagen: ${e.message}", e)
+        }
+    }
 
     private fun saveMessages() {
-        scope.launch(Dispatchers.IO) {
-            runCatching {
-                val data = json.encodeToString(
-                    ListSerializer(ChatMessage.serializer()),
-                    _messages.value.takeLast(100),
-                )
-                msgFile.writeText(data)
-            }
-        }
+        scope.launch(Dispatchers.IO) { writeMessagesToDisk() }
     }
 
     private fun loadMessages() {
@@ -220,8 +240,6 @@ class ChatRepository @Inject constructor(
                     ListSerializer(ChatMessage.serializer()),
                     msgFile.readText(),
                 )
-                // Altes Format (vor Segment-Einführung): Jarvis-Nachrichten ohne Segmente
-                // haben rohen Text mit Status-Zeilen – verwerfen und neu beginnen
                 val isLegacyFormat = msgs.any {
                     it.role == MessageRole.JARVIS && it.segments.isEmpty() && it.text.isNotBlank()
                 }
@@ -229,7 +247,6 @@ class ChatRepository @Inject constructor(
                     msgFile.delete()
                     return
                 }
-                // isStreaming-Flag beim Laden immer zurücksetzen (App-Neustart)
                 _messages.value = msgs.map { it.copy(isStreaming = false) }
             }
         }

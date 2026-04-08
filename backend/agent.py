@@ -332,9 +332,11 @@ KRITISCH – Autonomie-Regeln:
                 "Für ALLE Aktionen auf dem Android-Gerät (App starten, Shell-Befehle, Gerätinfo) "
                 "das Tool 'android_desktop' verwenden. "
                 "Verfügbare Aktionen: shell_exec (Shell-Befehl), launch_app (App starten per Name), "
+                "open_url (URL im Standard-Browser öffnen, text=URL z.B. 'https://google.de'), "
                 "list_apps (installierte Apps anzeigen), get_info (Gerätinformationen). "
                 "Empfohlener Ablauf: 1) get_info um Gerät zu identifizieren, "
-                "2) list_apps wenn App-Name unklar, 3) launch_app um App zu starten."
+                "2) list_apps wenn App-Name unklar, 3) launch_app um App zu starten. "
+                "Für 'öffne Browser' oder 'öffne URL': open_url mit der gewünschten URL verwenden."
             )
         else:
             # Browser: Linux-Desktop ist der richtige Kontext (Standard)

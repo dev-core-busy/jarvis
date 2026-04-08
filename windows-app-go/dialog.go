@@ -199,23 +199,26 @@ func (d *DialogController) handleUtterance(pcm []byte, durationMs int, state Dia
 		return
 	}
 
-	// Normale Spracheingabe
+	// Normale Spracheingabe – Mic sofort stoppen, dann senden
 	d.app.avatar.SetMode(ModeIdle)
-	// Immer erst nur transkribieren – voice_transcript-Callback entscheidet dann ob gesendet wird
 	d.app.chat.SetStatus("🎤 Transkribiere…")
-	d.ws.SendTranscribeOnly(b64)
 
+	// Mic-Hardware stoppen bevor wir senden (kein Race mit weiteren Frames)
 	d.mu.Lock()
 	d.state = StateSending
 	d.mu.Unlock()
+	d.audio.StopRecording()
+	if d.OnStop != nil {
+		d.OnStop()
+	}
 
-	if d.StopAfterFirstUtterance {
-		go func() {
-			d.Stop()
-			if d.OnStop != nil {
-				d.OnStop()
-			}
-		}()
+	if d.app.cfg.AutoSendVoice {
+		// AutoSend: direkt als [Voice]-Task senden – Backend transkribiert + startet Agent
+		// voice_transcript kommt zurück und zeigt den Text als User-Nachricht
+		d.ws.SendTask("[Voice]\n<audio>" + b64 + "</audio>")
+	} else {
+		// Manuell: nur transkribieren, Ergebnis ins Eingabefeld
+		d.ws.SendTranscribeOnly(b64)
 	}
 }
 

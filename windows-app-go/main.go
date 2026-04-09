@@ -380,11 +380,8 @@ func (ja *JarvisApp) onConnected(connected bool) {
 	if connected {
 		ja.chat.SetConnectionState("connected")
 		ja.chat.SetInputEnabled(true)
-		// Verbindungsstatus nur beim allerersten Verbinden im Chat zeigen;
-		// bei Reconnects genügt der Header-Indikator (grüner Punkt).
 		if !ja.everConnected {
 			ja.everConnected = true
-			ja.chat.AddMessage(RoleStatus, "✓ Verbunden mit Jarvis")
 		}
 		ja.startDialogIfNeeded()
 	} else {

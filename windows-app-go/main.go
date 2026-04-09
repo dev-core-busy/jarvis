@@ -421,10 +421,14 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 				ja.dialog.MuteWhileSpeaking(true)
 			}
 		} else if strings.HasPrefix(msg.Message, "❌") || strings.HasPrefix(msg.Message, "⚠") {
-			// Fehler und Warnungen immer zeigen – unabhängig vom Debug-Modus
+			// Fehler und Warnungen immer zeigen
+			ja.chat.AddMessage(RoleStatus, msg.Message)
+		} else if strings.HasPrefix(msg.Message, "✅ Aufgabe abgeschlossen") ||
+			strings.HasPrefix(msg.Message, "✅ Windows Desktop-Agent") {
+			// Wichtige Erfolgsmeldungen immer zeigen
 			ja.chat.AddMessage(RoleStatus, msg.Message)
 		} else if ja.debugMode {
-			// Debug-Modus: Agent-Denk-Nachrichten klein/gedimmt zeigen
+			// Debug-Modus: alle anderen Agent-Denk-Nachrichten (🚀🧠🔧✏️ etc.) gedimmt zeigen
 			ja.chat.AddDebugMessage(msg.Message)
 		}
 

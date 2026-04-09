@@ -1,6 +1,7 @@
 """Jarvis Agent – Kern-Loop: LLM ↔ Tools, Multi-Agent Support."""
 
 import asyncio
+import base64
 import json
 import re
 import time
@@ -439,6 +440,20 @@ KRITISCH – Autonomie-Regeln:
                     result = await self._execute_tool(tool_name, tool_args, ws=ws)
                     result_str = str(result)[:5000]
 
+                    # Screenshot-Bild erkennen (IMAGE_BASE64:pfad|base64data)
+                    image_part = None
+                    if isinstance(result, str) and result.startswith("IMAGE_BASE64:"):
+                        try:
+                            _, rest = result.split(":", 1)
+                            _img_path, b64data = rest.split("|", 1)
+                            png_bytes = base64.b64decode(b64data)
+                            image_part = types.Part.from_bytes(data=png_bytes, mime_type="image/png")
+                            size_kb = len(png_bytes) // 1024
+                            result_str = f"✅ Windows-Screenshot ({size_kb} KB) – Bildinhalt folgt direkt."
+                            _log(f"Screenshot-Bild als Inline-Part vorbereitet ({size_kb} KB)")
+                        except Exception as img_err:
+                            _log(f"Screenshot-Inline-Parse fehlgeschlagen: {img_err}")
+
                     # Tool-Statistik tracken
                     is_error = any(marker in result_str[:200].lower() for marker in
                                    ['fehler', 'error', '❌', 'traceback', 'exception', 'not found', 'failed'])
@@ -470,6 +485,9 @@ KRITISCH – Autonomie-Regeln:
                             response={"result": result_str},
                         )
                     )
+                    # Bild als separaten Inline-Part anfügen (Gemini Multimodal)
+                    if image_part:
+                        function_response_parts.append(image_part)
 
                 # Geschwindigkeits-Verzögerung
                 if self._speed < 1.0:
@@ -633,6 +651,18 @@ KRITISCH – Autonomie-Regeln:
                     result = await self._execute_tool(tool_name, tool_args)
                     result_str = str(result)[:5000]
 
+                    # Screenshot-Bild erkennen (IMAGE_BASE64:pfad|base64data)
+                    image_part = None
+                    if isinstance(result, str) and result.startswith("IMAGE_BASE64:"):
+                        try:
+                            _, rest = result.split(":", 1)
+                            _img_path, b64data = rest.split("|", 1)
+                            png_bytes = base64.b64decode(b64data)
+                            image_part = types.Part.from_bytes(data=png_bytes, mime_type="image/png")
+                            result_str = f"✅ Screenshot ({len(png_bytes)//1024} KB) – Bildinhalt folgt direkt."
+                        except Exception:
+                            pass
+
                     # Tool-Statistik tracken
                     is_error = any(marker in result_str[:200].lower() for marker in
                                    ['fehler', 'error', '❌', 'traceback', 'exception', 'not found', 'failed'])
@@ -647,6 +677,8 @@ KRITISCH – Autonomie-Regeln:
                             response={"result": result_str},
                         )
                     )
+                    if image_part:
+                        function_response_parts.append(image_part)
 
                 if config.LLM_PROVIDER == "google":
                     chat_history.append(response.raw.candidates[0].content)

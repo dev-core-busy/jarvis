@@ -185,11 +185,8 @@ class WindowsDesktopTool(BaseTool):
             try:
                 png_bytes = base64.b64decode(result["data"])
                 _SCREENSHOT_PATH.write_bytes(png_bytes)
-                size_kb = len(png_bytes) // 1024
-                return (
-                    f"✅ Screenshot gespeichert: {_SCREENSHOT_PATH} ({size_kb} KB). "
-                    f"Nutze das screenshot Tool um den Screenshot anzuzeigen."
-                )
+                # IMAGE_BASE64: Format – wird vom Agent-Loop als Inline-Bild ans LLM übergeben
+                return f"IMAGE_BASE64:{_SCREENSHOT_PATH}|{result['data']}"
             except Exception as e:
                 return f"❌ Screenshot-Dekodierung fehlgeschlagen: {e}"
 

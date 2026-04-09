@@ -35,7 +35,8 @@ type Config struct {
 	// Sprache
 	AutoSendVoice bool `json:"auto_send_voice"` // Spracheingabe direkt senden (kein Tipp-Bestätigen)
 	// Anzeige
-	DebugMode bool `json:"debug_mode"` // Agent-Denk-Nachrichten anzeigen
+	DebugMode     bool `json:"debug_mode"`       // Agent-Denk-Nachrichten anzeigen
+	TTSInTextMode bool `json:"tts_in_text_mode"` // Antworten im Text-Modus vorlesen
 }
 
 // AppVersion wird beim Build via -ldflags="-X main.AppVersion=0.8xx" gesetzt.

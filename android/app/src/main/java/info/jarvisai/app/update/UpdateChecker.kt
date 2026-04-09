@@ -40,7 +40,7 @@ data class UpdateState(
 class UpdateChecker @Inject constructor(
     private val okHttpClient: OkHttpClient,
 ) {
-    private val versionUrl = "https://jarvis-ai.info/version_android.json"
+    private val versionUrl = "https://jarvis-ai.info/downloads/version_android.json"
     private val json = Json { ignoreUnknownKeys = true }
     private var _apkUrl = "https://jarvis-ai.info/downloads/jarvis.apk?v=0"
     val apkUrl get() = _apkUrl

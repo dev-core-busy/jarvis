@@ -146,7 +146,6 @@ func main() {
 
 	// Single-Instance: Pipe-Server starten – bringt Fenster in Vordergrund wenn 2. Instanz startet
 	StartPipeServer(func() {
-		a.SendNotification(&fyne.Notification{Title: "Jarvis", Content: "Bereits aktiv"})
 		BringToForeground()
 	})
 
@@ -362,6 +361,19 @@ func (ja *JarvisApp) reconnect() {
 	ja.chat.OnSettings = func() {
 		showSettingsWindow(ja.fyneApp, ja, func() { ja.reconnect(); ja.refreshChatWindow() })
 	}
+	ja.chat.OnTTSToggle = func() {
+		ja.cfg.TTSInTextMode = !ja.cfg.TTSInTextMode
+		_ = ja.cfg.Save()
+		ja.chat.SetTTSEnabled(ja.cfg.TTSInTextMode)
+		if !ja.cfg.TTSInTextMode {
+			StopTTS()
+			ja.chat.SetTTSSpeaking(false)
+		}
+	}
+	ja.chat.OnTTSStop = func() {
+		StopTTS()
+		ja.chat.SetTTSSpeaking(false)
+	}
 	// Desktop-Steuerung: Backend kann Windows-Desktop steuern
 	ja.ws.OnDesktopCommand = func(cmd DesktopCommand) {
 		res := DesktopExecute(cmd)
@@ -446,7 +458,9 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 
 	case "agent_event":
 		if msg.Event == "started" {
-			// Neuer Durchlauf: TTS-Puffer zurücksetzen
+			// Neuer Durchlauf: laufende TTS abbrechen + Puffer zurücksetzen
+			StopTTS()
+			ja.chat.SetTTSSpeaking(false)
 			ja.ttsBufMu.Lock()
 			ja.ttsBuf.Reset()
 			ja.ttsBufMu.Unlock()
@@ -457,9 +471,12 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 			ja.ttsBuf.Reset()
 			ja.ttsBufMu.Unlock()
 			go func() {
-				// TTS nur im Dialogmodus sprechen
-				if ttsText != "" && ja.cfg.DialogMode {
+				// TTS im Dialogmodus ODER wenn Text-TTS eingeschaltet
+				wantTTS := (ja.cfg.DialogMode || ja.cfg.TTSInTextMode) && ttsText != ""
+				if wantTTS {
+					ja.chat.SetTTSSpeaking(true)
 					SpeakText(ttsText)
+					ja.chat.SetTTSSpeaking(false)
 				}
 				if ja.dialog != nil {
 					ja.dialog.MuteWhileSpeaking(false)
@@ -563,6 +580,8 @@ func (ja *JarvisApp) openChatWindowLocked() {
 	})
 	ja.chatWin = win
 	win.Show()
+	// TTS-Button-Zustand nach dem Aufbau setzen
+	ja.chat.SetTTSEnabled(ja.cfg.TTSInTextMode)
 }
 
 // startTextDictation startet die Spracheingabe im Text-Modus (einmalig).

@@ -21,4 +21,5 @@ func PlayTestVoice(voiceID string)                                           {}
 func PlayWAVBytes(data []byte)                                               {}
 func PlayBackendTTS(serverURL, apiKey, text, voiceID string) error           { return nil }
 func SpeakText(text string)                                                  {}
+func StopTTS()                                                               {}
 func ShowTrayBalloon(title, text string)                                     {}

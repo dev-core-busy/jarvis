@@ -155,9 +155,16 @@ type ChatWidget struct {
 	headerStack     *fyne.Container // container.NewStack – zeigt immer nur einen Header
 	selCountLbl     *canvas.Text
 
+	// TTS-Steuerung im Text-Modus
+	ttsToggleBtn *widget.Button // 🔊/🔇 im Header
+	ttsStopBtn   *widget.Button // ⏹ im Input-Bereich (nur sichtbar wenn TTS aktiv)
+	ttsStopWrap  *fyne.Container
+
 	OnSend      func(string)
 	OnMicButton func()
 	OnSettings  func()
+	OnTTSToggle func() // TTS ein/aus schalten
+	OnTTSStop   func() // laufende TTS-Wiedergabe unterbrechen
 }
 
 func NewChatWidget() *ChatWidget {
@@ -193,6 +200,30 @@ func NewChatWidget() *ChatWidget {
 	c.ConnLabel.TextSize = 11
 
 	return c
+}
+
+// SetTTSEnabled aktualisiert das TTS-Toggle-Icon (🔊 = an, 🔇 = aus).
+func (c *ChatWidget) SetTTSEnabled(enabled bool) {
+	if c.ttsToggleBtn == nil {
+		return
+	}
+	if enabled {
+		c.ttsToggleBtn.SetText("🔊")
+	} else {
+		c.ttsToggleBtn.SetText("🔇")
+	}
+}
+
+// SetTTSSpeaking zeigt/versteckt den TTS-Stop-Button.
+func (c *ChatWidget) SetTTSSpeaking(speaking bool) {
+	if c.ttsStopWrap == nil {
+		return
+	}
+	if speaking {
+		c.ttsStopWrap.Show()
+	} else {
+		c.ttsStopWrap.Hide()
+	}
 }
 
 // SetConnectionState aktualisiert Farbe und Text des Verbindungs-Dots im Header.
@@ -237,11 +268,23 @@ var BgColorNames = []string{
 func (c *ChatWidget) Layout(cfg *Config) fyne.CanvasObject {
 	header := c.buildChatHeader()
 
-	// Input-Bar horizontal: [🎤] [Texteingabe────] [➤]  (identisch Android)
+	// TTS-Stop-Button (⏹) – nur sichtbar wenn TTS gerade spricht
+	c.ttsStopBtn = widget.NewButton("⏹", func() {
+		if c.OnTTSStop != nil {
+			c.OnTTSStop()
+		}
+	})
+	c.ttsStopBtn.Importance = widget.WarningImportance
+	stopWrapped := container.NewGridWrap(fyne.NewSize(44, 44), c.ttsStopBtn)
+	c.ttsStopWrap = container.NewStack(stopWrapped)
+	c.ttsStopWrap.Hide()
+
+	// Input-Bar horizontal: [🎤] [⏹] [Texteingabe────] [➤]  (⏹ nur wenn TTS aktiv)
 	// Buttons quadratisch (44×44) → wirken runder, ähnlich Android FAB
 	sendWrapped := container.NewGridWrap(fyne.NewSize(44, 44), c.SendBtn)
 	micWrapped := container.NewGridWrap(fyne.NewSize(44, 44), c.MicBtn)
-	inputRow := container.NewBorder(nil, nil, micWrapped, sendWrapped, c.Input)
+	leftBtns := container.NewHBox(micWrapped, c.ttsStopWrap)
+	inputRow := container.NewBorder(nil, nil, leftBtns, sendWrapped, c.Input)
 	// Input-Bar: Gradient surfaceVariant → surface (Android-Elevation-Effekt)
 	inputBg := canvas.NewVerticalGradient(
 		color.RGBA{0x12, 0x1A, 0x36, 0xFF}, // oben dunkler
@@ -327,8 +370,14 @@ func (c *ChatWidget) buildChatHeader() fyne.CanvasObject {
 			c.OnSettings()
 		}
 	})
+	c.ttsToggleBtn = widget.NewButton("🔊", func() {
+		if c.OnTTSToggle != nil {
+			c.OnTTSToggle()
+		}
+	})
+	c.ttsToggleBtn.Importance = widget.LowImportance
 	normalRow := container.NewBorder(nil, nil, nil,
-		container.NewHBox(deleteBtn, settingsBtn),
+		container.NewHBox(c.ttsToggleBtn, deleteBtn, settingsBtn),
 		container.NewPadded(titleRow))
 	c.headerNormal = container.NewStack(headerBg(),
 		container.NewVBox(container.NewPadded(normalRow), sep()))

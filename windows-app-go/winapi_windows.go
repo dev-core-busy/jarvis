@@ -957,10 +957,11 @@ var (
 // Falls ja: sendet "show" durch Named Pipe an laufende Instanz und gibt false zurück.
 func EnsureSingleInstance() bool {
 	namePtr, _ := syscall.UTF16PtrFromString(_mutexName)
-	// Mutex anlegen – Handle bleibt bis Prozessende offen (bewusst kein CloseHandle)
-	pCreateMutexW.Call(0, 1, uintptr(unsafe.Pointer(namePtr)))
-	lastErr, _, _ := pGetLastError.Call()
-	if lastErr != _errAlreadyExists {
+	// bInitialOwner=0: kein exklusiver Besitz – nur Existenzprüfung.
+	// Der DRITTE Rückgabewert von Call() ist der Win32-Fehlercode (syscall.Errno).
+	// GetLastError() danach wäre zu spät – Go-Runtime kann den Error überschreiben.
+	_, _, err := pCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(namePtr)))
+	if err.(syscall.Errno) != syscall.Errno(183) { // 183 = ERROR_ALREADY_EXISTS
 		return true // Erste Instanz – normal starten
 	}
 	// Zweite Instanz: "show" an laufende Instanz schicken

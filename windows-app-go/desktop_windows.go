@@ -546,6 +546,50 @@ func getWindowInfo(hwnd uintptr) string {
 		hwnd, title, class, rect.Left, rect.Top, w, h)
 }
 
+// ─── Bekannte App-Namen ───────────────────────────────────────────────────────
+
+// knownApps mappt gängige Kurzbezeichnungen auf ausführbare Dateien.
+// Auch deutsche Umschreibungen (z.B. "excel arbeitsblatt") werden abgefangen.
+var knownApps = map[string]string{
+	// Microsoft Office
+	"excel":                    "excel.exe",
+	"excel arbeitsblatt":       "excel.exe",
+	"neues excel":              "excel.exe",
+	"neues excel arbeitsblatt": "excel.exe",
+	"word":                     "winword.exe",
+	"microsoft word":           "winword.exe",
+	"microsoft excel":          "excel.exe",
+	"powerpoint":               "powerpnt.exe",
+	"microsoft powerpoint":     "powerpnt.exe",
+	"outlook":                  "outlook.exe",
+	"onenote":                  "onenote.exe",
+	"access":                   "msaccess.exe",
+	// Windows-Bordmittel
+	"notepad":            "notepad.exe",
+	"editor":             "notepad.exe",
+	"texteditor":         "notepad.exe",
+	"wordpad":            "wordpad.exe",
+	"paint":              "mspaint.exe",
+	"calculator":         "calc.exe",
+	"taschenrechner":     "calc.exe",
+	"explorer":           "explorer.exe",
+	"dateiexplorer":      "explorer.exe",
+	"cmd":                "cmd.exe",
+	"eingabeaufforderung": "cmd.exe",
+	"powershell":         "powershell.exe",
+	"task manager":       "taskmgr.exe",
+	"taskmanager":        "taskmgr.exe",
+	"regedit":            "regedit.exe",
+	"snipping tool":      "SnippingTool.exe",
+	"snip":               "SnippingTool.exe",
+	// Browser
+	"chrome":             "chrome.exe",
+	"google chrome":      "chrome.exe",
+	"firefox":            "firefox.exe",
+	"edge":               "msedge.exe",
+	"microsoft edge":     "msedge.exe",
+}
+
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 
 func DesktopExecute(cmd DesktopCommand) DesktopResult {
@@ -684,15 +728,22 @@ func DesktopExecute(cmd DesktopCommand) DesktopResult {
 		}
 
 	case "open_app":
-		app := cmd.Text
+		app := strings.TrimSpace(cmd.Text)
 		if app == "" {
-			app = cmd.Cmd
+			app = strings.TrimSpace(cmd.Cmd)
 		}
 		if app == "" {
 			res.Error = "kein Programmname angegeben"
 			break
 		}
-		_, _, err := desktopShellExec(`start "" ` + app)
+		// Bekannte App-Namen auf ausführbare Dateien mappen (DE + EN)
+		if mapped, ok := knownApps[strings.ToLower(app)]; ok {
+			app = mapped
+		}
+		// PowerShell Start-Process ist robuster als 'start ""' (kein UNC-Pfad-Bug)
+		safe := strings.ReplaceAll(app, "'", "''")
+		psCmd := fmt.Sprintf(`powershell -NoProfile -WindowStyle Hidden -Command "Start-Process '%s'"`, safe)
+		_, _, err := desktopShellExec(psCmd)
 		if err != nil {
 			res.Error = err.Error()
 		} else {

@@ -612,7 +612,7 @@ var (
 func StopTTS() {
 	ttsStopMu.Lock()
 	defer ttsStopMu.Unlock()
-	if ttsStopCmd != nil {
+	if ttsStopCmd != nil && ttsStopCmd.Process != nil {
 		_ = ttsStopCmd.Process.Kill()
 		ttsStopCmd = nil
 	}
@@ -859,26 +859,25 @@ func SpeakText(text string) {
 		clean = clean[:cutAt]
 	}
 
-	// Backend-Stimme bevorzugen
-	if isBackendVoice(currentTTSVoice) && currentServerURL != "" {
+	// Backend-TTS bevorzugen: bei konfigurierter Backend-Stimme ODER als primärer Weg
+	// wenn Server erreichbar ist (leere Stimme → Server nutzt seinen Default).
+	if currentServerURL != "" {
 		if err := PlayBackendTTS(currentServerURL, currentAPIKey, clean, currentTTSVoice); err == nil {
 			return
 		}
-		// Fallback: SAPI
+		// Fallback: Windows SAPI
 	}
 
-	// SAPI PowerShell
+	// SAPI PowerShell (Fallback wenn kein Server oder Backend-TTS fehlschlägt)
 	escaped := strings.ReplaceAll(clean, "'", " ")
 	escaped = strings.ReplaceAll(escaped, "\n", " ")
 	escaped = strings.Join(strings.Fields(escaped), " ")
 
 	// Nur SAPI-Stimmen (sapi: Präfix) für SelectVoice verwenden.
-	// Backend-Voice-IDs (de-DE-KatjaNeural) funktionieren nicht mit SAPI.
 	voicePart := ""
 	if strings.HasPrefix(currentTTSVoice, "sapi:") {
 		safe := strings.ReplaceAll(currentTTSVoice[5:], "'", "")
 		if safe != "" {
-			// Try-Catch: SelectVoice schlägt fehl wenn Stimme nicht installiert
 			voicePart = `try { $v.SelectVoice('` + safe + `') } catch {}; `
 		}
 	}
@@ -891,11 +890,15 @@ func SpeakText(text string) {
 		"-Command", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
+	// Prozess starten BEVOR er in ttsStopCmd eingetragen wird → Process ist dann nie nil
+	if err := cmd.Start(); err != nil {
+		return
+	}
 	ttsStopMu.Lock()
 	ttsStopCmd = cmd
 	ttsStopMu.Unlock()
 
-	_ = cmd.Run()
+	_ = cmd.Wait()
 
 	ttsStopMu.Lock()
 	if ttsStopCmd == cmd {

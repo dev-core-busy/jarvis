@@ -460,7 +460,6 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 		if msg.Event == "started" {
 			// Neuer Durchlauf: laufende TTS abbrechen + Puffer zurücksetzen
 			StopTTS()
-			ja.chat.SetTTSSpeaking(false)
 			ja.ttsBufMu.Lock()
 			ja.ttsBuf.Reset()
 			ja.ttsBufMu.Unlock()
@@ -472,11 +471,8 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 			ja.ttsBufMu.Unlock()
 			go func() {
 				// TTS im Dialogmodus ODER wenn Text-TTS eingeschaltet
-				wantTTS := (ja.cfg.DialogMode || ja.cfg.TTSInTextMode) && ttsText != ""
-				if wantTTS {
-					ja.chat.SetTTSSpeaking(true)
+				if (ja.cfg.DialogMode || ja.cfg.TTSInTextMode) && ttsText != "" {
 					SpeakText(ttsText)
-					ja.chat.SetTTSSpeaking(false)
 				}
 				if ja.dialog != nil {
 					ja.dialog.MuteWhileSpeaking(false)

@@ -26,8 +26,9 @@ type JarvisApp struct {
 	chatWin   fyne.Window
 	chatMu    sync.Mutex
 
-	connected bool
-	debugMode bool // Zeigt alle Backend-Status-Nachrichten (nicht nur highlight)
+	connected      bool
+	everConnected  bool // true nach erster erfolgreicher Verbindung
+	debugMode      bool // Zeigt alle Backend-Status-Nachrichten (nicht nur highlight)
 
 	ttsBuf   strings.Builder // Sammelt LLM-Text für TTS-Ausgabe
 	ttsBufMu sync.Mutex      // Schützt ttsBuf gegen Race zwischen WS- und TTS-Goroutine
@@ -379,12 +380,20 @@ func (ja *JarvisApp) onConnected(connected bool) {
 	if connected {
 		ja.chat.SetConnectionState("connected")
 		ja.chat.SetInputEnabled(true)
-		ja.chat.AddMessage(RoleStatus, "✓ Verbunden mit Jarvis")
+		// Verbindungsstatus nur beim allerersten Verbinden im Chat zeigen;
+		// bei Reconnects genügt der Header-Indikator (grüner Punkt).
+		if !ja.everConnected {
+			ja.everConnected = true
+			ja.chat.AddMessage(RoleStatus, "✓ Verbunden mit Jarvis")
+		}
 		ja.startDialogIfNeeded()
 	} else {
 		ja.chat.SetConnectionState("disconnected")
 		ja.chat.SetInputEnabled(false)
-		ja.chat.AddMessage(RoleStatus, "Verbindung getrennt – erneuter Versuch…")
+		// "Verbindung getrennt" nur im Debug-Modus – der Header zeigt es ohnehin an.
+		if ja.debugMode {
+			ja.chat.AddMessage(RoleStatus, "Verbindung getrennt – erneuter Versuch…")
+		}
 		ja.avatar.SetMode(ModeIdle)
 		if ja.dialog != nil {
 			ja.dialog.MuteWhileSpeaking(true)
@@ -423,12 +432,8 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 		} else if strings.HasPrefix(msg.Message, "❌") || strings.HasPrefix(msg.Message, "⚠") {
 			// Fehler und Warnungen immer zeigen
 			ja.chat.AddMessage(RoleStatus, msg.Message)
-		} else if strings.HasPrefix(msg.Message, "✅ Aufgabe abgeschlossen") ||
-			strings.HasPrefix(msg.Message, "✅ Windows Desktop-Agent") {
-			// Wichtige Erfolgsmeldungen immer zeigen
-			ja.chat.AddMessage(RoleStatus, msg.Message)
 		} else if ja.debugMode {
-			// Debug-Modus: alle anderen Agent-Denk-Nachrichten (🚀🧠🔧✏️ etc.) gedimmt zeigen
+			// Debug-Modus: alle anderen Nachrichten (✅🚀🧠🔧✏️ etc.) gedimmt zeigen
 			ja.chat.AddDebugMessage(msg.Message)
 		}
 

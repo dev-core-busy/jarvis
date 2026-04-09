@@ -22,6 +22,7 @@ var (
 	deskUser32   = syscall.NewLazyDLL("user32.dll")
 	deskGdi32    = syscall.NewLazyDLL("gdi32.dll")
 	deskKernel32 = syscall.NewLazyDLL("kernel32.dll")
+	deskShell32  = syscall.NewLazyDLL("shell32.dll")
 
 	// GDI – Screenshot
 	procCreateCompatibleDC     = deskGdi32.NewProc("CreateCompatibleDC")
@@ -55,6 +56,9 @@ var (
 	procSetWindowPos        = deskUser32.NewProc("SetWindowPos")
 	procPostMessageW        = deskUser32.NewProc("PostMessageW")
 	procGetWindowRect       = deskUser32.NewProc("GetWindowRect")
+
+	// Shell32 – URL/App öffnen
+	procShellExecuteW = deskShell32.NewProc("ShellExecuteW")
 
 	// Kernel32 – Clipboard-Speicher
 	procGlobalAlloc   = deskKernel32.NewProc("GlobalAlloc")
@@ -546,6 +550,29 @@ func getWindowInfo(hwnd uintptr) string {
 		hwnd, title, class, rect.Left, rect.Top, w, h)
 }
 
+// ─── ShellExecuteW ────────────────────────────────────────────────────────────
+
+// shellOpen öffnet eine URL oder Datei/Programm über ShellExecuteW –
+// der native Windows-Weg, entspricht Doppelklick im Explorer.
+// Kein cmd.exe nötig → kein UNC-Pfad-Bug.
+func shellOpen(target string) error {
+	verbPtr, _   := syscall.UTF16PtrFromString("open")
+	targetPtr, _ := syscall.UTF16PtrFromString(target)
+	ret, _, _ := procShellExecuteW.Call(
+		0,                                     // hwnd
+		uintptr(unsafe.Pointer(verbPtr)),      // lpOperation = "open"
+		uintptr(unsafe.Pointer(targetPtr)),    // lpFile
+		0,                                     // lpParameters
+		0,                                     // lpDirectory
+		1,                                     // nShowCmd = SW_SHOWNORMAL
+	)
+	// ShellExecuteW: Rückgabe > 32 = Erfolg
+	if ret <= 32 {
+		return fmt.Errorf("ShellExecuteW fehlgeschlagen (code %d) für: %s", ret, target)
+	}
+	return nil
+}
+
 // ─── Bekannte App-Namen ───────────────────────────────────────────────────────
 
 // knownApps mappt gängige Kurzbezeichnungen auf ausführbare Dateien.
@@ -720,8 +747,7 @@ func DesktopExecute(cmd DesktopCommand) DesktopResult {
 		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 			url = "https://" + url
 		}
-		_, _, err := desktopShellExec(`start "" "` + url + `"`)
-		if err != nil {
+		if err := shellOpen(url); err != nil {
 			res.Error = err.Error()
 		} else {
 			res.Output = "Browser geöffnet: " + url
@@ -736,15 +762,10 @@ func DesktopExecute(cmd DesktopCommand) DesktopResult {
 			res.Error = "kein Programmname angegeben"
 			break
 		}
-		// Bekannte App-Namen auf ausführbare Dateien mappen (DE + EN)
 		if mapped, ok := knownApps[strings.ToLower(app)]; ok {
 			app = mapped
 		}
-		// PowerShell Start-Process ist robuster als 'start ""' (kein UNC-Pfad-Bug)
-		safe := strings.ReplaceAll(app, "'", "''")
-		psCmd := fmt.Sprintf(`powershell -NoProfile -WindowStyle Hidden -Command "Start-Process '%s'"`, safe)
-		_, _, err := desktopShellExec(psCmd)
-		if err != nil {
+		if err := shellOpen(app); err != nil {
 			res.Error = err.Error()
 		} else {
 			res.Output = "Gestartet: " + app

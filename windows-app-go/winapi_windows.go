@@ -929,12 +929,125 @@ func MoveAvatarWindow(dx, dy float64) {
 	)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Single-Instance (Mutex + Named Pipe IPC)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const (
+	_mutexName    = "Local\\JarvisDesktopApp_v1"
+	_pipeName     = `\\.\pipe\JarvisDesktopApp_v1`
+	_errAlreadyExists = uintptr(183) // ERROR_ALREADY_EXISTS
+)
+
+var (
+	pCreateNamedPipeW   = kernel32.MustFindProc("CreateNamedPipeW")
+	pConnectNamedPipe   = kernel32.MustFindProc("ConnectNamedPipe")
+	pReadFile           = kernel32.MustFindProc("ReadFile")
+	pWriteFile          = kernel32.MustFindProc("WriteFile")
+	pCreateFileW        = kernel32.MustFindProc("CreateFileW")
+	pCloseHandle        = kernel32.MustFindProc("CloseHandle")
+	pAllowSetForeground = user32.MustFindProc("AllowSetForegroundWindow")
+	pBringWindowToTop   = user32.MustFindProc("BringWindowToTop")
+	pEnumWindows        = user32.MustFindProc("EnumWindows")
+	pGetWindowTextW     = user32.MustFindProc("GetWindowTextW")
+	pIsWindowVisible    = user32.MustFindProc("IsWindowVisible")
+)
+
 // EnsureSingleInstance prüft via benanntem Mutex ob eine Instanz bereits läuft.
-// Gibt false zurück wenn eine zweite Instanz erkannt wird – die App soll dann beenden.
+// Falls ja: sendet "show" durch Named Pipe an laufende Instanz und gibt false zurück.
 func EnsureSingleInstance() bool {
-	const errorAlreadyExists = uintptr(183)
-	namePtr, _ := syscall.UTF16PtrFromString("Local\\JarvisAppMutex")
+	namePtr, _ := syscall.UTF16PtrFromString(_mutexName)
+	// Mutex anlegen – Handle bleibt bis Prozessende offen (bewusst kein CloseHandle)
 	pCreateMutexW.Call(0, 1, uintptr(unsafe.Pointer(namePtr)))
 	lastErr, _, _ := pGetLastError.Call()
-	return lastErr != errorAlreadyExists
+	if lastErr != _errAlreadyExists {
+		return true // Erste Instanz – normal starten
+	}
+	// Zweite Instanz: "show" an laufende Instanz schicken
+	pipePtr, _ := syscall.UTF16PtrFromString(_pipeName)
+	for i := 0; i < 8; i++ {
+		h, _, _ := pCreateFileW.Call(
+			uintptr(unsafe.Pointer(pipePtr)),
+			0x40000000, // GENERIC_WRITE
+			0, 0,
+			3,          // OPEN_EXISTING
+			0x00000080, // FILE_ATTRIBUTE_NORMAL
+			0,
+		)
+		if h != 0 && h != ^uintptr(0) {
+			msg := []byte("show\n")
+			var written uint32
+			pWriteFile.Call(h, uintptr(unsafe.Pointer(&msg[0])), uintptr(len(msg)), uintptr(unsafe.Pointer(&written)), 0)
+			pCloseHandle.Call(h)
+			return false
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return false
+}
+
+// StartPipeServer lauscht auf Named-Pipe-Verbindungen.
+// Bei Empfang von "show" wird onShow() aufgerufen (im eigenen Goroutine).
+func StartPipeServer(onShow func()) {
+	go func() {
+		for {
+			pipePtr, _ := syscall.UTF16PtrFromString(_pipeName)
+			h, _, _ := pCreateNamedPipeW.Call(
+				uintptr(unsafe.Pointer(pipePtr)),
+				0x00000001, // PIPE_ACCESS_INBOUND
+				0x00000000, // PIPE_TYPE_BYTE | PIPE_WAIT
+				10,         // nMaxInstances
+				512, 512,   // out/in buffer
+				0, 0,
+			)
+			if h == ^uintptr(0) { // INVALID_HANDLE_VALUE – kurz warten, Retry
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+			// Blockiert bis Client verbindet
+			pConnectNamedPipe.Call(h, 0)
+			go func(handle uintptr) {
+				defer pCloseHandle.Call(handle)
+				buf := make([]byte, 16)
+				var read uint32
+				r, _, _ := pReadFile.Call(handle, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), uintptr(unsafe.Pointer(&read)), 0)
+				if r != 0 && read > 0 {
+					onShow()
+				}
+			}(h)
+		}
+	}()
+}
+
+// BringToForeground sucht das Jarvis-Hauptfenster per Titel und bringt es in den Vordergrund.
+// Muss aus der laufenden Instanz aufgerufen werden (Input-Rechte → SetForegroundWindow erlaubt).
+func BringToForeground() {
+	// Via EnumWindows nach Fenstername suchen
+	var found uintptr
+	cb := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
+		if found != 0 {
+			return 0
+		}
+		vis, _, _ := pIsWindowVisible.Call(hwnd)
+		if vis == 0 {
+			return 1
+		}
+		buf := make([]uint16, 256)
+		pGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+		title := syscall.UTF16ToString(buf)
+		if title == "Jarvis – Chat" || title == "Jarvis" {
+			found = hwnd
+			return 0
+		}
+		return 1
+	})
+	pEnumWindows.Call(cb, 0)
+	if found == 0 {
+		return
+	}
+	// AllowSetForegroundWindow → SetForegroundWindow → BringWindowToTop
+	pAllowSetForeground.Call(^uintptr(0)) // ASFW_ANY
+	pShowWindow.Call(found, 9)            // SW_RESTORE (aus Minimize holen falls nötig)
+	pSetForegroundWindow.Call(found)
+	pBringWindowToTop.Call(found)
 }

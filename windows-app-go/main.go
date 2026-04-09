@@ -143,6 +143,12 @@ func main() {
 		ja.showStartUI()
 	}
 
+	// Single-Instance: Pipe-Server starten – bringt Fenster in Vordergrund wenn 2. Instanz startet
+	StartPipeServer(func() {
+		a.SendNotification(&fyne.Notification{Title: "Jarvis", Content: "Bereits aktiv"})
+		BringToForeground()
+	})
+
 	// Update-Check im Hintergrund (nicht blockierend)
 	go func() {
 		time.Sleep(5 * time.Second) // kurz warten bis UI fertig geladen

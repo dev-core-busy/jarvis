@@ -2,7 +2,9 @@
 
 package main
 
-func EnsureSingleInstance() bool                                             { return true }
+func EnsureSingleInstance() bool             { return true }
+func StartPipeServer(onShow func())          {}
+func BringToForeground()                     {}
 func MakeAvatarWindowFrameless()                                            {}
 func MakeChatWindowFrameless()                                              {}
 func MoveAvatarWindow(dx, dy float64)                                       {}

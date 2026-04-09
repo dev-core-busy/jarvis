@@ -267,10 +267,12 @@ fun ChatScreen(
             ChatInputBar(
                 text = inputText,
                 voiceState = voiceState,
+                isSpeaking = isSpeaking,
                 onTextChange = viewModel::onInputChange,
                 onSend = viewModel::sendMessage,
                 onMicStart = viewModel::startListening,
                 onMicStop = viewModel::stopListening,
+                onTtsStop = viewModel::stopTts,
             )
         }
 
@@ -603,10 +605,12 @@ private fun QuickActionRow(actions: List<String>, onAction: (String) -> Unit) {
 private fun ChatInputBar(
     text: String,
     voiceState: VoiceState,
+    isSpeaking: Boolean = false,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onMicStart: () -> Unit,
     onMicStop: () -> Unit,
+    onTtsStop: () -> Unit = {},
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -637,6 +641,17 @@ private fun ChatInputBar(
                     contentDescription = stringResource(R.string.chat_mic),
                     tint = micColor,
                 )
+            }
+
+            // TTS-Stop-Button (⏹) – nur sichtbar wenn Jarvis gerade spricht
+            if (isSpeaking) {
+                IconButton(onClick = onTtsStop) {
+                    Icon(
+                        imageVector = Icons.Filled.StopCircle,
+                        contentDescription = "Vorlesen stoppen",
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
 
             // Texteingabe

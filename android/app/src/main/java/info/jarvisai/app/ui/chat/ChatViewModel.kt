@@ -287,6 +287,11 @@ class ChatViewModel @Inject constructor(
         _voiceState.value = VoiceState.IDLE
     }
 
+    /** Laufende TTS-Ausgabe sofort unterbrechen. */
+    fun stopTts() {
+        ttsManager.stop()
+    }
+
     override fun onCleared() {
         super.onCleared()
         speechRecognizer?.destroy()

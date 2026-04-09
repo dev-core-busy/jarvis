@@ -1,8 +1,10 @@
 package info.jarvisai.app
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -39,6 +41,20 @@ class MainActivity : ComponentActivity() {
                 JarvisNavGraph()
             }
         }
+    }
+
+    /** Wird aufgerufen wenn eine zweite Instanz gestartet wird (singleTask).
+     *  Bringt das bestehende Fenster in den Vordergrund – keine Notification. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+        moveTaskToFront()
+    }
+
+    private fun moveTaskToFront() {
+        val am = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+        am.moveTaskToFront(taskId, 0)
     }
 }
 

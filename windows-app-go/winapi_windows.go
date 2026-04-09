@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -600,7 +601,27 @@ var (
 	currentTTSVoice  string
 	currentServerURL string
 	currentAPIKey    string
+
+	// TTS-Stop: laufender Prozess/MCI-Zustand
+	ttsStopMu      sync.Mutex
+	ttsStopCmd     *exec.Cmd // aktueller PowerShell-Prozess (SAPI)
+	ttsStopIsMCI   bool      // true = MCI/MP3 läuft gerade
 )
+
+// StopTTS unterbricht die laufende TTS-Wiedergabe sofort.
+func StopTTS() {
+	ttsStopMu.Lock()
+	defer ttsStopMu.Unlock()
+	if ttsStopCmd != nil {
+		_ = ttsStopCmd.Process.Kill()
+		ttsStopCmd = nil
+	}
+	if ttsStopIsMCI {
+		mciSend("stop jarvis_tts")
+		mciSend("close jarvis_tts")
+		ttsStopIsMCI = false
+	}
+}
 
 // SetTTSVoice setzt die aktive Stimme (SAPI-Name oder Backend-ID wie "de-DE-KatjaNeural").
 func SetTTSVoice(voice string) { currentTTSVoice = voice }
@@ -714,7 +735,17 @@ func playMP3Bytes(data []byte) {
 	defer os.Remove(path)
 	path = strings.ReplaceAll(path, "/", "\\")
 	mciSend(fmt.Sprintf(`open "%s" type mpegvideo alias jarvis_tts`, path))
+
+	ttsStopMu.Lock()
+	ttsStopIsMCI = true
+	ttsStopMu.Unlock()
+
 	mciSend(`play jarvis_tts wait`)
+
+	ttsStopMu.Lock()
+	ttsStopIsMCI = false
+	ttsStopMu.Unlock()
+
 	mciSend(`close jarvis_tts`)
 }
 
@@ -859,7 +890,18 @@ func SpeakText(text string) {
 		"-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
 		"-Command", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+
+	ttsStopMu.Lock()
+	ttsStopCmd = cmd
+	ttsStopMu.Unlock()
+
 	_ = cmd.Run()
+
+	ttsStopMu.Lock()
+	if ttsStopCmd == cmd {
+		ttsStopCmd = nil
+	}
+	ttsStopMu.Unlock()
 }
 
 // stripMarkdownForTTS entfernt Markdown-Formatierung für TTS-Ausgabe.

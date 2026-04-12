@@ -49,6 +49,7 @@ class ChatViewModel @Inject constructor(
     val messages: StateFlow<List<ChatMessage>> = repo.messages
     val connectionState: StateFlow<ConnectionState> = repo.connectionState
     val agents: StateFlow<List<AgentInfo>> = repo.agents
+    val isAgentRunning: StateFlow<Boolean> = repo.isAgentRunning
     val settings = settingsDataStore.settings
 
     // Avatar / TTS
@@ -150,6 +151,10 @@ class ChatViewModel @Inject constructor(
     fun sendQuickAction(action: String) {
         ttsManager.stop()
         repo.sendMessage(action)
+    }
+
+    fun stopAgent() {
+        repo.sendStop()
     }
 
     fun toggleAgentPanel() { _showAgentPanel.value = !_showAgentPanel.value }

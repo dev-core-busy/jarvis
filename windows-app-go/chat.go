@@ -145,8 +145,9 @@ type ChatWidget struct {
 	Input     *SendEntry
 	SendBtn   *widget.Button
 	MicBtn    *widget.Button
-	TtsStopBtn *widget.Button // Stop-Button für laufende TTS (nur sichtbar während Wiedergabe)
-	StatusLbl *canvas.Text
+	TtsStopBtn    *widget.Button // Stop-Button für laufende TTS (nur sichtbar während Wiedergabe)
+	StopAgentBtn  *widget.Button // Abbrechen-Button für laufende Agent-Anfrage
+	StatusLbl     *canvas.Text
 	ConnDot   *canvas.Circle
 	ConnLabel *canvas.Text
 
@@ -158,10 +159,11 @@ type ChatWidget struct {
 
 	ironManImg *canvas.Image // Avatar-Bild (für Show/Hide)
 
-	OnSend      func(string)
-	OnMicButton func()
-	OnSettings  func()
-	OnTTSStop   func() // laufende TTS-Wiedergabe unterbrechen
+	OnSend        func(string)
+	OnMicButton   func()
+	OnSettings    func()
+	OnTTSStop     func() // laufende TTS-Wiedergabe unterbrechen
+	OnStopAgent   func() // laufende Agent-Anfrage abbrechen
 }
 
 func NewChatWidget() *ChatWidget {
@@ -196,6 +198,15 @@ func NewChatWidget() *ChatWidget {
 	ttsStopBtn.Hide()
 	c.TtsStopBtn = ttsStopBtn
 
+	stopAgentBtn := widget.NewButtonWithIcon("Abbrechen", theme.CancelIcon(), func() {
+		if c.OnStopAgent != nil {
+			c.OnStopAgent()
+		}
+	})
+	stopAgentBtn.Importance = widget.DangerImportance
+	stopAgentBtn.Hide()
+	c.StopAgentBtn = stopAgentBtn
+
 	c.StatusLbl = canvas.NewText("", jc.muted)
 	c.StatusLbl.TextSize = 11
 	c.StatusLbl.Alignment = fyne.TextAlignCenter
@@ -219,6 +230,19 @@ func (c *ChatWidget) SetAvatarVisible(visible bool) {
 		c.ironManImg.Hide()
 	}
 	c.ironManImg.Refresh()
+}
+
+// SetAgentRunning blendet den Abbrechen-Button ein/aus.
+func (c *ChatWidget) SetAgentRunning(running bool) {
+	if c.StopAgentBtn == nil {
+		return
+	}
+	if running {
+		c.StopAgentBtn.Show()
+	} else {
+		c.StopAgentBtn.Hide()
+	}
+	c.StopAgentBtn.Refresh()
 }
 
 // SetTTSSpeaking blendet den TTS-Stop-Button ein/aus.
@@ -288,10 +312,15 @@ func (c *ChatWidget) Layout(cfg *Config) fyne.CanvasObject {
 		color.RGBA{0x1A, 0x1A, 0x2E, 0xFF}, // surface unten
 	)
 	sep := canvas.NewLine(color.RGBA{0x9B, 0x59, 0xB6, 0x40}) // lila Trennlinie
+	// Statuszeile: [StatusText ──────────────] [Abbrechen]
+	statusRow := container.NewBorder(nil, nil, nil,
+		c.StopAgentBtn,
+		c.StatusLbl,
+	)
 	inputArea := container.NewStack(inputBg,
 		container.NewVBox(
 			sep,
-			c.StatusLbl,
+			statusRow,
 			container.NewPadded(inputRow),
 		))
 

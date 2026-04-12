@@ -21,6 +21,7 @@
     const loginBtn = document.getElementById('login-btn');
 
     const logContainer = document.getElementById('log-container');
+    const thinkingBar = document.getElementById('llm-thinking-bar');
     const taskInput = document.getElementById('task-input');
     const btnSend = document.getElementById('btn-send');
     const btnPause = document.getElementById('btn-pause');
@@ -1002,6 +1003,8 @@
 
     // ─── Agent State ────────────────────────────────────────────
     function updateAgentState(state) {
+        const isRunning = state === 'running';
+        thinkingBar.hidden = !isRunning;
         switch (state) {
             case 'running':
                 btnPause.disabled = false;

@@ -800,6 +800,14 @@
             };
         }
 
+        // Thinking Bar: ausblenden wenn Hauptagent fertig oder idle
+        if ((event === 'finished' || event === 'paused') && !agent.is_sub_agent) {
+            updateAgentState('idle');
+        }
+        if (event === 'started' && !agent.is_sub_agent) {
+            updateAgentState('running');
+        }
+
         _renderAgentCards();
         _updateSidebarVisibility();
     }

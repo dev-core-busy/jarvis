@@ -264,15 +264,18 @@ fun ChatScreen(
             }
 
             // Eingabeleiste mit Navigation-Bar-Inset
+            val isAgentRunning by viewModel.isAgentRunning.collectAsState()
             ChatInputBar(
                 text = inputText,
                 voiceState = voiceState,
                 isSpeaking = isSpeaking,
+                isAgentRunning = isAgentRunning,
                 onTextChange = viewModel::onInputChange,
                 onSend = viewModel::sendMessage,
                 onMicStart = viewModel::startListening,
                 onMicStop = viewModel::stopListening,
                 onTtsStop = viewModel::stopTts,
+                onStopAgent = viewModel::stopAgent,
             )
         }
 
@@ -619,11 +622,13 @@ private fun ChatInputBar(
     text: String,
     voiceState: VoiceState,
     isSpeaking: Boolean = false,
+    isAgentRunning: Boolean = false,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onMicStart: () -> Unit,
     onMicStop: () -> Unit,
     onTtsStop: () -> Unit = {},
+    onStopAgent: () -> Unit = {},
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -654,6 +659,17 @@ private fun ChatInputBar(
                     contentDescription = stringResource(R.string.chat_mic),
                     tint = micColor,
                 )
+            }
+
+            // Abbrechen-Button – nur sichtbar wenn Agent läuft
+            if (isAgentRunning) {
+                IconButton(onClick = onStopAgent) {
+                    Icon(
+                        imageVector = Icons.Filled.Cancel,
+                        contentDescription = "Anfrage abbrechen",
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
 
             // TTS-Stop-Button (⏹) – nur sichtbar wenn Jarvis gerade spricht

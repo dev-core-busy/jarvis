@@ -380,6 +380,11 @@ func (ja *JarvisApp) reconnect() {
 		StopTTS()
 		ja.chat.SetTTSSpeaking(false)
 	}
+	ja.chat.OnStopAgent = func() {
+		ja.ws.SendStop("")
+		ja.chat.SetAgentRunning(false)
+		ja.chat.SetStatus("")
+	}
 	// Desktop-Steuerung: Backend kann Windows-Desktop steuern
 	ja.ws.OnDesktopCommand = func(cmd DesktopCommand) {
 		res := DesktopExecute(cmd)
@@ -477,7 +482,10 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 			ja.ttsBufMu.Lock()
 			ja.ttsBuf.Reset()
 			ja.ttsBufMu.Unlock()
+			ja.chat.SetAgentRunning(true)
 		} else if msg.Event == "finished" {
+			ja.chat.SetAgentRunning(false)
+			ja.chat.SetStatus("")
 			ja.avatar.SetMode(ModeIdle)
 			ja.ttsBufMu.Lock()
 			ttsText := ja.ttsBuf.String()

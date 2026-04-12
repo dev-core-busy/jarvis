@@ -93,6 +93,22 @@ func (c *WSClient) SendTask(text string) {
 	}
 }
 
+func (c *WSClient) SendStop(agentID string) {
+	payload := map[string]interface{}{
+		"type":   "control",
+		"action": "stop",
+		"token":  c.cfg.APIKey,
+	}
+	if agentID != "" {
+		payload["agent_id"] = agentID
+	}
+	data, _ := json.Marshal(payload)
+	select {
+	case c.sendCh <- data:
+	default:
+	}
+}
+
 func (c *WSClient) SendScreenResult(action, data string) {
 	payload := map[string]string{
 		"type":   "screen_result",

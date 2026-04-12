@@ -125,6 +125,17 @@ class ChatRepository @Inject constructor(
                 }
                 saveMessages()
             }
+            "llm_stats" -> {
+                val sec = event.duration_ms / 1000.0
+                val sb = StringBuilder("⏱ ${"%.1f".format(sec)}s")
+                if (event.total_tokens > 0) {
+                    sb.append(" · ${event.input_tokens} → ${event.output_tokens} Tokens")
+                }
+                if (event.steps > 0) {
+                    sb.append(" · ${event.steps} Schritt${if (event.steps != 1) "e" else ""}")
+                }
+                appendToStream(sb.toString(), SegmentType.STATUS)
+            }
             "agent_event" -> {
                 when (event.event) {
                     "finished" -> finalizeStream()

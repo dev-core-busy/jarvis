@@ -1137,6 +1137,22 @@ body {
     display: none !important;
 }
 
+/* LLM-Stats Zeile (Dauer + Token-Verbrauch) */
+.log-entry.log-stats {
+    padding: 0.05rem 0 0.2rem 0;
+    border-bottom: none;
+}
+.log-stats-text {
+    font-size: 0.7rem;
+    color: rgba(165, 180, 252, 0.55);
+    font-style: italic;
+    letter-spacing: 0.02em;
+}
+/* Im Debug-Modus aus: Stats auch ausblenden */
+.log-container.hide-debug .log-entry.log-stats {
+    display: none !important;
+}
+
 .log-entry:last-child {
     border-bottom: none;
 }

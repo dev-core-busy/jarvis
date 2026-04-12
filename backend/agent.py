@@ -571,7 +571,7 @@ KRITISCH – Autonomie-Regeln:
             await self._send_llm_stats(ws, _task_duration_ms, _total_input_tokens, _total_output_tokens, steps)
 
             # Auto-Learning: Bei mehrstufigen Aufgaben den Loesungsweg speichern
-            if steps >= 3 and self._tool_stats:
+            if steps >= 2 and self._tool_stats:
                 failed = [s for s in self._tool_stats if not s["success"]]
                 succeeded = [s for s in self._tool_stats if s["success"]]
                 if failed and succeeded:
@@ -749,7 +749,7 @@ KRITISCH – Autonomie-Regeln:
                 steps += 1
 
             # Auto-Learning (gleiche Logik wie in run_task)
-            if steps >= 3 and self._tool_stats:
+            if steps >= 2 and self._tool_stats:
                 failed = [s for s in self._tool_stats if not s["success"]]
                 succeeded = [s for s in self._tool_stats if s["success"]]
                 if failed and succeeded:

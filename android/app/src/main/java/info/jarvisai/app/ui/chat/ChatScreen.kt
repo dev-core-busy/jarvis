@@ -538,6 +538,9 @@ fun MessageBubble(
                         val answerText = msg.segments
                             .filter { it.type == SegmentType.ANSWER }
                             .joinToString("\n") { it.text }
+                        val statsText = msg.segments
+                            .filter { it.type == SegmentType.STATS }
+                            .joinToString(" ") { it.text }
                         if (answerText.isNotBlank()) {
                             // Antwort vorhanden → anzeigen, KEINE Punkte
                             Text(
@@ -551,6 +554,16 @@ fun MessageBubble(
                             // Noch keine Antwort → Punkte als Platzhalter
                             Spacer(modifier = Modifier.height(4.dp))
                             StreamingDots()
+                        }
+                        // Stats immer anzeigen (auch im Standard-Modus)
+                        if (statsText.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = statsText,
+                                color = Color.White.copy(alpha = 0.4f),
+                                fontSize = 11.sp,
+                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                            )
                         }
                     }
                 }

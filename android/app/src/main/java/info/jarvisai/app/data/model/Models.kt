@@ -7,9 +7,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class MessageRole { USER, JARVIS }
 
-/** STATUS = Agenten-Statuszeile (🚀🧠⏳✅), ANSWER = eigentliche LLM-Antwort */
+/** STATUS = Agenten-Statuszeile (🚀🧠⏳✅), ANSWER = eigentliche LLM-Antwort, STATS = Dauer/Token-Info */
 @Serializable
-enum class SegmentType { STATUS, ANSWER }
+enum class SegmentType { STATUS, ANSWER, STATS }
 
 /** Mundposition des Avatars für Lip-Sync-Animation */
 enum class AvatarMouthState { CLOSED, SMALL, OPEN }

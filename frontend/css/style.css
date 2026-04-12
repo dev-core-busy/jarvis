@@ -1150,6 +1150,27 @@ body {
 }
 /* Stats immer sichtbar – auch wenn Debug-Modus aus */
 
+/* LLM Thinking Bar – animierter Ladebalken */
+.llm-thinking-bar {
+    height: 3px;
+    width: 100%;
+    background: transparent;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.llm-thinking-bar::after {
+    content: '';
+    display: block;
+    height: 100%;
+    width: 40%;
+    background: linear-gradient(90deg, transparent, rgba(129,140,248,0.9), rgba(167,139,250,0.9), transparent);
+    animation: llm-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes llm-shimmer {
+    0%   { transform: translateX(-200%); }
+    100% { transform: translateX(400%); }
+}
+
 .log-entry:last-child {
     border-bottom: none;
 }

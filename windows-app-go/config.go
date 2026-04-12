@@ -12,6 +12,8 @@ type Config struct {
 	DialogMode  bool   `json:"dialog_mode"`
 	WindowW     int    `json:"window_w"`
 	WindowH     int    `json:"window_h"`
+	WindowX     int    `json:"window_x"` // Chat-Fenster Position (physische Pixel)
+	WindowY     int    `json:"window_y"`
 	SpeakerID   string `json:"speaker_id"`
 	MicID       string `json:"mic_id"`
 	SpeakerName string `json:"speaker_name"`
@@ -27,6 +29,8 @@ type Config struct {
 	VADThreshold    int    `json:"vad_threshold"`
 	// TTS-Stimme (Windows SAPI Stimmenname, "" = Standard)
 	TTSVoice string `json:"tts_voice"`
+	// STT-Modell (Dateiname ohne Pfad, "" = erstes verfügbares)
+	STTModel string `json:"stt_model"`
 	// Hintergrund
 	BackgroundType      string  `json:"background_type"`   // "gradient" | "color" | "photo"
 	BackgroundColor     int     `json:"background_color"`  // Index in bgPalette
@@ -37,6 +41,7 @@ type Config struct {
 	// Anzeige
 	DebugMode     bool `json:"debug_mode"`       // Agent-Denk-Nachrichten anzeigen
 	TTSInTextMode bool `json:"tts_in_text_mode"` // Antworten im Text-Modus vorlesen
+	AvatarVisible bool `json:"avatar_visible"`   // Iron Man Avatar anzeigen
 }
 
 // AppVersion wird beim Build via -ldflags="-X main.AppVersion=0.8xx" gesetzt.
@@ -63,6 +68,7 @@ var defaultConfig = Config{
 	BackgroundColor:     0,
 	BackgroundAlpha:     0.5,
 	AutoSendVoice:   true,
+	AvatarVisible:   true,
 }
 
 func configPath() string {

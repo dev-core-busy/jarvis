@@ -30,9 +30,21 @@ def _friendly_api_error(exc: Exception) -> str:
             return "🟡 **Anthropic überlastet**: Server aktuell überlastet – bitte nochmal versuchen."
 
     # ── Google / Gemini-spezifische Fehler ───────────────────────────────
-    if "google" in raw.lower() or "gemini" in raw.lower() or "generativelanguage" in raw.lower():
-        if "quota" in raw.lower() or "429" in raw:
+    # Gemini SDK-Fehler (google.genai.errors.ServerError) enthalten kein "google" im str(),
+    # daher auch anhand von Fehlercodes und -status erkennen
+    _is_gemini = (
+        "google" in raw.lower() or "gemini" in raw.lower()
+        or "generativelanguage" in raw.lower()
+        or type(exc).__module__.startswith("google")
+    )
+    if _is_gemini:
+        if "quota" in raw.lower() or "429" in raw or "RESOURCE_EXHAUSTED" in raw:
             return "🟡 **Google API-Limit**: Tages- oder Minutenkontingent erschöpft. Bitte warten oder anderen Provider wählen."
+        if "503" in raw or "UNAVAILABLE" in raw or "high demand" in raw.lower() or "502" in raw:
+            return (
+                "🟡 **Gemini temporär nicht verfügbar**: Das KI-Modell ist gerade überlastet.\n"
+                "💡 Bitte kurz warten und die Anfrage nochmal senden."
+            )
         if "401" in raw or "403" in raw or "api_key" in raw.lower():
             return "🔴 **Google API-Key ungültig**: Bitte API-Key in den Einstellungen prüfen."
         if "SAFETY" in raw or "safety" in raw.lower():
@@ -47,6 +59,15 @@ def _friendly_api_error(exc: Exception) -> str:
             return "🔴 **OpenRouter Guthaben aufgebraucht**: Bitte Guthaben auf openrouter.ai aufladen."
         if "401" in raw:
             return "🔴 **OpenRouter API-Key ungültig**: Bitte API-Key in den Einstellungen prüfen."
+
+    # ── Generische Überlastungs-/Verfügbarkeitsfehler (providerunabhängig) ──
+    if "503" in raw or "UNAVAILABLE" in raw or "high demand" in raw.lower() or "temporarily unavailable" in raw.lower():
+        return (
+            "🟡 **KI-Modell temporär nicht verfügbar**: Der Anbieter ist gerade überlastet.\n"
+            "💡 Bitte kurz warten und die Anfrage nochmal senden."
+        )
+    if "429" in raw or "rate limit" in raw.lower() or "RESOURCE_EXHAUSTED" in raw:
+        return "🟡 **Rate-Limit**: Zu viele Anfragen – bitte kurz warten und nochmal versuchen."
 
     # ── Netzwerk-/Verbindungsfehler ───────────────────────────────────────
     if "timeout" in raw.lower() or "timed out" in raw.lower():
@@ -134,19 +155,20 @@ Du kannst Aufgaben eigenständig lösen, indem du die verfügbaren Tools nutzt.
 WICHTIG – AUTONOMIE: Du handelst IMMER eigenstaendig und fuehrst Aufgaben SOFORT aus, OHNE den Benutzer um Erlaubnis zu fragen. Wenn der Benutzer sagt "fuehre X aus", dann fuehre es DIREKT aus. Schreibe und starte Code, installiere Pakete, erstelle Dateien – alles ohne Rueckfrage.
 
 Regeln:
-1. WISSENSFRAGEN DIREKT BEANTWORTEN: Wenn du die Antwort sicher aus deinem Wissen kennst (Allgemeinwissen, Mathematik, Fakten, Definitionen, Sprachen), antworte SOFORT ohne Tool-Aufruf.
-2. WISSENS-CACHE: Wenn du etwas ueber ein Tool nachgeschlagen hast, speichere es mit memory_manage (key mit Prefix "wissen_").
-3. Arbeite Schritt fuer Schritt und erklaere kurz, was du tust.
-4. Nutze shell_execute fuer Kommandozeilen-Befehle. Wenn Code ausgefuehrt werden soll, nutze shell_execute DIREKT.
-5. Nutze desktop_* Tools um Programme auf dem LINUX-Desktop zu bedienen. Fuer den Windows-Desktop: windows_desktop Tool verwenden.
-6. Nutze filesystem_* Tools um Dateien zu lesen/schreiben.
-7. Mache Screenshots um den Desktop-Zustand zu pruefen (screenshot Tool fuer Linux, windows_desktop(action='screenshot') fuer Windows).
-8. Wenn eine Aufgabe erledigt ist, sage es klar und deutlich.
-9. Bei Fehlern: analysiere, versuche eine Alternative.
-10. Antworte immer auf Deutsch.
-11. Nutze knowledge_search um in der Wissensdatenbank nach relevanten Informationen zu suchen.
+1. WISSENSDATENBANK ZUERST: Bei Fragen zu Produkten, Software, Technik, Kunden oder internen Vorgaben IMMER zuerst knowledge_search aufrufen. Die lokale Wissensdatenbank enthaelt Kundendokumentation, Produkthandbuecher, technische Spezifikationen und Installationsanleitungen. NIEMALS direkt ins Internet gehen, wenn ein Produktname, Softwarename oder eine fachliche Frage gestellt wird – erst knowledge_search! Den Suchbegriff IMMER selbst aus der Benutzeranfrage ableiten – NIEMALS den Benutzer nach einem Suchbegriff fragen. Beispiel: "wie funktioniert LDT Import in Medistar?" → knowledge_search({"query": "LDT Import Medistar"}).
+2. WISSENSFRAGEN AUS ALLGEMEINWISSEN: Nur bei eindeutigem Allgemeinwissen (Mathematik, Geografie, Geschichte, allgemeine Sprachfragen) antworte direkt. Bei allem mit Produktbezug oder Kundenbezug IMMER knowledge_search zuerst.
+3. WISSENS-CACHE: Wenn du etwas ueber ein Tool nachgeschlagen hast, speichere es mit memory_manage (key mit Prefix "wissen_").
+4. Arbeite Schritt fuer Schritt und erklaere kurz, was du tust.
+5. Nutze shell_execute fuer Kommandozeilen-Befehle. Wenn Code ausgefuehrt werden soll, nutze shell_execute DIREKT.
+6. Nutze desktop_* Tools um Programme auf dem LINUX-Desktop zu bedienen. Fuer den Windows-Desktop: windows_desktop Tool verwenden.
+7. Nutze filesystem_* Tools um Dateien zu lesen/schreiben.
+8. Mache Screenshots um den Desktop-Zustand zu pruefen (screenshot Tool fuer Linux, windows_desktop(action='screenshot') fuer Windows).
+9. Wenn eine Aufgabe erledigt ist, sage es klar und deutlich.
+10. Bei Fehlern: analysiere, versuche eine Alternative.
+11. Antworte immer auf Deutsch.
 12. Nutze memory_manage um wichtige Fakten dauerhaft zu speichern. Pruefe zu Beginn den Memory.
-13. WICHTIG: Bevor du eine Webseite oeffnest, MUSST du knowledge_search nutzen, um die exakten Vorgaben zu lesen!
+13. ABSOLUT VERBOTEN: Bevor du eine Webseite oder Suchmaschine oeffnest, MUSST du knowledge_search aufgerufen haben. Ohne vorherigen knowledge_search-Aufruf darf KEINE Webseite geoeffnet werden!
+14. ABSOLUT VERBOTEN: Lies NIEMALS .docx, .pdf, .xlsx, .pptx, .doc, .xls Dateien direkt mit filesystem_read – diese sind Binaerdateien und liefern unlesbaren Muell. Fuer Inhalte aus diesen Dateien ausschliesslich knowledge_search verwenden. Der Inhalt ist dort bereits korrekt geparst und durchsuchbar.
 
 AUTO-LEARNING – Lerne aus Erfahrung:
 - Wenn du fuer eine Aufgabe MEHRERE Versuche brauchst (z.B. verschiedene Tools oder Quellen probierst), speichere den ERFOLGREICHEN Weg:
@@ -417,9 +439,11 @@ KRITISCH – Autonomie-Regeln:
                 text_parts = [p.text for p in response.parts if p.text]
 
                 # Text-Antworten senden
+                # intermediate=True wenn gleichzeitig Tool-Aufrufe kommen (kein Endergebnis)
+                is_intermediate = bool(function_calls)
                 for text in text_parts:
                     if text.strip():
-                        await self._send_status(ws, text.strip(), highlight=True)
+                        await self._send_status(ws, text.strip(), highlight=True, intermediate=is_intermediate)
 
                 # Wenn keine Function Calls → fertig
                 if not function_calls:
@@ -794,8 +818,10 @@ KRITISCH – Autonomie-Regeln:
             await self._send_status(ws, "⏸️ Pausiert – warte auf Fortsetzen...")
             await self._pause_event.wait()
 
-    async def _send_status(self, ws: WebSocket, message: str, highlight: bool = False):
-        """Sendet Status-Update an Frontend (mit agent_id fuer Multi-Agent)."""
+    async def _send_status(self, ws: WebSocket, message: str, highlight: bool = False, intermediate: bool = False):
+        """Sendet Status-Update an Frontend (mit agent_id fuer Multi-Agent).
+        intermediate=True: LLM-Text der neben Tool-Aufrufen steht (Zwischenantwort, kein Endergebnis).
+        """
         try:
             msg = {
                 "type": "status",
@@ -807,6 +833,8 @@ KRITISCH – Autonomie-Regeln:
             }
             if highlight:
                 msg["highlight"] = True
+            if intermediate:
+                msg["intermediate"] = True
             await ws.send_json(msg)
         except Exception:
             pass

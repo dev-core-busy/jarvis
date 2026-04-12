@@ -212,8 +212,8 @@ func (a *AvatarWidget) drawFrame(w, h int) image.Image {
 		dc.Fill()
 	}
 
-	// ── 5. Equalizer-Balken am Mund (Speaking / Listening) ───────────────────
-	if mode == ModeSpeaking || mode == ModeListening {
+	// ── 5. Equalizer-Balken am Mund (nur beim Sprechen) ─────────────────────
+	if mode == ModeSpeaking {
 		numBars := 7
 		barW := W * 0.032
 		barGap := W * 0.010

@@ -999,9 +999,51 @@ async def test_profile_connection(request: Request, user: str = Depends(require_
             if provider == "openai_compatible":
                 models_url = f"{api_url}/models"
             elif provider == "google":
-                return JSONResponse({"success": True, "message": "Google Gemini – kein lokaler Endpunkt prüfbar", "latency_ms": 0})
+                t0 = time.monotonic()
+                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+                resp = await client.get(gemini_url, timeout=httpx.Timeout(10.0, connect=5.0))
+                latency = int((time.monotonic() - t0) * 1000)
+                if resp.status_code == 400:
+                    return JSONResponse({"success": False, "error": "API-Key ungültig (400 Bad Request)", "latency_ms": latency})
+                if resp.status_code == 403:
+                    return JSONResponse({"success": False, "error": "API-Key ungültig oder keine Berechtigung (403 Forbidden)", "latency_ms": latency})
+                if resp.status_code >= 400:
+                    return JSONResponse({"success": False, "error": f"Gemini API Fehler {resp.status_code}: {resp.text[:120]}", "latency_ms": latency})
+                data = resp.json()
+                model_ids = sorted([m.get("name", "").replace("models/", "") for m in data.get("models", []) if "generateContent" in m.get("supportedGenerationMethods", [])])
+                model_found = model in model_ids
+                if model_found:
+                    msg = f"Gemini API OK – '{model}' ✓ ({len(model_ids)} Modelle verfügbar)"
+                else:
+                    flash_models = [m for m in model_ids if "flash" in m.lower()]
+                    hint = "Verfügbare Flash-Modelle: " + ", ".join(flash_models[:8]) if flash_models else "Verfügbare Modelle: " + ", ".join(model_ids[:8])
+                    msg = f"Gemini API OK aber '{model}' nicht gefunden!\n{hint}"
+                return JSONResponse({
+                    "success": True,
+                    "message": msg,
+                    "latency_ms": latency,
+                    "model_found": model_found,
+                    "available_models": model_ids,
+                })
             elif provider in ("anthropic", "anthropic_session"):
-                return JSONResponse({"success": True, "message": "Anthropic – kein lokaler Endpunkt prüfbar", "latency_ms": 0})
+                t0 = time.monotonic()
+                anthropic_url = "https://api.anthropic.com/v1/models"
+                anthropic_headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+                resp = await client.get(anthropic_url, headers=anthropic_headers, timeout=httpx.Timeout(10.0, connect=5.0))
+                latency = int((time.monotonic() - t0) * 1000)
+                if resp.status_code == 401:
+                    return JSONResponse({"success": False, "error": "API-Key ungültig (401 Unauthorized)", "latency_ms": latency})
+                if resp.status_code >= 400:
+                    return JSONResponse({"success": False, "error": f"Anthropic API Fehler {resp.status_code}: {resp.text[:120]}", "latency_ms": latency})
+                data = resp.json()
+                model_ids = [m.get("id", "") for m in data.get("data", [])]
+                model_found = model in model_ids
+                return JSONResponse({
+                    "success": True,
+                    "message": f"Anthropic API OK – {len(model_ids)} Modelle verfügbar" + (f", '{model}' ✓" if model_found else f" – '{model}' nicht gefunden!"),
+                    "latency_ms": latency,
+                    "model_found": model_found,
+                })
             elif provider == "openrouter":
                 models_url = "https://openrouter.ai/api/v1/models"
             else:
@@ -1328,11 +1370,22 @@ async def get_knowledge_stats(user: str = Depends(require_auth)):
 
 @app.post("/api/knowledge/reindex")
 async def reindex_knowledge(user: str = Depends(require_auth)):
-    """Erzwingt vollständigen Neuaufbau des Knowledge-Index."""
+    """Startet vollständigen Neuaufbau des Knowledge-Index (non-blocking)."""
     import asyncio as _asyncio
-    from backend.tools.knowledge import force_reindex
-    result = await _asyncio.to_thread(force_reindex)
-    return JSONResponse(result)
+    from backend.tools.knowledge import force_reindex, get_index_progress, _set_progress
+    progress = get_index_progress()
+    if progress.get("running"):
+        return JSONResponse({"started": False, "message": "Indizierung läuft bereits"})
+    # Im Hintergrund starten
+    asyncio.create_task(_asyncio.to_thread(force_reindex))
+    return JSONResponse({"started": True})
+
+
+@app.get("/api/knowledge/index_progress")
+async def get_knowledge_index_progress(user: str = Depends(require_auth)):
+    """Liefert aktuellen Fortschritt der Indizierung."""
+    from backend.tools.knowledge import get_index_progress
+    return JSONResponse(get_index_progress())
 
 
 @app.get("/api/knowledge/files")
@@ -1627,6 +1680,14 @@ async def mount_share(idx: int, user: str = Depends(require_auth)):
     result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=15)
     if result.returncode != 0:
         return JSONResponse({"error": f"Mount fehlgeschlagen: {result.stderr.strip()}"}, status_code=500)
+
+    # Nach erfolgreichem Mount Index automatisch neu aufbauen
+    try:
+        from backend.tools.knowledge import force_reindex
+        await asyncio.to_thread(force_reindex)
+        print(f"[knowledge] Reindex nach Mount {source} → {mp}", flush=True)
+    except Exception as e:
+        print(f"[knowledge] Reindex nach Mount fehlgeschlagen: {e}", flush=True)
 
     return JSONResponse({"ok": True, "mountpoint": str(mp)})
 
@@ -2919,8 +2980,23 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             "agents": agent_manager.get_all_info(),
         })
 
-        # Aufgabe im Hintergrund starten
-        asyncio.create_task(agent.run_task(task_text, ws, client_type=client_type))
+        # Aufgabe im Hintergrund starten – sendet 'finished' wenn fertig (für Windows-TTS)
+        async def _run_main_agent_and_notify():
+            try:
+                await agent.run_task(task_text, ws, client_type=client_type)
+            except Exception:
+                pass
+            finally:
+                try:
+                    await ws.send_json({
+                        "type": "agent_event",
+                        "event": "finished",
+                        "agent": agent.get_info(),
+                        "agents": agent_manager.get_all_info(),
+                    })
+                except Exception:
+                    pass
+        asyncio.create_task(_run_main_agent_and_notify())
 
     elif msg_type == "spawn_agent":
         # Sub-Agent starten (vom Frontend oder Hauptagent)
@@ -3139,6 +3215,52 @@ async def startup():
                 threading.Thread(target=_auto_start_vision, daemon=True).start()
     except Exception as e:
         print(f"⚠️  Vision auto-start fehlgeschlagen: {e}")
+
+    # SMB/NFS-Mounts beim Start automatisch wiederherstellen
+    async def _auto_remount_shares():
+        import asyncio as _asyncio
+        await _asyncio.sleep(5)  # Warten bis Netzwerk stabil
+        try:
+            mounts = _get_mounts_config()
+            if not mounts:
+                return
+            needs_reindex = False
+            for idx, m in enumerate(mounts):
+                mp = _mount_path(idx)
+                if mp.is_mount():
+                    continue  # Bereits gemountet
+                mp.mkdir(parents=True, exist_ok=True)
+                source = m["source"]
+                mount_type = m.get("type", "smb")
+                username = m.get("username", "")
+                password = m.get("password", "")
+                if mount_type == "smb":
+                    opts = "ro"
+                    if username:
+                        opts += f",username={username},password={password}"
+                    else:
+                        opts += ",guest"
+                    cmd = ["mount", "-t", "cifs", source, str(mp), "-o", opts]
+                elif mount_type == "nfs":
+                    cmd = ["mount", "-t", "nfs", "-o", "ro", source, str(mp)]
+                else:
+                    continue
+                result = await _asyncio.to_thread(
+                    subprocess.run, cmd, capture_output=True, text=True, timeout=15
+                )
+                if result.returncode == 0:
+                    print(f"[knowledge] Auto-Mount: {source} → {mp}", flush=True)
+                    needs_reindex = True
+                else:
+                    print(f"[knowledge] Auto-Mount fehlgeschlagen ({source}): {result.stderr.strip()}", flush=True)
+            if needs_reindex:
+                from backend.tools.knowledge import force_reindex
+                await _asyncio.to_thread(force_reindex)
+                print("[knowledge] Index nach Auto-Mount neu aufgebaut", flush=True)
+        except Exception as e:
+            print(f"⚠️  Knowledge Auto-Mount fehlgeschlagen: {e}", flush=True)
+
+    asyncio.create_task(_auto_remount_shares())
 
 
 # ─── Direkt ausführen ─────────────────────────────────────────────────

@@ -12,12 +12,13 @@ import (
 )
 
 type WSMessage struct {
-	Type      string `json:"type"`
-	Message   string `json:"message,omitempty"`
-	Event     string `json:"event,omitempty"`
-	Data      string `json:"data,omitempty"`
-	Highlight bool   `json:"highlight,omitempty"`
-	Text      string `json:"text,omitempty"`
+	Type         string `json:"type"`
+	Message      string `json:"message,omitempty"`
+	Event        string `json:"event,omitempty"`
+	Data         string `json:"data,omitempty"`
+	Highlight    bool   `json:"highlight,omitempty"`
+	Intermediate bool   `json:"intermediate,omitempty"` // LLM-Zwischenantwort neben Tool-Aufrufen
+	Text         string `json:"text,omitempty"`
 	// Desktop-Steuerung
 	Action    string  `json:"action,omitempty"`
 	RequestID string  `json:"request_id,omitempty"`

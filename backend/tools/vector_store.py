@@ -1,15 +1,36 @@
 """Vector Store – ChromaDB + sentence-transformers fuer semantische Suche."""
 
 import logging
+import os
 import threading
 from pathlib import Path
+
+# ChromaDB-Telemetry deaktivieren (verhindert Fehler-Spam im Log)
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+os.environ.setdefault("CHROMA_TELEMETRY", "False")
 
 _log = logging.getLogger("jarvis.vector_store")
 _model_lock = threading.Lock()
 _embedding_model = None
 
 COLLECTION_NAME = "knowledge_chunks"
-MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
+
+# multilingual-e5-base: deutlich besser als MiniLM fuer deutschen Text
+# Erfordert Prefix "query:" bei Suchanfragen, "passage:" bei Dokumenten
+MODEL_NAME = "intfloat/multilingual-e5-base"
+
+# HNSW-Parameter: M=32 (Verbindungen), ef_construction=200 (Index-Qualitaet),
+# ef=100 (Query-Genauigkeit) – ChromaDB-Defaults sind sehr konservativ
+HNSW_PARAMS = {
+    "hnsw:space": "cosine",
+    "hnsw:M": 32,
+    "hnsw:construction_ef": 200,
+    "hnsw:search_ef": 100,
+    "hnsw:num_threads": 4,
+}
+
+# Mindest-Relevanz fuer Treffer (0.0–1.0)
+MIN_SCORE = 0.40
 
 
 def _get_embedding_model():
@@ -28,11 +49,32 @@ def _get_embedding_model():
 
 
 class ChromaEmbeddingFunction:
-    """Adapter: sentence-transformers → ChromaDB Embedding-Interface."""
+    """Adapter: sentence-transformers → ChromaDB Embedding-Interface.
+    e5-Modelle benoetigen Prefix 'passage:' fuer Dokumente beim Indexieren.
+    Implementiert ChromaDB 1.5+ EmbeddingFunction Protocol."""
+
+    def name(self) -> str:
+        return "jarvis-e5-multilingual"
+
+    def build_from_config(self, config: dict) -> "ChromaEmbeddingFunction":
+        return ChromaEmbeddingFunction()
+
+    def get_config(self) -> dict:
+        return {"model": MODEL_NAME}
 
     def __call__(self, input: list[str]) -> list[list[float]]:
         model = _get_embedding_model()
-        embeddings = model.encode(input, show_progress_bar=False)
+        # Prefix hinzufuegen falls noch nicht vorhanden
+        prefixed = [
+            t if t.startswith("passage:") or t.startswith("query:") else f"passage: {t}"
+            for t in input
+        ]
+        embeddings = model.encode(
+            prefixed,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+            batch_size=32,
+        )
         return embeddings.tolist()
 
 
@@ -47,9 +89,9 @@ class VectorStore:
         self._collection = self._client.get_or_create_collection(
             name=COLLECTION_NAME,
             embedding_function=self._ef,
-            metadata={"hnsw:space": "cosine"},
+            metadata=HNSW_PARAMS,
         )
-        _log.info(f"VectorStore initialisiert: {persist_dir}")
+        _log.info(f"VectorStore initialisiert: {persist_dir} ({self._collection.count()} Chunks)")
 
     def add_chunks(self, file_path: str, chunks: list[str], mtime: float):
         """Fuegt Chunks fuer eine Datei hinzu (ersetzt bestehende)."""
@@ -64,7 +106,7 @@ class VectorStore:
         ]
 
         # ChromaDB Batch-Limit beachten
-        batch_size = 500
+        batch_size = 200
         for start in range(0, len(chunks), batch_size):
             end = start + batch_size
             self._collection.add(
@@ -90,9 +132,19 @@ class VectorStore:
         except Exception:
             return []
 
+        # e5-Modell benoetigt "query:" Prefix bei Suchanfragen
+        query_text = f"query: {query}" if not query.startswith("query:") else query
+
+        model = _get_embedding_model()
+        query_embedding = model.encode(
+            [query_text],
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        ).tolist()
+
         results = self._collection.query(
-            query_texts=[query],
-            n_results=min(max_results, count),
+            query_embeddings=query_embedding,
+            n_results=min(max_results * 2, count),  # mehr holen, dann filtern
             include=["documents", "metadatas", "distances"],
         )
 
@@ -103,12 +155,13 @@ class VectorStore:
                 results["metadatas"][0],
                 results["distances"][0],
             ):
-                # Cosine-Distanz: 0 = identisch, 2 = gegenteilig
-                # Umrechnung in Aehnlichkeit: 1 - (dist/2)
+                # Cosine-Distanz → Aehnlichkeit (0=gleich, 1=perfekt)
                 score = 1.0 - (dist / 2.0)
-                output.append((score, meta["file_path"], doc))
+                if score >= MIN_SCORE:
+                    output.append((score, meta["file_path"], doc))
 
-        return output
+        # Auf max_results begrenzen nach Score-Filterung
+        return output[:max_results]
 
     def get_indexed_files(self) -> dict[str, float]:
         """Gibt {file_path: mtime} aller indexierten Dateien zurueck."""
@@ -124,11 +177,9 @@ class VectorStore:
             return {}
 
     def file_count(self) -> int:
-        """Anzahl einzigartiger Dateien im Index."""
         return len(self.get_indexed_files())
 
     def chunk_count(self) -> int:
-        """Gesamtanzahl der Chunks im Index."""
         try:
             return self._collection.count()
         except Exception:
@@ -143,6 +194,6 @@ class VectorStore:
         self._collection = self._client.get_or_create_collection(
             name=COLLECTION_NAME,
             embedding_function=self._ef,
-            metadata={"hnsw:space": "cosine"},
+            metadata=HNSW_PARAMS,
         )
         _log.info("VectorStore geleert")

@@ -19,10 +19,61 @@ import (
 
 const (
 	// Stabile Download-URLs über jarvis-ai.info (Redirect zu upstream, nur .htaccess ändern bei URL-Wechsel)
-	whisperZipURL   = "https://jarvis-ai.info/downloads/whisper-bin-x64.zip"
-	whisperModelURL = "https://jarvis-ai.info/downloads/ggml-small.bin"
+	whisperZipURL    = "https://jarvis-ai.info/downloads/whisper-bin-x64.zip"
+	whisperModelURL  = "https://jarvis-ai.info/downloads/ggml-small.bin"
 	whisperModelName = "ggml-small.bin"
+
+	// Hugging Face Basis-URL für whisper.cpp Modelle
+	hfBaseURL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
 )
+
+// STTModelDef beschreibt ein Whisper-Modell (für die Einstellungen-UI).
+type STTModelDef struct {
+	Label    string // Anzeigename
+	Filename string // Dateiname (ggml-*.bin)
+	URL      string // Download-URL
+	SizeMB   int    // Ungefähre Größe in MB
+	Note     string // Kurze Beschreibung
+}
+
+// STTModels enthält alle unterstützten Modelle (aufsteigend nach Größe).
+var STTModels = []STTModelDef{
+	{
+		Label: "Tiny (~75 MB)", Filename: "ggml-tiny.bin",
+		URL: hfBaseURL + "ggml-tiny.bin", SizeMB: 75,
+		Note: "Schnellstes Modell, begrenzte Genauigkeit",
+	},
+	{
+		Label: "Base (~142 MB)", Filename: "ggml-base.bin",
+		URL: hfBaseURL + "ggml-base.bin", SizeMB: 142,
+		Note: "Gute Balance zwischen Geschwindigkeit und Qualität",
+	},
+	{
+		Label: "Small (~466 MB)", Filename: "ggml-small.bin",
+		URL: "https://jarvis-ai.info/downloads/ggml-small.bin", SizeMB: 466,
+		Note: "Empfohlen – Standard für Deutsch",
+	},
+	{
+		Label: "Medium (~1,5 GB)", Filename: "ggml-medium.bin",
+		URL: hfBaseURL + "ggml-medium.bin", SizeMB: 1500,
+		Note: "Höhere Genauigkeit, deutlich langsamer",
+	},
+}
+
+// DownloadSTTModel lädt ein Modell nach Dateiname herunter.
+func DownloadSTTModel(def STTModelDef, progress func(float64)) error {
+	dir := sttDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("Ordner speech-to-text: %w", err)
+	}
+	dest := filepath.Join(dir, def.Filename)
+	tmp := dest + ".downloading"
+	if err := downloadWithProgress(def.URL, tmp, progress); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("Modell-Download fehlgeschlagen: %w", err)
+	}
+	return os.Rename(tmp, dest)
+}
 
 // WhisperStatus prüft ob whisper-cli.exe/whisper-server.exe und ein Sprachmodell vorhanden sind.
 func WhisperStatus() (hasExe, hasModel bool) {

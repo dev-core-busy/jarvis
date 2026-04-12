@@ -43,7 +43,7 @@ func httpClient(timeout time.Duration) *http.Client {
 // CheckForUpdate prüft version_windows.json auf jarvis-ai.info.
 // Gibt nil zurück wenn kein Update verfügbar oder bei Fehler.
 func CheckForUpdate() *WindowsVersionInfo {
-	url := fmt.Sprintf("https://jarvis-ai.info/version_windows.json?t=%d", time.Now().UnixMilli())
+	url := fmt.Sprintf("https://jarvis-ai.info/downloads/version_windows.json?t=%d", time.Now().UnixMilli())
 	resp, err := httpClient(10 * time.Second).Get(url)
 	if err != nil {
 		return nil

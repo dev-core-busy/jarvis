@@ -117,7 +117,7 @@ class MemoryTool(BaseTool):
             return self._execute_inner(**kwargs)
 
     def _execute_inner(self, **kwargs) -> str:
-        action = kwargs.get("action", "")
+        action = str(kwargs.get("action", "")).strip().strip('"\'\\')
         key = kwargs.get("key", "")
         value = kwargs.get("value", "")
         query = kwargs.get("query", "")

@@ -392,6 +392,9 @@ KRITISCH – Autonomie-Regeln:
         try:
             # Konversation starten
             chat_history = []
+            task_start_time = time.time()
+            _total_input_tokens  = 0
+            _total_output_tokens = 0
 
             # Modus-Hinweis (hilfreich bei langsamen lokalen Modellen)
             mode_hint = " [Prompt-Tool-Modus]" if getattr(self.provider, "prompt_tool_calling", False) else ""
@@ -413,6 +416,9 @@ KRITISCH – Autonomie-Regeln:
                 tools=self._tool_instances
             )
             tracer.end_span(llm_span)
+            if response.usage:
+                _total_input_tokens  += response.usage.get("input_tokens", 0)
+                _total_output_tokens += response.usage.get("output_tokens", 0)
             parts_count = len(response.parts) if response.parts else 0
             _log(f"LLM-Antwort erhalten: {parts_count} Parts")
             if parts_count == 0:
@@ -551,11 +557,18 @@ KRITISCH – Autonomie-Regeln:
                     tools=self._tool_instances
                 )
                 tracer.end_span(llm_span)
+                if response.usage:
+                    _total_input_tokens  += response.usage.get("input_tokens", 0)
+                    _total_output_tokens += response.usage.get("output_tokens", 0)
 
                 steps += 1
 
             if steps >= config.MAX_AGENT_STEPS:
                 await self._send_status(ws, f"⚠️ Maximale Schrittanzahl ({config.MAX_AGENT_STEPS}) erreicht")
+
+            # LLM-Stats senden (Dauer + Token-Verbrauch)
+            _task_duration_ms = int((time.time() - task_start_time) * 1000)
+            await self._send_llm_stats(ws, _task_duration_ms, _total_input_tokens, _total_output_tokens, steps)
 
             # Auto-Learning: Bei mehrstufigen Aufgaben den Loesungsweg speichern
             if steps >= 3 and self._tool_stats:
@@ -836,6 +849,21 @@ KRITISCH – Autonomie-Regeln:
             if intermediate:
                 msg["intermediate"] = True
             await ws.send_json(msg)
+        except Exception:
+            pass
+
+    async def _send_llm_stats(self, ws, duration_ms: int, input_tokens: int, output_tokens: int, steps: int):
+        """Sendet LLM-Statistiken (Dauer + Token-Verbrauch) an alle Clients."""
+        try:
+            await ws.send_json({
+                "type": "llm_stats",
+                "duration_ms": duration_ms,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+                "steps": steps,
+                "agent_id": self.agent_id,
+            })
         except Exception:
             pass
 

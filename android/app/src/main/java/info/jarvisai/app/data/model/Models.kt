@@ -48,6 +48,12 @@ data class WsEvent(
     val text: String = "",
     val cmd: String = "",
     val pkg: String = "",
+    // LLM-Statistiken
+    val duration_ms: Int = 0,
+    val input_tokens: Int = 0,
+    val output_tokens: Int = 0,
+    val total_tokens: Int = 0,
+    val steps: Int = 0,
 )
 
 // ─── Agent-Status ─────────────────────────────────────────────────────

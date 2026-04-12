@@ -22,6 +22,7 @@ class LLMPart:
 class LLMResponse:
     parts: List[LLMPart]
     raw: Any
+    usage: dict = None  # {"input_tokens": N, "output_tokens": M}
 
 
 class MockFC:
@@ -168,7 +169,16 @@ class GeminiProvider(LLMProvider):
             if resp.candidates and resp.candidates[0].content and resp.candidates[0].content.parts:
                 for p in resp.candidates[0].content.parts:
                     parts.append(LLMPart(text=p.text, function_call=p.function_call))
-            return LLMResponse(parts=parts, raw=resp)
+            usage = None
+            try:
+                um = resp.usage_metadata
+                usage = {
+                    "input_tokens": getattr(um, "prompt_token_count", 0) or 0,
+                    "output_tokens": getattr(um, "candidates_token_count", 0) or 0,
+                }
+            except Exception:
+                pass
+            return LLMResponse(parts=parts, raw=resp, usage=usage)
 
         return await _retry_with_backoff(_call)
 
@@ -324,7 +334,17 @@ class OpenAICompatibleProvider(LLMProvider):
                         args = {}
                     parts.append(LLMPart(function_call=MockFC(fn.get("name"), args)))
 
-        return LLMResponse(parts=parts, raw=data)
+        usage = None
+        try:
+            u = data.get("usage", {})
+            if u:
+                usage = {
+                    "input_tokens": u.get("prompt_tokens", 0) or 0,
+                    "output_tokens": u.get("completion_tokens", 0) or 0,
+                }
+        except Exception:
+            pass
+        return LLMResponse(parts=parts, raw=data, usage=usage)
 
     # ── Prompt-Modus (Tools im System-Prompt, XML-Tag-Parsing) ───────
 
@@ -424,7 +444,17 @@ class OpenAICompatibleProvider(LLMProvider):
             elif text.strip():
                 parts.append(LLMPart(text=text))
 
-        return LLMResponse(parts=parts, raw=data)
+        usage = None
+        try:
+            u = data.get("usage", {})
+            if u:
+                usage = {
+                    "input_tokens": u.get("prompt_tokens", 0) or 0,
+                    "output_tokens": u.get("completion_tokens", 0) or 0,
+                }
+        except Exception:
+            pass
+        return LLMResponse(parts=parts, raw=data, usage=usage)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -555,7 +585,16 @@ class AnthropicProvider(LLMProvider):
             elif block.type == "tool_use":
                 parts.append(LLMPart(function_call=MockFC(block.name, block.input)))
 
-        return LLMResponse(parts=parts, raw=response)
+        usage = None
+        try:
+            u = response.usage
+            usage = {
+                "input_tokens": getattr(u, "input_tokens", 0) or 0,
+                "output_tokens": getattr(u, "output_tokens", 0) or 0,
+            }
+        except Exception:
+            pass
+        return LLMResponse(parts=parts, raw=response, usage=usage)
 
 
 # ═══════════════════════════════════════════════════════════════════

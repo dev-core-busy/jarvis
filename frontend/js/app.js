@@ -403,6 +403,18 @@
             }
         });
 
+        ws.on('llm_stats', (data) => {
+            const agentId = data.agent_id || '_main';
+            const sec = (data.duration_ms / 1000).toFixed(1);
+            const inTok = data.input_tokens || 0;
+            const outTok = data.output_tokens || 0;
+            const total = data.total_tokens || (inTok + outTok);
+            let info = `⏱ ${sec}s`;
+            if (total > 0) info += ` · ${inTok.toLocaleString('de-DE')} → ${outTok.toLocaleString('de-DE')} Tokens`;
+            if (data.steps > 0) info += ` · ${data.steps} Schritt${data.steps !== 1 ? 'e' : ''}`;
+            addStatsEntry(info, agentId);
+        });
+
         ws.on('agent_event', (data) => {
             _handleAgentEvent(data);
         });
@@ -956,6 +968,19 @@
             const old = agentEntries.shift();
             if (old.parentNode) old.parentNode.removeChild(old);
         }
+    }
+
+    function addStatsEntry(info, agentId) {
+        const effectiveAgentId = agentId || '_main';
+        const entry = document.createElement('div');
+        entry.className = 'log-entry log-stats';
+        entry.dataset.agentId = effectiveAgentId;
+        if (effectiveAgentId !== _activeAgentId) entry.style.display = 'none';
+        entry.innerHTML = `<span class="log-stats-text">${escapeHtml(info)}</span>`;
+        _ensureAgentLog(effectiveAgentId);
+        _agentLogs[effectiveAgentId].push(entry);
+        logContainer.appendChild(entry);
+        if (effectiveAgentId === _activeAgentId) logContainer.scrollTop = logContainer.scrollHeight;
     }
 
     function escapeHtml(text) {

@@ -134,7 +134,7 @@ class ChatRepository @Inject constructor(
                 if (event.steps > 0) {
                     sb.append(" · ${event.steps} Schritt${if (event.steps != 1) "e" else ""}")
                 }
-                appendToStream(sb.toString(), SegmentType.STATUS)
+                appendToStream(sb.toString(), SegmentType.STATS)
             }
             "agent_event" -> {
                 when (event.event) {

@@ -1148,10 +1148,7 @@ body {
     font-style: italic;
     letter-spacing: 0.02em;
 }
-/* Im Debug-Modus aus: Stats auch ausblenden */
-.log-container.hide-debug .log-entry.log-stats {
-    display: none !important;
-}
+/* Stats immer sichtbar – auch wenn Debug-Modus aus */
 
 .log-entry:last-child {
     border-bottom: none;

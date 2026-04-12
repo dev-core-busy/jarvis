@@ -19,6 +19,12 @@ type WSMessage struct {
 	Highlight    bool   `json:"highlight,omitempty"`
 	Intermediate bool   `json:"intermediate,omitempty"` // LLM-Zwischenantwort neben Tool-Aufrufen
 	Text         string `json:"text,omitempty"`
+	// LLM-Statistiken
+	DurationMs   int `json:"duration_ms,omitempty"`
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
+	TotalTokens  int `json:"total_tokens,omitempty"`
+	Steps        int `json:"steps,omitempty"`
 	// Desktop-Steuerung
 	Action    string  `json:"action,omitempty"`
 	RequestID string  `json:"request_id,omitempty"`

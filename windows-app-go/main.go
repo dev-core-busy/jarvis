@@ -499,6 +499,21 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 			}()
 		}
 
+	case "llm_stats":
+		sec := float64(msg.DurationMs) / 1000.0
+		info := fmt.Sprintf("⏱ %.1fs", sec)
+		if msg.TotalTokens > 0 {
+			info += fmt.Sprintf(" · %d → %d Tokens", msg.InputTokens, msg.OutputTokens)
+		}
+		if msg.Steps > 0 {
+			stepWord := "Schritte"
+			if msg.Steps == 1 {
+				stepWord = "Schritt"
+			}
+			info += fmt.Sprintf(" · %d %s", msg.Steps, stepWord)
+		}
+		ja.chat.AddStatsMessage(info)
+
 	case "wakeword_result":
 		if msg.Highlight && ja.dialog != nil {
 			ja.dialog.OnWakeWordDetected()

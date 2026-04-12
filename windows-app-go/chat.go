@@ -593,6 +593,17 @@ func (c *ChatWidget) AddDebugMessage(text string) {
 	c.scrollToBottom()
 }
 
+// AddStatsMessage zeigt eine kleine LLM-Stats-Zeile (Dauer + Token-Verbrauch).
+func (c *ChatWidget) AddStatsMessage(text string) {
+	lbl := widget.NewLabel(text)
+	lbl.TextStyle = fyne.TextStyle{Italic: true}
+	lbl.Importance = widget.LowImportance
+	lbl.Wrapping = fyne.TextWrapWord
+	c.MsgBox.Add(lbl)
+	c.MsgBox.Refresh()
+	c.scrollToBottom()
+}
+
 func (c *ChatWidget) SetStatus(text string) {
 	c.StatusLbl.Text = text
 	c.StatusLbl.Refresh()

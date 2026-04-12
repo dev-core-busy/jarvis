@@ -91,6 +91,7 @@ class ChatRepository @Inject constructor(
     }
 
     fun sendStop() {
+        _isAgentRunning.value = false
         ws.sendStop()
     }
 

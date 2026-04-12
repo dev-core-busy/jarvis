@@ -18,7 +18,14 @@ class Config:
     DEFAULT_PROVIDERS = {
         "google": {
             "url": "https://api.google.com/genai/v1",
-            "models": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"],
+            "models": [
+                "gemini-2.5-pro-preview-05-06",
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+                "gemini-2.0-flash-lite",
+                "gemini-1.5-pro",
+                "gemini-1.5-flash",
+            ],
         },
         "openrouter": {
             "url": "https://openrouter.ai/api/v1/chat/completions",

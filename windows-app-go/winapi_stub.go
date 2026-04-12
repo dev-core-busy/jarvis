@@ -9,8 +9,10 @@ func MakeAvatarWindowFrameless()                                            {}
 func MakeChatWindowFrameless()                                              {}
 func MoveAvatarWindow(dx, dy float64)                                       {}
 func ClearAvatarHWND()                                                      {}
-func GetAvatarPosition() (x, y int)                                         { return 0, 0 }
-func SetAvatarPosition(x, y int)                                            {}
+func GetAvatarPosition() (x, y int)                                              { return 0, 0 }
+func SetAvatarPosition(x, y int)                                                 {}
+func GetChatWindowRect() (x, y, w, h int, ok bool)                               { return 0, 0, 0, 0, false }
+func SetChatWindowPos(x, y int)                                                   {}
 func StartNativeSysTray(_, _, _, _ func(), _, _ func() bool)                {}
 func SetTTSVoice(voice string)                                               {}
 func SetTTSServer(serverURL, apiKey string)                                  {}

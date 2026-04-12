@@ -92,54 +92,6 @@ func (r *iconBtnRenderer) Refresh() {
 func (r *iconBtnRenderer) Objects() []fyne.CanvasObject { return []fyne.CanvasObject{r.bg, r.img} }
 func (r *iconBtnRenderer) Destroy()                     {}
 
-// ── textBtn – großer Emoji/Text-Button ohne Hover-Effekt ─────────────────────
-
-type textBtn struct {
-	widget.BaseWidget
-	lbl   *canvas.Text
-	onTap func()
-}
-
-func newTextBtn(text string, size float32, col color.Color, onTap func()) *textBtn {
-	lbl := canvas.NewText(text, col)
-	lbl.TextSize = size
-	lbl.Alignment = fyne.TextAlignCenter
-	b := &textBtn{lbl: lbl, onTap: onTap}
-	b.ExtendBaseWidget(b)
-	return b
-}
-
-func (b *textBtn) Tapped(_ *fyne.PointEvent) {
-	if b.onTap != nil {
-		b.onTap()
-	}
-}
-func (b *textBtn) MinSize() fyne.Size { return fyne.NewSize(36, 36) }
-func (b *textBtn) SetText(s string) {
-	b.lbl.Text = s
-	b.lbl.Refresh()
-}
-func (b *textBtn) SetColor(c color.Color) {
-	b.lbl.Color = c
-	b.lbl.Refresh()
-}
-func (b *textBtn) CreateRenderer() fyne.WidgetRenderer {
-	return &textBtnRenderer{btn: b}
-}
-
-type textBtnRenderer struct{ btn *textBtn }
-
-func (r *textBtnRenderer) Layout(size fyne.Size) {
-	r.btn.lbl.Move(fyne.NewPos(0, 0))
-	r.btn.lbl.Resize(size)
-}
-func (r *textBtnRenderer) MinSize() fyne.Size { return fyne.NewSize(36, 36) }
-func (r *textBtnRenderer) Refresh()           { r.btn.lbl.Refresh() }
-func (r *textBtnRenderer) Objects() []fyne.CanvasObject {
-	return []fyne.CanvasObject{r.btn.lbl}
-}
-func (r *textBtnRenderer) Destroy() {}
-
 // ── SendEntry – Enter sendet, Alt+Enter fügt Zeilenumbruch ein ──────────────
 
 type SendEntry struct {
@@ -193,6 +145,7 @@ type ChatWidget struct {
 	Input     *SendEntry
 	SendBtn   *widget.Button
 	MicBtn    *widget.Button
+	TtsStopBtn *widget.Button // Stop-Button für laufende TTS (nur sichtbar während Wiedergabe)
 	StatusLbl *canvas.Text
 	ConnDot   *canvas.Circle
 	ConnLabel *canvas.Text
@@ -203,14 +156,11 @@ type ChatWidget struct {
 	headerStack     *fyne.Container // container.NewStack – zeigt immer nur einen Header
 	selCountLbl     *canvas.Text
 
-	// TTS-Steuerung im Text-Modus
-	ttsToggleBtn *textBtn // 🔊/🔇 im Header (groß, kein Hover)
-	ttsStopBtn   *textBtn // ⏹ im Input-Bereich
+	ironManImg *canvas.Image // Avatar-Bild (für Show/Hide)
 
 	OnSend      func(string)
 	OnMicButton func()
 	OnSettings  func()
-	OnTTSToggle func() // TTS ein/aus schalten
 	OnTTSStop   func() // laufende TTS-Wiedergabe unterbrechen
 }
 
@@ -237,6 +187,15 @@ func NewChatWidget() *ChatWidget {
 	micBtn.Importance = widget.MediumImportance
 	c.MicBtn = micBtn
 
+	ttsStopBtn := widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
+		if c.OnTTSStop != nil {
+			c.OnTTSStop()
+		}
+	})
+	ttsStopBtn.Importance = widget.DangerImportance
+	ttsStopBtn.Hide()
+	c.TtsStopBtn = ttsStopBtn
+
 	c.StatusLbl = canvas.NewText("", jc.muted)
 	c.StatusLbl.TextSize = 11
 	c.StatusLbl.Alignment = fyne.TextAlignCenter
@@ -249,23 +208,31 @@ func NewChatWidget() *ChatWidget {
 	return c
 }
 
-// SetTTSEnabled aktualisiert das TTS-Toggle-Icon und die Farbe.
-// 🔊 hell = an, 🔇 gedimmt = aus
-func (c *ChatWidget) SetTTSEnabled(enabled bool) {
-	if c.ttsToggleBtn == nil {
+// SetAvatarVisible blendet den Iron Man Avatar ein/aus.
+func (c *ChatWidget) SetAvatarVisible(visible bool) {
+	if c.ironManImg == nil {
 		return
 	}
-	if enabled {
-		c.ttsToggleBtn.SetText("🔊")
-		c.ttsToggleBtn.SetColor(jc.textPrimary)
+	if visible {
+		c.ironManImg.Show()
 	} else {
-		c.ttsToggleBtn.SetText("🔇")
-		c.ttsToggleBtn.SetColor(jc.muted)
+		c.ironManImg.Hide()
 	}
+	c.ironManImg.Refresh()
 }
 
-// SetTTSSpeaking – kein-op, Stop-Button ist immer sichtbar.
-func (c *ChatWidget) SetTTSSpeaking(_ bool) {}
+// SetTTSSpeaking blendet den TTS-Stop-Button ein/aus.
+func (c *ChatWidget) SetTTSSpeaking(speaking bool) {
+	if c.TtsStopBtn == nil {
+		return
+	}
+	if speaking {
+		c.TtsStopBtn.Show()
+	} else {
+		c.TtsStopBtn.Hide()
+	}
+	c.TtsStopBtn.Refresh()
+}
 
 // SetConnectionState aktualisiert Farbe und Text des Verbindungs-Dots im Header.
 // state: "connected" | "connecting" | "disconnected" | "error"
@@ -309,19 +276,12 @@ var BgColorNames = []string{
 func (c *ChatWidget) Layout(cfg *Config) fyne.CanvasObject {
 	header := c.buildChatHeader()
 
-	// TTS-Stop-Button (⏹) – immer sichtbar, gedimmt wenn kein TTS läuft
-	c.ttsStopBtn = newTextBtn("⏹", 22, color.RGBA{0xE7, 0x4C, 0x3C, 0xAA}, func() {
-		if c.OnTTSStop != nil {
-			c.OnTTSStop()
-		}
-	})
-	stopWrapped := container.NewGridWrap(fyne.NewSize(36, 36), c.ttsStopBtn)
-
-	// Input-Bar horizontal: [🎤] [⏹] [Texteingabe────] [➤]
+	// Input-Bar: [🎤] [Texteingabe────] [⏹(TTS)] [➤]
 	sendWrapped := container.NewGridWrap(fyne.NewSize(44, 44), c.SendBtn)
+	ttsStopWrapped := container.NewGridWrap(fyne.NewSize(44, 44), c.TtsStopBtn)
 	micWrapped := container.NewGridWrap(fyne.NewSize(44, 44), c.MicBtn)
-	leftBtns := container.NewHBox(micWrapped, stopWrapped)
-	inputRow := container.NewBorder(nil, nil, leftBtns, sendWrapped, c.Input)
+	inputRow := container.NewBorder(nil, nil, micWrapped,
+		container.NewHBox(ttsStopWrapped, sendWrapped), c.Input)
 	// Input-Bar: Gradient surfaceVariant → surface (Android-Elevation-Effekt)
 	inputBg := canvas.NewVerticalGradient(
 		color.RGBA{0x12, 0x1A, 0x36, 0xFF}, // oben dunkler
@@ -340,6 +300,7 @@ func (c *ChatWidget) Layout(cfg *Config) fyne.CanvasObject {
 	ironManImg := canvas.NewImageFromResource(ironManRes)
 	ironManImg.FillMode = canvas.ImageFillContain
 	ironManImg.Translucency = 0.30 // 70% sichtbar = 30% transparent
+	c.ironManImg = ironManImg      // Referenz speichern
 	ironManSized := container.NewGridWrap(fyne.NewSize(120, 150), ironManImg)
 	// Overlay: unsichtbarer Hintergrund + Avatar unten-rechts mit Abstand
 	ironManOverlay := container.NewBorder(nil,
@@ -407,14 +368,8 @@ func (c *ChatWidget) buildChatHeader() fyne.CanvasObject {
 			c.OnSettings()
 		}
 	})
-	c.ttsToggleBtn = newTextBtn("🔇", 22, jc.muted, func() {
-		if c.OnTTSToggle != nil {
-			c.OnTTSToggle()
-		}
-	})
-	ttsToggleWrapped := container.NewGridWrap(fyne.NewSize(36, 36), c.ttsToggleBtn)
 	normalRow := container.NewBorder(nil, nil, nil,
-		container.NewHBox(ttsToggleWrapped, deleteBtn, settingsBtn),
+		container.NewHBox(deleteBtn, settingsBtn),
 		container.NewPadded(titleRow))
 	c.headerNormal = container.NewStack(headerBg(),
 		container.NewVBox(container.NewPadded(normalRow), sep()))
@@ -425,8 +380,11 @@ func (c *ChatWidget) buildChatHeader() fyne.CanvasObject {
 	c.selCountLbl.TextSize = 16
 
 	cancelBtn := newIconBtn(theme.CancelIcon(), func() { c.exitSelectionMode() })
+	selectAllBtn := widget.NewButton("Alle", func() { c.selectAll() })
+	selectAllBtn.Importance = widget.LowImportance
 	confirmDeleteBtn := newIconBtn(theme.DeleteIcon(), func() { c.deleteSelected() })
-	selRow := container.NewBorder(nil, nil, cancelBtn, confirmDeleteBtn,
+	selRow := container.NewBorder(nil, nil, cancelBtn,
+		container.NewHBox(selectAllBtn, confirmDeleteBtn),
 		container.NewCenter(c.selCountLbl))
 	c.headerSelection = container.NewStack(headerBg(),
 		container.NewVBox(container.NewPadded(selRow), sep()))
@@ -467,14 +425,7 @@ func (c *ChatWidget) toggleSelection(idx int) {
 		c.selSet[idx] = true
 	}
 	c.updateSelCount()
-	// Nur die betroffene Zeile neu rendern
-	if idx < len(c.MsgBox.Objects) {
-		c.mu.Lock()
-		msg := c.messages[idx]
-		c.mu.Unlock()
-		c.MsgBox.Objects[idx] = c.buildRowAt(msg, idx)
-		c.MsgBox.Refresh()
-	}
+	c.rebuildAll()
 }
 
 func (c *ChatWidget) updateSelCount() {
@@ -506,13 +457,33 @@ func (c *ChatWidget) deleteSelected() {
 	c.exitSelectionMode()
 }
 
+func (c *ChatWidget) selectAll() {
+	c.mu.Lock()
+	allSelected := len(c.selSet) == len(c.messages)
+	if allSelected {
+		c.selSet = make(map[int]bool)
+	} else {
+		for i := range c.messages {
+			c.selSet[i] = true
+		}
+	}
+	c.mu.Unlock()
+	c.updateSelCount()
+	c.rebuildAll()
+}
+
 // rebuildAll rendert alle Nachrichten neu (z.B. nach Moduswechsel).
 func (c *ChatWidget) rebuildAll() {
 	c.mu.Lock()
 	msgs := append([]ChatMessage(nil), c.messages...)
 	c.mu.Unlock()
 	c.MsgBox.Objects = nil
+	var lastDate time.Time
 	for i, m := range msgs {
+		if lastDate.IsZero() || !sameDay(lastDate, m.Time) {
+			c.MsgBox.Objects = append(c.MsgBox.Objects, buildDateSeparator(m.Time))
+			lastDate = m.Time
+		}
 		c.MsgBox.Add(c.buildRowAt(m, i))
 	}
 	c.MsgBox.Refresh()
@@ -539,15 +510,49 @@ func (c *ChatWidget) Submit(text string) {
 	}
 }
 
+// buildDateSeparator erstellt eine zentrierte Datumszeile (z.B. "Mittwoch, 9. April 2025 · 14:32")
+func buildDateSeparator(t time.Time) fyne.CanvasObject {
+	weekdays := []string{"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"}
+	months := []string{"", "Januar", "Februar", "März", "April", "Mai", "Juni",
+		"Juli", "August", "September", "Oktober", "November", "Dezember"}
+	label := fmt.Sprintf("%s, %d. %s %d · %02d:%02d",
+		weekdays[t.Weekday()], t.Day(), months[t.Month()], t.Year(), t.Hour(), t.Minute())
+	lbl := widget.NewLabel(label)
+	lbl.Importance = widget.LowImportance
+	lbl.Alignment = fyne.TextAlignCenter
+	sep1 := widget.NewSeparator()
+	sep2 := widget.NewSeparator()
+	return container.NewVBox(
+		vSpacer(4),
+		container.NewBorder(nil, nil, sep1, sep2, container.NewCenter(lbl)),
+		vSpacer(4),
+	)
+}
+
+// sameDay returns true if two times are on the same calendar day.
+func sameDay(t1, t2 time.Time) bool {
+	ay, am, ad := t1.Date()
+	by, bm, bd := t2.Date()
+	return ay == by && am == bm && ad == bd
+}
+
 // ── Nachrichten hinzufügen ────────────────────────────────────────────────────
 
 func (c *ChatWidget) AddMessage(role MessageRole, text string) {
 	c.mu.Lock()
 	msg := ChatMessage{Role: role, Text: text, Time: time.Now()}
+	// Datum-Trenner wenn erster Eintrag des Tages
+	var addSep bool
+	if len(c.messages) == 0 || !sameDay(c.messages[len(c.messages)-1].Time, msg.Time) {
+		addSep = true
+	}
 	c.messages = append(c.messages, msg)
 	snap := append([]ChatMessage(nil), c.messages...)
 	c.mu.Unlock()
 
+	if addSep {
+		c.MsgBox.Add(buildDateSeparator(msg.Time))
+	}
 	row := c.buildRow(msg)
 	c.MsgBox.Add(row)
 	c.MsgBox.Refresh()
@@ -638,10 +643,7 @@ func (c *ChatWidget) LoadHistory() {
 	c.mu.Lock()
 	c.messages = msgs
 	c.mu.Unlock()
-	for _, m := range msgs {
-		c.MsgBox.Add(c.buildRow(m))
-	}
-	c.MsgBox.Refresh()
+	c.rebuildAll()
 	c.scrollToBottom()
 }
 
@@ -907,7 +909,11 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 
 func (c *ChatWidget) scrollToBottom() {
 	go func() {
-		time.Sleep(60 * time.Millisecond)
+		// Kurz warten damit Fyne das Layout berechnen kann
+		time.Sleep(80 * time.Millisecond)
+		c.Scroll.ScrollToBottom()
+		// Zweiter Versuch für große Historien (Fyne braucht ggf. mehrere Frames)
+		time.Sleep(150 * time.Millisecond)
 		c.Scroll.ScrollToBottom()
 	}()
 }

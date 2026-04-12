@@ -35,9 +35,25 @@ EXTENSIONS_AUDIO = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".o
 _cache_lock = threading.Lock()
 _log = logging.getLogger("jarvis.knowledge")
 
+# ─── Indizierungs-Fortschritt (thread-sicher) ────────────────────────────────
+_index_progress: dict = {"running": False, "phase": "", "done": 0, "total": 0, "vector_done": 0, "vector_total": 0, "error": ""}
+_progress_lock = threading.Lock()
+
+def get_index_progress() -> dict:
+    with _progress_lock:
+        return dict(_index_progress)
+
+def _set_progress(**kwargs):
+    with _progress_lock:
+        _index_progress.update(kwargs)
+
 # ─── Vector Store (optional, Fallback auf TF-IDF) ────────────────
 _vector_store = None
 _vector_store_checked = False
+
+# ─── Gecachte Stats (Format-Support ändert sich nie zur Laufzeit) ─
+_stats_cache: dict | None = None
+_stats_cache_lock = threading.Lock()
 
 
 def _get_vector_store():
@@ -75,25 +91,36 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int) -> bool:
         if path_str not in current_paths:
             vs.remove_file(path_str)
 
-    # Neue/geaenderte Dateien indexieren
-    changed = 0
+    # Neue/geaenderte Dateien ermitteln
+    to_index = []
     for filepath in files:
         path_str = str(filepath)
         try:
             mtime = filepath.stat().st_mtime
         except Exception:
             continue
-        if indexed.get(path_str) == mtime:
-            continue
+        if indexed.get(path_str) != mtime:
+            to_index.append(filepath)
 
-        text = _extract_text(filepath, max_bytes)
-        if text and text.strip():
-            chunks = _chunk_text(text)
-            vs.add_chunks(path_str, chunks, mtime)
-            changed += 1
-        else:
-            vs.remove_file(path_str)
+    _set_progress(phase="Vektor", vector_done=0, vector_total=len(to_index))
 
+    changed = 0
+    for i, filepath in enumerate(to_index):
+        path_str = str(filepath)
+        _set_progress(vector_done=i + 1, phase=f"Vektor: {filepath.name[:40]}")
+        try:
+            mtime = filepath.stat().st_mtime
+            text = _extract_text(filepath, max_bytes)
+            if text and text.strip():
+                chunks = _chunk_text(text)
+                vs.add_chunks(path_str, chunks, mtime)
+                changed += 1
+            else:
+                vs.remove_file(path_str)
+        except Exception:
+            pass
+
+    _set_progress(vector_done=len(to_index), vector_total=len(to_index))
     if changed:
         _log.info(f"Vektor-Index aktualisiert: {changed} Datei(en)")
     return True
@@ -312,7 +339,7 @@ def _tokenize(text: str) -> list[str]:
     return re.findall(r'\b\w{2,}\b', text.lower())
 
 
-def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[str]:
+def _chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str]:
     words = text.split()
     if len(words) <= chunk_size:
         return [text]
@@ -372,8 +399,8 @@ def _rebuild_cache(folders: list[Path], max_bytes: int) -> dict:
             if p not in current_paths:
                 del cache["files"][p]
 
-        # Neue/geänderte Dateien indexieren
-        changed = False
+        # Neue/geänderte Dateien ermitteln
+        to_index = []
         for filepath in files:
             path_str = str(filepath)
             try:
@@ -381,23 +408,34 @@ def _rebuild_cache(folders: list[Path], max_bytes: int) -> dict:
             except Exception:
                 continue
             cached = cache["files"].get(path_str, {})
-            if cached.get("mtime") == mtime:
-                continue  # Unverändert
+            if cached.get("mtime") != mtime:
+                to_index.append(filepath)
 
-            text = _extract_text(filepath, max_bytes)
-            if text and text.strip():
-                cache["files"][path_str] = {
-                    "mtime": mtime,
-                    "chunks": _chunk_text(text),
-                    "size": filepath.stat().st_size,
-                }
-            else:
-                cache["files"].pop(path_str, None)
-            changed = True
+        _set_progress(phase="TF-IDF", done=0, total=len(to_index))
+
+        changed = False
+        for i, filepath in enumerate(to_index):
+            path_str = str(filepath)
+            _set_progress(done=i + 1, phase=f"TF-IDF: {filepath.name[:40]}")
+            try:
+                mtime = filepath.stat().st_mtime
+                text = _extract_text(filepath, max_bytes)
+                if text and text.strip():
+                    cache["files"][path_str] = {
+                        "mtime": mtime,
+                        "chunks": _chunk_text(text),
+                        "size": filepath.stat().st_size,
+                    }
+                else:
+                    cache["files"].pop(path_str, None)
+                changed = True
+            except Exception:
+                pass
 
         if changed:
             _save_cache(cache)
 
+        _set_progress(done=len(to_index), total=len(to_index))
         return cache
 
 
@@ -444,14 +482,43 @@ def _search(query: str, cache: dict, max_results: int) -> list[tuple[float, str,
     return scored[:max_results]
 
 
-def get_stats() -> dict:
-    """Statistiken für die API."""
-    folders = _get_folders()
-    files = _all_files(folders)
-    cache = _load_cache()
-    total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
-    total_size = sum(f.stat().st_size for f in files if f.exists())
+def _get_static_stats() -> dict:
+    """Format-Support + ChromaDB-Client – wird einmalig gecacht (ändert sich nicht)."""
+    global _stats_cache
+    with _stats_cache_lock:
+        if _stats_cache is not None:
+            return _stats_cache
+        has_pdf = has_docx = has_xlsx = has_pptx = has_video = False
+        try:
+            import pdfplumber; has_pdf = True
+        except ImportError: pass
+        try:
+            import docx; has_docx = True
+        except ImportError: pass
+        try:
+            import openpyxl; has_xlsx = True
+        except ImportError: pass
+        try:
+            from pptx import Presentation; has_pptx = True
+        except ImportError: pass
+        try:
+            from faster_whisper import WhisperModel
+            if shutil.which("ffmpeg"): has_video = True
+        except ImportError: pass
 
+        _stats_cache = {
+            "pdf_support": has_pdf, "docx_support": has_docx,
+            "xlsx_support": has_xlsx, "pptx_support": has_pptx,
+            "video_support": has_video,
+        }
+        return _stats_cache
+
+
+def get_stats() -> dict:
+    """Statistiken für die API – schnell, kein Netzwerk-/Modell-Scan."""
+    folders = _get_folders()
+
+    # Ordner-Liste ohne Netzwerk-Scan
     folder_list = []
     for f in folders:
         try:
@@ -460,86 +527,73 @@ def get_stats() -> dict:
             rel = str(f)
         folder_list.append({"path": rel, "exists": f.exists()})
 
-    has_pdf = False
-    has_docx = False
-    has_xlsx = False
-    has_pptx = False
-    try:
-        import pdfplumber
-        has_pdf = True
-    except ImportError:
-        pass
-    try:
-        import docx
-        has_docx = True
-    except ImportError:
-        pass
-    try:
-        import openpyxl
-        has_xlsx = True
-    except ImportError:
-        pass
-    try:
-        from pptx import Presentation
-        has_pptx = True
-    except ImportError:
-        pass
+    # Nur gecachten TF-IDF-Index laden
+    cache = _load_cache()
+    total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
+    total_size   = sum(d.get("size", 0) for d in cache["files"].values())
 
-    has_video = False
+    # Vektor-DB: gecachter Client, nur count() aufrufen
+    has_vector = False
+    vector_chunks = 0
+    vector_files = 0
     try:
-        from faster_whisper import WhisperModel
-        if shutil.which("ffmpeg"):
-            has_video = True
-    except ImportError:
+        import chromadb as _chroma
+        from backend.tools.vector_store import COLLECTION_NAME
+        _vs_dir = PROJECT_ROOT / "data" / "vector_store"
+        _db = _vs_dir / "chroma.sqlite3"
+        if _db.exists() and _db.stat().st_size > 4096:
+            _c = _chroma.PersistentClient(path=str(_vs_dir))
+            _col = _c.get_or_create_collection(COLLECTION_NAME)
+            vector_chunks = _col.count()
+            has_vector = vector_chunks > 0
+            vector_files = len(cache["files"]) if has_vector else 0
+    except Exception:
         pass
-
-    # Vektor-Suche Status
-    vs = _get_vector_store()
-    has_vector = vs is not None
-    vector_chunks = vs.chunk_count() if vs else 0
-    vector_files = vs.file_count() if vs else 0
 
     return {
         "folders": folder_list,
-        "total_files": len(files),
+        "total_files": len(cache["files"]),
         "indexed_files": len(cache["files"]),
         "total_chunks": total_chunks,
         "total_size_bytes": total_size,
-        "pdf_support": has_pdf,
-        "docx_support": has_docx,
-        "xlsx_support": has_xlsx,
-        "pptx_support": has_pptx,
-        "video_support": has_video,
+        **_get_static_stats(),
         "vector_search": has_vector,
         "vector_files": vector_files,
         "vector_chunks": vector_chunks,
         "search_mode": _get_skill_config().get("search_mode", "auto"),
+        "indexing": get_index_progress()["running"],
     }
 
 
 def force_reindex() -> dict:
     """Erzwingt vollstaendigen Neuaufbau des Index (TF-IDF + Vektor)."""
-    with _cache_lock:
-        try:
-            INDEX_CACHE_PATH.unlink(missing_ok=True)
-        except Exception:
-            pass
+    _set_progress(running=True, phase="Starte...", done=0, total=0, vector_done=0, vector_total=0, error="")
+    try:
+        with _cache_lock:
+            try:
+                INDEX_CACHE_PATH.unlink(missing_ok=True)
+            except Exception:
+                pass
 
-    # Vektor-Index ebenfalls leeren
-    vs = _get_vector_store()
-    if vs:
-        vs.clear()
+        # Vektor-Index ebenfalls leeren
+        vs = _get_vector_store()
+        if vs:
+            vs.clear()
 
-    folders = _get_folders()
-    max_bytes = _get_max_bytes()
-    cache = _rebuild_cache(folders, max_bytes)
-    _rebuild_vector_index(folders, max_bytes)
+        folders = _get_folders()
+        max_bytes = _get_max_bytes()
+        cache = _rebuild_cache(folders, max_bytes)
+        _rebuild_vector_index(folders, max_bytes)
 
-    total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
-    vector_info = ""
-    if vs:
-        vector_info = f", Vektor: {vs.chunk_count()} Chunks"
-    return {"indexed_files": len(cache["files"]), "total_chunks": total_chunks, "vector_info": vector_info}
+        total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
+        vector_info = ""
+        if vs:
+            vector_info = f", Vektor: {vs.chunk_count()} Chunks"
+        _set_progress(running=False, phase="Fertig")
+        return {"indexed_files": len(cache["files"]), "total_chunks": total_chunks, "vector_info": vector_info}
+    except Exception as e:
+        _set_progress(running=False, phase="Fehler", error=str(e))
+        raise
 
 
 class KnowledgeTool(BaseTool):
@@ -552,10 +606,12 @@ class KnowledgeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Durchsucht die lokale Knowledge Base nach relevanten Dokumenten. "
-            "Unterstützt Text-, Markdown-, PDF-, DOCX-, Excel-, PowerPoint- und Video/Audio-Dateien aus konfigurierten Ordnern. "
-            "Nutze dieses Tool wenn du Informationen zu einem Thema brauchst, "
-            "die der Benutzer hinterlegt hat."
+            "IMMER ZUERST AUFRUFEN bei Fragen zu Produkten, Software, Technik oder Kunden! "
+            "Durchsucht die lokale Knowledge Base mit Kundendokumentation, Produkthandbüchern, "
+            "Installationsanleitungen, technischen Spezifikationen und internen Vorgaben. "
+            "Enthält PDFs, DOCX, PPTX, Excel und Textdateien. "
+            "VOR jeder Web- oder Google-Suche dieses Tool verwenden – "
+            "die Wissensdatenbank hat aktuelle, kundenbezogene Informationen die im Internet nicht zu finden sind."
         )
 
     def parameters_schema(self) -> dict:
@@ -576,10 +632,10 @@ class KnowledgeTool(BaseTool):
 
     async def execute(self, **kwargs) -> str:
         query = kwargs.get("query", "")
-        max_results = int(kwargs.get("max_results", 5))
+        max_results = int(kwargs.get("max_results", 8))
 
         if not query.strip():
-            return "❌ Leere Suchanfrage."
+            return "❌ Fehler: query-Parameter fehlt. Bitte knowledge_search erneut aufrufen und einen konkreten Suchbegriff aus der Benutzeranfrage als 'query' übergeben (z.B. knowledge_search({'query': 'LDT Import Medistar'}))."
 
         # Standardordner sicherstellen
         (PROJECT_ROOT / DEFAULT_FOLDER).mkdir(parents=True, exist_ok=True)
@@ -624,7 +680,7 @@ class KnowledgeTool(BaseTool):
         output = f"🔍 {len(results)} Treffer für '{query}' ({search_mode}):\n\n"
         for i, (score, filename, chunk) in enumerate(results, 1):
             output += f"--- [{i}] {filename} (Relevanz: {score:.2f}) ---\n"
-            output += chunk.strip()[:1000] + "\n\n"
+            output += chunk.strip()[:1500] + "\n\n"
 
         return output
 

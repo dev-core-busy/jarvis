@@ -33,6 +33,7 @@ func sttDir() string {
 }
 
 // findWhisper sucht whisper-cli.exe im Unterordner speech-to-text.
+// Nutzt das konfigurierte Modell (cfg.STTModel) wenn gesetzt und vorhanden.
 func findWhisper() (binPath, modelPath string, ok bool) {
 	dir := sttDir()
 	for _, name := range []string{"whisper-cli.exe", "whisper.exe", "main.exe"} {
@@ -45,9 +46,20 @@ func findWhisper() (binPath, modelPath string, ok bool) {
 	if binPath == "" {
 		return "", "", false
 	}
+
+	// Konfiguriertes Modell bevorzugen
+	if m := getActiveSTTModel(); m != "" {
+		p := filepath.Join(dir, m)
+		if _, err := os.Stat(p); err == nil {
+			return binPath, p, true
+		}
+	}
+
+	// Fallback: erstes vorhandenes Modell
 	for _, name := range []string{
 		"ggml-small.bin", "ggml-small-q5_1.bin", "ggml-small-q8_0.bin",
 		"ggml-base.bin", "ggml-base-q5_1.bin",
+		"ggml-medium.bin",
 		"ggml-tiny.bin", "ggml-tiny-q5_1.bin",
 	} {
 		p := filepath.Join(dir, name)
@@ -62,6 +74,28 @@ func findWhisper() (binPath, modelPath string, ok bool) {
 	return binPath, modelPath, true
 }
 
+// ListSTTModels gibt alle installierten Modell-Dateinamen zurück.
+func ListSTTModels() []string {
+	dir := sttDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var models []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".bin") && strings.HasPrefix(e.Name(), "ggml-") {
+			models = append(models, e.Name())
+		}
+	}
+	return models
+}
+
+// RestartWhisperServer stoppt den laufenden Server und startet ihn mit neuem Modell neu.
+func RestartWhisperServer() {
+	StopWhisperServer()
+	go StartWhisperServer()
+}
+
 // ── Whisper-Server (Modell bleibt im RAM → schnell ab 2. Aufruf) ─────────────
 
 const sttServerPort = 15748
@@ -70,7 +104,24 @@ var (
 	sttServerMu    sync.Mutex
 	sttServerCmd   *exec.Cmd
 	sttServerReady bool
+
+	// activeSTTModel: Dateiname des gewählten Modells (wird von main.go gesetzt).
+	activeSTTModel   string
+	activeSTTModelMu sync.Mutex
 )
+
+// SetActiveSTTModel setzt das gewünschte Modell (Dateiname, z.B. "ggml-small.bin").
+func SetActiveSTTModel(name string) {
+	activeSTTModelMu.Lock()
+	activeSTTModel = name
+	activeSTTModelMu.Unlock()
+}
+
+func getActiveSTTModel() string {
+	activeSTTModelMu.Lock()
+	defer activeSTTModelMu.Unlock()
+	return activeSTTModel
+}
 
 // StartWhisperServer startet whisper-server.exe im Hintergrund (falls vorhanden).
 // Blockiert bis der Server bereit ist (max. 20s für Modell-Laden).
@@ -157,7 +208,7 @@ func transcribeViaServer(wavData []byte) (string, error) {
 	w.Close()
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/inference", sttServerPort)
-	client := &http.Client{Timeout: 6 * time.Second}
+	client := &http.Client{Timeout: sttTimeoutForModel() - 5*time.Second}
 	resp, err := client.Post(url, w.FormDataContentType(), &buf) //nolint:gosec
 	if err != nil {
 		return "", err
@@ -196,6 +247,22 @@ func setSttLastMode(s string) {
 	sttLastModeMu.Unlock()
 }
 
+// sttTimeoutForModel gibt den Hard-Timeout passend zur Modellgröße zurück.
+// Richtwert: CPU-Inferenzzeit für ~2s Sprache (Modell bereits im RAM).
+func sttTimeoutForModel() time.Duration {
+	m := getActiveSTTModel()
+	switch {
+	case strings.Contains(m, "large"):
+		return 120 * time.Second
+	case strings.Contains(m, "medium"):
+		return 90 * time.Second
+	case strings.Contains(m, "base"):
+		return 30 * time.Second
+	default: // small, tiny, unbekannt
+		return 25 * time.Second
+	}
+}
+
 func TranscribeLocalSafe(wavData []byte) (string, error) {
 	type result struct {
 		text string
@@ -209,12 +276,13 @@ func TranscribeLocalSafe(wavData []byte) (string, error) {
 		default:
 		}
 	}()
+	timeout := sttTimeoutForModel()
 	select {
 	case r := <-ch:
 		return r.text, r.err
-	case <-time.After(25 * time.Second):
-		setSttLastMode("hard-timeout (25s)")
-		return "", fmt.Errorf("STT Timeout nach 25s – whisper hängt")
+	case <-time.After(timeout):
+		setSttLastMode(fmt.Sprintf("hard-timeout (%ds)", int(timeout.Seconds())))
+		return "", fmt.Errorf("STT Timeout nach %ds – whisper hängt", int(timeout.Seconds()))
 	}
 }
 
@@ -285,7 +353,9 @@ func transcribeWhisperCLI(wavData []byte, binPath, modelPath string) (string, er
 	}
 	f.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	// CLI-Timeout ebenfalls modellabhängig (etwas kürzer als Hard-Timeout)
+	cliTimeout := sttTimeoutForModel() - 5*time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), cliTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binPath,
 		"-m", modelPath,

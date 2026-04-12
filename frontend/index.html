@@ -543,25 +543,13 @@ sudo update-ca-certificates</code></pre>
                         </div>
                     </div>
 
-                    <!-- Modell: Dropdown für bekannte Provider -->
-                    <div class="form-group" id="model-select-group">
+                    <!-- Modell: Freitext mit Vorschlägen -->
+                    <div class="form-group">
                         <label>KI-Modell</label>
                         <div class="input-group">
-                            <select id="profile-model-select" class="select-field">
-                                <!-- Wird via JS befüllt -->
-                            </select>
+                            <input type="text" id="profile-model-input" list="model-suggestions" placeholder="Modellname eingeben oder aus Liste wählen" autocomplete="off">
+                            <datalist id="model-suggestions"></datalist>
                         </div>
-                    </div>
-
-                    <!-- Modell: Freitext für openai_compatible -->
-                    <div class="form-group" id="model-input-group" style="display: none;">
-                        <label>Modellname</label>
-                        <div class="input-group">
-                            <input type="text" id="profile-model-input" placeholder="z.B. llama3:8b, mistral, codellama">
-                        </div>
-                        <small class="tab-note" style="margin-top: 5px; opacity: 0.7;">
-                            Modellname wie vom Server erwartet (z.B. Ollama: llama3:8b)
-                        </small>
                     </div>
 
                     <!-- Prompt-Tool-Calling (nur openai_compatible) -->
@@ -793,6 +781,22 @@ sudo update-ca-certificates</code></pre>
                             <div class="kb-section-header">
                                 <h3>Statistiken</h3>
                                 <button class="kb-btn-action" id="btn-kb-reindex">Index neu aufbauen</button>
+                            </div>
+                            <!-- Fortschrittsbalken (immer im DOM, nur ein-/ausgeblendet) -->
+                            <div id="kb-index-progress-wrap" style="display:none;justify-content:flex-end;margin:8px 0 4px;">
+                                <div style="width:60%;box-sizing:border-box;overflow:hidden;">
+                                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                                        <span id="kb-progress-label" style="font-size:12px;opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;">Indizierung läuft...</span>
+                                        <span id="kb-progress-pct" style="font-size:12px;opacity:0.7;white-space:nowrap;flex-shrink:0;margin-left:8px;">0%</span>
+                                    </div>
+                                    <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:6px;overflow:hidden;">
+                                        <div id="kb-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent-primary),var(--accent-secondary));border-radius:4px;transition:width 0.4s ease;"></div>
+                                    </div>
+                                    <div style="display:flex;justify-content:space-between;margin-top:4px;overflow:hidden;">
+                                        <span id="kb-progress-phase" style="font-size:11px;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;"></span>
+                                        <span id="kb-progress-count" style="font-size:11px;opacity:0.5;white-space:nowrap;flex-shrink:0;margin-left:8px;"></span>
+                                    </div>
+                                </div>
                             </div>
                             <div id="kb-stats-container" class="kb-stats-container">
                                 <div class="kb-loading">Lade...</div>
@@ -1193,11 +1197,11 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/vnc.js?v=11"></script>
     <script src="/static/js/skills.js?v=21"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
-    <script src="/static/js/knowledge.js?v=9"></script>
+    <script src="/static/js/knowledge.js?v=17"></script>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=1"></script>
-    <script src="/static/js/app.js?v=47"></script>
+    <script src="/static/js/app.js?v=49"></script>
 </body>
 
 </html>

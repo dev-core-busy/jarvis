@@ -31,6 +31,23 @@ class JarvisKnowledgeManager {
         await this.fetchStats();
         await this.initWebDAV();
         await this.initMounts();
+        // Prüfen ob Indizierung gerade läuft (z.B. nach Seiten-Reload)
+        await this._checkRunningIndex();
+    }
+
+    async _checkRunningIndex() {
+        try {
+            const resp = await fetch('/api/knowledge/index_progress', {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            if (!resp.ok) return;
+            const p = await resp.json();
+            if (p.running) {
+                this._showProgressBar();
+                this._updateProgressBar(p);
+                this._startProgressPolling();
+            }
+        } catch (_) {}
     }
 
     // ─── Drag & Drop Upload ──────────────────────────────────────────
@@ -90,7 +107,7 @@ class JarvisKnowledgeManager {
         try {
             const resp = await fetch('/api/knowledge/upload', {
                 method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') },
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
                 body: formData,
             });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -125,7 +142,7 @@ class JarvisKnowledgeManager {
 
         try {
             const resp = await fetch('/api/knowledge/stats', {
-                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const stats = await resp.json();
@@ -148,15 +165,15 @@ class JarvisKnowledgeManager {
         const xlsxIcon = stats.xlsx_support ? '✅' : '⚠️';
         const pptxIcon = stats.pptx_support ? '✅' : '⚠️';
         const pdfTitle = stats.pdf_support ? 'PDF-Support aktiv' : 'pdfplumber nicht installiert';
-        const docxTitle = stats.docx_support ? 'DOCX-Support aktiv' : 'python-docx nicht installiert';
+        const docxTitle = stats.docx_support ? 'Word-Support aktiv (.docx, .doc)' : 'python-docx nicht installiert';
         const xlsxTitle = stats.xlsx_support ? 'Excel-Support aktiv' : 'openpyxl nicht installiert';
         const pptxTitle = stats.pptx_support ? 'PowerPoint-Support aktiv' : 'python-pptx nicht installiert';
         const videoIcon = stats.video_support ? '✅' : '⚠️';
         const videoTitle = stats.video_support ? 'Video/Audio-Support aktiv (ffmpeg + faster-whisper)' : 'ffmpeg oder faster-whisper fehlt';
-        const vectorIcon = stats.vector_search ? '✅' : '⚠️';
+        const vectorIcon = stats.vector_search ? '✅' : (stats.indexing ? '🔄' : '⚠️');
         const vectorTitle = stats.vector_search
             ? `Vektor-Suche aktiv (${stats.vector_files} Dateien, ${stats.vector_chunks} Chunks)`
-            : 'chromadb/sentence-transformers nicht installiert';
+            : (stats.indexing ? 'Vektor-Index wird gerade aufgebaut...' : 'chromadb/sentence-transformers nicht installiert');
 
         // Aktueller Suchmodus
         const mode = stats.search_mode || 'auto';
@@ -197,7 +214,7 @@ class JarvisKnowledgeManager {
             <div class="kb-formats">
                 <span class="kb-format-badge" title="Text-Formate immer aktiv">✅ Text/Markdown</span>
                 <span class="kb-format-badge" title="${pdfTitle}">${pdfIcon} PDF</span>
-                <span class="kb-format-badge" title="${docxTitle}">${docxIcon} DOCX</span>
+                <span class="kb-format-badge" title="${docxTitle}">${docxIcon} Word</span>
                 <span class="kb-format-badge" title="${xlsxTitle}">${xlsxIcon} Excel</span>
                 <span class="kb-format-badge" title="${pptxTitle}">${pptxIcon} PowerPoint</span>
                 <span class="kb-format-badge" title="${videoTitle}">${videoIcon} Video/Audio</span>
@@ -212,7 +229,7 @@ class JarvisKnowledgeManager {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (window.authToken || '')
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
                 },
                 body: JSON.stringify({ search_mode: mode })
             });
@@ -271,7 +288,7 @@ class JarvisKnowledgeManager {
 
         try {
             const resp = await fetch('/api/knowledge/files', {
-                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const data = await resp.json();
@@ -310,7 +327,7 @@ class JarvisKnowledgeManager {
                 method: 'DELETE',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (window.authToken || '')
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
                 },
                 body: JSON.stringify({ path: filePath })
             });
@@ -343,7 +360,7 @@ class JarvisKnowledgeManager {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (window.authToken || '')
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
                 },
                 body: JSON.stringify({ folders: await this._buildNewFolderList(folder, 'add') })
             });
@@ -366,7 +383,7 @@ class JarvisKnowledgeManager {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (window.authToken || '')
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
                 },
                 body: JSON.stringify({ folders: newFolders })
             });
@@ -382,7 +399,7 @@ class JarvisKnowledgeManager {
     async _buildNewFolderList(folder, action) {
         // Aktuelle Ordnerliste aus Stats laden
         const resp = await fetch('/api/knowledge/stats', {
-            headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+            headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
         });
         const stats = await resp.json();
         let folders = (stats.folders || []).map(f => f.path);
@@ -400,31 +417,104 @@ class JarvisKnowledgeManager {
     // ─── Reindex ─────────────────────────────────────────────────────
 
     async reindex() {
-        const btn = document.getElementById('btn-kb-reindex');
-        if (btn) {
-            btn.disabled = true;
-            btn.textContent = 'Läuft...';
-        }
-
         try {
             const resp = await fetch('/api/knowledge/reindex', {
                 method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const result = await resp.json();
-
-            this._showNotification(
-                `Index neu aufgebaut: ${result.indexed_files} Dateien, ${result.total_chunks} Chunks`,
-                'success'
-            );
-            await this.fetchStats();
+            if (result.started === false) {
+                this._showNotification(result.message || 'Läuft bereits', 'info');
+            } else {
+                this._showNotification('Indizierung gestartet...', 'success');
+                this._startProgressPolling();
+            }
         } catch (e) {
             this._showNotification('Fehler: ' + e.message, 'error');
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.textContent = 'Index neu aufbauen';
+        }
+    }
+
+    // ─── Fortschritts-Polling ─────────────────────────────────────────
+
+    _startProgressPolling() {
+        if (this._progressTimer) return; // bereits aktiv
+        this._showProgressBar();
+        this._progressTimer = setInterval(() => this._pollProgress(), 800);
+    }
+
+    _stopProgressPolling() {
+        if (this._progressTimer) {
+            clearInterval(this._progressTimer);
+            this._progressTimer = null;
+        }
+    }
+
+    async _pollProgress() {
+        try {
+            const resp = await fetch('/api/knowledge/index_progress', {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            if (!resp.ok) return;
+            const p = await resp.json();
+            this._updateProgressBar(p);
+            if (!p.running && (p.phase === 'Fertig' || p.phase === 'Fehler' || p.phase === '')) {
+                this._stopProgressPolling();
+                if (p.phase === 'Fertig') {
+                    setTimeout(() => this._hideProgressBar(), 2000);
+                    await this.fetchStats();
+                }
+            }
+        } catch (_) {}
+    }
+
+    _showProgressBar() {
+        const bar = document.getElementById('kb-index-progress-wrap');
+        if (bar) bar.style.display = 'flex';
+    }
+
+    _hideProgressBar() {
+        const bar = document.getElementById('kb-index-progress-wrap');
+        if (bar) bar.style.display = 'none';
+    }
+
+    _updateProgressBar(p) {
+        const label   = document.getElementById('kb-progress-label');
+        const pct     = document.getElementById('kb-progress-pct');
+        const bar     = document.getElementById('kb-progress-bar');
+        const phase   = document.getElementById('kb-progress-phase');
+        const count   = document.getElementById('kb-progress-count');
+        if (!bar) return;
+
+        // Gesamt-Fortschritt: TF-IDF + Vektor zusammen
+        const tTotal = p.total || 0;
+        const tDone  = p.done  || 0;
+        const vTotal = p.vector_total || 0;
+        const vDone  = p.vector_done  || 0;
+        const grand  = tTotal + vTotal;
+        const done   = tDone  + vDone;
+        const pctVal = grand > 0 ? Math.round((done / grand) * 100) : (p.phase === 'Fertig' ? 100 : 0);
+
+        bar.style.width = pctVal + '%';
+        if (pct)   pct.textContent   = pctVal + '%';
+        if (phase) phase.textContent = p.phase || '';
+        if (p.error && count) count.textContent = '⚠ ' + p.error.slice(0, 60);
+        else if (count) count.textContent = grand > 0 ? `${done} / ${grand}` : '';
+
+        if (label) {
+            if (p.phase === 'Fertig')      label.textContent = '✓ Indizierung abgeschlossen';
+            else if (p.phase === 'Fehler') label.textContent = '❌ Fehler bei der Indizierung';
+            else if (p.running)            label.textContent = 'Indizierung läuft...';
+            else                           label.textContent = 'Indizierung bereit';
+        }
+
+        // Dateien + Indiziert-Zähler live aktualisieren während Indizierung läuft
+        if (p.running) {
+            const statEls = document.querySelectorAll('#kb-stats-container .kb-stat-value');
+            // statEls[0] = Dateien, statEls[1] = Indiziert
+            if (statEls.length >= 2 && p.done > 0) {
+                statEls[0].textContent = p.total || p.done;
+                statEls[1].textContent = p.done;
             }
         }
     }
@@ -440,7 +530,7 @@ class JarvisKnowledgeManager {
 
         try {
             const resp = await fetch('/api/knowledge/webdav/status', {
-                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
             const data = await resp.json();
             toggle.checked = data.enabled;
@@ -463,7 +553,7 @@ class JarvisKnowledgeManager {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (window.authToken || '')
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
                 },
                 body: JSON.stringify({ enabled })
             });
@@ -496,7 +586,7 @@ class JarvisKnowledgeManager {
         if (!list) return;
         try {
             const resp = await fetch('/api/knowledge/mounts', {
-                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
             const mounts = await resp.json();
             this._renderMounts(mounts);
@@ -543,7 +633,7 @@ class JarvisKnowledgeManager {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (window.authToken || '')
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
                 },
                 body: JSON.stringify({ type, source, username, password })
             });
@@ -568,7 +658,7 @@ class JarvisKnowledgeManager {
             const action = mount ? 'mount' : 'unmount';
             const resp = await fetch(`/api/knowledge/mounts/${idx}/${action}`, {
                 method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
             if (!resp.ok) {
                 const err = await resp.json();
@@ -587,7 +677,7 @@ class JarvisKnowledgeManager {
         try {
             await fetch(`/api/knowledge/mounts/${idx}`, {
                 method: 'DELETE',
-                headers: { 'Authorization': 'Bearer ' + (window.authToken || '') }
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
             this._showNotification('Freigabe entfernt', 'success');
             await this.fetchMounts();

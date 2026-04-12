@@ -61,6 +61,9 @@ class FileSystemTool(BaseTool):
                     return f"Datei nicht gefunden: {p}"
                 if p.is_dir():
                     return f"{p} ist ein Verzeichnis, nicht eine Datei"
+                BINARY_EXTENSIONS = {".docx", ".doc", ".pdf", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".ods", ".odp", ".zip", ".tar", ".gz", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".mp3", ".mp4", ".wav"}
+                if p.suffix.lower() in BINARY_EXTENSIONS:
+                    return f"❌ '{p.name}' ist eine Binärdatei ({p.suffix}) und kann nicht direkt gelesen werden. Für Dokumentinhalte knowledge_search verwenden – der Inhalt ist dort bereits korrekt geparst."
                 text = p.read_text(encoding="utf-8", errors="replace")
                 if len(text) > 10000:
                     return text[:10000] + f"\n\n... (gekürzt, {len(text)} Zeichen gesamt)"

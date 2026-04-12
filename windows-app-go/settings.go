@@ -2,9 +2,13 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"net/url"
+	"os"
+	"path/filepath"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
@@ -57,9 +61,11 @@ func vSpacer(h float32) fyne.CanvasObject {
 // ── Wiederverwendbare Layout-Bausteine (analog Android) ──────────────────────
 
 // sectionHeader: Abschnitts-Titel, fett, mit Trennlinie darunter (Android SectionHeader).
+// Schriftgröße = Theme-Standard (13) × 1.5 = 20
 func sectionHeader(text string) fyne.CanvasObject {
-	lbl := widget.NewLabel(text)
+	lbl := canvas.NewText(text, jc.textPrimary)
 	lbl.TextStyle = fyne.TextStyle{Bold: true}
+	lbl.TextSize = 20
 	return tightVBox(lbl, widget.NewSeparator())
 }
 
@@ -109,8 +115,25 @@ func sliderRow(label string, min, max, step, initial float64, unit string, onCha
 }
 
 // showSettingsWindow öffnet Einstellungen als scrollbare Einzelspalte (Android-Stil).
+// Singleton: wenn bereits ein Settings-Fenster offen ist, wird es in den Vordergrund gebracht.
 func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
+	app.chatMu.Lock()
+	if app.settingsWin != nil {
+		app.chatMu.Unlock()
+		app.settingsWin.RequestFocus()
+		return
+	}
+	app.chatMu.Unlock()
+
 	win := a.NewWindow("Jarvis – Einstellungen")
+	app.chatMu.Lock()
+	app.settingsWin = win
+	app.chatMu.Unlock()
+	win.SetOnClosed(func() {
+		app.chatMu.Lock()
+		app.settingsWin = nil
+		app.chatMu.Unlock()
+	})
 	win.SetFixedSize(false)
 
 	// ── VERBINDUNG ────────────────────────────────────────────────────────────
@@ -439,11 +462,17 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	wakeCheck.OnChanged = setWakeFormEnabled
 
 	// ── ANZEIGE ───────────────────────────────────────────────────────────────
-	debugCheck := widget.NewCheck("", nil)
-	debugCheck.SetChecked(app.debugMode)
-
 	dialogCheck := widget.NewCheck("", nil)
 	dialogCheck.SetChecked(app.cfg.DialogMode)
+
+	ttsTextCheck := widget.NewCheck("", nil)
+	ttsTextCheck.SetChecked(app.cfg.TTSInTextMode)
+
+	avatarCheck := widget.NewCheck("", nil)
+	avatarCheck.SetChecked(app.cfg.AvatarVisible)
+
+	debugCheck := widget.NewCheck("", nil)
+	debugCheck.SetChecked(app.debugMode)
 
 	// ── LAYOUT: scrollbare Einzelspalte (Android-Stil) ────────────────────────
 	content := container.NewVBox(
@@ -491,7 +520,17 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 		settingRow("Automatisch senden",
 			"Transkribierter Text wird nach der Sprech-Pause direkt gesendet",
 			autoSendCheck),
-		vSpacer(8),
+
+		widget.NewSeparator(),
+
+		// — Spracherkennung (Whisper) —
+		sectionHeader("Spracherkennung (Whisper)"),
+		buildWhisperSection(win, app),
+
+		widget.NewSeparator(),
+
+		// — Dialogmodus —
+		sectionHeader("Dialogmodus"),
 		settingRow("Aktivierungswort verwenden",
 			"Mikrofon hört passiv zu bis das Aktivierungswort erkannt wird",
 			wakeCheck),
@@ -500,21 +539,27 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 
 		widget.NewSeparator(),
 
-		// — Spracherkennung (Whisper) —
-		sectionHeader("Spracherkennung (Whisper)"),
-		buildWhisperSection(win),
+		// — Textmodus —
+		sectionHeader("Textmodus"),
+		settingRow("Sprachausgabe",
+			"LLM-Antworten im Chat-Fenster vorlesen",
+			ttsTextCheck),
+		vSpacer(8),
+		settingRow("Avatar anzeigen",
+			"Iron Man Avatar im Chat-Fenster einblenden",
+			avatarCheck),
 
 		widget.NewSeparator(),
 
 		// — Anzeige —
 		sectionHeader("Anzeige"),
-		settingRow("Debug-Modus",
-			"Nachrichten als Volltext, fett/weiß — zeigt alle LLM-Details",
-			debugCheck),
-		vSpacer(8),
 		settingRow("Dialog-Modus",
 			"Avatar-Fenster mit Sprachdialog statt Chat-Fenster",
 			dialogCheck),
+		vSpacer(8),
+		settingRow("Debug-Modus",
+			"Nachrichten als Volltext, fett/weiß — zeigt alle LLM-Details",
+			debugCheck),
 
 		widget.NewSeparator(),
 
@@ -582,6 +627,11 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 		app.cfg.MinSpeechMs = int(minSpeechVal)
 		app.cfg.VADThreshold = int(vadVal)
 
+		// Sprachausgabe
+		app.cfg.TTSInTextMode = ttsTextCheck.Checked
+		app.cfg.AvatarVisible = avatarCheck.Checked
+		app.chat.SetAvatarVisible(app.cfg.AvatarVisible)
+
 		// Anzeige
 		if debugCheck.Checked != app.debugMode {
 			app.toggleDebug()
@@ -602,119 +652,171 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	})
 	saveBtn.Importance = widget.HighImportance
 
-	win.SetContent(container.NewBorder(nil,
-		container.NewPadded(saveBtn), nil, nil, scroll))
+	// Leicht hellerer Hintergrund (#1E1E35) damit Dropdowns (#1A1A2E) sich abgrenzen
+	settingsBg := canvas.NewRectangle(color.RGBA{0x1E, 0x1E, 0x35, 0xFF})
+	win.SetContent(container.NewStack(
+		settingsBg,
+		container.NewBorder(nil, container.NewPadded(saveBtn), nil, nil, scroll),
+	))
 	win.Resize(fyne.NewSize(440, 620))
 	win.Show()
 }
 
-// buildWhisperSection zeigt Whisper-Status und ermöglicht Download direkt aus den Einstellungen.
-func buildWhisperSection(win fyne.Window) fyne.CanvasObject {
+// buildWhisperSection zeigt Whisper-Binary-Status und Modell-Auswahl mit Download.
+func buildWhisperSection(win fyne.Window, app *JarvisApp) fyne.CanvasObject {
+	// ── Binary-Status ──────────────────────────────────────────────────
 	exeLbl := widget.NewLabel("")
-	modelLbl := widget.NewLabel("")
-	statusLbl := widget.NewLabel("")
-	statusLbl.Importance = widget.LowImportance
+	hasExe, _ := WhisperStatus()
+	if hasExe {
+		exeLbl.SetText("✓  whisper-cli.exe")
+		exeLbl.Importance = widget.SuccessImportance
+	} else {
+		exeLbl.SetText("✗  whisper-cli.exe  (fehlt)")
+		exeLbl.Importance = widget.DangerImportance
+	}
 
-	progress := widget.NewProgressBar()
-	progress.Hide()
+	exeDlBtn := widget.NewButton("whisper-cli.exe herunterladen", nil)
+	exeDlBtn.Importance = widget.HighImportance
+	exeProgress := widget.NewProgressBar()
+	exeProgress.Hide()
+	exeStatusLbl := widget.NewLabel("")
+	exeStatusLbl.Importance = widget.LowImportance
+	if hasExe {
+		exeDlBtn.Hide()
+	}
+	exeDlBtn.OnTapped = func() {
+		exeDlBtn.Disable()
+		exeProgress.Show()
+		go func() {
+			defer func() {
+				exeProgress.Hide()
+				h, _ := WhisperStatus()
+				if h {
+					exeLbl.SetText("✓  whisper-cli.exe")
+					exeLbl.Importance = widget.SuccessImportance
+					exeLbl.Refresh()
+					exeDlBtn.Hide()
+				}
+				exeDlBtn.Enable()
+			}()
+			exeStatusLbl.SetText("Lade whisper-cli.exe …")
+			if err := DownloadWhisperExe(func(p float64) { exeProgress.SetValue(p) }); err != nil {
+				exeStatusLbl.SetText("✗ " + err.Error())
+				return
+			}
+			exeStatusLbl.SetText("✓ whisper-cli.exe bereit")
+		}()
+	}
 
-	var dlBtn *widget.Button
-
-	refresh := func() {
-		hasExe, hasModel := WhisperStatus()
-		if hasExe {
-			exeLbl.SetText("✓  whisper-cli.exe")
-			exeLbl.Importance = widget.SuccessImportance
-		} else {
-			exeLbl.SetText("✗  whisper-cli.exe  (fehlt)")
-			exeLbl.Importance = widget.DangerImportance
-		}
-		if hasModel {
-			modelLbl.SetText("✓  ggml-small.bin")
-			modelLbl.Importance = widget.SuccessImportance
-		} else {
-			modelLbl.SetText("✗  ggml-small.bin  (466 MB)")
-			modelLbl.Importance = widget.DangerImportance
-		}
-		exeLbl.Refresh()
-		modelLbl.Refresh()
-		if hasExe && hasModel {
-			dlBtn.SetText("Alles vorhanden ✓")
-			dlBtn.Disable()
-			statusLbl.SetText("")
-		} else {
-			dlBtn.SetText("Herunterladen")
-			dlBtn.Enable()
+	// ── Modell-Zeilen ──────────────────────────────────────────────────
+	activeName := app.cfg.STTModel
+	if activeName == "" {
+		// Detect first installed model as active if none configured
+		if models := ListSTTModels(); len(models) > 0 {
+			activeName = models[0]
 		}
 	}
 
-	dlBtn = widget.NewButton("Herunterladen", func() {
-		dlBtn.Disable()
-		progress.SetValue(0)
-		progress.Show()
+	modelRows := container.NewVBox()
+	globalProgress := widget.NewProgressBar()
+	globalProgress.Hide()
+	globalStatusLbl := widget.NewLabel("")
+	globalStatusLbl.Importance = widget.LowImportance
 
-		go func() {
-			defer func() {
-				progress.Hide()
-				refresh()
-			}()
+	var rebuildModelRows func()
+	rebuildModelRows = func() {
+		modelRows.Objects = nil
+		currentActive := getActiveSTTModel()
+		if currentActive == "" {
+			currentActive = app.cfg.STTModel
+		}
 
-			hasExe, hasModel := WhisperStatus()
-			// Anzahl fehlender Komponenten für Fortschrittsberechnung
-			steps := 0
-			if !hasExe {
-				steps++
+		for _, def := range STTModels {
+			def := def // capture
+			installed := false
+			dir := sttDir()
+			if _, err := os.Stat(filepath.Join(dir, def.Filename)); err == nil {
+				installed = true
 			}
-			if !hasModel {
-				steps++
-			}
-			if steps == 0 {
-				return
-			}
-			stepSize := 1.0 / float64(steps)
-			offset := 0.0
 
-			if !hasExe {
-				statusLbl.SetText("Lade whisper-cli.exe …")
-				if err := DownloadWhisperExe(func(p float64) {
-					progress.SetValue(offset + p*stepSize)
-				}); err != nil {
-					statusLbl.SetText("✗ " + err.Error())
-					dlBtn.Enable()
-					return
+			nameLbl := widget.NewLabel(def.Label)
+			noteLbl := widget.NewLabel(def.Note)
+			noteLbl.Importance = widget.LowImportance
+			noteLbl.TextStyle = fyne.TextStyle{Italic: true}
+
+			var actionBtn *widget.Button
+			if installed {
+				if def.Filename == currentActive {
+					nameLbl.TextStyle = fyne.TextStyle{Bold: true}
+					actionBtn = widget.NewButton("✓ Aktiv", nil)
+					actionBtn.Disable()
+					actionBtn.Importance = widget.SuccessImportance
+				} else {
+					actionBtn = widget.NewButton("Aktivieren", func() {
+						app.cfg.STTModel = def.Filename
+						_ = app.cfg.Save()
+						SetActiveSTTModel(def.Filename)
+						RestartWhisperServer()
+						globalStatusLbl.SetText("✓ " + def.Filename + " aktiviert – Server neu gestartet")
+						rebuildModelRows()
+					})
+					actionBtn.Importance = widget.MediumImportance
 				}
-				offset += stepSize
+			} else {
+				actionBtn = widget.NewButton(fmt.Sprintf("Laden (%d MB)", def.SizeMB), func() {
+					actionBtn.Disable()
+					globalProgress.SetValue(0)
+					globalProgress.Show()
+					globalStatusLbl.SetText("Lade " + def.Filename + " …")
+					go func() {
+						defer func() {
+							globalProgress.Hide()
+							actionBtn.Enable()
+							rebuildModelRows()
+						}()
+						if err := DownloadSTTModel(def, func(p float64) {
+							globalProgress.SetValue(p)
+						}); err != nil {
+							globalStatusLbl.SetText("✗ " + err.Error())
+							return
+						}
+						// Automatisch aktivieren wenn noch kein Modell aktiv
+						if getActiveSTTModel() == "" || app.cfg.STTModel == "" {
+							app.cfg.STTModel = def.Filename
+							_ = app.cfg.Save()
+							SetActiveSTTModel(def.Filename)
+							RestartWhisperServer()
+						}
+						globalStatusLbl.SetText("✓ " + def.Filename + " heruntergeladen")
+					}()
+				})
+				actionBtn.Importance = widget.LowImportance
 			}
 
-			if !hasModel {
-				statusLbl.SetText("Lade ggml-small.bin (466 MB) …")
-				if err := DownloadWhisperModel(func(p float64) {
-					progress.SetValue(offset + p*stepSize)
-				}); err != nil {
-					statusLbl.SetText("✗ " + err.Error())
-					dlBtn.Enable()
-					return
-				}
-			}
+			row := container.NewBorder(nil, nil,
+				container.NewVBox(nameLbl, noteLbl),
+				actionBtn,
+			)
+			modelRows.Add(row)
+			modelRows.Add(widget.NewSeparator())
+		}
+		modelRows.Refresh()
+	}
 
-			statusLbl.SetText("✓ Whisper einsatzbereit")
-		}()
-	})
-	dlBtn.Importance = widget.HighImportance
+	rebuildModelRows()
 
-	refresh()
-
-	infoLbl := widget.NewLabel(
-		"Whisper bietet deutlich bessere Erkennungsqualität als Windows SAPI.\n" +
-			"Die Dateien werden neben jarvis.exe gespeichert (~500 MB).")
+	infoLbl := widget.NewLabel("Lokale Spracherkennung – keine Verbindung zum Server nötig.")
 	infoLbl.Importance = widget.LowImportance
 	infoLbl.Wrapping = fyne.TextWrapWord
 
 	return container.NewVBox(
-		container.NewGridWithColumns(2, exeLbl, modelLbl),
-		vSpacer(4),
-		container.NewHBox(dlBtn, statusLbl),
-		progress,
+		container.NewHBox(exeLbl, exeDlBtn),
+		exeProgress,
+		exeStatusLbl,
+		vSpacer(6),
+		modelRows,
+		globalProgress,
+		globalStatusLbl,
 		vSpacer(4),
 		infoLbl,
 	)

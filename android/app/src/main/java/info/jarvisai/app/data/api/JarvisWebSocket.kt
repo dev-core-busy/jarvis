@@ -84,6 +84,16 @@ class JarvisWebSocket @Inject constructor(
         ws?.send(payload) ?: Log.w(TAG, "sendTask: WebSocket nicht verbunden")
     }
 
+    fun sendStop(agentId: String = "") {
+        val obj = buildJsonObject {
+            put("type", "control")
+            put("action", "stop")
+            put("token", apiKey)
+            if (agentId.isNotBlank()) put("agent_id", agentId)
+        }
+        ws?.send(obj.toString()) ?: Log.w(TAG, "sendStop: WebSocket nicht verbunden")
+    }
+
     fun sendPing() {
         ws?.send("""{"type":"ping"}""")
     }

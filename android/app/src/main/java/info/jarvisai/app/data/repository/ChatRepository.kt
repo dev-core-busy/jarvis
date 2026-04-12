@@ -53,6 +53,9 @@ class ChatRepository @Inject constructor(
     private val _speakText = MutableSharedFlow<String>(extraBufferCapacity = 5)
     val speakText: SharedFlow<String> = _speakText
 
+    private val _isAgentRunning = MutableStateFlow(false)
+    val isAgentRunning: StateFlow<Boolean> = _isAgentRunning
+
     // @Volatile: sicher lesbar vom Main-Thread (sendMessage) und Dispatchers.Default (handleEvent)
     @Volatile private var streamingMsgId: String? = null
 
@@ -82,8 +85,13 @@ class ChatRepository @Inject constructor(
         finalizeStream()
         val userMsg = ChatMessage(role = MessageRole.USER, text = text)
         _messages.update { it + userMsg }
+        _isAgentRunning.value = true
         ws.sendTask(text)
         saveMessages()
+    }
+
+    fun sendStop() {
+        ws.sendStop()
     }
 
     private suspend fun collectEvents() {
@@ -116,6 +124,7 @@ class ChatRepository @Inject constructor(
             "highlight" -> appendToStream(event.message, SegmentType.ANSWER)
             "error" -> {
                 finalizeStream()
+                _isAgentRunning.value = false
                 _messages.update {
                     it + ChatMessage(
                         role = MessageRole.JARVIS,
@@ -138,7 +147,11 @@ class ChatRepository @Inject constructor(
             }
             "agent_event" -> {
                 when (event.event) {
-                    "finished" -> finalizeStream()
+                    "finished" -> {
+                        finalizeStream()
+                        _isAgentRunning.value = false
+                    }
+                    "started" -> _isAgentRunning.value = true
                     else -> { }
                 }
             }

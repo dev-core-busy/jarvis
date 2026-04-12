@@ -146,6 +146,7 @@ def _normalize_schema(schema: dict) -> dict:
 # ═══════════════════════════════════════════════════════════════════
 
 class GeminiProvider(LLMProvider):
+
     def __init__(self, api_key: str):
         self.client = genai.Client(api_key=api_key)
 

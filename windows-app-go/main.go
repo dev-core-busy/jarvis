@@ -22,9 +22,10 @@ type JarvisApp struct {
 	chat    *ChatWidget
 	dialog  *DialogController
 
-	avatarWin fyne.Window
-	chatWin   fyne.Window
-	chatMu    sync.Mutex
+	avatarWin  fyne.Window
+	chatWin    fyne.Window
+	settingsWin fyne.Window
+	chatMu     sync.Mutex
 
 	connected      bool
 	everConnected  bool // true nach erster erfolgreicher Verbindung
@@ -74,6 +75,7 @@ func main() {
 
 	a := app.NewWithID("com.jarvis.app")
 	a.Settings().SetTheme(JarvisTheme{})
+	a.SetIcon(fyne.NewStaticResource("jarvis_icon", jarvisIconPNG))
 
 	cfg := LoadConfig()
 
@@ -81,7 +83,8 @@ func main() {
 	SetTTSVoice(cfg.TTSVoice)
 	SetTTSServer(cfg.ServerURL, cfg.APIKey)
 
-	// Whisper-Server im Hintergrund starten – immer versuchen (Funktion prüft selbst)
+	// Gewähltes STT-Modell setzen und Whisper-Server starten
+	SetActiveSTTModel(cfg.STTModel)
 	go StartWhisperServer()
 
 	ja := &JarvisApp{
@@ -152,10 +155,22 @@ func main() {
 	// Update-Check im Hintergrund (nicht blockierend)
 	go func() {
 		time.Sleep(5 * time.Second) // kurz warten bis UI fertig geladen
-		if info := CheckForUpdate(); info != nil {
-			ja.chat.AddMessage(RoleStatus,
-				fmt.Sprintf("🔄 Update verfügbar: v%s – jarvis-ai.info/downloads/jarvis.exe", info.VersionName))
+		info := CheckForUpdate()
+		if info == nil {
+			return
 		}
+		ja.chat.AddMessage(RoleStatus,
+			fmt.Sprintf("🔄 Update v%s verfügbar – wird automatisch heruntergeladen...", info.VersionName))
+
+		err := PerformUpdate(info, func(progress float64) {
+			pct := int(progress * 100)
+			ja.chat.SetStatus(fmt.Sprintf("⬇ Update wird geladen... %d%%", pct))
+		})
+		if err != nil {
+			ja.chat.AddMessage(RoleStatus,
+				fmt.Sprintf("❌ Update fehlgeschlagen: %s", err.Error()))
+		}
+		// Bei Erfolg beendet PerformUpdate die App selbst
 	}()
 
 	a.Run()
@@ -361,15 +376,6 @@ func (ja *JarvisApp) reconnect() {
 	ja.chat.OnSettings = func() {
 		showSettingsWindow(ja.fyneApp, ja, func() { ja.reconnect(); ja.refreshChatWindow() })
 	}
-	ja.chat.OnTTSToggle = func() {
-		ja.cfg.TTSInTextMode = !ja.cfg.TTSInTextMode
-		_ = ja.cfg.Save()
-		ja.chat.SetTTSEnabled(ja.cfg.TTSInTextMode)
-		if !ja.cfg.TTSInTextMode {
-			StopTTS()
-			ja.chat.SetTTSSpeaking(false)
-		}
-	}
 	ja.chat.OnTTSStop = func() {
 		StopTTS()
 		ja.chat.SetTTSSpeaking(false)
@@ -427,7 +433,15 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 				ja.chat.SetStatus(msg.Message)
 				return
 			}
-			// Echten LLM-Streamingtext: Status leeren, in Bubble anzeigen + TTS sammeln
+			if msg.Intermediate {
+				// LLM-Zwischenantwort (Denken zwischen Tool-Aufrufen): nur im Debug-Modus gedimmt
+				ja.chat.SetStatus("")
+				if ja.debugMode {
+					ja.chat.AddDebugMessage("💭 " + msg.Message)
+				}
+				return
+			}
+			// Echte finale LLM-Antwort: Status leeren, in Bubble anzeigen + TTS sammeln
 			ja.chat.SetStatus("")
 			ja.chat.AppendToLast(msg.Message)
 			ja.ttsBufMu.Lock()
@@ -472,7 +486,9 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 			go func() {
 				// TTS im Dialogmodus ODER wenn Text-TTS eingeschaltet
 				if (ja.cfg.DialogMode || ja.cfg.TTSInTextMode) && ttsText != "" {
+					ja.chat.SetTTSSpeaking(true)
 					SpeakText(ttsText)
+					ja.chat.SetTTSSpeaking(false)
 				}
 				if ja.dialog != nil {
 					ja.dialog.MuteWhileSpeaking(false)
@@ -557,6 +573,7 @@ func (ja *JarvisApp) refreshChatWindow() {
 		return
 	}
 	ja.chatWin.SetContent(ja.chat.Layout(ja.cfg))
+	ja.chat.SetAvatarVisible(ja.cfg.AvatarVisible)
 }
 
 func (ja *JarvisApp) openChatWindowLocked() {
@@ -566,7 +583,15 @@ func (ja *JarvisApp) openChatWindowLocked() {
 	win.SetContent(ja.chat.Layout(ja.cfg))
 
 	// Fenster verstecken statt schließen → App bleibt im Tray am Leben
+	// Vorher Position + Größe speichern (Win32 liefert physische Pixel)
 	win.SetCloseIntercept(func() {
+		if x, y, w, h, ok := GetChatWindowRect(); ok {
+			ja.cfg.WindowX = x
+			ja.cfg.WindowY = y
+			ja.cfg.WindowW = w
+			ja.cfg.WindowH = h
+			_ = ja.cfg.Save()
+		}
 		win.Hide()
 	})
 	win.SetOnClosed(func() {
@@ -576,8 +601,16 @@ func (ja *JarvisApp) openChatWindowLocked() {
 	})
 	ja.chatWin = win
 	win.Show()
-	// TTS-Button-Zustand nach dem Aufbau setzen
-	ja.chat.SetTTSEnabled(ja.cfg.TTSInTextMode)
+	// Gespeicherte Position wiederherstellen (Win32, nach Show)
+	if ja.cfg.WindowX != 0 || ja.cfg.WindowY != 0 {
+		go SetChatWindowPos(ja.cfg.WindowX, ja.cfg.WindowY)
+	}
+	// Zum Ende scrollen nachdem Fyne das Layout berechnet hat
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		ja.chat.Scroll.ScrollToBottom()
+	}()
+	ja.chat.SetAvatarVisible(ja.cfg.AvatarVisible)
 }
 
 // startTextDictation startet die Spracheingabe im Text-Modus (einmalig).
@@ -739,6 +772,15 @@ func (ja *JarvisApp) shutdown() {
 	}
 	if ja.avatar != nil {
 		ja.avatar.Stop()
+	}
+	// Chat-Fenster Position + Größe speichern
+	if !ja.cfg.DialogMode {
+		if x, y, w, h, ok := GetChatWindowRect(); ok {
+			ja.cfg.WindowX = x
+			ja.cfg.WindowY = y
+			ja.cfg.WindowW = w
+			ja.cfg.WindowH = h
+		}
 	}
 	// Avatar-Position vor dem Beenden speichern
 	if ja.cfg.DialogMode && ja.avatarWin != nil {

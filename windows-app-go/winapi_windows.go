@@ -165,7 +165,6 @@ type notifyIconData struct {
 	Version         uint32
 	InfoTitle       [64]uint16
 	InfoFlags       uint32
-	_               [4]byte   // Padding für GUID
 	GuidItem        [16]byte
 	BalloonIcon     uintptr
 }
@@ -367,7 +366,7 @@ func runNativeSysTray() {
 	}
 
 	// Shell_NotifyIcon NIM_ADD
-	tip, _ := syscall.UTF16FromString("Jarvis AI")
+	tip, _ := syscall.UTF16FromString("Jarvis Desktop KI Agent")
 	nid := notifyIconData{
 		Wnd:             hwnd,
 		ID:              1,
@@ -383,6 +382,12 @@ func runNativeSysTray() {
 	const nimSetVersion = uintptr(4)
 	nid.Version = 4
 	pShellNotifyIconW.Call(nimSetVersion, uintptr(unsafe.Pointer(&nid)))
+
+	// Tooltip explizit nochmal setzen (NIM_MODIFY) – NIM_SETVERSION kann ihn zurücksetzen
+	nid.Version = 0
+	nid.Flags = nifTip
+	copy(nid.Tip[:], tip)
+	pShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&nid)))
 
 	// Message-Loop
 	var m msg
@@ -552,6 +557,34 @@ func GetAvatarPosition() (x, y int) {
 	return int(r.Left), int(r.Top)
 }
 
+// GetChatWindowRect gibt Position und Größe des Chat-Fensters in physischen Pixeln zurück.
+func GetChatWindowRect() (x, y, w, h int, ok bool) {
+	hwnd := findHWND("Jarvis – Chat")
+	if hwnd == 0 {
+		return 0, 0, 0, 0, false
+	}
+	var r winRECT
+	pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+	return int(r.Left), int(r.Top), int(r.Right - r.Left), int(r.Bottom - r.Top), true
+}
+
+// SetChatWindowPos setzt Position des Chat-Fensters (physische Pixel, nach Show aufrufen).
+func SetChatWindowPos(x, y int) {
+	if x == 0 && y == 0 {
+		return
+	}
+	for i := 0; i < 30; i++ {
+		time.Sleep(50 * time.Millisecond)
+		hwnd := findHWND("Jarvis – Chat")
+		if hwnd != 0 {
+			pSetWindowPos.Call(hwnd, 0,
+				uintptr(x), uintptr(y), 0, 0,
+				swpNosize|swpNozorder|swpNoActivate)
+			return
+		}
+	}
+}
+
 // SetAvatarPosition setzt die Fensterposition (Wiederherstellen beim Start).
 func SetAvatarPosition(x, y int) {
 	if x == 0 && y == 0 {
@@ -603,15 +636,18 @@ var (
 	currentAPIKey    string
 
 	// TTS-Stop: laufender Prozess/MCI-Zustand
-	ttsStopMu      sync.Mutex
-	ttsStopCmd     *exec.Cmd // aktueller PowerShell-Prozess (SAPI)
-	ttsStopIsMCI   bool      // true = MCI/MP3 läuft gerade
+	ttsStopMu        sync.Mutex
+	ttsStopCmd       *exec.Cmd // aktueller PowerShell-Prozess (SAPI)
+	ttsStopIsMCI     bool      // true = MCI/MP3 läuft gerade
+	ttsStopRequested bool      // Abbruch auch während HTTP-Request (vor MCI-Start)
 )
 
 // StopTTS unterbricht die laufende TTS-Wiedergabe sofort.
+// Setzt auch ttsStopRequested, damit ein noch laufender HTTP-Request keinen Abspielstart auslöst.
 func StopTTS() {
 	ttsStopMu.Lock()
 	defer ttsStopMu.Unlock()
+	ttsStopRequested = true
 	if ttsStopCmd != nil && ttsStopCmd.Process != nil {
 		_ = ttsStopCmd.Process.Kill()
 		ttsStopCmd = nil
@@ -725,6 +761,14 @@ func mciSend(cmd string) {
 
 // playMP3Bytes schreibt MP3-Daten in eine Temp-Datei und spielt sie via mciSendString ab.
 func playMP3Bytes(data []byte) {
+	// Abbruch prüfen: StopTTS() kann während HTTP-Request aufgerufen worden sein
+	ttsStopMu.Lock()
+	aborted := ttsStopRequested
+	ttsStopMu.Unlock()
+	if aborted {
+		return
+	}
+
 	f, err := os.CreateTemp("", "jarvis_tts_*.mp3")
 	if err != nil {
 		return
@@ -844,6 +888,11 @@ func PlayTestTone() {
 // SpeakText spricht den Text aus (blockierend, in Goroutine aufrufen).
 // Priorität: Backend-Stimme → Windows SAPI.
 func SpeakText(text string) {
+	// Flag zurücksetzen: jeder neue TTS-Aufruf startet clean
+	ttsStopMu.Lock()
+	ttsStopRequested = false
+	ttsStopMu.Unlock()
+
 	clean := stripMarkdownForTTS(text)
 	if clean == "" {
 		return

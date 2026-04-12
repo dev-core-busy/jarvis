@@ -88,7 +88,9 @@ class ShellTool(BaseTool):
         **kwargs,
     ) -> str:
         """Fuehrt Shell-Befehl aus. Bei _status_callback wird stdout live gestreamt."""
-        # Fallback: LLM schickt manchmal "code" statt "command"
+        # Fallback: LLM schickt manchmal "cmd" oder "code" statt "command"
+        if not command and kwargs.get("cmd"):
+            command = kwargs["cmd"]
         if not command and code:
             command = self._code_to_command(code.strip())
         elif command and code:

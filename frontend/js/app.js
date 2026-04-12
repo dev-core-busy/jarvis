@@ -1015,10 +1015,8 @@
         const inputName = document.getElementById('profile-name');
         const selectProvider = document.getElementById('profile-provider');
         const inputUrl = document.getElementById('profile-api-url');
-        const selectModel = document.getElementById('profile-model-select');
         const inputModel = document.getElementById('profile-model-input');
-        const modelSelectGroup = document.getElementById('model-select-group');
-        const modelInputGroup = document.getElementById('model-input-group');
+        const modelSuggestions = document.getElementById('model-suggestions');
         const promptToolGroup = document.getElementById('prompt-tool-group');
         const checkPromptTool = document.getElementById('profile-prompt-tool-calling');
         const inputKey = document.getElementById('profile-api-key');
@@ -1455,11 +1453,7 @@
 
             // Modell setzen (nach updateProviderUI)
             if (profile) {
-                if (profile.provider === 'openai_compatible') {
-                    inputModel.value = profile.model;
-                } else {
-                    selectModel.value = profile.model;
-                }
+                inputModel.value = profile.model || '';
                 if (checkPromptTool) {
                     checkPromptTool.checked = !!profile.prompt_tool_calling;
                 }
@@ -1477,22 +1471,14 @@
             const isOpenAICompat = provider === 'openai_compatible';
             const isSession = radioSession && radioSession.checked;
 
-            // Modell: Dropdown vs. Freitext
-            if (isOpenAICompat) {
-                modelSelectGroup.style.display = 'none';
-                modelInputGroup.style.display = '';
-            } else {
-                modelSelectGroup.style.display = '';
-                modelInputGroup.style.display = 'none';
-                // Modell-Liste befüllen
-                const models = (defaults[provider] && defaults[provider].models) || [];
-                selectModel.innerHTML = '';
-                models.forEach(m => {
-                    const opt = document.createElement('option');
-                    opt.value = opt.textContent = m;
-                    selectModel.appendChild(opt);
-                });
-            }
+            // Datalist mit Vorschlägen für aktuellen Provider befüllen
+            const models = (defaults[provider] && defaults[provider].models) || [];
+            modelSuggestions.innerHTML = '';
+            models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                modelSuggestions.appendChild(opt);
+            });
 
             // URL vorbefüllen wenn leer
             if (!inputUrl.value && defaults[provider]) {
@@ -1541,7 +1527,7 @@
         btnSaveProfile.addEventListener('click', async () => {
             const provider = selectProvider.value;
             const isSession = provider === 'anthropic' && radioSession && radioSession.checked;
-            const model = provider === 'openai_compatible' ? inputModel.value : selectModel.value;
+            const model = inputModel.value;
 
             if (!inputName.value.trim()) {
                 alert('Bitte einen Profilnamen eingeben.');
@@ -1624,7 +1610,7 @@
                         provider: selectProvider.value,
                         api_url: inputUrl.value.trim(),
                         api_key: inputKey.value.trim(),
-                        model: (selectProvider.value === 'openai_compatible' ? inputModel.value : selectModel.value) || '',
+                        model: inputModel.value.trim() || '',
                         auth_method: (radioSession && radioSession.checked) ? 'session' : 'api_key',
                         session_key: inputSessionKey ? inputSessionKey.value.trim() : '',
                     };
@@ -1634,11 +1620,25 @@
                         body: JSON.stringify(testPayload),
                     });
                     const data = await res.json();
+                    // Datalist mit echten API-Modellen befüllen
+                    const availModels = data.available_models || data.models || [];
+                    if (availModels.length > 0) {
+                        modelSuggestions.innerHTML = '';
+                        availModels.forEach(m => {
+                            const opt = document.createElement('option');
+                            opt.value = m;
+                            modelSuggestions.appendChild(opt);
+                        });
+                    }
                     if (data.success) {
-                        profileTestResult.style.background = 'rgba(46,204,113,0.15)';
-                        profileTestResult.style.border = '1px solid rgba(46,204,113,0.4)';
-                        profileTestResult.style.color = '#2ecc71';
-                        profileTestResult.textContent = `✓ ${data.message}${data.latency_ms ? ` (${data.latency_ms} ms)` : ''}`;
+                        const ok = data.model_found !== false;
+                        profileTestResult.style.background = ok ? 'rgba(46,204,113,0.15)' : 'rgba(230,126,34,0.15)';
+                        profileTestResult.style.border = ok ? '1px solid rgba(46,204,113,0.4)' : '1px solid rgba(230,126,34,0.4)';
+                        profileTestResult.style.color = ok ? '#2ecc71' : '#e67e22';
+                        profileTestResult.textContent = `${ok ? '✓' : '⚠'} ${data.message}${data.latency_ms ? ` (${data.latency_ms} ms)` : ''}`;
+                        if (availModels.length > 0 && !ok) {
+                            profileTestResult.textContent += ' → Modellname aus Vorschlagsliste wählen!';
+                        }
                     } else {
                         profileTestResult.style.background = 'rgba(231,76,60,0.15)';
                         profileTestResult.style.border = '1px solid rgba(231,76,60,0.4)';

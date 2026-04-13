@@ -1720,10 +1720,34 @@ async def webdav_status(user: str = Depends(require_auth)):
         except ValueError:
             name = f.name
         shares.append(name)
-    host = os.getenv("SERVER_IP", "127.0.0.1")
+    # Alle nicht-loopback IPv4-Adressen ermitteln
+    import socket
+    urls = []
+    if enabled:
+        try:
+            hostname = socket.gethostname()
+            all_ips = socket.gethostbyname_ex(hostname)[2]
+        except Exception:
+            all_ips = []
+        # Fallback: hostname -I Methode
+        try:
+            import subprocess
+            out = subprocess.check_output(["hostname", "-I"], text=True).strip()
+            all_ips += out.split()
+        except Exception:
+            pass
+        seen = set()
+        for ip in all_ips:
+            ip = ip.strip()
+            if ip and not ip.startswith("127.") and not ip.startswith("::") and ip not in seen:
+                seen.add(ip)
+                urls.append(f"https://{ip}/webdav/")
+        if not urls:
+            urls = [f"https://{os.getenv('SERVER_IP','<server-ip>')}/webdav/"]
     return JSONResponse({
         "enabled": enabled,
-        "url": f"https://{host}/webdav/" if enabled else None,
+        "urls": urls,
+        "url": urls[0] if urls else None,
         "shares": shares if enabled else [],
         "username": cfg.get("username", "jarvis"),
     })

@@ -539,7 +539,10 @@ class JarvisKnowledgeManager {
                 const urlEl = document.getElementById('kb-webdav-url');
                 const userEl = document.getElementById('kb-webdav-user');
                 const sharesEl = document.getElementById('kb-webdav-shares');
-                if (urlEl) urlEl.textContent = data.url || '';
+                if (urlEl) {
+                    const urls = data.urls && data.urls.length ? data.urls : (data.url ? [data.url] : []);
+                    urlEl.innerHTML = urls.map(u => `<a href="${u}" target="_blank" style="color:inherit">${u}</a>`).join('<br>');
+                }
                 if (userEl) userEl.textContent = data.username || 'jarvis';
                 if (sharesEl) sharesEl.textContent = (data.shares || []).join(', ');
             }

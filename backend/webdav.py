@@ -47,8 +47,11 @@ def get_webdav_app():
     folders = _get_folders()
 
     provider_mapping = {}
+    first_folder = None
     for folder in folders:
         folder.mkdir(parents=True, exist_ok=True)
+        if first_folder is None:
+            first_folder = folder
         try:
             share_name = str(folder.relative_to(PROJECT_ROOT)).replace("/", "_")
         except ValueError:
@@ -57,6 +60,9 @@ def get_webdav_app():
 
     if not provider_mapping:
         return None
+
+    # Root-Pfad auf primären Ordner mappen damit /webdav/ erreichbar ist
+    provider_mapping["/"] = str(first_folder)
 
     # Credentials (Default: Jarvis-Login)
     username = cfg.get("username", "jarvis")

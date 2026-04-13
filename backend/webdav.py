@@ -46,10 +46,6 @@ def get_webdav_app():
     from backend.tools.knowledge import _get_folders
     folders = _get_folders()
 
-    # Virtuelles Root-Verzeichnis mit Symlinks zu allen Knowledge-Ordnern
-    import tempfile, os
-    vroot = Path(tempfile.mkdtemp(prefix="jarvis_webdav_"))
-
     provider_mapping = {}
     for folder in folders:
         folder.mkdir(parents=True, exist_ok=True)
@@ -57,19 +53,14 @@ def get_webdav_app():
             share_name = str(folder.relative_to(PROJECT_ROOT)).replace("/", "_")
         except ValueError:
             share_name = folder.name
-        # Symlink im virtuellen Root anlegen
-        link = vroot / share_name
-        if link.exists() or link.is_symlink():
-            link.unlink()
-        os.symlink(str(folder), str(link))
         provider_mapping[f"/{share_name}"] = str(folder)
 
     if not provider_mapping:
-        vroot.rmdir()
         return None
 
-    # Root zeigt virtuelles Verzeichnis mit allen Shares als Unterordner
-    provider_mapping["/"] = str(vroot)
+    # Root auf den größten Share mappen (meistens SMB-Freigabe)
+    largest = max(folders, key=lambda f: sum(1 for _ in f.rglob("*") if _.is_file()) if f.exists() else 0)
+    provider_mapping["/"] = str(largest)
 
     # Credentials (Default: Jarvis-Login)
     username = cfg.get("username", "jarvis")

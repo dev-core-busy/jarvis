@@ -657,6 +657,17 @@ async def clear_telemetry(user: str = Depends(require_auth)):
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/system/restart")
+async def system_restart(user: str = Depends(require_auth)):
+    """Startet den Jarvis-Dienst neu (via systemctl)."""
+    import subprocess, threading
+    def _do_restart():
+        import time; time.sleep(1)
+        subprocess.run(["systemctl", "restart", "jarvis.service"], check=False)
+    threading.Thread(target=_do_restart, daemon=True).start()
+    return JSONResponse({"ok": True, "message": "Neustart eingeleitet"})
+
+
 @app.get("/api/config")
 async def get_config():
     """Öffentliche Konfiguration für Frontend."""

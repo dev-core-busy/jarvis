@@ -551,6 +551,32 @@ class JarvisKnowledgeManager {
         } catch (e) {}
     }
 
+    async saveWebdavCredentials() {
+        const user = document.getElementById('kb-webdav-new-user')?.value.trim();
+        const pass = document.getElementById('kb-webdav-new-pass')?.value;
+        if (!user && !pass) { this._showNotification('Bitte Benutzername oder Passwort eingeben', 'error'); return; }
+        try {
+            const body = { enabled: true };
+            if (user) body.username = user;
+            if (pass) body.password = pass;
+            await fetch('/api/knowledge/webdav/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                body: JSON.stringify(body)
+            });
+            // Jarvis-Server neu starten damit WebDAV neue Credentials übernimmt
+            await fetch('/api/system/restart', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            this._showNotification('Gespeichert – Server wird neu gestartet…', 'success');
+            document.getElementById('kb-webdav-new-user').value = '';
+            document.getElementById('kb-webdav-new-pass').value = '';
+        } catch (e) {
+            this._showNotification('Fehler: ' + e.message, 'error');
+        }
+    }
+
     async toggleWebDAV(enabled) {
         const details = document.getElementById('kb-webdav-details');
         try {
@@ -705,3 +731,4 @@ class JarvisKnowledgeManager {
 
 // Globale Instanz
 window.knowledgeManager = new JarvisKnowledgeManager();
+window._saveWebdavCredentials = () => window.knowledgeManager.saveWebdavCredentials();

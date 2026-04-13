@@ -850,10 +850,15 @@ sudo update-ca-certificates</code></pre>
                                 <div class="kb-webdav-info">
                                     <div class="kb-info-row"><span class="kb-info-label">URL:</span> <code id="kb-webdav-url"></code></div>
                                     <div class="kb-info-row"><span class="kb-info-label">Benutzer:</span> <code id="kb-webdav-user"></code></div>
-                                    <div class="kb-info-row"><span class="kb-info-label">Passwort:</span> <code id="kb-webdav-pass">jarvis</code> <span class="kb-info-hint">(WebDAV-eigenes Passwort, ≠ System-Login)</span></div>
+                                    <div class="kb-info-row"><span class="kb-info-label">Passwort:</span> <code id="kb-webdav-pass">jarvis</code> <span class="kb-info-hint">(eigenes WebDAV-Passwort, unabhängig vom System-Login)</span></div>
                                     <div class="kb-info-row"><span class="kb-info-label">Shares:</span> <span id="kb-webdav-shares"></span></div>
                                 </div>
-                                <p class="kb-hint">Aenderungen erfordern einen Server-Neustart.</p>
+                                <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+                                    <input type="text" id="kb-webdav-new-user" placeholder="Benutzername" style="width:130px;padding:4px 8px;font-size:0.82rem;background:var(--bg-glass);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);">
+                                    <input type="password" id="kb-webdav-new-pass" placeholder="Neues Passwort" style="width:150px;padding:4px 8px;font-size:0.82rem;background:var(--bg-glass);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);">
+                                    <button class="kb-btn-action" onclick="window._saveWebdavCredentials()" style="font-size:0.82rem;padding:4px 12px;">Speichern &amp; Neustart</button>
+                                </div>
+                                <p class="kb-hint" style="margin-top:8px;">⚠️ Nach dem Speichern wird der Jarvis-Server neu gestartet, damit der WebDAV-Dienst die neuen Zugangsdaten übernimmt.</p>
                             </div>
                         </div>
 
@@ -1143,7 +1148,8 @@ sudo update-ca-certificates</code></pre>
 
                 <!-- ═══ Tab: Sicherheit ═══ -->
                 <div id="settings-tab-security" class="settings-tab-content" style="display:none;">
-                    <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:16px;">🔒 Kennwort ändern</h3>
+                    <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:4px;">🔒 Kennwort ändern</h3>
+                    <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:16px;">Ändert das Linux-Benutzerkonto <code>jarvis</code> – gilt für die Web-Oberfläche und SSH-Login. <strong>Nicht</strong> das WebDAV-Passwort.</p>
                     <div class="form-group">
                         <label>Aktuelles Kennwort</label>
                         <div style="position:relative;width:25%;">
@@ -1198,7 +1204,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/vnc.js?v=11"></script>
     <script src="/static/js/skills.js?v=21"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
-    <script src="/static/js/knowledge.js?v=19"></script>
+    <script src="/static/js/knowledge.js?v=20"></script>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=1"></script>

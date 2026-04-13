@@ -1,9 +1,13 @@
 """OpenTelemetry Tracing fuer Jarvis – Agent-Runs, Tool-Ausfuehrungen, LLM-Calls."""
 
 import time
+import json
 import threading
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
+
+_STATS_FILE = Path(__file__).parent.parent / "data" / "telemetry_stats.json"
 
 # ─── Leichtgewichtiger Trace-Speicher (kein externer Collector noetig) ───────
 
@@ -56,9 +60,10 @@ class JarvisTracer:
             "llm_calls": 0,
             "errors": 0,
             "total_duration_ms": 0,
-            "tool_durations": defaultdict(list),  # tool_name -> [durations]
+            "tool_durations": defaultdict(list),
             "llm_durations": [],
         }
+        self._load_stats()
 
     def start_span(self, name: str, kind: str = "internal", parent_id: str | None = None) -> TraceSpan:
         """Startet einen neuen Span."""
@@ -93,6 +98,7 @@ class JarvisTracer:
 
             if status == "error":
                 self._stats["errors"] += 1
+            self._persist_stats()
 
     def get_stats(self) -> dict:
         """Gibt aggregierte Statistiken zurueck."""
@@ -132,6 +138,38 @@ class JarvisTracer:
         with self._lock:
             return [s.to_dict() for s in self._spans[-limit:]]
 
+    def _persist_stats(self):
+        """Speichert aggregierte Statistiken auf Disk (kein Lock noetig – wird innerhalb Lock aufgerufen)."""
+        try:
+            data = {
+                "agent_runs": self._stats["agent_runs"],
+                "tool_calls": self._stats["tool_calls"],
+                "llm_calls": self._stats["llm_calls"],
+                "errors": self._stats["errors"],
+                "total_duration_ms": self._stats["total_duration_ms"],
+                "tool_durations": dict(self._stats["tool_durations"]),
+                "llm_durations": self._stats["llm_durations"],
+            }
+            _STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _STATS_FILE.write_text(json.dumps(data))
+        except Exception:
+            pass
+
+    def _load_stats(self):
+        """Laedt gespeicherte Statistiken beim Start."""
+        try:
+            if _STATS_FILE.exists():
+                data = json.loads(_STATS_FILE.read_text())
+                self._stats["agent_runs"] = data.get("agent_runs", 0)
+                self._stats["tool_calls"] = data.get("tool_calls", 0)
+                self._stats["llm_calls"] = data.get("llm_calls", 0)
+                self._stats["errors"] = data.get("errors", 0)
+                self._stats["total_duration_ms"] = data.get("total_duration_ms", 0)
+                self._stats["tool_durations"] = defaultdict(list, data.get("tool_durations", {}))
+                self._stats["llm_durations"] = data.get("llm_durations", [])
+        except Exception:
+            pass
+
     def clear(self):
         """Loescht alle Spans und Statistiken."""
         with self._lock:
@@ -145,6 +183,7 @@ class JarvisTracer:
                 "tool_durations": defaultdict(list),
                 "llm_durations": [],
             }
+            self._persist_stats()
 
 
 # Singleton

@@ -1750,6 +1750,7 @@ async def webdav_status(user: str = Depends(require_auth)):
         "url": urls[0] if urls else None,
         "shares": shares if enabled else [],
         "username": cfg.get("username", "jarvis"),
+        "password": cfg.get("password", "jarvis"),
     })
 
 

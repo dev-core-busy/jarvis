@@ -850,7 +850,7 @@ sudo update-ca-certificates</code></pre>
                                 <div class="kb-webdav-info">
                                     <div class="kb-info-row"><span class="kb-info-label">URL:</span> <code id="kb-webdav-url"></code></div>
                                     <div class="kb-info-row"><span class="kb-info-label">Benutzer:</span> <code id="kb-webdav-user"></code></div>
-                                    <div class="kb-info-row"><span class="kb-info-label">Passwort:</span> <span class="kb-info-hint">Jarvis-Login Passwort</span></div>
+                                    <div class="kb-info-row"><span class="kb-info-label">Passwort:</span> <code id="kb-webdav-pass">jarvis</code> <span class="kb-info-hint">(WebDAV-eigenes Passwort, ≠ System-Login)</span></div>
                                     <div class="kb-info-row"><span class="kb-info-label">Shares:</span> <span id="kb-webdav-shares"></span></div>
                                 </div>
                                 <p class="kb-hint">Aenderungen erfordern einen Server-Neustart.</p>
@@ -1111,7 +1111,7 @@ sudo update-ca-certificates</code></pre>
                     <div class="kb-container">
                         <div id="tele-stat-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:20px;"></div>
                         <div class="sk-openclaw-section" id="tele-tool-section">
-                            <div class="kb-folder-header" style="cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('.kb-folder-arrow').textContent=this.nextElementSibling.style.display==='none'?'▶':'▼'">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadSpans();})(this)">
                                 <span class="kb-folder-icon">🔧</span>
                                 <span class="kb-folder-path" style="font-weight:600;">Tool-Statistiken</span>
                                 <span class="kb-folder-arrow">▼</span>
@@ -1119,7 +1119,7 @@ sudo update-ca-certificates</code></pre>
                             <div id="tele-tool-body"><div class="kb-loading">Lade…</div></div>
                         </div>
                         <div class="sk-openclaw-section" style="margin-top:10px;">
-                            <div class="kb-folder-header" style="cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('.kb-folder-arrow').textContent=this.nextElementSibling.style.display==='none'?'▶':'▼'">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadSpans();})(this)">
                                 <span class="kb-folder-icon">🧠</span>
                                 <span class="kb-folder-path" style="font-weight:600;">LLM-Statistiken</span>
                                 <span class="kb-folder-arrow">▼</span>
@@ -1127,7 +1127,7 @@ sudo update-ca-certificates</code></pre>
                             <div id="tele-llm-body"><div class="kb-loading">Lade…</div></div>
                         </div>
                         <div class="sk-openclaw-section" style="margin-top:10px;">
-                            <div class="kb-folder-header" style="cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('.kb-folder-arrow').textContent=this.nextElementSibling.style.display==='none'?'▶':'▼'">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadSpans();})(this)">
                                 <span class="kb-folder-icon">📋</span>
                                 <span class="kb-folder-path" style="font-weight:600;">Letzte Spans</span>
                                 <span class="kb-folder-arrow">▶</span>
@@ -1198,7 +1198,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/vnc.js?v=11"></script>
     <script src="/static/js/skills.js?v=21"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
-    <script src="/static/js/knowledge.js?v=18"></script>
+    <script src="/static/js/knowledge.js?v=19"></script>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=1"></script>

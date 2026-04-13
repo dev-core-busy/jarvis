@@ -544,6 +544,8 @@ class JarvisKnowledgeManager {
                     urlEl.innerHTML = urls.map(u => `<a href="${u}" target="_blank" style="color:inherit">${u}</a>`).join('<br>');
                 }
                 if (userEl) userEl.textContent = data.username || 'jarvis';
+                const passEl = document.getElementById('kb-webdav-pass');
+                if (passEl) passEl.textContent = data.password || 'jarvis';
                 if (sharesEl) sharesEl.textContent = (data.shares || []).join(', ');
             }
         } catch (e) {}

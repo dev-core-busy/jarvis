@@ -59,6 +59,8 @@ var (
 	pSetForegroundWindow = user32.MustFindProc("SetForegroundWindow")
 	pGetSystemMetrics    = user32.MustFindProc("GetSystemMetrics")
 	pGetWindowRect       = user32.MustFindProc("GetWindowRect")
+	pMonitorFromPoint    = user32.MustFindProc("MonitorFromPoint")
+	pGetMonitorInfoW     = user32.MustFindProc("GetMonitorInfoW")
 	pCreatePopupMenu     = user32.MustFindProc("CreatePopupMenu")
 	pAppendMenuW         = user32.MustFindProc("AppendMenuW")
 	pTrackPopupMenu      = user32.MustFindProc("TrackPopupMenu")
@@ -102,8 +104,10 @@ const (
 	swpNoActivate   = uintptr(0x0010)
 	hwndTopmost     = ^uintptr(0) // -1
 
-	smCxSmIcon = uintptr(49) // GetSystemMetrics: Breite des kleinen Icons (Tray)
-	smCySmIcon = uintptr(50) // GetSystemMetrics: Höhe des kleinen Icons (Tray)
+	smCxSmIcon     = uintptr(49) // GetSystemMetrics: Breite des kleinen Icons (Tray)
+	smCySmIcon     = uintptr(50) // GetSystemMetrics: Höhe des kleinen Icons (Tray)
+	smCyCaption    = uintptr(4)  // Höhe Titelleiste (physische Pixel)
+	monitorDefault = uintptr(2)  // MONITOR_DEFAULTTONEAREST
 
 	wmNcLButtonDown = uintptr(0x00A1)
 	htCaption       = uintptr(2)
@@ -380,14 +384,22 @@ func runNativeSysTray() {
 
 	// NOTIFYICON_VERSION_4 → modernes Verhalten (Windows Vista+)
 	const nimSetVersion = uintptr(4)
-	nid.Version = 4
-	pShellNotifyIconW.Call(nimSetVersion, uintptr(unsafe.Pointer(&nid)))
+	nid2 := notifyIconData{Wnd: hwnd, ID: 1}
+	nid2.Size = uint32(unsafe.Sizeof(nid2))
+	nid2.Version = 4
+	pShellNotifyIconW.Call(nimSetVersion, uintptr(unsafe.Pointer(&nid2)))
 
-	// Tooltip explizit nochmal setzen (NIM_MODIFY) – NIM_SETVERSION kann ihn zurücksetzen
-	nid.Version = 0
-	nid.Flags = nifTip
-	copy(nid.Tip[:], tip)
-	pShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&nid)))
+	// Tooltip nach NIM_SETVERSION neu setzen – alle Flags auf einmal
+	nid3 := notifyIconData{
+		Wnd:             hwnd,
+		ID:              1,
+		Flags:           nifMessage | nifIcon | nifTip,
+		CallbackMessage: wmTray,
+		Icon:            hIcon,
+	}
+	nid3.Size = uint32(unsafe.Sizeof(nid3))
+	copy(nid3.Tip[:], tip)
+	pShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&nid3)))
 
 	// Message-Loop
 	var m msg
@@ -530,8 +542,52 @@ func MakeAvatarWindowFrameless() {
 	avatarOrigWndProc, _, _ = pSetWindowLongPtrW.Call(hwnd, gwlWndProc, avatarSubclassProc)
 }
 
-// RECT Struktur für GetWindowRect
+// RECT Struktur für GetWindowRect / GetMonitorInfo
 type winRECT struct{ Left, Top, Right, Bottom int32 }
+
+// MONITORINFO für GetMonitorInfoW
+type monitorInfo struct {
+	Size    uint32
+	Monitor winRECT
+	Work    winRECT // Arbeitsbereich (ohne Taskleiste)
+	Flags   uint32
+}
+
+// validateWindowPos prüft ob x/y auf einem sichtbaren Monitor liegt.
+// Gibt ggf. korrigierte Koordinaten zurück (oben links bei ungültiger Position).
+func validateWindowPos(x, y, w, h int) (int, int) {
+	// MonitorFromPoint mit MONITOR_DEFAULTTONEAREST: gibt immer einen Monitor zurück
+	type point struct{ X, Y int32 }
+	pt := point{int32(x + w/2), int32(y + h/2)} // Mittelpunkt des Fensters prüfen
+	hMon, _, _ := pMonitorFromPoint.Call(
+		uintptr(pt.X), uintptr(pt.Y),
+		monitorDefault,
+	)
+	if hMon == 0 {
+		return 0, 0
+	}
+	var mi monitorInfo
+	mi.Size = uint32(unsafe.Sizeof(mi))
+	ret, _, _ := pGetMonitorInfoW.Call(hMon, uintptr(unsafe.Pointer(&mi)))
+	if ret == 0 {
+		return 0, 0
+	}
+	work := mi.Work
+	// Fenster muss mindestens 50px sichtbar sein
+	minVisible := int32(50)
+	if int32(x)+int32(w)-minVisible < work.Left || int32(x)+minVisible > work.Right ||
+		int32(y)+minVisible > work.Bottom || int32(y) < work.Top-int32(50) {
+		// Ungültig → oben links des Arbeitsbereichs
+		return int(work.Left), int(work.Top)
+	}
+	return x, y
+}
+
+// titleBarHeight gibt die Titelleistenhöhe in physischen Pixeln zurück.
+func titleBarHeight() int {
+	h, _, _ := pGetSystemMetrics.Call(smCyCaption)
+	return int(h)
+}
 
 // avatarHWND cached – verhindert FindWindow auf jedem Drag-Event
 var (
@@ -557,7 +613,9 @@ func GetAvatarPosition() (x, y int) {
 	return int(r.Left), int(r.Top)
 }
 
-// GetChatWindowRect gibt Position und Größe des Chat-Fensters in physischen Pixeln zurück.
+// GetChatWindowRect gibt Position und client-Größe des Chat-Fensters zurück.
+// Die Höhe wird um die Titelleiste bereinigt, damit win.Resize() beim nächsten
+// Öffnen dieselbe sichtbare Größe produziert (Fyne arbeitet ohne Titelleiste).
 func GetChatWindowRect() (x, y, w, h int, ok bool) {
 	hwnd := findHWND("Jarvis – Chat")
 	if hwnd == 0 {
@@ -565,10 +623,16 @@ func GetChatWindowRect() (x, y, w, h int, ok bool) {
 	}
 	var r winRECT
 	pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
-	return int(r.Left), int(r.Top), int(r.Right - r.Left), int(r.Bottom - r.Top), true
+	totalH := int(r.Bottom - r.Top)
+	clientH := totalH - titleBarHeight()
+	if clientH < 100 {
+		clientH = totalH // Fallback falls titleBarHeight fehlschlägt
+	}
+	return int(r.Left), int(r.Top), int(r.Right - r.Left), clientH, true
 }
 
 // SetChatWindowPos setzt Position des Chat-Fensters (physische Pixel, nach Show aufrufen).
+// Validiert die Position gegen den sichtbaren Bildschirmbereich.
 func SetChatWindowPos(x, y int) {
 	if x == 0 && y == 0 {
 		return
@@ -577,8 +641,14 @@ func SetChatWindowPos(x, y int) {
 		time.Sleep(50 * time.Millisecond)
 		hwnd := findHWND("Jarvis – Chat")
 		if hwnd != 0 {
+			// Fenstergröße für Validierung holen
+			var r winRECT
+			pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+			w := int(r.Right - r.Left)
+			h := int(r.Bottom - r.Top)
+			vx, vy := validateWindowPos(x, y, w, h)
 			pSetWindowPos.Call(hwnd, 0,
-				uintptr(x), uintptr(y), 0, 0,
+				uintptr(vx), uintptr(vy), 0, 0,
 				swpNosize|swpNozorder|swpNoActivate)
 			return
 		}

@@ -101,6 +101,7 @@ from backend.config import config
 from backend.llm import get_provider
 from backend.skills.manager import SkillManager
 from backend.tools.memory import load_memory_context, load_selective_memory
+import backend.conv_log as conv_log
 
 # ── Instructions aus data/instructions/*.md laden ─────────────────────────
 INSTRUCTIONS_DIR = Path(__file__).parent.parent / "data" / "instructions"
@@ -303,7 +304,7 @@ KRITISCH – Autonomie-Regeln:
             )
         return declarations
 
-    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser"):
+    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown"):
         """Führt eine Aufgabe aus – der Agent-Loop."""
         import sys
         from backend.telemetry import tracer
@@ -389,10 +390,12 @@ KRITISCH – Autonomie-Regeln:
             system_prompt += f"\n\n{memory_context}"
             await self._send_status(ws, "🧠 Memory geladen")
 
+        _conv_messages = []   # Für conv_log: alle LLM-Ein/Ausgaben dieser Konversation
+        _task_start_time = time.time()
         try:
             # Konversation starten
             chat_history = []
-            task_start_time = time.time()
+            task_start_time = _task_start_time
             _total_input_tokens  = 0
             _total_output_tokens = 0
 
@@ -450,6 +453,7 @@ KRITISCH – Autonomie-Regeln:
                 for text in text_parts:
                     if text.strip():
                         await self._send_status(ws, text.strip(), highlight=True, intermediate=is_intermediate)
+                        _conv_messages.append({"role": "assistant", "content": text.strip()})
 
                 # Wenn keine Function Calls → fertig
                 if not function_calls:
@@ -508,6 +512,7 @@ KRITISCH – Autonomie-Regeln:
                     await self._send_status(
                         ws, f"📋 Ergebnis: {result_str[:300]}{'...' if len(result_str) > 300 else ''}"
                     )
+                    _conv_messages.append({"role": "tool", "tool": tool_name, "content": result_str})
 
                     function_response_parts.append(
                         types.Part.from_function_response(
@@ -570,6 +575,22 @@ KRITISCH – Autonomie-Regeln:
             _task_duration_ms = int((time.time() - task_start_time) * 1000)
             await self._send_llm_stats(ws, _task_duration_ms, _total_input_tokens, _total_output_tokens, steps)
 
+            # Konversation im Verlauf-Log speichern
+            if not self.is_sub_agent:
+                try:
+                    conv_log.log_conversation(
+                        task=task_text,
+                        model=config.current_model,
+                        client_ip=client_ip,
+                        client_type=client_type,
+                        system_prompt=system_prompt,
+                        messages=_conv_messages,
+                        steps=steps,
+                        duration_ms=_task_duration_ms,
+                    )
+                except Exception as cl_err:
+                    _log(f"conv_log fehlgeschlagen: {cl_err}")
+
             # Auto-Learning: Bei mehrstufigen Aufgaben den Loesungsweg speichern
             if steps >= 2 and self._tool_stats:
                 failed = [s for s in self._tool_stats if not s["success"]]
@@ -609,9 +630,26 @@ KRITISCH – Autonomie-Regeln:
 
         except Exception as e:
             import traceback; _log(f"EXCEPTION: {e}\n{traceback.format_exc()}")
-            await self._send_status(ws, _friendly_api_error(e))
+            err_msg = _friendly_api_error(e)
+            await self._send_status(ws, err_msg)
             tracer.end_span(agent_span, status="error", error=str(e))
             agent_span = None  # Verhindern, dass finally nochmal beendet
+            if not self.is_sub_agent:
+                try:
+                    _dur = int((time.time() - _task_start_time) * 1000)
+                    conv_log.log_conversation(
+                        task=task_text,
+                        model=config.current_model,
+                        client_ip=client_ip,
+                        client_type=client_type,
+                        system_prompt=system_prompt if 'system_prompt' in locals() else "",
+                        messages=_conv_messages,
+                        steps=0,
+                        duration_ms=_dur,
+                        error=str(e)[:300],
+                    )
+                except Exception:
+                    pass
         finally:
             _log(f"run_task beendet (state={self.state.value})")
             if agent_span:

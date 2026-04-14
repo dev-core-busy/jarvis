@@ -12,7 +12,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=58">
+    <link rel="stylesheet" href="/static/css/style.css?v=59">
 </head>
 
 <body>
@@ -443,6 +443,7 @@ sudo update-ca-certificates</code></pre>
             <!-- Settings Tabs -->
             <div class="settings-tabs">
                 <button class="settings-tab-btn active" data-settings-tab="profiles">KI-Profile</button>
+                <button class="settings-tab-btn" data-settings-tab="instructions">Anweisungen</button>
                 <button class="settings-tab-btn" data-settings-tab="skills">Skills</button>
                 <button class="settings-tab-btn" data-settings-tab="whatsapp" id="settings-tab-btn-whatsapp" style="display:none">WhatsApp</button>
                 <button class="settings-tab-btn" data-settings-tab="knowledge">Wissen</button>
@@ -619,29 +620,24 @@ sudo update-ca-certificates</code></pre>
                     <div id="profile-test-result" style="display:none;margin-top:10px;padding:10px 14px;border-radius:8px;font-size:0.88rem;line-height:1.5;"></div>
                 </div>
 
-                <!-- ── Instruktionen (innerhalb KI-Profile) ── -->
-                <div id="profiles-instructions-section" style="display:none;">
-                    <hr class="settings-divider">
-                    <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:8px;">Instruktionen</h3>
-                    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px; line-height: 1.5;">
-                        Dauerhafte Anweisungen, die bei <strong style="color: var(--text-primary);">jedem Gespräch</strong> automatisch geladen werden.
-                        Beispiele: Kommunikationsstil, bevorzugte Tools, Sicherheitsregeln oder projektspezifische Vorgaben.
-                    </p>
+                </div><!-- /settings-tab-profiles -->
 
-                    <div style="display: flex; gap: 10px; margin-bottom: 16px; align-items: center;">
+                <!-- ═══ Tab: Anweisungen ═══ -->
+                <div id="settings-tab-instructions" class="settings-tab-content" style="display:none;">
+                    <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:16px;line-height:1.5;">
+                        Dauerhafte Anweisungen, die bei <strong style="color:var(--text-primary);">jedem Gespräch</strong> automatisch geladen werden.
+                        Beispiele: Kommunikationsstil, bevorzugte Tools, Sicherheitsregeln oder projektspezifische Vorgaben.
+                        Gespeichert in <code>data/instructions/</code>.
+                    </p>
+                    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;">
                         <input type="text" id="instr-new-name" placeholder="Name der neuen Instruktion"
-                               style="flex:1; padding:8px 12px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-size:0.85rem;">
-                        <button id="btn-instr-new" class="btn-primary" style="padding:8px 16px; font-size:0.85rem; white-space:nowrap;">
+                               style="flex:1;max-width:300px;padding:8px 12px;background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:0.85rem;">
+                        <button id="btn-instr-new" class="btn-primary" style="padding:8px 16px;font-size:0.85rem;white-space:nowrap;">
                             + Neue Instruktion
                         </button>
                     </div>
-
-                    <div id="instr-list" style="display: flex; flex-direction: column; gap: 10px;">
-                        <!-- Wird dynamisch befuellt -->
-                    </div>
+                    <div id="instr-list" style="display:flex;flex-direction:column;gap:10px;"></div>
                 </div>
-
-                </div><!-- /settings-tab-profiles -->
 
                 <!-- ═══ Tab: Skills ═══ -->
                 <div id="settings-tab-skills" class="settings-tab-content" style="display: none;">
@@ -1132,6 +1128,28 @@ sudo update-ca-certificates</code></pre>
                             <div id="tele-llm-body"><div class="kb-loading">Lade…</div></div>
                         </div>
                         <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadConvLog();})(this)">
+                                <span class="kb-folder-icon">💬</span>
+                                <span class="kb-folder-path" style="font-weight:600;">LLM-Verlauf</span>
+                                <span style="margin-left:auto;margin-right:8px;">
+                                    <select id="conv-log-ip-filter" style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:0.78rem;" onclick="event.stopPropagation()">
+                                        <option value="">Alle IPs</option>
+                                    </select>
+                                    <button id="conv-log-clear-btn" class="kb-btn-action" style="font-size:0.72rem;padding:2px 8px;margin-left:6px;" onclick="event.stopPropagation()">🗑</button>
+                                </span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="tele-convlog-body" style="display:none;max-height:420px;overflow-y:auto;"><div class="kb-loading">Lade…</div></div>
+                        </div>
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadErrors();})(this)">
+                                <span class="kb-folder-icon">❌</span>
+                                <span class="kb-folder-path" style="font-weight:600;">Fehler-Log</span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="tele-errors-body" style="display:none;"><div class="kb-loading">Lade…</div></div>
+                        </div>
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
                             <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadSpans();})(this)">
                                 <span class="kb-folder-icon">📋</span>
                                 <span class="kb-folder-path" style="font-weight:600;">Letzte Spans</span>
@@ -1207,8 +1225,8 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/knowledge.js?v=20"></script>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
-    <script src="/static/js/telemetry.js?v=1"></script>
-    <script src="/static/js/app.js?v=52"></script>
+    <script src="/static/js/telemetry.js?v=2"></script>
+    <script src="/static/js/app.js?v=53"></script>
 </body>
 
 </html>

@@ -546,7 +546,7 @@ class JarvisKnowledgeManager {
                 if (userEl) userEl.textContent = data.username || 'jarvis';
                 const passEl = document.getElementById('kb-webdav-pass');
                 if (passEl) passEl.textContent = data.password || 'jarvis';
-                if (sharesEl) sharesEl.textContent = (data.shares || []).join(', ');
+                if (sharesEl) sharesEl.textContent = 'Lokaler Ordner: ' + (data.shares || []).join(', ');
             }
         } catch (e) {}
     }

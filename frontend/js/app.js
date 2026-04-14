@@ -299,20 +299,36 @@
             }
             data.files.forEach(f => {
                 const card = document.createElement('div');
-                card.style.cssText = 'background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px;';
+                card.style.cssText = 'background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;';
                 card.innerHTML = `
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                        <strong style="color:var(--accent-hover);font-size:0.9rem;">${f.name}.md</strong>
+                    <div class="instr-card-header" data-name="${f.name}" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;cursor:pointer;user-select:none;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span class="instr-arrow" style="font-size:0.7rem;color:var(--text-muted);transition:transform 0.2s;">▶</span>
+                            <strong style="color:var(--accent-hover);font-size:0.9rem;">${f.name}.md</strong>
+                        </div>
                         <div style="display:flex;gap:6px;">
                             <button class="btn-instr-save" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;">Speichern</button>
                             <button class="btn-instr-del" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:var(--radius-sm);cursor:pointer;">Löschen</button>
                         </div>
                     </div>
-                    <textarea class="instr-editor" data-name="${f.name}" style="width:100%;min-height:120px;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;resize:vertical;line-height:1.5;">${f.content}</textarea>
+                    <div class="instr-card-body" style="display:none;padding:0 14px 14px;">
+                        <textarea class="instr-editor" data-name="${f.name}" style="width:100%;min-height:120px;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;resize:vertical;line-height:1.5;box-sizing:border-box;">${f.content}</textarea>
+                    </div>
                 `;
                 list.appendChild(card);
             });
-            // Event-Handler
+            // Auf-/Zuklappen per Klick auf Header
+            list.querySelectorAll('.instr-card-header').forEach(header => {
+                header.addEventListener('click', e => {
+                    if (e.target.closest('button')) return; // Buttons nicht triggern
+                    const body = header.nextElementSibling;
+                    const arrow = header.querySelector('.instr-arrow');
+                    const open = body.style.display !== 'none';
+                    body.style.display = open ? 'none' : 'block';
+                    arrow.style.transform = open ? '' : 'rotate(90deg)';
+                });
+            });
+            // Event-Handler Speichern
             list.querySelectorAll('.btn-instr-save').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const name = btn.dataset.name;
@@ -325,6 +341,7 @@
                     if (res.ok) { btn.textContent = '✓'; btn.style.background = '#10b981'; setTimeout(() => { btn.textContent = 'Speichern'; btn.style.background = ''; }, 1500); }
                 });
             });
+            // Event-Handler Löschen
             list.querySelectorAll('.btn-instr-del').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     if (!confirm(`Instruktion "${btn.dataset.name}" wirklich löschen?`)) return;

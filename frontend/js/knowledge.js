@@ -147,8 +147,7 @@ class JarvisKnowledgeManager {
             const stats = await resp.json();
 
             this._renderStats(stats);
-            // Ordnerliste wird nicht mehr angezeigt (bereits indizierte Ordner gehören
-            // nicht in die "Ordner hinzufügen"-Sektion)
+            this._renderFolders(stats.folders);
             this._populateUploadTargets(stats.folders);
         } catch (e) {
             if (container) container.innerHTML = `<div class="kb-error">Fehler beim Laden: ${e.message}</div>`;

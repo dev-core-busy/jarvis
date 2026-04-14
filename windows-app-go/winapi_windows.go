@@ -231,7 +231,29 @@ var (
 
 // chatSubclassFn: Nur ein schmaler Drag-Streifen ganz oben (20px) gibt HTCAPTION zurück.
 // Der Rest bleibt HTCLIENT → Fyne-Buttons/-Eingaben funktionieren normal.
+// WM_GETMINMAXINFO erzwingt Mindestfenstergröße (verhindert zu schmales Ziehen).
 func chatSubclassFn(hwnd, msg, wp, lp uintptr) uintptr {
+	const wmGetMinMaxInfo = uintptr(0x0024)
+	if msg == wmGetMinMaxInfo && lp != 0 {
+		// MINMAXINFO: ptMinTrackSize liegt bei Offset 24 (2x POINT á 8 Byte, dann 2x POINT, dann ptMinTrackSize)
+		// Struktur: reserved(8) + ptMaxSize(8) + ptMaxPosition(8) + ptMinTrackSize(8) + ptMaxTrackSize(8)
+		type point32 struct{ x, y int32 }
+		type minMaxInfo struct {
+			reserved     point32
+			maxSize      point32
+			maxPos       point32
+			minTrackSize point32
+			maxTrackSize point32
+		}
+		mmi := (*minMaxInfo)(unsafe.Pointer(lp))
+		if mmi.minTrackSize.x < 280 {
+			mmi.minTrackSize.x = 280
+		}
+		if mmi.minTrackSize.y < 200 {
+			mmi.minTrackSize.y = 200
+		}
+		return 0
+	}
 	if msg == wmNcHitTest {
 		ret, _, _ := pCallWindowProcW.Call(chatOrigWndProc, hwnd, msg, wp, lp)
 		if ret == htClient {
@@ -632,25 +654,45 @@ func GetChatWindowRect() (x, y, w, h int, ok bool) {
 }
 
 // SetChatWindowPos setzt Position des Chat-Fensters (physische Pixel, nach Show aufrufen).
-// Validiert die Position gegen den sichtbaren Bildschirmbereich.
+// Prüft ob der Punkt auf einem Monitor liegt; wenn nicht → Position 0,0.
+// Wartet 400ms damit Fyne sein eigenes Positionieren abschließen kann, bevor wir setzen.
+// Setzt die Position danach mehrfach, um spätes Fyne-Repositioning zu überschreiben.
 func SetChatWindowPos(x, y int) {
 	if x == 0 && y == 0 {
 		return
 	}
+	// MONITOR_DEFAULTTONULL: gibt 0 zurück wenn Punkt auf keinem Monitor liegt
+	const monitorDefaultToNull = uintptr(0)
+	hMon, _, _ := pMonitorFromPoint.Call(uintptr(x), uintptr(y), monitorDefaultToNull)
+	if hMon == 0 {
+		// Punkt liegt auf keinem Monitor → oben links des primären Monitors
+		x, y = 0, 0
+	}
+
+	// Warten bis HWND existiert (max. 1,5s in 50ms-Schritten)
+	var hwnd uintptr
 	for i := 0; i < 30; i++ {
 		time.Sleep(50 * time.Millisecond)
-		hwnd := findHWND("Jarvis – Chat")
+		hwnd = findHWND("Jarvis – Chat")
 		if hwnd != 0 {
-			// Fenstergröße für Validierung holen
-			var r winRECT
-			pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
-			w := int(r.Right - r.Left)
-			h := int(r.Bottom - r.Top)
-			vx, vy := validateWindowPos(x, y, w, h)
-			pSetWindowPos.Call(hwnd, 0,
-				uintptr(vx), uintptr(vy), 0, 0,
-				swpNosize|swpNozorder|swpNoActivate)
-			return
+			break
+		}
+	}
+	if hwnd == 0 {
+		return
+	}
+
+	// Fyne noch etwas Zeit geben, seine eigene Positionierung abzuschließen.
+	// Ohne diese Pause überschreibt Fyne unsere SetWindowPos-Änderung im Nachgang.
+	time.Sleep(350 * time.Millisecond)
+
+	// Position 3× setzen (100ms Abstand) um sicherzustellen dass sie "haftet"
+	for attempt := 0; attempt < 3; attempt++ {
+		pSetWindowPos.Call(hwnd, 0,
+			uintptr(x), uintptr(y), 0, 0,
+			swpNosize|swpNozorder|swpNoActivate)
+		if attempt < 2 {
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }

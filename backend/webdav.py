@@ -202,24 +202,12 @@ def get_webdav_app():
         _log.warning("wsgidav nicht installiert – WebDAV deaktiviert")
         return None
 
-    from backend.tools.knowledge import _get_folders
-    folders = _get_folders()
+    # WebDAV zeigt nur den lokalen Knowledge-Ordner (data/knowledge).
+    # SMB/NFS-Mounts sind read-only für die Indizierung und werden NICHT per WebDAV freigegeben.
+    local_kb = PROJECT_ROOT / "data" / "knowledge"
+    local_kb.mkdir(parents=True, exist_ok=True)
 
-    provider_mapping = {}
-    for folder in folders:
-        folder.mkdir(parents=True, exist_ok=True)
-        try:
-            share_name = str(folder.relative_to(PROJECT_ROOT)).replace("/", "_")
-        except ValueError:
-            share_name = folder.name
-        provider_mapping[f"/{share_name}"] = str(folder)
-
-    if not provider_mapping:
-        return None
-
-    # Root auf größten Share (meistens SMB-Freigabe)
-    largest = max(folders, key=lambda f: sum(1 for _ in f.rglob("*") if _.is_file()) if f.exists() else 0)
-    provider_mapping["/"] = str(largest)
+    provider_mapping = {"/": str(local_kb)}
 
     username = cfg.get("username", "jarvis")
     password = cfg.get("password", "jarvis")

@@ -634,18 +634,71 @@ class JarvisKnowledgeManager {
             return;
         }
         list.innerHTML = mounts.map((m, i) => `
-            <div class="kb-mount-item">
-                <span class="kb-mount-status ${m.active ? 'active' : 'inactive'}"></span>
-                <span class="kb-mount-type">${m.type}</span>
-                <span class="kb-mount-source">${m.source}</span>
-                <button class="btn-icon btn-small" title="${m.active ? 'Trennen' : 'Verbinden'}"
-                    onclick="window.knowledgeManager.toggleMount(${i}, ${!m.active})">
-                    ${m.active ? '⏏' : '▶'}
-                </button>
-                <button class="btn-icon btn-small" title="Entfernen"
-                    onclick="window.knowledgeManager.removeMount(${i})">✕</button>
+            <div class="kb-mount-item-wrap">
+                <div class="kb-mount-item">
+                    <span class="kb-mount-status ${m.active ? 'active' : 'inactive'}" title="${m.active ? 'Verbunden' : 'Getrennt'}"></span>
+                    <span class="kb-mount-type">${m.type}</span>
+                    <span class="kb-mount-source" title="${m.source}">${m.source}</span>
+                    <button class="btn-icon btn-small" title="${m.active ? 'Trennen' : 'Verbinden'}"
+                        onclick="window.knowledgeManager.toggleMount(${i}, ${!m.active})">
+                        ${m.active ? '⏏' : '▶'}
+                    </button>
+                    <button class="btn-icon btn-small" title="Bearbeiten"
+                        onclick="window.knowledgeManager.showEditMount(${i})">✏️</button>
+                    <button class="btn-icon btn-small" title="Entfernen"
+                        onclick="window.knowledgeManager.removeMount(${i})">✕</button>
+                </div>
+                <div class="kb-mount-edit-form" id="kb-mount-edit-${i}" style="display:none;">
+                    <select class="kb-input kb-mount-edit-type">
+                        <option value="smb" ${m.type==='smb'?'selected':''}>SMB/CIFS (Windows-Freigabe)</option>
+                        <option value="nfs" ${m.type==='nfs'?'selected':''}>NFS</option>
+                        <option value="webdav" ${m.type==='webdav'?'selected':''}>WebDAV</option>
+                    </select>
+                    <input type="text" class="kb-input kb-mount-edit-source" value="${m.source}" placeholder="//server/freigabe oder server:/pfad" />
+                    <input type="text" class="kb-input kb-mount-edit-user" value="${m.username||''}" placeholder="Benutzername (optional)" />
+                    <input type="password" class="kb-input kb-mount-edit-pass" placeholder="Passwort (leer = unverändert)" />
+                    <div class="kb-mount-actions">
+                        <button class="kb-btn-action" onclick="window.knowledgeManager.saveEditMount(${i})">Speichern</button>
+                        <button class="kb-btn-secondary" onclick="document.getElementById('kb-mount-edit-${i}').style.display='none'">Abbrechen</button>
+                    </div>
+                </div>
             </div>
         `).join('');
+    }
+
+    showEditMount(idx) {
+        const form = document.getElementById(`kb-mount-edit-${idx}`);
+        if (!form) return;
+        form.style.display = form.style.display === 'none' ? '' : 'none';
+    }
+
+    async saveEditMount(idx) {
+        const form = document.getElementById(`kb-mount-edit-${idx}`);
+        if (!form) return;
+        const type    = form.querySelector('.kb-mount-edit-type').value;
+        const source  = form.querySelector('.kb-mount-edit-source').value.trim();
+        const username = form.querySelector('.kb-mount-edit-user').value.trim();
+        const passEl  = form.querySelector('.kb-mount-edit-pass');
+        const password = passEl.value; // leer = wird im Backend nicht geändert wenn wir das so implementieren
+        if (!source) { this._showNotification('Quelle darf nicht leer sein', 'error'); return; }
+        try {
+            const resp = await fetch(`/api/knowledge/mounts/${idx}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
+                },
+                body: JSON.stringify({ type, source, username, password })
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.error || 'Fehler');
+            }
+            this._showNotification('Freigabe aktualisiert', 'success');
+            await this.fetchMounts();
+        } catch (e) {
+            this._showNotification('Fehler: ' + e.message, 'error');
+        }
     }
 
     async saveMount() {

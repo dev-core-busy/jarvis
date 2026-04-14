@@ -579,12 +579,10 @@ type monitorInfo struct {
 // Gibt ggf. korrigierte Koordinaten zurück (oben links bei ungültiger Position).
 func validateWindowPos(x, y, w, h int) (int, int) {
 	// MonitorFromPoint mit MONITOR_DEFAULTTONEAREST: gibt immer einen Monitor zurück
-	type point struct{ X, Y int32 }
-	pt := point{int32(x + w/2), int32(y + h/2)} // Mittelpunkt des Fensters prüfen
-	hMon, _, _ := pMonitorFromPoint.Call(
-		uintptr(pt.X), uintptr(pt.Y),
-		monitorDefault,
-	)
+	// POINT korrekt packen (Win64: x in low 32 Bit, y in high 32 Bit)
+	cx, cy := int32(x+w/2), int32(y+h/2) // Mittelpunkt des Fensters prüfen
+	ptPacked := uintptr(uint32(cx)) | (uintptr(uint32(cy)) << 32)
+	hMon, _, _ := pMonitorFromPoint.Call(ptPacked, monitorDefault)
 	if hMon == 0 {
 		return 0, 0
 	}
@@ -654,16 +652,20 @@ func GetChatWindowRect() (x, y, w, h int, ok bool) {
 }
 
 // SetChatWindowPos setzt Position des Chat-Fensters (physische Pixel, nach Show aufrufen).
-// Prüft ob der Punkt auf einem Monitor liegt; wenn nicht → Position 0,0.
-// Wartet 400ms damit Fyne sein eigenes Positionieren abschließen kann, bevor wir setzen.
-// Setzt die Position danach mehrfach, um spätes Fyne-Repositioning zu überschreiben.
+//
+// ACHTUNG Win64 Calling Convention: MonitorFromPoint(POINT, DWORD) – POINT ist ein 8-Byte-
+// Struct und wird auf x86-64 als einzelner 64-bit-Wert übergeben (x in low 32 Bit, y in
+// high 32 Bit). NICHT als zwei separate uintptr-Argumente – das würde y als dwFlags liefern
+// (z.B. 308), was ungültig ist und NULL zurückgibt → Fenster landet fälschlich bei 0,0.
 func SetChatWindowPos(x, y int) {
 	if x == 0 && y == 0 {
 		return
 	}
-	// MONITOR_DEFAULTTONULL: gibt 0 zurück wenn Punkt auf keinem Monitor liegt
-	const monitorDefaultToNull = uintptr(0)
-	hMon, _, _ := pMonitorFromPoint.Call(uintptr(x), uintptr(y), monitorDefaultToNull)
+
+	// POINT korrekt packen: x in low 32 Bit, y in high 32 Bit (Win64 struct-in-register)
+	pt := uintptr(uint32(x)) | (uintptr(uint32(y)) << 32)
+	// MONITOR_DEFAULTTONULL (0): gibt 0 zurück wenn Punkt auf keinem Monitor liegt
+	hMon, _, _ := pMonitorFromPoint.Call(pt, uintptr(0))
 	if hMon == 0 {
 		// Punkt liegt auf keinem Monitor → oben links des primären Monitors
 		x, y = 0, 0
@@ -682,17 +684,26 @@ func SetChatWindowPos(x, y int) {
 		return
 	}
 
-	// Fyne noch etwas Zeit geben, seine eigene Positionierung abzuschließen.
-	// Ohne diese Pause überschreibt Fyne unsere SetWindowPos-Änderung im Nachgang.
-	time.Sleep(350 * time.Millisecond)
-
-	// Position 3× setzen (100ms Abstand) um sicherzustellen dass sie "haftet"
-	for attempt := 0; attempt < 3; attempt++ {
+	// Position setzen und für max. 2,5s "verteidigen": Fyne (GLFW) kann das Fenster
+	// während der Initialisierung mehrfach verschieben (z.B. beim Zentrieren).
+	// Wir korrigieren solange bis die Position 3 Messungen in Folge stabil ist.
+	deadline := time.Now().Add(2500 * time.Millisecond)
+	stableCount := 0
+	for time.Now().Before(deadline) {
 		pSetWindowPos.Call(hwnd, 0,
 			uintptr(x), uintptr(y), 0, 0,
 			swpNosize|swpNozorder|swpNoActivate)
-		if attempt < 2 {
-			time.Sleep(100 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
+
+		var r winRECT
+		pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+		if int(r.Left) == x && int(r.Top) == y {
+			stableCount++
+			if stableCount >= 3 {
+				break // Position für 3×150ms stabil → Fyne fertig
+			}
+		} else {
+			stableCount = 0
 		}
 	}
 }

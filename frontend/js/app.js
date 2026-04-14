@@ -288,8 +288,9 @@
     async function _loadInstructions() {
         const list = document.getElementById('instr-list');
         if (!list) return;
+        const authHeader = { 'Authorization': `Bearer ${token}` };
         try {
-            const res = await fetch('/api/instructions');
+            const res = await fetch('/api/instructions', { headers: authHeader });
             const data = await res.json();
             list.innerHTML = '';
             if (!data.files || data.files.length === 0) {
@@ -317,7 +318,8 @@
                     const name = btn.dataset.name;
                     const textarea = list.querySelector(`.instr-editor[data-name="${name}"]`);
                     const res = await fetch(`/api/instructions/${name}`, {
-                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json', ...authHeader},
                         body: JSON.stringify({content: textarea.value})
                     });
                     if (res.ok) { btn.textContent = '✓'; btn.style.background = '#10b981'; setTimeout(() => { btn.textContent = 'Speichern'; btn.style.background = ''; }, 1500); }
@@ -326,7 +328,7 @@
             list.querySelectorAll('.btn-instr-del').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     if (!confirm(`Instruktion "${btn.dataset.name}" wirklich löschen?`)) return;
-                    await fetch(`/api/instructions/${btn.dataset.name}`, {method: 'DELETE'});
+                    await fetch(`/api/instructions/${btn.dataset.name}`, {method: 'DELETE', headers: authHeader});
                     _loadInstructions();
                 });
             });
@@ -339,7 +341,8 @@
         const name = nameInput.value.trim();
         if (!name) { nameInput.style.borderColor = 'var(--danger)'; setTimeout(() => nameInput.style.borderColor = '', 2000); return; }
         await fetch(`/api/instructions/${name}`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
             body: JSON.stringify({content: `# ${name}\n\nDeine Anweisungen hier eingeben...\n`})
         });
         nameInput.value = '';

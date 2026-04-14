@@ -138,7 +138,6 @@ class JarvisKnowledgeManager {
 
     async fetchStats() {
         const container = document.getElementById('kb-stats-container');
-        const folderList = document.getElementById('kb-folder-list');
 
         try {
             const resp = await fetch('/api/knowledge/stats', {
@@ -148,7 +147,8 @@ class JarvisKnowledgeManager {
             const stats = await resp.json();
 
             this._renderStats(stats);
-            this._renderFolders(stats.folders);
+            // Ordnerliste wird nicht mehr angezeigt (bereits indizierte Ordner gehören
+            // nicht in die "Ordner hinzufügen"-Sektion)
             this._populateUploadTargets(stats.folders);
         } catch (e) {
             if (container) container.innerHTML = `<div class="kb-error">Fehler beim Laden: ${e.message}</div>`;

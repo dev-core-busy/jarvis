@@ -1671,6 +1671,30 @@ async def remove_mount(idx: int, user: str = Depends(require_auth)):
     return JSONResponse({"ok": True})
 
 
+@app.put("/api/knowledge/mounts/{idx}")
+async def update_mount(idx: int, request: Request, user: str = Depends(require_auth)):
+    """Aktualisiert Typ, Quelle und Credentials einer bestehenden Freigabe."""
+    mounts = _get_mounts_config()
+    if idx < 0 or idx >= len(mounts):
+        return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
+    data = await request.json()
+    source = data.get("source", "").strip()
+    if not source:
+        return JSONResponse({"error": "Quelle fehlt"}, status_code=400)
+    # Unmounten falls aktiv (neue Credentials erfordern Neuverbindung)
+    mp = _mount_path(idx)
+    if mp.is_mount():
+        await asyncio.to_thread(subprocess.run, ["umount", str(mp)], capture_output=True, timeout=10)
+    mounts[idx] = {
+        "type": data.get("type", "smb"),
+        "source": source,
+        "username": data.get("username", ""),
+        "password": data.get("password", ""),
+    }
+    _save_mounts_config(mounts)
+    return JSONResponse({"ok": True})
+
+
 @app.post("/api/knowledge/mounts/{idx}/mount")
 async def mount_share(idx: int, user: str = Depends(require_auth)):
     mounts = _get_mounts_config()

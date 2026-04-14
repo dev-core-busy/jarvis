@@ -606,15 +606,21 @@ func (ja *JarvisApp) openChatWindowLocked() {
 	win.SetContent(ja.chat.Layout(ja.cfg))
 
 	// Fenster verstecken statt schließen → App bleibt im Tray am Leben
-	// Vorher Position + Größe speichern (Win32 liefert physische Pixel)
+	// Vorher Position (Win32 physische Pixel) + Größe (Fyne logical units) speichern.
+	// WICHTIG: Größe MUSS in Fyne-Einheiten gespeichert werden, da win.Resize() logische
+	// Einheiten erwartet. Win32-Pixel sind DPI-skaliert und führen bei jedem Neustart zu
+	// Größenwachstum (z.B. 420px × 1,25 DPI = 525px → nächste Runde 525 × 1,25 = ...).
 	win.SetCloseIntercept(func() {
-		if x, y, w, h, ok := GetChatWindowRect(); ok {
+		// Position: physische Pixel von Win32 (korrekt für SetWindowPos beim nächsten Start)
+		if x, y, _, _, ok := GetChatWindowRect(); ok {
 			ja.cfg.WindowX = x
 			ja.cfg.WindowY = y
-			ja.cfg.WindowW = w
-			ja.cfg.WindowH = h
-			_ = ja.cfg.Save()
 		}
+		// Größe: Fyne logical units (DPI-unabhängig, korrekt für win.Resize)
+		sz := win.Canvas().Size()
+		ja.cfg.WindowW = int(sz.Width)
+		ja.cfg.WindowH = int(sz.Height)
+		_ = ja.cfg.Save()
 		win.Hide()
 	})
 	win.SetOnClosed(func() {
@@ -796,14 +802,19 @@ func (ja *JarvisApp) shutdown() {
 	if ja.avatar != nil {
 		ja.avatar.Stop()
 	}
-	// Chat-Fenster Position + Größe speichern
+	// Chat-Fenster Position (Win32) + Größe (Fyne logical units) speichern
 	if !ja.cfg.DialogMode {
-		if x, y, w, h, ok := GetChatWindowRect(); ok {
+		if x, y, _, _, ok := GetChatWindowRect(); ok {
 			ja.cfg.WindowX = x
 			ja.cfg.WindowY = y
-			ja.cfg.WindowW = w
-			ja.cfg.WindowH = h
 		}
+		ja.chatMu.Lock()
+		if ja.chatWin != nil {
+			sz := ja.chatWin.Canvas().Size()
+			ja.cfg.WindowW = int(sz.Width)
+			ja.cfg.WindowH = int(sz.Height)
+		}
+		ja.chatMu.Unlock()
 	}
 	// Avatar-Position vor dem Beenden speichern
 	if ja.cfg.DialogMode && ja.avatarWin != nil {

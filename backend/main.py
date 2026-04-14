@@ -1399,7 +1399,12 @@ async def _broadcast_ws(message: dict):
 async def get_knowledge_stats(user: str = Depends(require_auth)):
     """Gibt Statistiken der Knowledge Base zurück."""
     from backend.tools.knowledge import get_stats
-    return JSONResponse(get_stats())
+    data = get_stats()
+    # Mount-Pfade aus der Ordner-Liste herausfiltern – sie erscheinen unter "Netzwerk-Freigaben"
+    mount_prefix = str(_MOUNT_BASE)
+    data["folders"] = [f for f in data.get("folders", [])
+                       if not f["path"].startswith(mount_prefix)]
+    return JSONResponse(data)
 
 
 @app.post("/api/knowledge/reindex")

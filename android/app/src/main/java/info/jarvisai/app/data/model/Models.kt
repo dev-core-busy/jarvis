@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 // ─── Chat ─────────────────────────────────────────────────────────────
 
 @Serializable
-enum class MessageRole { USER, JARVIS }
+enum class MessageRole { USER, JARVIS, DATE_SEPARATOR }
 
 /** STATUS = Agenten-Statuszeile (🚀🧠⏳✅), ANSWER = eigentliche LLM-Antwort, STATS = Dauer/Token-Info */
 @Serializable

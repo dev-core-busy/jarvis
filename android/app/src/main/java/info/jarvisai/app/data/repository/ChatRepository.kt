@@ -28,6 +28,9 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
@@ -83,7 +86,19 @@ class ChatRepository @Inject constructor(
     fun sendMessage(text: String) {
         pendingStatus.clear()
         finalizeStream()
-        val userMsg = ChatMessage(role = MessageRole.USER, text = text)
+        // Datums-Separator einfügen wenn erste Nachricht des Tages
+        val now = System.currentTimeMillis()
+        val dayFmt = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+        val lastMsgDay = _messages.value
+            .lastOrNull { it.role != MessageRole.DATE_SEPARATOR }
+            ?.timestamp?.let { dayFmt.format(Date(it)) }
+        val today = dayFmt.format(Date(now))
+        if (lastMsgDay == null || lastMsgDay != today) {
+            val dateLabel = SimpleDateFormat("EEEE, d. MMMM yyyy · HH:mm", Locale.GERMAN)
+                .format(Date(now))
+            _messages.update { it + ChatMessage(role = MessageRole.DATE_SEPARATOR, text = dateLabel, timestamp = now) }
+        }
+        val userMsg = ChatMessage(role = MessageRole.USER, text = text, timestamp = now)
         _messages.update { it + userMsg }
         _isAgentRunning.value = true
         ws.sendTask(text)

@@ -651,9 +651,32 @@ async def get_telemetry_spans(request: Request, user: str = Depends(require_auth
     limit = int(request.query_params.get("limit", "50"))
     return JSONResponse(tracer.get_recent_spans(limit))
 
+@app.get("/api/telemetry/errors")
+async def get_telemetry_errors(user: str = Depends(require_auth)):
+    return JSONResponse(tracer.get_errors())
+
 @app.delete("/api/telemetry")
 async def clear_telemetry(user: str = Depends(require_auth)):
     tracer.clear()
+    return JSONResponse({"ok": True})
+
+
+# ─── Konversations-Verlauf ────────────────────────────────────────────────────
+from backend.conv_log import get_conversations, get_known_ips, clear as clear_conv_log
+
+@app.get("/api/conv_log")
+async def api_conv_log(request: Request, user: str = Depends(require_auth)):
+    limit = int(request.query_params.get("limit", "50"))
+    ip = request.query_params.get("ip") or None
+    return JSONResponse(get_conversations(limit=limit, ip_filter=ip))
+
+@app.get("/api/conv_log/ips")
+async def api_conv_log_ips(user: str = Depends(require_auth)):
+    return JSONResponse(get_known_ips())
+
+@app.delete("/api/conv_log")
+async def api_conv_log_clear(user: str = Depends(require_auth)):
+    clear_conv_log()
     return JSONResponse({"ok": True})
 
 
@@ -1720,17 +1743,12 @@ async def unmount_share(idx: int, user: str = Depends(require_auth)):
 async def webdav_status(user: str = Depends(require_auth)):
     """WebDAV-Status und Verbindungsdetails."""
     from backend.webdav import _get_webdav_config, is_webdav_enabled
-    from backend.tools.knowledge import _get_folders, PROJECT_ROOT
+    from backend.tools.knowledge import PROJECT_ROOT
     cfg = _get_webdav_config()
     enabled = is_webdav_enabled()
-    folders = _get_folders()
-    shares = []
-    for f in folders:
-        try:
-            name = str(f.relative_to(PROJECT_ROOT)).replace("/", "_")
-        except ValueError:
-            name = f.name
-        shares.append(name)
+    # WebDAV zeigt nur den lokalen Knowledge-Ordner
+    local_kb = PROJECT_ROOT / "data" / "knowledge"
+    shares = [str(local_kb)]
     # Alle nicht-loopback IPv4-Adressen ermitteln
     import socket
     urls = []
@@ -1785,8 +1803,14 @@ async def webdav_config(request: Request, user: str = Depends(require_auth)):
     kb_state["config"] = kb_cfg
     config.save_skill_state("knowledge", kb_state)
 
-    return JSONResponse({"ok": True, "enabled": webdav.get("enabled", False),
-                         "hint": "Server-Neustart noetig fuer WebDAV-Aenderungen"})
+    # DAV-Cache invalidieren → nächster Request baut App neu (oder gibt 503 wenn disabled)
+    try:
+        if hasattr(app.state, "invalidate_dav_cache"):
+            app.state.invalidate_dav_cache()
+    except Exception:
+        pass
+
+    return JSONResponse({"ok": True, "enabled": webdav.get("enabled", False)})
 
 
 # ─── Instructions API ─────────────────────────────────────────────────
@@ -2990,6 +3014,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
 
         # Client-Typ bestimmen: wer hat diese WS-Verbindung aufgebaut?
         client_type = _get_client_type(ws)
+        client_ip = ws.client.host if ws.client else "unknown"
 
         from backend.agent import JarvisAgent, AgentManager
 
@@ -3002,7 +3027,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         if target_agent_id and agent_manager.get_agent(target_agent_id):
             target = agent_manager.get_agent(target_agent_id)
             if target.is_sub_agent:
-                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type))
+                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip))
                 return
 
         agent = agent_manager.get_or_create_main()
@@ -3019,7 +3044,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Aufgabe im Hintergrund starten – sendet 'finished' wenn fertig (für Windows-TTS)
         async def _run_main_agent_and_notify():
             try:
-                await agent.run_task(task_text, ws, client_type=client_type)
+                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip)
             except Exception:
                 pass
             finally:
@@ -3213,17 +3238,41 @@ async def startup():
             print(f"[whisper] Vorladen fehlgeschlagen: {e}", flush=True)
     threading.Thread(target=_preload_whisper, daemon=True).start()
 
-    # WebDAV-Server mounten (wenn aktiviert)
+    # WebDAV dynamisch mounten – prüft enabled-Status bei jedem Request
     try:
         from backend.webdav import get_webdav_app, is_webdav_enabled
-        if is_webdav_enabled():
-            dav_app = get_webdav_app()
-            if dav_app:
-                from starlette.middleware.wsgi import WSGIMiddleware
-                app.mount("/webdav", WSGIMiddleware(dav_app))
-                print("📁 WebDAV-Server aktiv unter /webdav/")
+        from starlette.middleware.wsgi import WSGIMiddleware
+        from starlette.responses import Response as _StarletteResp
+
+        _dav_cache: dict = {"app": None}  # Mutable Container für Cache
+
+        class _DynamicWebDAV:
+            """ASGI-Wrapper: leitet an WebDAV weiter wenn aktiviert, sonst 503."""
+            async def __call__(self, scope, receive, send):
+                if scope["type"] not in ("http",):
+                    return
+                if not is_webdav_enabled():
+                    _dav_cache["app"] = None
+                    resp = _StarletteResp("WebDAV deaktiviert", status_code=503)
+                    await resp(scope, receive, send)
+                    return
+                if _dav_cache["app"] is None:
+                    raw = get_webdav_app()
+                    _dav_cache["app"] = WSGIMiddleware(raw) if raw else None
+                    if _dav_cache["app"]:
+                        print("📁 WebDAV-App gestartet")
+                if _dav_cache["app"] is None:
+                    resp = _StarletteResp("WebDAV konnte nicht gestartet werden", status_code=503)
+                    await resp(scope, receive, send)
+                    return
+                await _dav_cache["app"](scope, receive, send)
+
+        app.mount("/webdav", _DynamicWebDAV())
+        # Cache invalidieren wenn Config gespeichert wird
+        app.state.invalidate_dav_cache = lambda: _dav_cache.update({"app": None})
+        print("📁 WebDAV-Route registriert (dynamisch)")
     except Exception as e:
-        print(f"⚠️  WebDAV konnte nicht gestartet werden: {e}")
+        print(f"⚠️  WebDAV-Route konnte nicht registriert werden: {e}")
 
     # HTTP→HTTPS Redirect-Server auf Port 80 starten
     if config.SERVER_PORT == 443:

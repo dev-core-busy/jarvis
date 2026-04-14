@@ -7,7 +7,9 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-_STATS_FILE = Path(__file__).parent.parent / "data" / "telemetry_stats.json"
+_STATS_FILE  = Path(__file__).parent.parent / "data" / "telemetry_stats.json"
+_ERRORS_FILE = Path(__file__).parent.parent / "data" / "telemetry_errors.json"
+_MAX_ERRORS  = 200
 
 # ─── Leichtgewichtiger Trace-Speicher (kein externer Collector noetig) ───────
 
@@ -98,6 +100,7 @@ class JarvisTracer:
 
             if status == "error":
                 self._stats["errors"] += 1
+                self._persist_error(span)
             self._persist_stats()
 
     def get_stats(self) -> dict:
@@ -138,6 +141,32 @@ class JarvisTracer:
         with self._lock:
             return [s.to_dict() for s in self._spans[-limit:]]
 
+    def get_errors(self, limit: int = 200) -> list[dict]:
+        """Gibt persistierte Fehler-Spans zurueck (ueberlebt Neustarts)."""
+        try:
+            if _ERRORS_FILE.exists():
+                data = json.loads(_ERRORS_FILE.read_text())
+                return list(reversed(data[-limit:]))
+        except Exception:
+            pass
+        return []
+
+    def _persist_error(self, span: TraceSpan):
+        """Haengt einen Fehler-Span an die persistierte Fehler-Liste an (innerhalb Lock)."""
+        try:
+            _ERRORS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            existing = []
+            if _ERRORS_FILE.exists():
+                existing = json.loads(_ERRORS_FILE.read_text())
+            entry = span.to_dict()
+            entry["ts"] = span.start_time
+            existing.append(entry)
+            if len(existing) > _MAX_ERRORS:
+                existing = existing[-_MAX_ERRORS:]
+            _ERRORS_FILE.write_text(json.dumps(existing))
+        except Exception:
+            pass
+
     def _persist_stats(self):
         """Speichert aggregierte Statistiken auf Disk (kein Lock noetig – wird innerhalb Lock aufgerufen)."""
         try:
@@ -171,7 +200,7 @@ class JarvisTracer:
             pass
 
     def clear(self):
-        """Loescht alle Spans und Statistiken."""
+        """Loescht alle Spans, Statistiken und persistierte Fehler."""
         with self._lock:
             self._spans.clear()
             self._stats = {
@@ -184,6 +213,10 @@ class JarvisTracer:
                 "llm_durations": [],
             }
             self._persist_stats()
+            try:
+                _ERRORS_FILE.write_text("[]")
+            except Exception:
+                pass
 
 
 # Singleton

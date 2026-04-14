@@ -1175,6 +1175,119 @@ body {
     border-bottom: none;
 }
 
+/* ── Konversations-Verlauf ───────────────────────────────────────────────── */
+.conv-log-entry {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 6px;
+    overflow: hidden;
+    background: var(--bg-glass);
+}
+.conv-log-entry.conv-log-has-error {
+    border-color: rgba(239,68,68,0.35);
+}
+.conv-log-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: background var(--transition);
+}
+.conv-log-header:hover { background: rgba(129,140,248,0.07); }
+.conv-log-chevron { color: var(--text-muted); font-size: 0.7rem; flex-shrink: 0; }
+.conv-log-task {
+    flex: 1;
+    font-size: 0.84rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 340px;
+}
+.conv-log-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+.conv-log-badge {
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(79,70,229,0.18);
+    color: var(--accent-hover);
+    border: 1px solid rgba(129,140,248,0.2);
+}
+.conv-log-badge.conv-log-error {
+    background: rgba(239,68,68,0.15);
+    color: #f87171;
+    border-color: rgba(239,68,68,0.25);
+}
+.conv-log-ip, .conv-log-model, .conv-log-steps, .conv-log-dur, .conv-log-ts {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+.conv-log-body {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+}
+.conv-log-error-msg {
+    font-size: 0.82rem;
+    color: #f87171;
+    margin-bottom: 8px;
+}
+.conv-log-system-prompt {
+    margin-bottom: 10px;
+}
+.conv-log-system-prompt pre {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    white-space: pre-wrap;
+    background: rgba(0,0,0,0.2);
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin-top: 4px;
+    max-height: 100px;
+    overflow-y: auto;
+}
+.conv-log-msgs-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+.conv-log-messages { display: flex; flex-direction: column; gap: 4px; }
+.conv-msg {
+    display: flex;
+    gap: 8px;
+    font-size: 0.79rem;
+    padding: 5px 8px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.03);
+}
+.conv-msg-assistant { border-left: 2px solid rgba(129,140,248,0.5); }
+.conv-msg-tool      { border-left: 2px solid rgba(251,191,36,0.4); }
+.conv-msg-user      { border-left: 2px solid rgba(74,222,128,0.4); }
+.conv-msg-label {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    min-width: 90px;
+}
+.conv-msg-preview {
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.conv-log-empty {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 24px;
+    font-size: 0.85rem;
+}
+
 /* Debug-Button */
 /* Exakt wie .header-status Badge */
 .btn-debug {

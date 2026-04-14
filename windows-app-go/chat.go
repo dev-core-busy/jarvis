@@ -901,8 +901,10 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 	switch msg.Role {
 
 	case RoleStatus:
-		lbl := canvas.NewText(msg.Text, jc.muted)
-		lbl.TextSize = 11
+		lbl := widget.NewLabel(msg.Text)
+		lbl.TextStyle = fyne.TextStyle{}
+		lbl.Importance = widget.LowImportance
+		lbl.Wrapping = fyne.TextWrapWord
 		lbl.Alignment = fyne.TextAlignCenter
 		return container.NewVBox(
 			container.NewGridWrap(fyne.NewSize(1, 4), spacing),
@@ -913,7 +915,7 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 	case RoleUser:
 		bg := canvas.NewRectangle(jc.userBubble)
 		bg.CornerRadius = 18
-		inner := container.NewStack(bg, container.NewPadded(newBoldWhiteText(msg.Text, false)))
+		inner := container.NewStack(bg, container.NewPadded(newBoldWhiteText(msg.Text, true)))
 		bubble := newTappableBubble(inner, leftClickFn, rightClickFn)
 		var row fyne.CanvasObject
 		if c.selMode {

@@ -1109,10 +1109,10 @@
         const tabVision = document.getElementById('settings-tab-vision');
         const tabMcp = document.getElementById('settings-tab-mcp');
         const tabTelemetry = document.getElementById('settings-tab-telemetry');
+        const tabInstructions = document.getElementById('settings-tab-instructions');
         const tabSecurity = document.getElementById('settings-tab-security');
-        const instrSection = document.getElementById('profiles-instructions-section');
 
-        const allSettingsTabs = [tabProfiles, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity];
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -1120,7 +1120,6 @@
                 tab.classList.add('active');
 
                 const target = tab.dataset.settingsTab;
-                // Alle Tabs ausblenden
                 allSettingsTabs.forEach(t => {
                     if (t) { t.style.display = 'none'; t.classList.remove('active'); }
                 });
@@ -1128,8 +1127,10 @@
                 if (target === 'profiles' && tabProfiles) {
                     tabProfiles.style.display = '';
                     tabProfiles.classList.add('active');
-                    // Instruktionen-Sektion im Profile-Tab anzeigen + laden
-                    if (instrSection) { instrSection.style.display = ''; _loadInstructions(); }
+                } else if (target === 'instructions' && tabInstructions) {
+                    tabInstructions.style.display = '';
+                    tabInstructions.classList.add('active');
+                    _loadInstructions();
                 } else if (target === 'skills' && tabSkills) {
                     tabSkills.style.display = '';
                     tabSkills.classList.add('active');
@@ -1313,8 +1314,6 @@
             if (tabGoogle) { tabGoogle.style.display = 'none'; tabGoogle.classList.remove('active'); }
             if (tabVision) { tabVision.style.display = 'none'; tabVision.classList.remove('active'); }
             if (tabTelemetry) { tabTelemetry.style.display = 'none'; tabTelemetry.classList.remove('active'); }
-            // Instruktionen im Profile-Tab laden
-            if (instrSection) { instrSection.style.display = ''; _loadInstructions(); }
             modal.classList.add('open');
         };
         const closeModal = () => {

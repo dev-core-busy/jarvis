@@ -25,7 +25,7 @@
 - Einziger Instruktions-Ordner: `data/instructions/`
 
 ## Kontext
-- Jarvis-Server: `root@191.100.144.1` (Debian 13)
-- SSH: `ssh -i /c/users/bender/.ssh/id_rsa root@191.100.144.1`
+- Jarvis-Server: `root@{{SERVER_IP}}` (Debian 13)
+- SSH: `ssh -i {{SSH_KEY_PATH}} root@{{SERVER_IP}}`
 - Weitere Plattformen: Windows Desktop App (Go/Fyne), Android App, jarvis-ai.info Landing Page
 - WhatsApp-Benachrichtigungen für wichtige Ereignisse sind gewünscht

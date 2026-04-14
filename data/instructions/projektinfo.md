@@ -3,7 +3,7 @@
 Jarvis ist ein autonomer KI-Agent fuer Linux-Systeme mit modularem Skill-System und WhatsApp-Integration.
 
 ## Server
-- Server-IP: ${SERVER_IP} (aus .env)
+- Server-IP: {{SERVER_IP}}
 - Betriebssystem: Debian 13 (Trixie)
 - Display: X11, physisches Display :0
 - Services: jarvis.service + whatsapp-bridge.service (systemd)
@@ -64,7 +64,7 @@ Smartphone → WhatsApp Server → Baileys Bridge (:3001) → Jarvis Backend (:4
 - `whisper_model`: tiny/base/small/medium/large (Standard: small)
 
 ## Wichtige Pfade
-- Projekt: /opt/jarvis (Service) + /home/bender/jarvis (Entwicklung)
+- Projekt: /opt/jarvis (Service) + /home/jarvis/jarvis (Entwicklung)
 - Skills: /opt/jarvis/skills/
 - WhatsApp Bridge: /opt/jarvis/services/whatsapp-bridge/
 - Zertifikate: /opt/jarvis/certs/

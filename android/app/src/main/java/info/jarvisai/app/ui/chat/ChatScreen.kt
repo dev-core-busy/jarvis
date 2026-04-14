@@ -252,14 +252,18 @@ fun ChatScreen(
                 contentPadding = PaddingValues(vertical = 12.dp),
             ) {
                 items(messages, key = { it.id }) { msg ->
-                    MessageBubble(
-                        msg = msg,
-                        debugMode = settings.debugMode,
-                        selectionMode = selectionMode,
-                        selected = msg.id in selectedIds,
-                        onLongPress = { viewModel.enterSelectionMode(msg.id) },
-                        onTap = { viewModel.toggleSelection(msg.id) },
-                    )
+                    if (msg.role == MessageRole.DATE_SEPARATOR) {
+                        DateSeparator(label = msg.text)
+                    } else {
+                        MessageBubble(
+                            msg = msg,
+                            debugMode = settings.debugMode,
+                            selectionMode = selectionMode,
+                            selected = msg.id in selectedIds,
+                            onLongPress = { viewModel.enterSelectionMode(msg.id) },
+                            onTap = { viewModel.toggleSelection(msg.id) },
+                        )
+                    }
                 }
             }
 
@@ -413,6 +417,27 @@ private fun JarvisTopBar(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
         ),
     )
+}
+
+// ─── Datums-Separator ────────────────────────────────────────────────
+
+@Composable
+fun DateSeparator(label: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Color.White.copy(alpha = 0.12f))
+        Text(
+            text = label,
+            color = Color.White.copy(alpha = 0.45f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = 10.dp),
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Color.White.copy(alpha = 0.12f))
+    }
 }
 
 // ─── Nachrichten-Bubble ───────────────────────────────────────────────

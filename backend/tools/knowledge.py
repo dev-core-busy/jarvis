@@ -76,13 +76,11 @@ def _get_vector_store():
         return None
 
 
-def _rebuild_vector_index(folders: list[Path], max_bytes: int) -> bool:
+def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = False) -> bool:
     """Inkrementeller Vektor-Index Aufbau. Gibt True zurueck wenn Index Inhalt hat.
 
-    WICHTIG: Diese Funktion wird inline im Suchpfad aufgerufen.
-    Bulk-Erstindizierung (leerer Index) wird NICHT inline gemacht – nur via
-    force_reindex(). Inline werden ausschliesslich kleine inkrementelle Updates
-    verarbeitet (neue/geaenderte Dateien seit letztem Lauf, max. 10 Stueck).
+    force=False (Suchpfad): Kein Bulk-Aufbau bei leerem Index, max. INLINE_LIMIT Dateien.
+    force=True  (Neu-Indizieren): Alle Dateien werden verarbeitet, kein Limit.
     """
     vs = _get_vector_store()
     if vs is None:
@@ -90,10 +88,11 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int) -> bool:
 
     indexed = vs.get_indexed_files()
 
-    # Leerer Index: kein Inline-Bulk-Indexing – Nutzer muss Neu-Indizieren ausloesen
-    if not indexed:
-        _log.debug("Vektor-Index leer – bitte Neu-Indizieren ausfuehren")
-        return False
+    if not force:
+        # Leerer Index: kein Inline-Bulk-Indexing
+        if not indexed:
+            _log.debug("Vektor-Index leer – bitte Neu-Indizieren ausfuehren")
+            return False
 
     files = _all_files(folders)
     current_paths = {str(f) for f in files}
@@ -103,7 +102,7 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int) -> bool:
         if path_str not in current_paths:
             vs.remove_file(path_str)
 
-    # Neue/geaenderte Dateien ermitteln (max. 10 inline, Rest beim naechsten force_reindex)
+    # Neue/geaenderte Dateien ermitteln
     to_index = []
     for filepath in files:
         path_str = str(filepath)
@@ -114,14 +113,16 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int) -> bool:
         if indexed.get(path_str) != mtime:
             to_index.append(filepath)
 
-    inline_limit = 10
-    if len(to_index) > inline_limit:
-        _log.info(f"{len(to_index)} neue/geaenderte Dateien – nur {inline_limit} inline, Rest via Neu-Indizieren")
-        to_index = to_index[:inline_limit]
+    if not force and len(to_index) > INLINE_LIMIT:
+        _log.info(f"{len(to_index)} neue/geaenderte Dateien – nur {INLINE_LIMIT} inline, Rest via Neu-Indizieren")
+        to_index = to_index[:INLINE_LIMIT]
+
+    _set_progress(phase="Vektor", vector_done=0, vector_total=len(to_index))
 
     changed = 0
     for i, filepath in enumerate(to_index):
         path_str = str(filepath)
+        _set_progress(vector_done=i + 1, phase=f"Vektor: {filepath.name[:40]}")
         try:
             mtime = filepath.stat().st_mtime
             text = _extract_text(filepath, max_bytes)
@@ -134,8 +135,9 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int) -> bool:
         except Exception:
             pass
 
+    _set_progress(vector_done=len(to_index), vector_total=len(to_index))
     if changed:
-        _log.info(f"Vektor-Index inkrementell aktualisiert: {changed} Datei(en)")
+        _log.info(f"Vektor-Index aktualisiert: {changed} Datei(en)")
     return vs.chunk_count() > 0
 
 
@@ -400,8 +402,14 @@ def _all_files(folders: list[Path]) -> list[Path]:
     return files
 
 
-def _rebuild_cache(folders: list[Path], max_bytes: int) -> dict:
-    """Inkrementeller Index-Aufbau (Thread-sicher)."""
+INLINE_LIMIT = 10  # Maximale Dateien die inline (im Suchpfad) indiziert werden
+
+def _rebuild_cache(folders: list[Path], max_bytes: int, force: bool = False) -> dict:
+    """Inkrementeller TF-IDF Index-Aufbau (Thread-sicher).
+
+    force=False (Suchpfad): Kein Bulk-Aufbau bei leerem Index, max. INLINE_LIMIT Dateien.
+    force=True  (Neu-Indizieren): Alle Dateien werden verarbeitet, kein Limit.
+    """
     with _cache_lock:
         cache = _load_cache()
         files = _all_files(folders)
@@ -423,6 +431,16 @@ def _rebuild_cache(folders: list[Path], max_bytes: int) -> dict:
             cached = cache["files"].get(path_str, {})
             if cached.get("mtime") != mtime:
                 to_index.append(filepath)
+
+        if not force:
+            # Leerer Index mit vielen Dateien: kein Inline-Bulk-Indexing
+            if not cache["files"] and len(to_index) > INLINE_LIMIT:
+                _log.debug(f"TF-IDF Index leer ({len(to_index)} Dateien) – bitte Neu-Indizieren ausfuehren")
+                return cache
+            # Bestehendes Inkrementell: max. INLINE_LIMIT Dateien inline
+            if len(to_index) > INLINE_LIMIT:
+                _log.info(f"{len(to_index)} geaenderte Dateien – nur {INLINE_LIMIT} inline, Rest via Neu-Indizieren")
+                to_index = to_index[:INLINE_LIMIT]
 
         _set_progress(phase="TF-IDF", done=0, total=len(to_index))
 
@@ -608,8 +626,8 @@ def force_reindex() -> dict:
 
         folders = _get_folders()
         max_bytes = _get_max_bytes()
-        cache = _rebuild_cache(folders, max_bytes)
-        _rebuild_vector_index(folders, max_bytes)
+        cache = _rebuild_cache(folders, max_bytes, force=True)
+        _rebuild_vector_index(folders, max_bytes, force=True)
 
         total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
         vector_info = ""
@@ -673,10 +691,14 @@ class KnowledgeTool(BaseTool):
         cfg = _get_skill_config()
         search_mode_cfg = cfg.get("search_mode", "auto")
 
-        # TF-IDF Cache immer aufbauen (wird fuer Stats/Management gebraucht)
-        cache = await asyncio.to_thread(_rebuild_cache, folders, max_bytes)
+        # TF-IDF Cache aufbauen (inkrementell, kein Bulk-Inline-Indexing)
+        cache = await asyncio.to_thread(_rebuild_cache, folders, max_bytes, False)
 
+        # Dateien vorhanden aber noch kein Index?
+        files_on_disk = _all_files(folders)
         if not cache["files"]:
+            if files_on_disk:
+                return f"⚠️ Knowledge Base hat {len(files_on_disk)} Dateien, aber noch keinen Index. Bitte einmal 'Neu Indizieren' in den Einstellungen ausführen."
             folder_display = ", ".join(
                 str(f.relative_to(PROJECT_ROOT)) if str(f).startswith(str(PROJECT_ROOT)) else str(f)
                 for f in folders

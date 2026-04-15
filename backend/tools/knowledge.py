@@ -691,12 +691,22 @@ class KnowledgeTool(BaseTool):
         cfg = _get_skill_config()
         search_mode_cfg = cfg.get("search_mode", "auto")
 
-        # TF-IDF Cache aufbauen (inkrementell, kein Bulk-Inline-Indexing)
-        cache = await asyncio.to_thread(_rebuild_cache, folders, max_bytes, False)
+        # TF-IDF Cache nur laden wenn benoetigt (nicht bei reinem Vektor-Modus)
+        # Spart bei 600+ Dateien das Laden aller Chunks in den RAM
+        vs = _get_vector_store()
+        vector_index_ready = vs is not None and vs.chunk_count() > 0
+        need_tfidf_cache = search_mode_cfg == "tfidf" or (
+            search_mode_cfg == "auto" and not vector_index_ready
+        )
+
+        if need_tfidf_cache:
+            cache = await asyncio.to_thread(_rebuild_cache, folders, max_bytes, False)
+        else:
+            cache = _load_cache()  # nur fuer die Leer-Pruefung, kein Rebuild
 
         # Dateien vorhanden aber noch kein Index?
         files_on_disk = _all_files(folders)
-        if not cache["files"]:
+        if not cache["files"] and not vector_index_ready:
             if files_on_disk:
                 return f"⚠️ Knowledge Base hat {len(files_on_disk)} Dateien, aber noch keinen Index. Bitte einmal 'Neu Indizieren' in den Einstellungen ausführen."
             folder_display = ", ".join(
@@ -708,16 +718,20 @@ class KnowledgeTool(BaseTool):
         results = None
         search_mode = "TF-IDF"
 
-        # Vektor-Suche wenn gewuenscht
         if search_mode_cfg in ("auto", "vector"):
             has_vector = await asyncio.to_thread(_rebuild_vector_index, folders, max_bytes)
             if has_vector:
+                # Vektor-Index vorhanden → ausschliesslich Vektor verwenden (kein TF-IDF-Fallback)
+                # Begruendung: TF-IDF skaliert O(n) mit Dateizahl, Vektor konstant ~35ms
                 results = await asyncio.to_thread(_vector_search, query, max_results)
-                if results:
-                    search_mode = "Vektor"
+                search_mode = "Vektor"
+            elif search_mode_cfg == "auto":
+                # Kein Vektor-Index → TF-IDF als Fallback
+                results = _search(query, cache, max_results)
+                search_mode = "TF-IDF"
+            # search_mode_cfg == "vector" ohne Index → keine Ergebnisse (hat_vector=False)
 
-        # TF-IDF wenn gewuenscht oder als Fallback
-        if not results and search_mode_cfg in ("auto", "tfidf"):
+        elif search_mode_cfg == "tfidf":
             results = _search(query, cache, max_results)
             search_mode = "TF-IDF"
 

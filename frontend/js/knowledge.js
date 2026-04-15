@@ -254,7 +254,7 @@ class JarvisKnowledgeManager {
                         title="${dbBtnTitle}" ${dbBtnDisabled ? 'disabled' : ''}>Datenbank</button>
                 </div>
                 <span class="kb-search-mode-label" style="margin-left:8px;">Aktiv:</span>
-                <span style="font-size:0.75rem;">${activeText}</span>
+                <span id="kb-active-label" style="font-size:0.75rem;">${activeText}</span>
             </div>
             <div class="kb-formats">
                 <span class="kb-format-badge" title="Text-Formate immer aktiv">✅ Text/Markdown</span>
@@ -504,15 +504,11 @@ class JarvisKnowledgeManager {
             const p = await resp.json();
             this._updateProgressBar(p);
 
-            // Stats (inkl. "Aktiv:"-Label) alle ~2.4s aktualisieren während Indizierung läuft
-            this._pollCount = (this._pollCount || 0) + 1;
-            if (p.running && this._pollCount % 3 === 0) {
-                await this.fetchStats();
-            }
+            // "Aktiv:"-Label direkt aktualisieren (kein fetchStats → kein Flackern)
+            if (p.running) this._updateActiveLabel(p.phase || '');
 
             if (!p.running && (p.phase === 'Fertig' || p.phase === 'Fehler' || p.phase === '')) {
                 this._stopProgressPolling();
-                this._pollCount = 0;
                 if (p.phase === 'Fertig') {
                     setTimeout(() => this._hideProgressBar(), 2000);
                     await this.fetchStats();
@@ -570,6 +566,16 @@ class JarvisKnowledgeManager {
                 statEls[1].textContent = p.done;
             }
         }
+    }
+
+    _updateActiveLabel(phase) {
+        const el = document.getElementById('kb-active-label');
+        if (!el) return;
+        const GREEN = '#34d399', YELLOW = '#f59e0b', GREY = '#94a3b8';
+        const isVector = phase.toLowerCase().includes('vektor');
+        const label = isVector ? 'Vektor-DB' : 'Dateiinhalt';
+        el.innerHTML = `<span style="color:${YELLOW};font-weight:600;">${label}</span>`
+                     + ` <span style="color:${GREY}">(wird indiziert…)</span>`;
     }
 
     // ─── WebDAV ───────────────────────────────────────────────────────

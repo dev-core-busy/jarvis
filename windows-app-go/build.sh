@@ -29,18 +29,34 @@ echo "Deploying $VERSION auf jarvis-ai.info..."
 curl --ssl-reqd --insecure -T jarvis.exe --user "$FTPS_USER" "$FTPS_BASE/downloads/jarvis.exe"
 echo "EXE hochgeladen"
 
-# version_windows.json aktualisieren
+# version_windows.json aktualisieren (PFAD: /downloads/ – UpdateChecker liest von dort)
 echo "{\"versionCode\":$NUM,\"versionName\":\"$VERSION\",\"downloadUrl\":\"https://jarvis-ai.info/downloads/jarvis.exe\"}" \
-  | curl --ssl-reqd --insecure -T - --user "$FTPS_USER" "$FTPS_BASE/version_windows.json"
+  | curl --ssl-reqd --insecure -T - --user "$FTPS_USER" "$FTPS_BASE/downloads/version_windows.json"
 echo "version_windows.json aktualisiert"
+
+# Verify version_windows.json
+ACTUAL=$(curl -s "https://jarvis-ai.info/downloads/version_windows.json?t=$(date +%s)" --insecure | grep -o "\"versionCode\":$NUM" || true)
+if [ -z "$ACTUAL" ]; then
+  echo "⚠ WARNUNG: version_windows.json Verifikation fehlgeschlagen!"
+else
+  echo "✓ version_windows.json verifiziert: versionCode=$NUM"
+fi
 
 # index.html: Versionsstring im Download-Button aktualisieren
 TMPHTML=$(mktemp)
-curl -s "https://jarvis-ai.info/" -o "$TMPHTML"
-# Alle "v0.XXX" im EXE-Download-Button ersetzen
-sed -i "s/Download · Portable EXE · v[0-9]\+\.[0-9]\+/Download · Portable EXE · $VERSION/g" "$TMPHTML"
+curl -s --ssl-reqd --insecure --user "$FTPS_USER" "$FTPS_BASE/index.html" -o "$TMPHTML"
+# Pattern: "Portable EXE · 0.XXX" (ohne v-Präfix)
+sed -i "s/Portable EXE · [0-9]\+\.[0-9]\+/Portable EXE · $VERSION/g" "$TMPHTML"
 curl --ssl-reqd --insecure -T "$TMPHTML" --user "$FTPS_USER" "$FTPS_BASE/index.html"
 rm "$TMPHTML"
+
+# Verify index.html
+VERHTML=$(curl -s "https://jarvis-ai.info/" --insecure | grep -o "Portable EXE · $VERSION" || true)
+if [ -z "$VERHTML" ]; then
+  echo "⚠ WARNUNG: index.html EXE-Version Verifikation fehlgeschlagen!"
+else
+  echo "✓ index.html verifiziert: $VERHTML"
+fi
 echo "index.html aktualisiert"
 
 echo "Deploy $VERSION abgeschlossen."

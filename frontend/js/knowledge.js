@@ -170,9 +170,16 @@ class JarvisKnowledgeManager {
         const videoIcon = stats.video_support ? '✅' : '⚠️';
         const videoTitle = stats.video_support ? 'Video/Audio-Support aktiv (ffmpeg + faster-whisper)' : 'ffmpeg oder faster-whisper fehlt';
         const vectorIcon = stats.vector_search ? '✅' : (stats.indexing ? '🔄' : '⚠️');
+        const vectorDbLabel = stats.vector_db_name
+            ? `${stats.vector_db_name}${stats.vector_db_version ? ' ' + stats.vector_db_version : ''}`
+            : 'Vektor-DB';
         const vectorTitle = stats.vector_search
-            ? `Vektor-Suche aktiv (${stats.vector_files} Dateien, ${stats.vector_chunks} Chunks)`
-            : (stats.indexing ? 'Vektor-Index wird gerade aufgebaut...' : 'chromadb/sentence-transformers nicht installiert');
+            ? `${vectorDbLabel} · ${stats.vector_model || ''}\nAktiv: ${stats.vector_files} Dateien, ${stats.vector_chunks} Chunks`
+            : (stats.indexing
+                ? `${vectorDbLabel} · Index wird aufgebaut…`
+                : (stats.vector_db_name
+                    ? `${vectorDbLabel} · ${stats.vector_model || ''}\nKein Index – bitte Neu-Indizieren`
+                    : 'faiss-cpu/sentence-transformers nicht installiert'));
 
         // Aktueller Suchmodus
         const mode = stats.search_mode || 'auto';
@@ -217,7 +224,7 @@ class JarvisKnowledgeManager {
                 <span class="kb-format-badge" title="${xlsxTitle}">${xlsxIcon} Excel</span>
                 <span class="kb-format-badge" title="${pptxTitle}">${pptxIcon} PowerPoint</span>
                 <span class="kb-format-badge" title="${videoTitle}">${videoIcon} Video/Audio</span>
-                <span class="kb-format-badge" title="${vectorTitle}">${vectorIcon} Vektor-DB</span>
+                <span class="kb-format-badge" title="${vectorTitle}">${vectorIcon} ${vectorDbLabel}</span>
             </div>
         `;
     }

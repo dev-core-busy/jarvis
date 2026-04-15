@@ -587,6 +587,7 @@ def get_stats() -> dict:
         "vector_model": vector_model,
         "search_mode": _get_skill_config().get("search_mode", "auto"),
         "indexing": get_index_progress()["running"],
+        "index_phase": get_index_progress()["phase"],
     }
 
 

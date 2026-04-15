@@ -185,14 +185,36 @@ class JarvisKnowledgeManager {
         // Aktueller Suchmodus
         const mode = stats.search_mode || 'auto';
 
-        // Was wird in 'auto' tatsächlich verwendet?
-        const autoEffective = stats.vector_search ? 'Vektor-DB' : 'Dateiinhalt';
-        const autoEffectiveColor = stats.vector_search ? '#34d399' : '#f59e0b';
-        const autoStatusText = mode === 'auto'
-            ? `Aktiv: <span style="color:${autoEffectiveColor};font-weight:600;">${autoEffective}</span>`
-            : (mode === 'vector'
-                ? `<span style="color:${stats.vector_search ? '#34d399' : '#f59e0b'};">${stats.vector_search ? 'Vektor-DB aktiv' : 'Kein Vektor-Index – bitte Neu-Indizieren'}</span>`
-                : `<span style="color:#94a3b8;">Dateiinhalt-Index aktiv</span>`);
+        // Statuszeile: gelb während Indizierung, grün wenn fertig
+        const phase = stats.index_phase || '';
+        const isVectorPhase = phase.toLowerCase().includes('vektor');
+        const GREEN = '#34d399', YELLOW = '#f59e0b', GREY = '#94a3b8';
+
+        function statusSpan(label, color) {
+            return `Aktiv: <span style="color:${color};font-weight:600;">${label}</span>`;
+        }
+
+        let autoStatusText;
+        if (stats.indexing) {
+            // Während Indizierung: gelb + Hinweis was gerade läuft
+            autoStatusText = isVectorPhase
+                ? statusSpan('Vektor-DB', YELLOW) + ' <span style="color:' + GREY + '">(wird indiziert…)</span>'
+                : statusSpan('Dateiinhalt', YELLOW) + ' <span style="color:' + GREY + '">(wird indiziert…)</span>';
+        } else if (mode === 'auto') {
+            autoStatusText = stats.vector_search
+                ? statusSpan('Vektor-DB', GREEN)
+                : (stats.total_chunks > 0
+                    ? statusSpan('Dateiinhalt', GREEN)
+                    : statusSpan('Dateiinhalt', YELLOW) + ' <span style="color:' + GREY + '">(kein Index – bitte Neu-Indizieren)</span>');
+        } else if (mode === 'vector') {
+            autoStatusText = stats.vector_search
+                ? statusSpan('Vektor-DB', GREEN)
+                : statusSpan('Vektor-DB', YELLOW) + ' <span style="color:' + GREY + '">(kein Index – bitte Neu-Indizieren)</span>';
+        } else {
+            autoStatusText = stats.total_chunks > 0
+                ? statusSpan('Dateiinhalt', GREEN)
+                : statusSpan('Dateiinhalt', YELLOW) + ' <span style="color:' + GREY + '">(kein Index – bitte Neu-Indizieren)</span>';
+        }
 
         // Datenbank-Button nur deaktivieren wenn FAISS nicht installiert
         const dbBtnDisabled = !stats.vector_db_available;

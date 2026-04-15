@@ -169,17 +169,18 @@ class JarvisKnowledgeManager {
         const pptxTitle = stats.pptx_support ? 'PowerPoint-Support aktiv' : 'python-pptx nicht installiert';
         const videoIcon = stats.video_support ? '✅' : '⚠️';
         const videoTitle = stats.video_support ? 'Video/Audio-Support aktiv (ffmpeg + faster-whisper)' : 'ffmpeg oder faster-whisper fehlt';
-        const vectorIcon = stats.vector_search ? '✅' : (stats.indexing ? '🔄' : '⚠️');
+        const vectorAvail = stats.vector_db_available;
+        const vectorIcon = vectorAvail ? '✅' : (stats.indexing ? '🔄' : '⚠️');
         const vectorDbLabel = stats.vector_db_name
             ? `${stats.vector_db_name}${stats.vector_db_version ? ' ' + stats.vector_db_version : ''}`
             : 'Vektor-DB';
-        const vectorTitle = stats.vector_search
-            ? `${vectorDbLabel} · ${stats.vector_model || ''}\nAktiv: ${stats.vector_files} Dateien, ${stats.vector_chunks} Chunks`
-            : (stats.indexing
-                ? `${vectorDbLabel} · Index wird aufgebaut…`
-                : (stats.vector_db_name
-                    ? `${vectorDbLabel} · ${stats.vector_model || ''}\nKein Index – bitte Neu-Indizieren`
-                    : 'faiss-cpu/sentence-transformers nicht installiert'));
+        const vectorTitle = vectorAvail
+            ? (stats.vector_search
+                ? `${vectorDbLabel} · ${stats.vector_model || ''}\nIndex: ${stats.vector_files} Dateien, ${stats.vector_chunks} Chunks`
+                : (stats.indexing
+                    ? `${vectorDbLabel} · ${stats.vector_model || ''}\nIndex wird aufgebaut…`
+                    : `${vectorDbLabel} · ${stats.vector_model || ''}\nKein Index vorhanden – bitte Neu-Indizieren`))
+            : 'faiss-cpu/sentence-transformers nicht installiert';
 
         // Aktueller Suchmodus
         const mode = stats.search_mode || 'auto';
@@ -224,7 +225,7 @@ class JarvisKnowledgeManager {
                 <span class="kb-format-badge" title="${xlsxTitle}">${xlsxIcon} Excel</span>
                 <span class="kb-format-badge" title="${pptxTitle}">${pptxIcon} PowerPoint</span>
                 <span class="kb-format-badge" title="${videoTitle}">${videoIcon} Video/Audio</span>
-                <span class="kb-format-badge" title="${vectorTitle}">${vectorIcon} ${vectorDbLabel}</span>
+                <span class="kb-format-badge" title="${vectorTitle}">${vectorIcon} Vektor-DB</span>
             </div>
         `;
     }

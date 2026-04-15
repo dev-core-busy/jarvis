@@ -77,21 +77,33 @@ def _get_vector_store():
 
 
 def _rebuild_vector_index(folders: list[Path], max_bytes: int) -> bool:
-    """Inkrementeller Vektor-Index Aufbau. Gibt True zurueck wenn verfuegbar."""
+    """Inkrementeller Vektor-Index Aufbau. Gibt True zurueck wenn Index Inhalt hat.
+
+    WICHTIG: Diese Funktion wird inline im Suchpfad aufgerufen.
+    Bulk-Erstindizierung (leerer Index) wird NICHT inline gemacht – nur via
+    force_reindex(). Inline werden ausschliesslich kleine inkrementelle Updates
+    verarbeitet (neue/geaenderte Dateien seit letztem Lauf, max. 10 Stueck).
+    """
     vs = _get_vector_store()
     if vs is None:
         return False
 
-    files = _all_files(folders)
-    current_paths = {str(f) for f in files}
     indexed = vs.get_indexed_files()
 
+    # Leerer Index: kein Inline-Bulk-Indexing – Nutzer muss Neu-Indizieren ausloesen
+    if not indexed:
+        _log.debug("Vektor-Index leer – bitte Neu-Indizieren ausfuehren")
+        return False
+
+    files = _all_files(folders)
+    current_paths = {str(f) for f in files}
+
     # Geloeschte Dateien entfernen
-    for path_str in indexed:
+    for path_str in list(indexed.keys()):
         if path_str not in current_paths:
             vs.remove_file(path_str)
 
-    # Neue/geaenderte Dateien ermitteln
+    # Neue/geaenderte Dateien ermitteln (max. 10 inline, Rest beim naechsten force_reindex)
     to_index = []
     for filepath in files:
         path_str = str(filepath)
@@ -102,12 +114,14 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int) -> bool:
         if indexed.get(path_str) != mtime:
             to_index.append(filepath)
 
-    _set_progress(phase="Vektor", vector_done=0, vector_total=len(to_index))
+    inline_limit = 10
+    if len(to_index) > inline_limit:
+        _log.info(f"{len(to_index)} neue/geaenderte Dateien – nur {inline_limit} inline, Rest via Neu-Indizieren")
+        to_index = to_index[:inline_limit]
 
     changed = 0
     for i, filepath in enumerate(to_index):
         path_str = str(filepath)
-        _set_progress(vector_done=i + 1, phase=f"Vektor: {filepath.name[:40]}")
         try:
             mtime = filepath.stat().st_mtime
             text = _extract_text(filepath, max_bytes)
@@ -120,10 +134,9 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int) -> bool:
         except Exception:
             pass
 
-    _set_progress(vector_done=len(to_index), vector_total=len(to_index))
     if changed:
-        _log.info(f"Vektor-Index aktualisiert: {changed} Datei(en)")
-    return True
+        _log.info(f"Vektor-Index inkrementell aktualisiert: {changed} Datei(en)")
+    return vs.chunk_count() > 0
 
 
 def _vector_search(query: str, max_results: int) -> list[tuple[float, str, str]] | None:
@@ -532,8 +545,9 @@ def get_stats() -> dict:
     total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
     total_size   = sum(d.get("size", 0) for d in cache["files"].values())
 
-    # Vektor-DB: FAISS-Index lesen (meta.json genuegt, kein volles Laden noetig)
-    has_vector = False
+    # Vektor-DB: FAISS verfuegbar? + Index-Inhalt lesen (meta.json, kein volles Laden)
+    vector_db_available = False  # FAISS installiert?
+    has_vector = False           # Index hat Inhalt?
     vector_chunks = 0
     vector_files = 0
     vector_db_name = ""
@@ -541,6 +555,7 @@ def get_stats() -> dict:
     vector_model = ""
     try:
         import faiss as _faiss
+        vector_db_available = True
         vector_db_name = "FAISS"
         vector_db_version = getattr(_faiss, "__version__", "")
         from backend.tools.vector_store import MODEL_NAME as _VS_MODEL
@@ -563,6 +578,7 @@ def get_stats() -> dict:
         "total_chunks": total_chunks,
         "total_size_bytes": total_size,
         **_get_static_stats(),
+        "vector_db_available": vector_db_available,
         "vector_search": has_vector,
         "vector_files": vector_files,
         "vector_chunks": vector_chunks,

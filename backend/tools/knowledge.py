@@ -532,21 +532,27 @@ def get_stats() -> dict:
     total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
     total_size   = sum(d.get("size", 0) for d in cache["files"].values())
 
-    # Vektor-DB: gecachter Client, nur count() aufrufen
+    # Vektor-DB: FAISS-Index lesen (meta.json genuegt, kein volles Laden noetig)
     has_vector = False
     vector_chunks = 0
     vector_files = 0
+    vector_db_name = ""
+    vector_db_version = ""
+    vector_model = ""
     try:
-        import chromadb as _chroma
-        from backend.tools.vector_store import COLLECTION_NAME
-        _vs_dir = PROJECT_ROOT / "data" / "vector_store"
-        _db = _vs_dir / "chroma.sqlite3"
-        if _db.exists() and _db.stat().st_size > 4096:
-            _c = _chroma.PersistentClient(path=str(_vs_dir))
-            _col = _c.get_or_create_collection(COLLECTION_NAME)
-            vector_chunks = _col.count()
+        import faiss as _faiss
+        vector_db_name = "FAISS"
+        vector_db_version = getattr(_faiss, "__version__", "")
+        from backend.tools.vector_store import MODEL_NAME as _VS_MODEL
+        vector_model = _VS_MODEL
+        _meta_path = PROJECT_ROOT / "data" / "vector_store" / "faiss_meta.json"
+        if _meta_path.exists() and _meta_path.stat().st_size > 10:
+            import json as _json
+            with open(_meta_path, "r", encoding="utf-8") as _f:
+                _meta = _json.load(_f)
+            vector_chunks = len(_meta)
             has_vector = vector_chunks > 0
-            vector_files = len(cache["files"]) if has_vector else 0
+            vector_files = len({m["file_path"] for m in _meta}) if has_vector else 0
     except Exception:
         pass
 
@@ -560,6 +566,9 @@ def get_stats() -> dict:
         "vector_search": has_vector,
         "vector_files": vector_files,
         "vector_chunks": vector_chunks,
+        "vector_db_name": vector_db_name,
+        "vector_db_version": vector_db_version,
+        "vector_model": vector_model,
         "search_mode": _get_skill_config().get("search_mode", "auto"),
         "indexing": get_index_progress()["running"],
     }
@@ -813,7 +822,7 @@ class KnowledgeManageTool(BaseTool):
             if stats.get("vector_search"):
                 vector_line = f"\n  🧠 Vektor-Suche: aktiv ({stats['vector_files']} Dateien, {stats['vector_chunks']} Chunks)"
             else:
-                vector_line = "\n  🧠 Vektor-Suche: inaktiv (chromadb/sentence-transformers fehlt)"
+                vector_line = "\n  🧠 Vektor-Suche: inaktiv (faiss-cpu/sentence-transformers fehlt)"
 
             return (
                 f"📊 Knowledge Base Statistiken:\n"

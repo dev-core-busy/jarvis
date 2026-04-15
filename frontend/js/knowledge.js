@@ -503,8 +503,16 @@ class JarvisKnowledgeManager {
             if (!resp.ok) return;
             const p = await resp.json();
             this._updateProgressBar(p);
+
+            // Stats (inkl. "Aktiv:"-Label) alle ~2.4s aktualisieren während Indizierung läuft
+            this._pollCount = (this._pollCount || 0) + 1;
+            if (p.running && this._pollCount % 3 === 0) {
+                await this.fetchStats();
+            }
+
             if (!p.running && (p.phase === 'Fertig' || p.phase === 'Fehler' || p.phase === '')) {
                 this._stopProgressPolling();
+                this._pollCount = 0;
                 if (p.phase === 'Fertig') {
                     setTimeout(() => this._hideProgressBar(), 2000);
                     await this.fetchStats();

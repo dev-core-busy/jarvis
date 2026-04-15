@@ -404,25 +404,6 @@ func runNativeSysTray() {
 	nid.Size = uint32(unsafe.Sizeof(nid))
 	_, _, _ = pShellNotifyIconW.Call(nimAdd, uintptr(unsafe.Pointer(&nid)))
 
-	// NOTIFYICON_VERSION_4 → modernes Verhalten (Windows Vista+)
-	const nimSetVersion = uintptr(4)
-	nid2 := notifyIconData{Wnd: hwnd, ID: 1}
-	nid2.Size = uint32(unsafe.Sizeof(nid2))
-	nid2.Version = 4
-	pShellNotifyIconW.Call(nimSetVersion, uintptr(unsafe.Pointer(&nid2)))
-
-	// Tooltip nach NIM_SETVERSION neu setzen – alle Flags auf einmal
-	nid3 := notifyIconData{
-		Wnd:             hwnd,
-		ID:              1,
-		Flags:           nifMessage | nifIcon | nifTip,
-		CallbackMessage: wmTray,
-		Icon:            hIcon,
-	}
-	nid3.Size = uint32(unsafe.Sizeof(nid3))
-	copy(nid3.Tip[:], tip)
-	pShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&nid3)))
-
 	// Message-Loop
 	var m msg
 	for {

@@ -190,30 +190,29 @@ class JarvisKnowledgeManager {
         const isVectorPhase = phase.toLowerCase().includes('vektor');
         const GREEN = '#34d399', YELLOW = '#f59e0b', GREY = '#94a3b8';
 
-        function statusSpan(label, color) {
-            return `Aktiv: <span style="color:${color};font-weight:600;">${label}</span>`;
+        function activeLabel(label, color) {
+            return `<span style="color:${color};font-weight:600;">${label}</span>`;
         }
 
-        let autoStatusText;
+        let activeText;
         if (stats.indexing) {
-            // Während Indizierung: gelb + Hinweis was gerade läuft
-            autoStatusText = isVectorPhase
-                ? statusSpan('Vektor-DB', YELLOW) + ' <span style="color:' + GREY + '">(wird indiziert…)</span>'
-                : statusSpan('Dateiinhalt', YELLOW) + ' <span style="color:' + GREY + '">(wird indiziert…)</span>';
+            activeText = isVectorPhase
+                ? activeLabel('Vektor-DB', YELLOW) + ` <span style="color:${GREY}">(wird indiziert…)</span>`
+                : activeLabel('Dateiinhalt', YELLOW) + ` <span style="color:${GREY}">(wird indiziert…)</span>`;
         } else if (mode === 'auto') {
-            autoStatusText = stats.vector_search
-                ? statusSpan('Vektor-DB', GREEN)
+            activeText = stats.vector_search
+                ? activeLabel('Vektor-DB', GREEN)
                 : (stats.total_chunks > 0
-                    ? statusSpan('Dateiinhalt', GREEN)
-                    : statusSpan('Dateiinhalt', YELLOW) + ' <span style="color:' + GREY + '">(kein Index – bitte Neu-Indizieren)</span>');
+                    ? activeLabel('Dateiinhalt', GREEN)
+                    : activeLabel('keiner', YELLOW));
         } else if (mode === 'vector') {
-            autoStatusText = stats.vector_search
-                ? statusSpan('Vektor-DB', GREEN)
-                : statusSpan('Vektor-DB', YELLOW) + ' <span style="color:' + GREY + '">(kein Index – bitte Neu-Indizieren)</span>';
+            activeText = stats.vector_search
+                ? activeLabel('Vektor-DB', GREEN)
+                : activeLabel('keiner', YELLOW);
         } else {
-            autoStatusText = stats.total_chunks > 0
-                ? statusSpan('Dateiinhalt', GREEN)
-                : statusSpan('Dateiinhalt', YELLOW) + ' <span style="color:' + GREY + '">(kein Index – bitte Neu-Indizieren)</span>';
+            activeText = stats.total_chunks > 0
+                ? activeLabel('Dateiinhalt', GREEN)
+                : activeLabel('keiner', YELLOW);
         }
 
         // Datenbank-Button nur deaktivieren wenn FAISS nicht installiert
@@ -241,7 +240,7 @@ class JarvisKnowledgeManager {
                     <span class="kb-stat-label">Gesamt</span>
                 </div>
             </div>
-            <div class="kb-search-mode">
+            <div class="kb-search-mode" style="display:grid;grid-template-columns:auto 1fr;align-items:center;gap:6px 10px;">
                 <span class="kb-search-mode-label">Suchmodus:</span>
                 <div class="kb-toggle-group">
                     <button class="kb-toggle-btn ${mode === 'auto' ? 'active' : ''}"
@@ -254,7 +253,8 @@ class JarvisKnowledgeManager {
                         data-mode="vector" onclick="window.knowledgeManager.setSearchMode('vector')"
                         title="${dbBtnTitle}" ${dbBtnDisabled ? 'disabled' : ''}>Datenbank</button>
                 </div>
-                <div style="font-size:0.75rem;margin-top:6px;color:var(--text-secondary);">${autoStatusText}</div>
+                <span class="kb-search-mode-label">Aktiv:</span>
+                <div style="font-size:0.75rem;">${activeText}</div>
             </div>
             <div class="kb-formats">
                 <span class="kb-format-badge" title="Text-Formate immer aktiv">✅ Text/Markdown</span>

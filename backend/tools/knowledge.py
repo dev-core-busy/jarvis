@@ -69,7 +69,7 @@ def _get_vector_store():
         _log.info("VectorStore verfuegbar – semantische Suche aktiv")
         return vs
     except ImportError as e:
-        _log.info(f"VectorStore nicht verfuegbar (chromadb/sentence-transformers fehlt): {e}")
+        _log.info(f"VectorStore nicht verfuegbar (faiss-cpu/sentence-transformers fehlt): {e}")
         return None
     except Exception as e:
         _log.warning(f"VectorStore Initialisierung fehlgeschlagen: {e}")

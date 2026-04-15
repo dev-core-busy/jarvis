@@ -185,6 +185,21 @@ class JarvisKnowledgeManager {
         // Aktueller Suchmodus
         const mode = stats.search_mode || 'auto';
 
+        // Was wird in 'auto' tatsächlich verwendet?
+        const autoEffective = stats.vector_search ? 'Vektor-DB' : 'Dateiinhalt';
+        const autoEffectiveColor = stats.vector_search ? '#34d399' : '#f59e0b';
+        const autoStatusText = mode === 'auto'
+            ? `Aktiv: <span style="color:${autoEffectiveColor};font-weight:600;">${autoEffective}</span>`
+            : (mode === 'vector'
+                ? `<span style="color:${stats.vector_search ? '#34d399' : '#f59e0b'};">${stats.vector_search ? 'Vektor-DB aktiv' : 'Kein Vektor-Index – bitte Neu-Indizieren'}</span>`
+                : `<span style="color:#94a3b8;">Dateiinhalt-Index aktiv</span>`);
+
+        // Datenbank-Button nur deaktivieren wenn FAISS nicht installiert
+        const dbBtnDisabled = !stats.vector_db_available;
+        const dbBtnTitle = stats.vector_db_available
+            ? (stats.vector_search ? 'Nur semantische Vektor-Suche (Bedeutung, Synonyme)' : 'Vektor-DB verfügbar, aber kein Index – bitte Neu-Indizieren')
+            : 'faiss-cpu nicht installiert';
+
         el.innerHTML = `
             <div class="kb-stat-grid">
                 <div class="kb-stat">
@@ -209,14 +224,15 @@ class JarvisKnowledgeManager {
                 <div class="kb-toggle-group">
                     <button class="kb-toggle-btn ${mode === 'auto' ? 'active' : ''}"
                         data-mode="auto" onclick="window.knowledgeManager.setSearchMode('auto')"
-                        title="Vektor-Suche bevorzugt, TF-IDF als Fallback">Auto</button>
+                        title="Vektor-DB bevorzugt wenn Index vorhanden, sonst Dateiinhalt-Index">Auto</button>
                     <button class="kb-toggle-btn ${mode === 'tfidf' ? 'active' : ''}"
                         data-mode="tfidf" onclick="window.knowledgeManager.setSearchMode('tfidf')"
-                        title="Nur Keyword-basierte Suche (schnell, exakt)">Dateiinhalt</button>
-                    <button class="kb-toggle-btn ${mode === 'vector' ? 'active' : ''} ${!stats.vector_search ? 'disabled' : ''}"
+                        title="Nur Dateiinhalt-Index (TF-IDF, Keyword-Suche)">Dateiinhalt</button>
+                    <button class="kb-toggle-btn ${mode === 'vector' ? 'active' : ''} ${dbBtnDisabled ? 'disabled' : ''}"
                         data-mode="vector" onclick="window.knowledgeManager.setSearchMode('vector')"
-                        title="Nur semantische Vektor-Suche (Bedeutung, Synonyme)" ${!stats.vector_search ? 'disabled' : ''}>Datenbank</button>
+                        title="${dbBtnTitle}" ${dbBtnDisabled ? 'disabled' : ''}>Datenbank</button>
                 </div>
+                <div style="font-size:0.75rem;margin-top:6px;color:var(--text-secondary);">${autoStatusText}</div>
             </div>
             <div class="kb-formats">
                 <span class="kb-format-badge" title="Text-Formate immer aktiv">✅ Text/Markdown</span>

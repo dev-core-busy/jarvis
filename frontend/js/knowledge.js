@@ -240,7 +240,7 @@ class JarvisKnowledgeManager {
                     <span class="kb-stat-label">Gesamt</span>
                 </div>
             </div>
-            <div class="kb-search-mode" style="display:grid;grid-template-columns:auto 1fr;align-items:center;gap:6px 10px;">
+            <div class="kb-search-mode" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
                 <span class="kb-search-mode-label">Suchmodus:</span>
                 <div class="kb-toggle-group">
                     <button class="kb-toggle-btn ${mode === 'auto' ? 'active' : ''}"
@@ -253,8 +253,8 @@ class JarvisKnowledgeManager {
                         data-mode="vector" onclick="window.knowledgeManager.setSearchMode('vector')"
                         title="${dbBtnTitle}" ${dbBtnDisabled ? 'disabled' : ''}>Datenbank</button>
                 </div>
-                <span class="kb-search-mode-label">Aktiv:</span>
-                <div style="font-size:0.75rem;">${activeText}</div>
+                <span class="kb-search-mode-label" style="margin-left:8px;">Aktiv:</span>
+                <span style="font-size:0.75rem;">${activeText}</span>
             </div>
             <div class="kb-formats">
                 <span class="kb-format-badge" title="Text-Formate immer aktiv">✅ Text/Markdown</span>

@@ -9,11 +9,18 @@ import info.jarvisai.app.data.prefs.SettingsDataStore
 import info.jarvisai.app.service.ServerTtsPlayer
 import info.jarvisai.app.service.TtsManager
 import info.jarvisai.app.service.TtsVoice
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import javax.inject.Inject
 
 @HiltViewModel
@@ -21,6 +28,7 @@ class SettingsViewModel @Inject constructor(
     private val store: SettingsDataStore,
     private val serverTtsPlayer: ServerTtsPlayer,
     private val ttsManager: TtsManager,
+    private val httpClient: OkHttpClient,
 ) : ViewModel() {
 
     private val _settings = MutableStateFlow(JarvisSettings())
@@ -28,6 +36,10 @@ class SettingsViewModel @Inject constructor(
 
     private val _saved = MutableStateFlow(false)
     val saved: StateFlow<Boolean> = _saved
+
+    // "" = idle, "loading", "ok", "error: ..."
+    private val _loginState = MutableStateFlow("")
+    val loginState: StateFlow<String> = _loginState.asStateFlow()
 
     private val _serverVoices = MutableStateFlow<List<TtsVoice>>(emptyList())
     val serverVoices: StateFlow<List<TtsVoice>> = _serverVoices.asStateFlow()
@@ -133,5 +145,52 @@ class SettingsViewModel @Inject constructor(
 
     fun resetSaved() {
         _saved.value = false
+    }
+
+    fun resetLoginState() {
+        _loginState.value = ""
+    }
+
+    fun loginWithCredentials(serverUrl: String, username: String, password: String) {
+        viewModelScope.launch {
+            _loginState.value = "loading"
+            try {
+                val baseUrl = serverUrl.trimEnd('/').let {
+                    when {
+                        it.startsWith("wss://") -> "https://" + it.removePrefix("wss://")
+                        it.startsWith("ws://")  -> "http://"  + it.removePrefix("ws://")
+                        it.isBlank()            -> ""
+                        !it.startsWith("http")  -> "https://$it"
+                        else                    -> it
+                    }
+                }
+                if (baseUrl.isBlank()) {
+                    _loginState.value = "error: Server-URL fehlt"
+                    return@launch
+                }
+                val bodyJson = """{"username":"${username.replace("\"","\\\"").replace("\\","\\\\")
+                    }","password":"${password.replace("\"","\\\"").replace("\\","\\\\")
+                    }"}"""
+                val reqBody = bodyJson.toRequestBody("application/json".toMediaType())
+                val request = Request.Builder()
+                    .url("$baseUrl/api/login")
+                    .post(reqBody)
+                    .build()
+                val responseStr = withContext(Dispatchers.IO) {
+                    httpClient.newCall(request).execute().use { resp ->
+                        resp.body?.string() ?: ""
+                    }
+                }
+                val json = JSONObject(responseStr)
+                if (json.getBoolean("success")) {
+                    onApiKeyChange(json.getString("token"))
+                    _loginState.value = "ok"
+                } else {
+                    _loginState.value = "error: ${json.optString("error", "Anmeldung fehlgeschlagen")}"
+                }
+            } catch (e: Exception) {
+                _loginState.value = "error: ${e.message ?: "Unbekannter Fehler"}"
+            }
+        }
     }
 }

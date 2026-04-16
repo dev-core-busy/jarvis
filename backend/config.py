@@ -257,6 +257,31 @@ class Config:
             self.AGENT_API_KEY = settings["agent_api_key"]
         self._save_to_file()
 
+    # ─── Generische Key-Value-Einstellungen ────────────────────────────
+
+    def get_setting(self, key: str, default=None):
+        """Liest einen generischen Einstellungswert aus settings.json."""
+        try:
+            if self.SETTINGS_FILE.exists():
+                data = json.loads(self.SETTINGS_FILE.read_text())
+                return data.get("extra", {}).get(key, default)
+        except Exception:
+            pass
+        return default
+
+    def save_setting(self, key: str, value):
+        """Speichert einen generischen Einstellungswert in settings.json."""
+        try:
+            data = {}
+            if self.SETTINGS_FILE.exists():
+                data = json.loads(self.SETTINGS_FILE.read_text())
+            if "extra" not in data:
+                data["extra"] = {}
+            data["extra"][key] = value
+            self.SETTINGS_FILE.write_text(json.dumps(data, indent=4))
+        except Exception as e:
+            print(f"[Config] save_setting Fehler: {e}", flush=True)
+
     # ─── Skills-Verwaltung ─────────────────────────────────────────
 
     def get_skill_states(self) -> dict:

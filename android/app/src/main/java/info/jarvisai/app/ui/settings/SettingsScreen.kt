@@ -328,9 +328,12 @@ fun SettingsScreen(
     val serverVoices by viewModel.serverVoices.collectAsState()
     val androidVoices by viewModel.androidVoices.collectAsState()
     val loadingVoices by viewModel.loadingVoices.collectAsState()
+    val loginState by viewModel.loginState.collectAsState()
     var apiKeyVisible by remember { mutableStateOf(false) }
     var showServerVoicePicker by remember { mutableStateOf(false) }
     var showAndroidVoicePicker by remember { mutableStateOf(false) }
+    var domainUsername by remember { mutableStateOf("") }
+    var domainPassword by remember { mutableStateOf("") }
 
     LaunchedEffect(showServerVoicePicker) {
         if (showServerVoicePicker) viewModel.fetchServerVoices()
@@ -402,6 +405,72 @@ fun SettingsScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
+            )
+
+            // ── Domain-Anmeldung (optional) ───────────────────────────
+            SectionHeader("Domain-Anmeldung (optional)")
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = domainUsername,
+                    onValueChange = { domainUsername = it },
+                    label = { Text("Benutzername") },
+                    placeholder = { Text("user@domain.com oder DOMAIN\\user") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    value = domainPassword,
+                    onValueChange = { domainPassword = it },
+                    label = { Text("Passwort") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = {
+                        viewModel.loginWithCredentials(settings.serverUrl, domainUsername, domainPassword)
+                    },
+                    enabled = loginState != "loading",
+                ) {
+                    if (loginState == "loading") {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Anmelden")
+                    }
+                }
+                if (loginState == "ok") {
+                    Text(
+                        "✓ Angemeldet!",
+                        color = JarvisGreen,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else if (loginState.startsWith("error:")) {
+                    Text(
+                        loginState.removePrefix("error:").trim(),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            Text(
+                "── oder API-Key direkt eingeben ──",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
             )
 
             OutlinedTextField(

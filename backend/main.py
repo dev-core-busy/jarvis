@@ -839,6 +839,27 @@ async def save_settings(request: Request, user: str = Depends(require_auth)):
     return JSONResponse({"success": True})
 
 
+@app.post("/api/auth/ad_test")
+async def test_ad_connection(request: Request, _username: str = Depends(require_auth)):
+    """Prüft ob der Domain-Controller erreichbar ist (reiner Verbindungstest, kein Bind)."""
+    body = await request.json()
+    ad_server = body.get("ad_server", "").strip()
+    ad_domain = body.get("ad_domain", "").strip()
+    if not ad_server or not ad_domain:
+        return JSONResponse({"reachable": False, "error": "Server und Domain erforderlich"})
+    try:
+        import ldap3
+        server = ldap3.Server(ad_server, get_info=ldap3.NONE, connect_timeout=5)
+        conn = ldap3.Connection(server, auto_bind=False)
+        conn.open()
+        conn.closed
+        return JSONResponse({"reachable": True})
+    except ImportError:
+        return JSONResponse({"reachable": False, "error": "ldap3 nicht installiert"})
+    except Exception as e:
+        return JSONResponse({"reachable": False, "error": str(e)})
+
+
 @app.get("/api/auth/ad_status")
 async def get_ad_status():
     """Gibt den aktuellen AD/LDAP-Konfigurationsstatus zurueck."""

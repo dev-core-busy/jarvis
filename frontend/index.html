@@ -1204,6 +1204,167 @@ sudo update-ca-certificates</code></pre>
                     <button class="kb-btn-action" id="sec-cpw-submit">Kennwort speichern</button>
 
                     <hr class="settings-divider" style="margin-top:24px;">
+
+                    <!-- ── Active Directory / LDAP ── -->
+                    <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:4px;">🏢 Active Directory / LDAP</h3>
+                    <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:16px;">
+                        Domain-Login für Windows- und Android-App. Jarvis-Server muss nur im gleichen Netzwerk wie der Domain-Controller sein – kein Domain-Beitritt erforderlich.
+                    </p>
+
+                    <!-- Status-Badge -->
+                    <div id="ad-status-badge" style="display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:8px;background:var(--bg-glass);border:1px solid var(--border);font-size:0.82rem;margin-bottom:16px;">
+                        <span id="ad-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0;"></span>
+                        <span id="ad-status-text" style="color:var(--text-muted);">Lade…</span>
+                    </div>
+
+                    <!-- Server + Domain -->
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                        <div class="form-group" style="margin:0;">
+                            <label>Domain-Controller (IP oder Hostname)</label>
+                            <input type="text" id="ad-server" placeholder="z.B. 192.168.1.10 oder dc.firma.local" style="width:100%;box-sizing:border-box;">
+                        </div>
+                        <div class="form-group" style="margin:0;">
+                            <label>Domain</label>
+                            <input type="text" id="ad-domain" placeholder="z.B. firma.local" style="width:100%;box-sizing:border-box;">
+                        </div>
+                    </div>
+
+                    <!-- Zugriffssteuerung -->
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label>
+                            Erlaubte Benutzer
+                            <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– kommagetrennt, z.B. <code>mueller,schmidt</code> (leer = alle AD-Benutzer)</span>
+                        </label>
+                        <input type="text" id="ad-allowed-users" placeholder="Leer lassen für alle Domänen-Benutzer" style="width:50%;box-sizing:border-box;">
+                    </div>
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label>
+                            Erlaubte Gruppe (AD-Gruppe)
+                            <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                        </label>
+                        <input type="text" id="ad-allowed-group" placeholder="z.B. CN=Jarvis-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                            ⚠ Wenn eine Gruppe eingetragen ist, wird die Benutzerliste ignoriert.
+                        </div>
+                    </div>
+
+                    <!-- Modus-Anzeige -->
+                    <div id="ad-mode-hint" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:12px;border:1px solid;"></div>
+
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                        <button class="kb-btn-action" id="ad-save-btn" onclick="window._adSave()">Speichern</button>
+                        <button class="kb-btn-secondary" onclick="window._adTest()">Verbindung testen</button>
+                        <span id="ad-save-status" style="font-size:0.82rem;"></span>
+                    </div>
+                    <div id="ad-test-result" style="font-size:0.82rem;min-height:18px;margin-top:4px;"></div>
+
+                    <script>
+                    (function() {
+                        async function _adLoad() {
+                            try {
+                                const r = await fetch('/api/auth/ad_status', {
+                                    headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+                                });
+                                const d = await r.json();
+                                document.getElementById('ad-server').value        = d.server        || '';
+                                document.getElementById('ad-domain').value        = d.domain        || '';
+                                document.getElementById('ad-allowed-users').value = d.allowed_users || '';
+                                document.getElementById('ad-allowed-group').value = d.allowed_group || '';
+                                _adUpdateStatus(d);
+                            } catch(e) {}
+                        }
+
+                        function _adUpdateStatus(d) {
+                            const dot  = document.getElementById('ad-status-dot');
+                            const txt  = document.getElementById('ad-status-text');
+                            const hint = document.getElementById('ad-mode-hint');
+                            if (!d.configured) {
+                                dot.style.background = '#94a3b8';
+                                txt.style.color      = 'var(--text-muted)';
+                                txt.textContent      = 'Nicht konfiguriert – lokaler Login aktiv';
+                                hint.style.display   = 'none';
+                                return;
+                            }
+                            dot.style.background = '#34d399';
+                            txt.style.color      = '#34d399';
+                            const modeLabels = { open: '🔓 Offen – alle Domänen-Benutzer erlaubt', users: '👥 Benutzerliste aktiv', group: '🏷️ Gruppen-Filter aktiv' };
+                            txt.textContent = 'Aktiv · ' + d.server + ' · ' + d.domain + ' · ' + (modeLabels[d.access_mode] || d.access_mode);
+                            hint.style.display     = 'block';
+                            if (d.access_mode === 'open') {
+                                hint.style.borderColor = '#f59e0b';
+                                hint.style.background  = 'rgba(245,158,11,0.08)';
+                                hint.style.color       = '#f59e0b';
+                                hint.textContent       = '⚠ Kein Zugriffsfilter – jeder Domänen-Benutzer mit gültigem Passwort kann sich anmelden.';
+                            } else if (d.access_mode === 'users') {
+                                hint.style.borderColor = '#34d399';
+                                hint.style.background  = 'rgba(52,211,153,0.08)';
+                                hint.style.color       = '#34d399';
+                                hint.textContent       = '✓ Benutzerliste: ' + d.allowed_users;
+                            } else {
+                                hint.style.borderColor = '#6366f1';
+                                hint.style.background  = 'rgba(99,102,241,0.08)';
+                                hint.style.color       = '#a5b4fc';
+                                hint.textContent       = '✓ Gruppen-Filter: ' + d.allowed_group;
+                            }
+                        }
+
+                        window._adSave = async function() {
+                            const btn = document.getElementById('ad-save-btn');
+                            const st  = document.getElementById('ad-save-status');
+                            btn.disabled = true;
+                            st.textContent = 'Speichern…'; st.style.color = 'var(--text-muted)';
+                            try {
+                                const r = await fetch('/api/settings', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                                    body: JSON.stringify({
+                                        ad_server:        document.getElementById('ad-server').value.trim(),
+                                        ad_domain:        document.getElementById('ad-domain').value.trim(),
+                                        ad_allowed_users: document.getElementById('ad-allowed-users').value.trim(),
+                                        ad_allowed_group: document.getElementById('ad-allowed-group').value.trim(),
+                                    })
+                                });
+                                if (!r.ok) throw new Error('HTTP ' + r.status);
+                                st.textContent = '✓ Gespeichert'; st.style.color = '#34d399';
+                                setTimeout(() => { st.textContent = ''; }, 3000);
+                                await _adLoad();
+                            } catch(e) {
+                                st.textContent = '✗ Fehler: ' + e.message; st.style.color = '#ef4444';
+                            } finally { btn.disabled = false; }
+                        };
+
+                        window._adTest = async function() {
+                            const res = document.getElementById('ad-test-result');
+                            const srv = document.getElementById('ad-server').value.trim();
+                            const dom = document.getElementById('ad-domain').value.trim();
+                            if (!srv || !dom) { res.style.color='#f59e0b'; res.textContent='⚠ Bitte Server und Domain eingeben'; return; }
+                            res.style.color='var(--text-muted)'; res.textContent='Verbinde mit ' + srv + '…';
+                            try {
+                                const r = await fetch('/api/auth/ad_test', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                                    body: JSON.stringify({ ad_server: srv, ad_domain: dom })
+                                });
+                                const d = await r.json();
+                                if (d.reachable) {
+                                    res.style.color='#34d399'; res.textContent='✓ ' + srv + ' erreichbar (LDAP Port 389)';
+                                } else {
+                                    res.style.color='#ef4444'; res.textContent='✗ Nicht erreichbar: ' + (d.error || 'Timeout');
+                                }
+                            } catch(e) { res.style.color='#ef4444'; res.textContent='✗ ' + e.message; }
+                        };
+
+                        // Laden wenn Security-Tab geöffnet wird
+                        document.addEventListener('DOMContentLoaded', function() {
+                            const secBtn = document.querySelector('[data-settings-tab="security"]');
+                            if (secBtn) secBtn.addEventListener('click', _adLoad);
+                        });
+                        // Auch direkt laden (falls Tab bereits aktiv)
+                        _adLoad();
+                    })();
+                    </script>
+
+                    <hr class="settings-divider" style="margin-top:24px;">
                     <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:8px;">🔑 Zwei-Faktor-Authentifizierung (2FA)</h3>
                     <p style="color:var(--text-secondary);font-size:0.85rem;line-height:1.5;margin-bottom:10px;">
                         Die Zwei-Faktor-Authentifizierung (2FA) ist noch nicht aktiviert. Diese Funktion wird in einer zukünftigen Version verfügbar sein.

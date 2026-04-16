@@ -246,7 +246,38 @@ def _mask_key(key: str) -> str:
 
 
 def authenticate_linux_user(username: str, password: str) -> bool:
-    """Authentifiziert einen Benutzer – via PAM (Linux) oder ENV-Variable (Docker)."""
+    """Authentifiziert einen Benutzer – via LDAP/AD (wenn konfiguriert), PAM (Linux) oder ENV-Variable (Docker)."""
+    # ─── Active Directory / LDAP-Authentifizierung ────────────────────
+    ad_server = config.get_setting("ad_server", "")
+    ad_domain = config.get_setting("ad_domain", "")
+    if ad_server and ad_domain:
+        try:
+            import ldap3
+            # Benutzername normalisieren: falls kein @ und kein \ enthalten, Domain anhaengen
+            bind_user = username
+            if "@" not in bind_user and "\\" not in bind_user:
+                bind_user = f"{username}@{ad_domain}"
+            server = ldap3.Server(ad_server, get_info=ldap3.NONE, connect_timeout=5)
+            conn = ldap3.Connection(server, user=bind_user, password=password, auto_bind=False)
+            if conn.bind():
+                conn.unbind()
+                print(f"[AUTH] AD-Login erfolgreich: {username}@{ad_domain}", flush=True)
+                return True
+            else:
+                _desc = conn.result.get('description', 'ungueltige Anmeldedaten')
+                print(f"[AUTH] AD-Login fehlgeschlagen: {username} – {_desc}", flush=True)
+                return False
+        except ImportError:
+            print("[AUTH] ldap3 nicht installiert – fallback auf PAM/Docker", flush=True)
+        except Exception as e:
+            # Unerwarteter Fehler (z.B. Netzwerkfehler) → Fallback auf lokale Auth
+            err_type = type(e).__name__
+            if "LDAPSocketOpen" in err_type or "LDAPSocket" in err_type:
+                print(f"[AUTH] AD nicht erreichbar ({ad_server}): {e} – fallback auf PAM/Docker", flush=True)
+            else:
+                print(f"[AUTH] AD Fehler ({err_type}): {e} – fallback auf PAM/Docker", flush=True)
+
+    # ─── Lokale Authentifizierung (PAM / Docker) ─────────────────
     if username not in ALLOWED_USERS:
         return False
     if _DOCKER_MODE:
@@ -736,10 +767,27 @@ async def get_settings(user: str = Depends(require_auth)):
 
 @app.post("/api/settings")
 async def save_settings(request: Request, user: str = Depends(require_auth)):
-    """Speichert globale Einstellungen (TTS, Desktop etc.)."""
+    """Speichert globale Einstellungen (TTS, Desktop, AD-Config etc.)."""
     body = await request.json()
     config.save_global_settings(body)
+    # AD-Konfiguration separat persistieren
+    if "ad_server" in body:
+        config.save_setting("ad_server", body["ad_server"])
+    if "ad_domain" in body:
+        config.save_setting("ad_domain", body["ad_domain"])
     return JSONResponse({"success": True})
+
+
+@app.get("/api/auth/ad_status")
+async def get_ad_status():
+    """Gibt den aktuellen AD/LDAP-Konfigurationsstatus zurueck."""
+    ad_server = config.get_setting("ad_server", "")
+    ad_domain = config.get_setting("ad_domain", "")
+    return JSONResponse({
+        "configured": bool(ad_server and ad_domain),
+        "server": ad_server,
+        "domain": ad_domain,
+    })
 
 
 # ─── SSL / Let's Encrypt Endpoints ────────────────────────────────────

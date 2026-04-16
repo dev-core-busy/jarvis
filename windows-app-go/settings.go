@@ -141,9 +141,34 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	hostEntry.SetText(urlToHost(app.cfg.ServerURL))
 	hostEntry.SetPlaceHolder("IP oder Hostname  z.B.  191.100.144.1")
 
+	// Domain-Login-Felder
+	domainUserEntry := widget.NewEntry()
+	domainUserEntry.SetPlaceHolder("Domain\\Benutzername oder user@domain.com")
+	domainPassEntry := widget.NewPasswordEntry()
+	domainPassEntry.SetPlaceHolder("Passwort")
+	domainLoginStatusLbl := widget.NewLabel("")
+	domainLoginBtn := widget.NewButton("Anmelden", nil)
+	domainLoginBtn.Importance = widget.HighImportance
+
 	keyEntry := widget.NewPasswordEntry()
 	keyEntry.SetText(app.cfg.APIKey)
 	keyEntry.SetPlaceHolder("API-Schlüssel")
+
+	domainLoginBtn.OnTapped = func() {
+		domainLoginStatusLbl.SetText("Anmelden…")
+		domainLoginBtn.Disable()
+		go func() {
+			defer domainLoginBtn.Enable()
+			svr := serverToURL(hostEntry.Text)
+			token, err := doLogin(svr, domainUserEntry.Text, domainPassEntry.Text)
+			if err != nil {
+				domainLoginStatusLbl.SetText("✗ " + err.Error())
+				return
+			}
+			keyEntry.SetText(token)
+			domainLoginStatusLbl.SetText("✓ Angemeldet!")
+		}()
+	}
 
 	connStatusLbl := widget.NewLabel("")
 	testBtn := widget.NewButton("Verbindung testen", func() {
@@ -486,6 +511,19 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 			return l
 		}(),
 		vSpacer(8),
+		// — Domain-Anmeldung —
+		sectionHeader("Domain-Anmeldung (optional)"),
+		labelAbove("Benutzername", domainUserEntry),
+		vSpacer(4),
+		labelAbove("Passwort", domainPassEntry),
+		vSpacer(4),
+		container.NewHBox(domainLoginBtn, domainLoginStatusLbl),
+		vSpacer(8),
+		func() fyne.CanvasObject {
+			l := widget.NewLabel("── oder API-Key direkt eingeben ──")
+			l.Importance = widget.LowImportance
+			return l
+		}(),
 		labelAbove("Agent API-Key", keyEntry),
 		vSpacer(2),
 		func() fyne.CanvasObject {

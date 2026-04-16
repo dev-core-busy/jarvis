@@ -558,12 +558,14 @@ class JarvisKnowledgeManager {
         }
 
         // Dateien + Indiziert-Zähler live aktualisieren während Indizierung läuft
+        // Vektor-Zähler bevorzugen (FAISS-Only-Modus), Fallback auf TF-IDF-Zähler
         if (p.running) {
             const statEls = document.querySelectorAll('#kb-stats-container .kb-stat-value');
-            // statEls[0] = Dateien, statEls[1] = Indiziert
-            if (statEls.length >= 2 && p.done > 0) {
-                statEls[0].textContent = p.total || p.done;
-                statEls[1].textContent = p.done;
+            const liveFiles = p.vector_total || p.total || 0;
+            const liveDone  = p.vector_done  || p.done  || 0;
+            if (statEls.length >= 2 && liveFiles > 0) {
+                statEls[0].textContent = liveFiles;
+                statEls[1].textContent = liveDone;
             }
         }
     }

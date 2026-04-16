@@ -245,6 +245,55 @@ def _mask_key(key: str) -> str:
     return "***" + key[-4:]
 
 
+def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
+    """Prüft AD-Whitelist nach erfolgreichem Bind.
+
+    Gibt True zurück wenn:
+    - Weder Benutzerliste noch Gruppe konfiguriert (alle AD-User erlaubt)
+    - Benutzername in ad_allowed_users-Liste
+    - User ist Mitglied der ad_allowed_group
+    """
+    import ldap3
+
+    # Benutzernamen normalisieren (nur den sAMAccountName, ohne Domain-Teil)
+    plain = username.split("@")[0].split("\\")[-1].lower()
+
+    # ── Benutzerliste prüfen ──────────────────────────────────────────
+    allowed_users_raw = config.get_setting("ad_allowed_users", "")
+    if allowed_users_raw.strip():
+        allowed = {u.strip().lower() for u in allowed_users_raw.split(",") if u.strip()}
+        if plain not in allowed:
+            print(f"[AUTH] AD-Whitelist: '{plain}' nicht in erlaubten Benutzern {allowed}", flush=True)
+            return False
+        print(f"[AUTH] AD-Whitelist: '{plain}' in Benutzerliste – Zugriff erlaubt", flush=True)
+        return True
+
+    # ── Gruppen-Filter prüfen ─────────────────────────────────────────
+    allowed_group = config.get_setting("ad_allowed_group", "").strip()
+    if allowed_group:
+        # User-DN über sAMAccountName suchen
+        conn.search(
+            search_base=base_dn,
+            search_filter=f"(sAMAccountName={plain})",
+            attributes=["memberOf", "dn"],
+        )
+        if not conn.entries:
+            print(f"[AUTH] AD-Gruppe: User '{plain}' nicht im Directory gefunden", flush=True)
+            return False
+        member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
+        # Vergleich case-insensitiv
+        group_lower = allowed_group.lower()
+        for g in member_of:
+            if g.lower() == group_lower or g.lower().startswith(f"cn={group_lower.lstrip('cn=').split(',')[0].lower()},"):
+                print(f"[AUTH] AD-Gruppe: '{plain}' ist Mitglied von '{allowed_group}' – Zugriff erlaubt", flush=True)
+                return True
+        print(f"[AUTH] AD-Gruppe: '{plain}' NICHT Mitglied von '{allowed_group}' – Zugriff verweigert", flush=True)
+        return False
+
+    # ── Keine Einschränkung konfiguriert → alle AD-User erlaubt ──────
+    return True
+
+
 def authenticate_linux_user(username: str, password: str) -> bool:
     """Authentifiziert einen Benutzer – via LDAP/AD (wenn konfiguriert), PAM (Linux) oder ENV-Variable (Docker)."""
     # ─── Active Directory / LDAP-Authentifizierung ────────────────────
@@ -257,12 +306,20 @@ def authenticate_linux_user(username: str, password: str) -> bool:
             bind_user = username
             if "@" not in bind_user and "\\" not in bind_user:
                 bind_user = f"{username}@{ad_domain}"
+            # Base-DN aus Domain ableiten: firma.local → DC=firma,DC=local
+            base_dn = ",".join(f"DC={part}" for part in ad_domain.split("."))
             server = ldap3.Server(ad_server, get_info=ldap3.NONE, connect_timeout=5)
             conn = ldap3.Connection(server, user=bind_user, password=password, auto_bind=False)
             if conn.bind():
+                # Credentials korrekt – jetzt Whitelist prüfen
+                allowed = _ad_user_allowed(conn, username, base_dn)
                 conn.unbind()
-                print(f"[AUTH] AD-Login erfolgreich: {username}@{ad_domain}", flush=True)
-                return True
+                if allowed:
+                    print(f"[AUTH] AD-Login erfolgreich: {bind_user}", flush=True)
+                    return True
+                else:
+                    print(f"[AUTH] AD-Login verweigert (Whitelist): {bind_user}", flush=True)
+                    return False
             else:
                 _desc = conn.result.get('description', 'ungueltige Anmeldedaten')
                 print(f"[AUTH] AD-Login fehlgeschlagen: {username} – {_desc}", flush=True)
@@ -775,6 +832,10 @@ async def save_settings(request: Request, user: str = Depends(require_auth)):
         config.save_setting("ad_server", body["ad_server"])
     if "ad_domain" in body:
         config.save_setting("ad_domain", body["ad_domain"])
+    if "ad_allowed_users" in body:
+        config.save_setting("ad_allowed_users", body["ad_allowed_users"])
+    if "ad_allowed_group" in body:
+        config.save_setting("ad_allowed_group", body["ad_allowed_group"])
     return JSONResponse({"success": True})
 
 
@@ -783,10 +844,19 @@ async def get_ad_status():
     """Gibt den aktuellen AD/LDAP-Konfigurationsstatus zurueck."""
     ad_server = config.get_setting("ad_server", "")
     ad_domain = config.get_setting("ad_domain", "")
+    allowed_users = config.get_setting("ad_allowed_users", "")
+    allowed_group = config.get_setting("ad_allowed_group", "")
     return JSONResponse({
         "configured": bool(ad_server and ad_domain),
         "server": ad_server,
         "domain": ad_domain,
+        "allowed_users": allowed_users,
+        "allowed_group": allowed_group,
+        "access_mode": (
+            "group"   if allowed_group else
+            "users"   if allowed_users else
+            "open"    # alle AD-User erlaubt
+        ),
     })
 
 

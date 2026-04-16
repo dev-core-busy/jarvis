@@ -549,7 +549,6 @@ def get_stats() -> dict:
     """Statistiken für die API – schnell, kein Netzwerk-/Modell-Scan."""
     folders = _get_folders()
 
-    # Ordner-Liste ohne Netzwerk-Scan
     folder_list = []
     for f in folders:
         try:
@@ -558,19 +557,16 @@ def get_stats() -> dict:
             rel = str(f)
         folder_list.append({"path": rel, "exists": f.exists()})
 
-    # Nur gecachten TF-IDF-Index laden
-    cache = _load_cache()
-    total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
-    total_size   = sum(d.get("size", 0) for d in cache["files"].values())
-
-    # Vektor-DB: FAISS verfuegbar? + Index-Inhalt lesen (meta.json, kein volles Laden)
-    vector_db_available = False  # FAISS installiert?
-    has_vector = False           # Index hat Inhalt?
+    # Vektor-DB: FAISS verfuegbar? + Index-Inhalt lesen (meta.json)
+    vector_db_available = False
+    has_vector = False
     vector_chunks = 0
     vector_files = 0
     vector_db_name = ""
     vector_db_version = ""
     vector_model = ""
+    faiss_file_paths: set = set()
+    faiss_meta_list: list = []
     try:
         import faiss as _faiss
         vector_db_available = True
@@ -582,17 +578,35 @@ def get_stats() -> dict:
         if _meta_path.exists() and _meta_path.stat().st_size > 10:
             import json as _json
             with open(_meta_path, "r", encoding="utf-8") as _f:
-                _meta = _json.load(_f)
-            vector_chunks = len(_meta)
+                faiss_meta_list = _json.load(_f)
+            vector_chunks = len(faiss_meta_list)
             has_vector = vector_chunks > 0
-            vector_files = len({m["file_path"] for m in _meta}) if has_vector else 0
+            faiss_file_paths = {m["file_path"] for m in faiss_meta_list}
+            vector_files = len(faiss_file_paths)
     except Exception:
         pass
 
+    # Datei-/Chunk-Zähler: FAISS-Meta bevorzugen wenn vorhanden, sonst TF-IDF-Cache
+    if has_vector:
+        total_files = vector_files
+        indexed_files = vector_files
+        total_chunks = vector_chunks
+        # Dateigröße aus Filesystem (FAISS speichert keine Größe)
+        total_size = sum(
+            Path(p).stat().st_size for p in faiss_file_paths
+            if Path(p).exists()
+        )
+    else:
+        cache = _load_cache()
+        total_files = len(cache["files"])
+        indexed_files = len(cache["files"])
+        total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
+        total_size = sum(d.get("size", 0) for d in cache["files"].values())
+
     return {
         "folders": folder_list,
-        "total_files": len(cache["files"]),
-        "indexed_files": len(cache["files"]),
+        "total_files": total_files,
+        "indexed_files": indexed_files,
         "total_chunks": total_chunks,
         "total_size_bytes": total_size,
         **_get_static_stats(),
@@ -610,31 +624,35 @@ def get_stats() -> dict:
 
 
 def force_reindex() -> dict:
-    """Erzwingt vollstaendigen Neuaufbau des Index (TF-IDF + Vektor)."""
+    """Vollstaendiger Neuaufbau:
+    - FAISS verfuegbar → nur Vektor-Index (schneller, besser bei 600+ Dateien)
+    - FAISS nicht verfuegbar → TF-IDF-Index
+    """
     _set_progress(running=True, phase="Starte...", done=0, total=0, vector_done=0, vector_total=0, error="")
     try:
-        with _cache_lock:
-            try:
-                INDEX_CACHE_PATH.unlink(missing_ok=True)
-            except Exception:
-                pass
-
-        # Vektor-Index ebenfalls leeren
-        vs = _get_vector_store()
-        if vs:
-            vs.clear()
-
         folders = _get_folders()
         max_bytes = _get_max_bytes()
-        cache = _rebuild_cache(folders, max_bytes, force=True)
-        _rebuild_vector_index(folders, max_bytes, force=True)
+        vs = _get_vector_store()
 
-        total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
-        vector_info = ""
-        if vs:
-            vector_info = f", Vektor: {vs.chunk_count()} Chunks"
-        _set_progress(running=False, phase="Fertig")
-        return {"indexed_files": len(cache["files"]), "total_chunks": total_chunks, "vector_info": vector_info}
+        if vs is not None:
+            # ── Nur FAISS aufbauen ──────────────────────────────────────────
+            vs.clear()
+            _rebuild_vector_index(folders, max_bytes, force=True)
+            chunk_count = vs.chunk_count()
+            file_count  = vs.file_count()
+            _set_progress(running=False, phase="Fertig")
+            return {"indexed_files": file_count, "total_chunks": chunk_count,
+                    "vector_info": f"Vektor: {chunk_count} Chunks"}
+        else:
+            # ── Nur TF-IDF aufbauen (FAISS nicht installiert) ───────────────
+            with _cache_lock:
+                INDEX_CACHE_PATH.unlink(missing_ok=True)
+            cache = _rebuild_cache(folders, max_bytes, force=True)
+            total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
+            _set_progress(running=False, phase="Fertig")
+            return {"indexed_files": len(cache["files"]), "total_chunks": total_chunks,
+                    "vector_info": ""}
+
     except Exception as e:
         _set_progress(running=False, phase="Fehler", error=str(e))
         raise

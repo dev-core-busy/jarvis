@@ -539,13 +539,13 @@ func (c *ChatWidget) Submit(text string) {
 	}
 }
 
-// buildDateSeparator erstellt eine zentrierte Datumszeile (z.B. "Mittwoch, 9. April 2025 · 14:32")
+// buildDateSeparator erstellt eine zentrierte Datumszeile (z.B. "Mittwoch, 9. April 2025")
 func buildDateSeparator(t time.Time) fyne.CanvasObject {
 	weekdays := []string{"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"}
 	months := []string{"", "Januar", "Februar", "März", "April", "Mai", "Juni",
 		"Juli", "August", "September", "Oktober", "November", "Dezember"}
-	label := fmt.Sprintf("%s, %d. %s %d · %02d:%02d",
-		weekdays[t.Weekday()], t.Day(), months[t.Month()], t.Year(), t.Hour(), t.Minute())
+	label := fmt.Sprintf("%s, %d. %s %d",
+		weekdays[t.Weekday()], t.Day(), months[t.Month()], t.Year())
 	lbl := widget.NewLabel(label)
 	lbl.Importance = widget.LowImportance
 	lbl.Alignment = fyne.TextAlignCenter
@@ -921,8 +921,12 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 		} else {
 			row = container.NewHBox(layout.NewSpacer(), bubble)
 		}
+		timeLabel := canvas.NewText(msg.Time.Format("15:04"), jc.muted)
+		timeLabel.TextSize = 10
 		return container.NewVBox(
 			container.NewGridWrap(fyne.NewSize(1, 8), spacing),
+			container.NewHBox(layout.NewSpacer(), timeLabel),
+			container.NewGridWrap(fyne.NewSize(1, 2), canvas.NewRectangle(colorTransparent)),
 			row,
 		)
 
@@ -940,8 +944,14 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 		} else {
 			leftPart = container.NewHBox(avatar, gap)
 		}
+		// Einrückung passend zur Avatar-Breite (32dp) + Gap (8dp)
+		avatarIndent := container.NewGridWrap(fyne.NewSize(40, 1), canvas.NewRectangle(colorTransparent))
+		timeLabel := canvas.NewText(msg.Time.Format("15:04"), jc.muted)
+		timeLabel.TextSize = 10
 		return container.NewVBox(
 			container.NewGridWrap(fyne.NewSize(1, 8), spacing),
+			container.NewHBox(avatarIndent, timeLabel),
+			container.NewGridWrap(fyne.NewSize(1, 2), canvas.NewRectangle(colorTransparent)),
 			container.NewBorder(nil, nil, leftPart, rightSpacer, bubble),
 		)
 	}

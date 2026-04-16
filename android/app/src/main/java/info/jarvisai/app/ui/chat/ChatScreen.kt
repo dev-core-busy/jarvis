@@ -44,6 +44,9 @@ import info.jarvisai.app.data.model.ChatMessage
 import info.jarvisai.app.data.model.ConnectionState
 import info.jarvisai.app.data.model.MessageRole
 import info.jarvisai.app.data.model.SegmentType
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import android.app.DownloadManager
 import android.content.Intent
 import info.jarvisai.app.update.DownloadPhase
@@ -540,6 +543,15 @@ fun MessageBubble(
         }
 
         Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
+            val timeStr = remember(msg.timestamp) {
+                SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp))
+            }
+            Text(
+                text = timeStr,
+                color = Color.White.copy(alpha = 0.35f),
+                fontSize = 10.sp,
+                modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 2.dp),
+            )
             Surface(
                 shape = RoundedCornerShape(
                     topStart = if (isUser) 18.dp else 4.dp,

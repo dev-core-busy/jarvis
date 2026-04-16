@@ -94,7 +94,7 @@ class ChatRepository @Inject constructor(
             ?.timestamp?.let { dayFmt.format(Date(it)) }
         val today = dayFmt.format(Date(now))
         if (lastMsgDay == null || lastMsgDay != today) {
-            val dateLabel = SimpleDateFormat("EEEE, d. MMMM yyyy · HH:mm", Locale.GERMAN)
+            val dateLabel = SimpleDateFormat("EEEE, d. MMMM yyyy", Locale.GERMAN)
                 .format(Date(now))
             _messages.update { it + ChatMessage(role = MessageRole.DATE_SEPARATOR, text = dateLabel, timestamp = now) }
         }

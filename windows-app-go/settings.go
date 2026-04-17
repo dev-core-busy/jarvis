@@ -146,7 +146,6 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	domainUserEntry.SetText(app.cfg.DomainUsername)
 	domainUserEntry.SetPlaceHolder("Domain\\Benutzername oder user@domain.com")
 	domainPassEntry := widget.NewPasswordEntry()
-	domainPassEntry.SetText(app.cfg.DomainPassword)
 	domainPassEntry.SetPlaceHolder("Passwort")
 	domainLoginStatusLbl := widget.NewLabel("")
 	domainLoginBtn := widget.NewButton("Anmelden", nil)
@@ -630,7 +629,6 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 		app.cfg.ServerURL = serverToURL(hostEntry.Text)
 		app.cfg.APIKey = keyEntry.Text
 		app.cfg.DomainUsername = domainUserEntry.Text
-		app.cfg.DomainPassword = domainPassEntry.Text
 
 		selSp := speakerSel.Selected
 		app.cfg.SpeakerName = selSp

@@ -42,7 +42,7 @@ data class JarvisSettings(
     val serverTtsVoice: String = "de-DE-ConradNeural",
     val androidTtsVoice: String = "de-de-x-deb-network",
     val domainUsername: String = "",
-    val domainPassword: String = "",
+    // domainPassword wird NICHT gespeichert (Sicherheit)
 )
 
 val DEFAULT_QUICK_ACTIONS = listOf(
@@ -72,7 +72,6 @@ class SettingsDataStore @Inject constructor(
     private val KEY_SERVER_TTS_VOICE   = stringPreferencesKey("server_tts_voice")
     private val KEY_ANDROID_TTS_VOICE  = stringPreferencesKey("android_tts_voice")
     private val KEY_DOMAIN_USERNAME    = stringPreferencesKey("domain_username")
-    private val KEY_DOMAIN_PASSWORD    = stringPreferencesKey("domain_password")
 
     val settings: Flow<JarvisSettings> = context.dataStore.data.map { prefs ->
         JarvisSettings(
@@ -95,7 +94,6 @@ class SettingsDataStore @Inject constructor(
             serverTtsVoice      = prefs[KEY_SERVER_TTS_VOICE] ?: "de-DE-ConradNeural",
             androidTtsVoice     = prefs[KEY_ANDROID_TTS_VOICE] ?: "de-de-x-deb-network",
             domainUsername      = prefs[KEY_DOMAIN_USERNAME] ?: "",
-            domainPassword      = prefs[KEY_DOMAIN_PASSWORD] ?: "",
         )
     }
 
@@ -119,7 +117,6 @@ class SettingsDataStore @Inject constructor(
             prefs[KEY_SERVER_TTS_VOICE]   = settings.serverTtsVoice
             prefs[KEY_ANDROID_TTS_VOICE]  = settings.androidTtsVoice
             prefs[KEY_DOMAIN_USERNAME]    = settings.domainUsername
-            prefs[KEY_DOMAIN_PASSWORD]    = settings.domainPassword
         }
     }
 }

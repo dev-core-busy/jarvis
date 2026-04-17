@@ -122,18 +122,10 @@ func main() {
 		func() { // Einstellungen
 			showSettingsWindow(ja.fyneApp, ja, func() { ja.reconnect(); ja.refreshChatWindow() })
 		},
-		func() { // Debug umschalten
-			ja.toggleDebug()
-			// Chat-Fenster öffnen damit Debug-Meldungen sichtbar sind
-			if !ja.cfg.DialogMode {
-				ja.openChatWindow()
-			}
-		},
 		func() { // Beenden
 			ja.shutdown()
 		},
 		func() bool { return ja.cfg.DialogMode },
-		func() bool { return ja.debugMode },
 	)
 
 	// Beim ersten Start sofort Einstellungen zeigen

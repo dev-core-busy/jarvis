@@ -42,9 +42,8 @@ type Config struct {
 	DebugMode     bool `json:"debug_mode"`       // Agent-Denk-Nachrichten anzeigen
 	TTSInTextMode bool `json:"tts_in_text_mode"` // Antworten im Text-Modus vorlesen
 	AvatarVisible bool `json:"avatar_visible"`   // Iron Man Avatar anzeigen
-	// Domain-Anmeldung (LDAP)
+	// Domain-Anmeldung (LDAP) – nur Benutzername wird gespeichert, niemals das Passwort
 	DomainUsername string `json:"domain_username"`
-	DomainPassword string `json:"domain_password"`
 }
 
 // AppVersion wird beim Build via -ldflags="-X main.AppVersion=0.8xx" gesetzt.

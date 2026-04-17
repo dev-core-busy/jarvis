@@ -305,10 +305,8 @@ var (
 	trayCallbacks struct {
 		onMode     func()
 		onSettings func()
-		onDebug    func()
 		onQuit     func()
 		dialogMode func() bool
-		debugMode  func() bool
 	}
 	trayHWnd uintptr
 	// Callback MUSS in Global-Variable gespeichert werden (kein GC!)
@@ -316,13 +314,11 @@ var (
 )
 
 // StartNativeSysTray startet das System-Tray in einem eigenen OS-Thread.
-func StartNativeSysTray(onMode, onSettings, onDebug, onQuit func(), dialogMode, debugMode func() bool) {
+func StartNativeSysTray(onMode, onSettings, onQuit func(), dialogMode func() bool) {
 	trayCallbacks.onMode = onMode
 	trayCallbacks.onSettings = onSettings
-	trayCallbacks.onDebug = onDebug
 	trayCallbacks.onQuit = onQuit
 	trayCallbacks.dialogMode = dialogMode
-	trayCallbacks.debugMode = debugMode
 
 	go func() {
 		runtime.LockOSThread() // KRITISCH: Win32 Message-Queue ist thread-spezifisch
@@ -452,18 +448,12 @@ func showTrayContextMenu(hwnd uintptr) {
 	if trayCallbacks.dialogMode != nil && !trayCallbacks.dialogMode() {
 		modeLabel = "Text  ->  zu Dialogmodus wechseln"
 	}
-	debugLabel := "🔍 Debug Modus aktivieren"
-	if trayCallbacks.debugMode != nil && trayCallbacks.debugMode() {
-		debugLabel = "🔍 Debug Modus deaktivieren"
-	}
 	modeLabelPtr, _ := syscall.UTF16PtrFromString(modeLabel)
 	settingsPtr, _ := syscall.UTF16PtrFromString("⚙  Einstellungen")
-	debugPtr, _ := syscall.UTF16PtrFromString(debugLabel)
 	quitPtr, _ := syscall.UTF16PtrFromString("✕  Beenden")
 
 	pAppendMenuW.Call(hMenu, mfString, menuIDMode, uintptr(unsafe.Pointer(modeLabelPtr)))
 	pAppendMenuW.Call(hMenu, mfString, menuIDSettings, uintptr(unsafe.Pointer(settingsPtr)))
-	pAppendMenuW.Call(hMenu, mfString, menuIDDebug, uintptr(unsafe.Pointer(debugPtr)))
 	pAppendMenuW.Call(hMenu, mfSeparator, 0, 0)
 	pAppendMenuW.Call(hMenu, mfString, menuIDQuit, uintptr(unsafe.Pointer(quitPtr)))
 
@@ -485,10 +475,6 @@ func showTrayContextMenu(hwnd uintptr) {
 		}
 	case menuIDSettings:
 		if cb := trayCallbacks.onSettings; cb != nil {
-			go cb()
-		}
-	case menuIDDebug:
-		if cb := trayCallbacks.onDebug; cb != nil {
 			go cb()
 		}
 	case menuIDQuit:

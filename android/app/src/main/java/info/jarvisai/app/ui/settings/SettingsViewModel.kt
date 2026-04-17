@@ -110,6 +110,14 @@ class SettingsViewModel @Inject constructor(
         _settings.value = _settings.value.copy(androidTtsVoice = voice)
     }
 
+    fun onDomainUsernameChange(username: String) {
+        _settings.value = _settings.value.copy(domainUsername = username)
+    }
+
+    fun onDomainPasswordChange(password: String) {
+        _settings.value = _settings.value.copy(domainPassword = password)
+    }
+
     fun fetchServerVoices() {
         val s = _settings.value
         if (s.serverUrl.isBlank() || s.apiKey.isBlank()) return

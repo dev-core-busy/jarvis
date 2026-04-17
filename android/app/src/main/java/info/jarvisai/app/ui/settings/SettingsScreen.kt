@@ -332,8 +332,7 @@ fun SettingsScreen(
     var apiKeyVisible by remember { mutableStateOf(false) }
     var showServerVoicePicker by remember { mutableStateOf(false) }
     var showAndroidVoicePicker by remember { mutableStateOf(false) }
-    var domainUsername by remember { mutableStateOf("") }
-    var domainPassword by remember { mutableStateOf("") }
+
 
     LaunchedEffect(showServerVoicePicker) {
         if (showServerVoicePicker) viewModel.fetchServerVoices()
@@ -415,16 +414,16 @@ fun SettingsScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OutlinedTextField(
-                    value = domainUsername,
-                    onValueChange = { domainUsername = it },
+                    value = settings.domainUsername,
+                    onValueChange = viewModel::onDomainUsernameChange,
                     label = { Text("Benutzername") },
                     placeholder = { Text("user@domain.com oder DOMAIN\\user") },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
                 OutlinedTextField(
-                    value = domainPassword,
-                    onValueChange = { domainPassword = it },
+                    value = settings.domainPassword,
+                    onValueChange = viewModel::onDomainPasswordChange,
                     label = { Text("Passwort") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -433,6 +432,12 @@ fun SettingsScreen(
                 )
             }
 
+            Text(
+                "Format: DOMAIN\\Benutzername  oder  benutzername@domain.com",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            )
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -440,7 +445,7 @@ fun SettingsScreen(
             ) {
                 Button(
                     onClick = {
-                        viewModel.loginWithCredentials(settings.serverUrl, domainUsername, domainPassword)
+                        viewModel.loginWithCredentials(settings.serverUrl, settings.domainUsername, settings.domainPassword)
                     },
                     enabled = loginState != "loading",
                 ) {
@@ -697,14 +702,25 @@ fun SettingsScreen(
 
             // ── Speichern ─────────────────────────────────────────────────
 
+            val canSave = settings.serverUrl.isNotBlank() &&
+                (settings.apiKey.isNotBlank() || loginState == "ok")
             Button(
                 onClick = viewModel::save,
+                enabled = canSave,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (saved) JarvisGreen else MaterialTheme.colorScheme.primary,
                 ),
             ) {
                 Text(if (saved) "✓ Gespeichert" else stringResource(R.string.settings_save))
+            }
+            if (!canSave) {
+                Text(
+                    "Bitte API-Key eingeben oder via Domain-Anmeldung anmelden",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
 
             // ── Info & Version ────────────────────────────────────────────

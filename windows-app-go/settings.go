@@ -143,12 +143,15 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 
 	// Domain-Login-Felder
 	domainUserEntry := widget.NewEntry()
+	domainUserEntry.SetText(app.cfg.DomainUsername)
 	domainUserEntry.SetPlaceHolder("Domain\\Benutzername oder user@domain.com")
 	domainPassEntry := widget.NewPasswordEntry()
+	domainPassEntry.SetText(app.cfg.DomainPassword)
 	domainPassEntry.SetPlaceHolder("Passwort")
 	domainLoginStatusLbl := widget.NewLabel("")
 	domainLoginBtn := widget.NewButton("Anmelden", nil)
 	domainLoginBtn.Importance = widget.HighImportance
+	domainLoginOk := false
 
 	keyEntry := widget.NewPasswordEntry()
 	keyEntry.SetText(app.cfg.APIKey)
@@ -163,10 +166,12 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 			token, err := doLogin(svr, domainUserEntry.Text, domainPassEntry.Text)
 			if err != nil {
 				domainLoginStatusLbl.SetText("✗ " + err.Error())
+				domainLoginOk = false
 				return
 			}
 			keyEntry.SetText(token)
 			domainLoginStatusLbl.SetText("✓ Angemeldet!")
+			domainLoginOk = true
 		}()
 	}
 
@@ -514,6 +519,11 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 		// — Domain-Anmeldung —
 		sectionHeader("Domain-Anmeldung (optional)"),
 		labelAbove("Benutzername", domainUserEntry),
+		func() fyne.CanvasObject {
+			l := widget.NewLabel("Format: DOMAIN\\Benutzername  oder  benutzername@domain.com")
+			l.Importance = widget.LowImportance
+			return l
+		}(),
 		vSpacer(4),
 		labelAbove("Passwort", domainPassEntry),
 		vSpacer(4),
@@ -609,12 +619,18 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 
 	// Speichern-Button volle Breite (Android-Stil)
 	saveBtn := widget.NewButton("Speichern", func() {
-		if hostEntry.Text == "" || keyEntry.Text == "" {
-			dialog.ShowError(fmt.Errorf("Bitte Server-URL und Agent API-Key eingeben"), win)
+		if hostEntry.Text == "" {
+			dialog.ShowError(fmt.Errorf("Bitte Server-URL eingeben"), win)
+			return
+		}
+		if keyEntry.Text == "" && !domainLoginOk {
+			dialog.ShowError(fmt.Errorf("Bitte entweder API-Key eingeben oder zuerst via Domain-Anmeldung anmelden"), win)
 			return
 		}
 		app.cfg.ServerURL = serverToURL(hostEntry.Text)
 		app.cfg.APIKey = keyEntry.Text
+		app.cfg.DomainUsername = domainUserEntry.Text
+		app.cfg.DomainPassword = domainPassEntry.Text
 
 		selSp := speakerSel.Selected
 		app.cfg.SpeakerName = selSp

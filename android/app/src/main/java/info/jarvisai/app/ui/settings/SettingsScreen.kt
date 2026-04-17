@@ -332,6 +332,7 @@ fun SettingsScreen(
     var apiKeyVisible by remember { mutableStateOf(false) }
     var showServerVoicePicker by remember { mutableStateOf(false) }
     var showAndroidVoicePicker by remember { mutableStateOf(false) }
+    var domainPassword by remember { mutableStateOf("") }
 
 
     LaunchedEffect(showServerVoicePicker) {
@@ -422,8 +423,8 @@ fun SettingsScreen(
                     modifier = Modifier.weight(1f),
                 )
                 OutlinedTextField(
-                    value = settings.domainPassword,
-                    onValueChange = viewModel::onDomainPasswordChange,
+                    value = domainPassword,
+                    onValueChange = { domainPassword = it },
                     label = { Text("Passwort") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -445,7 +446,7 @@ fun SettingsScreen(
             ) {
                 Button(
                     onClick = {
-                        viewModel.loginWithCredentials(settings.serverUrl, settings.domainUsername, settings.domainPassword)
+                        viewModel.loginWithCredentials(settings.serverUrl, settings.domainUsername, domainPassword)
                     },
                     enabled = loginState != "loading",
                 ) {

@@ -459,7 +459,7 @@ fun SettingsScreen(
                     onClick = {
                         viewModel.loginWithCredentials(settings.serverUrl, settings.domainUsername, domainPassword)
                     },
-                    enabled = loginState != "loading",
+                    enabled = loginState != "loading" && domainPassword.isNotBlank(),
                 ) {
                     if (loginState == "loading") {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)

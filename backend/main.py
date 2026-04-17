@@ -295,8 +295,28 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
 
 
 def authenticate_linux_user(username: str, password: str) -> bool:
-    """Authentifiziert einen Benutzer – via LDAP/AD (wenn konfiguriert), PAM (Linux) oder ENV-Variable (Docker)."""
-    # ─── Active Directory / LDAP-Authentifizierung ────────────────────
+    """Authentifiziert einen Benutzer – erst PAM/lokal, dann AD/LDAP (wenn konfiguriert)."""
+
+    # ─── 1. Lokale Authentifizierung (PAM / Docker) – immer zuerst ───
+    if username in ALLOWED_USERS:
+        local_ok = False
+        if _DOCKER_MODE:
+            state = _load_auth_state()
+            docker_pw = state.get("docker_password", {}).get(username)
+            if docker_pw is not None:
+                local_ok = password == docker_pw
+            else:
+                local_ok = password == _JARVIS_PASSWORD
+        else:
+            local_ok = _pam.authenticate(username, password, service="login")
+        if local_ok:
+            print(f"[AUTH] Lokaler Login erfolgreich: {username}", flush=True)
+            return True
+        # Lokaler User bekannt, aber Passwort falsch → kein AD-Versuch
+        print(f"[AUTH] Lokaler Login fehlgeschlagen: {username}", flush=True)
+        return False
+
+    # ─── 2. Active Directory / LDAP (nur für nicht-lokale User) ──────
     ad_server = config.get_setting("ad_server", "")
     ad_domain = config.get_setting("ad_domain", "")
     if ad_server and ad_domain:
@@ -322,22 +342,20 @@ def authenticate_linux_user(username: str, password: str) -> bool:
                     return False
             else:
                 _desc = conn.result.get('description', 'ungueltige Anmeldedaten')
-                print(f"[AUTH] AD-Login fehlgeschlagen: {username} – {_desc} – versuche lokale Auth", flush=True)
-                # Kein AD-User oder falsches Passwort → Fallback auf lokale Auth
-                # (ermöglicht lokalen 'jarvis'-User auch wenn AD konfiguriert ist)
+                print(f"[AUTH] AD-Login fehlgeschlagen: {username} – {_desc}", flush=True)
+                return False
         except ImportError:
-            print("[AUTH] ldap3 nicht installiert – fallback auf PAM/Docker", flush=True)
+            print("[AUTH] ldap3 nicht installiert", flush=True)
         except Exception as e:
-            # Unerwarteter Fehler (z.B. Netzwerkfehler) → Fallback auf lokale Auth
             err_type = type(e).__name__
             if "LDAPSocketOpen" in err_type or "LDAPSocket" in err_type:
-                print(f"[AUTH] AD nicht erreichbar ({ad_server}): {e} – fallback auf PAM/Docker", flush=True)
+                print(f"[AUTH] AD nicht erreichbar ({ad_server}): {e}", flush=True)
             else:
-                print(f"[AUTH] AD Fehler ({err_type}): {e} – fallback auf PAM/Docker", flush=True)
+                print(f"[AUTH] AD Fehler ({err_type}): {e}", flush=True)
 
-    # ─── Lokale Authentifizierung (PAM / Docker) ─────────────────
-    if username not in ALLOWED_USERS:
-        return False
+    return False
+
+    # ─── (toter Code – nur zur Referenz, nie erreicht) ───────────────
     if _DOCKER_MODE:
         # Im Docker-Modus: gespeichertes Passwort aus auth_state hat Vorrang vor ENV-Variable
         state = _load_auth_state()

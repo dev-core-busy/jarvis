@@ -322,8 +322,9 @@ def authenticate_linux_user(username: str, password: str) -> bool:
                     return False
             else:
                 _desc = conn.result.get('description', 'ungueltige Anmeldedaten')
-                print(f"[AUTH] AD-Login fehlgeschlagen: {username} – {_desc}", flush=True)
-                return False
+                print(f"[AUTH] AD-Login fehlgeschlagen: {username} – {_desc} – versuche lokale Auth", flush=True)
+                # Kein AD-User oder falsches Passwort → Fallback auf lokale Auth
+                # (ermöglicht lokalen 'jarvis'-User auch wenn AD konfiguriert ist)
         except ImportError:
             print("[AUTH] ldap3 nicht installiert – fallback auf PAM/Docker", flush=True)
         except Exception as e:

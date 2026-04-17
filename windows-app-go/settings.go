@@ -147,10 +147,27 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	domainUserEntry.SetPlaceHolder("Domain\\Benutzername oder user@domain.com")
 	domainPassEntry := widget.NewPasswordEntry()
 	domainPassEntry.SetPlaceHolder("Passwort")
+	domainPassVisible := false
+	domainPassToggleBtn := widget.NewButton("👁", func() {})
+	domainPassToggleBtn.Importance = widget.LowImportance
+	domainPassToggleBtn.OnTapped = func() {
+		domainPassVisible = !domainPassVisible
+		if domainPassVisible {
+			domainPassEntry.Password = false
+			domainPassToggleBtn.SetText("🙈")
+		} else {
+			domainPassEntry.Password = true
+			domainPassToggleBtn.SetText("👁")
+		}
+		domainPassEntry.Refresh()
+	}
 	domainLoginStatusLbl := widget.NewLabel("")
+	if app.cfg.DomainUsername != "" && app.cfg.APIKey != "" {
+		domainLoginStatusLbl.SetText("✓ Aktive Domain-Sitzung")
+	}
 	domainLoginBtn := widget.NewButton("Anmelden", nil)
 	domainLoginBtn.Importance = widget.HighImportance
-	domainLoginOk := false
+	domainLoginOk := app.cfg.DomainUsername != "" && app.cfg.APIKey != ""
 
 	keyEntry := widget.NewPasswordEntry()
 	keyEntry.SetText(app.cfg.APIKey)
@@ -524,7 +541,11 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 			return l
 		}(),
 		vSpacer(4),
-		labelAbove("Passwort", domainPassEntry),
+		func() fyne.CanvasObject {
+			lbl := widget.NewLabel("Passwort")
+			row := container.NewBorder(nil, nil, nil, domainPassToggleBtn, domainPassEntry)
+			return tightVBox(lbl, row)
+		}(),
 		vSpacer(4),
 		container.NewHBox(domainLoginBtn, domainLoginStatusLbl),
 		vSpacer(8),

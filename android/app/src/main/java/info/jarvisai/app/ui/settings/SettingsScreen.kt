@@ -330,6 +330,7 @@ fun SettingsScreen(
     val loadingVoices by viewModel.loadingVoices.collectAsState()
     val loginState by viewModel.loginState.collectAsState()
     var apiKeyVisible by remember { mutableStateOf(false) }
+    var domainPasswordVisible by remember { mutableStateOf(false) }
     var showServerVoicePicker by remember { mutableStateOf(false) }
     var showAndroidVoicePicker by remember { mutableStateOf(false) }
     var domainPassword by remember { mutableStateOf("") }
@@ -426,8 +427,18 @@ fun SettingsScreen(
                     value = domainPassword,
                     onValueChange = { domainPassword = it },
                     label = { Text("Passwort") },
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (domainPasswordVisible) VisualTransformation.None
+                                           else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { domainPasswordVisible = !domainPasswordVisible }) {
+                            Icon(
+                                imageVector = if (domainPasswordVisible) Icons.Filled.VisibilityOff
+                                              else Icons.Filled.Visibility,
+                                contentDescription = if (domainPasswordVisible) "Verbergen" else "Anzeigen",
+                            )
+                        }
+                    },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
@@ -456,16 +467,20 @@ fun SettingsScreen(
                         Text("Anmelden")
                     }
                 }
-                if (loginState == "ok") {
-                    Text(
+                when {
+                    loginState == "ok" -> Text(
                         "✓ Angemeldet!",
                         color = JarvisGreen,
                         style = MaterialTheme.typography.bodySmall,
                     )
-                } else if (loginState.startsWith("error:")) {
-                    Text(
+                    loginState.startsWith("error:") -> Text(
                         loginState.removePrefix("error:").trim(),
                         color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    settings.domainUsername.isNotBlank() && settings.apiKey.isNotBlank() -> Text(
+                        "✓ Aktive Domain-Sitzung",
+                        color = JarvisGreen,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }

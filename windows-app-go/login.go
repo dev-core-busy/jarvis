@@ -6,14 +6,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
 // doLogin sendet POST /api/login und gibt den Token zurueck.
 func doLogin(serverURL, username, password string) (string, error) {
-	// serverURL ist wss:// oder https:// – fuer HTTP-Requests immer https:// verwenden
+	// Nur Schema + Host extrahieren (Pfad wie /ws weglassen)
 	httpURL := toHTTPS(serverURL)
+	if parsed, err := url.Parse(httpURL); err == nil {
+		httpURL = parsed.Scheme + "://" + parsed.Host
+	}
 	loginURL := strings.TrimRight(httpURL, "/") + "/api/login"
 
 	body, _ := json.Marshal(map[string]string{

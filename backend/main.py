@@ -2724,8 +2724,10 @@ async def vision_download_stream_tools(request: Request):
 @app.post("/api/tts")
 async def tts_synthesize(request: Request):
     """Text-to-Speech via edge-tts. Gibt MP3-Audio zurück."""
-    if not (verify_token(request.headers.get("Authorization", "").replace("Bearer ", ""))
-            or _verify_agent_api_key(request)):
+    # Auth: Bearer-Token, X-API-Key als Login-Token oder Agent-API-Key
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    xkey = request.headers.get("X-API-Key", "")
+    if not (verify_token(token) or verify_token(xkey) or _verify_agent_api_key(request)):
         return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
 
     body = await request.json()
@@ -2773,8 +2775,10 @@ async def tts_synthesize(request: Request):
 @app.get("/api/tts/voices")
 async def tts_voices(request: Request):
     """Verfügbare edge-tts Stimmen (gefiltert nach Sprache, Standard: de-)."""
-    if not (verify_token(request.headers.get("Authorization", "").replace("Bearer ", ""))
-            or _verify_agent_api_key(request)):
+    # Auth: Bearer-Token, X-API-Key als Login-Token oder Agent-API-Key
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    xkey = request.headers.get("X-API-Key", "")
+    if not (verify_token(token) or verify_token(xkey) or _verify_agent_api_key(request)):
         return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
 
     locale = request.query_params.get("locale", "de-")

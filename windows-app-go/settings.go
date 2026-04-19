@@ -52,9 +52,6 @@ func tightVBox(objects ...fyne.CanvasObject) *fyne.Container {
 
 // vSpacer erzeugt einen unsichtbaren vertikalen Abstandshalter (in Pixeln).
 func vSpacer(h float32) fyne.CanvasObject {
-	r := widget.NewSeparator()
-	_ = r
-	// Leeres MinSize-Objekt via GridWrap
 	return container.NewGridWrap(fyne.NewSize(1, h))
 }
 

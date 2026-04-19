@@ -132,7 +132,8 @@ class VisionEngine:
     def __init__(self, data_dir: str = "data/vision"):
         self.data_dir = Path(data_dir)
         self.faces_dir = self.data_dir / "faces"
-        self.encodings_path = self.data_dir / "encodings.pkl"
+        self.encodings_path = self.data_dir / "encodings.json"
+        self._legacy_pkl_path = self.data_dir / "encodings.pkl"
         self.config_path = self.data_dir / "config.json"
         self.events_path = self.data_dir / "events.json"
 
@@ -211,11 +212,31 @@ class VisionEngine:
     # ── Encodings ─────────────────────────────────────────────────────────
 
     def _load_encodings(self):
-        """Lade vorberechnete Gesichts-Encodings aus Pickle."""
+        """Lade vorberechnete Gesichts-Encodings aus JSON (sicher, kein Pickle)."""
+        import numpy as np
+
+        # Migration: altes Pickle-Format einmalig konvertieren
+        if not self.encodings_path.exists() and self._legacy_pkl_path.exists():
+            try:
+                with open(self._legacy_pkl_path, "rb") as f:
+                    self._known_encodings = pickle.load(f)
+                log.info("Migration: Pickle → JSON (%d Profile)", len(self._known_encodings))
+                self._save_encodings()
+                self._legacy_pkl_path.rename(self._legacy_pkl_path.with_suffix(".pkl.bak"))
+            except Exception as e:
+                log.warning("Pickle-Migration fehlgeschlagen: %s", e)
+                self._known_encodings = {}
+            return
+
         if self.encodings_path.exists():
             try:
-                with open(self.encodings_path, "rb") as f:
-                    self._known_encodings = pickle.load(f)
+                with open(self.encodings_path, "r") as f:
+                    data = json.load(f)
+                # JSON-Listen zurück in numpy-Arrays konvertieren
+                self._known_encodings = {
+                    name: [np.array(enc) for enc in encs]
+                    for name, encs in data.items()
+                }
                 log.info("Encodings geladen: %d Profile", len(self._known_encodings))
             except Exception as e:
                 log.warning("Encodings laden fehlgeschlagen: %s", e)
@@ -224,10 +245,15 @@ class VisionEngine:
             self._known_encodings = {}
 
     def _save_encodings(self):
-        """Speichere Gesichts-Encodings als Pickle."""
+        """Speichere Gesichts-Encodings als JSON (sicher, kein Pickle)."""
         try:
-            with open(self.encodings_path, "wb") as f:
-                pickle.dump(self._known_encodings, f)
+            # numpy-Arrays in Listen konvertieren für JSON-Serialisierung
+            data = {
+                name: [enc.tolist() if hasattr(enc, 'tolist') else list(enc) for enc in encs]
+                for name, encs in self._known_encodings.items()
+            }
+            with open(self.encodings_path, "w") as f:
+                json.dump(data, f)
         except Exception as e:
             log.error("Encodings speichern fehlgeschlagen: %s", e)
 

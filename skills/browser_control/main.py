@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import shlex
 import shutil
 
 from backend.tools.base import BaseTool
@@ -16,7 +17,7 @@ class BrowserControlTool(BaseTool):
 
     # Browser-Erkennung: chromium → google-chrome → firefox
     BROWSER_CMD = next(
-        (f"{b} --no-sandbox --remote-debugging-port=9222 --user-data-dir=/tmp/jarvis-chrome"
+        (f"{b} --no-sandbox --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 --user-data-dir=/tmp/jarvis-chrome"
          for b in ("chromium", "google-chrome", "google-chrome-stable")
          if shutil.which(b)),
         "firefox-esr --new-instance"
@@ -102,7 +103,7 @@ class BrowserControlTool(BaseTool):
             if action == "open":
                 cmd = self.BROWSER_CMD
                 if url:
-                    cmd += f" '{url}'"
+                    cmd += f" {shlex.quote(url)}"
                 proc = await asyncio.create_subprocess_shell(
                     f"setsid {cmd} &",
                     stdout=asyncio.subprocess.PIPE,
@@ -124,7 +125,7 @@ class BrowserControlTool(BaseTool):
                 await asyncio.sleep(0.2)
                 await self._run("xdotool key --clearmodifiers ctrl+a")
                 await asyncio.sleep(0.1)
-                await self._run(f"xdotool type --clearmodifiers --delay 10 -- '{url}'")
+                await self._run(f"xdotool type --clearmodifiers --delay 10 -- {shlex.quote(url)}")
                 await asyncio.sleep(0.1)
                 await self._run("xdotool key --clearmodifiers Return")
                 return f"Navigation zu: {url}"
@@ -146,7 +147,7 @@ class BrowserControlTool(BaseTool):
                 await self._run("xdotool key --clearmodifiers ctrl+t")
                 if url:
                     await asyncio.sleep(0.3)
-                    await self._run(f"xdotool type --clearmodifiers --delay 10 -- '{url}'")
+                    await self._run(f"xdotool type --clearmodifiers --delay 10 -- {shlex.quote(url)}")
                     await asyncio.sleep(0.1)
                     await self._run("xdotool key --clearmodifiers Return")
                     return f"Neuer Tab geöffnet mit URL: {url}"
@@ -166,7 +167,7 @@ class BrowserControlTool(BaseTool):
 
             elif action == "switch_tab":
                 await self._focus_browser()
-                return await self._run(f"xdotool key --clearmodifiers ctrl+{tab_number}")
+                return await self._run(f"xdotool key --clearmodifiers ctrl+{int(tab_number)}")
 
             elif action == "zoom_in":
                 await self._focus_browser()
@@ -186,7 +187,7 @@ class BrowserControlTool(BaseTool):
                 await self._focus_browser()
                 await self._run("xdotool key --clearmodifiers ctrl+f")
                 await asyncio.sleep(0.3)
-                await self._run(f"xdotool type --clearmodifiers --delay 10 -- '{text}'")
+                await self._run(f"xdotool type --clearmodifiers --delay 10 -- {shlex.quote(text)}")
                 return f"Suche nach: {text}"
 
             elif action == "scroll_page":

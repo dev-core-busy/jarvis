@@ -24,6 +24,11 @@ services/whatsapp-bridge/.wwebjs_auth/
 data/logs/
 data/memory.json
 data/knowledge_index.json
+data/.secret_key
+data/auth_state.json
+data/vision/encodings.json
+data/vision/encodings.pkl
+data/vision/encodings.pkl.bak
 *.log
 
 # ─── Python ─────────────────────────────────────────────────────────────────

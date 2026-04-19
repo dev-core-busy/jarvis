@@ -66,6 +66,7 @@ class Config:
             SECRET_KEY = _secrets.token_hex(32)
             _secret_file.parent.mkdir(parents=True, exist_ok=True)
             _secret_file.write_text(SECRET_KEY)
+            os.chmod(str(_secret_file), 0o600)
             print(f"[SECURITY] SECRET_KEY auto-generiert und in {_secret_file} gespeichert", flush=True)
     AGENT_API_KEY: str = os.getenv("AGENT_API_KEY", "")  # API-Key für externen Agent-Task-Zugriff
     SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0")

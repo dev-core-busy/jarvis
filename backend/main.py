@@ -28,12 +28,32 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, U
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from fastapi.middleware.cors import CORSMiddleware
+
 from backend.config import config
 from backend.security import get_certificate_path
 
 # ─── App erstellen ────────────────────────────────────────────────────
 JARVIS_VERSION = "0.8.0"
 app = FastAPI(title="Jarvis", version=JARVIS_VERSION)
+
+# ─── CORS: Nur Same-Origin und explizit konfigurierte Domains erlauben ──
+_cors_origins = [
+    f"https://{os.getenv('SERVER_IP', '127.0.0.1')}",
+    f"https://{os.getenv('SERVER_IP', '127.0.0.1')}:{config.SERVER_PORT}",
+]
+# Zusätzliche CORS-Origins aus Settings laden (z.B. Tailscale-Hostname)
+_extra_origins = config.get_setting("cors_origins", "")
+if _extra_origins:
+    _cors_origins.extend(o.strip() for o in _extra_origins.split(",") if o.strip())
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Statische Dateien servieren (mit Cache-Busting Header)
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
@@ -66,6 +86,12 @@ async def vnc_websocket_proxy(websocket: WebSocket):
     noVNC sendet Daten über wss://host:443/ws/vnc (gleicher Port/Cert wie UI).
     So entfällt das Problem mit dem separaten SSL-Zertifikat auf Port 6080.
     """
+    # Auth: Token als Query-Parameter prüfen (WebSocket kann keine Header setzen)
+    token = websocket.query_params.get("token", "")
+    if not verify_token(token):
+        await websocket.close(code=4001, reason="Nicht authentifiziert")
+        return
+
     # Subprotocol nur setzen wenn Client es anbietet (noVNC kann "binary" senden oder nicht)
     requested = websocket.headers.get("sec-websocket-protocol", "")
     subproto = "binary" if "binary" in requested else None
@@ -122,24 +148,12 @@ async def vnc_websocket_proxy(websocket: WebSocket):
 active_sessions: dict[str, WebSocket] = {}
 agent_instance = None  # wird lazy initialisiert (Kompatibilitaet)
 agent_manager = None  # AgentManager fuer Multi-Agent Support
-_whisper_model = None  # lazy-geladen fuer Wake-Word-Erkennung
-
 # Client-Typ pro WebSocket-Verbindung
 # Schlüssel: id(ws), Wert: "browser" | "windows_desktop" | "android"
 _ws_client_types: dict[int, str] = {}
 
 def _get_client_type(ws) -> str:
     return _ws_client_types.get(id(ws), "browser")
-
-
-def _get_whisper_model():
-    """Gibt das Whisper-Modell zurück (lädt es beim ersten Aufruf)."""
-    global _whisper_model
-    if _whisper_model is None:
-        from faster_whisper import WhisperModel
-        _whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
-        print("[whisper] Modell geladen (small, cpu, int8)", flush=True)
-    return _whisper_model
 
 # Erlaubte Linux-Benutzer für Web-Login
 ALLOWED_USERS = {"jarvis"}
@@ -271,10 +285,13 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
     # ── Gruppen-Filter prüfen ─────────────────────────────────────────
     allowed_group = config.get_setting("ad_allowed_group", "").strip()
     if allowed_group:
+        # LDAP-Sonderzeichen escapen (verhindert LDAP-Injection)
+        safe_plain = plain.replace("\\", "\\5c").replace("*", "\\2a").replace(
+            "(", "\\28").replace(")", "\\29").replace("\x00", "\\00")
         # User-DN über sAMAccountName suchen
         conn.search(
             search_base=base_dn,
-            search_filter=f"(sAMAccountName={plain})",
+            search_filter=f"(sAMAccountName={safe_plain})",
             attributes=["memberOf", "dn"],
         )
         if not conn.entries:
@@ -304,7 +321,9 @@ def authenticate_linux_user(username: str, password: str) -> bool:
             state = _load_auth_state()
             docker_pw = state.get("docker_password", {}).get(username)
             if docker_pw is not None:
-                local_ok = password == docker_pw
+                # Gespeichertes Passwort ist SHA-256-Hash
+                pw_hash = hashlib.sha256(password.encode()).hexdigest()
+                local_ok = hmac.compare_digest(pw_hash, docker_pw)
             else:
                 local_ok = password == _JARVIS_PASSWORD
         else:
@@ -328,8 +347,17 @@ def authenticate_linux_user(username: str, password: str) -> bool:
                 bind_user = f"{username}@{ad_domain}"
             # Base-DN aus Domain ableiten: firma.local → DC=firma,DC=local
             base_dn = ",".join(f"DC={part}" for part in ad_domain.split("."))
-            server = ldap3.Server(ad_server, get_info=ldap3.NONE, connect_timeout=5)
+            # TLS verwenden wenn ldaps:// oder StartTLS wenn ldap://
+            use_ssl = ad_server.lower().startswith("ldaps://")
+            server = ldap3.Server(ad_server, use_ssl=use_ssl, get_info=ldap3.NONE, connect_timeout=5)
             conn = ldap3.Connection(server, user=bind_user, password=password, auto_bind=False)
+            # StartTLS bei unverschlüsselten Verbindungen versuchen
+            if not use_ssl:
+                try:
+                    conn.open()
+                    conn.start_tls()
+                except Exception:
+                    pass  # Fallback auf Plain wenn DC kein StartTLS unterstützt
             if conn.bind():
                 # Credentials korrekt – jetzt Whitelist prüfen
                 allowed = _ad_user_allowed(conn, username, base_dn)
@@ -354,16 +382,6 @@ def authenticate_linux_user(username: str, password: str) -> bool:
                 print(f"[AUTH] AD Fehler ({err_type}): {e}", flush=True)
 
     return False
-
-    # ─── (toter Code – nur zur Referenz, nie erreicht) ───────────────
-    if _DOCKER_MODE:
-        # Im Docker-Modus: gespeichertes Passwort aus auth_state hat Vorrang vor ENV-Variable
-        state = _load_auth_state()
-        docker_pw = state.get("docker_password", {}).get(username)
-        if docker_pw is not None:
-            return password == docker_pw
-        return password == _JARVIS_PASSWORD
-    return _pam.authenticate(username, password, service="login")
 
 
 # ─── Auth-State (Kennwort-Änderung / 2FA-Vorbereitung) ───────────────
@@ -655,11 +673,11 @@ async def change_password(request: Request, username: str = Depends(require_auth
 
     # Kennwort setzen
     if _DOCKER_MODE:
-        # Im Docker-Modus: Passwort in data/auth_state.json speichern (persistentes Volume)
+        # Im Docker-Modus: Passwort als SHA-256-Hash in data/auth_state.json speichern
         state = _load_auth_state()
         if "docker_password" not in state:
             state["docker_password"] = {}
-        state["docker_password"][username] = new_password
+        state["docker_password"][username] = hashlib.sha256(new_password.encode()).hexdigest()
         _save_auth_state(state)
         _set_user_auth_state(username, {"must_change_password": False})
         print(f"[AUTH] Docker-Kennwort für '{username}' erfolgreich geändert.", flush=True)
@@ -880,7 +898,7 @@ async def test_ad_connection(request: Request, _username: str = Depends(require_
 
 
 @app.get("/api/auth/ad_status")
-async def get_ad_status():
+async def get_ad_status(user: str = Depends(require_auth)):
     """Gibt den aktuellen AD/LDAP-Konfigurationsstatus zurueck."""
     ad_server = config.get_setting("ad_server", "")
     ad_domain = config.get_setting("ad_domain", "")
@@ -902,7 +920,7 @@ async def get_ad_status():
 
 # ─── SSL / Let's Encrypt Endpoints ────────────────────────────────────
 @app.get("/api/settings/ssl")
-async def get_ssl_info():
+async def get_ssl_info(user: str = Depends(require_auth)):
     """Gibt aktuelle SSL-Zertifikat-Infos zurück: Domain, Ablaufdatum, Is-Let's-Encrypt."""
     import ssl as _ssl
     import datetime
@@ -965,7 +983,7 @@ async def get_ssl_info():
 
 
 @app.post("/api/settings/letsencrypt")
-async def request_letsencrypt(request: Request):
+async def request_letsencrypt(request: Request, user: str = Depends(require_auth)):
     """Beantragt ein Let's Encrypt Zertifikat via certbot (standalone).
     Streamt den Fortschritt als Textzeilen zurück."""
     body = await request.json()
@@ -1078,7 +1096,7 @@ async def request_letsencrypt(request: Request):
 
 
 @app.post("/api/settings/ssl/custom")
-async def upload_custom_cert(request: Request):
+async def upload_custom_cert(request: Request, user: str = Depends(require_auth)):
     """Lädt ein eigenes SSL-Zertifikat hoch (PEM-Format)."""
     body = await request.json()
     cert_pem = body.get("cert", "").strip()
@@ -2019,10 +2037,13 @@ async def list_instructions(user: str = Depends(require_auth)):
 @app.get("/api/instructions/{name}")
 async def get_instruction(name: str, user: str = Depends(require_auth)):
     """Liest eine einzelne Instruction-Datei."""
-    filepath = INSTRUCTIONS_DIR / f"{name}.md"
+    safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+    if not safe_name:
+        return JSONResponse({"error": "Ungültiger Name"}, status_code=400)
+    filepath = INSTRUCTIONS_DIR / f"{safe_name}.md"
     if not filepath.exists():
         return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
-    return JSONResponse({"name": name, "filename": filepath.name,
+    return JSONResponse({"name": safe_name, "filename": filepath.name,
                          "content": filepath.read_text(encoding="utf-8")})
 
 
@@ -2046,7 +2067,10 @@ async def save_instruction(name: str, request: Request, user: str = Depends(requ
 @app.delete("/api/instructions/{name}")
 async def delete_instruction(name: str, user: str = Depends(require_auth)):
     """Loescht eine Instruction-Datei."""
-    filepath = INSTRUCTIONS_DIR / f"{name}.md"
+    safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+    if not safe_name:
+        return JSONResponse({"error": "Ungültiger Name"}, status_code=400)
+    filepath = INSTRUCTIONS_DIR / f"{safe_name}.md"
     if filepath.exists():
         filepath.unlink()
         return JSONResponse({"ok": True})
@@ -2951,7 +2975,13 @@ async def wa_incoming(request: Request):
     - type=text: Textnachricht → direkt als Agent-Task
     - type=voice: Sprachnachricht → Whisper-Transkription → Agent-Task
     - type=image/other: nur loggen
+
+    Sicherheit: Nur von localhost erreichbar (Bridge auf 127.0.0.1:3001).
     """
+    client_ip = request.client.host if request.client else ""
+    if client_ip not in ("127.0.0.1", "::1", "localhost"):
+        return JSONResponse({"error": "Nur von localhost erreichbar"}, status_code=403)
+
     body = await request.json()
 
     msg_type = body.get("type", "")

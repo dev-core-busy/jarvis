@@ -103,6 +103,14 @@ from backend.skills.manager import SkillManager
 from backend.tools.memory import load_memory_context, load_selective_memory
 import backend.conv_log as conv_log
 
+# ── Sicherheit: LDAP-Benutzer duerfen diese Tools NICHT verwenden ─────────
+_LOCAL_PRIVILEGED_USERS = {"jarvis", "root", ""}
+_BLOCKED_TOOLS_FOR_LDAP = {
+    "shell_execute",       # Keine Shell-Befehle
+    "write_file",          # Kein Dateisystem-Schreibzugriff
+    "spawn_agent",         # Keine Sub-Agents (koennten Shell nutzen)
+}
+
 # ── Instructions aus data/instructions/*.md laden ─────────────────────────
 INSTRUCTIONS_DIR = Path(__file__).parent.parent / "data" / "instructions"
 
@@ -304,12 +312,13 @@ KRITISCH – Autonomie-Regeln:
             )
         return declarations
 
-    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown"):
+    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = ""):
         """Führt eine Aufgabe aus – der Agent-Loop."""
         import sys
         from backend.telemetry import tracer
         def _log(msg): print(f"[AGENT {self.agent_id}] {msg}", flush=True)
         _log(f"run_task gestartet: {task_text[:100]}... (sub={self.is_sub_agent})")
+        self._current_username = username
         agent_span = tracer.start_span(f"agent:{self.label}", kind="agent")
         agent_span.attributes["agent.id"] = self.agent_id
         agent_span.attributes["agent.is_sub"] = self.is_sub_agent
@@ -587,6 +596,7 @@ KRITISCH – Autonomie-Regeln:
                         messages=_conv_messages,
                         steps=steps,
                         duration_ms=_task_duration_ms,
+                        username=username,
                     )
                 except Exception as cl_err:
                     _log(f"conv_log fehlgeschlagen: {cl_err}")
@@ -647,6 +657,7 @@ KRITISCH – Autonomie-Regeln:
                         steps=0,
                         duration_ms=_dur,
                         error=str(e)[:300],
+                        username=username,
                     )
                 except Exception:
                     pass
@@ -839,7 +850,13 @@ KRITISCH – Autonomie-Regeln:
             exec_args = dict(args)
             if ws and getattr(tool, 'supports_streaming', False):
                 exec_args['_status_callback'] = lambda msg: self._send_status(ws, msg)
-            result = await tool.execute(**exec_args)
+            # LDAP-Benutzer: Sicherheitskritische Tools komplett blockieren
+            _uname = getattr(self, '_current_username', '')
+            if _uname and _uname not in _LOCAL_PRIVILEGED_USERS and name in _BLOCKED_TOOLS_FOR_LDAP:
+                print(f"[AGENT] BLOCKED Tool '{name}' fuer LDAP-User '{_uname}'", flush=True)
+                result = f"Zugriff verweigert: Das Tool '{name}' steht LDAP-Benutzern nicht zur Verfuegung."
+            else:
+                result = await tool.execute(**exec_args)
             tracer.end_span(span, status="ok")
             return result
         except Exception as e:

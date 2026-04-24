@@ -733,12 +733,13 @@ func newBoldWhiteText(text string, wrap bool) *widget.RichText {
 type tappableBubble struct {
 	widget.BaseWidget
 	inner   fyne.CanvasObject
+	text    string // Originaltext der Nachricht (fuer Kopieren)
 	onTap   func() // Linksklick (z.B. Auswahl umschalten im Selektionsmodus)
 	onRight func() // Rechtsklick (z.B. Selektionsmodus betreten)
 }
 
-func newTappableBubble(inner fyne.CanvasObject, onTap func(), onRight func()) *tappableBubble {
-	t := &tappableBubble{inner: inner, onTap: onTap, onRight: onRight}
+func newTappableBubble(inner fyne.CanvasObject, text string, onTap func(), onRight func()) *tappableBubble {
+	t := &tappableBubble{inner: inner, text: text, onTap: onTap, onRight: onRight}
 	t.ExtendBaseWidget(t)
 	return t
 }
@@ -753,10 +754,28 @@ func (t *tappableBubble) Tapped(_ *fyne.PointEvent) {
 	}
 }
 
-func (t *tappableBubble) TappedSecondary(_ *fyne.PointEvent) {
-	if t.onRight != nil {
-		t.onRight()
+func (t *tappableBubble) TappedSecondary(ev *fyne.PointEvent) {
+	// Kontextmenue mit "Text kopieren" und "Auswählen"
+	c := fyne.CurrentApp().Driver().CanvasForObject(t)
+	if c == nil {
+		if t.onRight != nil {
+			t.onRight()
+		}
+		return
 	}
+
+	copyItem := fyne.NewMenuItem("Text kopieren", func() {
+		fyne.CurrentApp().Driver().AllWindows()[0].Clipboard().SetContent(t.text)
+	})
+	selectItem := fyne.NewMenuItem("Auswählen", func() {
+		if t.onRight != nil {
+			t.onRight()
+		}
+	})
+
+	menu := fyne.NewMenu("", copyItem, selectItem)
+	popUp := widget.NewPopUpMenu(menu, c)
+	popUp.ShowAtPosition(ev.AbsolutePosition)
 }
 
 // ── Bubble-Rendering – Android-identisches Design ────────────────────────────
@@ -914,7 +933,7 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 		bg := canvas.NewRectangle(jc.userBubble)
 		bg.CornerRadius = 18
 		inner := container.NewStack(bg, container.NewPadded(newBoldWhiteText(msg.Text, false)))
-		bubble := newTappableBubble(inner, leftClickFn, rightClickFn)
+		bubble := newTappableBubble(inner, msg.Text, leftClickFn, rightClickFn)
 		var row fyne.CanvasObject
 		if c.selMode {
 			row = container.NewHBox(checkBox, layout.NewSpacer(), bubble)
@@ -934,7 +953,7 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 		bg := canvas.NewRectangle(color.RGBA{0xFF, 0xFF, 0xFF, 0x38})
 		bg.CornerRadius = 18
 		inner := container.NewStack(bg, container.NewPadded(newBoldWhiteText(msg.Text, true)))
-		bubble := newTappableBubble(inner, leftClickFn, rightClickFn)
+		bubble := newTappableBubble(inner, msg.Text, leftClickFn, rightClickFn)
 		avatar := newJAvatarSmall()
 		gap := container.NewGridWrap(fyne.NewSize(8, 1), canvas.NewRectangle(colorTransparent))
 		rightSpacer := container.NewGridWrap(fyne.NewSize(60, 1), canvas.NewRectangle(colorTransparent))

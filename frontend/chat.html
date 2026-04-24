@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Jarvis Chat</title>
+    <link rel="stylesheet" href="/static/css/chat.css?v=5">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+</head>
+<body>
+
+<!-- Login Screen -->
+<div id="login-screen" class="login-screen">
+    <button class="btn-theme login-theme-btn" id="btn-theme-login" title="Hell/Dunkel umschalten">
+        <svg id="login-theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+        <svg id="login-theme-icon-sun" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+    </button>
+    <div class="login-card">
+        <div class="login-avatar">J</div>
+        <h1 class="login-title">Jarvis</h1>
+        <p class="login-subtitle">Domain-Anmeldung</p>
+        <form id="login-form" autocomplete="off">
+            <input type="text" id="login-user" placeholder="DOMAIN\benutzername" autocomplete="username" required>
+            <div class="password-wrap">
+                <input type="password" id="login-pass" placeholder="Kennwort" autocomplete="current-password" required>
+                <button type="button" class="eye-btn" id="eye-btn" tabindex="-1">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                </button>
+            </div>
+            <!-- TOTP-Eingabe (erscheint nach Passwort-Check wenn 2FA aktiv) -->
+            <div id="totp-row" class="totp-row hidden">
+                <input type="text" id="login-totp" placeholder="6-stelliger Code" autocomplete="one-time-code"
+                       inputmode="numeric" pattern="[0-9]*" maxlength="6">
+            </div>
+            <button type="submit" class="btn-login" id="btn-login">Anmelden</button>
+            <p class="login-error" id="login-error"></p>
+        </form>
+    </div>
+</div>
+
+<!-- Chat Screen -->
+<div id="chat-screen" class="chat-screen hidden">
+    <!-- Top Bar -->
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-avatar">J</div>
+            <span class="topbar-title">Jarvis</span>
+            <span class="topbar-dot" id="status-dot"></span>
+        </div>
+        <div class="topbar-right">
+            <button class="btn-theme" id="btn-theme" title="Hell/Dunkel umschalten">
+                <svg id="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                </svg>
+                <svg id="theme-icon-sun" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                </svg>
+            </button>
+            <button class="btn-theme" id="btn-cert" title="SSL-Zertifikat">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+            </button>
+            <button class="btn-totp-setup" id="btn-totp-setup" title="2FA einrichten">🔐</button>
+            <button class="btn-logout" id="btn-logout" title="Abmelden">⏻</button>
+        </div>
+    </header>
+
+    <!-- Messages -->
+    <div class="messages" id="messages">
+        <div class="welcome-msg">
+            <p>Hallo! Ich bin <strong>Jarvis</strong>.</p>
+            <p class="welcome-sub">Wie kann ich dir helfen?</p>
+        </div>
+    </div>
+
+    <!-- Input Bar -->
+    <div class="input-bar">
+        <div class="input-row">
+            <button class="btn-stop hidden" id="btn-stop" title="Agent stoppen">✕</button>
+            <textarea id="msg-input" placeholder="Nachricht eingeben…" rows="1" maxlength="10000"></textarea>
+            <button class="btn-send" id="btn-send" disabled title="Senden">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 2FA Setup Modal -->
+<div id="totp-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+        <h2 class="modal-title">Zwei-Faktor-Authentifizierung</h2>
+
+        <!-- Status: 2FA aktiv → Deaktivieren -->
+        <div id="totp-active" class="hidden">
+            <p class="totp-info">✅ 2FA ist <strong>aktiviert</strong>.</p>
+            <input type="password" id="totp-disable-pass" placeholder="Kennwort zur Bestätigung">
+            <button class="btn-login btn-danger" id="btn-totp-disable">2FA deaktivieren</button>
+        </div>
+
+        <!-- Status: 2FA inaktiv → Setup -->
+        <div id="totp-setup-flow" class="hidden">
+            <!-- Schritt 1: QR-Code scannen -->
+            <div id="totp-step1">
+                <p class="totp-info">Scanne den QR-Code mit <strong>Google Authenticator</strong>, Authy oder einer anderen TOTP-App.</p>
+                <div id="totp-qr" class="totp-qr"></div>
+                <p class="totp-secret-label">Oder manuell eingeben:</p>
+                <code id="totp-secret-code" class="totp-secret-code"></code>
+                <p class="totp-info" style="margin-top:16px">Gib den 6-stelligen Code aus der App ein:</p>
+                <input type="text" id="totp-verify-code" placeholder="000000" inputmode="numeric"
+                       pattern="[0-9]*" maxlength="6" autocomplete="one-time-code">
+                <button class="btn-login" id="btn-totp-verify">Bestätigen &amp; aktivieren</button>
+            </div>
+        </div>
+
+        <p class="login-error" id="totp-modal-error"></p>
+        <button class="btn-modal-close" id="btn-totp-close">Schließen</button>
+    </div>
+</div>
+
+<!-- SSL-Zertifikat Modal -->
+<div id="cert-modal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width:480px;text-align:left;">
+        <h2 class="modal-title" style="text-align:center;">SSL-Zertifikat installieren</h2>
+
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px;background:var(--bg);border-radius:12px;">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.5" style="flex-shrink:0;">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <path d="M9 12l2 2 4-4"/>
+            </svg>
+            <div>
+                <div style="font-size:14px;font-weight:600;color:var(--on-surface);">Selbstsigniertes Zertifikat</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px;">Muss einmalig installiert werden, damit der Browser die Verbindung als sicher einstuft.</div>
+            </div>
+        </div>
+
+        <a href="/api/cert" class="btn-login" style="display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;margin-bottom:16px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Zertifikat herunterladen (jarvis.cer)
+        </a>
+
+        <!-- Tabs -->
+        <div style="display:flex;gap:4px;margin-bottom:12px;">
+            <button class="cert-tab active" data-cert-tab="win">Windows</button>
+            <button class="cert-tab" data-cert-tab="linux">Linux</button>
+            <button class="cert-tab" data-cert-tab="browser">Browser</button>
+        </div>
+
+        <div id="cert-tab-win" class="cert-tab-content">
+            <ol style="font-size:13px;color:var(--on-surface);line-height:1.7;padding-left:18px;">
+                <li>Lade <code>jarvis.cer</code> herunter.</li>
+                <li>Rechtsklick auf die Datei → <strong>Zertifikat installieren</strong>.</li>
+                <li>Wähle <strong>Lokaler Computer</strong>.</li>
+                <li><strong>Alle Zertifikate in folgendem Speicher speichern</strong> → Durchsuchen → <strong>Vertrauenswürdige Stammzertifizierungsstellen</strong>.</li>
+                <li>Fertigstellen + <strong>Browser komplett neu starten</strong>.</li>
+            </ol>
+        </div>
+
+        <div id="cert-tab-linux" class="cert-tab-content hidden">
+            <pre style="background:var(--bg);padding:10px 12px;border-radius:8px;font-size:12px;color:var(--on-surface);overflow-x:auto;"><code>sudo cp jarvis.cer /usr/local/share/ca-certificates/jarvis.crt
+sudo update-ca-certificates</code></pre>
+            <p style="font-size:12px;color:var(--muted);margin-top:8px;">Chromium/Chrome benötigt ggf. zusätzlich den Browser-Import (siehe Browser-Tab).</p>
+        </div>
+
+        <div id="cert-tab-browser" class="cert-tab-content hidden">
+            <ol style="font-size:13px;color:var(--on-surface);line-height:1.7;padding-left:18px;">
+                <li>Browser-Einstellungen öffnen.</li>
+                <li>Nach <strong>Zertifikate</strong> suchen.</li>
+                <li><strong>Importieren</strong> im Reiter Zertifizierungsstellen.</li>
+                <li>Datei <code>jarvis.cer</code> auswählen.</li>
+                <li>Haken bei <strong>Dieser CA vertrauen, um Websites zu identifizieren</strong>.</li>
+            </ol>
+        </div>
+
+        <button class="btn-modal-close" id="btn-cert-close">Schließen</button>
+    </div>
+</div>
+
+<script src="/static/js/chat.js?v=5"></script>
+</body>
+</html>

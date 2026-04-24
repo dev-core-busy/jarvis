@@ -45,6 +45,7 @@ def log_conversation(
     steps: int,
     duration_ms: int,
     error: str | None = None,
+    username: str = "",
 ):
     """Speichert eine abgeschlossene Konversation."""
     entry = {
@@ -52,6 +53,7 @@ def log_conversation(
         "ts": time.time(),
         "task": task[:200],
         "model": model,
+        "username": username or "",
         "client_ip": client_ip or "unknown",
         "client_type": client_type or "browser",
         "steps": steps,
@@ -81,12 +83,15 @@ def _shrink(m: dict) -> dict:
     return result
 
 
-def get_conversations(limit: int = 50, ip_filter: str | None = None) -> list:
+def get_conversations(limit: int = 50, ip_filter: str | None = None,
+                      user_filter: str | None = None) -> list:
     with _lock:
         entries = _load()
     entries = list(reversed(entries))          # Neueste zuerst
     if ip_filter:
         entries = [e for e in entries if e.get("client_ip") == ip_filter]
+    if user_filter:
+        entries = [e for e in entries if e.get("username") == user_filter]
     return entries[:limit]
 
 
@@ -98,6 +103,17 @@ def get_known_ips() -> list[str]:
         ip = e.get("client_ip", "unknown")
         if ip not in seen:
             seen.append(ip)
+    return seen
+
+
+def get_known_users() -> list[str]:
+    with _lock:
+        entries = _load()
+    seen = []
+    for e in reversed(entries):
+        user = e.get("username", "")
+        if user and user not in seen:
+            seen.append(user)
     return seen
 
 

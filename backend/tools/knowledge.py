@@ -76,6 +76,21 @@ def _get_vector_store():
         return None
 
 
+def preload_embedding_model():
+    """Lädt das Embedding-Modell im Hintergrund vor (vermeidet Kaltstart bei erster Suche)."""
+    vs = _get_vector_store()
+    if vs is None:
+        print("[knowledge] Embedding-Preload übersprungen (kein VectorStore)", flush=True)
+        return
+    try:
+        from backend.tools.vector_store import _get_embedding_model
+        print("[knowledge] Lade Embedding-Modell vor...", flush=True)
+        _get_embedding_model()
+        print("[knowledge] Embedding-Modell vorgeladen ✓", flush=True)
+    except Exception as e:
+        print(f"[knowledge] Embedding-Modell Preload fehlgeschlagen: {e}", flush=True)
+
+
 def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = False) -> bool:
     """Inkrementeller Vektor-Index Aufbau. Gibt True zurueck wenn Index Inhalt hat.
 

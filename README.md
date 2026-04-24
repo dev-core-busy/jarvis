@@ -97,7 +97,7 @@ Full browser control via CDP (Chrome DevTools Protocol) and xdotool. The agent c
 ## Architecture
 
 ```mermaid
-flowchart TD
+flowchart LR
     subgraph Browser["🖥️ Browser Client"]
         Chat["LLM Chat UI\n(WebSocket)"]
         NOVNC["noVNC :6080\n(Live VNC)"]

@@ -293,6 +293,33 @@
         .desktop-content { padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; }
         .desktop-stand { width: 60px; height: 12px; background: rgba(59,130,246,0.2); margin: 0 auto; border-radius: 0 0 6px 6px; border: 2px solid rgba(59,130,246,0.3); border-top: none; }
 
+        /* Jarvis Chat Section */
+        .chat-section { background: linear-gradient(135deg, rgba(155,89,182,0.06) 0%, rgba(99,102,241,0.08) 100%); border-top: 1px solid rgba(155,89,182,0.2); border-bottom: 1px solid rgba(99,102,241,0.2); }
+        .chat-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+        @media (max-width: 768px) { .chat-inner { grid-template-columns: 1fr; gap: 32px; } }
+        .chat-badge-new { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px; background: linear-gradient(135deg, rgba(155,89,182,0.3), rgba(99,102,241,0.3)); border: 1px solid rgba(155,89,182,0.5); border-radius: 20px; font-size: 0.75rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #BB86FC; margin-bottom: 18px; animation: pulse 2s infinite; }
+        .chat-title { font-size: clamp(1.6rem, 3.5vw, 2.4rem); font-weight: 700; margin-bottom: 12px; line-height: 1.25; }
+        .chat-desc { color: var(--text-secondary); font-size: 0.975rem; line-height: 1.75; margin-bottom: 20px; }
+        .chat-features { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; }
+        .chat-features li { display: flex; align-items: center; gap: 10px; font-size: 0.875rem; color: var(--text-secondary); }
+        .chat-features li span.check { color: #BB86FC; font-size: 1rem; flex-shrink: 0; }
+        /* Chat UI Mockup */
+        .chat-mockup { position: relative; display: flex; justify-content: center; align-items: center; }
+        .chat-frame { width: 300px; background: #0A0A0F; border-radius: 16px; border: 1.5px solid rgba(155,89,182,0.5); box-shadow: 0 0 60px rgba(155,89,182,0.2), 0 24px 64px rgba(0,0,0,0.6); overflow: hidden; }
+        .chat-topbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #1A1A2E; border-bottom: 1px solid #333355; }
+        .chat-topbar-left { display: flex; align-items: center; gap: 8px; }
+        .chat-avatar-sm { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #9B59B6, #6A0DAD); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; }
+        .chat-topbar-name { font-size: 0.75rem; font-weight: 600; color: #E0E0E0; }
+        .chat-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #2ECC71; }
+        .chat-topbar-icons { display: flex; gap: 8px; font-size: 14px; color: #888899; }
+        .chat-messages { padding: 10px 10px; display: flex; flex-direction: column; gap: 6px; min-height: 200px; background: #0A0A0F; }
+        .chat-date { text-align: center; font-size: 9px; color: rgba(255,255,255,.35); margin: 4px 0; }
+        .chat-bubble-user { align-self: flex-end; background: rgba(155,89,182,0.45); border-radius: 14px 3px 14px 14px; padding: 7px 11px; font-size: 0.72rem; color: #fff; max-width: 70%; }
+        .chat-bubble-bot { align-self: flex-start; background: rgba(255,255,255,0.07); border-radius: 3px 14px 14px 14px; padding: 7px 11px; font-size: 0.72rem; color: rgba(255,255,255,0.85); max-width: 75%; border: 1px solid rgba(255,255,255,0.06); }
+        .chat-input-bar { padding: 8px 10px; background: #1A1A2E; border-top: 1px solid #333355; display: flex; align-items: center; gap: 8px; }
+        .chat-input-mock { flex: 1; height: 28px; border-radius: 14px; border: 1px solid #333355; background: transparent; font-size: 0.65rem; padding: 0 10px; color: #888899; display: flex; align-items: center; }
+        .chat-send-btn { width: 28px; height: 28px; border-radius: 50%; background: #9B59B6; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
         /* Android App Section */
         .android-section { background: linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(99,102,241,0.08) 100%); border-top: 1px solid rgba(16,185,129,0.2); border-bottom: 1px solid rgba(99,102,241,0.2); }
         .android-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
@@ -353,6 +380,7 @@
         <a href="#screenshots" class="t-de">Screenshots</a>
         <a href="#screenshots" class="t-en">Screenshots</a>
         <a href="#android" style="color:var(--success);font-weight:600;">📱 Android</a>
+        <a href="#chat" style="color:#BB86FC;font-weight:600;">💬 Chat</a>
         <a href="#windows" style="color:#60a5fa;font-weight:600;">🖥️ Windows</a>
         <a href="#install"     class="t-de">Installation</a>
         <a href="#install"     class="t-en">Install</a>
@@ -523,6 +551,20 @@
                 <div class="feature-desc t-de">Integriertes Tracing für Agent-Runs, Tool-Aufrufe und LLM-Calls. Performance-Statistiken in Echtzeit – Antwortzeiten, Fehlerquoten, Tool-Nutzung auf einen Blick.</div>
                 <div class="feature-desc t-en">Built-in tracing for agent runs, tool calls and LLM calls. Real-time performance stats – response times, error rates, tool usage at a glance.</div>
             </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">💬</div>
+                <div class="feature-title t-de">Jarvis Chat – Mobile-First UI</div>
+                <div class="feature-title t-en">Jarvis Chat – Mobile-First UI</div>
+                <div class="feature-desc t-de">Dedizierte Chat-Oberfläche unter <code>/chat</code> – optimiert für Smartphones und Desktop. Hell/Dunkel-Modus, LDAP-Anmeldung, TOTP 2FA, SSL-Zertifikat-Assistent und nahtlose Konversationsführung.</div>
+                <div class="feature-desc t-en">Dedicated chat UI at <code>/chat</code> – optimized for smartphones and desktop. Light/dark mode, LDAP login, TOTP 2FA, SSL certificate wizard and seamless conversation flow.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🔐</div>
+                <div class="feature-title t-de">Multi-User &amp; LDAP-Sicherheit</div>
+                <div class="feature-title t-en">Multi-User &amp; LDAP Security</div>
+                <div class="feature-desc t-de">LDAP-Domain-Anmeldung mit granularer Berechtigungskontrolle. LDAP-Nutzer können chatten und Wissen abrufen, aber keine Shell-Befehle ausführen oder Dateien schreiben – volle Isolation ohne Konfigurationsaufwand.</div>
+                <div class="feature-desc t-en">LDAP domain login with granular permission control. LDAP users can chat and query knowledge, but cannot execute shell commands or write files – full isolation with zero configuration.</div>
+            </div>
         </div>
     </div>
 </section>
@@ -618,6 +660,10 @@
                 <span class="t-de">Haupt-UI</span>
                 <span class="t-en">Main UI</span>
             </button>
+            <button class="tab-btn" onclick="showTab('chat', this)">
+                <span class="t-de">Chat-UI</span>
+                <span class="t-en">Chat UI</span>
+            </button>
         </div>
         <div class="screenshot-panels">
             <div id="tab-split" class="active">
@@ -640,6 +686,61 @@
                 </div>
                 <p class="screenshot-caption t-de">Haupt-Interface: Modernes Glassmorphism-Design mit Echtzeit-Chat und Agentensteuerung</p>
                 <p class="screenshot-caption t-en">Main interface: Modern glassmorphism design with real-time chat and agent control</p>
+            </div>
+            <div id="tab-chat">
+                <div style="display:flex;gap:24px;justify-content:center;align-items:flex-start;flex-wrap:wrap;">
+                    <!-- Dark Mode Mockup -->
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
+                        <div class="chat-frame" style="width:280px;">
+                            <div class="chat-topbar">
+                                <div class="chat-topbar-left">
+                                    <div class="chat-avatar-sm">J</div>
+                                    <span class="chat-topbar-name">Jarvis</span>
+                                    <div class="chat-status-dot"></div>
+                                </div>
+                                <div class="chat-topbar-icons">🌙 🛡️ 🔐 ⏻</div>
+                            </div>
+                            <div class="chat-messages">
+                                <div class="chat-date">24.04.2026</div>
+                                <div class="chat-bubble-user">Erstelle einen Bericht über unsere Server-Auslastung.</div>
+                                <div class="chat-bubble-bot">💻 df -h → 42% belegt<br>💻 top → CPU 18%<br>✅ Bericht erstellt und gespeichert.</div>
+                                <div class="chat-bubble-user">Danke! Wie war der Peak letzte Woche?</div>
+                                <div class="chat-bubble-bot">🧠 Memory geladen<br>Peak: Mittwoch 03:14 · CPU 87% · 14 min</div>
+                            </div>
+                            <div class="chat-input-bar">
+                                <div class="chat-input-mock">Nachricht eingeben…</div>
+                                <div class="chat-send-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></div>
+                            </div>
+                        </div>
+                        <span style="font-size:0.75rem;color:var(--text-muted);">Dark Mode</span>
+                    </div>
+                    <!-- Light Mode Mockup -->
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
+                        <div class="chat-frame" style="width:280px;background:#F5F5F7;border-color:rgba(155,89,182,0.3);">
+                            <div class="chat-topbar" style="background:#FFFFFF;border-color:#D0D0DD;">
+                                <div class="chat-topbar-left">
+                                    <div class="chat-avatar-sm">J</div>
+                                    <span class="chat-topbar-name" style="color:#333;">Jarvis</span>
+                                    <div class="chat-status-dot"></div>
+                                </div>
+                                <div class="chat-topbar-icons" style="color:#777;">☀️ 🛡️ 🔐 ⏻</div>
+                            </div>
+                            <div class="chat-messages" style="background:#F5F5F7;">
+                                <div class="chat-date" style="color:rgba(0,0,0,.4);">24.04.2026</div>
+                                <div class="chat-bubble-user" style="background:rgba(155,89,182,0.25);color:#222;">Wer hat gestern die meisten Anfragen gemacht?</div>
+                                <div class="chat-bubble-bot" style="background:rgba(0,0,0,0.06);color:#333;border-color:rgba(0,0,0,.08);">👤 DOMAIN\mueller: 143 Anfragen<br>👤 DOMAIN\schmidt: 89 Anfragen<br>👤 DOMAIN\admin: 12 Anfragen</div>
+                                <div class="chat-bubble-user" style="background:rgba(155,89,182,0.25);color:#222;">Super, danke!</div>
+                            </div>
+                            <div class="chat-input-bar" style="background:#FFFFFF;border-color:#D0D0DD;">
+                                <div class="chat-input-mock" style="border-color:#D0D0DD;color:#aaa;">Nachricht eingeben…</div>
+                                <div class="chat-send-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></div>
+                            </div>
+                        </div>
+                        <span style="font-size:0.75rem;color:var(--text-muted);">Light Mode</span>
+                    </div>
+                </div>
+                <p class="screenshot-caption t-de" style="margin-top:20px;">Jarvis Chat (/chat) – Mobile-optimierte Oberfläche mit Hell/Dunkel-Modus, LDAP-Anmeldung und 2FA</p>
+                <p class="screenshot-caption t-en" style="margin-top:20px;">Jarvis Chat (/chat) – mobile-optimized interface with light/dark mode, LDAP login and 2FA</p>
             </div>
         </div>
     </div>
@@ -901,8 +1002,8 @@ docker compose up -d</code>
                 </ul>
                 <a href="https://jarvis-ai.info/jarvis.apk?v=8b" class="btn-android">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M17.523 15.341a.54.54 0 0 1-.54.54H7.017a.54.54 0 0 1-.54-.54v-5.4a5.52 5.52 0 0 1 5.523-5.52 5.52 5.52 0 0 1 5.523 5.52v5.4zm-1.62-8.92a4.14 4.14 0 0 0-3.903-2.76 4.14 4.14 0 0 0-3.903 2.76h7.806zM8.1 2.46l-1.08-1.92a.18.18 0 0 0-.312.18l1.08 1.92a.18.18 0 0 0 .312-.18zm8.892 0a.18.18 0 0 0 .312.18l1.08-1.92a.18.18 0 0 0-.312-.18l-1.08 1.92zM6.48 17.46v2.7a.54.54 0 0 0 1.08 0v-2.7H6.48zm9.96 0v2.7a.54.54 0 0 0 1.08 0v-2.7h-1.08z"/></svg>
-                    <span class="t-de">APK herunterladen · v0.8</span>
-                    <span class="t-en">Download APK · v0.8</span>
+                    <span class="t-de">APK herunterladen · 0.841</span>
+                    <span class="t-en">Download APK · 0.841</span>
                 </a>
                 <span class="btn-android-note t-de">Android 8.0+ · ~20 MB · Debug-Build</span>
                 <span class="btn-android-note t-en">Android 8.0+ · ~20 MB · Debug build</span>
@@ -928,6 +1029,91 @@ docker compose up -d</code>
                         <div class="phone-msg user t-en">Thanks! Remind me at 7 PM.</div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="chat" class="chat-section">
+    <div class="container">
+        <div class="chat-inner">
+            <!-- Chat Mockup -->
+            <div class="chat-mockup reveal">
+                <div style="display:flex;gap:16px;align-items:flex-start;">
+                    <div class="chat-frame">
+                        <div class="chat-topbar">
+                            <div class="chat-topbar-left">
+                                <div class="chat-avatar-sm">J</div>
+                                <span class="chat-topbar-name">Jarvis</span>
+                                <div class="chat-status-dot"></div>
+                            </div>
+                            <div class="chat-topbar-icons">🌙 🛡️ 🔐 ⏻</div>
+                        </div>
+                        <div class="chat-messages">
+                            <div class="chat-date">24.04.2026</div>
+                            <div class="chat-bubble-user t-de">Analysiere den Speicher auf /dev/sda1</div>
+                            <div class="chat-bubble-user t-en">Analyze storage on /dev/sda1</div>
+                            <div class="chat-bubble-bot t-de">💻 df -h /dev/sda1<br>42% belegt · 58 GB frei<br>✅ Bericht gespeichert</div>
+                            <div class="chat-bubble-bot t-en">💻 df -h /dev/sda1<br>42% used · 58 GB free<br>✅ Report saved</div>
+                            <div class="chat-bubble-user t-de">Top 5 größte Verzeichnisse?</div>
+                            <div class="chat-bubble-user t-en">Top 5 largest directories?</div>
+                            <div class="chat-bubble-bot t-de">💻 du -sh /*<br>/var: 18 GB<br>/home: 12 GB<br>/opt: 8 GB…</div>
+                            <div class="chat-bubble-bot t-en">💻 du -sh /*<br>/var: 18 GB<br>/home: 12 GB<br>/opt: 8 GB…</div>
+                        </div>
+                        <div class="chat-input-bar">
+                            <div class="chat-input-mock t-de">Nachricht eingeben…</div>
+                            <div class="chat-input-mock t-en">Type a message…</div>
+                            <div class="chat-send-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></div>
+                        </div>
+                    </div>
+                    <div class="chat-frame" style="background:#F5F5F7;border-color:rgba(155,89,182,0.3);margin-top:24px;">
+                        <div class="chat-topbar" style="background:#FFFFFF;border-color:#D0D0DD;">
+                            <div class="chat-topbar-left">
+                                <div class="chat-avatar-sm">J</div>
+                                <span class="chat-topbar-name" style="color:#333;">Jarvis</span>
+                                <div class="chat-status-dot"></div>
+                            </div>
+                            <div class="chat-topbar-icons" style="color:#777;">☀️ 🛡️ 🔐 ⏻</div>
+                        </div>
+                        <div class="chat-messages" style="background:#F5F5F7;">
+                            <div class="chat-date" style="color:rgba(0,0,0,.4);">24.04.2026</div>
+                            <div class="chat-bubble-user" style="background:rgba(155,89,182,0.25);color:#222;" class="t-de">Wer hat heute Anfragen gestellt?</div>
+                            <div class="chat-bubble-user" style="background:rgba(155,89,182,0.25);color:#222;" class="t-en">Who made requests today?</div>
+                            <div class="chat-bubble-bot" style="background:rgba(0,0,0,0.06);color:#333;border-color:rgba(0,0,0,.08);">👤 mueller · 143<br>👤 schmidt · 89<br>👤 admin · 12</div>
+                            <div class="chat-bubble-user" style="background:rgba(155,89,182,0.25);color:#222;" class="t-de">Danke!</div>
+                            <div class="chat-bubble-user" style="background:rgba(155,89,182,0.25);color:#222;" class="t-en">Thanks!</div>
+                        </div>
+                        <div class="chat-input-bar" style="background:#FFFFFF;border-color:#D0D0DD;">
+                            <div class="chat-input-mock" style="border-color:#D0D0DD;color:#aaa;" class="t-de">Nachricht eingeben…</div>
+                            <div class="chat-input-mock" style="border-color:#D0D0DD;color:#aaa;" class="t-en">Type a message…</div>
+                            <div class="chat-send-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="reveal">
+                <div class="chat-badge-new">💬 Neu</div>
+                <h2 class="chat-title">
+                    <span class="t-de">Jarvis <span class="accent-text">Chat</span> – für jeden Browser</span>
+                    <span class="t-en">Jarvis <span class="accent-text">Chat</span> – for any browser</span>
+                </h2>
+                <p class="chat-desc t-de">
+                    Dedizierte Chat-Oberfläche unter <strong>/chat</strong> – optimiert für Smartphones, Tablets und Desktop.
+                    Kein nativer Client nötig: einfach die URL im Browser öffnen.
+                </p>
+                <p class="chat-desc t-en">
+                    Dedicated chat UI at <strong>/chat</strong> – optimized for smartphones, tablets and desktop.
+                    No native client needed: just open the URL in any browser.
+                </p>
+                <ul class="chat-features">
+                    <li><span class="check">✅</span> <span class="t-de">Hell/Dunkel-Modus mit automatischer Speicherung</span><span class="t-en">Light/dark mode with automatic persistence</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">LDAP-Domain-Anmeldung + TOTP Zwei-Faktor-Auth</span><span class="t-en">LDAP domain login + TOTP two-factor authentication</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">SSL-Zertifikat-Assistent (Download + Installationsanleitung)</span><span class="t-en">SSL certificate wizard (download + installation guide)</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">LDAP-Nutzer isoliert – kein Shell-Zugriff möglich</span><span class="t-en">LDAP users isolated – no shell access possible</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">30-Tage-Session – kein tägliches Neu-Anmelden</span><span class="t-en">30-day session – no daily re-login required</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Echtzeit-Streaming, Markdown-Rendering, Datums-Trenner</span><span class="t-en">Real-time streaming, markdown rendering, date separators</span></li>
+                </ul>
             </div>
         </div>
     </div>
@@ -985,11 +1171,12 @@ docker compose up -d</code>
                     <li><span class="check">✅</span> <span class="t-de">Push-Benachrichtigungen bei fertigem Task</span><span class="t-en">Push notifications on task completion</span></li>
                     <li><span class="check">✅</span> <span class="t-de">Agent-Status &amp; Multi-Agent Übersicht</span><span class="t-en">Agent status &amp; multi-agent overview</span></li>
                     <li><span class="check">✅</span> <span class="t-de">Dark Glassmorphism UI – wie die Web-Oberfläche</span><span class="t-en">Dark glassmorphism UI – matches the web interface</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Text per Rechtsklick kopierbar</span><span class="t-en">Copy text via right-click context menu</span></li>
                 </ul>
                 <a href="https://jarvis-ai.info/downloads/jarvis.exe" class="btn-windows">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
-                    <span class="t-de">Download · Portable EXE</span>
-                    <span class="t-en">Download · Portable EXE</span>
+                    <span class="t-de">Download · Portable EXE · v0.876</span>
+                    <span class="t-en">Download · Portable EXE · v0.876</span>
                 </a>
                 <span class="btn-windows-note t-de">Windows 10/11 · 64-bit · Portable – kein Setup nötig</span>
                 <span class="btn-windows-note t-en">Windows 10/11 · 64-bit · Portable – no installer needed</span>

@@ -61,6 +61,14 @@
                         </button>
                     </div>
                 </div>
+                <div id="totp-row" class="form-group" style="text-align:left;margin-bottom:14px;display:none;">
+                    <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;">2FA-CODE</label>
+                    <input type="text" id="login-totp" placeholder="6-stelliger Code"
+                        autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                        style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:1.2rem;font-family:var(--font-mono);text-align:center;letter-spacing:8px;font-weight:600;outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
+                        onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(99,102,241,0.2)'"
+                        onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
+                </div>
                 <button type="submit" class="btn-login" id="login-btn" style="width:100%;">
                     <span class="btn-text">ANMELDEN</span>
                 </button>
@@ -1132,10 +1140,14 @@ sudo update-ca-certificates</code></pre>
                                 <span class="kb-folder-icon">💬</span>
                                 <span class="kb-folder-path" style="font-weight:600;">LLM-Verlauf</span>
                                 <span style="margin-left:auto;margin-right:8px;">
-                                    <select id="conv-log-ip-filter" style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:0.78rem;" onclick="event.stopPropagation()">
+                                    <select id="conv-log-user-filter" style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:0.78rem;" onclick="event.stopPropagation()">
+                                        <option value="">Alle Benutzer</option>
+                                    </select>
+                                    <select id="conv-log-ip-filter" style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:0.78rem;margin-left:4px;" onclick="event.stopPropagation()">
                                         <option value="">Alle IPs</option>
                                     </select>
-                                    <button id="conv-log-clear-btn" class="kb-btn-action" style="font-size:0.72rem;padding:2px 8px;margin-left:6px;" onclick="event.stopPropagation()">🗑</button>
+                                    <button id="conv-log-refresh-btn" class="kb-btn-action" style="font-size:0.72rem;padding:2px 8px;margin-left:6px;" onclick="event.stopPropagation()" title="Aktualisieren">🔄</button>
+                                    <button id="conv-log-clear-btn" class="kb-btn-action" style="font-size:0.72rem;padding:2px 8px;margin-left:4px;" onclick="event.stopPropagation()">🗑</button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -1366,12 +1378,94 @@ sudo update-ca-certificates</code></pre>
 
                     <hr class="settings-divider" style="margin-top:24px;">
                     <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:8px;">🔑 Zwei-Faktor-Authentifizierung (2FA)</h3>
-                    <p style="color:var(--text-secondary);font-size:0.85rem;line-height:1.5;margin-bottom:10px;">
-                        Die Zwei-Faktor-Authentifizierung (2FA) ist noch nicht aktiviert. Diese Funktion wird in einer zukünftigen Version verfügbar sein.
-                    </p>
-                    <div style="padding:10px 14px;border-radius:8px;background:var(--bg-glass);border:1px solid var(--border);font-size:0.85rem;color:var(--text-muted);">
-                        ⏳ In Vorbereitung – TOTP (Time-based One-Time Password)-Unterstützung ist geplant.
+                    <div id="totp-settings-status" style="margin-bottom:12px;">
+                        <p style="color:var(--text-secondary);font-size:0.85rem;line-height:1.5;">Lade Status…</p>
                     </div>
+                    <div id="totp-settings-setup" style="display:none;">
+                        <div id="totp-settings-qr" style="text-align:center;margin:12px 0;"></div>
+                        <p style="color:var(--text-muted);font-size:0.78rem;text-align:center;margin-bottom:4px;">Manueller Schlüssel:</p>
+                        <code id="totp-settings-secret" style="display:block;text-align:center;font-size:0.85rem;color:var(--accent-hover);background:var(--bg-glass);padding:8px;border-radius:8px;letter-spacing:2px;margin-bottom:12px;user-select:all;cursor:pointer;"></code>
+                        <div style="display:flex;gap:8px;">
+                            <input type="text" id="totp-settings-code" placeholder="6-stelliger Code"
+                                inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+                                style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:1.1rem;text-align:center;letter-spacing:6px;font-weight:600;font-family:var(--font-mono);outline:none;">
+                            <button id="btn-totp-settings-verify" class="settings-action-btn" style="white-space:nowrap;">Aktivieren</button>
+                        </div>
+                    </div>
+                    <div id="totp-settings-disable" style="display:none;">
+                        <div style="display:flex;gap:8px;">
+                            <input type="password" id="totp-settings-disable-pw" placeholder="Kennwort zur Bestätigung"
+                                style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:0.9rem;outline:none;">
+                            <button id="btn-totp-settings-disable" class="settings-action-btn" style="background:var(--danger);white-space:nowrap;">Deaktivieren</button>
+                        </div>
+                    </div>
+                    <p id="totp-settings-error" style="color:var(--danger);font-size:0.85rem;margin-top:8px;min-height:20px;"></p>
+                    <script>
+                    (function() {
+                        async function _totpLoad() {
+                            const t = localStorage.getItem('jarvis_token');
+                            if (!t) return;
+                            const statusEl = document.getElementById('totp-settings-status');
+                            const setupEl = document.getElementById('totp-settings-setup');
+                            const disableEl = document.getElementById('totp-settings-disable');
+                            const errEl = document.getElementById('totp-settings-error');
+                            try {
+                                const r = await fetch('/api/auth/totp/status', { headers: { 'Authorization': 'Bearer ' + t } });
+                                const d = await r.json();
+                                if (d.enabled) {
+                                    statusEl.innerHTML = '<p style="color:var(--success);font-size:0.85rem;">✅ 2FA ist aktiviert. Zum Deaktivieren Kennwort eingeben:</p>';
+                                    setupEl.style.display = 'none';
+                                    disableEl.style.display = '';
+                                } else {
+                                    statusEl.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">2FA ist nicht aktiviert. Scanne den QR-Code mit Google Authenticator:</p>';
+                                    disableEl.style.display = 'none';
+                                    // Setup starten
+                                    const sr = await fetch('/api/auth/totp/setup', { method: 'POST', headers: { 'Authorization': 'Bearer ' + t } });
+                                    const sd = await sr.json();
+                                    document.getElementById('totp-settings-qr').innerHTML = '<img src="' + sd.qr_code + '" style="border-radius:8px;">';
+                                    document.getElementById('totp-settings-secret').textContent = sd.secret;
+                                    document.getElementById('totp-settings-code').value = '';
+                                    setupEl.style.display = '';
+                                }
+                            } catch(e) { statusEl.innerHTML = '<p style="color:var(--danger);font-size:0.85rem;">Fehler beim Laden</p>'; }
+
+                            // Aktivieren
+                            document.getElementById('btn-totp-settings-verify').onclick = async function() {
+                                errEl.textContent = '';
+                                const code = document.getElementById('totp-settings-code').value.trim();
+                                if (!code) return;
+                                try {
+                                    const r = await fetch('/api/auth/totp/verify', {
+                                        method: 'POST',
+                                        headers: { 'Authorization': 'Bearer ' + t, 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ code })
+                                    });
+                                    const d = await r.json();
+                                    if (d.success) { _totpLoad(); } else { errEl.textContent = d.error || 'Fehler'; }
+                                } catch(e) { errEl.textContent = 'Verbindungsfehler'; }
+                            };
+
+                            // Deaktivieren
+                            document.getElementById('btn-totp-settings-disable').onclick = async function() {
+                                errEl.textContent = '';
+                                const pw = document.getElementById('totp-settings-disable-pw').value;
+                                if (!pw) return;
+                                try {
+                                    const r = await fetch('/api/auth/totp/disable', {
+                                        method: 'POST',
+                                        headers: { 'Authorization': 'Bearer ' + t, 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ password: pw })
+                                    });
+                                    const d = await r.json();
+                                    if (d.success) { document.getElementById('totp-settings-disable-pw').value = ''; _totpLoad(); }
+                                    else { errEl.textContent = d.error || 'Fehler'; }
+                                } catch(e) { errEl.textContent = 'Verbindungsfehler'; }
+                            };
+                        }
+                        const secBtn = document.querySelector('[data-settings-tab="security"]');
+                        if (secBtn) secBtn.addEventListener('click', _totpLoad);
+                    })();
+                    </script>
                 </div>
 
             </div>
@@ -1380,14 +1474,14 @@ sudo update-ca-certificates</code></pre>
     </div>
 
     <script src="/static/js/websocket.js?v=6"></script>
-    <script src="/static/js/vnc.js?v=11"></script>
+    <script src="/static/js/vnc.js?v=13"></script>
     <script src="/static/js/skills.js?v=21"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
     <script src="/static/js/knowledge.js?v=32"></script>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
-    <script src="/static/js/telemetry.js?v=2"></script>
-    <script src="/static/js/app.js?v=55"></script>
+    <script src="/static/js/telemetry.js?v=3"></script>
+    <script src="/static/js/app.js?v=56"></script>
 </body>
 
 </html>

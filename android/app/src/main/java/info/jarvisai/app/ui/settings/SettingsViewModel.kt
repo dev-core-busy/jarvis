@@ -21,6 +21,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.net.URI
 import javax.inject.Inject
 
 @HiltViewModel
@@ -159,7 +160,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _loginState.value = "loading"
             try {
-                val baseUrl = serverUrl.trimEnd('/').let {
+                val httpUrl = serverUrl.trimEnd('/').let {
                     when {
                         it.startsWith("wss://") -> "https://" + it.removePrefix("wss://")
                         it.startsWith("ws://")  -> "http://"  + it.removePrefix("ws://")
@@ -168,13 +169,20 @@ class SettingsViewModel @Inject constructor(
                         else                    -> it
                     }
                 }
+                // Pfad entfernen (z.B. /ws) – nur Schema + Host + Port behalten
+                val baseUrl = try {
+                    val parsed = URI(httpUrl)
+                    val port = if (parsed.port > 0) ":${parsed.port}" else ""
+                    "${parsed.scheme}://${parsed.host}$port"
+                } catch (_: Exception) { httpUrl }
+
                 if (baseUrl.isBlank()) {
                     _loginState.value = "error: Server-URL fehlt"
                     return@launch
                 }
-                val bodyJson = """{"username":"${username.replace("\"","\\\"").replace("\\","\\\\")
-                    }","password":"${password.replace("\"","\\\"").replace("\\","\\\\")
-                    }"}"""
+                val safeUser = username.replace("\\", "\\\\").replace("\"", "\\\"")
+                val safePass = password.replace("\\", "\\\\").replace("\"", "\\\"")
+                val bodyJson = """{"username":"$safeUser","password":"$safePass"}"""
                 val reqBody = bodyJson.toRequestBody("application/json".toMediaType())
                 val request = Request.Builder()
                     .url("$baseUrl/api/login")

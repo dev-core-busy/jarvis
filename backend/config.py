@@ -235,7 +235,16 @@ class Config:
         print("Settings von v1 nach v2 migriert.")
 
     def _save_to_file(self):
-        """Speichert alles im v2-Format."""
+        """Speichert alles im v2-Format. Bestehende 'extra'-Section wird erhalten."""
+        # Bestehende extra-Section laden (AD-Config, etc.)
+        existing_extra = {}
+        try:
+            if self.SETTINGS_FILE.exists():
+                existing = json.loads(self.SETTINGS_FILE.read_text())
+                existing_extra = existing.get("extra", {})
+        except Exception:
+            pass
+
         data = {
             "version": 2,
             "active_profile_id": self.active_profile_id,
@@ -246,6 +255,8 @@ class Config:
             "skills": self._skill_states,
             "mcp_servers": self._mcp_servers,
         }
+        if existing_extra:
+            data["extra"] = existing_extra
         self.SETTINGS_FILE.write_text(json.dumps(data, indent=4))
 
     def save_global_settings(self, settings: dict):

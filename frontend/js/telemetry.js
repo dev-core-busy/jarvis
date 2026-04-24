@@ -17,6 +17,12 @@ class JarvisTelemetryManager {
         const ipSel = document.getElementById('conv-log-ip-filter');
         if (ipSel) ipSel.addEventListener('change', () => this._loadConvLog());
 
+        const userSel = document.getElementById('conv-log-user-filter');
+        if (userSel) userSel.addEventListener('change', () => this._loadConvLog());
+
+        const refreshBtn = document.getElementById('conv-log-refresh-btn');
+        if (refreshBtn) refreshBtn.addEventListener('click', () => this._loadConvLog());
+
         const clearBtn = document.getElementById('conv-log-clear-btn');
         if (clearBtn) clearBtn.addEventListener('click', () => this._clearConvLog());
     }
@@ -122,11 +128,14 @@ class JarvisTelemetryManager {
         if (!body) return;
         body.innerHTML = '<div class="kb-loading">Lade…</div>';
 
-        // IPs nachladen (einmalig oder bei Bedarf)
-        await this._loadConvLogIps();
+        // IPs und Benutzer nachladen
+        await Promise.all([this._loadConvLogIps(), this._loadConvLogUsers()]);
 
         const ip = (document.getElementById('conv-log-ip-filter') || {}).value || '';
-        const url = '/api/conv_log?limit=100' + (ip ? '&ip=' + encodeURIComponent(ip) : '');
+        const user = (document.getElementById('conv-log-user-filter') || {}).value || '';
+        let url = '/api/conv_log?limit=100';
+        if (ip) url += '&ip=' + encodeURIComponent(ip);
+        if (user) url += '&user=' + encodeURIComponent(user);
         try {
             const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + this._token() } });
             if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -167,6 +176,24 @@ class JarvisTelemetryManager {
         } catch (_) {}
     }
 
+    async _loadConvLogUsers() {
+        const sel = document.getElementById('conv-log-user-filter');
+        if (!sel) return;
+        try {
+            const res = await fetch('/api/conv_log/users', { headers: { 'Authorization': 'Bearer ' + this._token() } });
+            if (!res.ok) return;
+            const users = await res.json();
+            const cur = sel.value;
+            sel.innerHTML = '<option value="">Alle Benutzer</option>';
+            for (const u of users) {
+                const opt = document.createElement('option');
+                opt.value = u; opt.textContent = u;
+                if (u === cur) opt.selected = true;
+                sel.appendChild(opt);
+            }
+        } catch (_) {}
+    }
+
     _renderConvEntry(e) {
         const ts  = new Date(e.ts * 1000).toLocaleString('de-DE');
         const dur = _fmtDur(e.duration_ms);
@@ -191,6 +218,7 @@ class JarvisTelemetryManager {
     <span style="flex:1;font-size:0.83rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;">${(e.task||'').replace(/</g,'&lt;')}</span>
     <span style="display:flex;align-items:center;gap:5px;flex-shrink:0;flex-wrap:wrap;">
       ${errBadge}
+      ${e.username ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:99px;background:rgba(46,204,113,0.18);color:#2ecc71;border:1px solid rgba(46,204,113,0.25);">👤 ${e.username}</span>` : ''}
       <span style="font-size:0.68rem;padding:1px 5px;border-radius:99px;background:rgba(79,70,229,0.18);color:var(--accent-hover);border:1px solid rgba(129,140,248,0.2);">${e.client_type||'browser'}</span>
       <span style="font-size:0.71rem;color:var(--text-muted);">${e.client_ip||''}</span>
       <span style="font-size:0.71rem;color:var(--text-muted);">${e.model||''}</span>

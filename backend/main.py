@@ -152,9 +152,14 @@ agent_manager = None  # AgentManager fuer Multi-Agent Support
 # Client-Typ pro WebSocket-Verbindung
 # Schlüssel: id(ws), Wert: "browser" | "windows_desktop" | "android"
 _ws_client_types: dict[int, str] = {}
+# Authentifizierter Benutzer pro WebSocket-Verbindung
+_ws_usernames: dict[int, str] = {}
 
 def _get_client_type(ws) -> str:
     return _ws_client_types.get(id(ws), "browser")
+
+def _get_ws_username(ws) -> str:
+    return _ws_usernames.get(id(ws), "")
 
 # Erlaubte Linux-Benutzer für Web-Login
 ALLOWED_USERS = {"jarvis"}
@@ -214,11 +219,11 @@ def generate_token(username: str) -> str:
 
 
 def verify_token(token: str) -> str | None:
-    """Token verifizieren (gültig für 24h). Gibt Benutzername zurück oder None."""
+    """Token verifizieren (gültig für 30 Tage). Gibt Benutzername zurück oder None."""
     try:
         username, ts, sig = token.split(":", 2)
         age = time.time() - int(ts)
-        if age > 86400:
+        if age > 2592000:  # 30 Tage
             return None
         expected = hmac.new(
             config.SECRET_KEY.encode(),
@@ -607,6 +612,16 @@ async def index():
     )
 
 
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_page():
+    """Chat-UI ausliefern (separater Web-Zugang)."""
+    chat_file = FRONTEND_DIR / "chat.html"
+    return HTMLResponse(
+        content=chat_file.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
 @app.post("/api/login")
 async def login(request: Request):
     """Multi-User Login via Linux PAM → Token + Desktop-Session-Wechsel."""
@@ -629,20 +644,122 @@ async def login(request: Request):
             status_code=400,
         )
 
-    if authenticate_linux_user(username, password):
-        token = generate_token(username)
-        must_change = _get_user_auth_state(username).get("must_change_password", True)
-        # Desktop-Session im Hintergrund wechseln (nur im Nicht-Docker-Modus)
-        if not _DOCKER_MODE:
-            asyncio.get_event_loop().run_in_executor(None, switch_desktop_session, username)
-        return JSONResponse({"success": True, "token": token, "username": username,
-                             "must_change_password": must_change})
+    if not authenticate_linux_user(username, password):
+        _record_login_attempt(client_ip)
+        return JSONResponse(
+            {"success": False, "error": "Benutzername oder Passwort falsch"},
+            status_code=401,
+        )
 
-    _record_login_attempt(client_ip)
-    return JSONResponse(
-        {"success": False, "error": "Benutzername oder Passwort falsch"},
-        status_code=401,
-    )
+    user_state = _get_user_auth_state(username)
+    must_change = user_state.get("must_change_password", True)
+
+    # 2FA aktiviert? → TOTP-Code prüfen
+    if user_state.get("totp_enabled") and user_state.get("totp_secret"):
+        totp_code = body.get("totp_code", "").strip()
+        if not totp_code:
+            # Passwort korrekt, aber 2FA-Code fehlt → Frontend zeigt TOTP-Eingabe
+            return JSONResponse({"success": False, "requires_totp": True,
+                                 "error": "2FA-Code erforderlich"})
+        import pyotp
+        totp = pyotp.TOTP(user_state["totp_secret"])
+        if not totp.verify(totp_code, valid_window=1):
+            _record_login_attempt(client_ip)
+            return JSONResponse(
+                {"success": False, "requires_totp": True,
+                 "error": "Ungültiger 2FA-Code"},
+                status_code=401,
+            )
+
+    token = generate_token(username)
+    # Desktop-Session im Hintergrund wechseln (nur im Nicht-Docker-Modus)
+    if not _DOCKER_MODE:
+        asyncio.get_event_loop().run_in_executor(None, switch_desktop_session, username)
+    return JSONResponse({"success": True, "token": token, "username": username,
+                         "must_change_password": must_change})
+
+
+# ─── 2FA / TOTP (Google Authenticator etc.) ──────────────────────────
+
+@app.get("/api/auth/totp/status")
+async def totp_status(username: str = Depends(require_auth)):
+    """Gibt zurück ob 2FA für den Benutzer aktiviert ist."""
+    user_state = _get_user_auth_state(username)
+    return JSONResponse({
+        "enabled": bool(user_state.get("totp_enabled")),
+    })
+
+
+@app.post("/api/auth/totp/setup")
+async def totp_setup(username: str = Depends(require_auth)):
+    """Generiert ein neues TOTP-Secret + QR-Code (Base64 PNG).
+    Aktiviert 2FA noch NICHT – erst nach Verifizierung via /totp/verify.
+    """
+    import pyotp
+    import qrcode
+    import qrcode.image.pil
+    import io
+    import base64
+
+    secret = pyotp.random_base32()
+    # Provisioning-URI für Google Authenticator / Authy etc.
+    totp = pyotp.TOTP(secret)
+    # Benutzer-Label: Domain-Prefix entfernen für Übersichtlichkeit
+    display_name = username.split("\\")[-1] if "\\" in username else username
+    uri = totp.provisioning_uri(name=display_name, issuer_name="Jarvis")
+
+    # QR-Code als Base64-PNG generieren
+    img = qrcode.make(uri, image_factory=qrcode.image.pil.PilImage, box_size=6, border=2)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    qr_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    # Secret temporär speichern (noch nicht aktiviert!)
+    _set_user_auth_state(username, {"totp_secret": secret, "totp_enabled": False})
+
+    return JSONResponse({
+        "secret": secret,
+        "qr_code": f"data:image/png;base64,{qr_b64}",
+        "uri": uri,
+    })
+
+
+@app.post("/api/auth/totp/verify")
+async def totp_verify(request: Request, username: str = Depends(require_auth)):
+    """Verifiziert den ersten TOTP-Code und aktiviert 2FA."""
+    body = await request.json()
+    code = body.get("code", "").strip()
+    if not code:
+        return JSONResponse({"success": False, "error": "Code erforderlich"}, status_code=400)
+
+    user_state = _get_user_auth_state(username)
+    secret = user_state.get("totp_secret")
+    if not secret:
+        return JSONResponse({"success": False, "error": "Kein TOTP-Setup gefunden"}, status_code=400)
+
+    import pyotp
+    totp = pyotp.TOTP(secret)
+    if not totp.verify(code, valid_window=1):
+        return JSONResponse({"success": False, "error": "Ungültiger Code"}, status_code=401)
+
+    # 2FA aktivieren
+    _set_user_auth_state(username, {"totp_enabled": True})
+    return JSONResponse({"success": True, "message": "2FA aktiviert"})
+
+
+@app.post("/api/auth/totp/disable")
+async def totp_disable(request: Request, username: str = Depends(require_auth)):
+    """Deaktiviert 2FA. Erfordert aktuelles Passwort zur Bestätigung."""
+    body = await request.json()
+    password = body.get("password", "")
+    if not password:
+        return JSONResponse({"success": False, "error": "Passwort zur Bestätigung erforderlich"}, status_code=400)
+
+    if not authenticate_linux_user(username, password):
+        return JSONResponse({"success": False, "error": "Falsches Passwort"}, status_code=401)
+
+    _set_user_auth_state(username, {"totp_enabled": False, "totp_secret": None})
+    return JSONResponse({"success": True, "message": "2FA deaktiviert"})
 
 
 @app.post("/api/change-password")
@@ -788,17 +905,22 @@ async def clear_telemetry(user: str = Depends(require_auth)):
 
 
 # ─── Konversations-Verlauf ────────────────────────────────────────────────────
-from backend.conv_log import get_conversations, get_known_ips, clear as clear_conv_log
+from backend.conv_log import get_conversations, get_known_ips, get_known_users, clear as clear_conv_log
 
 @app.get("/api/conv_log")
 async def api_conv_log(request: Request, user: str = Depends(require_auth)):
     limit = int(request.query_params.get("limit", "50"))
     ip = request.query_params.get("ip") or None
-    return JSONResponse(get_conversations(limit=limit, ip_filter=ip))
+    username = request.query_params.get("user") or None
+    return JSONResponse(get_conversations(limit=limit, ip_filter=ip, user_filter=username))
 
 @app.get("/api/conv_log/ips")
 async def api_conv_log_ips(user: str = Depends(require_auth)):
     return JSONResponse(get_known_ips())
+
+@app.get("/api/conv_log/users")
+async def api_conv_log_users(user: str = Depends(require_auth)):
+    return JSONResponse(get_known_users())
 
 @app.delete("/api/conv_log")
 async def api_conv_log_clear(user: str = Depends(require_auth)):
@@ -817,12 +939,26 @@ async def system_restart(user: str = Depends(require_auth)):
     return JSONResponse({"ok": True, "message": "Neustart eingeleitet"})
 
 
+def _check_vnc_available() -> bool:
+    """Prüft ob x11vnc auf Port 5900 erreichbar ist (schneller TCP-Connect)."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        s.connect(("localhost", 5900))
+        s.close()
+        return True
+    except (ConnectionRefusedError, OSError, socket.timeout):
+        return False
+
+
 @app.get("/api/config")
 async def get_config():
     """Öffentliche Konfiguration für Frontend."""
+    vnc_ok = await asyncio.get_event_loop().run_in_executor(None, _check_vnc_available)
     return JSONResponse({
         "websockify_port": config.WEBSOCKIFY_PORT,
-        "vnc_available": True,
+        "vnc_available": vnc_ok,
     })
 @app.get("/api/cert")
 async def download_cert():
@@ -1787,6 +1923,7 @@ async def list_mounts(user: str = Depends(require_auth)):
             "type": m.get("type", "smb"),
             "source": m.get("source", ""),
             "active": mp.is_mount(),
+            "auto_mount": m.get("auto_mount", True),
             "mountpoint": str(mp),
         })
     return JSONResponse(result)
@@ -1921,6 +2058,10 @@ async def mount_share(idx: int, user: str = Depends(require_auth)):
     if result.returncode != 0:
         return JSONResponse({"error": f"Mount fehlgeschlagen: {result.stderr.strip()}"}, status_code=500)
 
+    # auto_mount aktivieren – Benutzer will diese Freigabe verbunden haben
+    mounts[idx]["auto_mount"] = True
+    _save_mounts_config(mounts)
+
     # Nach erfolgreichem Mount Index automatisch neu aufbauen
     try:
         from backend.tools.knowledge import force_reindex
@@ -1936,11 +2077,22 @@ async def mount_share(idx: int, user: str = Depends(require_auth)):
 async def unmount_share(idx: int, user: str = Depends(require_auth)):
     mp = _mount_path(idx)
     if not mp.is_mount():
+        # Auch bei bereits getrenntem Mount: auto_mount deaktivieren
+        mounts = _get_mounts_config()
+        if 0 <= idx < len(mounts):
+            mounts[idx]["auto_mount"] = False
+            _save_mounts_config(mounts)
         return JSONResponse({"ok": True, "hint": "War nicht gemountet"})
 
     result = await asyncio.to_thread(subprocess.run, ["umount", str(mp)], capture_output=True, text=True, timeout=10)
     if result.returncode != 0:
         return JSONResponse({"error": f"Unmount fehlgeschlagen: {result.stderr.strip()}"}, status_code=500)
+
+    # auto_mount deaktivieren – manuelle Trennung respektieren
+    mounts = _get_mounts_config()
+    if 0 <= idx < len(mounts):
+        mounts[idx]["auto_mount"] = False
+        _save_mounts_config(mounts)
 
     return JSONResponse({"ok": True})
 
@@ -2342,7 +2494,7 @@ async def openclaw_search(q: str = "", user: str = Depends(require_auth)):
                 })
     except Exception as e:
         results = []
-        _log(f"ClawHub API nicht erreichbar ({e})")
+        print(f"[WARN] ClawHub API nicht erreichbar ({e})")
 
     return JSONResponse({"results": results, "query": query})
 
@@ -3153,8 +3305,9 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         cpu_task.cancel()
         active_sessions.pop(session_id, None)
-        # Client-Typ entfernen
+        # Client-Typ + Username entfernen
         ct = _ws_client_types.pop(id(ws), "browser")
+        _ws_usernames.pop(id(ws), None)
         # Desktop-Client abmelden falls diese Verbindung es war
         if ct == "windows_desktop":
             try:
@@ -3192,11 +3345,15 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
     # Token pruefen: Login-Token ODER Agent API Key akzeptieren
     token = msg.get("token", "")
     if msg_type != "ping":
-        is_login_token = verify_token(token) is not None
+        token_username = verify_token(token)
+        is_login_token = token_username is not None
         is_api_key = bool(config.AGENT_API_KEY) and hmac.compare_digest(token, config.AGENT_API_KEY)
         if not is_login_token and not is_api_key:
             await ws.send_json({"type": "error", "message": "Nicht autorisiert"})
             return
+        # Username pro WS-Verbindung merken
+        if token_username:
+            _ws_usernames[id(ws)] = token_username
 
     if msg_type == "task":
         # Neue Aufgabe starten
@@ -3249,7 +3406,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         if target_agent_id and agent_manager.get_agent(target_agent_id):
             target = agent_manager.get_agent(target_agent_id)
             if target.is_sub_agent:
-                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip))
+                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws)))
                 return
 
         agent = agent_manager.get_or_create_main()
@@ -3266,7 +3423,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Aufgabe im Hintergrund starten – sendet 'finished' wenn fertig (für Windows-TTS)
         async def _run_main_agent_and_notify():
             try:
-                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip)
+                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws))
             except Exception:
                 pass
             finally:
@@ -3523,6 +3680,17 @@ async def startup():
     except Exception as e:
         print(f"⚠️  Vision auto-start fehlgeschlagen: {e}")
 
+    # Embedding-Modell im Hintergrund vorladen (vermeidet 6-30s Kaltstart bei erster Suche)
+    def _preload_embeddings():
+        import time
+        time.sleep(3)  # Warten bis Hauptprozess stabil
+        try:
+            from backend.tools.knowledge import preload_embedding_model
+            preload_embedding_model()
+        except Exception as e:
+            print(f"[knowledge] Embedding-Preload fehlgeschlagen: {e}", flush=True)
+    threading.Thread(target=_preload_embeddings, daemon=True).start()
+
     # SMB/NFS-Mounts beim Start automatisch wiederherstellen
     async def _auto_remount_shares():
         import asyncio as _asyncio
@@ -3533,6 +3701,10 @@ async def startup():
                 return
             needs_reindex = False
             for idx, m in enumerate(mounts):
+                # Manuell getrennte Shares nicht automatisch wieder mounten
+                if m.get("auto_mount") is False:
+                    print(f"[knowledge] Überspringe {m['source']} (manuell getrennt)", flush=True)
+                    continue
                 mp = _mount_path(idx)
                 if mp.is_mount():
                     continue  # Bereits gemountet

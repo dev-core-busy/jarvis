@@ -85,10 +85,18 @@
         loginError.hidden = true;
 
         try {
+            const payload = { username, password };
+            // TOTP-Code mitschicken falls Feld sichtbar
+            const totpRow = document.getElementById('totp-row');
+            const totpInput = document.getElementById('login-totp');
+            if (totpRow && totpRow.style.display !== 'none' && totpInput && totpInput.value.trim()) {
+                payload.totp_code = totpInput.value.trim();
+            }
+
             const res = await fetch('/api/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password }),
+                body: JSON.stringify(payload),
             });
             const data = await res.json();
 
@@ -97,10 +105,20 @@
                 currentUser = data.username || username;
                 localStorage.setItem('jarvis_token', token);
                 localStorage.setItem('jarvis_user', currentUser);
+                if (totpRow) totpRow.style.display = 'none';
+                if (totpInput) totpInput.value = '';
                 if (data.must_change_password) {
-                    showChangePwModal(true); // Pflicht beim ersten Login
+                    showChangePwModal(true);
                 } else {
-                    showMainScreen(); // initVNC() übernimmt sofortigen VNC-Verbindungsaufbau
+                    showMainScreen();
+                }
+            } else if (data.requires_totp) {
+                // Passwort korrekt, 2FA-Code nötig → TOTP-Feld einblenden
+                if (totpRow) totpRow.style.display = '';
+                if (totpInput) totpInput.focus();
+                if (data.error && data.error !== '2FA-Code erforderlich') {
+                    loginError.textContent = data.error;
+                    loginError.hidden = false;
                 }
             } else {
                 loginError.textContent = data.error || 'Anmeldung fehlgeschlagen';

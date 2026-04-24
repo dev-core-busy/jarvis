@@ -17,6 +17,8 @@ class JarvisVNC {
         this.websockifyPort = null;
         this._reconnectTimer  = null;
         this._countdownTimer  = null;
+        this._healthCheckTimer = null;
+        this._connectRetries  = 0;
         this._overlay     = null;
         this._probingActive = false;
     }
@@ -26,6 +28,7 @@ class JarvisVNC {
     connect(websockifyPort) {
         this.websockifyPort = websockifyPort;
         this._probingActive = false;
+        this._connectRetries = 0;
         this._clearTimers();
 
         const host = window.location.hostname || 'localhost';
@@ -35,7 +38,8 @@ class JarvisVNC {
         // WebSocket-Pfad: /ws/vnc → FastAPI proxied zu x11vnc TCP 5900
         // Token für VNC-Auth mitgeben
         const t = localStorage.getItem('jarvis_token') || '';
-        const vncUrl = `/novnc/vnc.html?autoconnect=true&resize=scale&view_only=false&host=${host}&port=${port}&path=ws/vnc?token=${encodeURIComponent(t)}&encrypt=1`;
+        const wsPath = encodeURIComponent(`ws/vnc?token=${encodeURIComponent(t)}`);
+        const vncUrl = `/novnc/vnc.html?autoconnect=true&resize=scale&view_only=false&host=${host}&port=${port}&path=${wsPath}&encrypt=1`;
 
         this.iframe.src    = vncUrl;
         this.iframe.hidden = false;
@@ -43,10 +47,51 @@ class JarvisVNC {
         this.connected     = true;
         this._removeOverlay();
 
-        this.statusEl.textContent = 'Verbunden';
-        this.statusEl.style.color = '#10b981';
+        this.statusEl.textContent = 'Verbinde…';
+        this.statusEl.style.color = '#f59e0b';
 
-        this.iframe.onerror = () => this.showError();
+        this.iframe.onerror = () => this._handleConnectFailure();
+
+        // Verbindung nach 4s prüfen: noVNC sendet 'connect'/'disconnect' Events via postMessage
+        // Fallback: nach 4s Health-Check ob VNC-WebSocket tatsächlich steht
+        this._healthCheckTimer = setTimeout(() => this._verifyConnection(), 4000);
+    }
+
+    /** Prüft ob die VNC-Verbindung tatsächlich steht, sonst Retry */
+    async _verifyConnection() {
+        if (!this.connected) return;
+        try {
+            const res = await fetch('/api/config', { cache: 'no-store' });
+            const data = await res.json();
+            if (data.vnc_available) {
+                // x11vnc läuft – Verbindung als OK annehmen
+                this.statusEl.textContent = 'Verbunden';
+                this.statusEl.style.color = '#10b981';
+            } else {
+                this._handleConnectFailure();
+            }
+        } catch {
+            this._handleConnectFailure();
+        }
+    }
+
+    /** Automatischer Retry bei fehlgeschlagenem Connect (max 5 Versuche) */
+    _handleConnectFailure() {
+        this._connectRetries = (this._connectRetries || 0) + 1;
+        if (this._connectRetries <= 5) {
+            console.log(`[VNC] Verbindung fehlgeschlagen, Retry ${this._connectRetries}/5...`);
+            this.statusEl.textContent = `Retry ${this._connectRetries}/5…`;
+            this.statusEl.style.color = '#f59e0b';
+            this.connected = false;
+            this.iframe.src = '';
+            // Kurze Pause, dann erneut probieren
+            this._reconnectTimer = setTimeout(() => {
+                this.connect(this.websockifyPort);
+            }, 2000);
+        } else {
+            console.log('[VNC] Max Retries erreicht');
+            this.showError();
+        }
     }
 
     // ─── Intelligentes Probing (ersetzt fixen Countdown) ─────────
@@ -153,8 +198,9 @@ class JarvisVNC {
     }
 
     _clearTimers() {
-        if (this._countdownTimer) { clearInterval(this._countdownTimer); this._countdownTimer = null; }
-        if (this._reconnectTimer) { clearTimeout(this._reconnectTimer);  this._reconnectTimer = null; }
+        if (this._countdownTimer)  { clearInterval(this._countdownTimer);  this._countdownTimer = null; }
+        if (this._reconnectTimer)  { clearTimeout(this._reconnectTimer);   this._reconnectTimer = null; }
+        if (this._healthCheckTimer){ clearTimeout(this._healthCheckTimer);  this._healthCheckTimer = null; }
     }
 
     // ─── Fehler / Disconnect ──────────────────────────────────────

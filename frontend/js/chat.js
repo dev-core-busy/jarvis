@@ -590,4 +590,13 @@
             else logout();
         }).catch(() => showChat());
     }
+
+    // PWA Service Worker registrieren
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/static/sw.js').then((reg) => {
+            console.log('[PWA] Service Worker registriert:', reg.scope);
+        }).catch((err) => {
+            console.warn('[PWA] Service Worker Fehler:', err);
+        });
+    }
 })();

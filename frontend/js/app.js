@@ -1159,8 +1159,9 @@
         const tabSecurity = document.getElementById('settings-tab-security');
         const tabCron    = document.getElementById('settings-tab-cron');
         const tabContext = document.getElementById('settings-tab-context');
+        const tabAudit   = document.getElementById('settings-tab-audit');
 
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron, tabContext];
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron, tabContext, tabAudit];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -1219,6 +1220,10 @@
                     tabContext.style.display = '';
                     tabContext.classList.add('active');
                     if (window.contextManager) window.contextManager.init();
+                } else if (target === 'audit' && tabAudit) {
+                    tabAudit.style.display = '';
+                    tabAudit.classList.add('active');
+                    if (window.auditManager) window.auditManager.init();
                 }
 
                 // Polling stoppen wenn weg-navigiert

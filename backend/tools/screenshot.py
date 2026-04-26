@@ -138,3 +138,80 @@ class ScreenshotTool(BaseTool):
                 f"(DISPLAY={display}, XAUTH={xauth}). "
                 f"Fehler: {'; '.join(errors)}"
             )
+
+
+class WaitForChangeTool(BaseTool):
+    """Wartet auf eine sichtbare Änderung auf dem Desktop (Screenshot-Diff)."""
+
+    @property
+    def name(self) -> str:
+        return "wait_for_screen_change"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Wartet aktiv auf eine sichtbare visuelle Änderung auf dem Desktop. "
+            "Macht alle 0.5s einen Screenshot und vergleicht Pixel-Differenz. "
+            "Gibt bei Änderung einen neuen Screenshot zurück; bei Timeout eine Fehlermeldung."
+        )
+
+    def parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "timeout_sec": {
+                    "type": "integer",
+                    "description": "Maximale Wartezeit in Sekunden (Standard: 15, max: 60).",
+                },
+                "threshold": {
+                    "type": "number",
+                    "description": "Pixel-Differenz-Schwellwert 0.0–1.0 (Standard: 0.01 = 1%).",
+                },
+            },
+            "required": [],
+        }
+
+    async def execute(self, timeout_sec: int = 15, threshold: float = 0.01, **kwargs) -> str:
+        try:
+            from PIL import Image, ImageChops
+            import io
+        except ImportError:
+            return "Fehler: Pillow ist nicht installiert."
+
+        timeout_sec = min(int(timeout_sec), 60)
+        threshold = max(0.0, min(float(threshold), 1.0))
+
+        screenshot_tool = ScreenshotTool()
+
+        async def _take() -> bytes | None:
+            result = await screenshot_tool.execute()
+            if result.startswith(IMAGE_PREFIX):
+                # Format: IMAGE_BASE64:<path>|<b64>
+                b64_part = result[len(IMAGE_PREFIX):].split("|", 1)[-1]
+                return base64.b64decode(b64_part)
+            return None
+
+        baseline_bytes = await _take()
+        if not baseline_bytes:
+            return "Fehler: Ausgangsbild konnte nicht aufgenommen werden."
+
+        baseline = Image.open(io.BytesIO(baseline_bytes)).convert("RGB")
+        total_pixels = baseline.width * baseline.height
+        elapsed = 0.0
+
+        while elapsed < timeout_sec:
+            await asyncio.sleep(0.5)
+            elapsed += 0.5
+            current_bytes = await _take()
+            if not current_bytes:
+                continue
+            current = Image.open(io.BytesIO(current_bytes)).convert("RGB")
+            diff = ImageChops.difference(baseline, current)
+            # Anzahl veränderter Pixel (beliebiger Kanal > 10)
+            changed = sum(1 for px in diff.getdata() if max(px) > 10)
+            ratio = changed / total_pixels
+            if ratio >= threshold:
+                b64 = base64.b64encode(current_bytes).decode()
+                return f"{IMAGE_PREFIX}/tmp/jarvis_screenshots/waitforchange.png|{b64}"
+
+        return f"⏱️ Timeout nach {timeout_sec}s – keine sichtbare Änderung erkannt (Schwellwert: {threshold*100:.1f}%)."

@@ -1159,10 +1159,9 @@
         const tabSecurity = document.getElementById('settings-tab-security');
         const tabCron    = document.getElementById('settings-tab-cron');
         const tabContext = document.getElementById('settings-tab-context');
-        const tabAudit     = document.getElementById('settings-tab-audit');
-        const tabExtractor = document.getElementById('settings-tab-extractor');
+        const tabAudit   = document.getElementById('settings-tab-audit');
 
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron, tabContext, tabAudit, tabExtractor];
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron, tabContext, tabAudit];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -1193,6 +1192,7 @@
                     tabKnowledge.style.display = '';
                     tabKnowledge.classList.add('active');
                     if (window.knowledgeManager) window.knowledgeManager.init();
+                    if (window.extractorManager) window.extractorManager.init();
                 } else if (target === 'google' && tabGoogle) {
                     tabGoogle.style.display = '';
                     tabGoogle.classList.add('active');
@@ -1225,10 +1225,6 @@
                     tabAudit.style.display = '';
                     tabAudit.classList.add('active');
                     if (window.auditManager) window.auditManager.init();
-                } else if (target === 'extractor' && tabExtractor) {
-                    tabExtractor.style.display = '';
-                    tabExtractor.classList.add('active');
-                    if (window.extractorManager) window.extractorManager.init();
                 }
 
                 // Polling stoppen wenn weg-navigiert

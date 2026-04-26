@@ -10,14 +10,31 @@ from typing import Any
 
 from backend.tools.base import BaseTool
 
-# Memory-Datei
-MEMORY_FILE = Path(__file__).parent.parent.parent / "data" / "memory.json"
+# Memory-Verzeichnis
+_DATA_DIR = Path(__file__).parent.parent.parent / "data"
+
+# Legacy-Datei (Rückwärtskompatibilität)
+MEMORY_FILE = _DATA_DIR / "memory.json"
 
 # Thread-Lock fuer parallelen Zugriff (Sub-Agents laufen in Threads)
 _lock = threading.Lock()
 
-# In-Memory Cache (vermeidet Disk-Reads bei jedem Zugriff)
-_cache: dict | None = None
+# In-Memory Caches pro Benutzer
+_cache: dict | None = None          # Legacy-Alias (zeigt auf "jarvis"-Cache)
+_user_caches: dict[str, dict | None] = {}
+
+
+def _get_memory_path(username: str = "") -> Path:
+    """Gibt den Memory-Dateipfad für einen Benutzer zurück.
+
+    Leerer Username / 'jarvis' → Rückwärtskompatibel: data/memory.json
+    Andere User → data/memory_{username}.json
+    """
+    if not username or username in ("jarvis", ""):
+        return MEMORY_FILE
+    # Nur sichere Dateinamen erlauben
+    safe = re.sub(r'[^a-zA-Z0-9_\-]', '_', username)
+    return _DATA_DIR / f"memory_{safe}.json"
 
 # Token-Limits
 TOKEN_LIMIT = 2000       # Warnung im System-Prompt
@@ -29,44 +46,57 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-def _load_memory_dict() -> dict:
+def _load_memory_dict(username: str = "") -> dict:
     """Laedt Memory aus Cache oder JSON-Datei mit Backup-Recovery."""
     global _cache
-    if _cache is not None:
-        return _cache
+    mem_file = _get_memory_path(username)
+    cache_key = username or "jarvis"
 
-    MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    if MEMORY_FILE.exists():
+    # Cache-Treffer
+    if cache_key in _user_caches and _user_caches[cache_key] is not None:
+        return _user_caches[cache_key]
+
+    mem_file.parent.mkdir(parents=True, exist_ok=True)
+    if mem_file.exists():
         try:
-            _cache = json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
-            return _cache
+            data = json.loads(mem_file.read_text(encoding="utf-8"))
+            _user_caches[cache_key] = data
+            if cache_key == "jarvis":
+                _cache = data  # Legacy-Alias
+            return data
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"[MEMORY] WARNUNG: memory.json korrupt ({e}), versuche Backup...", flush=True)
-            bak = MEMORY_FILE.with_suffix(".json.bak")
+            print(f"[MEMORY] WARNUNG: {mem_file.name} korrupt ({e}), versuche Backup...", flush=True)
+            bak = mem_file.with_suffix(".json.bak")
             if bak.exists():
                 try:
                     data = json.loads(bak.read_text(encoding="utf-8"))
                     print(f"[MEMORY] Backup geladen ({len(data)} Eintraege)", flush=True)
-                    MEMORY_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-                    _cache = data
-                    return _cache
+                    mem_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                    _user_caches[cache_key] = data
+                    if cache_key == "jarvis":
+                        _cache = data
+                    return data
                 except Exception:
                     pass
-            print("[MEMORY] Kein nutzbares Backup gefunden, starte mit leerem Memory", flush=True)
-            _cache = {}
-            return _cache
-    _cache = {}
-    return _cache
+            print(f"[MEMORY] Kein nutzbares Backup für {cache_key}, starte mit leerem Memory", flush=True)
+    _user_caches[cache_key] = {}
+    if cache_key == "jarvis":
+        _cache = {}
+    return _user_caches[cache_key]
 
 
-def _save_memory_dict(memory: dict):
+def _save_memory_dict(memory: dict, username: str = ""):
     """Speichert Memory mit Backup der vorherigen Version und aktualisiert Cache."""
     global _cache
-    MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    if MEMORY_FILE.exists():
-        shutil.copy2(MEMORY_FILE, MEMORY_FILE.with_suffix(".json.bak"))
-    MEMORY_FILE.write_text(json.dumps(memory, indent=2, ensure_ascii=False), encoding="utf-8")
-    _cache = memory
+    mem_file = _get_memory_path(username)
+    cache_key = username or "jarvis"
+    mem_file.parent.mkdir(parents=True, exist_ok=True)
+    if mem_file.exists():
+        shutil.copy2(mem_file, mem_file.with_suffix(".json.bak"))
+    mem_file.write_text(json.dumps(memory, indent=2, ensure_ascii=False), encoding="utf-8")
+    _user_caches[cache_key] = memory
+    if cache_key == "jarvis":
+        _cache = memory
 
 
 class MemoryTool(BaseTool):
@@ -121,8 +151,9 @@ class MemoryTool(BaseTool):
         key = kwargs.get("key", "")
         value = kwargs.get("value", "")
         query = kwargs.get("query", "")
+        username = str(kwargs.get("_username", "") or "")
 
-        memory = _load_memory_dict()
+        memory = _load_memory_dict(username)
 
         if action == "save":
             if not key or not value:
@@ -138,7 +169,7 @@ class MemoryTool(BaseTool):
                 "value": str(value),
                 "updated": datetime.now().isoformat(),
             }
-            _save_memory_dict(memory)
+            _save_memory_dict(memory, username)
             count = len(memory)
             tokens = _estimate_tokens(json.dumps(memory, ensure_ascii=False))
             hint = f" (Memory: {count} Eintraege, ~{tokens} Tokens)" if tokens > COMPRESS_THRESHOLD else ""
@@ -168,7 +199,7 @@ class MemoryTool(BaseTool):
                 return "❌ 'key' ist für 'delete' erforderlich."
             if key in memory:
                 del memory[key]
-                _save_memory_dict(memory)
+                _save_memory_dict(memory, username)
                 return f"🗑️ Gelöscht: {key}"
             return f"❓ Kein Eintrag '{key}' zum Löschen gefunden."
 
@@ -204,12 +235,12 @@ class MemoryTool(BaseTool):
         return f"❌ Unbekannte Aktion: {action}. Erlaubt: save, get, list, delete, search, compress."
 
 
-def load_memory_context() -> str:
+def load_memory_context(username: str = "") -> str:
     """Lädt alle Memory-Einträge als Kontext-String für den System-Prompt.
 
     Wird beim Start jeder Konversation automatisch injiziert.
     """
-    memory = _load_memory_dict()
+    memory = _load_memory_dict(username)
     if not memory:
         return ""
 
@@ -246,19 +277,19 @@ def load_memory_context() -> str:
     return context
 
 
-def load_selective_memory(task_text: str = "") -> str:
+def load_selective_memory(task_text: str = "", username: str = "") -> str:
     """Laedt Memory selektiv: Strategien/Tipps immer, Rest nur wenn relevant.
 
     Bei kleinem Memory (<50 Eintraege) wird alles geladen.
     Bei grossem Memory werden nur relevante Eintraege + Strategien geladen.
     """
-    memory = _load_memory_dict()
+    memory = _load_memory_dict(username)
     if not memory:
         return ""
 
     # Bei kleinem Memory: alles laden (alter Weg)
     if len(memory) < 50:
-        return load_memory_context()
+        return load_memory_context(username)
 
     # Bei grossem Memory: selektiv laden
     task_lower = task_text.lower() if task_text else ""

@@ -3655,6 +3655,15 @@ async def cron_run_now(job_id: str, req: Request):
         raise HTTPException(404, str(e))
 
 
+# ─── Audit-Log ───────────────────────────────────────────────────────
+@app.get("/api/audit_log")
+async def audit_log_list(req: Request, limit: int = 200, user: str = "", tool: str = ""):
+    _require_auth(req)
+    from backend.audit_log import read_log
+    entries = read_log(limit=limit, user_filter=user, tool_filter=tool)
+    return JSONResponse(entries)
+
+
 # ─── Datei-Watcher ───────────────────────────────────────────────────
 from backend.file_watcher import watcher_manager
 

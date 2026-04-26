@@ -583,7 +583,6 @@
 
     // ─── Spracheingabe (Mic-Button) ──────────────────────────────────
     const btnMic = $('btn-mic');
-    const msgInput = $('msg-input');
     let isRecording = false;
     let recognition = null;
 

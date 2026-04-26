@@ -1,0 +1,52 @@
+{
+    "name": "Telegram Bot",
+    "description": "Telegram Bot Integration – empfängt Nachrichten und sendet Antworten über einen Telegram Bot",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["telegram_send"],
+    "category": "kommunikation",
+    "icon": "message-circle",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "bot_token": {
+            "type": "string",
+            "label": "Bot Token",
+            "description": "Telegram Bot Token von @BotFather (z.B. 1234567890:ABCdefGHI...)",
+            "secret": true,
+            "required": true
+        },
+        "allowed_chat_ids": {
+            "type": "string",
+            "label": "Erlaubte Chat-IDs",
+            "description": "Kommagetrennte Liste der erlaubten Chat-IDs (leer = alle erlaubt)",
+            "required": false
+        },
+        "welcome_message": {
+            "type": "string",
+            "label": "Willkommensnachricht",
+            "description": "Nachricht bei /start Befehl",
+            "required": false
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": ["python-telegram-bot>=21.0"],
+    "permissions": ["network"],
+    "help": {
+        "details": "Verbindet Jarvis mit einem Telegram Bot. Nachrichten an den Bot werden als Jarvis-Tasks ausgeführt. Antworten gehen zurück an den Telegram-Chat.\n\n**Setup:**\n1. @BotFather in Telegram anschreiben → /newbot\n2. Bot-Token in Skill-Einstellungen eintragen\n3. Skill aktivieren\n4. Bot in Telegram anschreiben: /start",
+        "tools": [
+            {
+                "name": "telegram_send",
+                "label": "Telegram Nachricht senden",
+                "desc": "Sendet eine Textnachricht an einen Telegram-Chat."
+            }
+        ],
+        "use_cases": [
+            "Sende 'Server läuft!' an Telegram",
+            "Schicke den Tagesbericht per Telegram",
+            "Benachrichtige mich auf Telegram wenn der Backup fertig ist"
+        ],
+        "notes": "Benötigt python-telegram-bot >= 21.0. Bei erstem Start: Skill-Abhängigkeiten installieren."
+    }
+}

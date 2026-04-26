@@ -51,9 +51,10 @@ class CronManager:
     def get_job(self, job_id: str) -> Optional[dict]:
         return next((j for j in self._jobs if j["id"] == job_id), None)
 
-    def add_job(self, label: str, cron: str, task: str, enabled: bool = True) -> dict:
+    def add_job(self, label: str, cron: str, task: str, enabled: bool = True,
+                job_id: str | None = None) -> dict:
         job = {
-            "id": str(uuid.uuid4()),
+            "id": job_id or str(uuid.uuid4()),
             "label": label,
             "cron": cron,
             "task": task,
@@ -62,7 +63,10 @@ class CronManager:
             "last_result": None,
         }
         self._validate_cron(cron)
+        # Vorhandenen Job mit gleicher ID ersetzen
+        self._jobs = [j for j in self._jobs if j["id"] != job["id"]]
         self._jobs.append(job)
+        self._unregister(job["id"])
         if enabled:
             self._register(job)
         self._save()

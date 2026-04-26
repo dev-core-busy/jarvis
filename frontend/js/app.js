@@ -1157,9 +1157,10 @@
         const tabTelemetry = document.getElementById('settings-tab-telemetry');
         const tabInstructions = document.getElementById('settings-tab-instructions');
         const tabSecurity = document.getElementById('settings-tab-security');
-        const tabCron = document.getElementById('settings-tab-cron');
+        const tabCron    = document.getElementById('settings-tab-cron');
+        const tabContext = document.getElementById('settings-tab-context');
 
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron];
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron, tabContext];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -1214,12 +1215,15 @@
                     tabCron.style.display = '';
                     tabCron.classList.add('active');
                     if (window.cronManager) window.cronManager.init();
+                } else if (target === 'context' && tabContext) {
+                    tabContext.style.display = '';
+                    tabContext.classList.add('active');
+                    if (window.contextManager) window.contextManager.init();
                 }
 
-                // Vision-Polling stoppen wenn weg-navigiert
-                if (target !== 'vision' && window.visionManager) {
-                    window.visionManager.stop();
-                }
+                // Polling stoppen wenn weg-navigiert
+                if (target !== 'vision'   && window.visionManager)   window.visionManager.stop();
+                if (target !== 'context'  && window.contextManager)  window.contextManager.stop();
             });
         });
 

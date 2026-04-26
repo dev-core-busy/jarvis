@@ -930,6 +930,43 @@ async def api_conv_log_clear(user: str = Depends(require_auth)):
     return JSONResponse({"ok": True})
 
 
+@app.get("/api/context/stats")
+async def api_context_stats(user: str = Depends(require_auth)):
+    """Aktuelle Kontext-Statistiken des Hauptagenten."""
+    agent = agent_manager.main_agent
+    if not agent:
+        return JSONResponse({"history_entries": 0, "compress_threshold": 30,
+                             "fills_pct": 0, "session_input_tokens": 0,
+                             "session_output_tokens": 0, "session_total_tokens": 0,
+                             "estimated_history_tokens": 0, "agent_state": "idle"})
+    return JSONResponse(agent.get_context_stats())
+
+
+@app.post("/api/context/compress")
+async def api_context_compress(user: str = Depends(require_auth)):
+    """Erzwingt sofortige History-Komprimierung."""
+    agent = agent_manager.main_agent
+    if not agent:
+        return JSONResponse({"error": "Kein aktiver Agent"}, status_code=404)
+    result = await agent.force_compress()
+    return JSONResponse(result)
+
+
+@app.post("/api/context/threshold")
+async def api_context_threshold(request: Request, user: str = Depends(require_auth)):
+    """Setzt den Komprimierungs-Schwellwert (Anzahl History-Einträge)."""
+    body = await request.json()
+    threshold = int(body.get("threshold", 30))
+    threshold = max(4, min(200, threshold))
+    # Auf laufenden Agenten anwenden
+    agent = agent_manager.main_agent
+    if agent:
+        agent._compress_threshold = threshold
+    # Persistieren
+    config.save_setting("compress_threshold", threshold)
+    return JSONResponse({"threshold": threshold, "ok": True})
+
+
 @app.post("/api/system/restart")
 async def system_restart(user: str = Depends(require_auth)):
     """Startet den Jarvis-Dienst neu (via systemctl)."""

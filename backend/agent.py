@@ -234,6 +234,7 @@ KRITISCH – Autonomie-Regeln:
         self._current_task: asyncio.Task | None = None
         self._created_at = time.time()
         self._tool_stats: list[dict] = []  # Tool-Ausfuehrungslog fuer Auto-Learning
+        self._tool_cache: dict[str, str] = {}  # Tool-Ergebnis-Cache (lebt nur pro Task)
 
         # Skill Manager initialisieren (laedt alle aktivierten Skills)
         self.skill_manager = SkillManager()
@@ -259,6 +260,21 @@ KRITISCH – Autonomie-Regeln:
             self._tool_instances.append(AndroidDesktopTool())
         except Exception as e:
             print(f"[AGENT {self.agent_id}] AndroidDesktopTool nicht geladen: {e}", flush=True)
+
+        # Clipboard Tools (xclip-basiert)
+        try:
+            from backend.tools.clipboard import ReadClipboardTool, WriteClipboardTool
+            self._tool_instances.append(ReadClipboardTool())
+            self._tool_instances.append(WriteClipboardTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] ClipboardTools nicht geladen: {e}", flush=True)
+
+        # Screenshot-Diff / Wartelogik
+        try:
+            from backend.tools.screenshot import WaitForChangeTool
+            self._tool_instances.append(WaitForChangeTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] WaitForChangeTool nicht geladen: {e}", flush=True)
 
         # MCP-Tools laden (externe Tool-Server)
         try:
@@ -327,6 +343,7 @@ KRITISCH – Autonomie-Regeln:
         self.state = AgentState.RUNNING
         self._stop_flag = False
         self._pause_event.set()
+        self._tool_cache.clear()  # Cache für diesen Task-Run leeren
 
         # Provider bei jedem Start neu initialisieren (für geänderte Einstellungen)
         self.provider = get_provider(
@@ -555,6 +572,9 @@ KRITISCH – Autonomie-Regeln:
                         parts=function_response_parts,
                     )
                 )
+
+                # Kontextfenster-Management: lange Historien komprimieren
+                chat_history = await self._compress_history(chat_history, system_prompt)
 
                 llm_span = tracer.start_span(f"llm:step_{steps+1}", kind="llm", parent_id=self.agent_id)
                 llm_span.attributes["model"] = config.current_model
@@ -834,9 +854,20 @@ KRITISCH – Autonomie-Regeln:
 
         return "\n".join(collected_texts) if collected_texts else "Aufgabe ausgefuehrt (keine Textausgabe)."
 
+    # Tools, deren Ergebnisse innerhalb eines Task-Runs gecacht werden können
+    _CACHEABLE_TOOLS = {"read_file", "screenshot", "read_clipboard"}
+
     async def _execute_tool(self, name: str, args: dict, ws=None) -> str:
         """Fuehrt ein Tool aus. Bei Streaming-Tools wird Live-Output gesendet."""
+        import json as _json
         from backend.telemetry import tracer
+
+        # Cache-Check für cacheable Tools
+        if name in self._CACHEABLE_TOOLS:
+            cache_key = f"{name}:{_json.dumps(args, sort_keys=True)}"
+            if cache_key in self._tool_cache:
+                return self._tool_cache[cache_key]
+
         tool = self.tools_map.get(name)
         if not tool:
             return f"Fehler: Tool '{name}' nicht gefunden"
@@ -858,6 +889,11 @@ KRITISCH – Autonomie-Regeln:
             else:
                 result = await tool.execute(**exec_args)
             tracer.end_span(span, status="ok")
+            # Ergebnis cachen wenn Tool cacheable ist
+            if name in self._CACHEABLE_TOOLS:
+                import json as _json
+                cache_key = f"{name}:{_json.dumps(args, sort_keys=True)}"
+                self._tool_cache[cache_key] = result
             return result
         except Exception as e:
             tracer.end_span(span, status="error", error=str(e))
@@ -879,6 +915,70 @@ KRITISCH – Autonomie-Regeln:
             return f"Sub-Agent '{label}' gestartet (ID: {sub.agent_id})"
         except Exception as e:
             return f"Fehler beim Starten von Sub-Agent '{label}': {e}"
+
+    async def _compress_history(self, chat_history: list, system_prompt: str) -> list:
+        """Komprimiert lange Chat-Historien: Zusammenfassung der älteren Nachrichten."""
+        # Nur komprimieren wenn mehr als 30 Einträge (ca. 15 Runden)
+        if len(chat_history) <= 30:
+            return chat_history
+
+        # Letzte 4 Nachrichten behalten
+        keep = chat_history[-4:]
+        to_summarize = chat_history[:-4]
+
+        # Bisherigen Dialog für die Zusammenfassung als Text extrahieren
+        dialog_text = []
+        for entry in to_summarize:
+            try:
+                role = getattr(entry, "role", "unknown")
+                parts = getattr(entry, "parts", [])
+                for p in parts:
+                    t = getattr(p, "text", None)
+                    if t:
+                        dialog_text.append(f"[{role}] {t[:300]}")
+            except Exception:
+                pass
+
+        if not dialog_text:
+            return keep  # Nichts zu komprimieren
+
+        summary_prompt = (
+            "Fasse den folgenden Gesprächsabschnitt in maximal 300 Wörtern zusammen. "
+            "Behalte alle wichtigen Fakten, Ergebnisse und Entscheidungen.\n\n"
+            + "\n".join(dialog_text[:60])  # Maximal 60 Zeilen
+        )
+
+        try:
+            summary_response = await self.provider.generate_response(
+                model=config.current_model,
+                system_prompt="Du fasst Gespräche zusammen. Antworte ausschließlich mit der Zusammenfassung.",
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[types.Part.from_text(text=summary_prompt)],
+                    )
+                ],
+                tools=[],
+            )
+            summary_text = ""
+            if summary_response.parts:
+                for p in summary_response.parts:
+                    if p.text:
+                        summary_text += p.text
+            if summary_text:
+                summary_entry = types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(
+                        text=f"[Zusammenfassung des bisherigen Gesprächs]\n{summary_text}"
+                    )],
+                )
+                print(f"[AGENT {self.agent_id}] History komprimiert: {len(chat_history)} → {len(keep)+1} Einträge", flush=True)
+                return [summary_entry] + keep
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] History-Kompression fehlgeschlagen: {e}", flush=True)
+
+        # Fallback: nur letzte Einträge behalten
+        return keep
 
     async def _check_controls(self, ws: WebSocket):
         """Prüft Pause/Stop-Status."""

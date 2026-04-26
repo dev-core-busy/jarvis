@@ -504,8 +504,11 @@
             }
         });
 
-        // Cron-Events an cronManager weiterleiten
+        // Cron- und Watcher-Events an cronManager weiterleiten
         ws.on('cron_event', (data) => {
+            if (window.cronManager) window.cronManager.handleWsEvent(data);
+        });
+        ws.on('watcher_event', (data) => {
             if (window.cronManager) window.cronManager.handleWsEvent(data);
         });
 

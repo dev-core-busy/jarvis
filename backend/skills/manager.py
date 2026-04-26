@@ -97,6 +97,26 @@ class SkillManager:
             tools.extend(skill_data["tools"])
         return tools
 
+    def is_readonly(self, skill_name: str) -> bool:
+        """Gibt True zurück wenn der Skill als readonly markiert ist."""
+        manifest = self.loader.loaded_skills.get(skill_name, {}).get("manifest", {})
+        return bool(manifest.get("readonly", False))
+
+    def get_tool_skill(self, tool_name: str) -> str | None:
+        """Gibt den Skill-Namen zurück, der ein bestimmtes Tool bereitstellt."""
+        for skill_name, skill_data in self.loader.loaded_skills.items():
+            for tool in skill_data.get("tools", []):
+                if getattr(tool, "name", None) == tool_name:
+                    return skill_name
+        return None
+
+    def is_tool_readonly(self, tool_name: str) -> bool:
+        """Gibt True zurück wenn das Tool von einem readonly-Skill stammt."""
+        skill_name = self.get_tool_skill(tool_name)
+        if skill_name:
+            return self.is_readonly(skill_name)
+        return False
+
     def install_dependencies(self, name: str) -> str:
         """Installiert die Abhängigkeiten eines Skills."""
         skills = self.loader.discover_skills()

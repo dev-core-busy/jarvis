@@ -410,8 +410,8 @@ KRITISCH – Autonomie-Regeln:
             system_prompt += f"\n\n{instructions}"
             await self._send_status(ws, "📋 Instruktionen geladen")
 
-        # Memory-Kontext laden (selektiv nach Aufgabe + Strategien/Tipps)
-        memory_context = load_selective_memory(task_text)
+        # Memory-Kontext laden (selektiv nach Aufgabe + Strategien/Tipps, user-spezifisch)
+        memory_context = load_selective_memory(task_text, username=username)
         if memory_context:
             system_prompt += f"\n\n{memory_context}"
             await self._send_status(ws, "🧠 Memory geladen")
@@ -711,7 +711,7 @@ KRITISCH – Autonomie-Regeln:
         instructions = load_instructions()
         if instructions:
             system_prompt += f"\n\n{instructions}"
-        memory_context = load_selective_memory(task_text)
+        memory_context = load_selective_memory(task_text, username=getattr(self, '_current_username', ''))
         if memory_context:
             system_prompt += f"\n\n{memory_context}"
 
@@ -860,6 +860,7 @@ KRITISCH – Autonomie-Regeln:
     async def _execute_tool(self, name: str, args: dict, ws=None) -> str:
         """Fuehrt ein Tool aus. Bei Streaming-Tools wird Live-Output gesendet."""
         import json as _json
+        import time as _time
         from backend.telemetry import tracer
 
         # Cache-Check für cacheable Tools
@@ -881,19 +882,42 @@ KRITISCH – Autonomie-Regeln:
             exec_args = dict(args)
             if ws and getattr(tool, 'supports_streaming', False):
                 exec_args['_status_callback'] = lambda msg: self._send_status(ws, msg)
+            # Benutzer-spezifischer Memory-Namespace
+            if name == "memory_manage":
+                exec_args.setdefault('_username', getattr(self, '_current_username', ''))
+            # Read-Only Skill: schreibende Tools blockieren
+            _WRITE_TOOLS = {"shell_execute", "write_file", "desktop_action"}
+            if name in _WRITE_TOOLS and self.skill_manager.is_tool_readonly(name):
+                result = f"Zugriff verweigert: Das Tool '{name}' ist in diesem Read-Only Skill nicht erlaubt."
+                tracer.end_span(span, status="ok")
+                return result
+
             # LDAP-Benutzer: Sicherheitskritische Tools komplett blockieren
             _uname = getattr(self, '_current_username', '')
+            _t0 = _time.monotonic()
             if _uname and _uname not in _LOCAL_PRIVILEGED_USERS and name in _BLOCKED_TOOLS_FOR_LDAP:
                 print(f"[AGENT] BLOCKED Tool '{name}' fuer LDAP-User '{_uname}'", flush=True)
                 result = f"Zugriff verweigert: Das Tool '{name}' steht LDAP-Benutzern nicht zur Verfuegung."
             else:
                 result = await tool.execute(**exec_args)
+            _dur_ms = int((_time.monotonic() - _t0) * 1000)
             tracer.end_span(span, status="ok")
             # Ergebnis cachen wenn Tool cacheable ist
             if name in self._CACHEABLE_TOOLS:
-                import json as _json
                 cache_key = f"{name}:{_json.dumps(args, sort_keys=True)}"
                 self._tool_cache[cache_key] = result
+            # Audit-Log
+            try:
+                from backend.audit_log import log_tool as _audit
+                _audit(
+                    user=getattr(self, '_current_username', '') or 'unknown',
+                    tool=name,
+                    args=args,
+                    result_len=len(result) if result else 0,
+                    duration_ms=_dur_ms,
+                )
+            except Exception:
+                pass
             return result
         except Exception as e:
             tracer.end_span(span, status="error", error=str(e))

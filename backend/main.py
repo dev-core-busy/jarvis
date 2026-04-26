@@ -3888,7 +3888,6 @@ async def startup():
             for d in dead:
                 _active_ws.discard(d)
 
-        global agent_manager
         watcher_init(agent_manager, _watcher_broadcast)
         watcher_manager.start()
     except Exception as e:

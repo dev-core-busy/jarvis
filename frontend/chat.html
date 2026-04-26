@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Jarvis Chat</title>
-    <link rel="stylesheet" href="/static/css/chat.css?v=5">
+    <link rel="stylesheet" href="/static/css/chat.css?v=6">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <!-- PWA -->
     <link rel="manifest" href="/static/manifest.json">
@@ -93,6 +93,14 @@
         <div class="input-row">
             <button class="btn-stop hidden" id="btn-stop" title="Agent stoppen">✕</button>
             <textarea id="msg-input" placeholder="Nachricht eingeben…" rows="1" maxlength="10000"></textarea>
+            <button class="btn-mic" id="btn-mic" title="Spracheingabe">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" y1="19" x2="12" y2="23"/>
+                    <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+            </button>
             <button class="btn-send" id="btn-send" disabled title="Senden">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
             </button>
@@ -192,6 +200,6 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/chat.js?v=5"></script>
+<script src="/static/js/chat.js?v=6"></script>
 </body>
 </html>

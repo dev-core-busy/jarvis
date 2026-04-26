@@ -3806,6 +3806,91 @@ select.input-field {
 .audit-tool-other     { background: rgba(255,255,255,.07); color: var(--text-secondary); }
 
 /* ═══════════════════════════════════════════════════════════════════
+   Web-Extractor Tab
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Anleitung: nummerierte Schritte */
+.ext-info-step {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.ext-info-step:last-of-type { border-bottom: none; }
+
+.ext-info-num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+/* Pending-Badge */
+.ext-badge {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 1px 7px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+/* Fakten-Liste */
+.ext-facts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 4px;
+}
+
+.ext-fact-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+/* Q&A-Liste */
+.ext-qa-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.ext-qa-row {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+.ext-qa-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.ext-qa-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
    Google Apps Tab
    ═══════════════════════════════════════════════════════════════════ */
 

@@ -581,6 +581,56 @@
         });
     });
 
+    // ─── Spracheingabe (Mic-Button) ──────────────────────────────────
+    const btnMic = $('btn-mic');
+    const msgInput = $('msg-input');
+    let isRecording = false;
+    let recognition = null;
+
+    if (btnMic) {
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SR();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'de-DE';
+
+            recognition.onstart = () => {
+                isRecording = true;
+                btnMic.classList.add('recording');
+            };
+            recognition.onresult = (e) => {
+                const transcript = e.results[0][0].transcript;
+                if (msgInput) {
+                    msgInput.value = transcript;
+                    msgInput.dispatchEvent(new Event('input'));
+                }
+                stopMic();
+            };
+            recognition.onerror = () => stopMic();
+            recognition.onend = () => stopMic();
+
+            function stopMic() {
+                isRecording = false;
+                btnMic.classList.remove('recording');
+                if (recognition) recognition.stop();
+            }
+
+            btnMic.addEventListener('click', () => {
+                if (isRecording) {
+                    stopMic();
+                } else {
+                    isRecording = true;
+                    btnMic.classList.add('recording');
+                    recognition.start();
+                }
+            });
+        } else {
+            // Browser unterstützt keine Spracheingabe → Button ausblenden
+            btnMic.style.display = 'none';
+        }
+    }
+
     // Token vorhanden? → direkt zum Chat (Token wird beim ersten WS-Send validiert)
     if (token) {
         fetch('/api/config', {

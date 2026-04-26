@@ -461,6 +461,7 @@ sudo update-ca-certificates</code></pre>
                 <button class="settings-tab-btn" data-settings-tab="telemetry">Telemetry</button>
                 <button class="settings-tab-btn" data-settings-tab="security">Sicherheit</button>
                 <button class="settings-tab-btn" data-settings-tab="cron">⏰ Cron</button>
+                <button class="settings-tab-btn" data-settings-tab="context">🧠 Kontext</button>
             </div>
 
             <div class="modal-body">
@@ -1474,13 +1475,98 @@ sudo update-ca-certificates</code></pre>
                     <div id="cron-tab-content"></div>
                 </div>
 
+                <!-- ═══ Tab: Kontext ═══ -->
+                <div id="settings-tab-context" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+
+                        <!-- Statistiken -->
+                        <div class="kb-section">
+                            <div class="kb-section-header">
+                                <h3>Aktuelle Session</h3>
+                                <button id="ctx-refresh-btn" class="kb-btn-secondary" title="Aktualisieren">🔄</button>
+                            </div>
+                            <p class="kb-hint">Zeigt den Zustand des laufenden Hauptagenten. Token-Angaben werden nur aktualisiert, wenn eine Aufgabe aktiv ist.</p>
+                            <div class="kb-stat-grid" id="ctx-stat-grid" style="margin-top:0.5rem;">
+                                <div class="kb-stat">
+                                    <div class="kb-stat-value" id="ctx-history-entries">—</div>
+                                    <div class="kb-stat-label">History-Einträge</div>
+                                </div>
+                                <div class="kb-stat">
+                                    <div class="kb-stat-value" id="ctx-fills-pct">—</div>
+                                    <div class="kb-stat-label">Auslastung</div>
+                                </div>
+                                <div class="kb-stat">
+                                    <div class="kb-stat-value" id="ctx-input-tokens">—</div>
+                                    <div class="kb-stat-label">Input-Tokens</div>
+                                </div>
+                                <div class="kb-stat">
+                                    <div class="kb-stat-value" id="ctx-output-tokens">—</div>
+                                    <div class="kb-stat-label">Output-Tokens</div>
+                                </div>
+                                <div class="kb-stat">
+                                    <div class="kb-stat-value" id="ctx-total-tokens">—</div>
+                                    <div class="kb-stat-label">Tokens gesamt</div>
+                                </div>
+                                <div class="kb-stat">
+                                    <div class="kb-stat-value" id="ctx-hist-tokens">—</div>
+                                    <div class="kb-stat-label">History-Tokens (Schätz.)</div>
+                                </div>
+                                <div class="kb-stat">
+                                    <div class="kb-stat-value" id="ctx-agent-state">—</div>
+                                    <div class="kb-stat-label">Agent-Status</div>
+                                </div>
+                                <div class="kb-stat">
+                                    <div class="kb-stat-value" id="ctx-threshold-display">—</div>
+                                    <div class="kb-stat-label">Komprimierungs-Schwelle</div>
+                                </div>
+                            </div>
+                            <!-- Fortschrittsbalken -->
+                            <div style="margin-top:1rem;">
+                                <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                                    <span class="kb-hint" style="margin:0;">History-Auslastung</span>
+                                    <span class="kb-hint" id="ctx-fills-label" style="margin:0;">0 / 30 Einträge</span>
+                                </div>
+                                <div style="height:6px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden;">
+                                    <div id="ctx-fills-bar" style="height:100%;width:0%;background:var(--accent);border-radius:4px;transition:width 0.4s;"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Komprimierung -->
+                        <div class="kb-section">
+                            <div class="kb-section-header">
+                                <h3>Komprimierung</h3>
+                            </div>
+                            <p class="kb-hint">Wenn die History den Schwellwert überschreitet, fasst Jarvis den älteren Teil automatisch per LLM zusammen. Du kannst die Komprimierung auch manuell auslösen.</p>
+                            <div class="kb-form-grid-2" style="margin-top:0.75rem;margin-bottom:0;">
+                                <div class="kb-form-field">
+                                    <label class="kb-label" for="ctx-threshold-input">Schwellwert (History-Einträge)</label>
+                                    <div style="display:flex;gap:8px;">
+                                        <input id="ctx-threshold-input" type="number" min="4" max="200" step="2" value="30" class="kb-input">
+                                        <button id="ctx-threshold-save" class="kb-btn-action">Speichern</button>
+                                    </div>
+                                    <p class="kb-hint" style="margin-top:4px;">Min: 4 · Max: 200 · Standard: 30</p>
+                                </div>
+                                <div class="kb-form-field" style="justify-content:flex-end;">
+                                    <label class="kb-label">Manuelle Komprimierung</label>
+                                    <button id="ctx-compress-btn" class="kb-btn-action" style="align-self:flex-start;">🗜️ Jetzt komprimieren</button>
+                                    <p class="kb-hint" style="margin-top:4px;" id="ctx-compress-result"></p>
+                                </div>
+                            </div>
+                            <div id="ctx-notification" class="kb-notification" style="display:none;margin-top:0.5rem;"></div>
+                        </div>
+
+                    </div>
+                </div><!-- /settings-tab-context -->
+
             </div>
             <div id="version-modal-footer" class="settings-version-footer"></div>
         </div>
     </div>
 
     <script src="/static/js/websocket.js?v=6"></script>
-    <script src="/static/js/cron.js?v=2"></script>
+    <script src="/static/js/cron.js?v=3"></script>
+    <script src="/static/js/context.js?v=1"></script>
     <script src="/static/js/vnc.js?v=13"></script>
     <script src="/static/js/skills.js?v=21"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
@@ -1488,7 +1574,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=3"></script>
-    <script src="/static/js/app.js?v=58"></script>
+    <script src="/static/js/app.js?v=59"></script>
 </body>
 
 </html>

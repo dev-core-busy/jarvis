@@ -236,6 +236,17 @@ KRITISCH – Autonomie-Regeln:
         self._tool_stats: list[dict] = []  # Tool-Ausfuehrungslog fuer Auto-Learning
         self._tool_cache: dict[str, str] = {}  # Tool-Ergebnis-Cache (lebt nur pro Task)
 
+        # Kontext-Tracking (live während run_task; abfragbar via API)
+        try:
+            from backend.config import config as _cfg
+            _saved_threshold = _cfg.get_setting("compress_threshold")
+            self._compress_threshold: int = int(_saved_threshold) if _saved_threshold else 30
+        except Exception:
+            self._compress_threshold: int = 30   # Fallback
+        self._current_chat_history: list = [] # Live-Referenz auf aktuelle History
+        self._session_input_tokens:  int = 0  # Token-Zähler (aktuelle Session)
+        self._session_output_tokens: int = 0  # Token-Zähler (aktuelle Session)
+
         # Skill Manager initialisieren (laedt alle aktivierten Skills)
         self.skill_manager = SkillManager()
 
@@ -421,6 +432,9 @@ KRITISCH – Autonomie-Regeln:
         try:
             # Konversation starten
             chat_history = []
+            self._current_chat_history  = chat_history  # Live-Referenz für Context-Stats-API
+            self._session_input_tokens  = 0             # Token-Zähler zurücksetzen
+            self._session_output_tokens = 0
             task_start_time = _task_start_time
             _total_input_tokens  = 0
             _total_output_tokens = 0
@@ -448,6 +462,8 @@ KRITISCH – Autonomie-Regeln:
             if response.usage:
                 _total_input_tokens  += response.usage.get("input_tokens", 0)
                 _total_output_tokens += response.usage.get("output_tokens", 0)
+                self._session_input_tokens  = _total_input_tokens
+                self._session_output_tokens = _total_output_tokens
             parts_count = len(response.parts) if response.parts else 0
             _log(f"LLM-Antwort erhalten: {parts_count} Parts")
             if parts_count == 0:
@@ -594,6 +610,8 @@ KRITISCH – Autonomie-Regeln:
                 if response.usage:
                     _total_input_tokens  += response.usage.get("input_tokens", 0)
                     _total_output_tokens += response.usage.get("output_tokens", 0)
+                    self._session_input_tokens  = _total_input_tokens
+                    self._session_output_tokens = _total_output_tokens
 
                 steps += 1
 
@@ -942,8 +960,8 @@ KRITISCH – Autonomie-Regeln:
 
     async def _compress_history(self, chat_history: list, system_prompt: str) -> list:
         """Komprimiert lange Chat-Historien: Zusammenfassung der älteren Nachrichten."""
-        # Nur komprimieren wenn mehr als 30 Einträge (ca. 15 Runden)
-        if len(chat_history) <= 30:
+        # Nur komprimieren wenn über dem Schwellwert
+        if len(chat_history) <= self._compress_threshold:
             return chat_history
 
         # Letzte 4 Nachrichten behalten
@@ -1062,6 +1080,52 @@ KRITISCH – Autonomie-Regeln:
 
     def set_speed(self, speed: float):
         self._speed = max(0.1, min(5.0, speed))
+
+    def get_context_stats(self) -> dict:
+        """Gibt aktuelle Kontext-Statistiken zurück (History-Länge, Tokens, Schwellwert)."""
+        history = self._current_chat_history
+        n = len(history)
+        # Groben Token-Schätzwert aus History-Text berechnen (~4 Zeichen pro Token)
+        estimated_chars = 0
+        for entry in history:
+            try:
+                for p in getattr(entry, "parts", []):
+                    t = getattr(p, "text", None)
+                    if t:
+                        estimated_chars += len(t)
+            except Exception:
+                pass
+        estimated_tokens = estimated_chars // 4
+        return {
+            "history_entries":    n,
+            "compress_threshold": self._compress_threshold,
+            "fills_pct":          round(min(100, n / max(1, self._compress_threshold) * 100), 1),
+            "session_input_tokens":  self._session_input_tokens,
+            "session_output_tokens": self._session_output_tokens,
+            "session_total_tokens":  self._session_input_tokens + self._session_output_tokens,
+            "estimated_history_tokens": estimated_tokens,
+            "agent_state": self.state.value,
+        }
+
+    async def force_compress(self) -> dict:
+        """Erzwingt sofortige History-Komprimierung (unabhängig vom Schwellwert)."""
+        h = self._current_chat_history
+        before = len(h)
+        if before < 4:
+            return {"before": before, "after": before, "skipped": True, "reason": "zu kurz"}
+        # Temporär Schwellwert auf 0 setzen, komprimieren, dann Ergebnis zurückschreiben
+        orig_threshold = self._compress_threshold
+        self._compress_threshold = 0
+        try:
+            from backend.llm import get_provider
+            compressed = await self._compress_history(h, "")
+            # History in-place ersetzen (da _current_chat_history eine Referenz ist,
+            # müssen wir den Inhalt der ursprünglichen Liste ersetzen)
+            h.clear()
+            h.extend(compressed)
+        finally:
+            self._compress_threshold = orig_threshold
+        return {"before": before, "after": len(h), "skipped": False}
 
     def get_info(self) -> dict:
         """Agent-Info fuer Frontend."""

@@ -489,5 +489,5 @@ class JarvisCronManager {
     }
 }
 
-// Singleton
-const cronManager = new JarvisCronManager();
+// Singleton – als window-Property damit app.js darauf zugreifen kann
+window.cronManager = new JarvisCronManager();

@@ -460,6 +460,7 @@ sudo update-ca-certificates</code></pre>
                 <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;">Vision</button>
                 <button class="settings-tab-btn" data-settings-tab="telemetry">Telemetry</button>
                 <button class="settings-tab-btn" data-settings-tab="security">Sicherheit</button>
+                <button class="settings-tab-btn" data-settings-tab="cron">⏰ Cron</button>
             </div>
 
             <div class="modal-body">
@@ -1468,12 +1469,18 @@ sudo update-ca-certificates</code></pre>
                     </script>
                 </div>
 
+                <!-- ═══ Tab: Cron-Aufgaben ═══ -->
+                <div id="settings-tab-cron" class="settings-tab-content" style="display:none;">
+                    <div id="cron-tab-content"></div>
+                </div>
+
             </div>
             <div id="version-modal-footer" class="settings-version-footer"></div>
         </div>
     </div>
 
     <script src="/static/js/websocket.js?v=6"></script>
+    <script src="/static/js/cron.js?v=1"></script>
     <script src="/static/js/vnc.js?v=13"></script>
     <script src="/static/js/skills.js?v=21"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
@@ -1481,7 +1488,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=3"></script>
-    <script src="/static/js/app.js?v=56"></script>
+    <script src="/static/js/app.js?v=57"></script>
 </body>
 
 </html>

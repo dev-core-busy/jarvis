@@ -3694,11 +3694,26 @@ async def cron_run_now(job_id: str, req: Request):
 
 # ─── Audit-Log ───────────────────────────────────────────────────────
 @app.get("/api/audit_log")
-async def audit_log_list(req: Request, limit: int = 200, user: str = "", tool: str = ""):
-    _require_auth(req)
+async def audit_log_list(request: Request, limit: int = 200, user: str = "", tool: str = "",
+                         _u: str = Depends(require_auth)):
     from backend.audit_log import read_log
     entries = read_log(limit=limit, user_filter=user, tool_filter=tool)
     return JSONResponse(entries)
+
+
+@app.delete("/api/audit_log")
+async def audit_log_clear(_u: str = Depends(require_auth)):
+    """Löscht das Audit-Log."""
+    from backend.audit_log import AUDIT_FILE
+    try:
+        if AUDIT_FILE.exists():
+            AUDIT_FILE.write_text("", encoding="utf-8")
+        bak = AUDIT_FILE.with_suffix(".jsonl.bak")
+        if bak.exists():
+            bak.unlink()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True})
 
 
 # ─── Datei-Watcher ───────────────────────────────────────────────────

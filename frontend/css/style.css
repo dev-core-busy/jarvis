@@ -3732,6 +3732,80 @@ select.input-field {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   Audit-Log Tab
+   ═══════════════════════════════════════════════════════════════════ */
+
+.audit-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.audit-table thead tr {
+    background: rgba(255,255,255,0.05);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.audit-table th {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.audit-table td {
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    vertical-align: middle;
+    color: var(--text-primary);
+}
+
+.audit-table tbody tr:hover td {
+    background: rgba(255,255,255,0.03);
+}
+
+.audit-ts   { color: var(--text-secondary); white-space: nowrap; font-size: 0.75rem; }
+.audit-user { font-weight: 500; }
+.audit-dur  { color: var(--text-secondary); white-space: nowrap; }
+.audit-res  { color: var(--text-secondary); white-space: nowrap; }
+.audit-args { font-size: 0.75rem; font-family: monospace; word-break: break-word; max-width: 280px; }
+.audit-arg-key { color: var(--text-secondary); }
+.audit-arg-val { color: var(--text-primary); }
+
+.audit-empty {
+    text-align: center;
+    padding: 2rem !important;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+/* Tool-Badges */
+.audit-tool-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-size: 0.72rem;
+    font-family: monospace;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.audit-tool-shell     { background: rgba(231,76,60,.15);   color: #e74c3c; }
+.audit-tool-fs        { background: rgba(52,152,219,.15);  color: #3498db; }
+.audit-tool-desktop   { background: rgba(155,89,182,.15);  color: #9b59b6; }
+.audit-tool-msg       { background: rgba(46,204,113,.15);  color: #2ecc71; }
+.audit-tool-memory    { background: rgba(243,156,18,.15);  color: #f39c12; }
+.audit-tool-knowledge { background: rgba(26,188,156,.15);  color: #1abc9c; }
+.audit-tool-agent     { background: rgba(99,102,241,.15);  color: #6366f1; }
+.audit-tool-other     { background: rgba(255,255,255,.07); color: var(--text-secondary); }
+
+/* ═══════════════════════════════════════════════════════════════════
    Google Apps Tab
    ═══════════════════════════════════════════════════════════════════ */
 

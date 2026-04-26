@@ -3817,6 +3817,7 @@ async def startup():
                 _active_ws.discard(d)
 
         from backend.agent import AgentManager as _AM
+        global agent_manager
         if agent_manager is None:
             agent_manager = _AM()
         scheduler_init(agent_manager, _cron_broadcast)

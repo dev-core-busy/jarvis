@@ -460,8 +460,9 @@ sudo update-ca-certificates</code></pre>
                 <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;">Vision</button>
                 <button class="settings-tab-btn" data-settings-tab="telemetry">Telemetry</button>
                 <button class="settings-tab-btn" data-settings-tab="security">Sicherheit</button>
-                <button class="settings-tab-btn" data-settings-tab="cron">⏰ Cron</button>
-                <button class="settings-tab-btn" data-settings-tab="context">🧠 Kontext</button>
+                <button class="settings-tab-btn" data-settings-tab="cron">Cron</button>
+                <button class="settings-tab-btn" data-settings-tab="context">Kontext</button>
+                <button class="settings-tab-btn" data-settings-tab="audit">Audit</button>
             </div>
 
             <div class="modal-body">
@@ -1559,6 +1560,70 @@ sudo update-ca-certificates</code></pre>
                     </div>
                 </div><!-- /settings-tab-context -->
 
+                <!-- ═══ Tab: Audit-Log ═══ -->
+                <div id="settings-tab-audit" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+
+                        <!-- Header + Filter -->
+                        <div class="kb-section">
+                            <div class="kb-section-header">
+                                <h3>Tool-Audit-Log</h3>
+                                <div style="display:flex;gap:6px;">
+                                    <button id="audit-refresh-btn" class="kb-btn-secondary" title="Aktualisieren">🔄</button>
+                                    <button id="audit-clear-btn"   class="kb-btn-danger"    title="Log löschen">🗑️ Löschen</button>
+                                </div>
+                            </div>
+                            <p class="kb-hint">Jeder Tool-Aufruf des Agenten wird hier protokolliert (max. 10 MB, danach automatische Rotation).</p>
+
+                            <!-- Filter-Zeile -->
+                            <div class="kb-form-grid-2" style="margin-bottom:0;">
+                                <div class="kb-form-field">
+                                    <label class="kb-label" for="audit-filter-user">Filter: Benutzer</label>
+                                    <input id="audit-filter-user" type="text" placeholder="Alle" class="kb-input">
+                                </div>
+                                <div class="kb-form-field">
+                                    <label class="kb-label" for="audit-filter-tool">Filter: Tool</label>
+                                    <input id="audit-filter-tool" type="text" placeholder="Alle" class="kb-input">
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+                                <label class="kb-label" style="margin:0;white-space:nowrap;" for="audit-limit">Einträge:</label>
+                                <select id="audit-limit" class="kb-input" style="flex:0 0 auto;width:100px;">
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                    <option value="200" selected>200</option>
+                                    <option value="500">500</option>
+                                </select>
+                                <button id="audit-apply-btn" class="kb-btn-action">Anwenden</button>
+                                <span id="audit-count" class="kb-hint" style="margin:0;margin-left:auto;"></span>
+                            </div>
+                            <div id="audit-notification" class="kb-notification" style="display:none;margin-top:8px;"></div>
+                        </div>
+
+                        <!-- Tabelle -->
+                        <div class="kb-section" style="padding:0;overflow:hidden;">
+                            <div id="audit-table-wrap" style="overflow-x:auto;max-height:480px;overflow-y:auto;">
+                                <table id="audit-table" class="audit-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Zeit</th>
+                                            <th>Benutzer</th>
+                                            <th>Tool</th>
+                                            <th>Dauer</th>
+                                            <th>Ergebnis</th>
+                                            <th>Argumente</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="audit-tbody">
+                                        <tr><td colspan="6" class="audit-empty">Lade…</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                    </div>
+                </div><!-- /settings-tab-audit -->
+
             </div>
             <div id="version-modal-footer" class="settings-version-footer"></div>
         </div>
@@ -1567,6 +1632,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=3"></script>
     <script src="/static/js/context.js?v=1"></script>
+    <script src="/static/js/audit.js?v=1"></script>
     <script src="/static/js/vnc.js?v=13"></script>
     <script src="/static/js/skills.js?v=21"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
@@ -1574,7 +1640,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=3"></script>
-    <script src="/static/js/app.js?v=59"></script>
+    <script src="/static/js/app.js?v=60"></script>
 </body>
 
 </html>

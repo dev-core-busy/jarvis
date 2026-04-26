@@ -154,6 +154,8 @@ agent_manager = None  # AgentManager fuer Multi-Agent Support
 _ws_client_types: dict[int, str] = {}
 # Authentifizierter Benutzer pro WebSocket-Verbindung
 _ws_usernames: dict[int, str] = {}
+# Alle aktiven WebSocket-Verbindungen (für Broadcasts)
+_active_ws: set = set()
 
 def _get_client_type(ws) -> str:
     return _ws_client_types.get(id(ws), "browser")
@@ -3289,6 +3291,7 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     session_id = str(id(ws))
     active_sessions[session_id] = ws
+    _active_ws.add(ws)
 
     # CPU-Last-Sender im Hintergrund
     cpu_task = asyncio.create_task(cpu_broadcast(ws))
@@ -3305,6 +3308,7 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         cpu_task.cancel()
         active_sessions.pop(session_id, None)
+        _active_ws.discard(ws)
         # Client-Typ + Username entfernen
         ct = _ws_client_types.pop(id(ws), "browser")
         _ws_usernames.pop(id(ws), None)
@@ -3595,6 +3599,62 @@ async def _start_http_redirect():
     print("🔀 HTTP→HTTPS Redirect aktiv (Port 80 → 443)")
 
 
+# ─── Cron-Trigger ────────────────────────────────────────────────────
+from backend.scheduler import cron_manager
+
+@app.get("/api/cron")
+async def cron_list(req: Request):
+    _require_auth(req)
+    return JSONResponse(cron_manager.list_jobs())
+
+
+@app.post("/api/cron")
+async def cron_create(req: Request):
+    _require_auth(req)
+    body = await req.json()
+    try:
+        job = cron_manager.add_job(
+            label=body.get("label", "Job"),
+            cron=body["cron"],
+            task=body["task"],
+            enabled=body.get("enabled", True),
+        )
+        return JSONResponse(job, status_code=201)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.put("/api/cron/{job_id}")
+async def cron_update(job_id: str, req: Request):
+    _require_auth(req)
+    body = await req.json()
+    try:
+        job = cron_manager.update_job(job_id, **body)
+        return JSONResponse(job)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/cron/{job_id}")
+async def cron_delete(job_id: str, req: Request):
+    _require_auth(req)
+    try:
+        cron_manager.delete_job(job_id)
+        return JSONResponse({"ok": True})
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/cron/{job_id}/run")
+async def cron_run_now(job_id: str, req: Request):
+    _require_auth(req)
+    try:
+        result = await cron_manager.run_now(job_id)
+        return JSONResponse({"ok": True, "result": result[:500] if result else ""})
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
 # ─── Startup ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
@@ -3740,6 +3800,40 @@ async def startup():
             print(f"⚠️  Knowledge Auto-Mount fehlgeschlagen: {e}", flush=True)
 
     asyncio.create_task(_auto_remount_shares())
+
+    # Cron-Scheduler starten
+    try:
+        from backend.scheduler import cron_manager, init as scheduler_init
+
+        async def _cron_broadcast(msg: dict):
+            """Sendet Cron-Events an alle verbundenen WebSocket-Clients."""
+            dead = []
+            for ws_client in list(_active_ws):
+                try:
+                    await ws_client.send_json(msg)
+                except Exception:
+                    dead.append(ws_client)
+            for d in dead:
+                _active_ws.discard(d)
+
+        from backend.agent import AgentManager as _AM
+        if agent_manager is None:
+            agent_manager = _AM()
+        scheduler_init(agent_manager, _cron_broadcast)
+        cron_manager.start()
+    except Exception as e:
+        print(f"⚠️  Cron-Scheduler konnte nicht gestartet werden: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Scheduler sauber beenden."""
+    try:
+        from backend.scheduler import cron_manager
+        cron_manager.stop()
+        print("⏹️  Cron-Scheduler gestoppt")
+    except Exception:
+        pass
 
 
 # ─── Direkt ausführen ─────────────────────────────────────────────────

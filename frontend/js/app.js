@@ -504,6 +504,11 @@
             }
         });
 
+        // Cron-Events an cronManager weiterleiten
+        ws.on('cron_event', (data) => {
+            if (window.cronManager) window.cronManager.handleWsEvent(data);
+        });
+
         // Alle Nachrichten als DOM-Event weitersenden (für OpenClaw Import-Modal etc.)
         ws.on('message', (data) => {
             window.dispatchEvent(new CustomEvent('jarvis-ws-message', { detail: data }));
@@ -1149,8 +1154,9 @@
         const tabTelemetry = document.getElementById('settings-tab-telemetry');
         const tabInstructions = document.getElementById('settings-tab-instructions');
         const tabSecurity = document.getElementById('settings-tab-security');
+        const tabCron = document.getElementById('settings-tab-cron');
 
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity];
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -1201,6 +1207,10 @@
                     tabSecurity.style.display = '';
                     tabSecurity.classList.add('active');
                     _initSecurityTab();
+                } else if (target === 'cron' && tabCron) {
+                    tabCron.style.display = '';
+                    tabCron.classList.add('active');
+                    if (window.cronManager) window.cronManager.init();
                 }
 
                 // Vision-Polling stoppen wenn weg-navigiert

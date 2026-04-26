@@ -3563,6 +3563,174 @@ select.input-field {
     .kb-input { width: 100%; }
 }
 
+/* ─── Erweiterungen: Danger / Run / Label / Chip ─────────────────── */
+.kb-btn-danger {
+    padding: 0.3rem 0.65rem;
+    border-radius: 6px;
+    border: none;
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+    cursor: pointer;
+    font-size: 0.78rem;
+    transition: background 0.2s;
+}
+.kb-btn-danger:hover { background: rgba(231, 76, 60, 0.28); }
+
+.kb-btn-run {
+    padding: 0.3rem 0.65rem;
+    border-radius: 6px;
+    border: none;
+    background: rgba(46, 204, 113, 0.15);
+    color: #2ecc71;
+    cursor: pointer;
+    font-size: 0.78rem;
+    transition: background 0.2s;
+}
+.kb-btn-run:hover:not(:disabled) { background: rgba(46, 204, 113, 0.28); }
+.kb-btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.kb-btn-icon {
+    padding: 0.3rem 0.65rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.78rem;
+    transition: background 0.2s;
+}
+.kb-btn-icon:hover { background: rgba(255,255,255,0.07); }
+
+.kb-label {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.kb-chip {
+    font-size: 0.73rem;
+    padding: 2px 9px;
+    background: var(--bg-glass);
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: background 0.15s, color 0.15s;
+}
+.kb-chip:hover { background: rgba(255,255,255,0.09); color: var(--text-primary); }
+
+/* ─── Cron / Watcher Listeneinträge ─────────────────────────────── */
+.cron-item {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+.cron-item-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.cron-item-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.cron-item-dot.active { background: var(--success-color, #2ecc71); }
+.cron-item-dot.inactive { background: var(--text-muted, #6b7280); }
+.cron-item-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cron-item-code {
+    font-size: 0.75rem;
+    background: rgba(255,255,255,0.08);
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-family: monospace;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+}
+.cron-item-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+.cron-item-task {
+    font-size: 0.80rem;
+    color: var(--text-secondary);
+    padding-left: 16px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cron-item-meta {
+    font-size: 0.73rem;
+    color: var(--text-secondary);
+    opacity: 0.65;
+    padding-left: 16px;
+}
+.cron-item-path {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    padding-left: 16px;
+    font-family: monospace;
+}
+.cron-event-badge {
+    font-size: 0.68rem;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid var(--border-color);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--text-secondary);
+}
+
+/* ─── Formulargitter ─────────────────────────────────────────────── */
+.kb-form-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.kb-form-field { display: flex; flex-direction: column; gap: 4px; }
+.kb-form-field .kb-input { width: 100%; box-sizing: border-box; }
+.kb-form-row { margin-bottom: 10px; }
+.kb-form-row .kb-input { width: 100%; box-sizing: border-box; resize: vertical; }
+.kb-form-footer {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 4px;
+}
+.kb-form-footer-left { display: flex; align-items: center; gap: 6px; }
+.kb-form-footer-right { display: flex; gap: 6px; margin-left: auto; }
+.kb-form-checkbox-label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 0.82rem; color: var(--text-secondary); cursor: pointer;
+}
+.kb-chip-row {
+    display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px;
+}
+.kb-form-error {
+    color: #e74c3c;
+    font-size: 0.8rem;
+    margin-top: 6px;
+}
+
+@media (max-width: 520px) {
+    .kb-form-grid-2 { grid-template-columns: 1fr; }
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    Google Apps Tab
    ═══════════════════════════════════════════════════════════════════ */

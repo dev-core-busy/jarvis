@@ -1,0 +1,35 @@
+{
+  "name": "Jarvis AI Agent",
+  "short_name": "Jarvis",
+  "description": "Autonomer KI-Agent mit Desktop-Steuerung und WhatsApp-Integration",
+  "start_url": "/chat.html",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#7c3aed",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Chat",
+      "short_name": "Chat",
+      "description": "Jarvis Chat öffnen",
+      "url": "/chat.html",
+      "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "lang": "de"
+}

@@ -806,6 +806,150 @@ body {
     height: 28px;
 }
 
+/* ─── Update-Widget ─────────────────────────────────────────────── */
+.update-widget-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.update-widget {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    transition: all var(--transition);
+    user-select: none;
+}
+.update-widget:hover {
+    background: var(--bg-input);
+    border-color: var(--border);
+}
+.update-version {
+    font-size: 0.72rem;
+    font-family: monospace;
+    color: var(--text-secondary);
+    letter-spacing: 0.02em;
+}
+.update-badge {
+    font-size: 0.55rem;
+    color: #f39c12;
+    animation: upd-pulse 2s infinite;
+    line-height: 1;
+}
+.update-badge.has-update {
+    color: #2ecc71;
+}
+@keyframes upd-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.35; }
+}
+
+/* ─── Update-Dropdown ────────────────────────────────────────────── */
+.update-dropdown {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 360px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    z-index: 1000;
+    overflow: hidden;
+}
+.update-dropdown.hidden { display: none; }
+
+.update-dropdown-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.update-close-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 2px 5px;
+    border-radius: 4px;
+    transition: background 0.15s;
+}
+.update-close-btn:hover { background: rgba(255,255,255,0.08); }
+
+.update-dropdown-body {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 440px;
+    overflow-y: auto;
+}
+
+.upd-status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82rem;
+}
+.upd-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.upd-dot.ok      { background: #2ecc71; }
+.upd-dot.pending { background: #f39c12; }
+.upd-dot.error   { background: #e74c3c; }
+
+.upd-commit-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+.upd-commit {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    font-size: 0.77rem;
+}
+.upd-commit-hash {
+    font-family: monospace;
+    color: var(--accent);
+    flex-shrink: 0;
+}
+.upd-commit-msg  { color: var(--text-primary); }
+.upd-commit-date { color: var(--text-secondary); font-size: 0.71rem; flex-shrink: 0; }
+
+.upd-auto-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-top: 1px solid var(--border);
+}
+.upd-auto-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+.upd-schedule-select {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    padding: 3px 8px;
+    cursor: pointer;
+}
+
 /* ─── CPU Bar ───────────────────────────────────────────────────── */
 .cpu-bar-container {
     padding: 0 1.5rem;

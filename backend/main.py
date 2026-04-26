@@ -819,6 +819,74 @@ async def get_version():
     return JSONResponse({"version": JARVIS_VERSION})
 
 
+# ─── Update-System ────────────────────────────────────────────────────────────
+
+@app.get("/api/update/status")
+async def update_status(user: str = Depends(require_auth)):
+    """Prüft ob eine neue Version im Git-Repository verfügbar ist (git fetch)."""
+    from backend.update_manager import check_update
+    result = await asyncio.to_thread(check_update)
+    result["jarvis_version"] = JARVIS_VERSION
+    return JSONResponse(result)
+
+
+@app.post("/api/update/apply")
+async def update_apply(user: str = Depends(require_auth)):
+    """Führt git pull aus und startet den Service neu."""
+    from backend.update_manager import apply_update, restart_service_delayed
+    result = await asyncio.to_thread(apply_update)
+    if result["ok"]:
+        restart_service_delayed(delay_sec=2.0)
+    return JSONResponse(result)
+
+
+@app.get("/api/update/settings")
+async def update_settings_get(user: str = Depends(require_auth)):
+    """Gibt Auto-Update-Einstellungen zurück."""
+    auto_schedule = config.get_setting("auto_update_schedule", "never")
+    return JSONResponse({"auto_update_schedule": auto_schedule})
+
+
+@app.post("/api/update/settings")
+async def update_settings_set(request: Request, user: str = Depends(require_auth)):
+    """Speichert Auto-Update-Einstellungen und legt ggf. Cron-Job an."""
+    body    = await request.json()
+    schedule = body.get("auto_update_schedule", "never")
+
+    VALID = {"never", "daily", "weekly"}
+    if schedule not in VALID:
+        return JSONResponse({"error": "Ungültiger Wert"}, status_code=400)
+
+    config.save_setting("auto_update_schedule", schedule)
+
+    # Cron-Job verwalten
+    from backend.scheduler import cron_manager
+    _AUTO_JOB_ID = "system_auto_update"
+
+    # Alten Job entfernen
+    try: cron_manager.delete_job(_AUTO_JOB_ID)
+    except Exception: pass
+
+    if schedule != "never":
+        cron_expr = "0 3 * * *" if schedule == "daily" else "0 3 * * 1"
+        cron_manager.add_job(
+            label="Auto-Update (System)",
+            cron=cron_expr,
+            task=(
+                "Führe ein Jarvis-System-Update durch:\n"
+                "1. Prüfe ob Updates auf GitHub verfügbar sind\n"
+                "2. Falls ja: git pull und Neustart\n"
+                "Nutze dafür den shell_execute-Tool mit: "
+                "cd /opt/jarvis && git fetch origin && git pull origin master && "
+                "systemctl restart jarvis.service"
+            ),
+            enabled=True,
+            job_id=_AUTO_JOB_ID,
+        )
+
+    return JSONResponse({"ok": True, "auto_update_schedule": schedule})
+
+
 # ─── MCP Server Verwaltung ─────────────────────────────────────────────────
 from backend.mcp_client import mcp_manager
 

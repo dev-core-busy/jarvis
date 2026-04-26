@@ -1952,6 +1952,67 @@ def _mount_path(idx: int) -> Path:
     return _MOUNT_BASE / f"share_{idx}"
 
 
+# ─── Web-Extraktor ───────────────────────────────────────────────────────────
+
+@app.post("/api/knowledge/extract")
+async def knowledge_extract(request: Request, user: str = Depends(require_auth)):
+    """Ruft eine URL ab, extrahiert per LLM Wissen und speichert als Pending-Dokument."""
+    body = await request.json()
+    url = (body.get("url") or "").strip()
+    if not url:
+        return JSONResponse({"error": "Keine URL angegeben"}, status_code=400)
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        from backend.web_extractor import extract_from_url
+        doc = await extract_from_url(url)
+        return JSONResponse(doc)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/knowledge/pending")
+async def knowledge_pending_list(user: str = Depends(require_auth)):
+    from backend.web_extractor import list_pending
+    return JSONResponse(list_pending())
+
+
+@app.get("/api/knowledge/pending/{doc_id}")
+async def knowledge_pending_get(doc_id: str, user: str = Depends(require_auth)):
+    from backend.web_extractor import get_pending
+    doc = get_pending(doc_id)
+    if not doc:
+        return JSONResponse({"error": "Nicht gefunden"}, status_code=404)
+    return JSONResponse(doc)
+
+
+@app.patch("/api/knowledge/pending/{doc_id}")
+async def knowledge_pending_update(doc_id: str, request: Request, user: str = Depends(require_auth)):
+    from backend.web_extractor import update_pending
+    data = await request.json()
+    ok = update_pending(doc_id, data)
+    return JSONResponse({"ok": ok})
+
+
+@app.post("/api/knowledge/pending/{doc_id}/approve")
+async def knowledge_pending_approve(doc_id: str, user: str = Depends(require_auth)):
+    from backend.web_extractor import approve_pending
+    try:
+        result = approve_pending(doc_id)
+        return JSONResponse({"ok": True, **result})
+    except FileNotFoundError:
+        return JSONResponse({"error": "Nicht gefunden"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.delete("/api/knowledge/pending/{doc_id}")
+async def knowledge_pending_delete(doc_id: str, user: str = Depends(require_auth)):
+    from backend.web_extractor import delete_pending
+    ok = delete_pending(doc_id)
+    return JSONResponse({"ok": ok})
+
+
 @app.get("/api/knowledge/mounts")
 async def list_mounts(user: str = Depends(require_auth)):
     mounts = _get_mounts_config()

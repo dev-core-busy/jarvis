@@ -1159,9 +1159,10 @@
         const tabSecurity = document.getElementById('settings-tab-security');
         const tabCron    = document.getElementById('settings-tab-cron');
         const tabContext = document.getElementById('settings-tab-context');
-        const tabAudit   = document.getElementById('settings-tab-audit');
+        const tabAudit     = document.getElementById('settings-tab-audit');
+        const tabExtractor = document.getElementById('settings-tab-extractor');
 
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron, tabContext, tabAudit];
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron, tabContext, tabAudit, tabExtractor];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -1224,6 +1225,10 @@
                     tabAudit.style.display = '';
                     tabAudit.classList.add('active');
                     if (window.auditManager) window.auditManager.init();
+                } else if (target === 'extractor' && tabExtractor) {
+                    tabExtractor.style.display = '';
+                    tabExtractor.classList.add('active');
+                    if (window.extractorManager) window.extractorManager.init();
                 }
 
                 // Polling stoppen wenn weg-navigiert

@@ -254,6 +254,24 @@ sudo update-ca-certificates</code></pre>
             </div>
             <div class="header-right">
                 <div class="connection-indicator" id="connection-dot" title="Verbindungsstatus"></div>
+
+                <!-- Update-Widget + Dropdown -->
+                <div class="update-widget-wrap">
+                    <div id="update-widget" class="update-widget" title="Updates prüfen">
+                        <span id="update-version" class="update-version"></span>
+                        <span id="update-badge" class="update-badge" style="display:none;">●</span>
+                    </div>
+                    <div id="update-dropdown" class="update-dropdown hidden">
+                        <div class="update-dropdown-header">
+                            <span>Jarvis Updates</span>
+                            <button id="upd-close" class="update-close-btn">✕</button>
+                        </div>
+                        <div id="upd-body" class="update-dropdown-body">
+                            <p class="kb-hint" style="margin:0;">Prüfe…</p>
+                        </div>
+                    </div>
+                </div>
+
                 <button class="btn-icon" id="btn-settings" title="KI-Einstellungen">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="3"></circle>
@@ -1644,7 +1662,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=3"></script>
-    <script src="/static/js/app.js?v=62"></script>
+    <script src="/static/js/app.js?v=63"></script>
 </body>
 
 </html>

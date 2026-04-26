@@ -157,6 +157,7 @@
         connectWebSocket();
         initVNC();
         loadVersion();
+        updateWidget.init();
     }
 
     // ─── Kennwort-Änderungs-Modal ────────────────────────────────
@@ -301,6 +302,159 @@
             if (footer) footer.innerHTML = 'Jarvis v' + v + ' · Developed by Andreas Bender with <a href="https://claude.ai" target="_blank" style="color:var(--accent-hover);text-decoration:none;">Claude</a> (Anthropic)';
         } catch (e) { /* Version nicht verfuegbar */ }
     }
+
+    // ─── Update-Widget ────────────────────────────────────────────
+    const updateWidget = (() => {
+        const widget   = document.getElementById('update-widget');
+        const dropdown = document.getElementById('update-dropdown');
+        const badge    = document.getElementById('update-badge');
+        const verEl    = document.getElementById('update-version');
+        const body     = document.getElementById('upd-body');
+        let _open = false;
+        let _checkTimer = null;
+
+        function init() {
+            if (!widget) return;
+            widget.addEventListener('click', toggle);
+            document.getElementById('upd-close')?.addEventListener('click', close);
+            // Klick außerhalb schließt Dropdown
+            document.addEventListener('click', e => {
+                if (_open && !widget.contains(e.target) && !dropdown?.contains(e.target)) close();
+            });
+            // Sofort prüfen, danach alle 30 Min
+            _check();
+            _checkTimer = setInterval(_check, 30 * 60 * 1000);
+        }
+
+        function toggle() { _open ? close() : open(); }
+
+        function open() {
+            _open = true;
+            dropdown?.classList.remove('hidden');
+            _check();
+        }
+
+        function close() {
+            _open = false;
+            dropdown?.classList.add('hidden');
+        }
+
+        async function _check() {
+            try {
+                const r = await fetch('/api/update/status', { headers: _authHeaders() });
+                if (!r.ok) return;
+                const d = await r.json();
+                _render(d);
+            } catch (e) { /* offline */ }
+        }
+
+        function _render(d) {
+            // Version im Widget
+            if (verEl) verEl.textContent = 'v' + (d.jarvis_version || '?');
+
+            // Badge
+            if (badge) {
+                badge.style.display = d.has_update ? 'inline' : 'none';
+                badge.className = 'update-badge' + (d.has_update ? ' has-update' : '');
+                badge.title = d.has_update ? `${d.commits_behind} Commit(s) verfügbar` : '';
+            }
+
+            if (!body) return;
+
+            // Auto-Update-Einstellung laden
+            fetch('/api/update/settings', { headers: _authHeaders() })
+                .then(r => r.json())
+                .then(s => _buildBody(d, s.auto_update_schedule || 'never'))
+                .catch(() => _buildBody(d, 'never'));
+        }
+
+        function _buildBody(d, schedule) {
+            if (!body) return;
+            const statusDot  = d.has_update ? 'pending' : (d.ok ? 'ok' : 'error');
+            const statusText = d.has_update
+                ? `${d.commits_behind} neue${d.commits_behind === 1 ? 'r Commit' : ' Commits'} verfügbar`
+                : (d.ok ? 'Aktuell' : ('Fehler: ' + (d.error || '?')));
+
+            let commitsHtml = '';
+            if (d.recent_commits?.length) {
+                commitsHtml = `
+                <div class="upd-commit-list">
+                    ${d.recent_commits.map(c => `
+                    <div class="upd-commit">
+                        <span class="upd-commit-hash">${c.hash}</span>
+                        <span class="upd-commit-msg">${_esc(c.message)}</span>
+                        <span class="upd-commit-date">${c.date}</span>
+                    </div>`).join('')}
+                </div>`;
+            }
+
+            let updateBtn = '';
+            if (d.has_update) {
+                updateBtn = `<button id="upd-apply-btn" class="kb-btn-action" style="width:100%;">⬇ Jetzt aktualisieren</button>`;
+            } else {
+                updateBtn = `<button id="upd-check-btn" class="kb-btn-secondary" style="width:100%;font-size:.78rem;">🔄 Erneut prüfen</button>`;
+            }
+
+            body.innerHTML = `
+                <div class="upd-status-row">
+                    <span class="upd-dot ${statusDot}"></span>
+                    <span style="font-size:.82rem;color:var(--text-primary);">${statusText}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:.75rem;color:var(--text-secondary);">
+                    <span>Aktuell: <code style="color:var(--accent);">${d.current_hash || '?'}</code></span>
+                    <span>Branch: <code style="color:var(--text-secondary);">${d.branch || 'master'}</code></span>
+                </div>
+                ${commitsHtml}
+                ${updateBtn}
+                <div class="upd-auto-row">
+                    <span class="upd-auto-label">Auto-Update</span>
+                    <select id="upd-schedule" class="upd-schedule-select">
+                        <option value="never"  ${schedule==='never'  ?'selected':''}>Aus</option>
+                        <option value="daily"  ${schedule==='daily'  ?'selected':''}>Täglich (03:00)</option>
+                        <option value="weekly" ${schedule==='weekly' ?'selected':''}>Wöchentlich (Mo 03:00)</option>
+                    </select>
+                </div>`;
+
+            document.getElementById('upd-apply-btn')?.addEventListener('click', _applyUpdate);
+            document.getElementById('upd-check-btn')?.addEventListener('click', _check);
+            document.getElementById('upd-schedule')?.addEventListener('change', e => _saveSchedule(e.target.value));
+        }
+
+        async function _applyUpdate() {
+            const btn = document.getElementById('upd-apply-btn');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Aktualisiere…'; }
+            if (body) body.insertAdjacentHTML('afterbegin',
+                '<p class="kb-hint" style="margin:0;color:#f39c12;">Update wird durchgeführt – Jarvis startet danach neu…</p>');
+            try {
+                const r = await fetch('/api/update/apply', { method: 'POST', headers: _authHeaders() });
+                const d = await r.json();
+                if (d.ok) {
+                    if (body) body.innerHTML = `<p style="color:#2ecc71;font-size:.85rem;">✅ Update erfolgreich. Verbindung wird in 5 s wiederhergestellt…</p>`;
+                    setTimeout(() => window.location.reload(), 5000);
+                } else {
+                    if (body) body.insertAdjacentHTML('afterbegin',
+                        `<p class="kb-hint" style="color:#e74c3c;">Fehler: ${_esc(d.error || '')}</p>`);
+                    if (btn) { btn.disabled = false; btn.textContent = '⬇ Jetzt aktualisieren'; }
+                }
+            } catch (e) {
+                if (btn) { btn.disabled = false; btn.textContent = '⬇ Jetzt aktualisieren'; }
+            }
+        }
+
+        async function _saveSchedule(val) {
+            await fetch('/api/update/settings', {
+                method: 'POST',
+                headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ auto_update_schedule: val })
+            });
+        }
+
+        function _esc(s) {
+            return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        return { init };
+    })();
 
     // ─── Instructions Editor ─────────────────────────────────────
     async function _loadInstructions() {

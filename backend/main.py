@@ -3655,6 +3655,54 @@ async def cron_run_now(job_id: str, req: Request):
         raise HTTPException(404, str(e))
 
 
+# ─── Datei-Watcher ───────────────────────────────────────────────────
+from backend.file_watcher import watcher_manager
+
+@app.get("/api/watchers")
+async def watcher_list(req: Request):
+    _require_auth(req)
+    return JSONResponse(watcher_manager.list_watchers())
+
+
+@app.post("/api/watchers")
+async def watcher_create(req: Request):
+    _require_auth(req)
+    body = await req.json()
+    try:
+        w = watcher_manager.add_watcher(
+            label=body.get("label", "Watcher"),
+            path=body["path"],
+            pattern=body.get("pattern", "*"),
+            events=body.get("events", ["created"]),
+            task=body["task"],
+            enabled=body.get("enabled", True),
+        )
+        return JSONResponse(w, status_code=201)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.put("/api/watchers/{watcher_id}")
+async def watcher_update(watcher_id: str, req: Request):
+    _require_auth(req)
+    body = await req.json()
+    try:
+        w = watcher_manager.update_watcher(watcher_id, **body)
+        return JSONResponse(w)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/watchers/{watcher_id}")
+async def watcher_delete(watcher_id: str, req: Request):
+    _require_auth(req)
+    try:
+        watcher_manager.delete_watcher(watcher_id)
+        return JSONResponse({"ok": True})
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
 # ─── Startup ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
@@ -3825,14 +3873,41 @@ async def startup():
     except Exception as e:
         print(f"⚠️  Cron-Scheduler konnte nicht gestartet werden: {e}")
 
+    # Datei-Watcher starten
+    try:
+        from backend.file_watcher import watcher_manager, init as watcher_init
+
+        async def _watcher_broadcast(msg: dict):
+            """Sendet Watcher-Events an alle verbundenen WebSocket-Clients."""
+            dead = []
+            for ws_client in list(_active_ws):
+                try:
+                    await ws_client.send_json(msg)
+                except Exception:
+                    dead.append(ws_client)
+            for d in dead:
+                _active_ws.discard(d)
+
+        global agent_manager
+        watcher_init(agent_manager, _watcher_broadcast)
+        watcher_manager.start()
+    except Exception as e:
+        print(f"⚠️  Datei-Watcher konnte nicht gestartet werden: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown():
-    """Scheduler sauber beenden."""
+    """Scheduler und Watcher sauber beenden."""
     try:
         from backend.scheduler import cron_manager
         cron_manager.stop()
         print("⏹️  Cron-Scheduler gestoppt")
+    except Exception:
+        pass
+    try:
+        from backend.file_watcher import watcher_manager
+        watcher_manager.stop()
+        print("⏹️  Datei-Watcher gestoppt")
     except Exception:
         pass
 

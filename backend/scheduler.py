@@ -52,13 +52,14 @@ class CronManager:
         return next((j for j in self._jobs if j["id"] == job_id), None)
 
     def add_job(self, label: str, cron: str, task: str, enabled: bool = True,
-                job_id: str | None = None) -> dict:
+                job_id: str | None = None, once: bool = False) -> dict:
         job = {
             "id": job_id or str(uuid.uuid4()),
             "label": label,
             "cron": cron,
             "task": task,
             "enabled": enabled,
+            "once": once,   # True → Job löscht sich nach einmaligem Ausführen
             "last_run": None,
             "last_result": None,
         }
@@ -168,6 +169,14 @@ class CronManager:
         job["last_run"] = int(time.time())
         job["last_result"] = result[:500] if result else ""
         self._save()
+
+        # Einmalige Jobs nach Ausführung automatisch löschen
+        if job.get("once"):
+            try:
+                self.delete_job(job_id)
+                print(f"[Scheduler] Einmaliger Job '{label}' gelöscht.", flush=True)
+            except Exception as _de:
+                print(f"[Scheduler] Fehler beim Löschen von Einmal-Job: {_de}", flush=True)
 
         # Broadcast: Job fertig
         if _broadcast_fn:

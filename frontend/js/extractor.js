@@ -28,7 +28,8 @@ window.extractorManager = new (class JarvisExtractorManager {
     // ─── Info-Modal (an <body> angehängt, damit fixed-Overlay funktioniert) ──
 
     _renderInfoModal() {
-        if (document.getElementById('ext-info-modal')) return;
+        const existing = document.getElementById('ext-info-modal');
+        if (existing) { this._infoModal = existing; return; }
         const modal = document.createElement('div');
         modal.id = 'ext-info-modal';
         modal.className = 'modal-overlay hidden';
@@ -112,6 +113,14 @@ window.extractorManager = new (class JarvisExtractorManager {
                 <div id="ext-pending-list"><p class="kb-empty">Keine ausstehenden Extraktionen.</p></div>
             </div>
 
+            <!-- Extraktor: Genehmigter Verlauf -->
+            <div class="kb-section" id="ext-approved-section" style="display:none;">
+                <div class="kb-section-header">
+                    <h3>Genehmigt <span id="ext-approved-count" class="ext-badge ext-badge-approved" style="display:none;">0</span></h3>
+                </div>
+                <div id="ext-approved-list"></div>
+            </div>
+
             <!-- Extraktor: Review -->
             <div id="ext-review-wrap" class="kb-section" style="display:none;">
                 <div class="kb-section-header">
@@ -178,7 +187,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         try {
             const r = await fetch('/api/knowledge/extract', {
                 method: 'POST',
-                headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
+                headers: { ...{ 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') }, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ url })
             });
             const d = await r.json();
@@ -202,7 +211,7 @@ window.extractorManager = new (class JarvisExtractorManager {
 
     async _loadPending() {
         try {
-            const r = await fetch('/api/knowledge/pending', { headers: _authHeaders() });
+            const r = await fetch('/api/knowledge/pending', { headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') } });
             if (!r.ok) return;
             this._pending = await r.json();
             this._renderPending();
@@ -213,46 +222,125 @@ window.extractorManager = new (class JarvisExtractorManager {
         const el    = document.getElementById('ext-pending-list');
         const badge = document.getElementById('ext-pending-count');
         if (!el) return;
-        badge.textContent = this._pending.length;
-        badge.style.display = this._pending.length ? 'inline-block' : 'none';
 
-        if (!this._pending.length) {
+        const pending  = this._pending.filter(d => (d.status || 'pending') === 'pending');
+        const approved = this._pending.filter(d => d.status === 'approved');
+
+        // Badge zeigt nur ausstehende
+        badge.textContent = pending.length;
+        badge.style.display = pending.length ? 'inline-block' : 'none';
+
+        if (!pending.length) {
             el.innerHTML = `<p class="kb-empty">Keine ausstehenden Extraktionen.</p>`;
+        } else {
+            el.innerHTML = pending.map(doc => {
+                const dt     = new Date(doc.created_at * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+                const qa     = doc.qa_pairs?.length || 0;
+                const fct    = doc.facts?.length    || 0;
+                const domain = (() => { try { return new URL(doc.url).hostname; } catch { return doc.url; } })();
+                return `
+                <div class="cron-item" data-id="${doc.id}">
+                    <div class="cron-item-row">
+                        <span class="cron-item-dot active"></span>
+                        <span class="cron-item-label">${this._esc(doc.title)}</span>
+                        <div class="cron-item-actions">
+                            <button class="kb-btn-action ext-review-btn" data-id="${doc.id}" style="padding:3px 10px;font-size:.75rem;">Prüfen</button>
+                            <button class="kb-btn-secondary ext-dl-btn"  data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="JSON herunterladen">⬇️</button>
+                            <button class="kb-btn-danger ext-del-btn"    data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;">🗑️</button>
+                        </div>
+                    </div>
+                    <div class="cron-item-meta">${this._esc(domain)} · ${dt} · ${fct} Fakten · ${qa} Q&amp;A-Paare</div>
+                </div>`;
+            }).join('');
+            el.querySelectorAll('.ext-review-btn').forEach(btn => {
+                btn.onclick = () => {
+                    const doc = this._pending.find(d => d.id === btn.dataset.id);
+                    if (doc) this._openReview(doc);
+                };
+            });
+            el.querySelectorAll('.ext-dl-btn').forEach(btn => {
+                btn.onclick = () => {
+                    const doc = this._pending.find(d => d.id === btn.dataset.id);
+                    if (doc) this._downloadJson(doc);
+                };
+            });
+            el.querySelectorAll('.ext-del-btn').forEach(btn => {
+                btn.onclick = () => this._deletePending(btn.dataset.id);
+            });
+        }
+
+        // Genehmigter Verlauf
+        const secEl   = document.getElementById('ext-approved-section');
+        const apprEl  = document.getElementById('ext-approved-list');
+        const apprBdg = document.getElementById('ext-approved-count');
+        if (!secEl || !apprEl) return;
+        if (!approved.length) {
+            secEl.style.display = 'none';
             return;
         }
-        el.innerHTML = this._pending.map(doc => {
-            const dt     = new Date(doc.created_at * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
-            const qa     = doc.qa_pairs?.length || 0;
-            const fct    = doc.facts?.length    || 0;
+        secEl.style.display = '';
+        apprBdg.textContent = approved.length;
+        apprBdg.style.display = 'inline-block';
+        apprEl.innerHTML = approved.map(doc => {
+            const dtC    = new Date(doc.created_at  * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+            const dtA    = new Date((doc.approved_at || doc.created_at) * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+            const qa     = doc.qa_count  ?? doc.qa_pairs?.filter(p => p.approved !== false).length ?? 0;
+            const fct    = doc.fact_count ?? doc.facts?.length ?? 0;
             const domain = (() => { try { return new URL(doc.url).hostname; } catch { return doc.url; } })();
+            const fileHint = doc.file ? `<span style="font-family:monospace;font-size:.7rem;color:var(--text-secondary);">${this._esc(doc.file)}</span>` : '';
             return `
-            <div class="cron-item" data-id="${doc.id}">
+            <div class="cron-item" data-id="${doc.id}" style="border-left:3px solid var(--green,#10b981);">
                 <div class="cron-item-row">
-                    <span class="cron-item-dot active"></span>
+                    <span class="cron-item-dot" style="background:var(--green,#10b981);"></span>
                     <span class="cron-item-label">${this._esc(doc.title)}</span>
                     <div class="cron-item-actions">
-                        <button class="kb-btn-action ext-review-btn" data-id="${doc.id}" style="padding:3px 10px;font-size:.75rem;">Prüfen</button>
-                        <button class="kb-btn-danger ext-del-btn"    data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;">🗑️</button>
+                        <button class="kb-btn-secondary ext-edit-btn" data-id="${doc.id}" style="padding:3px 10px;font-size:.75rem;">✏️ Bearbeiten</button>
+                        <button class="kb-btn-secondary ext-dl-btn"   data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="JSON herunterladen">⬇️</button>
+                        <button class="kb-btn-danger ext-del-btn"     data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="Aus Verlauf und Wissens-DB entfernen">🗑️</button>
                     </div>
                 </div>
-                <div class="cron-item-meta">${this._esc(domain)} · ${dt} · ${fct} Fakten · ${qa} Q&amp;A-Paare</div>
+                <div class="cron-item-meta">${this._esc(domain)} · Extrahiert: ${dtC} · Genehmigt: ${dtA} · ${fct} Fakten · ${qa} Q&amp;A-Paare</div>
+                ${fileHint ? `<div style="padding:2px 0 0 18px;">${fileHint}</div>` : ''}
             </div>`;
         }).join('');
-
-        el.querySelectorAll('.ext-review-btn').forEach(btn => {
+        apprEl.querySelectorAll('.ext-edit-btn').forEach(btn => {
             btn.onclick = () => {
                 const doc = this._pending.find(d => d.id === btn.dataset.id);
-                if (doc) this._openReview(doc);
+                if (doc) this._openReview(doc, true);
             };
         });
-        el.querySelectorAll('.ext-del-btn').forEach(btn => {
-            btn.onclick = () => this._deletePending(btn.dataset.id);
+        apprEl.querySelectorAll('.ext-dl-btn').forEach(btn => {
+            btn.onclick = () => {
+                const doc = this._pending.find(d => d.id === btn.dataset.id);
+                if (doc) this._downloadJson(doc);
+            };
         });
+        apprEl.querySelectorAll('.ext-del-btn').forEach(btn => {
+            btn.onclick = () => this._deleteApproved(btn.dataset.id);
+        });
+    }
+
+    async _deleteApproved(id) {
+        if (!confirm('Aus Verlauf und Wissens-DB entfernen?\nDie .md-Datei wird ebenfalls gelöscht.')) return;
+        const doc = this._pending.find(d => d.id === id);
+        // MD-Datei auf Server löschen falls vorhanden
+        if (doc?.file) {
+            try {
+                await fetch('/api/knowledge/extract/file', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') },
+                    body: JSON.stringify({ file: doc.file })
+                });
+            } catch (e) {}
+        }
+        await fetch(`/api/knowledge/pending/${id}`, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') } });
+        this._loadPending();
+        this._notify('Eintrag entfernt', 'info');
     }
 
     async _deletePending(id) {
         if (!confirm('Extraktion wirklich verwerfen?')) return;
-        await fetch(`/api/knowledge/pending/${id}`, { method: 'DELETE', headers: _authHeaders() });
+        await fetch(`/api/knowledge/pending/${id}`, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') } });
         if (this._reviewing?.id === id) this._closeReview();
         this._loadPending();
         this._notify('Extraktion verworfen', 'info');
@@ -260,22 +348,41 @@ window.extractorManager = new (class JarvisExtractorManager {
 
     // ─── Review ──────────────────────────────────────────────────────────────
 
-    _openReview(doc) {
-        this._reviewing = doc;
+    _openReview(doc, isApproved = false) {
+        this._reviewing   = doc;
+        this._reviewIsApproved = isApproved;
         document.getElementById('ext-review-wrap').style.display = '';
-        document.getElementById('ext-review-title').textContent  = `Dokument prüfen – ${doc.title}`;
+        document.getElementById('ext-review-title').textContent  =
+            isApproved ? `Bearbeiten – ${doc.title}` : `Dokument prüfen – ${doc.title}`;
         document.getElementById('ext-review-url').innerHTML =
             `🔗 <a href="${this._esc(doc.url)}" target="_blank" style="color:var(--accent);">${this._esc(doc.url)}</a>`;
         document.getElementById('ext-edit-title').value   = doc.title   || '';
         document.getElementById('ext-edit-summary').value = doc.summary || '';
         this._renderFacts(doc.facts || []);
+        // Für bereits genehmigte Docs: alle Q&A als approved=true anzeigen (Checkboxen wegblenden wäre UX-Verbesserung)
         this._renderQa(doc.qa_pairs || []);
+
+        const saveBtn   = document.getElementById('ext-save-btn');
+        const rejectBtn = document.getElementById('ext-reject-btn');
+        if (isApproved) {
+            saveBtn.textContent   = '💾 Aktualisieren';
+            rejectBtn.textContent = '🗑️ Aus DB entfernen';
+        } else {
+            saveBtn.textContent   = '✅ In Wissens-DB speichern';
+            rejectBtn.textContent = '❌ Verwerfen';
+        }
         document.getElementById('ext-review-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     _closeReview() {
         this._reviewing = null;
+        this._reviewIsApproved = false;
         document.getElementById('ext-review-wrap').style.display = 'none';
+        // Buttons zurücksetzen
+        const saveBtn   = document.getElementById('ext-save-btn');
+        const rejectBtn = document.getElementById('ext-reject-btn');
+        if (saveBtn)   saveBtn.textContent   = '✅ In Wissens-DB speichern';
+        if (rejectBtn) rejectBtn.textContent = '❌ Verwerfen';
     }
 
     // ─── Fakten-Editor ───────────────────────────────────────────────────────
@@ -358,7 +465,8 @@ window.extractorManager = new (class JarvisExtractorManager {
 
     async _approve() {
         if (!this._reviewing) return;
-        const id = this._reviewing.id;
+        const id         = this._reviewing.id;
+        const isApproved = this._reviewIsApproved;
         const updated = {
             title:    document.getElementById('ext-edit-title').value.trim(),
             summary:  document.getElementById('ext-edit-summary').value.trim(),
@@ -370,35 +478,59 @@ window.extractorManager = new (class JarvisExtractorManager {
             return;
         }
         const btn = document.getElementById('ext-save-btn');
+        const origLabel = btn.textContent;
         btn.disabled = true; btn.textContent = '⏳ Speichere…';
+        const _auth = () => ({ 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') });
         try {
+            // 1. Änderungen ins JSON schreiben
             await fetch(`/api/knowledge/pending/${id}`, {
                 method: 'PATCH',
-                headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
+                headers: { ..._auth(), 'Content-Type': 'application/json' },
                 body: JSON.stringify(updated)
             });
+            // 2. (Re-)Approve: schreibt MD-Datei und startet Reindex
             const r = await fetch(`/api/knowledge/pending/${id}/approve`, {
-                method: 'POST', headers: _authHeaders()
+                method: 'POST', headers: _auth()
             });
             const d = await r.json();
             if (!r.ok || !d.ok) {
                 this._notifyReview('Fehler: ' + (d.error || r.status), 'error');
             } else {
-                this._notify(`✅ Gespeichert: ${d.fact_count} Fakten + ${d.qa_count} Q&A-Paare`);
+                const msg = isApproved
+                    ? `💾 Aktualisiert: ${d.fact_count} Fakten + ${d.qa_count} Q&A-Paare`
+                    : `✅ Gespeichert: ${d.fact_count} Fakten + ${d.qa_count} Q&A-Paare`;
+                this._notify(msg);
                 this._closeReview();
                 this._loadPending();
             }
         } catch (e) {
             this._notifyReview('Netzwerkfehler: ' + e.message, 'error');
         } finally {
-            btn.disabled = false; btn.textContent = '✅ In Wissens-DB speichern';
+            btn.disabled = false; btn.textContent = origLabel;
         }
     }
 
     async _reject() {
         if (!this._reviewing) return;
-        if (!confirm('Extraktion wirklich verwerfen? Der Inhalt wird nicht gespeichert.')) return;
-        await this._deletePending(this._reviewing.id);
+        if (this._reviewIsApproved) {
+            await this._deleteApproved(this._reviewing.id);
+        } else {
+            if (!confirm('Extraktion wirklich verwerfen? Der Inhalt wird nicht gespeichert.')) return;
+            await this._deletePending(this._reviewing.id);
+        }
+    }
+
+    // ─── Download ────────────────────────────────────────────────────────────
+
+    _downloadJson(doc) {
+        const json = JSON.stringify(doc, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `jarvis_extract_${doc.id}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
     }
 
     // ─── Hilfsmethoden ───────────────────────────────────────────────────────

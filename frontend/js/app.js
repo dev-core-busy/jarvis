@@ -158,7 +158,49 @@
         initVNC();
         loadVersion();
         updateWidget.init();
+        _startContextIndicator();
     }
+
+    // ─── Kontext-Indikator ───────────────────────────────────────────
+    let _ctxIndicatorTimer = null;
+
+    async function _updateContextIndicator() {
+        const indicator = document.getElementById('ctx-indicator');
+        const text      = document.getElementById('ctx-indicator-text');
+        if (!indicator) return;
+        try {
+            const r = await fetch('/api/context/stats', {
+                headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') }
+            });
+            if (!r.ok) return;
+            const d = await r.json();
+            const n = d.history_entries || 0;
+            if (n > 0) {
+                indicator.style.display = 'flex';
+                text.textContent = `Kontext: ${n} Einträge · ${d.fills_pct ?? 0} %`;
+            } else {
+                indicator.style.display = 'none';
+            }
+        } catch (e) { /* offline */ }
+    }
+
+    function _startContextIndicator() {
+        _updateContextIndicator();
+        _ctxIndicatorTimer = setInterval(_updateContextIndicator, 8000);
+    }
+
+    window._clearUserContext = async function() {
+        try {
+            const r = await fetch('/api/context/clear', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') }
+            });
+            const d = await r.json();
+            if (d.ok) {
+                document.getElementById('ctx-indicator').style.display = 'none';
+            }
+        } catch (e) { /* ignore */ }
+    };
 
     // ─── Kennwort-Änderungs-Modal ────────────────────────────────
     const changePwModal = document.getElementById('change-password-modal');
@@ -294,22 +336,23 @@
             const res = await fetch('/api/version');
             const data = await res.json();
             const v = data.version || '?';
-            // Pill im Header
-            const pill = document.getElementById('version-pill');
-            if (pill) pill.textContent = 'v' + v;
+            // Version in Pill (via update-version span, nicht textContent der Pill selbst)
+            const verSpan = document.getElementById('update-version');
+            if (verSpan) verSpan.textContent = 'v' + v;
             // Footer im Settings-Modal
             const footer = document.getElementById('version-modal-footer');
             if (footer) footer.innerHTML = 'Jarvis v' + v + ' · Developed by Andreas Bender with <a href="https://claude.ai" target="_blank" style="color:var(--accent-hover);text-decoration:none;">Claude</a> (Anthropic)';
         } catch (e) { /* Version nicht verfuegbar */ }
     }
 
-    // ─── Update-Widget ────────────────────────────────────────────
+    // ─── Update-Widget (an Version-Pill im Header) ────────────────
     const updateWidget = (() => {
-        const widget   = document.getElementById('update-widget');
+        const widget   = document.getElementById('version-pill');
         const dropdown = document.getElementById('update-dropdown');
         const badge    = document.getElementById('update-badge');
         const verEl    = document.getElementById('update-version');
         const body     = document.getElementById('upd-body');
+        const _auth    = () => ({ 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') });
         let _open = false;
         let _checkTimer = null;
 
@@ -341,7 +384,7 @@
 
         async function _check() {
             try {
-                const r = await fetch('/api/update/status', { headers: _authHeaders() });
+                const r = await fetch('/api/update/status', { headers: _auth() });
                 if (!r.ok) return;
                 const d = await r.json();
                 _render(d);
@@ -349,20 +392,26 @@
         }
 
         function _render(d) {
-            // Version im Widget
+            // Version in Pill
             if (verEl) verEl.textContent = 'v' + (d.jarvis_version || '?');
 
-            // Badge
+            // Badge + Pill-Farbe
             if (badge) {
                 badge.style.display = d.has_update ? 'inline' : 'none';
                 badge.className = 'update-badge' + (d.has_update ? ' has-update' : '');
                 badge.title = d.has_update ? `${d.commits_behind} Commit(s) verfügbar` : '';
             }
+            if (widget) {
+                widget.classList.toggle('has-update', !!d.has_update);
+                widget.title = d.has_update
+                    ? `${d.commits_behind} Update(s) verfügbar – klicken zum Aktualisieren`
+                    : 'Version & Updates';
+            }
 
             if (!body) return;
 
             // Auto-Update-Einstellung laden
-            fetch('/api/update/settings', { headers: _authHeaders() })
+            fetch('/api/update/settings', { headers: _auth() })
                 .then(r => r.json())
                 .then(s => _buildBody(d, s.auto_update_schedule || 'never'))
                 .catch(() => _buildBody(d, 'never'));
@@ -426,7 +475,7 @@
             if (body) body.insertAdjacentHTML('afterbegin',
                 '<p class="kb-hint" style="margin:0;color:#f39c12;">Update wird durchgeführt – Jarvis startet danach neu…</p>');
             try {
-                const r = await fetch('/api/update/apply', { method: 'POST', headers: _authHeaders() });
+                const r = await fetch('/api/update/apply', { method: 'POST', headers: _auth() });
                 const d = await r.json();
                 if (d.ok) {
                     if (body) body.innerHTML = `<p style="color:#2ecc71;font-size:.85rem;">✅ Update erfolgreich. Verbindung wird in 5 s wiederhergestellt…</p>`;
@@ -444,7 +493,7 @@
         async function _saveSchedule(val) {
             await fetch('/api/update/settings', {
                 method: 'POST',
-                headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
+                headers: { ..._auth(), 'Content-Type': 'application/json' },
                 body: JSON.stringify({ auto_update_schedule: val })
             });
         }
@@ -1003,6 +1052,7 @@
         // Thinking Bar: ausblenden wenn Hauptagent fertig oder idle
         if ((event === 'finished' || event === 'paused') && !agent.is_sub_agent) {
             updateAgentState('idle');
+            _updateContextIndicator();
         }
         if (event === 'started' && !agent.is_sub_agent) {
             updateAgentState('running');
@@ -1312,10 +1362,7 @@
         const tabInstructions = document.getElementById('settings-tab-instructions');
         const tabSecurity = document.getElementById('settings-tab-security');
         const tabCron    = document.getElementById('settings-tab-cron');
-        const tabContext = document.getElementById('settings-tab-context');
-        const tabAudit   = document.getElementById('settings-tab-audit');
-
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron, tabContext, tabAudit];
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -1371,19 +1418,11 @@
                     tabCron.style.display = '';
                     tabCron.classList.add('active');
                     if (window.cronManager) window.cronManager.init();
-                } else if (target === 'context' && tabContext) {
-                    tabContext.style.display = '';
-                    tabContext.classList.add('active');
-                    if (window.contextManager) window.contextManager.init();
-                } else if (target === 'audit' && tabAudit) {
-                    tabAudit.style.display = '';
-                    tabAudit.classList.add('active');
-                    if (window.auditManager) window.auditManager.init();
                 }
 
                 // Polling stoppen wenn weg-navigiert
-                if (target !== 'vision'   && window.visionManager)   window.visionManager.stop();
-                if (target !== 'context'  && window.contextManager)  window.contextManager.stop();
+                if (target !== 'vision'    && window.visionManager)   window.visionManager.stop();
+                if (target !== 'telemetry' && window.contextManager)  window.contextManager.stop();
             });
         });
 

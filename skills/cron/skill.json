@@ -1,0 +1,42 @@
+{
+    "name": "Cron",
+    "description": "Zeitgesteuerte Auftraege erstellen, auflisten und loeschen (Cron-Jobs)",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["cron_create", "cron_list", "cron_delete"],
+    "category": "system",
+    "icon": "clock",
+    "system": true,
+    "enabled": true,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "Erstellt, verwaltet und loescht zeitgesteuerte Auftraege (Cron-Jobs). Jobs werden per APScheduler (Europe/Berlin) ausgefuehrt und starten einen Jarvis-Agent-Task. Einmalige Jobs loeschen sich nach Ausfuehrung automatisch.",
+        "tools": [
+            {
+                "name": "cron_create",
+                "label": "Cron erstellen",
+                "desc": "Erstellt einen neuen Cron-Job mit Zeitplan und Aufgabe. Unterstuetzt einmalige und wiederkehrende Jobs."
+            },
+            {
+                "name": "cron_list",
+                "label": "Cron auflisten",
+                "desc": "Zeigt alle vorhandenen Cron-Jobs mit ID, Zeitplan und letztem Ergebnis."
+            },
+            {
+                "name": "cron_delete",
+                "label": "Cron loeschen",
+                "desc": "Loescht einen Cron-Job anhand seiner ID."
+            }
+        ],
+        "use_cases": [
+            "Erinnere mich morgen um 06:15 per WhatsApp: Datensicherung erstellen",
+            "Erstelle einen täglichen Cron-Job der um 08:00 den Serverstatus prüft",
+            "Zeige alle aktiven zeitgesteuerten Aufgaben",
+            "Lösche den Cron-Job mit ID abc12345"
+        ]
+    }
+}

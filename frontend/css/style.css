@@ -477,6 +477,8 @@ body {
     border-bottom: 1px solid var(--border);
     backdrop-filter: blur(20px);
     flex-shrink: 0;
+    position: relative;
+    z-index: 200;
 }
 
 .header-left {
@@ -568,6 +570,34 @@ body {
     border: 1px solid var(--border);
     cursor: default;
     user-select: none;
+}
+.upd-pill-clickable {
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.upd-pill-clickable:hover {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.5);
+    color: var(--accent);
+}
+.upd-pill-clickable.has-update {
+    background: rgba(46, 204, 113, 0.1);
+    border-color: rgba(46, 204, 113, 0.4);
+    color: #2ecc71;
+}
+.upd-pill-ver {
+    font-family: monospace;
+    letter-spacing: 0.02em;
+}
+/* Dropdown links von der Pill ausrichten (nicht rechts) */
+.header-info .update-widget-wrap .update-dropdown {
+    left: 0;
+    right: auto;
+    top: calc(100% + 8px);
+    z-index: 9999;
 }
 
 /* Version im Settings-Modal Footer */
@@ -854,10 +884,10 @@ body {
     top: calc(100% + 10px);
     right: 0;
     width: 360px;
-    background: var(--bg-card);
+    background: #111827;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
     z-index: 1000;
     overflow: hidden;
 }
@@ -3940,6 +3970,7 @@ select.input-field {
     font-weight: 600;
     white-space: nowrap;
 }
+.audit-tool-task      { background: rgba(255,255,255,.05);  color: var(--text-muted); font-style:italic; }
 .audit-tool-shell     { background: rgba(231,76,60,.15);   color: #e74c3c; }
 .audit-tool-fs        { background: rgba(52,152,219,.15);  color: #3498db; }
 .audit-tool-desktop   { background: rgba(155,89,182,.15);  color: #9b59b6; }
@@ -3948,6 +3979,52 @@ select.input-field {
 .audit-tool-knowledge { background: rgba(26,188,156,.15);  color: #1abc9c; }
 .audit-tool-agent     { background: rgba(99,102,241,.15);  color: #6366f1; }
 .audit-tool-other     { background: rgba(255,255,255,.07); color: var(--text-secondary); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Allgemeines Modal-Overlay (genutzt von Extractor-Anleitung etc.)
+   ═══════════════════════════════════════════════════════════════════ */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(4px);
+}
+.modal-overlay.hidden { display: none; }
+
+.modal-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 24px;
+    width: 520px;
+    max-width: 92vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+.modal-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 16px;
+}
+.btn-modal-close {
+    display: inline-block;
+    padding: 7px 20px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: opacity 0.15s;
+}
+.btn-modal-close:hover { opacity: 0.85; }
 
 /* ═══════════════════════════════════════════════════════════════════
    Web-Extractor Tab
@@ -3990,6 +4067,9 @@ select.input-field {
     padding: 1px 7px;
     margin-left: 6px;
     vertical-align: middle;
+}
+.ext-badge-approved {
+    background: var(--green, #10b981);
 }
 
 /* Fakten-Liste */

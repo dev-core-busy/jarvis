@@ -38,10 +38,30 @@ def _get_embedding_model():
         if _embedding_model is not None:
             return _embedding_model
         from sentence_transformers import SentenceTransformer
+        # PyTorch auf 2 Kerne begrenzen (verhindert CPU-Sättigung bei Indexierung)
+        try:
+            import torch
+            torch.set_num_threads(2)
+        except Exception:
+            pass
         _log.info(f"Lade Embedding-Modell: {MODEL_NAME}")
         _embedding_model = SentenceTransformer(MODEL_NAME)
         _log.info("Embedding-Modell geladen")
         return _embedding_model
+
+
+def release_memory_to_os() -> None:
+    """Gibt vom Python-Allocator gecachten Speicher an das OS zurueck.
+    Aufrufen nach Bulk-Indexierung um RAM freizugeben."""
+    try:
+        import gc
+        gc.collect()
+        # malloc_trim() gibt leere Speicherseiten direkt an den Kernel zurueck
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+        _log.info("malloc_trim() ausgefuehrt – Speicher an OS zurueckgegeben")
+    except Exception as e:
+        _log.debug(f"malloc_trim fehlgeschlagen: {e}")
 
 
 def _encode(texts: list[str], prefix: str = "passage") -> np.ndarray:
@@ -55,7 +75,7 @@ def _encode(texts: list[str], prefix: str = "passage") -> np.ndarray:
         prefixed,
         normalize_embeddings=True,
         show_progress_bar=False,
-        batch_size=64,
+        batch_size=16,   # 16 statt 64: reduziert Peak-RAM um ~75% bei Indexierung
     )
     return vecs.astype(np.float32)
 

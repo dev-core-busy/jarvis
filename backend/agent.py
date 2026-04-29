@@ -106,10 +106,31 @@ import backend.conv_log as conv_log
 # ── Sicherheit: LDAP-Benutzer duerfen diese Tools NICHT verwenden ─────────
 _LOCAL_PRIVILEGED_USERS = {"jarvis", "root", ""}
 _BLOCKED_TOOLS_FOR_LDAP = {
-    "shell_execute",       # Keine Shell-Befehle
     "write_file",          # Kein Dateisystem-Schreibzugriff
     "spawn_agent",         # Keine Sub-Agents (koennten Shell nutzen)
+    "write_clipboard",     # Kein Clipboard-Schreibzugriff
 }
+
+# Regex fuer Shell-Befehle die LDAP-Benutzern verboten sind
+# (destruktive Operationen, Secret-Dateien, System-Aenderungen)
+_LDAP_SHELL_FORBIDDEN = re.compile(
+    r'\b(?:rm\b|rmdir\b|chmod\b|chown\b|chattr\b|'
+    r'apt(?:-get)?\b|pip3?\s+install|npm\s+install|yum\s+install|dnf\s+install|'
+    r'systemctl\s+(?:start|stop|restart|enable|disable|mask|daemon-reload)\b|'
+    r'service\s+\S+\s+(?:start|stop|restart)\b|'
+    r'reboot\b|shutdown\b|poweroff\b|halt\b|'
+    r'dd\s|mkfs\b|fdisk\b|parted\b|'
+    r'useradd\b|usermod\b|userdel\b|groupadd\b|passwd\b|'
+    r'crontab\s+-[er]\b|'
+    r'tee\s)',
+    re.IGNORECASE,
+)
+# Schreib-Redirects und Secret-Pfade als separate Pattern
+_LDAP_SHELL_WRITE_REDIRECT = re.compile(r'(?<![<|&])>\s*\S')
+_LDAP_SHELL_SECRET_PATHS = re.compile(
+    r'(?:/opt/jarvis/\.env\b|/home/jarvis/jarvis/\.env\b|auth_state\.json\b)',
+    re.IGNORECASE,
+)
 
 # ── Instructions aus data/instructions/*.md laden ─────────────────────────
 INSTRUCTIONS_DIR = Path(__file__).parent.parent / "data" / "instructions"
@@ -246,6 +267,7 @@ KRITISCH – Autonomie-Regeln:
         self._current_chat_history: list = [] # Live-Referenz auf aktuelle History
         self._session_input_tokens:  int = 0  # Token-Zähler (aktuelle Session)
         self._session_output_tokens: int = 0  # Token-Zähler (aktuelle Session)
+        self._user_histories: dict[str, list] = {}  # Persistente History pro User
 
         # Skill Manager initialisieren (laedt alle aktivierten Skills)
         self.skill_manager = SkillManager()
@@ -346,6 +368,13 @@ KRITISCH – Autonomie-Regeln:
         def _log(msg): print(f"[AGENT {self.agent_id}] {msg}", flush=True)
         _log(f"run_task gestartet: {task_text[:100]}... (sub={self.is_sub_agent})")
         self._current_username = username
+        # Task im Audit-Log festhalten (unabhängig ob Tools genutzt werden)
+        try:
+            from backend.audit_log import log_task as _audit_task
+            _audit_task(user=username or "unknown", task=task_text,
+                        client_type=client_type, client_ip=client_ip)
+        except Exception:
+            pass
         agent_span = tracer.start_span(f"agent:{self.label}", kind="agent")
         agent_span.attributes["agent.id"] = self.agent_id
         agent_span.attributes["agent.is_sub"] = self.is_sub_agent
@@ -415,6 +444,23 @@ KRITISCH – Autonomie-Regeln:
             # Browser: Linux-Desktop ist der richtige Kontext (Standard)
             pass
 
+        # LDAP-Benutzer: Eingeschränkter Systemprompt-Zusatz
+        if not self.is_sub_agent and username and username not in _LOCAL_PRIVILEGED_USERS:
+            system_prompt += (
+                "\n\nWICHTIG – EINGESCHRÄNKTE BENUTZERRECHTE (LDAP/Netzwerk-Benutzer): "
+                "Dieser Benutzer ist ein normaler Netzwerk-Benutzer ohne Administrator-Rechte. "
+                "ABSOLUT VERBOTEN: Shell-Befehle die Dateien schreiben oder löschen (rm, mv, cp auf sensible Pfade, "
+                "dd, mkfs, etc.), Redirect-Schreiben (> in Datei), Paketinstallationen (apt, pip, npm install), "
+                "System-Dienste steuern (systemctl start/stop/restart), Nutzerkonten verwalten (useradd, passwd), "
+                "System neustarten (reboot, shutdown). "
+                "ABSOLUT VERBOTEN: Secrets, Credentials oder API-Keys auslesen "
+                "(.env-Dateien, auth_state.json, API-Key-Felder in settings.json). "
+                "ERLAUBT: Alle Lese-Operationen auf nicht-sensiblen Dateien, Wissensdatenbank, "
+                "Systeminformationen (date, ls, df, free, uname, ps, top, uptime, etc.), "
+                "Allgemeinwissen, Berechnungen, Textverarbeitung. "
+                "Bei Anfragen auf gesperrte Ressourcen: Höflich ablehnen und erklären was nicht erlaubt ist."
+            )
+
         # Benutzer-Instruktionen laden (data/instructions/*.md)
         instructions = load_instructions()
         if instructions:
@@ -430,8 +476,12 @@ KRITISCH – Autonomie-Regeln:
         _conv_messages = []   # Für conv_log: alle LLM-Ein/Ausgaben dieser Konversation
         _task_start_time = time.time()
         try:
-            # Konversation starten
-            chat_history = []
+            # Konversation starten – pro User persistente History weiterverwenden
+            _history_key = username or "anonymous"
+            if self.is_sub_agent:
+                chat_history = []
+            else:
+                chat_history = self._user_histories.get(_history_key, [])
             self._current_chat_history  = chat_history  # Live-Referenz für Context-Stats-API
             self._session_input_tokens  = 0             # Token-Zähler zurücksetzen
             self._session_output_tokens = 0
@@ -443,19 +493,15 @@ KRITISCH – Autonomie-Regeln:
             mode_hint = " [Prompt-Tool-Modus]" if getattr(self.provider, "prompt_tool_calling", False) else ""
             await self._send_status(ws, f"⏳ Warte auf LLM-Antwort…{mode_hint}", highlight=True)
 
-            # Initial-Nachricht senden
+            # Initial-Nachricht senden – ggf. mit vorheriger Chat-History als Kontext
             _log(f"LLM-Aufruf mit {len(self._tool_instances)} Tools...")
+            _user_msg = types.Content(role="user", parts=[types.Part.from_text(text=task_text)])
             llm_span = tracer.start_span("llm:initial", kind="llm", parent_id=self.agent_id)
             llm_span.attributes["model"] = config.current_model
             response = await self.provider.generate_response(
                 model=config.current_model,
                 system_prompt=system_prompt,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[types.Part.from_text(text=task_text)],
-                    )
-                ],
+                contents=[*chat_history, _user_msg],
                 tools=self._tool_instances
             )
             tracer.end_span(llm_span)
@@ -497,8 +543,17 @@ KRITISCH – Autonomie-Regeln:
                         await self._send_status(ws, text.strip(), highlight=True, intermediate=is_intermediate)
                         _conv_messages.append({"role": "assistant", "content": text.strip()})
 
-                # Wenn keine Function Calls → fertig
+                # Wenn keine Function Calls → fertig; User+Antwort in History eintragen
                 if not function_calls:
+                    chat_history.append(_user_msg)
+                    if config.LLM_PROVIDER == "google" and hasattr(response, 'raw') and response.raw and response.raw.candidates:
+                        chat_history.append(response.raw.candidates[0].content)
+                    else:
+                        _resp_parts = []
+                        for p in response.parts:
+                            if p.text: _resp_parts.append(types.Part.from_text(text=p.text))
+                        if _resp_parts:
+                            chat_history.append(types.Content(role="model", parts=_resp_parts))
                     await self._send_status(ws, "✅ Aufgabe abgeschlossen")
                     break
 
@@ -572,6 +627,9 @@ KRITISCH – Autonomie-Regeln:
                     await asyncio.sleep(delay)
 
                 # Nächsten LLM-Aufruf mit Tool-Ergebnissen
+                # Beim ersten Tool-Step: User-Nachricht als Anker in History einbauen
+                if steps == 0 and (not chat_history or chat_history[-1] != _user_msg):
+                    chat_history.append(_user_msg)
                 if config.LLM_PROVIDER == "google":
                     chat_history.append(response.raw.candidates[0].content)
                 else:
@@ -597,13 +655,7 @@ KRITISCH – Autonomie-Regeln:
                 response = await self.provider.generate_response(
                     model=config.current_model,
                     system_prompt=system_prompt,
-                    contents=[
-                        types.Content(
-                            role="user",
-                            parts=[types.Part.from_text(text=task_text)],
-                        ),
-                        *chat_history,
-                    ],
+                    contents=chat_history,
                     tools=self._tool_instances
                 )
                 tracer.end_span(llm_span)
@@ -638,6 +690,8 @@ KRITISCH – Autonomie-Regeln:
                     )
                 except Exception as cl_err:
                     _log(f"conv_log fehlgeschlagen: {cl_err}")
+                # Chat-History für nächste Anfrage dieses Users speichern
+                self._user_histories[_history_key] = chat_history
 
             # Auto-Learning: Bei mehrstufigen Aufgaben den Loesungsweg speichern
             if steps >= 2 and self._tool_stats:
@@ -682,6 +736,9 @@ KRITISCH – Autonomie-Regeln:
             await self._send_status(ws, err_msg)
             tracer.end_span(agent_span, status="error", error=str(e))
             agent_span = None  # Verhindern, dass finally nochmal beendet
+            # History auch bei Fehler zurückspeichern
+            if not self.is_sub_agent and chat_history:
+                self._user_histories[_history_key] = chat_history
             if not self.is_sub_agent:
                 try:
                     _dur = int((time.time() - _task_start_time) * 1000)
@@ -910,13 +967,30 @@ KRITISCH – Autonomie-Regeln:
                 tracer.end_span(span, status="ok")
                 return result
 
-            # LDAP-Benutzer: Sicherheitskritische Tools komplett blockieren
+            # LDAP-Benutzer: Sicherheitskritische Tools und Befehle blockieren
             _uname = getattr(self, '_current_username', '')
             _t0 = _time.monotonic()
-            if _uname and _uname not in _LOCAL_PRIVILEGED_USERS and name in _BLOCKED_TOOLS_FOR_LDAP:
-                print(f"[AGENT] BLOCKED Tool '{name}' fuer LDAP-User '{_uname}'", flush=True)
-                result = f"Zugriff verweigert: Das Tool '{name}' steht LDAP-Benutzern nicht zur Verfuegung."
-            else:
+            _ldap_blocked = False
+            if _uname and _uname not in _LOCAL_PRIVILEGED_USERS:
+                if name in _BLOCKED_TOOLS_FOR_LDAP:
+                    print(f"[AGENT] BLOCKED Tool '{name}' fuer LDAP-User '{_uname}'", flush=True)
+                    result = f"Zugriff verweigert: Das Tool '{name}' steht LDAP-Benutzern nicht zur Verfuegung."
+                    _ldap_blocked = True
+                elif name == "shell_execute":
+                    _cmd = args.get("command", "")
+                    if _LDAP_SHELL_FORBIDDEN.search(_cmd):
+                        print(f"[AGENT] BLOCKED shell command for LDAP-User '{_uname}': {_cmd[:80]}", flush=True)
+                        result = "Zugriff verweigert: Dieser Shell-Befehl ist für LDAP-Benutzer nicht erlaubt (keine System-Änderungen)."
+                        _ldap_blocked = True
+                    elif _LDAP_SHELL_WRITE_REDIRECT.search(_cmd):
+                        print(f"[AGENT] BLOCKED shell write-redirect for LDAP-User '{_uname}': {_cmd[:80]}", flush=True)
+                        result = "Zugriff verweigert: Datei-Schreiben via Shell ist für LDAP-Benutzer nicht erlaubt."
+                        _ldap_blocked = True
+                    elif _LDAP_SHELL_SECRET_PATHS.search(_cmd):
+                        print(f"[AGENT] BLOCKED shell secret-path for LDAP-User '{_uname}': {_cmd[:80]}", flush=True)
+                        result = "Zugriff verweigert: Zugriff auf diese Datei ist für LDAP-Benutzer nicht erlaubt."
+                        _ldap_blocked = True
+            if not _ldap_blocked:
                 result = await tool.execute(**exec_args)
             _dur_ms = int((_time.monotonic() - _t0) * 1000)
             tracer.end_span(span, status="ok")

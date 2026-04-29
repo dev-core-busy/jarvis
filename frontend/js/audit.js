@@ -38,7 +38,7 @@ window.auditManager = new (class JarvisAuditManager {
         if (tool) params.set('tool', tool);
 
         try {
-            const r = await fetch(`/api/audit_log?${params}`, { headers: _authHeaders() });
+            const r = await fetch(`/api/audit_log?${params}`, { headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') } });
             if (!r.ok) { this._notify('Ladefehler: ' + r.status, 'error'); return; }
             const entries = await r.json();
             this._render(entries);
@@ -61,12 +61,13 @@ window.auditManager = new (class JarvisAuditManager {
 
         tbody.innerHTML = entries.map(e => {
             const ts  = new Date(e.ts * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'medium' });
-            const dur = e.duration_ms !== undefined ? `${e.duration_ms} ms` : '—';
-            const res = e.result_len  !== undefined ? `${e.result_len} B` : '—';
+            const isTask = e.tool === '[task]';
+            const dur = isTask ? '—' : (e.duration_ms != null ? `${e.duration_ms} ms` : '—');
+            const res = isTask ? '—' : (e.result_len  != null ? `${e.result_len} B`  : '—');
             const args = e.args && Object.keys(e.args).length
                 ? Object.entries(e.args)
                     .map(([k, v]) => {
-                        const val = typeof v === 'string' ? v.substring(0, 60) + (v.length > 60 ? '…' : '') : JSON.stringify(v).substring(0, 60);
+                        const val = typeof v === 'string' ? v.substring(0, 80) + (v.length > 80 ? '…' : '') : JSON.stringify(v).substring(0, 80);
                         return `<span class="audit-arg-key">${this._esc(k)}</span>=<span class="audit-arg-val">${this._esc(val)}</span>`;
                     })
                     .join(' ')
@@ -74,8 +75,9 @@ window.auditManager = new (class JarvisAuditManager {
 
             // Tool-Badge-Farbe nach Kategorie
             const toolClass = this._toolClass(e.tool || '');
+            const rowStyle  = isTask ? 'opacity:.7;' : '';
 
-            return `<tr>
+            return `<tr style="${rowStyle}">
                 <td class="audit-ts">${ts}</td>
                 <td class="audit-user">${this._esc(e.user || '—')}</td>
                 <td><span class="audit-tool-badge ${toolClass}">${this._esc(e.tool || '—')}</span></td>
@@ -87,6 +89,7 @@ window.auditManager = new (class JarvisAuditManager {
     }
 
     _toolClass(tool) {
+        if (tool === '[task]')             return 'audit-tool-task';
         if (tool.startsWith('shell'))      return 'audit-tool-shell';
         if (tool.startsWith('read_file') || tool.startsWith('write_file') || tool.startsWith('list_dir')) return 'audit-tool-fs';
         if (tool.startsWith('screenshot') || tool.startsWith('desktop') || tool.startsWith('wait_for')) return 'audit-tool-desktop';
@@ -100,7 +103,7 @@ window.auditManager = new (class JarvisAuditManager {
     async _clear() {
         if (!confirm('Audit-Log wirklich vollständig löschen?')) return;
         try {
-            const r = await fetch('/api/audit_log', { method: 'DELETE', headers: _authHeaders() });
+            const r = await fetch('/api/audit_log', { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') } });
             const d = await r.json();
             if (d.ok) {
                 this._notify('🗑️ Log gelöscht', 'info');

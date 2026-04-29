@@ -12,7 +12,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=59">
+    <link rel="stylesheet" href="/static/css/style.css?v=65">
 </head>
 
 <body>
@@ -237,7 +237,22 @@ sudo update-ca-certificates</code></pre>
                 </div>
                 <div class="header-info">
                     <h1 class="header-title">JARVIS</h1>
-                    <div id="version-pill" class="header-version-pill"></div>
+                    <!-- Version-Pill: klickbar, öffnet Update-Dropdown -->
+                    <div class="update-widget-wrap">
+                        <div id="version-pill" class="header-version-pill upd-pill-clickable" title="Updates &amp; Version">
+                            <span id="update-version" class="upd-pill-ver">v?</span>
+                            <span id="update-badge" class="update-badge" style="display:none;">●</span>
+                        </div>
+                        <div id="update-dropdown" class="update-dropdown hidden">
+                            <div class="update-dropdown-header">
+                                <span>Jarvis Updates</span>
+                                <button id="upd-close" class="update-close-btn">✕</button>
+                            </div>
+                            <div id="upd-body" class="update-dropdown-body">
+                                <p class="kb-hint" style="margin:0;">Prüfe…</p>
+                            </div>
+                        </div>
+                    </div>
                     <div id="security-indicator" class="security-badge" title="Sicherheitsstatus">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2.5">
@@ -254,23 +269,6 @@ sudo update-ca-certificates</code></pre>
             </div>
             <div class="header-right">
                 <div class="connection-indicator" id="connection-dot" title="Verbindungsstatus"></div>
-
-                <!-- Update-Widget + Dropdown -->
-                <div class="update-widget-wrap">
-                    <div id="update-widget" class="update-widget" title="Updates prüfen">
-                        <span id="update-version" class="update-version"></span>
-                        <span id="update-badge" class="update-badge" style="display:none;">●</span>
-                    </div>
-                    <div id="update-dropdown" class="update-dropdown hidden">
-                        <div class="update-dropdown-header">
-                            <span>Jarvis Updates</span>
-                            <button id="upd-close" class="update-close-btn">✕</button>
-                        </div>
-                        <div id="upd-body" class="update-dropdown-body">
-                            <p class="kb-hint" style="margin:0;">Prüfe…</p>
-                        </div>
-                    </div>
-                </div>
 
                 <button class="btn-icon" id="btn-settings" title="KI-Einstellungen">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -377,6 +375,15 @@ sudo update-ca-certificates</code></pre>
                     </div>
                 </div>
 
+                <!-- Kontext-Indikator -->
+                <div id="ctx-indicator" style="display:none;align-items:center;gap:8px;padding:4px 10px 2px;flex-shrink:0;">
+                    <span id="ctx-indicator-pill" style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);font-size:0.73rem;color:var(--accent);cursor:default;user-select:none;">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                        <span id="ctx-indicator-text">Kontext aktiv</span>
+                        <button id="ctx-indicator-clear" title="Kontext zurücksetzen" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:var(--text-muted);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()">✕</button>
+                    </span>
+                </div>
+
                 <!-- Eingabe -->
                 <div class="input-bar">
                     <textarea id="task-input" placeholder="Aufgabe für Jarvis eingeben..." rows="2"></textarea>
@@ -479,8 +486,6 @@ sudo update-ca-certificates</code></pre>
                 <button class="settings-tab-btn" data-settings-tab="telemetry">Telemetry</button>
                 <button class="settings-tab-btn" data-settings-tab="security">Sicherheit</button>
                 <button class="settings-tab-btn" data-settings-tab="cron">Cron</button>
-                <button class="settings-tab-btn" data-settings-tab="context">Kontext</button>
-                <button class="settings-tab-btn" data-settings-tab="audit">Audit</button>
             </div>
 
             <div class="modal-body">
@@ -1193,6 +1198,108 @@ sudo update-ca-certificates</code></pre>
                             </div>
                             <div id="tele-spans-body" style="display:none;"><div class="kb-loading">Lade…</div></div>
                         </div>
+                        <!-- ── Kontext / History ── -->
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.contextManager)window.contextManager.init();else if(b.style.display==='none'&&window.contextManager)window.contextManager.stop();})(this)">
+                                <span class="kb-folder-icon">🧩</span>
+                                <span class="kb-folder-path" style="font-weight:600;">Kontext / History</span>
+                                <span style="margin-left:auto;margin-right:8px;" onclick="event.stopPropagation()">
+                                    <button id="ctx-refresh-btn" class="kb-btn-secondary" style="font-size:0.72rem;padding:2px 8px;" title="Aktualisieren">🔄</button>
+                                </span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="ctx-section-body" style="display:none;padding:10px 0 4px;">
+                                <p class="kb-hint" style="margin:0 0 8px;">Zustand des laufenden Hauptagenten. Token-Angaben werden nur aktualisiert, wenn eine Aufgabe aktiv ist.</p>
+                                <div class="kb-stat-grid" id="ctx-stat-grid" style="margin-top:0;">
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-history-entries">—</div><div class="kb-stat-label">History-Einträge</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-fills-pct">—</div><div class="kb-stat-label">Auslastung</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-input-tokens">—</div><div class="kb-stat-label">Input-Tokens</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-output-tokens">—</div><div class="kb-stat-label">Output-Tokens</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-total-tokens">—</div><div class="kb-stat-label">Tokens gesamt</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-hist-tokens">—</div><div class="kb-stat-label">History-Tokens (Schätz.)</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-agent-state">—</div><div class="kb-stat-label">Agent-Status</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-threshold-display">—</div><div class="kb-stat-label">Komprimierungs-Schwelle</div></div>
+                                </div>
+                                <div style="margin-top:10px;">
+                                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                                        <span class="kb-hint" style="margin:0;">History-Auslastung</span>
+                                        <span class="kb-hint" id="ctx-fills-label" style="margin:0;">0 / 30 Einträge</span>
+                                    </div>
+                                    <div style="height:6px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden;">
+                                        <div id="ctx-fills-bar" style="height:100%;width:0%;background:var(--accent);border-radius:4px;transition:width 0.4s;"></div>
+                                    </div>
+                                </div>
+                                <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:160px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="ctx-threshold-input">Schwellwert (History-Einträge)</label>
+                                        <div style="display:flex;gap:6px;">
+                                            <input id="ctx-threshold-input" type="number" min="4" max="200" step="2" value="30" class="kb-input" style="height:28px;font-size:0.8rem;">
+                                            <button id="ctx-threshold-save" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 10px;">Speichern</button>
+                                        </div>
+                                        <p class="kb-hint" style="margin-top:3px;">Min: 4 · Max: 200 · Standard: 30</p>
+                                    </div>
+                                    <div style="flex:0 0 auto;">
+                                        <button id="ctx-compress-btn" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 12px;">🗜️ Jetzt komprimieren</button>
+                                        <button id="ctx-clear-btn" class="kb-btn-danger" style="height:28px;font-size:0.8rem;padding:0 12px;margin-top:6px;">🗑️ Verlauf löschen</button>
+                                        <p class="kb-hint" style="margin-top:3px;" id="ctx-compress-result"></p>
+                                    </div>
+                                </div>
+                                <div id="ctx-notification" class="kb-notification" style="display:none;margin-top:8px;"></div>
+                            </div>
+                        </div>
+
+                        <!-- ── Audit-Log ── -->
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.auditManager)window.auditManager.init();})(this)">
+                                <span class="kb-folder-icon">📋</span>
+                                <span class="kb-folder-path" style="font-weight:600;">Tool-Audit-Log</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" onclick="event.stopPropagation()">
+                                    <button id="audit-refresh-btn" class="kb-btn-secondary" style="font-size:0.72rem;padding:2px 8px;" title="Aktualisieren">🔄</button>
+                                    <button id="audit-clear-btn" class="kb-btn-danger" style="font-size:0.72rem;padding:2px 8px;" title="Log löschen">🗑️</button>
+                                </span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="audit-section-body" style="display:none;padding:10px 0 4px;">
+                                <p class="kb-hint" style="margin:0 0 8px;">Jeder Tool-Aufruf des Agenten wird hier protokolliert (max. 10 MB, danach automatische Rotation).</p>
+                                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:flex-end;">
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:120px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="audit-filter-user">Benutzer</label>
+                                        <input id="audit-filter-user" type="text" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
+                                    </div>
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:120px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="audit-filter-tool">Tool</label>
+                                        <input id="audit-filter-tool" type="text" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
+                                    </div>
+                                    <select id="audit-limit" class="kb-input" style="flex:0 0 auto;width:90px;height:28px;font-size:0.8rem;">
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                        <option value="200" selected>200</option>
+                                        <option value="500">500</option>
+                                    </select>
+                                    <button id="audit-apply-btn" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 12px;">Anwenden</button>
+                                    <span id="audit-count" class="kb-hint" style="margin:0;"></span>
+                                </div>
+                                <div id="audit-notification" class="kb-notification" style="display:none;margin-bottom:6px;"></div>
+                                <div id="audit-table-wrap" style="overflow-x:auto;max-height:400px;overflow-y:auto;">
+                                    <table id="audit-table" class="audit-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Zeit</th>
+                                                <th>Benutzer</th>
+                                                <th>Tool</th>
+                                                <th>Dauer</th>
+                                                <th>Ergebnis</th>
+                                                <th>Argumente</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="audit-tbody">
+                                            <tr><td colspan="6" class="audit-empty">Lade…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
                         <div style="display:flex;gap:10px;margin-top:16px;">
                             <button class="vis-btn vis-btn-primary" id="btn-tele-refresh">↻ Aktualisieren</button>
                             <button class="vis-btn" id="btn-tele-clear" style="color:#ef4444;border-color:rgba(239,68,68,0.4);">Zurücksetzen</button>
@@ -1497,153 +1604,7 @@ sudo update-ca-certificates</code></pre>
                     <div id="cron-tab-content"></div>
                 </div>
 
-                <!-- ═══ Tab: Kontext ═══ -->
-                <div id="settings-tab-context" class="settings-tab-content" style="display:none;">
-                    <div class="kb-container">
 
-                        <!-- Statistiken -->
-                        <div class="kb-section">
-                            <div class="kb-section-header">
-                                <h3>Aktuelle Session</h3>
-                                <button id="ctx-refresh-btn" class="kb-btn-secondary" title="Aktualisieren">🔄</button>
-                            </div>
-                            <p class="kb-hint">Zeigt den Zustand des laufenden Hauptagenten. Token-Angaben werden nur aktualisiert, wenn eine Aufgabe aktiv ist.</p>
-                            <div class="kb-stat-grid" id="ctx-stat-grid" style="margin-top:0.5rem;">
-                                <div class="kb-stat">
-                                    <div class="kb-stat-value" id="ctx-history-entries">—</div>
-                                    <div class="kb-stat-label">History-Einträge</div>
-                                </div>
-                                <div class="kb-stat">
-                                    <div class="kb-stat-value" id="ctx-fills-pct">—</div>
-                                    <div class="kb-stat-label">Auslastung</div>
-                                </div>
-                                <div class="kb-stat">
-                                    <div class="kb-stat-value" id="ctx-input-tokens">—</div>
-                                    <div class="kb-stat-label">Input-Tokens</div>
-                                </div>
-                                <div class="kb-stat">
-                                    <div class="kb-stat-value" id="ctx-output-tokens">—</div>
-                                    <div class="kb-stat-label">Output-Tokens</div>
-                                </div>
-                                <div class="kb-stat">
-                                    <div class="kb-stat-value" id="ctx-total-tokens">—</div>
-                                    <div class="kb-stat-label">Tokens gesamt</div>
-                                </div>
-                                <div class="kb-stat">
-                                    <div class="kb-stat-value" id="ctx-hist-tokens">—</div>
-                                    <div class="kb-stat-label">History-Tokens (Schätz.)</div>
-                                </div>
-                                <div class="kb-stat">
-                                    <div class="kb-stat-value" id="ctx-agent-state">—</div>
-                                    <div class="kb-stat-label">Agent-Status</div>
-                                </div>
-                                <div class="kb-stat">
-                                    <div class="kb-stat-value" id="ctx-threshold-display">—</div>
-                                    <div class="kb-stat-label">Komprimierungs-Schwelle</div>
-                                </div>
-                            </div>
-                            <!-- Fortschrittsbalken -->
-                            <div style="margin-top:1rem;">
-                                <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-                                    <span class="kb-hint" style="margin:0;">History-Auslastung</span>
-                                    <span class="kb-hint" id="ctx-fills-label" style="margin:0;">0 / 30 Einträge</span>
-                                </div>
-                                <div style="height:6px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden;">
-                                    <div id="ctx-fills-bar" style="height:100%;width:0%;background:var(--accent);border-radius:4px;transition:width 0.4s;"></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Komprimierung -->
-                        <div class="kb-section">
-                            <div class="kb-section-header">
-                                <h3>Komprimierung</h3>
-                            </div>
-                            <p class="kb-hint">Wenn die History den Schwellwert überschreitet, fasst Jarvis den älteren Teil automatisch per LLM zusammen. Du kannst die Komprimierung auch manuell auslösen.</p>
-                            <div class="kb-form-grid-2" style="margin-top:0.75rem;margin-bottom:0;">
-                                <div class="kb-form-field">
-                                    <label class="kb-label" for="ctx-threshold-input">Schwellwert (History-Einträge)</label>
-                                    <div style="display:flex;gap:8px;">
-                                        <input id="ctx-threshold-input" type="number" min="4" max="200" step="2" value="30" class="kb-input">
-                                        <button id="ctx-threshold-save" class="kb-btn-action">Speichern</button>
-                                    </div>
-                                    <p class="kb-hint" style="margin-top:4px;">Min: 4 · Max: 200 · Standard: 30</p>
-                                </div>
-                                <div class="kb-form-field" style="justify-content:flex-end;">
-                                    <label class="kb-label">Manuelle Komprimierung</label>
-                                    <button id="ctx-compress-btn" class="kb-btn-action" style="align-self:flex-start;">🗜️ Jetzt komprimieren</button>
-                                    <p class="kb-hint" style="margin-top:4px;" id="ctx-compress-result"></p>
-                                </div>
-                            </div>
-                            <div id="ctx-notification" class="kb-notification" style="display:none;margin-top:0.5rem;"></div>
-                        </div>
-
-                    </div>
-                </div><!-- /settings-tab-context -->
-
-                <!-- ═══ Tab: Audit-Log ═══ -->
-                <div id="settings-tab-audit" class="settings-tab-content" style="display:none;">
-                    <div class="kb-container">
-
-                        <!-- Header + Filter -->
-                        <div class="kb-section">
-                            <div class="kb-section-header">
-                                <h3>Tool-Audit-Log</h3>
-                                <div style="display:flex;gap:6px;">
-                                    <button id="audit-refresh-btn" class="kb-btn-secondary" title="Aktualisieren">🔄</button>
-                                    <button id="audit-clear-btn"   class="kb-btn-danger"    title="Log löschen">🗑️ Löschen</button>
-                                </div>
-                            </div>
-                            <p class="kb-hint">Jeder Tool-Aufruf des Agenten wird hier protokolliert (max. 10 MB, danach automatische Rotation).</p>
-
-                            <!-- Filter-Zeile -->
-                            <div class="kb-form-grid-2" style="margin-bottom:0;">
-                                <div class="kb-form-field">
-                                    <label class="kb-label" for="audit-filter-user">Filter: Benutzer</label>
-                                    <input id="audit-filter-user" type="text" placeholder="Alle" class="kb-input">
-                                </div>
-                                <div class="kb-form-field">
-                                    <label class="kb-label" for="audit-filter-tool">Filter: Tool</label>
-                                    <input id="audit-filter-tool" type="text" placeholder="Alle" class="kb-input">
-                                </div>
-                            </div>
-                            <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
-                                <label class="kb-label" style="margin:0;white-space:nowrap;" for="audit-limit">Einträge:</label>
-                                <select id="audit-limit" class="kb-input" style="flex:0 0 auto;width:100px;">
-                                    <option value="50">50</option>
-                                    <option value="100">100</option>
-                                    <option value="200" selected>200</option>
-                                    <option value="500">500</option>
-                                </select>
-                                <button id="audit-apply-btn" class="kb-btn-action">Anwenden</button>
-                                <span id="audit-count" class="kb-hint" style="margin:0;margin-left:auto;"></span>
-                            </div>
-                            <div id="audit-notification" class="kb-notification" style="display:none;margin-top:8px;"></div>
-                        </div>
-
-                        <!-- Tabelle -->
-                        <div class="kb-section" style="padding:0;overflow:hidden;">
-                            <div id="audit-table-wrap" style="overflow-x:auto;max-height:480px;overflow-y:auto;">
-                                <table id="audit-table" class="audit-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Zeit</th>
-                                            <th>Benutzer</th>
-                                            <th>Tool</th>
-                                            <th>Dauer</th>
-                                            <th>Ergebnis</th>
-                                            <th>Argumente</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="audit-tbody">
-                                        <tr><td colspan="6" class="audit-empty">Lade…</td></tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                    </div>
-                </div><!-- /settings-tab-audit -->
 
             </div>
             <div id="version-modal-footer" class="settings-version-footer"></div>
@@ -1651,18 +1612,18 @@ sudo update-ca-certificates</code></pre>
     </div>
 
     <script src="/static/js/websocket.js?v=6"></script>
-    <script src="/static/js/cron.js?v=3"></script>
-    <script src="/static/js/context.js?v=1"></script>
-    <script src="/static/js/audit.js?v=1"></script>
-    <script src="/static/js/extractor.js?v=2"></script>
-    <script src="/static/js/vnc.js?v=13"></script>
+    <script src="/static/js/cron.js?v=5"></script>
+    <script src="/static/js/context.js?v=3"></script>
+    <script src="/static/js/audit.js?v=3"></script>
+    <script src="/static/js/extractor.js?v=7"></script>
+    <script src="/static/js/vnc.js?v=14"></script>
     <script src="/static/js/skills.js?v=21"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
     <script src="/static/js/knowledge.js?v=32"></script>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=3"></script>
-    <script src="/static/js/app.js?v=63"></script>
+    <script src="/static/js/app.js?v=68"></script>
 </body>
 
 </html>

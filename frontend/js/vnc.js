@@ -50,6 +50,13 @@ class JarvisVNC {
         this.statusEl.textContent = 'Verbinde…';
         this.statusEl.style.color = '#f59e0b';
 
+        // Desktop-Sperre beim VNC-Verbinden automatisch aufheben
+        const _tok = localStorage.getItem('jarvis_token') || '';
+        fetch('/api/vnc/unlock', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + _tok }
+        }).catch(() => {});
+
         this.iframe.onerror = () => this._handleConnectFailure();
 
         // Verbindung nach 4s prüfen: noVNC sendet 'connect'/'disconnect' Events via postMessage

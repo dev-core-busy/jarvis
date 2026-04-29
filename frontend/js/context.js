@@ -32,15 +32,17 @@ window.contextManager = new (class JarvisContextManager {
         const refreshBtn  = document.getElementById('ctx-refresh-btn');
         const saveBtn     = document.getElementById('ctx-threshold-save');
         const compressBtn = document.getElementById('ctx-compress-btn');
+        const clearBtn    = document.getElementById('ctx-clear-btn');
 
         if (refreshBtn)  refreshBtn.onclick  = () => this._load();
         if (saveBtn)     saveBtn.onclick      = () => this._saveThreshold();
         if (compressBtn) compressBtn.onclick  = () => this._forceCompress();
+        if (clearBtn)    clearBtn.onclick     = () => this._clearHistory();
     }
 
     async _load() {
         try {
-            const r = await fetch('/api/context/stats', { headers: _authHeaders() });
+            const r = await fetch('/api/context/stats', { headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') } });
             if (!r.ok) return;
             const d = await r.json();
             this._render(d);
@@ -107,7 +109,7 @@ window.contextManager = new (class JarvisContextManager {
         try {
             const r = await fetch('/api/context/threshold', {
                 method: 'POST',
-                headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
+                headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || ''), 'Content-Type': 'application/json' },
                 body: JSON.stringify({ threshold: val })
             });
             const d = await r.json();
@@ -124,7 +126,7 @@ window.contextManager = new (class JarvisContextManager {
         try {
             const r = await fetch('/api/context/compress', {
                 method: 'POST',
-                headers: _authHeaders()
+                headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') }
             });
             const d = await r.json();
             if (d.skipped) {
@@ -140,6 +142,23 @@ window.contextManager = new (class JarvisContextManager {
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = '🗜️ Jetzt komprimieren'; }
         }
+    }
+
+    async _clearHistory() {
+        if (!confirm('Chat-Verlauf für deinen Benutzer löschen? Das nächste Gespräch startet ohne Kontext.')) return;
+        try {
+            const r = await fetch('/api/context/clear', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') }
+            });
+            const d = await r.json();
+            if (d.ok) {
+                this._notify(`✅ Verlauf gelöscht (${d.cleared} Einträge)`);
+                this._load();
+            } else {
+                this._notify('Fehler beim Löschen', 'error');
+            }
+        } catch (e) { this._notify('Netzwerkfehler: ' + e.message, 'error'); }
     }
 
     _notify(msg, type = 'success') {

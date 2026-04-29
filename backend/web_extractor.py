@@ -217,7 +217,8 @@ def update_pending(doc_id: str, data: dict) -> bool:
 
 
 def approve_pending(doc_id: str) -> dict:
-    """Genehmigte Items als .md in die Wissens-DB schreiben, Pending löschen."""
+    """Genehmigte Items als .md in die Wissens-DB schreiben.
+    Das Pending-Dokument bleibt erhalten (status='approved') fuer die Verlaufsansicht."""
     doc = get_pending(doc_id)
     if not doc:
         raise FileNotFoundError(f"Pending-Dokument {doc_id} nicht gefunden")
@@ -256,15 +257,28 @@ def approve_pending(doc_id: str) -> dict:
     md_content = "\n".join(lines)
     target_path.write_text(md_content, encoding="utf-8")
 
-    # Pending löschen
-    delete_pending(doc_id)
+    # Pending-Dokument als "approved" markieren (nicht loeschen – Verlauf erhalten)
+    doc["status"] = "approved"
+    doc["approved_at"] = int(time.time())
+    doc["file"] = str(target_path.relative_to(PROJECT_ROOT))
+    doc["qa_count"] = len(approved_qa)
+    doc["fact_count"] = len(approved_facts)
+    save_pending(doc)
 
     # Wissens-Index neu aufbauen (im Hintergrund-Thread)
+    def _reindex_and_trim():
+        force_reindex()
+        try:
+            from backend.tools.vector_store import release_memory_to_os
+            release_memory_to_os()
+        except Exception:
+            pass
+
     import threading
-    threading.Thread(target=force_reindex, daemon=True).start()
+    threading.Thread(target=_reindex_and_trim, daemon=True).start()
 
     return {
-        "file": str(target_path.relative_to(PROJECT_ROOT)),
+        "file": doc["file"],
         "qa_count": len(approved_qa),
         "fact_count": len(approved_facts),
     }

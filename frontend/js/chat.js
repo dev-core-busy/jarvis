@@ -104,7 +104,43 @@
         chatScreen.classList.remove('hidden');
         connectWS();
         msgInput.focus();
+        _startContextIndicator();
     }
+
+    // ─── Kontext-Indikator ────────────────────────────────────────────
+    let _ctxTimer = null;
+    const _authHdr = () => ({ 'Authorization': 'Bearer ' + token });
+
+    async function _updateContextIndicator() {
+        const el   = document.getElementById('ctx-indicator');
+        const text = document.getElementById('ctx-indicator-text');
+        if (!el) return;
+        try {
+            const r = await fetch('/api/context/stats', { headers: _authHdr() });
+            if (!r.ok) return;
+            const d = await r.json();
+            const n = d.history_entries || 0;
+            if (n > 0) {
+                el.style.display = 'flex';
+                text.textContent = `Kontext: ${n} Einträge · ${d.fills_pct ?? 0} %`;
+            } else {
+                el.style.display = 'none';
+            }
+        } catch (e) { /* offline */ }
+    }
+
+    function _startContextIndicator() {
+        _updateContextIndicator();
+        _ctxTimer = setInterval(_updateContextIndicator, 8000);
+    }
+
+    window._clearUserContext = async function () {
+        try {
+            const r = await fetch('/api/context/clear', { method: 'POST', headers: _authHdr() });
+            const d = await r.json();
+            if (d.ok) document.getElementById('ctx-indicator').style.display = 'none';
+        } catch (e) { /* ignore */ }
+    };
 
     function logout() {
         token = '';
@@ -263,6 +299,7 @@
             // Streaming beenden
             removeStreamingDots();
             currentBotBubble = null;
+            _updateContextIndicator();
         }
     }
 

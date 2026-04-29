@@ -2,6 +2,10 @@
  * Jarvis Trigger-UI  (Cron-Jobs + Datei-Watcher)
  * Design: kb-container / kb-section System  (wie Wissen- und Skills-Tab)
  */
+function _authHeaders() {
+    return { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') };
+}
+
 window.cronManager = new (class JarvisCronManager {
     constructor() {
         this._jobs     = [];
@@ -233,12 +237,31 @@ window.cronManager = new (class JarvisCronManager {
     // ═══ CRON JOBS ═══════════════════════════════════════════════════════
 
     async _loadJobs() {
+        const el = document.getElementById('cron-list');
         try {
             const r = await fetch('/api/cron', { headers: _authHeaders() });
-            if (!r.ok) return;
-            this._jobs = await r.json();
-            this._renderJobList();
-        } catch (e) { console.error('[Cron] Ladefehler:', e); }
+            if (!r.ok) {
+                if (el) el.innerHTML = `<p class="kb-empty" style="color:var(--error,#f87171);">Fehler beim Laden (${r.status}). Bitte Seite neu laden.</p>`;
+                return;
+            }
+            let data;
+            try {
+                data = await r.json();
+            } catch (jsonErr) {
+                if (el) el.innerHTML = `<p class="kb-empty" style="color:var(--error,#f87171);">JSON-Fehler: ${jsonErr.message}</p>`;
+                return;
+            }
+            this._jobs = data;
+            try {
+                this._renderJobList();
+            } catch (renderErr) {
+                console.error('[Cron] Render-Fehler:', renderErr);
+                if (el) el.innerHTML = `<p class="kb-empty" style="color:var(--error,#f87171);">Render-Fehler: ${renderErr.message}</p>`;
+            }
+        } catch (e) {
+            console.error('[Cron] Ladefehler:', e);
+            if (el) el.innerHTML = `<p class="kb-empty" style="color:var(--error,#f87171);">Fehler: ${e.message || e} (${e.name || 'unknown'})</p>`;
+        }
     }
 
     _renderJobList() {
@@ -249,13 +272,14 @@ window.cronManager = new (class JarvisCronManager {
             return;
         }
         el.innerHTML = `<div class="kb-folder-list">${this._jobs.map(job => {
-            const lastRun = job.last_run ? new Date(job.last_run * 1000).toLocaleString('de-DE') : '—';
-            const dotCls  = job.enabled ? 'active' : 'inactive';
+            const lastRun  = job.last_run ? new Date(job.last_run * 1000).toLocaleString('de-DE') : '—';
+            const dotCls   = job.enabled ? 'active' : 'inactive';
+            const onceBadge = job.once ? `<span style="font-size:.7rem;background:var(--accent-muted,rgba(99,102,241,.2));color:var(--accent);border-radius:4px;padding:1px 6px;margin-left:4px;">einmalig</span>` : '';
             return `
             <div class="cron-item" data-id="${job.id}">
                 <div class="cron-item-row">
                     <span class="cron-item-dot ${dotCls}"></span>
-                    <span class="cron-item-label">${this._esc(job.label)}</span>
+                    <span class="cron-item-label">${this._esc(job.label)}${onceBadge}</span>
                     <code  class="cron-item-code">${this._esc(job.cron)}</code>
                     <div   class="cron-item-actions">
                         <button class="kb-btn-run  cron-run-btn"  data-id="${job.id}" title="Jetzt ausführen">▶</button>

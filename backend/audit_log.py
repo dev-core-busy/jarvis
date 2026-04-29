@@ -1,4 +1,4 @@
-"""Jarvis Audit-Log – strukturiertes JSONL-Logging aller Tool-Ausführungen."""
+"""Jarvis Audit-Log – strukturiertes JSONL-Logging aller Tasks und Tool-Ausführungen."""
 
 import json
 import threading
@@ -14,6 +14,23 @@ def _ensure_dir():
     AUDIT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 
+def log_task(user: str, task: str, client_type: str = "", client_ip: str = ""):
+    """Loggt den Start einer Benutzer-Anfrage (auch ohne Tool-Aufruf)."""
+    entry = {
+        "ts": int(time.time()),
+        "user": user or "unknown",
+        "tool": "[task]",
+        "args": {
+            "task": task[:200] + ("…" if len(task) > 200 else ""),
+            **({"client_type": client_type} if client_type else {}),
+            **({"client_ip": client_ip} if client_ip else {}),
+        },
+        "result_len": None,
+        "duration_ms": None,
+    }
+    _write(entry)
+
+
 def log_tool(user: str, tool: str, args: dict, result_len: int, duration_ms: int):
     """Loggt einen Tool-Aufruf als JSONL-Zeile."""
     entry = {
@@ -24,6 +41,11 @@ def log_tool(user: str, tool: str, args: dict, result_len: int, duration_ms: int
         "result_len": result_len,
         "duration_ms": duration_ms,
     }
+    _write(entry)
+
+
+def _write(entry: dict):
+    """Schreibt einen Eintrag atomar in die Log-Datei."""
     line = json.dumps(entry, ensure_ascii=False)
     with _lock:
         _ensure_dir()
@@ -49,9 +71,9 @@ def read_log(limit: int = 500, user_filter: str = "", tool_filter: str = "") -> 
             continue
         try:
             entry = json.loads(line)
-            if user_filter and entry.get("user") != user_filter:
+            if user_filter and user_filter.lower() not in (entry.get("user") or "").lower():
                 continue
-            if tool_filter and entry.get("tool") != tool_filter:
+            if tool_filter and tool_filter.lower() not in (entry.get("tool") or "").lower():
                 continue
             entries.append(entry)
             if len(entries) >= limit:

@@ -71,6 +71,27 @@ async def no_cache_static(request: Request, call_next):
 
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
+
+# ─── PWA Root-Dateien (müssen unter / erreichbar sein, nicht /static/) ───
+@app.get("/manifest.json", include_in_schema=False)
+async def pwa_manifest():
+    f = FRONTEND_DIR / "manifest.json"
+    if not f.exists():
+        raise HTTPException(status_code=404)
+    from fastapi.responses import FileResponse
+    return FileResponse(str(f), media_type="application/manifest+json",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def pwa_service_worker():
+    f = FRONTEND_DIR / "sw.js"
+    if not f.exists():
+        raise HTTPException(status_code=404)
+    from fastapi.responses import FileResponse
+    return FileResponse(str(f), media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
+
 # noVNC-Dateien über Port 443 servieren (verhindert separates SSL-Zertifikat auf Port 6080)
 _NOVNC_DIRS = ["/usr/share/novnc", "/usr/share/noVNC", "/snap/novnc/current/usr/share/novnc"]
 for _nvdir in _NOVNC_DIRS:
@@ -103,6 +124,9 @@ async def vnc_websocket_proxy(websocket: WebSocket):
     except (ConnectionRefusedError, OSError):
         await websocket.close(code=1011, reason="VNC nicht erreichbar")
         return
+
+    # Desktop-Sperre beim VNC-Connect automatisch aufheben
+    asyncio.create_task(asyncio.to_thread(_unlock_desktop_screen))
 
     async def ws_to_tcp():
         """WebSocket-Frames → TCP."""
@@ -143,6 +167,114 @@ async def vnc_websocket_proxy(websocket: WebSocket):
         await websocket.close()
     except Exception:
         pass
+
+
+def _unlock_desktop_screen(target_user: str = "jarvis") -> None:
+    """Bildschirmschoner/Sperre fuer den Desktop-Benutzer deaktivieren.
+    Wird beim VNC-Connect und bei Session-Wechsel aufgerufen.
+
+    Strategie (von zuverlässig nach aufwändig):
+    1. loginctl unlock-sessions  → systemd/PAM-Standard für alle Sessions
+    2. pkill cinnamon-screensaver → prozessbasiert, funktioniert ohne D-Bus
+    3. Aktiven Session-User auf Display :0 dynamisch ermitteln
+    4. D-Bus screensaver-Befehl als dieser User
+    5. DPMS aufwecken mit korrekter XAUTHORITY
+    """
+    # Bekannte X-Auth-Datei fuer Display :0 (lightdm setzt diese)
+    _XAUTH = "/var/run/lightdm/root/:0"
+    _xenv  = {"DISPLAY": ":0", "XAUTHORITY": _XAUTH}
+
+    try:
+        # ── 1. systemd loginctl ────────────────────────────────────────────────
+        subprocess.run(["loginctl", "unlock-sessions"], capture_output=True, timeout=5)
+
+        # ── 2. Screensaver-Prozess direkt beenden (zuverlässigste Methode) ─────
+        subprocess.run(["pkill", "-f", "cinnamon-screensaver"], capture_output=True, timeout=5)
+        subprocess.run(["pkill", "-f", "xscreensaver"],         capture_output=True, timeout=5)
+        subprocess.run(["pkill", "-f", "gnome-screensaver"],    capture_output=True, timeout=5)
+
+        # ── 3. Aktiven Session-User auf :0 ermitteln ───────────────────────────
+        uid  = None
+        user = None
+        try:
+            # `who` liefert z.B.: "andreas seat0  2026-04-28 09:00 (:0)"
+            who = subprocess.run(["who"], capture_output=True, text=True, timeout=5)
+            for line in who.stdout.splitlines():
+                if "(:0)" in line or "(:0." in line:
+                    user = line.split()[0]
+                    break
+            # loginctl als Fallback: erste Seat0-Session die kein Greeter ist
+            if not user:
+                sess = subprocess.run(
+                    ["loginctl", "list-sessions", "--no-legend"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                for line in sess.stdout.splitlines():
+                    parts = line.split()
+                    # Format: SESSION UID USER SEAT CLASS ...
+                    if len(parts) >= 5 and parts[3] == "seat0" and parts[4] != "greeter" and parts[2] not in ("lightdm", "root", ""):
+                        user = parts[2]
+                        uid  = parts[1]
+                        break
+            if user and not uid:
+                uid_r = subprocess.run(["id", "-u", user], capture_output=True, text=True, timeout=5)
+                uid = uid_r.stdout.strip() or None
+        except Exception:
+            pass
+
+        # Fallback auf target_user wenn kein aktiver User gefunden
+        if not uid:
+            import pwd as _pwd
+            try:
+                uid  = str(_pwd.getpwnam(target_user).pw_uid)
+                user = target_user
+            except KeyError:
+                uid  = "1001"
+                user = target_user
+
+        # ── 4. D-Bus Screensaver-Kommando als Session-User ─────────────────────
+        dbus_sock = f"/run/user/{uid}/bus"
+        if Path(dbus_sock).exists():
+            dbus_env = {**_xenv, "DBUS_SESSION_BUS_ADDRESS": f"unix:path={dbus_sock}", "HOME": f"/home/{user}"}
+            subprocess.run(
+                ["sudo", "-u", f"#{uid}", "cinnamon-screensaver-command", "--deactivate"],
+                env=dbus_env, capture_output=True, timeout=5,
+            )
+            subprocess.run(
+                ["sudo", "-u", f"#{uid}", "xdg-screensaver", "reset"],
+                env=dbus_env, capture_output=True, timeout=3,
+            )
+
+        # ── 5. DPMS aufwecken ──────────────────────────────────────────────────
+        subprocess.run(["xset", "-display", ":0", "dpms", "force", "on"], env=_xenv, capture_output=True, timeout=5)
+        subprocess.run(["xset", "-display", ":0", "s", "reset"],          env=_xenv, capture_output=True, timeout=5)
+
+        # ── 6. Greeter-Fall: kein aktiver User auf :0 → jarvis einloggen ──────
+        # Pruefen ob Greeter laeuft (kein normaler User auf :0)
+        who2 = subprocess.run(["who"], capture_output=True, text=True, timeout=5)
+        display_users = [
+            line.split()[0] for line in who2.stdout.splitlines()
+            if "(:0)" in line or "(:0." in line
+        ]
+        # Wenn niemand oder nur lightdm auf :0 → Greeter zeigt → jarvis einloggen
+        if not display_users or all(u in ("lightdm", "root") for u in display_users):
+            print("[VNC] Greeter aktiv – setze Autologin auf jarvis und starte Session.", flush=True)
+            _AUTOLOGIN_CONF = "/etc/lightdm/lightdm.conf.d/50-jarvis-autologin.conf"
+            try:
+                import os as _os
+                _os.makedirs(_os.path.dirname(_AUTOLOGIN_CONF), exist_ok=True)
+                with open(_AUTOLOGIN_CONF, "w") as _f:
+                    _f.write("[Seat:*]\nautologin-user=jarvis\nautologin-user-timeout=0\n")
+            except Exception as _e:
+                print(f"[VNC] Autologin-Datei schreiben fehlgeschlagen: {_e}", flush=True)
+            # dm-tool: jarvis-Session direkt starten (kein LightDM-Neustart noetig)
+            subprocess.run(["dm-tool", "switch-to-user", "jarvis"], capture_output=True, timeout=10)
+            print("[VNC] dm-tool switch-to-user jarvis ausgefuehrt.", flush=True)
+        else:
+            print(f"[VNC] Bildschirmsperre aufgehoben (user={user}, uid={uid})", flush=True)
+
+    except Exception as e:
+        print(f"[VNC] Screensaver-Unlock Fehler: {e}", flush=True)
 
 
 # ─── State ────────────────────────────────────────────────────────────
@@ -245,6 +377,17 @@ async def require_auth(request: Request) -> str:
     username = verify_token(token)
     if not username:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
+    return username
+
+
+async def require_local_auth(request: Request) -> str:
+    """FastAPI Dependency: Nur lokale Benutzer (ALLOWED_USERS) duerfen Admin-Aktionen ausfuehren."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = verify_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Nicht authentifiziert")
+    if username not in ALLOWED_USERS:
+        raise HTTPException(status_code=403, detail="Nur lokale Administratoren dürfen diese Aktion ausführen.")
     return username
 
 
@@ -480,34 +623,8 @@ def switch_desktop_session(username: str):
         print(msg, flush=True)
 
     def unlock_screen(target_user):
-        """Bildschirmschoner deaktivieren nach Login."""
-        try:
-            uid_result = subprocess.run(
-                ["id", "-u", target_user], capture_output=True, text=True, timeout=5
-            )
-            uid = uid_result.stdout.strip()
-            env = {
-                "DISPLAY": ":0",
-                "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus",
-                "HOME": f"/home/{target_user}",
-            }
-            # Screensaver sofort deaktivieren
-            subprocess.run(
-                ["sudo", "-u", target_user, "cinnamon-screensaver-command", "--deactivate"],
-                env=env, capture_output=True, timeout=5
-            )
-            # DPMS (Monitor-Abschaltung) aufwecken
-            subprocess.run(
-                ["sudo", "-u", target_user, "xset", "-display", ":0", "dpms", "force", "on"],
-                env=env, capture_output=True, timeout=5
-            )
-            subprocess.run(
-                ["sudo", "-u", target_user, "xset", "-display", ":0", "s", "reset"],
-                env=env, capture_output=True, timeout=5
-            )
-            log(f"[Session-Wechsel] Bildschirmschoner fuer '{target_user}' deaktiviert.")
-        except Exception as e:
-            log(f"[Session-Wechsel] Screensaver-Unlock Fehler: {e}")
+        """Delegiert an die Modul-Level-Funktion."""
+        _unlock_desktop_screen(target_user)
 
     def restart_vnc():
         """x11vnc für Display :0 robust neu starten."""
@@ -644,6 +761,15 @@ async def login(request: Request):
         return JSONResponse(
             {"success": False, "error": "Benutzername und Passwort erforderlich"},
             status_code=400,
+        )
+
+    # Nur lokale Benutzer (ALLOWED_USERS) duerfen sich anmelden
+    if username not in ALLOWED_USERS:
+        _record_login_attempt(client_ip)
+        print(f"[AUTH] Anmeldung verweigert (nicht in ALLOWED_USERS): {username}", flush=True)
+        return JSONResponse(
+            {"success": False, "error": "Benutzername oder Passwort falsch"},
+            status_code=401,
         )
 
     if not authenticate_linux_user(username, password):
@@ -831,7 +957,7 @@ async def update_status(user: str = Depends(require_auth)):
 
 
 @app.post("/api/update/apply")
-async def update_apply(user: str = Depends(require_auth)):
+async def update_apply(user: str = Depends(require_local_auth)):
     """Führt git pull aus und startet den Service neu."""
     from backend.update_manager import apply_update, restart_service_delayed
     result = await asyncio.to_thread(apply_update)
@@ -848,7 +974,7 @@ async def update_settings_get(user: str = Depends(require_auth)):
 
 
 @app.post("/api/update/settings")
-async def update_settings_set(request: Request, user: str = Depends(require_auth)):
+async def update_settings_set(request: Request, user: str = Depends(require_local_auth)):
     """Speichert Auto-Update-Einstellungen und legt ggf. Cron-Job an."""
     body    = await request.json()
     schedule = body.get("auto_update_schedule", "never")
@@ -908,7 +1034,7 @@ async def get_mcp_servers(user: str = Depends(require_auth)):
     return JSONResponse(mcp_manager.get_status())
 
 @app.post("/api/mcp/servers")
-async def add_mcp_server(request: Request, user: str = Depends(require_auth)):
+async def add_mcp_server(request: Request, user: str = Depends(require_local_auth)):
     data = await request.json()
     server = config.add_mcp_server(data)
     if data.get("enabled", True):
@@ -916,7 +1042,7 @@ async def add_mcp_server(request: Request, user: str = Depends(require_auth)):
     return JSONResponse(server)
 
 @app.put("/api/mcp/servers/{server_id}")
-async def update_mcp_server(server_id: str, request: Request, user: str = Depends(require_auth)):
+async def update_mcp_server(server_id: str, request: Request, user: str = Depends(require_local_auth)):
     data = await request.json()
     result = config.update_mcp_server(server_id, data)
     if not result:
@@ -929,14 +1055,14 @@ async def update_mcp_server(server_id: str, request: Request, user: str = Depend
     return JSONResponse(result)
 
 @app.delete("/api/mcp/servers/{server_id}")
-async def remove_mcp_server(server_id: str, user: str = Depends(require_auth)):
+async def remove_mcp_server(server_id: str, user: str = Depends(require_local_auth)):
     await mcp_manager.disconnect_server(server_id)
     if config.remove_mcp_server(server_id):
         return JSONResponse({"ok": True})
     return JSONResponse({"detail": "Server nicht gefunden"}, status_code=404)
 
 @app.post("/api/mcp/servers/{server_id}/toggle")
-async def toggle_mcp_server(server_id: str, request: Request, user: str = Depends(require_auth)):
+async def toggle_mcp_server(server_id: str, request: Request, user: str = Depends(require_local_auth)):
     data = await request.json()
     enabled = data.get("enabled", True)
     config.toggle_mcp_server(server_id, enabled)
@@ -947,7 +1073,7 @@ async def toggle_mcp_server(server_id: str, request: Request, user: str = Depend
     return JSONResponse({"ok": True, "enabled": enabled})
 
 @app.post("/api/mcp/servers/{server_id}/reconnect")
-async def reconnect_mcp_server(server_id: str, user: str = Depends(require_auth)):
+async def reconnect_mcp_server(server_id: str, user: str = Depends(require_local_auth)):
     success = await mcp_manager.connect_server(server_id)
     return JSONResponse({"ok": success})
 
@@ -1020,6 +1146,20 @@ async def api_context_compress(user: str = Depends(require_auth)):
     return JSONResponse(result)
 
 
+@app.post("/api/context/clear")
+async def api_context_clear(user: str = Depends(require_auth)):
+    """Löscht die Chat-History des aktuellen Benutzers (neues Gespräch)."""
+    agent = agent_manager.main_agent
+    if not agent:
+        return JSONResponse({"ok": True, "cleared": 0})
+    history = agent._user_histories.pop(user, [])
+    # Falls gerade aktiv: auch live-Referenz leeren
+    if agent._current_chat_history is history:
+        history.clear()
+        agent._current_chat_history = []
+    return JSONResponse({"ok": True, "cleared": len(history)})
+
+
 @app.post("/api/context/threshold")
 async def api_context_threshold(request: Request, user: str = Depends(require_auth)):
     """Setzt den Komprimierungs-Schwellwert (Anzahl History-Einträge)."""
@@ -1036,7 +1176,7 @@ async def api_context_threshold(request: Request, user: str = Depends(require_au
 
 
 @app.post("/api/system/restart")
-async def system_restart(user: str = Depends(require_auth)):
+async def system_restart(user: str = Depends(require_local_auth)):
     """Startet den Jarvis-Dienst neu (via systemctl)."""
     import subprocess, threading
     def _do_restart():
@@ -1057,6 +1197,13 @@ def _check_vnc_available() -> bool:
         return True
     except (ConnectionRefusedError, OSError, socket.timeout):
         return False
+
+
+@app.post("/api/vnc/unlock")
+async def vnc_unlock(user: str = Depends(require_auth)):
+    """Desktop-Sperre manuell aufheben (Screensaver deaktivieren)."""
+    await asyncio.to_thread(_unlock_desktop_screen)
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/config")
@@ -1104,7 +1251,7 @@ async def get_settings(user: str = Depends(require_auth)):
 
 
 @app.post("/api/settings")
-async def save_settings(request: Request, user: str = Depends(require_auth)):
+async def save_settings(request: Request, user: str = Depends(require_local_auth)):
     """Speichert globale Einstellungen (TTS, Desktop, AD-Config etc.)."""
     body = await request.json()
     config.save_global_settings(body)
@@ -1227,7 +1374,7 @@ async def get_ssl_info(user: str = Depends(require_auth)):
 
 
 @app.post("/api/settings/letsencrypt")
-async def request_letsencrypt(request: Request, user: str = Depends(require_auth)):
+async def request_letsencrypt(request: Request, user: str = Depends(require_local_auth)):
     """Beantragt ein Let's Encrypt Zertifikat via certbot (standalone).
     Streamt den Fortschritt als Textzeilen zurück."""
     body = await request.json()
@@ -1340,7 +1487,7 @@ async def request_letsencrypt(request: Request, user: str = Depends(require_auth
 
 
 @app.post("/api/settings/ssl/custom")
-async def upload_custom_cert(request: Request, user: str = Depends(require_auth)):
+async def upload_custom_cert(request: Request, user: str = Depends(require_local_auth)):
     """Lädt ein eigenes SSL-Zertifikat hoch (PEM-Format)."""
     body = await request.json()
     cert_pem = body.get("cert", "").strip()
@@ -1387,7 +1534,7 @@ async def get_profiles(user: str = Depends(require_auth)):
 
 
 @app.post("/api/profiles")
-async def create_profile(request: Request, user: str = Depends(require_auth)):
+async def create_profile(request: Request, user: str = Depends(require_local_auth)):
     """Erstellt ein neues Profil."""
     body = await request.json()
     profile = config.create_profile(body)
@@ -1395,7 +1542,7 @@ async def create_profile(request: Request, user: str = Depends(require_auth)):
 
 
 @app.put("/api/profiles/{profile_id}")
-async def update_profile(profile_id: str, request: Request, user: str = Depends(require_auth)):
+async def update_profile(profile_id: str, request: Request, user: str = Depends(require_local_auth)):
     """Aktualisiert ein bestehendes Profil."""
     body = await request.json()
     profile = config.update_profile(profile_id, body)
@@ -1405,7 +1552,7 @@ async def update_profile(profile_id: str, request: Request, user: str = Depends(
 
 
 @app.delete("/api/profiles/{profile_id}")
-async def delete_profile(profile_id: str, user: str = Depends(require_auth)):
+async def delete_profile(profile_id: str, user: str = Depends(require_local_auth)):
     """Löscht ein Profil (mindestens eines muss bestehen bleiben)."""
     if config.delete_profile(profile_id):
         return JSONResponse({"success": True})
@@ -1413,13 +1560,13 @@ async def delete_profile(profile_id: str, user: str = Depends(require_auth)):
 
 
 @app.get("/api/settings/agentkey")
-async def get_agent_key(user: str = Depends(require_auth)):
+async def get_agent_key(user: str = Depends(require_local_auth)):
     """Gibt den unmasked Agent API Key zurück (für Eye-Button)."""
     return JSONResponse({"agent_api_key": config.AGENT_API_KEY or ""})
 
 
 @app.get("/api/profiles/{profile_id}/key")
-async def get_profile_key(profile_id: str, user: str = Depends(require_auth)):
+async def get_profile_key(profile_id: str, user: str = Depends(require_local_auth)):
     """Gibt die unmasked API- und Session-Keys eines Profils zurück (für Eye-Button)."""
     for p in config.profiles:
         if p["id"] == profile_id:
@@ -1535,7 +1682,7 @@ async def test_profile_connection(request: Request, user: str = Depends(require_
 
 
 @app.post("/api/profiles/{profile_id}/activate")
-async def activate_profile(profile_id: str, user: str = Depends(require_auth)):
+async def activate_profile(profile_id: str, user: str = Depends(require_local_auth)):
     """Setzt ein Profil als aktiv."""
     if config.activate_profile(profile_id):
         return JSONResponse({"success": True})
@@ -1627,7 +1774,7 @@ async def get_skills(user: str = Depends(require_auth)):
 
 
 @app.post("/api/skills/{name}/enable")
-async def enable_skill(name: str, user: str = Depends(require_auth)):
+async def enable_skill(name: str, user: str = Depends(require_local_auth)):
     """Aktiviert einen Skill."""
     sm = _get_skill_manager()
     success = sm.enable_skill(name)
@@ -1637,7 +1784,7 @@ async def enable_skill(name: str, user: str = Depends(require_auth)):
 
 
 @app.post("/api/skills/{name}/disable")
-async def disable_skill(name: str, user: str = Depends(require_auth)):
+async def disable_skill(name: str, user: str = Depends(require_local_auth)):
     """Deaktiviert einen Skill."""
     sm = _get_skill_manager()
     success = sm.disable_skill(name)
@@ -1661,7 +1808,7 @@ async def get_skill_config(name: str, user: str = Depends(require_auth)):
 
 
 @app.post("/api/skills/{name}/config")
-async def update_skill_config(name: str, request: Request, user: str = Depends(require_auth)):
+async def update_skill_config(name: str, request: Request, user: str = Depends(require_local_auth)):
     """Aktualisiert die Konfiguration eines Skills."""
     body = await request.json()
     sm = _get_skill_manager()
@@ -1678,7 +1825,7 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
 
 
 @app.post("/api/skills/{name}/install")
-async def install_skill_deps(name: str, user: str = Depends(require_auth)):
+async def install_skill_deps(name: str, user: str = Depends(require_local_auth)):
     """Installiert die Abhängigkeiten eines Skills."""
     sm = _get_skill_manager()
     result = sm.install_dependencies(name)
@@ -1686,7 +1833,7 @@ async def install_skill_deps(name: str, user: str = Depends(require_auth)):
 
 
 @app.delete("/api/skills/{name}")
-async def uninstall_skill(name: str, user: str = Depends(require_auth)):
+async def uninstall_skill(name: str, user: str = Depends(require_local_auth)):
     """Entfernt einen Skill (nur nicht-system Skills)."""
     sm = _get_skill_manager()
     success = sm.uninstall_skill(name)
@@ -1698,7 +1845,7 @@ async def uninstall_skill(name: str, user: str = Depends(require_auth)):
 
 
 @app.post("/api/skills/reload")
-async def reload_skills(user: str = Depends(require_auth)):
+async def reload_skills(user: str = Depends(require_local_auth)):
     """Lädt alle Skills neu (Hot-Reload)."""
     if agent_instance:
         agent_instance.reload_skills()
@@ -1835,8 +1982,15 @@ async def reindex_knowledge(user: str = Depends(require_auth)):
     progress = get_index_progress()
     if progress.get("running"):
         return JSONResponse({"started": False, "message": "Indizierung läuft bereits"})
-    # Im Hintergrund starten
-    asyncio.create_task(_asyncio.to_thread(force_reindex))
+    # Im Hintergrund starten, danach Speicher freigeben
+    async def _run_reindex():
+        await _asyncio.to_thread(force_reindex)
+        try:
+            from backend.tools.vector_store import release_memory_to_os
+            await _asyncio.to_thread(release_memory_to_os)
+        except Exception:
+            pass
+    asyncio.create_task(_run_reindex())
     return JSONResponse({"started": True})
 
 
@@ -2079,6 +2233,29 @@ async def knowledge_pending_delete(doc_id: str, user: str = Depends(require_auth
     from backend.web_extractor import delete_pending
     ok = delete_pending(doc_id)
     return JSONResponse({"ok": ok})
+
+
+@app.delete("/api/knowledge/extract/file")
+async def knowledge_extract_file_delete(request: Request, user: str = Depends(require_auth)):
+    """Löscht eine genehmigte Extraktions-MD-Datei und startet Reindex."""
+    body = await request.json()
+    rel_path = (body.get("file") or "").strip().lstrip("/")
+    if not rel_path:
+        return JSONResponse({"ok": False, "error": "Kein Dateipfad"}, status_code=400)
+    from backend.config import config as _cfg
+    target = Path(_cfg.PROJECT_ROOT) / rel_path
+    # Sicherheitscheck: Datei muss im knowledge-Ordner liegen und extract_ prefix haben
+    try:
+        target.resolve().relative_to(Path(_cfg.PROJECT_ROOT).resolve())
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Ungültiger Pfad"}, status_code=400)
+    if not target.name.startswith("extract_"):
+        return JSONResponse({"ok": False, "error": "Nur extract_*-Dateien können gelöscht werden"}, status_code=400)
+    if target.exists():
+        target.unlink()
+    # Reindex im Hintergrund
+    asyncio.create_task(asyncio.to_thread(lambda: __import__('backend.tools.knowledge', fromlist=['force_reindex']).force_reindex()))
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/knowledge/mounts")
@@ -3401,7 +3578,25 @@ Beispiel-Nachrichten und was du tun sollst:
 - "Starte den Webserver neu" → shell_execute: systemctl restart ...
 - "Liste die letzten Logs" → shell_execute: journalctl oder tail
 
-WICHTIG: Antworte NUR mit dem Ergebnis. Kein "Ich werde...", kein "Lass mich...". Direkte Antwort.
+ERINNERUNGEN per WhatsApp (immer cron_create verwenden – nie ablehnen!):
+- "Erinnere mich morgen um 06:15 per WhatsApp an Datensicherung"
+  → cron_create: label="WA Erinnerung: Datensicherung", cron="15 6 <morgen-tag> <monat> *",
+    task="Sende WhatsApp an {sender}: Erinnerung: Datensicherung erstellen!", einmalig=True
+  → Antwort: "Erinnerung gesetzt: morgen um 06:15 bekommst du eine WhatsApp."
+- "Erinnere mich jeden Montag um 09:00 per WhatsApp"
+  → cron_create: label="WA Wochenerinnerung", cron="0 9 * * 1",
+    task="Sende WhatsApp an {sender}: Deine wöchentliche Erinnerung!", einmalig=False
+  → Antwort: "Wöchentliche Erinnerung jeden Montag um 09:00 gesetzt."
+- "Welche Erinnerungen habe ich?" → cron_list
+- "Lösche die Erinnerung / den Cron-Job X" → cron_delete mit der Job-ID
+
+WICHTIG fuer Erinnerungen:
+- Das aktuelle Datum und die Uhrzeit per shell_execute ermitteln (date '+%d %m %Y %H:%M') bevor du den Cron-Ausdruck berechnest.
+- Fuer einmalige Termine (morgen, uebermorgen, naechsten Dienstag etc.): einmalig=True setzen.
+- Die Telefonnummer im task IMMER als {sender} eintragen (das ist die Nummer des Absenders).
+- Timezone ist Europe/Berlin – Cron-Zeiten entsprechend setzen.
+
+WICHTIG allgemein: Antworte NUR mit dem Ergebnis. Kein "Ich werde...", kein "Lass mich...". Direkte Antwort.
 Wenn du ein Tool nutzt, fuehre es aus und antworte mit dem Ergebnis.
 Speichere Nachrichten NICHT im Memory, ausser der Benutzer sagt explizit "merke dir..." oder "speichere...".
 
@@ -3769,14 +3964,12 @@ async def _start_http_redirect():
 from backend.scheduler import cron_manager
 
 @app.get("/api/cron")
-async def cron_list(req: Request):
-    _require_auth(req)
+async def cron_list(user: str = Depends(require_auth)):
     return JSONResponse(cron_manager.list_jobs())
 
 
 @app.post("/api/cron")
-async def cron_create(req: Request):
-    _require_auth(req)
+async def cron_create_api(req: Request, user: str = Depends(require_auth)):
     body = await req.json()
     try:
         job = cron_manager.add_job(
@@ -3784,6 +3977,7 @@ async def cron_create(req: Request):
             cron=body["cron"],
             task=body["task"],
             enabled=body.get("enabled", True),
+            once=body.get("once", False),
         )
         return JSONResponse(job, status_code=201)
     except (ValueError, KeyError) as e:
@@ -3791,8 +3985,7 @@ async def cron_create(req: Request):
 
 
 @app.put("/api/cron/{job_id}")
-async def cron_update(job_id: str, req: Request):
-    _require_auth(req)
+async def cron_update(job_id: str, req: Request, user: str = Depends(require_auth)):
     body = await req.json()
     try:
         job = cron_manager.update_job(job_id, **body)
@@ -3802,8 +3995,7 @@ async def cron_update(job_id: str, req: Request):
 
 
 @app.delete("/api/cron/{job_id}")
-async def cron_delete(job_id: str, req: Request):
-    _require_auth(req)
+async def cron_delete_api(job_id: str, user: str = Depends(require_auth)):
     try:
         cron_manager.delete_job(job_id)
         return JSONResponse({"ok": True})
@@ -3812,8 +4004,7 @@ async def cron_delete(job_id: str, req: Request):
 
 
 @app.post("/api/cron/{job_id}/run")
-async def cron_run_now(job_id: str, req: Request):
-    _require_auth(req)
+async def cron_run_now(job_id: str, user: str = Depends(require_auth)):
     try:
         result = await cron_manager.run_now(job_id)
         return JSONResponse({"ok": True, "result": result[:500] if result else ""})
@@ -3849,14 +4040,12 @@ async def audit_log_clear(_u: str = Depends(require_auth)):
 from backend.file_watcher import watcher_manager
 
 @app.get("/api/watchers")
-async def watcher_list(req: Request):
-    _require_auth(req)
+async def watcher_list(user: str = Depends(require_auth)):
     return JSONResponse(watcher_manager.list_watchers())
 
 
 @app.post("/api/watchers")
-async def watcher_create(req: Request):
-    _require_auth(req)
+async def watcher_create(req: Request, user: str = Depends(require_auth)):
     body = await req.json()
     try:
         w = watcher_manager.add_watcher(
@@ -3873,8 +4062,7 @@ async def watcher_create(req: Request):
 
 
 @app.put("/api/watchers/{watcher_id}")
-async def watcher_update(watcher_id: str, req: Request):
-    _require_auth(req)
+async def watcher_update(watcher_id: str, req: Request, user: str = Depends(require_auth)):
     body = await req.json()
     try:
         w = watcher_manager.update_watcher(watcher_id, **body)
@@ -3884,8 +4072,7 @@ async def watcher_update(watcher_id: str, req: Request):
 
 
 @app.delete("/api/watchers/{watcher_id}")
-async def watcher_delete(watcher_id: str, req: Request):
-    _require_auth(req)
+async def watcher_delete(watcher_id: str, user: str = Depends(require_auth)):
     try:
         watcher_manager.delete_watcher(watcher_id)
         return JSONResponse({"ok": True})
@@ -4034,6 +4221,12 @@ async def startup():
                 from backend.tools.knowledge import force_reindex
                 await _asyncio.to_thread(force_reindex)
                 print("[knowledge] Index nach Auto-Mount neu aufgebaut", flush=True)
+                # Speicher nach Bulk-Indexierung an OS zurueckgeben
+                try:
+                    from backend.tools.vector_store import release_memory_to_os
+                    await _asyncio.to_thread(release_memory_to_os)
+                except Exception:
+                    pass
         except Exception as e:
             print(f"⚠️  Knowledge Auto-Mount fehlgeschlagen: {e}", flush=True)
 

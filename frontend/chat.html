@@ -90,6 +90,14 @@
 
     <!-- Input Bar -->
     <div class="input-bar">
+        <!-- Kontext-Indikator -->
+        <div id="ctx-indicator" style="display:none;align-items:center;padding:3px 10px 1px;">
+            <span id="ctx-indicator-pill" style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);font-size:0.73rem;color:#a5b4fc;cursor:default;user-select:none;">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                <span id="ctx-indicator-text">Kontext aktiv</span>
+                <button id="ctx-indicator-clear" title="Kontext zurücksetzen" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:rgba(255,255,255,0.4);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()">✕</button>
+            </span>
+        </div>
         <div class="input-row">
             <button class="btn-stop hidden" id="btn-stop" title="Agent stoppen">✕</button>
             <textarea id="msg-input" placeholder="Nachricht eingeben…" rows="1" maxlength="10000"></textarea>
@@ -200,6 +208,6 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/chat.js?v=6"></script>
+<script src="/static/js/chat.js?v=7"></script>
 </body>
 </html>

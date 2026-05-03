@@ -528,7 +528,22 @@ KRITISCH – Autonomie-Regeln:
 
                 # Antwort verarbeiten
                 if not response.parts:
-                    await self._send_status(ws, "⚠️ Keine Antwort vom LLM erhalten")
+                    # Leere Antwort: einmal automatisch retry mit verkürztem Prompt
+                    _log("Leere LLM-Antwort – retry mit Fallback-Prompt")
+                    try:
+                        retry_resp = await self.provider.generate_response(
+                            model=config.current_model,
+                            system_prompt="Antworte kurz und hilfreich auf Deutsch.",
+                            contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_text)])],
+                            tools=[],
+                        )
+                        retry_text = " ".join(p.text for p in (retry_resp.parts or []) if p.text).strip()
+                        if retry_text:
+                            await self._send_status(ws, retry_text, highlight=True)
+                            break
+                    except Exception as _re:
+                        _log(f"Retry fehlgeschlagen: {_re}")
+                    await self._send_status(ws, "⚠️ Keine Antwort vom LLM erhalten. Bitte versuche es erneut.", highlight=True)
                     break
 
                 # Function Calls und Text trennen

@@ -30,6 +30,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -55,6 +56,9 @@ class ChatViewModel @Inject constructor(
     // Avatar / TTS
     val isSpeaking: StateFlow<Boolean> = ttsManager.isSpeaking
     val avatarMouthState: StateFlow<AvatarMouthState> = ttsManager.mouthState
+
+    private val _ttsEnabled = MutableStateFlow(true)
+    val ttsEnabled: StateFlow<Boolean> = _ttsEnabled
 
     private val _inputText = MutableStateFlow("")
     val inputText: StateFlow<String> = _inputText
@@ -93,6 +97,7 @@ class ChatViewModel @Inject constructor(
                 autoSendVoice = s.autoSendVoice
                 voiceSilenceMs = s.voiceSilenceMs
                 _avatarType.value = s.avatarType
+                _ttsEnabled.value = s.ttsEnabled
                 ttsManager.configure(
                     serverTtsEnabled = s.serverTtsEnabled,
                     serverUrl        = s.serverUrl,
@@ -106,6 +111,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             repo.speakText.collect { text ->
                 if (_avatarType.value == AvatarType.NONE) return@collect
+                if (!_ttsEnabled.value) return@collect
                 ttsManager.speak(text)
             }
         }
@@ -295,6 +301,16 @@ class ChatViewModel @Inject constructor(
     /** Laufende TTS-Ausgabe sofort unterbrechen. */
     fun stopTts() {
         ttsManager.stop()
+    }
+
+    /** Sprachausgabe global an/aus schalten und persistieren. */
+    fun toggleTts() {
+        val newVal = !_ttsEnabled.value
+        _ttsEnabled.value = newVal
+        if (!newVal) ttsManager.stop()
+        viewModelScope.launch {
+            settingsDataStore.save(settingsDataStore.settings.first().copy(ttsEnabled = newVal))
+        }
     }
 
     override fun onCleared() {

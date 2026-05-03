@@ -12,7 +12,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=65">
+    <link rel="stylesheet" href="/static/css/style.css?v=70">
 </head>
 
 <body>
@@ -270,6 +270,11 @@ sudo update-ca-certificates</code></pre>
             <div class="header-right">
                 <div class="connection-indicator" id="connection-dot" title="Verbindungsstatus"></div>
 
+                <a href="/userchat" class="btn-icon" title="Benutzer-Chat" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                </a>
                 <button class="btn-icon" id="btn-settings" title="KI-Einstellungen">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="3"></circle>
@@ -386,6 +391,12 @@ sudo update-ca-certificates</code></pre>
 
                 <!-- Eingabe -->
                 <div class="input-bar">
+                    <button class="btn-tts" id="btn-tts" title="Sprachausgabe">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                            <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+                        </svg>
+                    </button>
                     <textarea id="task-input" placeholder="Aufgabe für Jarvis eingeben..." rows="2"></textarea>
                     <button class="btn-mic" id="btn-mic" title="Spracheingabe">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -495,60 +506,89 @@ sudo update-ca-certificates</code></pre>
 
                 <!-- ── Ansicht 1: Profilliste ── -->
                 <div id="profiles-list-view">
-                    <div id="profiles-container" class="profiles-list">
-                        <!-- Profil-Cards werden via JS erzeugt -->
-                    </div>
-                    <button class="btn-add-profile" id="btn-add-profile">+ Neues Profil</button>
+                    <div class="kb-container">
 
-                    <hr class="settings-divider">
-
-                    <div class="form-group">
-                        <label>Sprachausgabe (TTS)</label>
-                        <label class="checkbox-group">
-                            <input type="checkbox" id="setting-tts">
-                            <span>Aktiviere Sprachausgabe</span>
-                        </label>
-                    </div>
-
-                    <hr class="settings-divider">
-
-                    <div class="form-group">
-                        <label>Agent API Key</label>
-                        <div class="input-group" style="display: flex; gap: 8px; align-items: center;">
-                            <input type="password" id="setting-agent-api-key" placeholder="Noch kein Key generiert" style="flex: 1;" readonly>
-                            <button class="btn-icon btn-small" id="btn-toggle-apikey" title="Anzeigen/Verbergen" style="flex-shrink: 0;">
-                                <svg id="ico-agent-apikey" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                            </button>
-                            <button class="btn-icon btn-small" id="btn-copy-apikey" title="Kopieren" style="flex-shrink: 0;">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                            </button>
-                            <button class="btn-secondary btn-small" id="btn-generate-apikey" style="flex-shrink: 0; padding: 4px 10px; font-size: 0.75rem;">Generieren</button>
-                        </div>
-                        <small class="tab-note" style="margin-top: 5px; opacity: 0.7;">
-                            Für externen Zugriff auf <code>POST /api/agent/task</code> (z.B. Vision auf Raspberry Pi).
-                            <br>Header: <code>X-API-Key: &lt;key&gt;</code>
-                        </small>
-                    </div>
-
-                    <hr class="settings-divider">
-                    <div class="form-group">
-                        <label>HTTPS / SSL-Zertifikat</label>
-                        <div id="ssl-status" style="margin-bottom:12px; padding:10px; border-radius:8px; background:var(--bg-glass); border:1px solid var(--border); font-size:0.85rem;">
-                            <span id="ssl-status-text">Lade...</span>
-                        </div>
-
-                        <!-- Let's Encrypt -->
-                        <div style="background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md); padding:14px; margin-bottom:10px;">
-                            <div style="font-size:0.8rem; font-weight:600; color:var(--accent-hover); margin-bottom:10px;">Let's Encrypt (kostenlos, automatisch)</div>
-                            <div class="form-row" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
-                                <input type="text" id="le-domain" placeholder="meinserver.example.com" style="width:100%">
-                                <input type="email" id="le-email" placeholder="email@example.com" style="width:100%">
+                        <!-- KI-Profile -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-list-hdr">
+                                <h3>KI-Profile</h3>
+                                <span class="sk-openclaw-toggle" id="prof-sect-list-tog">▶</span>
                             </div>
-                            <small style="color:var(--text-muted); display:block; margin-bottom:10px;">Port 80 muss vom Internet erreichbar sein. Die Domain muss auf diesen Server zeigen.</small>
-                            <button class="btn-secondary btn-small" id="btn-request-letsencrypt">Zertifikat beantragen</button>
-                            <div id="le-progress" style="display:none; margin-top:10px; padding:10px; background:var(--bg-glass-heavy); border-radius:8px; font-family:monospace; font-size:0.78rem; max-height:150px; overflow-y:auto; color:var(--text-secondary);"></div>
+                            <div id="prof-sect-list-body" class="kb-collapse-body" style="display:none;">
+                                <div style="margin-bottom:10px;">
+                                    <button class="btn-add-profile" id="btn-add-profile" style="margin:0;">+ Neues Profil</button>
+                                </div>
+                                <div id="profiles-container" class="profiles-list">
+                                    <!-- Profil-Cards werden via JS erzeugt -->
+                                </div>
+                            </div>
                         </div>
-                    </div>
+
+                        <!-- Sprachausgabe -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-tts-hdr">
+                                <h3>Sprachausgabe (TTS)</h3>
+                                <span class="sk-openclaw-toggle" id="prof-sect-tts-tog">▶</span>
+                            </div>
+                            <div id="prof-sect-tts-body" class="kb-collapse-body" style="display:none;">
+                                <div>
+                                    <label style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;">Stimme</label>
+                                    <select id="setting-tts-voice" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.85rem;">
+                                        <option value="">⏳ Stimmen werden geladen…</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Agent API Key -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-api-hdr">
+                                <h3>Agent API Key</h3>
+                                <span class="sk-openclaw-toggle" id="prof-sect-api-tog">▶</span>
+                            </div>
+                            <div id="prof-sect-api-body" class="kb-collapse-body" style="display:none;">
+                                <div class="input-group" style="display: flex; gap: 8px; align-items: center;">
+                                    <input type="password" id="setting-agent-api-key" placeholder="Noch kein Key generiert" style="flex: 1;" readonly>
+                                    <button class="btn-icon btn-small" id="btn-toggle-apikey" title="Anzeigen/Verbergen" style="flex-shrink: 0;">
+                                        <svg id="ico-agent-apikey" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                    <button class="btn-icon btn-small" id="btn-copy-apikey" title="Kopieren" style="flex-shrink: 0;">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                    </button>
+                                    <button class="btn-secondary btn-small" id="btn-generate-apikey" style="flex-shrink: 0; padding: 4px 10px; font-size: 0.75rem;">Generieren</button>
+                                </div>
+                                <small class="tab-note" style="margin-top: 5px; opacity: 0.7;">
+                                    Für externen Zugriff auf <code>POST /api/agent/task</code> (z.B. Vision auf Raspberry Pi).
+                                    <br>Header: <code>X-API-Key: &lt;key&gt;</code>
+                                </small>
+                            </div>
+                        </div>
+
+                        <!-- HTTPS / SSL -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-ssl-hdr">
+                                <h3>HTTPS / SSL-Zertifikat</h3>
+                                <span class="sk-openclaw-toggle" id="prof-sect-ssl-tog">▶</span>
+                            </div>
+                            <div id="prof-sect-ssl-body" class="kb-collapse-body" style="display:none;">
+                                <div id="ssl-status" style="margin-bottom:12px; padding:10px; border-radius:8px; background:var(--bg-glass); border:1px solid var(--border); font-size:0.85rem;">
+                                    <span id="ssl-status-text">Lade...</span>
+                                </div>
+                                <!-- Let's Encrypt -->
+                                <div style="background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md); padding:14px; margin-bottom:10px;">
+                                    <div style="font-size:0.8rem; font-weight:600; color:var(--accent-hover); margin-bottom:10px;">Let's Encrypt (kostenlos, automatisch)</div>
+                                    <div class="form-row" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                                        <input type="text" id="le-domain" placeholder="meinserver.example.com" style="width:100%">
+                                        <input type="email" id="le-email" placeholder="email@example.com" style="width:100%">
+                                    </div>
+                                    <small style="color:var(--text-muted); display:block; margin-bottom:10px;">Port 80 muss vom Internet erreichbar sein. Die Domain muss auf diesen Server zeigen.</small>
+                                    <button class="btn-secondary btn-small" id="btn-request-letsencrypt">Zertifikat beantragen</button>
+                                    <div id="le-progress" style="display:none; margin-top:10px; padding:10px; background:var(--bg-glass-heavy); border-radius:8px; font-family:monospace; font-size:0.78rem; max-height:150px; overflow-y:auto; color:var(--text-secondary);"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div><!-- /kb-container -->
                 </div>
 
                 <!-- ── Ansicht 2: Profil bearbeiten/erstellen ── -->
@@ -717,86 +757,99 @@ sudo update-ca-certificates</code></pre>
                 <!-- ═══ Tab: WhatsApp ═══ -->
                 <div id="settings-tab-whatsapp" class="settings-tab-content" style="display: none;">
                     <div class="wa-container">
-                        <!-- Status-Bereich -->
-                        <div class="wa-status-card glass">
-                            <div class="wa-status-header">
-                                <div class="wa-status-icon" id="wa-status-icon">
-                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-                                    </svg>
-                                </div>
-                                <div class="wa-status-info">
-                                    <h3 id="wa-status-text">WhatsApp Status</h3>
-                                    <p id="wa-status-detail" class="wa-status-detail">Lade...</p>
-                                </div>
-                                <div class="wa-status-badge" id="wa-status-badge">--</div>
-                            </div>
-                            <div class="wa-status-stats">
-                                <div class="wa-stat">
-                                    <span class="wa-stat-label">Nummer</span>
-                                    <span class="wa-stat-value" id="wa-connected-number">--</span>
-                                </div>
-                                <div class="wa-stat">
-                                    <span class="wa-stat-label">Nachrichten</span>
-                                    <span class="wa-stat-value" id="wa-msg-count">0</span>
-                                </div>
-                            </div>
-                        </div>
+                        <div class="kb-container">
 
-                        <!-- QR-Code-Bereich -->
-                        <div class="wa-qr-section" id="wa-qr-section">
-                            <h3>QR-Code scannen</h3>
-                            <p class="wa-qr-hint">Öffne WhatsApp auf deinem Handy &rarr; Einstellungen &rarr; Verknüpfte Geräte &rarr; Gerät verknüpfen</p>
-                            <div class="wa-qr-box" id="wa-qr-box">
-                                <div class="wa-qr-loading">Warte auf QR-Code...</div>
-                            </div>
-                        </div>
-
-                        <!-- Aktionen -->
-                        <div class="wa-actions">
-                            <button class="btn-wa-action" id="btn-wa-reconnect" title="Verbindung neu herstellen">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
-                                Reconnect
-                            </button>
-                            <button class="btn-wa-action btn-wa-danger" id="btn-wa-logout" title="WhatsApp abmelden">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
-                                Abmelden
-                            </button>
-                        </div>
-
-                        <!-- Debug & Logs -->
-                        <div class="wa-logs-section">
-                            <div class="wa-logs-header">
-                                <h3>Logs & Debug</h3>
-                                <div class="wa-logs-controls">
-                                    <label class="wa-debug-toggle" title="Debug-Modus aktivieren">
-                                        <input type="checkbox" id="wa-debug-toggle">
-                                        <span>Debug</span>
-                                    </label>
-                                    <select id="wa-log-filter" class="wa-log-select">
-                                        <option value="">Alle</option>
-                                        <option value="ERROR">Fehler</option>
-                                        <option value="WARN">Warnungen</option>
-                                        <option value="INFO">Info</option>
-                                        <option value="DEBUG">Debug</option>
-                                    </select>
-                                    <select id="wa-log-source" class="wa-log-select">
-                                        <option value="">Backend+Bridge</option>
-                                        <option value="backend">Backend</option>
-                                        <option value="bridge">Bridge</option>
-                                    </select>
-                                    <button class="btn-wa-action btn-wa-sm" id="btn-wa-logs-refresh" title="Logs neu laden">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
-                                    </button>
-                                    <button class="btn-wa-action btn-wa-sm btn-wa-danger" id="btn-wa-logs-clear" title="Logs löschen">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
+                            <!-- Status & Verbindung -->
+                            <div class="kb-section">
+                                <div class="kb-section-header kb-collapse-header is-collapsed" id="wa-sect-status-hdr">
+                                    <h3>Status &amp; Verbindung</h3>
+                                    <span class="sk-openclaw-toggle" id="wa-sect-status-tog">▶</span>
+                                </div>
+                                <div id="wa-sect-status-body" class="kb-collapse-body" style="display:none;">
+                                    <div class="wa-status-card glass" style="margin-bottom:12px;">
+                                        <div class="wa-status-header">
+                                            <div class="wa-status-icon" id="wa-status-icon">
+                                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+                                                </svg>
+                                            </div>
+                                            <div class="wa-status-info">
+                                                <h3 id="wa-status-text">WhatsApp Status</h3>
+                                                <p id="wa-status-detail" class="wa-status-detail">Lade...</p>
+                                            </div>
+                                            <div class="wa-status-badge" id="wa-status-badge">--</div>
+                                        </div>
+                                        <div class="wa-status-stats">
+                                            <div class="wa-stat">
+                                                <span class="wa-stat-label">Nummer</span>
+                                                <span class="wa-stat-value" id="wa-connected-number">--</span>
+                                            </div>
+                                            <div class="wa-stat">
+                                                <span class="wa-stat-label">Nachrichten</span>
+                                                <span class="wa-stat-value" id="wa-msg-count">0</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="wa-qr-section" id="wa-qr-section">
+                                        <h3>QR-Code scannen</h3>
+                                        <p class="wa-qr-hint">Öffne WhatsApp auf deinem Handy &rarr; Einstellungen &rarr; Verknüpfte Geräte &rarr; Gerät verknüpfen</p>
+                                        <div class="wa-qr-box" id="wa-qr-box">
+                                            <div class="wa-qr-loading">Warte auf QR-Code...</div>
+                                        </div>
+                                    </div>
+                                    <div class="wa-actions" style="margin-top:12px;">
+                                        <button class="btn-wa-action" id="btn-wa-reconnect" title="Verbindung neu herstellen">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                                            Reconnect
+                                        </button>
+                                        <button class="btn-wa-action btn-wa-danger" id="btn-wa-logout" title="WhatsApp abmelden">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                                            Abmelden
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="wa-logs-container" id="wa-logs-container">
-                                <div class="wa-logs-empty">Keine Logs vorhanden</div>
+
+                            <!-- Logs & Debug -->
+                            <div class="kb-section">
+                                <div class="kb-section-header kb-collapse-header is-collapsed" id="wa-sect-logs-hdr">
+                                    <h3>Logs &amp; Debug</h3>
+                                    <span class="sk-openclaw-toggle" id="wa-sect-logs-tog">▶</span>
+                                </div>
+                                <div id="wa-sect-logs-body" class="kb-collapse-body" style="display:none;">
+                                    <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
+                                        <button class="btn-wa-action btn-wa-sm" id="btn-wa-logs-refresh" title="Logs neu laden">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                                        </button>
+                                        <button class="btn-wa-action btn-wa-sm btn-wa-danger" id="btn-wa-logs-clear" title="Logs löschen">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                        </button>
+                                    </div>
+                                    <div class="wa-logs-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+                                        <label class="wa-debug-toggle" title="Debug-Modus aktivieren">
+                                            <input type="checkbox" id="wa-debug-toggle">
+                                            <span>Debug</span>
+                                        </label>
+                                        <select id="wa-log-filter" class="wa-log-select">
+                                            <option value="">Alle</option>
+                                            <option value="ERROR">Fehler</option>
+                                            <option value="WARN">Warnungen</option>
+                                            <option value="INFO">Info</option>
+                                            <option value="DEBUG">Debug</option>
+                                        </select>
+                                        <select id="wa-log-source" class="wa-log-select">
+                                            <option value="">Backend+Bridge</option>
+                                            <option value="backend">Backend</option>
+                                            <option value="bridge">Bridge</option>
+                                        </select>
+                                    </div>
+                                    <div class="wa-logs-container" id="wa-logs-container">
+                                        <div class="wa-logs-empty">Keine Logs vorhanden</div>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
+
+                        </div><!-- /kb-container -->
                     </div>
                 </div>
 
@@ -809,71 +862,91 @@ sudo update-ca-certificates</code></pre>
 
                         <!-- Statistiken -->
                         <div class="kb-section">
-                            <div class="kb-section-header">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-stats-hdr">
                                 <h3>Statistiken</h3>
-                                <button class="kb-btn-action" id="btn-kb-reindex">Index neu aufbauen</button>
+                                <span class="sk-openclaw-toggle" id="kb-sect-stats-tog">▶</span>
                             </div>
-                            <!-- Fortschrittsbalken (immer im DOM, nur ein-/ausgeblendet) -->
-                            <div id="kb-index-progress-wrap" style="display:none;justify-content:flex-end;margin:8px 0 4px;">
-                                <div style="width:60%;box-sizing:border-box;overflow:hidden;">
-                                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-                                        <span id="kb-progress-label" style="font-size:12px;opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;">Indizierung läuft...</span>
-                                        <span id="kb-progress-pct" style="font-size:12px;opacity:0.7;white-space:nowrap;flex-shrink:0;margin-left:8px;">0%</span>
-                                    </div>
-                                    <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:6px;overflow:hidden;">
-                                        <div id="kb-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent-hover));border-radius:4px;transition:width 0.4s ease;"></div>
-                                    </div>
-                                    <div style="display:flex;justify-content:space-between;margin-top:4px;overflow:hidden;">
-                                        <span id="kb-progress-phase" style="font-size:11px;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;"></span>
-                                        <span id="kb-progress-count" style="font-size:11px;opacity:0.5;white-space:nowrap;flex-shrink:0;margin-left:8px;"></span>
+                            <div id="kb-sect-stats-body" class="kb-collapse-body" style="display:none;">
+                                <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+                                    <button class="kb-btn-action" id="btn-kb-reindex">Index neu aufbauen</button>
+                                </div>
+                                <!-- Fortschrittsbalken (immer im DOM, nur ein-/ausgeblendet) -->
+                                <div id="kb-index-progress-wrap" style="display:none;justify-content:flex-end;margin:8px 0 4px;">
+                                    <div style="width:60%;box-sizing:border-box;overflow:hidden;">
+                                        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                                            <span id="kb-progress-label" style="font-size:12px;opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;">Indizierung läuft...</span>
+                                            <span id="kb-progress-pct" style="font-size:12px;opacity:0.7;white-space:nowrap;flex-shrink:0;margin-left:8px;">0%</span>
+                                        </div>
+                                        <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:6px;overflow:hidden;">
+                                            <div id="kb-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent-hover));border-radius:4px;transition:width 0.4s ease;"></div>
+                                        </div>
+                                        <div style="display:flex;justify-content:space-between;margin-top:4px;overflow:hidden;">
+                                            <span id="kb-progress-phase" style="font-size:11px;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;"></span>
+                                            <span id="kb-progress-count" style="font-size:11px;opacity:0.5;white-space:nowrap;flex-shrink:0;margin-left:8px;"></span>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                            <div id="kb-stats-container" class="kb-stats-container">
-                                <div class="kb-loading">Lade...</div>
+                                <div id="kb-stats-container" class="kb-stats-container">
+                                    <div class="kb-loading">Lade...</div>
+                                </div>
                             </div>
                         </div>
 
                         <!-- Datei-Upload -->
                         <div class="kb-section">
-                            <h3>Dateien hochladen</h3>
-                            <div id="kb-drop-zone" class="kb-drop-zone">
-                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
-                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                                    <polyline points="17 8 12 3 7 8"/>
-                                    <line x1="12" y1="3" x2="12" y2="15"/>
-                                </svg>
-                                <p>Dateien hierher ziehen oder <label for="kb-file-input" class="kb-upload-link">durchsuchen</label></p>
-                                <input type="file" id="kb-file-input" multiple style="display:none" />
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-upload-hdr">
+                                <h3>Dateien hochladen</h3>
+                                <span class="sk-openclaw-toggle" id="kb-sect-upload-tog">▶</span>
                             </div>
-                            <div class="kb-upload-row">
-                                <select id="kb-upload-target" class="kb-input kb-upload-select"></select>
-                                <div id="kb-upload-status" class="kb-upload-status"></div>
+                            <div id="kb-sect-upload-body" class="kb-collapse-body" style="display:none;">
+                                <div id="kb-drop-zone" class="kb-drop-zone">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/>
+                                        <line x1="12" y1="3" x2="12" y2="15"/>
+                                    </svg>
+                                    <p>Dateien hierher ziehen oder <label for="kb-file-input" class="kb-upload-link">durchsuchen</label></p>
+                                    <input type="file" id="kb-file-input" multiple style="display:none" />
+                                </div>
+                                <div class="kb-upload-row">
+                                    <select id="kb-upload-target" class="kb-input kb-upload-select"></select>
+                                    <div id="kb-upload-status" class="kb-upload-status"></div>
+                                </div>
                             </div>
                         </div>
 
                         <!-- Ordner-Verwaltung -->
                         <div class="kb-section">
-                            <h3>Ordner</h3>
-                            <p class="kb-hint">Lokale Verzeichnisse, die in der Wissensdatenbank indiziert werden. Pfad relativ zum Projektroot (z.B. <code>data/knowledge</code>) oder absolut.</p>
-                            <div id="kb-folder-list" class="kb-folder-list">
-                                <div class="kb-loading">Lade...</div>
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-folder-hdr">
+                                <h3>Ordner</h3>
+                                <span class="sk-openclaw-toggle" id="kb-sect-folder-tog">▶</span>
                             </div>
-                            <div class="kb-add-folder">
-                                <input type="text" id="kb-folder-input" class="kb-input"
-                                    placeholder="Pfad zum Ordner (z.B. data/knowledge)" />
-                                <button class="kb-btn-action" id="btn-kb-add-folder">Hinzufügen</button>
+                            <div id="kb-sect-folder-body" class="kb-collapse-body" style="display:none;">
+                                <p class="kb-hint">Lokale Verzeichnisse, die in der Wissensdatenbank indiziert werden. Pfad relativ zum Projektroot (z.B. <code>data/knowledge</code>) oder absolut.</p>
+                                <div id="kb-folder-list" class="kb-folder-list">
+                                    <div class="kb-loading">Lade...</div>
+                                </div>
+                                <div class="kb-add-folder">
+                                    <input type="text" id="kb-folder-input" class="kb-input"
+                                        placeholder="Pfad zum Ordner (z.B. data/knowledge)" />
+                                    <button class="kb-btn-action" id="btn-kb-add-folder">Hinzufügen</button>
+                                </div>
                             </div>
                         </div>
 
                         <!-- WebDAV-Server -->
                         <div class="kb-section">
-                            <div class="kb-section-header">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-webdav-hdr">
                                 <h3>WebDAV-Server</h3>
+                                <span class="sk-openclaw-toggle" id="kb-sect-webdav-tog">▶</span>
+                            </div>
+                            <div id="kb-sect-webdav-body" class="kb-collapse-body" style="display:none;">
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="kb-webdav-toggle" />
                                     <span class="toggle-slider"></span>
                                 </label>
+                                <span style="font-size:0.82rem;color:var(--text-secondary);">WebDAV aktivieren</span>
                             </div>
                             <p class="kb-hint">Wissensdatenbank als Netzlaufwerk einbinden (Windows/Mac/Linux Dateimanager).</p>
                             <div id="kb-webdav-details" style="display:none;">
@@ -890,32 +963,46 @@ sudo update-ca-certificates</code></pre>
                                 </div>
                                 <p class="kb-hint" style="margin-top:8px;">⚠️ Nach dem Speichern wird der Jarvis-Server neu gestartet, damit der WebDAV-Dienst die neuen Zugangsdaten übernimmt.</p>
                             </div>
+                            </div><!-- /kb-sect-webdav-body -->
                         </div>
 
                         <!-- Netzwerk-Freigaben -->
                         <div class="kb-section">
-                            <h3>Netzwerk-Freigaben</h3>
-                            <p class="kb-hint">Externe SMB/NFS/WebDAV-Freigaben als Wissensquellen einbinden.</p>
-                            <div id="kb-mount-list" class="kb-mount-list"></div>
-                            <button class="kb-btn-action" id="btn-kb-add-mount">+ Freigabe hinzufuegen</button>
-                            <div id="kb-mount-form" class="kb-mount-form" style="display:none;">
-                                <select id="kb-mount-type" class="kb-input">
-                                    <option value="smb">SMB/CIFS (Windows-Freigabe)</option>
-                                    <option value="nfs">NFS</option>
-                                    <option value="webdav">WebDAV</option>
-                                </select>
-                                <input type="text" id="kb-mount-source" class="kb-input" placeholder="//server/freigabe oder server:/pfad" />
-                                <input type="text" id="kb-mount-user" class="kb-input" placeholder="Benutzername (optional)" />
-                                <input type="password" id="kb-mount-pass" class="kb-input" placeholder="Passwort (optional)" />
-                                <div class="kb-mount-actions">
-                                    <button class="kb-btn-action" onclick="window.knowledgeManager.saveMount()">Verbinden</button>
-                                    <button class="kb-btn-secondary" onclick="document.getElementById('kb-mount-form').style.display='none'">Abbrechen</button>
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-net-hdr">
+                                <h3>Netzwerk-Freigaben</h3>
+                                <span class="sk-openclaw-toggle" id="kb-sect-net-tog">▶</span>
+                            </div>
+                            <div id="kb-sect-net-body" class="kb-collapse-body" style="display:none;">
+                                <p class="kb-hint">Externe SMB/NFS/WebDAV-Freigaben als Wissensquellen einbinden.</p>
+                                <div id="kb-mount-list" class="kb-mount-list"></div>
+                                <button class="kb-btn-action" id="btn-kb-add-mount">+ Freigabe hinzufuegen</button>
+                                <div id="kb-mount-form" class="kb-mount-form" style="display:none;">
+                                    <select id="kb-mount-type" class="kb-input">
+                                        <option value="smb">SMB/CIFS (Windows-Freigabe)</option>
+                                        <option value="nfs">NFS</option>
+                                        <option value="webdav">WebDAV</option>
+                                    </select>
+                                    <input type="text" id="kb-mount-source" class="kb-input" placeholder="//server/freigabe oder server:/pfad" />
+                                    <input type="text" id="kb-mount-user" class="kb-input" placeholder="Benutzername (optional)" />
+                                    <input type="password" id="kb-mount-pass" class="kb-input" placeholder="Passwort (optional)" />
+                                    <div class="kb-mount-actions">
+                                        <button class="kb-btn-action" onclick="window.knowledgeManager.saveMount()">Verbinden</button>
+                                        <button class="kb-btn-secondary" onclick="document.getElementById('kb-mount-form').style.display='none'">Abbrechen</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
                         <!-- ─── Extractor ──────────────────────────────── -->
-                        <div id="extractor-tab-content"></div>
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-ext-hdr">
+                                <h3>Informationsextraktor</h3>
+                                <span class="sk-openclaw-toggle" id="kb-sect-ext-tog">▶</span>
+                            </div>
+                            <div id="kb-sect-ext-body" class="kb-collapse-body" style="display:none;">
+                                <div id="extractor-tab-content"></div>
+                            </div>
+                        </div>
 
                     </div>
                 </div>
@@ -939,174 +1026,180 @@ sudo update-ca-certificates</code></pre>
 
                 <div id="settings-tab-vision" class="settings-tab-content" style="display: none;">
                     <div class="vis-container">
+                        <div class="kb-container">
 
-                        <!-- Benachrichtigung -->
-                        <div id="vis-notification" class="vis-notification" style="display:none;"></div>
+                            <!-- Benachrichtigung -->
+                            <div id="vis-notification" class="vis-notification" style="display:none;"></div>
 
-                        <!-- ── Dashboard ─────────────────────────────────────── -->
-                        <div class="vis-section">
-                            <div class="vis-section-header">
-                                <h3>
-                                    <span class="vis-status-dot vis-dot-off" id="vis-status-dot"></span>
-                                    Kamera-Feed
-                                </h3>
-                                <span class="vis-status-label" id="vis-status-text">Gestoppt</span>
-                                <button class="vis-btn vis-btn-sm" id="vis-btn-toggle">Starten</button>
-                            </div>
-                            <div class="vis-dashboard">
-                                <div class="vis-feed-wrap">
-                                    <div id="vis-feed-placeholder" class="vis-feed-placeholder">Kamera nicht aktiv</div>
-                                    <img id="vis-feed-img" class="vis-feed-img" style="display:none;" />
+                            <!-- ── Kamera-Feed ── -->
+                            <div class="kb-section">
+                                <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-feed-hdr">
+                                    <h3><span class="vis-status-dot vis-dot-off" id="vis-status-dot"></span> Kamera-Feed</h3>
+                                    <span class="sk-openclaw-toggle" id="vis-sect-feed-tog">▶</span>
                                 </div>
-                                <div class="vis-detected-panel">
-                                    <h4>Erkannt:</h4>
-                                    <div id="vis-detected-faces">
-                                        <span class="vis-no-faces">Keine Gesichter erkannt</span>
+                                <div id="vis-sect-feed-body" class="kb-collapse-body" style="display:none;">
+                                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                                        <span class="vis-status-label" id="vis-status-text">Gestoppt</span>
+                                        <button class="vis-btn vis-btn-sm" id="vis-btn-toggle">Starten</button>
                                     </div>
-                                </div>
-                            </div>
-
-                            <!-- Vision Log -->
-                            <div class="vis-log-section">
-                                <div class="vis-log-header">
-                                    <h4>Log</h4>
-                                    <button class="vis-btn vis-btn-sm" id="vis-btn-clear-log" title="Log leeren">Leeren</button>
-                                </div>
-                                <div id="vis-log" class="vis-log"></div>
-                            </div>
-                        </div>
-
-                        <!-- ── Training Wizard ──────────────────────────────── -->
-                        <div class="vis-section">
-                            <h3>Training</h3>
-                            <button class="vis-btn vis-btn-primary" id="vis-btn-train-new">Neues Gesicht trainieren</button>
-
-                            <!-- Wizard (versteckt bis Klick) -->
-                            <div id="vis-wizard" class="vis-wizard" style="display:none;">
-
-                                <!-- Schritt 1: Gesicht suchen -->
-                                <div id="vis-wizard-step-detect" class="vis-wizard-step">
-                                    <div class="vis-wizard-spinner"></div>
-                                    <p>Bitte schauen Sie in die Kamera...</p>
-                                    <small class="vis-hint">Gesicht wird gesucht. Halten Sie den Kopf ruhig.</small>
-                                </div>
-
-                                <!-- Schritt 2: Gesicht erkannt – Training starten -->
-                                <div id="vis-wizard-step-name" class="vis-wizard-step" style="display:none;">
-                                    <div class="vis-wizard-face-row">
-                                        <img id="vis-wizard-crop" class="vis-wizard-crop" alt="Erkanntes Gesicht" />
-                                        <div class="vis-wizard-name-col">
-                                            <p>Gesicht erkannt! Klicke auf Training starten.</p>
-                                            <button class="vis-btn vis-btn-primary" id="vis-wizard-confirm"
-                                                    onclick="if(window.visionManager){window.visionManager._confirmWizardTraining().catch(e=>alert('Fehler: '+e.message))}else{alert('visionManager nicht geladen')}">Training starten</button>
+                                    <div class="vis-dashboard">
+                                        <div class="vis-feed-wrap">
+                                            <div id="vis-feed-placeholder" class="vis-feed-placeholder">Kamera nicht aktiv</div>
+                                            <img id="vis-feed-img" class="vis-feed-img" style="display:none;" />
+                                        </div>
+                                        <div class="vis-detected-panel">
+                                            <h4>Erkannt:</h4>
+                                            <div id="vis-detected-faces">
+                                                <span class="vis-no-faces">Keine Gesichter erkannt</span>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-
-                                <!-- Schritt 3: Fortschritt -->
-                                <div id="vis-wizard-step-progress" class="vis-wizard-step" style="display:none;">
-                                    <div class="vis-progress-wrap">
-                                        <div class="vis-progress-bar">
-                                            <div class="vis-progress-fill" id="vis-train-progress" style="width:0%"></div>
+                                    <div class="vis-log-section">
+                                        <div class="vis-log-header">
+                                            <h4>Log</h4>
+                                            <button class="vis-btn vis-btn-sm" id="vis-btn-clear-log" title="Log leeren">Leeren</button>
                                         </div>
-                                        <span class="vis-progress-text" id="vis-train-progress-text"></span>
+                                        <div id="vis-log" class="vis-log"></div>
                                     </div>
-                                    <p class="vis-hint">Gesicht in verschiedenen Winkeln vor die Kamera halten.</p>
                                 </div>
+                            </div>
 
-                                <!-- Schritt 4: Name + Aktion konfigurieren -->
-                                <div id="vis-wizard-step-action" class="vis-wizard-step" style="display:none;">
-                                    <h4 id="vis-wizard-done-title">Training abgeschlossen!</h4>
-                                    <div class="vis-wizard-name-row">
-                                        <label>Wie heißt diese Person?</label>
-                                        <input type="text" class="vis-input" id="vis-wizard-name" placeholder="Name eingeben..." />
+                            <!-- ── Training ── -->
+                            <div class="kb-section">
+                                <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-train-hdr">
+                                    <h3>Training</h3>
+                                    <span class="sk-openclaw-toggle" id="vis-sect-train-tog">▶</span>
+                                </div>
+                                <div id="vis-sect-train-body" class="kb-collapse-body" style="display:none;">
+                                    <div style="margin-bottom:10px;">
+                                        <button class="vis-btn vis-btn-primary" id="vis-btn-train-new">Neues Gesicht trainieren</button>
                                     </div>
-                                    <div class="vis-wizard-action-row">
-                                        <label>Was soll bei Erkennung passieren?</label>
-                                        <select class="vis-select" id="vis-wizard-action">
-                                            <option value="greet">Begrüßung (Lautsprecher)</option>
-                                            <option value="llm">An LLM senden</option>
-                                            <option value="door">Tür öffnen</option>
-                                            <option value="webhook">Webhook aufrufen</option>
-                                            <option value="log" selected>Nur Loggen</option>
-                                        </select>
-                                        <div id="vis-wizard-action-value-wrap" style="display:none;">
-                                            <input type="text" class="vis-input" id="vis-wizard-action-value"
-                                                   placeholder="z.B. Hallo {name}!" />
+                                    <div id="vis-wizard" class="vis-wizard" style="display:none;">
+                                        <div id="vis-wizard-step-detect" class="vis-wizard-step">
+                                            <div class="vis-wizard-spinner"></div>
+                                            <p>Bitte schauen Sie in die Kamera...</p>
+                                            <small class="vis-hint">Gesicht wird gesucht. Halten Sie den Kopf ruhig.</small>
+                                        </div>
+                                        <div id="vis-wizard-step-name" class="vis-wizard-step" style="display:none;">
+                                            <div class="vis-wizard-face-row">
+                                                <img id="vis-wizard-crop" class="vis-wizard-crop" alt="Erkanntes Gesicht" />
+                                                <div class="vis-wizard-name-col">
+                                                    <p>Gesicht erkannt! Klicke auf Training starten.</p>
+                                                    <button class="vis-btn vis-btn-primary" id="vis-wizard-confirm"
+                                                            onclick="if(window.visionManager){window.visionManager._confirmWizardTraining().catch(e=>alert('Fehler: '+e.message))}else{alert('visionManager nicht geladen')}">Training starten</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div id="vis-wizard-step-progress" class="vis-wizard-step" style="display:none;">
+                                            <div class="vis-progress-wrap">
+                                                <div class="vis-progress-bar">
+                                                    <div class="vis-progress-fill" id="vis-train-progress" style="width:0%"></div>
+                                                </div>
+                                                <span class="vis-progress-text" id="vis-train-progress-text"></span>
+                                            </div>
+                                            <p class="vis-hint">Gesicht in verschiedenen Winkeln vor die Kamera halten.</p>
+                                        </div>
+                                        <div id="vis-wizard-step-action" class="vis-wizard-step" style="display:none;">
+                                            <h4 id="vis-wizard-done-title">Training abgeschlossen!</h4>
+                                            <div class="vis-wizard-name-row">
+                                                <label>Wie heißt diese Person?</label>
+                                                <input type="text" class="vis-input" id="vis-wizard-name" placeholder="Name eingeben..." />
+                                            </div>
+                                            <div class="vis-wizard-action-row">
+                                                <label>Was soll bei Erkennung passieren?</label>
+                                                <select class="vis-select" id="vis-wizard-action">
+                                                    <option value="greet">Begrüßung (Lautsprecher)</option>
+                                                    <option value="llm">An LLM senden</option>
+                                                    <option value="door">Tür öffnen</option>
+                                                    <option value="webhook">Webhook aufrufen</option>
+                                                    <option value="log" selected>Nur Loggen</option>
+                                                </select>
+                                                <div id="vis-wizard-action-value-wrap" style="display:none;">
+                                                    <input type="text" class="vis-input" id="vis-wizard-action-value" placeholder="z.B. Hallo {name}!" />
+                                                </div>
+                                            </div>
+                                            <button class="vis-btn vis-btn-primary" id="vis-wizard-save"
+                                                    onclick="if(window.visionManager){window.visionManager._saveWizardAction().catch(e=>alert('Fehler: '+e.message))}else{alert('visionManager nicht geladen')}">Speichern</button>
+                                        </div>
+                                        <button class="vis-btn vis-btn-sm" id="vis-wizard-cancel">Abbrechen</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ── Bekannte Gesichter ── -->
+                            <div class="kb-section">
+                                <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-faces-hdr">
+                                    <h3>Bekannte Gesichter</h3>
+                                    <span class="sk-openclaw-toggle" id="vis-sect-faces-tog">▶</span>
+                                </div>
+                                <div id="vis-sect-faces-body" class="kb-collapse-body" style="display:none;">
+                                    <div id="vis-profiles-list" class="vis-profiles-list">
+                                        <div class="vis-empty">Noch keine Gesichter trainiert.</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ── Kamera-Einstellungen ── -->
+                            <div class="kb-section">
+                                <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-cfg-hdr">
+                                    <h3>Kamera-Einstellungen</h3>
+                                    <span class="sk-openclaw-toggle" id="vis-sect-cfg-tog">▶</span>
+                                </div>
+                                <div id="vis-sect-cfg-body" class="kb-collapse-body" style="display:none;">
+                                    <div class="vis-settings-grid">
+                                        <div class="vis-setting-row">
+                                            <label>USB-Kamera</label>
+                                            <div class="vis-setting-controls">
+                                                <select class="vis-select" id="vis-cam-select">
+                                                    <option value="0">– Kameras laden (🔄) –</option>
+                                                </select>
+                                                <button class="vis-btn-sm" id="vis-btn-cam-load" title="Kameras laden">&#x1F504;</button>
+                                            </div>
+                                        </div>
+                                        <div class="vis-setting-row">
+                                            <label>Netzwerk-Kamera</label>
+                                            <div class="vis-setting-controls">
+                                                <input type="text" class="vis-input" id="vis-cam-url" placeholder="http://192.168.1.100:8090/feed" style="flex:1" />
+                                                <button class="vis-btn-sm vis-btn-download" id="vis-btn-stream-tools" onclick="visionManager._downloadStreamTools()" title="Windows Stream-Tools (ffmpeg) herunterladen">&#x2B07;</button>
+                                            </div>
+                                            <small class="vis-hint">URL hat Vorrang vor USB-Kamera &middot; &#x2B07; = FFmpeg Stream-Tools f&uuml;r Windows</small>
+                                        </div>
+                                        <div class="vis-setting-row">
+                                            <label>Erkennungsmodell</label>
+                                            <select class="vis-select" id="vis-set-model">
+                                                <option value="hog">HOG (schnell, CPU)</option>
+                                                <option value="cnn">CNN (genau, GPU)</option>
+                                            </select>
+                                        </div>
+                                        <div class="vis-setting-row">
+                                            <label>Toleranz (0.0-1.0)</label>
+                                            <input type="number" class="vis-input vis-input-sm" id="vis-set-tolerance" value="0.6" min="0.1" max="1.0" step="0.05" />
+                                        </div>
+                                        <div class="vis-setting-row">
+                                            <label>Intervall (Sek.)</label>
+                                            <input type="number" class="vis-input vis-input-sm" id="vis-set-interval" value="1.0" min="0.1" max="10" step="0.1" />
+                                        </div>
+                                        <div class="vis-setting-row">
+                                            <label>Training-Samples</label>
+                                            <input type="number" class="vis-input vis-input-sm" id="vis-set-samples" value="30" min="5" max="200" />
+                                        </div>
+                                        <div class="vis-setting-row">
+                                            <label>Auto-Start</label>
+                                            <label class="vis-checkbox"><input type="checkbox" id="vis-set-autostart"> <span>Bei Skill-Aktivierung starten</span></label>
                                         </div>
                                     </div>
-                                    <button class="vis-btn vis-btn-primary" id="vis-wizard-save"
-                                            onclick="if(window.visionManager){window.visionManager._saveWizardAction().catch(e=>alert('Fehler: '+e.message))}else{alert('visionManager nicht geladen')}">Speichern</button>
-                                </div>
-
-                                <button class="vis-btn vis-btn-sm" id="vis-wizard-cancel">Abbrechen</button>
-                            </div>
-                        </div>
-
-                        <!-- ── Bekannte Gesichter ────────────────────────────── -->
-                        <div class="vis-section">
-                            <h3>Bekannte Gesichter</h3>
-                            <div id="vis-profiles-list" class="vis-profiles-list">
-                                <div class="vis-empty">Noch keine Gesichter trainiert.</div>
-                            </div>
-                        </div>
-
-                        <!-- ── Einstellungen ─────────────────────────────────── -->
-                        <div class="vis-section">
-                            <h3>Kamera-Einstellungen</h3>
-                            <div class="vis-settings-grid">
-                                <div class="vis-setting-row">
-                                    <label>USB-Kamera</label>
-                                    <div class="vis-setting-controls">
-                                        <select class="vis-select" id="vis-cam-select">
-                                            <option value="0">– Kameras laden (🔄) –</option>
-                                        </select>
-                                        <button class="vis-btn-sm" id="vis-btn-cam-load" title="Kameras laden">&#x1F504;</button>
+                                    <div class="vis-controls" style="margin-top:0.75rem;">
+                                        <button class="vis-btn vis-btn-primary" id="vis-btn-save-settings">Einstellungen speichern</button>
+                                    </div>
+                                    <hr class="vis-divider">
+                                    <div class="vis-danger-zone">
+                                        <button class="vis-btn vis-btn-danger" id="vis-btn-cleanup">Alle Daten zurücksetzen</button>
+                                        <small>Löscht alle Profile, Bilder und Events unwiderruflich.</small>
                                     </div>
                                 </div>
-                                <div class="vis-setting-row">
-                                    <label>Netzwerk-Kamera</label>
-                                    <div class="vis-setting-controls">
-                                        <input type="text" class="vis-input" id="vis-cam-url" placeholder="http://192.168.1.100:8090/feed" style="flex:1" />
-                                        <button class="vis-btn-sm vis-btn-download" id="vis-btn-stream-tools" onclick="visionManager._downloadStreamTools()" title="Windows Stream-Tools (ffmpeg) herunterladen">&#x2B07;</button>
-                                    </div>
-                                    <small class="vis-hint">URL hat Vorrang vor USB-Kamera &middot; &#x2B07; = FFmpeg Stream-Tools f&uuml;r Windows</small>
-                                </div>
-                                <div class="vis-setting-row">
-                                    <label>Erkennungsmodell</label>
-                                    <select class="vis-select" id="vis-set-model">
-                                        <option value="hog">HOG (schnell, CPU)</option>
-                                        <option value="cnn">CNN (genau, GPU)</option>
-                                    </select>
-                                </div>
-                                <div class="vis-setting-row">
-                                    <label>Toleranz (0.0-1.0)</label>
-                                    <input type="number" class="vis-input vis-input-sm" id="vis-set-tolerance" value="0.6" min="0.1" max="1.0" step="0.05" />
-                                </div>
-                                <div class="vis-setting-row">
-                                    <label>Intervall (Sek.)</label>
-                                    <input type="number" class="vis-input vis-input-sm" id="vis-set-interval" value="1.0" min="0.1" max="10" step="0.1" />
-                                </div>
-                                <div class="vis-setting-row">
-                                    <label>Training-Samples</label>
-                                    <input type="number" class="vis-input vis-input-sm" id="vis-set-samples" value="30" min="5" max="200" />
-                                </div>
-                                <div class="vis-setting-row">
-                                    <label>Auto-Start</label>
-                                    <label class="vis-checkbox"><input type="checkbox" id="vis-set-autostart"> <span>Bei Skill-Aktivierung starten</span></label>
-                                </div>
-                            </div>
-                            <div class="vis-controls" style="margin-top:0.75rem;">
-                                <button class="vis-btn vis-btn-primary" id="vis-btn-save-settings">Einstellungen speichern</button>
                             </div>
 
-                            <hr class="vis-divider">
-                            <div class="vis-danger-zone">
-                                <button class="vis-btn vis-btn-danger" id="vis-btn-cleanup">Alle Daten zurücksetzen</button>
-                                <small>Löscht alle Profile, Bilder und Events unwiderruflich.</small>
-                            </div>
-                        </div>
-
+                        </div><!-- /kb-container -->
                     </div><!-- /vis-container -->
                 </div><!-- /settings-tab-vision -->
 
@@ -1309,295 +1402,314 @@ sudo update-ca-certificates</code></pre>
 
                 <!-- ═══ Tab: Sicherheit ═══ -->
                 <div id="settings-tab-security" class="settings-tab-content" style="display:none;">
-                    <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:4px;">🔒 Kennwort ändern</h3>
-                    <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:16px;">Ändert das Linux-Benutzerkonto <code>jarvis</code> – gilt für die Web-Oberfläche und SSH-Login. <strong>Nicht</strong> das WebDAV-Passwort.</p>
-                    <div class="form-group">
-                        <label>Aktuelles Kennwort</label>
-                        <div style="position:relative;width:25%;">
-                            <input type="password" id="sec-cpw-old" placeholder="Aktuelles Kennwort" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
-                            <button type="button" id="btn-eye-sec-old" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
-                                <svg id="ico-eye-sec-old" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Neues Kennwort</label>
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div style="position:relative;width:25%;flex-shrink:0;">
-                                <input type="password" id="sec-cpw-new" placeholder="Neues Kennwort" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
-                                <button type="button" id="btn-eye-sec-new" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
-                                    <svg id="ico-eye-sec-new" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                </button>
+                    <div class="kb-container">
+
+                        <!-- ── Kennwort ändern ── -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-pw-hdr">
+                                <h3>Kennwort ändern</h3>
+                                <span class="sk-openclaw-toggle" id="sec-sect-pw-tog">▶</span>
                             </div>
-                            <button type="button" id="sec-cpw-suggest" class="kb-btn-action" style="font-size:0.78rem;padding:3px 10px;flex-shrink:0;">🔑 Generieren</button>
+                            <div id="sec-sect-pw-body" class="kb-collapse-body" style="display:none;">
+                                <p class="kb-hint">Ändert das Linux-Benutzerkonto <code>jarvis</code> – gilt für die Web-Oberfläche und SSH-Login. <strong>Nicht</strong> das WebDAV-Passwort.</p>
+                                <div class="form-group">
+                                    <label>Aktuelles Kennwort</label>
+                                    <div style="position:relative;width:25%;">
+                                        <input type="password" id="sec-cpw-old" placeholder="Aktuelles Kennwort" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                                        <button type="button" id="btn-eye-sec-old" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
+                                            <svg id="ico-eye-sec-old" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Neues Kennwort</label>
+                                    <div style="display:flex;align-items:center;gap:8px;">
+                                        <div style="position:relative;width:25%;flex-shrink:0;">
+                                            <input type="password" id="sec-cpw-new" placeholder="Neues Kennwort" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                                            <button type="button" id="btn-eye-sec-new" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
+                                                <svg id="ico-eye-sec-new" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                            </button>
+                                        </div>
+                                        <button type="button" id="sec-cpw-suggest" class="kb-btn-action" style="font-size:0.78rem;padding:3px 10px;flex-shrink:0;">🔑 Generieren</button>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Kennwort bestätigen</label>
+                                    <div style="position:relative;width:25%;">
+                                        <input type="password" id="sec-cpw-confirm" placeholder="Kennwort wiederholen" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                                        <button type="button" id="btn-eye-sec-confirm" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
+                                            <svg id="ico-eye-sec-confirm" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="sec-cpw-strength" style="font-size:0.8rem;min-height:18px;margin-bottom:8px;width:25%;"></div>
+                                <div id="sec-cpw-error" style="display:none;color:#ff6b6b;font-size:0.85rem;margin-bottom:10px;"></div>
+                                <div id="sec-cpw-success" style="display:none;color:#4ade80;font-size:0.85rem;margin-bottom:10px;"></div>
+                                <button class="kb-btn-action" id="sec-cpw-submit">Kennwort speichern</button>
+                            </div>
                         </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Kennwort bestätigen</label>
-                        <div style="position:relative;width:25%;">
-                            <input type="password" id="sec-cpw-confirm" placeholder="Kennwort wiederholen" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
-                            <button type="button" id="btn-eye-sec-confirm" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
-                                <svg id="ico-eye-sec-confirm" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                            </button>
-                        </div>
-                    </div>
-                    <div id="sec-cpw-strength" style="font-size:0.8rem;min-height:18px;margin-bottom:8px;width:25%;"></div>
-                    <div id="sec-cpw-error" style="display:none;color:#ff6b6b;font-size:0.85rem;margin-bottom:10px;"></div>
-                    <div id="sec-cpw-success" style="display:none;color:#4ade80;font-size:0.85rem;margin-bottom:10px;"></div>
-                    <button class="kb-btn-action" id="sec-cpw-submit">Kennwort speichern</button>
 
-                    <hr class="settings-divider" style="margin-top:24px;">
+                        <!-- ── Active Directory / LDAP ── -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-ad-hdr">
+                                <h3>Active Directory / LDAP</h3>
+                                <span class="sk-openclaw-toggle" id="sec-sect-ad-tog">▶</span>
+                            </div>
+                            <div id="sec-sect-ad-body" class="kb-collapse-body" style="display:none;">
+                                <p class="kb-hint">
+                                    Domain-Login für Windows- und Android-App. Jarvis-Server muss nur im gleichen Netzwerk wie der Domain-Controller sein – kein Domain-Beitritt erforderlich.
+                                </p>
 
-                    <!-- ── Active Directory / LDAP ── -->
-                    <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:4px;">🏢 Active Directory / LDAP</h3>
-                    <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:16px;">
-                        Domain-Login für Windows- und Android-App. Jarvis-Server muss nur im gleichen Netzwerk wie der Domain-Controller sein – kein Domain-Beitritt erforderlich.
-                    </p>
+                                <!-- Status-Badge -->
+                                <div id="ad-status-badge" style="display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:8px;background:var(--bg-glass);border:1px solid var(--border);font-size:0.82rem;margin-bottom:16px;">
+                                    <span id="ad-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0;"></span>
+                                    <span id="ad-status-text" style="color:var(--text-muted);">Lade…</span>
+                                </div>
 
-                    <!-- Status-Badge -->
-                    <div id="ad-status-badge" style="display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:8px;background:var(--bg-glass);border:1px solid var(--border);font-size:0.82rem;margin-bottom:16px;">
-                        <span id="ad-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0;"></span>
-                        <span id="ad-status-text" style="color:var(--text-muted);">Lade…</span>
-                    </div>
+                                <!-- Server + Domain -->
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                    <div class="form-group" style="margin:0;">
+                                        <label>Domain-Controller (IP oder Hostname)</label>
+                                        <input type="text" id="ad-server" placeholder="z.B. 192.168.1.10 oder dc.firma.local" style="width:100%;box-sizing:border-box;">
+                                    </div>
+                                    <div class="form-group" style="margin:0;">
+                                        <label>Domain</label>
+                                        <input type="text" id="ad-domain" placeholder="z.B. firma.local" style="width:100%;box-sizing:border-box;">
+                                    </div>
+                                </div>
 
-                    <!-- Server + Domain -->
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
-                        <div class="form-group" style="margin:0;">
-                            <label>Domain-Controller (IP oder Hostname)</label>
-                            <input type="text" id="ad-server" placeholder="z.B. 192.168.1.10 oder dc.firma.local" style="width:100%;box-sizing:border-box;">
-                        </div>
-                        <div class="form-group" style="margin:0;">
-                            <label>Domain</label>
-                            <input type="text" id="ad-domain" placeholder="z.B. firma.local" style="width:100%;box-sizing:border-box;">
-                        </div>
-                    </div>
+                                <!-- Zugriffssteuerung -->
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        Erlaubte Benutzer
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– kommagetrennt, z.B. <code>mueller,schmidt</code> (leer = alle AD-Benutzer)</span>
+                                    </label>
+                                    <input type="text" id="ad-allowed-users" placeholder="Leer lassen für alle Domänen-Benutzer" style="width:50%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        Erlaubte Gruppe (AD-Gruppe)
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                                    </label>
+                                    <input type="text" id="ad-allowed-group" placeholder="z.B. CN=Jarvis-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                        ⚠ Wenn eine Gruppe eingetragen ist, wird die Benutzerliste ignoriert.
+                                    </div>
+                                </div>
 
-                    <!-- Zugriffssteuerung -->
-                    <div class="form-group" style="margin-bottom:8px;">
-                        <label>
-                            Erlaubte Benutzer
-                            <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– kommagetrennt, z.B. <code>mueller,schmidt</code> (leer = alle AD-Benutzer)</span>
-                        </label>
-                        <input type="text" id="ad-allowed-users" placeholder="Leer lassen für alle Domänen-Benutzer" style="width:50%;box-sizing:border-box;">
-                    </div>
-                    <div class="form-group" style="margin-bottom:8px;">
-                        <label>
-                            Erlaubte Gruppe (AD-Gruppe)
-                            <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
-                        </label>
-                        <input type="text" id="ad-allowed-group" placeholder="z.B. CN=Jarvis-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
-                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                            ⚠ Wenn eine Gruppe eingetragen ist, wird die Benutzerliste ignoriert.
-                        </div>
-                    </div>
+                                <!-- Modus-Anzeige -->
+                                <div id="ad-mode-hint" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:12px;border:1px solid;"></div>
 
-                    <!-- Modus-Anzeige -->
-                    <div id="ad-mode-hint" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:12px;border:1px solid;"></div>
+                                <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                                    <button class="kb-btn-action" id="ad-save-btn" onclick="window._adSave()">Speichern</button>
+                                    <button class="kb-btn-secondary" onclick="window._adTest()">Verbindung testen</button>
+                                    <span id="ad-save-status" style="font-size:0.82rem;"></span>
+                                </div>
+                                <div id="ad-test-result" style="font-size:0.82rem;min-height:18px;margin-top:4px;"></div>
 
-                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-                        <button class="kb-btn-action" id="ad-save-btn" onclick="window._adSave()">Speichern</button>
-                        <button class="kb-btn-secondary" onclick="window._adTest()">Verbindung testen</button>
-                        <span id="ad-save-status" style="font-size:0.82rem;"></span>
-                    </div>
-                    <div id="ad-test-result" style="font-size:0.82rem;min-height:18px;margin-top:4px;"></div>
+                                <script>
+                                (function() {
+                                    async function _adLoad() {
+                                        try {
+                                            const r = await fetch('/api/auth/ad_status', {
+                                                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+                                            });
+                                            const d = await r.json();
+                                            document.getElementById('ad-server').value        = d.server        || '';
+                                            document.getElementById('ad-domain').value        = d.domain        || '';
+                                            document.getElementById('ad-allowed-users').value = d.allowed_users || '';
+                                            document.getElementById('ad-allowed-group').value = d.allowed_group || '';
+                                            _adUpdateStatus(d);
+                                        } catch(e) {}
+                                    }
 
-                    <script>
-                    (function() {
-                        async function _adLoad() {
-                            try {
-                                const r = await fetch('/api/auth/ad_status', {
-                                    headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
-                                });
-                                const d = await r.json();
-                                document.getElementById('ad-server').value        = d.server        || '';
-                                document.getElementById('ad-domain').value        = d.domain        || '';
-                                document.getElementById('ad-allowed-users').value = d.allowed_users || '';
-                                document.getElementById('ad-allowed-group').value = d.allowed_group || '';
-                                _adUpdateStatus(d);
-                            } catch(e) {}
-                        }
+                                    function _adUpdateStatus(d) {
+                                        const dot  = document.getElementById('ad-status-dot');
+                                        const txt  = document.getElementById('ad-status-text');
+                                        const hint = document.getElementById('ad-mode-hint');
+                                        if (!d.configured) {
+                                            dot.style.background = '#94a3b8';
+                                            txt.style.color      = 'var(--text-muted)';
+                                            txt.textContent      = 'Nicht konfiguriert – lokaler Login aktiv';
+                                            hint.style.display   = 'none';
+                                            return;
+                                        }
+                                        dot.style.background = '#34d399';
+                                        txt.style.color      = '#34d399';
+                                        const modeLabels = { open: '🔓 Offen – alle Domänen-Benutzer erlaubt', users: '👥 Benutzerliste aktiv', group: '🏷️ Gruppen-Filter aktiv' };
+                                        txt.textContent = 'Aktiv · ' + d.server + ' · ' + d.domain + ' · ' + (modeLabels[d.access_mode] || d.access_mode);
+                                        hint.style.display     = 'block';
+                                        if (d.access_mode === 'open') {
+                                            hint.style.borderColor = '#f59e0b';
+                                            hint.style.background  = 'rgba(245,158,11,0.08)';
+                                            hint.style.color       = '#f59e0b';
+                                            hint.textContent       = '⚠ Kein Zugriffsfilter – jeder Domänen-Benutzer mit gültigem Passwort kann sich anmelden.';
+                                        } else if (d.access_mode === 'users') {
+                                            hint.style.borderColor = '#34d399';
+                                            hint.style.background  = 'rgba(52,211,153,0.08)';
+                                            hint.style.color       = '#34d399';
+                                            hint.textContent       = '✓ Benutzerliste: ' + d.allowed_users;
+                                        } else {
+                                            hint.style.borderColor = '#6366f1';
+                                            hint.style.background  = 'rgba(99,102,241,0.08)';
+                                            hint.style.color       = '#a5b4fc';
+                                            hint.textContent       = '✓ Gruppen-Filter: ' + d.allowed_group;
+                                        }
+                                    }
 
-                        function _adUpdateStatus(d) {
-                            const dot  = document.getElementById('ad-status-dot');
-                            const txt  = document.getElementById('ad-status-text');
-                            const hint = document.getElementById('ad-mode-hint');
-                            if (!d.configured) {
-                                dot.style.background = '#94a3b8';
-                                txt.style.color      = 'var(--text-muted)';
-                                txt.textContent      = 'Nicht konfiguriert – lokaler Login aktiv';
-                                hint.style.display   = 'none';
-                                return;
-                            }
-                            dot.style.background = '#34d399';
-                            txt.style.color      = '#34d399';
-                            const modeLabels = { open: '🔓 Offen – alle Domänen-Benutzer erlaubt', users: '👥 Benutzerliste aktiv', group: '🏷️ Gruppen-Filter aktiv' };
-                            txt.textContent = 'Aktiv · ' + d.server + ' · ' + d.domain + ' · ' + (modeLabels[d.access_mode] || d.access_mode);
-                            hint.style.display     = 'block';
-                            if (d.access_mode === 'open') {
-                                hint.style.borderColor = '#f59e0b';
-                                hint.style.background  = 'rgba(245,158,11,0.08)';
-                                hint.style.color       = '#f59e0b';
-                                hint.textContent       = '⚠ Kein Zugriffsfilter – jeder Domänen-Benutzer mit gültigem Passwort kann sich anmelden.';
-                            } else if (d.access_mode === 'users') {
-                                hint.style.borderColor = '#34d399';
-                                hint.style.background  = 'rgba(52,211,153,0.08)';
-                                hint.style.color       = '#34d399';
-                                hint.textContent       = '✓ Benutzerliste: ' + d.allowed_users;
-                            } else {
-                                hint.style.borderColor = '#6366f1';
-                                hint.style.background  = 'rgba(99,102,241,0.08)';
-                                hint.style.color       = '#a5b4fc';
-                                hint.textContent       = '✓ Gruppen-Filter: ' + d.allowed_group;
-                            }
-                        }
+                                    window._adSave = async function() {
+                                        const btn = document.getElementById('ad-save-btn');
+                                        const st  = document.getElementById('ad-save-status');
+                                        btn.disabled = true;
+                                        st.textContent = 'Speichern…'; st.style.color = 'var(--text-muted)';
+                                        try {
+                                            const r = await fetch('/api/settings', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                                                body: JSON.stringify({
+                                                    ad_server:        document.getElementById('ad-server').value.trim(),
+                                                    ad_domain:        document.getElementById('ad-domain').value.trim(),
+                                                    ad_allowed_users: document.getElementById('ad-allowed-users').value.trim(),
+                                                    ad_allowed_group: document.getElementById('ad-allowed-group').value.trim(),
+                                                })
+                                            });
+                                            if (!r.ok) throw new Error('HTTP ' + r.status);
+                                            st.textContent = '✓ Gespeichert'; st.style.color = '#34d399';
+                                            setTimeout(() => { st.textContent = ''; }, 3000);
+                                            await _adLoad();
+                                        } catch(e) {
+                                            st.textContent = '✗ Fehler: ' + e.message; st.style.color = '#ef4444';
+                                        } finally { btn.disabled = false; }
+                                    };
 
-                        window._adSave = async function() {
-                            const btn = document.getElementById('ad-save-btn');
-                            const st  = document.getElementById('ad-save-status');
-                            btn.disabled = true;
-                            st.textContent = 'Speichern…'; st.style.color = 'var(--text-muted)';
-                            try {
-                                const r = await fetch('/api/settings', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
-                                    body: JSON.stringify({
-                                        ad_server:        document.getElementById('ad-server').value.trim(),
-                                        ad_domain:        document.getElementById('ad-domain').value.trim(),
-                                        ad_allowed_users: document.getElementById('ad-allowed-users').value.trim(),
-                                        ad_allowed_group: document.getElementById('ad-allowed-group').value.trim(),
-                                    })
-                                });
-                                if (!r.ok) throw new Error('HTTP ' + r.status);
-                                st.textContent = '✓ Gespeichert'; st.style.color = '#34d399';
-                                setTimeout(() => { st.textContent = ''; }, 3000);
-                                await _adLoad();
-                            } catch(e) {
-                                st.textContent = '✗ Fehler: ' + e.message; st.style.color = '#ef4444';
-                            } finally { btn.disabled = false; }
-                        };
+                                    window._adTest = async function() {
+                                        const res = document.getElementById('ad-test-result');
+                                        const srv = document.getElementById('ad-server').value.trim();
+                                        const dom = document.getElementById('ad-domain').value.trim();
+                                        if (!srv || !dom) { res.style.color='#f59e0b'; res.textContent='⚠ Bitte Server und Domain eingeben'; return; }
+                                        res.style.color='var(--text-muted)'; res.textContent='Verbinde mit ' + srv + '…';
+                                        try {
+                                            const r = await fetch('/api/auth/ad_test', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                                                body: JSON.stringify({ ad_server: srv, ad_domain: dom })
+                                            });
+                                            const d = await r.json();
+                                            if (d.reachable) {
+                                                res.style.color='#34d399'; res.textContent='✓ ' + srv + ' erreichbar (LDAP Port 389)';
+                                            } else {
+                                                res.style.color='#ef4444'; res.textContent='✗ Nicht erreichbar: ' + (d.error || 'Timeout');
+                                            }
+                                        } catch(e) { res.style.color='#ef4444'; res.textContent='✗ ' + e.message; }
+                                    };
 
-                        window._adTest = async function() {
-                            const res = document.getElementById('ad-test-result');
-                            const srv = document.getElementById('ad-server').value.trim();
-                            const dom = document.getElementById('ad-domain').value.trim();
-                            if (!srv || !dom) { res.style.color='#f59e0b'; res.textContent='⚠ Bitte Server und Domain eingeben'; return; }
-                            res.style.color='var(--text-muted)'; res.textContent='Verbinde mit ' + srv + '…';
-                            try {
-                                const r = await fetch('/api/auth/ad_test', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
-                                    body: JSON.stringify({ ad_server: srv, ad_domain: dom })
-                                });
-                                const d = await r.json();
-                                if (d.reachable) {
-                                    res.style.color='#34d399'; res.textContent='✓ ' + srv + ' erreichbar (LDAP Port 389)';
-                                } else {
-                                    res.style.color='#ef4444'; res.textContent='✗ Nicht erreichbar: ' + (d.error || 'Timeout');
-                                }
-                            } catch(e) { res.style.color='#ef4444'; res.textContent='✗ ' + e.message; }
-                        };
-
-                        // Laden wenn Security-Tab geöffnet wird
-                        document.addEventListener('DOMContentLoaded', function() {
-                            const secBtn = document.querySelector('[data-settings-tab="security"]');
-                            if (secBtn) secBtn.addEventListener('click', _adLoad);
-                        });
-                        // Auch direkt laden (falls Tab bereits aktiv)
-                        _adLoad();
-                    })();
-                    </script>
-
-                    <hr class="settings-divider" style="margin-top:24px;">
-                    <h3 style="color:var(--text-primary);font-size:1rem;margin-bottom:8px;">🔑 Zwei-Faktor-Authentifizierung (2FA)</h3>
-                    <div id="totp-settings-status" style="margin-bottom:12px;">
-                        <p style="color:var(--text-secondary);font-size:0.85rem;line-height:1.5;">Lade Status…</p>
-                    </div>
-                    <div id="totp-settings-setup" style="display:none;">
-                        <div id="totp-settings-qr" style="text-align:center;margin:12px 0;"></div>
-                        <p style="color:var(--text-muted);font-size:0.78rem;text-align:center;margin-bottom:4px;">Manueller Schlüssel:</p>
-                        <code id="totp-settings-secret" style="display:block;text-align:center;font-size:0.85rem;color:var(--accent-hover);background:var(--bg-glass);padding:8px;border-radius:8px;letter-spacing:2px;margin-bottom:12px;user-select:all;cursor:pointer;"></code>
-                        <div style="display:flex;gap:8px;">
-                            <input type="text" id="totp-settings-code" placeholder="6-stelliger Code"
-                                inputmode="numeric" maxlength="6" autocomplete="one-time-code"
-                                style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:1.1rem;text-align:center;letter-spacing:6px;font-weight:600;font-family:var(--font-mono);outline:none;">
-                            <button id="btn-totp-settings-verify" class="settings-action-btn" style="white-space:nowrap;">Aktivieren</button>
-                        </div>
-                    </div>
-                    <div id="totp-settings-disable" style="display:none;">
-                        <div style="display:flex;gap:8px;">
-                            <input type="password" id="totp-settings-disable-pw" placeholder="Kennwort zur Bestätigung"
-                                style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:0.9rem;outline:none;">
-                            <button id="btn-totp-settings-disable" class="settings-action-btn" style="background:var(--danger);white-space:nowrap;">Deaktivieren</button>
-                        </div>
-                    </div>
-                    <p id="totp-settings-error" style="color:var(--danger);font-size:0.85rem;margin-top:8px;min-height:20px;"></p>
-                    <script>
-                    (function() {
-                        async function _totpLoad() {
-                            const t = localStorage.getItem('jarvis_token');
-                            if (!t) return;
-                            const statusEl = document.getElementById('totp-settings-status');
-                            const setupEl = document.getElementById('totp-settings-setup');
-                            const disableEl = document.getElementById('totp-settings-disable');
-                            const errEl = document.getElementById('totp-settings-error');
-                            try {
-                                const r = await fetch('/api/auth/totp/status', { headers: { 'Authorization': 'Bearer ' + t } });
-                                const d = await r.json();
-                                if (d.enabled) {
-                                    statusEl.innerHTML = '<p style="color:var(--success);font-size:0.85rem;">✅ 2FA ist aktiviert. Zum Deaktivieren Kennwort eingeben:</p>';
-                                    setupEl.style.display = 'none';
-                                    disableEl.style.display = '';
-                                } else {
-                                    statusEl.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">2FA ist nicht aktiviert. Scanne den QR-Code mit Google Authenticator:</p>';
-                                    disableEl.style.display = 'none';
-                                    // Setup starten
-                                    const sr = await fetch('/api/auth/totp/setup', { method: 'POST', headers: { 'Authorization': 'Bearer ' + t } });
-                                    const sd = await sr.json();
-                                    document.getElementById('totp-settings-qr').innerHTML = '<img src="' + sd.qr_code + '" style="border-radius:8px;">';
-                                    document.getElementById('totp-settings-secret').textContent = sd.secret;
-                                    document.getElementById('totp-settings-code').value = '';
-                                    setupEl.style.display = '';
-                                }
-                            } catch(e) { statusEl.innerHTML = '<p style="color:var(--danger);font-size:0.85rem;">Fehler beim Laden</p>'; }
-
-                            // Aktivieren
-                            document.getElementById('btn-totp-settings-verify').onclick = async function() {
-                                errEl.textContent = '';
-                                const code = document.getElementById('totp-settings-code').value.trim();
-                                if (!code) return;
-                                try {
-                                    const r = await fetch('/api/auth/totp/verify', {
-                                        method: 'POST',
-                                        headers: { 'Authorization': 'Bearer ' + t, 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ code })
+                                    document.addEventListener('DOMContentLoaded', function() {
+                                        const secBtn = document.querySelector('[data-settings-tab="security"]');
+                                        if (secBtn) secBtn.addEventListener('click', _adLoad);
                                     });
-                                    const d = await r.json();
-                                    if (d.success) { _totpLoad(); } else { errEl.textContent = d.error || 'Fehler'; }
-                                } catch(e) { errEl.textContent = 'Verbindungsfehler'; }
-                            };
+                                    _adLoad();
+                                })();
+                                </script>
+                            </div>
+                        </div>
 
-                            // Deaktivieren
-                            document.getElementById('btn-totp-settings-disable').onclick = async function() {
-                                errEl.textContent = '';
-                                const pw = document.getElementById('totp-settings-disable-pw').value;
-                                if (!pw) return;
-                                try {
-                                    const r = await fetch('/api/auth/totp/disable', {
-                                        method: 'POST',
-                                        headers: { 'Authorization': 'Bearer ' + t, 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ password: pw })
-                                    });
-                                    const d = await r.json();
-                                    if (d.success) { document.getElementById('totp-settings-disable-pw').value = ''; _totpLoad(); }
-                                    else { errEl.textContent = d.error || 'Fehler'; }
-                                } catch(e) { errEl.textContent = 'Verbindungsfehler'; }
-                            };
-                        }
-                        const secBtn = document.querySelector('[data-settings-tab="security"]');
-                        if (secBtn) secBtn.addEventListener('click', _totpLoad);
-                    })();
-                    </script>
-                </div>
+                        <!-- ── Zwei-Faktor-Authentifizierung ── -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-2fa-hdr">
+                                <h3>Zwei-Faktor-Authentifizierung (2FA)</h3>
+                                <span class="sk-openclaw-toggle" id="sec-sect-2fa-tog">▶</span>
+                            </div>
+                            <div id="sec-sect-2fa-body" class="kb-collapse-body" style="display:none;">
+                                <div id="totp-settings-status" style="margin-bottom:12px;">
+                                    <p style="color:var(--text-secondary);font-size:0.85rem;line-height:1.5;">Lade Status…</p>
+                                </div>
+                                <div id="totp-settings-setup" style="display:none;">
+                                    <div id="totp-settings-qr" style="text-align:center;margin:12px 0;"></div>
+                                    <p style="color:var(--text-muted);font-size:0.78rem;text-align:center;margin-bottom:4px;">Manueller Schlüssel:</p>
+                                    <code id="totp-settings-secret" style="display:block;text-align:center;font-size:0.85rem;color:var(--accent-hover);background:var(--bg-glass);padding:8px;border-radius:8px;letter-spacing:2px;margin-bottom:12px;user-select:all;cursor:pointer;"></code>
+                                    <div style="display:flex;gap:8px;">
+                                        <input type="text" id="totp-settings-code" placeholder="6-stelliger Code"
+                                            inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+                                            style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:1.1rem;text-align:center;letter-spacing:6px;font-weight:600;font-family:var(--font-mono);outline:none;">
+                                        <button id="btn-totp-settings-verify" class="settings-action-btn" style="white-space:nowrap;">Aktivieren</button>
+                                    </div>
+                                </div>
+                                <div id="totp-settings-disable" style="display:none;">
+                                    <div style="display:flex;gap:8px;">
+                                        <input type="password" id="totp-settings-disable-pw" placeholder="Kennwort zur Bestätigung"
+                                            style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:0.9rem;outline:none;">
+                                        <button id="btn-totp-settings-disable" class="settings-action-btn" style="background:var(--danger);white-space:nowrap;">Deaktivieren</button>
+                                    </div>
+                                </div>
+                                <p id="totp-settings-error" style="color:var(--danger);font-size:0.85rem;margin-top:8px;min-height:20px;"></p>
+                                <script>
+                                (function() {
+                                    async function _totpLoad() {
+                                        const t = localStorage.getItem('jarvis_token');
+                                        if (!t) return;
+                                        const statusEl = document.getElementById('totp-settings-status');
+                                        const setupEl = document.getElementById('totp-settings-setup');
+                                        const disableEl = document.getElementById('totp-settings-disable');
+                                        const errEl = document.getElementById('totp-settings-error');
+                                        try {
+                                            const r = await fetch('/api/auth/totp/status', { headers: { 'Authorization': 'Bearer ' + t } });
+                                            const d = await r.json();
+                                            if (d.enabled) {
+                                                statusEl.innerHTML = '<p style="color:var(--success);font-size:0.85rem;">✅ 2FA ist aktiviert. Zum Deaktivieren Kennwort eingeben:</p>';
+                                                setupEl.style.display = 'none';
+                                                disableEl.style.display = '';
+                                            } else {
+                                                statusEl.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">2FA ist nicht aktiviert. Scanne den QR-Code mit Google Authenticator:</p>';
+                                                disableEl.style.display = 'none';
+                                                const sr = await fetch('/api/auth/totp/setup', { method: 'POST', headers: { 'Authorization': 'Bearer ' + t } });
+                                                const sd = await sr.json();
+                                                document.getElementById('totp-settings-qr').innerHTML = '<img src="' + sd.qr_code + '" style="border-radius:8px;">';
+                                                document.getElementById('totp-settings-secret').textContent = sd.secret;
+                                                document.getElementById('totp-settings-code').value = '';
+                                                setupEl.style.display = '';
+                                            }
+                                        } catch(e) { statusEl.innerHTML = '<p style="color:var(--danger);font-size:0.85rem;">Fehler beim Laden</p>'; }
+
+                                        document.getElementById('btn-totp-settings-verify').onclick = async function() {
+                                            errEl.textContent = '';
+                                            const code = document.getElementById('totp-settings-code').value.trim();
+                                            if (!code) return;
+                                            try {
+                                                const r = await fetch('/api/auth/totp/verify', {
+                                                    method: 'POST',
+                                                    headers: { 'Authorization': 'Bearer ' + t, 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ code })
+                                                });
+                                                const d = await r.json();
+                                                if (d.success) { _totpLoad(); } else { errEl.textContent = d.error || 'Fehler'; }
+                                            } catch(e) { errEl.textContent = 'Verbindungsfehler'; }
+                                        };
+
+                                        document.getElementById('btn-totp-settings-disable').onclick = async function() {
+                                            errEl.textContent = '';
+                                            const pw = document.getElementById('totp-settings-disable-pw').value;
+                                            if (!pw) return;
+                                            try {
+                                                const r = await fetch('/api/auth/totp/disable', {
+                                                    method: 'POST',
+                                                    headers: { 'Authorization': 'Bearer ' + t, 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ password: pw })
+                                                });
+                                                const d = await r.json();
+                                                if (d.success) { document.getElementById('totp-settings-disable-pw').value = ''; _totpLoad(); }
+                                                else { errEl.textContent = d.error || 'Fehler'; }
+                                            } catch(e) { errEl.textContent = 'Verbindungsfehler'; }
+                                        };
+                                    }
+                                    const secBtn = document.querySelector('[data-settings-tab="security"]');
+                                    if (secBtn) secBtn.addEventListener('click', _totpLoad);
+                                })();
+                                </script>
+                            </div>
+                        </div>
+
+                    </div><!-- /kb-container -->
+                </div><!-- /settings-tab-security -->
 
                 <!-- ═══ Tab: Cron-Aufgaben ═══ -->
                 <div id="settings-tab-cron" class="settings-tab-content" style="display:none;">
@@ -1612,10 +1724,10 @@ sudo update-ca-certificates</code></pre>
     </div>
 
     <script src="/static/js/websocket.js?v=6"></script>
-    <script src="/static/js/cron.js?v=5"></script>
+    <script src="/static/js/cron.js?v=8"></script>
     <script src="/static/js/context.js?v=3"></script>
     <script src="/static/js/audit.js?v=3"></script>
-    <script src="/static/js/extractor.js?v=7"></script>
+    <script src="/static/js/extractor.js?v=8"></script>
     <script src="/static/js/vnc.js?v=14"></script>
     <script src="/static/js/skills.js?v=21"></script>
     <script src="/static/js/whatsapp.js?v=8"></script>
@@ -1623,7 +1735,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=3"></script>
-    <script src="/static/js/app.js?v=68"></script>
+    <script src="/static/js/app.js?v=77"></script>
 </body>
 
 </html>

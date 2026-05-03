@@ -41,6 +41,7 @@ type Config struct {
 	// Anzeige
 	DebugMode     bool `json:"debug_mode"`       // Agent-Denk-Nachrichten anzeigen
 	TTSInTextMode bool `json:"tts_in_text_mode"` // Antworten im Text-Modus vorlesen
+	TTSEnabled    bool `json:"tts_enabled"`       // Sprachausgabe global an/aus
 	AvatarVisible bool `json:"avatar_visible"`   // Iron Man Avatar anzeigen
 	// Domain-Anmeldung (LDAP) – nur Benutzername wird gespeichert, niemals das Passwort
 	DomainUsername string `json:"domain_username"`
@@ -71,6 +72,7 @@ var defaultConfig = Config{
 	BackgroundAlpha:     0.5,
 	AutoSendVoice:   true,
 	AvatarVisible:   true,
+	TTSEnabled:      true,
 }
 
 func configPath() string {

@@ -15,6 +15,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -76,6 +78,7 @@ fun ChatScreen(
     val selectionMode by viewModel.selectionMode.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val isSpeaking by viewModel.isSpeaking.collectAsState()
+    val isTtsEnabled by viewModel.ttsEnabled.collectAsState()
     val avatarMouth by viewModel.avatarMouthState.collectAsState()
     val avatarType by viewModel.avatarType.collectAsState()
     val listState = rememberLazyListState()
@@ -277,12 +280,14 @@ fun ChatScreen(
                 voiceState = voiceState,
                 isSpeaking = isSpeaking,
                 isAgentRunning = isAgentRunning,
+                isTtsEnabled = isTtsEnabled,
                 onTextChange = viewModel::onInputChange,
                 onSend = viewModel::sendMessage,
                 onMicStart = viewModel::startListening,
                 onMicStop = viewModel::stopListening,
                 onTtsStop = viewModel::stopTts,
                 onStopAgent = viewModel::stopAgent,
+                onToggleTts = viewModel::toggleTts,
             )
         }
 
@@ -660,12 +665,14 @@ private fun ChatInputBar(
     voiceState: VoiceState,
     isSpeaking: Boolean = false,
     isAgentRunning: Boolean = false,
+    isTtsEnabled: Boolean = true,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onMicStart: () -> Unit,
     onMicStop: () -> Unit,
     onTtsStop: () -> Unit = {},
     onStopAgent: () -> Unit = {},
+    onToggleTts: () -> Unit = {},
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -679,6 +686,18 @@ private fun ChatInputBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // TTS-Toggle-Button (🔊/🔇)
+            IconButton(onClick = onToggleTts) {
+                Icon(
+                    imageVector = if (isTtsEnabled) Icons.AutoMirrored.Filled.VolumeUp
+                                  else Icons.AutoMirrored.Filled.VolumeOff,
+                    contentDescription = if (isTtsEnabled) "Sprachausgabe deaktivieren"
+                                         else "Sprachausgabe aktivieren",
+                    tint = if (isTtsEnabled) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             // Mic-Button
             val micColor = when (voiceState) {
                 VoiceState.LISTENING -> JarvisGreen

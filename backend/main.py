@@ -289,6 +289,30 @@ _ws_usernames: dict[int, str] = {}
 # Alle aktiven WebSocket-Verbindungen (für Broadcasts)
 _active_ws: set = set()
 
+# ─── User-Chat State ──────────────────────────────────────────────────
+# Username → Liste aktiver WebSocket-Verbindungen (mehrere Tabs möglich)
+_uc_clients: dict[str, list[WebSocket]] = {}
+
+async def _uc_send(ws: WebSocket, msg: dict):
+    """Sendet eine Nachricht an einen User-Chat-Client (silent bei Fehler)."""
+    try:
+        await ws.send_json(msg)
+    except Exception:
+        pass
+
+async def _uc_send_to_user(username: str, msg: dict):
+    """Leitet eine Nachricht an alle WebSocket-Verbindungen eines Users weiter."""
+    for ws in list(_uc_clients.get(username, [])):
+        await _uc_send(ws, msg)
+
+async def _uc_broadcast_presence():
+    """Sendet die aktuelle Online-User-Liste an alle verbundenen User-Chat-Clients."""
+    users = [{"username": u, "online": True} for u in _uc_clients if _uc_clients[u]]
+    msg = {"type": "presence", "users": users}
+    for username, conns in list(_uc_clients.items()):
+        for ws in list(conns):
+            await _uc_send(ws, msg)
+
 def _get_client_type(ws) -> str:
     return _ws_client_types.get(id(ws), "browser")
 
@@ -741,6 +765,97 @@ async def chat_page():
     )
 
 
+@app.get("/userchat", response_class=HTMLResponse)
+async def userchat_page():
+    """User-zu-User-Chat-UI ausliefern."""
+    f = FRONTEND_DIR / "userchat.html"
+    return HTMLResponse(
+        content=f.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+@app.get("/api/users/online")
+async def get_online_users(user: str = Depends(require_auth)):
+    """Gibt Liste der aktuell im User-Chat verbundenen User zurück."""
+    users = [u for u, conns in _uc_clients.items() if conns]
+    return JSONResponse({"users": users})
+
+
+@app.websocket("/ws/users")
+async def userchat_ws(ws: WebSocket):
+    """WebSocket-Endpoint für den User-zu-User-Chat."""
+    await ws.accept()
+    username: str | None = None
+    try:
+        # Erste Nachricht muss Auth-Token enthalten
+        raw = await asyncio.wait_for(ws.receive_json(), timeout=10.0)
+        token_str = raw.get("token", "")
+        username = verify_token(token_str)
+        if not username:
+            await ws.send_json({"type": "error", "message": "Nicht autorisiert"})
+            await ws.close()
+            return
+
+        # Client registrieren
+        if username not in _uc_clients:
+            _uc_clients[username] = []
+        _uc_clients[username].append(ws)
+
+        # Willkommens-Nachricht + aktuelle User-Liste senden
+        online_users = [{"username": u, "online": True} for u in _uc_clients if _uc_clients[u]]
+        await _uc_send(ws, {"type": "connected", "username": username, "users": online_users})
+        # Presence-Update an alle senden
+        await _uc_broadcast_presence()
+
+        # Nachrichten-Loop
+        while True:
+            try:
+                data = await ws.receive_json()
+            except Exception:
+                break
+
+            msg_type = data.get("type", "")
+
+            if msg_type == "dm":
+                to_user = data.get("to", "")
+                text = data.get("text", "").strip()
+                if not to_user or not text:
+                    continue
+                import time
+                msg = {
+                    "type": "dm",
+                    "from": username,
+                    "to": to_user,
+                    "text": text,
+                    "ts": int(time.time() * 1000),
+                }
+                # An Empfänger senden
+                await _uc_send_to_user(to_user, msg)
+                # Echo an Sender (damit eigene Nachricht im Chat erscheint)
+                await _uc_send(ws, msg)
+
+            elif msg_type == "typing":
+                to_user = data.get("to", "")
+                if to_user:
+                    await _uc_send_to_user(to_user, {"type": "typing", "from": username})
+
+    except asyncio.TimeoutError:
+        pass
+    except Exception:
+        pass
+    finally:
+        # Client sauber entfernen
+        if username and username in _uc_clients:
+            try:
+                _uc_clients[username].remove(ws)
+            except ValueError:
+                pass
+            if not _uc_clients[username]:
+                del _uc_clients[username]
+        await _uc_broadcast_presence()
+
+
 @app.post("/api/login")
 async def login(request: Request):
     """Multi-User Login via Linux PAM → Token + Desktop-Session-Wechsel."""
@@ -763,10 +878,13 @@ async def login(request: Request):
             status_code=400,
         )
 
-    # Nur lokale Benutzer (ALLOWED_USERS) duerfen sich anmelden
-    if username not in ALLOWED_USERS:
+    # Lokale User (ALLOWED_USERS) immer erlaubt.
+    # AD/LDAP-User erlaubt wenn LDAP konfiguriert – authenticate_linux_user() prueft dann Zugriffsrechte.
+    _ad_srv = config.get_setting("ad_server", "")
+    _ad_dom = config.get_setting("ad_domain", "")
+    if username not in ALLOWED_USERS and not (_ad_srv and _ad_dom):
         _record_login_attempt(client_ip)
-        print(f"[AUTH] Anmeldung verweigert (nicht in ALLOWED_USERS): {username}", flush=True)
+        print(f"[AUTH] Anmeldung verweigert (kein LDAP, nicht in ALLOWED_USERS): {username}", flush=True)
         return JSONResponse(
             {"success": False, "error": "Benutzername oder Passwort falsch"},
             status_code=401,
@@ -1244,6 +1362,7 @@ async def get_settings(user: str = Depends(require_auth)):
         "active_profile_id": config.active_profile_id,
         "profiles": safe_profiles,
         "tts_enabled": config.TTS_ENABLED,
+        "tts_voice": config.TTS_VOICE,
         "use_physical_desktop": config.USE_PHYSICAL_DESKTOP,
         "agent_api_key": _mask_key(config.AGENT_API_KEY),
         "defaults": config.DEFAULT_PROVIDERS,
@@ -2189,6 +2308,35 @@ async def knowledge_extract(request: Request, user: str = Depends(require_auth))
         from backend.web_extractor import extract_from_url
         doc = await extract_from_url(url)
         return JSONResponse(doc)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/knowledge/extract/upload")
+async def knowledge_extract_upload(
+    file: UploadFile = File(...),
+    user: str = Depends(require_auth),
+):
+    """Datei hochladen → Text extrahieren → LLM → Pending-Dokument."""
+    _SUPPORTED = {
+        ".pdf", ".txt", ".md", ".rst", ".csv",
+        ".docx", ".doc", ".xlsx", ".ods", ".pptx",
+        ".mp3", ".m4a", ".wav", ".ogg",
+        ".mp4", ".mov", ".mkv", ".avi",
+    }
+    suffix = Path(file.filename or "file").suffix.lower()
+    if suffix not in _SUPPORTED:
+        return JSONResponse(
+            {"error": f"Format nicht unterstützt: '{suffix}'. Erlaubt: {', '.join(sorted(_SUPPORTED))}"},
+            status_code=415,
+        )
+    content = await file.read()
+    if len(content) > 50 * 1024 * 1024:
+        return JSONResponse({"error": "Datei zu groß (max. 50 MB)"}, status_code=413)
+    try:
+        from backend.web_extractor import extract_from_file
+        doc = await extract_from_file(file.filename, content)
+        return JSONResponse(doc, status_code=201)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

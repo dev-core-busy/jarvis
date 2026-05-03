@@ -45,13 +45,13 @@ fi
 # index.html: Versionsstring im Download-Button aktualisieren
 TMPHTML=$(mktemp)
 curl -s --ssl-reqd --insecure --user "$FTPS_USER" "$FTPS_BASE/index.html" -o "$TMPHTML"
-# Pattern: "Portable EXE · 0.XXX" (ohne v-Präfix)
-sed -i "s/Portable EXE · [0-9]\+\.[0-9]\+/Portable EXE · $VERSION/g" "$TMPHTML"
+# Pattern: "Portable EXE · v0.XXX" (mit v-Präfix wie in der Landing Page)
+sed -i "s/Portable EXE · v[0-9]\+\.[0-9]\+/Portable EXE · v$VERSION/g" "$TMPHTML"
 curl --ssl-reqd --insecure -T "$TMPHTML" --user "$FTPS_USER" "$FTPS_BASE/index.html"
 rm "$TMPHTML"
 
 # Verify index.html
-VERHTML=$(curl -s "https://jarvis-ai.info/" --insecure | grep -o "Portable EXE · $VERSION" || true)
+VERHTML=$(curl -s "https://jarvis-ai.info/" --insecure | grep -o "Portable EXE · v$VERSION" || true)
 if [ -z "$VERHTML" ]; then
   echo "⚠ WARNUNG: index.html EXE-Version Verifikation fehlgeschlagen!"
 else

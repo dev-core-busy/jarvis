@@ -146,6 +146,7 @@ type ChatWidget struct {
 	SendBtn   *widget.Button
 	MicBtn    *widget.Button
 	TtsStopBtn    *widget.Button // Stop-Button für laufende TTS (nur sichtbar während Wiedergabe)
+	TtsToggleBtn  *widget.Button // Toggle-Button: Sprachausgabe an/aus
 	StopAgentBtn  *widget.Button // Abbrechen-Button für laufende Agent-Anfrage
 	StatusLbl     *canvas.Text
 	ConnDot   *canvas.Circle
@@ -162,8 +163,9 @@ type ChatWidget struct {
 	OnSend        func(string)
 	OnMicButton   func()
 	OnSettings    func()
-	OnTTSStop     func() // laufende TTS-Wiedergabe unterbrechen
-	OnStopAgent   func() // laufende Agent-Anfrage abbrechen
+	OnTTSStop     func()    // laufende TTS-Wiedergabe unterbrechen
+	OnTTSToggle   func()    // Sprachausgabe an/aus umschalten
+	OnStopAgent   func()   // laufende Agent-Anfrage abbrechen
 }
 
 func NewChatWidget() *ChatWidget {
@@ -197,6 +199,14 @@ func NewChatWidget() *ChatWidget {
 	ttsStopBtn.Importance = widget.DangerImportance
 	ttsStopBtn.Hide()
 	c.TtsStopBtn = ttsStopBtn
+
+	ttsToggleBtn := widget.NewButtonWithIcon("", theme.VolumeUpIcon(), func() {
+		if c.OnTTSToggle != nil {
+			c.OnTTSToggle()
+		}
+	})
+	ttsToggleBtn.Importance = widget.MediumImportance
+	c.TtsToggleBtn = ttsToggleBtn
 
 	stopAgentBtn := widget.NewButtonWithIcon("Abbrechen", theme.CancelIcon(), func() {
 		if c.OnStopAgent != nil {
@@ -258,6 +268,19 @@ func (c *ChatWidget) SetTTSSpeaking(speaking bool) {
 	c.TtsStopBtn.Refresh()
 }
 
+// SetTTSEnabled aktualisiert das Icon des TTS-Toggle-Buttons.
+func (c *ChatWidget) SetTTSEnabled(enabled bool) {
+	if c.TtsToggleBtn == nil {
+		return
+	}
+	if enabled {
+		c.TtsToggleBtn.SetIcon(theme.VolumeUpIcon())
+	} else {
+		c.TtsToggleBtn.SetIcon(theme.VolumeMuteIcon())
+	}
+	c.TtsToggleBtn.Refresh()
+}
+
 // SetConnectionState aktualisiert Farbe und Text des Verbindungs-Dots im Header.
 // state: "connected" | "connecting" | "disconnected" | "error"
 func (c *ChatWidget) SetConnectionState(state string) {
@@ -300,11 +323,13 @@ var BgColorNames = []string{
 func (c *ChatWidget) Layout(cfg *Config) fyne.CanvasObject {
 	header := c.buildChatHeader()
 
-	// Input-Bar: [🎤] [Texteingabe────] [⏹(TTS)] [➤]
+	// Input-Bar: [🔊] [🎤] [Texteingabe────] [⏹(TTS)] [➤]
 	sendWrapped := container.NewGridWrap(fyne.NewSize(44, 44), c.SendBtn)
 	ttsStopWrapped := container.NewGridWrap(fyne.NewSize(44, 44), c.TtsStopBtn)
+	ttsToggleWrapped := container.NewGridWrap(fyne.NewSize(44, 44), c.TtsToggleBtn)
 	micWrapped := container.NewGridWrap(fyne.NewSize(44, 44), c.MicBtn)
-	inputRow := container.NewBorder(nil, nil, micWrapped,
+	leftBtns := container.NewHBox(ttsToggleWrapped, micWrapped)
+	inputRow := container.NewBorder(nil, nil, leftBtns,
 		container.NewHBox(ttsStopWrapped, sendWrapped), c.Input)
 	// Input-Bar: Gradient surfaceVariant → surface (Android-Elevation-Effekt)
 	inputBg := canvas.NewVerticalGradient(

@@ -109,8 +109,10 @@ class CronManager:
         """Job im APScheduler registrieren."""
         try:
             trigger = CronTrigger.from_crontab(job["cron"], timezone="Europe/Berlin")
+            # AsyncIOScheduler führt async-Funktionen direkt im Event-Loop aus –
+            # kein synchroner Wrapper nötig (der hatte RuntimeError in Thread-Pool)
             self._scheduler.add_job(
-                self._execute_sync,
+                self._execute,
                 trigger=trigger,
                 id=job["id"],
                 args=[job["id"]],
@@ -126,11 +128,6 @@ class CronManager:
                 self._scheduler.remove_job(job_id)
         except Exception:
             pass
-
-    def _execute_sync(self, job_id: str):
-        """Synchroner Wrapper – erstellt asyncio-Task."""
-        loop = asyncio.get_event_loop()
-        loop.create_task(self._execute(job_id))
 
     async def _execute(self, job_id: str) -> str:
         """Job ausführen: Agent-Task headless starten."""

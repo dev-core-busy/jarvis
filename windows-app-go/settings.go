@@ -502,9 +502,6 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 	dialogCheck := widget.NewCheck("", nil)
 	dialogCheck.SetChecked(app.cfg.DialogMode)
 
-	ttsTextCheck := widget.NewCheck("", nil)
-	ttsTextCheck.SetChecked(app.cfg.TTSInTextMode)
-
 	avatarCheck := widget.NewCheck("", nil)
 	avatarCheck.SetChecked(app.cfg.AvatarVisible)
 
@@ -596,10 +593,6 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 
 		// — Textmodus —
 		sectionHeader("Textmodus"),
-		settingRow("Sprachausgabe",
-			"LLM-Antworten im Chat-Fenster vorlesen",
-			ttsTextCheck),
-		vSpacer(8),
 		settingRow("Avatar anzeigen",
 			"Iron Man Avatar im Chat-Fenster einblenden",
 			avatarCheck),
@@ -687,8 +680,6 @@ func showSettingsWindow(a fyne.App, app *JarvisApp, onSave func()) {
 		app.cfg.MinSpeechMs = int(minSpeechVal)
 		app.cfg.VADThreshold = int(vadVal)
 
-		// Sprachausgabe
-		app.cfg.TTSInTextMode = ttsTextCheck.Checked
 		app.cfg.AvatarVisible = avatarCheck.Checked
 		app.chat.SetAvatarVisible(app.cfg.AvatarVisible)
 

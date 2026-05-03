@@ -1,31 +1,34 @@
 /**
- * Jarvis Web-Extraktor
- * URL → LLM-Extraktion → Validierung durch Mensch → Wissens-DB
- * Eingebettet in den Wissen-Tab (kein eigener Settings-Tab).
- * Design: kb-section System
+ * Jarvis Informationsextraktor
+ * URL oder Datei → LLM-Extraktion → menschliche Validierung → Wissens-DB
+ * Unterstützte Formate: URLs, PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, MP3/MP4 u.v.m.
  */
 window.extractorManager = new (class JarvisExtractorManager {
 
     constructor() {
-        this._pending     = [];
-        this._reviewing   = null;
-        this._container   = null;
-        this._infoModal   = null;
-        this._initialized = false;
+        this._pending          = [];
+        this._reviewing        = null;
+        this._reviewIsApproved = false;
+        this._container        = null;
+        this._infoModal        = null;
+        this._initialized      = false;
+        this._activeInputTab   = 'url';
+        this._dropFile         = null;   // Datei die per DnD reingekommen ist
     }
 
     init() {
         this._container = document.getElementById('extractor-tab-content');
         if (!this._container) return;
         if (!this._initialized) {
-            this._renderInfoModal();   // Info-Modal global an <body>
-            this._renderSections();    // Sektionen in den Wissen-Tab
+            this._renderInfoModal();
+            this._renderSections();
+            this._setupDnD();
             this._initialized = true;
         }
         this._loadPending();
     }
 
-    // ─── Info-Modal (an <body> angehängt, damit fixed-Overlay funktioniert) ──
+    // ─── Info-Modal ──────────────────────────────────────────────────────────
 
     _renderInfoModal() {
         const existing = document.getElementById('ext-info-modal');
@@ -34,28 +37,33 @@ window.extractorManager = new (class JarvisExtractorManager {
         modal.id = 'ext-info-modal';
         modal.className = 'modal-overlay hidden';
         modal.innerHTML = `
-            <div class="modal-card" style="max-width:520px;text-align:left;">
-                <h2 class="modal-title">URL-Informationsextraktor</h2>
+            <div class="modal-card" style="max-width:540px;text-align:left;">
+                <h2 class="modal-title">Informationsextraktor</h2>
 
                 <div class="ext-info-step">
                     <span class="ext-info-num">1</span>
                     <div>
-                        <strong>URL eingeben</strong><br>
-                        <span class="kb-hint" style="margin:0;">Gib die Adresse einer Webseite ein, deren Inhalt du in die Wissensdatenbank aufnehmen möchtest.</span>
+                        <strong>Quelle wählen</strong><br>
+                        <span class="kb-hint" style="margin:0;">
+                            <strong>URL:</strong> Adresse einer öffentlich erreichbaren Webseite eingeben.<br>
+                            <strong>Datei:</strong> Datei per Drag &amp; Drop ablegen oder über den Datei-Browser wählen.
+                            Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV,
+                            sowie Audio/Video (MP3, MP4, MOV …) via Whisper-Transkription.
+                        </span>
                     </div>
                 </div>
                 <div class="ext-info-step">
                     <span class="ext-info-num">2</span>
                     <div>
                         <strong>Extraktion starten</strong><br>
-                        <span class="kb-hint" style="margin:0;">Jarvis ruft die Seite ab und analysiert den Inhalt mit dem konfigurierten LLM. Dabei werden automatisch eine Zusammenfassung, Kernfakten und Frage-Antwort-Paare generiert.</span>
+                        <span class="kb-hint" style="margin:0;">Jarvis ruft die Seite ab bzw. liest die Datei und analysiert den Inhalt mit dem konfigurierten LLM. Dabei werden automatisch eine Zusammenfassung, Kernfakten und Frage-Antwort-Paare generiert.</span>
                     </div>
                 </div>
                 <div class="ext-info-step">
                     <span class="ext-info-num">3</span>
                     <div>
                         <strong>Ergebnis validieren</strong><br>
-                        <span class="kb-hint" style="margin:0;">Öffne das Dokument über <em>Prüfen</em>. Du kannst Titel, Zusammenfassung und Fakten bearbeiten sowie einzelne Frage-Antwort-Paare aktivieren, deaktivieren, bearbeiten oder löschen. Neue Paare können hinzugefügt werden.</span>
+                        <span class="kb-hint" style="margin:0;">Öffne das Dokument über <em>Prüfen</em>. Du kannst Titel, Zusammenfassung und Fakten bearbeiten sowie einzelne Frage-Antwort-Paare aktivieren, deaktivieren, bearbeiten oder löschen.</span>
                     </div>
                 </div>
                 <div class="ext-info-step">
@@ -68,7 +76,8 @@ window.extractorManager = new (class JarvisExtractorManager {
 
                 <div style="background:rgba(255,255,255,0.04);border-radius:8px;padding:10px 14px;margin-top:4px;">
                     <p class="kb-hint" style="margin:0;">
-                        <strong>Hinweis:</strong> Nicht gespeicherte Extraktionen bleiben im Bereich <em>Ausstehend</em> und können jederzeit geprüft oder verworfen werden. Funktioniert nur mit öffentlich erreichbaren Webseiten.
+                        <strong>Hinweis:</strong> Nicht gespeicherte Extraktionen bleiben im Bereich <em>Ausstehend</em>.
+                        Audio/Video-Transkription erfordert faster-whisper + ffmpeg auf dem Server.
                     </p>
                 </div>
 
@@ -76,7 +85,6 @@ window.extractorManager = new (class JarvisExtractorManager {
             </div>`;
         document.body.appendChild(modal);
         this._infoModal = modal;
-
         modal.addEventListener('click', e => { if (e.target === modal) this._hideInfo(); });
         document.getElementById('ext-info-close').onclick = () => this._hideInfo();
     }
@@ -84,22 +92,52 @@ window.extractorManager = new (class JarvisExtractorManager {
     _showInfo() { this._infoModal?.classList.remove('hidden'); }
     _hideInfo() { this._infoModal?.classList.add('hidden'); }
 
-    // ─── Sektionen im Wissen-Tab ─────────────────────────────────────────────
+    // ─── Sektionen rendern ───────────────────────────────────────────────────
 
     _renderSections() {
         this._container.innerHTML = `
 
-            <!-- Extraktor: URL-Eingabe -->
+            <!-- Extraktor: Eingabe (URL + Datei) -->
             <div class="kb-section">
                 <div class="kb-section-header">
-                    <h3>URL-Informationsextraktor</h3>
+                    <h3>Informationsextraktor</h3>
                     <button id="ext-info-btn" class="kb-btn-secondary" title="Anleitung">❓</button>
                 </div>
-                <p class="kb-hint">Webseiten-Inhalt per LLM in strukturiertes Wissen umwandeln – mit menschlicher Validierung vor der Ablage.</p>
-                <div style="display:flex;gap:8px;margin-top:4px;">
-                    <input id="ext-url-input" type="url" placeholder="https://beispiel.de/artikel" class="kb-input" style="flex:1;">
-                    <button id="ext-extract-btn" class="kb-btn-action">Extrahieren</button>
+                <p class="kb-hint">Webseiten oder Dateien per LLM in strukturiertes Wissen umwandeln – mit menschlicher Validierung.</p>
+
+                <!-- Sub-Tabs -->
+                <div class="ext-input-tabs">
+                    <button class="ext-input-tab active" id="ext-tab-url">🌐 URL</button>
+                    <button class="ext-input-tab"        id="ext-tab-file">📄 Datei</button>
                 </div>
+
+                <!-- Panel: URL -->
+                <div id="ext-panel-url">
+                    <div style="display:flex;gap:8px;">
+                        <input id="ext-url-input" type="url" placeholder="https://beispiel.de/artikel" class="kb-input" style="flex:1;">
+                        <button id="ext-extract-btn" class="kb-btn-action">Extrahieren</button>
+                    </div>
+                </div>
+
+                <!-- Panel: Datei -->
+                <div id="ext-panel-file" style="display:none;">
+                    <div class="ext-drop-zone" id="ext-drop-zone">
+                        <input type="file" id="ext-file-input"
+                            accept=".pdf,.txt,.md,.rst,.csv,.docx,.doc,.xlsx,.ods,.pptx,.mp3,.m4a,.wav,.ogg,.mp4,.mov,.mkv,.avi">
+                        <div style="font-size:1.8rem;line-height:1;">📄</div>
+                        <div class="ext-drop-zone-label">Datei hierher ziehen oder <span style="color:var(--accent);text-decoration:underline;cursor:pointer;">durchsuchen</span></div>
+                        <div class="ext-drop-zone-hint">PDF · DOCX · XLSX · PPTX · TXT · MD · CSV · MP3 · MP4 · MOV · max. 50 MB</div>
+                    </div>
+                    <!-- Drop-Banner: erscheint nach DnD-Ablage -->
+                    <div id="ext-drop-banner" class="ext-drop-banner" style="display:none;margin-top:8px;">
+                        <span style="font-size:1.1rem;">📄</span>
+                        <span class="ext-drop-banner-name" id="ext-drop-name">–</span>
+                        <span class="ext-drop-banner-size" id="ext-drop-size"></span>
+                        <button id="ext-drop-analyse-btn" class="kb-btn-action" style="padding:.35rem .9rem;font-size:.8rem;flex-shrink:0;">Analysieren ▶</button>
+                        <button id="ext-drop-cancel-btn"  class="kb-btn-secondary" style="padding:.35rem .6rem;font-size:.8rem;flex-shrink:0;">✕</button>
+                    </div>
+                </div>
+
                 <div id="ext-extract-status" class="kb-hint" style="margin-top:6px;display:none;"></div>
                 <div id="ext-notification" class="kb-notification" style="display:none;margin-top:8px;"></div>
             </div>
@@ -127,7 +165,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                     <h3 id="ext-review-title">Dokument prüfen</h3>
                     <button id="ext-review-close" class="kb-btn-secondary">✕</button>
                 </div>
-                <p class="kb-hint" id="ext-review-url" style="word-break:break-all;margin-bottom:12px;"></p>
+                <p class="kb-hint" id="ext-review-source" style="word-break:break-all;margin-bottom:12px;"></p>
 
                 <div class="kb-form-field" style="margin-bottom:10px;">
                     <label class="kb-label">Titel</label>
@@ -158,21 +196,97 @@ window.extractorManager = new (class JarvisExtractorManager {
             </div>
         `;
 
+        // Tab-Buttons
+        document.getElementById('ext-tab-url').onclick  = () => this._switchInputTab('url');
+        document.getElementById('ext-tab-file').onclick = () => this._switchInputTab('file');
+
+        // URL-Tab
         document.getElementById('ext-info-btn').onclick    = () => this._showInfo();
         document.getElementById('ext-extract-btn').onclick = () => this._startExtract();
-        document.getElementById('ext-refresh-btn').onclick = () => this._loadPending();
-        document.getElementById('ext-review-close').onclick = () => this._closeReview();
-        document.getElementById('ext-add-fact-btn').onclick = () => this._addFact();
-        document.getElementById('ext-add-qa-btn').onclick   = () => this._addQa();
-        document.getElementById('ext-save-btn').onclick    = () => this._approve();
-        document.getElementById('ext-reject-btn').onclick  = () => this._reject();
-
         document.getElementById('ext-url-input').addEventListener('keydown', e => {
             if (e.key === 'Enter') this._startExtract();
         });
+
+        // Datei-Tab
+        document.getElementById('ext-file-input').addEventListener('change', e => {
+            const file = e.target.files?.[0];
+            if (file) this._showDropBanner(file);
+        });
+
+        // Drop-Banner
+        document.getElementById('ext-drop-analyse-btn').onclick = () => {
+            if (this._dropFile) this._startExtractFile(this._dropFile);
+        };
+        document.getElementById('ext-drop-cancel-btn').onclick = () => this._hideDropBanner();
+
+        // Allgemein
+        document.getElementById('ext-refresh-btn').onclick  = () => this._loadPending();
+        document.getElementById('ext-review-close').onclick = () => this._closeReview();
+        document.getElementById('ext-add-fact-btn').onclick = () => this._addFact();
+        document.getElementById('ext-add-qa-btn').onclick   = () => this._addQa();
+        document.getElementById('ext-save-btn').onclick     = () => this._approve();
+        document.getElementById('ext-reject-btn').onclick   = () => this._reject();
     }
 
-    // ─── Extraktion starten ──────────────────────────────────────────────────
+    // ─── Input-Tab-Umschalter ────────────────────────────────────────────────
+
+    _switchInputTab(tab) {
+        this._activeInputTab = tab;
+        document.getElementById('ext-tab-url').classList.toggle('active', tab === 'url');
+        document.getElementById('ext-tab-file').classList.toggle('active', tab === 'file');
+        document.getElementById('ext-panel-url').style.display  = tab === 'url'  ? '' : 'none';
+        document.getElementById('ext-panel-file').style.display = tab === 'file' ? '' : 'none';
+    }
+
+    // ─── Drag & Drop ─────────────────────────────────────────────────────────
+
+    _setupDnD() {
+        const zone = document.getElementById('ext-drop-zone');
+        if (!zone) return;
+
+        // Drop-Zone selbst
+        zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+        zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+        zone.addEventListener('drop', e => {
+            e.preventDefault();
+            zone.classList.remove('drag-over');
+            const file = e.dataTransfer?.files?.[0];
+            if (file) this._showDropBanner(file);
+        });
+
+        // Globaler Listener auf dem Container → Datei-Tab automatisch aktivieren
+        this._container.addEventListener('dragover', e => {
+            if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
+        });
+        this._container.addEventListener('drop', e => {
+            const file = e.dataTransfer?.files?.[0];
+            if (!file) return;
+            e.preventDefault();
+            // Nicht doppelt verarbeiten wenn Drop bereits in der Drop-Zone landete
+            if (e.target.closest('#ext-drop-zone')) return;
+            this._switchInputTab('file');
+            this._showDropBanner(file);
+        });
+    }
+
+    _showDropBanner(file) {
+        this._dropFile = file;
+        this._switchInputTab('file');
+        const fmt = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1024).toFixed(0) + ' KB';
+        document.getElementById('ext-drop-name').textContent = file.name;
+        document.getElementById('ext-drop-size').textContent = fmt(file.size);
+        document.getElementById('ext-drop-banner').style.display = 'flex';
+    }
+
+    _hideDropBanner() {
+        this._dropFile = null;
+        document.getElementById('ext-drop-banner').style.display = 'none';
+        // Datei-Input zurücksetzen
+        const inp = document.getElementById('ext-file-input');
+        if (inp) inp.value = '';
+    }
+
+    // ─── URL-Extraktion ──────────────────────────────────────────────────────
 
     async _startExtract() {
         const url = document.getElementById('ext-url-input').value.trim();
@@ -187,8 +301,8 @@ window.extractorManager = new (class JarvisExtractorManager {
         try {
             const r = await fetch('/api/knowledge/extract', {
                 method: 'POST',
-                headers: { ...{ 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') }, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
+                headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url }),
             });
             const d = await r.json();
             if (!r.ok || d.error) {
@@ -207,15 +321,56 @@ window.extractorManager = new (class JarvisExtractorManager {
         }
     }
 
+    // ─── Datei-Extraktion ────────────────────────────────────────────────────
+
+    async _startExtractFile(file) {
+        const banner = document.getElementById('ext-drop-banner');
+        const btn    = document.getElementById('ext-drop-analyse-btn');
+        const status = document.getElementById('ext-extract-status');
+
+        btn.disabled = true; btn.textContent = '⏳ Läuft…';
+        status.textContent = `„${file.name}" wird analysiert (${file.type || 'unbekannter Typ'})…`;
+        status.style.display = 'block';
+
+        try {
+            const form = new FormData();
+            form.append('file', file);
+            const r = await fetch('/api/knowledge/extract/upload', {
+                method: 'POST',
+                headers: _authHeaders(),   // kein Content-Type – FormData setzt es selbst
+                body: form,
+            });
+            const d = await r.json();
+            if (!r.ok || d.error) {
+                this._notify('Fehler: ' + (d.error || r.status), 'error');
+            } else {
+                this._hideDropBanner();
+                this._notify(`✅ Extraktion abgeschlossen: „${d.title}"`);
+                this._loadPending();
+                setTimeout(() => this._openReview(d), 300);
+            }
+        } catch (e) {
+            this._notify('Netzwerkfehler: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false; btn.textContent = 'Analysieren ▶';
+            status.style.display = 'none';
+        }
+    }
+
     // ─── Pending-Liste ───────────────────────────────────────────────────────
 
     async _loadPending() {
         try {
-            const r = await fetch('/api/knowledge/pending', { headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') } });
+            const r = await fetch('/api/knowledge/pending', { headers: _authHeaders() });
             if (!r.ok) return;
             this._pending = await r.json();
             this._renderPending();
         } catch (e) { console.error('[Extractor]', e); }
+    }
+
+    _sourceLabel(doc) {
+        if (doc.source_type === 'file') return `📄 ${doc.source_name || doc.url}`;
+        try { return '🌐 ' + new URL(doc.url).hostname; } catch { return doc.url || ''; }
     }
 
     _renderPending() {
@@ -226,7 +381,6 @@ window.extractorManager = new (class JarvisExtractorManager {
         const pending  = this._pending.filter(d => (d.status || 'pending') === 'pending');
         const approved = this._pending.filter(d => d.status === 'approved');
 
-        // Badge zeigt nur ausstehende
         badge.textContent = pending.length;
         badge.style.display = pending.length ? 'inline-block' : 'none';
 
@@ -234,10 +388,9 @@ window.extractorManager = new (class JarvisExtractorManager {
             el.innerHTML = `<p class="kb-empty">Keine ausstehenden Extraktionen.</p>`;
         } else {
             el.innerHTML = pending.map(doc => {
-                const dt     = new Date(doc.created_at * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
-                const qa     = doc.qa_pairs?.length || 0;
-                const fct    = doc.facts?.length    || 0;
-                const domain = (() => { try { return new URL(doc.url).hostname; } catch { return doc.url; } })();
+                const dt  = new Date(doc.created_at * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+                const qa  = doc.qa_pairs?.length || 0;
+                const fct = doc.facts?.length    || 0;
                 return `
                 <div class="cron-item" data-id="${doc.id}">
                     <div class="cron-item-row">
@@ -249,7 +402,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                             <button class="kb-btn-danger ext-del-btn"    data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;">🗑️</button>
                         </div>
                     </div>
-                    <div class="cron-item-meta">${this._esc(domain)} · ${dt} · ${fct} Fakten · ${qa} Q&amp;A-Paare</div>
+                    <div class="cron-item-meta">${this._esc(this._sourceLabel(doc))} · ${dt} · ${fct} Fakten · ${qa} Q&amp;A-Paare</div>
                 </div>`;
             }).join('');
             el.querySelectorAll('.ext-review-btn').forEach(btn => {
@@ -274,20 +427,18 @@ window.extractorManager = new (class JarvisExtractorManager {
         const apprEl  = document.getElementById('ext-approved-list');
         const apprBdg = document.getElementById('ext-approved-count');
         if (!secEl || !apprEl) return;
-        if (!approved.length) {
-            secEl.style.display = 'none';
-            return;
-        }
+        if (!approved.length) { secEl.style.display = 'none'; return; }
+
         secEl.style.display = '';
         apprBdg.textContent = approved.length;
         apprBdg.style.display = 'inline-block';
+
         apprEl.innerHTML = approved.map(doc => {
             const dtC    = new Date(doc.created_at  * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
             const dtA    = new Date((doc.approved_at || doc.created_at) * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
             const qa     = doc.qa_count  ?? doc.qa_pairs?.filter(p => p.approved !== false).length ?? 0;
             const fct    = doc.fact_count ?? doc.facts?.length ?? 0;
-            const domain = (() => { try { return new URL(doc.url).hostname; } catch { return doc.url; } })();
-            const fileHint = doc.file ? `<span style="font-family:monospace;font-size:.7rem;color:var(--text-secondary);">${this._esc(doc.file)}</span>` : '';
+            const fileHint = doc.file ? `<div style="padding:2px 0 0 18px;font-family:monospace;font-size:.7rem;color:var(--text-secondary);">${this._esc(doc.file)}</div>` : '';
             return `
             <div class="cron-item" data-id="${doc.id}" style="border-left:3px solid var(--green,#10b981);">
                 <div class="cron-item-row">
@@ -299,10 +450,11 @@ window.extractorManager = new (class JarvisExtractorManager {
                         <button class="kb-btn-danger ext-del-btn"     data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="Aus Verlauf und Wissens-DB entfernen">🗑️</button>
                     </div>
                 </div>
-                <div class="cron-item-meta">${this._esc(domain)} · Extrahiert: ${dtC} · Genehmigt: ${dtA} · ${fct} Fakten · ${qa} Q&amp;A-Paare</div>
-                ${fileHint ? `<div style="padding:2px 0 0 18px;">${fileHint}</div>` : ''}
+                <div class="cron-item-meta">${this._esc(this._sourceLabel(doc))} · Extrahiert: ${dtC} · Genehmigt: ${dtA} · ${fct} Fakten · ${qa} Q&amp;A-Paare</div>
+                ${fileHint}
             </div>`;
         }).join('');
+
         apprEl.querySelectorAll('.ext-edit-btn').forEach(btn => {
             btn.onclick = () => {
                 const doc = this._pending.find(d => d.id === btn.dataset.id);
@@ -323,24 +475,23 @@ window.extractorManager = new (class JarvisExtractorManager {
     async _deleteApproved(id) {
         if (!confirm('Aus Verlauf und Wissens-DB entfernen?\nDie .md-Datei wird ebenfalls gelöscht.')) return;
         const doc = this._pending.find(d => d.id === id);
-        // MD-Datei auf Server löschen falls vorhanden
         if (doc?.file) {
             try {
                 await fetch('/api/knowledge/extract/file', {
                     method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') },
-                    body: JSON.stringify({ file: doc.file })
+                    headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file: doc.file }),
                 });
             } catch (e) {}
         }
-        await fetch(`/api/knowledge/pending/${id}`, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') } });
+        await fetch(`/api/knowledge/pending/${id}`, { method: 'DELETE', headers: _authHeaders() });
         this._loadPending();
         this._notify('Eintrag entfernt', 'info');
     }
 
     async _deletePending(id) {
         if (!confirm('Extraktion wirklich verwerfen?')) return;
-        await fetch(`/api/knowledge/pending/${id}`, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') } });
+        await fetch(`/api/knowledge/pending/${id}`, { method: 'DELETE', headers: _authHeaders() });
         if (this._reviewing?.id === id) this._closeReview();
         this._loadPending();
         this._notify('Extraktion verworfen', 'info');
@@ -349,36 +500,38 @@ window.extractorManager = new (class JarvisExtractorManager {
     // ─── Review ──────────────────────────────────────────────────────────────
 
     _openReview(doc, isApproved = false) {
-        this._reviewing   = doc;
+        this._reviewing        = doc;
         this._reviewIsApproved = isApproved;
+
         document.getElementById('ext-review-wrap').style.display = '';
         document.getElementById('ext-review-title').textContent  =
             isApproved ? `Bearbeiten – ${doc.title}` : `Dokument prüfen – ${doc.title}`;
-        document.getElementById('ext-review-url').innerHTML =
-            `🔗 <a href="${this._esc(doc.url)}" target="_blank" style="color:var(--accent);">${this._esc(doc.url)}</a>`;
+
+        // Quellenzeile: URL klickbar, Datei nur Text
+        const srcEl = document.getElementById('ext-review-source');
+        if (doc.source_type === 'file') {
+            srcEl.innerHTML = `📄 <strong>${this._esc(doc.source_name || doc.url)}</strong>`;
+        } else {
+            srcEl.innerHTML = `🔗 <a href="${this._esc(doc.url)}" target="_blank" style="color:var(--accent);">${this._esc(doc.url)}</a>`;
+        }
+
         document.getElementById('ext-edit-title').value   = doc.title   || '';
         document.getElementById('ext-edit-summary').value = doc.summary || '';
         this._renderFacts(doc.facts || []);
-        // Für bereits genehmigte Docs: alle Q&A als approved=true anzeigen (Checkboxen wegblenden wäre UX-Verbesserung)
         this._renderQa(doc.qa_pairs || []);
 
         const saveBtn   = document.getElementById('ext-save-btn');
         const rejectBtn = document.getElementById('ext-reject-btn');
-        if (isApproved) {
-            saveBtn.textContent   = '💾 Aktualisieren';
-            rejectBtn.textContent = '🗑️ Aus DB entfernen';
-        } else {
-            saveBtn.textContent   = '✅ In Wissens-DB speichern';
-            rejectBtn.textContent = '❌ Verwerfen';
-        }
+        saveBtn.textContent   = isApproved ? '💾 Aktualisieren'         : '✅ In Wissens-DB speichern';
+        rejectBtn.textContent = isApproved ? '🗑️ Aus DB entfernen'      : '❌ Verwerfen';
+
         document.getElementById('ext-review-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     _closeReview() {
-        this._reviewing = null;
+        this._reviewing        = null;
         this._reviewIsApproved = false;
         document.getElementById('ext-review-wrap').style.display = 'none';
-        // Buttons zurücksetzen
         const saveBtn   = document.getElementById('ext-save-btn');
         const rejectBtn = document.getElementById('ext-reject-btn');
         if (saveBtn)   saveBtn.textContent   = '✅ In Wissens-DB speichern';
@@ -480,17 +633,14 @@ window.extractorManager = new (class JarvisExtractorManager {
         const btn = document.getElementById('ext-save-btn');
         const origLabel = btn.textContent;
         btn.disabled = true; btn.textContent = '⏳ Speichere…';
-        const _auth = () => ({ 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') });
         try {
-            // 1. Änderungen ins JSON schreiben
             await fetch(`/api/knowledge/pending/${id}`, {
                 method: 'PATCH',
-                headers: { ..._auth(), 'Content-Type': 'application/json' },
-                body: JSON.stringify(updated)
+                headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify(updated),
             });
-            // 2. (Re-)Approve: schreibt MD-Datei und startet Reindex
             const r = await fetch(`/api/knowledge/pending/${id}/approve`, {
-                method: 'POST', headers: _auth()
+                method: 'POST', headers: _authHeaders(),
             });
             const d = await r.json();
             if (!r.ok || !d.ok) {

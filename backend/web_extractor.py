@@ -1,4 +1,4 @@
-"""Jarvis Web-Extraktor – URL abrufen, per LLM strukturieren, als Pending-Dokument speichern."""
+"""Jarvis Web-Extraktor – URL / Datei abrufen, per LLM strukturieren, als Pending-Dokument speichern."""
 
 import asyncio
 import json
@@ -12,7 +12,7 @@ PENDING_DIR = Path("data/knowledge/pending")
 # ─── LLM-Prompt ──────────────────────────────────────────────────────────────
 
 _EXTRACT_PROMPT = """\
-Analysiere den folgenden Webseiten-Inhalt und erstelle eine strukturierte Wissensextraktion.
+Analysiere den folgenden Inhalt und erstelle eine strukturierte Wissensextraktion.
 
 Ausgabe AUSSCHLIESSLICH als valides JSON-Objekt mit diesen Feldern:
 {
@@ -35,16 +35,42 @@ Regeln:
 - Keine Quellenangaben, keine URLs in den Antworten
 - Kein Markdown, keine Code-Blöcke um das JSON
 
-Webseiten-Inhalt:
+Inhalt:
 ---
 {content}
 ---
 """
 
+# ─── Datei-Typ Erkennung ─────────────────────────────────────────────────────
+
+# Content-Type → Dateiendung für direkte Datei-Downloads via URL
+_CT_TO_SUFFIX: dict[str, str] = {
+    "application/pdf":                                                          ".pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/msword":                                                       ".doc",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       ".xlsx",
+    "application/vnd.ms-excel":                                                 ".xls",
+    "application/vnd.oasis.opendocument.spreadsheet":                          ".ods",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "text/csv":                                                                 ".csv",
+    "audio/mpeg":   ".mp3",
+    "audio/mp4":    ".m4a",
+    "audio/wav":    ".wav",
+    "audio/ogg":    ".ogg",
+    "video/mp4":    ".mp4",
+    "video/quicktime": ".mov",
+    "video/x-matroska": ".mkv",
+}
+_FILE_SUFFIXES: frozenset[str] = frozenset(
+    ".pdf .docx .doc .xlsx .xls .ods .pptx .csv "
+    ".mp3 .m4a .wav .ogg .mp4 .mov .mkv .avi".split()
+)
+
+
 # ─── URL abrufen ─────────────────────────────────────────────────────────────
 
-async def fetch_url(url: str) -> tuple[str, str]:
-    """Ruft URL ab und gibt (title, plaintext) zurück."""
+async def _http_get(url: str):
+    """Führt einen GET-Request aus und gibt das httpx-Response-Objekt zurück."""
     try:
         import httpx
     except ImportError:
@@ -52,20 +78,13 @@ async def fetch_url(url: str) -> tuple[str, str]:
 
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; JarvisBot/1.0; +https://jarvis-ai.info)",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept": "*/*",
         "Accept-Language": "de,en;q=0.7",
     }
-
-    async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as client:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()
-        html = resp.text
-
-    # HTML → Plaintext
-    title, text = _html_to_text(html)
-    # Auf 8000 Zeichen kürzen (LLM-Kontext)
-    text = text[:8000]
-    return title, text
+        return resp
 
 
 def _html_to_text(html: str) -> tuple[str, str]:
@@ -102,13 +121,34 @@ def _strip_tags(html: str) -> str:
 # ─── LLM-Extraktion ──────────────────────────────────────────────────────────
 
 async def extract_from_url(url: str) -> dict:
-    """Haupt-Funktion: URL → strukturiertes Pending-Dokument."""
+    """URL → strukturiertes Pending-Dokument.
+    Erkennt automatisch ob die URL auf eine HTML-Seite oder eine Datei zeigt
+    (PDF, DOCX, XLSX, PPTX, Audio/Video …) und wählt die passende Pipeline."""
+    from pathlib import Path as _Path
+
+    resp = await _http_get(url)
+
+    # Content-Type auswerten (nur Typ, ohne Parameter wie charset)
+    ct = resp.headers.get("content-type", "").lower().split(";")[0].strip()
+    url_suffix = _Path(url.split("?")[0]).suffix.lower()
+
+    # Datei-Pipeline? → Content-Type hat Vorrang, dann URL-Endung
+    detected_suffix = _CT_TO_SUFFIX.get(ct) or (url_suffix if url_suffix in _FILE_SUFFIXES else None)
+
+    if detected_suffix:
+        # Dateiname aus URL ableiten
+        raw_name = _Path(url.split("?")[0]).name
+        filename = raw_name if raw_name.endswith(detected_suffix) else (raw_name or "dokument") + detected_suffix
+        # Datei-Pipeline mit Original-URL als Quelle
+        return await extract_from_file(filename, resp.content, source_url=url)
+
+    # ── HTML-Pipeline ──────────────────────────────────────────────────────────
     from backend.config import config
     from backend.llm import get_provider
     from google.genai import types
 
-    # 1. URL abrufen
-    page_title, content = await fetch_url(url)
+    page_title, content = _html_to_text(resp.text)
+    content = content[:8000]
 
     if not content.strip():
         raise ValueError("Seite enthält keinen lesbaren Text")
@@ -235,7 +275,8 @@ def approve_pending(doc_id: str) -> dict:
     target_path = target_dir / filename
 
     # Markdown-Dokument aufbauen
-    lines = [f"# {doc['title']}", "", f"> Quelle: {doc['url']}", ""]
+    source_label = doc.get("source_name") or doc.get("url", "")
+    lines = [f"# {doc['title']}", "", f"> Quelle: {source_label}", ""]
 
     if doc.get("summary"):
         lines += ["## Zusammenfassung", "", doc["summary"], ""]
@@ -290,3 +331,104 @@ def delete_pending(doc_id: str) -> bool:
         path.unlink()
         return True
     return False
+
+
+# ─── Datei-Extraktion ────────────────────────────────────────────────────────
+
+async def extract_from_file(filename: str, content: bytes, source_url: str | None = None) -> dict:
+    """Datei → Text-Extraktion → LLM → Pending-Dokument.
+    Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV und Audio/Video via Whisper.
+    source_url: wird gesetzt wenn die Datei über eine URL heruntergeladen wurde."""
+    import asyncio as _asyncio
+    import os as _os
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+
+    suffix = _Path(filename).suffix.lower() or ".bin"
+
+    # Temp-Datei mit korrektem Suffix anlegen (damit _extract_text das Format erkennt)
+    fd, tmp_path = _tempfile.mkstemp(suffix=suffix, prefix="jarvis_ext_")
+    try:
+        _os.close(fd)
+        _Path(tmp_path).write_bytes(content)
+
+        # Blockierende Text-Extraktion (PDF-Parsing, Whisper, …) im Thread ausführen
+        from backend.tools.knowledge import _extract_text
+        text = await _asyncio.to_thread(
+            _extract_text, _Path(tmp_path), 50 * 1024 * 1024
+        )
+    finally:
+        try:
+            _os.unlink(tmp_path)
+        except Exception:
+            pass
+
+    if not text or not text.strip():
+        raise ValueError(
+            f"Datei enthält keinen extrahierbaren Text (Format: {suffix}). "
+            "Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, "
+            "MP3/M4A/WAV (Transkription via Whisper), MP4/MOV/MKV."
+        )
+
+    # Auf 8 000 Zeichen kürzen (LLM-Kontext)
+    text = text[:8000]
+
+    # LLM-Extraktion – gleiche Pipeline wie URL-Extraktion
+    from backend.config import config
+    from backend.llm import get_provider
+    from google.genai import types
+
+    provider = get_provider(
+        config.LLM_PROVIDER,
+        config.current_api_key,
+        auth_method=config.current_auth_method,
+        session_key=config.current_session_key,
+        prompt_tool_calling=False,
+    )
+
+    prompt = _EXTRACT_PROMPT.replace("{content}", f"[Datei: {filename}]\n\n{text}")
+    response = await provider.generate_response(
+        model=config.current_model,
+        system_prompt="Du bist ein Wissensextraktor. Antworte ausschließlich mit dem angeforderten JSON.",
+        contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+        tools=[],
+    )
+
+    raw_text = ""
+    if response.parts:
+        for p in response.parts:
+            if getattr(p, "text", None):
+                raw_text += p.text
+
+    json_match = re.search(r'\{[\s\S]*\}', raw_text)
+    if not json_match:
+        raise ValueError(f"LLM lieferte kein gültiges JSON: {raw_text[:300]}")
+
+    data = json.loads(json_match.group(0))
+
+    doc_id = str(uuid.uuid4())[:8]
+    qa_pairs = [
+        {
+            "id": str(uuid.uuid4())[:6],
+            "q": str(pair.get("q", "")).strip(),
+            "a": str(pair.get("a", "")).strip(),
+            "approved": True,
+        }
+        for pair in data.get("qa_pairs", [])
+    ]
+
+    pending = {
+        "id":          doc_id,
+        "url":         source_url or f"file://{filename}",
+        "source_type": "url" if source_url else "file",
+        "source_name": filename,
+        "title":   str(data.get("title", filename)).strip()[:300],
+        "summary": str(data.get("summary", "")).strip(),
+        "facts":   [str(f).strip() for f in data.get("facts", []) if str(f).strip()],
+        "qa_pairs":    qa_pairs,
+        "created_at":  int(time.time()),
+        "status":      "pending",
+    }
+
+    save_pending(pending)
+    return pending

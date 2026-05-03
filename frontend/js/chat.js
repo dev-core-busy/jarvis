@@ -14,6 +14,11 @@
     let currentBotBubble = null;   // Streaming-Ziel
     let lastDate = '';
 
+    // TTS-State
+    let ttsEnabled = false;
+    let _ttsAudio = null;
+    let _ttsBuf = '';              // sammelt Bot-Text während Streaming
+
     // ─── DOM ────────────────────────────────────────────────────
     const $ = id => document.getElementById(id);
     const loginScreen  = $('login-screen');
@@ -34,6 +39,93 @@
     const statusDot    = $('status-dot');
     const totpSetupBtn = $('btn-totp-setup');
     const totpModal    = $('totp-modal');
+    const btnTtsChat   = $('btn-tts-chat');
+    const chatTtsVoice = $('chat-tts-voice');
+    const chatTtsIconOn  = $('chat-tts-icon-on');
+    const chatTtsIconOff = $('chat-tts-icon-off');
+
+    // ═════════════════════════════════════════════════════════════
+    //  TTS
+    // ═════════════════════════════════════════════════════════════
+
+    function _updateTtsChatBtn() {
+        if (!btnTtsChat) return;
+        if (chatTtsIconOn)  chatTtsIconOn.style.display  = ttsEnabled ? '' : 'none';
+        if (chatTtsIconOff) chatTtsIconOff.style.display = ttsEnabled ? 'none' : '';
+        const voiceWrap = $('tts-voice-wrap');
+        if (voiceWrap) voiceWrap.style.display = ttsEnabled ? '' : 'none';
+        btnTtsChat.title = ttsEnabled ? 'Sprachausgabe deaktivieren' : 'Sprachausgabe aktivieren';
+    }
+
+    async function _loadChatTtsVoices(savedVoice) {
+        if (!chatTtsVoice) return;
+        try {
+            const resp = await fetch('/api/tts/voices', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (!resp.ok) return;
+            const voices = await resp.json();
+            chatTtsVoice.innerHTML = '<option value="">Standard</option>';
+            voices.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v.name;
+                opt.textContent = v.display || v.name;
+                chatTtsVoice.appendChild(opt);
+            });
+            if (savedVoice) chatTtsVoice.value = savedVoice;
+        } catch (e) { /* ignore */ }
+    }
+
+    async function _saveChatTtsSettings() {
+        // LocalStorage = primaere Persistenz (funktioniert fuer alle User, auch LDAP)
+        // Backend = best-effort (klappt nur fuer lokale Admin-User wegen require_local_auth)
+        try {
+            localStorage.setItem('jarvis_chat_tts_enabled', ttsEnabled ? '1' : '0');
+            localStorage.setItem('jarvis_chat_tts_voice', chatTtsVoice?.value || '');
+        } catch (e) { /* ignore */ }
+        try {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ tts_enabled: ttsEnabled, tts_voice: chatTtsVoice?.value || '' })
+            });
+        } catch (e) { /* ignore */ }
+    }
+
+    function stopSpeak() {
+        if (_ttsAudio) { _ttsAudio.pause(); _ttsAudio.src = ''; _ttsAudio = null; }
+    }
+
+    async function speak(text) {
+        if (!ttsEnabled || !text) return;
+        const clean = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
+        if (!clean) return;
+        stopSpeak();
+        const voice = chatTtsVoice?.value || '';
+        try {
+            const resp = await fetch('/api/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ text: clean, voice })
+            });
+            if (!resp.ok) return;
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            _ttsAudio = new Audio(url);
+            _ttsAudio.onended = () => { URL.revokeObjectURL(url); _ttsAudio = null; };
+            _ttsAudio.play().catch(() => {});
+        } catch (e) { console.warn('[TTS] Fehler:', e); }
+    }
+
+    if (btnTtsChat) {
+        btnTtsChat.addEventListener('click', () => {
+            ttsEnabled = !ttsEnabled;
+            _updateTtsChatBtn();
+            if (!ttsEnabled) stopSpeak();
+            _saveChatTtsSettings();
+        });
+    }
+    if (chatTtsVoice) {
+        chatTtsVoice.addEventListener('change', () => _saveChatTtsSettings());
+    }
 
     // ═════════════════════════════════════════════════════════════
     //  LOGIN
@@ -105,6 +197,23 @@
         connectWS();
         msgInput.focus();
         _startContextIndicator();
+        // TTS-Einstellungen laden: LocalStorage hat Vorrang vor Backend
+        const lsEnabled = localStorage.getItem('jarvis_chat_tts_enabled');
+        const lsVoice   = localStorage.getItem('jarvis_chat_tts_voice');
+        if (lsEnabled !== null) {
+            ttsEnabled = lsEnabled === '1';
+            _updateTtsChatBtn();
+            _loadChatTtsVoices(lsVoice || '');
+        } else {
+            // Fallback: Backend-Settings (klappt nur fuer lokale Admins)
+            fetch('/api/settings', { headers: { 'Authorization': `Bearer ${token}` } })
+                .then(r => r.json())
+                .then(d => {
+                    ttsEnabled = d.tts_enabled || false;
+                    _updateTtsChatBtn();
+                    _loadChatTtsVoices(d.tts_voice || '');
+                }).catch(() => { _loadChatTtsVoices(''); });
+        }
     }
 
     // ─── Kontext-Indikator ────────────────────────────────────────────
@@ -122,7 +231,7 @@
             const n = d.history_entries || 0;
             if (n > 0) {
                 el.style.display = 'flex';
-                text.textContent = `Kontext: ${n} Einträge · ${d.fills_pct ?? 0} %`;
+                text.textContent = `Kontext Speicher: ${n} Einträge · ${d.fills_pct ?? 0} %`;
             } else {
                 el.style.display = 'none';
             }
@@ -282,7 +391,8 @@
         } else if (text.startsWith('⏸') || text.startsWith('▶') || text.startsWith('⏹')) {
             addStatusLine(text);
         } else {
-            // LLM-Antwort-Text → Bot-Bubble (Streaming)
+            // LLM-Antwort-Text → Bot-Bubble (Streaming) + TTS-Puffer füllen
+            _ttsBuf += (text + ' ');
             appendToBotBubble(text);
         }
     }
@@ -290,6 +400,7 @@
     function handleAgentEvent(msg) {
         if (msg.event === 'started') {
             agentRunning = true;
+            _ttsBuf = '';  // Puffer für neue Antwort zurücksetzen
             stopBtn.classList.remove('hidden');
             // Neue Bot-Bubble vorbereiten
             currentBotBubble = null;
@@ -300,6 +411,10 @@
             removeStreamingDots();
             currentBotBubble = null;
             _updateContextIndicator();
+            // TTS: gesammelte Antwort vorlesen
+            const toSpeak = _ttsBuf.trim();
+            _ttsBuf = '';
+            if (toSpeak) speak(toSpeak);
         }
     }
 
@@ -637,11 +752,14 @@
             };
             recognition.onresult = (e) => {
                 const transcript = e.results[0][0].transcript;
-                if (msgInput) {
-                    msgInput.value = transcript;
+                if (msgInput && transcript && transcript.trim()) {
+                    msgInput.value = transcript.trim();
                     msgInput.dispatchEvent(new Event('input'));
+                    stopMic();
+                    sendMessage(); // erkannten Text sofort senden
+                } else {
+                    stopMic();
                 }
-                stopMic();
             };
             recognition.onerror = () => stopMic();
             recognition.onend = () => stopMic();
@@ -655,6 +773,8 @@
             btnMic.addEventListener('click', () => {
                 if (isRecording) {
                     stopMic();
+                    // Wenn Text im Feld → direkt senden
+                    if (msgInput && msgInput.value.trim()) sendMessage();
                 } else {
                     isRecording = true;
                     btnMic.classList.add('recording');

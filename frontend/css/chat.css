@@ -450,7 +450,9 @@ body {
 
 .btn-mic {
     width: 38px; height: 38px;
-    border: none;
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.08);
     border-radius: 50%;
     background: transparent;
     color: var(--text-muted);
@@ -459,7 +461,7 @@ body {
     flex-shrink: 0;
     transition: color .2s, background .2s;
 }
-.btn-mic:hover { color: var(--purple); background: rgba(124,58,237,.12); }
+.btn-mic:hover { color: #22c55e; background: rgba(34,197,94,.15); border-color: #22c55e; }
 .btn-mic.recording {
     color: #e74c3c;
     background: rgba(231,76,60,.15);
@@ -515,6 +517,40 @@ body {
 
 /* Topbar-Buttons */
 .topbar-right { display: flex; gap: 4px; align-items: center; }
+
+/* ─── TTS Stimme-Wrapper in Topbar ──────────────────────────── */
+.tts-voice-wrap {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface);
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+    padding: 3px 8px 3px 10px;
+}
+.tts-voice-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    white-space: nowrap;
+    user-select: none;
+    letter-spacing: 0.02em;
+}
+.tts-voice-select {
+    background: transparent;
+    border: none;
+    color: var(--on-surface);
+    font-size: 0.78rem;
+    max-width: 140px;
+    min-width: 70px;
+    cursor: pointer;
+    outline: none;
+    padding: 2px 0;
+    font-family: inherit;
+}
+.tts-voice-select option {
+    background: var(--surface);
+    color: var(--on-surface);
+}
 
 .btn-totp-setup {
     background: none; border: none;

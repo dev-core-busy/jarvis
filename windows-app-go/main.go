@@ -372,6 +372,17 @@ func (ja *JarvisApp) reconnect() {
 		StopTTS()
 		ja.chat.SetTTSSpeaking(false)
 	}
+	ja.chat.OnTTSToggle = func() {
+		ja.cfg.TTSEnabled = !ja.cfg.TTSEnabled
+		ja.chat.SetTTSEnabled(ja.cfg.TTSEnabled)
+		if !ja.cfg.TTSEnabled {
+			StopTTS()
+			ja.chat.SetTTSSpeaking(false)
+		}
+		_ = ja.cfg.Save()
+	}
+	// Initialen TTS-Zustand setzen
+	ja.chat.SetTTSEnabled(ja.cfg.TTSEnabled)
 	ja.chat.OnStopAgent = func() {
 		ja.ws.SendStop("")
 		ja.chat.SetAgentRunning(false)
@@ -484,8 +495,8 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 			ja.ttsBuf.Reset()
 			ja.ttsBufMu.Unlock()
 			go func() {
-				// TTS im Dialogmodus ODER wenn Text-TTS eingeschaltet
-				if (ja.cfg.DialogMode || ja.cfg.TTSInTextMode) && ttsText != "" {
+				// TTS wenn global aktiviert (Lautsprecher-Button)
+				if ja.cfg.TTSEnabled && ttsText != "" {
 					ja.chat.SetTTSSpeaking(true)
 					SpeakText(ttsText)
 					ja.chat.SetTTSSpeaking(false)

@@ -10,6 +10,7 @@
     let currentUser = localStorage.getItem('jarvis_user') || '';
     let ws = null;
     let vnc = null;
+    let _ttsEnabled = false;   // TTS-Status (kein Checkbox mehr – btn-tts ist alleiniger Toggle)
 
     // ─── DOM Elemente ───────────────────────────────────────────
     const loginScreen = document.getElementById('login-screen');
@@ -30,6 +31,7 @@
     const btnClearLog = document.getElementById('btn-clear-log');
     const btnLogout = document.getElementById('btn-logout');
     const btnMic = document.getElementById('btn-mic');
+    const btnTts = document.getElementById('btn-tts');
     const btnZoomIn = document.getElementById('btn-zoom-in');
     const btnZoomOut = document.getElementById('btn-zoom-out');
     const btnZoomReset = document.getElementById('btn-zoom-reset');
@@ -177,7 +179,7 @@
             const n = d.history_entries || 0;
             if (n > 0) {
                 indicator.style.display = 'flex';
-                text.textContent = `Kontext: ${n} Einträge · ${d.fills_pct ?? 0} %`;
+                text.textContent = `Kontext Speicher: ${n} Einträge · ${d.fills_pct ?? 0} %`;
             } else {
                 indicator.style.display = 'none';
             }
@@ -634,7 +636,13 @@
             const agentId = data.agent_id || '_main';
             // Fehlermeldungen (❌/🔴/⚠️) immer als highlight anzeigen, unabhängig vom Debug-Modus
             const isError = data.message && (data.message.startsWith('❌') || data.message.startsWith('🔴') || data.message.startsWith('⚠️'));
-            addLogEntry(data.message, 'info', data.highlight || isError, agentId);
+            // ⏳ Fortschritts-Meldungen (Warte auf LLM, Tool-Ausführung etc.) nur im Debug sichtbar
+            const isProgress = data.message && (
+                data.message.trimStart().startsWith('⏳') ||
+                data.message.trimStart().startsWith('🔧') ||
+                data.message.trimStart().startsWith('🚀')
+            );
+            addLogEntry(data.message, 'info', (data.highlight && !isProgress) || isError, agentId);
             // Agent-State in Sidebar aktualisieren
             if (data.agent_id) {
                 _updateAgentCard(data.agent_id, data.agent_label, data.state, data.is_sub_agent);
@@ -728,7 +736,7 @@
     window.sendJarvisTask = function (text) {
         if (!ws) return false;
         ws.send({ type: 'task', text, token });
-        addLogEntry(`📝 Aufgabe: ${text.substring(0, 80)}…`, 'task', true);
+        addLogEntry(`📝 Aufgabe: ${text.substring(0, 80)}…`, 'task', false);
         return true;
     };
 
@@ -757,7 +765,7 @@
             msg.agent_id = _activeAgentId;
         }
         ws.send(msg);
-        addLogEntry(`📝 Aufgabe: ${text}`, 'task', true, _activeAgentId);
+        addLogEntry(`📝 Aufgabe: ${text}`, 'task', false, _activeAgentId);
         taskInput.value = '';
         taskInput.style.height = 'auto';
 
@@ -785,9 +793,13 @@
 
         recognition.onresult = (event) => {
             const transcript = event.results[0][0].transcript;
-            taskInput.value = transcript;
-            taskInput.dispatchEvent(new Event('input')); // Trigger auto-resize
-            addLogEntry(`🎙️ Erkannt: "${transcript}"`, 'system');
+            if (transcript && transcript.trim()) {
+                taskInput.value = transcript.trim();
+                taskInput.dispatchEvent(new Event('input'));
+                addLogEntry(`🎙️ Erkannt: "${transcript.trim()}"`, 'system');
+                stopRecording();
+                sendTask();
+            }
         };
 
         recognition.onerror = (event) => {
@@ -814,6 +826,8 @@
             }
             if (isRecording) {
                 stopRecording();
+                // Wenn Text im Eingabefeld → direkt senden
+                if (taskInput.value.trim()) sendTask();
             } else {
                 recognition.start();
             }
@@ -924,26 +938,64 @@
     });
 
     // ─── Sprachausgabe (TTS) ────────────────────────────────────
-    function speak(text) {
-        if (!window.speechSynthesis) return;
-        // Falls TTS deaktiviert ist, abbrechen
-        const ttsEnabled = document.getElementById('setting-tts')?.checked;
-        if (!ttsEnabled) return;
+    let _ttsAudio = null;   // aktuell abgespielte Audio-Instanz
 
-        // Laufende Sprachausgaben abbrechen um Überlappung zu vermeiden
-        window.speechSynthesis.cancel();
+    function stopSpeak() {
+        if (_ttsAudio) {
+            _ttsAudio.pause();
+            _ttsAudio.src = '';
+            _ttsAudio = null;
+        }
+    }
 
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'de-DE';
-        utterance.rate = 1.0;
-        utterance.pitch = 1.0;
+    async function speak(text) {
+        if (!_ttsEnabled || !text) return;
+        const clean = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
+        if (!clean) return;
+        stopSpeak();
+        const voice = document.getElementById('setting-tts-voice')?.value || '';
+        try {
+            const resp = await fetch('/api/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ text: clean, voice })
+            });
+            if (!resp.ok) return;
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            _ttsAudio = new Audio(url);
+            _ttsAudio.onended = () => { URL.revokeObjectURL(url); _ttsAudio = null; };
+            _ttsAudio.play().catch(() => {});
+        } catch (e) {
+            console.warn('[TTS] Fehler:', e);
+        }
+    }
 
-        // Versuche eine deutsche Stimme zu finden
-        const voices = window.speechSynthesis.getVoices();
-        const deVoice = voices.find(v => v.lang.startsWith('de'));
-        if (deVoice) utterance.voice = deVoice;
+    // ─── TTS-Button Zustand ─────────────────────────────────────
+    const SVG_SPEAKER_ON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`;
+    const SVG_SPEAKER_OFF = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>`;
 
-        window.speechSynthesis.speak(utterance);
+    function _updateTtsBtn() {
+        if (!btnTts) return;
+        btnTts.classList.toggle('tts-active', _ttsEnabled);
+        btnTts.title = _ttsEnabled ? 'Sprachausgabe aktiv – klicken zum Deaktivieren' : 'Sprachausgabe inaktiv – klicken zum Aktivieren';
+        btnTts.innerHTML = _ttsEnabled ? SVG_SPEAKER_ON : SVG_SPEAKER_OFF;
+    }
+
+    if (btnTts) {
+        btnTts.addEventListener('click', async () => {
+            _ttsEnabled = !_ttsEnabled;
+            _updateTtsBtn();
+            if (!_ttsEnabled) stopSpeak();
+            // Persistieren
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ tts_enabled: _ttsEnabled })
+                });
+            } catch (e) { /* ignore */ }
+        });
     }
 
     // ─── Multi-Agent State ──────────────────────────────────────
@@ -1185,9 +1237,10 @@
 
     // ─── Log ────────────────────────────────────────────────────
     function addLogEntry(message, type = 'info', highlight = false, agentId = null) {
-        if (type === 'system' || type === 'info') {
-            const cleanMessage = message.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
-            speak(cleanMessage);
+        // TTS nur für die eigentliche LLM-Antwort (highlight=true), nicht für Status-Meldungen
+        if (highlight && (type === 'system' || type === 'info')) {
+            const cleanMessage = message.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
+            if (cleanMessage) speak(cleanMessage);
         }
         // Willkommens-Nachricht entfernen
         const welcome = logContainer.querySelector('.log-welcome');
@@ -1309,6 +1362,7 @@
         const inputSessionKey = document.getElementById('profile-session-key');
         const apikeyHint = document.querySelector('.apikey-hint');
         const checkTts = document.getElementById('setting-tts');
+        const selectTtsVoice = document.getElementById('setting-tts-voice');
         const inputAgentKey = document.getElementById('setting-agent-api-key');
         const btnGenKey = document.getElementById('btn-generate-apikey');
         const btnCopyKey = document.getElementById('btn-copy-apikey');
@@ -1349,6 +1403,79 @@
             skillManager = new window.JarvisSkillManager();
         }
 
+        // ── Wissen-Tab: Abschnitte einklappbar ──
+        // ── Generischer Collapse-Init ──────────────────────────────────────
+        function _collapseInit(sections) {
+            sections.forEach(({ hdr, body, tog }) => {
+                const hdrEl = document.getElementById(hdr);
+                if (!hdrEl || hdrEl._kbBound) return;
+                hdrEl._kbBound = true;
+                // Initiale is-collapsed Klasse setzen
+                const bodyEl0 = document.getElementById(body);
+                if (bodyEl0 && bodyEl0.style.display === 'none') {
+                    hdrEl.classList.add('is-collapsed');
+                }
+                hdrEl.addEventListener('click', (e) => {
+                    if (e.target.closest('button, input, label, .toggle-switch, a')) return;
+                    const bodyEl = document.getElementById(body);
+                    const togEl  = document.getElementById(tog);
+                    const collapsed = bodyEl.style.display !== 'none';
+                    bodyEl.style.display = collapsed ? 'none' : '';
+                    if (togEl) togEl.textContent = collapsed ? '▶' : '▼';
+                    hdrEl.classList.toggle('is-collapsed', collapsed);
+                });
+            });
+        }
+
+        // ── Wissen-Tab Collapse ────────────────────────────────────────────
+        function _initKbCollapse() {
+            _collapseInit([
+                { hdr: 'kb-sect-stats-hdr',  body: 'kb-sect-stats-body',  tog: 'kb-sect-stats-tog'  },
+                { hdr: 'kb-sect-upload-hdr', body: 'kb-sect-upload-body', tog: 'kb-sect-upload-tog' },
+                { hdr: 'kb-sect-folder-hdr', body: 'kb-sect-folder-body', tog: 'kb-sect-folder-tog' },
+                { hdr: 'kb-sect-webdav-hdr', body: 'kb-sect-webdav-body', tog: 'kb-sect-webdav-tog' },
+                { hdr: 'kb-sect-net-hdr',    body: 'kb-sect-net-body',    tog: 'kb-sect-net-tog'    },
+                { hdr: 'kb-sect-ext-hdr',    body: 'kb-sect-ext-body',    tog: 'kb-sect-ext-tog'    },
+            ]);
+        }
+
+        // ── Sicherheit-Tab Collapse ────────────────────────────────────────
+        function _initSecCollapse() {
+            _collapseInit([
+                { hdr: 'sec-sect-pw-hdr',  body: 'sec-sect-pw-body',  tog: 'sec-sect-pw-tog'  },
+                { hdr: 'sec-sect-ad-hdr',  body: 'sec-sect-ad-body',  tog: 'sec-sect-ad-tog'  },
+                { hdr: 'sec-sect-2fa-hdr', body: 'sec-sect-2fa-body', tog: 'sec-sect-2fa-tog' },
+            ]);
+        }
+
+        // ── KI-Profile Collapse ────────────────────────────────────────────
+        function _initProfilesCollapse() {
+            _collapseInit([
+                { hdr: 'prof-sect-list-hdr', body: 'prof-sect-list-body', tog: 'prof-sect-list-tog' },
+                { hdr: 'prof-sect-tts-hdr',  body: 'prof-sect-tts-body',  tog: 'prof-sect-tts-tog'  },
+                { hdr: 'prof-sect-api-hdr',  body: 'prof-sect-api-body',  tog: 'prof-sect-api-tog'  },
+                { hdr: 'prof-sect-ssl-hdr',  body: 'prof-sect-ssl-body',  tog: 'prof-sect-ssl-tog'  },
+            ]);
+        }
+
+        // ── WhatsApp-Tab Collapse ──────────────────────────────────────────
+        function _initWaCollapse() {
+            _collapseInit([
+                { hdr: 'wa-sect-status-hdr', body: 'wa-sect-status-body', tog: 'wa-sect-status-tog' },
+                { hdr: 'wa-sect-logs-hdr',   body: 'wa-sect-logs-body',   tog: 'wa-sect-logs-tog'   },
+            ]);
+        }
+
+        // ── Vision-Tab Collapse ────────────────────────────────────────────
+        function _initVisionCollapse() {
+            _collapseInit([
+                { hdr: 'vis-sect-feed-hdr',  body: 'vis-sect-feed-body',  tog: 'vis-sect-feed-tog'  },
+                { hdr: 'vis-sect-train-hdr', body: 'vis-sect-train-body', tog: 'vis-sect-train-tog' },
+                { hdr: 'vis-sect-faces-hdr', body: 'vis-sect-faces-body', tog: 'vis-sect-faces-tog' },
+                { hdr: 'vis-sect-cfg-hdr',   body: 'vis-sect-cfg-body',   tog: 'vis-sect-cfg-tog'   },
+            ]);
+        }
+
         // ── Settings Tabs ──
         const settingsTabs = document.querySelectorAll('.settings-tab-btn');
         const tabProfiles = document.getElementById('settings-tab-profiles');
@@ -1377,6 +1504,7 @@
                 if (target === 'profiles' && tabProfiles) {
                     tabProfiles.style.display = '';
                     tabProfiles.classList.add('active');
+                    _initProfilesCollapse();
                 } else if (target === 'instructions' && tabInstructions) {
                     tabInstructions.style.display = '';
                     tabInstructions.classList.add('active');
@@ -1388,10 +1516,12 @@
                 } else if (target === 'whatsapp' && tabWhatsApp) {
                     tabWhatsApp.style.display = '';
                     tabWhatsApp.classList.add('active');
+                    _initWaCollapse();
                     if (window.waManager) window.waManager.refresh();
                 } else if (target === 'knowledge' && tabKnowledge) {
                     tabKnowledge.style.display = '';
                     tabKnowledge.classList.add('active');
+                    _initKbCollapse();
                     if (window.knowledgeManager) window.knowledgeManager.init();
                     if (window.extractorManager) window.extractorManager.init();
                 } else if (target === 'google' && tabGoogle) {
@@ -1405,6 +1535,7 @@
                 } else if (target === 'vision' && tabVision) {
                     tabVision.style.display = '';
                     tabVision.classList.add('active');
+                    _initVisionCollapse();
                     if (window.visionManager) window.visionManager.refresh();
                 } else if (target === 'telemetry' && tabTelemetry) {
                     tabTelemetry.style.display = '';
@@ -1413,6 +1544,7 @@
                 } else if (target === 'security' && tabSecurity) {
                     tabSecurity.style.display = '';
                     tabSecurity.classList.add('active');
+                    _initSecCollapse();
                     _initSecurityTab();
                 } else if (target === 'cron' && tabCron) {
                     tabCron.style.display = '';
@@ -1562,6 +1694,7 @@
             settingsTabs.forEach(t => t.classList.remove('active'));
             if (settingsTabs[0]) settingsTabs[0].classList.add('active');
             if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+            _initProfilesCollapse();
             if (tabSkills) { tabSkills.style.display = 'none'; tabSkills.classList.remove('active'); }
             if (tabWhatsApp) { tabWhatsApp.style.display = 'none'; tabWhatsApp.classList.remove('active'); }
             if (tabKnowledge) { tabKnowledge.style.display = 'none'; tabKnowledge.classList.remove('active'); }
@@ -1602,7 +1735,10 @@
                 profiles = data.profiles || [];
                 activeProfileId = data.active_profile_id || '';
                 defaults = data.defaults || {};
-                if (checkTts) checkTts.checked = data.tts_enabled || false;
+                _ttsEnabled = data.tts_enabled || false;
+                _updateTtsBtn();
+                // Stimmen laden und gespeicherte Auswahl setzen
+                _loadTtsVoices(data.tts_voice || '');
                 // Agent API Key: vollen Key vom Server holen → type=password zeigt korrekte Sternanzahl
                 if (inputAgentKey) {
                     fetch('/api/settings/agentkey', { headers: { 'Authorization': `Bearer ${token}` } })
@@ -1946,9 +2082,33 @@
             });
         }
 
-        // ── TTS-Checkbox speichern ──
-        if (checkTts) {
-            checkTts.addEventListener('change', async () => {
+        // ── TTS-Stimmen laden ──
+        async function _loadTtsVoices(savedVoice) {
+            if (!selectTtsVoice) return;
+            try {
+                const resp = await fetch('/api/tts/voices', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!resp.ok) { selectTtsVoice.innerHTML = '<option value="">Standard</option>'; return; }
+                const voices = await resp.json();
+                selectTtsVoice.innerHTML = '<option value="">Standard (de-DE-ConradNeural)</option>';
+                voices.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v.name;
+                    opt.textContent = v.display || v.name;
+                    selectTtsVoice.appendChild(opt);
+                });
+                if (savedVoice) selectTtsVoice.value = savedVoice;
+            } catch (e) {
+                if (selectTtsVoice) selectTtsVoice.innerHTML = '<option value="">Standard</option>';
+            }
+        }
+
+        // TTS-Enabled wird jetzt direkt vom btn-tts-Click-Handler persistiert (kein Checkbox mehr)
+
+        // ── TTS-Stimme speichern ──
+        if (selectTtsVoice) {
+            selectTtsVoice.addEventListener('change', async () => {
                 try {
                     await fetch('/api/settings', {
                         method: 'POST',
@@ -1956,10 +2116,10 @@
                             'Content-Type': 'application/json',
                             'Authorization': `Bearer ${token}`
                         },
-                        body: JSON.stringify({ tts_enabled: checkTts.checked })
+                        body: JSON.stringify({ tts_voice: selectTtsVoice.value })
                     });
                 } catch (err) {
-                    console.error('Fehler beim Speichern der TTS-Einstellung:', err);
+                    console.error('Fehler beim Speichern der TTS-Stimme:', err);
                 }
             });
         }

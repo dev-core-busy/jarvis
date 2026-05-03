@@ -29,184 +29,173 @@ window.cronManager = new (class JarvisCronManager {
         this._loadWatchers();
     }
 
-    // ─── Sub-Tab ─────────────────────────────────────────────────────────
-
-    _switchSubTab(tab) {
-        this._activeSubTab = tab;
-        ['cron', 'watcher'].forEach(t => {
-            const btn   = document.getElementById(`trigger-subtab-${t}`);
-            const panel = document.getElementById(`trigger-panel-${t}`);
-            if (btn)   btn.classList.toggle('active', t === tab);
-            if (panel) panel.style.display = t === tab ? '' : 'none';
-        });
-    }
-
     // ─── Render ──────────────────────────────────────────────────────────
 
     _render() {
         this._container.innerHTML = `
         <div class="kb-container">
 
-            <!-- Sub-Tab-Leiste -->
-            <div class="kb-toggle-group" style="align-self:flex-start;">
-                <button id="trigger-subtab-cron"    class="kb-toggle-btn active">⏰ Cron-Aufgaben</button>
-                <button id="trigger-subtab-watcher" class="kb-toggle-btn">📁 Datei-Watcher</button>
-            </div>
-
             <!-- Benachrichtigung -->
             <div id="cron-notification" class="kb-notification" style="display:none;"></div>
 
-            <!-- ═══ Panel: Cron ═══ -->
-            <div id="trigger-panel-cron">
-
-                <!-- Header-Sektion -->
-                <div class="kb-section">
-                    <div class="kb-section-header">
-                        <h3>Geplante Aufgaben</h3>
-                        <div style="display:flex;gap:6px;">
-                            <button id="cron-add-btn"     class="kb-btn-action">+ Neue Aufgabe</button>
-                            <button id="cron-refresh-btn" class="kb-btn-secondary" title="Aktualisieren">🔄</button>
-                        </div>
-                    </div>
-                    <p class="kb-hint">Jarvis führt die angegebene Aufgabe automatisch zum geplanten Zeitpunkt aus.</p>
+            <!-- ═══ Sektion: Cron-Aufgaben ═══ -->
+            <div class="kb-section">
+                <div class="kb-section-header kb-collapse-header" id="cron-sect-jobs-hdr">
+                    <h3>Cron-Aufgaben</h3>
+                    <span class="sk-openclaw-toggle" id="cron-sect-jobs-tog">▶</span>
                 </div>
-
-                <!-- Formular -->
-                <div id="cron-form-wrap" class="kb-section" style="display:none;">
-                    <h3 id="cron-form-title">Neue Aufgabe</h3>
-
-                    <div class="kb-form-grid-2">
-                        <div class="kb-form-field">
-                            <label class="kb-label" for="cron-label">Bezeichnung</label>
-                            <input id="cron-label" type="text" placeholder="z.B. Täglicher Server-Report" class="kb-input">
-                        </div>
-                        <div class="kb-form-field">
-                            <label class="kb-label" for="cron-schedule">
-                                Zeitplan (Cron) &ensp;<a href="https://crontab.guru" target="_blank" style="color:var(--accent);">Hilfe ↗</a>
-                            </label>
-                            <input id="cron-schedule" type="text" placeholder="0 8 * * *" class="kb-input">
-                        </div>
+                <div id="cron-sect-jobs-body" style="display:none;">
+                    <p class="kb-hint" style="margin-top:6px;">Jarvis führt die angegebene Aufgabe automatisch zum geplanten Zeitpunkt aus.</p>
+                    <div style="display:flex;gap:6px;margin:8px 0 10px;">
+                        <button id="cron-add-btn"     class="kb-btn-action">+ Neue Aufgabe</button>
+                        <button id="cron-refresh-btn" class="kb-btn-secondary" title="Aktualisieren">🔄</button>
                     </div>
 
-                    <!-- Beispiel-Chips -->
-                    <div class="kb-chip-row">
-                        ${[['Täglich 8:00','0 8 * * *'],['Stündlich','0 * * * *'],['Montags 9:00','0 9 * * 1'],['Alle 15 Min','*/15 * * * *'],['1. des Monats','0 0 1 * *']]
-                          .map(([l,c]) => `<button class="kb-chip cron-example-btn" data-cron="${c}">${l} <code>${c}</code></button>`).join('')}
-                    </div>
+                    <!-- Formular -->
+                    <div id="cron-form-wrap" style="display:none;margin:10px 0;padding:14px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:8px;">
+                        <h3 id="cron-form-title" style="margin:0 0 12px;font-size:.9rem;">Neue Aufgabe</h3>
 
-                    <div class="kb-form-row">
-                        <label class="kb-label" for="cron-task">Aufgabe für Jarvis</label>
-                        <textarea id="cron-task" rows="3" class="kb-input"
-                            placeholder="Was soll Jarvis tun? z.B.: Prüfe Server-Auslastung und sende Zusammenfassung per WhatsApp."></textarea>
-                    </div>
-
-                    <div class="kb-form-footer">
-                        <div class="kb-form-footer-left">
-                            <label class="kb-form-checkbox-label">
-                                <input id="cron-enabled" type="checkbox" checked> Aktiv
-                            </label>
-                        </div>
-                        <div class="kb-form-footer-right">
-                            <button id="cron-cancel-btn" class="kb-btn-secondary">Abbrechen</button>
-                            <button id="cron-save-btn"   class="kb-btn-action">Speichern</button>
-                        </div>
-                    </div>
-                    <p id="cron-form-error" class="kb-form-error" style="display:none;"></p>
-                </div>
-
-                <!-- Job-Liste -->
-                <div id="cron-list" class="kb-section">
-                    <p class="kb-loading">Lade…</p>
-                </div>
-
-            </div><!-- /panel-cron -->
-
-            <!-- ═══ Panel: Datei-Watcher ═══ -->
-            <div id="trigger-panel-watcher" style="display:none;">
-
-                <!-- Header-Sektion -->
-                <div class="kb-section">
-                    <div class="kb-section-header">
-                        <h3>Datei-Watcher</h3>
-                        <div style="display:flex;gap:6px;">
-                            <button id="watcher-add-btn"     class="kb-btn-action">+ Neuer Watcher</button>
-                            <button id="watcher-refresh-btn" class="kb-btn-secondary" title="Aktualisieren">🔄</button>
-                        </div>
-                    </div>
-                    <p class="kb-hint">Jarvis reagiert automatisch, wenn Dateien in einem Ordner erstellt, geändert oder gelöscht werden.</p>
-                </div>
-
-                <!-- Watcher-Formular -->
-                <div id="watcher-form-wrap" class="kb-section" style="display:none;">
-                    <h3 id="watcher-form-title">Neuer Watcher</h3>
-
-                    <div class="kb-form-grid-2">
-                        <div class="kb-form-field">
-                            <label class="kb-label" for="watcher-label">Bezeichnung</label>
-                            <input id="watcher-label" type="text" placeholder="z.B. PDF Inbox" class="kb-input">
-                        </div>
-                        <div class="kb-form-field">
-                            <label class="kb-label" for="watcher-path">Ordnerpfad</label>
-                            <input id="watcher-path" type="text" placeholder="/home/jarvis/inbox" class="kb-input">
-                        </div>
-                    </div>
-
-                    <div class="kb-form-grid-2">
-                        <div class="kb-form-field">
-                            <label class="kb-label" for="watcher-pattern">Datei-Muster</label>
-                            <input id="watcher-pattern" type="text" placeholder="*.pdf" class="kb-input">
-                        </div>
-                        <div class="kb-form-field">
-                            <label class="kb-label">Ereignisse</label>
-                            <div style="display:flex;gap:12px;padding-top:4px;">
-                                ${['created','modified','deleted','moved'].map(ev =>
-                                    `<label class="kb-form-checkbox-label">
-                                        <input type="checkbox" class="watcher-event-cb" value="${ev}" ${ev==='created'?'checked':''}> ${ev}
-                                    </label>`
-                                ).join('')}
+                        <div class="kb-form-grid-2">
+                            <div class="kb-form-field">
+                                <label class="kb-label" for="cron-label">Bezeichnung</label>
+                                <input id="cron-label" type="text" placeholder="z.B. Täglicher Server-Report" class="kb-input">
+                            </div>
+                            <div class="kb-form-field">
+                                <label class="kb-label" for="cron-schedule">
+                                    Zeitplan (Cron) &ensp;<a href="https://crontab.guru" target="_blank" style="color:var(--accent);">Hilfe ↗</a>
+                                </label>
+                                <input id="cron-schedule" type="text" placeholder="0 8 * * *" class="kb-input">
+                                <small id="cron-schedule-preview" style="display:block;margin-top:4px;font-size:.75rem;opacity:.6;min-height:1em;"></small>
                             </div>
                         </div>
+
+                        <!-- Beispiel-Chips -->
+                        <div class="kb-chip-row">
+                            ${[['Täglich 8:00','0 8 * * *'],['Stündlich','0 * * * *'],['Montags 9:00','0 9 * * 1'],['Alle 15 Min','*/15 * * * *'],['1. des Monats','0 0 1 * *']]
+                              .map(([l,c]) => `<button class="kb-chip cron-example-btn" data-cron="${c}">${l} <code>${c}</code></button>`).join('')}
+                        </div>
+
+                        <div class="kb-form-row">
+                            <label class="kb-label" for="cron-task">Aufgabe für Jarvis</label>
+                            <textarea id="cron-task" rows="3" class="kb-input"
+                                placeholder="Was soll Jarvis tun? z.B.: Prüfe Server-Auslastung und sende Zusammenfassung per WhatsApp."></textarea>
+                        </div>
+
+                        <div class="kb-form-footer">
+                            <div class="kb-form-footer-left">
+                                <label class="kb-form-checkbox-label">
+                                    <input id="cron-enabled" type="checkbox" checked> Aktiv
+                                </label>
+                            </div>
+                            <div class="kb-form-footer-right">
+                                <button id="cron-cancel-btn" class="kb-btn-secondary">Abbrechen</button>
+                                <button id="cron-save-btn"   class="kb-btn-action">Speichern</button>
+                            </div>
+                        </div>
+                        <p id="cron-form-error" class="kb-form-error" style="display:none;"></p>
                     </div>
 
-                    <div class="kb-form-row">
-                        <label class="kb-label" for="watcher-task">
-                            Aufgabe für Jarvis &ensp;<span style="opacity:.6;font-size:.75rem;">Platzhalter: <code class="kb-hint" style="margin:0;">&#123;filename&#125;</code> <code class="kb-hint" style="margin:0;">&#123;filepath&#125;</code></span>
-                        </label>
-                        <textarea id="watcher-task" rows="3" class="kb-input"
-                            placeholder="Fasse die neu eingetroffene Datei {filename} zusammen."></textarea>
+                    <!-- Job-Liste -->
+                    <div id="cron-list">
+                        <p class="kb-loading">Lade…</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ Sektion: Datei-Watcher ═══ -->
+            <div class="kb-section">
+                <div class="kb-section-header kb-collapse-header" id="cron-sect-watch-hdr">
+                    <h3>Datei-Watcher</h3>
+                    <span class="sk-openclaw-toggle" id="cron-sect-watch-tog">▶</span>
+                </div>
+                <div id="cron-sect-watch-body" style="display:none;">
+                    <p class="kb-hint" style="margin-top:6px;">Jarvis reagiert automatisch, wenn Dateien in einem Ordner erstellt, geändert oder gelöscht werden.</p>
+                    <div style="display:flex;gap:6px;margin:8px 0 10px;">
+                        <button id="watcher-add-btn"     class="kb-btn-action">+ Neuer Watcher</button>
+                        <button id="watcher-refresh-btn" class="kb-btn-secondary" title="Aktualisieren">🔄</button>
                     </div>
 
-                    <div class="kb-form-footer">
-                        <div class="kb-form-footer-left">
-                            <label class="kb-form-checkbox-label">
-                                <input id="watcher-enabled" type="checkbox" checked> Aktiv
+                    <!-- Watcher-Formular -->
+                    <div id="watcher-form-wrap" style="display:none;margin:10px 0;padding:14px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:8px;">
+                        <h3 id="watcher-form-title" style="margin:0 0 12px;font-size:.9rem;">Neuer Watcher</h3>
+
+                        <div class="kb-form-grid-2">
+                            <div class="kb-form-field">
+                                <label class="kb-label" for="watcher-label">Bezeichnung</label>
+                                <input id="watcher-label" type="text" placeholder="z.B. PDF Inbox" class="kb-input">
+                            </div>
+                            <div class="kb-form-field">
+                                <label class="kb-label" for="watcher-path">Ordnerpfad</label>
+                                <input id="watcher-path" type="text" placeholder="/home/jarvis/inbox" class="kb-input">
+                            </div>
+                        </div>
+
+                        <div class="kb-form-grid-2">
+                            <div class="kb-form-field">
+                                <label class="kb-label" for="watcher-pattern">Datei-Muster</label>
+                                <input id="watcher-pattern" type="text" placeholder="*.pdf" class="kb-input">
+                            </div>
+                            <div class="kb-form-field">
+                                <label class="kb-label">Ereignisse</label>
+                                <div style="display:flex;gap:12px;padding-top:4px;">
+                                    ${['created','modified','deleted','moved'].map(ev =>
+                                        `<label class="kb-form-checkbox-label">
+                                            <input type="checkbox" class="watcher-event-cb" value="${ev}" ${ev==='created'?'checked':''}> ${ev}
+                                        </label>`
+                                    ).join('')}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="kb-form-row">
+                            <label class="kb-label" for="watcher-task">
+                                Aufgabe für Jarvis &ensp;<span style="opacity:.6;font-size:.75rem;">Platzhalter: <code class="kb-hint" style="margin:0;">&#123;filename&#125;</code> <code class="kb-hint" style="margin:0;">&#123;filepath&#125;</code></span>
                             </label>
+                            <textarea id="watcher-task" rows="3" class="kb-input"
+                                placeholder="Fasse die neu eingetroffene Datei {filename} zusammen."></textarea>
                         </div>
-                        <div class="kb-form-footer-right">
-                            <button id="watcher-cancel-btn" class="kb-btn-secondary">Abbrechen</button>
-                            <button id="watcher-save-btn"   class="kb-btn-action">Speichern</button>
+
+                        <div class="kb-form-footer">
+                            <div class="kb-form-footer-left">
+                                <label class="kb-form-checkbox-label">
+                                    <input id="watcher-enabled" type="checkbox" checked> Aktiv
+                                </label>
+                            </div>
+                            <div class="kb-form-footer-right">
+                                <button id="watcher-cancel-btn" class="kb-btn-secondary">Abbrechen</button>
+                                <button id="watcher-save-btn"   class="kb-btn-action">Speichern</button>
+                            </div>
                         </div>
+                        <p id="watcher-form-error" class="kb-form-error" style="display:none;"></p>
                     </div>
-                    <p id="watcher-form-error" class="kb-form-error" style="display:none;"></p>
-                </div>
 
-                <!-- Watcher-Liste -->
-                <div id="watcher-list" class="kb-section">
-                    <p class="kb-loading">Lade…</p>
+                    <!-- Watcher-Liste -->
+                    <div id="watcher-list">
+                        <p class="kb-loading">Lade…</p>
+                    </div>
                 </div>
-
-            </div><!-- /panel-watcher -->
+            </div>
 
         </div><!-- /kb-container -->
         `;
 
-        // Sub-Tab Buttons
-        document.getElementById('trigger-subtab-cron').onclick    = () => this._switchSubTab('cron');
-        document.getElementById('trigger-subtab-watcher').onclick = () => this._switchSubTab('watcher');
+        // Collapse-Logik für beide Sektionen
+        this._bindCollapse('cron-sect-jobs-hdr',   'cron-sect-jobs-body',   'cron-sect-jobs-tog');
+        this._bindCollapse('cron-sect-watch-hdr',  'cron-sect-watch-body',  'cron-sect-watch-tog');
 
         // Cron Beispiel-Chips
         this._container.querySelectorAll('.cron-example-btn').forEach(btn => {
-            btn.onclick = () => { document.getElementById('cron-schedule').value = btn.dataset.cron; };
+            btn.onclick = () => {
+                const inp = document.getElementById('cron-schedule');
+                inp.value = btn.dataset.cron;
+                inp.dispatchEvent(new Event('input'));
+            };
+        });
+
+        // Live-Preview im Formular
+        document.getElementById('cron-schedule').addEventListener('input', e => {
+            const prev = document.getElementById('cron-schedule-preview');
+            if (prev) prev.textContent = this._cronToText(e.target.value);
         });
 
         // Cron Toolbar
@@ -218,6 +207,34 @@ window.cronManager = new (class JarvisCronManager {
         document.getElementById('watcher-add-btn').onclick     = () => this._showWatcherForm();
         document.getElementById('watcher-refresh-btn').onclick = () => this._loadWatchers();
         document.getElementById('watcher-cancel-btn').onclick  = () => this._hideWatcherForm();
+    }
+
+    // ─── Collapse-Helper ─────────────────────────────────────────────────
+    _bindCollapse(hdrId, bodyId, togId) {
+        const hdr = document.getElementById(hdrId);
+        if (!hdr || hdr._crBound) return;
+        hdr._crBound = true;
+        hdr.addEventListener('click', e => {
+            if (e.target.closest('button, input, label')) return;
+            const body = document.getElementById(bodyId);
+            const tog  = document.getElementById(togId);
+            const collapsed = body.style.display !== 'none';
+            body.style.display = collapsed ? 'none' : '';
+            if (tog) tog.textContent = collapsed ? '▶' : '▼';
+            hdr.classList.toggle('is-collapsed', collapsed);
+        });
+    }
+
+    // Sektion aufklappen (z.B. wenn "+ Neue Aufgabe" geklickt)
+    _expandSection(bodyId, togId, hdrId) {
+        const body = document.getElementById(bodyId);
+        const tog  = document.getElementById(togId);
+        const hdr  = document.getElementById(hdrId);
+        if (body && body.style.display === 'none') {
+            body.style.display = '';
+            if (tog) tog.textContent = '▼';
+            if (hdr) hdr.classList.remove('is-collapsed');
+        }
     }
 
     _bindForms() {
@@ -280,7 +297,7 @@ window.cronManager = new (class JarvisCronManager {
                 <div class="cron-item-row">
                     <span class="cron-item-dot ${dotCls}"></span>
                     <span class="cron-item-label">${this._esc(job.label)}${onceBadge}</span>
-                    <code  class="cron-item-code">${this._esc(job.cron)}</code>
+                    <code  class="cron-item-code" data-tip="${this._esc(this._cronToText(job.cron))}">${this._esc(job.cron)}</code>
                     <div   class="cron-item-actions">
                         <button class="kb-btn-run  cron-run-btn"  data-id="${job.id}" title="Jetzt ausführen">▶</button>
                         <button class="kb-btn-icon cron-edit-btn" data-id="${job.id}" title="Bearbeiten">✏️</button>
@@ -302,6 +319,7 @@ window.cronManager = new (class JarvisCronManager {
     }
 
     _showJobForm(job = null) {
+        this._expandSection('cron-sect-jobs-body', 'cron-sect-jobs-tog', 'cron-sect-jobs-hdr');
         this._editingJobId = job ? job.id : null;
         document.getElementById('cron-form-title').textContent  = job ? 'Aufgabe bearbeiten' : 'Neue Aufgabe';
         document.getElementById('cron-label').value    = job ? job.label : '';
@@ -310,6 +328,9 @@ window.cronManager = new (class JarvisCronManager {
         document.getElementById('cron-enabled').checked = job ? job.enabled : true;
         document.getElementById('cron-form-error').style.display = 'none';
         document.getElementById('cron-form-wrap').style.display  = '';
+        // Live-Preview aktualisieren
+        const prev = document.getElementById('cron-schedule-preview');
+        if (prev) prev.textContent = job ? this._cronToText(job.cron) : '';
         document.getElementById('cron-label').focus();
     }
 
@@ -438,6 +459,7 @@ window.cronManager = new (class JarvisCronManager {
     }
 
     _showWatcherForm(w = null) {
+        this._expandSection('cron-sect-watch-body', 'cron-sect-watch-tog', 'cron-sect-watch-hdr');
         this._editingWatcherId = w ? w.id : null;
         document.getElementById('watcher-form-title').textContent = w ? 'Watcher bearbeiten' : 'Neuer Watcher';
         document.getElementById('watcher-label').value   = w ? w.label : '';
@@ -534,5 +556,98 @@ window.cronManager = new (class JarvisCronManager {
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
+    }
+
+    // ─── Cron → deutschen Satz ─────────────────────────────────────────────
+    _cronToText(expr) {
+        if (!expr) return '';
+        const e = expr.trim();
+
+        // Sonderfälle
+        if (e === '@reboot')  return 'Beim Systemstart';
+        if (e === '@yearly' || e === '@annually') return 'Einmal im Jahr (1. Januar, 00:00 Uhr)';
+        if (e === '@monthly') return 'Einmal im Monat (1., 00:00 Uhr)';
+        if (e === '@weekly')  return 'Einmal pro Woche (Sonntag, 00:00 Uhr)';
+        if (e === '@daily' || e === '@midnight') return 'Täglich um 00:00 Uhr';
+        if (e === '@hourly')  return 'Jede Stunde';
+
+        const parts = e.split(/\s+/);
+        if (parts.length !== 5) return '';
+        const [minF, hourF, domF, monF, dowF] = parts;
+
+        const DAYS   = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+        const MONTHS = ['Januar','Februar','März','April','Mai','Juni','Juli','August',
+                        'September','Oktober','November','Dezember'];
+
+        const pad2   = n => String(n).padStart(2, '0');
+        const num    = f => parseInt(f, 10);
+        const isAny  = f => f === '*';
+        const isStep = f => /^\*\/\d+$/.test(f);
+        const step   = f => parseInt(f.slice(2));
+        const isList = f => f.includes(',') && !f.includes('/');
+        const isRng  = f => /^\d+-\d+$/.test(f);
+        const isNum  = f => /^\d+$/.test(f);
+
+        // --- Frequenz-Schnellpfade ---
+        if (isAny(minF) && isAny(hourF) && isAny(domF) && isAny(monF) && isAny(dowF))
+            return 'Jede Minute';
+        if (isStep(minF) && isAny(hourF) && isAny(domF) && isAny(monF) && isAny(dowF)) {
+            const s = step(minF);
+            return s === 1 ? 'Jede Minute' : `Alle ${s} Minuten`;
+        }
+        if (isNum(minF) && isAny(hourF) && isAny(domF) && isAny(monF) && isAny(dowF))
+            return num(minF) === 0 ? 'Jede Stunde' : `Jede Stunde, Minute ${num(minF)}`;
+        if (isStep(hourF) && isAny(domF) && isAny(monF) && isAny(dowF)) {
+            const s = step(hourF);
+            const t = isNum(minF) ? `, Minute ${num(minF)}` : '';
+            return (s === 1 ? 'Jede Stunde' : `Alle ${s} Stunden`) + t;
+        }
+        if (isStep(minF) && isNum(hourF))
+            return `Alle ${step(minF)} Minuten, ${pad2(num(hourF))}:00–${pad2(num(hourF))}:59 Uhr`;
+
+        // --- Zeit ---
+        let timeStr = '';
+        if (isNum(hourF) && isNum(minF))
+            timeStr = `um ${pad2(num(hourF))}:${pad2(num(minF))} Uhr`;
+        else if (isNum(hourF) && isAny(minF))
+            timeStr = `ab ${pad2(num(hourF))}:00 Uhr (jede Minute)`;
+
+        // --- Wochentag ---
+        let dowStr = '';
+        if (!isAny(dowF)) {
+            if (isNum(dowF)) {
+                dowStr = `jeden ${DAYS[num(dowF) % 7]}`;
+            } else if (isRng(dowF)) {
+                const [a, b] = dowF.split('-').map(Number);
+                dowStr = `${DAYS[a % 7]} bis ${DAYS[b % 7]}`;
+            } else if (isList(dowF)) {
+                const ds = dowF.split(',').map(v => DAYS[Number(v) % 7]);
+                const last = ds.pop();
+                dowStr = (ds.length ? ds.join(', ') + ' und ' : '') + last;
+            }
+        }
+
+        // --- Tag / Monat ---
+        let dateStr = '';
+        if (isAny(dowF)) {
+            const hasD = !isAny(domF) && isNum(domF);
+            const hasM = !isAny(monF) && isNum(monF);
+            if (hasD && hasM)       dateStr = `am ${num(domF)}. ${MONTHS[num(monF) - 1]}`;
+            else if (hasD)          dateStr = `am ${num(domF)}. jeden Monats`;
+            else if (hasM)          dateStr = `im ${MONTHS[num(monF) - 1]}`;
+        }
+
+        // --- Zusammensetzen ---
+        const when = dowStr || dateStr;
+        if (when && timeStr) {
+            const w = when.charAt(0).toUpperCase() + when.slice(1);
+            return `${w} ${timeStr}`;
+        }
+        if (when) return when.charAt(0).toUpperCase() + when.slice(1);
+        if (timeStr && isAny(domF) && isAny(monF) && isAny(dowF))
+            return `Täglich ${timeStr}`;
+        if (timeStr) return timeStr.charAt(0).toUpperCase() + timeStr.slice(1);
+
+        return ''; // kein passendes Muster
     }
 })();

@@ -86,20 +86,23 @@ class ChatRepository @Inject constructor(
     fun sendMessage(text: String) {
         pendingStatus.clear()
         finalizeStream()
-        // Datums-Separator einfügen wenn erste Nachricht des Tages
         val now = System.currentTimeMillis()
         val dayFmt = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
-        val lastMsgDay = _messages.value
-            .lastOrNull { it.role != MessageRole.DATE_SEPARATOR }
-            ?.timestamp?.let { dayFmt.format(Date(it)) }
         val today = dayFmt.format(Date(now))
-        if (lastMsgDay == null || lastMsgDay != today) {
-            val dateLabel = SimpleDateFormat("EEEE, d. MMMM yyyy", Locale.GERMAN)
-                .format(Date(now))
-            _messages.update { it + ChatMessage(role = MessageRole.DATE_SEPARATOR, text = dateLabel, timestamp = now) }
+        // Separator-Prüfung + User-Nachricht in einem einzigen atomaren Update:
+        // Kein Separator wenn (a) gleicher Tag wie letzte Nicht-Separator-Nachricht
+        //                   oder (b) der letzte Eintrag bereits ein Separator ist
+        _messages.update { current ->
+            val lastNonSepDay = current.lastOrNull { it.role != MessageRole.DATE_SEPARATOR }
+                ?.timestamp?.let { dayFmt.format(Date(it)) }
+            val lastIsSeparator = current.lastOrNull()?.role == MessageRole.DATE_SEPARATOR
+            val needsSeparator = (lastNonSepDay == null || lastNonSepDay != today) && !lastIsSeparator
+            val withSep = if (needsSeparator) {
+                val label = SimpleDateFormat("EEEE, d. MMMM yyyy", Locale.GERMAN).format(Date(now))
+                current + ChatMessage(role = MessageRole.DATE_SEPARATOR, text = label, timestamp = now)
+            } else current
+            withSep + ChatMessage(role = MessageRole.USER, text = text, timestamp = now)
         }
-        val userMsg = ChatMessage(role = MessageRole.USER, text = text, timestamp = now)
-        _messages.update { it + userMsg }
         _isAgentRunning.value = true
         ws.sendTask(text)
         saveMessages()
@@ -287,7 +290,13 @@ class ChatRepository @Inject constructor(
                     msgFile.delete()
                     return
                 }
-                _messages.value = msgs.map { it.copy(isStreaming = false) }
+                // Aufeinanderfolgende Datums-Separatoren bereinigen (Duplikate aus alten Versionen)
+                val cleaned = msgs.filterIndexed { i, msg ->
+                    msg.role != MessageRole.DATE_SEPARATOR ||
+                    i == 0 ||
+                    msgs[i - 1].role != MessageRole.DATE_SEPARATOR
+                }
+                _messages.value = cleaned.map { it.copy(isStreaming = false) }
             }
         }
     }

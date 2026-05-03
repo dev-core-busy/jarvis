@@ -81,6 +81,7 @@ class Config:
 
     # Globale Einstellungen (nicht profil-spezifisch)
     TTS_ENABLED: bool = False
+    TTS_VOICE: str = ""          # z.B. "de-DE-ConradNeural", "" = Server-Standard
     USE_PHYSICAL_DESKTOP: bool = False
 
     def __init__(self):
@@ -180,6 +181,7 @@ class Config:
         self.profiles = data.get("profiles", [])
         self.active_profile_id = data.get("active_profile_id", "")
         self.TTS_ENABLED = data.get("tts_enabled", False)
+        self.TTS_VOICE = data.get("tts_voice", "")
         self.USE_PHYSICAL_DESKTOP = data.get("use_physical_desktop", False)
         self._skill_states = data.get("skills", {})
         self._mcp_servers = data.get("mcp_servers", [])
@@ -249,6 +251,7 @@ class Config:
             "version": 2,
             "active_profile_id": self.active_profile_id,
             "tts_enabled": self.TTS_ENABLED,
+            "tts_voice": self.TTS_VOICE,
             "use_physical_desktop": self.USE_PHYSICAL_DESKTOP,
             "agent_api_key": self.AGENT_API_KEY,
             "profiles": self.profiles,
@@ -263,6 +266,8 @@ class Config:
         """Speichert globale Einstellungen (TTS, Desktop, Agent-API-Key etc.)."""
         if "tts_enabled" in settings:
             self.TTS_ENABLED = settings["tts_enabled"]
+        if "tts_voice" in settings:
+            self.TTS_VOICE = settings["tts_voice"]
         if "use_physical_desktop" in settings:
             self.USE_PHYSICAL_DESKTOP = settings["use_physical_desktop"]
         if "agent_api_key" in settings:

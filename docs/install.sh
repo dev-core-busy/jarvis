@@ -484,14 +484,8 @@ else
         pip install --no-cache-dir -q $CORE_REQS || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
     fi
 
-    # Phase 2: dlib + face-recognition (wird kompiliert – dauert 10-20 Min!)
-    info "Kompiliere dlib + face-recognition (dauert 10-20 Min auf kleinen VMs) ..."
-    if run_with_spinner "dlib + face-recognition kompilieren" 900 \
-        pip install --no-cache-dir -q "face-recognition>=1.3.0" "opencv-python-headless>=4.8.0"; then
-        success "face-recognition installiert (Gesichtserkennung aktiv)"
-    else
-        optional "face-recognition konnte nicht kompiliert werden – Gesichtserkennung nicht verfügbar."
-    fi
+    # Phase 2: dlib + face-recognition – wird NICHT automatisch installiert (dauert 10-20 Min)
+    # Manuell nachrüsten: cd <install-dir> && venv/bin/pip install face-recognition opencv-python-headless
 
     # Phase 3: ChromaDB + Sentence-Transformers (Vektor-Datenbank)
     info "Installiere ChromaDB + Sentence-Transformers ..."
@@ -745,6 +739,10 @@ ${BOLD}Nützliche Befehle:${RESET}
   ${CYAN}journalctl -u jarvis.service -f${RESET}    # Logs live verfolgen
   ${CYAN}systemctl disable jarvis.service${RESET}   # Autostart deaktivieren
 $(echo -e "$WA_NOTE")
+${BOLD}Optionale Komponenten (manuell nachrüsten):${RESET}
+  ${DIM}Gesichtserkennung (dlib – dauert 10-20 Min):${RESET}
+  ${CYAN}cd $INSTALL_DIR && venv/bin/pip install face-recognition opencv-python-headless${RESET}
+
 ${BOLD}Dokumentation & GitHub:${RESET}
   ${CYAN}https://jarvis-ai.info${RESET}
   ${CYAN}https://github.com/dev-core-busy/jarvis${RESET}

@@ -472,17 +472,16 @@ if [[ $UPDATE_MODE -eq 1 ]]; then
     fi
 else
     # ── Erstinstallation: 4 Phasen ──────────────────────────────────────────
-    # Phase 1: Schnelle Pakete (ohne dlib/face-recognition/chromadb/sentence-transformers)
-    info "Installiere Kern-Abhängigkeiten ..."
-    if run_with_spinner "Kern-Pakete installieren (FastAPI, Pillow, ...)" 60 \
-        pip install --no-cache-dir fastapi==0.115.6 "uvicorn[standard]==0.34.0" google-genai==1.5.0 "anthropic>=0.39.0" \
-        python-dotenv==1.0.1 psutil==6.1.1 pyautogui==0.9.54 pillow==11.1.0 python-multipart==0.0.20 \
-        websockets==14.2 "python-pam>=2.0.2" "six>=1.16.0" "pdfplumber>=0.10.0" "python-docx>=1.0.0" \
-        "openpyxl>=3.1.0" "python-pptx>=0.6.23" "wsgidav>=4.3.0" "numpy<2.1"; then
+    # Phase 1: Kern-Pakete direkt aus requirements.txt (ohne langsame/optionale Pakete)
+    # Ausgeschlossen: face-recognition/opencv (kompiliert), chromadb, sentence-transformers, faster-whisper
+    info "Installiere Kern-Abhängigkeiten aus requirements.txt ..."
+    CORE_REQS=$(grep -v -E "^\s*#|^\s*$|face-recognition|opencv|chromadb|sentence-transformers|faster-whisper" requirements.txt | tr '\n' ' ')
+    if run_with_spinner "Kern-Pakete installieren" 120 \
+        bash -c "pip install --no-cache-dir $CORE_REQS"; then
         success "Kern-Pakete installiert"
     else
         warn "Stiller Durchlauf fehlgeschlagen – zeige Fehlerausgabe:"
-        pip install --no-cache-dir -r requirements.txt || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
+        pip install --no-cache-dir $CORE_REQS || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
     fi
 
     # Phase 2: dlib + face-recognition (wird kompiliert – dauert 10-20 Min!)

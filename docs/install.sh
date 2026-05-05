@@ -46,7 +46,7 @@ if [[ $UPDATE_MODE -eq 1 ]]; then
     STEP_ESTIMATES=(0 2 5 5 5 5 10 120 10 3 5)
 else
     # Erstinstallation: volle Dauer
-    STEP_ESTIMATES=(0 3 45 40 240 45 15 900 20 5 10)
+    STEP_ESTIMATES=(0 3 45 40 240 45 15 180 20 5 10)
 fi
 STEP_NAMES=("" "Betriebssystem" "Basis-Abhaengigkeiten" "Python & Node.js"
              "Desktop & VNC" "Chrome/Chromium" "Jarvis klonen"

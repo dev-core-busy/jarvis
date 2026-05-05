@@ -631,14 +631,53 @@ WA_UNIT
         $SUDO systemctl start jarvis.service 2>/dev/null || true
     fi
 
-    # face-recognition im Hintergrund kompilieren (nach Servicestart, dauert 10-20 Min)
+    # face-recognition via eigenem systemd-Service installieren (reboot-sicher, wiederholt bis Erfolg)
     if [[ $UPDATE_MODE -eq 0 ]]; then
-        nohup bash -c "
-            $INSTALL_DIR/venv/bin/pip install -q --no-cache-dir 'face-recognition>=1.3.0' 'opencv-python-headless>=4.8.0' \
-                >> /var/log/jarvis-vision-install.log 2>&1 \
-            && echo 'face-recognition installiert' >> /var/log/jarvis-vision-install.log
-        " >/dev/null 2>&1 &
-        info "Gesichtserkennung wird im Hintergrund kompiliert (Log: /var/log/jarvis-vision-install.log)"
+        # Installations-Skript schreiben
+        $SUDO tee "$INSTALL_DIR/vision-install.sh" >/dev/null << VISION_SH
+#!/bin/bash
+INSTALL_DIR="$INSTALL_DIR"
+VENV="\$INSTALL_DIR/venv/bin/python3"
+PIP="\$INSTALL_DIR/venv/bin/pip"
+
+if "\$VENV" -c "import face_recognition" 2>/dev/null; then
+    echo "face-recognition bereits installiert."
+    systemctl disable jarvis-vision-install.service 2>/dev/null || true
+    exit 0
+fi
+
+echo "Installiere face-recognition + opencv (dauert 10-20 Min) ..."
+if "\$PIP" install -q --no-cache-dir "face-recognition>=1.3.0" "opencv-python-headless>=4.8.0"; then
+    echo "face-recognition erfolgreich installiert."
+    systemctl disable jarvis-vision-install.service 2>/dev/null || true
+else
+    echo "Installation fehlgeschlagen – wird beim naechsten Start erneut versucht."
+    exit 1
+fi
+VISION_SH
+        $SUDO chmod +x "$INSTALL_DIR/vision-install.sh"
+
+        # systemd-Service schreiben
+        $SUDO tee /etc/systemd/system/jarvis-vision-install.service >/dev/null << VISION_UNIT
+[Unit]
+Description=Jarvis Vision-Abhaengigkeiten (face-recognition/dlib)
+After=network-online.target jarvis.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$INSTALL_DIR/vision-install.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+VISION_UNIT
+
+        $SUDO systemctl daemon-reload
+        $SUDO systemctl enable jarvis-vision-install.service >/dev/null 2>&1
+        $SUDO systemctl start jarvis-vision-install.service >/dev/null 2>&1 &
+        info "Gesichtserkennung wird im Hintergrund kompiliert – reboot-sicher (Log: journalctl -u jarvis-vision-install)"
     fi
 
     # Status prüfen

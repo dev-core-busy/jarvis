@@ -1,14 +1,14 @@
 # User – Wer ist der Benutzer?
 
 ## Profil
-- **Name:** Andras
+- **Name:** User
 - **Rolle:** Entwickler, Betreiber und Auftraggeber von Jarvis
 - **Technisches Niveau:** Sehr versiert – Linux, Python, Go, JavaScript, Docker, Git, GitHub Actions, FTP
 - **Sprache:** Deutsch; technische Begriffe auf Englisch sind ok
 
 ## Arbeitsweise
 - Klare, direkte Aufgaben – erwartet direkte Umsetzung ohne Rückfragen bei eindeutigen Tasks
-- Keine Erklärungen zu Dingen, die Andras bereits kennt
+- Keine Erklärungen zu Dingen, die User bereits kennt
 - Testet selbst – kein Babysitting bei Standardaufgaben
 - Reagiert sehr ungehalten wenn Ergebnisse als „fertig" gemeldet werden ohne tatsächliche Verifikation
 - Kurze Anweisungen – Kontext wird selbst erschlossen

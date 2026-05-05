@@ -4,9 +4,13 @@
 JARVIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$JARVIS_DIR"
 
-# 1. Display-Erkennung (Priorität :0)
+# 1. Display-Erkennung (Priorität: LightDM :1, dann :0, dann :10)
 if [ -z "$DISPLAY" ] || [ "$DISPLAY" == ":10" ]; then
-    if [ -S "/tmp/.X11-unix/X0" ]; then
+    if [ -f "/var/run/lightdm/root/:1" ] && [ -S "/tmp/.X11-unix/X1" ]; then
+        export DISPLAY=:1
+        export XAUTHORITY="/var/run/lightdm/root/:1"
+        echo "LightDM-Display :1 erkannt."
+    elif [ -S "/tmp/.X11-unix/X0" ]; then
         export DISPLAY=:0
         echo "Physisches Display :0 erkannt."
     else
@@ -15,7 +19,7 @@ if [ -z "$DISPLAY" ] || [ "$DISPLAY" == ":10" ]; then
     fi
 fi
 
-# XAUTHORITY ermitteln (für :0)
+# XAUTHORITY ermitteln (für :0, bei :1 bereits oben gesetzt)
 if [ "$DISPLAY" == ":0" ] && [ -z "$XAUTHORITY" ]; then
     if [ -f "/var/run/lightdm/root/:0" ]; then
         export XAUTHORITY="/var/run/lightdm/root/:0"
@@ -74,6 +78,8 @@ if ! pgrep -x "x11vnc" > /dev/null; then
 
     if [ "$DISPLAY" == ":0" ]; then
         x11vnc -display :0 -auth guess -shared -forever -nopw -bg -quiet -rfbport 5900
+    elif [ -n "$XAUTHORITY" ]; then
+        x11vnc -display "$DISPLAY" -auth "$XAUTHORITY" -shared -forever -nopw -bg -quiet -rfbport 5900
     else
         x11vnc -display "$DISPLAY" -rfbport 5900 -shared -forever -nopw -bg -quiet
     fi

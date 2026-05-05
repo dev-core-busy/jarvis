@@ -2,7 +2,7 @@
 
 ## Profil
 - **Name:** User
-- **Rolle:** Entwickler, Betreiber und Auftraggeber von Jarvis
+- **Rolle:** Hauptbenutzer von Jarvis
 - **Technisches Niveau:** Sehr versiert – Linux, Python, Go, JavaScript, Docker, Git, GitHub Actions, FTP
 - **Sprache:** Deutsch; technische Begriffe auf Englisch sind ok
 

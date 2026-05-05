@@ -475,14 +475,16 @@ else
     # Phase 1: Kern-Pakete direkt aus requirements.txt (ohne langsame/optionale Pakete)
     # Ausgeschlossen: face-recognition/opencv (kompiliert), chromadb, sentence-transformers, faster-whisper
     info "Installiere Kern-Abhängigkeiten aus requirements.txt ..."
-    CORE_REQS=$(grep -v -E "^\s*#|^\s*$|face-recognition|opencv|chromadb|sentence-transformers|faster-whisper" requirements.txt | tr '\n' ' ')
+    CORE_REQS_FILE=$(mktemp)
+    grep -v -E "^\s*#|^\s*$|face-recognition|opencv|chromadb|sentence-transformers|faster-whisper" requirements.txt > "$CORE_REQS_FILE"
     if run_with_spinner "Kern-Pakete installieren" 120 \
-        bash -c "pip install --no-cache-dir -q $CORE_REQS"; then
+        pip install --no-cache-dir -q -r "$CORE_REQS_FILE"; then
         success "Kern-Pakete installiert"
     else
         warn "Stiller Durchlauf fehlgeschlagen – zeige Fehlerausgabe:"
-        pip install --no-cache-dir -q $CORE_REQS || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
+        pip install --no-cache-dir -r "$CORE_REQS_FILE" || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
     fi
+    rm -f "$CORE_REQS_FILE"
 
     # Phase 2: face-recognition wird nach Servicestart im Hintergrund installiert (dauert 10-20 Min)
 

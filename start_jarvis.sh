@@ -35,6 +35,12 @@ fi
 
 echo "Nutze DISPLAY=$DISPLAY mit XAUTHORITY=$XAUTHORITY"
 
+# Jarvis-Ports vor Tailscale ts-input-DROP freischalten (443, 80, 6080)
+for PORT in 443 80 6080; do
+    iptables -C INPUT -p tcp --dport $PORT -j ACCEPT 2>/dev/null || \
+        iptables -I INPUT 1 -p tcp --dport $PORT -j ACCEPT
+done
+
 # Screensaver und DPMS deaktivieren (verhindert schwarzen Bildschirm bei VNC)
 xset s off -dpms 2>/dev/null || true
 pkill -f cinnamon-screensaver 2>/dev/null || true

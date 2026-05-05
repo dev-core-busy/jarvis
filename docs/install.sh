@@ -464,7 +464,7 @@ if [[ $UPDATE_MODE -eq 1 ]]; then
     # ── Update: nur requirements.txt upgraden ────────────────────────────────
     info "Aktualisiere Python-Pakete ..."
     if run_with_spinner "Python-Pakete aktualisieren" 90 \
-        pip install --no-cache-dir --upgrade -r requirements.txt; then
+        pip install --no-cache-dir -q --upgrade -r requirements.txt; then
         success "Python-Pakete aktualisiert"
     else
         warn "Upgrade fehlgeschlagen – zeige Fehlerausgabe:"
@@ -477,17 +477,17 @@ else
     info "Installiere Kern-Abhängigkeiten aus requirements.txt ..."
     CORE_REQS=$(grep -v -E "^\s*#|^\s*$|face-recognition|opencv|chromadb|sentence-transformers|faster-whisper" requirements.txt | tr '\n' ' ')
     if run_with_spinner "Kern-Pakete installieren" 120 \
-        bash -c "pip install --no-cache-dir $CORE_REQS"; then
+        bash -c "pip install --no-cache-dir -q $CORE_REQS"; then
         success "Kern-Pakete installiert"
     else
         warn "Stiller Durchlauf fehlgeschlagen – zeige Fehlerausgabe:"
-        pip install --no-cache-dir $CORE_REQS || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
+        pip install --no-cache-dir -q $CORE_REQS || error "Python-Pakete konnten nicht installiert werden! Abhängigkeiten prüfen (build-essential, python3-dev, libssl-dev, cmake, libboost-all-dev)."
     fi
 
     # Phase 2: dlib + face-recognition (wird kompiliert – dauert 10-20 Min!)
     info "Kompiliere dlib + face-recognition (dauert 10-20 Min auf kleinen VMs) ..."
     if run_with_spinner "dlib + face-recognition kompilieren" 900 \
-        pip install --no-cache-dir "face-recognition>=1.3.0" "opencv-python-headless>=4.8.0"; then
+        pip install --no-cache-dir -q "face-recognition>=1.3.0" "opencv-python-headless>=4.8.0"; then
         success "face-recognition installiert (Gesichtserkennung aktiv)"
     else
         optional "face-recognition konnte nicht kompiliert werden – Gesichtserkennung nicht verfügbar."
@@ -496,7 +496,7 @@ else
     # Phase 3: ChromaDB + Sentence-Transformers (Vektor-Datenbank)
     info "Installiere ChromaDB + Sentence-Transformers ..."
     if run_with_spinner "Vektor-Datenbank installieren" 120 \
-        pip install --no-cache-dir "chromadb>=0.4.0,<1.0" "sentence-transformers>=2.2.0,<4.0"; then
+        pip install --no-cache-dir -q "chromadb>=0.4.0,<1.0" "sentence-transformers>=2.2.0,<4.0"; then
         success "Vektor-Datenbank installiert (Wissenssuche aktiv)"
     else
         optional "ChromaDB/Sentence-Transformers konnte nicht installiert werden – Wissenssuche nutzt TF-IDF Fallback."
@@ -504,7 +504,7 @@ else
 
     # Phase 4: faster-whisper (optional)
     if run_with_spinner "faster-whisper installieren (Sprach-Transkription)" 60 \
-        pip install --no-cache-dir faster-whisper "numpy<2.1"; then
+        pip install --no-cache-dir -q faster-whisper "numpy<2.1"; then
         success "faster-whisper installiert (Sprach-Transkription aktiv)"
     else
         optional "faster-whisper konnte nicht installiert werden – Sprach-Transkription nicht verfügbar."

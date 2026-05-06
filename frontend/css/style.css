@@ -998,13 +998,24 @@ body {
     color: var(--text-secondary);
 }
 .upd-schedule-select {
-    background: var(--bg-input);
-    border: 1px solid var(--border);
+    background: var(--bg-glass-heavy, rgba(15,23,42,0.9));
+    border: 1px solid var(--border-hover, rgba(255,255,255,0.15));
     border-radius: 6px;
-    color: var(--text-primary);
+    color: var(--text-primary, #f8fafc);
     font-size: 0.78rem;
-    padding: 3px 8px;
+    padding: 4px 8px;
     cursor: pointer;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+    font-family: inherit;
+}
+.upd-schedule-select option {
+    background: #1e293b;
+    color: #f8fafc;
+}
+.upd-schedule-select:focus {
+    border-color: var(--accent, #6366f1);
 }
 
 /* ─── CPU Bar ───────────────────────────────────────────────────── */

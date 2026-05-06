@@ -21,6 +21,68 @@
     // Online-Status: username → bool
     const _online = {};
 
+    // ─── Benachrichtigungen ──────────────────────────────────────
+    function _requestNotifyPermission() {
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    }
+
+    function _showNotification(from, text) {
+        // Nur wenn Tab nicht im Fokus ODER anderer Partner aktiv
+        const tabFocused  = document.hasFocus();
+        const chatVisible = from === activePartner && tabFocused;
+        if (chatVisible) return;
+
+        _playPing();
+        _updateTabTitle();
+
+        if (!('Notification' in window) || Notification.permission !== 'granted') return;
+        const body = text.length > 100 ? text.slice(0, 97) + '…' : text;
+        const n = new Notification(`💬 ${from}`, {
+            body,
+            icon: '/static/favicon.png?v=6',
+            tag:  `jarvis-uc-${from}`,   // ersetzt vorherige Benachrichtigung desselben Senders
+            renotify: true,
+        });
+        n.onclick = () => {
+            window.focus();
+            openChat(from);
+            n.close();
+        };
+    }
+
+    function _playPing() {
+        try {
+            const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+            const osc  = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1047, ctx.currentTime);          // C6
+            osc.frequency.setValueAtTime(1319, ctx.currentTime + 0.08);   // E6
+            gain.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.35);
+        } catch (e) { /* AudioContext evtl. nicht verfügbar */ }
+    }
+
+    function _updateTabTitle() {
+        const total = Object.values(_unread).reduce((a, b) => a + b, 0);
+        document.title = total > 0 ? `(${total}) Benutzer-Chat – Jarvis` : 'Jarvis – Benutzer-Chat';
+    }
+
+    // Tab erhält Fokus → aktiven Chat als gelesen markieren
+    window.addEventListener('focus', () => {
+        if (activePartner && _unread[activePartner]) {
+            _unread[activePartner] = 0;
+            renderUserList();
+            _updateTabTitle();
+        }
+    });
+
     // ─── DOM ────────────────────────────────────────────────────
     const $ = id => document.getElementById(id);
     const loginScreen   = $('login-screen');
@@ -126,6 +188,7 @@
         chatScreen.style.display  = 'block';
         chatScreen.classList.remove('hidden');
         if (ownBadge) ownBadge.textContent = myUser;
+        _requestNotifyPermission();
         connectWS();
     }
 
@@ -189,6 +252,11 @@
                     // Ungelesen hochzählen
                     _unread[partner] = (_unread[partner] || 0) + 1;
                     renderUserList();
+                }
+                // Benachrichtigung nur für fremde Nachrichten (nicht eigene Echo-Msgs)
+                if (msg.from !== myUser) {
+                    _showNotification(msg.from, msg.text);
+                    _updateTabTitle();
                 }
                 break;
             }
@@ -271,6 +339,7 @@
     function openChat(username) {
         activePartner = username;
         _unread[username] = 0;
+        _updateTabTitle();
 
         // Header
         partnerAvatar.textContent = initial(username);

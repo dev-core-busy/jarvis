@@ -474,8 +474,11 @@
         async function _applyUpdate() {
             const btn = document.getElementById('upd-apply-btn');
             if (btn) { btn.disabled = true; btn.textContent = '⏳ Aktualisiere…'; }
-            if (body) body.insertAdjacentHTML('afterbegin',
-                '<p class="kb-hint" style="margin:0;color:#f39c12;">Update wird durchgeführt – Jarvis startet danach neu…</p>');
+            const infoEl = document.createElement('p');
+            infoEl.className = 'kb-hint';
+            infoEl.style.cssText = 'margin:0;color:#f39c12;';
+            infoEl.textContent = 'Update wird durchgeführt – Jarvis startet danach neu…';
+            if (body) { body.prepend(infoEl); body.scrollTop = 0; }
             try {
                 const r = await fetch('/api/update/apply', { method: 'POST', headers: _auth() });
                 const d = await r.json();
@@ -483,8 +486,11 @@
                     if (body) body.innerHTML = `<p style="color:#2ecc71;font-size:.85rem;">✅ Update erfolgreich. Verbindung wird in 5 s wiederhergestellt…</p>`;
                     setTimeout(() => window.location.reload(), 5000);
                 } else {
-                    if (body) body.insertAdjacentHTML('afterbegin',
-                        `<p class="kb-hint" style="color:#e74c3c;">Fehler: ${_esc(d.error || '')}</p>`);
+                    const errEl = document.createElement('p');
+                    errEl.className = 'kb-hint';
+                    errEl.style.cssText = 'color:#e74c3c;white-space:pre-wrap;word-break:break-word;';
+                    errEl.textContent = `Fehler: ${d.error || 'Unbekannter Fehler'}`;
+                    if (body) { body.prepend(errEl); body.scrollTop = 0; }
                     if (btn) { btn.disabled = false; btn.textContent = '⬇ Jetzt aktualisieren'; }
                 }
             } catch (e) {

@@ -81,11 +81,27 @@ def check_update() -> dict:
 
 
 def apply_update() -> dict:
-    """Führt git pull aus. Restart wird separat ausgelöst."""
+    """Führt git pull aus. Lokal geänderte Dateien werden per stash/pop bewahrt."""
+    # 1. Lokale Änderungen stashen – verhindert Merge-Konflikte bei data/-Dateien
+    stash_rc, stash_out, _ = _git("stash", "push", "-m", "jarvis-auto-pre-update")
+    stashed = stash_rc == 0 and "No local changes to save" not in stash_out
+
+    # 2. Pull
     rc, out, err = _git("pull", "origin", timeout=60)
     if rc != 0:
+        # Pull fehlgeschlagen → Stash sofort zurückspielen
+        if stashed:
+            _git("stash", "pop")
         return {"ok": False, "error": err or out, "output": out}
-    return {"ok": True, "output": out}
+
+    # 3. Stash zurückspielen
+    pop_note = ""
+    if stashed:
+        pop_rc, pop_out, pop_err = _git("stash", "pop")
+        if pop_rc != 0:
+            pop_note = f"\n⚠ Lokale Änderungen konnten nicht automatisch wiederhergestellt werden: {pop_err}"
+
+    return {"ok": True, "output": out + pop_note}
 
 
 def restart_service_delayed(delay_sec: float = 2.0):

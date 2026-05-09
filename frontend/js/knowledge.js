@@ -273,7 +273,7 @@ class JarvisKnowledgeManager {
             </div>
         `;
 
-        // Gelerntes Wissen – Statistik-Panel anfügen
+        // Gelerntes Wissen – Statistik-Panel + Öffnen-Button
         if (learnedStats !== null && learnedStats !== undefined) {
             const lf = learnedStats.total_files || 0;
             const lkb = learnedStats.total_size_kb || 0;
@@ -286,7 +286,117 @@ class JarvisKnowledgeManager {
                 <span class="kb-learned-sep">·</span>
                 <span class="kb-learned-stat">${lkb} KB</span>
                 ${lf > 0 ? `<span class="kb-learned-sep">·</span><span class="kb-learned-months">${lmonths}</span>` : ''}
-            </div>`;
+                <button class="kb-learned-open-btn" onclick="window.knowledgeManager.toggleLearnedList()" title="Gelernte Einträge anzeigen / verwalten">
+                    ${lf > 0 ? '📋 Anzeigen' : '📋 Liste'}
+                </button>
+            </div>
+            <div id="kb-learned-list" style="display:none;"></div>`;
+        }
+    }
+
+    async toggleLearnedList() {
+        const el = document.getElementById('kb-learned-list');
+        if (!el) return;
+        if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+        el.innerHTML = '<div class="kb-files-loading">Lädt…</div>';
+        el.style.display = 'block';
+        try {
+            const resp = await fetch('/api/knowledge/learned', {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const files = await resp.json();
+            if (!files.length) {
+                el.innerHTML = '<div class="kb-files-empty" style="padding:10px 0;">Noch keine gelernten Einträge vorhanden.</div>';
+                return;
+            }
+            el.innerHTML = files.map((f, i) => {
+                const d = new Date(f.mtime * 1000);
+                const dateStr = d.toLocaleDateString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric'}) +
+                                ' ' + d.toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit'});
+                const safeId = 'lf_' + i;
+                return `
+                <div class="kb-learned-item" id="${safeId}">
+                    <div class="kb-learned-item-header">
+                        <span class="kb-learned-item-title" title="${f.path}">${f.title}</span>
+                        <span class="kb-learned-item-date">${dateStr} · ${f.size_kb} KB</span>
+                        <div class="kb-learned-item-actions">
+                            <button class="kb-btn-sm" onclick="window.knowledgeManager.toggleLearnedEdit('${safeId}', '${f.path.replace(/'/g,"\\'")}')">✏️</button>
+                            <button class="kb-btn-sm kb-btn-del" onclick="window.knowledgeManager.deleteLearnedFile('${f.path.replace(/'/g,"\\'")}')">🗑</button>
+                        </div>
+                    </div>
+                    <div class="kb-learned-item-editor" id="${safeId}_editor" style="display:none;"></div>
+                </div>`;
+            }).join('');
+        } catch (e) {
+            el.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
+        }
+    }
+
+    async toggleLearnedEdit(itemId, filePath) {
+        const editorEl = document.getElementById(itemId + '_editor');
+        if (!editorEl) return;
+        if (editorEl.style.display !== 'none') { editorEl.style.display = 'none'; return; }
+        editorEl.innerHTML = '<div class="kb-files-loading">Lädt…</div>';
+        editorEl.style.display = 'block';
+        try {
+            const resp = await fetch('/api/knowledge/file_read?path=' + encodeURIComponent(filePath), {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            const safeContent = (data.content || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            editorEl.innerHTML = `
+                <textarea class="kb-learned-textarea" id="${itemId}_ta">${data.content || ''}</textarea>
+                <div class="kb-learned-editor-btns">
+                    <button class="kb-btn-sm kb-btn-save" onclick="window.knowledgeManager.saveLearnedFile('${filePath.replace(/'/g,"\\'")}','${itemId}')">💾 Speichern</button>
+                    <button class="kb-btn-sm" onclick="document.getElementById('${itemId}_editor').style.display='none'">Abbrechen</button>
+                </div>`;
+        } catch (e) {
+            editorEl.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
+        }
+    }
+
+    async saveLearnedFile(filePath, itemId) {
+        const ta = document.getElementById(itemId + '_ta');
+        if (!ta) return;
+        try {
+            const resp = await fetch('/api/knowledge/file_write', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
+                },
+                body: JSON.stringify({ path: filePath, content: ta.value })
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            this._showNotification('Gespeichert und neu indiziert ✓', 'success');
+            document.getElementById(itemId + '_editor').style.display = 'none';
+        } catch (e) {
+            this._showNotification('Fehler: ' + e.message, 'error');
+        }
+    }
+
+    async deleteLearnedFile(filePath) {
+        if (!confirm('Diesen gelernten Eintrag löschen?')) return;
+        try {
+            const resp = await fetch('/api/knowledge/files', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
+                },
+                body: JSON.stringify({ path: filePath })
+            });
+            if (!resp.ok) { const err = await resp.json(); throw new Error(err.error || 'HTTP ' + resp.status); }
+            this._showNotification('Eintrag gelöscht', 'success');
+            // Liste und Stats neu laden
+            const listEl = document.getElementById('kb-learned-list');
+            if (listEl) listEl.style.display = 'none';
+            await this.fetchStats();
+            await this.toggleLearnedList();
+        } catch (e) {
+            this._showNotification('Fehler: ' + e.message, 'error');
         }
     }
 

@@ -2178,7 +2178,100 @@ async def delete_knowledge_file(request: Request, user: str = Depends(require_au
         return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
 
     resolved.unlink()
+    # Aus FAISS-Index entfernen
+    try:
+        from backend.tools.knowledge import _get_vector_store
+        vs = _get_vector_store()
+        if vs:
+            vs.remove_file(str(resolved))
+    except Exception:
+        pass
     return JSONResponse({"ok": True, "deleted": file_path})
+
+
+@app.get("/api/knowledge/learned")
+async def list_learned_files(user: str = Depends(require_auth)):
+    """Listet alle automatisch gelernten Konversations-Dateien."""
+    from backend.learning import LEARNED_DIR, PROJECT_ROOT as LRN_ROOT
+    result = []
+    if not LEARNED_DIR.exists():
+        return JSONResponse(result)
+    for md in sorted(LEARNED_DIR.rglob("conv_*.md"), reverse=True)[:100]:
+        try:
+            stat = md.stat()
+            content = md.read_text(encoding="utf-8")
+            # Titel aus erster Zeile
+            first_line = content.splitlines()[0].lstrip("# ").strip() if content else md.name
+            try:
+                rel = str(md.relative_to(LRN_ROOT))
+            except ValueError:
+                rel = str(md)
+            result.append({
+                "path": rel,
+                "name": md.name,
+                "title": first_line[:80],
+                "size_kb": round(stat.st_size / 1024, 1),
+                "mtime": stat.st_mtime,
+                "preview": content[:200],
+            })
+        except Exception:
+            continue
+    return JSONResponse(result)
+
+
+@app.get("/api/knowledge/file_read")
+async def read_knowledge_file(path: str, user: str = Depends(require_auth)):
+    """Liest den Inhalt einer Text-Datei aus dem Knowledge-Verzeichnis."""
+    from backend.tools.knowledge import _get_folders, PROJECT_ROOT
+    from backend.learning import LEARNED_DIR
+    resolved = (PROJECT_ROOT / path).resolve()
+    # Sicherheitscheck: Datei muss in Knowledge- oder Learned-Verzeichnis liegen
+    allowed = str(resolved).startswith(str(LEARNED_DIR.resolve()))
+    if not allowed:
+        for folder in _get_folders():
+            try:
+                resolved.relative_to(folder.resolve())
+                allowed = True
+                break
+            except ValueError:
+                continue
+    if not allowed:
+        return JSONResponse({"error": "Zugriff verweigert"}, status_code=403)
+    if not resolved.is_file():
+        return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
+    try:
+        content = resolved.read_text(encoding="utf-8")
+        return JSONResponse({"ok": True, "content": content})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.put("/api/knowledge/file_write")
+async def write_knowledge_file(request: Request, user: str = Depends(require_auth)):
+    """Aktualisiert den Inhalt einer gelernten Datei und re-indexiert sie in FAISS."""
+    from backend.learning import LEARNED_DIR, PROJECT_ROOT as LRN_ROOT
+    data = await request.json()
+    path = data.get("path", "").strip()
+    content = data.get("content", "")
+    if not path:
+        return JSONResponse({"error": "Kein Pfad"}, status_code=400)
+    resolved = (LRN_ROOT / path).resolve()
+    # Nur Dateien innerhalb LEARNED_DIR dürfen geschrieben werden
+    if not str(resolved).startswith(str(LEARNED_DIR.resolve())):
+        return JSONResponse({"error": "Zugriff verweigert"}, status_code=403)
+    if not resolved.exists():
+        return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
+    try:
+        resolved.write_text(content, encoding="utf-8")
+        # FAISS re-indexieren
+        try:
+            from backend.learning import _index_immediately
+            _index_immediately(resolved, content)
+        except Exception:
+            pass
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/api/knowledge/open-folder")

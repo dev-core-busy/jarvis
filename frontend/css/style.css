@@ -3390,6 +3390,25 @@ select.input-field {
     cursor: default;
 }
 
+/* Gelerntes Wissen Panel */
+.kb-learned-panel {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+}
+.kb-learned-icon { font-size: 1rem; }
+.kb-learned-title { font-weight: 600; color: var(--text-primary); }
+.kb-learned-stat { color: var(--accent, #7c3aed); font-weight: 500; }
+.kb-learned-sep { color: var(--text-secondary); opacity: 0.5; }
+.kb-learned-months { font-size: 0.72rem; opacity: 0.7; }
+
 /* Suchmodus Toggle */
 .kb-search-mode {
     display: flex;

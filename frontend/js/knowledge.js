@@ -140,13 +140,19 @@ class JarvisKnowledgeManager {
         const container = document.getElementById('kb-stats-container');
 
         try {
-            const resp = await fetch('/api/knowledge/stats', {
-                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
-            });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            const stats = await resp.json();
+            const [statsResp, learnedResp] = await Promise.all([
+                fetch('/api/knowledge/stats', {
+                    headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+                }),
+                fetch('/api/knowledge/learned_stats', {
+                    headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+                }).catch(() => null),
+            ]);
+            if (!statsResp.ok) throw new Error('HTTP ' + statsResp.status);
+            const stats = await statsResp.json();
+            const learnedStats = learnedResp && learnedResp.ok ? await learnedResp.json() : null;
 
-            this._renderStats(stats);
+            this._renderStats(stats, learnedStats);
             this._renderFolders(stats.folders);
             this._populateUploadTargets(stats.folders);
         } catch (e) {
@@ -154,7 +160,7 @@ class JarvisKnowledgeManager {
         }
     }
 
-    _renderStats(stats) {
+    _renderStats(stats, learnedStats) {
         const el = document.getElementById('kb-stats-container');
         if (!el) return;
 
@@ -266,6 +272,22 @@ class JarvisKnowledgeManager {
                 <span class="kb-format-badge" title="${vectorTitle}">${vectorIcon} Vektor-DB</span>
             </div>
         `;
+
+        // Gelerntes Wissen – Statistik-Panel anfügen
+        if (learnedStats !== null && learnedStats !== undefined) {
+            const lf = learnedStats.total_files || 0;
+            const lkb = learnedStats.total_size_kb || 0;
+            const lmonths = (learnedStats.months || []).join(', ') || '–';
+            el.innerHTML += `
+            <div class="kb-learned-panel" title="Jarvis speichert nach jeder Konversation verifizierte Fakten aus Tool-Ergebnissen in der Wissensdatenbank (knowledge/learned/)">
+                <span class="kb-learned-icon">🧠</span>
+                <span class="kb-learned-title">Gelerntes Wissen</span>
+                <span class="kb-learned-stat">${lf} Konversation${lf !== 1 ? 'en' : ''}</span>
+                <span class="kb-learned-sep">·</span>
+                <span class="kb-learned-stat">${lkb} KB</span>
+                ${lf > 0 ? `<span class="kb-learned-sep">·</span><span class="kb-learned-months">${lmonths}</span>` : ''}
+            </div>`;
+        }
     }
 
     async setSearchMode(mode) {

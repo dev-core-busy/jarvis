@@ -2120,6 +2120,13 @@ async def get_knowledge_index_progress(user: str = Depends(require_auth)):
     return JSONResponse(get_index_progress())
 
 
+@app.get("/api/knowledge/learned_stats")
+async def get_learned_stats(user: str = Depends(require_auth)):
+    """Liefert Statistiken ueber automatisch gelernte Konversations-Fakten."""
+    from backend.learning import get_learned_stats
+    return JSONResponse(get_learned_stats())
+
+
 @app.get("/api/knowledge/files")
 async def get_knowledge_files(user: str = Depends(require_auth)):
     """Gibt alle indizierten Dateien gruppiert nach Ordner zurück."""

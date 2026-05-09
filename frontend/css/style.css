@@ -392,7 +392,39 @@ body {
     margin-top: 2rem;
     display: flex;
     justify-content: center;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
 }
+
+/* ── Sprach-Toggle (DE / EN) ──────────────────────────────────── */
+.lang-toggle {
+    display: flex;
+    gap: 2px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 2px;
+}
+.lang-toggle-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #64748b);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 3px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.lang-toggle-btn:hover { color: var(--text-primary); }
+.lang-toggle-btn.active {
+    background: rgba(99,102,241,0.25);
+    color: var(--text-primary);
+}
+/* Kompaktvariante im Header */
+.lang-toggle.header-lang { border-color: rgba(255,255,255,0.08); }
 
 .btn-link {
     background: rgba(99, 102, 241, 0.05);

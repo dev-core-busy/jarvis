@@ -18,7 +18,7 @@
 
 <!-- Login Screen -->
 <div id="login-screen" class="login-screen">
-    <button class="btn-theme login-theme-btn" id="btn-theme-login" title="Hell/Dunkel umschalten">
+    <button class="btn-theme login-theme-btn" id="btn-theme-login" data-i18n-title="chat.theme" title="Hell/Dunkel umschalten">
         <svg id="login-theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
         </svg>
@@ -29,11 +29,11 @@
     <div class="login-card">
         <div class="login-avatar">J</div>
         <h1 class="login-title">Jarvis</h1>
-        <p class="login-subtitle">Domain-Anmeldung</p>
+        <p class="login-subtitle" data-i18n="chat.domain_login">Domain-Anmeldung</p>
         <form id="login-form" autocomplete="off">
-            <input type="text" id="login-user" placeholder="DOMAIN\benutzername" autocomplete="username" required>
+            <input type="text" id="login-user" placeholder="DOMAIN\benutzername" data-i18n-placeholder="chat.domain_ph" autocomplete="username" required>
             <div class="password-wrap">
-                <input type="password" id="login-pass" placeholder="Kennwort" autocomplete="current-password" required>
+                <input type="password" id="login-pass" placeholder="Kennwort" data-i18n-placeholder="chat.password_ph" autocomplete="current-password" required>
                 <button type="button" class="eye-btn" id="eye-btn" tabindex="-1">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
@@ -43,11 +43,18 @@
             </div>
             <!-- TOTP-Eingabe (erscheint nach Passwort-Check wenn 2FA aktiv) -->
             <div id="totp-row" class="totp-row hidden">
-                <input type="text" id="login-totp" placeholder="6-stelliger Code" autocomplete="one-time-code"
+                <input type="text" id="login-totp" placeholder="6-stelliger Code" data-i18n-placeholder="chat.totp_ph" autocomplete="one-time-code"
                        inputmode="numeric" pattern="[0-9]*" maxlength="6">
             </div>
-            <button type="submit" class="btn-login" id="btn-login">Anmelden</button>
+            <button type="submit" class="btn-login" id="btn-login" data-i18n="chat.submit">Anmelden</button>
             <p class="login-error" id="login-error"></p>
+            <!-- Sprach-Toggle im Login -->
+            <div style="display:flex;justify-content:center;margin-top:0.75rem;">
+                <div class="lang-toggle" id="chat-login-lang-toggle">
+                    <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang('de')" title="Deutsch">DE</button>
+                    <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang('en')" title="English">EN</button>
+                </div>
+            </div>
         </form>
     </div>
 </div>
@@ -62,13 +69,18 @@
             <span class="topbar-dot" id="status-dot"></span>
         </div>
         <div class="topbar-right">
+            <!-- Sprach-Toggle im Chat-Header -->
+            <div class="lang-toggle header-lang" id="chat-header-lang-toggle" style="margin-right:4px;">
+                <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang('de')" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang('en')" title="English">EN</button>
+            </div>
             <div class="tts-voice-wrap" id="tts-voice-wrap" style="display:none;">
-                <span class="tts-voice-label">Stimme</span>
-                <select id="chat-tts-voice" class="tts-voice-select" title="Stimme wählen">
-                    <option value="">Standard</option>
+                <span class="tts-voice-label" data-i18n="chat.voice_label">Stimme</span>
+                <select id="chat-tts-voice" class="tts-voice-select" data-i18n-title="chat.tts_toggle" title="Stimme wählen">
+                    <option value="" data-i18n="chat.voice_default">Standard</option>
                 </select>
             </div>
-            <button class="btn-theme" id="btn-tts-chat" title="Sprachausgabe ein/aus">
+            <button class="btn-theme" id="btn-tts-chat" data-i18n-title="chat.tts_toggle" title="Sprachausgabe ein/aus">
                 <svg id="chat-tts-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
                     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
                 </svg>
@@ -227,6 +239,7 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
+<script src="/static/js/i18n.js?v=1"></script>
 <script src="/static/js/chat.js?v=12"></script>
 </body>
 </html>

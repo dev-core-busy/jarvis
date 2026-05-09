@@ -12,7 +12,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=73">
+    <link rel="stylesheet" href="/static/css/style.css?v=74">
 </head>
 
 <body>
@@ -36,20 +36,20 @@
                 </div>
             </div>
             <h1 class="login-title">JARVIS</h1>
-            <p class="login-subtitle">KI Linux Agent</p>
+            <p class="login-subtitle" data-i18n="login.subtitle">KI Linux Agent</p>
             <form id="login-form" class="login-form">
                 <div class="form-group" style="text-align:left;margin-bottom:14px;">
-                    <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;">BENUTZERNAME</label>
-                    <input type="text" id="login-username" placeholder="Benutzername"
+                    <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;" data-i18n="login.username.label">BENUTZERNAME</label>
+                    <input type="text" id="login-username" placeholder="Benutzername" data-i18n-placeholder="login.username.ph"
                         autocomplete="username" required
                         style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
                         onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(99,102,241,0.2)'"
                         onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
                 </div>
                 <div class="form-group" style="text-align:left;margin-bottom:20px;">
-                    <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;">KENNWORT</label>
+                    <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;" data-i18n="login.password.label">KENNWORT</label>
                     <div style="position:relative;">
-                        <input type="password" id="login-password" placeholder="Kennwort"
+                        <input type="password" id="login-password" placeholder="Kennwort" data-i18n-placeholder="login.password.ph"
                             autocomplete="current-password" required
                             style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 42px 11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
                             onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(99,102,241,0.2)'"
@@ -62,15 +62,15 @@
                     </div>
                 </div>
                 <div id="totp-row" class="form-group" style="text-align:left;margin-bottom:14px;display:none;">
-                    <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;">2FA-CODE</label>
-                    <input type="text" id="login-totp" placeholder="6-stelliger Code"
+                    <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;" data-i18n="login.totp.label">2FA-CODE</label>
+                    <input type="text" id="login-totp" placeholder="6-stelliger Code" data-i18n-placeholder="login.totp.ph"
                         autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
                         style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:1.2rem;font-family:var(--font-mono);text-align:center;letter-spacing:8px;font-weight:600;outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
                         onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(99,102,241,0.2)'"
                         onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
                 </div>
                 <button type="submit" class="btn-login" id="login-btn" style="width:100%;">
-                    <span class="btn-text">ANMELDEN</span>
+                    <span class="btn-text" data-i18n="login.submit">ANMELDEN</span>
                 </button>
                 <p id="login-error" class="login-error" hidden></p>
 
@@ -82,8 +82,15 @@
                             <path d="M12 8v4"></path>
                             <path d="M12 16h.01"></path>
                         </svg>
-                        SSL Zertifikat & Verbindung Hilfe
+                        <span data-i18n="login.ssl.help">SSL Zertifikat & Verbindung Hilfe</span>
                     </button>
+                </div>
+                <!-- Sprach-Toggle im Login -->
+                <div style="display:flex;justify-content:center;margin-top:0.5rem;">
+                    <div class="lang-toggle" id="login-lang-toggle">
+                        <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang('de')" title="Deutsch">DE</button>
+                        <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang('en')" title="English">EN</button>
+                    </div>
                 </div>
             </form>
         </div>
@@ -268,14 +275,20 @@ sudo update-ca-certificates</code></pre>
                 </div>
             </div>
             <div class="header-right">
-                <div class="connection-indicator" id="connection-dot" title="Verbindungsstatus"></div>
+                <div class="connection-indicator" id="connection-dot" data-i18n-title="header.connection" title="Verbindungsstatus"></div>
 
-                <a href="/userchat" class="btn-icon" title="Benutzer-Chat" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
+                <!-- Sprach-Toggle im Header -->
+                <div class="lang-toggle header-lang" id="header-lang-toggle">
+                    <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang('de')" title="Deutsch">DE</button>
+                    <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang('en')" title="English">EN</button>
+                </div>
+
+                <a href="/userchat" class="btn-icon" data-i18n-title="header.user_chat" title="Benutzer-Chat" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                     </svg>
                 </a>
-                <button class="btn-icon" id="btn-settings" title="KI-Einstellungen">
+                <button class="btn-icon" id="btn-settings" data-i18n-title="header.settings" title="KI-Einstellungen">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="3"></circle>
                         <path
@@ -283,7 +296,7 @@ sudo update-ca-certificates</code></pre>
                         </path>
                     </svg>
                 </button>
-                <button class="btn-icon" id="btn-logout" title="Abmelden">
+                <button class="btn-icon" id="btn-logout" data-i18n-title="header.logout" title="Abmelden">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                         <polyline points="16 17 21 12 16 7" />
@@ -303,7 +316,7 @@ sudo update-ca-certificates</code></pre>
                             <path d="M12 20h9" />
                             <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                         </svg>
-                        Agent Aktivitätslog
+                        <span data-i18n="panel.agent.title">Agent Aktivitätslog</span>
                     </h2>
 
                     <!-- Fenster-Steuerung -->
@@ -480,23 +493,22 @@ sudo update-ca-certificates</code></pre>
     <div id="settings-modal" class="modal">
         <div class="modal-content glass">
             <div class="modal-header">
-                <h2 id="settings-title">Einstellungen</h2>
+                <h2 id="settings-title" data-i18n="settings.title">Einstellungen</h2>
                 <button class="btn-close-modal" id="btn-close-settings">&times;</button>
             </div>
 
             <!-- Settings Tabs -->
             <div class="settings-tabs">
-                <button class="settings-tab-btn active" data-settings-tab="profiles">KI-Profile</button>
-                <button class="settings-tab-btn" data-settings-tab="instructions">Anweisungen</button>
-                <button class="settings-tab-btn" data-settings-tab="skills">Skills</button>
-                <button class="settings-tab-btn" data-settings-tab="whatsapp" id="settings-tab-btn-whatsapp" style="display:none">WhatsApp</button>
-                <button class="settings-tab-btn" data-settings-tab="knowledge">Wissen</button>
-                <!-- Google-Tab entfernt – Config erfolgt über Skill-Einstellungen -->
-                <button class="settings-tab-btn" data-settings-tab="mcp">MCP</button>
-                <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;">Vision</button>
-                <button class="settings-tab-btn" data-settings-tab="telemetry">Telemetry</button>
-                <button class="settings-tab-btn" data-settings-tab="security">Sicherheit</button>
-                <button class="settings-tab-btn" data-settings-tab="cron">Cron</button>
+                <button class="settings-tab-btn active" data-settings-tab="profiles" data-i18n="settings.tab.profiles">KI-Profile</button>
+                <button class="settings-tab-btn" data-settings-tab="instructions" data-i18n="settings.tab.instructions">Anweisungen</button>
+                <button class="settings-tab-btn" data-settings-tab="skills" data-i18n="settings.tab.skills">Skills</button>
+                <button class="settings-tab-btn" data-settings-tab="whatsapp" id="settings-tab-btn-whatsapp" style="display:none" data-i18n="settings.tab.whatsapp">WhatsApp</button>
+                <button class="settings-tab-btn" data-settings-tab="knowledge" data-i18n="settings.tab.knowledge">Wissen</button>
+                <button class="settings-tab-btn" data-settings-tab="mcp" data-i18n="settings.tab.mcp">MCP</button>
+                <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;" data-i18n="settings.tab.vision">Vision</button>
+                <button class="settings-tab-btn" data-settings-tab="telemetry" data-i18n="settings.tab.telemetry">Telemetry</button>
+                <button class="settings-tab-btn" data-settings-tab="security" data-i18n="settings.tab.security">Sicherheit</button>
+                <button class="settings-tab-btn" data-settings-tab="cron" data-i18n="settings.tab.cron">Cron</button>
             </div>
 
             <div class="modal-body">
@@ -1723,6 +1735,7 @@ sudo update-ca-certificates</code></pre>
         </div>
     </div>
 
+    <script src="/static/js/i18n.js?v=1"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=8"></script>
     <script src="/static/js/context.js?v=3"></script>
@@ -1735,7 +1748,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=3"></script>
-    <script src="/static/js/app.js?v=78"></script>
+    <script src="/static/js/app.js?v=79"></script>
 </body>
 
 </html>

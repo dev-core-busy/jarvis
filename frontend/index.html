@@ -101,37 +101,37 @@
     <div id="change-password-modal" class="modal" style="display:none; z-index:9999;">
         <div class="modal-content glass" style="max-width:420px;">
             <div class="modal-header">
-                <h2 id="change-pw-title">🔒 Kennwort ändern</h2>
+                <h2 id="change-pw-title" data-i18n="security.change_pw">🔒 Kennwort ändern</h2>
             </div>
             <div class="modal-body">
-                <p id="change-pw-hint" style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:16px;line-height:1.5;">
+                <p id="change-pw-hint" data-i18n="security.pw_hint" style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:16px;line-height:1.5;">
                     Bitte setze ein neues Kennwort. Es muss mindestens 8 Zeichen, einen Großbuchstaben, einen Kleinbuchstaben und eine Ziffer enthalten.
                 </p>
                 <div class="form-group">
-                    <label>Aktuelles Kennwort</label>
+                    <label data-i18n="security.current_pw">Aktuelles Kennwort</label>
                     <div style="position:relative;">
-                        <input type="password" id="cpw-old" placeholder="Aktuelles Kennwort" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                        <input type="password" id="cpw-old" data-i18n-placeholder="security.pw_ph_current" placeholder="Aktuelles Kennwort" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
                         <button type="button" id="btn-eye-cpw-old" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
                             <svg id="ico-eye-cpw-old" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         </button>
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Neues Kennwort</label>
+                    <label data-i18n="security.new_pw">Neues Kennwort</label>
                     <div style="position:relative;">
-                        <input type="password" id="cpw-new" placeholder="Neues Kennwort" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                        <input type="password" id="cpw-new" data-i18n-placeholder="security.pw_ph_new" placeholder="Neues Kennwort" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
                         <button type="button" id="btn-eye-cpw-new" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
                             <svg id="ico-eye-cpw-new" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         </button>
                     </div>
                     <div style="display:flex;justify-content:flex-end;margin-top:5px;">
-                        <button type="button" id="cpw-suggest" class="kb-btn-action" style="font-size:0.78rem;padding:3px 10px;">🔑 Generieren</button>
+                        <button type="button" id="cpw-suggest" class="kb-btn-action" data-i18n="security.generate" style="font-size:0.78rem;padding:3px 10px;">🔑 Generieren</button>
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Kennwort bestätigen</label>
+                    <label data-i18n="security.confirm_pw">Kennwort bestätigen</label>
                     <div style="position:relative;">
-                        <input type="password" id="cpw-confirm" placeholder="Kennwort wiederholen" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                        <input type="password" id="cpw-confirm" data-i18n-placeholder="security.pw_ph_repeat" placeholder="Kennwort wiederholen" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
                         <button type="button" id="btn-eye-cpw-confirm" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
                             <svg id="ico-eye-cpw-confirm" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         </button>
@@ -140,8 +140,8 @@
                 <div id="cpw-strength" style="margin-bottom:8px;font-size:0.8rem;min-height:18px;"></div>
                 <div id="cpw-error" style="display:none;color:#ff6b6b;font-size:0.85rem;margin-bottom:10px;"></div>
                 <div style="display:flex;gap:10px;justify-content:flex-end;">
-                    <button class="btn-secondary" id="cpw-cancel" style="display:none;">Abbrechen</button>
-                    <button class="kb-btn-action" id="cpw-submit">Kennwort speichern</button>
+                    <button class="btn-secondary" id="cpw-cancel" data-i18n="common.cancel" style="display:none;">Abbrechen</button>
+                    <button class="kb-btn-action" id="cpw-submit" data-i18n="security.save_pw">Kennwort speichern</button>
                 </div>
             </div>
         </div>
@@ -523,12 +523,12 @@ sudo update-ca-certificates</code></pre>
                         <!-- KI-Profile -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-list-hdr">
-                                <h3>KI-Profile</h3>
+                                <h3 data-i18n="profile.section_list">KI-Profile</h3>
                                 <span class="sk-openclaw-toggle" id="prof-sect-list-tog">▶</span>
                             </div>
                             <div id="prof-sect-list-body" class="kb-collapse-body" style="display:none;">
                                 <div style="margin-bottom:10px;">
-                                    <button class="btn-add-profile" id="btn-add-profile" style="margin:0;">+ Neues Profil</button>
+                                    <button class="btn-add-profile" id="btn-add-profile" data-i18n="profile.add_btn" style="margin:0;">+ Neues Profil</button>
                                 </div>
                                 <div id="profiles-container" class="profiles-list">
                                     <!-- Profil-Cards werden via JS erzeugt -->
@@ -539,12 +539,12 @@ sudo update-ca-certificates</code></pre>
                         <!-- Sprachausgabe -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-tts-hdr">
-                                <h3>Sprachausgabe (TTS)</h3>
+                                <h3 data-i18n="profile.section_tts">Sprachausgabe (TTS)</h3>
                                 <span class="sk-openclaw-toggle" id="prof-sect-tts-tog">▶</span>
                             </div>
                             <div id="prof-sect-tts-body" class="kb-collapse-body" style="display:none;">
                                 <div>
-                                    <label style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;">Stimme</label>
+                                    <label data-i18n="profile.voice_label" style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;">Stimme</label>
                                     <select id="setting-tts-voice" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.85rem;">
                                         <option value="">⏳ Stimmen werden geladen…</option>
                                     </select>
@@ -555,7 +555,7 @@ sudo update-ca-certificates</code></pre>
                         <!-- Agent API Key -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-api-hdr">
-                                <h3>Agent API Key</h3>
+                                <h3 data-i18n="profile.section_key">Agent API Key</h3>
                                 <span class="sk-openclaw-toggle" id="prof-sect-api-tog">▶</span>
                             </div>
                             <div id="prof-sect-api-body" class="kb-collapse-body" style="display:none;">
@@ -579,7 +579,7 @@ sudo update-ca-certificates</code></pre>
                         <!-- HTTPS / SSL -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-ssl-hdr">
-                                <h3>HTTPS / SSL-Zertifikat</h3>
+                                <h3 data-i18n="profile.section_ssl">HTTPS / SSL-Zertifikat</h3>
                                 <span class="sk-openclaw-toggle" id="prof-sect-ssl-tog">▶</span>
                             </div>
                             <div id="prof-sect-ssl-body" class="kb-collapse-body" style="display:none;">
@@ -606,14 +606,14 @@ sudo update-ca-certificates</code></pre>
                 <!-- ── Ansicht 2: Profil bearbeiten/erstellen ── -->
                 <div id="profile-edit-view" style="display: none;">
                     <div class="form-group">
-                        <label>Profilname</label>
+                        <label data-i18n="profile.name_label">Profilname</label>
                         <div class="input-group">
-                            <input type="text" id="profile-name" placeholder="z.B. Google Standard">
+                            <input type="text" id="profile-name" data-i18n-placeholder="profile.name_ph" placeholder="z.B. Google Standard">
                         </div>
                     </div>
 
                     <div class="form-group">
-                        <label>LLM Anbieter</label>
+                        <label data-i18n="profile.provider_label">LLM Anbieter</label>
                         <div class="input-group">
                             <select id="profile-provider" class="select-field">
                                 <option value="google">Google Gemini</option>
@@ -633,9 +633,9 @@ sudo update-ca-certificates</code></pre>
 
                     <!-- Modell: Freitext mit Vorschlägen -->
                     <div class="form-group">
-                        <label>KI-Modell</label>
+                        <label data-i18n="profile.model_label">KI-Modell</label>
                         <div class="input-group">
-                            <input type="text" id="profile-model-input" list="model-suggestions" placeholder="Modellname eingeben oder aus Liste wählen" autocomplete="off">
+                            <input type="text" id="profile-model-input" list="model-suggestions" data-i18n-placeholder="profile.model_ph" placeholder="Modellname eingeben oder aus Liste wählen" autocomplete="off">
                             <datalist id="model-suggestions"></datalist>
                         </div>
                     </div>
@@ -654,7 +654,7 @@ sudo update-ca-certificates</code></pre>
 
                     <!-- Zugangsart (nur bei Anthropic sichtbar) -->
                     <div class="form-group" id="auth-method-group" style="display: none;">
-                        <label>Zugangsart</label>
+                        <label data-i18n="profile.auth_method_label">Zugangsart</label>
                         <div class="input-group" style="display: flex; gap: 1rem;">
                             <label class="checkbox-group" style="flex: 1; cursor: pointer;">
                                 <input type="radio" name="auth-method" id="auth-apikey" value="api_key" checked>
@@ -669,7 +669,7 @@ sudo update-ca-certificates</code></pre>
 
                     <!-- API Key -->
                     <div class="form-group" id="apikey-group">
-                        <label>API Key</label>
+                        <label data-i18n="profile.apikey_label">API Key</label>
                         <div class="input-group">
                             <input type="password" id="profile-api-key" placeholder="AIza... / sk-or-... / sk-ant-...">
                             <button type="button" id="btn-toggle-profile-apikey" title="Key anzeigen/verbergen" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
@@ -681,7 +681,7 @@ sudo update-ca-certificates</code></pre>
 
                     <!-- Session Key (nur bei Anthropic Session) -->
                     <div class="form-group" id="session-group" style="display: none;">
-                        <label>Session Key</label>
+                        <label data-i18n="profile.session_key_label">Session Key</label>
                         <div class="input-group">
                             <input type="password" id="profile-session-key" placeholder="sk-ant-sid01-...">
                             <button type="button" id="btn-toggle-profile-sessionkey" title="Key anzeigen/verbergen" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
@@ -696,11 +696,11 @@ sudo update-ca-certificates</code></pre>
                     </div>
 
                     <div class="modal-actions">
-                        <button class="btn-primary" id="btn-save-profile">Speichern</button>
-                        <button class="btn-secondary" id="btn-cancel-profile">Abbrechen</button>
+                        <button class="btn-primary" id="btn-save-profile" data-i18n="profile.save">Speichern</button>
+                        <button class="btn-secondary" id="btn-cancel-profile" data-i18n="profile.cancel">Abbrechen</button>
                         <button class="btn-secondary" id="btn-test-profile" style="margin-left:auto;">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                            Verbindung testen
+                            <span data-i18n="profile.test">Verbindung testen</span>
                         </button>
                     </div>
                     <div id="profile-test-result" style="display:none;margin-top:10px;padding:10px 14px;border-radius:8px;font-size:0.88rem;line-height:1.5;"></div>
@@ -716,9 +716,9 @@ sudo update-ca-certificates</code></pre>
                         Gespeichert in <code>data/instructions/</code>.
                     </p>
                     <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;">
-                        <input type="text" id="instr-new-name" placeholder="Name der neuen Instruktion"
+                        <input type="text" id="instr-new-name" data-i18n-placeholder="instructions.new_ph" placeholder="Name der neuen Instruktion"
                                style="flex:1;max-width:300px;padding:8px 12px;background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:0.85rem;">
-                        <button id="btn-instr-new" class="btn-primary" style="padding:8px 16px;font-size:0.85rem;white-space:nowrap;">
+                        <button id="btn-instr-new" class="btn-primary" data-i18n="instructions.new" style="padding:8px 16px;font-size:0.85rem;white-space:nowrap;">
                             + Neue Instruktion
                         </button>
                     </div>
@@ -1419,36 +1419,36 @@ sudo update-ca-certificates</code></pre>
                         <!-- ── Kennwort ändern ── -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-pw-hdr">
-                                <h3>Kennwort ändern</h3>
+                                <h3 data-i18n="security.section_pw">Kennwort ändern</h3>
                                 <span class="sk-openclaw-toggle" id="sec-sect-pw-tog">▶</span>
                             </div>
                             <div id="sec-sect-pw-body" class="kb-collapse-body" style="display:none;">
                                 <p class="kb-hint">Ändert das Linux-Benutzerkonto <code>jarvis</code> – gilt für die Web-Oberfläche und SSH-Login. <strong>Nicht</strong> das WebDAV-Passwort.</p>
                                 <div class="form-group">
-                                    <label>Aktuelles Kennwort</label>
+                                    <label data-i18n="security.current_pw">Aktuelles Kennwort</label>
                                     <div style="position:relative;width:25%;">
-                                        <input type="password" id="sec-cpw-old" placeholder="Aktuelles Kennwort" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                                        <input type="password" id="sec-cpw-old" data-i18n-placeholder="security.pw_ph_current" placeholder="Aktuelles Kennwort" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
                                         <button type="button" id="btn-eye-sec-old" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
                                             <svg id="ico-eye-sec-old" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                         </button>
                                     </div>
                                 </div>
                                 <div class="form-group">
-                                    <label>Neues Kennwort</label>
+                                    <label data-i18n="security.new_pw">Neues Kennwort</label>
                                     <div style="display:flex;align-items:center;gap:8px;">
                                         <div style="position:relative;width:25%;flex-shrink:0;">
-                                            <input type="password" id="sec-cpw-new" placeholder="Neues Kennwort" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                                            <input type="password" id="sec-cpw-new" data-i18n-placeholder="security.pw_ph_new" placeholder="Neues Kennwort" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
                                             <button type="button" id="btn-eye-sec-new" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
                                                 <svg id="ico-eye-sec-new" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                             </button>
                                         </div>
-                                        <button type="button" id="sec-cpw-suggest" class="kb-btn-action" style="font-size:0.78rem;padding:3px 10px;flex-shrink:0;">🔑 Generieren</button>
+                                        <button type="button" id="sec-cpw-suggest" class="kb-btn-action" data-i18n="security.generate" style="font-size:0.78rem;padding:3px 10px;flex-shrink:0;">🔑 Generieren</button>
                                     </div>
                                 </div>
                                 <div class="form-group">
-                                    <label>Kennwort bestätigen</label>
+                                    <label data-i18n="security.confirm_pw">Kennwort bestätigen</label>
                                     <div style="position:relative;width:25%;">
-                                        <input type="password" id="sec-cpw-confirm" placeholder="Kennwort wiederholen" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
+                                        <input type="password" id="sec-cpw-confirm" data-i18n-placeholder="security.pw_ph_repeat" placeholder="Kennwort wiederholen" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding-right:38px;">
                                         <button type="button" id="btn-eye-sec-confirm" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;">
                                             <svg id="ico-eye-sec-confirm" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                         </button>
@@ -1457,14 +1457,14 @@ sudo update-ca-certificates</code></pre>
                                 <div id="sec-cpw-strength" style="font-size:0.8rem;min-height:18px;margin-bottom:8px;width:25%;"></div>
                                 <div id="sec-cpw-error" style="display:none;color:#ff6b6b;font-size:0.85rem;margin-bottom:10px;"></div>
                                 <div id="sec-cpw-success" style="display:none;color:#4ade80;font-size:0.85rem;margin-bottom:10px;"></div>
-                                <button class="kb-btn-action" id="sec-cpw-submit">Kennwort speichern</button>
+                                <button class="kb-btn-action" id="sec-cpw-submit" data-i18n="security.save_pw">Kennwort speichern</button>
                             </div>
                         </div>
 
                         <!-- ── Active Directory / LDAP ── -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-ad-hdr">
-                                <h3>Active Directory / LDAP</h3>
+                                <h3 data-i18n="security.section_ad">Active Directory / LDAP</h3>
                                 <span class="sk-openclaw-toggle" id="sec-sect-ad-tog">▶</span>
                             </div>
                             <div id="sec-sect-ad-body" class="kb-collapse-body" style="display:none;">
@@ -1628,7 +1628,7 @@ sudo update-ca-certificates</code></pre>
                         <!-- ── Zwei-Faktor-Authentifizierung ── -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-2fa-hdr">
-                                <h3>Zwei-Faktor-Authentifizierung (2FA)</h3>
+                                <h3 data-i18n="security.section_2fa">Zwei-Faktor-Authentifizierung (2FA)</h3>
                                 <span class="sk-openclaw-toggle" id="sec-sect-2fa-tog">▶</span>
                             </div>
                             <div id="sec-sect-2fa-body" class="kb-collapse-body" style="display:none;">
@@ -1735,7 +1735,7 @@ sudo update-ca-certificates</code></pre>
         </div>
     </div>
 
-    <script src="/static/js/i18n.js?v=1"></script>
+    <script src="/static/js/i18n.js?v=3"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=8"></script>
     <script src="/static/js/context.js?v=3"></script>
@@ -1748,7 +1748,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/mcp.js?v=1"></script>
     <script src="/static/js/vision.js?v=26"></script>
     <script src="/static/js/telemetry.js?v=3"></script>
-    <script src="/static/js/app.js?v=79"></script>
+    <script src="/static/js/app.js?v=82"></script>
 </body>
 
 </html>

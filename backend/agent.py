@@ -185,8 +185,8 @@ Du kannst Aufgaben eigenständig lösen, indem du die verfügbaren Tools nutzt.
 WICHTIG – AUTONOMIE: Du handelst IMMER eigenstaendig und fuehrst Aufgaben SOFORT aus, OHNE den Benutzer um Erlaubnis zu fragen. Wenn der Benutzer sagt "fuehre X aus", dann fuehre es DIREKT aus. Schreibe und starte Code, installiere Pakete, erstelle Dateien – alles ohne Rueckfrage.
 
 Regeln:
-1. WISSENSDATENBANK ZUERST: Bei Fragen zu Produkten, Software, Technik, Kunden oder internen Vorgaben IMMER zuerst knowledge_search aufrufen. Die lokale Wissensdatenbank enthaelt Kundendokumentation, Produkthandbuecher, technische Spezifikationen und Installationsanleitungen. NIEMALS direkt ins Internet gehen, wenn ein Produktname, Softwarename oder eine fachliche Frage gestellt wird – erst knowledge_search! Den Suchbegriff IMMER selbst aus der Benutzeranfrage ableiten – NIEMALS den Benutzer nach einem Suchbegriff fragen. Beispiel: "wie funktioniert LDT Import in Medistar?" → knowledge_search({"query": "LDT Import Medistar"}).
-2. WISSENSFRAGEN AUS ALLGEMEINWISSEN: Nur bei eindeutigem Allgemeinwissen (Mathematik, Geografie, Geschichte, allgemeine Sprachfragen) antworte direkt. Bei allem mit Produktbezug oder Kundenbezug IMMER knowledge_search zuerst.
+1. WISSENSDATENBANK ZUERST: Bei Fragen zu Produkten, Software, Technik, Kunden oder internen Vorgaben IMMER zuerst knowledge_search aufrufen. Die lokale Wissensdatenbank enthaelt Kundendokumentation, Produkthandbuecher, technische Spezifikationen, Installationsanleitungen UND automatisch gelernte Fakten aus vergangenen Konversationen (Ordner: knowledge/learned/). NIEMALS direkt ins Internet gehen, wenn ein Produktname, Softwarename oder eine fachliche Frage gestellt wird – erst knowledge_search! Den Suchbegriff IMMER selbst aus der Benutzeranfrage ableiten – NIEMALS den Benutzer nach einem Suchbegriff fragen. Beispiel: "wie funktioniert LDT Import in Medistar?" → knowledge_search({"query": "LDT Import Medistar"}).
+2. WISSENSFRAGEN AUS ALLGEMEINWISSEN: Nur bei eindeutigem Allgemeinwissen (Mathematik, Geografie, Geschichte, allgemeine Sprachfragen) antworte direkt. Bei allem mit Produktbezug oder Kundenbezug IMMER knowledge_search zuerst. Vergangene Loesungen finden sich auch in der Wissensdatenbank (knowledge_search mit Aufgabenbeschreibung als Suchbegriff).
 3. WISSENS-CACHE: Wenn du etwas ueber ein Tool nachgeschlagen hast, speichere es mit memory_manage (key mit Prefix "wissen_").
 4. Arbeite Schritt fuer Schritt und erklaere kurz, was du tust.
 5. Nutze shell_execute fuer Kommandozeilen-Befehle. Wenn Code ausgefuehrt werden soll, nutze shell_execute DIREKT.
@@ -707,6 +707,22 @@ KRITISCH – Autonomie-Regeln:
                     _log(f"conv_log fehlgeschlagen: {cl_err}")
                 # Chat-History für nächste Anfrage dieses Users speichern
                 self._user_histories[_history_key] = chat_history
+
+                # Background-Learning: Fakten aus Konversation extrahieren + in FAISS indexieren
+                if _conv_messages and steps >= 1:
+                    try:
+                        from backend import learning as _learning
+                        asyncio.create_task(
+                            _learning.learn_from_conversation(
+                                task=task_text,
+                                conv_messages=_conv_messages,
+                                provider=self.provider,
+                                model=config.current_model,
+                            )
+                        )
+                        _log("Background-Learning gestartet")
+                    except Exception as learn_err:
+                        _log(f"Background-Learning konnte nicht gestartet werden: {learn_err}")
 
             # Auto-Learning: Bei mehrstufigen Aufgaben den Loesungsweg speichern
             if steps >= 2 and self._tool_stats:

@@ -3408,6 +3408,83 @@ select.input-field {
 .kb-learned-stat { color: var(--accent, #7c3aed); font-weight: 500; }
 .kb-learned-sep { color: var(--text-secondary); opacity: 0.5; }
 .kb-learned-months { font-size: 0.72rem; opacity: 0.7; }
+.kb-learned-open-btn {
+    margin-left: auto;
+    background: rgba(99,102,241,0.15);
+    border: 1px solid rgba(99,102,241,0.3);
+    color: var(--text-primary);
+    border-radius: 6px;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.kb-learned-open-btn:hover { background: rgba(99,102,241,0.28); }
+
+/* Gelernte Einträge – Liste */
+.kb-learned-item {
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
+    margin-top: 6px;
+    overflow: hidden;
+    background: rgba(15,23,42,0.5);
+}
+.kb-learned-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    flex-wrap: wrap;
+}
+.kb-learned-item-title {
+    font-size: 0.82rem;
+    color: var(--text-primary);
+    font-weight: 500;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 55%;
+}
+.kb-learned-item-date {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    opacity: 0.7;
+    white-space: nowrap;
+}
+.kb-learned-item-actions { display: flex; gap: 4px; margin-left: auto; }
+.kb-btn-sm {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--text-secondary);
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.kb-btn-sm:hover { background: rgba(255,255,255,0.12); }
+.kb-btn-sm.kb-btn-del:hover { background: rgba(239,68,68,0.2); color: #ef4444; border-color: rgba(239,68,68,0.3); }
+.kb-btn-sm.kb-btn-save { color: #34d399; border-color: rgba(52,211,153,0.3); }
+.kb-btn-sm.kb-btn-save:hover { background: rgba(52,211,153,0.15); }
+.kb-learned-item-editor { padding: 0 10px 10px; }
+.kb-learned-textarea {
+    width: 100%;
+    min-height: 160px;
+    background: rgba(15,23,42,0.8);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    font-family: 'JetBrains Mono', monospace, inherit;
+    padding: 8px 10px;
+    resize: vertical;
+    outline: none;
+    line-height: 1.5;
+    box-sizing: border-box;
+}
+.kb-learned-textarea:focus { border-color: rgba(99,102,241,0.4); }
+.kb-learned-editor-btns { display: flex; gap: 6px; margin-top: 6px; }
 
 /* Suchmodus Toggle */
 .kb-search-mode {

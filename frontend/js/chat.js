@@ -54,7 +54,7 @@
         if (chatTtsIconOff) chatTtsIconOff.style.display = ttsEnabled ? 'none' : '';
         const voiceWrap = $('tts-voice-wrap');
         if (voiceWrap) voiceWrap.style.display = ttsEnabled ? '' : 'none';
-        btnTtsChat.title = ttsEnabled ? 'Sprachausgabe deaktivieren' : 'Sprachausgabe aktivieren';
+        btnTtsChat.title = window.t(ttsEnabled ? 'chat.tts_on' : 'chat.tts_off');
     }
 
     async function _loadChatTtsVoices(savedVoice) {
@@ -148,7 +148,7 @@
         e.preventDefault();
         loginError.textContent = '';
         loginBtn.disabled = true;
-        loginBtn.textContent = 'Anmelden…';
+        loginBtn.textContent = window.t('chat.connecting');
 
         try {
             const payload = {
@@ -181,13 +181,13 @@
                     loginError.textContent = data.error;
                 }
             } else {
-                loginError.textContent = data.error || 'Anmeldung fehlgeschlagen';
+                loginError.textContent = data.error || window.t('chat.login_failed');
             }
         } catch (err) {
-            loginError.textContent = 'Verbindungsfehler';
+            loginError.textContent = window.t('chat.connection_error');
         } finally {
             loginBtn.disabled = false;
-            loginBtn.textContent = 'Anmelden';
+            loginBtn.textContent = window.t('chat.submit');
         }
     });
 
@@ -231,7 +231,7 @@
             const n = d.history_entries || 0;
             if (n > 0) {
                 el.style.display = 'flex';
-                text.textContent = `Kontext Speicher: ${n} Einträge · ${d.fills_pct ?? 0} %`;
+                text.textContent = window.t('chat.ctx_label').replace('{n}', n).replace('{pct}', d.fills_pct ?? 0);
             } else {
                 el.style.display = 'none';
             }

@@ -123,14 +123,14 @@
                     loginError.hidden = false;
                 }
             } else {
-                loginError.textContent = data.error || 'Anmeldung fehlgeschlagen';
+                loginError.textContent = data.error || window.t('login.failed');
                 loginError.hidden = false;
             }
         } catch (err) {
-            loginError.textContent = 'Server nicht erreichbar';
+            loginError.textContent = window.t('login.server_error');
             loginError.hidden = false;
         } finally {
-            loginBtn.querySelector('.btn-text').textContent = 'ANMELDEN';
+            loginBtn.querySelector('.btn-text').textContent = window.t('login.submit');
             loginBtn.disabled = false;
         }
     });
@@ -181,7 +181,7 @@
             const n = d.history_entries || 0;
             if (n > 0) {
                 indicator.style.display = 'flex';
-                text.textContent = `Kontext Speicher: ${n} Einträge · ${d.fills_pct ?? 0} %`;
+                text.textContent = window.t('context.label').replace('{n}', n).replace('{pct}', d.fills_pct ?? 0);
             } else {
                 indicator.style.display = 'none';
             }
@@ -252,7 +252,7 @@
             /[0-9]/.test(pw),
         ];
         const score = checks.filter(Boolean).length;
-        const labels = ['Sehr schwach', 'Schwach', 'Mittel', 'Stark', 'Sehr stark'];
+        const labels = [0,1,2,3,4].map(i => window.t('security.strength.' + i));
         const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#16a34a'];
         if (pw.length === 0) { cpwStrength.textContent = ''; return; }
         cpwStrength.innerHTML = `<span style="color:${colors[score]}">● ${labels[score]}</span>`;
@@ -303,11 +303,11 @@
             const new_pw = cpwNew ? cpwNew.value : '';
             const conf_pw = cpwConfirm ? cpwConfirm.value : '';
             if (!old_pw || !new_pw || !conf_pw) {
-                if (cpwError) { cpwError.textContent = 'Alle Felder ausfüllen.'; cpwError.style.display = ''; }
+                if (cpwError) { cpwError.textContent = window.t('security.fill_fields'); cpwError.style.display = ''; }
                 return;
             }
             cpwSubmit.disabled = true;
-            cpwSubmit.textContent = 'Speichere...';
+            cpwSubmit.textContent = window.t('common.saving');
             try {
                 const res = await fetch('/api/change-password', {
                     method: 'POST',
@@ -320,16 +320,16 @@
                     if (_cpwMandatory) {
                         showMainScreen();
                     } else {
-                        addLogEntry('✅ Kennwort erfolgreich geändert.', 'system');
+                        addLogEntry(window.t('security.password_changed'), 'system');
                     }
                 } else {
-                    if (cpwError) { cpwError.textContent = data.error || 'Fehler beim Ändern.'; cpwError.style.display = ''; }
+                    if (cpwError) { cpwError.textContent = data.error || window.t('security.change_error'); cpwError.style.display = ''; }
                 }
             } catch (e) {
-                if (cpwError) { cpwError.textContent = 'Server nicht erreichbar.'; cpwError.style.display = ''; }
+                if (cpwError) { cpwError.textContent = window.t('login.server_error'); cpwError.style.display = ''; }
             } finally {
                 cpwSubmit.disabled = false;
-                cpwSubmit.textContent = 'Kennwort speichern';
+                cpwSubmit.textContent = window.t('security.save_pw');
             }
         });
     }
@@ -403,13 +403,13 @@
             if (badge) {
                 badge.style.display = d.has_update ? 'inline' : 'none';
                 badge.className = 'update-badge' + (d.has_update ? ' has-update' : '');
-                badge.title = d.has_update ? `${d.commits_behind} Commit(s) verfügbar` : '';
+                badge.title = d.has_update ? window.t('update.badge_title').replace('{n}', d.commits_behind) : '';
             }
             if (widget) {
                 widget.classList.toggle('has-update', !!d.has_update);
                 widget.title = d.has_update
-                    ? `${d.commits_behind} Update(s) verfügbar – klicken zum Aktualisieren`
-                    : 'Version & Updates';
+                    ? window.t('update.widget_title_avail').replace('{n}', d.commits_behind)
+                    : window.t('update.widget_title_ok');
             }
 
             if (!body) return;
@@ -425,8 +425,10 @@
             if (!body) return;
             const statusDot  = d.has_update ? 'pending' : (d.ok ? 'ok' : 'error');
             const statusText = d.has_update
-                ? `${d.commits_behind} neue${d.commits_behind === 1 ? 'r Commit' : ' Commits'} verfügbar`
-                : (d.ok ? 'Aktuell' : ('Fehler: ' + (d.error || '?')));
+                ? (d.commits_behind === 1
+                    ? window.t('update.commits_singular').replace('{n}', d.commits_behind)
+                    : window.t('update.commits_plural').replace('{n}', d.commits_behind))
+                : (d.ok ? window.t('update.status_ok') : window.t('update.status_error').replace('{msg}', d.error || '?'));
 
             let commitsHtml = '';
             if (d.recent_commits?.length) {
@@ -443,9 +445,9 @@
 
             let updateBtn = '';
             if (d.has_update) {
-                updateBtn = `<button id="upd-apply-btn" class="kb-btn-action" style="width:100%;">⬇ Jetzt aktualisieren</button>`;
+                updateBtn = `<button id="upd-apply-btn" class="kb-btn-action" style="width:100%;">${window.t('update.apply_btn')}</button>`;
             } else {
-                updateBtn = `<button id="upd-check-btn" class="kb-btn-secondary" style="width:100%;font-size:.78rem;">🔄 Erneut prüfen</button>`;
+                updateBtn = `<button id="upd-check-btn" class="kb-btn-secondary" style="width:100%;font-size:.78rem;">${window.t('update.check_btn')}</button>`;
             }
 
             body.innerHTML = `
@@ -454,17 +456,17 @@
                     <span style="font-size:.82rem;color:var(--text-primary);">${statusText}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;font-size:.75rem;color:var(--text-secondary);">
-                    <span>Aktuell: <code style="color:var(--accent);">${d.current_hash || '?'}</code></span>
-                    <span>Branch: <code style="color:var(--text-secondary);">${d.branch || 'master'}</code></span>
+                    <span>${window.t('update.current')} <code style="color:var(--accent);">${d.current_hash || '?'}</code></span>
+                    <span>${window.t('update.branch')} <code style="color:var(--text-secondary);">${d.branch || 'master'}</code></span>
                 </div>
                 ${commitsHtml}
                 ${updateBtn}
                 <div class="upd-auto-row">
-                    <span class="upd-auto-label">Auto-Update</span>
+                    <span class="upd-auto-label">${window.t('update.auto_label')}</span>
                     <select id="upd-schedule" class="upd-schedule-select">
-                        <option value="never"  ${schedule==='never'  ?'selected':''}>Aus</option>
-                        <option value="daily"  ${schedule==='daily'  ?'selected':''}>Täglich (03:00)</option>
-                        <option value="weekly" ${schedule==='weekly' ?'selected':''}>Wöchentlich (Mo 03:00)</option>
+                        <option value="never"  ${schedule==='never'  ?'selected':''}>${window.t('update.sched_never')}</option>
+                        <option value="daily"  ${schedule==='daily'  ?'selected':''}>${window.t('update.sched_daily')}</option>
+                        <option value="weekly" ${schedule==='weekly' ?'selected':''}>${window.t('update.sched_weekly')}</option>
                     </select>
                 </div>`;
 
@@ -475,28 +477,28 @@
 
         async function _applyUpdate() {
             const btn = document.getElementById('upd-apply-btn');
-            if (btn) { btn.disabled = true; btn.textContent = '⏳ Aktualisiere…'; }
+            if (btn) { btn.disabled = true; btn.textContent = window.t('update.applying'); }
             const infoEl = document.createElement('p');
             infoEl.className = 'kb-hint';
             infoEl.style.cssText = 'margin:0;color:#f39c12;';
-            infoEl.textContent = 'Update wird durchgeführt – Jarvis startet danach neu…';
+            infoEl.textContent = window.t('update.in_progress');
             if (body) { body.prepend(infoEl); body.scrollTop = 0; }
             try {
                 const r = await fetch('/api/update/apply', { method: 'POST', headers: _auth() });
                 const d = await r.json();
                 if (d.ok) {
-                    if (body) body.innerHTML = `<p style="color:#2ecc71;font-size:.85rem;">✅ Update erfolgreich. Verbindung wird in 5 s wiederhergestellt…</p>`;
+                    if (body) body.innerHTML = `<p style="color:#2ecc71;font-size:.85rem;">${window.t('update.success')}</p>`;
                     setTimeout(() => window.location.reload(), 5000);
                 } else {
                     const errEl = document.createElement('p');
                     errEl.className = 'kb-hint';
                     errEl.style.cssText = 'color:#e74c3c;white-space:pre-wrap;word-break:break-word;';
-                    errEl.textContent = `Fehler: ${d.error || 'Unbekannter Fehler'}`;
+                    errEl.textContent = window.t('update.error').replace('{msg}', d.error || window.t('update.unknown_error'));
                     if (body) { body.prepend(errEl); body.scrollTop = 0; }
-                    if (btn) { btn.disabled = false; btn.textContent = '⬇ Jetzt aktualisieren'; }
+                    if (btn) { btn.disabled = false; btn.textContent = window.t('update.apply_btn'); }
                 }
             } catch (e) {
-                if (btn) { btn.disabled = false; btn.textContent = '⬇ Jetzt aktualisieren'; }
+                if (btn) { btn.disabled = false; btn.textContent = window.t('update.apply_btn'); }
             }
         }
 
@@ -525,7 +527,7 @@
             const data = await res.json();
             list.innerHTML = '';
             if (!data.files || data.files.length === 0) {
-                list.innerHTML = '<p style="color:var(--text-muted); font-size:0.85rem;">Noch keine Instruktionen vorhanden. Erstelle eine neue über das Feld oben.</p>';
+                list.innerHTML = `<p style="color:var(--text-muted); font-size:0.85rem;">${window.t('instructions.empty')}</p>`;
                 return;
             }
             data.files.forEach(f => {
@@ -538,8 +540,8 @@
                             <strong style="color:var(--accent-hover);font-size:0.9rem;">${f.name}.md</strong>
                         </div>
                         <div style="display:flex;gap:6px;">
-                            <button class="btn-instr-save" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;">Speichern</button>
-                            <button class="btn-instr-del" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:var(--radius-sm);cursor:pointer;">Löschen</button>
+                            <button class="btn-instr-save" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;">${window.t('instructions.save')}</button>
+                            <button class="btn-instr-del" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:var(--radius-sm);cursor:pointer;">${window.t('instructions.delete')}</button>
                         </div>
                     </div>
                     <div class="instr-card-body" style="display:none;padding:0 14px 14px;">
@@ -569,18 +571,18 @@
                         headers: {'Content-Type': 'application/json', ...authHeader},
                         body: JSON.stringify({content: textarea.value})
                     });
-                    if (res.ok) { btn.textContent = '✓'; btn.style.background = '#10b981'; setTimeout(() => { btn.textContent = 'Speichern'; btn.style.background = ''; }, 1500); }
+                    if (res.ok) { btn.textContent = '✓'; btn.style.background = '#10b981'; setTimeout(() => { btn.textContent = window.t('instructions.save'); btn.style.background = ''; }, 1500); }
                 });
             });
             // Event-Handler Löschen
             list.querySelectorAll('.btn-instr-del').forEach(btn => {
                 btn.addEventListener('click', async () => {
-                    if (!confirm(`Instruktion "${btn.dataset.name}" wirklich löschen?`)) return;
+                    if (!confirm(window.t('instructions.confirm_delete').replace('{name}', btn.dataset.name))) return;
                     await fetch(`/api/instructions/${btn.dataset.name}`, {method: 'DELETE', headers: authHeader});
                     _loadInstructions();
                 });
             });
-        } catch (e) { list.innerHTML = '<p style="color:var(--danger);">Fehler beim Laden der Instruktionen.</p>'; }
+        } catch (e) { list.innerHTML = `<p style="color:var(--danger);">${window.t('instructions.error')}</p>`; }
     }
 
     // Neue Instruktion erstellen
@@ -902,7 +904,7 @@
     let _debugMode = localStorage.getItem('jarvis_debug') !== 'false'; // Default: an
     // Initialzustand setzen
     const _updateDebugBtn = () => {
-        btnDebug.textContent = _debugMode ? 'debug aktiv' : 'debug aktivieren';
+        btnDebug.textContent = window.t(_debugMode ? 'panel.debug.on' : 'panel.debug.off');
         btnDebug.classList.toggle('active', _debugMode);
         logContainer.classList.toggle('hide-debug', !_debugMode);
     };
@@ -1724,13 +1726,13 @@
         function showListView() {
             listView.style.display = '';
             editView.style.display = 'none';
-            settingsTitle.textContent = 'KI-Einstellungen';
+            settingsTitle.textContent = window.t('settings.title');
         }
 
         function showEditView(isNew) {
             listView.style.display = 'none';
             editView.style.display = '';
-            settingsTitle.textContent = isNew ? 'Neues Profil' : 'Profil bearbeiten';
+            settingsTitle.textContent = isNew ? window.t('profile.new') : window.t('profile.edit');
         }
 
         // ── Profile laden ──
@@ -1810,7 +1812,7 @@
                 renderProfileList();
                 const profile = profiles.find(p => p.id === id);
                 if (profile) {
-                    addLogEntry('Profil gewechselt: ' + profile.name, 'system');
+                    addLogEntry(window.t('profile.switched').replace('{name}', profile.name), 'system');
                 }
             } catch (err) {
                 console.error('Fehler beim Aktivieren:', err);
@@ -1820,11 +1822,11 @@
         // ── Profil löschen ──
         async function deleteProfile(id) {
             if (profiles.length <= 1) {
-                alert('Das letzte Profil kann nicht gelöscht werden.');
+                alert(window.t('profile.cannot_delete_last'));
                 return;
             }
             const profile = profiles.find(p => p.id === id);
-            if (!confirm(`Profil "${profile?.name}" wirklich löschen?`)) return;
+            if (!confirm(window.t('profile.confirm_delete').replace('{name}', profile?.name || ''))) return;
 
             try {
                 const res = await fetch(`/api/profiles/${id}`, {
@@ -1834,12 +1836,12 @@
                 const data = await res.json();
                 if (data.success) {
                     await loadProfiles();
-                    addLogEntry('Profil gelöscht: ' + (profile?.name || ''), 'system');
+                    addLogEntry(window.t('profile.deleted').replace('{name}', profile?.name || ''), 'system');
                 } else {
-                    alert('Fehler: ' + (data.error || 'Unbekannt'));
+                    alert(window.t('common.error_unknown').replace('{msg}', data.error || '?'));
                 }
             } catch (err) {
-                alert('Server-Verbindung fehlgeschlagen');
+                alert(window.t('common.connection_failed'));
             }
         }
 
@@ -1963,11 +1965,11 @@
             const model = inputModel.value;
 
             if (!inputName.value.trim()) {
-                alert('Bitte einen Profilnamen eingeben.');
+                alert(window.t('profile.name_required'));
                 return;
             }
             if (!model.trim()) {
-                alert('Bitte ein Modell angeben.');
+                alert(window.t('profile.model_required'));
                 return;
             }
 
@@ -1982,7 +1984,7 @@
                 prompt_tool_calling: provider === 'openai_compatible' && checkPromptTool ? checkPromptTool.checked : false,
             };
 
-            btnSaveProfile.textContent = 'Speichere...';
+            btnSaveProfile.textContent = window.t('common.saving');
             btnSaveProfile.disabled = true;
 
             try {
@@ -2010,16 +2012,16 @@
                 }
                 const data = await res.json();
                 if (data.success) {
-                    addLogEntry('Profil gespeichert: ' + profileData.name + (profileData.model ? ' (' + profileData.model + ')' : ''), 'system');
+                    addLogEntry(window.t('profile.saved').replace('{name}', profileData.name + (profileData.model ? ' (' + profileData.model + ')' : '')), 'system');
                     await loadProfiles();
                     showListView();
                 } else {
-                    alert('Fehler: ' + (data.error || 'Unbekannt'));
+                    alert(window.t('common.error_unknown').replace('{msg}', data.error || '?'));
                 }
             } catch (err) {
-                alert('Server-Verbindung fehlgeschlagen');
+                alert(window.t('common.connection_failed'));
             } finally {
-                btnSaveProfile.textContent = 'Speichern';
+                btnSaveProfile.textContent = window.t('profile.save');
                 btnSaveProfile.disabled = false;
             }
         });
@@ -2031,12 +2033,12 @@
         if (btnTestProfile) {
             btnTestProfile.addEventListener('click', async () => {
                 btnTestProfile.disabled = true;
-                btnTestProfile.textContent = 'Teste…';
+                btnTestProfile.textContent = window.t('common.testing');
                 profileTestResult.style.display = '';
                 profileTestResult.style.background = 'rgba(255,255,255,0.05)';
                 profileTestResult.style.border = '1px solid rgba(255,255,255,0.1)';
                 profileTestResult.style.color = 'var(--text-muted)';
-                profileTestResult.textContent = '⏳ Verbindung wird geprüft…';
+                profileTestResult.textContent = window.t('profile.testing');
                 try {
                     // Aktuelle Formularwerte verwenden (nicht die gespeicherten)
                     const testPayload = {
@@ -2082,7 +2084,7 @@
                     profileTestResult.style.background = 'rgba(231,76,60,0.15)';
                     profileTestResult.style.border = '1px solid rgba(231,76,60,0.4)';
                     profileTestResult.style.color = '#e74c3c';
-                    profileTestResult.textContent = `✗ Fehler: ${e.message}`;
+                    profileTestResult.textContent = `✗ ${window.t('update.error').replace('{msg}', e.message)}`;
                 } finally {
                     btnTestProfile.disabled = false;
                     btnTestProfile.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Verbindung testen';
@@ -2164,8 +2166,8 @@
             btnCopyKey.addEventListener('click', () => {
                 if (_agentKeyValue) {
                     navigator.clipboard.writeText(_agentKeyValue).then(() => {
-                        btnCopyKey.title = 'Kopiert!';
-                        setTimeout(() => { btnCopyKey.title = 'Kopieren'; }, 2000);
+                        btnCopyKey.title = window.t('common.copied');
+                        setTimeout(() => { btnCopyKey.title = window.t('common.copy'); }, 2000);
                     });
                 }
             });

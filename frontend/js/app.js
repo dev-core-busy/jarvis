@@ -82,7 +82,7 @@
         const password = loginPassword.value.trim();
         if (!username || !password) return;
 
-        loginBtn.querySelector('.btn-text').textContent = 'Verbinde...';
+        loginBtn.querySelector('.btn-text').textContent = window.t ? window.t('common.connecting') : 'Verbinde...';
         loginBtn.disabled = true;
         loginError.hidden = true;
 
@@ -161,6 +161,8 @@
         loadVersion();
         updateWidget.init();
         _startContextIndicator();
+        // Sprachübersetzungen nach Screen-Wechsel anwenden
+        if (window.applyLang) window.applyLang();
     }
 
     // ─── Kontext-Indikator ───────────────────────────────────────────
@@ -615,7 +617,7 @@
 
         ws.on('connected', () => {
             connectionDot.classList.add('connected');
-            addLogEntry('🔗 Verbindung hergestellt', 'system');
+            addLogEntry('🔗 ' + (window.t ? window.t('notif.connected') : 'Verbindung hergestellt'), 'system');
             // Nach Reconnect VNC neu verbinden, falls nicht schon verbunden/probiert
             if (vnc && !vnc.connected && !vnc._probingActive) {
                 vnc.startProbing(2000, 30);
@@ -631,7 +633,7 @@
         });
 
         ws.on('reconnecting', (attempt) => {
-            addLogEntry(`🔄 Verbindung wird wiederhergestellt... (Versuch ${attempt})`, 'system');
+            addLogEntry('🔄 ' + (window.t ? window.t('notif.reconnect').replace('{n}', attempt) : `Verbindung wird wiederhergestellt... (Versuch ${attempt})`), 'system');
         });
 
         ws.on('cpu', (data) => {
@@ -1033,9 +1035,9 @@
         // Placeholder im Eingabefeld aktualisieren
         const info = _agentInfos[agentId];
         if (info && info.is_sub_agent) {
-            taskInput.placeholder = `Nachricht an ${info.label}...`;
+            taskInput.placeholder = (window.t ? window.t('input.placeholder.agent') : 'Nachricht an {label}...').replace('{label}', info.label);
         } else {
-            taskInput.placeholder = 'Aufgabe eingeben...';
+            taskInput.placeholder = window.t ? window.t('input.placeholder') : 'Aufgabe für Jarvis eingeben...';
         }
 
         // Zum Ende scrollen

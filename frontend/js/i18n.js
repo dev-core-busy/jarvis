@@ -415,6 +415,18 @@ const _I18N = {
         'skills.mkt_search_ph': 'Skills suchen…',
         'skills.mkt_none':      'Keine Skills gefunden. Versuche andere Suchbegriffe.',
 
+        // ── Cognitive Evolution ───────────────────────────────
+        'skills.cat.system':        'System',
+        'evolution.phase.analyze':  'Analysieren',
+        'evolution.phase.propose':  'Vorschlag',
+        'evolution.phase.validate': 'Validieren',
+        'evolution.phase.apply':    'Anwenden',
+        'evolution.phase.cycle':    'Vollzyklus',
+        'evolution.status.proposed':  'Vorgeschlagen',
+        'evolution.status.validated': 'Validiert',
+        'evolution.status.applied':   'Angewendet',
+        'evolution.status.failed':    'Fehlgeschlagen',
+
         // ── WhatsApp ──────────────────────────────────────────
         'wa.status_connection': 'Status & Verbindung',
         'wa.loading':           'Lade...',
@@ -1115,6 +1127,18 @@ const _I18N = {
         'skills.mkt_search_btn':'Search skills',
         'skills.mkt_search_ph': 'Search skills…',
         'skills.mkt_none':      'No skills found. Try different search terms.',
+
+        // ── Cognitive Evolution ───────────────────────────────
+        'skills.cat.system':        'System',
+        'evolution.phase.analyze':  'Analyze',
+        'evolution.phase.propose':  'Propose',
+        'evolution.phase.validate': 'Validate',
+        'evolution.phase.apply':    'Apply',
+        'evolution.phase.cycle':    'Full Cycle',
+        'evolution.status.proposed':  'Proposed',
+        'evolution.status.validated': 'Validated',
+        'evolution.status.applied':   'Applied',
+        'evolution.status.failed':    'Failed',
 
         // ── WhatsApp ──────────────────────────────────────────
         'wa.status_connection': 'Status & Connection',

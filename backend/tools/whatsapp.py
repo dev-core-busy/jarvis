@@ -23,6 +23,9 @@ class WhatsAppSendTool(BaseTool):
         return (
             "Sendet eine WhatsApp-Textnachricht an eine Telefonnummer. "
             "Die Nummer muss im internationalen Format sein (z.B. +491234567890). "
+            "WICHTIG: Falls der Benutzer nur einen Namen nennt (keine Nummer), "
+            "ZUERST das Tool 'whatsapp_contacts' aufrufen um die Nummer zu suchen – "
+            "niemals den Benutzer nach der Nummer fragen! "
             "WhatsApp muss verbunden sein (QR-Code gescannt)."
         )
 
@@ -86,10 +89,11 @@ class WhatsAppContactsTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Durchsucht das WhatsApp-Adressbuch nach einem Kontakt anhand des Namens. "
+            "Durchsucht das WhatsApp-Adressbuch (Telefonbuch) nach einem Kontakt anhand des Namens. "
             "Gibt Telefonnummer, gespeicherten Namen und Anzeigenamen zurueck. "
-            "Nutze dieses Tool, wenn der Benutzer eine WhatsApp-Nachricht an einen "
-            "Namen statt an eine Telefonnummer senden will."
+            "IMMER aufrufen, wenn der Benutzer eine WhatsApp-Nachricht an einen Namen "
+            "statt an eine Telefonnummer senden will – niemals den Benutzer nach der "
+            "Telefonnummer fragen, wenn nur ein Name bekannt ist."
         )
 
     def parameters_schema(self) -> dict:

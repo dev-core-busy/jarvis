@@ -96,7 +96,7 @@ class JarvisKnowledgeManager {
         const status = document.getElementById('kb-upload-status');
         const folder = this._getUploadTarget();
 
-        if (status) status.textContent = `${fileList.length} Datei(en) werden hochgeladen...`;
+        if (status) status.textContent = window.t('knowledge.uploading').replace('{n}', fileList.length);
 
         const formData = new FormData();
         formData.append('folder', folder);
@@ -113,10 +113,10 @@ class JarvisKnowledgeManager {
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const result = await resp.json();
 
-            let msg = `${result.total_saved} Datei(en) hochgeladen`;
+            let msg = window.t('knowledge.uploaded').replace('{saved}', result.total_saved);
             if (result.total_rejected > 0) {
                 const names = result.rejected.map(r => r.name).join(', ');
-                msg += ` | ${result.total_rejected} abgelehnt: ${names}`;
+                msg += ` | ` + window.t('knowledge.rejected').replace('{n}', result.total_rejected).replace('{names}', names);
             }
             if (status) {
                 status.textContent = msg;
@@ -127,10 +127,10 @@ class JarvisKnowledgeManager {
             await this.fetchStats();
         } catch (e) {
             if (status) {
-                status.textContent = 'Upload fehlgeschlagen: ' + e.message;
+                status.textContent = window.t('knowledge.upload_failed').replace('{msg}', e.message);
                 status.style.color = '#ef4444';
             }
-            this._showNotification('Upload fehlgeschlagen: ' + e.message, 'error');
+            this._showNotification(window.t('knowledge.upload_failed').replace('{msg}', e.message), 'error');
         }
     }
 
@@ -156,7 +156,7 @@ class JarvisKnowledgeManager {
             this._renderFolders(stats.folders);
             this._populateUploadTargets(stats.folders);
         } catch (e) {
-            if (container) container.innerHTML = `<div class="kb-error">Fehler beim Laden: ${e.message}</div>`;
+            if (container) container.innerHTML = `<div class="kb-error">${window.t('knowledge.load_error').replace('{msg}', e.message)}</div>`;
         }
     }
 
@@ -182,10 +182,10 @@ class JarvisKnowledgeManager {
             : 'Vektor-DB';
         const vectorTitle = vectorAvail
             ? (stats.vector_search
-                ? `${vectorDbLabel} · ${stats.vector_model || ''}\nIndex: ${stats.vector_files} Dateien, ${stats.vector_chunks} Chunks`
+                ? `${vectorDbLabel} · ${stats.vector_model || ''}\nIndex: ${stats.vector_files} ${window.t('knowledge.stat.files')}, ${stats.vector_chunks} Chunks`
                 : (stats.indexing
-                    ? `${vectorDbLabel} · ${stats.vector_model || ''}\nIndex wird aufgebaut…`
-                    : `${vectorDbLabel} · ${stats.vector_model || ''}\nKein Index vorhanden – bitte Neu-Indizieren`))
+                    ? `${vectorDbLabel} · ${stats.vector_model || ''}\n${window.t('knowledge.indexing_building')}`
+                    : `${vectorDbLabel} · ${stats.vector_model || ''}\n${window.t('knowledge.no_index')}`))
             : 'faiss-cpu/sentence-transformers nicht installiert';
 
         // Aktueller Suchmodus
@@ -203,73 +203,73 @@ class JarvisKnowledgeManager {
         let activeText;
         if (stats.indexing) {
             activeText = isVectorPhase
-                ? activeLabel('Vektor-DB', YELLOW) + ` <span style="color:${GREY}">(wird indiziert…)</span>`
-                : activeLabel('Dateiinhalt', YELLOW) + ` <span style="color:${GREY}">(wird indiziert…)</span>`;
+                ? activeLabel(window.t('knowledge.vektor_db'), YELLOW) + ` <span style="color:${GREY}">(${window.t('knowledge.indexing_progress')})</span>`
+                : activeLabel(window.t('knowledge.file_content'), YELLOW) + ` <span style="color:${GREY}">(${window.t('knowledge.indexing_progress')})</span>`;
         } else if (mode === 'auto') {
             activeText = stats.vector_search
-                ? activeLabel('Vektor-DB', GREEN)
+                ? activeLabel(window.t('knowledge.vektor_db'), GREEN)
                 : (stats.total_chunks > 0
-                    ? activeLabel('Dateiinhalt', GREEN)
-                    : activeLabel('keiner', YELLOW));
+                    ? activeLabel(window.t('knowledge.file_content'), GREEN)
+                    : activeLabel(window.t('knowledge.none_label'), YELLOW));
         } else if (mode === 'vector') {
             activeText = stats.vector_search
-                ? activeLabel('Vektor-DB', GREEN)
-                : activeLabel('keiner', YELLOW);
+                ? activeLabel(window.t('knowledge.vektor_db'), GREEN)
+                : activeLabel(window.t('knowledge.none_label'), YELLOW);
         } else {
             activeText = stats.total_chunks > 0
-                ? activeLabel('Dateiinhalt', GREEN)
-                : activeLabel('keiner', YELLOW);
+                ? activeLabel(window.t('knowledge.file_content'), GREEN)
+                : activeLabel(window.t('knowledge.none_label'), YELLOW);
         }
 
         // Datenbank-Button nur deaktivieren wenn FAISS nicht installiert
         const dbBtnDisabled = !stats.vector_db_available;
         const dbBtnTitle = stats.vector_db_available
-            ? (stats.vector_search ? 'Nur semantische Vektor-Suche (Bedeutung, Synonyme)' : 'Vektor-DB verfügbar, aber kein Index – bitte Neu-Indizieren')
+            ? (stats.vector_search ? window.t('knowledge.search_auto_title') : window.t('knowledge.search_vector_no_index'))
             : 'faiss-cpu nicht installiert';
 
         el.innerHTML = `
             <div class="kb-stat-grid">
                 <div class="kb-stat">
                     <span class="kb-stat-value">${stats.total_files}</span>
-                    <span class="kb-stat-label">Dateien</span>
+                    <span class="kb-stat-label">${window.t('knowledge.stat.files')}</span>
                 </div>
                 <div class="kb-stat">
                     <span class="kb-stat-value">${stats.indexed_files}</span>
-                    <span class="kb-stat-label">Indiziert</span>
+                    <span class="kb-stat-label">${window.t('knowledge.stat.indexed')}</span>
                 </div>
                 <div class="kb-stat">
                     <span class="kb-stat-value">${stats.total_chunks}</span>
-                    <span class="kb-stat-label">Chunks</span>
+                    <span class="kb-stat-label">${window.t('knowledge.stat.chunks')}</span>
                 </div>
                 <div class="kb-stat">
                     <span class="kb-stat-value">${sizeMb} MB</span>
-                    <span class="kb-stat-label">Gesamt</span>
+                    <span class="kb-stat-label">${window.t('knowledge.stat.size')}</span>
                 </div>
             </div>
             <div class="kb-search-mode" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
-                <span class="kb-search-mode-label">Suchmodus:</span>
+                <span class="kb-search-mode-label">${window.t('knowledge.search_mode_label')}</span>
                 <div class="kb-toggle-group">
                     <button class="kb-toggle-btn ${mode === 'auto' ? 'active' : ''}"
                         data-mode="auto" onclick="window.knowledgeManager.setSearchMode('auto')"
-                        title="Vektor-DB bevorzugt wenn Index vorhanden, sonst Dateiinhalt-Index">Auto</button>
+                        title="${window.t('knowledge.search_auto_title')}">${window.t('knowledge.search_auto')}</button>
                     <button class="kb-toggle-btn ${mode === 'tfidf' ? 'active' : ''}"
                         data-mode="tfidf" onclick="window.knowledgeManager.setSearchMode('tfidf')"
-                        title="Nur Dateiinhalt-Index (TF-IDF, Keyword-Suche)">Dateiinhalt</button>
+                        title="TF-IDF">${window.t('knowledge.search_tfidf')}</button>
                     <button class="kb-toggle-btn ${mode === 'vector' ? 'active' : ''} ${dbBtnDisabled ? 'disabled' : ''}"
                         data-mode="vector" onclick="window.knowledgeManager.setSearchMode('vector')"
-                        title="${dbBtnTitle}" ${dbBtnDisabled ? 'disabled' : ''}>Datenbank</button>
+                        title="${dbBtnTitle}" ${dbBtnDisabled ? 'disabled' : ''}>${window.t('knowledge.search_vector')}</button>
                 </div>
-                <span class="kb-search-mode-label" style="margin-left:8px;">Aktiv:</span>
+                <span class="kb-search-mode-label" style="margin-left:8px;">${window.t('knowledge.search_active_label')}</span>
                 <span id="kb-active-label" style="font-size:0.75rem;">${activeText}</span>
             </div>
             <div class="kb-formats">
-                <span class="kb-format-badge" title="Text-Formate immer aktiv">✅ Text/Markdown</span>
+                <span class="kb-format-badge" title="${window.t('knowledge.format_text_title')}">✅ Text/Markdown</span>
                 <span class="kb-format-badge" title="${pdfTitle}">${pdfIcon} PDF</span>
                 <span class="kb-format-badge" title="${docxTitle}">${docxIcon} Word</span>
                 <span class="kb-format-badge" title="${xlsxTitle}">${xlsxIcon} Excel</span>
                 <span class="kb-format-badge" title="${pptxTitle}">${pptxIcon} PowerPoint</span>
                 <span class="kb-format-badge" title="${videoTitle}">${videoIcon} Video/Audio</span>
-                <span class="kb-format-badge" title="${vectorTitle}">${vectorIcon} Vektor-DB</span>
+                <span class="kb-format-badge" title="${vectorTitle}">${vectorIcon} ${window.t('knowledge.vektor_db')}</span>
             </div>
         `;
 
@@ -278,16 +278,19 @@ class JarvisKnowledgeManager {
             const lf = learnedStats.total_files || 0;
             const lkb = learnedStats.total_size_kb || 0;
             const lmonths = (learnedStats.months || []).join(', ') || '–';
+            const convLabel = lf === 1
+                ? `1 ${window.t('knowledge.stat.indexed')}`
+                : `${lf} ${window.t('knowledge.stat.files')}`;
             el.innerHTML += `
-            <div class="kb-learned-panel" title="Jarvis speichert nach jeder Konversation verifizierte Fakten aus Tool-Ergebnissen in der Wissensdatenbank (knowledge/learned/)">
+            <div class="kb-learned-panel" title="${window.t('knowledge.learned.title')}">
                 <span class="kb-learned-icon">🧠</span>
-                <span class="kb-learned-title">Gelerntes Wissen</span>
-                <span class="kb-learned-stat">${lf} Konversation${lf !== 1 ? 'en' : ''}</span>
+                <span class="kb-learned-title">${window.t('knowledge.learned.title')}</span>
+                <span class="kb-learned-stat">${lf} ${lf !== 1 ? window.t('knowledge.stat.files') : window.t('knowledge.stat.indexed')}</span>
                 <span class="kb-learned-sep">·</span>
                 <span class="kb-learned-stat">${lkb} KB</span>
                 ${lf > 0 ? `<span class="kb-learned-sep">·</span><span class="kb-learned-months">${lmonths}</span>` : ''}
-                <button class="kb-learned-open-btn" onclick="window.knowledgeManager.toggleLearnedList()" title="Gelernte Einträge anzeigen / verwalten">
-                    ${lf > 0 ? '📋 Anzeigen' : '📋 Liste'}
+                <button class="kb-learned-open-btn" onclick="window.knowledgeManager.toggleLearnedList()">
+                    ${lf > 0 ? window.t('knowledge.learned.show') : window.t('knowledge.learned.list_btn')}
                 </button>
             </div>
             <div id="kb-learned-list" style="display:none;"></div>`;
@@ -298,7 +301,7 @@ class JarvisKnowledgeManager {
         const el = document.getElementById('kb-learned-list');
         if (!el) return;
         if (el.style.display !== 'none') { el.style.display = 'none'; return; }
-        el.innerHTML = '<div class="kb-files-loading">Lädt…</div>';
+        el.innerHTML = `<div class="kb-files-loading">${window.t('knowledge.loading')}</div>`;
         el.style.display = 'block';
         try {
             const resp = await fetch('/api/knowledge/learned', {
@@ -307,7 +310,7 @@ class JarvisKnowledgeManager {
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const files = await resp.json();
             if (!files.length) {
-                el.innerHTML = '<div class="kb-files-empty" style="padding:10px 0;">Noch keine gelernten Einträge vorhanden.</div>';
+                el.innerHTML = `<div class="kb-files-empty" style="padding:10px 0;">${window.t('knowledge.learned.no_entries')}</div>`;
                 return;
             }
             el.innerHTML = files.map((f, i) => {
@@ -337,7 +340,7 @@ class JarvisKnowledgeManager {
         const editorEl = document.getElementById(itemId + '_editor');
         if (!editorEl) return;
         if (editorEl.style.display !== 'none') { editorEl.style.display = 'none'; return; }
-        editorEl.innerHTML = '<div class="kb-files-loading">Lädt…</div>';
+        editorEl.innerHTML = `<div class="kb-files-loading">${window.t('knowledge.loading')}</div>`;
         editorEl.style.display = 'block';
         try {
             const resp = await fetch('/api/knowledge/file_read?path=' + encodeURIComponent(filePath), {
@@ -349,8 +352,8 @@ class JarvisKnowledgeManager {
             editorEl.innerHTML = `
                 <textarea class="kb-learned-textarea" id="${itemId}_ta">${data.content || ''}</textarea>
                 <div class="kb-learned-editor-btns">
-                    <button class="kb-btn-sm kb-btn-save" onclick="window.knowledgeManager.saveLearnedFile('${filePath.replace(/'/g,"\\'")}','${itemId}')">💾 Speichern</button>
-                    <button class="kb-btn-sm" onclick="document.getElementById('${itemId}_editor').style.display='none'">Abbrechen</button>
+                    <button class="kb-btn-sm kb-btn-save" onclick="window.knowledgeManager.saveLearnedFile('${filePath.replace(/'/g,"\\'")}','${itemId}')">${window.t('knowledge.learned.save_btn')}</button>
+                    <button class="kb-btn-sm" onclick="document.getElementById('${itemId}_editor').style.display='none'">${window.t('common.cancel')}</button>
                 </div>`;
         } catch (e) {
             editorEl.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
@@ -370,7 +373,7 @@ class JarvisKnowledgeManager {
                 body: JSON.stringify({ path: filePath, content: ta.value })
             });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            this._showNotification('Gespeichert und neu indiziert ✓', 'success');
+            this._showNotification(window.t('knowledge.learned.saved'), 'success');
             document.getElementById(itemId + '_editor').style.display = 'none';
         } catch (e) {
             this._showNotification('Fehler: ' + e.message, 'error');
@@ -378,7 +381,7 @@ class JarvisKnowledgeManager {
     }
 
     async deleteLearnedFile(filePath) {
-        if (!confirm('Diesen gelernten Eintrag löschen?')) return;
+        if (!confirm(window.t('knowledge.learned.delete_confirm'))) return;
         try {
             const resp = await fetch('/api/knowledge/files', {
                 method: 'DELETE',
@@ -389,7 +392,7 @@ class JarvisKnowledgeManager {
                 body: JSON.stringify({ path: filePath })
             });
             if (!resp.ok) { const err = await resp.json(); throw new Error(err.error || 'HTTP ' + resp.status); }
-            this._showNotification('Eintrag gelöscht', 'success');
+            this._showNotification(window.t('knowledge.learned.deleted'), 'success');
             // Liste und Stats neu laden
             const listEl = document.getElementById('kb-learned-list');
             if (listEl) listEl.style.display = 'none';
@@ -426,20 +429,20 @@ class JarvisKnowledgeManager {
         if (!el) return;
 
         if (!folders || folders.length === 0) {
-            el.innerHTML = '<div class="kb-empty">Keine Ordner konfiguriert</div>';
+            el.innerHTML = `<div class="kb-empty">${window.t('knowledge.no_folders')}</div>`;
             return;
         }
 
         el.innerHTML = folders.map((f, idx) => `
             <div class="kb-folder-item" id="kb-folder-item-${idx}">
                 <div class="kb-folder-header">
-                    <button class="kb-folder-toggle" title="Dateien anzeigen"
+                    <button class="kb-folder-toggle" title="${window.t('knowledge.folder_files_title')}"
                         onclick="window.knowledgeManager.toggleFolder(${idx}, '${f.path}')">
                         <span class="kb-folder-icon">${f.exists ? '📁' : '⚠️'}</span>
                         <span class="kb-folder-path" title="${f.path}">${f.path}</span>
                         <span class="kb-folder-arrow" id="kb-arrow-${idx}">▶</span>
                     </button>
-                    <button class="kb-btn-remove" data-folder="${f.path}" title="Ordner entfernen"
+                    <button class="kb-btn-remove" data-folder="${f.path}" title="${window.t('knowledge.folder_remove_title')}"
                         onclick="window.knowledgeManager.removeFolder('${f.path}')">✕</button>
                 </div>
                 <div class="kb-folder-files" id="kb-files-${idx}" style="display:none;"></div>
@@ -459,7 +462,7 @@ class JarvisKnowledgeManager {
             return;
         }
 
-        filesEl.innerHTML = '<div class="kb-files-loading">Lädt…</div>';
+        filesEl.innerHTML = `<div class="kb-files-loading">${window.t('knowledge.loading')}</div>`;
         filesEl.style.display = 'block';
         if (arrowEl) arrowEl.textContent = '▼';
 
@@ -472,23 +475,31 @@ class JarvisKnowledgeManager {
 
             const folderData = data.find(d => d.folder === folderPath);
             if (!folderData || !folderData.exists) {
-                filesEl.innerHTML = '<div class="kb-files-empty">Ordner existiert nicht</div>';
+                filesEl.innerHTML = `<div class="kb-files-empty">${window.t('knowledge.folder_not_exists')}</div>`;
                 return;
             }
             if (!folderData.files || folderData.files.length === 0) {
-                filesEl.innerHTML = '<div class="kb-files-empty">Keine Dateien gefunden</div>';
+                filesEl.innerHTML = `<div class="kb-files-empty">${window.t('knowledge.no_files')}</div>`;
                 return;
             }
 
-            filesEl.innerHTML = folderData.files.map(f => `
+            filesEl.innerHTML = folderData.files.map(f => {
+                const safePath = f.path.replace(/'/g, "\\'");
+                const isText = /\.(txt|md|json|yaml|yml|csv|log|xml|html|htm|py|js|ts|sh|cfg|ini|toml|rst|tex)$/i.test(f.name);
+                const viewBtn = isText
+                    ? `<button class="kb-btn-view-file" title="${window.t('knowledge.file_view_title') || 'Inhalt anzeigen'}"
+                            onclick="window.knowledgeManager.viewFile('${safePath}', '${f.name}')">👁</button>`
+                    : '';
+                return `
                 <div class="kb-file-item" id="kb-file-${btoa(f.path).replace(/[^a-zA-Z0-9]/g, '')}">
                     <span class="kb-file-icon">📄</span>
                     <span class="kb-file-name" title="${f.path}">${f.name}</span>
                     <span class="kb-file-size">${f.size}</span>
-                    <button class="kb-btn-delete-file" title="Datei löschen"
-                        onclick="window.knowledgeManager.deleteFile('${f.path.replace(/'/g, "\\'")}', ${idx}, '${folderPath}')">✕</button>
-                </div>
-            `).join('');
+                    ${viewBtn}
+                    <button class="kb-btn-delete-file" title="${window.t('knowledge.file_delete_title')}"
+                        onclick="window.knowledgeManager.deleteFile('${safePath}', ${idx}, '${folderPath}')">✕</button>
+                </div>`;
+            }).join('');
         } catch (e) {
             filesEl.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
         }
@@ -497,7 +508,7 @@ class JarvisKnowledgeManager {
     // ─── Datei löschen ──────────────────────────────────────────────
 
     async deleteFile(filePath, folderIdx, folderPath) {
-        if (!confirm(`Datei "${filePath.split('/').pop()}" wirklich löschen?`)) return;
+        if (!confirm(window.t('knowledge.file_delete_confirm').replace('{name}', filePath.split('/').pop()))) return;
 
         try {
             const resp = await fetch('/api/knowledge/files', {
@@ -512,7 +523,7 @@ class JarvisKnowledgeManager {
                 const err = await resp.json();
                 throw new Error(err.error || 'HTTP ' + resp.status);
             }
-            this._showNotification('Datei gelöscht', 'success');
+            this._showNotification(window.t('knowledge.file_deleted'), 'success');
             // Ordner-Inhalt neu laden
             const filesEl = document.getElementById(`kb-files-${folderIdx}`);
             if (filesEl) filesEl.style.display = 'none';
@@ -520,6 +531,57 @@ class JarvisKnowledgeManager {
             await this.fetchStats();
         } catch (e) {
             this._showNotification('Fehler: ' + e.message, 'error');
+        }
+    }
+
+    // ─── Datei anzeigen ──────────────────────────────────────────────
+
+    async viewFile(filePath, fileName) {
+        // Vorherigen Modal entfernen
+        document.getElementById('kb-file-view-modal')?.remove();
+
+        const modal = document.createElement('div');
+        modal.id = 'kb-file-view-modal';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+        modal.innerHTML = `
+            <div style="background:var(--bg-glass);border:1px solid var(--border-color);border-radius:12px;max-width:800px;width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border-color);">
+                    <span style="font-weight:600;font-size:0.9rem;color:var(--text-primary);">📄 ${fileName}</span>
+                    <button id="kb-file-view-close" style="background:none;border:none;color:var(--text-secondary);font-size:1.2rem;cursor:pointer;padding:2px 6px;border-radius:4px;" title="${window.t('common.close') || 'Schließen'}">✕</button>
+                </div>
+                <div id="kb-file-view-body" style="padding:16px;overflow:auto;flex:1;font-family:monospace;font-size:0.8rem;line-height:1.5;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">
+                    <div style="text-align:center;padding:20px;color:var(--text-muted);">Lade…</div>
+                </div>
+                <div style="padding:10px 16px;border-top:1px solid var(--border-color);display:flex;justify-content:flex-end;">
+                    <button id="kb-file-view-close2" style="padding:6px 16px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-glass);color:var(--text-primary);cursor:pointer;font-size:0.85rem;">${window.t('common.close') || 'Schließen'}</button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+
+        const close = () => modal.remove();
+        modal.querySelector('#kb-file-view-close').onclick  = close;
+        modal.querySelector('#kb-file-view-close2').onclick = close;
+        modal.addEventListener('click', e => { if (e.target === modal) close(); });
+        document.addEventListener('keydown', function esc(e) {
+            if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
+        });
+
+        try {
+            const resp = await fetch(`/api/knowledge/file_read?path=${encodeURIComponent(filePath)}`, {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            const data = await resp.json();
+            const body = modal.querySelector('#kb-file-view-body');
+            if (data.ok) {
+                body.textContent = data.content;
+            } else {
+                body.style.color = 'var(--error, #f87171)';
+                body.textContent = data.error || 'Fehler beim Laden';
+            }
+        } catch (e) {
+            const body = modal.querySelector('#kb-file-view-body');
+            body.style.color = 'var(--error, #f87171)';
+            body.textContent = 'Fehler: ' + e.message;
         }
     }
 
@@ -544,7 +606,7 @@ class JarvisKnowledgeManager {
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
             input.value = '';
-            this._showNotification('Ordner hinzugefügt', 'success');
+            this._showNotification(window.t('knowledge.folder_added'), 'success');
             await this.fetchStats();
         } catch (e) {
             this._showNotification('Fehler: ' + e.message, 'error');
@@ -552,7 +614,7 @@ class JarvisKnowledgeManager {
     }
 
     async removeFolder(folder) {
-        if (!confirm(`Ordner "${folder}" aus der Knowledge Base entfernen?`)) return;
+        if (!confirm(window.t('knowledge.folder_remove_confirm').replace('{folder}', folder))) return;
 
         try {
             const newFolders = await this._buildNewFolderList(folder, 'remove');
@@ -566,7 +628,7 @@ class JarvisKnowledgeManager {
             });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
-            this._showNotification('Ordner entfernt', 'success');
+            this._showNotification(window.t('knowledge.folder_removed'), 'success');
             await this.fetchStats();
         } catch (e) {
             this._showNotification('Fehler: ' + e.message, 'error');
@@ -602,9 +664,9 @@ class JarvisKnowledgeManager {
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const result = await resp.json();
             if (result.started === false) {
-                this._showNotification(result.message || 'Läuft bereits', 'info');
+                this._showNotification(result.message || window.t('knowledge.already_running'), 'info');
             } else {
-                this._showNotification('Indizierung gestartet...', 'success');
+                this._showNotification(window.t('knowledge.indexing_started'), 'success');
                 this._startProgressPolling();
             }
         } catch (e) {
@@ -683,10 +745,10 @@ class JarvisKnowledgeManager {
         else if (count) count.textContent = grand > 0 ? `${done} / ${grand}` : '';
 
         if (label) {
-            if (p.phase === 'Fertig')      label.textContent = '✓ Indizierung abgeschlossen';
-            else if (p.phase === 'Fehler') label.textContent = '❌ Fehler bei der Indizierung';
-            else if (p.running)            label.textContent = 'Indizierung läuft...';
-            else                           label.textContent = 'Indizierung bereit';
+            if (p.phase === 'Fertig')      label.textContent = window.t('knowledge.indexing_done');
+            else if (p.phase === 'Fehler') label.textContent = window.t('knowledge.indexing_error_label');
+            else if (p.running)            label.textContent = window.t('knowledge.indexing_running');
+            else                           label.textContent = window.t('knowledge.indexing_ready');
         }
 
         // Dateien + Indiziert-Zähler live aktualisieren während Indizierung läuft
@@ -707,9 +769,9 @@ class JarvisKnowledgeManager {
         if (!el) return;
         const GREEN = '#34d399', YELLOW = '#f59e0b', GREY = '#94a3b8';
         const isVector = phase.toLowerCase().includes('vektor');
-        const label = isVector ? 'Vektor-DB' : 'Dateiinhalt';
+        const label = isVector ? window.t('knowledge.vektor_db') : window.t('knowledge.file_content');
         el.innerHTML = `<span style="color:${YELLOW};font-weight:600;">${label}</span>`
-                     + ` <span style="color:${GREY}">(wird indiziert…)</span>`;
+                     + ` <span style="color:${GREY}">(${window.t('knowledge.indexing_progress')})</span>`;
     }
 
     // ─── WebDAV ───────────────────────────────────────────────────────
@@ -739,7 +801,7 @@ class JarvisKnowledgeManager {
                 if (userEl) userEl.textContent = data.username || 'jarvis';
                 const passEl = document.getElementById('kb-webdav-pass');
                 if (passEl) passEl.textContent = data.password || 'jarvis';
-                if (sharesEl) sharesEl.textContent = 'Lokaler Ordner: ' + (data.shares || []).join(', ');
+                if (sharesEl) sharesEl.textContent = window.t('knowledge.webdav_local_folder') + (data.shares || []).join(', ');
             }
         } catch (e) {}
     }
@@ -747,7 +809,7 @@ class JarvisKnowledgeManager {
     async saveWebdavCredentials() {
         const user = document.getElementById('kb-webdav-new-user')?.value.trim();
         const pass = document.getElementById('kb-webdav-new-pass')?.value;
-        if (!user && !pass) { this._showNotification('Bitte Benutzername oder Passwort eingeben', 'error'); return; }
+        if (!user && !pass) { this._showNotification(window.t('knowledge.webdav_fill_error'), 'error'); return; }
         try {
             const body = { enabled: true };
             if (user) body.username = user;
@@ -762,7 +824,7 @@ class JarvisKnowledgeManager {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
-            this._showNotification('Gespeichert – Server wird neu gestartet…', 'success');
+            this._showNotification(window.t('knowledge.webdav_saved'), 'success');
             document.getElementById('kb-webdav-new-user').value = '';
             document.getElementById('kb-webdav-new-pass').value = '';
         } catch (e) {
@@ -783,12 +845,12 @@ class JarvisKnowledgeManager {
             });
             if (details) details.style.display = enabled ? '' : 'none';
             this._showNotification(
-                enabled ? 'WebDAV aktiviert (Server-Neustart noetig)' : 'WebDAV deaktiviert',
+                enabled ? window.t('knowledge.webdav_enabled_msg') : window.t('knowledge.webdav_disabled_msg'),
                 'success'
             );
             if (enabled) await this.initWebDAV();
         } catch (e) {
-            this._showNotification('WebDAV-Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('knowledge.webdav_error').replace('{msg}', e.message), 'error');
         }
     }
 
@@ -823,22 +885,22 @@ class JarvisKnowledgeManager {
         const list = document.getElementById('kb-mount-list');
         if (!list) return;
         if (!mounts || mounts.length === 0) {
-            list.innerHTML = '<div class="kb-hint" style="margin:0;">Keine Freigaben konfiguriert</div>';
+            list.innerHTML = `<div class="kb-hint" style="margin:0;">${window.t('knowledge.no_shares')}</div>`;
             return;
         }
         list.innerHTML = mounts.map((m, i) => `
             <div class="kb-mount-item-wrap">
                 <div class="kb-mount-item">
-                    <span class="kb-mount-status ${m.active ? 'active' : 'inactive'}" title="${m.active ? 'Verbunden' : 'Getrennt'}"></span>
+                    <span class="kb-mount-status ${m.active ? 'active' : 'inactive'}" title="${m.active ? window.t('knowledge.share_connected_title') : window.t('knowledge.share_disconnected_title')}"></span>
                     <span class="kb-mount-type">${m.type}</span>
                     <span class="kb-mount-source" title="${m.source}">${m.source}</span>
-                    <button class="btn-icon btn-small" title="${m.active ? 'Trennen' : 'Verbinden'}"
+                    <button class="btn-icon btn-small" title="${m.active ? window.t('knowledge.share_disconnect_title') : window.t('knowledge.share_connect_title')}"
                         onclick="window.knowledgeManager.toggleMount(${i}, ${!m.active})">
                         ${m.active ? '⏏' : '▶'}
                     </button>
-                    <button class="btn-icon btn-small" title="Bearbeiten"
+                    <button class="btn-icon btn-small" title="${window.t('knowledge.share_edit_title')}"
                         onclick="window.knowledgeManager.showEditMount(${i})">✏️</button>
-                    <button class="btn-icon btn-small" title="Entfernen"
+                    <button class="btn-icon btn-small" title="${window.t('knowledge.share_remove_title')}"
                         onclick="window.knowledgeManager.removeMount(${i})">✕</button>
                 </div>
                 <div class="kb-mount-edit-form" id="kb-mount-edit-${i}" style="display:none;">
@@ -847,12 +909,12 @@ class JarvisKnowledgeManager {
                         <option value="nfs" ${m.type==='nfs'?'selected':''}>NFS</option>
                         <option value="webdav" ${m.type==='webdav'?'selected':''}>WebDAV</option>
                     </select>
-                    <input type="text" class="kb-input kb-mount-edit-source" value="${m.source}" placeholder="//server/freigabe oder server:/pfad" />
-                    <input type="text" class="kb-input kb-mount-edit-user" value="${m.username||''}" placeholder="Benutzername (optional)" />
-                    <input type="password" class="kb-input kb-mount-edit-pass" placeholder="Passwort (leer = unverändert)" />
+                    <input type="text" class="kb-input kb-mount-edit-source" value="${m.source}" placeholder="${window.t('knowledge.share_source_ph')}" />
+                    <input type="text" class="kb-input kb-mount-edit-user" value="${m.username||''}" placeholder="${window.t('knowledge.share_user_ph')}" />
+                    <input type="password" class="kb-input kb-mount-edit-pass" placeholder="${window.t('knowledge.share_pass_unchanged_ph')}" />
                     <div class="kb-mount-actions">
-                        <button class="kb-btn-action" onclick="window.knowledgeManager.saveEditMount(${i})">Speichern</button>
-                        <button class="kb-btn-secondary" onclick="document.getElementById('kb-mount-edit-${i}').style.display='none'">Abbrechen</button>
+                        <button class="kb-btn-action" onclick="window.knowledgeManager.saveEditMount(${i})">${window.t('knowledge.share_save_btn')}</button>
+                        <button class="kb-btn-secondary" onclick="document.getElementById('kb-mount-edit-${i}').style.display='none'">${window.t('common.cancel')}</button>
                     </div>
                 </div>
             </div>
@@ -873,7 +935,7 @@ class JarvisKnowledgeManager {
         const username = form.querySelector('.kb-mount-edit-user').value.trim();
         const passEl  = form.querySelector('.kb-mount-edit-pass');
         const password = passEl.value; // leer = wird im Backend nicht geändert wenn wir das so implementieren
-        if (!source) { this._showNotification('Quelle darf nicht leer sein', 'error'); return; }
+        if (!source) { this._showNotification(window.t('knowledge.share_source_empty'), 'error'); return; }
         try {
             const resp = await fetch(`/api/knowledge/mounts/${idx}`, {
                 method: 'PUT',
@@ -887,7 +949,7 @@ class JarvisKnowledgeManager {
                 const err = await resp.json();
                 throw new Error(err.error || 'Fehler');
             }
-            this._showNotification('Freigabe aktualisiert', 'success');
+            this._showNotification(window.t('knowledge.share_updated'), 'success');
             await this.fetchMounts();
         } catch (e) {
             this._showNotification('Fehler: ' + e.message, 'error');
@@ -901,7 +963,7 @@ class JarvisKnowledgeManager {
         const password = document.getElementById('kb-mount-pass')?.value;
 
         if (!source) {
-            this._showNotification('Bitte Quelle angeben', 'error');
+            this._showNotification(window.t('knowledge.share_source_required'), 'error');
             return;
         }
 
@@ -922,7 +984,7 @@ class JarvisKnowledgeManager {
             document.getElementById('kb-mount-source').value = '';
             document.getElementById('kb-mount-user').value = '';
             document.getElementById('kb-mount-pass').value = '';
-            this._showNotification('Freigabe hinzugefuegt', 'success');
+            this._showNotification(window.t('knowledge.share_added'), 'success');
             await this.fetchMounts();
             await this.fetchStats();
         } catch (e) {
@@ -941,7 +1003,7 @@ class JarvisKnowledgeManager {
                 const err = await resp.json();
                 throw new Error(err.error || 'Fehler');
             }
-            this._showNotification(mount ? 'Freigabe verbunden' : 'Freigabe getrennt', 'success');
+            this._showNotification(mount ? window.t('knowledge.share_mounted') : window.t('knowledge.share_unmounted'), 'success');
             await this.fetchMounts();
             await this.fetchStats();
         } catch (e) {
@@ -950,13 +1012,13 @@ class JarvisKnowledgeManager {
     }
 
     async removeMount(idx) {
-        if (!confirm('Freigabe entfernen?')) return;
+        if (!confirm(window.t('knowledge.share_remove_confirm'))) return;
         try {
             await fetch(`/api/knowledge/mounts/${idx}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
-            this._showNotification('Freigabe entfernt', 'success');
+            this._showNotification(window.t('knowledge.share_removed'), 'success');
             await this.fetchMounts();
         } catch (e) {
             this._showNotification('Fehler: ' + e.message, 'error');

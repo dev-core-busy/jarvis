@@ -691,3 +691,33 @@ body {
 }
 .eye-btn svg { width: 20px; height: 20px; }
 .eye-btn:hover { opacity: .8; }
+
+/* ═══════════════════════════════════════════════════════════════
+   LANGUAGE TOGGLE (DE/EN)
+   ═══════════════════════════════════════════════════════════════ */
+.lang-toggle {
+    display: flex;
+    gap: 2px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 2px;
+}
+.lang-toggle-btn {
+    background: transparent;
+    border: none;
+    color: rgba(224,224,240,0.45);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 3px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.lang-toggle-btn:hover { color: #e0e0f0; }
+.lang-toggle-btn.active {
+    background: rgba(155,89,182,0.35);
+    color: #e0e0f0;
+}
+.lang-toggle.header-lang { border-color: rgba(255,255,255,0.08); }

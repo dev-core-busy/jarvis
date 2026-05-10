@@ -35,6 +35,7 @@ private data class WsOutgoing(
     val text: String,
     val token: String,
     val agent_id: String? = null,
+    val lang: String = "de",
 )
 
 @Singleton
@@ -73,12 +74,13 @@ class JarvisWebSocket @Inject constructor(
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
-    fun sendTask(text: String, agentId: String = "") {
+    fun sendTask(text: String, agentId: String = "", lang: String = "de") {
         val msg = WsOutgoing(
             type = "task",
             text = text,
             token = apiKey,
             agent_id = agentId.ifBlank { null },
+            lang = lang,
         )
         val payload = json.encodeToString(msg)
         ws?.send(payload) ?: Log.w(TAG, "sendTask: WebSocket nicht verbunden")

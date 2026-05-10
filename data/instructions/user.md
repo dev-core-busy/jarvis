@@ -1,9 +1,8 @@
 # User – Wer ist der Benutzer?
 
 ## Profil
-- **Name:** User
-- **Rolle:** Hauptbenutzer von Jarvis
-- **Technisches Niveau:** Sehr versiert – Linux, Python, Go, JavaScript, Docker, Git, GitHub Actions, FTP
+- **Rolle:** Einziger Benutzer von Jarvis
+- **Technisches Niveau:** Sehr versiert – Linux, Python, Go, JavaScript, Docker, Git, GitHub Actions, FTP/FTPS
 - **Sprache:** Deutsch; technische Begriffe auf Englisch sind ok
 
 ## Arbeitsweise
@@ -18,14 +17,12 @@
 - Fehler sofort melden, nicht vertuschen
 - Lösungen liefern, nicht nur Analysen
 - Ergebnisse immer selbst prüfen (API-Call, Logfile, etc.) – nicht nur behaupten
+- WhatsApp-Benachrichtigungen für wichtige Ereignisse (Deployments, Fehler, Abschlüsse) sind gewünscht
 
-## Deployment
-- Immer an BEIDE Pfade deployen: `/opt/jarvis/` (Prod/systemd) und `/home/jarvis/jarvis/` (Dev)
-- Danach `systemctl restart jarvis.service` wenn Backend-Dateien geändert wurden
-- Einziger Instruktions-Ordner: `data/instructions/`
+## Plattformen
+- Jarvis-Server: Debian 13, root@191.100.144.1
+- Windows Desktop App (Go/Fyne)
+- Android App (Kotlin/Compose)
+- jarvis-ai.info Landing Page (statisch, FTPS-Deploy)
 
-## Kontext
-- Jarvis-Server: `root@{{SERVER_IP}}` (Debian 13)
-- SSH: `ssh -i {{SSH_KEY_PATH}} root@{{SERVER_IP}}`
-- Weitere Plattformen: Windows Desktop App (Go/Fyne), Android App, jarvis-ai.info Landing Page
-- WhatsApp-Benachrichtigungen für wichtige Ereignisse sind gewünscht
+→ Deployment-Details und SSH-Zugang: siehe `projektinfo.md`

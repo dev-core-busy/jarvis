@@ -46,6 +46,9 @@ import info.jarvisai.app.data.prefs.BG_PHOTO
 import info.jarvisai.app.ui.theme.JarvisGreen
 import info.jarvisai.app.ui.theme.JarvisPurple
 
+// Übersetzungs-Helfer: gibt DE- oder EN-String zurück je nach lang.
+private fun s(de: String, en: String, lang: String) = if (lang == "en") en else de
+
 // ─── Stimmen-Auswahl-Dialoge ──────────────────────────────────────────────────
 
 @Composable
@@ -56,10 +59,11 @@ private fun ServerVoicePickerDialog(
     onSelect: (String) -> Unit,
     onPreview: (String) -> Unit,
     onDismiss: () -> Unit,
+    lang: String = "de",
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Server-Stimme (edge-tts)") },
+        title = { Text(s("Server-Stimme (edge-tts)", "Server Voice (edge-tts)", lang)) },
         text = {
             when {
                 loadingVoices -> Box(
@@ -67,7 +71,8 @@ private fun ServerVoicePickerDialog(
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator() }
                 voices.isEmpty() -> Text(
-                    "Keine Stimmen verfügbar.\nServer-URL und API-Key prüfen.",
+                    s("Keine Stimmen verfügbar.\nServer-URL und API-Key prüfen.",
+                      "No voices available.\nCheck server URL and API key.", lang),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 else -> LazyColumn(modifier = Modifier.height(360.dp)) {
@@ -108,7 +113,7 @@ private fun ServerVoicePickerDialog(
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.VolumeUp,
-                                    contentDescription = "Vorschau",
+                                    contentDescription = s("Vorschau", "Preview", lang),
                                     modifier = Modifier.size(18.dp),
                                 )
                             }
@@ -120,7 +125,7 @@ private fun ServerVoicePickerDialog(
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Schließen") }
+            TextButton(onClick = onDismiss) { Text(s("Schließen", "Close", lang)) }
         },
     )
 }
@@ -132,10 +137,11 @@ private fun AndroidVoicePickerDialog(
     onSelect: (String) -> Unit,
     onPreview: (String) -> Unit,
     onDismiss: () -> Unit,
+    lang: String = "de",
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Android-Stimme") },
+        title = { Text(s("Android-Stimme", "Android Voice", lang)) },
         text = {
             LazyColumn(modifier = Modifier.height(360.dp)) {
                 item {
@@ -152,7 +158,7 @@ private fun AndroidVoicePickerDialog(
                         Text("♂", color = Color(0xFF64B5F6), fontSize = 14.sp,
                             modifier = Modifier.width(20.dp))
                         Text(
-                            text = "Automatisch (beste männliche Stimme)",
+                            text = s("Automatisch (beste männliche Stimme)", "Automatic (best male voice)", lang),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = if (isAuto) FontWeight.Bold else FontWeight.Normal,
                             color = if (isAuto) JarvisPurple else Color.Unspecified,
@@ -164,7 +170,7 @@ private fun AndroidVoicePickerDialog(
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.VolumeUp,
-                                contentDescription = "Vorschau",
+                                contentDescription = s("Vorschau", "Preview", lang),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -209,7 +215,7 @@ private fun AndroidVoicePickerDialog(
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.VolumeUp,
-                                contentDescription = "Vorschau",
+                                contentDescription = s("Vorschau", "Preview", lang),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -220,7 +226,7 @@ private fun AndroidVoicePickerDialog(
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Schließen") }
+            TextButton(onClick = onDismiss) { Text(s("Schließen", "Close", lang)) }
         },
     )
 }
@@ -334,6 +340,7 @@ fun SettingsScreen(
     var showServerVoicePicker by remember { mutableStateOf(false) }
     var showAndroidVoicePicker by remember { mutableStateOf(false) }
     var domainPassword by remember { mutableStateOf("") }
+    val lang = settings.uiLang
 
 
     LaunchedEffect(showServerVoicePicker) {
@@ -354,10 +361,10 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
+                title = { Text(s("Einstellungen", "Settings", lang)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = s("Zurück", "Back", lang))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -374,6 +381,7 @@ fun SettingsScreen(
                 onSelect      = { voice -> viewModel.onServerTtsVoiceChange(voice); showServerVoicePicker = false },
                 onPreview     = viewModel::previewServerVoice,
                 onDismiss     = { showServerVoicePicker = false },
+                lang          = lang,
             )
         }
         if (showAndroidVoicePicker) {
@@ -383,6 +391,7 @@ fun SettingsScreen(
                 onSelect     = { voice -> viewModel.onAndroidTtsVoiceChange(voice); showAndroidVoicePicker = false },
                 onPreview    = viewModel::previewAndroidVoice,
                 onDismiss    = { showAndroidVoicePicker = false },
+                lang         = lang,
             )
         }
         Column(
@@ -395,21 +404,21 @@ fun SettingsScreen(
         ) {
 
             // ── Verbindung ────────────────────────────────────────────────
-            SectionHeader("Verbindung")
+            SectionHeader(s("Verbindung", "Connection", lang))
 
             OutlinedTextField(
                 value = settings.serverUrl,
                 onValueChange = viewModel::onServerUrlChange,
                 label = { Text("Server-URL") },
-                placeholder = { Text("z.B. https://100.x.x.x") },
-                supportingText = { Text("Tailscale- oder lokale Adresse des Jarvis-Servers") },
+                placeholder = { Text(s("z.B. https://100.x.x.x", "e.g. https://100.x.x.x", lang)) },
+                supportingText = { Text(s("Tailscale- oder lokale Adresse des Jarvis-Servers", "Tailscale or local address of the Jarvis server", lang)) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
 
             // ── Domain-Anmeldung (optional) ───────────────────────────
-            SectionHeader("Domain-Anmeldung (optional)")
+            SectionHeader(s("Domain-Anmeldung (optional)", "Domain Login (optional)", lang))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -418,15 +427,15 @@ fun SettingsScreen(
                 OutlinedTextField(
                     value = settings.domainUsername,
                     onValueChange = viewModel::onDomainUsernameChange,
-                    label = { Text("Benutzername") },
-                    placeholder = { Text("user@domain.com oder DOMAIN\\user") },
+                    label = { Text(s("Benutzername", "Username", lang)) },
+                    placeholder = { Text(s("user@domain.com oder DOMAIN\\user", "user@domain.com or DOMAIN\\user", lang)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
                 OutlinedTextField(
                     value = domainPassword,
                     onValueChange = { domainPassword = it },
-                    label = { Text("Passwort") },
+                    label = { Text(s("Passwort", "Password", lang)) },
                     visualTransformation = if (domainPasswordVisible) VisualTransformation.None
                                            else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -435,7 +444,7 @@ fun SettingsScreen(
                             Icon(
                                 imageVector = if (domainPasswordVisible) Icons.Filled.VisibilityOff
                                               else Icons.Filled.Visibility,
-                                contentDescription = if (domainPasswordVisible) "Verbergen" else "Anzeigen",
+                                contentDescription = if (domainPasswordVisible) s("Verbergen", "Hide", lang) else s("Anzeigen", "Show", lang),
                             )
                         }
                     },
@@ -445,7 +454,8 @@ fun SettingsScreen(
             }
 
             Text(
-                "Format: DOMAIN\\Benutzername  oder  benutzername@domain.com",
+                s("Format: DOMAIN\\Benutzername  oder  benutzername@domain.com",
+                  "Format: DOMAIN\\username  or  username@domain.com", lang),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             )
@@ -464,12 +474,12 @@ fun SettingsScreen(
                     if (loginState == "loading") {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     } else {
-                        Text("Anmelden")
+                        Text(s("Anmelden", "Sign In", lang))
                     }
                 }
                 when {
                     loginState == "ok" -> Text(
-                        "✓ Angemeldet!",
+                        s("✓ Angemeldet!", "✓ Signed in!", lang),
                         color = JarvisGreen,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -479,7 +489,7 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     settings.domainUsername.isNotBlank() && settings.apiKey.isNotBlank() -> Text(
-                        "✓ Aktive Domain-Sitzung",
+                        s("✓ Aktive Domain-Sitzung", "✓ Active domain session", lang),
                         color = JarvisGreen,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -487,7 +497,7 @@ fun SettingsScreen(
             }
 
             Text(
-                "── oder API-Key direkt eingeben ──",
+                s("── oder API-Key direkt eingeben ──", "── or enter API key directly ──", lang),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -498,8 +508,8 @@ fun SettingsScreen(
                 value = settings.apiKey,
                 onValueChange = viewModel::onApiKeyChange,
                 label = { Text("Agent API-Key") },
-                placeholder = { Text("AGENT_API_KEY aus Jarvis-Einstellungen") },
-                supportingText = { Text("Einstellungen → Agent API-Key in der Jarvis Web-UI") },
+                placeholder = { Text(s("AGENT_API_KEY aus Jarvis-Einstellungen", "AGENT_API_KEY from Jarvis settings", lang)) },
+                supportingText = { Text(s("Einstellungen → Agent API-Key in der Jarvis Web-UI", "Settings → Agent API-Key in the Jarvis Web-UI", lang)) },
                 visualTransformation = if (apiKeyVisible) VisualTransformation.None
                                        else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -508,7 +518,7 @@ fun SettingsScreen(
                         Icon(
                             imageVector = if (apiKeyVisible) Icons.Filled.VisibilityOff
                                           else Icons.Filled.Visibility,
-                            contentDescription = if (apiKeyVisible) "Verbergen" else "Anzeigen",
+                            contentDescription = if (apiKeyVisible) s("Verbergen", "Hide", lang) else s("Anzeigen", "Show", lang),
                         )
                     }
                 },
@@ -519,11 +529,12 @@ fun SettingsScreen(
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
             // ── Spracheingabe ─────────────────────────────────────────────
-            SectionHeader("Spracheingabe")
+            SectionHeader(s("Spracheingabe", "Voice Input", lang))
 
             SettingRow(
-                label = "Automatisch senden",
-                description = "Transkribierter Text wird nach der Sprech-Pause direkt gesendet",
+                label = s("Automatisch senden", "Auto-send", lang),
+                description = s("Transkribierter Text wird nach der Sprech-Pause direkt gesendet",
+                                 "Transcribed text is sent automatically after the speech pause", lang),
             ) {
                 Switch(
                     checked = settings.autoSendVoice,
@@ -532,8 +543,9 @@ fun SettingsScreen(
             }
 
             SliderRow(
-                label = "Sprech-Pause",
-                description = "Stille-Dauer bis die Spracheingabe automatisch abgeschlossen wird",
+                label = s("Sprech-Pause", "Speech pause", lang),
+                description = s("Stille-Dauer bis die Spracheingabe automatisch abgeschlossen wird",
+                                 "Silence duration until voice input is automatically completed", lang),
                 value = settings.voiceSilenceMs.toFloat(),
                 onValueChange = { viewModel.onVoiceSilenceChange(it.toInt()) },
                 valueRange = 500f..2000f,
@@ -545,7 +557,7 @@ fun SettingsScreen(
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
             // ── Hintergrund ───────────────────────────────────────────────
-            SectionHeader("Hintergrund")
+            SectionHeader(s("Hintergrund", "Background", lang))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -553,8 +565,8 @@ fun SettingsScreen(
             ) {
                 listOf(
                     BG_GRADIENT to "Gradient",
-                    BG_PHOTO    to "Foto",
-                    BG_COLOR    to "Farbe",
+                    BG_PHOTO    to s("Foto", "Photo", lang),
+                    BG_COLOR    to s("Farbe", "Color", lang),
                 ).forEach { (type, label) ->
                     FilterChip(
                         selected = settings.backgroundType == type,
@@ -581,22 +593,22 @@ fun SettingsScreen(
                     ) {
                         Text(
                             when (settings.backgroundImageUri) {
-                                BG_DEFAULT_URI -> "Jarvis Standard-Bild"
-                                ""             -> "Foto auswählen"
-                                else           -> "Foto ändern"
+                                BG_DEFAULT_URI -> s("Jarvis Standard-Bild", "Jarvis default image", lang)
+                                ""             -> s("Foto auswählen", "Choose photo", lang)
+                                else           -> s("Foto ändern", "Change photo", lang)
                             }
                         )
                     }
                     if (settings.backgroundImageUri != BG_DEFAULT_URI) {
                         OutlinedButton(onClick = { viewModel.onBackgroundImageUriChange(BG_DEFAULT_URI) }) {
-                            Text("Standard")
+                            Text(s("Standard", "Default", lang))
                         }
                     }
                 }
 
                 SliderRow(
-                    label = "Helligkeit",
-                    description = "Transparenz des Hintergrundbilds",
+                    label = s("Helligkeit", "Brightness", lang),
+                    description = s("Transparenz des Hintergrundbilds", "Transparency of the background image", lang),
                     value = settings.backgroundAlpha,
                     onValueChange = viewModel::onBackgroundAlphaChange,
                     valueRange = 0.1f..1.0f,
@@ -606,7 +618,7 @@ fun SettingsScreen(
 
             if (settings.backgroundType == BG_COLOR) {
                 Text(
-                    "Hintergrundfarbe auswählen",
+                    s("Hintergrundfarbe auswählen", "Choose background color", lang),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -642,11 +654,12 @@ fun SettingsScreen(
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
             // ── Anzeige ───────────────────────────────────────────────────
-            SectionHeader("Anzeige")
+            SectionHeader(s("Anzeige", "Display", lang))
 
             SettingRow(
-                label = "Avatar verwenden",
-                description = "Iron Man Helm mit Sprachausgabe im Chat-Hintergrund",
+                label = s("Avatar verwenden", "Use Avatar", lang),
+                description = s("Iron Man Helm mit Sprachausgabe im Chat-Hintergrund",
+                                 "Iron Man helmet with speech output in the chat background", lang),
             ) {
                 Switch(
                     checked = settings.avatarType == AvatarType.IRONMAN,
@@ -655,8 +668,9 @@ fun SettingsScreen(
             }
 
             SettingRow(
-                label = "Server-Stimme (edge-tts)",
-                description = "Sprachausgabe via Jarvis-Server (höhere Qualität)",
+                label = s("Server-Stimme (edge-tts)", "Server Voice (edge-tts)", lang),
+                description = s("Sprachausgabe via Jarvis-Server (höhere Qualität)",
+                                 "Speech output via Jarvis server (higher quality)", lang),
             ) {
                 Switch(
                     checked = settings.serverTtsEnabled,
@@ -671,7 +685,7 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text("Server-Stimme", style = MaterialTheme.typography.bodyMedium)
+                        Text(s("Server-Stimme", "Server Voice", lang), style = MaterialTheme.typography.bodyMedium)
                         Text(
                             settings.serverTtsVoice.ifBlank { "de-DE-ConradNeural" },
                             style = MaterialTheme.typography.bodySmall,
@@ -679,7 +693,7 @@ fun SettingsScreen(
                         )
                     }
                     OutlinedButton(onClick = { showServerVoicePicker = true }) {
-                        Text("Wählen")
+                        Text(s("Wählen", "Select", lang))
                     }
                 }
             } else {
@@ -689,24 +703,49 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text("Android-Stimme", style = MaterialTheme.typography.bodyMedium)
+                        Text(s("Android-Stimme", "Android Voice", lang), style = MaterialTheme.typography.bodyMedium)
                         Text(
                             if (settings.androidTtsVoice.isBlank())
-                                "Automatisch (beste männliche Stimme)"
+                                s("Automatisch (beste männliche Stimme)", "Automatic (best male voice)", lang)
                             else settings.androidTtsVoice,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     OutlinedButton(onClick = { showAndroidVoicePicker = true }) {
-                        Text("Wählen")
+                        Text(s("Wählen", "Select", lang))
                     }
                 }
             }
 
+            // ── Sprache / Language ────────────────────────────────────────
+            SectionHeader("Sprache / Language")
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf("de" to "Deutsch", "en" to "English").forEach { (code, label) ->
+                    FilterChip(
+                        selected = settings.uiLang == code,
+                        onClick = { viewModel.onUiLangChange(code) },
+                        label = { Text(label) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            Text(
+                s("Bestimmt die Sprache der KI-Antworten und der App-Oberfläche",
+                  "Sets the language of AI responses and the app interface", lang),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
             SettingRow(
-                label = "Debug-Modus",
-                description = "Nachrichten als Volltext, fett/weiß — zeigt alle LLM-Details",
+                label = s("Debug-Modus", "Debug mode", lang),
+                description = s("Nachrichten als Volltext, fett/weiß — zeigt alle LLM-Details",
+                                 "Messages as full text, bold/white — shows all LLM details", lang),
             ) {
                 Switch(
                     checked = settings.debugMode,
@@ -728,11 +767,12 @@ fun SettingsScreen(
                     containerColor = if (saved) JarvisGreen else MaterialTheme.colorScheme.primary,
                 ),
             ) {
-                Text(if (saved) "✓ Gespeichert" else stringResource(R.string.settings_save))
+                Text(if (saved) s("✓ Gespeichert", "✓ Saved", lang) else s("Speichern", "Save", lang))
             }
             if (!canSave) {
                 Text(
-                    "Bitte API-Key eingeben oder via Domain-Anmeldung anmelden",
+                    s("Bitte API-Key eingeben oder via Domain-Anmeldung anmelden",
+                      "Please enter an API key or sign in via domain login", lang),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(top = 4.dp),

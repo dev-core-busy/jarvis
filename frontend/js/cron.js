@@ -41,28 +41,28 @@ window.cronManager = new (class JarvisCronManager {
             <!-- ═══ Sektion: Cron-Aufgaben ═══ -->
             <div class="kb-section">
                 <div class="kb-section-header kb-collapse-header" id="cron-sect-jobs-hdr">
-                    <h3>Cron-Aufgaben</h3>
+                    <h3>${window.t('cron.section_jobs')}</h3>
                     <span class="sk-openclaw-toggle" id="cron-sect-jobs-tog">▶</span>
                 </div>
                 <div id="cron-sect-jobs-body" style="display:none;">
-                    <p class="kb-hint" style="margin-top:6px;">Jarvis führt die angegebene Aufgabe automatisch zum geplanten Zeitpunkt aus.</p>
+                    <p class="kb-hint" style="margin-top:6px;">${window.t('cron.jobs_hint')}</p>
                     <div style="display:flex;gap:6px;margin:8px 0 10px;">
-                        <button id="cron-add-btn"     class="kb-btn-action">+ Neue Aufgabe</button>
+                        <button id="cron-add-btn"     class="kb-btn-action">${window.t('cron.add_job_btn')}</button>
                         <button id="cron-refresh-btn" class="kb-btn-secondary" title="Aktualisieren">🔄</button>
                     </div>
 
                     <!-- Formular -->
                     <div id="cron-form-wrap" style="display:none;margin:10px 0;padding:14px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:8px;">
-                        <h3 id="cron-form-title" style="margin:0 0 12px;font-size:.9rem;">Neue Aufgabe</h3>
+                        <h3 id="cron-form-title" style="margin:0 0 12px;font-size:.9rem;">${window.t('cron.form_title_new')}</h3>
 
                         <div class="kb-form-grid-2">
                             <div class="kb-form-field">
-                                <label class="kb-label" for="cron-label">Bezeichnung</label>
+                                <label class="kb-label" for="cron-label">${window.t('cron.label_label')}</label>
                                 <input id="cron-label" type="text" placeholder="z.B. Täglicher Server-Report" class="kb-input">
                             </div>
                             <div class="kb-form-field">
                                 <label class="kb-label" for="cron-schedule">
-                                    Zeitplan (Cron) &ensp;<a href="https://crontab.guru" target="_blank" style="color:var(--accent);">Hilfe ↗</a>
+                                    ${window.t('cron.schedule_label')} &ensp;<a href="https://crontab.guru" target="_blank" style="color:var(--accent);">Hilfe ↗</a>
                                 </label>
                                 <input id="cron-schedule" type="text" placeholder="0 8 * * *" class="kb-input">
                                 <small id="cron-schedule-preview" style="display:block;margin-top:4px;font-size:.75rem;opacity:.6;min-height:1em;"></small>
@@ -84,12 +84,12 @@ window.cronManager = new (class JarvisCronManager {
                         <div class="kb-form-footer">
                             <div class="kb-form-footer-left">
                                 <label class="kb-form-checkbox-label">
-                                    <input id="cron-enabled" type="checkbox" checked> Aktiv
+                                    <input id="cron-enabled" type="checkbox" checked> ${window.t('common.active')}
                                 </label>
                             </div>
                             <div class="kb-form-footer-right">
-                                <button id="cron-cancel-btn" class="kb-btn-secondary">Abbrechen</button>
-                                <button id="cron-save-btn"   class="kb-btn-action">Speichern</button>
+                                <button id="cron-cancel-btn" class="kb-btn-secondary">${window.t('cron.cancel_btn')}</button>
+                                <button id="cron-save-btn"   class="kb-btn-action">${window.t('cron.save_btn')}</button>
                             </div>
                         </div>
                         <p id="cron-form-error" class="kb-form-error" style="display:none;"></p>
@@ -105,38 +105,38 @@ window.cronManager = new (class JarvisCronManager {
             <!-- ═══ Sektion: Datei-Watcher ═══ -->
             <div class="kb-section">
                 <div class="kb-section-header kb-collapse-header" id="cron-sect-watch-hdr">
-                    <h3>Datei-Watcher</h3>
+                    <h3>${window.t('cron.section_watcher')}</h3>
                     <span class="sk-openclaw-toggle" id="cron-sect-watch-tog">▶</span>
                 </div>
                 <div id="cron-sect-watch-body" style="display:none;">
-                    <p class="kb-hint" style="margin-top:6px;">Jarvis reagiert automatisch, wenn Dateien in einem Ordner erstellt, geändert oder gelöscht werden.</p>
+                    <p class="kb-hint" style="margin-top:6px;">${window.t('cron.watcher_hint')}</p>
                     <div style="display:flex;gap:6px;margin:8px 0 10px;">
-                        <button id="watcher-add-btn"     class="kb-btn-action">+ Neuer Watcher</button>
+                        <button id="watcher-add-btn"     class="kb-btn-action">${window.t('cron.add_watcher_btn')}</button>
                         <button id="watcher-refresh-btn" class="kb-btn-secondary" title="Aktualisieren">🔄</button>
                     </div>
 
                     <!-- Watcher-Formular -->
                     <div id="watcher-form-wrap" style="display:none;margin:10px 0;padding:14px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:8px;">
-                        <h3 id="watcher-form-title" style="margin:0 0 12px;font-size:.9rem;">Neuer Watcher</h3>
+                        <h3 id="watcher-form-title" style="margin:0 0 12px;font-size:.9rem;">${window.t('cron.form_title_new_watcher')}</h3>
 
                         <div class="kb-form-grid-2">
                             <div class="kb-form-field">
-                                <label class="kb-label" for="watcher-label">Bezeichnung</label>
+                                <label class="kb-label" for="watcher-label">${window.t('cron.label_label')}</label>
                                 <input id="watcher-label" type="text" placeholder="z.B. PDF Inbox" class="kb-input">
                             </div>
                             <div class="kb-form-field">
-                                <label class="kb-label" for="watcher-path">Ordnerpfad</label>
+                                <label class="kb-label" for="watcher-path">${window.t('cron.watcher_path')}</label>
                                 <input id="watcher-path" type="text" placeholder="/home/jarvis/inbox" class="kb-input">
                             </div>
                         </div>
 
                         <div class="kb-form-grid-2">
                             <div class="kb-form-field">
-                                <label class="kb-label" for="watcher-pattern">Datei-Muster</label>
+                                <label class="kb-label" for="watcher-pattern">${window.t('cron.watcher_pattern')}</label>
                                 <input id="watcher-pattern" type="text" placeholder="*.pdf" class="kb-input">
                             </div>
                             <div class="kb-form-field">
-                                <label class="kb-label">Ereignisse</label>
+                                <label class="kb-label">${window.t('cron.watcher_events')}</label>
                                 <div style="display:flex;gap:12px;padding-top:4px;">
                                     ${['created','modified','deleted','moved'].map(ev =>
                                         `<label class="kb-form-checkbox-label">
@@ -158,12 +158,12 @@ window.cronManager = new (class JarvisCronManager {
                         <div class="kb-form-footer">
                             <div class="kb-form-footer-left">
                                 <label class="kb-form-checkbox-label">
-                                    <input id="watcher-enabled" type="checkbox" checked> Aktiv
+                                    <input id="watcher-enabled" type="checkbox" checked> ${window.t('common.active')}
                                 </label>
                             </div>
                             <div class="kb-form-footer-right">
-                                <button id="watcher-cancel-btn" class="kb-btn-secondary">Abbrechen</button>
-                                <button id="watcher-save-btn"   class="kb-btn-action">Speichern</button>
+                                <button id="watcher-cancel-btn" class="kb-btn-secondary">${window.t('cron.cancel_btn')}</button>
+                                <button id="watcher-save-btn"   class="kb-btn-action">${window.t('cron.save_btn')}</button>
                             </div>
                         </div>
                         <p id="watcher-form-error" class="kb-form-error" style="display:none;"></p>
@@ -285,7 +285,7 @@ window.cronManager = new (class JarvisCronManager {
         const el = document.getElementById('cron-list');
         if (!el) return;
         if (!this._jobs.length) {
-            el.innerHTML = `<p class="kb-empty" style="text-align:center;padding:16px 0;">Noch keine geplanten Aufgaben. Klicke <strong>+ Neue Aufgabe</strong> um loszulegen.</p>`;
+            el.innerHTML = `<p class="kb-empty" style="text-align:center;padding:16px 0;">${window.t('cron.no_jobs')}</p>`;
             return;
         }
         el.innerHTML = `<div class="kb-folder-list">${this._jobs.map(job => {
@@ -308,7 +308,7 @@ window.cronManager = new (class JarvisCronManager {
                     </div>
                 </div>
                 <div class="cron-item-task">${this._esc(job.task)}</div>
-                <div class="cron-item-meta">Letzter Lauf: ${lastRun}${job.last_result ? ` · ${this._esc(job.last_result.substring(0,80))}${job.last_result.length>80?'…':''}` : ''}</div>
+                <div class="cron-item-meta">${window.t('cron.last_run')}: ${lastRun}${job.last_result ? ` · ${this._esc(job.last_result.substring(0,80))}${job.last_result.length>80?'…':''}` : ''}</div>
             </div>`;
         }).join('')}</div>`;
 
@@ -321,7 +321,7 @@ window.cronManager = new (class JarvisCronManager {
     _showJobForm(job = null) {
         this._expandSection('cron-sect-jobs-body', 'cron-sect-jobs-tog', 'cron-sect-jobs-hdr');
         this._editingJobId = job ? job.id : null;
-        document.getElementById('cron-form-title').textContent  = job ? 'Aufgabe bearbeiten' : 'Neue Aufgabe';
+        document.getElementById('cron-form-title').textContent  = job ? window.t('cron.form_title_edit') : window.t('cron.form_title_new');
         document.getElementById('cron-label').value    = job ? job.label : '';
         document.getElementById('cron-schedule').value = job ? job.cron  : '';
         document.getElementById('cron-task').value     = job ? job.task  : '';
@@ -351,7 +351,7 @@ window.cronManager = new (class JarvisCronManager {
         const enabled = document.getElementById('cron-enabled').checked;
         const errEl   = document.getElementById('cron-form-error');
         if (!label || !cron || !task) {
-            errEl.textContent  = 'Bitte alle Felder ausfüllen.';
+            errEl.textContent  = window.t('cron.error_fill_all');
             errEl.style.display = 'block';
             return;
         }
@@ -372,7 +372,7 @@ window.cronManager = new (class JarvisCronManager {
             }
             this._hideJobForm();
             this._loadJobs();
-            this._notify('✅ Aufgabe gespeichert');
+            this._notify(window.t('cron.job_saved'));
         } catch (e) {
             errEl.textContent = 'Netzwerkfehler: ' + e.message;
             errEl.style.display = 'block';
@@ -380,10 +380,10 @@ window.cronManager = new (class JarvisCronManager {
     }
 
     async _deleteJob(id) {
-        if (!confirm('Aufgabe wirklich löschen?')) return;
+        if (!confirm(window.t('cron.delete_job_confirm'))) return;
         await fetch(`/api/cron/${id}`, { method: 'DELETE', headers: _authHeaders() });
         this._loadJobs();
-        this._notify('🗑️ Aufgabe gelöscht', 'info');
+        this._notify(window.t('cron.job_deleted'), 'info');
     }
 
     async _toggleJob(id, enabled) {
@@ -425,7 +425,7 @@ window.cronManager = new (class JarvisCronManager {
         const el = document.getElementById('watcher-list');
         if (!el) return;
         if (!this._watchers.length) {
-            el.innerHTML = `<p class="kb-empty" style="text-align:center;padding:16px 0;">Noch keine Datei-Watcher. Klicke <strong>+ Neuer Watcher</strong> um loszulegen.</p>`;
+            el.innerHTML = `<p class="kb-empty" style="text-align:center;padding:16px 0;">${window.t('cron.no_watchers')}</p>`;
             return;
         }
         el.innerHTML = `<div class="kb-folder-list">${this._watchers.map(w => {
@@ -449,7 +449,7 @@ window.cronManager = new (class JarvisCronManager {
                 </div>
                 <div class="cron-item-path">📂 ${this._esc(w.path)}</div>
                 <div class="cron-item-task">${this._esc(w.task)}</div>
-                <div class="cron-item-meta">Letzter Trigger: ${lastTrig}${w.last_result ? ` · ${this._esc(w.last_result.substring(0,80))}${w.last_result.length>80?'…':''}` : ''}</div>
+                <div class="cron-item-meta">${window.t('cron.last_trigger')}: ${lastTrig}${w.last_result ? ` · ${this._esc(w.last_result.substring(0,80))}${w.last_result.length>80?'…':''}` : ''}</div>
             </div>`;
         }).join('')}</div>`;
 
@@ -461,7 +461,7 @@ window.cronManager = new (class JarvisCronManager {
     _showWatcherForm(w = null) {
         this._expandSection('cron-sect-watch-body', 'cron-sect-watch-tog', 'cron-sect-watch-hdr');
         this._editingWatcherId = w ? w.id : null;
-        document.getElementById('watcher-form-title').textContent = w ? 'Watcher bearbeiten' : 'Neuer Watcher';
+        document.getElementById('watcher-form-title').textContent = w ? window.t('cron.form_title_edit_watcher') : window.t('cron.form_title_new_watcher');
         document.getElementById('watcher-label').value   = w ? w.label : '';
         document.getElementById('watcher-path').value    = w ? w.path  : '';
         document.getElementById('watcher-pattern').value = w ? (w.pattern || '*') : '*.pdf';
@@ -495,12 +495,12 @@ window.cronManager = new (class JarvisCronManager {
         const errEl   = document.getElementById('watcher-form-error');
 
         if (!label || !path || !task) {
-            errEl.textContent = 'Bitte Bezeichnung, Pfad und Aufgabe ausfüllen.';
+            errEl.textContent = window.t('cron.watcher_error_fill');
             errEl.style.display = 'block';
             return;
         }
         if (!events.length) {
-            errEl.textContent = 'Mindestens ein Ereignis auswählen.';
+            errEl.textContent = window.t('cron.watcher_error_events');
             errEl.style.display = 'block';
             return;
         }
@@ -521,7 +521,7 @@ window.cronManager = new (class JarvisCronManager {
             }
             this._hideWatcherForm();
             this._loadWatchers();
-            this._notify('✅ Watcher gespeichert');
+            this._notify(window.t('cron.watcher_saved'));
         } catch (e) {
             errEl.textContent = 'Netzwerkfehler: ' + e.message;
             errEl.style.display = 'block';
@@ -529,10 +529,10 @@ window.cronManager = new (class JarvisCronManager {
     }
 
     async _deleteWatcher(id) {
-        if (!confirm('Watcher wirklich löschen?')) return;
+        if (!confirm(window.t('cron.delete_watcher_confirm'))) return;
         await fetch(`/api/watchers/${id}`, { method: 'DELETE', headers: _authHeaders() });
         this._loadWatchers();
-        this._notify('🗑️ Watcher gelöscht', 'info');
+        this._notify(window.t('cron.watcher_deleted'), 'info');
     }
 
     async _toggleWatcher(id, enabled) {

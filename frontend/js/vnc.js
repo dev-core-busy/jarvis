@@ -47,7 +47,7 @@ class JarvisVNC {
         this.connected     = true;
         this._removeOverlay();
 
-        this.statusEl.textContent = 'Verbinde…';
+        this.statusEl.textContent = window.t('panel.desktop.connecting');
         this.statusEl.style.color = '#f59e0b';
 
         // Desktop-Sperre beim VNC-Verbinden automatisch aufheben
@@ -72,7 +72,7 @@ class JarvisVNC {
             const data = await res.json();
             if (data.vnc_available) {
                 // x11vnc läuft – Verbindung als OK annehmen
-                this.statusEl.textContent = 'Verbunden';
+                this.statusEl.textContent = window.t('panel.desktop.connected');
                 this.statusEl.style.color = '#10b981';
             } else {
                 this._handleConnectFailure();
@@ -116,7 +116,7 @@ class JarvisVNC {
 
         this._clearTimers();
         this._showWaitingOverlay();
-        this.statusEl.textContent = 'Warte auf Desktop…';
+        this.statusEl.textContent = window.t('panel.desktop.loading');
         this.statusEl.style.color = '#f59e0b';
 
         let attempts = 0;
@@ -175,11 +175,11 @@ class JarvisVNC {
         this._overlay.innerHTML = `
             <div class="vnc-reconnect-content">
                 <div class="vnc-reconnect-spinner"></div>
-                <div class="vnc-reconnect-text">Warte auf Desktop…</div>
-                <div class="vnc-reconnect-sub">Verbindung wird automatisch hergestellt</div>
+                <div class="vnc-reconnect-text">${window.t('panel.desktop.loading')}</div>
+                <div class="vnc-reconnect-sub">${window.t('panel.desktop.auto_connect')}</div>
                 <button class="vnc-reconnect-btn"
                     onclick="window._jarvisVNC && window._jarvisVNC._retryNow()">
-                    Jetzt versuchen
+                    ${window.t('panel.desktop.retry_now')}
                 </button>
             </div>
         `;

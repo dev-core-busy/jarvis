@@ -45,6 +45,8 @@ type Config struct {
 	AvatarVisible bool `json:"avatar_visible"`   // Iron Man Avatar anzeigen
 	// Domain-Anmeldung (LDAP) – nur Benutzername wird gespeichert, niemals das Passwort
 	DomainUsername string `json:"domain_username"`
+	// UI-Sprache und Antwortsprache des Agenten: "de" | "en"
+	UILang string `json:"ui_lang"`
 }
 
 // AppVersion wird beim Build via -ldflags="-X main.AppVersion=0.8xx" gesetzt.
@@ -73,6 +75,7 @@ var defaultConfig = Config{
 	AutoSendVoice:   true,
 	AvatarVisible:   true,
 	TTSEnabled:      true,
+	UILang:          "de",
 }
 
 func configPath() string {

@@ -43,6 +43,7 @@ data class JarvisSettings(
     val androidTtsVoice: String = "de-de-x-deb-network",
     val domainUsername: String = "",
     val ttsEnabled: Boolean = true,   // Sprachausgabe global an/aus
+    val uiLang: String = "de",        // UI-Sprache + Antwortsprache: "de" | "en"
     // domainPassword wird NICHT gespeichert (Sicherheit)
 )
 
@@ -74,6 +75,7 @@ class SettingsDataStore @Inject constructor(
     private val KEY_ANDROID_TTS_VOICE  = stringPreferencesKey("android_tts_voice")
     private val KEY_DOMAIN_USERNAME    = stringPreferencesKey("domain_username")
     private val KEY_TTS_ENABLED        = booleanPreferencesKey("tts_enabled")
+    private val KEY_UI_LANG            = stringPreferencesKey("ui_lang")
 
     val settings: Flow<JarvisSettings> = context.dataStore.data.map { prefs ->
         JarvisSettings(
@@ -97,6 +99,7 @@ class SettingsDataStore @Inject constructor(
             androidTtsVoice     = prefs[KEY_ANDROID_TTS_VOICE] ?: "de-de-x-deb-network",
             domainUsername      = prefs[KEY_DOMAIN_USERNAME] ?: "",
             ttsEnabled          = prefs[KEY_TTS_ENABLED] ?: true,
+            uiLang              = prefs[KEY_UI_LANG] ?: "de",
         )
     }
 
@@ -121,6 +124,7 @@ class SettingsDataStore @Inject constructor(
             prefs[KEY_ANDROID_TTS_VOICE]  = settings.androidTtsVoice
             prefs[KEY_DOMAIN_USERNAME]    = settings.domainUsername
             prefs[KEY_TTS_ENABLED]        = settings.ttsEnabled
+            prefs[KEY_UI_LANG]            = settings.uiLang
         }
     }
 }

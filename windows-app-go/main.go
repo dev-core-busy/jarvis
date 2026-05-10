@@ -78,6 +78,7 @@ func main() {
 	a.SetIcon(fyne.NewStaticResource("jarvis_icon", jarvisIconPNG))
 
 	cfg := LoadConfig()
+	appLang = cfg.UILang // i18n: UI-Sprache aus Config setzen
 
 	// Gespeicherte TTS-Stimme aktivieren
 	SetTTSVoice(cfg.TTSVoice)
@@ -152,15 +153,16 @@ func main() {
 			return
 		}
 		ja.chat.AddMessage(RoleStatus,
-			fmt.Sprintf("🔄 Update v%s verfügbar – wird automatisch heruntergeladen...", info.VersionName))
+			fmt.Sprintf(t("🔄 Update v%s verfügbar – wird automatisch heruntergeladen...",
+				"🔄 Update v%s available – downloading automatically..."), info.VersionName))
 
 		err := PerformUpdate(info, func(progress float64) {
 			pct := int(progress * 100)
-			ja.chat.SetStatus(fmt.Sprintf("⬇ Update wird geladen... %d%%", pct))
+			ja.chat.SetStatus(fmt.Sprintf(t("⬇ Update wird geladen... %d%%", "⬇ Downloading update... %d%%"), pct))
 		})
 		if err != nil {
 			ja.chat.AddMessage(RoleStatus,
-				fmt.Sprintf("❌ Update fehlgeschlagen: %s", err.Error()))
+				fmt.Sprintf(t("❌ Update fehlgeschlagen: %s", "❌ Update failed: %s"), err.Error()))
 		}
 		// Bei Erfolg beendet PerformUpdate die App selbst
 	}()
@@ -178,11 +180,12 @@ func (ja *JarvisApp) toggleDebug() {
 	ja.cfg.DebugMode = ja.debugMode
 	_ = ja.cfg.Save()
 	if ja.debugMode {
-		ja.chat.AddMessage(RoleStatus, "🔍 Debug-Modus AN – alle Agent-Nachrichten sichtbar")
+		ja.chat.AddMessage(RoleStatus, t("🔍 Debug-Modus AN – alle Agent-Nachrichten sichtbar", "🔍 Debug mode ON – all agent messages visible"))
 		ja.chat.AddMessage(RoleStatus,
-			"Avatar-Farben: 🟡 Gold = Bereit  🟢 Grün = Hört  🔵 Cyan = Spricht")
+			t("Avatar-Farben: 🟡 Gold = Bereit  🟢 Grün = Hört  🔵 Cyan = Spricht",
+				"Avatar colors: 🟡 Gold = Ready  🟢 Green = Listening  🔵 Cyan = Speaking"))
 	} else {
-		ja.chat.AddMessage(RoleStatus, "🔍 Debug-Modus AUS")
+		ja.chat.AddMessage(RoleStatus, t("🔍 Debug-Modus AUS", "🔍 Debug mode OFF"))
 	}
 }
 
@@ -222,7 +225,7 @@ func (ja *JarvisApp) startDialogIfNeeded() {
 		return
 	}
 	if ja.audio == nil {
-		ja.chat.AddMessage(RoleStatus, "❌ Audio nicht verfügbar – Mikrofon konnte nicht initialisiert werden")
+		ja.chat.AddMessage(RoleStatus, t("❌ Audio nicht verfügbar – Mikrofon konnte nicht initialisiert werden", "❌ Audio unavailable – microphone could not be initialized"))
 		return
 	}
 	if ja.dialog == nil {
@@ -241,8 +244,9 @@ func (ja *JarvisApp) startDialogIfNeeded() {
 	}
 	if err := ja.dialog.Start(); err != nil {
 		ja.chat.AddMessage(RoleStatus,
-			"❌ Mikrofon-Fehler: "+err.Error()+
-				"\n→ Bitte Mikrofonzugriff in den Windows-Datenschutzeinstellungen prüfen")
+			t("❌ Mikrofon-Fehler: ", "❌ Microphone error: ")+err.Error()+
+				t("\n→ Bitte Mikrofonzugriff in den Windows-Datenschutzeinstellungen prüfen",
+					"\n→ Please check microphone access in Windows Privacy Settings"))
 		return
 	}
 
@@ -286,7 +290,7 @@ func (ja *JarvisApp) runDialogLoop(d *DialogController) {
 
 			// Spracheingabe → lokal transkribieren
 			ja.avatar.SetMode(ModeIdle)
-			ja.chat.SetStatus("🎤 Transkribiere…")
+			ja.chat.SetStatus(t("🎤 Transkribiere…", "🎤 Transcribing…"))
 			transcript, err := TranscribeLocalSafe(wav)
 			ja.chat.SetStatus("")
 			if err != nil || transcript == "" {
@@ -346,7 +350,7 @@ func (ja *JarvisApp) reconnect() {
 		ja.textDictating = false
 		ja.textDictCtrl = nil
 		if transcript == "" {
-			ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
+			ja.chat.AddMessage(RoleStatus, t("🎤 Spracheingabe nicht erkannt", "🎤 Voice input not recognized"))
 			return
 		}
 		ja.chat.SetInput(transcript)
@@ -356,7 +360,7 @@ func (ja *JarvisApp) reconnect() {
 	}
 	ja.chat.OnSend = func(text string) {
 		ja.chat.AddMessage(RoleUser, text)
-		ja.ws.SendTask(text)
+		ja.ws.SendTask(text, ja.cfg.UILang)
 	}
 	ja.chat.OnMicButton = func() {
 		if ja.textDictating {
@@ -415,7 +419,7 @@ func (ja *JarvisApp) onConnected(connected bool) {
 		ja.chat.SetInputEnabled(false)
 		// "Verbindung getrennt" nur im Debug-Modus – der Header zeigt es ohnehin an.
 		if ja.debugMode {
-			ja.chat.AddMessage(RoleStatus, "Verbindung getrennt – erneuter Versuch…")
+			ja.chat.AddMessage(RoleStatus, t("Verbindung getrennt – erneuter Versuch…", "Connection lost – retrying…"))
 		}
 		ja.avatar.SetMode(ModeIdle)
 		if ja.dialog != nil {
@@ -517,9 +521,9 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 			info += fmt.Sprintf(" · %d → %d Tokens", msg.InputTokens, msg.OutputTokens)
 		}
 		if msg.Steps > 0 {
-			stepWord := "Schritte"
+			stepWord := t("Schritte", "steps")
 			if msg.Steps == 1 {
-				stepWord = "Schritt"
+				stepWord = t("Schritt", "step")
 			}
 			info += fmt.Sprintf(" · %d %s", msg.Steps, stepWord)
 		}
@@ -648,7 +652,7 @@ func (ja *JarvisApp) openChatWindowLocked() {
 // startTextDictation startet die Spracheingabe im Text-Modus (einmalig).
 func (ja *JarvisApp) startTextDictation() {
 	if ja.audio == nil {
-		ja.chat.AddMessage(RoleStatus, "❌ Audio nicht verfügbar")
+		ja.chat.AddMessage(RoleStatus, t("❌ Audio nicht verfügbar", "❌ Audio unavailable"))
 		return
 	}
 	if ja.cfg.DialogMode {
@@ -673,7 +677,7 @@ func (ja *JarvisApp) startTextDictation() {
 	ja.textDictating = true
 	ja.chat.SetMicActive(true)
 	if ja.debugMode {
-		ja.chat.AddMessage(RoleStatus, "🎤 [1] Mikrofon gestartet – sprechen Sie jetzt…")
+		ja.chat.AddMessage(RoleStatus, t("🎤 [1] Mikrofon gestartet – sprechen Sie jetzt…", "🎤 [1] Microphone started – speak now…"))
 	}
 
 	dc := NewDialogController(ja.audio, ja.ws, ja)
@@ -747,7 +751,7 @@ func (ja *JarvisApp) startTextDictation() {
 		}
 
 		// Lokale STT – TranscribeLocalSafe hat harten 25s-Timeout (Windows-Pipe-Bug)
-		ja.chat.SetStatus("🎤 Transkribiere…")
+		ja.chat.SetStatus(t("🎤 Transkribiere…", "🎤 Transcribing…"))
 		transcript, err := TranscribeLocalSafe(wav)
 		autoSend := ja.cfg.AutoSendVoice
 		ja.chat.SetStatus("")
@@ -760,7 +764,7 @@ func (ja *JarvisApp) startTextDictation() {
 			return
 		}
 		if transcript == "" {
-			ja.chat.AddMessage(RoleStatus, "🎤 Spracheingabe nicht erkannt")
+			ja.chat.AddMessage(RoleStatus, t("🎤 Spracheingabe nicht erkannt", "🎤 Voice input not recognized"))
 			return
 		}
 		if ja.debugMode {

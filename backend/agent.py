@@ -309,6 +309,13 @@ KRITISCH – Autonomie-Regeln:
         except Exception as e:
             print(f"[AGENT {self.agent_id}] WaitForChangeTool nicht geladen: {e}", flush=True)
 
+        # Reflection / Selbstverbesserungs-System
+        try:
+            from backend.tools.reflection import ReflectionTool
+            self._tool_instances.append(ReflectionTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] ReflectionTool nicht geladen: {e}", flush=True)
+
         # MCP-Tools laden (externe Tool-Server)
         try:
             from backend.mcp_client import mcp_manager
@@ -361,7 +368,7 @@ KRITISCH – Autonomie-Regeln:
             )
         return declarations
 
-    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = ""):
+    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de"):
         """Führt eine Aufgabe aus – der Agent-Loop."""
         import sys
         from backend.telemetry import tracer
@@ -443,6 +450,13 @@ KRITISCH – Autonomie-Regeln:
         else:
             # Browser: Linux-Desktop ist der richtige Kontext (Standard)
             pass
+
+        # Antwortsprache gemäß UI-Sprache des Nutzers
+        if lang == "en":
+            system_prompt += (
+                "\n\nIMPORTANT – RESPONSE LANGUAGE: The user's interface is set to English. "
+                "Always respond in English, regardless of the language used in system instructions or tool results."
+            )
 
         # LDAP-Benutzer: Eingeschränkter Systemprompt-Zusatz
         if not self.is_sub_agent and username and username not in _LOCAL_PRIVILEGED_USERS:

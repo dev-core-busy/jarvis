@@ -3,11 +3,10 @@
  * Cached statische Assets für Offline-Nutzung.
  */
 
-const CACHE_NAME = 'jarvis-pwa-v1';
+const CACHE_NAME = 'jarvis-pwa-v3';
 
-// Assets die beim Install gecacht werden
+// Nur wirklich cachbare statische Assets (kein HTML – Server setzt no-store)
 const PRECACHE_ASSETS = [
-  '/chat.html',
   '/static/css/chat.css',
   '/static/js/chat.js',
   '/static/js/websocket.js',
@@ -19,7 +18,6 @@ const PRECACHE_ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      // Graceful: einzelne Fehler beim Precaching nicht abbrechen lassen
       return Promise.allSettled(
         PRECACHE_ASSETS.map((url) =>
           cache.add(url).catch((err) => {
@@ -32,7 +30,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// ─── Activate ──────────────────────────────────────────────────────────────
+// ─── Activate: alte Caches löschen + Clients sofort neu laden ──────────────
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -41,7 +39,12 @@ self.addEventListener('activate', (event) => {
           .filter((key) => key !== CACHE_NAME)
           .map((key) => caches.delete(key))
       )
-    )
+    ).then(() => {
+      // Alle offenen Fenster nach SW-Update neu laden (löscht stale State)
+      return self.clients.matchAll({ type: 'window' }).then((clients) => {
+        clients.forEach((c) => c.navigate(c.url));
+      });
+    })
   );
   self.clients.claim();
 });
@@ -56,7 +59,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Network-First für HTML (immer aktuell), Cache-First für statische Assets
-  const isHtml = url.pathname.endsWith('.html') || url.pathname === '/';
+  const isHtml = url.pathname.endsWith('.html') || url.pathname === '/' || url.pathname === '/chat';
   const isStatic = url.pathname.startsWith('/static/');
 
   if (isHtml) {
@@ -97,5 +100,5 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  event.waitUntil(clients.openWindow('/chat.html'));
+  event.waitUntil(clients.openWindow('/chat'));
 });

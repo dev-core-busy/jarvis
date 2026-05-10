@@ -148,7 +148,7 @@
             if (!el) return;
             const installed = this.skills.filter(s => s.enabled);
             if (installed.length === 0) {
-                el.innerHTML = '<div class="kb-empty">Keine Skills installiert.</div>';
+                el.innerHTML = `<div class="kb-empty">${window.t('skills.none_installed')}</div>`;
                 return;
             }
             el.innerHTML = '';
@@ -182,16 +182,16 @@
                     <span class="sk-item-desc">${skill.description || ''}</span>
                 </div>
                 <div class="sk-item-actions">
-                    <button class="sk-btn sk-btn-info" title="Anleitung anzeigen">${SVG_INFO}</button>
+                    <button class="sk-btn sk-btn-info" title="${window.t('skills.show_info')}">${SVG_INFO}</button>
                     ${hasConfig
-                        ? `<button class="sk-btn sk-btn-cfg" title="Konfigurieren">${SVG_CFG}</button>`
+                        ? `<button class="sk-btn sk-btn-cfg" title="${window.t('skills.cfg_title')}">${SVG_CFG}</button>`
                         : ''}
                     <label class="skill-toggle" title="${isSystem ? 'System-Skill' : 'An / Aus'}">
                         <input type="checkbox" ${skill.enabled ? 'checked' : ''}>
                         <span class="skill-toggle-slider"></span>
                     </label>
                     ${!isSystem
-                        ? `<button class="sk-btn sk-btn-rm" title="Deinstallieren">✕</button>`
+                        ? `<button class="sk-btn sk-btn-rm" title="${window.t('common.delete')}">✕</button>`
                         : ''}
                 </div>`;
 
@@ -268,8 +268,8 @@
             if (filtered.length === 0) {
                 el.innerHTML = `<div class="kb-empty">${
                     available.length === 0
-                        ? 'Alle Skills sind bereits installiert.'
-                        : 'Keine Skills gefunden.'
+                        ? window.t('skills.all_installed')
+                        : window.t('skills.none_found')
                 }</div>`;
                 return;
             }
@@ -292,8 +292,8 @@
                     <span class="sk-item-desc">${skill.description || ''}</span>
                 </div>
                 <div class="sk-item-actions">
-                    <button class="sk-btn sk-btn-info" title="Anleitung anzeigen">${SVG_INFO}</button>
-                    <button class="sk-btn-add">+ Hinzufügen</button>
+                    <button class="sk-btn sk-btn-info" title="${window.t('skills.show_info')}">${SVG_INFO}</button>
+                    <button class="sk-btn-add">${window.t('skills.add_btn')}</button>
                 </div>`;
 
             item.querySelector('.sk-btn-info').addEventListener('click', (e) => {
@@ -322,23 +322,23 @@
             const bodyHTML = this._ocCollapsed ? '' : `
                 <div class="sk-openclaw-body">
                     <p class="sk-openclaw-hint">
-                        Skills durchsuchen, prüfen und bei Bedarf importieren.
+                        ${window.t('skills.mkt_hint') || 'Skills durchsuchen, prüfen und bei Bedarf importieren.'}
                     </p>
-                    <label class="sk-openclaw-label">Welchen Skill suchst du?
-                        <small>(leer = populäre Skills anzeigen)</small>
+                    <label class="sk-openclaw-label">${window.t('skills.mkt_label') || 'Welchen Skill suchst du?'}
+                        <small>${window.t('skills.mkt_label_hint') || '(leer = populäre Skills anzeigen)'}</small>
                     </label>
                     <textarea id="sk-oc-description" class="sk-openclaw-textarea"
-                        placeholder='z. B. "Skill für Telegram" oder "PDF-Analyse"'
+                        placeholder='${window.t('skills.mkt_ph') || 'z. B. "Skill für Telegram" oder "PDF-Analyse"'}'
                         rows="2"></textarea>
                     <button id="sk-oc-search-btn" class="sk-openclaw-btn">
-                        🔍 Skills suchen
+                        🔍 ${window.t('skills.mkt_search_btn') || 'Skills suchen'}
                     </button>
                     <div id="sk-oc-results" class="sk-oc-results"></div>
                 </div>`;
 
             ocEl.innerHTML = `
                 <div class="sk-openclaw-header" id="sk-oc-header">
-                    <span class="sk-openclaw-title">🛒 OpenClaw Marketplace</span>
+                    <span class="sk-openclaw-title">${window.t('skills.marketplace')}</span>
                     <span class="sk-openclaw-toggle">${this._ocCollapsed ? '▶' : '▼'}</span>
                 </div>
                 ${bodyHTML}`;
@@ -386,11 +386,11 @@
                 const data = await resp.json();
                 if (data.local) {
                     statusEl.className = 'sk-openclaw-llm-status sk-openclaw-llm-local';
-                    statusEl.textContent = '🟢 Lokales LLM aktiv – Import verfügbar';
+                    statusEl.textContent = window.t('skills.llm_local');
                     if (importBtn) importBtn.disabled = false;
                 } else {
                     statusEl.className = 'sk-openclaw-llm-status sk-openclaw-llm-cloud';
-                    statusEl.textContent = '⚠ Cloud-LLM aktiv – nur mit lokalem LLM verfügbar';
+                    statusEl.textContent = window.t('skills.llm_cloud');
                     if (importBtn) importBtn.disabled = true;
                 }
             } catch (e) {
@@ -408,7 +408,7 @@
             if (!resultsEl) return;
 
             // Such-Feedback
-            if (searchBtn) { searchBtn.disabled = true; searchBtn.textContent = '⏳ Suche läuft…'; }
+            if (searchBtn) { searchBtn.disabled = true; searchBtn.textContent = window.t('skills.searching'); }
             resultsEl.innerHTML = '<div class="sk-oc-loading">🔍 Suche auf OpenClaw…</div>';
 
             try {
@@ -420,7 +420,7 @@
                 const skills = data.results || [];
 
                 if (skills.length === 0) {
-                    resultsEl.innerHTML = '<div class="sk-oc-empty">Keine Skills gefunden. Versuche andere Suchbegriffe.</div>';
+                    resultsEl.innerHTML = `<div class="sk-oc-empty">${window.t('skills.mkt_none')}</div>`;
                     return;
                 }
 
@@ -449,7 +449,7 @@
                 console.error('OpenClaw Suche Fehler:', e);
                 resultsEl.innerHTML = '<div class="sk-oc-empty">❌ Suche fehlgeschlagen.</div>';
             } finally {
-                if (searchBtn) { searchBtn.disabled = false; searchBtn.textContent = '🔍 Skills suchen'; }
+                if (searchBtn) { searchBtn.disabled = false; searchBtn.textContent = `🔍 ${window.t('skills.mkt_search_btn') || 'Skills suchen'}`; }
             }
         }
 
@@ -485,7 +485,7 @@
                 <div class="sk-import-panel" role="dialog" aria-modal="true">
                     <div class="sk-import-header">
                         <span class="sk-import-title">🛒 OpenClaw Skill Import</span>
-                        <button class="sk-import-close" title="Schließen">✕</button>
+                        <button class="sk-import-close" title="${window.t('common.close')}">✕</button>
                     </div>
                     <div class="sk-import-log" id="sk-import-log">
                         <div class="sk-import-msg sk-import-msg-info">
@@ -503,7 +503,7 @@
                             📋 Skills neu laden
                         </button>
                         <button id="sk-import-close2" class="btn-secondary sk-import-footer-btn">
-                            Schließen
+                            ${window.t('common.close')}
                         </button>
                     </div>
                 </div>`;
@@ -553,7 +553,7 @@
             if (typeof window.sendJarvisTask === 'function') {
                 window.sendJarvisTask(taskText);
             } else {
-                addMsg('⚠ WebSocket nicht verbunden – bitte den Jarvis-Chat öffnen und erneut versuchen.', 'error');
+                addMsg(window.t('skills.ws_error'), 'error');
             }
 
             // Follow-up-Nachricht senden
@@ -614,7 +614,7 @@
             // Tools-HTML
             const toolsHTML = tools.length
                 ? `<div class="sk-info-section">
-                    <div class="sk-info-section-title">Verfügbare Tools (${tools.length})</div>
+                    <div class="sk-info-section-title">${window.t('skills.available_tools')} (${tools.length})</div>
                     <div class="sk-info-tools">
                         ${tools.map(t => `
                         <div class="sk-info-tool">
@@ -639,7 +639,7 @@
             // Setup-HTML
             const setupHTML = help.setup
                 ? `<div class="sk-info-section sk-info-section-setup">
-                    <div class="sk-info-section-title">⚙ Einrichtung</div>
+                    <div class="sk-info-section-title">${window.t('skills.setup')}</div>
                     <p class="sk-info-section-text">${help.setup}</p>
                 </div>`
                 : '';
@@ -647,7 +647,7 @@
             // Notes-HTML
             const notesHTML = help.notes
                 ? `<div class="sk-info-section sk-info-section-notes">
-                    <div class="sk-info-section-title">ℹ Hinweise</div>
+                    <div class="sk-info-section-title">${window.t('skills.notes')}</div>
                     <p class="sk-info-section-text">${help.notes}</p>
                 </div>`
                 : '';
@@ -670,7 +670,7 @@
                                 <span class="sk-info-cat">${catLabel}</span>
                             </div>
                         </div>
-                        <button class="sk-info-close" title="Schließen">✕</button>
+                        <button class="sk-info-close" title="${window.t('common.close')}">✕</button>
                     </div>
                     <div class="sk-info-body">
                         <p class="sk-info-details">${details}</p>
@@ -705,7 +705,7 @@
                 await fetch(`/api/skills/${name}/enable`, {
                     method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
                 });
-                this._notify(`"${name}" aktiviert`, 'success');
+                this._notify(`"${name}" ${window.t('skills.activated')}`, 'success');
                 await this.loadSkills();
                 if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
                 if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
@@ -713,13 +713,13 @@
         }
 
         async _deactivate(name) {
-            if (!confirm(`Skill "${name}" deinstallieren?`)) return;
+            if (!confirm(`"${name}" ${window.t('skills.deinstall_confirm')}`)) return;
             const token = localStorage.getItem('jarvis_token') || '';
             try {
                 await fetch(`/api/skills/${name}/disable`, {
                     method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
                 });
-                this._notify(`"${name}" deinstalliert`, 'success');
+                this._notify(`"${name}" ${window.t('skills.uninstalled')}`, 'success');
                 await this.loadSkills();
                 if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
                 if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
@@ -728,7 +728,7 @@
 
         async _toggle(e, name, enabled, isSystem) {
             if (isSystem && !enabled) {
-                if (!confirm(`"${name}" ist ein System-Skill. Wirklich deaktivieren?`)) {
+                if (!confirm(`"${name}" ${window.t('skills.confirm_disable_system')}`)) {
                     e.target.checked = true; return;
                 }
             }
@@ -789,11 +789,11 @@
             }
             overlay.innerHTML = `
                 <div class="skill-config-dialog">
-                    <h3>Konfiguration: ${name}</h3>
+                    <h3>${window.t('skills.config_title').replace('{name}', name)}</h3>
                     <form id="skill-config-form">${formHTML}</form>
                     <div class="modal-actions">
-                        <button class="btn-primary" id="btn-save-skill-config">Speichern</button>
-                        <button class="btn-secondary" id="btn-cancel-skill-config">Abbrechen</button>
+                        <button class="btn-primary" id="btn-save-skill-config">${window.t('common.save')}</button>
+                        <button class="btn-secondary" id="btn-cancel-skill-config">${window.t('common.cancel')}</button>
                     </div>
                 </div>`;
             document.body.appendChild(overlay);

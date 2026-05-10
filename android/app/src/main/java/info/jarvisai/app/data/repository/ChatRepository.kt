@@ -62,6 +62,9 @@ class ChatRepository @Inject constructor(
     // @Volatile: sicher lesbar vom Main-Thread (sendMessage) und Dispatchers.Default (handleEvent)
     @Volatile private var streamingMsgId: String? = null
 
+    // Aktuelle UI-Sprache – wird aus Settings-Flow befüllt (thread-sicher via @Volatile)
+    @Volatile private var currentLang: String = "de"
+
     // Fallback-Timer: falls server kein agent_event:finished schickt, nach 1.5s auto-finalize
     private var finalizeTimeoutJob: Job? = null
 
@@ -74,6 +77,7 @@ class ChatRepository @Inject constructor(
         loadMessages()
         scope.launch { collectEvents() }
         scope.launch { collectDesktopCommands() }
+        scope.launch { settingsDataStore.settings.collect { currentLang = it.uiLang } }
     }
 
     suspend fun connect() {
@@ -104,7 +108,7 @@ class ChatRepository @Inject constructor(
             withSep + ChatMessage(role = MessageRole.USER, text = text, timestamp = now)
         }
         _isAgentRunning.value = true
-        ws.sendTask(text)
+        ws.sendTask(text, lang = currentLang)
         saveMessages()
     }
 

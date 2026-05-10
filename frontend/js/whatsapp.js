@@ -124,7 +124,7 @@ class JarvisWhatsAppManager {
             if (lastError) {
                 detail.textContent = lastError;
             } else if (state === 'connected') {
-                detail.textContent = 'Bereit für Nachrichten';
+                detail.textContent = window.t('wa.ready');
             } else if (state === 'qr_pending') {
                 detail.textContent = 'Scanne den QR-Code mit deinem Handy';
             } else {

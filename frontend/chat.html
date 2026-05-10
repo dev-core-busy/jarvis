@@ -4,15 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Jarvis Chat</title>
-    <link rel="stylesheet" href="/static/css/chat.css?v=8">
+    <link rel="stylesheet" href="/static/css/chat.css?v=9">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <!-- PWA -->
-    <link rel="manifest" href="/static/manifest.json">
+    <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#7c3aed">
+    <!-- iOS PWA -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Jarvis">
     <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="/static/icons/icon-512.png">
 </head>
 <body>
 
@@ -74,11 +76,12 @@
                 <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang('de')" title="Deutsch">DE</button>
                 <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang('en')" title="English">EN</button>
             </div>
-            <div class="tts-voice-wrap" id="tts-voice-wrap" style="display:none;">
+            <div class="tts-voice-wrap" id="tts-voice-wrap" style="display:none;align-items:center;gap:4px;">
                 <span class="tts-voice-label" data-i18n="chat.voice_label">Stimme</span>
                 <select id="chat-tts-voice" class="tts-voice-select" data-i18n-title="chat.tts_toggle" title="Stimme wählen">
                     <option value="" data-i18n="chat.voice_default">Standard</option>
                 </select>
+                <button id="btn-tts-preview-chat" data-i18n-title="profile.voice_preview" title="Stimme vorhören" style="flex-shrink:0;padding:0 7px;height:30px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font-size:0.85rem;line-height:1;">▶</button>
             </div>
             <button class="btn-theme" id="btn-tts-chat" data-i18n-title="chat.tts_toggle" title="Sprachausgabe ein/aus">
                 <svg id="chat-tts-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
@@ -88,7 +91,7 @@
                     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
                 </svg>
             </button>
-            <button class="btn-theme" id="btn-theme" title="Hell/Dunkel umschalten">
+            <button class="btn-theme" id="btn-theme" data-i18n-title="chat.theme" title="Hell/Dunkel umschalten">
                 <svg id="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                 </svg>
@@ -96,26 +99,26 @@
                     <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
                 </svg>
             </button>
-            <a href="/userchat" class="btn-theme" title="Benutzer-Chat" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
+            <a href="/userchat" class="btn-theme" data-i18n-title="chat.user_chat" title="Benutzer-Chat" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                 </svg>
             </a>
-            <button class="btn-theme" id="btn-cert" title="SSL-Zertifikat">
+            <button class="btn-theme" id="btn-cert" data-i18n-title="chat.ssl_cert" title="SSL-Zertifikat">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                 </svg>
             </button>
-            <button class="btn-totp-setup" id="btn-totp-setup" title="2FA einrichten">🔐</button>
-            <button class="btn-logout" id="btn-logout" title="Abmelden">⏻</button>
+            <button class="btn-totp-setup" id="btn-totp-setup" data-i18n-title="chat.setup_2fa" title="2FA einrichten">🔐</button>
+            <button class="btn-logout" id="btn-logout" data-i18n-title="chat.logout" title="Abmelden">⏻</button>
         </div>
     </header>
 
     <!-- Messages -->
     <div class="messages" id="messages">
         <div class="welcome-msg">
-            <p>Hallo! Ich bin <strong>Jarvis</strong>.</p>
-            <p class="welcome-sub">Wie kann ich dir helfen?</p>
+            <p data-i18n="chat.greeting">Hallo! Ich bin Jarvis.</p>
+            <p class="welcome-sub" data-i18n="chat.greeting_sub">Wie kann ich dir helfen?</p>
         </div>
     </div>
 
@@ -125,14 +128,14 @@
         <div id="ctx-indicator" style="display:none;align-items:center;padding:3px 10px 1px;">
             <span id="ctx-indicator-pill" style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);font-size:0.73rem;color:#a5b4fc;cursor:default;user-select:none;">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                <span id="ctx-indicator-text">Kontext aktiv</span>
-                <button id="ctx-indicator-clear" title="Kontext zurücksetzen" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:rgba(255,255,255,0.4);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()">✕</button>
+                <span id="ctx-indicator-text" data-i18n="chat.ctx_active">Kontext aktiv</span>
+                <button id="ctx-indicator-clear" data-i18n-title="chat.ctx_reset" title="Kontext zurücksetzen" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:rgba(255,255,255,0.4);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()">✕</button>
             </span>
         </div>
         <div class="input-row">
-            <button class="btn-stop hidden" id="btn-stop" title="Agent stoppen">✕</button>
-            <textarea id="msg-input" placeholder="Nachricht eingeben…" rows="1" maxlength="10000"></textarea>
-            <button class="btn-mic" id="btn-mic" title="Spracheingabe">
+            <button class="btn-stop hidden" id="btn-stop" data-i18n-title="chat.stop_agent" title="Agent stoppen">✕</button>
+            <textarea id="msg-input" data-i18n-placeholder="chat.input_ph" placeholder="Nachricht eingeben…" rows="1" maxlength="10000"></textarea>
+            <button class="btn-mic" id="btn-mic" data-i18n-title="chat.mic" title="Spracheingabe">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
                     <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
@@ -140,7 +143,7 @@
                     <line x1="8" y1="23" x2="16" y2="23"/>
                 </svg>
             </button>
-            <button class="btn-send" id="btn-send" disabled title="Senden">
+            <button class="btn-send" id="btn-send" disabled data-i18n-title="chat.send" title="Senden">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
             </button>
         </div>
@@ -239,7 +242,7 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=3"></script>
-<script src="/static/js/chat.js?v=13"></script>
+<script src="/static/js/i18n.js?v=9"></script>
+<script src="/static/js/chat.js?v=17"></script>
 </body>
 </html>

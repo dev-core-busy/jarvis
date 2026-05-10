@@ -2,11 +2,11 @@
   "name": "Jarvis AI Agent",
   "short_name": "Jarvis",
   "description": "Autonomer KI-Agent mit Desktop-Steuerung und WhatsApp-Integration",
-  "start_url": "/chat.html",
+  "start_url": "/chat",
   "display": "standalone",
   "background_color": "#0d1117",
   "theme_color": "#7c3aed",
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "icons": [
     {
       "src": "/static/icons/icon-192.png",
@@ -26,7 +26,7 @@
       "name": "Chat",
       "short_name": "Chat",
       "description": "Jarvis Chat öffnen",
-      "url": "/chat.html",
+      "url": "/chat",
       "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }]
     }
   ],

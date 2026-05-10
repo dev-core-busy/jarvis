@@ -21,7 +21,7 @@
         <div class="banner-content">
             <span class="banner-icon">⚠️</span>
             <span class="banner-text" id="security-banner-text">Verbindung unsicher</span>
-            <button class="btn-banner-action" id="btn-banner-help">Zertifikat installieren</button>
+            <button class="btn-banner-action" id="btn-banner-help" data-i18n="cert.banner.btn">Zertifikat installieren</button>
             <button class="btn-close-banner" id="btn-close-banner">&times;</button>
         </div>
     </div>
@@ -151,7 +151,7 @@
     <div id="cert-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>🔒 Sichere Verbindung einrichten</h2>
+                <h2 data-i18n="cert.modal.title">🔒 Sichere Verbindung einrichten</h2>
                 <button class="btn-icon" id="btn-close-modal">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -169,9 +169,8 @@
                         </svg>
                     </div>
                     <div class="cert-info">
-                        <h3>SSL-Zertifikat installieren</h3>
-                        <p>Damit Browser diese Verbindung als sicher einstufen, muss das Zertifikat importiert werden.
-                        </p>
+                        <h3 data-i18n="cert.h3">SSL-Zertifikat installieren</h3>
+                        <p data-i18n="cert.desc">Damit Browser diese Verbindung als sicher einstufen, muss das Zertifikat importiert werden.</p>
                         <a href="/api/cert" class="btn-primary btn-download">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
@@ -179,7 +178,7 @@
                                 <polyline points="7 10 12 15 17 10"></polyline>
                                 <line x1="12" y1="15" x2="12" y2="3"></line>
                             </svg>
-                            Zertifikat herunterladen (jarvis.cer)
+                            <span data-i18n="cert.download">Zertifikat herunterladen (jarvis.cer)</span>
                         </a>
                     </div>
                 </div>
@@ -187,45 +186,40 @@
                 <div class="tabs">
                     <button class="tab-btn active" data-tab="windows">Windows</button>
                     <button class="tab-btn" data-tab="linux">Linux</button>
-                    <button class="tab-btn" data-tab="browser">Browser-Import</button>
+                    <button class="tab-btn" data-tab="browser" data-i18n="cert.tab.browser">Browser-Import</button>
                 </div>
 
                 <div class="tab-content active" id="tab-windows">
                     <ol class="steps-list">
-                        <li>Lade die Datei <code>jarvis.cer</code> herunter.</li>
-                        <li>Rechtsklick auf die Datei → <strong>"Zertifikat installieren"</strong>.</li>
-                        <li>Wähle <strong>"Lokaler Computer"</strong> (nicht "Aktueller Benutzer").</li>
-                        <li>Wähle <strong>"Alle Zertifikate in folgendem Speicher speichern"</strong>.</li>
-                        <li>Klicke auf "Durchsuchen" und wähle <strong>"Vertrauenswürdige
-                                Stammzertifizierungsstellen"</strong>.</li>
-                        <li>Bestätigen und Fertigstellen.</li>
-                        <li><strong>Browser komplett neu starten</strong> (alle Tabs schließen).</li>
+                        <li data-i18n-html="cert.win.step1">Lade die Datei <code>jarvis.cer</code> herunter.</li>
+                        <li data-i18n-html="cert.win.step2">Rechtsklick auf die Datei → <strong>"Zertifikat installieren"</strong>.</li>
+                        <li data-i18n-html="cert.win.step3">Wähle <strong>"Lokaler Computer"</strong> (nicht "Aktueller Benutzer").</li>
+                        <li data-i18n-html="cert.win.step4">Wähle <strong>"Alle Zertifikate in folgendem Speicher speichern"</strong>.</li>
+                        <li data-i18n-html="cert.win.step5">Klicke auf "Durchsuchen" und wähle <strong>"Vertrauenswürdige Stammzertifizierungsstellen"</strong>.</li>
+                        <li data-i18n-html="cert.win.step6">Bestätigen und Fertigstellen.</li>
+                        <li data-i18n-html="cert.win.step7"><strong>Browser komplett neu starten</strong> (alle Tabs schließen).</li>
                     </ol>
                 </div>
 
                 <div class="tab-content" id="tab-linux">
                     <div class="code-block">
-                        <pre><code># Zertifikat kopieren
+                        <pre><code># Copy certificate
 sudo cp jarvis.crt /usr/local/share/ca-certificates/jarvis.crt
 
-# Store aktualisieren
+# Update store
 sudo update-ca-certificates</code></pre>
                     </div>
-                    <p class="tab-note">Für Chromium/Chrome unter Linux muss oft zusätzlich der Browser-Import (siehe
-                        Tab "Browser-Import") durchgeführt werden, da diese eigene Stores nutzen.</p>
+                    <p class="tab-note" data-i18n="cert.linux.note">Für Chromium/Chrome unter Linux muss oft zusätzlich der Browser-Import (siehe Tab "Browser-Import") durchgeführt werden, da diese eigene Stores nutzen.</p>
                 </div>
 
                 <div class="tab-content" id="tab-browser">
-                    <p>Falls die System-Installation nicht greift (z.B. Firefox):</p>
+                    <p data-i18n="cert.browser.intro">Falls die System-Installation nicht greift (z.B. Firefox):</p>
                     <ol class="steps-list">
-                        <li>Öffne die Einstellungen deines Browsers.</li>
-                        <li>Suche nach <strong>"Zertifikate"</strong> oder <strong>"Zertifikate verwalten"</strong>.
-                        </li>
-                        <li>Klicke auf <strong>"Importieren..."</strong> im Reiter "Zertifizierungsstellen"
-                            (Authorities).</li>
-                        <li>Wähle die Datei <code>jarvis.cer</code> aus.</li>
-                        <li>Setze den Haken bei <strong>"Dieser CA vertrauen, um Websites zu identifizieren"</strong>.
-                        </li>
+                        <li data-i18n-html="cert.browser.step1">Öffne die Einstellungen deines Browsers.</li>
+                        <li data-i18n-html="cert.browser.step2">Suche nach <strong>"Zertifikate"</strong> oder <strong>"Zertifikate verwalten"</strong>.</li>
+                        <li data-i18n-html="cert.browser.step3">Klicke auf <strong>"Importieren..."</strong> im Reiter "Zertifizierungsstellen" (Authorities).</li>
+                        <li data-i18n-html="cert.browser.step4">Wähle die Datei <code>jarvis.cer</code> aus.</li>
+                        <li data-i18n-html="cert.browser.step5">Setze den Haken bei <strong>"Dieser CA vertrauen, um Websites zu identifizieren"</strong>.</li>
                     </ol>
                 </div>
             </div>
@@ -260,7 +254,7 @@ sudo update-ca-certificates</code></pre>
                             </div>
                         </div>
                     </div>
-                    <div id="security-indicator" class="security-badge" title="Sicherheitsstatus">
+                    <div id="security-indicator" class="security-badge" title="Sicherheitsstatus" data-i18n-title="security.status">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2.5">
                             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
@@ -283,7 +277,7 @@ sudo update-ca-certificates</code></pre>
                     <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang('en')" title="English">EN</button>
                 </div>
 
-                <a href="/userchat" class="btn-icon" data-i18n-title="header.user_chat" title="Benutzer-Chat" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
+                <a href="/userchat" target="_blank" class="btn-icon" data-i18n-title="header.user_chat" title="Benutzer-Chat" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                     </svg>
@@ -322,19 +316,19 @@ sudo update-ca-certificates</code></pre>
                     <!-- Fenster-Steuerung -->
                     <div class="window-controls"
                         style="display: flex; gap: 4px; margin-left: auto; margin-right: 1rem;">
-                        <button class="btn-icon btn-small btn-window btn-win-minimize" title="Minimieren">
+                        <button class="btn-icon btn-small btn-window btn-win-minimize" title="Minimieren" data-i18n-title="panel.minimize">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <line x1="5" y1="12" x2="19" y2="12"></line>
                             </svg>
                         </button>
-                        <button class="btn-icon btn-small btn-window btn-win-maximize" title="Maximieren">
+                        <button class="btn-icon btn-small btn-window btn-win-maximize" title="Maximieren" data-i18n-title="panel.maximize">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                             </svg>
                         </button>
-                        <button class="btn-icon btn-small btn-window btn-win-restore" title="Wiederherstellen">
+                        <button class="btn-icon btn-small btn-window btn-win-restore" title="Wiederherstellen" data-i18n-title="panel.restore">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <rect x="4" y="8" width="12" height="12" rx="1" ry="1"></rect>
@@ -343,7 +337,7 @@ sudo update-ca-certificates</code></pre>
                         </button>
                     </div>
 
-                    <button class="btn-icon btn-small" id="btn-clear-log" title="Log leeren">
+                    <button class="btn-icon btn-small" id="btn-clear-log" title="Log leeren" data-i18n-title="panel.clear">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <polyline points="3 6 5 6 21 6" />
@@ -369,27 +363,27 @@ sudo update-ca-certificates</code></pre>
 
                 <!-- Steuerung -->
                 <div class="control-bar" id="control-bar">
-                    <button class="btn-control" id="btn-pause" title="Pausieren" disabled>
+                    <button class="btn-control" id="btn-pause" title="Pausieren" data-i18n-title="panel.pause" disabled>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                             <rect x="6" y="4" width="4" height="16" />
                             <rect x="14" y="4" width="4" height="16" />
                         </svg>
                     </button>
-                    <button class="btn-control" id="btn-resume" title="Fortsetzen" disabled hidden>
+                    <button class="btn-control" id="btn-resume" title="Fortsetzen" data-i18n-title="panel.resume" disabled hidden>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                             <polygon points="5 3 19 12 5 21 5 3" />
                         </svg>
                     </button>
-                    <button class="btn-control btn-danger" id="btn-stop" title="Stoppen" disabled>
+                    <button class="btn-control btn-danger" id="btn-stop" title="Stoppen" data-i18n-title="panel.stop" disabled>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                             <rect x="4" y="4" width="16" height="16" rx="2" />
                         </svg>
                     </button>
-                    <button class="btn-debug active" id="btn-debug" title="Debug-Ausgaben ein/ausblenden">debug aktiv</button>
+                    <button class="btn-debug active" id="btn-debug" title="Debug-Ausgaben ein/ausblenden" data-i18n-title="panel.debug_toggle">debug aktiv</button>
                     <div class="zoom-control">
-                        <button class="btn-zoom" id="btn-zoom-out" title="Verkleinern">−</button>
-                        <button class="btn-zoom btn-zoom-reset" id="btn-zoom-reset" title="Zurücksetzen">100%</button>
-                        <button class="btn-zoom" id="btn-zoom-in" title="Vergrößern">+</button>
+                        <button class="btn-zoom" id="btn-zoom-out" title="Verkleinern" data-i18n-title="panel.zoom.out">−</button>
+                        <button class="btn-zoom btn-zoom-reset" id="btn-zoom-reset" title="Zurücksetzen" data-i18n-title="panel.zoom.reset">100%</button>
+                        <button class="btn-zoom" id="btn-zoom-in" title="Vergrößern" data-i18n-title="panel.zoom.in">+</button>
                     </div>
                 </div>
 
@@ -398,20 +392,20 @@ sudo update-ca-certificates</code></pre>
                     <span id="ctx-indicator-pill" style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);font-size:0.73rem;color:var(--accent);cursor:default;user-select:none;">
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                         <span id="ctx-indicator-text">Kontext aktiv</span>
-                        <button id="ctx-indicator-clear" title="Kontext zurücksetzen" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:var(--text-muted);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()">✕</button>
+                        <button id="ctx-indicator-clear" title="Kontext zurücksetzen" data-i18n-title="input.reset_ctx" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:var(--text-muted);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()">✕</button>
                     </span>
                 </div>
 
                 <!-- Eingabe -->
                 <div class="input-bar">
-                    <button class="btn-tts" id="btn-tts" title="Sprachausgabe">
+                    <button class="btn-tts" id="btn-tts" title="Sprachausgabe" data-i18n-title="input.tts">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
                             <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
                         </svg>
                     </button>
                     <textarea id="task-input" placeholder="Aufgabe für Jarvis eingeben..." rows="2"></textarea>
-                    <button class="btn-mic" id="btn-mic" title="Spracheingabe">
+                    <button class="btn-mic" id="btn-mic" title="Spracheingabe" data-i18n-title="input.mic">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
@@ -420,7 +414,7 @@ sudo update-ca-certificates</code></pre>
                             <line x1="8" y1="23" x2="16" y2="23"></line>
                         </svg>
                     </button>
-                    <button class="btn-send" id="btn-send" title="Absenden">
+                    <button class="btn-send" id="btn-send" title="Absenden" data-i18n-title="input.send">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <line x1="22" y1="2" x2="11" y2="13" />
@@ -448,19 +442,19 @@ sudo update-ca-certificates</code></pre>
 
                     <!-- Fenster-Steuerung -->
                     <div class="window-controls" style="display: flex; gap: 4px; margin-left: auto;">
-                        <button class="btn-icon btn-small btn-window btn-win-minimize" title="Minimieren">
+                        <button class="btn-icon btn-small btn-window btn-win-minimize" title="Minimieren" data-i18n-title="panel.minimize">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <line x1="5" y1="12" x2="19" y2="12"></line>
                             </svg>
                         </button>
-                        <button class="btn-icon btn-small btn-window btn-win-maximize" title="Maximieren">
+                        <button class="btn-icon btn-small btn-window btn-win-maximize" title="Maximieren" data-i18n-title="panel.maximize">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                             </svg>
                         </button>
-                        <button class="btn-icon btn-small btn-window btn-win-restore" title="Wiederherstellen">
+                        <button class="btn-icon btn-small btn-window btn-win-restore" title="Wiederherstellen" data-i18n-title="panel.restore">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <rect x="4" y="8" width="12" height="12" rx="1" ry="1"></rect>
@@ -470,7 +464,7 @@ sudo update-ca-certificates</code></pre>
                     </div>
 
                     <div class="panel-actions">
-                        <span class="vnc-status" id="vnc-status">Nicht verbunden</span>
+                        <span class="vnc-status" id="vnc-status" data-i18n="panel.desktop.notconn">Nicht verbunden</span>
                     </div>
                 </div>
                 <div class="desktop-preview" id="desktop-preview">
@@ -545,9 +539,12 @@ sudo update-ca-certificates</code></pre>
                             <div id="prof-sect-tts-body" class="kb-collapse-body" style="display:none;">
                                 <div>
                                     <label data-i18n="profile.voice_label" style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;">Stimme</label>
-                                    <select id="setting-tts-voice" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.85rem;">
-                                        <option value="">⏳ Stimmen werden geladen…</option>
-                                    </select>
+                                    <div style="display:flex;gap:6px;align-items:center;">
+                                        <select id="setting-tts-voice" style="flex:1;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.85rem;">
+                                            <option value="">⏳ Stimmen werden geladen…</option>
+                                        </select>
+                                        <button id="btn-tts-preview" title="Stimme vorhören" style="flex-shrink:0;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);cursor:pointer;font-size:0.9rem;transition:all 0.2s;" data-i18n-title="profile.voice_preview">▶</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -560,16 +557,16 @@ sudo update-ca-certificates</code></pre>
                             </div>
                             <div id="prof-sect-api-body" class="kb-collapse-body" style="display:none;">
                                 <div class="input-group" style="display: flex; gap: 8px; align-items: center;">
-                                    <input type="password" id="setting-agent-api-key" placeholder="Noch kein Key generiert" style="flex: 1;" readonly>
-                                    <button class="btn-icon btn-small" id="btn-toggle-apikey" title="Anzeigen/Verbergen" style="flex-shrink: 0;">
+                                    <input type="password" id="setting-agent-api-key" data-i18n-placeholder="profile.no_key_yet" placeholder="Noch kein Key generiert" style="flex: 1;" readonly>
+                                    <button class="btn-icon btn-small" id="btn-toggle-apikey" data-i18n-title="profile.show_hide" title="Anzeigen/Verbergen" style="flex-shrink: 0;">
                                         <svg id="ico-agent-apikey" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                     </button>
-                                    <button class="btn-icon btn-small" id="btn-copy-apikey" title="Kopieren" style="flex-shrink: 0;">
+                                    <button class="btn-icon btn-small" id="btn-copy-apikey" title="Kopieren" data-i18n-title="common.copy" style="flex-shrink: 0;">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                                     </button>
-                                    <button class="btn-secondary btn-small" id="btn-generate-apikey" style="flex-shrink: 0; padding: 4px 10px; font-size: 0.75rem;">Generieren</button>
+                                    <button class="btn-secondary btn-small" id="btn-generate-apikey" data-i18n="security.generate" style="flex-shrink: 0; padding: 4px 10px; font-size: 0.75rem;">🔑 Generieren</button>
                                 </div>
-                                <small class="tab-note" style="margin-top: 5px; opacity: 0.7;">
+                                <small class="tab-note" data-i18n-html="profile.apikey_hint" style="margin-top: 5px; opacity: 0.7;">
                                     Für externen Zugriff auf <code>POST /api/agent/task</code> (z.B. Vision auf Raspberry Pi).
                                     <br>Header: <code>X-API-Key: &lt;key&gt;</code>
                                 </small>
@@ -735,14 +732,14 @@ sudo update-ca-certificates</code></pre>
                         <!-- Mögliche Skills (aufklappbar) -->
                         <div class="sk-openclaw-section" id="sk-available-section">
                             <div class="sk-openclaw-header" id="sk-available-header">
-                                <span class="sk-openclaw-title">📦 Mögliche Skills</span>
+                                <span class="sk-openclaw-title" data-i18n="skills.available">📦 Mögliche Skills</span>
                                 <span class="sk-openclaw-toggle" id="sk-available-toggle">▶</span>
                             </div>
                             <div class="sk-openclaw-body" id="sk-available-body" style="display:none;">
-                                <p class="kb-hint" style="margin: 0 0 0.5rem 0;">Skill auswählen und per <strong>Hinzufügen</strong> aktivieren.</p>
+                                <p class="kb-hint" style="margin: 0 0 0.5rem 0;" data-i18n="skills.select_hint">Skill auswählen und per <strong>Hinzufügen</strong> aktivieren.</p>
                                 <div class="sk-search-row">
                                     <input type="text" id="sk-search" class="kb-input sk-search-input"
-                                        placeholder="Skills durchsuchen…" />
+                                        data-i18n-placeholder="skills.search_ph" placeholder="Skills durchsuchen…" />
                                 </div>
                                 <div id="sk-available-list" class="sk-list">
                                     <div class="kb-loading">Lade...</div>
@@ -753,7 +750,7 @@ sudo update-ca-certificates</code></pre>
                         <!-- Installierte Skills (aufklappbar) -->
                         <div class="sk-openclaw-section" id="sk-installed-section">
                             <div class="sk-openclaw-header" id="sk-installed-header">
-                                <span class="sk-openclaw-title">✅ Installierte Skills</span>
+                                <span class="sk-openclaw-title" data-i18n="skills.installed">✅ Installierte Skills</span>
                                 <span class="sk-openclaw-toggle" id="sk-installed-toggle">▶</span>
                             </div>
                             <div class="sk-openclaw-body" id="sk-installed-body" style="display:none;">
@@ -774,7 +771,7 @@ sudo update-ca-certificates</code></pre>
                             <!-- Status & Verbindung -->
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="wa-sect-status-hdr">
-                                    <h3>Status &amp; Verbindung</h3>
+                                    <h3 data-i18n="wa.status_connection">Status &amp; Verbindung</h3>
                                     <span class="sk-openclaw-toggle" id="wa-sect-status-tog">▶</span>
                                 </div>
                                 <div id="wa-sect-status-body" class="kb-collapse-body" style="display:none;">
@@ -787,36 +784,36 @@ sudo update-ca-certificates</code></pre>
                                             </div>
                                             <div class="wa-status-info">
                                                 <h3 id="wa-status-text">WhatsApp Status</h3>
-                                                <p id="wa-status-detail" class="wa-status-detail">Lade...</p>
+                                                <p id="wa-status-detail" class="wa-status-detail" data-i18n="wa.loading">Lade...</p>
                                             </div>
                                             <div class="wa-status-badge" id="wa-status-badge">--</div>
                                         </div>
                                         <div class="wa-status-stats">
                                             <div class="wa-stat">
-                                                <span class="wa-stat-label">Nummer</span>
+                                                <span class="wa-stat-label" data-i18n="wa.number">Nummer</span>
                                                 <span class="wa-stat-value" id="wa-connected-number">--</span>
                                             </div>
                                             <div class="wa-stat">
-                                                <span class="wa-stat-label">Nachrichten</span>
+                                                <span class="wa-stat-label" data-i18n="wa.messages">Nachrichten</span>
                                                 <span class="wa-stat-value" id="wa-msg-count">0</span>
                                             </div>
                                         </div>
                                     </div>
                                     <div class="wa-qr-section" id="wa-qr-section">
-                                        <h3>QR-Code scannen</h3>
-                                        <p class="wa-qr-hint">Öffne WhatsApp auf deinem Handy &rarr; Einstellungen &rarr; Verknüpfte Geräte &rarr; Gerät verknüpfen</p>
+                                        <h3 data-i18n="wa.qr_scan">QR-Code scannen</h3>
+                                        <p class="wa-qr-hint" data-i18n="wa.qr_hint">Öffne WhatsApp auf deinem Handy &rarr; Einstellungen &rarr; Verknüpfte Geräte &rarr; Gerät verknüpfen</p>
                                         <div class="wa-qr-box" id="wa-qr-box">
-                                            <div class="wa-qr-loading">Warte auf QR-Code...</div>
+                                            <div class="wa-qr-loading" data-i18n="wa.qr_waiting">Warte auf QR-Code...</div>
                                         </div>
                                     </div>
                                     <div class="wa-actions" style="margin-top:12px;">
-                                        <button class="btn-wa-action" id="btn-wa-reconnect" title="Verbindung neu herstellen">
+                                        <button class="btn-wa-action" id="btn-wa-reconnect" data-i18n-title="wa.reconnect_title" title="Verbindung neu herstellen">
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
-                                            Reconnect
+                                            <span data-i18n="wa.reconnect">Reconnect</span>
                                         </button>
-                                        <button class="btn-wa-action btn-wa-danger" id="btn-wa-logout" title="WhatsApp abmelden">
+                                        <button class="btn-wa-action btn-wa-danger" id="btn-wa-logout" data-i18n-title="wa.logout_title" title="WhatsApp abmelden">
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
-                                            Abmelden
+                                            <span data-i18n="wa.logout">Abmelden</span>
                                         </button>
                                     </div>
                                 </div>
@@ -825,27 +822,27 @@ sudo update-ca-certificates</code></pre>
                             <!-- Logs & Debug -->
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="wa-sect-logs-hdr">
-                                    <h3>Logs &amp; Debug</h3>
+                                    <h3 data-i18n="wa.logs_debug">Logs &amp; Debug</h3>
                                     <span class="sk-openclaw-toggle" id="wa-sect-logs-tog">▶</span>
                                 </div>
                                 <div id="wa-sect-logs-body" class="kb-collapse-body" style="display:none;">
                                     <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
-                                        <button class="btn-wa-action btn-wa-sm" id="btn-wa-logs-refresh" title="Logs neu laden">
+                                        <button class="btn-wa-action btn-wa-sm" id="btn-wa-logs-refresh" data-i18n-title="wa.logs_reload" title="Logs neu laden">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
                                         </button>
-                                        <button class="btn-wa-action btn-wa-sm btn-wa-danger" id="btn-wa-logs-clear" title="Logs löschen">
+                                        <button class="btn-wa-action btn-wa-sm btn-wa-danger" id="btn-wa-logs-clear" data-i18n-title="wa.logs_clear" title="Logs löschen">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                                         </button>
                                     </div>
                                     <div class="wa-logs-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
-                                        <label class="wa-debug-toggle" title="Debug-Modus aktivieren">
+                                        <label class="wa-debug-toggle" data-i18n-title="wa.debug_title" title="Debug-Modus aktivieren">
                                             <input type="checkbox" id="wa-debug-toggle">
                                             <span>Debug</span>
                                         </label>
                                         <select id="wa-log-filter" class="wa-log-select">
-                                            <option value="">Alle</option>
-                                            <option value="ERROR">Fehler</option>
-                                            <option value="WARN">Warnungen</option>
+                                            <option value="" data-i18n="wa.filter_all">Alle</option>
+                                            <option value="ERROR" data-i18n="wa.filter_errors">Fehler</option>
+                                            <option value="WARN" data-i18n="wa.filter_warnings">Warnungen</option>
                                             <option value="INFO">Info</option>
                                             <option value="DEBUG">Debug</option>
                                         </select>
@@ -856,7 +853,7 @@ sudo update-ca-certificates</code></pre>
                                         </select>
                                     </div>
                                     <div class="wa-logs-container" id="wa-logs-container">
-                                        <div class="wa-logs-empty">Keine Logs vorhanden</div>
+                                        <div class="wa-logs-empty" data-i18n="wa.no_logs">Keine Logs vorhanden</div>
                                     </div>
                                 </div>
                             </div>
@@ -875,18 +872,18 @@ sudo update-ca-certificates</code></pre>
                         <!-- Statistiken -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-stats-hdr">
-                                <h3>Statistiken</h3>
+                                <h3 data-i18n="knowledge.section_stats">Statistiken</h3>
                                 <span class="sk-openclaw-toggle" id="kb-sect-stats-tog">▶</span>
                             </div>
                             <div id="kb-sect-stats-body" class="kb-collapse-body" style="display:none;">
                                 <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
-                                    <button class="kb-btn-action" id="btn-kb-reindex">Index neu aufbauen</button>
+                                    <button class="kb-btn-action" id="btn-kb-reindex" data-i18n="knowledge.reindex_btn">Index neu aufbauen</button>
                                 </div>
                                 <!-- Fortschrittsbalken (immer im DOM, nur ein-/ausgeblendet) -->
                                 <div id="kb-index-progress-wrap" style="display:none;justify-content:flex-end;margin:8px 0 4px;">
                                     <div style="width:60%;box-sizing:border-box;overflow:hidden;">
                                         <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-                                            <span id="kb-progress-label" style="font-size:12px;opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;">Indizierung läuft...</span>
+                                            <span id="kb-progress-label" style="font-size:12px;opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;" data-i18n="knowledge.indexing_running">Indizierung läuft...</span>
                                             <span id="kb-progress-pct" style="font-size:12px;opacity:0.7;white-space:nowrap;flex-shrink:0;margin-left:8px;">0%</span>
                                         </div>
                                         <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:6px;overflow:hidden;">
@@ -899,7 +896,7 @@ sudo update-ca-certificates</code></pre>
                                     </div>
                                 </div>
                                 <div id="kb-stats-container" class="kb-stats-container">
-                                    <div class="kb-loading">Lade...</div>
+                                    <div class="kb-loading" data-i18n="common.loading">Lädt…</div>
                                 </div>
                             </div>
                         </div>
@@ -907,7 +904,7 @@ sudo update-ca-certificates</code></pre>
                         <!-- Datei-Upload -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-upload-hdr">
-                                <h3>Dateien hochladen</h3>
+                                <h3 data-i18n="knowledge.section_upload">Dateien hochladen</h3>
                                 <span class="sk-openclaw-toggle" id="kb-sect-upload-tog">▶</span>
                             </div>
                             <div id="kb-sect-upload-body" class="kb-collapse-body" style="display:none;">
@@ -917,7 +914,7 @@ sudo update-ca-certificates</code></pre>
                                         <polyline points="17 8 12 3 7 8"/>
                                         <line x1="12" y1="3" x2="12" y2="15"/>
                                     </svg>
-                                    <p>Dateien hierher ziehen oder <label for="kb-file-input" class="kb-upload-link">durchsuchen</label></p>
+                                    <p><span data-i18n="knowledge.drop_hint">Dateien hierher ziehen oder</span> <label for="kb-file-input" class="kb-upload-link" data-i18n="knowledge.browse">durchsuchen</label></p>
                                     <input type="file" id="kb-file-input" multiple style="display:none" />
                                 </div>
                                 <div class="kb-upload-row">
@@ -930,18 +927,19 @@ sudo update-ca-certificates</code></pre>
                         <!-- Ordner-Verwaltung -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-folder-hdr">
-                                <h3>Ordner</h3>
+                                <h3 data-i18n="knowledge.section_folders">Ordner</h3>
                                 <span class="sk-openclaw-toggle" id="kb-sect-folder-tog">▶</span>
                             </div>
                             <div id="kb-sect-folder-body" class="kb-collapse-body" style="display:none;">
-                                <p class="kb-hint">Lokale Verzeichnisse, die in der Wissensdatenbank indiziert werden. Pfad relativ zum Projektroot (z.B. <code>data/knowledge</code>) oder absolut.</p>
+                                <p class="kb-hint" data-i18n-html="knowledge.folders_hint">Lokale Verzeichnisse, die in der Wissensdatenbank indiziert werden. Pfad relativ zum Projektroot (z.B. <code>data/knowledge</code>) oder absolut.</p>
                                 <div id="kb-folder-list" class="kb-folder-list">
-                                    <div class="kb-loading">Lade...</div>
+                                    <div class="kb-loading" data-i18n="knowledge.loading">Lädt…</div>
                                 </div>
                                 <div class="kb-add-folder">
                                     <input type="text" id="kb-folder-input" class="kb-input"
+                                        data-i18n-placeholder="knowledge.folder_ph"
                                         placeholder="Pfad zum Ordner (z.B. data/knowledge)" />
-                                    <button class="kb-btn-action" id="btn-kb-add-folder">Hinzufügen</button>
+                                    <button class="kb-btn-action" id="btn-kb-add-folder" data-i18n="knowledge.add_btn">Hinzufügen</button>
                                 </div>
                             </div>
                         </div>
@@ -949,7 +947,7 @@ sudo update-ca-certificates</code></pre>
                         <!-- WebDAV-Server -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-webdav-hdr">
-                                <h3>WebDAV-Server</h3>
+                                <h3 data-i18n="knowledge.section_webdav">WebDAV-Server</h3>
                                 <span class="sk-openclaw-toggle" id="kb-sect-webdav-tog">▶</span>
                             </div>
                             <div id="kb-sect-webdav-body" class="kb-collapse-body" style="display:none;">
@@ -958,22 +956,22 @@ sudo update-ca-certificates</code></pre>
                                     <input type="checkbox" id="kb-webdav-toggle" />
                                     <span class="toggle-slider"></span>
                                 </label>
-                                <span style="font-size:0.82rem;color:var(--text-secondary);">WebDAV aktivieren</span>
+                                <span style="font-size:0.82rem;color:var(--text-secondary);" data-i18n="knowledge.webdav_enable">WebDAV aktivieren</span>
                             </div>
-                            <p class="kb-hint">Wissensdatenbank als Netzlaufwerk einbinden (Windows/Mac/Linux Dateimanager).</p>
+                            <p class="kb-hint" data-i18n="knowledge.webdav_hint">Wissensdatenbank als Netzlaufwerk einbinden (Windows/Mac/Linux Dateimanager).</p>
                             <div id="kb-webdav-details" style="display:none;">
                                 <div class="kb-webdav-info">
                                     <div class="kb-info-row"><span class="kb-info-label">URL:</span> <code id="kb-webdav-url"></code></div>
-                                    <div class="kb-info-row"><span class="kb-info-label">Benutzer:</span> <code id="kb-webdav-user"></code></div>
-                                    <div class="kb-info-row"><span class="kb-info-label">Passwort:</span> <code id="kb-webdav-pass">jarvis</code> <span class="kb-info-hint">(eigenes WebDAV-Passwort, unabhängig vom System-Login)</span></div>
-                                    <div class="kb-info-row"><span class="kb-info-label">Shares:</span> <span id="kb-webdav-shares"></span></div>
+                                    <div class="kb-info-row"><span class="kb-info-label" data-i18n="knowledge.webdav_user_label">Benutzer:</span> <code id="kb-webdav-user"></code></div>
+                                    <div class="kb-info-row"><span class="kb-info-label" data-i18n="knowledge.webdav_pass_label">Passwort:</span> <code id="kb-webdav-pass">jarvis</code> <span class="kb-info-hint" data-i18n="knowledge.webdav_pass_hint">(eigenes WebDAV-Passwort, unabhängig vom System-Login)</span></div>
+                                    <div class="kb-info-row"><span class="kb-info-label" data-i18n="knowledge.webdav_shares_label">Shares:</span> <span id="kb-webdav-shares"></span></div>
                                 </div>
                                 <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
-                                    <input type="text" id="kb-webdav-new-user" placeholder="Benutzername" style="width:130px;padding:4px 8px;font-size:0.82rem;background:var(--bg-glass);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);">
-                                    <input type="password" id="kb-webdav-new-pass" placeholder="Neues Passwort" style="width:150px;padding:4px 8px;font-size:0.82rem;background:var(--bg-glass);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);">
-                                    <button class="kb-btn-action" onclick="window._saveWebdavCredentials()" style="font-size:0.82rem;padding:4px 12px;">Speichern &amp; Neustart</button>
+                                    <input type="text" id="kb-webdav-new-user" data-i18n-placeholder="knowledge.username_ph" placeholder="Benutzername" style="width:130px;padding:4px 8px;font-size:0.82rem;background:var(--bg-glass);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);">
+                                    <input type="password" id="kb-webdav-new-pass" data-i18n-placeholder="knowledge.new_pass_ph" placeholder="Neues Passwort" style="width:150px;padding:4px 8px;font-size:0.82rem;background:var(--bg-glass);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);">
+                                    <button class="kb-btn-action" onclick="window._saveWebdavCredentials()" style="font-size:0.82rem;padding:4px 12px;" data-i18n="knowledge.webdav_save_btn">Speichern &amp; Neustart</button>
                                 </div>
-                                <p class="kb-hint" style="margin-top:8px;">⚠️ Nach dem Speichern wird der Jarvis-Server neu gestartet, damit der WebDAV-Dienst die neuen Zugangsdaten übernimmt.</p>
+                                <p class="kb-hint" style="margin-top:8px;" data-i18n="knowledge.webdav_save_hint">⚠️ Nach dem Speichern wird der Jarvis-Server neu gestartet, damit der WebDAV-Dienst die neuen Zugangsdaten übernimmt.</p>
                             </div>
                             </div><!-- /kb-sect-webdav-body -->
                         </div>
@@ -981,25 +979,25 @@ sudo update-ca-certificates</code></pre>
                         <!-- Netzwerk-Freigaben -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-net-hdr">
-                                <h3>Netzwerk-Freigaben</h3>
+                                <h3 data-i18n="knowledge.section_shares">Netzwerk-Freigaben</h3>
                                 <span class="sk-openclaw-toggle" id="kb-sect-net-tog">▶</span>
                             </div>
                             <div id="kb-sect-net-body" class="kb-collapse-body" style="display:none;">
-                                <p class="kb-hint">Externe SMB/NFS/WebDAV-Freigaben als Wissensquellen einbinden.</p>
+                                <p class="kb-hint" data-i18n="knowledge.shares_hint">Externe SMB/NFS/WebDAV-Freigaben als Wissensquellen einbinden.</p>
                                 <div id="kb-mount-list" class="kb-mount-list"></div>
-                                <button class="kb-btn-action" id="btn-kb-add-mount">+ Freigabe hinzufuegen</button>
+                                <button class="kb-btn-action" id="btn-kb-add-mount" data-i18n="knowledge.add_share_btn">+ Freigabe hinzufügen</button>
                                 <div id="kb-mount-form" class="kb-mount-form" style="display:none;">
                                     <select id="kb-mount-type" class="kb-input">
                                         <option value="smb">SMB/CIFS (Windows-Freigabe)</option>
                                         <option value="nfs">NFS</option>
                                         <option value="webdav">WebDAV</option>
                                     </select>
-                                    <input type="text" id="kb-mount-source" class="kb-input" placeholder="//server/freigabe oder server:/pfad" />
-                                    <input type="text" id="kb-mount-user" class="kb-input" placeholder="Benutzername (optional)" />
-                                    <input type="password" id="kb-mount-pass" class="kb-input" placeholder="Passwort (optional)" />
+                                    <input type="text" id="kb-mount-source" class="kb-input" data-i18n-placeholder="knowledge.share_source_ph" placeholder="//server/freigabe oder server:/pfad" />
+                                    <input type="text" id="kb-mount-user" class="kb-input" data-i18n-placeholder="knowledge.share_user_ph" placeholder="Benutzername (optional)" />
+                                    <input type="password" id="kb-mount-pass" class="kb-input" data-i18n-placeholder="knowledge.share_pass_ph" placeholder="Passwort (optional)" />
                                     <div class="kb-mount-actions">
-                                        <button class="kb-btn-action" onclick="window.knowledgeManager.saveMount()">Verbinden</button>
-                                        <button class="kb-btn-secondary" onclick="document.getElementById('kb-mount-form').style.display='none'">Abbrechen</button>
+                                        <button class="kb-btn-action" onclick="window.knowledgeManager.saveMount()" data-i18n="knowledge.connect_btn">Verbinden</button>
+                                        <button class="kb-btn-secondary" onclick="document.getElementById('kb-mount-form').style.display='none'" data-i18n="common.cancel">Abbrechen</button>
                                     </div>
                                 </div>
                             </div>
@@ -1008,7 +1006,7 @@ sudo update-ca-certificates</code></pre>
                         <!-- ─── Extractor ──────────────────────────────── -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-ext-hdr">
-                                <h3>Informationsextraktor</h3>
+                                <h3 data-i18n="knowledge.section_extractor">Informationsextraktor</h3>
                                 <span class="sk-openclaw-toggle" id="kb-sect-ext-tog">▶</span>
                             </div>
                             <div id="kb-sect-ext-body" class="kb-collapse-body" style="display:none;">
@@ -1027,9 +1025,9 @@ sudo update-ca-certificates</code></pre>
                 <!-- ═══ Tab: MCP Server ═══ -->
                 <div id="settings-tab-mcp" class="settings-tab-content" style="display: none;">
                     <div class="kb-container">
-                        <p class="kb-hint">MCP-Server verbinden externe Tools mit Jarvis (Model Context Protocol).
+                        <p class="kb-hint" data-i18n="mcp.hint">MCP-Server verbinden externe Tools mit Jarvis (Model Context Protocol).
                             Server werden als Subprozesse (stdio) oder über HTTP/SSE angebunden.</p>
-                        <button class="kb-btn" id="mcp-add-btn" style="margin-bottom: 1rem;">
+                        <button class="kb-btn" id="mcp-add-btn" style="margin-bottom: 1rem;" data-i18n="mcp.add_btn">
                             + MCP-Server hinzufügen
                         </button>
                         <div id="mcp-server-list"></div>
@@ -1046,30 +1044,30 @@ sudo update-ca-certificates</code></pre>
                             <!-- ── Kamera-Feed ── -->
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-feed-hdr">
-                                    <h3><span class="vis-status-dot vis-dot-off" id="vis-status-dot"></span> Kamera-Feed</h3>
+                                    <h3><span class="vis-status-dot vis-dot-off" id="vis-status-dot"></span> <span data-i18n="vis.feed_title">Kamera-Feed</span></h3>
                                     <span class="sk-openclaw-toggle" id="vis-sect-feed-tog">▶</span>
                                 </div>
                                 <div id="vis-sect-feed-body" class="kb-collapse-body" style="display:none;">
                                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-                                        <span class="vis-status-label" id="vis-status-text">Gestoppt</span>
-                                        <button class="vis-btn vis-btn-sm" id="vis-btn-toggle">Starten</button>
+                                        <span class="vis-status-label" id="vis-status-text" data-i18n="vis.stopped">Gestoppt</span>
+                                        <button class="vis-btn vis-btn-sm" id="vis-btn-toggle" data-i18n="vis.start">Starten</button>
                                     </div>
                                     <div class="vis-dashboard">
                                         <div class="vis-feed-wrap">
-                                            <div id="vis-feed-placeholder" class="vis-feed-placeholder">Kamera nicht aktiv</div>
+                                            <div id="vis-feed-placeholder" class="vis-feed-placeholder" data-i18n="vis.no_camera">Kamera nicht aktiv</div>
                                             <img id="vis-feed-img" class="vis-feed-img" style="display:none;" />
                                         </div>
                                         <div class="vis-detected-panel">
-                                            <h4>Erkannt:</h4>
+                                            <h4 data-i18n="vis.detected">Erkannt:</h4>
                                             <div id="vis-detected-faces">
-                                                <span class="vis-no-faces">Keine Gesichter erkannt</span>
+                                                <span class="vis-no-faces" data-i18n="vis.no_faces">Keine Gesichter erkannt</span>
                                             </div>
                                         </div>
                                     </div>
                                     <div class="vis-log-section">
                                         <div class="vis-log-header">
-                                            <h4>Log</h4>
-                                            <button class="vis-btn vis-btn-sm" id="vis-btn-clear-log" title="Log leeren">Leeren</button>
+                                            <h4 data-i18n="vis.log">Log</h4>
+                                            <button class="vis-btn vis-btn-sm" id="vis-btn-clear-log" data-i18n="vis.clear_log" data-i18n-title="vis.clear_log_title" title="Log leeren">Leeren</button>
                                         </div>
                                         <div id="vis-log" class="vis-log"></div>
                                     </div>
@@ -1079,25 +1077,25 @@ sudo update-ca-certificates</code></pre>
                             <!-- ── Training ── -->
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-train-hdr">
-                                    <h3>Training</h3>
+                                    <h3 data-i18n="vis.training_title">Training</h3>
                                     <span class="sk-openclaw-toggle" id="vis-sect-train-tog">▶</span>
                                 </div>
                                 <div id="vis-sect-train-body" class="kb-collapse-body" style="display:none;">
                                     <div style="margin-bottom:10px;">
-                                        <button class="vis-btn vis-btn-primary" id="vis-btn-train-new">Neues Gesicht trainieren</button>
+                                        <button class="vis-btn vis-btn-primary" id="vis-btn-train-new" data-i18n="vis.train_new">Neues Gesicht trainieren</button>
                                     </div>
                                     <div id="vis-wizard" class="vis-wizard" style="display:none;">
                                         <div id="vis-wizard-step-detect" class="vis-wizard-step">
                                             <div class="vis-wizard-spinner"></div>
-                                            <p>Bitte schauen Sie in die Kamera...</p>
-                                            <small class="vis-hint">Gesicht wird gesucht. Halten Sie den Kopf ruhig.</small>
+                                            <p data-i18n="vis.look_at_cam">Bitte schauen Sie in die Kamera...</p>
+                                            <small class="vis-hint" data-i18n="vis.searching_face">Gesicht wird gesucht. Halten Sie den Kopf ruhig.</small>
                                         </div>
                                         <div id="vis-wizard-step-name" class="vis-wizard-step" style="display:none;">
                                             <div class="vis-wizard-face-row">
                                                 <img id="vis-wizard-crop" class="vis-wizard-crop" alt="Erkanntes Gesicht" />
                                                 <div class="vis-wizard-name-col">
-                                                    <p>Gesicht erkannt! Klicke auf Training starten.</p>
-                                                    <button class="vis-btn vis-btn-primary" id="vis-wizard-confirm"
+                                                    <p data-i18n="vis.face_detected">Gesicht erkannt! Klicke auf Training starten.</p>
+                                                    <button class="vis-btn vis-btn-primary" id="vis-wizard-confirm" data-i18n="vis.start_training"
                                                             onclick="if(window.visionManager){window.visionManager._confirmWizardTraining().catch(e=>alert('Fehler: '+e.message))}else{alert('visionManager nicht geladen')}">Training starten</button>
                                                 </div>
                                             </div>
@@ -1109,31 +1107,31 @@ sudo update-ca-certificates</code></pre>
                                                 </div>
                                                 <span class="vis-progress-text" id="vis-train-progress-text"></span>
                                             </div>
-                                            <p class="vis-hint">Gesicht in verschiedenen Winkeln vor die Kamera halten.</p>
+                                            <p class="vis-hint" data-i18n="vis.rotate_face">Gesicht in verschiedenen Winkeln vor die Kamera halten.</p>
                                         </div>
                                         <div id="vis-wizard-step-action" class="vis-wizard-step" style="display:none;">
-                                            <h4 id="vis-wizard-done-title">Training abgeschlossen!</h4>
+                                            <h4 id="vis-wizard-done-title" data-i18n="vis.training_done">Training abgeschlossen!</h4>
                                             <div class="vis-wizard-name-row">
-                                                <label>Wie heißt diese Person?</label>
-                                                <input type="text" class="vis-input" id="vis-wizard-name" placeholder="Name eingeben..." />
+                                                <label data-i18n="vis.who_is_this">Wie heißt diese Person?</label>
+                                                <input type="text" class="vis-input" id="vis-wizard-name" data-i18n-placeholder="vis.name_ph" placeholder="Name eingeben..." />
                                             </div>
                                             <div class="vis-wizard-action-row">
-                                                <label>Was soll bei Erkennung passieren?</label>
+                                                <label data-i18n="vis.what_on_detect">Was soll bei Erkennung passieren?</label>
                                                 <select class="vis-select" id="vis-wizard-action">
-                                                    <option value="greet">Begrüßung (Lautsprecher)</option>
-                                                    <option value="llm">An LLM senden</option>
-                                                    <option value="door">Tür öffnen</option>
-                                                    <option value="webhook">Webhook aufrufen</option>
-                                                    <option value="log" selected>Nur Loggen</option>
+                                                    <option value="greet" data-i18n="vis.action_greet">Begrüßung (Lautsprecher)</option>
+                                                    <option value="llm" data-i18n="vis.action_llm">An LLM senden</option>
+                                                    <option value="door" data-i18n="vis.action_door">Tür öffnen</option>
+                                                    <option value="webhook" data-i18n="vis.action_webhook">Webhook aufrufen</option>
+                                                    <option value="log" selected data-i18n="vis.action_log">Nur Loggen</option>
                                                 </select>
                                                 <div id="vis-wizard-action-value-wrap" style="display:none;">
-                                                    <input type="text" class="vis-input" id="vis-wizard-action-value" placeholder="z.B. Hallo {name}!" />
+                                                    <input type="text" class="vis-input" id="vis-wizard-action-value" data-i18n-placeholder="vis.action_value_ph" placeholder="z.B. Hallo {name}!" />
                                                 </div>
                                             </div>
-                                            <button class="vis-btn vis-btn-primary" id="vis-wizard-save"
+                                            <button class="vis-btn vis-btn-primary" id="vis-wizard-save" data-i18n="common.save"
                                                     onclick="if(window.visionManager){window.visionManager._saveWizardAction().catch(e=>alert('Fehler: '+e.message))}else{alert('visionManager nicht geladen')}">Speichern</button>
                                         </div>
-                                        <button class="vis-btn vis-btn-sm" id="vis-wizard-cancel">Abbrechen</button>
+                                        <button class="vis-btn vis-btn-sm" id="vis-wizard-cancel" data-i18n="common.cancel">Abbrechen</button>
                                     </div>
                                 </div>
                             </div>
@@ -1141,12 +1139,12 @@ sudo update-ca-certificates</code></pre>
                             <!-- ── Bekannte Gesichter ── -->
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-faces-hdr">
-                                    <h3>Bekannte Gesichter</h3>
+                                    <h3 data-i18n="vis.known_faces">Bekannte Gesichter</h3>
                                     <span class="sk-openclaw-toggle" id="vis-sect-faces-tog">▶</span>
                                 </div>
                                 <div id="vis-sect-faces-body" class="kb-collapse-body" style="display:none;">
                                     <div id="vis-profiles-list" class="vis-profiles-list">
-                                        <div class="vis-empty">Noch keine Gesichter trainiert.</div>
+                                        <div class="vis-empty" data-i18n="vis.no_trained">Noch keine Gesichter trainiert.</div>
                                     </div>
                                 </div>
                             </div>
@@ -1154,22 +1152,22 @@ sudo update-ca-certificates</code></pre>
                             <!-- ── Kamera-Einstellungen ── -->
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-cfg-hdr">
-                                    <h3>Kamera-Einstellungen</h3>
+                                    <h3 data-i18n="vis.cam_settings">Kamera-Einstellungen</h3>
                                     <span class="sk-openclaw-toggle" id="vis-sect-cfg-tog">▶</span>
                                 </div>
                                 <div id="vis-sect-cfg-body" class="kb-collapse-body" style="display:none;">
                                     <div class="vis-settings-grid">
                                         <div class="vis-setting-row">
-                                            <label>USB-Kamera</label>
+                                            <label data-i18n="vis.usb_cam">USB-Kamera</label>
                                             <div class="vis-setting-controls">
                                                 <select class="vis-select" id="vis-cam-select">
-                                                    <option value="0">– Kameras laden (🔄) –</option>
+                                                    <option value="0" data-i18n="vis.cam_load_ph">– Kameras laden (🔄) –</option>
                                                 </select>
                                                 <button class="vis-btn-sm" id="vis-btn-cam-load" title="Kameras laden">&#x1F504;</button>
                                             </div>
                                         </div>
                                         <div class="vis-setting-row">
-                                            <label>Netzwerk-Kamera</label>
+                                            <label data-i18n="vis.net_cam">Netzwerk-Kamera</label>
                                             <div class="vis-setting-controls">
                                                 <input type="text" class="vis-input" id="vis-cam-url" placeholder="http://192.168.1.100:8090/feed" style="flex:1" />
                                                 <button class="vis-btn-sm vis-btn-download" id="vis-btn-stream-tools" onclick="visionManager._downloadStreamTools()" title="Windows Stream-Tools (ffmpeg) herunterladen">&#x2B07;</button>
@@ -1177,36 +1175,36 @@ sudo update-ca-certificates</code></pre>
                                             <small class="vis-hint">URL hat Vorrang vor USB-Kamera &middot; &#x2B07; = FFmpeg Stream-Tools f&uuml;r Windows</small>
                                         </div>
                                         <div class="vis-setting-row">
-                                            <label>Erkennungsmodell</label>
+                                            <label data-i18n="vis.detect_model">Erkennungsmodell</label>
                                             <select class="vis-select" id="vis-set-model">
-                                                <option value="hog">HOG (schnell, CPU)</option>
-                                                <option value="cnn">CNN (genau, GPU)</option>
+                                                <option value="hog" data-i18n="vis.model_hog">HOG (schnell, CPU)</option>
+                                                <option value="cnn" data-i18n="vis.model_cnn">CNN (genau, GPU)</option>
                                             </select>
                                         </div>
                                         <div class="vis-setting-row">
-                                            <label>Toleranz (0.0-1.0)</label>
+                                            <label data-i18n="vis.tolerance">Toleranz (0.0–1.0)</label>
                                             <input type="number" class="vis-input vis-input-sm" id="vis-set-tolerance" value="0.6" min="0.1" max="1.0" step="0.05" />
                                         </div>
                                         <div class="vis-setting-row">
-                                            <label>Intervall (Sek.)</label>
+                                            <label data-i18n="vis.interval">Intervall (Sek.)</label>
                                             <input type="number" class="vis-input vis-input-sm" id="vis-set-interval" value="1.0" min="0.1" max="10" step="0.1" />
                                         </div>
                                         <div class="vis-setting-row">
-                                            <label>Training-Samples</label>
+                                            <label data-i18n="vis.samples">Training-Samples</label>
                                             <input type="number" class="vis-input vis-input-sm" id="vis-set-samples" value="30" min="5" max="200" />
                                         </div>
                                         <div class="vis-setting-row">
-                                            <label>Auto-Start</label>
-                                            <label class="vis-checkbox"><input type="checkbox" id="vis-set-autostart"> <span>Bei Skill-Aktivierung starten</span></label>
+                                            <label data-i18n="vis.autostart">Auto-Start</label>
+                                            <label class="vis-checkbox"><input type="checkbox" id="vis-set-autostart"> <span data-i18n="vis.autostart_hint">Bei Skill-Aktivierung starten</span></label>
                                         </div>
                                     </div>
                                     <div class="vis-controls" style="margin-top:0.75rem;">
-                                        <button class="vis-btn vis-btn-primary" id="vis-btn-save-settings">Einstellungen speichern</button>
+                                        <button class="vis-btn vis-btn-primary" id="vis-btn-save-settings" data-i18n="vis.save_settings">Einstellungen speichern</button>
                                     </div>
                                     <hr class="vis-divider">
                                     <div class="vis-danger-zone">
-                                        <button class="vis-btn vis-btn-danger" id="vis-btn-cleanup">Alle Daten zurücksetzen</button>
-                                        <small>Löscht alle Profile, Bilder und Events unwiderruflich.</small>
+                                        <button class="vis-btn vis-btn-danger" id="vis-btn-cleanup" data-i18n="vis.reset_all">Alle Daten zurücksetzen</button>
+                                        <small data-i18n="vis.reset_warning">Löscht alle Profile, Bilder und Events unwiderruflich.</small>
                                     </div>
                                 </div>
                             </div>
@@ -1234,16 +1232,16 @@ sudo update-ca-certificates</code></pre>
                 <div id="vis-profile-modal" class="vis-modal" style="display:none;">
                     <div class="vis-modal-panel">
                         <div class="vis-modal-header">
-                            <h3>Profil bearbeiten</h3>
+                            <h3 data-i18n="vis.edit_profile">Profil bearbeiten</h3>
                             <button class="vis-modal-close" id="vis-modal-close">&times;</button>
                         </div>
                         <div class="vis-modal-body">
-                            <label>Name</label>
+                            <label data-i18n="vis.name_label">Name</label>
                             <input type="text" class="vis-input" id="vis-modal-name" />
                         </div>
                         <div class="vis-modal-footer">
-                            <button class="vis-btn vis-btn-primary" id="vis-modal-save">Speichern</button>
-                            <button class="vis-btn" id="vis-modal-cancel">Abbrechen</button>
+                            <button class="vis-btn vis-btn-primary" id="vis-modal-save" data-i18n="common.save">Speichern</button>
+                            <button class="vis-btn" id="vis-modal-cancel" data-i18n="common.cancel">Abbrechen</button>
                         </div>
                     </div>
                 </div>
@@ -1256,7 +1254,7 @@ sudo update-ca-certificates</code></pre>
                         <div class="sk-openclaw-section" id="tele-tool-section">
                             <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadSpans();})(this)">
                                 <span class="kb-folder-icon">🔧</span>
-                                <span class="kb-folder-path" style="font-weight:600;">Tool-Statistiken</span>
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.tool_stats">Tool-Statistiken</span>
                                 <span class="kb-folder-arrow">▼</span>
                             </div>
                             <div id="tele-tool-body"><div class="kb-loading">Lade…</div></div>
@@ -1264,7 +1262,7 @@ sudo update-ca-certificates</code></pre>
                         <div class="sk-openclaw-section" style="margin-top:10px;">
                             <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadSpans();})(this)">
                                 <span class="kb-folder-icon">🧠</span>
-                                <span class="kb-folder-path" style="font-weight:600;">LLM-Statistiken</span>
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.llm_stats">LLM-Statistiken</span>
                                 <span class="kb-folder-arrow">▼</span>
                             </div>
                             <div id="tele-llm-body"><div class="kb-loading">Lade…</div></div>
@@ -1272,13 +1270,13 @@ sudo update-ca-certificates</code></pre>
                         <div class="sk-openclaw-section" style="margin-top:10px;">
                             <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadConvLog();})(this)">
                                 <span class="kb-folder-icon">💬</span>
-                                <span class="kb-folder-path" style="font-weight:600;">LLM-Verlauf</span>
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.llm_history">LLM-Verlauf</span>
                                 <span style="margin-left:auto;margin-right:8px;">
                                     <select id="conv-log-user-filter" style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:0.78rem;" onclick="event.stopPropagation()">
-                                        <option value="">Alle Benutzer</option>
+                                        <option value="" data-i18n="telemetry.all_users">Alle Benutzer</option>
                                     </select>
                                     <select id="conv-log-ip-filter" style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:0.78rem;margin-left:4px;" onclick="event.stopPropagation()">
-                                        <option value="">Alle IPs</option>
+                                        <option value="" data-i18n="telemetry.all_ips">Alle IPs</option>
                                     </select>
                                     <button id="conv-log-refresh-btn" class="kb-btn-action" style="font-size:0.72rem;padding:2px 8px;margin-left:6px;" onclick="event.stopPropagation()" title="Aktualisieren">🔄</button>
                                     <button id="conv-log-clear-btn" class="kb-btn-action" style="font-size:0.72rem;padding:2px 8px;margin-left:4px;" onclick="event.stopPropagation()">🗑</button>
@@ -1290,7 +1288,7 @@ sudo update-ca-certificates</code></pre>
                         <div class="sk-openclaw-section" style="margin-top:10px;">
                             <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadErrors();})(this)">
                                 <span class="kb-folder-icon">❌</span>
-                                <span class="kb-folder-path" style="font-weight:600;">Fehler-Log</span>
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.error_log">Fehler-Log</span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
                             <div id="tele-errors-body" style="display:none;"><div class="kb-loading">Lade…</div></div>
@@ -1298,7 +1296,7 @@ sudo update-ca-certificates</code></pre>
                         <div class="sk-openclaw-section" style="margin-top:10px;">
                             <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadSpans();})(this)">
                                 <span class="kb-folder-icon">📋</span>
-                                <span class="kb-folder-path" style="font-weight:600;">Letzte Spans</span>
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.last_spans">Letzte Spans</span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
                             <div id="tele-spans-body" style="display:none;"><div class="kb-loading">Lade…</div></div>
@@ -1307,27 +1305,27 @@ sudo update-ca-certificates</code></pre>
                         <div class="sk-openclaw-section" style="margin-top:10px;">
                             <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.contextManager)window.contextManager.init();else if(b.style.display==='none'&&window.contextManager)window.contextManager.stop();})(this)">
                                 <span class="kb-folder-icon">🧩</span>
-                                <span class="kb-folder-path" style="font-weight:600;">Kontext / History</span>
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.context_history">Kontext / History</span>
                                 <span style="margin-left:auto;margin-right:8px;" onclick="event.stopPropagation()">
                                     <button id="ctx-refresh-btn" class="kb-btn-secondary" style="font-size:0.72rem;padding:2px 8px;" title="Aktualisieren">🔄</button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
                             <div id="ctx-section-body" style="display:none;padding:10px 0 4px;">
-                                <p class="kb-hint" style="margin:0 0 8px;">Zustand des laufenden Hauptagenten. Token-Angaben werden nur aktualisiert, wenn eine Aufgabe aktiv ist.</p>
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="telemetry.ctx_hint">Zustand des laufenden Hauptagenten. Token-Angaben werden nur aktualisiert, wenn eine Aufgabe aktiv ist.</p>
                                 <div class="kb-stat-grid" id="ctx-stat-grid" style="margin-top:0;">
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-history-entries">—</div><div class="kb-stat-label">History-Einträge</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-fills-pct">—</div><div class="kb-stat-label">Auslastung</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-input-tokens">—</div><div class="kb-stat-label">Input-Tokens</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-output-tokens">—</div><div class="kb-stat-label">Output-Tokens</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-total-tokens">—</div><div class="kb-stat-label">Tokens gesamt</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-hist-tokens">—</div><div class="kb-stat-label">History-Tokens (Schätz.)</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-agent-state">—</div><div class="kb-stat-label">Agent-Status</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-threshold-display">—</div><div class="kb-stat-label">Komprimierungs-Schwelle</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-history-entries">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_entries">History-Einträge</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-fills-pct">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_load">Auslastung</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-input-tokens">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_input_tok">Input-Tokens</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-output-tokens">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_output_tok">Output-Tokens</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-total-tokens">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_total_tok">Tokens gesamt</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-hist-tokens">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_hist_tok">History-Tokens (Schätz.)</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-agent-state">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_agent_state">Agent-Status</div></div>
+                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-threshold-display">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_threshold">Komprimierungs-Schwelle</div></div>
                                 </div>
                                 <div style="margin-top:10px;">
                                     <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-                                        <span class="kb-hint" style="margin:0;">History-Auslastung</span>
+                                        <span class="kb-hint" style="margin:0;" data-i18n="telemetry.ctx_utilization">History-Auslastung</span>
                                         <span class="kb-hint" id="ctx-fills-label" style="margin:0;">0 / 30 Einträge</span>
                                     </div>
                                     <div style="height:6px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden;">
@@ -1336,16 +1334,16 @@ sudo update-ca-certificates</code></pre>
                                 </div>
                                 <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
                                     <div class="kb-form-field" style="margin:0;flex:1;min-width:160px;">
-                                        <label class="kb-label" style="margin-bottom:2px;" for="ctx-threshold-input">Schwellwert (History-Einträge)</label>
+                                        <label class="kb-label" style="margin-bottom:2px;" for="ctx-threshold-input" data-i18n="telemetry.ctx_threshold_label">Schwellwert (History-Einträge)</label>
                                         <div style="display:flex;gap:6px;">
                                             <input id="ctx-threshold-input" type="number" min="4" max="200" step="2" value="30" class="kb-input" style="height:28px;font-size:0.8rem;">
-                                            <button id="ctx-threshold-save" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 10px;">Speichern</button>
+                                            <button id="ctx-threshold-save" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 10px;" data-i18n="common.save">Speichern</button>
                                         </div>
                                         <p class="kb-hint" style="margin-top:3px;">Min: 4 · Max: 200 · Standard: 30</p>
                                     </div>
                                     <div style="flex:0 0 auto;">
-                                        <button id="ctx-compress-btn" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 12px;">🗜️ Jetzt komprimieren</button>
-                                        <button id="ctx-clear-btn" class="kb-btn-danger" style="height:28px;font-size:0.8rem;padding:0 12px;margin-top:6px;">🗑️ Verlauf löschen</button>
+                                        <button id="ctx-compress-btn" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 12px;" data-i18n="telemetry.ctx_compress_btn">🗜️ Jetzt komprimieren</button>
+                                        <button id="ctx-clear-btn" class="kb-btn-danger" style="height:28px;font-size:0.8rem;padding:0 12px;margin-top:6px;" data-i18n="telemetry.ctx_clear_btn">🗑️ Verlauf löschen</button>
                                         <p class="kb-hint" style="margin-top:3px;" id="ctx-compress-result"></p>
                                     </div>
                                 </div>
@@ -1357,23 +1355,23 @@ sudo update-ca-certificates</code></pre>
                         <div class="sk-openclaw-section" style="margin-top:10px;">
                             <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.auditManager)window.auditManager.init();})(this)">
                                 <span class="kb-folder-icon">📋</span>
-                                <span class="kb-folder-path" style="font-weight:600;">Tool-Audit-Log</span>
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.audit_log">Tool-Audit-Log</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" onclick="event.stopPropagation()">
                                     <button id="audit-refresh-btn" class="kb-btn-secondary" style="font-size:0.72rem;padding:2px 8px;" title="Aktualisieren">🔄</button>
-                                    <button id="audit-clear-btn" class="kb-btn-danger" style="font-size:0.72rem;padding:2px 8px;" title="Log löschen">🗑️</button>
+                                    <button id="audit-clear-btn" class="kb-btn-danger" style="font-size:0.72rem;padding:2px 8px;" title="Log löschen" data-i18n-title="telemetry.audit_clear">🗑️</button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
                             <div id="audit-section-body" style="display:none;padding:10px 0 4px;">
-                                <p class="kb-hint" style="margin:0 0 8px;">Jeder Tool-Aufruf des Agenten wird hier protokolliert (max. 10 MB, danach automatische Rotation).</p>
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="telemetry.audit_hint">Jeder Tool-Aufruf des Agenten wird hier protokolliert (max. 10 MB, danach automatische Rotation).</p>
                                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:flex-end;">
                                     <div class="kb-form-field" style="margin:0;flex:1;min-width:120px;">
-                                        <label class="kb-label" style="margin-bottom:2px;" for="audit-filter-user">Benutzer</label>
-                                        <input id="audit-filter-user" type="text" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="audit-filter-user" data-i18n="telemetry.audit_user_label">Benutzer</label>
+                                        <input id="audit-filter-user" type="text" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
                                     </div>
                                     <div class="kb-form-field" style="margin:0;flex:1;min-width:120px;">
-                                        <label class="kb-label" style="margin-bottom:2px;" for="audit-filter-tool">Tool</label>
-                                        <input id="audit-filter-tool" type="text" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="audit-filter-tool" data-i18n="telemetry.audit_tool_label">Tool</label>
+                                        <input id="audit-filter-tool" type="text" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
                                     </div>
                                     <select id="audit-limit" class="kb-input" style="flex:0 0 auto;width:90px;height:28px;font-size:0.8rem;">
                                         <option value="50">50</option>
@@ -1381,7 +1379,7 @@ sudo update-ca-certificates</code></pre>
                                         <option value="200" selected>200</option>
                                         <option value="500">500</option>
                                     </select>
-                                    <button id="audit-apply-btn" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 12px;">Anwenden</button>
+                                    <button id="audit-apply-btn" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 12px;" data-i18n="common.apply">Anwenden</button>
                                     <span id="audit-count" class="kb-hint" style="margin:0;"></span>
                                 </div>
                                 <div id="audit-notification" class="kb-notification" style="display:none;margin-bottom:6px;"></div>
@@ -1389,16 +1387,16 @@ sudo update-ca-certificates</code></pre>
                                     <table id="audit-table" class="audit-table">
                                         <thead>
                                             <tr>
-                                                <th>Zeit</th>
-                                                <th>Benutzer</th>
-                                                <th>Tool</th>
-                                                <th>Dauer</th>
-                                                <th>Ergebnis</th>
-                                                <th>Argumente</th>
+                                                <th data-i18n="telemetry.audit_col_time">Zeit</th>
+                                                <th data-i18n="telemetry.audit_user_label">Benutzer</th>
+                                                <th data-i18n="telemetry.audit_tool_label">Tool</th>
+                                                <th data-i18n="telemetry.audit_col_dur">Dauer</th>
+                                                <th data-i18n="telemetry.audit_col_result">Ergebnis</th>
+                                                <th data-i18n="telemetry.audit_col_args">Argumente</th>
                                             </tr>
                                         </thead>
                                         <tbody id="audit-tbody">
-                                            <tr><td colspan="6" class="audit-empty">Lade…</td></tr>
+                                            <tr><td colspan="6" class="audit-empty" data-i18n="common.loading">Lädt…</td></tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -1406,8 +1404,8 @@ sudo update-ca-certificates</code></pre>
                         </div>
 
                         <div style="display:flex;gap:10px;margin-top:16px;">
-                            <button class="vis-btn vis-btn-primary" id="btn-tele-refresh">↻ Aktualisieren</button>
-                            <button class="vis-btn" id="btn-tele-clear" style="color:#ef4444;border-color:rgba(239,68,68,0.4);">Zurücksetzen</button>
+                            <button class="vis-btn vis-btn-primary" id="btn-tele-refresh" data-i18n="telemetry.refresh">↻ Aktualisieren</button>
+                            <button class="vis-btn" id="btn-tele-clear" style="color:#ef4444;border-color:rgba(239,68,68,0.4);" data-i18n="telemetry.reset">Zurücksetzen</button>
                         </div>
                     </div>
                 </div>
@@ -1423,7 +1421,7 @@ sudo update-ca-certificates</code></pre>
                                 <span class="sk-openclaw-toggle" id="sec-sect-pw-tog">▶</span>
                             </div>
                             <div id="sec-sect-pw-body" class="kb-collapse-body" style="display:none;">
-                                <p class="kb-hint">Ändert das Linux-Benutzerkonto <code>jarvis</code> – gilt für die Web-Oberfläche und SSH-Login. <strong>Nicht</strong> das WebDAV-Passwort.</p>
+                                <p class="kb-hint" data-i18n-html="security.pw_change_hint">Ändert das Linux-Benutzerkonto <code>jarvis</code> – gilt für die Web-Oberfläche und SSH-Login. <strong>Nicht</strong> das WebDAV-Passwort.</p>
                                 <div class="form-group">
                                     <label data-i18n="security.current_pw">Aktuelles Kennwort</label>
                                     <div style="position:relative;width:25%;">
@@ -1468,43 +1466,41 @@ sudo update-ca-certificates</code></pre>
                                 <span class="sk-openclaw-toggle" id="sec-sect-ad-tog">▶</span>
                             </div>
                             <div id="sec-sect-ad-body" class="kb-collapse-body" style="display:none;">
-                                <p class="kb-hint">
-                                    Domain-Login für Windows- und Android-App. Jarvis-Server muss nur im gleichen Netzwerk wie der Domain-Controller sein – kein Domain-Beitritt erforderlich.
-                                </p>
+                                <p class="kb-hint" data-i18n="security.ad_hint">Domain-Login für Windows- und Android-App. Jarvis-Server muss nur im gleichen Netzwerk wie der Domain-Controller sein – kein Domain-Beitritt erforderlich.</p>
 
                                 <!-- Status-Badge -->
                                 <div id="ad-status-badge" style="display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:8px;background:var(--bg-glass);border:1px solid var(--border);font-size:0.82rem;margin-bottom:16px;">
                                     <span id="ad-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0;"></span>
-                                    <span id="ad-status-text" style="color:var(--text-muted);">Lade…</span>
+                                    <span id="ad-status-text" style="color:var(--text-muted);" data-i18n="common.loading">Lädt…</span>
                                 </div>
 
                                 <!-- Server + Domain -->
                                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
                                     <div class="form-group" style="margin:0;">
-                                        <label>Domain-Controller (IP oder Hostname)</label>
-                                        <input type="text" id="ad-server" placeholder="z.B. 192.168.1.10 oder dc.firma.local" style="width:100%;box-sizing:border-box;">
+                                        <label data-i18n="security.ad_dc_label">Domain-Controller (IP oder Hostname)</label>
+                                        <input type="text" id="ad-server" data-i18n-placeholder="security.ad_dc_ph" placeholder="z.B. 192.168.1.10 oder dc.firma.local" style="width:100%;box-sizing:border-box;">
                                     </div>
                                     <div class="form-group" style="margin:0;">
-                                        <label>Domain</label>
-                                        <input type="text" id="ad-domain" placeholder="z.B. firma.local" style="width:100%;box-sizing:border-box;">
+                                        <label data-i18n="security.ad_domain_label">Domain</label>
+                                        <input type="text" id="ad-domain" data-i18n-placeholder="security.ad_domain_ph" placeholder="z.B. firma.local" style="width:100%;box-sizing:border-box;">
                                     </div>
                                 </div>
 
                                 <!-- Zugriffssteuerung -->
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
-                                        Erlaubte Benutzer
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– kommagetrennt, z.B. <code>mueller,schmidt</code> (leer = alle AD-Benutzer)</span>
+                                        <span data-i18n="security.ad_users_label">Erlaubte Benutzer</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n-html="security.ad_users_hint">– kommagetrennt, z.B. <code>mueller,schmidt</code> (leer = alle AD-Benutzer)</span>
                                     </label>
-                                    <input type="text" id="ad-allowed-users" placeholder="Leer lassen für alle Domänen-Benutzer" style="width:50%;box-sizing:border-box;">
+                                    <input type="text" id="ad-allowed-users" data-i18n-placeholder="security.ad_users_ph" placeholder="Leer lassen für alle Domänen-Benutzer" style="width:50%;box-sizing:border-box;">
                                 </div>
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
-                                        Erlaubte Gruppe (AD-Gruppe)
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                                        <span data-i18n="security.ad_group_label">Erlaubte Gruppe (AD-Gruppe)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
                                     </label>
-                                    <input type="text" id="ad-allowed-group" placeholder="z.B. CN=Jarvis-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                    <input type="text" id="ad-allowed-group" data-i18n-placeholder="security.ad_group_ph" placeholder="z.B. CN=Jarvis-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;" data-i18n="security.ad_group_warning">
                                         ⚠ Wenn eine Gruppe eingetragen ist, wird die Benutzerliste ignoriert.
                                     </div>
                                 </div>
@@ -1513,8 +1509,8 @@ sudo update-ca-certificates</code></pre>
                                 <div id="ad-mode-hint" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:12px;border:1px solid;"></div>
 
                                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-                                    <button class="kb-btn-action" id="ad-save-btn" onclick="window._adSave()">Speichern</button>
-                                    <button class="kb-btn-secondary" onclick="window._adTest()">Verbindung testen</button>
+                                    <button class="kb-btn-action" id="ad-save-btn" onclick="window._adSave()" data-i18n="common.save">Speichern</button>
+                                    <button class="kb-btn-secondary" onclick="window._adTest()" data-i18n="profile.test">Verbindung testen</button>
                                     <span id="ad-save-status" style="font-size:0.82rem;"></span>
                                 </div>
                                 <div id="ad-test-result" style="font-size:0.82rem;min-height:18px;margin-top:4px;"></div>
@@ -1542,30 +1538,30 @@ sudo update-ca-certificates</code></pre>
                                         if (!d.configured) {
                                             dot.style.background = '#94a3b8';
                                             txt.style.color      = 'var(--text-muted)';
-                                            txt.textContent      = 'Nicht konfiguriert – lokaler Login aktiv';
+                                            txt.textContent      = window.t('security.ad_not_configured');
                                             hint.style.display   = 'none';
                                             return;
                                         }
                                         dot.style.background = '#34d399';
                                         txt.style.color      = '#34d399';
-                                        const modeLabels = { open: '🔓 Offen – alle Domänen-Benutzer erlaubt', users: '👥 Benutzerliste aktiv', group: '🏷️ Gruppen-Filter aktiv' };
-                                        txt.textContent = 'Aktiv · ' + d.server + ' · ' + d.domain + ' · ' + (modeLabels[d.access_mode] || d.access_mode);
+                                        const modeLabels = { open: window.t('security.ad_mode_open'), users: window.t('security.ad_mode_users'), group: window.t('security.ad_mode_group') };
+                                        txt.textContent = window.t('security.ad_active_label') + ' · ' + d.server + ' · ' + d.domain + ' · ' + (modeLabels[d.access_mode] || d.access_mode);
                                         hint.style.display     = 'block';
                                         if (d.access_mode === 'open') {
                                             hint.style.borderColor = '#f59e0b';
                                             hint.style.background  = 'rgba(245,158,11,0.08)';
                                             hint.style.color       = '#f59e0b';
-                                            hint.textContent       = '⚠ Kein Zugriffsfilter – jeder Domänen-Benutzer mit gültigem Passwort kann sich anmelden.';
+                                            hint.textContent       = window.t('security.ad_warn_open');
                                         } else if (d.access_mode === 'users') {
                                             hint.style.borderColor = '#34d399';
                                             hint.style.background  = 'rgba(52,211,153,0.08)';
                                             hint.style.color       = '#34d399';
-                                            hint.textContent       = '✓ Benutzerliste: ' + d.allowed_users;
-                                        } else {
+                                            hint.textContent       = window.t('security.ad_users_active') + ' ' + d.allowed_users;
+                                        } else if (d.access_mode === 'group') {
                                             hint.style.borderColor = '#6366f1';
                                             hint.style.background  = 'rgba(99,102,241,0.08)';
                                             hint.style.color       = '#a5b4fc';
-                                            hint.textContent       = '✓ Gruppen-Filter: ' + d.allowed_group;
+                                            hint.textContent       = window.t('security.ad_group_active') + ' ' + d.allowed_group;
                                         }
                                     }
 
@@ -1573,7 +1569,7 @@ sudo update-ca-certificates</code></pre>
                                         const btn = document.getElementById('ad-save-btn');
                                         const st  = document.getElementById('ad-save-status');
                                         btn.disabled = true;
-                                        st.textContent = 'Speichern…'; st.style.color = 'var(--text-muted)';
+                                        st.textContent = window.t('common.saving'); st.style.color = 'var(--text-muted)';
                                         try {
                                             const r = await fetch('/api/settings', {
                                                 method: 'POST',
@@ -1586,7 +1582,7 @@ sudo update-ca-certificates</code></pre>
                                                 })
                                             });
                                             if (!r.ok) throw new Error('HTTP ' + r.status);
-                                            st.textContent = '✓ Gespeichert'; st.style.color = '#34d399';
+                                            st.textContent = window.t('security.ad_saved'); st.style.color = '#34d399';
                                             setTimeout(() => { st.textContent = ''; }, 3000);
                                             await _adLoad();
                                         } catch(e) {
@@ -1598,8 +1594,8 @@ sudo update-ca-certificates</code></pre>
                                         const res = document.getElementById('ad-test-result');
                                         const srv = document.getElementById('ad-server').value.trim();
                                         const dom = document.getElementById('ad-domain').value.trim();
-                                        if (!srv || !dom) { res.style.color='#f59e0b'; res.textContent='⚠ Bitte Server und Domain eingeben'; return; }
-                                        res.style.color='var(--text-muted)'; res.textContent='Verbinde mit ' + srv + '…';
+                                        if (!srv || !dom) { res.style.color='#f59e0b'; res.textContent=window.t('security.ad_fill_fields'); return; }
+                                        res.style.color='var(--text-muted)'; res.textContent=window.t('security.ad_connecting') + ' ' + srv + '…';
                                         try {
                                             const r = await fetch('/api/auth/ad_test', {
                                                 method: 'POST',
@@ -1608,9 +1604,9 @@ sudo update-ca-certificates</code></pre>
                                             });
                                             const d = await r.json();
                                             if (d.reachable) {
-                                                res.style.color='#34d399'; res.textContent='✓ ' + srv + ' erreichbar (LDAP Port 389)';
+                                                res.style.color='#34d399'; res.textContent='✓ ' + srv + ' – ' + window.t('security.ad_reachable');
                                             } else {
-                                                res.style.color='#ef4444'; res.textContent='✗ Nicht erreichbar: ' + (d.error || 'Timeout');
+                                                res.style.color='#ef4444'; res.textContent='✗ ' + window.t('security.ad_unreachable') + ': ' + (d.error || 'Timeout');
                                             }
                                         } catch(e) { res.style.color='#ef4444'; res.textContent='✗ ' + e.message; }
                                     };
@@ -1633,24 +1629,24 @@ sudo update-ca-certificates</code></pre>
                             </div>
                             <div id="sec-sect-2fa-body" class="kb-collapse-body" style="display:none;">
                                 <div id="totp-settings-status" style="margin-bottom:12px;">
-                                    <p style="color:var(--text-secondary);font-size:0.85rem;line-height:1.5;">Lade Status…</p>
+                                    <p style="color:var(--text-secondary);font-size:0.85rem;line-height:1.5;" data-i18n="common.loading">Lade Status…</p>
                                 </div>
                                 <div id="totp-settings-setup" style="display:none;">
                                     <div id="totp-settings-qr" style="text-align:center;margin:12px 0;"></div>
-                                    <p style="color:var(--text-muted);font-size:0.78rem;text-align:center;margin-bottom:4px;">Manueller Schlüssel:</p>
+                                    <p style="color:var(--text-muted);font-size:0.78rem;text-align:center;margin-bottom:4px;" data-i18n="security.totp_manual_key">Manueller Schlüssel:</p>
                                     <code id="totp-settings-secret" style="display:block;text-align:center;font-size:0.85rem;color:var(--accent-hover);background:var(--bg-glass);padding:8px;border-radius:8px;letter-spacing:2px;margin-bottom:12px;user-select:all;cursor:pointer;"></code>
                                     <div style="display:flex;gap:8px;">
-                                        <input type="text" id="totp-settings-code" placeholder="6-stelliger Code"
+                                        <input type="text" id="totp-settings-code" data-i18n-placeholder="chat.totp_ph" placeholder="6-stelliger Code"
                                             inputmode="numeric" maxlength="6" autocomplete="one-time-code"
                                             style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:1.1rem;text-align:center;letter-spacing:6px;font-weight:600;font-family:var(--font-mono);outline:none;">
-                                        <button id="btn-totp-settings-verify" class="settings-action-btn" style="white-space:nowrap;">Aktivieren</button>
+                                        <button id="btn-totp-settings-verify" class="settings-action-btn" style="white-space:nowrap;" data-i18n="security.totp_activate">Aktivieren</button>
                                     </div>
                                 </div>
                                 <div id="totp-settings-disable" style="display:none;">
                                     <div style="display:flex;gap:8px;">
-                                        <input type="password" id="totp-settings-disable-pw" placeholder="Kennwort zur Bestätigung"
+                                        <input type="password" id="totp-settings-disable-pw" data-i18n-placeholder="security.pw_ph_current" placeholder="Kennwort zur Bestätigung"
                                             style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:0.9rem;outline:none;">
-                                        <button id="btn-totp-settings-disable" class="settings-action-btn" style="background:var(--danger);white-space:nowrap;">Deaktivieren</button>
+                                        <button id="btn-totp-settings-disable" class="settings-action-btn" style="background:var(--danger);white-space:nowrap;" data-i18n="security.totp_deactivate">Deaktivieren</button>
                                     </div>
                                 </div>
                                 <p id="totp-settings-error" style="color:var(--danger);font-size:0.85rem;margin-top:8px;min-height:20px;"></p>
@@ -1667,11 +1663,11 @@ sudo update-ca-certificates</code></pre>
                                             const r = await fetch('/api/auth/totp/status', { headers: { 'Authorization': 'Bearer ' + t } });
                                             const d = await r.json();
                                             if (d.enabled) {
-                                                statusEl.innerHTML = '<p style="color:var(--success);font-size:0.85rem;">✅ 2FA ist aktiviert. Zum Deaktivieren Kennwort eingeben:</p>';
+                                                statusEl.innerHTML = '<p style="color:var(--success);font-size:0.85rem;">' + window.t('security.totp_enabled_msg') + '</p>';
                                                 setupEl.style.display = 'none';
                                                 disableEl.style.display = '';
                                             } else {
-                                                statusEl.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">2FA ist nicht aktiviert. Scanne den QR-Code mit Google Authenticator:</p>';
+                                                statusEl.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">' + window.t('security.totp_disabled_msg') + '</p>';
                                                 disableEl.style.display = 'none';
                                                 const sr = await fetch('/api/auth/totp/setup', { method: 'POST', headers: { 'Authorization': 'Bearer ' + t } });
                                                 const sd = await sr.json();
@@ -1680,7 +1676,7 @@ sudo update-ca-certificates</code></pre>
                                                 document.getElementById('totp-settings-code').value = '';
                                                 setupEl.style.display = '';
                                             }
-                                        } catch(e) { statusEl.innerHTML = '<p style="color:var(--danger);font-size:0.85rem;">Fehler beim Laden</p>'; }
+                                        } catch(e) { statusEl.innerHTML = '<p style="color:var(--danger);font-size:0.85rem;">' + window.t('security.totp_error_load') + '</p>'; }
 
                                         document.getElementById('btn-totp-settings-verify').onclick = async function() {
                                             errEl.textContent = '';
@@ -1693,8 +1689,8 @@ sudo update-ca-certificates</code></pre>
                                                     body: JSON.stringify({ code })
                                                 });
                                                 const d = await r.json();
-                                                if (d.success) { _totpLoad(); } else { errEl.textContent = d.error || 'Fehler'; }
-                                            } catch(e) { errEl.textContent = 'Verbindungsfehler'; }
+                                                if (d.success) { _totpLoad(); } else { errEl.textContent = d.error || window.t('security.totp_error_load'); }
+                                            } catch(e) { errEl.textContent = window.t('security.totp_error_load'); }
                                         };
 
                                         document.getElementById('btn-totp-settings-disable').onclick = async function() {
@@ -1709,8 +1705,8 @@ sudo update-ca-certificates</code></pre>
                                                 });
                                                 const d = await r.json();
                                                 if (d.success) { document.getElementById('totp-settings-disable-pw').value = ''; _totpLoad(); }
-                                                else { errEl.textContent = d.error || 'Fehler'; }
-                                            } catch(e) { errEl.textContent = 'Verbindungsfehler'; }
+                                                else { errEl.textContent = d.error || window.t('security.totp_error_load'); }
+                                            } catch(e) { errEl.textContent = window.t('security.totp_error_load'); }
                                         };
                                     }
                                     const secBtn = document.querySelector('[data-settings-tab="security"]');
@@ -1735,20 +1731,20 @@ sudo update-ca-certificates</code></pre>
         </div>
     </div>
 
-    <script src="/static/js/i18n.js?v=3"></script>
+    <script src="/static/js/i18n.js?v=9"></script>
     <script src="/static/js/websocket.js?v=6"></script>
-    <script src="/static/js/cron.js?v=8"></script>
-    <script src="/static/js/context.js?v=3"></script>
+    <script src="/static/js/cron.js?v=11"></script>
+    <script src="/static/js/context.js?v=4"></script>
     <script src="/static/js/audit.js?v=3"></script>
-    <script src="/static/js/extractor.js?v=8"></script>
-    <script src="/static/js/vnc.js?v=14"></script>
-    <script src="/static/js/skills.js?v=21"></script>
-    <script src="/static/js/whatsapp.js?v=8"></script>
-    <script src="/static/js/knowledge.js?v=34"></script>
-    <script src="/static/js/mcp.js?v=1"></script>
-    <script src="/static/js/vision.js?v=26"></script>
-    <script src="/static/js/telemetry.js?v=3"></script>
-    <script src="/static/js/app.js?v=82"></script>
+    <script src="/static/js/extractor.js?v=9"></script>
+    <script src="/static/js/vnc.js?v=16"></script>
+    <script src="/static/js/skills.js?v=23"></script>
+    <script src="/static/js/whatsapp.js?v=9"></script>
+    <script src="/static/js/knowledge.js?v=36"></script>
+    <script src="/static/js/mcp.js?v=3"></script>
+    <script src="/static/js/vision.js?v=28"></script>
+    <script src="/static/js/telemetry.js?v=4"></script>
+    <script src="/static/js/app.js?v=87"></script>
 </body>
 
 </html>

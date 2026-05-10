@@ -65,10 +65,10 @@ window.contextManager = new (class JarvisContextManager {
         const stateEl = $('ctx-agent-state');
         if (stateEl) {
             const stateMap = {
-                idle:    { label: 'Bereit',    color: 'var(--text-secondary)' },
-                running: { label: 'Läuft',     color: 'var(--success-color,#2ecc71)' },
-                paused:  { label: 'Pausiert',  color: '#f39c12' },
-                stopped: { label: 'Gestoppt',  color: '#e74c3c' },
+                idle:    { label: window.t('agent.idle'),    color: 'var(--text-secondary)' },
+                running: { label: window.t('agent.running'), color: 'var(--success-color,#2ecc71)' },
+                paused:  { label: window.t('agent.paused'),  color: '#f39c12' },
+                stopped: { label: window.t('agent.stopped'), color: '#e74c3c' },
             };
             const s = stateMap[d.agent_state] || { label: d.agent_state || '—', color: 'var(--text-secondary)' };
             stateEl.textContent = s.label;
@@ -95,7 +95,7 @@ window.contextManager = new (class JarvisContextManager {
             bar.style.background = pct < 60 ? 'var(--accent)' : pct < 85 ? '#f39c12' : '#e74c3c';
         }
         if (label) {
-            label.textContent = `${d.history_entries ?? 0} / ${d.compress_threshold ?? 30} Einträge`;
+            label.textContent = `${d.history_entries ?? 0} / ${d.compress_threshold ?? 30} ${window.t('ctx.entries')}`;
         }
     }
 
@@ -104,7 +104,7 @@ window.contextManager = new (class JarvisContextManager {
         if (!inp) return;
         const val = parseInt(inp.value, 10);
         if (isNaN(val) || val < 4 || val > 200) {
-            this._notify('Ungültiger Wert (4–200)', 'error'); return;
+            this._notify(window.t('ctx.invalid_value'), 'error'); return;
         }
         try {
             const r = await fetch('/api/context/threshold', {
@@ -113,7 +113,7 @@ window.contextManager = new (class JarvisContextManager {
                 body: JSON.stringify({ threshold: val })
             });
             const d = await r.json();
-            this._notify(`✅ Schwellwert auf ${d.threshold} gesetzt`);
+            this._notify(`✅ ${window.t('ctx.threshold_set')}: ${d.threshold}`);
             inp._userEdited = false;
             this._load();
         } catch (e) { this._notify('Netzwerkfehler: ' + e.message, 'error'); }
@@ -122,7 +122,7 @@ window.contextManager = new (class JarvisContextManager {
     async _forceCompress() {
         const btn = document.getElementById('ctx-compress-btn');
         const res = document.getElementById('ctx-compress-result');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ Komprimiere…'; }
+        if (btn) { btn.disabled = true; btn.textContent = window.t('ctx.compressing'); }
         try {
             const r = await fetch('/api/context/compress', {
                 method: 'POST',
@@ -130,22 +130,22 @@ window.contextManager = new (class JarvisContextManager {
             });
             const d = await r.json();
             if (d.skipped) {
-                this._notify(`ℹ️ Nicht komprimiert: ${d.reason}`, 'info');
-                if (res) res.textContent = `Nicht nötig: ${d.reason}`;
+                this._notify(`ℹ️ ${window.t('ctx.compress_skip')}: ${d.reason}`, 'info');
+                if (res) res.textContent = `${window.t('ctx.compress_skip')}: ${d.reason}`;
             } else {
-                this._notify(`✅ Komprimiert: ${d.before} → ${d.after} Einträge`);
-                if (res) res.textContent = `Letzte Komprimierung: ${d.before} → ${d.after} Einträge`;
+                this._notify(`${window.t('ctx.compress_done')}: ${d.before} → ${d.after} ${window.t('ctx.entries')}`);
+                if (res) res.textContent = `${window.t('ctx.last_compress')}: ${d.before} → ${d.after} ${window.t('ctx.entries')}`;
             }
             this._load();
         } catch (e) {
             this._notify('Fehler: ' + e.message, 'error');
         } finally {
-            if (btn) { btn.disabled = false; btn.textContent = '🗜️ Jetzt komprimieren'; }
+            if (btn) { btn.disabled = false; btn.textContent = window.t('ctx.compress_now'); }
         }
     }
 
     async _clearHistory() {
-        if (!confirm('Chat-Verlauf für deinen Benutzer löschen? Das nächste Gespräch startet ohne Kontext.')) return;
+        if (!confirm(window.t('ctx.clear_confirm'))) return;
         try {
             const r = await fetch('/api/context/clear', {
                 method: 'POST',
@@ -153,10 +153,10 @@ window.contextManager = new (class JarvisContextManager {
             });
             const d = await r.json();
             if (d.ok) {
-                this._notify(`✅ Verlauf gelöscht (${d.cleared} Einträge)`);
+                this._notify(`${window.t('ctx.cleared')} (${d.cleared} ${window.t('ctx.entries')})`);
                 this._load();
             } else {
-                this._notify('Fehler beim Löschen', 'error');
+                this._notify(window.t('ctx.clear_error'), 'error');
             }
         } catch (e) { this._notify('Netzwerkfehler: ' + e.message, 'error'); }
     }

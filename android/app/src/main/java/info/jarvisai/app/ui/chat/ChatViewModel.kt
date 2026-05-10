@@ -88,6 +88,7 @@ class ChatViewModel @Inject constructor(
     private var speechRecognizer: SpeechRecognizer? = null
     private var autoSendVoice = false
     private var voiceSilenceMs = 1500
+    private var currentUiLang = "de"
 
     init {
         // Alle Settings-Änderungen live übernehmen
@@ -96,6 +97,7 @@ class ChatViewModel @Inject constructor(
                 _quickActions.value = s.quickActions
                 autoSendVoice = s.autoSendVoice
                 voiceSilenceMs = s.voiceSilenceMs
+                currentUiLang = s.uiLang
                 _avatarType.value = s.avatarType
                 _ttsEnabled.value = s.ttsEnabled
                 ttsManager.configure(
@@ -281,11 +283,13 @@ class ChatViewModel @Inject constructor(
                 override fun onRmsChanged(rmsdB: Float) {}
             })
         }
+        val speechLocale = if (currentUiLang == "en") "en-US" else "de-DE"
+        val speechPrompt = if (currentUiLang == "en") "Speak with Jarvis…" else "Sprich mit Jarvis…"
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "de-DE")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Sprich mit Jarvis…")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, speechLocale)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, speechPrompt)
             putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", voiceSilenceMs.toLong())
             putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", voiceSilenceMs.toLong())
             putExtra("android.speech.extra.SPEECH_INPUT_MINIMUM_LENGTH_MILLIS", 500L)

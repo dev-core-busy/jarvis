@@ -3,7 +3,8 @@
 Jarvis ist ein autonomer KI-Agent fuer Linux-Systeme mit modularem Skill-System und WhatsApp-Integration.
 
 ## Server
-- Server-IP: {{SERVER_IP}}
+- Server-IP: 191.100.144.1
+- SSH: `ssh -i /c/users/bender/.ssh/id_rsa root@191.100.144.1`
 - Betriebssystem: Debian 13 (Trixie)
 - Display: X11, physisches Display :0
 - Services: jarvis.service + whatsapp-bridge.service (systemd)
@@ -26,7 +27,7 @@ Modulares Plugin-System. Jeder Skill hat ein `skill.json` Manifest und ein Pytho
 | Desktop | desktop_control | X11 Maus/Tastatur/Fenster steuern |
 | Dateisystem | filesystem | Dateien lesen/schreiben/auflisten |
 | Screenshot | screenshot | Desktop-Screenshots erstellen (Base64) |
-| Wissensdatenbank | knowledge_search | TF-IDF Suche in data/knowledge/ |
+| Wissensdatenbank | knowledge_search | Vektor-Suche + TF-IDF Fallback (Auto-Modus) in data/knowledge/ |
 | Memory | memory_manage | Persistenter Key-Value-Speicher |
 
 ### Externe Skills
@@ -64,13 +65,21 @@ Smartphone → WhatsApp Server → Baileys Bridge (:3001) → Jarvis Backend (:4
 - `whisper_model`: tiny/base/small/medium/large (Standard: small)
 
 ## Wichtige Pfade
-- Projekt: /opt/jarvis (Service) + /home/jarvis/jarvis (Entwicklung)
+- Projekt: /opt/jarvis (Service/Prod) + /home/jarvis/jarvis (Entwicklung)
+- Instruktionen: /opt/jarvis/data/instructions/
 - Skills: /opt/jarvis/skills/
 - WhatsApp Bridge: /opt/jarvis/services/whatsapp-bridge/
 - Zertifikate: /opt/jarvis/certs/
 - Knowledge Base: /opt/jarvis/data/knowledge/
 - Memory: /opt/jarvis/data/memory.json
 - Settings: /opt/jarvis/data/settings.json
+
+## Deployment-Regeln
+- Dateien immer an BEIDE Pfade deployen: `/opt/jarvis/` UND `/home/jarvis/jarvis/`
+- Nach Backend-Änderungen (Python-Dateien): `systemctl restart jarvis.service`
+- Nach WhatsApp-Bridge-Änderungen: `systemctl restart whatsapp-bridge.service`
+- Frontend-Änderungen: Cache-Buster in index.html hochzählen (`?v=N`)
+- Deploy-Befehl: `scp -i /c/users/bender/.ssh/id_rsa <datei> root@191.100.144.1:/opt/jarvis/<pfad>`
 
 ## Zugang
 - HTTPS Port: 443 (Backend + Frontend)

@@ -60,6 +60,9 @@ import info.jarvisai.app.data.model.AvatarType
 import info.jarvisai.app.ui.avatar.IronManAvatar
 import info.jarvisai.app.ui.theme.*
 
+// Übersetzungs-Helfer: gibt DE- oder EN-String zurück je nach lang.
+private fun s(de: String, en: String, lang: String) = if (lang == "en") en else de
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -174,6 +177,7 @@ fun ChatScreen(
                     onSelectAll = viewModel::selectAll,
                     onDelete = viewModel::deleteSelected,
                     onExit = viewModel::exitSelectionMode,
+                    lang = settings.uiLang,
                 )
             } else {
                 JarvisTopBar(
@@ -182,6 +186,7 @@ fun ChatScreen(
                     onOpenSettings = onOpenSettings,
                     onToggleAgents = viewModel::toggleAgentPanel,
                     onReconnect = viewModel::reconnect,
+                    lang = settings.uiLang,
                 )
             }
 
@@ -216,10 +221,10 @@ fun ChatScreen(
                         ) {
                             Text(
                                 text = when (updateState.phase) {
-                                    DownloadPhase.IDLE     -> "Update ${updateState.versionName} verfügbar"
-                                    DownloadPhase.DOWNLOADING -> "Lade herunter… ${updateState.progress} %"
-                                    DownloadPhase.READY    -> "Download abgeschlossen – Installation startet…"
-                                    DownloadPhase.ERROR    -> "Download fehlgeschlagen"
+                                    DownloadPhase.IDLE     -> s("Update ${updateState.versionName} verfügbar", "Update ${updateState.versionName} available", settings.uiLang)
+                                    DownloadPhase.DOWNLOADING -> s("Lade herunter… ${updateState.progress} %", "Downloading… ${updateState.progress} %", settings.uiLang)
+                                    DownloadPhase.READY    -> s("Download abgeschlossen – Installation startet…", "Download complete – installing…", settings.uiLang)
+                                    DownloadPhase.ERROR    -> s("Download fehlgeschlagen", "Download failed", settings.uiLang)
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (updateState.phase == DownloadPhase.ERROR)
@@ -227,10 +232,10 @@ fun ChatScreen(
                             )
                             when (updateState.phase) {
                                 DownloadPhase.IDLE -> TextButton(onClick = viewModel::downloadUpdate) {
-                                    Text("Installieren", color = JarvisGreen, fontWeight = FontWeight.Bold)
+                                    Text(s("Installieren", "Install", settings.uiLang), color = JarvisGreen, fontWeight = FontWeight.Bold)
                                 }
                                 DownloadPhase.ERROR -> TextButton(onClick = viewModel::dismissUpdate) {
-                                    Text("Schließen", color = MaterialTheme.colorScheme.error)
+                                    Text(s("Schließen", "Close", settings.uiLang), color = MaterialTheme.colorScheme.error)
                                 }
                                 else -> {}
                             }
@@ -288,6 +293,7 @@ fun ChatScreen(
                 onTtsStop = viewModel::stopTts,
                 onStopAgent = viewModel::stopAgent,
                 onToggleTts = viewModel::toggleTts,
+                lang = settings.uiLang,
             )
         }
 
@@ -300,6 +306,7 @@ fun ChatScreen(
         ) {
             AgentPanel(
                 agents = agents,
+                lang = settings.uiLang,
                 modifier = Modifier
                     .width(220.dp)
                     .fillMaxHeight(),
@@ -318,16 +325,17 @@ private fun SelectionTopBar(
     onSelectAll: () -> Unit,
     onDelete: () -> Unit,
     onExit: () -> Unit,
+    lang: String = "de",
 ) {
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = onExit) {
-                Icon(Icons.Filled.Close, contentDescription = "Auswahl beenden")
+                Icon(Icons.Filled.Close, contentDescription = s("Auswahl beenden", "Exit selection", lang))
             }
         },
         title = {
             Text(
-                text = if (selectedCount == 0) "Auswählen" else "$selectedCount ausgewählt",
+                text = if (selectedCount == 0) s("Auswählen", "Select", lang) else "$selectedCount ${s("ausgewählt", "selected", lang)}",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -335,7 +343,7 @@ private fun SelectionTopBar(
         actions = {
             TextButton(onClick = onSelectAll) {
                 Text(
-                    text = if (selectedCount == totalCount) "Keine" else "Alle",
+                    text = if (selectedCount == totalCount) s("Keine", "None", lang) else s("Alle", "All", lang),
                     color = JarvisPurple,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -343,7 +351,7 @@ private fun SelectionTopBar(
             IconButton(onClick = onDelete, enabled = selectedCount > 0) {
                 Icon(
                     Icons.Filled.Delete,
-                    contentDescription = "Löschen",
+                    contentDescription = s("Löschen", "Delete", lang),
                     tint = if (selectedCount > 0) JarvisError
                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                 )
@@ -365,6 +373,7 @@ private fun JarvisTopBar(
     onOpenSettings: () -> Unit,
     onToggleAgents: () -> Unit,
     onReconnect: () -> Unit,
+    lang: String = "de",
 ) {
     TopAppBar(
         title = {
@@ -389,10 +398,10 @@ private fun JarvisTopBar(
                 )
                 Text(
                     when (connectionState) {
-                        ConnectionState.CONNECTED -> "verbunden"
-                        ConnectionState.CONNECTING -> "verbinde…"
-                        ConnectionState.ERROR -> "Fehler"
-                        ConnectionState.DISCONNECTED -> "getrennt"
+                        ConnectionState.CONNECTED -> s("verbunden", "connected", lang)
+                        ConnectionState.CONNECTING -> s("verbinde…", "connecting…", lang)
+                        ConnectionState.ERROR -> s("Fehler", "Error", lang)
+                        ConnectionState.DISCONNECTED -> s("getrennt", "disconnected", lang)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -407,18 +416,18 @@ private fun JarvisTopBar(
                 }
             ) {
                 IconButton(onClick = onToggleAgents) {
-                    Icon(Icons.Filled.AccountTree, contentDescription = "Agents")
+                    Icon(Icons.Filled.AccountTree, contentDescription = s("Agents", "Agents", lang))
                 }
             }
             // Reconnect bei Fehler
             if (connectionState == ConnectionState.ERROR || connectionState == ConnectionState.DISCONNECTED) {
                 IconButton(onClick = onReconnect) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Reconnect")
+                    Icon(Icons.Filled.Refresh, contentDescription = s("Neu verbinden", "Reconnect", lang))
                 }
             }
             // Settings
             IconButton(onClick = onOpenSettings) {
-                Icon(Icons.Filled.Settings, contentDescription = "Einstellungen")
+                Icon(Icons.Filled.Settings, contentDescription = s("Einstellungen", "Settings", lang))
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -673,6 +682,7 @@ private fun ChatInputBar(
     onTtsStop: () -> Unit = {},
     onStopAgent: () -> Unit = {},
     onToggleTts: () -> Unit = {},
+    lang: String = "de",
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -691,8 +701,8 @@ private fun ChatInputBar(
                 Icon(
                     imageVector = if (isTtsEnabled) Icons.AutoMirrored.Filled.VolumeUp
                                   else Icons.AutoMirrored.Filled.VolumeOff,
-                    contentDescription = if (isTtsEnabled) "Sprachausgabe deaktivieren"
-                                         else "Sprachausgabe aktivieren",
+                    contentDescription = if (isTtsEnabled) s("Sprachausgabe deaktivieren", "Disable speech output", lang)
+                                         else s("Sprachausgabe aktivieren", "Enable speech output", lang),
                     tint = if (isTtsEnabled) MaterialTheme.colorScheme.primary
                            else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -712,7 +722,7 @@ private fun ChatInputBar(
                 Icon(
                     imageVector = if (voiceState == VoiceState.LISTENING)
                         Icons.Filled.MicOff else Icons.Filled.Mic,
-                    contentDescription = stringResource(R.string.chat_mic),
+                    contentDescription = s("Spracheingabe", "Voice input", lang),
                     tint = micColor,
                 )
             }
@@ -722,7 +732,7 @@ private fun ChatInputBar(
                 IconButton(onClick = onStopAgent) {
                     Icon(
                         imageVector = Icons.Filled.Cancel,
-                        contentDescription = "Anfrage abbrechen",
+                        contentDescription = s("Anfrage abbrechen", "Cancel request", lang),
                         tint = MaterialTheme.colorScheme.error,
                     )
                 }
@@ -733,7 +743,7 @@ private fun ChatInputBar(
                 IconButton(onClick = onTtsStop) {
                     Icon(
                         imageVector = Icons.Filled.StopCircle,
-                        contentDescription = "Vorlesen stoppen",
+                        contentDescription = s("Vorlesen stoppen", "Stop reading", lang),
                         tint = MaterialTheme.colorScheme.error,
                     )
                 }
@@ -743,7 +753,7 @@ private fun ChatInputBar(
             OutlinedTextField(
                 value = text,
                 onValueChange = onTextChange,
-                placeholder = { Text(stringResource(R.string.chat_hint)) },
+                placeholder = { Text(s("Nachricht an Jarvis…", "Message to Jarvis…", lang)) },
                 modifier = Modifier.weight(1f),
                 maxLines = 4,
                 shape = RoundedCornerShape(24.dp),
@@ -761,7 +771,7 @@ private fun ChatInputBar(
                     containerColor = MaterialTheme.colorScheme.primary,
                 ),
             ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.chat_send))
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = s("Senden", "Send", lang))
             }
         }
     }
@@ -770,7 +780,7 @@ private fun ChatInputBar(
 // ─── Agent-Panel ──────────────────────────────────────────────────────
 
 @Composable
-fun AgentPanel(agents: List<AgentInfo>, modifier: Modifier = Modifier) {
+fun AgentPanel(agents: List<AgentInfo>, lang: String = "de", modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
@@ -789,16 +799,16 @@ fun AgentPanel(agents: List<AgentInfo>, modifier: Modifier = Modifier) {
                 modifier = Modifier.padding(bottom = 4.dp),
             )
             if (agents.isEmpty()) {
-                Text("Keine aktiven Agents", style = MaterialTheme.typography.bodySmall)
+                Text(s("Keine aktiven Agents", "No active agents", lang), style = MaterialTheme.typography.bodySmall)
             } else {
-                agents.forEach { agent -> AgentCard(agent) }
+                agents.forEach { agent -> AgentCard(agent, lang) }
             }
         }
     }
 }
 
 @Composable
-private fun AgentCard(agent: AgentInfo) {
+private fun AgentCard(agent: AgentInfo, lang: String = "de") {
     val isMain = !agent.is_sub_agent
     val statusColor = when (agent.status) {
         "running" -> if (isMain) JarvisGreen else JarvisPurple
@@ -823,7 +833,7 @@ private fun AgentCard(agent: AgentInfo) {
             )
             Column {
                 Text(
-                    agent.label.ifBlank { if (isMain) "Hauptagent" else "Sub-Agent" },
+                    agent.label.ifBlank { if (isMain) s("Hauptagent", "Main Agent", lang) else s("Sub-Agent", "Sub-Agent", lang) },
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium,
                 )

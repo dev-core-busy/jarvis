@@ -97,7 +97,7 @@ class JarvisVisionManager {
             // Kein Frame verfuegbar – Platzhalter zeigen
             this._showFeedImage(false);
             const ph = document.getElementById('vis-feed-placeholder');
-            if (ph) ph.textContent = 'Kein Kamerabild verfügbar';
+            if (ph) ph.textContent = window.t('vis.no_cam_image');
         };
         newImg.src = `/api/vision/snapshot?t=${Date.now()}&token=${token}`;
     }
@@ -221,7 +221,7 @@ class JarvisVisionManager {
 
             // Kein Frame verfuegbar (Kamera offline)
             if (fps === 0 && this._lastLogState !== 'no_frame') {
-                this._visLog('Kein Kamerabild – Stream nicht erreichbar', 'warn');
+                this._visLog(window.t('vis.no_cam_image'), 'warn');
                 this._lastLogState = 'no_frame';
             } else if (fps > 0) {
                 this._lastLogState = 'running';
@@ -676,14 +676,14 @@ class JarvisVisionManager {
             const valueField = valueType === 'url'
                 ? `<input type="url" class="vis-input vis-action-value" data-profile="${p.id}" value="${this._esc(p.action_value || '')}" placeholder="https://example.com/webhook" />`
                 : valueType === 'prompt'
-                ? `<textarea class="vis-input vis-action-value" data-profile="${p.id}" rows="2" placeholder="z.B. Hallo {name}! oder LLM-Prompt...">${this._esc(p.action_value || '')}</textarea>`
+                ? `<textarea class="vis-input vis-action-value" data-profile="${p.id}" rows="2" placeholder="${window.t('vis.action_value_ph')}">${this._esc(p.action_value || '')}</textarea>`
                 : '';
 
             // Lautsprecher-Auswahl bei "greet"
             const greetTarget = p.greet_target || 'browser';
             const greetSelect = p.action === 'greet'
                 ? `<div class="vis-greet-target-wrap" id="vis-gt-${p.id}">
-                       <label style="font-size:0.8rem;color:var(--text-secondary);">Ausgabe:</label>
+                       <label style="font-size:0.8rem;color:var(--text-secondary);">${window.t('vis.output_label')}</label>
                        <select class="vis-select vis-greet-target" data-profile="${p.id}">
                            <option value="browser" ${greetTarget === 'browser' ? 'selected' : ''}>🔊 Browser (TTS)</option>
                            <option value="server" ${greetTarget === 'server' ? 'selected' : ''}>🖥️ Server (espeak)</option>
@@ -706,8 +706,8 @@ class JarvisVisionManager {
                             <small>${p.num_images} Bilder · ${date}</small>
                         </div>
                         <div class="vis-profile-actions">
-                            <button class="vis-btn-sm" onclick="visionManager._editProfile('${p.id}')" title="Bearbeiten">✏</button>
-                            <button class="vis-btn-sm vis-btn-danger" onclick="visionManager._deleteProfile('${p.id}')" title="Löschen">✕</button>
+                            <button class="vis-btn-sm" onclick="visionManager._editProfile('${p.id}')" title="${window.t('common.edit')}">✏</button>
+                            <button class="vis-btn-sm vis-btn-danger" onclick="visionManager._deleteProfile('${p.id}')" title="${window.t('vis.delete_title')}">✕</button>
                         </div>
                     </div>
                     <div class="vis-profile-action-config">
@@ -732,7 +732,7 @@ class JarvisVisionManager {
         if (type === 'url') {
             wrap.innerHTML = `<input type="url" class="vis-input vis-action-value" data-profile="${pid}" placeholder="https://example.com/webhook" />`;
         } else if (type === 'prompt') {
-            wrap.innerHTML = `<textarea class="vis-input vis-action-value" data-profile="${pid}" rows="2" placeholder="z.B. Hallo {name}! oder LLM-Prompt..."></textarea>`;
+            wrap.innerHTML = `<textarea class="vis-input vis-action-value" data-profile="${pid}" rows="2" placeholder="${window.t('vis.action_value_ph')}"></textarea>`;
         } else {
             wrap.innerHTML = '';
         }
@@ -745,7 +745,7 @@ class JarvisVisionManager {
                 gtWrap.className = 'vis-greet-target-wrap';
                 gtWrap.id = `vis-gt-${pid}`;
                 gtWrap.innerHTML = `
-                    <label style="font-size:0.8rem;color:var(--text-secondary);">Ausgabe:</label>
+                    <label style="font-size:0.8rem;color:var(--text-secondary);">${window.t('vis.output_label')}</label>
                     <select class="vis-select vis-greet-target" data-profile="${pid}">
                         <option value="browser" selected>🔊 Browser (TTS)</option>
                         <option value="server">🖥️ Server (espeak)</option>
@@ -808,13 +808,13 @@ class JarvisVisionManager {
 
     _actionLabel(actionId) {
         const map = {
-            greet: 'Begrüßung',
-            llm: 'An LLM',
-            door: 'Tür öffnen',
+            greet: window.t('vis.action_greet_short'),
+            llm: 'LLM',
+            door: window.t('vis.action_door_short'),
             webhook: 'Webhook',
-            log: 'Loggen',
+            log: window.t('vis.action_log'),
         };
-        return map[actionId] || actionId || 'Loggen';
+        return map[actionId] || actionId || window.t('vis.action_log');
     }
 
     _actionValueType(actionId) {
@@ -882,7 +882,7 @@ class JarvisVisionManager {
             headers: this._hdr(),
         });
         const data = await resp.json();
-        this._notify(data.message || data.error || 'Gelöscht');
+        this._notify(data.message || data.error || window.t('vis.deleted'));
         await this._fetchProfiles();
     }
 
@@ -941,16 +941,16 @@ class JarvisVisionManager {
     _downloadStreamTools() {
         // Direkt von jarvis-ai.info herunterladen (kein Backend-Proxy noetig)
         window.open('https://jarvis-ai.info/downloads/jarvis_cam_stream.zip', '_blank');
-        this._notify('Download gestartet – ZIP enthält ffmpeg.exe + ffmpeg_stream.ps1');
+        this._notify(window.t('vis.download_started'));
     }
 
     /* ── System-Reset ───────────────────────────────────────────────── */
 
     async _cleanup() {
-        if (!confirm('Alle Vision-Daten (Profile, Bilder, Events) wirklich löschen?')) return;
+        if (!confirm(window.t('vis.confirm_delete_all'))) return;
 
         const data = await this._api('/cleanup', { method: 'POST' });
-        this._notify(data.message || data.error || 'Zurückgesetzt');
+        this._notify(data.message || data.error || window.t('vis.reset_done'));
         await this._fetchProfiles();
         await this._fetchStatus();
     }

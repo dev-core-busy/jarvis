@@ -38,7 +38,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         modal.className = 'modal-overlay hidden';
         modal.innerHTML = `
             <div class="modal-card" style="max-width:540px;text-align:left;">
-                <h2 class="modal-title">Informationsextraktor</h2>
+                <h2 class="modal-title">${window.t('ext.title')}</h2>
 
                 <div class="ext-info-step">
                     <span class="ext-info-num">1</span>
@@ -63,25 +63,25 @@ window.extractorManager = new (class JarvisExtractorManager {
                     <span class="ext-info-num">3</span>
                     <div>
                         <strong>Ergebnis validieren</strong><br>
-                        <span class="kb-hint" style="margin:0;">Öffne das Dokument über <em>Prüfen</em>. Du kannst Titel, Zusammenfassung und Fakten bearbeiten sowie einzelne Frage-Antwort-Paare aktivieren, deaktivieren, bearbeiten oder löschen.</span>
+                        <span class="kb-hint" style="margin:0;">Öffne das Dokument über <em>${window.t('ext.check_btn')}</em>. Du kannst Titel, Zusammenfassung und Fakten bearbeiten sowie einzelne Frage-Antwort-Paare aktivieren, deaktivieren, bearbeiten oder löschen.</span>
                     </div>
                 </div>
                 <div class="ext-info-step">
                     <span class="ext-info-num">4</span>
                     <div>
                         <strong>In Wissens-DB speichern</strong><br>
-                        <span class="kb-hint" style="margin:0;">Klicke auf <em>In Wissens-DB speichern</em>. Nur aktivierte Elemente werden übernommen. Das Dokument wird als Markdown-Datei angelegt und der Suchindex automatisch neu aufgebaut.</span>
+                        <span class="kb-hint" style="margin:0;">Klicke auf <em>${window.t('ext.save_btn')}</em>. Nur aktivierte Elemente werden übernommen. Das Dokument wird als Markdown-Datei angelegt und der Suchindex automatisch neu aufgebaut.</span>
                     </div>
                 </div>
 
                 <div style="background:rgba(255,255,255,0.04);border-radius:8px;padding:10px 14px;margin-top:4px;">
                     <p class="kb-hint" style="margin:0;">
-                        <strong>Hinweis:</strong> Nicht gespeicherte Extraktionen bleiben im Bereich <em>Ausstehend</em>.
+                        <strong>Hinweis:</strong> Nicht gespeicherte Extraktionen bleiben im Bereich <em>${window.t('ext.pending')}</em>.
                         Audio/Video-Transkription erfordert faster-whisper + ffmpeg auf dem Server.
                     </p>
                 </div>
 
-                <button class="btn-modal-close" id="ext-info-close" style="margin-top:16px;">Schließen</button>
+                <button class="btn-modal-close" id="ext-info-close" style="margin-top:16px;">${window.t('common.close')}</button>
             </div>`;
         document.body.appendChild(modal);
         this._infoModal = modal;
@@ -100,10 +100,10 @@ window.extractorManager = new (class JarvisExtractorManager {
             <!-- Extraktor: Eingabe (URL + Datei) -->
             <div class="kb-section">
                 <div class="kb-section-header">
-                    <h3>Informationsextraktor</h3>
-                    <button id="ext-info-btn" class="kb-btn-secondary" title="Anleitung">❓</button>
+                    <h3>${window.t('ext.title')}</h3>
+                    <button id="ext-info-btn" class="kb-btn-secondary" title="${window.t('ext.info_title')}">❓</button>
                 </div>
-                <p class="kb-hint">Webseiten oder Dateien per LLM in strukturiertes Wissen umwandeln – mit menschlicher Validierung.</p>
+                <p class="kb-hint">${window.t('ext.hint')}</p>
 
                 <!-- Sub-Tabs -->
                 <div class="ext-input-tabs">
@@ -115,7 +115,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                 <div id="ext-panel-url">
                     <div style="display:flex;gap:8px;">
                         <input id="ext-url-input" type="url" placeholder="https://beispiel.de/artikel" class="kb-input" style="flex:1;">
-                        <button id="ext-extract-btn" class="kb-btn-action">Extrahieren</button>
+                        <button id="ext-extract-btn" class="kb-btn-action">${window.t('ext.extract_btn')}</button>
                     </div>
                 </div>
 
@@ -133,7 +133,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                         <span style="font-size:1.1rem;">📄</span>
                         <span class="ext-drop-banner-name" id="ext-drop-name">–</span>
                         <span class="ext-drop-banner-size" id="ext-drop-size"></span>
-                        <button id="ext-drop-analyse-btn" class="kb-btn-action" style="padding:.35rem .9rem;font-size:.8rem;flex-shrink:0;">Analysieren ▶</button>
+                        <button id="ext-drop-analyse-btn" class="kb-btn-action" style="padding:.35rem .9rem;font-size:.8rem;flex-shrink:0;">${window.t('ext.analyse_btn')}</button>
                         <button id="ext-drop-cancel-btn"  class="kb-btn-secondary" style="padding:.35rem .6rem;font-size:.8rem;flex-shrink:0;">✕</button>
                     </div>
                 </div>
@@ -145,16 +145,16 @@ window.extractorManager = new (class JarvisExtractorManager {
             <!-- Extraktor: Pending-Liste -->
             <div class="kb-section">
                 <div class="kb-section-header">
-                    <h3>Ausstehend <span id="ext-pending-count" class="ext-badge" style="display:none;">0</span></h3>
-                    <button id="ext-refresh-btn" class="kb-btn-secondary" title="Aktualisieren">🔄</button>
+                    <h3>${window.t('ext.pending')} <span id="ext-pending-count" class="ext-badge" style="display:none;">0</span></h3>
+                    <button id="ext-refresh-btn" class="kb-btn-secondary" title="${window.t('ext.refresh_title')}">🔄</button>
                 </div>
-                <div id="ext-pending-list"><p class="kb-empty">Keine ausstehenden Extraktionen.</p></div>
+                <div id="ext-pending-list"><p class="kb-empty">${window.t('ext.no_pending')}</p></div>
             </div>
 
             <!-- Extraktor: Genehmigter Verlauf -->
             <div class="kb-section" id="ext-approved-section" style="display:none;">
                 <div class="kb-section-header">
-                    <h3>Genehmigt <span id="ext-approved-count" class="ext-badge ext-badge-approved" style="display:none;">0</span></h3>
+                    <h3>${window.t('ext.approved_section')} <span id="ext-approved-count" class="ext-badge ext-badge-approved" style="display:none;">0</span></h3>
                 </div>
                 <div id="ext-approved-list"></div>
             </div>
@@ -162,34 +162,34 @@ window.extractorManager = new (class JarvisExtractorManager {
             <!-- Extraktor: Review -->
             <div id="ext-review-wrap" class="kb-section" style="display:none;">
                 <div class="kb-section-header">
-                    <h3 id="ext-review-title">Dokument prüfen</h3>
+                    <h3 id="ext-review-title">${window.t('ext.review_title')}</h3>
                     <button id="ext-review-close" class="kb-btn-secondary">✕</button>
                 </div>
                 <p class="kb-hint" id="ext-review-source" style="word-break:break-all;margin-bottom:12px;"></p>
 
                 <div class="kb-form-field" style="margin-bottom:10px;">
-                    <label class="kb-label">Titel</label>
+                    <label class="kb-label">${window.t('ext.title_label')}</label>
                     <input id="ext-edit-title" type="text" class="kb-input" style="width:100%;box-sizing:border-box;">
                 </div>
                 <div class="kb-form-field" style="margin-bottom:10px;">
-                    <label class="kb-label">Zusammenfassung</label>
+                    <label class="kb-label">${window.t('ext.summary_label')}</label>
                     <textarea id="ext-edit-summary" rows="3" class="kb-input" style="width:100%;box-sizing:border-box;resize:vertical;"></textarea>
                 </div>
                 <div class="kb-form-field" style="margin-bottom:10px;">
-                    <label class="kb-label">Kernfakten</label>
+                    <label class="kb-label">${window.t('ext.facts_label')}</label>
                     <div id="ext-facts-list" class="ext-facts-list"></div>
-                    <button id="ext-add-fact-btn" class="kb-btn-secondary" style="margin-top:6px;font-size:.78rem;">+ Fakt hinzufügen</button>
+                    <button id="ext-add-fact-btn" class="kb-btn-secondary" style="margin-top:6px;font-size:.78rem;">${window.t('ext.add_fact')}</button>
                 </div>
                 <div class="kb-form-field" style="margin-bottom:10px;">
-                    <label class="kb-label">Fragen &amp; Antworten <span class="kb-hint" style="margin:0;font-size:.73rem;">(aktivierte werden gespeichert)</span></label>
+                    <label class="kb-label">${window.t('ext.qa_label')} <span class="kb-hint" style="margin:0;font-size:.73rem;">${window.t('ext.qa_hint')}</span></label>
                     <div id="ext-qa-list" class="ext-qa-list"></div>
-                    <button id="ext-add-qa-btn" class="kb-btn-secondary" style="margin-top:6px;font-size:.78rem;">+ Paar hinzufügen</button>
+                    <button id="ext-add-qa-btn" class="kb-btn-secondary" style="margin-top:6px;font-size:.78rem;">${window.t('ext.add_qa')}</button>
                 </div>
 
                 <div class="kb-form-footer" style="margin-top:12px;">
-                    <button id="ext-reject-btn" class="kb-btn-danger" style="padding:.45rem 1rem;font-size:.82rem;">❌ Verwerfen</button>
+                    <button id="ext-reject-btn" class="kb-btn-danger" style="padding:.45rem 1rem;font-size:.82rem;">${window.t('ext.reject_btn')}</button>
                     <div class="kb-form-footer-right">
-                        <button id="ext-save-btn" class="kb-btn-action">✅ In Wissens-DB speichern</button>
+                        <button id="ext-save-btn" class="kb-btn-action">${window.t('ext.save_btn')}</button>
                     </div>
                 </div>
                 <div id="ext-review-notification" class="kb-notification" style="display:none;margin-top:8px;"></div>
@@ -290,12 +290,12 @@ window.extractorManager = new (class JarvisExtractorManager {
 
     async _startExtract() {
         const url = document.getElementById('ext-url-input').value.trim();
-        if (!url) { this._notify('Bitte eine URL eingeben.', 'error'); return; }
+        if (!url) { this._notify(window.t('ext.url_required'), 'error'); return; }
 
         const btn    = document.getElementById('ext-extract-btn');
         const status = document.getElementById('ext-extract-status');
-        btn.disabled = true; btn.textContent = '⏳ Läuft…';
-        status.textContent = 'Seite wird abgerufen und analysiert…';
+        btn.disabled = true; btn.textContent = window.t('ext.running');
+        status.textContent = window.t('ext.extracting');
         status.style.display = 'block';
 
         try {
@@ -316,7 +316,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         } catch (e) {
             this._notify('Netzwerkfehler: ' + e.message, 'error');
         } finally {
-            btn.disabled = false; btn.textContent = 'Extrahieren';
+            btn.disabled = false; btn.textContent = window.t('ext.extract_btn');
             status.style.display = 'none';
         }
     }
@@ -328,8 +328,8 @@ window.extractorManager = new (class JarvisExtractorManager {
         const btn    = document.getElementById('ext-drop-analyse-btn');
         const status = document.getElementById('ext-extract-status');
 
-        btn.disabled = true; btn.textContent = '⏳ Läuft…';
-        status.textContent = `„${file.name}" wird analysiert (${file.type || 'unbekannter Typ'})…`;
+        btn.disabled = true; btn.textContent = window.t('ext.running');
+        status.textContent = `„${file.name}" ${window.t('ext.running').replace('⏳ ', '')} (${file.type || '?'})…`;
         status.style.display = 'block';
 
         try {
@@ -352,7 +352,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         } catch (e) {
             this._notify('Netzwerkfehler: ' + e.message, 'error');
         } finally {
-            btn.disabled = false; btn.textContent = 'Analysieren ▶';
+            btn.disabled = false; btn.textContent = window.t('ext.analyse_btn');
             status.style.display = 'none';
         }
     }
@@ -385,7 +385,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         badge.style.display = pending.length ? 'inline-block' : 'none';
 
         if (!pending.length) {
-            el.innerHTML = `<p class="kb-empty">Keine ausstehenden Extraktionen.</p>`;
+            el.innerHTML = `<p class="kb-empty">${window.t('ext.no_pending')}</p>`;
         } else {
             el.innerHTML = pending.map(doc => {
                 const dt  = new Date(doc.created_at * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
@@ -397,7 +397,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                         <span class="cron-item-dot active"></span>
                         <span class="cron-item-label">${this._esc(doc.title)}</span>
                         <div class="cron-item-actions">
-                            <button class="kb-btn-action ext-review-btn" data-id="${doc.id}" style="padding:3px 10px;font-size:.75rem;">Prüfen</button>
+                            <button class="kb-btn-action ext-review-btn" data-id="${doc.id}" style="padding:3px 10px;font-size:.75rem;">${window.t('ext.check_btn')}</button>
                             <button class="kb-btn-secondary ext-dl-btn"  data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="JSON herunterladen">⬇️</button>
                             <button class="kb-btn-danger ext-del-btn"    data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;">🗑️</button>
                         </div>
@@ -473,7 +473,7 @@ window.extractorManager = new (class JarvisExtractorManager {
     }
 
     async _deleteApproved(id) {
-        if (!confirm('Aus Verlauf und Wissens-DB entfernen?\nDie .md-Datei wird ebenfalls gelöscht.')) return;
+        if (!confirm(window.t('ext.delete_approved_confirm'))) return;
         const doc = this._pending.find(d => d.id === id);
         if (doc?.file) {
             try {
@@ -505,7 +505,7 @@ window.extractorManager = new (class JarvisExtractorManager {
 
         document.getElementById('ext-review-wrap').style.display = '';
         document.getElementById('ext-review-title').textContent  =
-            isApproved ? `Bearbeiten – ${doc.title}` : `Dokument prüfen – ${doc.title}`;
+            isApproved ? `${window.t('common.edit')} – ${doc.title}` : `${window.t('ext.review_title')} – ${doc.title}`;
 
         // Quellenzeile: URL klickbar, Datei nur Text
         const srcEl = document.getElementById('ext-review-source');
@@ -522,8 +522,8 @@ window.extractorManager = new (class JarvisExtractorManager {
 
         const saveBtn   = document.getElementById('ext-save-btn');
         const rejectBtn = document.getElementById('ext-reject-btn');
-        saveBtn.textContent   = isApproved ? '💾 Aktualisieren'         : '✅ In Wissens-DB speichern';
-        rejectBtn.textContent = isApproved ? '🗑️ Aus DB entfernen'      : '❌ Verwerfen';
+        saveBtn.textContent   = isApproved ? window.t('ext.update_btn')    : window.t('ext.save_btn');
+        rejectBtn.textContent = isApproved ? window.t('ext.remove_from_db') : window.t('ext.reject_btn');
 
         document.getElementById('ext-review-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -534,8 +534,8 @@ window.extractorManager = new (class JarvisExtractorManager {
         document.getElementById('ext-review-wrap').style.display = 'none';
         const saveBtn   = document.getElementById('ext-save-btn');
         const rejectBtn = document.getElementById('ext-reject-btn');
-        if (saveBtn)   saveBtn.textContent   = '✅ In Wissens-DB speichern';
-        if (rejectBtn) rejectBtn.textContent = '❌ Verwerfen';
+        if (saveBtn)   saveBtn.textContent   = window.t('ext.save_btn');
+        if (rejectBtn) rejectBtn.textContent = window.t('ext.reject_btn');
     }
 
     // ─── Fakten-Editor ───────────────────────────────────────────────────────
@@ -579,7 +579,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                 <div class="ext-qa-header">
                     <label class="kb-form-checkbox-label" title="Aktiviert → wird gespeichert">
                         <input type="checkbox" class="ext-qa-check" data-id="${p.id || i}" ${p.approved !== false ? 'checked' : ''}>
-                        <span style="font-size:.75rem;color:var(--text-secondary);">Übernehmen</span>
+                        <span style="font-size:.75rem;color:var(--text-secondary);">${window.t('ext.apply')}</span>
                     </label>
                     <button class="kb-btn-danger ext-qa-del" data-idx="${i}" style="padding:2px 7px;font-size:.73rem;margin-left:auto;">✕</button>
                 </div>
@@ -632,7 +632,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         }
         const btn = document.getElementById('ext-save-btn');
         const origLabel = btn.textContent;
-        btn.disabled = true; btn.textContent = '⏳ Speichere…';
+        btn.disabled = true; btn.textContent = window.t('ext.saving');
         try {
             await fetch(`/api/knowledge/pending/${id}`, {
                 method: 'PATCH',

@@ -49,8 +49,8 @@ class JarvisTelemetryManager {
                     { label: 'Agent-Runs',   value: s.agent_runs,  icon: '🤖' },
                     { label: 'Tool-Calls',   value: s.tool_calls,  icon: '🔧' },
                     { label: 'LLM-Calls',    value: s.llm_calls,   icon: '🧠' },
-                    { label: 'Fehler',       value: s.errors,      icon: '❌', danger: s.errors > 0 },
-                    { label: 'Gesamtdauer',  value: _fmtDur(s.total_duration_ms), icon: '⏱' },
+                    { label: window.t('telemetry.stat_errors'),   value: s.errors,      icon: '❌', danger: s.errors > 0 },
+                    { label: window.t('telemetry.stat_duration'), value: _fmtDur(s.total_duration_ms), icon: '⏱' },
                 ].map(c => `
                     <div style="background:var(--bg-glass);border:1px solid ${c.danger ? 'rgba(239,68,68,0.4)' : 'var(--border)'};border-radius:var(--radius-md);padding:12px 14px;text-align:center;">
                         <div style="font-size:1.4rem;margin-bottom:4px;">${c.icon}</div>
@@ -65,7 +65,7 @@ class JarvisTelemetryManager {
             if (toolBody) {
                 const tools = Object.entries(s.tool_stats || {});
                 if (tools.length === 0) {
-                    toolBody.innerHTML = '<div class="kb-files-empty">Noch keine Tool-Calls aufgezeichnet</div>';
+                    toolBody.innerHTML = '<div class="kb-files-empty">' + window.t('telemetry.no_tool_calls') + '</div>';
                 } else {
                     toolBody.innerHTML = `
                         <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
@@ -98,15 +98,15 @@ class JarvisTelemetryManager {
             if (llmBody) {
                 const l = s.llm_stats || {};
                 if (!l.calls) {
-                    llmBody.innerHTML = '<div class="kb-files-empty">Noch keine LLM-Calls aufgezeichnet</div>';
+                    llmBody.innerHTML = '<div class="kb-files-empty">' + window.t('telemetry.no_llm_calls') + '</div>';
                 } else {
                     llmBody.innerHTML = `
                         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;padding:10px;">
                             ${[
                                 ['Calls', l.calls],
-                                ['Ø Antwortzeit', _fmtDur(l.avg_ms)],
-                                ['Schnellste', _fmtDur(l.min_ms)],
-                                ['Langsamste', _fmtDur(l.max_ms)],
+                                [window.t('telemetry.llm_avg_time'), _fmtDur(l.avg_ms)],
+                                [window.t('telemetry.llm_fastest'), _fmtDur(l.min_ms)],
+                                [window.t('telemetry.llm_slowest'), _fmtDur(l.max_ms)],
                             ].map(([k,v]) => `
                                 <div style="background:var(--bg-secondary);border-radius:var(--radius-sm);padding:8px 10px;text-align:center;">
                                     <div style="font-size:0.95rem;font-weight:600;color:var(--text-primary);">${v}</div>
@@ -141,7 +141,7 @@ class JarvisTelemetryManager {
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const entries = await res.json();
             if (!entries.length) {
-                body.innerHTML = '<div class="kb-files-empty">Noch keine Konversationen aufgezeichnet</div>';
+                body.innerHTML = '<div class="kb-files-empty">' + window.t('telemetry.no_convs') + '</div>';
                 return;
             }
             body.innerHTML = entries.map(e => this._renderConvEntry(e)).join('');
@@ -166,7 +166,7 @@ class JarvisTelemetryManager {
             if (!res.ok) return;
             const ips = await res.json();
             const cur = sel.value;
-            sel.innerHTML = '<option value="">Alle IPs</option>';
+            sel.innerHTML = '<option value="">' + window.t('telemetry.all_ips') + '</option>';
             for (const ip of ips) {
                 const opt = document.createElement('option');
                 opt.value = ip; opt.textContent = ip;
@@ -184,7 +184,7 @@ class JarvisTelemetryManager {
             if (!res.ok) return;
             const users = await res.json();
             const cur = sel.value;
-            sel.innerHTML = '<option value="">Alle Benutzer</option>';
+            sel.innerHTML = '<option value="">' + window.t('telemetry.all_users') + '</option>';
             for (const u of users) {
                 const opt = document.createElement('option');
                 opt.value = u; opt.textContent = u;
@@ -198,13 +198,13 @@ class JarvisTelemetryManager {
         const ts  = new Date(e.ts * 1000).toLocaleString('de-DE');
         const dur = _fmtDur(e.duration_ms);
         const errBadge = e.error
-            ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:99px;background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.25);">Fehler</span>`
+            ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:99px;background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.25);">${window.t('telemetry.error_badge')}</span>`
             : '';
         const msgsHtml = (e.messages || []).map(m => {
             const col = m.role === 'assistant' ? 'rgba(129,140,248,0.5)'
                       : m.role === 'tool'      ? 'rgba(251,191,36,0.4)'
                       : 'rgba(74,222,128,0.4)';
-            const lbl = m.role === 'tool' ? `🔧 ${m.tool || 'tool'}` : m.role === 'assistant' ? '🤖 Assistent' : '👤 User';
+            const lbl = m.role === 'tool' ? `🔧 ${m.tool || 'tool'}` : m.role === 'assistant' ? window.t('telemetry.role_assistant') : '👤 User';
             const prev = (m.preview || m.content || '').replace(/</g,'&lt;');
             return `<div style="display:flex;gap:8px;font-size:0.78rem;padding:4px 8px;border-radius:5px;background:rgba(255,255,255,0.03);border-left:2px solid ${col};">
                 <span style="flex-shrink:0;color:var(--text-muted);font-size:0.71rem;min-width:88px;">${lbl}</span>
@@ -222,20 +222,20 @@ class JarvisTelemetryManager {
       <span style="font-size:0.68rem;padding:1px 5px;border-radius:99px;background:rgba(79,70,229,0.18);color:var(--accent-hover);border:1px solid rgba(129,140,248,0.2);">${e.client_type||'browser'}</span>
       <span style="font-size:0.71rem;color:var(--text-muted);">${e.client_ip||''}</span>
       <span style="font-size:0.71rem;color:var(--text-muted);">${e.model||''}</span>
-      <span style="font-size:0.71rem;color:var(--text-muted);">${e.steps} Schr.</span>
+      <span style="font-size:0.71rem;color:var(--text-muted);">${e.steps} ${window.t('telemetry.steps_abbr')}</span>
       <span style="font-size:0.71rem;color:var(--text-muted);">${dur}</span>
       <span style="font-size:0.71rem;color:var(--text-muted);">${ts}</span>
     </span>
   </div>
   <div style="display:none;padding:8px 12px;border-top:1px solid var(--border);">
     ${e.error ? `<div style="font-size:0.81rem;color:#f87171;margin-bottom:7px;">❌ ${e.error.replace(/</g,'&lt;')}</div>` : ''}
-    <div style="display:flex;flex-direction:column;gap:3px;">${msgsHtml || '<em style="font-size:0.78rem;color:var(--text-muted);">Keine Nachrichten</em>'}</div>
+    <div style="display:flex;flex-direction:column;gap:3px;">${msgsHtml || `<em style="font-size:0.78rem;color:var(--text-muted);">${window.t('telemetry.no_messages')}</em>`}</div>
   </div>
 </div>`;
     }
 
     async _clearConvLog() {
-        if (!confirm('LLM-Verlauf löschen?')) return;
+        if (!confirm(window.t('telemetry.clear_convlog_confirm'))) return;
         await fetch('/api/conv_log', { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + this._token() } });
         await this._loadConvLog();
     }
@@ -253,7 +253,7 @@ class JarvisTelemetryManager {
             const errors = await res.json();
 
             if (!errors.length) {
-                body.innerHTML = '<div class="kb-files-empty">Keine Fehler aufgezeichnet ✓</div>';
+                body.innerHTML = '<div class="kb-files-empty">' + window.t('telemetry.no_errors') + '</div>';
                 return;
             }
             body.innerHTML = `
@@ -261,7 +261,7 @@ class JarvisTelemetryManager {
                     <thead>
                         <tr style="color:var(--text-secondary);text-align:left;border-bottom:1px solid var(--border);">
                             <th style="padding:6px 10px;">Span</th>
-                            <th style="padding:6px 10px;">Fehlermeldung</th>
+                            <th style="padding:6px 10px;">${window.t('telemetry.error_col')}</th>
                             <th style="padding:6px 10px;text-align:right;">ms</th>
                         </tr>
                     </thead>
@@ -293,7 +293,7 @@ class JarvisTelemetryManager {
             const spans = await res.json();
 
             if (!spans.length) {
-                body.innerHTML = '<div class="kb-files-empty">Keine Spans vorhanden</div>';
+                body.innerHTML = '<div class="kb-files-empty">' + window.t('telemetry.no_spans') + '</div>';
                 return;
             }
 
@@ -327,7 +327,7 @@ class JarvisTelemetryManager {
     }
 
     async clear() {
-        if (!confirm('Alle Telemetry-Daten zurücksetzen?')) return;
+        if (!confirm(window.t('telemetry.clear_all_confirm'))) return;
         await fetch('/api/telemetry', {
             method: 'DELETE',
             headers: { 'Authorization': 'Bearer ' + this._token() }

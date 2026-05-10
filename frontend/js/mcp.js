@@ -31,8 +31,8 @@
             if (!this._servers.length) {
                 list.innerHTML = `
                     <div class="mcp-empty">
-                        <p>Keine MCP-Server konfiguriert.</p>
-                        <p class="mcp-hint">MCP-Server erweitern Jarvis um externe Tools – z.B. Dateisystem, Datenbanken, Web-Suche.</p>
+                        <p>${window.t('mcp.no_servers')}</p>
+                        <p class="mcp-hint">${window.t('mcp.empty_hint')}</p>
                     </div>`;
                 return;
             }
@@ -46,9 +46,9 @@
                 ? '<span class="mcp-dot mcp-dot-on"></span>'
                 : '<span class="mcp-dot mcp-dot-off"></span>';
             const statusText = srv.connected
-                ? `Verbunden – ${srv.tool_count} Tools`
-                : (srv.error ? `Fehler: ${srv.error}` : 'Nicht verbunden');
-            const toggleLabel = srv.enabled ? 'Aktiv' : 'Inaktiv';
+                ? window.t('mcp.connected').replace('{n}', srv.tool_count)
+                : (srv.error ? window.t('mcp.error').replace('{msg}', srv.error) : window.t('mcp.disconnected'));
+            const toggleLabel = srv.enabled ? window.t('mcp.active') : window.t('mcp.inactive');
             const transportBadge = srv.transport === 'stdio' ? '⌨️ stdio' : '🌐 SSE';
 
             const toolsList = srv.tools && srv.tools.length
@@ -75,8 +75,8 @@
                                 <input type="checkbox" ${srv.enabled ? 'checked' : ''} data-action="toggle" data-id="${srv.id}">
                                 <span>${toggleLabel}</span>
                             </label>
-                            <button class="mcp-btn-sm" data-action="reconnect" data-id="${srv.id}" title="Neu verbinden">🔄</button>
-                            <button class="mcp-btn-sm mcp-btn-danger" data-action="remove" data-id="${srv.id}" title="Entfernen">✕</button>
+                            <button class="mcp-btn-sm" data-action="reconnect" data-id="${srv.id}" title="${window.t('mcp.reconnect')}">🔄</button>
+                            <button class="mcp-btn-sm mcp-btn-danger" data-action="remove" data-id="${srv.id}" title="${window.t('mcp.remove')}">✕</button>
                         </div>
                     </div>
                     <div class="mcp-card-status">${statusText}</div>
@@ -110,25 +110,25 @@
             form.id = 'mcp-add-form';
             form.className = 'mcp-form';
             form.innerHTML = `
-                <h4>Neuer MCP-Server</h4>
+                <h4>${window.t('mcp.new_server')}</h4>
                 <div class="mcp-form-row">
                     <label>Name</label>
-                    <input type="text" id="mcp-f-name" placeholder="z.B. filesystem" class="mcp-input">
+                    <input type="text" id="mcp-f-name" placeholder="${window.t('mcp.name_ph')}" class="mcp-input">
                 </div>
                 <div class="mcp-form-row">
                     <label>Transport</label>
                     <select id="mcp-f-transport" class="mcp-input">
-                        <option value="stdio">stdio (Subprozess)</option>
-                        <option value="sse">SSE (HTTP)</option>
+                        <option value="stdio">${window.t('mcp.transport_stdio')}</option>
+                        <option value="sse">${window.t('mcp.transport_sse')}</option>
                     </select>
                 </div>
                 <div id="mcp-f-stdio-fields">
                     <div class="mcp-form-row">
                         <label>Command</label>
-                        <input type="text" id="mcp-f-command" placeholder="z.B. npx, python3, node" class="mcp-input">
+                        <input type="text" id="mcp-f-command" placeholder="${window.t('mcp.command_ph')}" class="mcp-input">
                     </div>
                     <div class="mcp-form-row">
-                        <label>Argumente (je Zeile eins)</label>
+                        <label>${window.t('mcp.args_label')}</label>
                         <textarea id="mcp-f-args" class="mcp-input" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"></textarea>
                     </div>
                 </div>
@@ -139,12 +139,12 @@
                     </div>
                 </div>
                 <div class="mcp-form-row">
-                    <label>Umgebungsvariablen (KEY=VALUE, je Zeile)</label>
+                    <label>${window.t('mcp.env_label')}</label>
                     <textarea id="mcp-f-env" class="mcp-input" rows="2" placeholder="API_KEY=xxx"></textarea>
                 </div>
                 <div class="mcp-form-buttons">
-                    <button id="mcp-f-save" class="mcp-btn-primary">Hinzufügen</button>
-                    <button id="mcp-f-cancel" class="mcp-btn-sm">Abbrechen</button>
+                    <button id="mcp-f-save" class="mcp-btn-primary">${window.t('mcp.add_btn')}</button>
+                    <button id="mcp-f-cancel" class="mcp-btn-sm">${window.t('common.cancel')}</button>
                 </div>`;
 
             list.parentNode.insertBefore(form, list);
@@ -168,7 +168,7 @@
             const url = document.getElementById('mcp-f-url')?.value?.trim();
             const envText = document.getElementById('mcp-f-env')?.value || '';
 
-            if (!name) return alert('Name ist Pflicht');
+            if (!name) return alert(window.t('mcp.name_required'));
 
             const args = argsText.split('\n').map(s => s.trim()).filter(Boolean);
             const env = {};
@@ -189,7 +189,7 @@
                 document.getElementById('mcp-add-form')?.remove();
                 await this.refresh();
             } catch (e) {
-                alert('Fehler: ' + e.message);
+                alert(window.t('mcp.error').replace('{msg}', e.message));
             }
         }
 
@@ -213,7 +213,7 @@
         }
 
         async _remove(id) {
-            if (!confirm('MCP-Server wirklich entfernen?')) return;
+            if (!confirm(window.t('mcp.remove_confirm'))) return;
             const token = localStorage.getItem('jarvis_token') || '';
             await fetch(`/api/mcp/servers/${id}`, {
                 method: 'DELETE',

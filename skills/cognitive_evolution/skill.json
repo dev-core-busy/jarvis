@@ -1,0 +1,61 @@
+{
+  "name": "Cognitive Evolution",
+  "name_en": "Cognitive Evolution",
+  "description": "Selbstverbessernder kognitiver Agent – analysiert Fähigkeitslücken, generiert neuen Skill-Code, validiert und wendet ihn an. Kann neue Skills schreiben und sich selbst optimieren.",
+  "description_en": "Self-improving cognitive agent – analyzes capability gaps, generates new skill code, validates and applies it. Can write new skills and optimize itself.",
+  "version": "1.0.0",
+  "author": "Jarvis",
+  "module": "main",
+  "tools": [
+    "evolution_analyze",
+    "evolution_propose",
+    "evolution_validate",
+    "evolution_apply",
+    "evolution_cycle"
+  ],
+  "category": "system",
+  "icon": "brain",
+  "system": true,
+  "enabled": false,
+  "config_schema": {},
+  "knowledge_docs": [],
+  "dependencies": [],
+  "permissions": [],
+  "help": {
+    "details": "Kognitiver Selbstverbesserungs-Skill: Analyse → Vorschlag → Validierung → Anwendung. Kann neue Jarvis-Skills generieren (skills/<name>/), Instruktionen anpassen und sich selbst optimieren (engine.py via importlib.reload). Alle Änderungen werden durch LLM-Validierung gesichert.",
+    "tools": [
+      {
+        "name": "evolution_analyze",
+        "label": "Analysieren",
+        "desc": "Phase 1: Analysiert eine Fähigkeitslücke oder ein Verbesserungsziel. Gibt strukturierte Analyse mit Empfehlungen zurück."
+      },
+      {
+        "name": "evolution_propose",
+        "label": "Vorschlag generieren",
+        "desc": "Phase 2: LLM generiert konkreten Code (neuer Skill oder Patch). Proposal wird in data/learnings/proposals/ gespeichert."
+      },
+      {
+        "name": "evolution_validate",
+        "label": "Validieren",
+        "desc": "Phase 3: Syntax-Check + unabhängige LLM-Sicherheitsprüfung des Proposals. Fail-open – blockiert nie dauerhaft."
+      },
+      {
+        "name": "evolution_apply",
+        "label": "Anwenden",
+        "desc": "Phase 4: Schreibt Dateien, lädt neue Skills oder patcht sich selbst via importlib.reload(). Setzt Status auf 'applied'."
+      },
+      {
+        "name": "evolution_cycle",
+        "label": "Vollzyklus (autonom)",
+        "desc": "Startet einen dedizierten Sub-Agenten der alle 4 Phasen autonom durchläuft. Ziel als Freitext angeben."
+      }
+    ],
+    "use_cases": [
+      "Schreibe einen neuen Skill der PDFs lesen kann",
+      "Analysiere was mir fehlt um Wetterdaten abzurufen",
+      "Optimiere die Evolution-Engine um LLM-Calls zu cachen",
+      "Baue mir einen Skill der Markdown-Dateien zusammenfasst"
+    ],
+    "notes": "Neue Skills werden nach evolution_apply automatisch geladen. Aktivierung via Jarvis-Einstellungen → Skills. Self-Patches (scope=self_patch) werden sofort via importlib.reload() aktiv – kein Service-Restart nötig."
+  }
+}

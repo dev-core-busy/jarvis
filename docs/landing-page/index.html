@@ -379,8 +379,9 @@
         <a href="#openclaw">OpenClaw</a>
         <a href="#screenshots" class="t-de">Screenshots</a>
         <a href="#screenshots" class="t-en">Screenshots</a>
-        <a href="#android" style="color:var(--success);font-weight:600;">📱 Android</a>
         <a href="#chat" style="color:#BB86FC;font-weight:600;">💬 Chat</a>
+        <a href="#android" style="color:var(--success);font-weight:600;">📱 Android</a>
+        <a href="#ios" style="color:#c084fc;font-weight:600;">🍎 iOS</a>
         <a href="#windows" style="color:#60a5fa;font-weight:600;">🖥️ Windows</a>
         <a href="#install"     class="t-de">Installation</a>
         <a href="#install"     class="t-en">Install</a>
@@ -585,6 +586,13 @@
                 <div class="feature-title t-en">Audit Log &amp; Per-User Memory</div>
                 <div class="feature-desc t-de">Jede Tool-Ausführung wird strukturiert geloggt (Wer? Was? Wie lange?). Persistentes Gedächtnis pro Benutzer: jeder User hat seinen eigenen Memory-Namespace – keine Überschneidung zwischen Accounts.</div>
                 <div class="feature-desc t-en">Every tool execution is structured-logged (who? what? how long?). Persistent memory per user: each account has its own memory namespace – no overlap between users.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🧬</div>
+                <div class="feature-title t-de">Selbstoptimierung &amp; Code-Fixes</div>
+                <div class="feature-title t-en">Self-Optimization &amp; Code Fixes</div>
+                <div class="feature-desc t-de">Jarvis analysiert eigene Fehler in drei Phasen (Diagnose / Root Cause / Prävention) und schreibt strukturierte Lernberichte. Mit ausdrücklicher Benutzer-Freigabe passt er Instruktionen und Code-Level-Fixes eigenständig an – validiert durch eine zweite LLM-Instanz, bevor Änderungen angewendet werden.</div>
+                <div class="feature-desc t-en">Jarvis analyses its own errors in three phases (Diagnose / Root Cause / Prevention) and writes structured learning reports. With explicit user authorization it applies instruction updates and code-level fixes autonomously – validated by a second LLM instance before any change is written.</div>
             </div>
         </div>
     </div>
@@ -996,65 +1004,6 @@ docker compose up -d</code>
     </div>
 </section>
 
-<section id="android" class="android-section">
-    <div class="container">
-        <div class="android-inner">
-            <div class="reveal">
-                <div class="android-badge-new">✨ Neu</div>
-                <h2 class="android-title">
-                    <span class="t-de">Jarvis in der <span class="accent-text">Hosentasche</span></span>
-                    <span class="t-en">Jarvis in your <span class="accent-text">pocket</span></span>
-                </h2>
-                <p class="android-desc t-de">
-                    Native Android App – chatte mit deinem Jarvis-Server von überall via <strong>Tailscale VPN</strong>.
-                    Spracheingabe, Echtzeit-Agent-Status und automatische Updates inklusive.
-                </p>
-                <p class="android-desc t-en">
-                    Native Android app – chat with your Jarvis server from anywhere via <strong>Tailscale VPN</strong>.
-                    Voice input, real-time agent status and automatic updates included.
-                </p>
-                <ul class="android-features">
-                    <li><span class="check">✅</span> <span class="t-de">Sicherer Zugriff via Tailscale VPN</span><span class="t-en">Secure access via Tailscale VPN</span></li>
-                    <li><span class="check">✅</span> <span class="t-de">On-Device Spracheingabe (kein Cloud-STT)</span><span class="t-en">On-device voice input (no cloud STT)</span></li>
-                    <li><span class="check">✅</span> <span class="t-de">Agent-Status &amp; Multi-Agent Panel</span><span class="t-en">Agent status &amp; multi-agent panel</span></li>
-                    <li><span class="check">✅</span> <span class="t-de">Push-Benachrichtigungen bei fertigem Task</span><span class="t-en">Push notifications on task completion</span></li>
-                    <li><span class="check">✅</span> <span class="t-de">In-App Update-Funktion</span><span class="t-en">In-app update function</span></li>
-                    <li><span class="check">✅</span> <span class="t-de">Dark Glassmorphism UI – wie die Web-Oberfläche</span><span class="t-en">Dark glassmorphism UI – matches the web interface</span></li>
-                </ul>
-                <a href="https://jarvis-ai.info/jarvis.apk?v=8b" class="btn-android">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M17.523 15.341a.54.54 0 0 1-.54.54H7.017a.54.54 0 0 1-.54-.54v-5.4a5.52 5.52 0 0 1 5.523-5.52 5.52 5.52 0 0 1 5.523 5.52v5.4zm-1.62-8.92a4.14 4.14 0 0 0-3.903-2.76 4.14 4.14 0 0 0-3.903 2.76h7.806zM8.1 2.46l-1.08-1.92a.18.18 0 0 0-.312.18l1.08 1.92a.18.18 0 0 0 .312-.18zm8.892 0a.18.18 0 0 0 .312.18l1.08-1.92a.18.18 0 0 0-.312-.18l-1.08 1.92zM6.48 17.46v2.7a.54.54 0 0 0 1.08 0v-2.7H6.48zm9.96 0v2.7a.54.54 0 0 0 1.08 0v-2.7h-1.08z"/></svg>
-                    <span class="t-de">APK herunterladen · 0.841</span>
-                    <span class="t-en">Download APK · 0.841</span>
-                </a>
-                <span class="btn-android-note t-de">Android 8.0+ · ~20 MB · Debug-Build</span>
-                <span class="btn-android-note t-en">Android 8.0+ · ~20 MB · Debug build</span>
-            </div>
-
-            <!-- Phone Mockup -->
-            <div class="android-mockup reveal">
-                <div class="phone-frame">
-                    <div class="phone-glow"></div>
-                    <div class="phone-notch"></div>
-                    <div class="phone-screen">
-                        <div class="phone-topbar">
-                            <div class="phone-dot"></div>
-                            <div class="phone-title">JARVIS</div>
-                        </div>
-                        <div class="phone-msg bot t-de">🚀 Starte Aufgabe: Wie ist das Wetter?</div>
-                        <div class="phone-msg bot t-en">🚀 Starting task: What's the weather?</div>
-                        <div class="phone-msg bot t-de">🧠 Memory geladen<br>⏳ Warte auf LLM…</div>
-                        <div class="phone-msg bot t-en">🧠 Memory loaded<br>⏳ Waiting for LLM…</div>
-                        <div class="phone-msg bot t-de">☀️ In Berlin sind es 18°C, leicht bewölkt.<br>✅ Aufgabe abgeschlossen</div>
-                        <div class="phone-msg bot t-en">☀️ Berlin: 18°C, partly cloudy.<br>✅ Task completed</div>
-                        <div class="phone-msg user t-de">Danke! Erinnere mich um 19 Uhr.</div>
-                        <div class="phone-msg user t-en">Thanks! Remind me at 7 PM.</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
-
 <section id="chat" class="chat-section">
     <div class="container">
         <div class="chat-inner">
@@ -1135,6 +1084,168 @@ docker compose up -d</code>
                     <li><span class="check">✅</span> <span class="t-de">30-Tage-Session – kein tägliches Neu-Anmelden</span><span class="t-en">30-day session – no daily re-login required</span></li>
                     <li><span class="check">✅</span> <span class="t-de">Echtzeit-Streaming, Markdown-Rendering, Datums-Trenner</span><span class="t-en">Real-time streaming, markdown rendering, date separators</span></li>
                 </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="android" class="android-section">
+    <div class="container">
+        <div class="android-inner">
+            <div class="reveal">
+                <div class="android-badge-new">✨ Neu</div>
+                <h2 class="android-title">
+                    <span class="t-de">Jarvis in der <span class="accent-text">Hosentasche</span></span>
+                    <span class="t-en">Jarvis in your <span class="accent-text">pocket</span></span>
+                </h2>
+                <p class="android-desc t-de">
+                    Native Android App – chatte mit deinem Jarvis-Server von überall via <strong>Tailscale VPN</strong>.
+                    Spracheingabe, Echtzeit-Agent-Status und automatische Updates inklusive.
+                </p>
+                <p class="android-desc t-en">
+                    Native Android app – chat with your Jarvis server from anywhere via <strong>Tailscale VPN</strong>.
+                    Voice input, real-time agent status and automatic updates included.
+                </p>
+                <ul class="android-features">
+                    <li><span class="check">✅</span> <span class="t-de">Sicherer Zugriff via Tailscale VPN</span><span class="t-en">Secure access via Tailscale VPN</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">On-Device Spracheingabe (kein Cloud-STT)</span><span class="t-en">On-device voice input (no cloud STT)</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Agent-Status &amp; Multi-Agent Panel</span><span class="t-en">Agent status &amp; multi-agent panel</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Push-Benachrichtigungen bei fertigem Task</span><span class="t-en">Push notifications on task completion</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">In-App Update-Funktion</span><span class="t-en">In-app update function</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Dark Glassmorphism UI – wie die Web-Oberfläche</span><span class="t-en">Dark glassmorphism UI – matches the web interface</span></li>
+                </ul>
+                <a href="https://jarvis-ai.info/jarvis.apk?v=8b" class="btn-android">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M17.523 15.341a.54.54 0 0 1-.54.54H7.017a.54.54 0 0 1-.54-.54v-5.4a5.52 5.52 0 0 1 5.523-5.52 5.52 5.52 0 0 1 5.523 5.52v5.4zm-1.62-8.92a4.14 4.14 0 0 0-3.903-2.76 4.14 4.14 0 0 0-3.903 2.76h7.806zM8.1 2.46l-1.08-1.92a.18.18 0 0 0-.312.18l1.08 1.92a.18.18 0 0 0 .312-.18zm8.892 0a.18.18 0 0 0 .312.18l1.08-1.92a.18.18 0 0 0-.312-.18l-1.08 1.92zM6.48 17.46v2.7a.54.54 0 0 0 1.08 0v-2.7H6.48zm9.96 0v2.7a.54.54 0 0 0 1.08 0v-2.7h-1.08z"/></svg>
+                    <span class="t-de">APK herunterladen · 0.841</span>
+                    <span class="t-en">Download APK · 0.841</span>
+                </a>
+                <span class="btn-android-note t-de">Android 8.0+ · ~20 MB · Debug-Build</span>
+                <span class="btn-android-note t-en">Android 8.0+ · ~20 MB · Debug build</span>
+                <p class="android-pwa-note t-de">💡 Keine App-Installation? Einfach als <a href="#ios">PWA</a> direkt im Browser nutzen – funktioniert auf Android &amp; iOS.</p>
+                <p class="android-pwa-note t-en">💡 No app install? Use Jarvis directly as a <a href="#ios">PWA</a> in your browser – works on Android &amp; iOS.</p>
+            </div>
+
+            <!-- Phone Mockup -->
+            <div class="android-mockup reveal">
+                <div class="phone-frame">
+                    <div class="phone-glow"></div>
+                    <div class="phone-notch"></div>
+                    <div class="phone-screen">
+                        <div class="phone-topbar">
+                            <div class="phone-dot"></div>
+                            <div class="phone-title">JARVIS</div>
+                        </div>
+                        <div class="phone-msg bot t-de">🚀 Starte Aufgabe: Wie ist das Wetter?</div>
+                        <div class="phone-msg bot t-en">🚀 Starting task: What's the weather?</div>
+                        <div class="phone-msg bot t-de">🧠 Memory geladen<br>⏳ Warte auf LLM…</div>
+                        <div class="phone-msg bot t-en">🧠 Memory loaded<br>⏳ Waiting for LLM…</div>
+                        <div class="phone-msg bot t-de">☀️ In Berlin sind es 18°C, leicht bewölkt.<br>✅ Aufgabe abgeschlossen</div>
+                        <div class="phone-msg bot t-en">☀️ Berlin: 18°C, partly cloudy.<br>✅ Task completed</div>
+                        <div class="phone-msg user t-de">Danke! Erinnere mich um 19 Uhr.</div>
+                        <div class="phone-msg user t-en">Thanks! Remind me at 7 PM.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="ios" class="ios-section">
+    <div class="container">
+        <div class="ios-inner">
+            <div class="reveal">
+                <div class="ios-badge">🍎 iOS &amp; iPadOS</div>
+                <h2 class="ios-title">
+                    <span class="t-de">Jarvis als <span class="accent-text">PWA</span> auf iPhone &amp; iPad</span>
+                    <span class="t-en">Jarvis as a <span class="accent-text">PWA</span> on iPhone &amp; iPad</span>
+                </h2>
+                <p class="ios-desc t-de">
+                    Kein App Store, keine Installation – füge Jarvis Chat einfach über Safari zum Home-Bildschirm hinzu.
+                    Sieht und verhält sich wie eine native App, direkt von deinem Server.
+                </p>
+                <p class="ios-desc t-en">
+                    No App Store, no installation – just add Jarvis Chat to your home screen via Safari.
+                    Looks and feels like a native app, served directly from your server.
+                </p>
+                <ul class="ios-features">
+                    <li><span class="check">✅</span> <span class="t-de">Kein App Store – keine Abhängigkeiten</span><span class="t-en">No App Store – fully self-hosted</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Vollbild-Modus, eigenes Icon, eigener Splash-Screen</span><span class="t-en">Full-screen mode, custom icon, custom splash screen</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Dark &amp; Light Mode – passt sich automatisch an</span><span class="t-en">Dark &amp; light mode – adapts automatically</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Offline-Cache (statische Assets via Service Worker)</span><span class="t-en">Offline cache (static assets via service worker)</span></li>
+                    <li><span class="check">✅</span> <span class="t-de">Funktioniert auf iPhone &amp; iPad (Safari 16.4+)</span><span class="t-en">Works on iPhone &amp; iPad (Safari 16.4+)</span></li>
+                </ul>
+
+                <div class="ios-steps">
+                    <div class="ios-step">
+                        <div class="ios-step-num">1</div>
+                        <div class="ios-step-text t-de">Öffne <strong>Safari</strong> und navigiere zur Jarvis-URL deines Servers (z.B. <strong>https://192.168.x.x/chat</strong>).</div>
+                        <div class="ios-step-text t-en">Open <strong>Safari</strong> and navigate to your Jarvis server URL (e.g. <strong>https://192.168.x.x/chat</strong>).</div>
+                    </div>
+                    <div class="ios-step">
+                        <div class="ios-step-num">2</div>
+                        <div class="ios-step-text t-de">Tippe auf das <strong>Teilen-Symbol</strong> (□↑) in der Safari-Adressleiste unten.</div>
+                        <div class="ios-step-text t-en">Tap the <strong>Share button</strong> (□↑) in the Safari toolbar at the bottom.</div>
+                    </div>
+                    <div class="ios-step">
+                        <div class="ios-step-num">3</div>
+                        <div class="ios-step-text t-de">Wähle <strong>„Zum Home-Bildschirm"</strong> aus der Aktionsliste.</div>
+                        <div class="ios-step-text t-en">Select <strong>"Add to Home Screen"</strong> from the action list.</div>
+                    </div>
+                    <div class="ios-step">
+                        <div class="ios-step-num">4</div>
+                        <div class="ios-step-text t-de">Namen bestätigen → <strong>Hinzufügen</strong> antippen. Fertig – Jarvis erscheint auf dem Home-Bildschirm.</div>
+                        <div class="ios-step-text t-en">Confirm the name → tap <strong>Add</strong>. Done – Jarvis appears on your home screen.</div>
+                    </div>
+                </div>
+
+                <p class="ios-note t-de">⚠️ Beim ersten Öffnen musst du das selbstsignierte Zertifikat einmalig vertrauen: <em>Einstellungen → VPN &amp; Geräteverwaltung → Zertifikat → Vertrauen</em>.</p>
+                <p class="ios-note t-en">⚠️ On first launch you need to trust the self-signed certificate once: <em>Settings → VPN &amp; Device Management → Certificate → Trust</em>.</p>
+            </div>
+
+            <!-- iOS Mockup -->
+            <div class="ios-mockup reveal">
+                <div class="ios-share-demo">
+                    <div class="ios-browser-bar">
+                        <div class="ios-browser-dot"></div>
+                        <span>192.168.x.x/chat</span>
+                    </div>
+                    <div class="ios-share-sheet">
+                        <div class="ios-share-title t-de">Teilen über…</div>
+                        <div class="ios-share-title t-en">Share via…</div>
+                        <div class="ios-share-actions">
+                            <div class="ios-share-action">
+                                <div class="ios-share-icon highlight">＋</div>
+                                <div class="ios-share-label highlight t-de">Zum Home-Bildschirm</div>
+                                <div class="ios-share-label highlight t-en">Add to Home Screen</div>
+                            </div>
+                            <div class="ios-share-action">
+                                <div class="ios-share-icon dim">📋</div>
+                                <div class="ios-share-label t-de">Kopieren</div>
+                                <div class="ios-share-label t-en">Copy</div>
+                            </div>
+                            <div class="ios-share-action">
+                                <div class="ios-share-icon dim">🔖</div>
+                                <div class="ios-share-label t-de">Lesezeichen</div>
+                                <div class="ios-share-label t-en">Bookmark</div>
+                            </div>
+                            <div class="ios-share-action">
+                                <div class="ios-share-icon dim">✉️</div>
+                                <div class="ios-share-label t-de">Mail</div>
+                                <div class="ios-share-label t-en">Mail</div>
+                            </div>
+                        </div>
+                        <div style="background:#3a3a3c;border-radius:10px;padding:12px;display:flex;align-items:center;gap:12px;">
+                            <div style="width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#9B59B6,#6A0DAD);display:flex;align-items:center;justify-content:center;font-size:1.3rem;font-weight:700;color:#fff;flex-shrink:0;">J</div>
+                            <div>
+                                <div style="font-size:0.78rem;font-weight:600;color:#fff;">Jarvis</div>
+                                <div style="font-size:0.65rem;color:#8e8e93;" class="t-de">192.168.x.x</div>
+                                <div style="font-size:0.65rem;color:#8e8e93;" class="t-en">192.168.x.x</div>
+                            </div>
+                            <button style="margin-left:auto;background:#c084fc;border:none;border-radius:8px;padding:6px 14px;font-size:0.75rem;font-weight:600;color:#fff;cursor:pointer;" class="t-de">Hinzufügen</button>
+                            <button style="margin-left:auto;background:#c084fc;border:none;border-radius:8px;padding:6px 14px;font-size:0.75rem;font-weight:600;color:#fff;cursor:pointer;" class="t-en">Add</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="de" class="lang-de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis – Docker Installation &amp; Konfiguration</title>
+    <meta name="robots" content="index, follow">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg:            #0d0d1a;
+            --bg-secondary:  #111827;
+            --bg-glass:      rgba(255,255,255,0.04);
+            --bg-glass-med:  rgba(255,255,255,0.08);
+            --border:        rgba(255,255,255,0.08);
+            --border-hover:  rgba(255,255,255,0.20);
+            --text-primary:  #e8eaf6;
+            --text-secondary:rgba(255,255,255,0.55);
+            --text-muted:    rgba(255,255,255,0.30);
+            --accent:        #6366f1;
+            --accent-glow:   rgba(99,102,241,0.45);
+            --accent-hover:  #818cf8;
+            --accent-light:  rgba(99,102,241,0.12);
+            --cyan:          #06b6d4;
+            --cyan-glow:     rgba(6,182,212,0.35);
+            --success:       #10b981;
+            --warning:       #f59e0b;
+            --danger:        #ef4444;
+            --radius-sm:  8px; --radius-md: 12px; --radius-lg: 16px; --radius-xl: 24px;
+            --font-body:  'Inter', -apple-system, sans-serif;
+            --font-title: 'Orbitron', sans-serif;
+            --font-mono:  'JetBrains Mono', monospace;
+            --transition: 0.2s cubic-bezier(0.4,0,0.2,1);
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body { font-family: var(--font-body); background: var(--bg); color: var(--text-primary); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+        a { color: var(--accent-hover); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        /* Nav */
+        nav { position: sticky; top: 0; z-index: 100; display: flex; align-items: center; justify-content: space-between; padding: 0 32px; height: 60px; background: rgba(13,13,26,0.92); backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); }
+        .nav-logo { font-family: var(--font-title); font-size: 1.3rem; font-weight: 900; letter-spacing: 4px; background: linear-gradient(135deg, var(--accent), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .nav-badge { padding: 3px 10px; background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.35); border-radius: 12px; font-size: 0.72rem; font-weight: 600; color: var(--accent-hover); letter-spacing: 1px; text-transform: uppercase; margin-left: 12px; }
+        .nav-back { font-size: 0.85rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; transition: color var(--transition); }
+        .nav-back:hover { color: var(--text-primary); text-decoration: none; }
+
+        /* Layout – Zweispaltig: TOC links, Content rechts */
+        .page-outer { max-width: 1140px; margin: 0 auto; padding: 48px 24px 96px; display: flex; gap: 40px; align-items: flex-start; }
+        .toc-wrap { width: 190px; flex-shrink: 0; }
+        .toc-sticky { position: sticky; top: 80px; }
+        .page-wrap { flex: 1; min-width: 0; }
+        @media (max-width: 900px) { .toc-wrap { display: none; } .page-outer { padding: 32px 16px 64px; } }
+
+        /* Sidebar TOC */
+        .toc { background: var(--bg-glass); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; }
+        .toc-title { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+        .toc a { display: block; font-size: 0.8rem; color: var(--text-secondary); padding: 4px 0; border-left: 2px solid transparent; padding-left: 10px; transition: all var(--transition); }
+        .toc a:hover { color: var(--text-primary); border-color: var(--accent); text-decoration: none; }
+        .toc a.sub { padding-left: 20px; font-size: 0.75rem; }
+
+        /* Page header */
+        .page-header { margin-bottom: 48px; padding-bottom: 32px; border-bottom: 1px solid var(--border); }
+        .page-eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px; background: rgba(6,182,212,0.1); border: 1px solid rgba(6,182,212,0.3); border-radius: 20px; font-size: 0.75rem; font-weight: 600; color: var(--cyan); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 20px; }
+        .page-title { font-family: var(--font-title); font-size: clamp(1.8rem, 4vw, 2.8rem); font-weight: 900; letter-spacing: 4px; background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent-hover) 50%, var(--cyan) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; line-height: 1.15; }
+        .page-subtitle { font-size: 1.05rem; color: var(--text-secondary); max-width: 680px; line-height: 1.7; }
+
+        /* Sections */
+        .doc-section { margin-bottom: 56px; }
+        .doc-section:last-child { margin-bottom: 0; }
+        h2 { font-size: 1.35rem; font-weight: 700; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; scroll-margin-top: 80px; }
+        h2 .h-icon { font-size: 1.1rem; }
+        h3 { font-size: 1rem; font-weight: 600; color: var(--accent-hover); margin-bottom: 12px; margin-top: 24px; }
+
+        /* Code */
+        .code-block { background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px 22px; margin: 14px 0; overflow-x: auto; position: relative; }
+        .code-block.highlight { border-color: rgba(99,102,241,0.4); background: rgba(99,102,241,0.05); }
+        .code-block.cyan { border-color: rgba(6,182,212,0.35); background: rgba(6,182,212,0.04); }
+        .code-block code { font-family: var(--font-mono); font-size: 0.84rem; color: var(--cyan); white-space: pre; display: block; line-height: 1.7; }
+        .code-block code .comment { color: var(--text-muted); }
+        .code-block code .key { color: #a5b4fc; }
+        .code-block code .val { color: #86efac; }
+        .code-block code .str { color: #fbbf24; }
+        .code-inline { font-family: var(--font-mono); font-size: 0.82rem; color: var(--cyan); background: rgba(6,182,212,0.1); padding: 2px 7px; border-radius: 5px; border: 1px solid rgba(6,182,212,0.2); white-space: nowrap; }
+        .copy-btn { position: absolute; top: 10px; right: 10px; background: none; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer; border-radius: 6px; padding: 3px 8px; font-size: 0.8rem; transition: all var(--transition); font-family: var(--font-body); }
+        .copy-btn:hover { border-color: var(--border-hover); color: var(--text-primary); }
+
+        /* Info boxes */
+        .info-box { display: flex; gap: 14px; padding: 16px 18px; border-radius: var(--radius-md); margin: 16px 0; font-size: 0.88rem; line-height: 1.6; }
+        .info-box .icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+        .info-box.tip { background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); }
+        .info-box.tip .icon { color: var(--success); }
+        .info-box.warn { background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25); }
+        .info-box.warn .icon { color: var(--warning); }
+        .info-box.info { background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25); }
+        .info-box.info .icon { color: var(--accent-hover); }
+
+        /* Tables */
+        .doc-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.86rem; }
+        .doc-table th { text-align: left; padding: 10px 14px; background: var(--bg-glass-med); border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+        .doc-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--text-secondary); }
+        .doc-table tr:last-child td { border-bottom: none; }
+        .doc-table tr:hover td { background: var(--bg-glass); }
+        .doc-table td:first-child { font-family: var(--font-mono); font-size: 0.8rem; color: var(--cyan); white-space: nowrap; }
+        .doc-table td strong { color: var(--text-primary); font-weight: 500; }
+
+        /* Steps */
+        .steps { display: flex; flex-direction: column; gap: 0; }
+        .step { display: flex; gap: 20px; position: relative; padding-bottom: 28px; }
+        .step:last-child { padding-bottom: 0; }
+        .step:not(:last-child)::before { content: ''; position: absolute; left: 18px; top: 40px; bottom: 0; width: 2px; background: var(--border); }
+        .step-num { width: 38px; height: 38px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), #4f46e5); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem; flex-shrink: 0; box-shadow: 0 0 16px var(--accent-glow); }
+        .step-content { flex: 1; padding-top: 6px; }
+        .step-title { font-size: 1rem; font-weight: 600; margin-bottom: 8px; }
+        .step-desc { font-size: 0.88rem; color: var(--text-secondary); }
+
+        /* Port table */
+        .port-badge { display: inline-block; font-family: var(--font-mono); font-size: 0.78rem; padding: 2px 8px; background: rgba(6,182,212,0.12); border: 1px solid rgba(6,182,212,0.25); border-radius: 6px; color: var(--cyan); }
+
+        /* Footer */
+        .page-footer { margin-top: 72px; padding-top: 32px; border-top: 1px solid var(--border); text-align: center; font-size: 0.82rem; color: var(--text-muted); }
+        .page-footer a { color: var(--accent-hover); }
+
+        /* i18n */
+        html.lang-de .t-en { display: none !important; }
+        html.lang-en .t-de { display: none !important; }
+        .lang-btn { display: flex; background: var(--bg-glass-med); border: 1px solid var(--border); border-radius: 20px; overflow: hidden; }
+        .lang-btn button { background: none; border: none; cursor: pointer; padding: 4px 12px; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); transition: all var(--transition); }
+        .lang-btn button.active { background: var(--accent); color: #fff; }
+    </style>
+    <script>
+        function setLang(lang) {
+            document.documentElement.className = 'lang-' + lang;
+            document.documentElement.lang = lang;
+            document.getElementById('btn-de').classList.toggle('active', lang === 'de');
+            document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+            try { localStorage.setItem('jarvis-lang', lang); } catch(e) {}
+        }
+        (function() {
+            try { const s = localStorage.getItem('jarvis-lang'); if (s === 'en') setLang('en'); } catch(e) {}
+        })();
+    </script>
+</head>
+<body>
+
+<nav>
+    <div style="display:flex; align-items:center;">
+        <a href="/" class="nav-logo">JARVIS</a>
+        <span class="nav-badge">🐳 Docker Docs</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:16px;">
+        <div class="lang-btn">
+            <button id="btn-de" class="active" onclick="setLang('de')">DE</button>
+            <button id="btn-en" onclick="setLang('en')">EN</button>
+        </div>
+        <a href="/" class="nav-back"><span class="t-de">← Zurück zur Hauptseite</span><span class="t-en">← Back to main page</span></a>
+    </div>
+</nav>
+
+<div class="page-outer">
+
+<!-- Inhaltsverzeichnis (Desktop) -->
+<div class="toc-wrap">
+    <div class="toc-sticky">
+        <div class="toc">
+            <div class="toc-title"><span class="t-de">Inhalt</span><span class="t-en">Contents</span></div>
+            <a href="#voraussetzungen"><span class="t-de">Voraussetzungen</span><span class="t-en">Requirements</span></a>
+            <a href="#quickstart">Quick Start</a>
+            <a href="#konfiguration"><span class="t-de">Konfiguration</span><span class="t-en">Configuration</span></a>
+            <a class="sub" href="#env-variablen"><span class="t-de">ENV-Variablen</span><span class="t-en">ENV Variables</span></a>
+            <a class="sub" href="#volumes">Volumes</a>
+            <a class="sub" href="#ports">Ports</a>
+            <a href="#passwort"><span class="t-de">Passwort ändern</span><span class="t-en">Change Password</span></a>
+            <a href="#api-key"><span class="t-de">API-Key einrichten</span><span class="t-en">Set up API Key</span></a>
+            <a href="#whatsapp"><span class="t-de">WhatsApp Bridge</span><span class="t-en">WhatsApp Bridge</span></a>
+            <a href="#updates">Updates</a>
+            <a href="#befehle"><span class="t-de">Nützliche Befehle</span><span class="t-en">Useful Commands</span></a>
+            <a href="#troubleshooting">Troubleshooting</a>
+        </div>
+    </div>
+</div>
+
+<div class="page-wrap">
+
+    <!-- Header -->
+    <div class="page-header">
+        <div class="page-eyebrow">🐳 <span class="t-de">Docker Dokumentation</span><span class="t-en">Docker Documentation</span></div>
+        <h1 class="page-title"><span class="t-de">Docker Installation &amp;<br>Konfiguration</span><span class="t-en">Docker Installation &amp;<br>Configuration</span></h1>
+        <p class="page-subtitle">
+            <span class="t-de">Vollständige Anleitung zum Einrichten von Jarvis in einer bestehenden Docker-Umgebung –
+            von der ersten Installation bis zur WhatsApp-Integration.</span>
+            <span class="t-en">Complete guide to setting up Jarvis in an existing Docker environment –
+            from first installation to WhatsApp integration.</span>
+        </p>
+    </div>
+
+    <!-- ── 1. Voraussetzungen ── -->
+    <div class="doc-section" id="voraussetzungen">
+        <h2><span class="h-icon">✅</span> <span class="t-de">Voraussetzungen</span><span class="t-en">Requirements</span></h2>
+        <p style="color:var(--text-secondary); margin-bottom:16px;"><span class="t-de">Folgendes muss auf dem Host-System vorhanden sein:</span><span class="t-en">The following must be present on the host system:</span></p>
+
+        <table class="doc-table">
+            <thead><tr><th>Software</th><th><span class="t-de">Mindestversion</span><span class="t-en">Minimum version</span></th><th><span class="t-de">Prüfen</span><span class="t-en">Check</span></th></tr></thead>
+            <tbody>
+                <tr><td>Docker Engine</td><td><strong>20.10+</strong></td><td><span class="code-inline">docker --version</span></td></tr>
+                <tr><td>Docker Compose</td><td><strong>v2.0+ (Plugin)</strong></td><td><span class="code-inline">docker compose version</span></td></tr>
+            </tbody>
+        </table>
+
+        <div class="info-box tip">
+            <span class="icon">💡</span>
+            <div><span class="t-de">Docker Desktop (Windows/Mac) und Docker Engine (Linux) sind beide kompatibel. Auf Linux empfiehlt sich das offizielle <a href="https://docs.docker.com/engine/install/" target="_blank">Docker-Repository</a> statt der Paketquellen der Distribution.</span><span class="t-en">Docker Desktop (Windows/Mac) and Docker Engine (Linux) are both compatible. On Linux the official <a href="https://docs.docker.com/engine/install/" target="_blank">Docker repository</a> is recommended over the distribution's package sources.</span></div>
+        </div>
+
+        <h3><span class="t-de">Docker auf Debian/Ubuntu installieren (falls noch nicht vorhanden)</span><span class="t-en">Install Docker on Debian/Ubuntu (if not already installed)</span></h3>
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
+            <code>curl -fsSL https://get.docker.com | sh
+systemctl enable --now docker</code>
+        </div>
+    </div>
+
+    <!-- ── 2. Quick Start ── -->
+    <div class="doc-section" id="quickstart">
+        <h2><span class="h-icon">🚀</span> Quick Start</h2>
+        <p style="color:var(--text-secondary); margin-bottom:24px;"><span class="t-de">In zwei Schritten startklar:</span><span class="t-en">Up and running in two steps:</span></p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-content">
+                    <div class="step-title"><span class="t-de">Herunterladen &amp; Starten</span><span class="t-en">Download &amp; Start</span></div>
+                    <div class="step-desc"><span class="t-de">Lädt die <span class="code-inline">docker-compose.yml</span> herunter und startet Jarvis. Das Docker-Image (~600 MB) wird beim ersten Mal automatisch gezogen.</span><span class="t-en">Downloads the <span class="code-inline">docker-compose.yml</span> and starts Jarvis. The Docker image (~600 MB) is pulled automatically on first run.</span></div>
+                    <div class="code-block highlight">
+                        <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
+                        <code>curl -fsSL https://jarvis-ai.info/downloads/docker-compose.yml -o docker-compose.yml
+docker compose up -d</code>
+                    </div>
+                    <div class="step-desc" style="margin-top:10px;"><span class="t-de">Danach im Browser öffnen:</span><span class="t-en">Then open in your browser:</span></div>
+                    <div class="code-block" style="margin-top:8px;">
+                        <code>https://&lt;server-ip&gt;         <span class="comment"># Web-UI (HTTPS)</span>
+https://&lt;server-ip&gt;:6080   <span class="comment"># VNC Desktop (HTTPS)</span>
+
+Login: jarvis / jarvis</code>
+                    </div>
+                    <div class="info-box tip" style="margin-top:12px;">
+                        <span class="icon">🔐</span>
+                        <div><span class="t-de">Beim ersten Aufruf erscheint eine SSL-Warnung (selbstsigniertes Zertifikat). Einfach <strong>„Trotzdem fortfahren"</strong> klicken – das ist normal und sicher im lokalen Netz.</span><span class="t-en">On first visit a SSL warning appears (self-signed certificate). Simply click <strong>"Proceed anyway"</strong> – this is normal and safe on a local network.</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-content">
+                    <div class="step-title"><span class="t-de">Update auf neueste Version</span><span class="t-en">Update to latest version</span></div>
+                    <div class="step-desc"><span class="t-de">Holt das neueste Image und startet den Container neu. Alle Daten (Settings, Memory, WhatsApp-Session) bleiben erhalten.</span><span class="t-en">Pulls the latest image and restarts the container. All data (settings, memory, WhatsApp session) is preserved.</span></div>
+                    <div class="code-block cyan">
+                        <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
+                        <code>docker compose pull && docker compose down && docker compose up -d</code>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── 3. Konfiguration ── -->
+    <div class="doc-section" id="konfiguration">
+        <h2><span class="h-icon">⚙️</span> <span class="t-de">Konfiguration</span><span class="t-en">Configuration</span></h2>
+
+        <!-- ENV -->
+        <h3 id="env-variablen"><span class="t-de">Environment-Variablen</span><span class="t-en">Environment Variables</span></h3>
+        <p style="color:var(--text-secondary); margin-bottom:12px;"><span class="t-de">Alle Einstellungen werden über <span class="code-inline">environment:</span> in der <span class="code-inline">docker-compose.yml</span> gesteuert:</span><span class="t-en">All settings are controlled via <span class="code-inline">environment:</span> in the <span class="code-inline">docker-compose.yml</span>:</span></p>
+
+        <table class="doc-table">
+            <thead><tr><th>Variable</th><th><span class="t-de">Standard</span><span class="t-en">Default</span></th><th><span class="t-de">Beschreibung</span><span class="t-en">Description</span></th></tr></thead>
+            <tbody>
+                <tr><td>JARVIS_DOCKER</td><td><strong>1</strong></td><td><span class="t-de">Aktiviert Docker-Modus (ENV-Auth statt Linux-PAM). <strong>Nicht ändern.</strong></span><span class="t-en">Enables Docker mode (ENV auth instead of Linux-PAM). <strong>Do not change.</strong></span></td></tr>
+                <tr><td>JARVIS_PASSWORD</td><td><strong>jarvis</strong></td><td><span class="t-de">Passwort für den Web-Login (Benutzername ist immer <strong>jarvis</strong>)</span><span class="t-en">Password for web login (username is always <strong>jarvis</strong>)</span></td></tr>
+                <tr><td>GEMINI_API_KEY</td><td>–</td><td><span class="t-de">Google Gemini API-Key (alternativ im Web-UI eintragen)</span><span class="t-en">Google Gemini API key (or enter via Web-UI)</span></td></tr>
+                <tr><td>ANTHROPIC_API_KEY</td><td>–</td><td><span class="t-de">Anthropic Claude API-Key</span><span class="t-en">Anthropic Claude API key</span></td></tr>
+                <tr><td>OPENROUTER_API_KEY</td><td>–</td><td><span class="t-de">OpenRouter API-Key (Zugang zu vielen Modellen)</span><span class="t-en">OpenRouter API key (access to many models)</span></td></tr>
+                <tr><td>OPENAI_API_KEY</td><td>–</td><td><span class="t-de">OpenAI-kompatibler Key (auch für lokale Modelle via Ollama)</span><span class="t-en">OpenAI-compatible key (also for local models via Ollama)</span></td></tr>
+            </tbody>
+        </table>
+
+        <div class="info-box info">
+            <span class="icon">ℹ️</span>
+            <div><span class="t-de">API-Keys können auch <strong>nach dem Start</strong> im Web-UI eingetragen werden: <strong>Einstellungen (⚙) → LLM-Profile → Profil hinzufügen</strong>. Kein Neustart nötig.</span><span class="t-en">API keys can also be entered <strong>after startup</strong> in the Web-UI: <strong>Settings (⚙) → LLM Profiles → Add profile</strong>. No restart required.</span></div>
+        </div>
+
+        <!-- Volumes -->
+        <h3 id="volumes"><span class="t-de">Volumes (persistente Daten)</span><span class="t-en">Volumes (persistent data)</span></h3>
+        <p style="color:var(--text-secondary); margin-bottom:12px;"><span class="t-de">Jarvis speichert folgende Daten dauerhaft:</span><span class="t-en">Jarvis stores the following data persistently:</span></p>
+
+        <table class="doc-table">
+            <thead><tr><th>Volume</th><th><span class="t-de">Pfad im Container</span><span class="t-en">Path in container</span></th><th><span class="t-de">Inhalt</span><span class="t-en">Contents</span></th></tr></thead>
+            <tbody>
+                <tr><td>jarvis-data</td><td>/app/data</td><td><span class="t-de"><strong>Memory, Wissensdatenbank, Logs</strong> – bitte regelmäßig sichern</span><span class="t-en"><strong>Memory, knowledge base, logs</strong> – please back up regularly</span></td></tr>
+                <tr><td>jarvis-certs</td><td>/app/certs</td><td><span class="t-de">SSL-Zertifikate (werden beim ersten Start automatisch erstellt)</span><span class="t-en">SSL certificates (created automatically on first start)</span></td></tr>
+                <tr><td>wa-session</td><td>/app/services/whatsapp-bridge/auth</td><td><span class="t-de"><strong>WhatsApp-Session</strong> (Baileys Auth-Daten, bleibt bei Updates erhalten)</span><span class="t-en"><strong>WhatsApp session</strong> (Baileys auth data, preserved across updates)</span></td></tr>
+            </tbody>
+        </table>
+
+        <div class="info-box warn">
+            <span class="icon">⚠️</span>
+            <div><span class="t-de">Beim <span class="code-inline">docker compose down -v</span> werden Volumes <strong>gelöscht</strong>. Ohne <span class="code-inline">-v</span> bleiben sie erhalten. Für Backups: <span class="code-inline">docker run --rm -v jarvis-data:/data -v $(pwd):/backup alpine tar czf /backup/jarvis-backup.tar.gz /data</span></span><span class="t-en">Running <span class="code-inline">docker compose down -v</span> will <strong>delete</strong> volumes. Without <span class="code-inline">-v</span> they are preserved. For backups: <span class="code-inline">docker run --rm -v jarvis-data:/data -v $(pwd):/backup alpine tar czf /backup/jarvis-backup.tar.gz /data</span></span></div>
+        </div>
+
+        <!-- Ports -->
+        <h3 id="ports"><span class="t-de">Port-Mapping</span><span class="t-en">Port Mapping</span></h3>
+
+        <table class="doc-table">
+            <thead><tr><th><span class="t-de">Host-Port</span><span class="t-en">Host Port</span></th><th><span class="t-de">Container-Port</span><span class="t-en">Container Port</span></th><th>Service</th></tr></thead>
+            <tbody>
+                <tr><td><span class="port-badge">443</span></td><td>443</td><td><strong>Jarvis Web-UI</strong> (HTTPS/FastAPI)</td></tr>
+                <tr><td><span class="port-badge">80</span></td><td>80</td><td><strong>HTTP → HTTPS Redirect</strong></td></tr>
+                <tr><td><span class="port-badge">6080</span></td><td>6080</td><td><strong>noVNC Desktop</strong> (HTTPS/WebSocket)</td></tr>
+            </tbody>
+        </table>
+
+        <p style="color:var(--text-secondary); font-size:0.88rem; margin-top:8px;"><span class="t-de">Anderen Port verwenden (z.B. wenn 443 belegt ist):</span><span class="t-en">Use a different port (e.g. if 443 is already in use):</span></p>
+        <div class="code-block">
+            <code><span class="key">ports</span>:
+  - <span class="str">"9443:443"</span>    <span class="comment"># Jarvis accessible on port 9443</span>
+  - <span class="str">"9080:6080"</span>   <span class="comment"># VNC accessible on port 9080</span></code>
+        </div>
+
+        <h3><span class="t-de">Hinter einem Reverse Proxy (nginx / Traefik)</span><span class="t-en">Behind a reverse proxy (nginx / Traefik)</span></h3>
+        <p style="color:var(--text-secondary); margin-bottom:12px;"><span class="t-de">Falls Jarvis hinter einem Reverse Proxy laufen soll, der SSL terminiert:</span><span class="t-en">If Jarvis should run behind a reverse proxy that terminates SSL:</span></p>
+        <div class="code-block">
+            <code><span class="comment"># In docker-compose.yml: disable SSL inside the container</span>
+<span class="key">environment</span>:
+  <span class="key">JARVIS_DOCKER</span>: <span class="str">"1"</span>
+  <span class="key">JARVIS_NO_SSL</span>: <span class="str">"1"</span>   <span class="comment"># coming in a future release</span>
+
+<span class="comment"># nginx example config:</span>
+location / {
+    proxy_pass         https://127.0.0.1:443;
+    proxy_http_version 1.1;
+    proxy_set_header   Upgrade $http_upgrade;
+    proxy_set_header   Connection "upgrade";
+    proxy_set_header   Host $host;
+}</code>
+        </div>
+    </div>
+
+    <!-- ── 4. Passwort ── -->
+    <div class="doc-section" id="passwort">
+        <h2><span class="h-icon">🔑</span> <span class="t-de">Passwort ändern</span><span class="t-en">Change Password</span></h2>
+
+        <p style="color:var(--text-secondary); margin-bottom:16px;"><span class="t-de">Das Passwort wird über die ENV-Variable <span class="code-inline">JARVIS_PASSWORD</span> gesetzt. Änderung:</span><span class="t-en">The password is set via the ENV variable <span class="code-inline">JARVIS_PASSWORD</span>. To change it:</span></p>
+
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
+            <code><span class="comment"># 1. Edit docker-compose.yml</span>
+<span class="key">environment</span>:
+  <span class="key">JARVIS_DOCKER</span>: <span class="str">"1"</span>
+  <span class="key">JARVIS_PASSWORD</span>: <span class="str">"my-new-password"</span>
+
+<span class="comment"># 2. Restart the container</span>
+docker compose up -d --force-recreate</code>
+        </div>
+
+        <div class="info-box warn">
+            <span class="icon">⚠️</span>
+            <div><span class="t-de">Das Passwort steht als Klartext in der <span class="code-inline">docker-compose.yml</span>. Für Produktionsumgebungen empfiehlt sich eine <span class="code-inline">.env</span>-Datei:</span><span class="t-en">The password is stored as plain text in <span class="code-inline">docker-compose.yml</span>. For production environments a <span class="code-inline">.env</span> file is recommended:</span></div>
+        </div>
+
+        <h3><span class="t-de">Sicherer: .env-Datei verwenden</span><span class="t-en">More secure: use a .env file</span></h3>
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
+            <code><span class="comment"># Create .env file (loaded automatically by docker compose)</span>
+echo "JARVIS_PASSWORD=my-secure-password" > .env
+echo "GEMINI_API_KEY=AIza..." >> .env
+
+<span class="comment"># Then in docker-compose.yml:</span>
+<span class="key">environment</span>:
+  <span class="key">JARVIS_DOCKER</span>: <span class="str">"1"</span>
+  <span class="key">JARVIS_PASSWORD</span>: <span class="str">"${JARVIS_PASSWORD}"</span>
+  <span class="key">GEMINI_API_KEY</span>: <span class="str">"${GEMINI_API_KEY}"</span></code>
+        </div>
+    </div>
+
+    <!-- ── 5. API-Key ── -->
+    <div class="doc-section" id="api-key">
+        <h2><span class="h-icon">🤖</span> <span class="t-de">LLM API-Key einrichten</span><span class="t-en">Set up LLM API Key</span></h2>
+
+        <p style="color:var(--text-secondary); margin-bottom:16px;"><span class="t-de">Jarvis unterstützt mehrere KI-Anbieter. Der einfachste Weg ist das Web-UI:</span><span class="t-en">Jarvis supports multiple AI providers. The easiest way is through the Web-UI:</span></p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-content">
+                    <div class="step-title"><span class="t-de">Web-UI öffnen und einloggen</span><span class="t-en">Open Web-UI and log in</span></div>
+                    <div class="step-desc"><span class="code-inline">https://&lt;server-ip&gt;</span> → Login: jarvis / jarvis</div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-content">
+                    <div class="step-title"><span class="t-de">Einstellungen → LLM-Profile</span><span class="t-en">Settings → LLM Profiles</span></div>
+                    <div class="step-desc"><span class="t-de">Zahnrad-Icon (⚙) oben rechts → Tab "LLM-Profile" → <strong>Profil hinzufügen</strong></span><span class="t-en">Gear icon (⚙) top right → Tab "LLM Profiles" → <strong>Add profile</strong></span></div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-content">
+                    <div class="step-title"><span class="t-de">Anbieter &amp; Key auswählen</span><span class="t-en">Select provider &amp; key</span></div>
+                    <div class="step-desc"><span class="t-de">Unterstützte Anbieter und empfohlene Einstiegsmodelle:</span><span class="t-en">Supported providers and recommended starter models:</span></div>
+                    <table class="doc-table" style="margin-top:10px;">
+                        <thead><tr><th><span class="t-de">Anbieter</span><span class="t-en">Provider</span></th><th><span class="t-de">Modell (Empfehlung)</span><span class="t-en">Model (recommended)</span></th><th><span class="t-de">Kosten</span><span class="t-en">Cost</span></th></tr></thead>
+                        <tbody>
+                            <tr><td>Google Gemini</td><td>gemini-2.0-flash</td><td><span class="t-de"><strong>Kostenlos</strong> (mit Limits)</span><span class="t-en"><strong>Free</strong> (with limits)</span></td></tr>
+                            <tr><td>OpenRouter</td><td>google/gemini-flash-1.5</td><td><span class="t-de">Pay-per-use, sehr günstig</span><span class="t-en">Pay-per-use, very affordable</span></td></tr>
+                            <tr><td>Anthropic</td><td>claude-sonnet-4-6</td><td>Pay-per-use</td></tr>
+                            <tr><td>OpenAI</td><td>gpt-4o-mini</td><td>Pay-per-use</td></tr>
+                            <tr><td><span class="t-de">Ollama (lokal)</span><span class="t-en">Ollama (local)</span></td><td>llama3.2, mistral, ...</td><td><span class="t-de"><strong>Kostenlos</strong></span><span class="t-en"><strong>Free</strong></span></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <h3><span class="t-de">Ollama (lokale KI, kein API-Key nötig)</span><span class="t-en">Ollama (local AI, no API key needed)</span></h3>
+        <p style="color:var(--text-secondary); margin-bottom:12px;"><span class="t-de">Wenn Ollama auf dem gleichen Host läuft:</span><span class="t-en">If Ollama runs on the same host:</span></p>
+        <div class="code-block">
+            <code><span class="comment"># In Jarvis Web-UI → LLM Profiles:</span>
+Provider: OpenAI-compatible
+API-URL:  http://host.docker.internal:11434/v1   <span class="comment"># Docker → Host</span>
+API-Key:  ollama                                  <span class="comment"># any string</span>
+Model:    llama3.2</code>
+        </div>
+
+        <div class="info-box tip">
+            <span class="icon">💡</span>
+            <div><span class="t-de">Auf Linux ist <span class="code-inline">host.docker.internal</span> erst ab Docker 20.10 verfügbar. Alternative: <span class="code-inline">network_mode: host</span> in der docker-compose.yml, dann <span class="code-inline">http://localhost:11434/v1</span> verwenden.</span><span class="t-en">On Linux <span class="code-inline">host.docker.internal</span> is only available from Docker 20.10. Alternative: use <span class="code-inline">network_mode: host</span> in docker-compose.yml and then <span class="code-inline">http://localhost:11434/v1</span>.</span></div>
+        </div>
+    </div>
+
+    <!-- ── 6. WhatsApp Bridge ── -->
+    <div class="doc-section" id="whatsapp">
+        <h2><span class="h-icon">💬</span> <span class="t-de">WhatsApp-Integration</span><span class="t-en">WhatsApp Integration</span></h2>
+
+        <p style="color:var(--text-secondary); margin-bottom:16px;"><span class="t-de">Die WhatsApp-Bridge (Node.js + Baileys) ist <strong>im Jarvis-Container integriert</strong> und startet automatisch mit. Es ist kein separater Container nötig.</span><span class="t-en">The WhatsApp bridge (Node.js + Baileys) is <strong>integrated in the Jarvis container</strong> and starts automatically. No separate container is needed.</span></p>
+
+        <div class="info-box tip">
+            <span class="icon">✅</span>
+            <div><span class="t-de">WhatsApp ist sofort einsatzbereit – einfach den WhatsApp-Skill in den Einstellungen aktivieren und den QR-Code scannen.</span><span class="t-en">WhatsApp is ready to use immediately – just enable the WhatsApp skill in settings and scan the QR code.</span></div>
+        </div>
+
+        <h3><span class="t-de">WhatsApp verbinden (QR-Code scannen)</span><span class="t-en">Connect WhatsApp (scan QR code)</span></h3>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-content">
+                    <div class="step-title"><span class="t-de">WhatsApp-Skill aktivieren</span><span class="t-en">Enable WhatsApp skill</span></div>
+                    <div class="step-desc"><span class="t-de">Im Web-UI: <strong>Einstellungen (⚙) → Skills → WhatsApp → Hinzufügen</strong></span><span class="t-en">In the Web-UI: <strong>Settings (⚙) → Skills → WhatsApp → Add</strong></span></div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-content">
+                    <div class="step-title"><span class="t-de">QR-Code scannen</span><span class="t-en">Scan QR code</span></div>
+                    <div class="step-desc"><span class="t-de">Im WhatsApp-Tab erscheint der QR-Code. In der WhatsApp-App auf dem Smartphone: <strong>Einstellungen → Verknüpfte Geräte → Gerät hinzufügen</strong> → QR-Code scannen.</span><span class="t-en">The QR code appears in the WhatsApp tab. In the WhatsApp app on your phone: <strong>Settings → Linked Devices → Link a Device</strong> → scan QR code.</span></div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-content">
+                    <div class="step-title"><span class="t-de">Fertig!</span><span class="t-en">Done!</span></div>
+                    <div class="step-desc"><span class="t-de">Die Session bleibt im Volume <span class="code-inline">wa-session</span> dauerhaft erhalten – auch bei Container-Neustarts und Updates.</span><span class="t-en">The session is permanently stored in the <span class="code-inline">wa-session</span> volume – even across container restarts and updates.</span></div>
+                </div>
+            </div>
+        </div>
+
+        <h3><span class="t-de">Bridge-Status prüfen</span><span class="t-en">Check bridge status</span></h3>
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
+            <code><span class="comment"># Show bridge logs inside the container</span>
+docker compose logs jarvis | grep "WA-Bridge"
+
+<span class="comment"># Query status via API</span>
+docker exec jarvis curl -s http://127.0.0.1:3001/status</code>
+        </div>
+    </div>
+
+    <!-- ── 7. Updates ── -->
+    <div class="doc-section" id="updates">
+        <h2><span class="h-icon">🔄</span> Updates</h2>
+
+        <p style="color:var(--text-secondary); margin-bottom:14px;"><span class="t-de">Auf die neueste Version aktualisieren:</span><span class="t-en">Update to the latest version:</span></p>
+
+        <div class="code-block highlight">
+            <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
+            <code><span class="comment"># Pull new image and restart container</span>
+docker compose pull
+docker compose up -d
+
+<span class="comment"># Remove old image (optional)</span>
+docker image prune -f</code>
+        </div>
+
+        <div class="info-box tip">
+            <span class="icon">✅</span>
+            <div><span class="t-de">Alle Volumes (<span class="code-inline">jarvis-data</span>, <span class="code-inline">jarvis-certs</span>, <span class="code-inline">wa-session</span>) bleiben bei Updates erhalten – Einstellungen, Memory, Wissensdatenbank und WhatsApp-Session gehen nicht verloren.</span><span class="t-en">All volumes (<span class="code-inline">jarvis-data</span>, <span class="code-inline">jarvis-certs</span>, <span class="code-inline">wa-session</span>) are preserved across updates – settings, memory, knowledge base and WhatsApp session are not lost.</span></div>
+        </div>
+    </div>
+
+    <!-- ── 8. Nützliche Befehle ── -->
+    <div class="doc-section" id="befehle">
+        <h2><span class="h-icon">🛠️</span> <span class="t-de">Nützliche Befehle</span><span class="t-en">Useful Commands</span></h2>
+
+        <table class="doc-table">
+            <thead><tr><th><span class="t-de">Befehl</span><span class="t-en">Command</span></th><th><span class="t-de">Beschreibung</span><span class="t-en">Description</span></th></tr></thead>
+            <tbody>
+                <tr><td>docker compose up -d</td><td><span class="t-de"><strong>Starten</strong> (im Hintergrund)</span><span class="t-en"><strong>Start</strong> (in background)</span></td></tr>
+                <tr><td>docker compose down</td><td><span class="t-de"><strong>Stoppen</strong> (Volumes bleiben erhalten)</span><span class="t-en"><strong>Stop</strong> (volumes preserved)</span></td></tr>
+                <tr><td>docker compose restart jarvis</td><td><span class="t-de">Nur Jarvis neu starten</span><span class="t-en">Restart Jarvis only</span></td></tr>
+                <tr><td>docker compose logs -f jarvis</td><td><span class="t-de">Live-Logs von Jarvis</span><span class="t-en">Live logs from Jarvis</span></td></tr>
+                <tr><td>docker compose logs jarvis | grep WA-Bridge</td><td><span class="t-de">WhatsApp-Bridge-Logs</span><span class="t-en">WhatsApp bridge logs</span></td></tr>
+                <tr><td>docker compose ps</td><td><span class="t-de">Status aller Container</span><span class="t-en">Status of all containers</span></td></tr>
+                <tr><td>docker compose pull && docker compose up -d</td><td><span class="t-de">Update auf neueste Version</span><span class="t-en">Update to latest version</span></td></tr>
+                <tr><td>docker exec -it jarvis bash</td><td><span class="t-de">Shell im Container öffnen</span><span class="t-en">Open shell inside container</span></td></tr>
+                <tr><td>docker stats jarvis</td><td><span class="t-de">CPU/RAM-Verbrauch live</span><span class="t-en">Live CPU/RAM usage</span></td></tr>
+            </tbody>
+        </table>
+
+        <h3><span class="t-de">Backup der Daten</span><span class="t-en">Data backup</span></h3>
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
+            <code><span class="comment"># Backup data volume</span>
+docker run --rm \
+  -v jarvis-data:/data \
+  -v $(pwd):/backup \
+  alpine tar czf /backup/jarvis-backup-$(date +%Y%m%d).tar.gz /data
+
+<span class="comment"># Restore</span>
+docker run --rm \
+  -v jarvis-data:/data \
+  -v $(pwd):/backup \
+  alpine tar xzf /backup/jarvis-backup-20260101.tar.gz -C /</code>
+        </div>
+    </div>
+
+    <!-- ── 9. Troubleshooting ── -->
+    <div class="doc-section" id="troubleshooting">
+        <h2><span class="h-icon">🔍</span> Troubleshooting</h2>
+
+        <h3><span class="t-de">Container startet nicht / crasht sofort</span><span class="t-en">Container won't start / crashes immediately</span></h3>
+        <div class="code-block">
+            <code><span class="comment"># Find the cause of the error in the logs</span>
+docker compose logs jarvis | tail -50</code>
+        </div>
+
+        <h3><span class="t-de">Web-UI nicht erreichbar</span><span class="t-en">Web-UI not reachable</span></h3>
+        <div class="code-block">
+            <code><span class="comment"># Check if the container is running</span>
+docker compose ps
+
+<span class="comment"># Check if ports are bound</span>
+ss -tlnp | grep -E "443|6080"
+
+<span class="comment"># Open firewall ports (ufw)</span>
+ufw allow 443/tcp
+ufw allow 80/tcp
+ufw allow 6080/tcp</code>
+        </div>
+
+        <h3><span class="t-de">SSL-Zertifikat wird nicht akzeptiert</span><span class="t-en">SSL certificate not accepted</span></h3>
+        <div class="info-box info">
+            <span class="icon">ℹ️</span>
+            <div><span class="t-de">Jarvis verwendet ein selbstsigniertes Zertifikat. Browser-Warnung beim ersten Aufruf ist normal. In Chrome: <strong>„Erweitert" → „Weiter zu ..."</strong> klicken. Für echte Zertifikate (Let's Encrypt) einen Reverse Proxy vorschalten.</span><span class="t-en">Jarvis uses a self-signed certificate. A browser warning on first visit is normal. In Chrome: click <strong>"Advanced" → "Proceed to ..."</strong>. For real certificates (Let's Encrypt) use a reverse proxy.</span></div>
+        </div>
+
+        <h3><span class="t-de">VNC (noVNC) zeigt schwarzen Bildschirm</span><span class="t-en">VNC (noVNC) shows black screen</span></h3>
+        <div class="code-block">
+            <code><span class="comment"># Check Xvfb/x11vnc status inside the container</span>
+docker exec jarvis ps aux | grep -E "Xvfb|x11vnc|xfce"
+
+<span class="comment"># Restart the container</span>
+docker compose restart jarvis</code>
+        </div>
+
+        <h3><span class="t-de">Zu wenig RAM / Container wird gekillt (OOM)</span><span class="t-en">Not enough RAM / container is killed (OOM)</span></h3>
+        <table class="doc-table">
+            <thead><tr><th><span class="t-de">Komponente</span><span class="t-en">Component</span></th><th><span class="t-de">RAM-Bedarf</span><span class="t-en">RAM required</span></th></tr></thead>
+            <tbody>
+                <tr><td><span class="t-de">Jarvis (Minimum)</span><span class="t-en">Jarvis (minimum)</span></td><td><strong>~512 MB</strong></td></tr>
+                <tr><td><span class="t-de">Jarvis (empfohlen)</span><span class="t-en">Jarvis (recommended)</span></td><td><strong>~1 GB</strong></td></tr>
+                <tr><td><span class="t-de">+ WhatsApp Bridge (integriert)</span><span class="t-en">+ WhatsApp Bridge (integrated)</span></td><td>+ ~100 MB</td></tr>
+                <tr><td><span class="t-de">+ Browser-Automation</span><span class="t-en">+ Browser automation</span></td><td>+ ~1 GB</td></tr>
+            </tbody>
+        </table>
+
+        <h3><span class="t-de">Portkonflikt – Port 443 bereits belegt</span><span class="t-en">Port conflict – port 443 already in use</span></h3>
+        <div class="code-block">
+            <code><span class="comment"># Which process is using port 443?</span>
+ss -tlnp | grep 443
+
+<span class="comment"># Set a different host port in docker-compose.yml:</span>
+<span class="key">ports</span>:
+  - <span class="str">"8443:443"</span>   <span class="comment"># Jarvis then accessible on port 8443</span></code>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="page-footer">
+        <p>© 2026 Andreas Bender · <a href="https://github.com/dev-core-busy/jarvis">GitHub</a> · <a href="/">jarvis-ai.info</a> · <span class="t-de">Lizenz:</span><span class="t-en">License:</span> <a href="https://github.com/dev-core-busy/jarvis/blob/master/LICENSE">AGPL-3.0</a></p>
+    </div>
+
+</div><!-- /page-wrap -->
+</div><!-- /page-outer -->
+
+<script>
+function copyCode(btn) {
+    const block = btn.closest('.code-block');
+    const code = block.querySelector('code').innerText;
+    navigator.clipboard.writeText(code).then(function() {
+        const origHTML = btn.innerHTML;
+        const isEn = document.documentElement.classList.contains('lang-en');
+        btn.innerHTML = isEn ? '✓ Copied' : '✓ Kopiert';
+        btn.style.color = 'var(--success)';
+        setTimeout(function() { btn.innerHTML = origHTML; btn.style.color = ''; }, 2000);
+    });
+}
+</script>
+
+</body>
+</html>

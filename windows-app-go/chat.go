@@ -176,7 +176,7 @@ func NewChatWidget() *ChatWidget {
 	c.Scroll.Direction = container.ScrollVerticalOnly
 
 	c.Input = newSendEntry()
-	c.Input.SetPlaceHolder("Nachricht an Jarvis…")
+	c.Input.SetPlaceHolder(t("Nachricht an Jarvis…", "Message to Jarvis…"))
 	c.Input.OnSend = func() { c.submit() }
 
 	sendIcon := widget.NewButton("➤", func() { c.submit() })
@@ -208,7 +208,7 @@ func NewChatWidget() *ChatWidget {
 	ttsToggleBtn.Importance = widget.MediumImportance
 	c.TtsToggleBtn = ttsToggleBtn
 
-	stopAgentBtn := widget.NewButtonWithIcon("Abbrechen", theme.CancelIcon(), func() {
+	stopAgentBtn := widget.NewButtonWithIcon(t("Abbrechen", "Cancel"), theme.CancelIcon(), func() {
 		if c.OnStopAgent != nil {
 			c.OnStopAgent()
 		}
@@ -223,7 +223,7 @@ func NewChatWidget() *ChatWidget {
 
 	// Verbindungs-Dot: startet grau (getrennt)
 	c.ConnDot = canvas.NewCircle(jc.danger)
-	c.ConnLabel = canvas.NewText("getrennt", jc.muted)
+	c.ConnLabel = canvas.NewText(t("getrennt", "disconnected"), jc.muted)
 	c.ConnLabel.TextSize = 11
 
 	return c
@@ -287,13 +287,13 @@ func (c *ChatWidget) SetConnectionState(state string) {
 	switch state {
 	case "connected":
 		c.ConnDot.FillColor = jc.success
-		c.ConnLabel.Text = "verbunden"
+		c.ConnLabel.Text = t("verbunden", "connected")
 	case "connecting":
 		c.ConnDot.FillColor = color.RGBA{0xFF, 0xFF, 0x00, 0xFF} // Gelb
-		c.ConnLabel.Text = "verbinde…"
+		c.ConnLabel.Text = t("verbinde…", "connecting…")
 	default:
 		c.ConnDot.FillColor = jc.danger
-		c.ConnLabel.Text = "getrennt"
+		c.ConnLabel.Text = t("getrennt", "disconnected")
 	}
 	c.ConnDot.Refresh()
 	c.ConnLabel.Refresh()
@@ -309,14 +309,12 @@ var bgPalette = []color.RGBA{
 	{0x1A, 0x10, 0x00, 0xFF}, // 5: Dunkel-Gold
 }
 
-// BgColorNames sind die Anzeigenamen zu bgPalette (für Settings-Dropdown).
-var BgColorNames = []string{
-	"Dunkel-Lila (Standard)",
-	"Tief-Blau",
-	"Fast Schwarz",
-	"Dunkel-Grün",
-	"Dunkel-Rot",
-	"Dunkel-Gold",
+// BgColorNames gibt die übersetzten Anzeigenamen zur bgPalette zurück.
+func BgColorNames() []string {
+	if appLang == "en" {
+		return []string{"Dark Purple (Default)", "Deep Blue", "Near Black", "Dark Green", "Dark Red", "Dark Gold"}
+	}
+	return []string{"Dunkel-Lila (Standard)", "Tief-Blau", "Fast Schwarz", "Dunkel-Grün", "Dunkel-Rot", "Dunkel-Gold"}
 }
 
 // Layout gibt das fertige Container-Objekt zurück. cfg bestimmt den Hintergrund.
@@ -429,12 +427,12 @@ func (c *ChatWidget) buildChatHeader() fyne.CanvasObject {
 		container.NewVBox(container.NewPadded(normalRow), sep()))
 
 	// ── Selektion-Header ──────────────────────────────────────────────────────
-	c.selCountLbl = canvas.NewText("0 ausgewählt", jc.textPrimary)
+	c.selCountLbl = canvas.NewText(t("Tippe zum Auswählen", "Tap to select"), jc.textPrimary)
 	c.selCountLbl.TextStyle = fyne.TextStyle{Bold: true}
 	c.selCountLbl.TextSize = 16
 
 	cancelBtn := newIconBtn(theme.CancelIcon(), func() { c.exitSelectionMode() })
-	selectAllBtn := widget.NewButton("Alle", func() { c.selectAll() })
+	selectAllBtn := widget.NewButton(t("Alle", "All"), func() { c.selectAll() })
 	selectAllBtn.Importance = widget.LowImportance
 	confirmDeleteBtn := newIconBtn(theme.DeleteIcon(), func() { c.deleteSelected() })
 	selRow := container.NewBorder(nil, nil, cancelBtn,
@@ -485,9 +483,9 @@ func (c *ChatWidget) toggleSelection(idx int) {
 func (c *ChatWidget) updateSelCount() {
 	n := len(c.selSet)
 	if n == 0 {
-		c.selCountLbl.Text = "Tippe zum Auswählen"
+		c.selCountLbl.Text = t("Tippe zum Auswählen", "Tap to select")
 	} else {
-		c.selCountLbl.Text = fmt.Sprintf("%d ausgewählt", n)
+		c.selCountLbl.Text = fmt.Sprintf(t("%d ausgewählt", "%d selected"), n)
 	}
 	c.selCountLbl.Refresh()
 }
@@ -566,11 +564,14 @@ func (c *ChatWidget) Submit(text string) {
 
 // buildDateSeparator erstellt eine zentrierte Datumszeile (z.B. "Mittwoch, 9. April 2025")
 func buildDateSeparator(t time.Time) fyne.CanvasObject {
-	weekdays := []string{"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"}
-	months := []string{"", "Januar", "Februar", "März", "April", "Mai", "Juni",
-		"Juli", "August", "September", "Oktober", "November", "Dezember"}
-	label := fmt.Sprintf("%s, %d. %s %d",
-		weekdays[t.Weekday()], t.Day(), months[t.Month()], t.Year())
+	var label string
+	if appLang == "en" {
+		label = fmt.Sprintf("%s, %s %d, %d",
+			weekdayName(int(t.Weekday())), monthName(int(t.Month())), t.Day(), t.Year())
+	} else {
+		label = fmt.Sprintf("%s, %d. %s %d",
+			weekdayName(int(t.Weekday())), t.Day(), monthName(int(t.Month())), t.Year())
+	}
 	lbl := widget.NewLabel(label)
 	lbl.Importance = widget.LowImportance
 	lbl.Alignment = fyne.TextAlignCenter
@@ -769,32 +770,32 @@ func newTappableBubble(inner fyne.CanvasObject, text string, onTap func(), onRig
 	return t
 }
 
-func (t *tappableBubble) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(t.inner)
+func (tb *tappableBubble) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(tb.inner)
 }
 
-func (t *tappableBubble) Tapped(_ *fyne.PointEvent) {
-	if t.onTap != nil {
-		t.onTap()
+func (tb *tappableBubble) Tapped(_ *fyne.PointEvent) {
+	if tb.onTap != nil {
+		tb.onTap()
 	}
 }
 
-func (t *tappableBubble) TappedSecondary(ev *fyne.PointEvent) {
+func (tb *tappableBubble) TappedSecondary(ev *fyne.PointEvent) {
 	// Kontextmenue mit "Text kopieren" und "Auswählen"
-	c := fyne.CurrentApp().Driver().CanvasForObject(t)
+	c := fyne.CurrentApp().Driver().CanvasForObject(tb)
 	if c == nil {
-		if t.onRight != nil {
-			t.onRight()
+		if tb.onRight != nil {
+			tb.onRight()
 		}
 		return
 	}
 
-	copyItem := fyne.NewMenuItem("Text kopieren", func() {
-		fyne.CurrentApp().Driver().AllWindows()[0].Clipboard().SetContent(t.text)
+	copyItem := fyne.NewMenuItem(t("Text kopieren", "Copy text"), func() {
+		fyne.CurrentApp().Driver().AllWindows()[0].Clipboard().SetContent(tb.text)
 	})
-	selectItem := fyne.NewMenuItem("Auswählen", func() {
-		if t.onRight != nil {
-			t.onRight()
+	selectItem := fyne.NewMenuItem(t("Auswählen", "Select"), func() {
+		if tb.onRight != nil {
+			tb.onRight()
 		}
 	})
 

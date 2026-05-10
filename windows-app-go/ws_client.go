@@ -80,11 +80,15 @@ func (c *WSClient) Stop() {
 	c.mu.Unlock()
 }
 
-func (c *WSClient) SendTask(text string) {
+func (c *WSClient) SendTask(text string, lang string) {
+	if lang == "" {
+		lang = "de"
+	}
 	payload := map[string]string{
 		"type":  "task",
 		"text":  text,
 		"token": c.cfg.APIKey,
+		"lang":  lang,
 	}
 	data, _ := json.Marshal(payload)
 	select {

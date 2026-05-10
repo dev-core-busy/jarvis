@@ -545,7 +545,7 @@
                         </div>
                     </div>
                     <div class="instr-card-body" style="display:none;padding:0 14px 14px;">
-                        <textarea class="instr-editor" data-name="${f.name}" style="width:100%;min-height:120px;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;resize:vertical;line-height:1.5;box-sizing:border-box;">${f.content}</textarea>
+                        <textarea class="instr-editor" data-name="${f.name}" style="width:100%;min-height:360px;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;resize:vertical;line-height:1.5;box-sizing:border-box;">${f.content}</textarea>
                     </div>
                 `;
                 list.appendChild(card);
@@ -745,7 +745,7 @@
     /** Sendet einen Task an den Jarvis-Agenten via WebSocket. */
     window.sendJarvisTask = function (text) {
         if (!ws) return false;
-        ws.send({ type: 'task', text, token });
+        ws.send({ type: 'task', text, token, lang: window._lang || 'de' });
         addLogEntry(`📝 Aufgabe: ${text.substring(0, 80)}…`, 'task', false);
         return true;
     };
@@ -770,7 +770,7 @@
         if (!text || !ws) return;
 
         // Aufgabe an den aktiven Agent senden
-        const msg = { type: 'task', text, token };
+        const msg = { type: 'task', text, token, lang: window._lang || 'de' };
         if (_activeAgentId && _activeAgentId !== '_main') {
             msg.agent_id = _activeAgentId;
         }
@@ -988,7 +988,7 @@
     function _updateTtsBtn() {
         if (!btnTts) return;
         btnTts.classList.toggle('tts-active', _ttsEnabled);
-        btnTts.title = _ttsEnabled ? 'Sprachausgabe aktiv – klicken zum Deaktivieren' : 'Sprachausgabe inaktiv – klicken zum Aktivieren';
+        btnTts.title = _ttsEnabled ? window.t('tts.on') : window.t('tts.off');
         btnTts.innerHTML = _ttsEnabled ? SVG_SPEAKER_ON : SVG_SPEAKER_OFF;
     }
 
@@ -1141,9 +1141,9 @@
             const info = _agentInfos[id];
             const isActive = id === _activeAgentId;
             const typeClass = info.is_sub_agent ? 'sub-agent' : 'main-agent';
-            const stateLabel = { running: 'Läuft', idle: 'Bereit', paused: 'Pause', stopped: 'Stopp' };
+            const stateLabel = { running: window.t('agent.running'), idle: window.t('agent.idle'), paused: window.t('agent.paused'), stopped: window.t('agent.stopped') };
             const closeBtn = info.is_sub_agent
-                ? `<span class="agent-card-close" onclick="event.stopPropagation(); window._removeAgent('${id}')" title="Entfernen">×</span>`
+                ? `<span class="agent-card-close" onclick="event.stopPropagation(); window._removeAgent('${id}')" title="${window.t('agent.remove')}">×</span>`
                 : '';
             return `<div class="agent-card ${typeClass} ${isActive ? 'active' : ''}"
                          data-agent-id="${id}"
@@ -1642,9 +1642,9 @@
                 if (d.is_letsencrypt) {
                     el.innerHTML = `\u2705 Let's Encrypt: <strong>${d.domain}</strong> \u2013 g\u00fcltig bis ${d.expiry}`;
                 } else if (d.expiry) {
-                    el.innerHTML = `\u26a0\ufe0f Self-signed Zertifikat aktiv (g\u00fcltig bis ${d.expiry})`;
+                    el.innerHTML = window.t('profile.cert_self_signed') + ` ${d.expiry})`;
                 } else {
-                    el.innerHTML = '\u26a0\ufe0f Self-signed Zertifikat aktiv';
+                    el.innerHTML = window.t('profile.cert_self_signed_nodate');
                 }
             } catch (e) { /* ignorieren */ }
         }
@@ -1782,7 +1782,7 @@
                         <button class="btn-icon btn-small btn-edit-profile" data-id="${p.id}" title="Bearbeiten">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                         </button>
-                        <button class="btn-icon btn-small btn-delete-profile" data-id="${p.id}" title="Löschen">
+                        <button class="btn-icon btn-small btn-delete-profile" data-id="${p.id}" title="${window.t('common.delete')}">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                         </button>
                     </div>
@@ -2134,6 +2134,49 @@
             });
         }
 
+        // ── TTS-Stimme Vorschau ──
+        const btnTtsPreview = document.getElementById('btn-tts-preview');
+        if (btnTtsPreview && selectTtsVoice) {
+            btnTtsPreview.addEventListener('click', async () => {
+                const voice = selectTtsVoice.value;
+                const previewText = window._lang === 'en'
+                    ? 'Hello, I am Jarvis, your autonomous AI assistant.'
+                    : 'Hallo, ich bin Jarvis, dein autonomer KI-Assistent.';
+                const origHtml = btnTtsPreview.innerHTML;
+                btnTtsPreview.disabled = true;
+                btnTtsPreview.innerHTML = '⏳';
+                try {
+                    const resp = await fetch('/api/tts', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ text: previewText, voice: voice || '' })
+                    });
+                    if (!resp.ok) throw new Error('TTS-Fehler');
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const audio = new Audio(url);
+                    btnTtsPreview.innerHTML = '🔊';
+                    audio.onended = () => {
+                        URL.revokeObjectURL(url);
+                        btnTtsPreview.innerHTML = origHtml;
+                        btnTtsPreview.disabled = false;
+                    };
+                    audio.onerror = () => {
+                        URL.revokeObjectURL(url);
+                        btnTtsPreview.innerHTML = origHtml;
+                        btnTtsPreview.disabled = false;
+                    };
+                    await audio.play();
+                } catch (e) {
+                    btnTtsPreview.innerHTML = '❌';
+                    setTimeout(() => { btnTtsPreview.innerHTML = origHtml; btnTtsPreview.disabled = false; }, 1500);
+                }
+            });
+        }
+
         // ── Agent API Key: Generieren ──
         if (btnGenKey) {
             btnGenKey.addEventListener('click', async () => {
@@ -2259,11 +2302,11 @@
                 const new_pw  = newEl ? newEl.value : '';
                 const conf_pw = confEl ? confEl.value : '';
                 if (!old_pw || !new_pw || !conf_pw) {
-                    if (errEl) { errEl.textContent = 'Alle Felder ausfüllen.'; errEl.style.display = ''; }
+                    if (errEl) { errEl.textContent = window.t('security.fill_fields'); errEl.style.display = ''; }
                     return;
                 }
                 submitEl.disabled = true;
-                submitEl.textContent = 'Speichere...';
+                submitEl.textContent = window.t('common.saving');
                 try {
                     const res = await fetch('/api/change-password', {
                         method: 'POST',
@@ -2276,15 +2319,15 @@
                         if (newEl) newEl.value = '';
                         if (confEl) confEl.value = '';
                         if (strengthEl) strengthEl.textContent = '';
-                        if (okEl) { okEl.textContent = '✅ Kennwort erfolgreich geändert.'; okEl.style.display = ''; }
+                        if (okEl) { okEl.textContent = window.t('security.password_changed'); okEl.style.display = ''; }
                     } else {
-                        if (errEl) { errEl.textContent = data.error || 'Fehler.'; errEl.style.display = ''; }
+                        if (errEl) { errEl.textContent = data.error || window.t('common.error'); errEl.style.display = ''; }
                     }
                 } catch (e) {
-                    if (errEl) { errEl.textContent = 'Server nicht erreichbar.'; errEl.style.display = ''; }
+                    if (errEl) { errEl.textContent = window.t('common.connection_failed'); errEl.style.display = ''; }
                 } finally {
                     submitEl.disabled = false;
-                    submitEl.textContent = 'Kennwort speichern';
+                    submitEl.textContent = window.t('security.save_pw');
                 }
             };
         }
@@ -2293,7 +2336,7 @@
             if (!outputEl) return;
             const pw = inputEl.value;
             const score = [pw.length >= 8, /[A-Z]/.test(pw), /[a-z]/.test(pw), /[0-9]/.test(pw)].filter(Boolean).length;
-            const labels = ['Sehr schwach', 'Schwach', 'Mittel', 'Stark', 'Sehr stark'];
+            const labels = [window.t('security.strength.0'), window.t('security.strength.1'), window.t('security.strength.2'), window.t('security.strength.3'), window.t('security.strength.4')];
             const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#16a34a'];
             outputEl.innerHTML = pw.length ? `<span style="color:${colors[score]}">● ${labels[score]}</span>` : '';
         }
@@ -2393,10 +2436,10 @@
             // Unsichere Verbindung – Banner anzeigen
             banner.hidden = false;
             banner.style.display = 'block';
-            bannerText.textContent = '⚠️ UNSICHERE VERBINDUNG! Bitte verwenden Sie HTTPS.';
+            bannerText.textContent = window.t('panel.security_banner');
             if (indicator) {
                 indicator.className = 'security-badge';
-                indicator.title = 'Kritisch: Keine Verschlüsselung';
+                indicator.title = window.t('panel.security_critical');
             }
 
             // Cert-Modal beim ersten Seitenaufruf automatisch öffnen (wie Klick auf den Button)
@@ -2413,7 +2456,7 @@
             banner.style.display = 'none';
             if (indicator) {
                 indicator.className = 'security-badge secure';
-                indicator.title = 'Gesichert';
+                indicator.title = window.t('panel.security_secure');
             }
         }
 

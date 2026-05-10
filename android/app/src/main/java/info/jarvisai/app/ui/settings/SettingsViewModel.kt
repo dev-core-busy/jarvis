@@ -115,6 +115,10 @@ class SettingsViewModel @Inject constructor(
         _settings.value = _settings.value.copy(domainUsername = username)
     }
 
+    fun onUiLangChange(lang: String) {
+        _settings.value = _settings.value.copy(uiLang = lang)
+    }
+
     fun fetchServerVoices() {
         val s = _settings.value
         if (s.serverUrl.isBlank() || s.apiKey.isBlank()) return

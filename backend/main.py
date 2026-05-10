@@ -4003,6 +4003,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                     return
 
         target_agent_id = msg.get("agent_id", "")
+        ui_lang = msg.get("lang", "de")  # UI-Sprache des Nutzers (de/en)
 
         # Client-Typ bestimmen: wer hat diese WS-Verbindung aufgebaut?
         client_type = _get_client_type(ws)
@@ -4019,7 +4020,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         if target_agent_id and agent_manager.get_agent(target_agent_id):
             target = agent_manager.get_agent(target_agent_id)
             if target.is_sub_agent:
-                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws)))
+                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang))
                 return
 
         agent = agent_manager.get_or_create_main()
@@ -4036,7 +4037,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Aufgabe im Hintergrund starten – sendet 'finished' wenn fertig (für Windows-TTS)
         async def _run_main_agent_and_notify():
             try:
-                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws))
+                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang)
             except Exception:
                 pass
             finally:

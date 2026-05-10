@@ -127,6 +127,36 @@
         chatTtsVoice.addEventListener('change', () => _saveChatTtsSettings());
     }
 
+    const btnTtsPreviewChat = $('btn-tts-preview-chat');
+    if (btnTtsPreviewChat && chatTtsVoice) {
+        btnTtsPreviewChat.addEventListener('click', async () => {
+            const voice = chatTtsVoice.value;
+            const previewText = window._lang === 'en'
+                ? 'Hello, I am Jarvis, your autonomous AI assistant.'
+                : 'Hallo, ich bin Jarvis, dein autonomer KI-Assistent.';
+            btnTtsPreviewChat.disabled = true;
+            btnTtsPreviewChat.innerHTML = '⏳';
+            try {
+                const resp = await fetch('/api/tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ text: previewText, voice: voice || '' })
+                });
+                if (!resp.ok) throw new Error('TTS error');
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                btnTtsPreviewChat.innerHTML = '🔊';
+                audio.onended = () => { URL.revokeObjectURL(url); btnTtsPreviewChat.innerHTML = '▶'; btnTtsPreviewChat.disabled = false; };
+                audio.onerror  = () => { URL.revokeObjectURL(url); btnTtsPreviewChat.innerHTML = '▶'; btnTtsPreviewChat.disabled = false; };
+                await audio.play();
+            } catch (e) {
+                btnTtsPreviewChat.innerHTML = '▶';
+                btnTtsPreviewChat.disabled = false;
+            }
+        });
+    }
+
     // ═════════════════════════════════════════════════════════════
     //  LOGIN
     // ═════════════════════════════════════════════════════════════
@@ -319,7 +349,7 @@
         if (!text) return;
 
         addBubble(text, 'user');
-        wsSend({ type: 'task', text });
+        wsSend({ type: 'task', text, lang: window._lang || 'de' });
 
         msgInput.value = '';
         msgInput.style.height = '';
@@ -381,20 +411,18 @@
         const text = msg.message || '';
         if (!text) return;
 
-        // Highlight-Nachrichten = LLM-Antworten → in Bot-Bubble
-        // Prefix-basierte Erkennung (identisch zu Android SegmentType)
-        if (text.startsWith('🚀 ') || text.startsWith('🔧 ') || text.startsWith('📋 ')
-            || text.startsWith('⏳') || text.startsWith('💬') || text.startsWith('💻 ')
-            || text.startsWith('✅') || text.startsWith('⚠️') || text.startsWith('❌')) {
-            // Debug/Status-Zeilen ausblenden (wie Android ohne Debug-Modus)
-            return;
-        } else if (text.startsWith('⏸') || text.startsWith('▶') || text.startsWith('⏹')) {
-            addStatusLine(text);
-        } else {
-            // LLM-Antwort-Text → Bot-Bubble (Streaming) + TTS-Puffer füllen
+        // Status-Nachrichten erkennen: beginnen immer mit einem bekannten Emoji
+        const STATUS_PREFIXES = ['🚀','🔧','📋','⏳','💬','💻','✅','⚠️','❌','🧠','⏸','▶','⏹'];
+        const isStatus = STATUS_PREFIXES.some(p => text.startsWith(p));
+
+        if (msg.highlight && !isStatus) {
+            // Echter LLM-Antwort-Text (highlight=true, kein Status-Emoji) → Bot-Bubble + TTS
             _ttsBuf += (text + ' ');
             appendToBotBubble(text);
+        } else if (isStatus && (text.startsWith('⏸') || text.startsWith('▶') || text.startsWith('⏹'))) {
+            addStatusLine(text);
         }
+        // Alle anderen Status-Nachrichten still ignorieren
     }
 
     function handleAgentEvent(msg) {

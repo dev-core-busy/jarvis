@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Jarvis – Benutzer-Chat</title>
-    <link rel="stylesheet" href="/static/css/chat.css?v=9">
+    <link rel="stylesheet" href="/static/css/chat.css?v=11">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#7c3aed">
@@ -188,12 +188,12 @@
         .uc-msg-row.mine { flex-direction: row-reverse; }
 
         .uc-bubble {
-            max-width: 70%;
             padding: 8px 14px;
             border-radius: 18px;
             font-size: 0.9rem;
             line-height: 1.45;
-            word-break: break-word;
+            overflow-wrap: break-word;
+            word-break: normal;
         }
         .uc-bubble.theirs {
             background: rgba(30,41,59,0.85);
@@ -275,6 +275,360 @@
 
         /* Kein Chat gewählt */
         .uc-no-chat { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; color: #475569; gap: 10px; font-size: 0.9rem; }
+
+        /* ─── Emoji-Picker ─────────────────────────────────────── */
+        .uc-input-bar { position: relative; }
+
+        .uc-emoji-btn {
+            width: 36px; height: 36px;
+            background: none; border: none; cursor: pointer;
+            font-size: 1.35rem; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; align-self: flex-end; margin-bottom: 2px;
+            transition: background 0.15s, transform 0.1s;
+            color: #64748b;
+        }
+        .uc-emoji-btn:hover { background: rgba(124,58,237,0.18); transform: scale(1.1); color: #a78bfa; }
+        .uc-emoji-btn.open  { background: rgba(124,58,237,0.22); color: #a78bfa; }
+
+        /* ─── Anhang-Button ─────────────────────────────────────── */
+        .uc-attach-btn {
+            width: 36px; height: 36px;
+            background: none; border: none; cursor: pointer;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; align-self: flex-end; margin-bottom: 2px;
+            transition: background 0.15s, color 0.15s;
+            color: #64748b; padding: 0;
+        }
+        .uc-attach-btn:hover { background: rgba(124,58,237,0.18); color: #a78bfa; }
+        .uc-attach-btn.has-files { color: #a78bfa; }
+
+        /* ─── Anhang-Vorschau ────────────────────────────────────── */
+        .uc-attach-preview {
+            display: flex; flex-wrap: wrap; gap: 5px;
+            padding: 6px 14px 0; background: rgba(15,23,42,0.7);
+            border-top: 1px solid rgba(255,255,255,0.06);
+        }
+        .uc-attach-chip {
+            display: flex; align-items: center; gap: 4px;
+            padding: 3px 6px 3px 4px;
+            border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(30,41,59,0.8); font-size: 0.78rem; color: #94a3b8;
+            max-width: 150px;
+        }
+        .uc-attach-chip img { width: 26px; height: 26px; object-fit: cover; border-radius: 3px; flex-shrink: 0; }
+        .uc-attach-chip-icon { font-size: 1.1rem; line-height: 1; flex-shrink: 0; }
+        .uc-attach-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+        .uc-attach-chip-rm { background: none; border: none; cursor: pointer; color: #64748b; font-size: 1rem; padding: 0 2px; line-height: 1; transition: color 0.15s; flex-shrink: 0; }
+        .uc-attach-chip-rm:hover { color: #f87171; }
+
+        /* ─── Bildergalerie ──────────────────────────────────────── */
+        .uc-img-gallery { display: grid; gap: 2px; border-radius: 10px; overflow: hidden; cursor: pointer; margin-top: 4px; max-width: 230px; }
+        .uc-ig-1 { grid-template-columns: 1fr; }
+        .uc-ig-2 { grid-template-columns: 1fr 1fr; }
+        .uc-ig-3, .uc-ig-4 { grid-template-columns: 1fr 1fr; }
+        .uc-ig-cell { position: relative; aspect-ratio: 1; overflow: hidden; }
+        .uc-ig-cell img { width: 100%; height: 100%; object-fit: cover; display: block; transition: filter .15s; }
+        .uc-ig-cell:hover img { filter: brightness(0.88); }
+        .uc-ig-more {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.55);
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; font-size: 1.5rem; font-weight: 700;
+            pointer-events: none;
+        }
+
+        /* ─── Datei-Chips ────────────────────────────────────────── */
+        .uc-file-chip {
+            display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px;
+            padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,0.06);
+            border-left: 3px solid rgba(255,255,255,0.15); cursor: default;
+        }
+        .uc-file-chip.pdf   { border-color: #ef4444; }
+        .uc-file-chip.audio { border-color: #22c55e; }
+        .uc-file-chip.video { border-color: #3b82f6; }
+        .uc-file-chip.other { border-color: #94a3b8; }
+        .uc-fc-icon { font-size: 1.6rem; flex-shrink: 0; }
+        .uc-fc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+        .uc-fc-name { font-size: 0.82rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e2e8f0; }
+        .uc-fc-badge { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: .03em; }
+        .uc-fc-dl { color: #a78bfa; text-decoration: none; font-size: 1.15rem; padding: 2px 4px; flex-shrink: 0; }
+        .uc-fc-dl:hover { color: #c4b5fd; }
+        .uc-fc-player { width: 100%; height: 34px; min-width: 180px; flex-basis: 100%; margin-top: 2px; }
+
+        /* ─── Lightbox ───────────────────────────────────────────── */
+        .uc-lightbox {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.93);
+            z-index: 10000; display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity .2s;
+        }
+        .uc-lightbox.open { opacity: 1; pointer-events: all; }
+        .uc-lb-img { max-width: calc(100vw - 96px); max-height: calc(100vh - 96px); object-fit: contain; border-radius: 6px; user-select: none; }
+        .uc-lb-close {
+            position: absolute; top: 14px; right: 14px;
+            background: rgba(255,255,255,0.12); border: none; color: #fff;
+            width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
+            font-size: 1.1rem; display: flex; align-items: center; justify-content: center;
+            transition: background .15s;
+        }
+        .uc-lb-close:hover { background: rgba(255,255,255,0.22); }
+        .uc-lb-nav {
+            position: absolute; top: 50%; transform: translateY(-50%);
+            background: rgba(255,255,255,0.12); border: none; color: #fff;
+            width: 44px; height: 44px; border-radius: 50%; cursor: pointer;
+            font-size: 1.6rem; display: flex; align-items: center; justify-content: center;
+            transition: background .15s;
+        }
+        .uc-lb-nav:hover { background: rgba(255,255,255,0.22); }
+        #uc-lb-prev { left: 14px; }
+        #uc-lb-next { right: 14px; }
+        .uc-lb-counter { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.6); font-size: 0.85rem; }
+        .uc-lb-actions { position: absolute; bottom: 10px; right: 14px; display: flex; gap: 6px; }
+        .uc-lb-btn {
+            background: rgba(255,255,255,0.12); border: none; color: #fff;
+            padding: 6px 12px; border-radius: 8px; cursor: pointer;
+            font-size: 0.82rem; transition: background .15s;
+        }
+        .uc-lb-btn:hover { background: rgba(255,255,255,0.22); }
+
+        /* ─── Kontextmenü ────────────────────────────────────────── */
+        .uc-ctx-menu {
+            position: fixed; z-index: 9999;
+            background: rgba(18,24,38,0.98); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+            min-width: 160px; overflow: hidden;
+            opacity: 0; pointer-events: none; transition: opacity .12s; transform: scale(0.95);
+        }
+        .uc-ctx-menu.open { opacity: 1; pointer-events: all; transform: scale(1); }
+        .uc-ctx-item {
+            display: flex; align-items: center; gap: 9px;
+            padding: 10px 14px; cursor: pointer; font-size: 0.88rem;
+            color: #e2e8f0; border: none; background: none; width: 100%; text-align: left;
+            transition: background .12s;
+        }
+        .uc-ctx-item:hover { background: rgba(255,255,255,0.07); }
+
+        /* ─── Weiterleiten-Modal ─────────────────────────────────── */
+        .uc-fwd-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+            z-index: 10001; align-items: center; justify-content: center;
+        }
+        .uc-fwd-card {
+            background: #1a2535; border-radius: 14px; padding: 20px;
+            min-width: 240px; max-width: 300px; width: 90%;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+        .uc-fwd-title { font-size: 1rem; font-weight: 600; color: #e2e8f0; margin-bottom: 12px; }
+        .uc-fwd-user {
+            display: flex; align-items: center; gap: 10px;
+            padding: 9px 4px; cursor: pointer;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            transition: background .12s; border-radius: 6px;
+        }
+        .uc-fwd-user:hover { background: rgba(124,58,237,0.15); }
+        .uc-fwd-user:last-child { border-bottom: none; }
+        .uc-fwd-avatar { width: 32px; height: 32px; border-radius: 50%; background: #7c3aed; display: flex; align-items: center; justify-content: center; font-size: 0.88rem; font-weight: 600; color: #fff; flex-shrink: 0; }
+        .uc-fwd-cancel { margin-top: 12px; width: 100%; padding: 8px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(255,255,255,0.05); color: #94a3b8; cursor: pointer; font-size: 0.88rem; }
+        .uc-fwd-cancel:hover { background: rgba(255,255,255,0.1); }
+
+        /* ─── Toast (nicht unterstütztes Format) ─────────────────── */
+        #uc-attach-toast {
+            position: fixed; bottom: 70px; left: 50%;
+            transform: translateX(-50%) translateY(10px);
+            background: rgba(15,23,42,0.97); border: 1px solid rgba(255,255,255,0.1);
+            border-left: 3px solid #f87171; color: #e2e8f0;
+            padding: 9px 15px; border-radius: 6px; font-size: 0.83rem;
+            white-space: nowrap; opacity: 0; pointer-events: none;
+            transition: opacity 0.2s, transform 0.2s; z-index: 9999;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+        }
+        #uc-attach-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .uc-messages.uc-drag-over {
+            outline: 2px dashed #7c3aed; outline-offset: -4px;
+            background: rgba(124,58,237,0.04);
+        }
+
+        .uc-emoji-picker {
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 0;
+            width: 320px;
+            max-width: calc(100vw - 20px);
+            height: 320px;
+            background: rgba(10,18,38,0.97);
+            border: 1px solid rgba(124,58,237,0.25);
+            border-radius: 14px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+            display: flex; flex-direction: column;
+            z-index: 200;
+            overflow: hidden;
+            backdrop-filter: blur(20px);
+            transform-origin: bottom left;
+            animation: uc-ep-in 0.18s ease-out;
+        }
+        @keyframes uc-ep-in {
+            from { opacity:0; transform: scale(0.92) translateY(8px); }
+            to   { opacity:1; transform: scale(1)    translateY(0);   }
+        }
+
+        .uc-emoji-search-wrap {
+            padding: 8px 10px 6px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .uc-emoji-search {
+            width: 100%; box-sizing: border-box;
+            background: rgba(30,41,59,0.7);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 20px;
+            padding: 6px 14px;
+            color: #e2e8f0; font-size: 0.82rem;
+            outline: none; font-family: inherit;
+        }
+        .uc-emoji-search:focus { border-color: rgba(124,58,237,0.4); }
+        .uc-emoji-search::placeholder { color: #475569; }
+
+        .uc-emoji-cats {
+            display: flex; gap: 0;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 0 2px;
+            overflow-x: auto; flex-shrink: 0;
+        }
+        .uc-emoji-cats::-webkit-scrollbar { display: none; }
+
+        .uc-emoji-cat {
+            flex-shrink: 0;
+            background: none; border: none;
+            padding: 6px 9px; font-size: 1.15rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: border-color 0.15s, background 0.15s;
+            border-radius: 6px 6px 0 0;
+            opacity: 0.55;
+        }
+        .uc-emoji-cat:hover  { background: rgba(124,58,237,0.12); opacity: 0.85; }
+        .uc-emoji-cat.active { border-bottom-color: #7c3aed; opacity: 1; }
+
+        .uc-emoji-grid {
+            flex: 1; overflow-y: auto;
+            padding: 6px;
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 1px;
+            align-content: start;
+        }
+        .uc-emoji-grid::-webkit-scrollbar { width: 4px; }
+        .uc-emoji-grid::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.3); border-radius: 2px; }
+
+        .uc-ep-emoji {
+            font-size: 1.45rem; text-align: center;
+            padding: 5px 2px; cursor: pointer;
+            border-radius: 6px;
+            transition: background 0.1s, transform 0.1s;
+            user-select: none; line-height: 1;
+        }
+        .uc-ep-emoji:hover { background: rgba(124,58,237,0.28); transform: scale(1.25); }
+
+        .uc-ep-empty {
+            grid-column: 1/-1; text-align: center;
+            color: #475569; font-size: 0.8rem; padding: 24px 0;
+        }
+
+        /* Nachrichten-Footer: Zeit + Ticks */
+        .uc-msg-footer {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            padding: 1px 2px 0;
+        }
+        .uc-msg-footer.mine {
+            justify-content: flex-end;
+        }
+
+        /* Lesestatus-Ticks (nur eigene Nachrichten) */
+        .uc-ticks {
+            font-size: 0.7rem;
+            color: #64748b;
+            line-height: 1;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }
+        .uc-ticks.read {
+            color: #7c3aed;
+        }
+
+        /* Links in Nachrichten */
+        .uc-bubble a {
+            color: #a78bfa;
+            text-decoration: underline;
+            word-break: break-all;
+        }
+        .uc-bubble a:hover { color: #c4b5fd; }
+
+        /* ── Nachrichtenreaktionen ── */
+        .uc-bubble-wrap { position: relative; display: flex; flex-direction: column; max-width: 70%; }
+        .uc-bubble-wrap:hover .uc-reaction-bar,
+        .uc-reaction-bar:hover { opacity: 1; visibility: visible; transform: translateY(0); }
+        .uc-reaction-bar {
+            position: absolute; bottom: calc(100% + 4px); left: 0;
+            display: flex; align-items: center; gap: 1px;
+            background: rgba(15,23,42,0.97);
+            border: 1px solid rgba(99,102,241,0.28); border-radius: 20px;
+            padding: 5px 8px; opacity: 0; visibility: hidden; transform: translateY(5px);
+            transition: opacity .14s, transform .14s, visibility .14s;
+            z-index: 20; box-shadow: 0 4px 18px rgba(0,0,0,0.5); white-space: nowrap;
+        }
+        .uc-reaction-bar.mine { left: auto; right: 0; }
+        .uc-reaction-quick {
+            font-size: 20px; cursor: pointer; padding: 2px 3px; border-radius: 50%;
+            transition: transform .1s; line-height: 1; user-select: none;
+        }
+        .uc-reaction-quick:hover { transform: scale(1.35); }
+        .uc-reaction-more {
+            font-size: 13px; cursor: pointer; width: 26px; height: 26px; border-radius: 50%;
+            background: rgba(255,255,255,0.09); color: #94a3b8;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; margin-left: 2px; user-select: none;
+            transition: background .1s, color .1s;
+        }
+        .uc-reaction-more:hover { background: rgba(99,102,241,0.3); color: #e2e8f0; }
+        .uc-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; min-height: 0; }
+        .uc-reactions.mine { justify-content: flex-end; }
+        .uc-reaction-pill {
+            display: inline-flex; align-items: center; gap: 4px; font-size: 13px; line-height: 1;
+            background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px; padding: 2px 7px 2px 5px; cursor: pointer; user-select: none;
+            transition: background .12s, border-color .12s, transform .08s;
+        }
+        .uc-reaction-pill:hover { background: rgba(99,102,241,0.12); border-color: rgba(99,102,241,0.35); }
+        .uc-reaction-pill.mine { background: rgba(99,102,241,0.22); border-color: rgba(99,102,241,0.55); }
+        .uc-reaction-pill:active { transform: scale(0.93); }
+        .uc-rp-count { font-size: 11px; color: #64748b; }
+        /* Mini-Picker für Reaktionen */
+        #uc-rxn-picker {
+            position: fixed; background: rgba(15,23,42,0.98);
+            border: 1px solid rgba(99,102,241,0.3); border-radius: 12px;
+            padding: 8px; z-index: 9999; width: 276px; display: none;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6); backdrop-filter: blur(12px);
+        }
+        #uc-rxn-picker.open { display: block; }
+        .uc-rxn-cats { display: flex; gap: 3px; margin-bottom: 6px; overflow-x: auto; scrollbar-width: none; }
+        .uc-rxn-cat {
+            background: none; border: none; cursor: pointer; font-size: 16px;
+            padding: 3px 5px; border-radius: 6px; opacity: .6; flex-shrink: 0;
+            transition: opacity .1s, background .1s;
+        }
+        .uc-rxn-cat:hover { opacity: 1; background: rgba(255,255,255,0.07); }
+        .uc-rxn-cat.active { opacity: 1; background: rgba(99,102,241,0.22); }
+        .uc-rxn-grid {
+            display: grid; grid-template-columns: repeat(8,1fr); gap: 1px;
+            max-height: 155px; overflow-y: auto;
+            scrollbar-width: thin; scrollbar-color: rgba(99,102,241,0.3) transparent;
+        }
+        .uc-rxn-emoji {
+            font-size: 17px; cursor: pointer; padding: 3px; border-radius: 5px;
+            text-align: center; line-height: 1.35; transition: background .1s, transform .1s;
+        }
+        .uc-rxn-emoji:hover { background: rgba(99,102,241,0.18); transform: scale(1.2); }
     </style>
 </head>
 <body>
@@ -313,13 +667,16 @@
 </div>
 
 <!-- Chat Screen -->
-<div id="chat-screen" class="hidden" style="display:none;flex-direction:column;height:100vh;">
+<div id="chat-screen" class="hidden" style="display:none;flex-direction:column;height:100vh;overflow:hidden;">
 
     <!-- Top Bar (analog zu /chat) -->
     <header class="topbar">
         <div class="topbar-left">
             <div class="topbar-avatar">J</div>
             <span class="topbar-title" data-i18n="uc.title">Benutzer-Chat</span>
+            <a href="https://jarvis-ai.info" target="_blank" rel="noopener noreferrer"
+               style="font-size:0.65rem;color:#64748b;text-decoration:none;opacity:0.6;margin-left:4px;"
+               onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">jarvis-ai.info</a>
             <span id="uc-own-badge" class="uc-myself-badge" style="font-size:0.72rem;color:#64748b;margin-left:6px;"></span>
         </div>
         <div class="topbar-right">
@@ -333,7 +690,7 @@
                     <polyline points="9 22 9 12 15 12 15 22"/>
                 </svg>
             </a>
-            <button id="btn-uc-logout" class="btn-logout" data-i18n-title="header.logout" title="Abmelden" onclick="location.reload()">⏻</button>
+            <button id="btn-uc-logout" class="btn-logout" data-i18n-title="header.logout" title="Abmelden">⏻</button>
         </div>
     </header>
 
@@ -370,7 +727,26 @@
                 </div>
                 <div class="uc-messages" id="uc-messages"></div>
                 <div class="uc-typing" id="uc-typing"></div>
+                <!-- Anhang-Vorschau (versteckt wenn leer) -->
+                <div class="uc-attach-preview" id="uc-attach-preview" style="display:none;"></div>
                 <div class="uc-input-bar">
+                    <!-- Emoji Picker Popup -->
+                    <div id="uc-emoji-picker" class="uc-emoji-picker" style="display:none;">
+                        <div class="uc-emoji-search-wrap">
+                            <input type="text" id="uc-emoji-search" class="uc-emoji-search" placeholder="Emoji suchen…" autocomplete="off">
+                        </div>
+                        <div class="uc-emoji-cats" id="uc-emoji-cats"></div>
+                        <div class="uc-emoji-grid" id="uc-emoji-grid"></div>
+                    </div>
+                    <!-- Emoji-Button -->
+                    <button class="uc-emoji-btn" id="uc-emoji-btn" type="button" title="Emoji">😊</button>
+                    <!-- Anhang-Button -->
+                    <button class="uc-attach-btn" id="uc-attach-btn" type="button" title="Datei anhängen">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                        </svg>
+                    </button>
+                    <input type="file" id="uc-attach-input" multiple accept="image/*,audio/*,video/*,application/pdf" style="display:none">
                     <textarea class="uc-input" id="uc-input" data-i18n-placeholder="uc.placeholder" placeholder="Nachricht schreiben…" rows="1"></textarea>
                     <button class="uc-send-btn" id="uc-send-btn" data-i18n-title="input.send" title="Senden">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -385,7 +761,38 @@
     </div>
 </div>
 
+<div id="uc-rxn-picker"></div>
+<div id="uc-attach-toast"></div>
+
+<!-- Lightbox -->
+<div id="uc-lightbox" class="uc-lightbox">
+    <button id="uc-lb-close" class="uc-lb-close">✕</button>
+    <button id="uc-lb-prev" class="uc-lb-nav">‹</button>
+    <img id="uc-lb-img" class="uc-lb-img" alt="">
+    <button id="uc-lb-next" class="uc-lb-nav">›</button>
+    <div id="uc-lb-counter" class="uc-lb-counter"></div>
+    <div class="uc-lb-actions">
+        <button id="uc-lb-save" class="uc-lb-btn">💾 Speichern</button>
+        <button id="uc-lb-fwd" class="uc-lb-btn">↩️ Weiterleiten</button>
+    </div>
+</div>
+
+<!-- Kontext-Menü (Rechtsklick auf Anhang) -->
+<div id="uc-ctx-menu" class="uc-ctx-menu">
+    <button class="uc-ctx-item" id="uc-ctx-save-btn">💾 Speichern</button>
+    <button class="uc-ctx-item" id="uc-ctx-fwd-btn">↩️ Weiterleiten</button>
+</div>
+
+<!-- Weiterleiten-Modal -->
+<div id="uc-fwd-overlay" class="uc-fwd-overlay" style="display:none;">
+    <div class="uc-fwd-card">
+        <div class="uc-fwd-title">Weiterleiten an…</div>
+        <div id="uc-fwd-list"></div>
+        <button class="uc-fwd-cancel" id="uc-fwd-cancel">Abbrechen</button>
+    </div>
+</div>
+
 <script src="/static/js/i18n.js?v=8"></script>
-<script src="/static/js/userchat.js?v=2"></script>
+<script src="/static/js/userchat.js?v=8"></script>
 </body>
 </html>

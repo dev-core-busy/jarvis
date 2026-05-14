@@ -110,6 +110,17 @@ func main() {
 	ja.chat = NewChatWidget()
 	ja.chat.SetInputEnabled(false)
 	ja.chat.LoadHistory()
+	// Feedback-Callback: sendet Bewertung an Backend und zeigt LLM-Analyse im Chat
+	ja.chat.OnFeedback = func(rating, botText string) {
+		c := ja.cfg
+		ja.chat.mu.Lock()
+		userMsg := ja.chat.lastUserMsg
+		ja.chat.mu.Unlock()
+		PostFeedback(c.ServerURL, c.APIKey, rating, userMsg, botText, func(analysis string) {
+			// LLM-Analyse als Jarvis-Nachricht in den Chat einfügen
+			ja.chat.AddMessage(RoleJarvis, analysis)
+		})
+	}
 
 	// Natives Win32 System-Tray starten (kein externes Paket)
 	StartNativeSysTray(

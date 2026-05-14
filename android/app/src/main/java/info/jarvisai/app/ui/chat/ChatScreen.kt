@@ -273,6 +273,7 @@ fun ChatScreen(
                             selected = msg.id in selectedIds,
                             onLongPress = { viewModel.enterSelectionMode(msg.id) },
                             onTap = { viewModel.toggleSelection(msg.id) },
+                            onFeedback = { rating -> viewModel.sendFeedback(msg, rating) },
                         )
                     }
                 }
@@ -468,6 +469,7 @@ fun MessageBubble(
     selected: Boolean = false,
     onLongPress: () -> Unit = {},
     onTap: () -> Unit = {},
+    onFeedback: (String) -> Unit = {},
 ) {
     val isUser = msg.role == MessageRole.USER
 
@@ -625,6 +627,68 @@ fun MessageBubble(
         }
 
         if (isUser) Spacer(modifier = Modifier.width(8.dp))
+    }
+
+    // Feedback-Buttons unter jeder abgeschlossenen Jarvis-Antwort
+    if (!isUser && !msg.isStreaming && !debugMode && msg.text.isNotBlank()) {
+        FeedbackRow(onFeedback = onFeedback)
+    }
+}
+
+@Composable
+private fun FeedbackRow(onFeedback: (String) -> Unit) {
+    var rated by remember { mutableStateOf<String?>(null) }
+    var feedbackMsg by remember { mutableStateOf<String?>(null) }
+
+    if (feedbackMsg != null) {
+        Text(
+            text = feedbackMsg!!,
+            color = Color.White.copy(alpha = 0.4f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(start = 44.dp, top = 2.dp, bottom = 4.dp),
+        )
+        return
+    }
+
+    Row(
+        modifier = Modifier
+            .padding(start = 44.dp, top = 2.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        listOf("👍" to "positive", "👎" to "negative", "❌" to "wrong").forEach { (emoji, rating) ->
+            val isActive = rated == rating
+            OutlinedButton(
+                onClick = {
+                    if (rated == null) {
+                        rated = rating
+                        onFeedback(rating)
+                        feedbackMsg = when (rating) {
+                            "positive" -> "👍 Danke!"
+                            "negative" -> "🔧 Danke – ich lerne daraus."
+                            else       -> "🔧 Danke – ich analysiere die Antwort."
+                        }
+                    }
+                },
+                enabled = rated == null,
+                modifier = Modifier.size(32.dp),
+                contentPadding = PaddingValues(0.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (isActive) Color(0xFF7C3AED).copy(alpha = 0.25f)
+                                     else Color.Transparent,
+                    contentColor   = if (isActive) Color.White else Color.White.copy(alpha = 0.55f),
+                    disabledContentColor = if (isActive) Color.White else Color.White.copy(alpha = 0.2f),
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isActive) Color(0xFF7C3AED).copy(alpha = 0.7f)
+                    else Color.White.copy(alpha = 0.18f),
+                ),
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Text(emoji, fontSize = 15.sp)
+            }
+        }
     }
 }
 

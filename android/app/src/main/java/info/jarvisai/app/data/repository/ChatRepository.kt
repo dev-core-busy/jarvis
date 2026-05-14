@@ -254,6 +254,19 @@ class ChatRepository @Inject constructor(
         writeMessagesToDisk()
     }
 
+    /** Fügt eine lokale Jarvis-Nachricht ein (z.B. Feedback-Analyse) – ohne WebSocket. */
+    fun addLocalJarvisMessage(text: String) {
+        _messages.update {
+            it + ChatMessage(
+                role = MessageRole.JARVIS,
+                text = text,
+                segments = listOf(MessageSegment(SegmentType.ANSWER, text)),
+                isStreaming = false,
+            )
+        }
+        saveMessages()
+    }
+
     fun deleteMessages(ids: Set<String>) {
         _messages.update { msgs -> msgs.filter { it.id !in ids } }
         saveMessages()

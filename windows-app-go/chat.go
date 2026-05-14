@@ -135,6 +135,7 @@ func (e *SendEntry) TypedKey(key *fyne.KeyEvent) {
 type ChatWidget struct {
 	mu       sync.Mutex
 	messages []ChatMessage
+	lastUserMsg string // für Feedback merken
 
 	// Selektionsmodus (analog Android)
 	selMode  bool
@@ -166,6 +167,7 @@ type ChatWidget struct {
 	OnTTSStop     func()    // laufende TTS-Wiedergabe unterbrechen
 	OnTTSToggle   func()    // Sprachausgabe an/aus umschalten
 	OnStopAgent   func()   // laufende Agent-Anfrage abbrechen
+	OnFeedback    func(rating, botText string) // Benutzer-Feedback (optional)
 }
 
 func NewChatWidget() *ChatWidget {
@@ -594,6 +596,11 @@ func sameDay(t1, t2 time.Time) bool {
 // ── Nachrichten hinzufügen ────────────────────────────────────────────────────
 
 func (c *ChatWidget) AddMessage(role MessageRole, text string) {
+	if role == RoleUser {
+		c.mu.Lock()
+		c.lastUserMsg = text
+		c.mu.Unlock()
+	}
 	c.mu.Lock()
 	msg := ChatMessage{Role: role, Text: text, Time: time.Now()}
 	// Datum-Trenner wenn erster Eintrag des Tages
@@ -989,17 +996,116 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 		} else {
 			leftPart = container.NewHBox(avatar, gap)
 		}
-		// Einrückung passend zur Avatar-Breite (32dp) + Gap (8dp)
 		avatarIndent := container.NewGridWrap(fyne.NewSize(40, 1), canvas.NewRectangle(colorTransparent))
 		timeLabel := canvas.NewText(msg.Time.Format("15:04"), jc.muted)
 		timeLabel.TextSize = 10
+
+		// Feedback-Buttons (nur wenn kein Selektionsmodus + Callback gesetzt)
+		var feedbackRow fyne.CanvasObject
+		if !c.selMode && c.OnFeedback != nil {
+			feedbackRow = c.newFeedbackRow(msg.Text)
+		} else {
+			feedbackRow = container.NewGridWrap(fyne.NewSize(1, 1), canvas.NewRectangle(colorTransparent))
+		}
+
 		return container.NewVBox(
 			container.NewGridWrap(fyne.NewSize(1, 8), spacing),
 			container.NewHBox(avatarIndent, timeLabel),
 			container.NewGridWrap(fyne.NewSize(1, 2), canvas.NewRectangle(colorTransparent)),
 			container.NewBorder(nil, nil, leftPart, rightSpacer, bubble),
+			container.NewHBox(container.NewGridWrap(fyne.NewSize(40, 1), canvas.NewRectangle(colorTransparent)), feedbackRow),
 		)
 	}
+}
+
+// ── emojiBtn – großer, tappbarer Emoji-Button für Feedback-Zeile ─────────────
+
+type emojiBtn struct {
+	widget.BaseWidget
+	emoji   string
+	size    float32
+	onTap   func()
+	hovered bool
+	bgRef   *canvas.Rectangle
+}
+
+func newEmojiBtn(emoji string, fontSize float32, onTap func()) *emojiBtn {
+	b := &emojiBtn{emoji: emoji, size: fontSize, onTap: onTap}
+	b.ExtendBaseWidget(b)
+	return b
+}
+
+func (b *emojiBtn) Tapped(_ *fyne.PointEvent) {
+	if b.onTap != nil {
+		b.onTap()
+	}
+}
+func (b *emojiBtn) MouseIn(_ *desktop.MouseEvent) {
+	b.hovered = true
+	if b.bgRef != nil {
+		b.bgRef.Hidden = false
+		b.bgRef.Refresh()
+	}
+}
+func (b *emojiBtn) MouseMoved(_ *desktop.MouseEvent) {}
+func (b *emojiBtn) MouseOut() {
+	b.hovered = false
+	if b.bgRef != nil {
+		b.bgRef.Hidden = true
+		b.bgRef.Refresh()
+	}
+}
+func (b *emojiBtn) MinSize() fyne.Size { return fyne.NewSize(b.size*2.4, b.size*2.4) }
+
+func (b *emojiBtn) CreateRenderer() fyne.WidgetRenderer {
+	bg := canvas.NewRectangle(color.RGBA{0xFF, 0xFF, 0xFF, 0x18})
+	bg.CornerRadius = 10
+	bg.Hidden = true
+	b.bgRef = bg
+
+	lbl := canvas.NewText(b.emoji, color.White)
+	lbl.TextSize = b.size
+	lbl.Alignment = fyne.TextAlignCenter
+
+	inner := container.NewStack(bg, container.NewCenter(lbl))
+	return widget.NewSimpleRenderer(inner)
+}
+
+// newFeedbackRow erstellt eine Zeile mit 👍/👎/❌-Buttons für Jarvis-Antworten.
+func (c *ChatWidget) newFeedbackRow(botText string) fyne.CanvasObject {
+	infoLbl := canvas.NewText("", jc.muted)
+	infoLbl.TextSize = 11
+
+	rated := false
+
+	makeBtn := func(emoji, rating, confirmTxt string) *emojiBtn {
+		var btn *emojiBtn
+		btn = newEmojiBtn(emoji, 22, func() {
+			if rated {
+				return
+			}
+			rated = true
+			btn.bgRef.Hidden = true
+			btn.bgRef.Refresh()
+			c.mu.Lock()
+			lastUser := c.lastUserMsg
+			c.mu.Unlock()
+			if c.OnFeedback != nil {
+				c.OnFeedback(rating, botText)
+				_ = lastUser
+			}
+			infoLbl.Text = confirmTxt
+			infoLbl.Refresh()
+		})
+		return btn
+	}
+
+	btnUp  := makeBtn("👍", "positive", "👍 Danke!")
+	btnDn  := makeBtn("👎", "negative", "🔧 ich lerne daraus…")
+	btnWrg := makeBtn("❌", "wrong",    "🔧 analysiere die Antwort…")
+
+	row := container.NewHBox(btnUp, btnDn, btnWrg, infoLbl)
+	return row
 }
 
 func (c *ChatWidget) scrollToBottom() {

@@ -12,6 +12,11 @@
     let vnc = null;
     let _ttsEnabled = false;   // TTS-Status (kein Checkbox mehr – btn-tts ist alleiniger Toggle)
 
+    // Feedback-State
+    let _fb_lastUserTask   = '';     // letzte gesendete Aufgabe
+    let _fb_lastHighlightEl = null;  // letztes log-highlight DOM-Element
+    let _fb_lastHighlightText = '';  // gesammelter highlight-Text
+
     // ─── DOM Elemente ───────────────────────────────────────────
     const loginScreen = document.getElementById('login-screen');
     const mainScreen = document.getElementById('main-screen');
@@ -30,6 +35,20 @@
     const btnStop = document.getElementById('btn-stop');
     const btnClearLog = document.getElementById('btn-clear-log');
     const btnLogout = document.getElementById('btn-logout');
+    const btnAttach = document.getElementById('btn-attach');
+    const attachInput = document.getElementById('attach-input');
+    const attachPreviewBar = document.getElementById('attach-preview-bar');
+    const attachToast = document.getElementById('attach-toast');
+
+    // ─── Toast für Fehlermeldungen ───────────────────────────────
+    let _toastTimer = null;
+    function showAttachToast(msg) {
+        if (!attachToast) return;
+        attachToast.textContent = msg;
+        attachToast.classList.add('show');
+        clearTimeout(_toastTimer);
+        _toastTimer = setTimeout(() => attachToast.classList.remove('show'), 4000);
+    }
     const btnMic = document.getElementById('btn-mic');
     const btnTts = document.getElementById('btn-tts');
     const btnZoomIn = document.getElementById('btn-zoom-in');
@@ -135,6 +154,18 @@
         }
     });
 
+    // ─── TOTP Auto-Submit: Formular schicken sobald 6 Ziffern eingegeben ──────
+    const _totpAutoInput = document.getElementById('login-totp');
+    if (_totpAutoInput) {
+        _totpAutoInput.addEventListener('input', () => {
+            const digits = _totpAutoInput.value.replace(/\D/g, '');
+            if (digits.length === 6 && !loginBtn.disabled) {
+                _totpAutoInput.value = digits;
+                loginForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            }
+        });
+    }
+
     // ─── Eye-Toggle Hilfsfunktion (global im IIFE) ──────────────
     const _SVG_EYE_OPEN   = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
     const _SVG_EYE_CLOSED = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
@@ -225,7 +256,17 @@
     function showChangePwModal(mandatory) {
         _cpwMandatory = mandatory;
         if (changePwModal) changePwModal.classList.add('open');
-        if (cpwCancel) cpwCancel.style.display = mandatory ? 'none' : '';
+        // Abbrechen immer sichtbar – bei Pflicht-Änderung als Abmelden-Button
+        if (cpwCancel) {
+            cpwCancel.style.display = '';
+            if (mandatory) {
+                cpwCancel.textContent = 'Abmelden';
+                cpwCancel.removeAttribute('data-i18n');
+            } else {
+                cpwCancel.setAttribute('data-i18n', 'common.cancel');
+                cpwCancel.textContent = window.t ? window.t('common.cancel') : 'Abbrechen';
+            }
+        }
         if (cpwOld) cpwOld.value = '';
         if (cpwNew) { cpwNew.type = 'password'; cpwNew.value = ''; cpwNew.removeEventListener('input', _cpwStrengthCheck); cpwNew.addEventListener('input', _cpwStrengthCheck); }
         if (cpwConfirm) { cpwConfirm.type = 'password'; cpwConfirm.value = ''; }
@@ -293,6 +334,10 @@
     if (cpwCancel) {
         cpwCancel.addEventListener('click', () => {
             hideChangePwModal();
+            if (_cpwMandatory) {
+                // Pflicht-Kennwortänderung abgebrochen → Token löschen + Login-Screen
+                showLoginScreen();
+            }
         });
     }
 
@@ -764,20 +809,158 @@
         }
     }
 
+    // ─── Datei-Anhänge ──────────────────────────────────────────
+    let _pendingAttachments = [];  // [{name, mime_type, data (base64), type}]
+
+    function _renderAttachPreviews() {
+        if (!attachPreviewBar) return;
+        attachPreviewBar.innerHTML = '';
+        if (_pendingAttachments.length === 0) {
+            attachPreviewBar.style.display = 'none';
+            if (btnAttach) btnAttach.classList.remove('has-files');
+            return;
+        }
+        attachPreviewBar.style.display = 'flex';
+        if (btnAttach) btnAttach.classList.add('has-files');
+        _pendingAttachments.forEach((att, idx) => {
+            const chip = document.createElement('div');
+            chip.className = 'attach-chip';
+            if (att.type === 'image') {
+                const img = document.createElement('img');
+                img.src = `data:${att.mime_type};base64,${att.data}`;
+                chip.appendChild(img);
+            } else {
+                const ico = document.createElement('span');
+                ico.className = 'attach-chip-icon';
+                ico.textContent = att.type === 'audio' ? '🎵' : att.type === 'pdf' ? '📄' : '🎬';
+                chip.appendChild(ico);
+            }
+            const nm = document.createElement('span');
+            nm.className = 'attach-chip-name';
+            nm.textContent = att.name.length > 16 ? att.name.slice(0, 14) + '…' : att.name;
+            nm.title = att.name;
+            chip.appendChild(nm);
+            const rm = document.createElement('button');
+            rm.className = 'attach-chip-remove';
+            rm.textContent = '×';
+            rm.title = 'Entfernen';
+            rm.addEventListener('click', () => {
+                _pendingAttachments.splice(idx, 1);
+                _renderAttachPreviews();
+            });
+            chip.appendChild(rm);
+            attachPreviewBar.appendChild(chip);
+        });
+    }
+
+    const _SUPPORTED_MIME = new Set([
+        // Bilder
+        'image/jpeg','image/jpg','image/png','image/gif','image/webp','image/bmp',
+        // Audio
+        'audio/wav','audio/mp3','audio/mpeg','audio/ogg','audio/webm','audio/aac','audio/flac','audio/m4a','audio/x-m4a',
+        // Video
+        'video/mp4','video/webm','video/ogg','video/quicktime','video/x-msvideo','video/mpeg',
+        // Dokumente
+        'application/pdf',
+    ]);
+
+    async function _addFilesToAttachments(files) {
+        const MAX_FILES = 5;
+        const unsupported = [];
+        for (const file of Array.from(files)) {
+            const mime = (file.type || '').toLowerCase();
+            // Nicht unterstütztes Format?
+            if (!_SUPPORTED_MIME.has(mime) && !mime.startsWith('image/') && !mime.startsWith('audio/') && !mime.startsWith('video/')) {
+                const ext = file.name.includes('.') ? '.' + file.name.split('.').pop().toUpperCase() : mime || 'Unbekannt';
+                unsupported.push(ext);
+                continue;
+            }
+            if (_pendingAttachments.length >= MAX_FILES) {
+                showAttachToast(`Maximal ${MAX_FILES} Dateien gleichzeitig erlaubt.`);
+                break;
+            }
+            let type = 'video';
+            if (mime.startsWith('image/')) type = 'image';
+            else if (mime.startsWith('audio/')) type = 'audio';
+            else if (mime === 'application/pdf') type = 'pdf';
+            try {
+                const b64 = await new Promise((res, rej) => {
+                    const r = new FileReader();
+                    r.onload = e => res(e.target.result.split(',')[1]);
+                    r.onerror = rej;
+                    r.readAsDataURL(file);
+                });
+                _pendingAttachments.push({ name: file.name, mime_type: mime, data: b64, type });
+            } catch (e) {
+                console.error('Datei konnte nicht gelesen werden:', e);
+                showAttachToast(`"${file.name}" konnte nicht gelesen werden.`);
+            }
+        }
+        if (unsupported.length > 0) {
+            const fmts = [...new Set(unsupported)].join(', ');
+            showAttachToast(`Format nicht unterstützt: ${fmts} – Erlaubt: Bilder, Audio, Video, PDF`);
+        }
+        _renderAttachPreviews();
+    }
+
+    if (btnAttach) btnAttach.addEventListener('click', () => attachInput && attachInput.click());
+    if (attachInput) {
+        attachInput.addEventListener('change', async () => {
+            await _addFilesToAttachments(attachInput.files);
+            attachInput.value = '';
+        });
+    }
+
+    // Drag & Drop auf dem linken Panel
+    const _panelLeft = document.querySelector('.panel-left');
+    if (_panelLeft) {
+        _panelLeft.addEventListener('dragover', e => {
+            e.preventDefault();
+            _panelLeft.classList.add('drag-over');
+        });
+        _panelLeft.addEventListener('dragleave', e => {
+            if (!_panelLeft.contains(e.relatedTarget)) _panelLeft.classList.remove('drag-over');
+        });
+        _panelLeft.addEventListener('drop', async e => {
+            e.preventDefault();
+            _panelLeft.classList.remove('drag-over');
+            if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+                await _addFilesToAttachments(e.dataTransfer.files);
+            }
+        });
+    }
+
     // ─── Aufgabe senden ─────────────────────────────────────────
     function sendTask() {
         const text = taskInput.value.trim();
-        if (!text || !ws) return;
+        if ((!text && _pendingAttachments.length === 0) || !ws) return;
+        if (!text && _pendingAttachments.length > 0) {
+            // Nur Datei, kein Text → Standardaufgabe
+            taskInput.value = 'Bitte analysiere/beschreibe die angehängten Dateien.';
+        }
+        const finalText = taskInput.value.trim();
+
+        _fb_lastUserTask = finalText;       // für Feedback merken
+        _fb_lastHighlightEl   = null;
+        _fb_lastHighlightText = '';
 
         // Aufgabe an den aktiven Agent senden
-        const msg = { type: 'task', text, token, lang: window._lang || 'de' };
+        const msg = { type: 'task', text: finalText, token, lang: window._lang || 'de' };
         if (_activeAgentId && _activeAgentId !== '_main') {
             msg.agent_id = _activeAgentId;
         }
+        if (_pendingAttachments.length > 0) {
+            msg.attachments = _pendingAttachments.map(a => ({
+                name: a.name, mime_type: a.mime_type, data: a.data,
+            }));
+        }
         ws.send(msg);
-        addLogEntry(`📝 Aufgabe: ${text}`, 'task', false, _activeAgentId);
+        const attInfo = _pendingAttachments.length > 0 ? ` [+ ${_pendingAttachments.length} Datei(en)]` : '';
+        addLogEntry(`📝 Aufgabe: ${finalText}${attInfo}`, 'task', false, _activeAgentId);
         taskInput.value = '';
         taskInput.style.height = 'auto';
+        _pendingAttachments = [];
+        _renderAttachPreviews();
 
         // Steuerung aktivieren
         btnPause.disabled = false;
@@ -1115,6 +1298,12 @@
         if ((event === 'finished' || event === 'paused') && !agent.is_sub_agent) {
             updateAgentState('idle');
             _updateContextIndicator();
+            // Feedback-Buttons an letzten Log-Eintrag hängen (immer, solange Task vorhanden)
+            if (event === 'finished' && _fb_lastHighlightEl && _fb_lastUserTask) {
+                _appendFeedbackToLog(_fb_lastHighlightEl, _fb_lastUserTask, _fb_lastHighlightText.trim());
+                _fb_lastHighlightEl   = null;
+                _fb_lastHighlightText = '';
+            }
         }
         if (event === 'started' && !agent.is_sub_agent) {
             updateAgentState('running');
@@ -1257,7 +1446,8 @@
         if (welcome) welcome.remove();
 
         const entry = document.createElement('div');
-        entry.className = 'log-entry' + (highlight ? ' log-highlight' : '');
+        const isTask = (type === 'task');
+        entry.className = 'log-entry' + (highlight ? ' log-highlight' : '') + (isTask ? ' log-task' : '');
 
         // Agent-ID zuordnen
         const effectiveAgentId = agentId || '_main';
@@ -1276,6 +1466,12 @@
         const time = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
         entry.innerHTML = `<span class="log-time">${time}</span>${escapeHtml(message)}`;
+
+        // Für Feedback: letzten Eintrag des Hauptagents merken (nicht nur highlights)
+        if (effectiveAgentId === '_main' || !effectiveAgentId) {
+            if (!isTask) _fb_lastHighlightEl = entry;   // task-Zeile selbst nicht als target
+            if (highlight) _fb_lastHighlightText += ' ' + message;
+        }
 
         logContainer.appendChild(entry);
 
@@ -2582,5 +2778,65 @@
     setupModal();
     setupSettings();
     checkSecurity();
+
+    // ─── Feedback ───────────────────────────────────────────────
+    function _appendFeedbackToLog(targetEl, userTask, botText) {
+        const row = document.createElement('div');
+        row.className = 'log-feedback-row';
+        row.innerHTML =
+            `<button class="log-fb-btn" data-r="positive" title="Gute Antwort">👍</button>` +
+            `<button class="log-fb-btn" data-r="negative" title="Schlechte Antwort">👎</button>` +
+            `<button class="log-fb-btn" data-r="wrong"    title="Falsche Antwort">❌</button>`;
+        targetEl.after(row);
+
+        row.querySelectorAll('.log-fb-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const rating = btn.dataset.r;
+                row.querySelectorAll('.log-fb-btn').forEach(b => b.disabled = true);
+                btn.classList.add('log-fb-active');
+                try {
+                    const res = await fetch('/api/feedback', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token, rating, user_message: userTask, bot_response: botText }),
+                    });
+                    const data = await res.json();
+                    const info = document.createElement('div');
+                    info.className = 'log-fb-info';
+                    info.textContent = data.message || 'Danke!';
+                    row.replaceWith(info);
+                    // LLM-Analyse mit Alternativen als highlight-Eintrag einblenden
+                    if (data.analysis) {
+                        addLogEntry(data.analysis, 'info', true, '_main');
+                    }
+                } catch {
+                    btn.disabled = false;
+                }
+            });
+        });
+    }
+
+    // Feedback-CSS einmalig injizieren
+    (function () {
+        if (document.getElementById('jarvis-app-fb-css')) return;
+        const s = document.createElement('style');
+        s.id = 'jarvis-app-fb-css';
+        s.textContent = `
+.log-feedback-row{display:flex;gap:4px;margin:2px 0 2px 8px;}
+.log-fb-btn{background:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;
+  padding:1px 7px;font-size:.78rem;cursor:pointer;color:rgba(255,255,255,.4);
+  transition:all .15s;}
+.log-fb-btn:hover:not(:disabled){border-color:rgba(255,255,255,.3);color:#fff;transform:scale(1.1);}
+.log-fb-btn:disabled{cursor:default;opacity:.4;}
+.log-fb-btn.log-fb-active{border-color:rgba(124,58,237,.6);background:rgba(124,58,237,.18);color:#fff;}
+.log-fb-info{font-size:.72rem;color:rgba(255,255,255,.4);margin:2px 0 2px 8px;}
+.log-entry.log-task{color:rgba(167,139,250,.9);font-weight:500;
+  background:rgba(124,58,237,.07);border-left:2px solid rgba(124,58,237,.45);
+  padding-left:6px;margin:4px 0;}
+.log-container.hide-debug .log-entry.log-task{display:block!important;}
+        `;
+        document.head.appendChild(s);
+    })();
+
 })();
 

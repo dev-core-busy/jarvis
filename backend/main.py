@@ -6,6 +6,7 @@ import hmac
 import json
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 import httpx
@@ -292,6 +293,37 @@ _active_ws: set = set()
 # ─── User-Chat State ──────────────────────────────────────────────────
 # Username → Liste aktiver WebSocket-Verbindungen (mehrere Tabs möglich)
 _uc_clients: dict[str, list[WebSocket]] = {}
+
+# Nachrichten-Historie: conv_key → [msg, ...]
+_uc_history: dict[str, list] = {}
+_UC_HISTORY_FILE = Path("data/userchat_history.json")
+_UC_HISTORY_MAX  = 200   # max. Nachrichten pro Konversation
+
+def _uc_conv_key(u1: str, u2: str) -> str:
+    """Eindeutiger Konversations-Schlüssel (alphabetisch sortiert)."""
+    return "__".join(sorted([u1, u2]))
+
+def _uc_load_history():
+    """Lädt die Nachrichten-Historie aus der JSON-Datei."""
+    if _UC_HISTORY_FILE.exists():
+        try:
+            raw = json.loads(_UC_HISTORY_FILE.read_text(encoding="utf-8"))
+            _uc_history.clear()
+            for k, v in raw.items():
+                _uc_history[k] = v
+        except Exception as e:
+            print(f"⚠️  userchat_history laden fehlgeschlagen: {e}")
+
+def _uc_save_history():
+    """Speichert die Nachrichten-Historie in die JSON-Datei."""
+    try:
+        _UC_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _UC_HISTORY_FILE.write_text(
+            json.dumps(_uc_history, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        print(f"⚠️  userchat_history speichern fehlgeschlagen: {e}")
 
 async def _uc_send(ws: WebSocket, msg: dict):
     """Sendet eine Nachricht an einen User-Chat-Client (silent bei Fehler)."""
@@ -808,6 +840,16 @@ async def userchat_ws(ws: WebSocket):
         # Presence-Update an alle senden
         await _uc_broadcast_presence()
 
+        # Chat-Historie senden: alle Konversationen dieses Users
+        user_history: dict[str, list] = {}
+        for key, msgs in _uc_history.items():
+            parts = key.split("__")
+            if username in parts:
+                partner = parts[0] if parts[1] == username else parts[1]
+                user_history[partner] = msgs
+        if user_history:
+            await _uc_send(ws, {"type": "history", "conversations": user_history})
+
         # Nachrichten-Loop
         while True:
             try:
@@ -820,25 +862,109 @@ async def userchat_ws(ws: WebSocket):
             if msg_type == "dm":
                 to_user = data.get("to", "")
                 text = data.get("text", "").strip()
-                if not to_user or not text:
+                raw_atts = data.get("attachments", [])
+                if not to_user or (not text and not raw_atts):
                     continue
-                import time
+                # Anhänge validieren (max 5 MB pro Datei, max 5 Anhänge)
+                _UC_OK_MIME = {
+                    "image/jpeg","image/jpg","image/png","image/gif","image/webp","image/bmp",
+                    "audio/wav","audio/mp3","audio/mpeg","audio/ogg","audio/webm","audio/aac",
+                    "audio/flac","audio/m4a","audio/x-m4a",
+                    "video/mp4","video/webm","video/ogg","video/quicktime",
+                    "application/pdf",
+                }
+                clean_atts = []
+                for _a in raw_atts[:5]:
+                    _am = (_a.get("mime_type","") or "").strip().lower()
+                    _ad = _a.get("data","")
+                    _an = _a.get("name","datei")[:80]
+                    if _am in _UC_OK_MIME and _ad and len(_ad) <= 7_000_000:  # ~5 MB binary
+                        clean_atts.append({"name": _an, "mime_type": _am, "data": _ad})
+                msg_id = str(uuid.uuid4())[:8]
                 msg = {
                     "type": "dm",
                     "from": username,
                     "to": to_user,
-                    "text": text,
+                    "text": text or "",
                     "ts": int(time.time() * 1000),
+                    "msg_id": msg_id,
+                    "status": "delivered",
                 }
-                # An Empfänger senden
+                if clean_atts:
+                    msg["attachments"] = clean_atts
+                # In Historie speichern
+                key = _uc_conv_key(username, to_user)
+                if key not in _uc_history:
+                    _uc_history[key] = []
+                _uc_history[key].append(msg)
+                if len(_uc_history[key]) > _UC_HISTORY_MAX:
+                    _uc_history[key] = _uc_history[key][-_UC_HISTORY_MAX:]
+                _uc_save_history()
+                # An Empfänger senden (auch wenn offline – erhält Nachricht via Historie)
                 await _uc_send_to_user(to_user, msg)
-                # Echo an Sender (damit eigene Nachricht im Chat erscheint)
+                # Echo an Sender
                 await _uc_send(ws, msg)
+
+            elif msg_type == "read":
+                # Empfänger hat Nachrichten von `partner` gelesen
+                partner = data.get("from", "")
+                if not partner:
+                    continue
+                key = _uc_conv_key(username, partner)
+                updated_ids = []
+                for m in _uc_history.get(key, []):
+                    if (m.get("from") == partner
+                            and m.get("to") == username
+                            and m.get("status") != "read"):
+                        m["status"] = "read"
+                        updated_ids.append(m.get("msg_id"))
+                if updated_ids:
+                    _uc_save_history()
+                    # Sender benachrichtigen (Doppel-Haken)
+                    await _uc_send_to_user(partner, {
+                        "type": "msg_status",
+                        "conv_with": username,
+                        "status": "read",
+                        "msg_ids": updated_ids,
+                    })
 
             elif msg_type == "typing":
                 to_user = data.get("to", "")
                 if to_user:
                     await _uc_send_to_user(to_user, {"type": "typing", "from": username})
+
+            elif msg_type == "reaction":
+                to_user = data.get("to", "")
+                msg_id  = data.get("msg_id", "")
+                emoji   = data.get("emoji", "")
+                if not to_user or not msg_id or not emoji or len(emoji) > 12:
+                    continue
+                key = _uc_conv_key(username, to_user)
+                removed = False
+                for m in _uc_history.get(key, []):
+                    if m.get("msg_id") == msg_id:
+                        if "reactions" not in m:
+                            m["reactions"] = {}
+                        if emoji not in m["reactions"]:
+                            m["reactions"][emoji] = []
+                        if username in m["reactions"][emoji]:
+                            m["reactions"][emoji].remove(username)
+                            removed = True
+                            if not m["reactions"][emoji]:
+                                del m["reactions"][emoji]
+                        else:
+                            m["reactions"][emoji].append(username)
+                        break
+                _uc_save_history()
+                rxn_msg = {
+                    "type": "reaction",
+                    "msg_id": msg_id,
+                    "emoji": emoji,
+                    "from": username,
+                    "removed": removed,
+                }
+                await _uc_send_to_user(to_user, rxn_msg)
+                await _uc_send(ws, rxn_msg)  # Echo an Sender
 
     except asyncio.TimeoutError:
         pass
@@ -1806,6 +1932,127 @@ async def activate_profile(profile_id: str, user: str = Depends(require_local_au
     if config.activate_profile(profile_id):
         return JSONResponse({"success": True})
     return JSONResponse({"success": False, "error": "Profil nicht gefunden"}, status_code=404)
+
+
+@app.post("/api/feedback")
+async def api_feedback(request: Request):
+    """Benutzer-Feedback zu einer Jarvis-Antwort (👍 / 👎 / ❌ Falsch)."""
+    body = await request.json()
+
+    # Token optional (Jarvis-Auth oder anonymous)
+    token_str = (
+        request.headers.get("Authorization", "").replace("Bearer ", "")
+        or body.get("token", "")
+    )
+    user = verify_token(token_str) or "anonymous"
+
+    rating   = body.get("rating", "")        # "positive" | "negative" | "wrong"
+    user_msg = body.get("user_message", "")
+    bot_resp = body.get("bot_response", "")
+
+    if rating not in ("positive", "negative", "wrong"):
+        return JSONResponse({"success": False, "error": "Ungültiges Rating"}, status_code=400)
+
+    # In data/feedback.json speichern
+    feedback_file = Path("data/feedback.json")
+    feedbacks = []
+    if feedback_file.exists():
+        try:
+            feedbacks = json.loads(feedback_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    feedbacks.append({
+        "ts": int(time.time() * 1000),
+        "user": user,
+        "rating": rating,
+        "user_message": user_msg[:500],
+        "bot_response": bot_resp[:500],
+    })
+    feedbacks = feedbacks[-500:]
+    feedback_file.parent.mkdir(parents=True, exist_ok=True)
+    feedback_file.write_text(json.dumps(feedbacks, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if rating == "positive":
+        return JSONResponse({"success": True, "message": "👍 Danke! Das freut mich.", "analysis": ""})
+
+    # Für negative/wrong: LLM-Analyse synchron awaiten und im Response zurückgeben
+    analysis = await _feedback_self_improve(user_msg, bot_resp, rating)
+    verb = "falsch" if rating == "wrong" else "unzureichend"
+    return JSONResponse({
+        "success": True,
+        "message": (
+            f"🔧 Danke für dein Feedback! Ich habe analysiert, warum die Antwort {verb} war, "
+            "und eine Lernnotiz gespeichert."
+        ),
+        "analysis": analysis,
+    })
+
+
+async def _feedback_self_improve(user_msg: str, bot_resp: str, rating: str) -> str:
+    """LLM analysiert schlechte Antwort, speichert Lernnotiz und gibt Analyse zurück."""
+    import datetime
+    try:
+        from backend import config as _cfg
+        from backend.llm import get_provider
+
+        try:
+            from google.genai import types as _gt
+            def _mk_part(t):
+                return _gt.Content(role="user", parts=[_gt.Part.from_text(text=t)])
+        except ImportError:
+            class _P:
+                def __init__(self, t): self.text = t; self.function_call = None; self.function_response = None
+            class _C:
+                def __init__(self, t): self.role = "user"; self.parts = [_P(t)]
+            def _mk_part(t): return _C(t)
+
+        provider = get_provider(
+            _cfg.LLM_PROVIDER,
+            _cfg.current_api_key,
+            _cfg.current_model,
+        )
+        reason = "falsch" if rating == "wrong" else "schlecht/unzureichend"
+        prompt = (
+            f"Du bist Jarvis. Ein Benutzer hat eine deiner Antworten als '{reason}' bewertet.\n\n"
+            f"Frage des Benutzers:\n{user_msg}\n\n"
+            f"Deine Antwort (bewertet als '{reason}'):\n{bot_resp[:600]}\n\n"
+            f"Erstelle eine strukturierte Lernnotiz mit folgenden Abschnitten:\n\n"
+            f"## Was war {reason}?\n"
+            f"(2-3 Sätze Analyse des Fehlers)\n\n"
+            f"## Bessere Alternativen\n"
+            f"Formuliere 3-5 konkrete alternative Antworten auf die Frage, die besser gewesen wären. "
+            f"Nummeriere sie (1. 2. 3. ...) und erkläre jeweils kurz warum diese Variante besser ist.\n\n"
+            f"## Lernregel\n"
+            f"(1-2 Sätze: Welche Regel soll Jarvis für zukünftige ähnliche Fragen beachten?)"
+        )
+        contents = [_mk_part(prompt)]
+        analysis = ""
+        async for chunk in provider.generate_stream(
+            system="Du bist ein KI-Assistent der eigene Fehler analysiert, bessere Alternativen formuliert und daraus Lernregeln ableitet.",
+            contents=contents,
+            tools=[],
+        ):
+            if hasattr(chunk, "text"):
+                analysis += chunk.text
+
+        if not analysis.strip():
+            return ""
+
+        ts_str = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        note_dir = Path("data/knowledge/learned")
+        note_dir.mkdir(parents=True, exist_ok=True)
+        note_file = note_dir / f"feedback_{int(time.time())}.md"
+        note_file.write_text(
+            f"# Feedback-Lernnotiz ({rating}) – {ts_str}\n\n"
+            f"## Benutzerfrage\n{user_msg}\n\n"
+            f"## Ursprüngliche Antwort (bewertet: {reason})\n{bot_resp[:400]}\n\n"
+            f"{analysis}\n",
+            encoding="utf-8",
+        )
+        return analysis
+    except Exception as e:
+        print(f"⚠️  Feedback-Selbstoptimierung fehlgeschlagen: {e}")
+        return ""
 
 
 @app.get("/api/health")
@@ -4002,6 +4249,68 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                     await ws.send_json({"type": "error", "message": f"Sprachtranskription fehlgeschlagen: {e}"})
                     return
 
+        # ── Datei-Anhänge verarbeiten ──────────────────────────────────────
+        _raw_attachments = msg.get("attachments", [])
+        _ALLOWED_IMG_MIME  = {"image/jpeg","image/jpg","image/png","image/gif","image/webp","image/bmp"}
+        _ALLOWED_AUD_MIME  = {"audio/wav","audio/mp3","audio/mpeg","audio/ogg","audio/webm","audio/aac","audio/flac","audio/m4a","audio/x-m4a"}
+        _ALLOWED_VID_MIME  = {"video/mp4","video/webm","video/ogg","video/quicktime","video/x-msvideo","video/mpeg"}
+        image_attachments  = []
+        _text_prepend      = []   # Transkripte + PDF-Texte die dem task_text vorangestellt werden
+
+        if _raw_attachments:
+            import base64 as _b64att
+            for _a in _raw_attachments[:5]:
+                _mime  = (_a.get("mime_type","") or "").strip().lower()
+                _data  = _a.get("data","")
+                _name  = _a.get("name","datei")
+                if not _mime or not _data:
+                    continue
+                if _mime in _ALLOWED_IMG_MIME:
+                    if len(_data) <= 14_000_000:   # max ~10 MB binary
+                        image_attachments.append({"name": _name, "mime_type": _mime, "data": _data})
+                elif _mime in _ALLOWED_AUD_MIME or _mime in _ALLOWED_VID_MIME:
+                    if len(_data) > 34_000_000:    # max ~25 MB binary
+                        continue
+                    try:
+                        await ws.send_json({"type": "status", "message": f"🎵 Transkribiere {_name}…"})
+                        _raw_bytes = _b64att.b64decode(_data)
+                        _ext = ".wav" if "wav" in _mime else (".mp4" if "video" in _mime else ".ogg")
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(suffix=_ext, delete=False) as _tf:
+                            _tf.write(_raw_bytes)
+                            _tmp_path = _tf.name
+                        _transcript = await asyncio.to_thread(_transcribe_audio, _tmp_path, "de", None)
+                        os.unlink(_tmp_path)
+                        if _transcript:
+                            _text_prepend.append(f"[Transkript von {_name}]: {_transcript}")
+                    except Exception as _ae:
+                        print(f"[attach] Transkription fehlgeschlagen ({_name}): {_ae}", flush=True)
+                elif _mime == "application/pdf":
+                    if len(_data) > 20_000_000:    # max ~15 MB binary
+                        continue
+                    try:
+                        await ws.send_json({"type": "status", "message": f"📄 Lese PDF {_name}…"})
+                        _pdf_bytes = _b64att.b64decode(_data)
+                        def _extract_pdf_text(pdf_bytes: bytes) -> str:
+                            import pypdf, io
+                            reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+                            pages = []
+                            for i, page in enumerate(reader.pages[:50]):  # max 50 Seiten
+                                text = page.extract_text() or ""
+                                if text.strip():
+                                    pages.append(f"[Seite {i+1}]\n{text.strip()}")
+                            return "\n\n".join(pages)
+                        _pdf_text = await asyncio.to_thread(_extract_pdf_text, _pdf_bytes)
+                        if _pdf_text.strip():
+                            _text_prepend.append(f"[PDF-Inhalt von {_name}]:\n{_pdf_text}")
+                        else:
+                            _text_prepend.append(f"[PDF {_name}: Kein extrahierbarer Text gefunden (gescanntes/bildbasiertes PDF)]")
+                    except Exception as _pe:
+                        print(f"[attach] PDF-Extraktion fehlgeschlagen ({_name}): {_pe}", flush=True)
+                        _text_prepend.append(f"[PDF {_name}: Konnte nicht gelesen werden – {_pe}]")
+            if _text_prepend:
+                task_text = "\n\n".join(_text_prepend) + "\n\n" + task_text
+
         target_agent_id = msg.get("agent_id", "")
         ui_lang = msg.get("lang", "de")  # UI-Sprache des Nutzers (de/en)
 
@@ -4020,7 +4329,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         if target_agent_id and agent_manager.get_agent(target_agent_id):
             target = agent_manager.get_agent(target_agent_id)
             if target.is_sub_agent:
-                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang))
+                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang, attachments=image_attachments))
                 return
 
         agent = agent_manager.get_or_create_main()
@@ -4037,7 +4346,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Aufgabe im Hintergrund starten – sendet 'finished' wenn fertig (für Windows-TTS)
         async def _run_main_agent_and_notify():
             try:
-                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang)
+                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang, attachments=image_attachments)
             except Exception:
                 pass
             finally:
@@ -4341,6 +4650,9 @@ async def startup():
         port_info = f":{config.SERVER_PORT}" if config.SERVER_PORT != 443 else ""
         print("✅ Jarvis Backend gestartet")
         print(f"🌐 https://{os.getenv('SERVER_IP', '127.0.0.1')}{port_info}")
+
+    # User-Chat-Historie laden
+    _uc_load_history()
 
     # Whisper-Modell im Hintergrund vorladen (für Wake-Word-Erkennung)
     import threading

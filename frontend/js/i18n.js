@@ -81,7 +81,7 @@ const _I18N = {
 
         // ── Settings Modal ────────────────────────────────────
         'settings.title':           'Einstellungen',
-        'settings.tab.profiles':    'KI-Profile',
+        'settings.tab.profiles':    'LLM-Profile',
         'settings.tab.instructions':'Anweisungen',
         'settings.tab.skills':      'Skills',
         'settings.tab.whatsapp':    'WhatsApp',
@@ -168,7 +168,7 @@ const _I18N = {
         'profile.session_key_label':'Session Key',
         'profile.add_btn':          '+ Neues Profil',
         'profile.voice_label':      'Stimme',
-        'profile.section_list':     'KI-Profile',
+        'profile.section_list':     'LLM-Profile',
         'profile.section_tts':      'Sprachausgabe (TTS)',
         'profile.section_key':      'Agent API Key',
         'profile.section_ssl':      'HTTPS / SSL-Zertifikat',
@@ -794,7 +794,7 @@ const _I18N = {
 
         // ── Settings Modal ────────────────────────────────────
         'settings.title':           'Settings',
-        'settings.tab.profiles':    'AI Profiles',
+        'settings.tab.profiles':    'LLM Profiles',
         'settings.tab.instructions':'Instructions',
         'settings.tab.skills':      'Skills',
         'settings.tab.whatsapp':    'WhatsApp',
@@ -881,7 +881,7 @@ const _I18N = {
         'profile.session_key_label':'Session Key',
         'profile.add_btn':          '+ New Profile',
         'profile.voice_label':      'Voice',
-        'profile.section_list':     'AI Profiles',
+        'profile.section_list':     'LLM Profiles',
         'profile.section_tts':      'Text-to-Speech (TTS)',
         'profile.section_key':      'Agent API Key',
         'profile.section_ssl':      'HTTPS / SSL Certificate',

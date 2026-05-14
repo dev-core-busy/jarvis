@@ -449,13 +449,11 @@ body {
 .btn-send:not(:disabled):hover { background: var(--purple-light); }
 
 .btn-mic {
-    width: 38px; height: 38px;
+    width: 42px; height: 42px;
     border: 1px solid rgba(34, 197, 94, 0.35);
-    color: #22c55e;
-    background: rgba(34, 197, 94, 0.08);
-    border-radius: 50%;
-    background: transparent;
     color: var(--text-muted);
+    background: transparent;
+    border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
     flex-shrink: 0;
@@ -721,3 +719,101 @@ body {
     color: #e0e0f0;
 }
 .lang-toggle.header-lang { border-color: rgba(255,255,255,0.08); }
+
+/* ─── Datei-Anhang Button ───────────────────────────────────── */
+.btn-attach {
+    width: 42px; height: 42px;
+    border: 1px solid var(--outline);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; flex-shrink: 0;
+    transition: color .2s, background .2s, border-color .2s;
+    padding: 0;
+}
+.btn-attach:hover { color: var(--purple); background: rgba(124,58,237,.12); border-color: var(--purple); }
+.btn-attach.has-files { color: var(--purple); border-color: var(--purple); background: rgba(124,58,237,.1); }
+
+/* ─── Anhang-Vorschau ────────────────────────────────────────── */
+.attach-preview-bar {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 6px 0 4px;
+}
+.attach-chip {
+    display: flex; align-items: center; gap: 4px;
+    padding: 3px 6px 3px 4px;
+    border-radius: 8px; border: 1px solid var(--outline);
+    background: var(--surface); font-size: 0.78rem; color: var(--on-surface);
+    max-width: 150px;
+}
+.attach-chip img { width: 26px; height: 26px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.attach-chip-icon { font-size: 1.1rem; line-height: 1; flex-shrink: 0; }
+.attach-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.attach-chip-remove { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 1rem; padding: 0 2px; line-height: 1; transition: color .15s; flex-shrink: 0; }
+.attach-chip-remove:hover { color: var(--error); }
+
+/* ─── Drag-Over ──────────────────────────────────────────────── */
+.messages.drag-over {
+    outline: 2px dashed var(--purple);
+    outline-offset: -4px;
+    background: rgba(124,58,237,0.04);
+}
+
+/* ─── Toast ──────────────────────────────────────────────────── */
+#attach-toast {
+    position: fixed; bottom: 80px; left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    background: var(--surface); border: 1px solid var(--outline);
+    border-left: 3px solid var(--error); color: var(--on-surface);
+    padding: 9px 15px; border-radius: 10px; font-size: 0.83rem;
+    white-space: nowrap; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; z-index: 9999;
+    box-shadow: 0 4px 16px rgba(0,0,0,.35);
+}
+#attach-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ─── Bildergalerie (Anhang-Vorschau in Bubbles) ─────────────── */
+.uc-img-gallery { display: grid; gap: 2px; border-radius: 10px; overflow: hidden; cursor: pointer; margin-top: 4px; max-width: 260px; }
+.uc-ig-1 { grid-template-columns: 1fr; }
+.uc-ig-2 { grid-template-columns: 1fr 1fr; }
+.uc-ig-3, .uc-ig-4 { grid-template-columns: 1fr 1fr; }
+.uc-ig-cell { position: relative; aspect-ratio: 1; overflow: hidden; }
+.uc-ig-cell img { width: 100%; height: 100%; object-fit: cover; display: block; transition: filter .15s; }
+.uc-ig-cell:hover img { filter: brightness(0.88); }
+.uc-ig-more { position: absolute; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 1.5rem; font-weight: 700; pointer-events: none; }
+
+/* ─── Datei-Chips (Audio / Video / PDF / Sonstige) ───────────── */
+.uc-file-chip { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,0.06); border-left: 3px solid rgba(255,255,255,0.15); cursor: default; }
+.uc-file-chip.pdf   { border-color: #ef4444; }
+.uc-file-chip.audio { border-color: #22c55e; }
+.uc-file-chip.video { border-color: #3b82f6; }
+.uc-file-chip.other { border-color: #94a3b8; }
+.uc-fc-icon  { font-size: 1.6rem; flex-shrink: 0; }
+.uc-fc-info  { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.uc-fc-name  { font-size: 0.82rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e2e8f0; }
+.uc-fc-badge { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: .03em; }
+.uc-fc-dl    { color: #a78bfa; text-decoration: none; font-size: 1.15rem; padding: 2px 4px; flex-shrink: 0; }
+.uc-fc-dl:hover { color: #c4b5fd; }
+.uc-fc-player { width: 100%; height: 34px; min-width: 180px; flex-basis: 100%; margin-top: 2px; }
+
+/* ─── Lightbox ────────────────────────────────────────────────── */
+.uc-lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.93); z-index: 10000; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.uc-lightbox.open { opacity: 1; pointer-events: all; }
+.uc-lb-img { max-width: calc(100vw - 96px); max-height: calc(100vh - 96px); object-fit: contain; border-radius: 6px; user-select: none; }
+.uc-lb-close { position: absolute; top: 14px; right: 14px; background: rgba(255,255,255,0.12); border: none; color: #fff; width: 38px; height: 38px; border-radius: 50%; cursor: pointer; font-size: 1.1rem; display: flex; align-items: center; justify-content: center; transition: background .15s; }
+.uc-lb-close:hover { background: rgba(255,255,255,0.22); }
+.uc-lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.12); border: none; color: #fff; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; font-size: 1.6rem; display: flex; align-items: center; justify-content: center; transition: background .15s; }
+.uc-lb-nav:hover { background: rgba(255,255,255,0.22); }
+#uc-lb-prev { left: 14px; }
+#uc-lb-next { right: 14px; }
+.uc-lb-counter { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.6); font-size: 0.85rem; }
+.uc-lb-actions { position: absolute; bottom: 10px; right: 14px; display: flex; gap: 6px; }
+.uc-lb-btn { background: rgba(255,255,255,0.12); border: none; color: #fff; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 0.82rem; transition: background .15s; }
+.uc-lb-btn:hover { background: rgba(255,255,255,0.22); }
+
+/* ─── Kontextmenü (Rechtsklick auf Anhang) ───────────────────── */
+.uc-ctx-menu { position: fixed; z-index: 9999; background: rgba(18,24,38,0.98); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); min-width: 160px; overflow: hidden; opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s; transform: scale(0.95); }
+.uc-ctx-menu.open { opacity: 1; pointer-events: all; transform: scale(1); }
+.uc-ctx-item { display: flex; align-items: center; gap: 9px; padding: 10px 14px; cursor: pointer; font-size: 0.88rem; color: #e2e8f0; border: none; background: none; width: 100%; text-align: left; transition: background .12s; }
+.uc-ctx-item:hover { background: rgba(255,255,255,0.07); }

@@ -235,6 +235,7 @@ class OpenAICompatibleProvider(LLMProvider):
             role = "assistant" if content.role == "model" else "user"
             content_str = ""
             tool_call_id = None
+            image_blocks = []
 
             for part in content.parts:
                 if part.text:
@@ -243,8 +244,25 @@ class OpenAICompatibleProvider(LLMProvider):
                     role = "tool"
                     tool_call_id = "call_" + part.function_response.name
                     content_str = json.dumps(part.function_response.response)
+                _id_obj = getattr(part, "inline_data", None)
+                if _id_obj:
+                    _mime = getattr(_id_obj, "mime_type", "")
+                    _data = getattr(_id_obj, "data", b"")
+                    if _mime and _data and _mime.startswith("image/"):
+                        import base64 as _b64m
+                        image_blocks.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{_mime};base64,{_b64m.b64encode(_data).decode()}"}
+                        })
 
-            msg = {"role": role, "content": content_str}
+            if image_blocks and not tool_call_id:
+                _content_list = []
+                if content_str:
+                    _content_list.append({"type": "text", "text": content_str})
+                _content_list.extend(image_blocks)
+                msg = {"role": role, "content": _content_list}
+            else:
+                msg = {"role": role, "content": content_str}
             if tool_call_id:
                 msg["tool_call_id"] = tool_call_id
             messages.append(msg)
@@ -501,6 +519,7 @@ class AnthropicProvider(LLMProvider):
             fn_calls = []
             fn_responses = []
 
+            inline_data_blocks = []  # Für Bild-Anhänge (Anthropic image blocks)
             for part in content.parts:
                 if getattr(part, "text", None):
                     text_parts.append(part.text)
@@ -510,6 +529,20 @@ class AnthropicProvider(LLMProvider):
                 fr = getattr(part, "function_response", None)
                 if fr and getattr(fr, "name", None):
                     fn_responses.append(fr)
+                _id_obj = getattr(part, "inline_data", None)
+                if _id_obj:
+                    _mime = getattr(_id_obj, "mime_type", "")
+                    _data = getattr(_id_obj, "data", b"")
+                    if _mime and _data and _mime.startswith("image/"):
+                        import base64 as _b64a
+                        inline_data_blocks.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": _mime,
+                                "data": _b64a.b64encode(_data).decode(),
+                            },
+                        })
 
             if fn_responses:
                 tool_result_blocks = []
@@ -543,7 +576,14 @@ class AnthropicProvider(LLMProvider):
 
             else:
                 text = "\n".join(text_parts)
-                if text:
+                if inline_data_blocks:
+                    # Bilder + Text als Content-Array (Anthropic-Format)
+                    _blocks = []
+                    if text:
+                        _blocks.append({"type": "text", "text": text})
+                    _blocks.extend(inline_data_blocks)
+                    messages.append({"role": role, "content": _blocks})
+                elif text:
                     messages.append({"role": role, "content": text})
 
         anthropic_tools = []

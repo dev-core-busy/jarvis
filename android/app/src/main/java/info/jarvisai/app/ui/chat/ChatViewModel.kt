@@ -35,6 +35,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import info.jarvisai.app.data.model.SegmentType
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 
 enum class VoiceState { IDLE, LISTENING, ERROR }
 
@@ -314,6 +320,55 @@ class ChatViewModel @Inject constructor(
         if (!newVal) ttsManager.stop()
         viewModelScope.launch {
             settingsDataStore.save(settingsDataStore.settings.first().copy(ttsEnabled = newVal))
+        }
+    }
+
+    /** Benutzer-Feedback für eine Jarvis-Antwort an den Server senden.
+     *  Negative/falsche Bewertungen: Server gibt LLM-Analyse zurück, die als Jarvis-Nachricht angezeigt wird. */
+    fun sendFeedback(msg: ChatMessage, rating: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val settings = settingsDataStore.settings.first()
+                val baseUrl = settings.serverUrl
+                    .replace("wss://", "https://")
+                    .replace("ws://", "http://")
+                    .removeSuffix("/ws")
+                    .removeSuffix("/ws/")
+                val botResp = msg.segments
+                    .filter { it.type == SegmentType.ANSWER }
+                    .joinToString(" ") { it.text }
+                val lastUserMsg = messages.value
+                    .lastOrNull { it.role == MessageRole.USER && it.timestamp < msg.timestamp }
+                    ?.text ?: ""
+
+                val body = JSONObject().apply {
+                    put("token", settings.apiKey)
+                    put("rating", rating)
+                    put("user_message", lastUserMsg)
+                    put("bot_response", botResp.take(500))
+                }.toString()
+
+                // Großzügiger Timeout: LLM-Analyse kann 20-40s dauern
+                val client = OkHttpClient.Builder()
+                    .callTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                val req = Request.Builder()
+                    .url("$baseUrl/api/feedback")
+                    .post(body.toRequestBody("application/json".toMediaType()))
+                    .build()
+                val response = client.newCall(req).execute()
+                val responseBody = response.body?.string() ?: return@launch
+                response.close()
+
+                // LLM-Analyse aus Response extrahieren und als Jarvis-Nachricht anzeigen
+                val respJson = org.json.JSONObject(responseBody)
+                val analysis = respJson.optString("analysis", "")
+                if (analysis.isNotBlank()) {
+                    repo.addLocalJarvisMessage(analysis)
+                }
+            } catch (e: Exception) {
+                // Feedback-Fehler still ignorieren
+            }
         }
     }
 

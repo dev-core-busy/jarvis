@@ -19,6 +19,17 @@
     let _ttsAudio = null;
     let _ttsBuf = '';              // sammelt Bot-Text während Streaming
 
+    // Feedback-State
+    let _lastUserMsg  = '';        // letzte gesendete Benutzerfrage
+    let _lastBotResp  = '';        // letzte vollständige Bot-Antwort
+    let _lastBotCol   = null;      // .msg-col des letzten Bot-Bubbles
+    let _lastStats    = '';        // Statistik-Text des letzten Bot-Bubbles
+
+    // Verlauf-Persistenz
+    const _HISTORY_KEY = 'jarvis_chat_history_v1';
+    const _HISTORY_MAX = 120;
+    let _chatHistory   = [];
+
     // ─── DOM ────────────────────────────────────────────────────
     const $ = id => document.getElementById(id);
     const loginScreen  = $('login-screen');
@@ -35,6 +46,10 @@
     const msgInput     = $('msg-input');
     const sendBtn      = $('btn-send');
     const stopBtn      = $('btn-stop');
+    const btnAttach    = $('btn-attach');
+    const attachInput  = $('attach-input');
+    const attachBar    = $('attach-preview-bar');
+    const attachToast  = $('attach-toast');
     const logoutBtn    = $('btn-logout');
     const statusDot    = $('status-dot');
     const totpSetupBtn = $('btn-totp-setup');
@@ -225,6 +240,7 @@
         loginScreen.classList.add('hidden');
         chatScreen.classList.remove('hidden');
         connectWS();
+        _restoreHistory();
         msgInput.focus();
         _startContextIndicator();
         // TTS-Einstellungen laden: LocalStorage hat Vorrang vor Backend
@@ -344,15 +360,141 @@
     //  NACHRICHT SENDEN
     // ═════════════════════════════════════════════════════════════
 
+    // ─── Datei-Anhänge ──────────────────────────────────────────
+    let _pendingAttachments = [];
+
+    const _SUPPORTED = new Set([
+        'image/jpeg','image/jpg','image/png','image/gif','image/webp','image/bmp',
+        'audio/wav','audio/mp3','audio/mpeg','audio/ogg','audio/webm','audio/aac','audio/flac','audio/m4a','audio/x-m4a',
+        'video/mp4','video/webm','video/ogg','video/quicktime','video/x-msvideo','video/mpeg',
+        'application/pdf',
+    ]);
+
+    let _toastTimer = null;
+    function showToast(msg) {
+        if (!attachToast) return;
+        attachToast.textContent = msg;
+        attachToast.classList.add('show');
+        clearTimeout(_toastTimer);
+        _toastTimer = setTimeout(() => attachToast.classList.remove('show'), 4000);
+    }
+
+    function renderPreviews() {
+        if (!attachBar) return;
+        attachBar.innerHTML = '';
+        if (_pendingAttachments.length === 0) {
+            attachBar.style.display = 'none';
+            if (btnAttach) btnAttach.classList.remove('has-files');
+            sendBtn.disabled = !msgInput.value.trim();
+            return;
+        }
+        attachBar.style.display = 'flex';
+        if (btnAttach) btnAttach.classList.add('has-files');
+        sendBtn.disabled = false;
+        _pendingAttachments.forEach((att, idx) => {
+            const chip = document.createElement('div');
+            chip.className = 'attach-chip';
+            if (att.type === 'image') {
+                const img = document.createElement('img');
+                img.src = `data:${att.mime_type};base64,${att.data}`;
+                chip.appendChild(img);
+            } else {
+                const ico = document.createElement('span');
+                ico.className = 'attach-chip-icon';
+                ico.textContent = att.type === 'audio' ? '🎵' : att.type === 'pdf' ? '📄' : '🎬';
+                chip.appendChild(ico);
+            }
+            const nm = document.createElement('span');
+            nm.className = 'attach-chip-name';
+            nm.textContent = att.name.length > 16 ? att.name.slice(0,14)+'…' : att.name;
+            nm.title = att.name;
+            chip.appendChild(nm);
+            const rm = document.createElement('button');
+            rm.className = 'attach-chip-remove';
+            rm.textContent = '×';
+            rm.type = 'button';
+            rm.addEventListener('click', () => { _pendingAttachments.splice(idx,1); renderPreviews(); });
+            chip.appendChild(rm);
+            attachBar.appendChild(chip);
+        });
+    }
+
+    async function addFiles(files) {
+        const unsupported = [];
+        for (const file of Array.from(files)) {
+            const mime = (file.type || '').toLowerCase();
+            if (!_SUPPORTED.has(mime) && !mime.startsWith('image/') && !mime.startsWith('audio/') && !mime.startsWith('video/')) {
+                const ext = file.name.includes('.') ? '.'+file.name.split('.').pop().toUpperCase() : mime||'?';
+                unsupported.push(ext); continue;
+            }
+            if (_pendingAttachments.length >= 5) { showToast('Max. 5 Dateien erlaubt.'); break; }
+            let type = 'video';
+            if (mime.startsWith('image/')) type = 'image';
+            else if (mime.startsWith('audio/')) type = 'audio';
+            else if (mime === 'application/pdf') type = 'pdf';
+            try {
+                const b64 = await new Promise((res,rej) => {
+                    const r = new FileReader();
+                    r.onload = e => res(e.target.result.split(',')[1]);
+                    r.onerror = rej;
+                    r.readAsDataURL(file);
+                });
+                _pendingAttachments.push({ name: file.name, mime_type: mime, data: b64, type });
+            } catch(e) { showToast(`"${file.name}" konnte nicht gelesen werden.`); }
+        }
+        if (unsupported.length > 0) {
+            const fmts = [...new Set(unsupported)].join(', ');
+            showToast(`Format nicht unterstützt: ${fmts} – Erlaubt: Bilder, Audio, Video, PDF`);
+        }
+        renderPreviews();
+    }
+
+    if (btnAttach) btnAttach.addEventListener('click', () => attachInput && attachInput.click());
+    if (attachInput) {
+        attachInput.addEventListener('change', async () => { await addFiles(attachInput.files); attachInput.value = ''; });
+    }
+
+    // Drag & Drop auf Nachrichten-Bereich
+    if (messagesEl) {
+        messagesEl.addEventListener('dragover', e => { e.preventDefault(); messagesEl.classList.add('drag-over'); });
+        messagesEl.addEventListener('dragleave', e => { if (!messagesEl.contains(e.relatedTarget)) messagesEl.classList.remove('drag-over'); });
+        messagesEl.addEventListener('drop', async e => {
+            e.preventDefault(); messagesEl.classList.remove('drag-over');
+            if (e.dataTransfer && e.dataTransfer.files.length > 0) await addFiles(e.dataTransfer.files);
+        });
+    }
+
     function sendMessage() {
         const text = msgInput.value.trim();
-        if (!text) return;
+        if (!text && _pendingAttachments.length === 0) return;
+        const finalText = text || 'Bitte analysiere/beschreibe die angehängten Dateien.';
 
-        addBubble(text, 'user');
-        wsSend({ type: 'task', text, lang: window._lang || 'de' });
+        _lastUserMsg = finalText;
+        _lastBotResp = '';
+        _lastBotCol  = null;
+        _lastStats   = '';
+
+        const userBubble = addBubble(finalText, 'user');
+        if (_pendingAttachments.length > 0) {
+            // Snapshot der Anhänge für Rendering (vor dem Leeren von _pendingAttachments)
+            const attSnap = _pendingAttachments.map(a => ({ name: a.name, mime_type: a.mime_type, data: a.data }));
+            _renderAttachments(userBubble, { attachments: attSnap });
+        }
+
+        // Benutzernachricht im Verlauf speichern (nur Text + Hinweis, kein base64)
+        const attNote = _pendingAttachments.length > 0 ? ` [+ ${_pendingAttachments.length} Datei(en)]` : '';
+        _chatHistory.push({ role: 'user', text: finalText + attNote, time: timeStr(), date: _currentDateStr() });
+        _saveHistory();
+        const msg = { type: 'task', text: finalText, lang: window._lang || 'de' };
+        if (_pendingAttachments.length > 0) {
+            msg.attachments = _pendingAttachments.map(a => ({ name: a.name, mime_type: a.mime_type, data: a.data }));
+        }
+        wsSend(msg);
 
         msgInput.value = '';
         msgInput.style.height = '';
+        _pendingAttachments = [];
+        renderPreviews();
         sendBtn.disabled = true;
     }
 
@@ -366,7 +508,7 @@
     });
 
     msgInput.addEventListener('input', () => {
-        sendBtn.disabled = !msgInput.value.trim();
+        sendBtn.disabled = !msgInput.value.trim() && _pendingAttachments.length === 0;
         // Auto-resize
         msgInput.style.height = '';
         msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
@@ -428,21 +570,28 @@
     function handleAgentEvent(msg) {
         if (msg.event === 'started') {
             agentRunning = true;
-            _ttsBuf = '';  // Puffer für neue Antwort zurücksetzen
+            _ttsBuf = '';
             stopBtn.classList.remove('hidden');
-            // Neue Bot-Bubble vorbereiten
             currentBotBubble = null;
         } else if (msg.event === 'finished') {
             agentRunning = false;
             stopBtn.classList.add('hidden');
-            // Streaming beenden
             removeStreamingDots();
             currentBotBubble = null;
             _updateContextIndicator();
-            // TTS: gesammelte Antwort vorlesen
             const toSpeak = _ttsBuf.trim();
             _ttsBuf = '';
             if (toSpeak) speak(toSpeak);
+            // Bot-Antwort im Verlauf speichern
+            if (_lastBotResp) {
+                _chatHistory.push({ role: 'bot', text: _lastBotResp, time: timeStr(), date: _currentDateStr(), stats: _lastStats });
+                _saveHistory();
+            }
+            // Feedback-Buttons anfügen
+            if (_lastBotCol && _lastBotResp) {
+                _appendFeedbackRow(_lastBotCol, _lastUserMsg, _lastBotResp);
+                _lastBotCol = null;
+            }
         }
     }
 
@@ -488,14 +637,15 @@
     function appendToBotBubble(text) {
         if (!currentBotBubble) {
             currentBotBubble = addBubble(text, 'bot');
+            _lastBotCol = currentBotBubble.parentElement; // .msg-col merken
             addStreamingDots();
         } else {
-            // Neuen Text anhängen (ersetze bisherigen Inhalt)
             currentBotBubble.innerHTML = renderMarkdown(
                 (currentBotBubble._rawText || '') + '\n' + text
             );
         }
         currentBotBubble._rawText = (currentBotBubble._rawText || '') + '\n' + text;
+        _lastBotResp = currentBotBubble._rawText.trim();
         scrollToBottom();
     }
 
@@ -508,7 +658,8 @@
         const dur = (msg.duration_ms / 1000).toFixed(1);
         const tokens = msg.total_tokens || 0;
         const steps = msg.steps || 0;
-        stats.textContent = `${dur}s · ${tokens} Tokens · ${steps} Schritte`;
+        _lastStats = `${dur}s · ${tokens} Tokens · ${steps} Schritte`;
+        stats.textContent = _lastStats;
         currentBotBubble.parentElement.appendChild(stats);
         scrollToBottom();
     }
@@ -565,6 +716,262 @@
     function removeWelcome() {
         const w = messagesEl.querySelector('.welcome-msg');
         if (w) w.remove();
+    }
+
+    // ─── Datei-Anhang-Rendering (Galerie, Lightbox, Kontextmenü) ─
+
+    function _dataUrl(att) {
+        return `data:${att.mime_type};base64,${att.data}`;
+    }
+
+    // Lightbox
+    let _lbAtts = [], _lbIdx = 0;
+    function openLightbox(atts, idx) {
+        _lbAtts = atts; _lbIdx = idx;
+        _lbUpdate();
+        document.getElementById('uc-lightbox')?.classList.add('open');
+    }
+    function closeLightbox() {
+        document.getElementById('uc-lightbox')?.classList.remove('open');
+    }
+    function _lbUpdate() {
+        const img     = document.getElementById('uc-lb-img');
+        const counter = document.getElementById('uc-lb-counter');
+        const prev    = document.getElementById('uc-lb-prev');
+        const next    = document.getElementById('uc-lb-next');
+        if (!img) return;
+        const att = _lbAtts[_lbIdx];
+        img.src = _dataUrl(att);
+        img.alt = att.name || '';
+        if (counter) counter.textContent = _lbAtts.length > 1 ? `${_lbIdx + 1} / ${_lbAtts.length}` : '';
+        if (prev)    prev.style.display  = _lbAtts.length > 1 ? '' : 'none';
+        if (next)    next.style.display  = _lbAtts.length > 1 ? '' : 'none';
+    }
+    document.addEventListener('keydown', e => {
+        const lb = document.getElementById('uc-lightbox');
+        if (!lb || !lb.classList.contains('open')) return;
+        if (e.key === 'Escape') closeLightbox();
+        if (e.key === 'ArrowLeft')  { _lbIdx = (_lbIdx - 1 + _lbAtts.length) % _lbAtts.length; _lbUpdate(); }
+        if (e.key === 'ArrowRight') { _lbIdx = (_lbIdx + 1) % _lbAtts.length; _lbUpdate(); }
+    });
+    (function initLightbox() {
+        document.getElementById('uc-lb-close')?.addEventListener('click', closeLightbox);
+        document.getElementById('uc-lb-prev')?.addEventListener('click', () => {
+            _lbIdx = (_lbIdx - 1 + _lbAtts.length) % _lbAtts.length; _lbUpdate();
+        });
+        document.getElementById('uc-lb-next')?.addEventListener('click', () => {
+            _lbIdx = (_lbIdx + 1) % _lbAtts.length; _lbUpdate();
+        });
+        document.getElementById('uc-lb-save')?.addEventListener('click', () => {
+            const att = _lbAtts[_lbIdx];
+            Object.assign(document.createElement('a'), { href: _dataUrl(att), download: att.name || 'bild' }).click();
+        });
+        document.getElementById('uc-lightbox')?.addEventListener('click', e => {
+            if (e.target === document.getElementById('uc-lightbox')) closeLightbox();
+        });
+    })();
+
+    // Kontextmenü
+    let _ctxAtt = null;
+    function showCtxMenu(e, att) {
+        e.preventDefault(); e.stopPropagation();
+        _ctxAtt = att;
+        const menu = document.getElementById('uc-ctx-menu');
+        if (!menu) return;
+        const x = Math.min(e.clientX, window.innerWidth - 180);
+        const y = Math.min(e.clientY, window.innerHeight - 60);
+        menu.style.left = x + 'px';
+        menu.style.top  = y + 'px';
+        menu.classList.add('open');
+    }
+    function hideCtxMenu() { document.getElementById('uc-ctx-menu')?.classList.remove('open'); }
+    document.addEventListener('click', hideCtxMenu);
+    document.getElementById('uc-ctx-save-btn')?.addEventListener('click', () => {
+        if (!_ctxAtt) return;
+        Object.assign(document.createElement('a'), { href: _dataUrl(_ctxAtt), download: _ctxAtt.name || 'datei' }).click();
+        hideCtxMenu();
+    });
+
+    // Long-Press (Mobile)
+    function addLongPress(el, callback) {
+        let timer = null;
+        el.addEventListener('touchstart', e => { timer = setTimeout(() => callback(e.touches[0]), 600); }, { passive: true });
+        el.addEventListener('touchend', () => clearTimeout(timer));
+        el.addEventListener('touchmove', () => clearTimeout(timer));
+    }
+
+    // Anhang-Rendering
+    function _renderAttachments(bubble, msg) {
+        const atts = msg.attachments || [];
+        if (atts.length === 0) return;
+        const imgAtts   = atts.filter(a => (a.mime_type || '').startsWith('image/'));
+        const otherAtts = atts.filter(a => !(a.mime_type || '').startsWith('image/'));
+
+        if (imgAtts.length > 0) {
+            const MAX = 4;
+            const gallery = document.createElement('div');
+            gallery.className = 'uc-img-gallery uc-ig-' + Math.min(imgAtts.length, MAX);
+            gallery.style.marginTop = bubble.innerHTML.trim() ? '6px' : '0';
+            imgAtts.slice(0, MAX).forEach((att, i) => {
+                const cell = document.createElement('div');
+                cell.className = 'uc-ig-cell';
+                const img = document.createElement('img');
+                img.src = _dataUrl(att);
+                img.alt = att.name || 'Bild';
+                img.loading = 'lazy';
+                cell.appendChild(img);
+                if (i === MAX - 1 && imgAtts.length > MAX) {
+                    const ov = document.createElement('div');
+                    ov.className = 'uc-ig-more';
+                    ov.textContent = '+' + (imgAtts.length - MAX + 1);
+                    cell.appendChild(ov);
+                }
+                cell.addEventListener('click', e => { e.stopPropagation(); openLightbox(imgAtts, i); });
+                cell.addEventListener('contextmenu', e => showCtxMenu(e, att));
+                addLongPress(cell, e => showCtxMenu(e, att));
+                gallery.appendChild(cell);
+            });
+            bubble.appendChild(gallery);
+        }
+        for (const att of otherAtts) {
+            bubble.appendChild(_renderFileChip(att));
+        }
+    }
+
+    function _renderFileChip(att) {
+        const mime = (att.mime_type || '').toLowerCase();
+        const src  = _dataUrl(att);
+        const wrap = document.createElement('div');
+        wrap.className = 'uc-file-chip';
+        wrap.style.marginTop = '4px';
+
+        if (mime.startsWith('audio/')) {
+            wrap.classList.add('audio');
+            wrap.innerHTML = `<div class="uc-fc-icon">🎵</div>
+                <div class="uc-fc-info">
+                    <span class="uc-fc-name" title="${escapeHtml(att.name||'')}">${escapeHtml(att.name||'Audio')}</span>
+                    <span class="uc-fc-badge">Audio</span>
+                </div>`;
+            const player = document.createElement('audio');
+            player.controls = true; player.src = src; player.className = 'uc-fc-player';
+            wrap.appendChild(player);
+        } else if (mime.startsWith('video/')) {
+            wrap.classList.add('video');
+            wrap.innerHTML = `<div class="uc-fc-icon">🎬</div>
+                <div class="uc-fc-info">
+                    <span class="uc-fc-name" title="${escapeHtml(att.name||'')}">${escapeHtml(att.name||'Video')}</span>
+                    <span class="uc-fc-badge">Video</span>
+                </div>`;
+            const player = document.createElement('video');
+            player.controls = true; player.src = src; player.className = 'uc-fc-player'; player.style.maxWidth = '220px';
+            wrap.appendChild(player);
+        } else {
+            const isPdf = mime === 'application/pdf';
+            wrap.classList.add(isPdf ? 'pdf' : 'other');
+            const icon  = isPdf ? '📄' : '📎';
+            const badge = isPdf ? 'PDF' : att.name?.split('.').pop()?.toUpperCase() || 'Datei';
+            wrap.innerHTML = `<div class="uc-fc-icon">${icon}</div>
+                <div class="uc-fc-info" style="flex:1;min-width:0;">
+                    <span class="uc-fc-name" title="${escapeHtml(att.name||'')}">${escapeHtml(att.name||'Datei')}</span>
+                    <span class="uc-fc-badge">${escapeHtml(badge)}</span>
+                </div>
+                <a class="uc-fc-dl" href="${src}" download="${escapeHtml(att.name||'datei')}" title="Herunterladen" onclick="event.stopPropagation()">⬇</a>`;
+            wrap.addEventListener('contextmenu', e => showCtxMenu(e, att));
+            addLongPress(wrap, e => showCtxMenu(e, att));
+        }
+        return wrap;
+    }
+
+    // ─── Verlauf-Persistenz (localStorage) ──────────────────────
+    function _currentDateStr() {
+        return new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    }
+
+    function _saveHistory() {
+        try {
+            if (_chatHistory.length > _HISTORY_MAX) {
+                _chatHistory = _chatHistory.slice(-_HISTORY_MAX);
+            }
+            localStorage.setItem(_HISTORY_KEY, JSON.stringify(_chatHistory));
+        } catch(e) { /* QuotaExceeded – ignorieren */ }
+    }
+
+    function _loadHistory() {
+        try {
+            const raw = localStorage.getItem(_HISTORY_KEY);
+            return raw ? (JSON.parse(raw) || []) : [];
+        } catch(e) { return []; }
+    }
+
+    function _addHistoryBubble(entry) {
+        const row = document.createElement('div');
+        row.className = `msg-row ${entry.role}`;
+
+        const timeEl = document.createElement('div');
+        timeEl.className = 'msg-time';
+        timeEl.textContent = entry.time || '';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'msg-bubble';
+        bubble.innerHTML = entry.role === 'user'
+            ? escapeHtml(entry.text)
+            : renderMarkdown(entry.text);
+
+        const col = document.createElement('div');
+        col.appendChild(timeEl);
+        col.appendChild(bubble);
+
+        if (entry.role === 'bot') {
+            const avatar = document.createElement('div');
+            avatar.className = 'msg-avatar';
+            avatar.textContent = 'J';
+            row.appendChild(avatar);
+
+            if (entry.stats) {
+                const stats = document.createElement('div');
+                stats.className = 'msg-stats';
+                stats.textContent = entry.stats;
+                col.appendChild(stats);
+            }
+        }
+
+        row.appendChild(col);
+        messagesEl.appendChild(row);
+    }
+
+    function _restoreHistory() {
+        _chatHistory = _loadHistory();
+        if (_chatHistory.length === 0) return;
+
+        removeWelcome();
+        let restoredDate = '';
+
+        for (const entry of _chatHistory) {
+            if (entry.date && entry.date !== restoredDate) {
+                restoredDate = entry.date;
+                const sep = document.createElement('div');
+                sep.className = 'date-sep';
+                sep.innerHTML = `<span>${entry.date}</span>`;
+                messagesEl.appendChild(sep);
+            }
+
+            if (entry.role === 'user' || entry.role === 'bot') {
+                _addHistoryBubble(entry);
+            }
+        }
+
+        // lastDate mit dem letzten wiederhergestellten Datum synchronisieren,
+        // damit maybeAddDateSep() keinen doppelten Separator erzeugt
+        if (restoredDate) lastDate = restoredDate;
+
+        // Visueller Trenner zwischen alten und neuen Nachrichten
+        const divider = document.createElement('div');
+        divider.className = 'date-sep';
+        divider.style.opacity = '0.45';
+        divider.innerHTML = `<span>── Neue Sitzung ──</span>`;
+        messagesEl.appendChild(divider);
+
+        scrollToBottom();
     }
 
     function escapeHtml(str) {
@@ -814,6 +1221,66 @@
             btnMic.style.display = 'none';
         }
     }
+
+    // ═════════════════════════════════════════════════════════════
+    //  FEEDBACK
+    // ═════════════════════════════════════════════════════════════
+
+    function _appendFeedbackRow(col, userMsg, botResp) {
+        const row = document.createElement('div');
+        row.className = 'msg-feedback-row';
+        row.innerHTML =
+            `<button class="msg-fb-btn" data-r="positive" title="Gute Antwort">👍</button>` +
+            `<button class="msg-fb-btn" data-r="negative" title="Schlechte Antwort">👎</button>` +
+            `<button class="msg-fb-btn" data-r="wrong"    title="Falsche Antwort">❌</button>`;
+        col.appendChild(row);
+
+        row.querySelectorAll('.msg-fb-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const rating = btn.dataset.r;
+                row.querySelectorAll('.msg-fb-btn').forEach(b => b.disabled = true);
+                btn.classList.add('msg-fb-active');
+                try {
+                    const res = await fetch('/api/feedback', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token, rating, user_message: userMsg, bot_response: botResp }),
+                    });
+                    const data = await res.json();
+                    // Kurze Bestätigung anzeigen
+                    const info = document.createElement('div');
+                    info.className = 'msg-fb-info';
+                    info.textContent = data.message || 'Danke!';
+                    row.replaceWith(info);
+                    // LLM-Analyse mit Alternativen als Jarvis-Antwort einblenden
+                    if (data.analysis) {
+                        addBubble(data.analysis, 'bot');
+                    }
+                } catch {
+                    btn.disabled = false;
+                }
+            });
+        });
+    }
+
+    // Einmalig Feedback-CSS einfügen
+    (function _injectFeedbackCss() {
+        const id = 'jarvis-feedback-css';
+        if (document.getElementById(id)) return;
+        const s = document.createElement('style');
+        s.id = id;
+        s.textContent = `
+.msg-feedback-row{display:flex;gap:4px;margin-top:4px;padding-left:2px;}
+.msg-fb-btn{background:none;border:1px solid rgba(255,255,255,.12);border-radius:8px;
+  padding:2px 8px;font-size:.8rem;cursor:pointer;color:rgba(255,255,255,.5);
+  transition:all .15s;}
+.msg-fb-btn:hover:not(:disabled){border-color:rgba(255,255,255,.35);color:#fff;transform:scale(1.1);}
+.msg-fb-btn:disabled{cursor:default;opacity:.5;}
+.msg-fb-btn.msg-fb-active{border-color:rgba(124,58,237,.7);background:rgba(124,58,237,.2);color:#fff;}
+.msg-fb-info{font-size:.75rem;color:rgba(255,255,255,.45);margin-top:4px;padding-left:2px;}
+        `;
+        document.head.appendChild(s);
+    })();
 
     // Token vorhanden? → direkt zum Chat (Token wird beim ersten WS-Send validiert)
     if (token) {

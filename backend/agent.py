@@ -368,7 +368,7 @@ KRITISCH – Autonomie-Regeln:
             )
         return declarations
 
-    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de"):
+    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None):
         """Führt eine Aufgabe aus – der Agent-Loop."""
         import sys
         from backend.telemetry import tracer
@@ -509,7 +509,15 @@ KRITISCH – Autonomie-Regeln:
 
             # Initial-Nachricht senden – ggf. mit vorheriger Chat-History als Kontext
             _log(f"LLM-Aufruf mit {len(self._tool_instances)} Tools...")
-            _user_msg = types.Content(role="user", parts=[types.Part.from_text(text=task_text)])
+            _user_parts = [types.Part.from_text(text=task_text)]
+            for _att in (attachments or []):
+                try:
+                    _att_bytes = base64.b64decode(_att["data"])
+                    _user_parts.append(types.Part.from_bytes(data=_att_bytes, mime_type=_att["mime_type"]))
+                    _log(f"Anhang hinzugefügt: {_att.get('name','?')} ({_att['mime_type']})")
+                except Exception as _att_err:
+                    _log(f"Anhang übersprungen ({_att.get('name','?')}): {_att_err}")
+            _user_msg = types.Content(role="user", parts=_user_parts)
             llm_span = tracer.start_span("llm:initial", kind="llm", parent_id=self.agent_id)
             llm_span.attributes["model"] = config.current_model
             response = await self.provider.generate_response(

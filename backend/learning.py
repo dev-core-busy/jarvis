@@ -3,9 +3,15 @@
 Nach jeder Konversation werden faktische Erkenntnisse aus Tool-Ergebnissen
 extrahiert und sofort in der Wissensdatenbank (FAISS) indexiert.
 
+Kern-Prinzip: Lernen bedeutet, etwas NACHHER BESSER ODER RICHTIGER zu machen
+als VORHER. Ein gespeicherter Fakt ist nur dann eine Lernerkenntnis, wenn
+Jarvis dadurch eine zukuenftige Aufgabe besser oder korrekter erledigen kann.
+Ephemere Fakten (aktuelles Datum, momentane Systemzustaende, Einmal-Messwerte)
+sind KEIN Lernen und werden explizit ausgefiltert.
+
 Anti-Halluzinations-Schutz:
 - Nur Tool-Ergebnisse (role='tool') werden analysiert – keine LLM-Spekulationen.
-- LLM-Prompt macht explizit klar: nur direkt belegte Fakten, nie Annahmen.
+- LLM-Prompt prueft jeden Fakt am Verbesserungs-Kriterium: "Hilft das in Zukunft?"
 - Leere / "NICHTS"-Antworten werden still verworfen.
 
 Architektur:
@@ -137,22 +143,29 @@ async def _extract_facts_llm(
 
     extraction_prompt = (
         f"Analysiere die folgenden Tool-Ergebnisse aus einer KI-Konversation "
-        f"und extrahiere AUSSCHLIESSLICH faktische Informationen, "
-        f"die DIREKT und unveraendert in den Tool-Ausgaben belegt sind.\n\n"
-        f"STRENG VERBOTEN:\n"
+        f"und extrahiere AUSSCHLIESSLICH Erkenntnisse, die Jarvis in ZUKUNFT "
+        f"besser oder richtiger machen.\n\n"
+        f"KERN-PRUEFUNG fuer jeden Kandidaten-Fakt:\n"
+        f"  → 'Wuerde Jarvis dadurch eine kuenftige Aufgabe BESSER oder RICHTIGER erledigen als ohne dieses Wissen?'\n"
+        f"  Wenn NEIN: NICHT speichern.\n\n"
+        f"STRENG VERBOTEN (kein dauerhafter Mehrwert):\n"
+        f"- Aktuelles Datum, aktuelle Uhrzeit oder Zeitstempel jeder Art\n"
+        f"- Momentane Systemzustaende die sich staendig aendern (CPU-Last, freier Speicher, laufende Prozesse)\n"
+        f"- Einmalige Messwerte oder Zufallsergebnisse ohne Wiederholungspotenzial\n"
         f"- Schlussfolgerungen oder Interpretationen des KI-Assistenten\n"
-        f"- Allgemeinwissen (das ist bereits bekannt)\n"
-        f"- Fehlermeldungen oder temporaere Systemzustaende\n"
-        f"- Informationen die nicht direkt aus Tool-Ausgaben stammen\n\n"
-        f"ERLAUBT (nur wenn direkt in den Tool-Ausgaben sichtbar):\n"
-        f"- Konkrete Konfigurationen, Werte, Adressen, Dateinamen, Versionen\n"
-        f"- Inhalte aus gelesenen Dateien oder Dokumenten\n"
-        f"- Erfolgreiche Befehlsausgaben mit konkreten Ergebnissen\n"
-        f"- Erlernte Loesungswege bei erfolgreichen Aufgaben\n\n"
+        f"- Allgemeinwissen das jeder kennt\n"
+        f"- Fehlermeldungen (ausser der Loesungsweg ist dauerhaft relevant)\n"
+        f"- Informationen die in einer Woche nicht mehr stimmen\n\n"
+        f"ERLAUBT (dauerhaft nuetzlich, direkt aus Tool-Ausgaben belegbar):\n"
+        f"- Stabile Konfigurationen: IP-Adressen, Ports, Pfade, Dateinamen, Versionsnummern\n"
+        f"- Erlernte Vorgehensweisen und Loesungswege die sich wiederholen koennen\n"
+        f"- Permanent gueltige Fakten ueber Kunden, Systeme, Produkte\n"
+        f"- Fehler-und-Loesung-Paare die kuenftig erneut auftreten koennen\n"
+        f"- Inhalte aus gelesenen Dokumenten mit dauerhafter Relevanz\n\n"
         f"Aufgabe war: {task_short}\n\n"
         f"Tool-Ergebnisse:\n{tool_block[:4000]}\n\n"
-        f"Gib 2-6 kompakte Fakten-Stichpunkte aus (je 1-2 Saetze).\n"
-        f"Wenn nichts Faktisches belegbar ist: antworte mit genau 'NICHTS'.\n"
+        f"Gib 2-6 kompakte Stichpunkte aus (je 1-2 Saetze).\n"
+        f"Wenn kein einziger Fakt den Zukunfts-Test besteht: antworte mit genau 'NICHTS'.\n"
         f"Format: '- [Stichwort]: Fakt'\n"
         f"Antworte auf Deutsch."
     )
@@ -161,9 +174,11 @@ async def _extract_facts_llm(
         resp = await provider.generate_response(
             model=model,
             system_prompt=(
-                "Du bist ein praeziser Wissens-Extraktor. "
-                "Gib NUR Fakten aus, die direkt in den Tool-Ergebnissen belegt sind. "
-                "Keine Spekulation, keine LLM-Annahmen."
+                "Du bist ein strenger Lern-Filter fuer ein KI-System. "
+                "Lernen bedeutet: etwas nachher BESSER oder RICHTIGER machen als vorher. "
+                "Speichere AUSSCHLIESSLICH Fakten die zukuenftige Aufgaben verbessern. "
+                "Ephemere Fakten (Datum, Uhrzeit, momentane Zustaende) sind KEIN Lernen – sofort verwerfen. "
+                "Keine Spekulation, keine LLM-Annahmen, nur belegte dauerhafte Erkenntnisse."
             ),
             contents=[
                 types.Content(

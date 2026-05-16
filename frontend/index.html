@@ -1517,7 +1517,37 @@ sudo update-ca-certificates</code></pre>
                                     </div>
                                 </div>
 
-                                <!-- Modus-Anzeige -->
+                                <!-- ── Wissens-Editoren ── -->
+                                <hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:14px 0 12px;">
+                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                                    <span style="font-size:1rem;">📚</span>
+                                    <span style="font-weight:600;font-size:0.92rem;">Wissens-Editoren</span>
+                                    <span style="color:var(--text-muted);font-size:0.78rem;">– Wer darf Wissen hinzufügen, bearbeiten und löschen?</span>
+                                </div>
+                                <p class="kb-hint" style="margin-bottom:10px;">Leer lassen = alle angemeldeten Benutzer dürfen Wissen bearbeiten. Lokale Admins sind immer berechtigt.</p>
+
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Erlaubte Editoren</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
+                                    </label>
+                                    <input type="text" id="ad-knowledge-editors" placeholder="Leer = alle Benutzer dürfen bearbeiten" style="width:60%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Editor-Gruppe (AD-Gruppe)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                                    </label>
+                                    <input type="text" id="ad-knowledge-editors-group" placeholder="z.B. CN=Knowledge-Editors,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                        ⚠ Gruppenprüfung wird beim Login gecacht – Änderungen erfordern Neuanmeldung der betroffenen Benutzer.
+                                    </div>
+                                </div>
+
+                                <!-- Wissens-Editor Status -->
+                                <div id="ad-knowledge-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:4px;border:1px solid;"></div>
+
+                                <!-- Modus-Anzeige (Login-Zugriff) -->
                                 <div id="ad-mode-hint" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:12px;border:1px solid;"></div>
 
                                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
@@ -1539,6 +1569,8 @@ sudo update-ca-certificates</code></pre>
                                             document.getElementById('ad-domain').value        = d.domain        || '';
                                             document.getElementById('ad-allowed-users').value = d.allowed_users || '';
                                             document.getElementById('ad-allowed-group').value = d.allowed_group || '';
+                                            document.getElementById('ad-knowledge-editors').value = d.knowledge_editors || '';
+                                            document.getElementById('ad-knowledge-editors-group').value = d.knowledge_editors_group || '';
                                             _adUpdateStatus(d);
                                         } catch(e) {}
                                     }
@@ -1575,6 +1607,31 @@ sudo update-ca-certificates</code></pre>
                                             hint.style.color       = '#a5b4fc';
                                             hint.textContent       = window.t('security.ad_group_active') + ' ' + d.allowed_group;
                                         }
+                                        // Wissens-Editor Status
+                                        const kst = document.getElementById('ad-knowledge-status');
+                                        if (kst) {
+                                            if (!d.knowledge_editors && !d.knowledge_editors_group) {
+                                                kst.style.display = 'block';
+                                                kst.style.borderColor = '#f59e0b';
+                                                kst.style.background  = 'rgba(245,158,11,0.06)';
+                                                kst.style.color       = '#f59e0b';
+                                                kst.textContent = '📚 Wissens-Editoren: Alle angemeldeten Benutzer dürfen Wissen bearbeiten';
+                                            } else if (d.knowledge_edit_mode === 'users') {
+                                                kst.style.display = 'block';
+                                                kst.style.borderColor = '#34d399';
+                                                kst.style.background  = 'rgba(52,211,153,0.06)';
+                                                kst.style.color       = '#34d399';
+                                                kst.textContent = '📚 Wissens-Editoren: ' + d.knowledge_editors;
+                                            } else if (d.knowledge_edit_mode === 'group') {
+                                                kst.style.display = 'block';
+                                                kst.style.borderColor = '#6366f1';
+                                                kst.style.background  = 'rgba(99,102,241,0.06)';
+                                                kst.style.color       = '#a5b4fc';
+                                                kst.textContent = '📚 Editor-Gruppe: ' + d.knowledge_editors_group;
+                                            } else {
+                                                kst.style.display = 'none';
+                                            }
+                                        }
                                     }
 
                                     window._adSave = async function() {
@@ -1589,8 +1646,10 @@ sudo update-ca-certificates</code></pre>
                                                 body: JSON.stringify({
                                                     ad_server:        document.getElementById('ad-server').value.trim(),
                                                     ad_domain:        document.getElementById('ad-domain').value.trim(),
-                                                    ad_allowed_users: document.getElementById('ad-allowed-users').value.trim(),
-                                                    ad_allowed_group: document.getElementById('ad-allowed-group').value.trim(),
+                                                    ad_allowed_users:          document.getElementById('ad-allowed-users').value.trim(),
+                                                    ad_allowed_group:          document.getElementById('ad-allowed-group').value.trim(),
+                                                    ad_knowledge_editors:      document.getElementById('ad-knowledge-editors').value.trim(),
+                                                    ad_knowledge_editors_group: document.getElementById('ad-knowledge-editors-group').value.trim(),
                                                 })
                                             });
                                             if (!r.ok) throw new Error('HTTP ' + r.status);

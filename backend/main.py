@@ -447,6 +447,48 @@ async def require_local_auth(request: Request) -> str:
     return username
 
 
+async def require_knowledge_editor(request: Request, user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Prüft ob der Benutzer Wissen bearbeiten darf.
+
+    Erlaubt wenn:
+    - Keine Editor-Einschränkung konfiguriert (bestehende Behavior beibehalten)
+    - Lokaler Admin (ALLOWED_USERS)
+    - AD-User in ad_knowledge_editors-Benutzerliste
+    - AD-User in ad_knowledge_editors_group (wird beim Login gecacht)
+    """
+    editors_raw = config.get_setting("ad_knowledge_editors", "").strip()
+    editors_group = config.get_setting("ad_knowledge_editors_group", "").strip()
+
+    # Keine Einschränkung konfiguriert → alle dürfen (bestehende Behavior bleibt erhalten)
+    if not editors_raw and not editors_group:
+        return user
+
+    # Lokale Admins immer erlaubt
+    if user in ALLOWED_USERS:
+        return user
+
+    plain = user.split("@")[0].split("\\")[-1].lower()
+
+    # Benutzerliste (kein LDAP nötig, sofort wirksam)
+    if editors_raw:
+        allowed_list = {u.strip().lower() for u in editors_raw.split(",") if u.strip()}
+        if plain in allowed_list:
+            return user
+        if not editors_group:
+            raise HTTPException(status_code=403,
+                detail="Keine Berechtigung zum Bearbeiten von Wissen – Benutzer nicht in Editoren-Liste")
+
+    # Gruppen-Check via Login-Cache
+    if editors_group:
+        if _knowledge_editor_cache.get(plain, False):
+            return user
+        raise HTTPException(status_code=403,
+            detail="Keine Berechtigung zum Bearbeiten von Wissen – "
+                   "nicht in Editor-Gruppe (ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+    raise HTTPException(status_code=403, detail="Keine Berechtigung zum Bearbeiten von Wissen")
+
+
 async def require_auth_or_query(request: Request) -> str:
     """Auth via Header ODER ?token= Query-Parameter (fuer img/audio Tags)."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
@@ -518,6 +560,62 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
     return True
 
 
+# ─── Wissens-Bearbeitungsrechte ───────────────────────────────────────
+# Cache: sAMAccountName (lower) → bool (darf Wissen bearbeiten)
+# Wird beim AD-Login befüllt und beim Speichern neuer Editor-Einstellungen geleert.
+_knowledge_editor_cache: dict[str, bool] = {}
+
+
+def _check_knowledge_edit_permission_with_conn(username: str, conn, base_dn: str) -> bool:
+    """Prüft ob ein AD-User Wissen bearbeiten darf (nur beim Login aufrufbar – LDAP-Bind aktiv).
+
+    Gibt True zurück wenn:
+    - Weder Editoren-Liste noch Editoren-Gruppe konfiguriert (alle dürfen)
+    - Benutzername in ad_knowledge_editors-Liste
+    - User ist Mitglied der ad_knowledge_editors_group
+    """
+    editors_raw = config.get_setting("ad_knowledge_editors", "").strip()
+    editors_group = config.get_setting("ad_knowledge_editors_group", "").strip()
+
+    # Keine Einschränkung → alle AD-User dürfen Wissen bearbeiten
+    if not editors_raw and not editors_group:
+        return True
+
+    plain = username.split("@")[0].split("\\")[-1].lower()
+
+    # Benutzerliste prüfen
+    if editors_raw:
+        allowed = {u.strip().lower() for u in editors_raw.split(",") if u.strip()}
+        if plain in allowed:
+            return True
+        if not editors_group:
+            return False  # Liste konfiguriert, User nicht drin, keine Gruppe → Nein
+
+    # Gruppen-Check via LDAP (Bind ist aktiv)
+    if editors_group and conn is not None:
+        safe_plain = plain.replace("\\", "\\5c").replace("*", "\\2a").replace(
+            "(", "\\28").replace(")", "\\29").replace("\x00", "\\00")
+        try:
+            conn.search(
+                search_base=base_dn,
+                search_filter=f"(sAMAccountName={safe_plain})",
+                attributes=["memberOf"],
+            )
+            if conn.entries:
+                member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
+                group_lower = editors_group.lower()
+                for g in member_of:
+                    if g.lower() == group_lower or g.lower().startswith(
+                            f"cn={group_lower.lstrip('cn=').split(',')[0].lower()},"):
+                        print(f"[AUTH] Knowledge-Editor Gruppe: '{plain}' darf Wissen bearbeiten", flush=True)
+                        return True
+            print(f"[AUTH] Knowledge-Editor Gruppe: '{plain}' NICHT in Gruppe '{editors_group}'", flush=True)
+        except Exception as e:
+            print(f"[AUTH] Knowledge-Editor Gruppen-Check Fehler: {e}", flush=True)
+
+    return False
+
+
 def authenticate_linux_user(username: str, password: str) -> bool:
     """Authentifiziert einen Benutzer – erst PAM/lokal, dann AD/LDAP (wenn konfiguriert)."""
 
@@ -566,8 +664,13 @@ def authenticate_linux_user(username: str, password: str) -> bool:
                 except Exception:
                     pass  # Fallback auf Plain wenn DC kein StartTLS unterstützt
             if conn.bind():
-                # Credentials korrekt – jetzt Whitelist prüfen
+                # Credentials korrekt – Whitelist prüfen + Wissens-Recht cachen
                 allowed = _ad_user_allowed(conn, username, base_dn)
+                # Wissens-Bearbeitungsrecht während des aktiven Binds ermitteln und cachen
+                plain_key = username.split("@")[0].split("\\")[-1].lower()
+                _knowledge_editor_cache[plain_key] = _check_knowledge_edit_permission_with_conn(
+                    username, conn, base_dn
+                )
                 conn.unbind()
                 if allowed:
                     print(f"[AUTH] AD-Login erfolgreich: {bind_user}", flush=True)
@@ -1509,6 +1612,12 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("ad_allowed_users", body["ad_allowed_users"])
     if "ad_allowed_group" in body:
         config.save_setting("ad_allowed_group", body["ad_allowed_group"])
+    if "ad_knowledge_editors" in body:
+        config.save_setting("ad_knowledge_editors", body["ad_knowledge_editors"])
+        _knowledge_editor_cache.clear()  # Cache leeren → Benutzer müssen sich für Gruppenprüfung neu einloggen
+    if "ad_knowledge_editors_group" in body:
+        config.save_setting("ad_knowledge_editors_group", body["ad_knowledge_editors_group"])
+        _knowledge_editor_cache.clear()
     return JSONResponse({"success": True})
 
 
@@ -1540,6 +1649,8 @@ async def get_ad_status(user: str = Depends(require_auth)):
     ad_domain = config.get_setting("ad_domain", "")
     allowed_users = config.get_setting("ad_allowed_users", "")
     allowed_group = config.get_setting("ad_allowed_group", "")
+    knowledge_editors = config.get_setting("ad_knowledge_editors", "")
+    knowledge_editors_group = config.get_setting("ad_knowledge_editors_group", "")
     return JSONResponse({
         "configured": bool(ad_server and ad_domain),
         "server": ad_server,
@@ -1550,6 +1661,13 @@ async def get_ad_status(user: str = Depends(require_auth)):
             "group"   if allowed_group else
             "users"   if allowed_users else
             "open"    # alle AD-User erlaubt
+        ),
+        "knowledge_editors": knowledge_editors,
+        "knowledge_editors_group": knowledge_editors_group,
+        "knowledge_edit_mode": (
+            "group"     if knowledge_editors_group else
+            "users"     if knowledge_editors else
+            "all"       # alle authentifizierten Benutzer dürfen
         ),
     })
 
@@ -2341,7 +2459,7 @@ async def get_knowledge_stats(user: str = Depends(require_auth)):
 
 
 @app.post("/api/knowledge/reindex")
-async def reindex_knowledge(user: str = Depends(require_auth)):
+async def reindex_knowledge(user: str = Depends(require_knowledge_editor)):
     """Startet vollständigen Neuaufbau des Knowledge-Index (non-blocking)."""
     import asyncio as _asyncio
     from backend.tools.knowledge import force_reindex, get_index_progress, _set_progress
@@ -2400,7 +2518,7 @@ async def get_knowledge_files(user: str = Depends(require_auth)):
 
 
 @app.delete("/api/knowledge/files")
-async def delete_knowledge_file(request: Request, user: str = Depends(require_auth)):
+async def delete_knowledge_file(request: Request, user: str = Depends(require_knowledge_editor)):
     """Löscht eine einzelne Datei aus einem Knowledge-Ordner."""
     from backend.tools.knowledge import _get_folders, PROJECT_ROOT
     data = await request.json()
@@ -2494,7 +2612,7 @@ async def read_knowledge_file(path: str, user: str = Depends(require_auth)):
 
 
 @app.put("/api/knowledge/file_write")
-async def write_knowledge_file(request: Request, user: str = Depends(require_auth)):
+async def write_knowledge_file(request: Request, user: str = Depends(require_knowledge_editor)):
     """Aktualisiert den Inhalt einer gelernten Datei und re-indexiert sie in FAISS."""
     from backend.learning import LEARNED_DIR, PROJECT_ROOT as LRN_ROOT
     data = await request.json()
@@ -2557,7 +2675,7 @@ async def open_knowledge_folder(request: Request, user: str = Depends(require_au
 async def upload_knowledge_files(
     files: list[UploadFile] = File(...),
     folder: str = Form("data/knowledge"),
-    user: str = Depends(require_auth),
+    user: str = Depends(require_knowledge_editor),
 ):
     """Dateien per Browser-Upload in einen Knowledge-Ordner hochladen."""
     from backend.tools.knowledge import (
@@ -2643,7 +2761,7 @@ def _mount_path(idx: int) -> Path:
 # ─── Web-Extraktor ───────────────────────────────────────────────────────────
 
 @app.post("/api/knowledge/extract")
-async def knowledge_extract(request: Request, user: str = Depends(require_auth)):
+async def knowledge_extract(request: Request, user: str = Depends(require_knowledge_editor)):
     """Ruft eine URL ab, extrahiert per LLM Wissen und speichert als Pending-Dokument."""
     body = await request.json()
     url = (body.get("url") or "").strip()
@@ -2662,7 +2780,7 @@ async def knowledge_extract(request: Request, user: str = Depends(require_auth))
 @app.post("/api/knowledge/extract/upload")
 async def knowledge_extract_upload(
     file: UploadFile = File(...),
-    user: str = Depends(require_auth),
+    user: str = Depends(require_knowledge_editor),
 ):
     """Datei hochladen → Text extrahieren → LLM → Pending-Dokument."""
     _SUPPORTED = {
@@ -2704,7 +2822,7 @@ async def knowledge_pending_get(doc_id: str, user: str = Depends(require_auth)):
 
 
 @app.patch("/api/knowledge/pending/{doc_id}")
-async def knowledge_pending_update(doc_id: str, request: Request, user: str = Depends(require_auth)):
+async def knowledge_pending_update(doc_id: str, request: Request, user: str = Depends(require_knowledge_editor)):
     from backend.web_extractor import update_pending
     data = await request.json()
     ok = update_pending(doc_id, data)
@@ -2712,7 +2830,7 @@ async def knowledge_pending_update(doc_id: str, request: Request, user: str = De
 
 
 @app.post("/api/knowledge/pending/{doc_id}/approve")
-async def knowledge_pending_approve(doc_id: str, user: str = Depends(require_auth)):
+async def knowledge_pending_approve(doc_id: str, user: str = Depends(require_knowledge_editor)):
     from backend.web_extractor import approve_pending
     try:
         result = approve_pending(doc_id)
@@ -2724,14 +2842,14 @@ async def knowledge_pending_approve(doc_id: str, user: str = Depends(require_aut
 
 
 @app.delete("/api/knowledge/pending/{doc_id}")
-async def knowledge_pending_delete(doc_id: str, user: str = Depends(require_auth)):
+async def knowledge_pending_delete(doc_id: str, user: str = Depends(require_knowledge_editor)):
     from backend.web_extractor import delete_pending
     ok = delete_pending(doc_id)
     return JSONResponse({"ok": ok})
 
 
 @app.delete("/api/knowledge/extract/file")
-async def knowledge_extract_file_delete(request: Request, user: str = Depends(require_auth)):
+async def knowledge_extract_file_delete(request: Request, user: str = Depends(require_knowledge_editor)):
     """Löscht eine genehmigte Extraktions-MD-Datei und startet Reindex."""
     body = await request.json()
     rel_path = (body.get("file") or "").strip().lstrip("/")

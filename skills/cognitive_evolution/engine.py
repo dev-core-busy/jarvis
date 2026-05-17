@@ -597,16 +597,17 @@ async def _apply_new_skill(proposal: dict) -> str:
                 except Exception as e:
                     pass  # Deploy-Fehler sind nicht kritisch
 
-    # Skill dynamisch laden
+    # Skill-Code verifizieren (temporärer SkillLoader – registriert nicht beim laufenden Agent)
     load_result = ""
     try:
-        from backend.skills.manager import skill_manager
-        tools = skill_manager.loader.load_skill(skill_name)
-        load_result = f"✅ Skill '{skill_name}' geladen ({len(tools)} Tools)"
+        from backend.skills.loader import SkillLoader
+        _tmp_loader = SkillLoader()
+        tools = _tmp_loader.load_skill(skill_name)
+        load_result = f"✅ Skill-Code syntaktisch korrekt ({len(tools)} Tools). In Jarvis-Einstellungen → Skills aktivieren."
     except Exception as e:
         load_result = (
-            f"⚠️ Skill-Dateien geschrieben, aber automatisches Laden fehlgeschlagen: {e}\n"
-            f"→ Skill manuell in Jarvis-Einstellungen → Skills aktivieren."
+            f"⚠️ Skill-Dateien geschrieben, aber Code-Verifikation fehlgeschlagen: {e}\n"
+            f"→ Generierten Code prüfen, dann in Jarvis-Einstellungen → Skills manuell aktivieren."
         )
 
     return (

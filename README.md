@@ -6,7 +6,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-green?logo=gnu)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.8-orange)](https://github.com/dev-core-busy/jarvis/releases)
+[![Version](https://img.shields.io/badge/Version-0.9-orange)](https://github.com/dev-core-busy/jarvis/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey?logo=linux)](https://www.linux.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen)](https://github.com/dev-core-busy/jarvis/pulls)
 [![OpenClaw Compatible](https://img.shields.io/badge/OpenClaw-Compatible-6366f1)](https://github.com/dev-core-busy/jarvis#openclaw-skill-ecosystem)
@@ -29,12 +29,19 @@
 - [Key Features](#key-features)
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
-- [Screenshots](#screenshots)
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Multi-User Chat](#multi-user-chat)
+- [Multi-Agent System](#multi-agent-system)
 - [Skill System](#skill-system)
 - [WhatsApp Integration](#whatsapp-integration)
 - [Knowledge Base](#knowledge-base)
+- [Vision & Face Recognition](#vision--face-recognition)
+- [AD/LDAP & Security](#adldap--security)
+- [Multimedia Attachments](#multimedia-attachments)
+- [Feedback & Self-Improvement](#feedback--self-improvement)
+- [Cognitive Evolution](#cognitive-evolution)
+- [Client Apps](#client-apps)
 - [API Reference](#api-reference)
 - [Contributing](#contributing)
 - [Third-Party Licenses](#third-party-licenses)
@@ -62,24 +69,47 @@ Jarvis handles it. You watch it happen.
 ### 🖥️ VNC Split View
 The web interface shows your LLM chat **and a live desktop feed side by side**. The agent can see exactly what it's doing — screenshots feed back into the LLM context automatically. No more blind automation.
 
-### 🧩 Modular Skill System
-Skills are self-contained Python packages that extend Jarvis with new capabilities. Install, enable, disable, and configure them through the UI without touching config files. Compatible with [openclaw](https://github.com/steipete/gogcli) skills.
-
 ### 🔀 Multi-LLM Support
 Switch between AI providers without restarting anything:
-- **Google Gemini** (gemini-2.0-flash, gemini-1.5-pro, ...)
-- **Anthropic Claude** (claude-opus-4, claude-sonnet-4, ...)
-- **OpenRouter** (hundreds of models)
-- **Local Ollama** (llama3, mistral, qwen2.5, ... — fully offline)
+- **Google Gemini** (gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-pro, …)
+- **Anthropic Claude** (claude-opus-4, claude-sonnet-4-5, claude-haiku-4, …)
+- **OpenRouter** (hundreds of models via one API)
+- **Local Ollama** (llama3, mistral, qwen2.5, … — fully offline)
 - Any **OpenAI-compatible** endpoint
 
 Both native tool/function calling **and** prompt-based tool calling are supported — so even models without native tool support can use all of Jarvis's capabilities.
+
+### 🤖 Multi-Agent System
+The **main agent can spawn autonomous sub-agents** for parallel or background tasks. Each sub-agent runs independently, reports back in real-time, and appears in the sidebar. Complex multi-step workflows run in parallel without blocking the main conversation.
+
+### 💬 Multi-User Chat
+A built-in **user-to-user chat** (`/userchat`) lets all logged-in users communicate in real-time — with image galleries, audio/video players, file attachments, lightbox preview, and a forward/save context menu.
+
+### 📎 Multimedia Attachments
+Send **images, audio, video, and PDFs** directly in the Jarvis chat:
+- Images are sent to the LLM for visual analysis (all providers supported)
+- Audio/Video is transcribed locally via Whisper before the LLM sees it
+- PDFs are extracted and injected as text context
+- In-chat gallery with lightbox, right-click context menu, and mobile long-press support
 
 ### 📱 WhatsApp Agent
 Send Jarvis a voice note or text message on WhatsApp, get a response back. Voice messages are transcribed via faster-whisper (runs locally, no cloud). Perfect for mobile task delegation.
 
 ### 📚 Knowledge Base
-Drop PDFs, DOCX files, or plain text into watched folders. Jarvis indexes them with TF-IDF and can search them during tasks. Multi-folder support, automatic re-indexing on file changes.
+Drop PDFs, DOCX files, or plain text into watched folders. Jarvis indexes them with both **TF-IDF and ChromaDB vector search** (multilingual embeddings). Multi-folder support, automatic re-indexing on file changes.
+
+### 🧩 Modular Skill System
+Skills are self-contained Python packages that extend Jarvis with new capabilities. Install, enable, disable, and configure them through the UI without touching config files. Compatible with [OpenClaw](https://github.com/steipete/gogcli) skills.
+
+### 👁️ Vision & Face Recognition
+The optional **Vision Skill** adds real-time face recognition via dlib/face_recognition. Define per-person actions (webhook, LLM prompt, log-only) with configurable cooldown and tolerance. Works with USB cameras or IP cameras.
+
+### 🔐 Enterprise Security
+- **Active Directory / LDAP** authentication (no domain join required)
+- **2FA / TOTP** for all users
+- Granular **knowledge editor permissions** (per user or AD group)
+- HTTPS with auto-generated self-signed certificates or Let's Encrypt
+- Token-based auth (HMAC-SHA256, 30-day validity)
 
 ### 🌐 Google Workspace Integration
 Manage Gmail, Google Calendar, and Google Drive through natural language commands — powered by the openclaw/gog CLI.
@@ -87,10 +117,11 @@ Manage Gmail, Google Calendar, and Google Drive through natural language command
 ### 🤖 Browser Automation
 Full browser control via CDP (Chrome DevTools Protocol) and xdotool. The agent can navigate websites, fill forms, click elements, and extract information.
 
-### 🔐 Secure by Default
-- HTTPS with self-signed certificates (auto-generated)
-- Session-based authentication
-- All external services proxied through the FastAPI backend
+### ⭐ Feedback & Self-Improvement
+After every bot response, one-click **👍 👎 ❌ feedback** triggers automatic LLM analysis, generates 3–5 better alternatives, and permanently feeds learning rules into the knowledge base — no manual configuration needed.
+
+### 🧬 Cognitive Evolution
+The **Cognitive Evolution Skill** lets Jarvis improve and extend itself: it analyzes gaps, proposes new skills or code patches, validates them through a second LLM, and applies them — including hot-reloading its own engine without a service restart.
 
 ---
 
@@ -98,53 +129,57 @@ Full browser control via CDP (Chrome DevTools Protocol) and xdotool. The agent c
 
 ```mermaid
 flowchart LR
-    subgraph Browser["🖥️ Browser Client"]
-        Chat["LLM Chat UI\n(WebSocket)"]
-        NOVNC["noVNC :6080\n(Live VNC)"]
-        UI["Settings / Skills\nWhatsApp Logs"]
+    subgraph Clients["📱 Clients"]
+        WebUI["Web UI\n(Browser)"]
+        AndroidApp["Android App"]
+        WindowsApp["Windows App"]
+        WA["WhatsApp"]
     end
 
     subgraph Backend["⚙️ FastAPI Backend :443"]
         Agent["JarvisAgent\n(agent.py)"]
-        SkillsAPI["Skills API\n/api/skills"]
-        WAProxy["WhatsApp Proxy\n_wa_bridge_async()"]
-        SkillMgr["SkillManager\n(skills/*.py)"]
-        Bridge["Baileys Bridge\nNode.js :3001\n(localhost only)"]
+        AgentMgr["AgentManager\n(Multi-Agent)"]
+        SkillsAPI["Skills API"]
+        WAProxy["WhatsApp Proxy"]
+        SkillMgr["SkillManager"]
 
         subgraph Tools["🔧 Tool Layer"]
-            ToolList["shell · desktop · filesystem · screenshot · memory\nknowledge · browser_control · whatsapp · google_apps"]
+            ToolList["shell · desktop · filesystem · screenshot\nknowledge · memory · browser · whatsapp · vision"]
         end
 
-        LLM["LLM Client\n(llm.py)\nMulti-Provider"]
-        VNCServer["x11vnc :5900\n(→ noVNC)"]
-        Xvfb["Xvfb/X11 :1\nOpenbox WM"]
+        LLM["LLM Client\n(Multi-Provider)"]
+        VNCServer["x11vnc :5900\n(→ noVNC :6080)"]
+        Bridge["Baileys Bridge\nNode.js :3001"]
     end
 
-    Chat -->|WSS/HTTPS| Agent
-    NOVNC -->|WSS| Backend
-    UI -->|HTTPS| Backend
+    WebUI -->|WSS/HTTPS| Agent
+    AndroidApp -->|HTTPS| Agent
+    WindowsApp -->|HTTPS| Agent
+    WA --> Bridge --> WAProxy --> Agent
 
-    Agent --> SkillMgr
-    SkillsAPI --> SkillMgr
-    WAProxy --> Bridge
-    SkillMgr --> Tools
+    Agent --> AgentMgr
+    AgentMgr -->|spawns| Agent
+    Agent --> SkillMgr --> Tools
     Agent --> LLM
-    VNCServer --> NOVNC
-    Xvfb --> VNCServer
+    VNCServer --> WebUI
 ```
 
 ### Component Overview
 
 | Component | File | Description |
 |-----------|------|-------------|
-| FastAPI Server | `backend/main.py` | HTTP/WebSocket endpoints, auth, WhatsApp proxy |
-| Agent Loop | `backend/agent.py` | Task execution, tool calling, LLM orchestration |
+| FastAPI Server | `backend/main.py` | HTTP/WebSocket endpoints, auth, AD/LDAP, WhatsApp proxy |
+| Agent Loop | `backend/agent.py` | Task execution, tool calling, LLM orchestration, multimodal |
+| Agent Manager | `backend/agent.py` | Main + sub-agent lifecycle, parallel execution |
 | LLM Client | `backend/llm.py` | Multi-provider abstraction (Gemini, Claude, OpenRouter, Ollama) |
 | Config | `backend/config.py` | Environment + settings.json management |
 | Skill Manager | `backend/skills/manager.py` | Load, enable, disable, configure skills |
 | Tool Base | `backend/tools/base.py` | `BaseTool` class all tools inherit from |
+| Learning | `backend/learning.py` | Feedback processing, self-improvement, knowledge indexing |
 | WhatsApp Bridge | `services/whatsapp-bridge/index.js` | Baileys v7 + Express API |
-| Frontend | `frontend/index.html` + `js/` | Single-page app, no build system required |
+| Frontend | `frontend/index.html` + `js/` | Main SPA — agent chat, settings, VNC |
+| PWA Chat | `frontend/chat.html` + `js/chat.js` | Lightweight PWA chat with history persistence |
+| User Chat | `frontend/userchat.html` + `js/userchat.js` | Multi-user real-time chat with media |
 
 ---
 
@@ -156,15 +191,21 @@ flowchart LR
 | Python | 3.13 | Core runtime |
 | FastAPI | latest | REST API + WebSocket server |
 | uvicorn | latest | ASGI server |
+| ldap3 | latest | Active Directory / LDAP authentication |
 | faster-whisper | latest | Voice transcription (CPU, int8) |
+| pypdf | latest | PDF text extraction |
+| ChromaDB | latest | Vector database for semantic search |
+| sentence-transformers | latest | Multilingual embeddings (MiniLM-L12-v2) |
+| face_recognition | latest | Face detection + recognition (dlib) |
 
 ### Frontend
 | Technology | Purpose |
 |-----------|---------|
-| Vanilla JS | Zero-dependency UI |
+| Vanilla JS | Zero-dependency UI (no build system) |
 | CSS Custom Properties | Dark Glassmorphism theme |
 | WebSocket API | Real-time agent communication |
 | noVNC | In-browser VNC client |
+| Service Worker | PWA offline support |
 
 ### Desktop / System
 | Technology | Purpose |
@@ -173,7 +214,6 @@ flowchart LR
 | Openbox | Lightweight window manager |
 | x11vnc | VNC server for X11 session |
 | websockify | WebSocket-to-TCP proxy (noVNC bridge) |
-| xrdp | RDP access to existing desktop session |
 | xdotool | X11 automation (keyboard, mouse, window management) |
 
 ### WhatsApp
@@ -182,22 +222,6 @@ flowchart LR
 | Node.js 20+ | WhatsApp bridge runtime |
 | Baileys v7 | WhatsApp Web API (no official API required) |
 | Express | HTTP API for bridge ↔ backend communication |
-
----
-
-## Screenshots
-
-### Split View — Chat + Live Desktop
-![Jarvis Split View](https://jarvis-ai.info/img/split_view.png)
-*Left panel: LLM conversation with tool call display. Right panel: Live VNC desktop feed.*
-
-### Settings & Skill Manager
-![Settings](https://jarvis-ai.info/img/settings.png)
-*Enable/disable skills, configure providers, manage API keys — all in the UI.*
-
-### WhatsApp Integration
-![WhatsApp Integration](docs/screenshots/whatsapp.png)
-*Send tasks via WhatsApp text or voice note, receive structured responses.*
 
 ---
 
@@ -214,7 +238,8 @@ sudo apt-get update && sudo apt-get install -y \
   xvfb x11vnc openbox \
   websockify \
   xdotool \
-  ffmpeg  # for audio processing
+  ffmpeg \
+  cmake libboost-all-dev  # required for face_recognition (dlib)
 ```
 
 > **Note:** Node.js 20+ is required. Use [nvm](https://github.com/nvm-sh/nvm) if your distro ships an older version.
@@ -223,8 +248,8 @@ sudo apt-get update && sudo apt-get install -y \
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/dev-core-busy/jarvix.git
-cd jarvix
+git clone https://github.com/dev-core-busy/jarvis.git
+cd jarvis
 
 # 2. Create Python virtual environment
 python3 -m venv venv
@@ -248,7 +273,7 @@ nano .env   # Add your API keys (see Configuration section)
 
 Open your browser at `https://your-server-ip` and log in with `jarvis/jarvis`.
 
-> **Self-signed certificate:** Your browser will warn about the certificate on first visit. This is expected — accept the exception.
+> **Self-signed certificate:** Your browser will warn about the certificate on first visit. This is expected — accept the exception or install the certificate from Settings → SSL.
 
 ### systemd Service (Recommended for Production)
 
@@ -280,7 +305,7 @@ sudo journalctl -u jarvis.service -f
 
 ## Configuration
 
-All configuration lives in `.env` (secrets) and `data/settings.json` (UI-managed settings).
+All configuration lives in `.env` (secrets) and `data/settings.json` (UI-managed settings). Most settings can be changed at runtime via the web UI.
 
 ### `.env` Reference
 
@@ -308,9 +333,44 @@ KNOWLEDGE_DIRS=/data/docs,/home/jarvis/notes  # Watched knowledge folders
 
 ### Switching LLM Providers
 
-Use the Settings panel in the web UI to switch providers and models at runtime — no restart required.
+Use the Settings panel in the web UI to switch providers and models at runtime — no restart required. Multiple profiles can be saved and activated with one click.
 
-For **local Ollama**, make sure Ollama is running (`ollama serve`) and select "Ollama" as provider in the UI.
+---
+
+## Multi-User Chat
+
+The `/userchat` endpoint provides a **real-time P2P chat** between all users currently logged into Jarvis.
+
+### Features
+- **Live presence** — see who's online with colored status dots
+- **Image gallery** — up to 4 images in a grid, tap to open fullscreen lightbox
+- **Audio/Video players** — inline playback directly in the chat bubble
+- **File chips** — PDF and other attachments with download links
+- **Lightbox** — fullscreen image viewer with keyboard navigation (← → Esc) and save button
+- **Context menu** — right-click or long-press (mobile) on any attachment: Save / Forward
+- **Forward** — send any file to another online user with one tap
+- **Emoji reactions** — react to any message
+- **Typing indicators** and read receipts
+
+Attachments are transferred peer-to-peer through the server — Jarvis does **not** analyze them.
+
+---
+
+## Multi-Agent System
+
+Jarvis can spawn **autonomous sub-agents** that work in parallel with the main agent.
+
+```python
+# In a task, the main agent can spawn sub-agents:
+# {"_spawn_agent": true, "label": "Research Agent", "task": "Find all papers about X"}
+```
+
+- Each sub-agent has access to all tools and skills
+- Sub-agents appear as cards in the sidebar (purple = sub-agent, green = main)
+- Real-time streaming output for every agent
+- Sub-agents are fully autonomous — no interruptions or confirmations
+
+This enables patterns like: *"Simultaneously research topic A and B, then merge the results."*
 
 ---
 
@@ -369,16 +429,14 @@ def get_tools(config: dict) -> list:
 |-------|-------------|
 | `browser_control` | CDP + xdotool browser automation |
 | `whatsapp` | Send/receive WhatsApp messages |
-| `google_apps` | Gmail, Calendar, Drive via gog CLI |
+| `vision` | Real-time face recognition (USB/IP camera) |
+| `cognitive_evolution` | Self-improving agent (analyze → propose → validate → apply) |
 | `example_skill` | Template for new skill development |
 
 ### Installing a Skill
 
 1. Place the skill folder under `skills/`
-2. Restart Jarvis or use the Skills API: `POST /api/skills/reload`
-3. Enable in the web UI under Settings → Skills
-
-> **openclaw compatibility:** Skills built for the [openclaw](https://github.com/steipete/gogcli) ecosystem work with Jarvis's skill loader with minimal adaptation.
+2. Enable in the web UI under Settings → Skills (hot-reload, no restart needed)
 
 ---
 
@@ -386,19 +444,9 @@ def get_tools(config: dict) -> list:
 
 > **Jarvis is fully compatible with the [OpenClaw](https://github.com/steipete/gogcli) skill format.**
 
-OpenClaw is a growing ecosystem of AI agent skills. Jarvis can import any OpenClaw skill package directly — just drop the skill folder into `skills/` and it's ready to use.
-
-### Why this matters
-
-| Without OpenClaw | With OpenClaw |
-|---|---|
-| Write every tool from scratch | Reuse existing skills instantly |
-| Limited to built-in capabilities | Access a growing ecosystem |
-| Skills locked to one agent | Skills work across OpenClaw agents |
+OpenClaw is a growing ecosystem of AI agent skills. Jarvis can import any OpenClaw skill package directly.
 
 ### Built-in OpenClaw Skills
-
-Jarvis ships with 3 production-ready OpenClaw skills out of the box:
 
 | Skill | Description |
 |---|---|
@@ -409,21 +457,11 @@ Jarvis ships with 3 production-ready OpenClaw skills out of the box:
 ### Importing an OpenClaw Skill
 
 ```bash
-# 1. Download any OpenClaw-compatible skill package
-# 2. Drop it into the skills/ directory
+# Drop it into the skills/ directory
 cp -r my_openclaw_skill/ skills/
 
-# 3. Reload via API (no restart needed!)
-curl -X POST https://localhost/api/skills/reload
-
-# 4. Enable in UI: Settings → Skills → toggle ON
+# Enable in UI: Settings → Skills → toggle ON
 ```
-
-Or use the **built-in import workflow** in Jarvis:
-```
-Task: "Import the OpenClaw skill from /path/to/skill_package"
-```
-Jarvis handles the rest automatically.
 
 ---
 
@@ -458,9 +496,18 @@ Only numbers listed in `WA_ALLOWED_NUMBERS` can send tasks to Jarvis. Self-chat 
 Drop documents into watched folders and Jarvis can search them during tasks.
 
 ### Supported Formats
-- PDF (`.pdf`)
+- PDF (`.pdf`) — full text extraction
 - Word Documents (`.docx`)
 - Plain Text (`.txt`, `.md`)
+- Any text format
+
+### Search Modes
+
+| Mode | Description |
+|------|-------------|
+| **Auto** | Tries vector search first, falls back to TF-IDF |
+| **TF-IDF** | Fast keyword-based search, works offline |
+| **Vector** | Semantic search via ChromaDB + multilingual embeddings |
 
 ### Configuration
 
@@ -468,15 +515,192 @@ Drop documents into watched folders and Jarvis can search them during tasks.
 KNOWLEDGE_DIRS=/home/jarvis/docs,/opt/company-wiki
 ```
 
-Or configure via the Settings UI. Files are indexed automatically when changed (mtime-based, TF-IDF search index).
+Or configure via the Settings UI. Files are indexed automatically on change.
 
-### Usage
+### Knowledge Editor Permissions
+
+Under **Settings → Security → Active Directory**, you can restrict who is allowed to add, edit, or delete knowledge:
+
+- **Allowed Editors** — comma-separated usernames (e.g. `mueller,schmidt`)
+- **Editor Group** — AD group DN (e.g. `CN=Knowledge-Editors,OU=Groups,DC=firma,DC=local`)
+- Empty = all authenticated users may edit (default)
+- Local admin users are always allowed
+
+---
+
+## Vision & Face Recognition
+
+The optional **Vision Skill** adds real-time face recognition using [face_recognition](https://github.com/ageitgey/face_recognition) (dlib).
+
+### Features
+- Detect and identify faces from USB camera or IP camera (RTSP/HTTP)
+- Per-person configurable actions:
+  - **Webhook** — HTTP POST to any URL
+  - **LLM Prompt** — trigger a Jarvis task (e.g. "Greet {name} and unlock the door")
+  - **Log only** — silent event log
+- Configurable tolerance (0.0–1.0) and cooldown per person
+- Training via the Settings UI — upload photos per person
+- Supports HOG (fast, CPU) and CNN (accurate, GPU) detection models
+
+### Setup
+1. Enable the Vision Skill in Settings → Skills
+2. Add people in Settings → Vision → Profiles
+3. Upload training photos and click "Train"
+4. Configure actions per profile
+5. Start the camera feed
+
+---
+
+## AD/LDAP & Security
+
+### Active Directory / LDAP Login
+
+Jarvis supports domain logins without joining the domain — the server only needs network access to the Domain Controller.
 
 ```
-"Summarize the onboarding document from my docs folder"
-"What does our Q3 report say about marketing spend?"
-"Find all mentions of 'deployment procedure' in the knowledge base"
+Settings → Security → Active Directory / LDAP
 ```
+
+| Field | Description |
+|-------|-------------|
+| Domain Controller | IP or hostname of your DC |
+| Domain | e.g. `firma.local` |
+| Allowed Users | Comma-separated whitelist (empty = all AD users) |
+| Allowed Group | AD group DN — takes precedence over user list |
+| Allowed Editors | Who may edit the knowledge base |
+| Editor Group | AD group for knowledge editors |
+
+- TLS / StartTLS is attempted automatically
+- Group membership is checked and cached at login time
+- Local admin accounts are always accessible regardless of AD config
+
+### Two-Factor Authentication (TOTP)
+
+Every user can enable 2FA via **Settings → Security → 2FA** (Google Authenticator, Authy, or any TOTP app compatible with RFC 6238).
+
+### Password Management
+
+Local users can change their password via **Settings → Security → Change Password**.
+
+---
+
+## Multimedia Attachments
+
+All Jarvis chat interfaces support rich file attachments.
+
+### Main Chat (`/`)
+
+| File Type | LLM Handling |
+|-----------|-------------|
+| Images (JPG, PNG, GIF, WebP, …) | Sent directly to LLM as vision input |
+| Audio (MP3, WAV, OGG, M4A, …) | Transcribed via Whisper, text sent to LLM |
+| Video (MP4, WebM, …) | Audio track transcribed via Whisper |
+| PDF | Text extracted via pypdf, injected as context |
+
+Supports all major LLM providers:
+- **Gemini**: native multimodal (images sent as bytes)
+- **Claude/Anthropic**: images as base64 content blocks
+- **OpenAI-compatible**: images as `image_url` content blocks
+
+### PWA Chat (`/chat`)
+
+Full attachment support with **chat history persistence** (localStorage, last 120 messages). History is restored on next login with date separators and session markers.
+
+### User Chat (`/userchat`)
+
+Attachments are transferred as-is between users — the LLM is not involved. Images appear in a gallery grid, audio/video as inline players, PDFs/files as download chips.
+
+**Attach UI features:**
+- Drag & Drop onto the message area
+- Preview bar with thumbnail chips before sending
+- Toast notification for unsupported formats
+- Right-click / long-press context menu on received files: **Save** or **Forward**
+- Lightbox with keyboard navigation (← → Esc)
+
+---
+
+## Feedback & Self-Improvement
+
+After every Jarvis response, **👍 👎 ❌ feedback buttons** appear inline:
+
+| Rating | Effect |
+|--------|--------|
+| 👍 Positive | Logged as positive example |
+| 👎 Negative | LLM analyzes response, generates 3–5 better alternatives, derives learning rule |
+| ❌ Wrong | Same as negative + marks as factually incorrect |
+
+Learning rules are stored in the knowledge base and influence future responses immediately — no retraining, no manual configuration.
+
+Available in: Web Chat, Android App, iOS PWA, Windows App.
+
+---
+
+## Cognitive Evolution
+
+The **Cognitive Evolution Skill** (`skills/cognitive_evolution/`) gives Jarvis the ability to extend and improve itself through a structured 4-phase cycle:
+
+```
+Analyze → Propose → Validate → Apply
+```
+
+| Tool | Description |
+|------|-------------|
+| `evolution_analyze` | Identifies gaps and plans the required change |
+| `evolution_propose` | Generates code (new skill or patch), saves as proposal |
+| `evolution_validate` | Syntax check + independent LLM security review |
+| `evolution_apply` | Writes files, hot-reloads skills, updates engine |
+| `evolution_cycle` | Runs all 4 phases via autonomous sub-agent |
+
+### What it can do
+
+- **Write new skills** — generates `skill.json` + `main.py`, activates them at runtime
+- **Patch itself** — rewrites `engine.py` and reloads it via `importlib.reload()` without restart
+- **Fix backend code** — delegates to the existing ReflectionTool (backup + LLM validation)
+- **Update instructions** — modifies Jarvis's behavioral instruction files
+
+### Safety
+
+- Every proposal is validated by `py_compile` (syntax) and a second independent LLM
+- Backups are created before any file is overwritten
+- Skills are isolated in `skills/` — the core backend is only touched via explicit `code_fix` scope
+- The skill is **disabled by default** — enable manually in Settings → Skills
+
+---
+
+## Client Apps
+
+### Android App
+
+A native Android app is included under `android/`. Features:
+- Full Jarvis chat with streaming responses
+- Attachment support (images, audio, video, PDF)
+- 👍👎❌ feedback
+- Push notifications (optional)
+- Domain login (AD/LDAP supported)
+
+Build: open `android/` in Android Studio and run.
+
+### Windows App (Go)
+
+A lightweight Windows desktop client is included under `windows-app-go/`. Features:
+- System tray integration
+- Native WebView-based chat UI
+- Auto-update support
+- Runs as a background service
+
+Build:
+```bash
+cd windows-app-go
+bash build.sh
+```
+
+### iOS / PWA
+
+No native iOS app is required. Open `https://your-server/chat` in Safari → Add to Home Screen. The PWA supports:
+- Offline-capable (Service Worker)
+- Chat history persistence
+- Microphone input (Web Speech API)
+- File attachments
 
 ---
 
@@ -484,38 +708,71 @@ Or configure via the Settings UI. Files are indexed automatically when changed (
 
 The FastAPI backend exposes a REST + WebSocket API. Interactive docs available at `https://your-server/docs`.
 
+### Authentication
+
+All API calls require a Bearer token obtained via `/api/login`:
+
+```bash
+curl -s -X POST https://your-server/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"jarvis","password":"jarvis"}' | jq .token
+```
+
 ### Key Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/task` | Run a task (non-streaming) |
-| `WS` | `/ws` | WebSocket for streaming agent output |
+| `POST` | `/api/login` | Authenticate, get Bearer token |
+| `WS` | `/ws` | WebSocket — agent streaming, multi-user chat |
 | `GET` | `/api/skills` | List all skills with status |
 | `POST` | `/api/skills/{name}/enable` | Enable a skill |
 | `POST` | `/api/skills/{name}/disable` | Disable a skill |
-| `POST` | `/api/skills/{name}/config` | Update skill configuration |
+| `GET` | `/api/knowledge/files` | List indexed knowledge files |
+| `POST` | `/api/knowledge/upload` | Upload file to knowledge base |
+| `PUT` | `/api/knowledge/file_write` | Edit a knowledge file |
+| `DELETE` | `/api/knowledge/files` | Delete a knowledge file |
+| `POST` | `/api/knowledge/extract` | Extract knowledge from URL |
 | `GET` | `/api/wa/logs` | WhatsApp message logs |
-| `POST` | `/api/wa/send` | Send a WhatsApp message |
+| `GET` | `/api/auth/ad_status` | Active Directory configuration + status |
+| `POST` | `/api/feedback` | Submit response feedback |
 | `GET` | `/api/memory` | Read persistent memory |
 | `POST` | `/api/memory` | Write to persistent memory |
 
 ### WebSocket Protocol
 
 ```javascript
-// Connect
 const ws = new WebSocket('wss://your-server/ws');
 
-// Send a task
+// Run an agent task
 ws.send(JSON.stringify({
   type: 'task',
-  content: 'Take a screenshot of the current desktop'
+  text: 'Take a screenshot of the current desktop',
+  token: 'your-bearer-token',
+  lang: 'de',  // optional: 'de' or 'en'
+  attachments: [  // optional
+    { name: 'photo.jpg', mime_type: 'image/jpeg', data: '<base64>' }
+  ]
 }));
 
-// Receive streaming output
+// Receive messages
 ws.onmessage = (event) => {
   const msg = JSON.parse(event.data);
-  // msg.type: 'token' | 'tool_call' | 'tool_result' | 'done' | 'error'
+  // msg.type: 'status' | 'agent_event' | 'llm_stats' | 'agent_list' | 'dm'
+  // msg.highlight: true → LLM response text
+  // msg.agent_id: which agent sent this
 };
+
+// User-to-user DM
+ws.send(JSON.stringify({
+  type: 'dm',
+  to: 'other_user',
+  text: 'Hello!',
+  token: 'your-bearer-token',
+  attachments: []  // optional
+}));
+
+// Stop running agent
+ws.send(JSON.stringify({ type: 'control', action: 'stop', token: '...' }));
 ```
 
 ---
@@ -526,7 +783,7 @@ Contributions are very welcome! Here's how to get involved:
 
 ### 🐛 Reporting Bugs
 
-Open an issue at [github.com/dev-core-busy/jarvix/issues](https://github.com/dev-core-busy/jarvix/issues) and include:
+Open an issue at [github.com/dev-core-busy/jarvis/issues](https://github.com/dev-core-busy/jarvis/issues) and include:
 - Your OS and Python version
 - Steps to reproduce
 - Expected vs actual behavior
@@ -552,6 +809,7 @@ Open an issue with the `enhancement` label. Describe the use case, not just the 
 - **Frontend:** Pure Vanilla JS, no frameworks, no build system
 - **Secrets:** Never commit `.env` files or API keys
 - **numpy:** Must stay `< 2.1` (VM lacks SSE4.2 / x86-v2 support)
+- **Existing files:** Always use Edit (targeted diff) — never overwrite with Write (risk of 0-byte files)
 
 ### Writing a New Skill
 
@@ -560,11 +818,9 @@ The fastest way to contribute is building a new skill. Use `skills/example_skill
 ```bash
 cp -r skills/example_skill skills/my_new_skill
 # Edit skill.json and main.py
-# Test locally
+# Enable in Settings → Skills
 # Submit PR!
 ```
-
-Check the [Skill Development Guide](docs/skill_development.md) for detailed instructions.
 
 ---
 
@@ -577,15 +833,19 @@ Jarvis is built on the shoulders of excellent open-source projects:
 | FastAPI | MIT | https://github.com/tiangolo/fastapi |
 | uvicorn | BSD-3-Clause | https://github.com/encode/uvicorn |
 | python-dotenv | BSD-3-Clause | https://github.com/theskumar/python-dotenv |
+| ldap3 | LGPL-3.0 | https://github.com/cannatag/ldap3 |
 | Baileys (WhatsApp) | MIT | https://github.com/WhiskeySockets/Baileys |
 | faster-whisper | MIT | https://github.com/SYSTRAN/faster-whisper |
+| pypdf | BSD-3-Clause | https://github.com/py-pdf/pypdf |
+| ChromaDB | Apache-2.0 | https://github.com/chroma-core/chroma |
+| sentence-transformers | Apache-2.0 | https://github.com/UKPLab/sentence-transformers |
+| face_recognition | MIT | https://github.com/ageitgey/face_recognition |
 | noVNC | MPL-2.0 | https://github.com/novnc/noVNC |
 | websockify | LGPL-3.0 | https://github.com/novnc/websockify |
 | xdotool | MIT | https://github.com/jordansissel/xdotool |
 | openclaw/gog CLI | MIT | https://github.com/steipete/gogcli |
 | Openbox | GPL-2.0 | http://openbox.org |
 | x11vnc | GPL-2.0 | https://github.com/LibVNC/x11vnc |
-| xrdp | Apache-2.0 | https://github.com/neutrinolabs/xrdp |
 
 Full license texts are included in the `LICENSES/` directory.
 

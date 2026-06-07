@@ -40,7 +40,7 @@
             <form id="login-form" class="login-form">
                 <div class="form-group" style="text-align:left;margin-bottom:14px;">
                     <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;" data-i18n="login.username.label">BENUTZERNAME</label>
-                    <input type="text" id="login-username" placeholder="Benutzername" data-i18n-placeholder="login.username.ph"
+                    <input type="text" id="login-username" name="username" placeholder="Benutzername" data-i18n-placeholder="login.username.ph"
                         autocomplete="username" required
                         style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
                         onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(99,102,241,0.2)'"
@@ -49,7 +49,7 @@
                 <div class="form-group" style="text-align:left;margin-bottom:20px;">
                     <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;" data-i18n="login.password.label">KENNWORT</label>
                     <div style="position:relative;">
-                        <input type="password" id="login-password" placeholder="Kennwort" data-i18n-placeholder="login.password.ph"
+                        <input type="password" id="login-password" name="password" placeholder="Kennwort" data-i18n-placeholder="login.password.ph"
                             autocomplete="current-password" required
                             style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 42px 11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
                             onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(99,102,241,0.2)'"
@@ -1926,7 +1926,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/telemetry.js?v=4"></script>
-    <script src="/static/js/app.js?v=90"></script>
+    <script src="/static/js/app.js?v=91"></script>
 </body>
 
 </html>

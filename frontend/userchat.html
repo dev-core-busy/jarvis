@@ -690,6 +690,11 @@
                     <polyline points="9 22 9 12 15 12 15 22"/>
                 </svg>
             </a>
+            <button class="btn-theme" id="btn-uc-issues" title="Issues / Feedback" onclick="window.JarvisIssues && window.JarvisIssues.open()">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+            </button>
             <script>
                 // Back-Link je nach Herkunft setzen:
                 //   ?from=main → /            (Jarvis Hauptseite)
@@ -818,6 +823,7 @@
 </div>
 
 <script src="/static/js/i18n.js?v=8"></script>
+<script src="/static/js/issues.js?v=1"></script>
 <script src="/static/js/userchat.js?v=8"></script>
 </body>
 </html>

@@ -134,6 +134,9 @@ func main() {
 		func() { // Einstellungen
 			showSettingsWindow(ja.fyneApp, ja, func() { ja.reconnect(); ja.refreshChatWindow() })
 		},
+		func() { // Issues / Feedback
+			ShowIssuesWindow(ja)
+		},
 		func() { // Beenden
 			ja.shutdown()
 		},

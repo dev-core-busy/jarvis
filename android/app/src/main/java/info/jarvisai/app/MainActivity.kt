@@ -15,6 +15,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
 import info.jarvisai.app.ui.chat.ChatScreen
+import info.jarvisai.app.ui.issues.IssuesScreen
 import info.jarvisai.app.ui.settings.SettingsScreen
 import info.jarvisai.app.ui.theme.JarvisTheme
 
@@ -64,11 +65,17 @@ private fun JarvisNavGraph() {
     NavHost(navController = navController, startDestination = "chat") {
         composable("chat") {
             ChatScreen(
-                onOpenSettings = { navController.navigate("settings") }
+                onOpenSettings = { navController.navigate("settings") },
+                onOpenIssues = { navController.navigate("issues") },
             )
         }
         composable("settings") {
             SettingsScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable("issues") {
+            IssuesScreen(
                 onBack = { navController.popBackStack() }
             )
         }

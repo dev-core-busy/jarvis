@@ -145,6 +145,7 @@ const (
 	menuIDSettings = uintptr(1002)
 	menuIDDebug    = uintptr(1003)
 	menuIDQuit     = uintptr(1004)
+	menuIDIssues   = uintptr(1005)
 
 )
 
@@ -305,6 +306,7 @@ var (
 	trayCallbacks struct {
 		onMode     func()
 		onSettings func()
+		onIssues   func()
 		onQuit     func()
 		dialogMode func() bool
 	}
@@ -314,9 +316,10 @@ var (
 )
 
 // StartNativeSysTray startet das System-Tray in einem eigenen OS-Thread.
-func StartNativeSysTray(onMode, onSettings, onQuit func(), dialogMode func() bool) {
+func StartNativeSysTray(onMode, onSettings, onIssues, onQuit func(), dialogMode func() bool) {
 	trayCallbacks.onMode = onMode
 	trayCallbacks.onSettings = onSettings
+	trayCallbacks.onIssues = onIssues
 	trayCallbacks.onQuit = onQuit
 	trayCallbacks.dialogMode = dialogMode
 
@@ -450,10 +453,12 @@ func showTrayContextMenu(hwnd uintptr) {
 	}
 	modeLabelPtr, _ := syscall.UTF16PtrFromString(modeLabel)
 	settingsPtr, _ := syscall.UTF16PtrFromString("⚙  Einstellungen")
+	issuesPtr, _ := syscall.UTF16PtrFromString("🐞  Issues / Feedback")
 	quitPtr, _ := syscall.UTF16PtrFromString("✕  Beenden")
 
 	pAppendMenuW.Call(hMenu, mfString, menuIDMode, uintptr(unsafe.Pointer(modeLabelPtr)))
 	pAppendMenuW.Call(hMenu, mfString, menuIDSettings, uintptr(unsafe.Pointer(settingsPtr)))
+	pAppendMenuW.Call(hMenu, mfString, menuIDIssues, uintptr(unsafe.Pointer(issuesPtr)))
 	pAppendMenuW.Call(hMenu, mfSeparator, 0, 0)
 	pAppendMenuW.Call(hMenu, mfString, menuIDQuit, uintptr(unsafe.Pointer(quitPtr)))
 
@@ -475,6 +480,10 @@ func showTrayContextMenu(hwnd uintptr) {
 		}
 	case menuIDSettings:
 		if cb := trayCallbacks.onSettings; cb != nil {
+			go cb()
+		}
+	case menuIDIssues:
+		if cb := trayCallbacks.onIssues; cb != nil {
 			go cb()
 		}
 	case menuIDQuit:

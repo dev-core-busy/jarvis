@@ -689,6 +689,15 @@
     }
 
     // ─── Date Separator ─────────────────────────────────────────
+    function _dateLabel(str) {
+        const fmt = d => d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' });
+        const todayStr = fmt(new Date());
+        const yesterStr = fmt(new Date(Date.now() - 86400000));
+        if (str === todayStr)   return 'Heute';
+        if (str === yesterStr)  return 'Gestern';
+        return str;
+    }
+
     function maybeAddDateSep() {
         const today = new Date().toLocaleDateString('de-DE', {
             day: '2-digit', month: '2-digit', year: 'numeric'
@@ -698,7 +707,7 @@
 
         const sep = document.createElement('div');
         sep.className = 'date-sep';
-        sep.innerHTML = `<span>${today}</span>`;
+        sep.innerHTML = `<span>${_dateLabel(today)}</span>`;
         messagesEl.appendChild(sep);
     }
 
@@ -951,7 +960,7 @@
                 restoredDate = entry.date;
                 const sep = document.createElement('div');
                 sep.className = 'date-sep';
-                sep.innerHTML = `<span>${entry.date}</span>`;
+                sep.innerHTML = `<span>${_dateLabel(entry.date)}</span>`;
                 messagesEl.appendChild(sep);
             }
 
@@ -980,28 +989,124 @@
         return d.innerHTML;
     }
 
-    /** Einfaches Markdown → HTML: **bold**, *italic*, `code`, ```pre``` */
+    /** Vollständiges Markdown → HTML:
+     *  Überschriften (#–####), Listen (- / 1.), Blockquotes (>), Links,
+     *  Tabellen, **bold**, *italic*, ~~del~~, `code`, ```block``` */
     function renderMarkdown(text) {
-        let html = escapeHtml(text);
+        const _E = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-        // Code-Blöcke (```)
-        html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-            return `<pre><code>${code.trim()}</code></pre>`;
+        // 1) Code-Blöcke extrahieren (vor HTML-Escape)
+        const codeBlocks = [];
+        let s = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+            const idx = codeBlocks.length;
+            codeBlocks.push(`<pre><code>${_E(code.trim())}</code></pre>`);
+            return `\x01CODE${idx}\x01`;
         });
 
-        // Inline-Code
-        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+        // 2) HTML escapen
+        s = _E(s);
 
-        // Bold
-        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        // 3) Inline-Code
+        s = s.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
 
-        // Italic
-        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        // 4) Inline-Formatter (bold, italic, links, del)
+        function _inline(t) {
+            t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+            t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+            t = t.replace(/_([^_\n]+)_/g, '<em>$1</em>');
+            t = t.replace(/~~(.+?)~~/g, '<del>$1</del>');
+            t = t.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_, title, url) => {
+                const raw = url.replace(/&amp;/g,'&');
+                const safe = /^https?:\/\/|^\//.test(raw) ? raw : '#';
+                return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${title}</a>`;
+            });
+            return t;
+        }
 
-        // Newlines
-        html = html.replace(/\n/g, '<br>');
+        // 5) Zeilenweise Block-Elemente verarbeiten
+        const lines = s.split('\n');
+        const out = [];
+        let i = 0;
 
-        return html;
+        while (i < lines.length) {
+            const l = lines[i];
+
+            // Heading (#, ##, ###, ####)
+            const hm = l.match(/^(#{1,4}) (.+)/);
+            if (hm) {
+                out.push(`<h${hm[1].length}>${_inline(hm[2])}</h${hm[1].length}>`);
+                i++; continue;
+            }
+
+            // Horizontale Linie
+            if (/^---+$/.test(l.trim())) {
+                out.push('<hr>');
+                i++; continue;
+            }
+
+            // Blockquote (&gt; wegen HTML-Escape)
+            if (l.startsWith('&gt; ')) {
+                out.push(`<blockquote>${_inline(l.slice(5))}</blockquote>`);
+                i++; continue;
+            }
+
+            // Unordered list (-, *, +)
+            if (/^[ \t]*[-*+] /.test(l)) {
+                const items = [];
+                while (i < lines.length && /^[ \t]*[-*+] /.test(lines[i])) {
+                    items.push(`<li>${_inline(lines[i].replace(/^[ \t]*[-*+] /, ''))}</li>`);
+                    i++;
+                }
+                out.push(`<ul>${items.join('')}</ul>`);
+                continue;
+            }
+
+            // Ordered list (1. 2. …)
+            if (/^[ \t]*\d+\. /.test(l)) {
+                const items = [];
+                while (i < lines.length && /^[ \t]*\d+\. /.test(lines[i])) {
+                    items.push(`<li>${_inline(lines[i].replace(/^[ \t]*\d+\. /, ''))}</li>`);
+                    i++;
+                }
+                out.push(`<ol>${items.join('')}</ol>`);
+                continue;
+            }
+
+            // Tabelle (|col|col|)
+            if (l.includes('|') && i + 1 < lines.length && /^\|?[\s\-:|]+\|/.test(lines[i+1])) {
+                const tblLines = [];
+                while (i < lines.length && lines[i].includes('|')) {
+                    tblLines.push(lines[i]); i++;
+                }
+                if (tblLines.length >= 2) {
+                    const heads = tblLines[0].split('|').map(c=>c.trim()).filter(Boolean);
+                    const rows  = tblLines.slice(2).map(r => r.split('|').map(c=>c.trim()).filter(Boolean));
+                    let tbl = '<table><thead><tr>' + heads.map(h=>`<th>${_inline(h)}</th>`).join('') + '</tr></thead><tbody>';
+                    rows.forEach(r => { tbl += '<tr>' + r.map(c=>`<td>${_inline(c)}</td>`).join('') + '</tr>'; });
+                    tbl += '</tbody></table>';
+                    out.push(tbl);
+                    continue;
+                }
+            }
+
+            // Leerzeile
+            if (!l.trim()) {
+                if (out.length && out[out.length-1] !== '<br>') out.push('<br>');
+                i++; continue;
+            }
+
+            // Normaler Text
+            out.push(_inline(l) + '<br>');
+            i++;
+        }
+
+        // 6) Zusammenführen + Code-Blöcke wiederherstellen
+        let result = out.join('')
+            .replace(/\x01CODE(\d+)\x01/g, (_, n) => codeBlocks[+n]);
+        // Führende/nachfolgende <br> entfernen
+        result = result.replace(/^(<br>)+/, '').replace(/(<br>)+$/, '');
+        return result;
     }
 
     // ═════════════════════════════════════════════════════════════

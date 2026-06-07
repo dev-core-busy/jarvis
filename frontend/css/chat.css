@@ -279,8 +279,11 @@ body {
 }
 
 /* ─── Col (flex-child der Row) ───────────────────────────────── */
-.msg-row > div {
-    max-width: min(300px, 80%);
+.msg-row.user > div {
+    max-width: min(420px, 85%);
+}
+.msg-row.bot > div {
+    max-width: 90%;
 }
 
 /* ─── Bubble ─────────────────────────────────────────────────── */
@@ -373,6 +376,78 @@ body {
 .msg-bubble pre code {
     background: none;
     padding: 0;
+}
+
+/* ─── Markdown: Überschriften ────────────────────────────────── */
+.msg-bubble h1 { font-size: 1.25em; font-weight: 700; margin: 10px 0 4px; line-height: 1.3; }
+.msg-bubble h2 { font-size: 1.15em; font-weight: 700; margin: 8px 0 4px; line-height: 1.3; }
+.msg-bubble h3 { font-size: 1.05em; font-weight: 600; margin: 7px 0 3px; line-height: 1.3; }
+.msg-bubble h4 { font-size: 1em;    font-weight: 600; margin: 6px 0 3px; line-height: 1.3; }
+.msg-bubble h1:first-child,
+.msg-bubble h2:first-child,
+.msg-bubble h3:first-child,
+.msg-bubble h4:first-child { margin-top: 0; }
+
+/* ─── Markdown: Listen ───────────────────────────────────────── */
+.msg-bubble ul, .msg-bubble ol {
+    padding-left: 20px;
+    margin: 4px 0;
+}
+.msg-bubble li { margin: 2px 0; line-height: 1.5; }
+.msg-bubble ul li { list-style-type: disc; }
+.msg-bubble ol li { list-style-type: decimal; }
+
+/* ─── Markdown: Blockquote ───────────────────────────────────── */
+.msg-bubble blockquote {
+    border-left: 3px solid var(--purple);
+    padding: 4px 10px;
+    margin: 6px 0;
+    color: var(--muted);
+    font-style: italic;
+    border-radius: 0 4px 4px 0;
+    background: rgba(155,89,182,0.06);
+}
+
+/* ─── Markdown: Links ────────────────────────────────────────── */
+.msg-bubble a {
+    color: var(--purple-light);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    word-break: break-all;
+}
+.msg-bubble a:hover { opacity: .8; }
+
+/* ─── Markdown: Trennlinie ───────────────────────────────────── */
+.msg-bubble hr {
+    border: none;
+    border-top: 1px solid var(--outline);
+    margin: 8px 0;
+}
+
+/* ─── Markdown: Durchgestrichen ─────────────────────────────── */
+.msg-bubble del { text-decoration: line-through; opacity: .7; }
+
+/* ─── Markdown: Tabelle ──────────────────────────────────────── */
+.msg-bubble table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+    margin: 8px 0;
+    overflow-x: auto;
+    display: block;
+}
+.msg-bubble th, .msg-bubble td {
+    border: 1px solid var(--outline);
+    padding: 5px 10px;
+    text-align: left;
+    white-space: nowrap;
+}
+.msg-bubble th {
+    background: rgba(155,89,182,0.12);
+    font-weight: 600;
+}
+.msg-bubble tr:nth-child(even) td {
+    background: rgba(255,255,255,0.03);
 }
 
 /* ─── Date Separator ─────────────────────────────────────────── */

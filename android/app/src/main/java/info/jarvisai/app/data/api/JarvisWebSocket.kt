@@ -86,6 +86,23 @@ class JarvisWebSocket @Inject constructor(
         ws?.send(payload) ?: Log.w(TAG, "sendTask: WebSocket nicht verbunden")
     }
 
+    /**
+     * Sendet eine bearbeitete User-Nachricht. Das Backend trimmt die History
+     * auf die ersten [truncateUserMsgIndex] User-Nachrichten und generiert die
+     * Antwort neu. [truncateUserMsgIndex] ist 0-basiert (zählt nur USER-Rollen).
+     */
+    fun sendTaskWithTruncate(text: String, truncateUserMsgIndex: Int, agentId: String = "", lang: String = "de") {
+        val payload = buildJsonObject {
+            put("type", "task")
+            put("text", text)
+            put("token", apiKey)
+            put("lang", lang)
+            put("truncate_user_msg_index", truncateUserMsgIndex)
+            if (agentId.isNotBlank()) put("agent_id", agentId)
+        }.toString()
+        ws?.send(payload) ?: Log.w(TAG, "sendTaskWithTruncate: WebSocket nicht verbunden")
+    }
+
     fun sendStop(agentId: String = "") {
         val obj = buildJsonObject {
             put("type", "control")

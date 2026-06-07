@@ -274,6 +274,8 @@ fun ChatScreen(
                             onLongPress = { viewModel.enterSelectionMode(msg.id) },
                             onTap = { viewModel.toggleSelection(msg.id) },
                             onFeedback = { rating -> viewModel.sendFeedback(msg, rating) },
+                            onEdit = { newText -> viewModel.editUserMessage(msg.id, newText) },
+                            lang = settings.uiLang,
                         )
                     }
                 }
@@ -470,8 +472,23 @@ fun MessageBubble(
     onLongPress: () -> Unit = {},
     onTap: () -> Unit = {},
     onFeedback: (String) -> Unit = {},
+    onEdit: (String) -> Unit = {},
+    lang: String = "de",
 ) {
     val isUser = msg.role == MessageRole.USER
+    var showEditDialog by remember(msg.id) { mutableStateOf(false) }
+
+    if (showEditDialog) {
+        EditMessageDialog(
+            initialText = msg.text,
+            lang = lang,
+            onDismiss = { showEditDialog = false },
+            onSave = { newText ->
+                showEditDialog = false
+                onEdit(newText)
+            },
+        )
+    }
 
     // Auswahl-Hintergrund wenn markiert
     val rowBg = if (selected) JarvisPurple.copy(alpha = 0.15f) else Color.Transparent
@@ -562,12 +579,31 @@ fun MessageBubble(
             val timeStr = remember(msg.timestamp) {
                 SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp))
             }
-            Text(
-                text = timeStr,
-                color = Color.White.copy(alpha = 0.35f),
-                fontSize = 10.sp,
+            // Zeit + (bei User) Edit-Icon in einer Zeile
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 2.dp),
-            )
+            ) {
+                if (isUser && !selectionMode) {
+                    IconButton(
+                        onClick = { showEditDialog = true },
+                        modifier = Modifier.size(20.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Edit,
+                            contentDescription = s("Nachricht bearbeiten", "Edit message", lang),
+                            tint = Color.White.copy(alpha = 0.55f),
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                Text(
+                    text = timeStr,
+                    color = Color.White.copy(alpha = 0.35f),
+                    fontSize = 10.sp,
+                )
+            }
             Surface(
                 shape = RoundedCornerShape(
                     topStart = if (isUser) 18.dp else 4.dp,
@@ -633,6 +669,68 @@ fun MessageBubble(
     if (!isUser && !msg.isStreaming && !debugMode && msg.text.isNotBlank()) {
         FeedbackRow(onFeedback = onFeedback)
     }
+}
+
+@Composable
+private fun EditMessageDialog(
+    initialText: String,
+    lang: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(initialText) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = s("Nachricht bearbeiten", "Edit message", lang),
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 120.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = JarvisPurple,
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
+                    cursorColor = JarvisPurple,
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val trimmed = text.trim()
+                    if (trimmed.isNotBlank() && trimmed != initialText.trim()) {
+                        onSave(trimmed)
+                    } else {
+                        onDismiss()
+                    }
+                },
+            ) {
+                Text(
+                    text = s("Speichern", "Save", lang),
+                    color = JarvisPurple,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    text = s("Abbrechen", "Cancel", lang),
+                    color = Color.White.copy(alpha = 0.7f),
+                )
+            }
+        },
+        containerColor = Color(0xFF1A1A2E),
+    )
 }
 
 @Composable

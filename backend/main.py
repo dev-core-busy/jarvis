@@ -1507,6 +1507,86 @@ async def api_context_clear(user: str = Depends(require_auth)):
     return JSONResponse({"ok": True, "cleared": len(history)})
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# PROTOCOL: truncate_user_msg_index — "Nachricht editieren"-Feature
+# ────────────────────────────────────────────────────────────────────────────
+# Alle Chat-Clients (Web, Android, Windows) MUESSEN den folgenden Algorithmus
+# IDENTISCH umsetzen, damit Backend-History, lokale History und sichtbare UI
+# konsistent bleiben:
+#
+#   1. Index ermitteln: position der editierten Nachricht innerhalb der
+#      User-Rollen (0-basiert, nur Rolle=="user" zaehlen).
+#   2. UI: alle Nachrichten NACH der editierten Bubble entfernen.
+#   3. Lokale History: auf die ersten (userIndex+1) User-Eintraege kuerzen
+#      und Text der editierten Nachricht ersetzen.
+#   4. WS-Nachricht senden:
+#        { "type":"task", "text": neuerText, "token": ...,
+#          "truncate_user_msg_index": userIndex, "lang": ... }
+#   5. Backend trimmt seine `_user_histories[user]` via
+#      `_truncate_history_to_user_index(history, userIndex)` BEVOR die
+#      neue (editierte) Frage angehaengt und das LLM erneut aufgerufen wird.
+#
+# Implementierungen (bei Protokoll-Aenderungen alle synchron halten!):
+#   - frontend/js/chatlib.js   :: truncateHistoryToUserIndex + submitEdit
+#   - frontend/js/app.js       :: _submitEdit (Hauptseite)
+#   - frontend/js/chat.js      :: _submitEdit (Chat-Standalone / PWA)
+#   - windows-app-go/chat.go   :: editUserMessageAt
+#   - windows-app-go/ws_client.go :: SendTaskWithTruncate
+#   - android/.../ChatRepository.kt :: editUserMessage
+#   - android/.../JarvisWebSocket.kt :: sendTaskWithTruncate
+# ════════════════════════════════════════════════════════════════════════════
+def _truncate_history_to_user_index(history: list, keep_user_count: int) -> int:
+    """
+    Trimmt die Chat-History des Backends so, dass die ersten `keep_user_count`
+    User-Nachrichten (inkl. ihrer Antworten) erhalten bleiben und alles danach
+    entfernt wird.
+
+    Beispiel:
+        history = [user0, model0, user1, model1, user2, model2]
+        keep_user_count = 1 → [user0, model0]
+        keep_user_count = 2 → [user0, model0, user1, model1]
+        keep_user_count = 0 → []  (alles löschen)
+
+    Rückgabe: Anzahl der entfernten Einträge.
+    """
+    if not history or keep_user_count < 0:
+        return 0
+    user_seen = 0
+    cut_at = len(history)
+    for idx, entry in enumerate(history):
+        role = getattr(entry, "role", None)
+        if role == "user":
+            if user_seen == keep_user_count:
+                cut_at = idx
+                break
+            user_seen += 1
+    removed = len(history) - cut_at
+    if removed > 0:
+        del history[cut_at:]
+    return removed
+
+
+@app.post("/api/context/truncate")
+async def api_context_truncate(request: Request, user: str = Depends(require_auth)):
+    """
+    Trimmt die Chat-History des Users auf die ersten N User-Nachrichten.
+    Wird für das 'Nachricht editieren'-Feature genutzt: bevor die editierte
+    Frage gesendet wird, löscht der Client alles ab dem Edit-Punkt.
+
+    Body: { "keep_user_count": int }
+    """
+    body = await request.json()
+    keep = int(body.get("keep_user_count", 0))
+    agent = agent_manager.main_agent
+    if not agent:
+        return JSONResponse({"ok": True, "removed": 0, "remaining": 0})
+    history = agent._user_histories.get(user)
+    if history is None:
+        return JSONResponse({"ok": True, "removed": 0, "remaining": 0})
+    removed = _truncate_history_to_user_index(history, keep)
+    return JSONResponse({"ok": True, "removed": removed, "remaining": len(history)})
+
+
 @app.post("/api/context/threshold")
 async def api_context_threshold(request: Request, user: str = Depends(require_auth)):
     """Setzt den Komprimierungs-Schwellwert (Anzahl History-Einträge)."""
@@ -4452,6 +4532,28 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
 
         agent = agent_manager.get_or_create_main()
         agent_instance = agent  # Kompatibilitaet
+
+        # ── Edit-Modus: vor neuem Task History trimmen ─────────────────
+        # Wenn das Frontend eine editierte Nachricht sendet, kommt
+        # `truncate_user_msg_index` mit der Anzahl der zu behaltenden
+        # User-Nachrichten. Alles danach (inkl. der vorherigen Antworten)
+        # wird gelöscht, bevor die neue (editierte) Frage gestellt wird.
+        _trunc = msg.get("truncate_user_msg_index")
+        if _trunc is not None and not (target_agent_id and agent_manager.get_agent(target_agent_id)):
+            try:
+                _keep = int(_trunc)
+                _user_key = _get_ws_username(ws) or "anonymous"
+                _hist = agent._user_histories.get(_user_key)
+                if _hist is not None:
+                    _removed = _truncate_history_to_user_index(_hist, _keep)
+                    if _removed > 0:
+                        await ws.send_json({
+                            "type": "status",
+                            "message": f"✏️ History auf {_keep} Nachrichten gekürzt ({_removed} Einträge entfernt)",
+                            "highlight": False,
+                        })
+            except (ValueError, TypeError) as _trunc_err:
+                print(f"[truncate] Ungültiger truncate_user_msg_index: {_trunc_err}", flush=True)
 
         # Agent-Liste ans Frontend senden
         await ws.send_json({

@@ -17,6 +17,14 @@
     let _fb_lastHighlightEl = null;  // letztes log-highlight DOM-Element
     let _fb_lastHighlightText = '';  // gesammelter highlight-Text
 
+    // ─── Bubble-Chat & History-State ────────────────────────────
+    let _currentBotBubble  = null;   // aktuelles Streaming-Bot-Bubble DOM-Element
+    let _currentBotRaw     = '';     // akkumulierter Roh-Text der aktuellen Bot-Antwort
+    let _lastBubbleDate    = '';     // letztes Datum für Date-Separator
+    const _HISTORY_KEY     = 'jarvis_main_history_v1';
+    const _HISTORY_MAX     = 120;
+    let   _mainHistory     = [];
+
     // ─── DOM Elemente ───────────────────────────────────────────
     const loginScreen = document.getElementById('login-screen');
     const mainScreen = document.getElementById('main-screen');
@@ -187,6 +195,7 @@
     function showMainScreen() {
         loginScreen.classList.remove('active');
         mainScreen.classList.add('active');
+        _restoreHistory();
         connectWebSocket();
         initVNC();
         loadVersion();
@@ -956,7 +965,11 @@
         }
         ws.send(msg);
         const attInfo = _pendingAttachments.length > 0 ? ` [+ ${_pendingAttachments.length} Datei(en)]` : '';
-        addLogEntry(`📝 Aufgabe: ${finalText}${attInfo}`, 'task', false, _activeAgentId);
+        // Benutzer-Bubble anzeigen und in History speichern
+        const _uTime = _timeStr(), _uDate = _currentDateStr();
+        _addBubble(finalText + (attInfo || ''), 'user', _uTime, false);
+        _mainHistory.push({ role: 'user', text: finalText + (attInfo || ''), time: _uTime, date: _uDate });
+        _saveHistory();
         taskInput.value = '';
         taskInput.style.height = 'auto';
         _pendingAttachments = [];
@@ -1247,6 +1260,9 @@
                 delete _agentInfos[oldId];
             }
             _activeAgentId = agent.agent_id;
+            // Eventuell offene Bot-Bubble aus vorherigem Task verwerfen
+            _currentBotBubble = null;
+            _currentBotRaw = '';
         }
 
         if (event === 'started' || event === 'spawned') {
@@ -1296,6 +1312,15 @@
 
         // Thinking Bar: ausblenden wenn Hauptagent fertig oder idle
         if ((event === 'finished' || event === 'paused') && !agent.is_sub_agent) {
+            if (event === 'finished') {
+                // Bot-Bubble abschließen und in History speichern
+                _finalizeBotBubble();
+                if (_currentBotRaw.trim()) {
+                    _mainHistory.push({ role: 'bot', text: _currentBotRaw.trim(), time: _timeStr(), date: _currentDateStr() });
+                    _saveHistory();
+                    _currentBotRaw = '';
+                }
+            }
             updateAgentState('idle');
             _updateContextIndicator();
             // Feedback-Buttons an letzten Log-Eintrag hängen (immer, solange Task vorhanden)
@@ -1435,11 +1460,285 @@
     };
 
     // ─── Log ────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    //  BUBBLE-CHAT SYSTEM – Verlauf + Bubble-Rendering
+    // ═══════════════════════════════════════════════════════════════
+
+    // ─── CSS einmalig injizieren ─────────────────────────────────
+    (function _injectBubbleCss() {
+        if (document.getElementById('jv-bubble-css')) return;
+        const s = document.createElement('style');
+        s.id = 'jv-bubble-css';
+        s.textContent = `
+.jv-bubble-row{display:flex;gap:8px;max-width:100%;animation:fadeIn .25s ease-out;margin:2px 0;}
+.jv-bubble-row.user{justify-content:flex-end;}
+.jv-bubble-row.bot {justify-content:flex-start;}
+.jv-bubble-col{display:flex;flex-direction:column;}
+.jv-bubble-row.user .jv-bubble-col{align-items:flex-end;max-width:min(480px,85%);}
+.jv-bubble-row.bot  .jv-bubble-col{align-items:flex-start;max-width:92%;}
+.jv-bubble-avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#9B59B6,#6A0DAD);
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;
+  color:#fff;flex-shrink:0;align-self:flex-end;}
+.jv-bubble{padding:9px 13px;font-size:14px;line-height:1.55;color:#fff;
+  overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;}
+.jv-bubble-row.user .jv-bubble{background:rgba(155,89,182,.4);border-radius:16px 4px 16px 16px;}
+.jv-bubble-row.bot  .jv-bubble{background:rgba(255,255,255,.08);border-radius:4px 16px 16px 16px;white-space:normal;}
+.jv-bubble-time{font-size:10px;color:rgba(255,255,255,.32);padding:1px 4px;}
+.jv-bubble-row.user .jv-bubble-time{text-align:right;}
+.jv-bubble-stats{font-size:11px;color:rgba(165,180,252,.55);font-style:italic;padding:2px 4px;}
+.jv-date-sep{display:flex;align-items:center;gap:10px;padding:8px 0;margin:4px 0;}
+.jv-date-sep::before,.jv-date-sep::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.1);}
+.jv-date-sep span{font-size:11px;color:rgba(255,255,255,.38);white-space:nowrap;}
+.jv-streaming-dots{font-size:10px;color:rgba(255,255,255,.35);
+  animation:jvDotPulse .6s ease-in-out infinite alternate;}
+@keyframes jvDotPulse{from{opacity:.25}to{opacity:.9}}
+/* Markdown in Bot-Bubbles */
+.jv-bubble strong,.jv-bubble b{font-weight:700;}
+.jv-bubble em,.jv-bubble i{font-style:italic;}
+.jv-bubble del{text-decoration:line-through;opacity:.7;}
+.jv-bubble code{background:rgba(255,255,255,.1);padding:1px 5px;border-radius:4px;
+  font-family:'Courier New',monospace;font-size:12px;}
+.jv-bubble pre{background:rgba(0,0,0,.3);padding:9px 11px;border-radius:7px;
+  overflow-x:auto;margin:5px 0;font-size:12px;line-height:1.4;white-space:pre;}
+.jv-bubble pre code{background:none;padding:0;}
+.jv-bubble h1{font-size:1.2em;font-weight:700;margin:8px 0 3px;}
+.jv-bubble h2{font-size:1.1em;font-weight:700;margin:7px 0 3px;}
+.jv-bubble h3{font-size:1.02em;font-weight:600;margin:6px 0 3px;}
+.jv-bubble h4{font-size:1em;font-weight:600;margin:5px 0 3px;}
+.jv-bubble h1:first-child,.jv-bubble h2:first-child,.jv-bubble h3:first-child,.jv-bubble h4:first-child{margin-top:0;}
+.jv-bubble ul,.jv-bubble ol{padding-left:18px;margin:3px 0;}
+.jv-bubble li{margin:2px 0;line-height:1.45;}
+.jv-bubble blockquote{border-left:3px solid #9B59B6;padding:3px 9px;margin:5px 0;
+  color:rgba(255,255,255,.6);font-style:italic;background:rgba(155,89,182,.06);border-radius:0 4px 4px 0;}
+.jv-bubble a{color:#BB86FC;text-decoration:underline;text-underline-offset:2px;word-break:break-all;}
+.jv-bubble hr{border:none;border-top:1px solid rgba(255,255,255,.15);margin:7px 0;}
+.jv-bubble table{border-collapse:collapse;font-size:12px;margin:6px 0;display:block;overflow-x:auto;}
+.jv-bubble th,.jv-bubble td{border:1px solid rgba(255,255,255,.18);padding:4px 8px;white-space:nowrap;}
+.jv-bubble th{background:rgba(155,89,182,.15);font-weight:600;}
+.jv-bubble tr:nth-child(even) td{background:rgba(255,255,255,.03);}
+        `;
+        document.head.appendChild(s);
+    })();
+
+    // ─── Markdown-Renderer ───────────────────────────────────────
+    function _renderMarkdown(text) {
+        const _E = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const codeBlocks = [];
+        let s = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+            const idx = codeBlocks.length;
+            codeBlocks.push(`<pre><code>${_E(code.trim())}</code></pre>`);
+            return `\x01CODE${idx}\x01`;
+        });
+        s = _E(s);
+        s = s.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
+        function _inline(t) {
+            t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+            t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+            t = t.replace(/_([^_\n]+)_/g, '<em>$1</em>');
+            t = t.replace(/~~(.+?)~~/g, '<del>$1</del>');
+            t = t.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_, tit, url) => {
+                const raw = url.replace(/&amp;/g,'&');
+                const safe = /^https?:\/\/|^\//.test(raw) ? raw : '#';
+                return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${tit}</a>`;
+            });
+            return t;
+        }
+        const lines = s.split('\n');
+        const out = [];
+        let i = 0;
+        while (i < lines.length) {
+            const l = lines[i];
+            const hm = l.match(/^(#{1,4}) (.+)/);
+            if (hm) { out.push(`<h${hm[1].length}>${_inline(hm[2])}</h${hm[1].length}>`); i++; continue; }
+            if (/^---+$/.test(l.trim())) { out.push('<hr>'); i++; continue; }
+            if (l.startsWith('&gt; ')) { out.push(`<blockquote>${_inline(l.slice(5))}</blockquote>`); i++; continue; }
+            if (/^[ \t]*[-*+] /.test(l)) {
+                const its = [];
+                while (i < lines.length && /^[ \t]*[-*+] /.test(lines[i]))
+                    its.push(`<li>${_inline(lines[i++].replace(/^[ \t]*[-*+] /,''))}</li>`);
+                out.push(`<ul>${its.join('')}</ul>`); continue;
+            }
+            if (/^[ \t]*\d+\. /.test(l)) {
+                const its = [];
+                while (i < lines.length && /^[ \t]*\d+\. /.test(lines[i]))
+                    its.push(`<li>${_inline(lines[i++].replace(/^[ \t]*\d+\. /,''))}</li>`);
+                out.push(`<ol>${its.join('')}</ol>`); continue;
+            }
+            if (l.includes('|') && i+1 < lines.length && /^\|?[\s\-:|]+\|/.test(lines[i+1])) {
+                const tl = [];
+                while (i < lines.length && lines[i].includes('|')) tl.push(lines[i++]);
+                if (tl.length >= 2) {
+                    const hs = tl[0].split('|').map(c=>c.trim()).filter(Boolean);
+                    const rs = tl.slice(2).map(r=>r.split('|').map(c=>c.trim()).filter(Boolean));
+                    let t = '<table><thead><tr>'+hs.map(h=>`<th>${_inline(h)}</th>`).join('')+'</tr></thead><tbody>';
+                    rs.forEach(r=>{t+='<tr>'+r.map(c=>`<td>${_inline(c)}</td>`).join('')+'</tr>';});
+                    out.push(t+'</tbody></table>'); continue;
+                }
+            }
+            if (!l.trim()) { if (out.length && out[out.length-1]!=='<br>') out.push('<br>'); i++; continue; }
+            out.push(_inline(l)+'<br>'); i++;
+        }
+        let r = out.join('').replace(/\x01CODE(\d+)\x01/g,(_,n)=>codeBlocks[+n]);
+        return r.replace(/^(<br>)+/,'').replace(/(<br>)+$/,'');
+    }
+
+    // ─── Datum-Hilfsfunktionen ───────────────────────────────────
+    function _currentDateStr() {
+        return new Date().toLocaleDateString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric'});
+    }
+    function _timeStr() {
+        return new Date().toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit'});
+    }
+    function _dateLabel(str) {
+        const fmt = d => d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
+        if (str === fmt(new Date())) return 'Heute';
+        if (str === fmt(new Date(Date.now()-86400000))) return 'Gestern';
+        return str;
+    }
+
+    // ─── Datum-Separator ─────────────────────────────────────────
+    function _maybeAddDateSep(dateStr) {
+        if (!dateStr || dateStr === _lastBubbleDate) return;
+        _lastBubbleDate = dateStr;
+        const sep = document.createElement('div');
+        sep.className = 'jv-date-sep';
+        sep.innerHTML = `<span>${_dateLabel(dateStr)}</span>`;
+        logContainer.appendChild(sep);
+    }
+
+    // ─── Bubble erstellen ─────────────────────────────────────────
+    function _addBubble(text, role, timeStr, isMarkdown) {
+        // Welcome-Nachricht entfernen
+        const welcome = logContainer.querySelector('.log-welcome');
+        if (welcome) welcome.remove();
+
+        _maybeAddDateSep(_currentDateStr());
+
+        const row = document.createElement('div');
+        row.className = `jv-bubble-row ${role}`;
+
+        const col = document.createElement('div');
+        col.className = 'jv-bubble-col';
+
+        const timeEl = document.createElement('div');
+        timeEl.className = 'jv-bubble-time';
+        timeEl.textContent = timeStr || _timeStr();
+
+        const bubble = document.createElement('div');
+        bubble.className = 'jv-bubble';
+        bubble.innerHTML = isMarkdown ? _renderMarkdown(text) : escapeHtml(text);
+
+        col.appendChild(timeEl);
+        col.appendChild(bubble);
+
+        if (role === 'bot') {
+            const avatar = document.createElement('div');
+            avatar.className = 'jv-bubble-avatar';
+            avatar.textContent = 'J';
+            row.appendChild(avatar);
+        }
+        row.appendChild(col);
+        logContainer.appendChild(row);
+        logContainer.scrollTop = logContainer.scrollHeight;
+
+        return { row, col, bubble };
+    }
+
+    // ─── Bot-Bubble Streaming ─────────────────────────────────────
+    function _appendToBotBubble(text) {
+        if (!_currentBotBubble) {
+            const { row, col, bubble } = _addBubble(text, 'bot', _timeStr(), true);
+            _currentBotBubble = bubble;
+            _currentBotBubbleCol = col;
+            // Streaming-Dots innerhalb der Bubble-Col anzeigen
+            const dots = document.createElement('div');
+            dots.className = 'jv-streaming-dots';
+            dots.textContent = '●●●';
+            col.appendChild(dots);
+        } else {
+            _currentBotRaw += '\n' + text;
+            _currentBotBubble.innerHTML = _renderMarkdown(_currentBotRaw.trim());
+        }
+        if (!_currentBotRaw) _currentBotRaw = text;
+        logContainer.scrollTop = logContainer.scrollHeight;
+    }
+
+    function _finalizeBotBubble() {
+        if (_currentBotBubbleCol) {
+            const dots = _currentBotBubbleCol.querySelector('.jv-streaming-dots');
+            if (dots) dots.remove();
+        }
+        _currentBotBubble = null;
+        _currentBotBubbleCol = null;
+    }
+
+    // Referenz auf die Col des aktuellen Bot-Bubbles (für Stats + Feedback)
+    let _currentBotBubbleCol = null;
+
+    // ─── History Persistenz ───────────────────────────────────────
+    function _saveHistory() {
+        try {
+            if (_mainHistory.length > _HISTORY_MAX) _mainHistory = _mainHistory.slice(-_HISTORY_MAX);
+            localStorage.setItem(_HISTORY_KEY, JSON.stringify(_mainHistory));
+        } catch(e) { /* QuotaExceeded */ }
+    }
+    function _loadHistory() {
+        try {
+            const raw = localStorage.getItem(_HISTORY_KEY);
+            return raw ? (JSON.parse(raw) || []) : [];
+        } catch(e) { return []; }
+    }
+    function _restoreHistory() {
+        _mainHistory = _loadHistory();
+        if (_mainHistory.length === 0) return;
+        const welcome = logContainer.querySelector('.log-welcome');
+        if (welcome) welcome.remove();
+        let lastDate = '';
+        for (const entry of _mainHistory) {
+            if (entry.date && entry.date !== lastDate) {
+                lastDate = entry.date;
+                _lastBubbleDate = lastDate;  // Sync damit _maybeAddDateSep nicht doppelt zeichnet
+                const sep = document.createElement('div');
+                sep.className = 'jv-date-sep';
+                sep.innerHTML = `<span>${_dateLabel(entry.date)}</span>`;
+                logContainer.appendChild(sep);
+            }
+            if (entry.role === 'user') {
+                _addBubble(entry.text, 'user', entry.time || '', false);
+            } else if (entry.role === 'bot') {
+                const { col, bubble } = _addBubble(entry.text, 'bot', entry.time || '', true);
+                if (entry.stats) {
+                    const statsEl = document.createElement('div');
+                    statsEl.className = 'jv-bubble-stats';
+                    statsEl.textContent = entry.stats;
+                    col.appendChild(statsEl);
+                }
+            }
+        }
+        // Neue-Sitzung Trennlinie
+        const div = document.createElement('div');
+        div.className = 'jv-date-sep';
+        div.style.opacity = '0.4';
+        div.innerHTML = '<span>── Neue Sitzung ──</span>';
+        logContainer.appendChild(div);
+        // lastBubbleDate für neue Nachrichten auf heutiges Datum setzen
+        _lastBubbleDate = lastDate;
+        logContainer.scrollTop = logContainer.scrollHeight;
+    }
+
     function addLogEntry(message, type = 'info', highlight = false, agentId = null) {
         // TTS nur für die eigentliche LLM-Antwort (highlight=true), nicht für Status-Meldungen
         if (highlight && (type === 'system' || type === 'info')) {
             const cleanMessage = message.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
             if (cleanMessage) speak(cleanMessage);
+        }
+        // Bubble-System: LLM-Streaming-Chunks des Hauptagents als Bot-Bubble darstellen
+        if (highlight && (type === 'system' || type === 'info') && (!agentId || agentId === '_main')) {
+            _appendToBotBubble(message);
+            if (_currentBotBubble) _fb_lastHighlightEl = _currentBotBubble;
+            _fb_lastHighlightText += ' ' + message;
+            return;
         }
         // Willkommens-Nachricht entfernen
         const welcome = logContainer.querySelector('.log-welcome');

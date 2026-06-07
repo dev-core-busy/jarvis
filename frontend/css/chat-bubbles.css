@@ -1,0 +1,135 @@
+/* ============================================================
+ * chat-bubbles.css – Edit-Styles fuer das Hauptseiten-Chat
+ * (.jv-bubble-* Praefix, geladen von index.html).
+ *
+ * Frueher waren diese Regeln inline im _injectBubbleCss()-Block
+ * von app.js. Wurden ausgelagert, damit Bugfixes nicht im
+ * JS-Template-Literal stattfinden muessen.
+ *
+ * Pendant fuer das Standalone-Chat (.msg-edit-*) bleibt in
+ * frontend/css/chat.css (themed via CSS Custom Properties fuer
+ * Light/Dark-Mode).
+ *
+ * Siehe Protokoll-Block in backend/main.py vor
+ * _truncate_history_to_user_index() fuer den End-zu-End-Flow.
+ * ============================================================ */
+
+/* ── Geteilte Ansicht: verhindere, dass Chat-Bubbles ueber Panel-Grenze
+      hinausragen und Desktop ueberlagern. min-width:0 erlaubt Schrumpfen
+      unter Content-Breite, overflow-x:hidden kappt harte Ueberlaeufe. ── */
+.jv-bubble-row {
+    min-width: 0;
+    max-width: 100%;
+}
+.jv-bubble-col {
+    min-width: 0;
+    overflow: hidden;
+}
+.jv-bubble {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+.jv-bubble pre {
+    max-width: 100%;
+    overflow-x: auto;
+    /* white-space:pre belassen – Zeilenumbrueche bleiben, aber pre-Block
+       ist selbst breitenbeschraenkt + horizontal scrollbar. */
+}
+.jv-bubble img,
+.jv-bubble video,
+.jv-bubble canvas,
+.jv-bubble iframe {
+    max-width: 100%;
+    height: auto;
+}
+.jv-bubble table {
+    max-width: 100%;
+}
+
+/* ── Time-Zeile als Flex-Container, damit Edit-Button daneben sitzen kann ── */
+.jv-bubble-row.user .jv-bubble-time {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+/* ── Edit-Button (✏) ── */
+.jv-bubble-edit-btn {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, .25);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 2px;
+    line-height: 1;
+    transition: color .15s, opacity .15s;
+    opacity: .6;
+    font-family: inherit;
+}
+.jv-bubble-row.user:hover .jv-bubble-edit-btn {
+    color: rgba(255, 255, 255, .65);
+    opacity: 1;
+}
+.jv-bubble-edit-btn:hover {
+    color: rgba(255, 255, 255, 1) !important;
+}
+.jv-bubble-edit-btn:focus-visible {
+    outline: 1px solid rgba(155, 89, 182, .7);
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+/* ── Editier-Textarea innerhalb der Bubble ── */
+.jv-bubble-edit-area {
+    width: 100%;
+    min-height: 60px;
+    background: rgba(0, 0, 0, .25);
+    border: 1px solid rgba(155, 89, 182, .55);
+    border-radius: 8px;
+    color: #fff;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 8px 11px;
+    resize: vertical;
+    outline: none;
+    box-sizing: border-box;
+}
+.jv-bubble-edit-area:focus {
+    border-color: rgba(155, 89, 182, .9);
+    box-shadow: 0 0 8px rgba(155, 89, 182, .25);
+}
+
+/* ── Aktions-Buttons (Speichern / Abbrechen) ── */
+.jv-bubble-edit-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    justify-content: flex-end;
+}
+.jv-bubble-edit-actions button {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    border: none;
+    color: #fff;
+    transition: opacity .15s;
+    font-family: inherit;
+}
+.jv-bubble-edit-save {
+    background: #6A0DAD;
+}
+.jv-bubble-edit-cancel {
+    background: rgba(255, 255, 255, .15);
+}
+.jv-bubble-edit-actions button:hover {
+    opacity: .85;
+}
+.jv-bubble-edit-actions button:disabled {
+    opacity: .4;
+    cursor: not-allowed;
+}

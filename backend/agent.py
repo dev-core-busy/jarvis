@@ -704,8 +704,90 @@ KRITISCH – Autonomie-Regeln:
 
                 steps += 1
 
-            if steps >= config.MAX_AGENT_STEPS:
-                await self._send_status(ws, f"⚠️ Maximale Schrittanzahl ({config.MAX_AGENT_STEPS}) erreicht")
+            if steps >= config.MAX_AGENT_STEPS and not self._stop_flag:
+                # Max-Steps erreicht: einen finalen LLM-Call OHNE Tools erzwingen,
+                # damit der User mit dem bisherigen Kontext eine Antwort bekommt.
+                # Mehrstufiger Fallback, weil ein simpler tools=[]-Call bei langer
+                # Tool-Historie oft leeren Text liefert (LLM erkennt das letzte
+                # Turn-Ende als function_response und antwortet nicht).
+                await self._send_status(
+                    ws,
+                    f"⚠️ Maximale Schrittanzahl ({config.MAX_AGENT_STEPS}) erreicht – erzeuge finale Antwort ohne weitere Tools …"
+                )
+
+                async def _try_final(label: str, contents_, system_):
+                    try:
+                        _resp = await self.provider.generate_response(
+                            model=config.current_model,
+                            system_prompt=system_,
+                            contents=contents_,
+                            tools=[],
+                        )
+                        if _resp.usage:
+                            nonlocal _total_input_tokens, _total_output_tokens
+                            _total_input_tokens  += _resp.usage.get("input_tokens", 0)
+                            _total_output_tokens += _resp.usage.get("output_tokens", 0)
+                            self._session_input_tokens  = _total_input_tokens
+                            self._session_output_tokens = _total_output_tokens
+                        _txt = " ".join(p.text for p in (_resp.parts or []) if p.text).strip()
+                        _log(f"Final-Versuch '{label}': {len(_txt)} Zeichen Text")
+                        return _txt
+                    except Exception as _err:
+                        _log(f"Final-Versuch '{label}' fehlgeschlagen: {_err}")
+                        return ""
+
+                _final_text = ""
+                _final_instruction = types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=(
+                        "Bitte beantworte jetzt die ursprüngliche Frage vollständig "
+                        "und direkt aus deinem Wissen und den bisherigen Tool-Ergebnissen. "
+                        "Rufe KEINE Tools mehr auf. Antworte nur als reiner Text."
+                    ))],
+                )
+
+                # Versuch 1: bisherige History + explizite User-Instruktion am Ende
+                _final_text = await _try_final(
+                    "with_history",
+                    [*chat_history, _final_instruction],
+                    system_prompt + "\n\n## MAX_STEPS ERREICHT – Antworte JETZT als reiner Text, ohne Tools.",
+                )
+
+                # Versuch 2: kompletter Reset – nur Original-Aufgabe, neutraler Prompt
+                if not _final_text:
+                    _log("Final-Versuch 1 leer – versuche Reset-Variante (nur Original-Task)")
+                    _reset_user = types.Content(
+                        role="user",
+                        parts=[types.Part.from_text(text=(
+                            f"{task_text}\n\n"
+                            "(Antworte direkt aus deinem Wissen. Keine Tools verfügbar.)"
+                        ))],
+                    )
+                    _final_text = await _try_final(
+                        "reset_only_task",
+                        [_reset_user],
+                        "Du bist ein hilfreicher Assistent. Antworte vollständig und direkt auf Deutsch.",
+                    )
+
+                if _final_text:
+                    await self._send_status(ws, _final_text, highlight=True)
+                    # _user_msg nur anhaengen, wenn es noch nicht in der History steht
+                    # (kann durch Z. 668 beim ersten Tool-Call bereits drin sein) –
+                    # sonst entstehen doppelte user-Eintraege, was Anthropic strict ablehnt.
+                    if not chat_history or chat_history[-1] != _user_msg:
+                        chat_history.append(_user_msg)
+                    chat_history.append(types.Content(
+                        role="model",
+                        parts=[types.Part.from_text(text=_final_text)]
+                    ))
+                    _conv_messages.append({"role": "assistant", "content": _final_text})
+                else:
+                    await self._send_status(
+                        ws,
+                        "⚠️ Auch nach Reset-Versuch keine Antwort vom LLM. "
+                        "Bitte Frage neu stellen (eventuell präziser/kürzer).",
+                        highlight=True,
+                    )
 
             # LLM-Stats senden (Dauer + Token-Verbrauch)
             _task_duration_ms = int((time.time() - task_start_time) * 1000)
@@ -944,6 +1026,58 @@ KRITISCH – Autonomie-Regeln:
                 )
 
                 steps += 1
+
+            # Max-Steps in headless: finalen No-Tools-Call erzwingen, damit
+            # collected_texts mindestens eine Antwort enthält. Mehrstufiger
+            # Fallback wie in run_task: erst mit History+Instruktion, dann Reset.
+            if steps >= config.MAX_AGENT_STEPS and not self._stop_flag:
+                async def _try_final_h(label: str, contents_, system_):
+                    try:
+                        _resp = await self.provider.generate_response(
+                            model=config.current_model,
+                            system_prompt=system_,
+                            contents=contents_,
+                            tools=[],
+                        )
+                        _txt = " ".join(p.text for p in (_resp.parts or []) if p.text).strip()
+                        _log(f"Headless Final-Versuch '{label}': {len(_txt)} Zeichen Text")
+                        return _txt
+                    except Exception as _err:
+                        _log(f"Headless Final-Versuch '{label}' fehlgeschlagen: {_err}")
+                        return ""
+
+                _final_instruction_h = types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=(
+                        "Bitte beantworte jetzt die ursprüngliche Aufgabe vollständig "
+                        "und direkt aus deinem Wissen und den bisherigen Tool-Ergebnissen. "
+                        "Rufe KEINE Tools mehr auf. Antworte nur als reiner Text."
+                    ))],
+                )
+
+                _final_h_text = await _try_final_h(
+                    "with_history",
+                    [
+                        types.Content(role="user", parts=[types.Part.from_text(text=task_text)]),
+                        *chat_history,
+                        _final_instruction_h,
+                    ],
+                    system_prompt + "\n\n## MAX_STEPS ERREICHT – Antworte JETZT als reiner Text, ohne Tools.",
+                )
+
+                if not _final_h_text:
+                    _log("Headless Final-Versuch 1 leer – Reset-Variante (nur Original-Task)")
+                    _final_h_text = await _try_final_h(
+                        "reset_only_task",
+                        [types.Content(role="user", parts=[types.Part.from_text(text=(
+                            f"{task_text}\n\n"
+                            "(Antworte direkt aus deinem Wissen. Keine Tools verfügbar.)"
+                        ))])],
+                        "Du bist ein hilfreicher Assistent. Antworte vollständig und direkt auf Deutsch.",
+                    )
+
+                if _final_h_text:
+                    collected_texts.append(_final_h_text)
 
             # Auto-Learning (gleiche Logik wie in run_task)
             if steps >= 2 and self._tool_stats:

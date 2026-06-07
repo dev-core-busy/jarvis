@@ -1134,12 +1134,19 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* Wichtig fuer Flex-Layout: erlaubt Schrumpfen unter Content-Breite,
+       sonst druecken lange Codebloecke das Panel ueber die 50% hinaus
+       und ueberlagern den Desktop-Panel rechts. */
+    min-width: 0;
 }
 
 .panel-left {
     width: 50%;
     min-width: 300px;
     max-width: 80%;
+    /* flex-shrink explizit, damit width:50% als Soll-Basis gilt
+       und Content nie weiter wachsen kann. */
+    flex-shrink: 1;
 }
 
 .panel-right {
@@ -1188,14 +1195,19 @@ body {
     display: flex;
     overflow: hidden;
     min-height: 0;
+    min-width: 0;
 }
 
 .log-container {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 0.75rem 1rem;
     scroll-behavior: smooth;
     font-size: 0.84rem;
+    /* Ohne min-width:0 wuerde der Container von langen pre/code-Bloecken
+       horizontal aufgeblasen werden und das gesamte Panel-Left verbreitern. */
+    min-width: 0;
 }
 
 /* ─── Multi-Agent Sidebar ─────────────────────────────────────── */
@@ -1369,6 +1381,9 @@ body {
     border-bottom: 1px solid rgba(99, 102, 241, 0.05);
     animation: fadeIn 0.3s ease-out;
     word-break: break-word;
+    overflow-wrap: anywhere;
+    max-width: 100%;
+    min-width: 0;
 }
 
 .log-entry.log-highlight {
@@ -1379,6 +1394,10 @@ body {
 /* Debug-Modus aus: nicht-highlight Eintraege ausblenden */
 .log-container.hide-debug .log-entry:not(.log-highlight) {
     display: none !important;
+}
+/* Stats-Zeile (Dauer · Tokens · tok/s · Schritte) auch im Nicht-Debug-Modus zeigen */
+.log-container.hide-debug .log-entry.log-stats {
+    display: block !important;
 }
 
 /* LLM-Stats Zeile (Dauer + Token-Verbrauch) */

@@ -200,6 +200,15 @@ class ChatViewModel @Inject constructor(
         exitSelectionMode()
     }
 
+    /**
+     * Editiert eine eigene User-Nachricht: alle Folgenachrichten werden gelöscht
+     * und das Backend generiert die Antwort neu (mit gekürzter History).
+     */
+    fun editUserMessage(messageId: String, newText: String) {
+        ttsManager.stop()
+        repo.editUserMessage(messageId, newText)
+    }
+
     fun downloadUpdate() {
         val ctx = getApplication<Application>()
         val downloadId = updateChecker.startDownload(ctx)

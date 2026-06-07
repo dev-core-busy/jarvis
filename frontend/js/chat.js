@@ -599,7 +599,7 @@
     //  BUBBLES RENDERN
     // ═════════════════════════════════════════════════════════════
 
-    function addBubble(text, role) {
+    function addBubble(text, role, customTime) {
         removeWelcome();
         maybeAddDateSep();
 
@@ -609,12 +609,29 @@
         // Timestamp
         const timeEl = document.createElement('div');
         timeEl.className = 'msg-time';
-        timeEl.textContent = timeStr();
 
         // Bubble
         const bubble = document.createElement('div');
         bubble.className = 'msg-bubble';
         bubble.innerHTML = role === 'user' ? escapeHtml(text) : renderMarkdown(text);
+
+        // Edit-Button für User-Bubbles
+        if (role === 'user') {
+            const editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'msg-edit-btn';
+            editBtn.title = 'Nachricht bearbeiten';
+            editBtn.setAttribute('aria-label', 'Nachricht bearbeiten');
+            editBtn.textContent = '✏';
+            editBtn.addEventListener('click', () => _editUserBubble(row, bubble));
+            timeEl.appendChild(editBtn);
+            const timeSpan = document.createElement('span');
+            timeSpan.textContent = customTime || timeStr();
+            timeEl.appendChild(timeSpan);
+            row.dataset.rawText = text;
+        } else {
+            timeEl.textContent = customTime || timeStr();
+        }
 
         const col = document.createElement('div');
         col.appendChild(timeEl);
@@ -632,6 +649,86 @@
         scrollToBottom();
 
         return bubble;
+    }
+
+    // ─── Edit-Modus für User-Bubbles (delegiert an chatlib.js) ───
+    let _editingRow = null;
+
+    function _editUserBubble(row, bubble) {
+        if (_editingRow) return;
+        if (!row || !bubble) return;
+        if (!(window.JarvisChatLib && window.JarvisChatLib.enterEditMode)) {
+            alert('Edit-Bibliothek (chatlib.js) nicht geladen.');
+            return;
+        }
+        const ok = window.JarvisChatLib.enterEditMode(row, bubble, {
+            editBtnSelector: '.msg-edit-btn',
+            areaClass:    'msg-edit-area',
+            actionsClass: 'msg-edit-actions',
+            saveClass:    'msg-edit-save',
+            cancelClass:  'msg-edit-cancel',
+            isBlocked: () => agentRunning,
+            blockMessage: 'Bitte stoppe zuerst die laufende Aufgabe.',
+            onCommit: (newText) => _submitEdit(row, bubble, newText),
+            onCancel: () => { _editingRow = null; },
+        });
+        if (ok) _editingRow = row;
+    }
+
+    function _restoreBubble(bubble, row) {
+        if (window.JarvisChatLib && window.JarvisChatLib.exitEditMode) {
+            window.JarvisChatLib.exitEditMode(row, bubble, { editBtnSelector: '.msg-edit-btn' });
+        }
+        _editingRow = null;
+    }
+
+    function _submitEdit(row, bubble, newText) {
+        const allUserRows = messagesEl.querySelectorAll('.msg-row.user');
+        const userIndex = Array.from(allUserRows).indexOf(row);
+        if (userIndex < 0) { _restoreBubble(bubble, row); return; }
+
+        // DOM: alles nach dieser Row entfernen
+        if (window.JarvisChatLib && window.JarvisChatLib.removeRowsAfter) {
+            window.JarvisChatLib.removeRowsAfter(row);
+        }
+
+        // Streaming-State zurücksetzen
+        currentBotBubble = null;
+        _lastBotCol = null;
+        _lastBotResp = '';
+        _lastStats = '';
+
+        // _chatHistory trimmen + Text aktualisieren (in place)
+        if (window.JarvisChatLib && window.JarvisChatLib.truncateHistoryToUserIndex) {
+            window.JarvisChatLib.truncateHistoryToUserIndex(
+                _chatHistory, userIndex, newText,
+                { timeStr: timeStr(), dateStr: _currentDateStr() }
+            );
+        }
+        _saveHistory();
+
+        // Bubble visuell zurücksetzen mit neuem Text
+        bubble.classList.remove('editing');
+        bubble.innerHTML = escapeHtml(newText);
+        delete bubble.dataset.origHtml;
+        row.dataset.rawText = newText;
+        const editBtn = row.querySelector('.msg-edit-btn');
+        if (editBtn) editBtn.style.visibility = '';
+        const timeSpan = row.querySelector('.msg-time span');
+        if (timeSpan) timeSpan.textContent = timeStr();
+        _editingRow = null;
+
+        // WS-Task mit truncate-Hint
+        _lastUserMsg = newText;
+        _lastBotResp = '';
+        _lastBotCol  = null;
+        _lastStats   = '';
+        wsSend({
+            type: 'task',
+            text: newText,
+            lang: window._lang || 'de',
+            truncate_user_msg_index: userIndex,
+        });
     }
 
     function appendToBotBubble(text) {
@@ -655,10 +752,18 @@
 
         const stats = document.createElement('div');
         stats.className = 'msg-stats';
-        const dur = (msg.duration_ms / 1000).toFixed(1);
+        const secNum = (msg.duration_ms || 0) / 1000;
+        const dur = secNum.toFixed(1);
         const tokens = msg.total_tokens || 0;
+        const outTok = msg.output_tokens || 0;
         const steps = msg.steps || 0;
-        _lastStats = `${dur}s · ${tokens} Tokens · ${steps} Schritte`;
+        let s = `${dur}s · ${tokens} Tokens`;
+        if (outTok > 0 && secNum > 0) {
+            const tps = outTok / secNum;
+            s += ` · ${tps >= 100 ? tps.toFixed(0) : tps.toFixed(1)} tok/s`;
+        }
+        s += ` · ${steps} Schritte`;
+        _lastStats = s;
         stats.textContent = _lastStats;
         currentBotBubble.parentElement.appendChild(stats);
         scrollToBottom();
@@ -711,9 +816,11 @@
         messagesEl.appendChild(sep);
     }
 
-    // ─── Helpers ────────────────────────────────────────────────
+    // ─── Helpers (delegieren an chatlib.js) ─────────────────────
     function timeStr() {
-        return new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+        return (window.JarvisChatLib && window.JarvisChatLib.timeStr)
+            ? window.JarvisChatLib.timeStr()
+            : new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
     }
 
     function scrollToBottom() {
@@ -891,21 +998,27 @@
         return wrap;
     }
 
-    // ─── Verlauf-Persistenz (localStorage) ──────────────────────
+    // ─── Verlauf-Persistenz (delegiert an chatlib.js) ───────────
     function _currentDateStr() {
-        return new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        return (window.JarvisChatLib && window.JarvisChatLib.currentDateStr)
+            ? window.JarvisChatLib.currentDateStr()
+            : new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
     function _saveHistory() {
-        try {
-            if (_chatHistory.length > _HISTORY_MAX) {
-                _chatHistory = _chatHistory.slice(-_HISTORY_MAX);
-            }
-            localStorage.setItem(_HISTORY_KEY, JSON.stringify(_chatHistory));
-        } catch(e) { /* QuotaExceeded – ignorieren */ }
+        if (_chatHistory.length > _HISTORY_MAX) _chatHistory = _chatHistory.slice(-_HISTORY_MAX);
+        if (window.JarvisChatLib && window.JarvisChatLib.saveHistory) {
+            window.JarvisChatLib.saveHistory(_HISTORY_KEY, _chatHistory, _HISTORY_MAX);
+        } else {
+            try { localStorage.setItem(_HISTORY_KEY, JSON.stringify(_chatHistory)); }
+            catch(e) { /* QuotaExceeded */ }
+        }
     }
 
     function _loadHistory() {
+        if (window.JarvisChatLib && window.JarvisChatLib.loadHistory) {
+            return window.JarvisChatLib.loadHistory(_HISTORY_KEY);
+        }
         try {
             const raw = localStorage.getItem(_HISTORY_KEY);
             return raw ? (JSON.parse(raw) || []) : [];
@@ -918,13 +1031,30 @@
 
         const timeEl = document.createElement('div');
         timeEl.className = 'msg-time';
-        timeEl.textContent = entry.time || '';
 
         const bubble = document.createElement('div');
         bubble.className = 'msg-bubble';
         bubble.innerHTML = entry.role === 'user'
             ? escapeHtml(entry.text)
             : renderMarkdown(entry.text);
+
+        // Edit-Button für User-Bubbles (auch nach Reload nutzbar)
+        if (entry.role === 'user') {
+            const editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'msg-edit-btn';
+            editBtn.title = 'Nachricht bearbeiten';
+            editBtn.setAttribute('aria-label', 'Nachricht bearbeiten');
+            editBtn.textContent = '✏';
+            editBtn.addEventListener('click', () => _editUserBubble(row, bubble));
+            timeEl.appendChild(editBtn);
+            const timeSpan = document.createElement('span');
+            timeSpan.textContent = entry.time || '';
+            timeEl.appendChild(timeSpan);
+            row.dataset.rawText = entry.text;
+        } else {
+            timeEl.textContent = entry.time || '';
+        }
 
         const col = document.createElement('div');
         col.appendChild(timeEl);
@@ -984,129 +1114,21 @@
     }
 
     function escapeHtml(str) {
+        if (window.JarvisChatLib && window.JarvisChatLib.escapeHtml) {
+            return window.JarvisChatLib.escapeHtml(str);
+        }
         const d = document.createElement('div');
         d.textContent = str;
         return d.innerHTML;
     }
 
-    /** Vollständiges Markdown → HTML:
-     *  Überschriften (#–####), Listen (- / 1.), Blockquotes (>), Links,
-     *  Tabellen, **bold**, *italic*, ~~del~~, `code`, ```block``` */
+    /** Markdown → HTML, delegiert an chatlib.js (einheitlicher Renderer). */
     function renderMarkdown(text) {
-        const _E = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-        // 1) Code-Blöcke extrahieren (vor HTML-Escape)
-        const codeBlocks = [];
-        let s = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-            const idx = codeBlocks.length;
-            codeBlocks.push(`<pre><code>${_E(code.trim())}</code></pre>`);
-            return `\x01CODE${idx}\x01`;
-        });
-
-        // 2) HTML escapen
-        s = _E(s);
-
-        // 3) Inline-Code
-        s = s.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
-
-        // 4) Inline-Formatter (bold, italic, links, del)
-        function _inline(t) {
-            t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-            t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-            t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-            t = t.replace(/_([^_\n]+)_/g, '<em>$1</em>');
-            t = t.replace(/~~(.+?)~~/g, '<del>$1</del>');
-            t = t.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_, title, url) => {
-                const raw = url.replace(/&amp;/g,'&');
-                const safe = /^https?:\/\/|^\//.test(raw) ? raw : '#';
-                return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${title}</a>`;
-            });
-            return t;
+        if (window.JarvisChatLib && window.JarvisChatLib.renderMarkdown) {
+            return window.JarvisChatLib.renderMarkdown(text);
         }
-
-        // 5) Zeilenweise Block-Elemente verarbeiten
-        const lines = s.split('\n');
-        const out = [];
-        let i = 0;
-
-        while (i < lines.length) {
-            const l = lines[i];
-
-            // Heading (#, ##, ###, ####)
-            const hm = l.match(/^(#{1,4}) (.+)/);
-            if (hm) {
-                out.push(`<h${hm[1].length}>${_inline(hm[2])}</h${hm[1].length}>`);
-                i++; continue;
-            }
-
-            // Horizontale Linie
-            if (/^---+$/.test(l.trim())) {
-                out.push('<hr>');
-                i++; continue;
-            }
-
-            // Blockquote (&gt; wegen HTML-Escape)
-            if (l.startsWith('&gt; ')) {
-                out.push(`<blockquote>${_inline(l.slice(5))}</blockquote>`);
-                i++; continue;
-            }
-
-            // Unordered list (-, *, +)
-            if (/^[ \t]*[-*+] /.test(l)) {
-                const items = [];
-                while (i < lines.length && /^[ \t]*[-*+] /.test(lines[i])) {
-                    items.push(`<li>${_inline(lines[i].replace(/^[ \t]*[-*+] /, ''))}</li>`);
-                    i++;
-                }
-                out.push(`<ul>${items.join('')}</ul>`);
-                continue;
-            }
-
-            // Ordered list (1. 2. …)
-            if (/^[ \t]*\d+\. /.test(l)) {
-                const items = [];
-                while (i < lines.length && /^[ \t]*\d+\. /.test(lines[i])) {
-                    items.push(`<li>${_inline(lines[i].replace(/^[ \t]*\d+\. /, ''))}</li>`);
-                    i++;
-                }
-                out.push(`<ol>${items.join('')}</ol>`);
-                continue;
-            }
-
-            // Tabelle (|col|col|)
-            if (l.includes('|') && i + 1 < lines.length && /^\|?[\s\-:|]+\|/.test(lines[i+1])) {
-                const tblLines = [];
-                while (i < lines.length && lines[i].includes('|')) {
-                    tblLines.push(lines[i]); i++;
-                }
-                if (tblLines.length >= 2) {
-                    const heads = tblLines[0].split('|').map(c=>c.trim()).filter(Boolean);
-                    const rows  = tblLines.slice(2).map(r => r.split('|').map(c=>c.trim()).filter(Boolean));
-                    let tbl = '<table><thead><tr>' + heads.map(h=>`<th>${_inline(h)}</th>`).join('') + '</tr></thead><tbody>';
-                    rows.forEach(r => { tbl += '<tr>' + r.map(c=>`<td>${_inline(c)}</td>`).join('') + '</tr>'; });
-                    tbl += '</tbody></table>';
-                    out.push(tbl);
-                    continue;
-                }
-            }
-
-            // Leerzeile
-            if (!l.trim()) {
-                if (out.length && out[out.length-1] !== '<br>') out.push('<br>');
-                i++; continue;
-            }
-
-            // Normaler Text
-            out.push(_inline(l) + '<br>');
-            i++;
-        }
-
-        // 6) Zusammenführen + Code-Blöcke wiederherstellen
-        let result = out.join('')
-            .replace(/\x01CODE(\d+)\x01/g, (_, n) => codeBlocks[+n]);
-        // Führende/nachfolgende <br> entfernen
-        result = result.replace(/^(<br>)+/, '').replace(/(<br>)+$/, '');
-        return result;
+        // Fallback (sollte nie greifen, da chat.html chatlib.js vor chat.js lädt)
+        return escapeHtml(text).replace(/\n/g, '<br>');
     }
 
     // ═════════════════════════════════════════════════════════════

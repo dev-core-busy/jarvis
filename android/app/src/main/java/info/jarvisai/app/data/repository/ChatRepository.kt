@@ -163,6 +163,12 @@ class ChatRepository @Inject constructor(
                 if (event.total_tokens > 0) {
                     sb.append(" · ${event.input_tokens} → ${event.output_tokens} Tokens")
                 }
+                // Output-Token/s: Antwort-Geschwindigkeit (was der Nutzer spürt)
+                if (event.output_tokens > 0 && sec > 0.0) {
+                    val tps = event.output_tokens / sec
+                    val tpsStr = if (tps >= 100.0) "%.0f".format(tps) else "%.1f".format(tps)
+                    sb.append(" · $tpsStr tok/s")
+                }
                 if (event.steps > 0) {
                     sb.append(" · ${event.steps} Schritt${if (event.steps != 1) "e" else ""}")
                 }
@@ -270,6 +276,42 @@ class ChatRepository @Inject constructor(
     fun deleteMessages(ids: Set<String>) {
         _messages.update { msgs -> msgs.filter { it.id !in ids } }
         saveMessages()
+    }
+
+    /**
+     * Editiert eine User-Nachricht: Aktualisiert den Text, löscht alle Folgenachrichten
+     * (Antworten + spätere User-Nachrichten) und sendet die neue Nachricht ans Backend,
+     * welches die History entsprechend trimmt und die Antwort neu generiert.
+     *
+     * Gibt true zurück, wenn die Bearbeitung erfolgreich angestoßen wurde.
+     */
+    fun editUserMessage(messageId: String, newText: String): Boolean {
+        val trimmedNew = newText.trim()
+        if (trimmedNew.isBlank()) return false
+
+        // Laufenden Stream abbrechen, falls vorhanden
+        finalizeStream()
+        pendingStatus.clear()
+
+        val current = _messages.value
+        val idx = current.indexOfFirst { it.id == messageId && it.role == MessageRole.USER }
+        if (idx < 0) return false
+
+        // userMsgIndex: Anzahl USER-Nachrichten vor idx (0-basiert, entspricht Backend-Semantik)
+        var userMsgIndex = 0
+        for (i in 0 until idx) {
+            if (current[i].role == MessageRole.USER) userMsgIndex++
+        }
+
+        // Folgenachrichten löschen + Text aktualisieren
+        val now = System.currentTimeMillis()
+        val edited = current[idx].copy(text = trimmedNew, timestamp = now)
+        _messages.update { current.subList(0, idx) + edited }
+
+        _isAgentRunning.value = true
+        ws.sendTaskWithTruncate(trimmedNew, userMsgIndex, lang = currentLang)
+        saveMessages()
+        return true
     }
 
     fun clearMessages() {

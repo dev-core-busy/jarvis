@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
@@ -168,6 +169,10 @@ type ChatWidget struct {
 	OnTTSToggle   func()    // Sprachausgabe an/aus umschalten
 	OnStopAgent   func()   // laufende Agent-Anfrage abbrechen
 	OnFeedback    func(rating, botText string) // Benutzer-Feedback (optional)
+	// OnEditUserMessage wird aufgerufen, wenn der Benutzer eine eigene Nachricht
+	// bearbeitet hat. newText ist die neue Nachricht, userMsgIndex ist der
+	// 0-basierte Index in der User-Nachrichten-Folge (zaehlt nur RoleUser).
+	OnEditUserMessage func(newText string, userMsgIndex int)
 }
 
 func NewChatWidget() *ChatWidget {
@@ -743,6 +748,90 @@ func (c *ChatWidget) deleteMessageAt(idx int) {
 	c.rebuildAll()
 }
 
+// showEditDialog oeffnet einen Dialog zum Bearbeiten der User-Nachricht an idx.
+// Auf "Speichern" wird editUserMessageAt() aufgerufen, welche die Folgenachrichten
+// loescht und OnEditUserMessage triggert (was die WS-Anfrage neu sendet).
+func (c *ChatWidget) showEditDialog(idx int) {
+	c.mu.Lock()
+	if idx < 0 || idx >= len(c.messages) || c.messages[idx].Role != RoleUser {
+		c.mu.Unlock()
+		return
+	}
+	originalText := c.messages[idx].Text
+	c.mu.Unlock()
+
+	wins := fyne.CurrentApp().Driver().AllWindows()
+	if len(wins) == 0 {
+		return
+	}
+	parent := wins[0]
+
+	entry := widget.NewMultiLineEntry()
+	entry.SetText(originalText)
+	entry.Wrapping = fyne.TextWrapWord
+	// Mindestgroesse, damit der Dialog brauchbar ist
+	entry.Resize(fyne.NewSize(480, 160))
+
+	form := container.NewBorder(nil, nil, nil, nil, entry)
+
+	dlg := dialog.NewCustomConfirm(
+		t("Nachricht bearbeiten", "Edit message"),
+		t("Speichern", "Save"),
+		t("Abbrechen", "Cancel"),
+		form,
+		func(ok bool) {
+			if !ok {
+				return
+			}
+			newText := entry.Text
+			if newText == "" || newText == originalText {
+				return
+			}
+			c.editUserMessageAt(idx, newText)
+		},
+		parent,
+	)
+	dlg.Resize(fyne.NewSize(520, 260))
+	dlg.Show()
+}
+
+// editUserMessageAt aktualisiert die User-Nachricht an idx, loescht alle
+// nachfolgenden Nachrichten (User + Jarvis + Status) und triggert OnEditUserMessage,
+// damit das Backend die History trimmt und die Antwort neu generiert.
+func (c *ChatWidget) editUserMessageAt(idx int, newText string) {
+	c.mu.Lock()
+	if idx < 0 || idx >= len(c.messages) || c.messages[idx].Role != RoleUser {
+		c.mu.Unlock()
+		return
+	}
+	// userMsgIndex: zaehle wie viele RoleUser-Nachrichten VOR idx liegen.
+	// Dies ergibt die 0-basierte Position der bearbeiteten Nachricht in der
+	// User-Folge und entspricht der Semantik des Backends (truncate_user_msg_index).
+	userMsgIndex := 0
+	for i := 0; i < idx; i++ {
+		if c.messages[i].Role == RoleUser {
+			userMsgIndex++
+		}
+	}
+	// Text aktualisieren
+	c.messages[idx].Text = newText
+	c.messages[idx].Time = time.Now()
+	c.lastUserMsg = newText
+	// Alle Folgenachrichten loeschen
+	c.messages = c.messages[:idx+1]
+	snap := append([]ChatMessage(nil), c.messages...)
+	c.mu.Unlock()
+
+	c.rebuildAll()
+	c.scrollToBottom()
+	go SaveHistory(snap)
+
+	// Backend informieren: History trimmen + neue Antwort generieren
+	if c.OnEditUserMessage != nil {
+		c.OnEditUserMessage(newText, userMsgIndex)
+	}
+}
+
 // newBoldWhiteText erstellt einen fett-weißen Textblock mit Zeilenumbruch.
 // widget.RichText erlaubt explizite Farbe + Bold + Wrapping.
 // newBoldWhiteText: fett-weißer Text, optional mit Zeilenumbruch.
@@ -769,6 +858,7 @@ type tappableBubble struct {
 	text    string // Originaltext der Nachricht (fuer Kopieren)
 	onTap   func() // Linksklick (z.B. Auswahl umschalten im Selektionsmodus)
 	onRight func() // Rechtsklick (z.B. Selektionsmodus betreten)
+	onEdit  func() // Optional: Edit-Aktion im Kontextmenue (nur fuer User-Nachrichten gesetzt)
 }
 
 func newTappableBubble(inner fyne.CanvasObject, text string, onTap func(), onRight func()) *tappableBubble {
@@ -806,7 +896,16 @@ func (tb *tappableBubble) TappedSecondary(ev *fyne.PointEvent) {
 		}
 	})
 
-	menu := fyne.NewMenu("", copyItem, selectItem)
+	items := []*fyne.MenuItem{copyItem}
+	if tb.onEdit != nil {
+		editItem := fyne.NewMenuItem(t("Bearbeiten", "Edit"), func() {
+			tb.onEdit()
+		})
+		items = append(items, editItem)
+	}
+	items = append(items, selectItem)
+
+	menu := fyne.NewMenu("", items...)
 	popUp := widget.NewPopUpMenu(menu, c)
 	popUp.ShowAtPosition(ev.AbsolutePosition)
 }
@@ -967,6 +1066,16 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 		bg.CornerRadius = 18
 		inner := container.NewStack(bg, container.NewPadded(newBoldWhiteText(msg.Text, false)))
 		bubble := newTappableBubble(inner, msg.Text, leftClickFn, rightClickFn)
+		// Edit-Aktion: zeigt Dialog mit Textarea und ruft editUserMessageAt() auf.
+		// Nur ausserhalb des Selektionsmodus aktiv.
+		if !c.selMode {
+			bubble.onEdit = func() {
+				cur := resolveIdx()
+				if cur >= 0 {
+					c.showEditDialog(cur)
+				}
+			}
+		}
 		var row fyne.CanvasObject
 		if c.selMode {
 			row = container.NewHBox(checkBox, layout.NewSpacer(), bubble)

@@ -684,12 +684,37 @@
                 <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang('de')" title="Deutsch">DE</button>
                 <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang('en')" title="English">EN</button>
             </div>
-            <a href="/chat" class="btn-theme" data-i18n-title="uc.back" title="Zurück zu Jarvis" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
+            <a id="uc-back-link" href="/chat" class="btn-theme" data-i18n-title="uc.back" title="Zurück zu Jarvis" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
                     <polyline points="9 22 9 12 15 12 15 22"/>
                 </svg>
             </a>
+            <script>
+                // Back-Link je nach Herkunft setzen:
+                //   ?from=main → /            (Jarvis Hauptseite)
+                //   ?from=chat → /chat        (Jarvis Chat)
+                //   sonst: document.referrer auswerten, Fallback /chat
+                (function () {
+                    try {
+                        var p = new URLSearchParams(window.location.search).get('from');
+                        var target = '/chat';
+                        if (p === 'main') target = '/';
+                        else if (p === 'chat') target = '/chat';
+                        else if (document.referrer) {
+                            try {
+                                var ref = new URL(document.referrer);
+                                if (ref.origin === window.location.origin) {
+                                    if (ref.pathname === '/' || ref.pathname === '/index.html') target = '/';
+                                    else if (ref.pathname === '/chat' || ref.pathname === '/chat.html') target = '/chat';
+                                }
+                            } catch (e) {}
+                        }
+                        var el = document.getElementById('uc-back-link');
+                        if (el) el.setAttribute('href', target);
+                    } catch (e) {}
+                })();
+            </script>
             <button id="btn-uc-logout" class="btn-logout" data-i18n-title="header.logout" title="Abmelden">⏻</button>
         </div>
     </header>

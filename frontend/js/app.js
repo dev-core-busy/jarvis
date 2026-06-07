@@ -1734,7 +1734,10 @@
             if (cleanMessage) speak(cleanMessage);
         }
         // Bubble-System: LLM-Streaming-Chunks des Hauptagents als Bot-Bubble darstellen
-        if (highlight && (type === 'system' || type === 'info') && (!agentId || agentId === '_main')) {
+        // Backend sendet echte UUIDs als agent_id – deshalb per _agentInfos prüfen ob Hauptagent
+        const _bubbleAgentId = agentId || '_main';
+        const _isMainAgentBubble = !_agentInfos[_bubbleAgentId]?.is_sub_agent;
+        if (highlight && (type === 'system' || type === 'info') && _isMainAgentBubble) {
             _appendToBotBubble(message);
             if (_currentBotBubble) _fb_lastHighlightEl = _currentBotBubble;
             _fb_lastHighlightText += ' ' + message;
@@ -1767,7 +1770,8 @@
         entry.innerHTML = `<span class="log-time">${time}</span>${escapeHtml(message)}`;
 
         // Für Feedback: letzten Eintrag des Hauptagents merken (nicht nur highlights)
-        if (effectiveAgentId === '_main' || !effectiveAgentId) {
+        // effectiveAgentId kann echte UUID sein (Backend sendet keine '_main'-ID)
+        if (effectiveAgentId === '_main' || effectiveAgentId === _activeAgentId) {
             if (!isTask) _fb_lastHighlightEl = entry;   // task-Zeile selbst nicht als target
             if (highlight) _fb_lastHighlightText += ' ' + message;
         }

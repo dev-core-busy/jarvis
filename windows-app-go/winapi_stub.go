@@ -13,7 +13,7 @@ func GetAvatarPosition() (x, y int)                                             
 func SetAvatarPosition(x, y int)                                                 {}
 func GetChatWindowRect() (x, y, w, h int, ok bool)                               { return 0, 0, 0, 0, false }
 func SetChatWindowPos(x, y int)                                                   {}
-func StartNativeSysTray(_, _, _, _ func(), _, _ func() bool)                {}
+func StartNativeSysTray(_, _, _, _ func(), _ func() bool)                   {}
 func SetTTSVoice(voice string)                                               {}
 func SetTTSServer(serverURL, apiKey string)                                  {}
 func ListTTSVoices() []string                                                { return nil }

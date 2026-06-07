@@ -4858,6 +4858,118 @@ async def watcher_delete(watcher_id: str, user: str = Depends(require_auth)):
         raise HTTPException(404, str(e))
 
 
+# ═══ Issue-Tracker ════════════════════════════════════════════════════
+# Berechtigung: alle authentifizierten User sehen alles; Autor editiert
+# seine Issues solange status != "closed"; jarvis hat Vollzugriff inkl.
+# Status-Wechsel/Comment/Delete. Implementierung in backend/issues.py.
+from backend import issues as _issues_mod
+
+
+@app.get("/api/issues")
+async def api_issues_list(request: Request, user: str = Depends(require_auth)):
+    """Liste aller Issues. Optionale Filter: ?mine=1 &status=open &type=bug"""
+    mine = request.query_params.get("mine", "") in ("1", "true", "yes")
+    status = request.query_params.get("status") or None
+    type_ = request.query_params.get("type") or None
+    issues = _issues_mod.list_issues(user, mine_only=mine, status=status, type_=type_)
+    return JSONResponse({
+        "ok": True,
+        "issues": issues,
+        "current_user": user,
+        "is_admin": _issues_mod.is_jarvis(user),
+    })
+
+
+@app.get("/api/issues/{issue_id}")
+async def api_issues_get(issue_id: str, user: str = Depends(require_auth)):
+    issue = _issues_mod.get_issue(issue_id)
+    if not issue:
+        raise HTTPException(404, "Issue nicht gefunden")
+    return JSONResponse({
+        "ok": True,
+        "issue": issue,
+        "current_user": user,
+        "is_admin": _issues_mod.is_jarvis(user),
+        "can_edit": _issues_mod.can_edit(issue, user),
+        "can_delete": _issues_mod.can_delete(issue, user),
+    })
+
+
+@app.post("/api/issues")
+async def api_issues_create(request: Request, user: str = Depends(require_auth)):
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, "Ungueltiger JSON-Body")
+    issue, err = _issues_mod.create_issue(user, data or {})
+    if not issue:
+        raise HTTPException(400, err)
+    return JSONResponse({"ok": True, "issue": issue})
+
+
+@app.patch("/api/issues/{issue_id}")
+async def api_issues_update(issue_id: str, request: Request,
+                            user: str = Depends(require_auth)):
+    try:
+        patch = await request.json()
+    except Exception:
+        raise HTTPException(400, "Ungueltiger JSON-Body")
+    issue, err = _issues_mod.update_issue(user, issue_id, patch or {})
+    if not issue:
+        # 403 wenn Berechtigung, 404 wenn nicht gefunden, sonst 400
+        if "Berechtigung" in err or "geschlossen" in err:
+            raise HTTPException(403, err)
+        if "nicht gefunden" in err:
+            raise HTTPException(404, err)
+        raise HTTPException(400, err)
+    return JSONResponse({"ok": True, "issue": issue})
+
+
+@app.delete("/api/issues/{issue_id}")
+async def api_issues_delete(issue_id: str, user: str = Depends(require_auth)):
+    ok, err = _issues_mod.delete_issue(user, issue_id)
+    if not ok:
+        if "Jarvis" in err or "Berechtigung" in err:
+            raise HTTPException(403, err)
+        raise HTTPException(404, err)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/issues/{issue_id}/attachments")
+async def api_issues_attach(issue_id: str, file: UploadFile = File(...),
+                            user: str = Depends(require_auth)):
+    content = await file.read()
+    saved, err = _issues_mod.add_attachment(user, issue_id, file.filename or "file", content)
+    if not saved:
+        if "Berechtigung" in err:
+            raise HTTPException(403, err)
+        if "nicht gefunden" in err:
+            raise HTTPException(404, err)
+        raise HTTPException(400, err)
+    return JSONResponse({"ok": True, "filename": saved})
+
+
+@app.get("/api/issues/{issue_id}/attachments/{filename}")
+async def api_issues_get_attachment(issue_id: str, filename: str,
+                                    user: str = Depends(require_auth_or_query)):
+    p = _issues_mod.get_attachment_path(issue_id, filename)
+    if not p:
+        raise HTTPException(404, "Anhang nicht gefunden")
+    # Content-Type per Endung erraten (Bilder/PDF inline, Rest Download)
+    return FileResponse(str(p), filename=filename)
+
+
+@app.delete("/api/issues/{issue_id}/attachments/{filename}")
+async def api_issues_del_attachment(issue_id: str, filename: str,
+                                    user: str = Depends(require_auth)):
+    ok, err = _issues_mod.delete_attachment(user, issue_id, filename)
+    if not ok:
+        if "Berechtigung" in err:
+            raise HTTPException(403, err)
+        raise HTTPException(404, err)
+    return JSONResponse({"ok": True})
+
+
 # ─── Startup ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():

@@ -107,6 +107,11 @@
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                 </svg>
             </a>
+            <button class="btn-theme" id="btn-chat-issues" title="Issues / Feedback" onclick="window.JarvisIssues && window.JarvisIssues.open()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+            </button>
             <button class="btn-theme" id="btn-cert" data-i18n-title="chat.ssl_cert" title="SSL-Zertifikat">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
@@ -274,6 +279,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/i18n.js?v=9"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=1"></script>
+<script src="/static/js/issues.js?v=1"></script>
 <script src="/static/js/chat.js?v=25"></script>
 </body>
 </html>

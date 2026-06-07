@@ -67,6 +67,7 @@ private fun s(de: String, en: String, lang: String) = if (lang == "en") en else 
 @Composable
 fun ChatScreen(
     onOpenSettings: () -> Unit,
+    onOpenIssues: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val messages by viewModel.messages.collectAsState()
@@ -184,6 +185,7 @@ fun ChatScreen(
                     connectionState = connectionState,
                     agentCount = agents.count { it.status == "running" },
                     onOpenSettings = onOpenSettings,
+                    onOpenIssues = onOpenIssues,
                     onToggleAgents = viewModel::toggleAgentPanel,
                     onReconnect = viewModel::reconnect,
                     lang = settings.uiLang,
@@ -374,6 +376,7 @@ private fun JarvisTopBar(
     connectionState: ConnectionState,
     agentCount: Int,
     onOpenSettings: () -> Unit,
+    onOpenIssues: () -> Unit = {},
     onToggleAgents: () -> Unit,
     onReconnect: () -> Unit,
     lang: String = "de",
@@ -427,6 +430,10 @@ private fun JarvisTopBar(
                 IconButton(onClick = onReconnect) {
                     Icon(Icons.Filled.Refresh, contentDescription = s("Neu verbinden", "Reconnect", lang))
                 }
+            }
+            // Issues / Feedback
+            IconButton(onClick = onOpenIssues) {
+                Icon(Icons.Filled.BugReport, contentDescription = s("Issues / Feedback", "Issues / Feedback", lang))
             }
             // Settings
             IconButton(onClick = onOpenSettings) {

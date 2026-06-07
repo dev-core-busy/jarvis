@@ -97,6 +97,28 @@ func (c *WSClient) SendTask(text string, lang string) {
 	}
 }
 
+// SendTaskWithTruncate sendet eine bearbeitete Nachricht und weist das Backend an,
+// die History auf die ersten `truncateUserMsgIndex` User-Nachrichten zu kuerzen,
+// bevor die neue Nachricht hinzugefuegt wird. truncateUserMsgIndex ist 0-basiert
+// und entspricht der Position der bearbeiteten User-Nachricht (zaehlt nur user-Rollen).
+func (c *WSClient) SendTaskWithTruncate(text string, lang string, truncateUserMsgIndex int) {
+	if lang == "" {
+		lang = "de"
+	}
+	payload := map[string]interface{}{
+		"type":                    "task",
+		"text":                    text,
+		"token":                   c.cfg.APIKey,
+		"lang":                    lang,
+		"truncate_user_msg_index": truncateUserMsgIndex,
+	}
+	data, _ := json.Marshal(payload)
+	select {
+	case c.sendCh <- data:
+	default:
+	}
+}
+
 func (c *WSClient) SendStop(agentID string) {
 	payload := map[string]interface{}{
 		"type":   "control",

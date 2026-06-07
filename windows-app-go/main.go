@@ -373,6 +373,11 @@ func (ja *JarvisApp) reconnect() {
 		ja.chat.AddMessage(RoleUser, text)
 		ja.ws.SendTask(text, ja.cfg.UILang)
 	}
+	// Editieren einer User-Nachricht: Backend trimmt History auf die ersten
+	// userMsgIndex User-Nachrichten und generiert die Antwort neu.
+	ja.chat.OnEditUserMessage = func(newText string, userMsgIndex int) {
+		ja.ws.SendTaskWithTruncate(newText, ja.cfg.UILang, userMsgIndex)
+	}
 	ja.chat.OnMicButton = func() {
 		if ja.textDictating {
 			ja.stopTextDictation()
@@ -530,6 +535,15 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 		info := fmt.Sprintf("⏱ %.1fs", sec)
 		if msg.TotalTokens > 0 {
 			info += fmt.Sprintf(" · %d → %d Tokens", msg.InputTokens, msg.OutputTokens)
+		}
+		// Output-Token/s: Antwort-Geschwindigkeit (was der Nutzer spürt)
+		if msg.OutputTokens > 0 && sec > 0 {
+			tps := float64(msg.OutputTokens) / sec
+			if tps >= 100 {
+				info += fmt.Sprintf(" · %.0f tok/s", tps)
+			} else {
+				info += fmt.Sprintf(" · %.1f tok/s", tps)
+			}
 		}
 		if msg.Steps > 0 {
 			stepWord := t("Schritte", "steps")

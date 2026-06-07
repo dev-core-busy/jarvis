@@ -719,12 +719,19 @@
 
         ws.on('llm_stats', (data) => {
             const agentId = data.agent_id || '_main';
-            const sec = (data.duration_ms / 1000).toFixed(1);
+            const secNum = (data.duration_ms || 0) / 1000;
+            const sec = secNum.toFixed(1);
             const inTok = data.input_tokens || 0;
             const outTok = data.output_tokens || 0;
             const total = data.total_tokens || (inTok + outTok);
             let info = `⏱ ${sec}s`;
             if (total > 0) info += ` · ${inTok.toLocaleString('de-DE')} → ${outTok.toLocaleString('de-DE')} Tokens`;
+            // Output-Token/s: nur die Antwort-Geschwindigkeit (was der User spürt)
+            if (outTok > 0 && secNum > 0) {
+                const tps = outTok / secNum;
+                const tpsStr = tps >= 100 ? tps.toFixed(0) : tps.toFixed(1);
+                info += ` · ${tpsStr} tok/s`;
+            }
             if (data.steps > 0) info += ` · ${data.steps} Schritt${data.steps !== 1 ? 'e' : ''}`;
             addStatsEntry(info, agentId);
         });
@@ -1516,79 +1523,30 @@
 .jv-bubble th,.jv-bubble td{border:1px solid rgba(255,255,255,.18);padding:4px 8px;white-space:nowrap;}
 .jv-bubble th{background:rgba(155,89,182,.15);font-weight:600;}
 .jv-bubble tr:nth-child(even) td{background:rgba(255,255,255,.03);}
+/* Edit-Button/Edit-Area-Styles ausgelagert nach /css/chat-bubbles.css (siehe index.html). */
         `;
         document.head.appendChild(s);
     })();
 
-    // ─── Markdown-Renderer ───────────────────────────────────────
+    // ─── Markdown-Renderer (delegiert an chatlib.js) ─────────────
     function _renderMarkdown(text) {
-        const _E = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        const codeBlocks = [];
-        let s = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-            const idx = codeBlocks.length;
-            codeBlocks.push(`<pre><code>${_E(code.trim())}</code></pre>`);
-            return `\x01CODE${idx}\x01`;
-        });
-        s = _E(s);
-        s = s.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
-        function _inline(t) {
-            t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-            t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-            t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-            t = t.replace(/_([^_\n]+)_/g, '<em>$1</em>');
-            t = t.replace(/~~(.+?)~~/g, '<del>$1</del>');
-            t = t.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_, tit, url) => {
-                const raw = url.replace(/&amp;/g,'&');
-                const safe = /^https?:\/\/|^\//.test(raw) ? raw : '#';
-                return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${tit}</a>`;
-            });
-            return t;
+        if (window.JarvisChatLib && window.JarvisChatLib.renderMarkdown) {
+            return window.JarvisChatLib.renderMarkdown(text);
         }
-        const lines = s.split('\n');
-        const out = [];
-        let i = 0;
-        while (i < lines.length) {
-            const l = lines[i];
-            const hm = l.match(/^(#{1,4}) (.+)/);
-            if (hm) { out.push(`<h${hm[1].length}>${_inline(hm[2])}</h${hm[1].length}>`); i++; continue; }
-            if (/^---+$/.test(l.trim())) { out.push('<hr>'); i++; continue; }
-            if (l.startsWith('&gt; ')) { out.push(`<blockquote>${_inline(l.slice(5))}</blockquote>`); i++; continue; }
-            if (/^[ \t]*[-*+] /.test(l)) {
-                const its = [];
-                while (i < lines.length && /^[ \t]*[-*+] /.test(lines[i]))
-                    its.push(`<li>${_inline(lines[i++].replace(/^[ \t]*[-*+] /,''))}</li>`);
-                out.push(`<ul>${its.join('')}</ul>`); continue;
-            }
-            if (/^[ \t]*\d+\. /.test(l)) {
-                const its = [];
-                while (i < lines.length && /^[ \t]*\d+\. /.test(lines[i]))
-                    its.push(`<li>${_inline(lines[i++].replace(/^[ \t]*\d+\. /,''))}</li>`);
-                out.push(`<ol>${its.join('')}</ol>`); continue;
-            }
-            if (l.includes('|') && i+1 < lines.length && /^\|?[\s\-:|]+\|/.test(lines[i+1])) {
-                const tl = [];
-                while (i < lines.length && lines[i].includes('|')) tl.push(lines[i++]);
-                if (tl.length >= 2) {
-                    const hs = tl[0].split('|').map(c=>c.trim()).filter(Boolean);
-                    const rs = tl.slice(2).map(r=>r.split('|').map(c=>c.trim()).filter(Boolean));
-                    let t = '<table><thead><tr>'+hs.map(h=>`<th>${_inline(h)}</th>`).join('')+'</tr></thead><tbody>';
-                    rs.forEach(r=>{t+='<tr>'+r.map(c=>`<td>${_inline(c)}</td>`).join('')+'</tr>';});
-                    out.push(t+'</tbody></table>'); continue;
-                }
-            }
-            if (!l.trim()) { if (out.length && out[out.length-1]!=='<br>') out.push('<br>'); i++; continue; }
-            out.push(_inline(l)+'<br>'); i++;
-        }
-        let r = out.join('').replace(/\x01CODE(\d+)\x01/g,(_,n)=>codeBlocks[+n]);
-        return r.replace(/^(<br>)+/,'').replace(/(<br>)+$/,'');
+        // Fallback: minimal — falls chatlib.js (unerwartet) nicht geladen ist
+        return escapeHtml(text).replace(/\n/g, '<br>');
     }
 
-    // ─── Datum-Hilfsfunktionen ───────────────────────────────────
+    // ─── Datum-Hilfsfunktionen (delegieren an chatlib.js) ────────
     function _currentDateStr() {
-        return new Date().toLocaleDateString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric'});
+        return (window.JarvisChatLib && window.JarvisChatLib.currentDateStr)
+            ? window.JarvisChatLib.currentDateStr()
+            : new Date().toLocaleDateString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric'});
     }
     function _timeStr() {
-        return new Date().toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit'});
+        return (window.JarvisChatLib && window.JarvisChatLib.timeStr)
+            ? window.JarvisChatLib.timeStr()
+            : new Date().toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit'});
     }
     function _dateLabel(str) {
         const fmt = d => d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
@@ -1623,11 +1581,29 @@
 
         const timeEl = document.createElement('div');
         timeEl.className = 'jv-bubble-time';
-        timeEl.textContent = timeStr || _timeStr();
 
         const bubble = document.createElement('div');
         bubble.className = 'jv-bubble';
         bubble.innerHTML = isMarkdown ? _renderMarkdown(text) : escapeHtml(text);
+
+        // Time + Edit-Button für User-Bubbles
+        if (role === 'user') {
+            const editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'jv-bubble-edit-btn';
+            editBtn.title = 'Nachricht bearbeiten';
+            editBtn.setAttribute('aria-label', 'Nachricht bearbeiten');
+            editBtn.textContent = '✏';
+            editBtn.addEventListener('click', () => _editUserBubble(row, bubble));
+            timeEl.appendChild(editBtn);
+            const timeSpan = document.createElement('span');
+            timeSpan.textContent = timeStr || _timeStr();
+            timeEl.appendChild(timeSpan);
+            // Originalen Text auf der Row speichern für Cancel-Funktion
+            row.dataset.rawText = text;
+        } else {
+            timeEl.textContent = timeStr || _timeStr();
+        }
 
         col.appendChild(timeEl);
         col.appendChild(bubble);
@@ -1643,6 +1619,99 @@
         logContainer.scrollTop = logContainer.scrollHeight;
 
         return { row, col, bubble };
+    }
+
+    // ─── Edit-Modus für User-Bubbles (delegiert an chatlib.js) ───
+    let _editingRow = null;   // verhindert gleichzeitiges Editieren mehrerer Bubbles
+
+    function _editUserBubble(row, bubble) {
+        if (_editingRow) return;            // schon ein Edit aktiv
+        if (!row || !bubble) return;
+        if (!(window.JarvisChatLib && window.JarvisChatLib.enterEditMode)) {
+            alert('Edit-Bibliothek (chatlib.js) nicht geladen.');
+            return;
+        }
+        const ok = window.JarvisChatLib.enterEditMode(row, bubble, {
+            editBtnSelector: '.jv-bubble-edit-btn',
+            areaClass:    'jv-bubble-edit-area',
+            actionsClass: 'jv-bubble-edit-actions',
+            saveClass:    'jv-bubble-edit-save',
+            cancelClass:  'jv-bubble-edit-cancel',
+            isBlocked: () => {
+                const _stopBtn = document.getElementById('btn-stop');
+                return !!(_stopBtn && !_stopBtn.disabled);
+            },
+            blockMessage: 'Bitte stoppe zuerst die laufende Aufgabe (■-Button).',
+            onCommit: (newText) => _submitEdit(row, bubble, newText),
+            onCancel: () => { _editingRow = null; },
+        });
+        if (ok) _editingRow = row;
+    }
+
+    function _restoreBubble(bubble, row) {
+        if (window.JarvisChatLib && window.JarvisChatLib.exitEditMode) {
+            window.JarvisChatLib.exitEditMode(row, bubble, { editBtnSelector: '.jv-bubble-edit-btn' });
+        }
+        _editingRow = null;
+    }
+
+    function _submitEdit(row, bubble, newText) {
+        // Index der zu editierenden User-Bubble (0-basiert)
+        const allUserRows = logContainer.querySelectorAll('.jv-bubble-row.user');
+        const userIndex = Array.from(allUserRows).indexOf(row);
+        if (userIndex < 0) { _restoreBubble(bubble, row); return; }
+
+        // 1) DOM: alle Bubbles/Datums-Separatoren NACH dieser Row entfernen
+        if (window.JarvisChatLib && window.JarvisChatLib.removeRowsAfter) {
+            window.JarvisChatLib.removeRowsAfter(row);
+        }
+
+        // 2) Streaming-State zurücksetzen
+        _currentBotBubble = null;
+        _currentBotBubbleCol = null;
+        _currentBotRaw = '';
+
+        // 3) _mainHistory trimmen + Text aktualisieren (in place)
+        if (window.JarvisChatLib && window.JarvisChatLib.truncateHistoryToUserIndex) {
+            window.JarvisChatLib.truncateHistoryToUserIndex(
+                _mainHistory, userIndex, newText,
+                { timeStr: _timeStr(), dateStr: _currentDateStr() }
+            );
+        }
+        _saveHistory();
+
+        // 4) Bubble visuell zurücksetzen mit neuem Text
+        bubble.classList.remove('editing');
+        bubble.innerHTML = escapeHtml(newText);
+        delete bubble.dataset.origHtml;
+        row.dataset.rawText = newText;
+        const editBtn = row.querySelector('.jv-bubble-edit-btn');
+        if (editBtn) editBtn.style.visibility = '';
+        // Time aktualisieren (zweites Kind: span)
+        const timeSpan = row.querySelector('.jv-bubble-time span');
+        if (timeSpan) timeSpan.textContent = _timeStr();
+        _editingRow = null;
+
+        // 5) WS-Task mit truncate-Hint senden (Backend kürzt seine History)
+        if (!ws) { alert('Keine WebSocket-Verbindung.'); return; }
+        const wsMsg = {
+            type: 'task',
+            text: newText,
+            token,
+            lang: window._lang || 'de',
+            truncate_user_msg_index: userIndex,  // Backend behält die ersten N user-Nachrichten
+        };
+        if (_activeAgentId && _activeAgentId !== '_main') {
+            wsMsg.agent_id = _activeAgentId;
+        }
+        // Feedback-State zurücksetzen
+        _fb_lastUserTask = newText;
+        _fb_lastHighlightEl = null;
+        _fb_lastHighlightText = '';
+
+        ws.send(wsMsg);
+        btnPause.disabled = false;
+        btnStop.disabled = false;
     }
 
     // ─── Bot-Bubble Streaming ─────────────────────────────────────
@@ -1676,14 +1745,20 @@
     // Referenz auf die Col des aktuellen Bot-Bubbles (für Stats + Feedback)
     let _currentBotBubbleCol = null;
 
-    // ─── History Persistenz ───────────────────────────────────────
+    // ─── History Persistenz (delegieren an chatlib.js) ──────────
     function _saveHistory() {
-        try {
-            if (_mainHistory.length > _HISTORY_MAX) _mainHistory = _mainHistory.slice(-_HISTORY_MAX);
-            localStorage.setItem(_HISTORY_KEY, JSON.stringify(_mainHistory));
-        } catch(e) { /* QuotaExceeded */ }
+        if (_mainHistory.length > _HISTORY_MAX) _mainHistory = _mainHistory.slice(-_HISTORY_MAX);
+        if (window.JarvisChatLib && window.JarvisChatLib.saveHistory) {
+            window.JarvisChatLib.saveHistory(_HISTORY_KEY, _mainHistory, _HISTORY_MAX);
+        } else {
+            try { localStorage.setItem(_HISTORY_KEY, JSON.stringify(_mainHistory)); }
+            catch(e) { /* QuotaExceeded */ }
+        }
     }
     function _loadHistory() {
+        if (window.JarvisChatLib && window.JarvisChatLib.loadHistory) {
+            return window.JarvisChatLib.loadHistory(_HISTORY_KEY);
+        }
         try {
             const raw = localStorage.getItem(_HISTORY_KEY);
             return raw ? (JSON.parse(raw) || []) : [];
@@ -1805,6 +1880,9 @@
     }
 
     function escapeHtml(text) {
+        if (window.JarvisChatLib && window.JarvisChatLib.escapeHtml) {
+            return window.JarvisChatLib.escapeHtml(text);
+        }
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;

@@ -300,6 +300,130 @@
         if (editBtnEl) editBtnEl.style.visibility = '';
     }
 
+    /* ───────────────────────────────────────────────────────────── *
+     *  Bubble-Kontextmenue (Rechtsklick / Long-Press)
+     *
+     *  Erzeugt EIN globales Floating-Menu (#jv-bubble-ctx-menu) und
+     *  haengt es per `setupBubbleContextMenu(el, opts)` an jede Bubble-
+     *  Row. Die Aktionen werden pro Aufruf neu konfiguriert.
+     *
+     *  opts = {
+     *    items: [
+     *      { label: 'Bearbeiten', icon: '✏', onClick: () => {...} },
+     *      { label: 'Loeschen',   icon: '🗑', danger: true, onClick: ... },
+     *      { label: 'Kopieren',   icon: '⧉', onClick: ... },
+     *    ]
+     *  }
+     *  Items mit `onClick === null` werden uebersprungen (z.B. Bearbeiten
+     *  bei Bot-Bubbles weglassen).
+     * ───────────────────────────────────────────────────────────── */
+    let _ctxMenuEl = null;
+    function _ensureCtxMenu() {
+        if (_ctxMenuEl) return _ctxMenuEl;
+        _ctxMenuEl = document.createElement('div');
+        _ctxMenuEl.id = 'jv-bubble-ctx-menu';
+        _ctxMenuEl.className = 'jv-bubble-ctx-menu';
+        document.body.appendChild(_ctxMenuEl);
+        // Globale Close-Handler
+        document.addEventListener('click', () => _hideCtxMenu());
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') _hideCtxMenu();
+        });
+        window.addEventListener('blur', () => _hideCtxMenu());
+        window.addEventListener('resize', () => _hideCtxMenu());
+        return _ctxMenuEl;
+    }
+    function _hideCtxMenu() {
+        if (_ctxMenuEl) _ctxMenuEl.classList.remove('open');
+    }
+    function _showCtxMenuAt(x, y, items) {
+        const menu = _ensureCtxMenu();
+        menu.innerHTML = '';
+        const usable = items.filter(it => it && typeof it.onClick === 'function');
+        if (usable.length === 0) return;
+        for (const it of usable) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'jv-bubble-ctx-item' + (it.danger ? ' danger' : '');
+            const icon = it.icon ? `<span class="jv-bubble-ctx-icon">${it.icon}</span>` : '';
+            btn.innerHTML = `${icon}<span>${escapeHtml(it.label || '')}</span>`;
+            btn.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                _hideCtxMenu();
+                try { it.onClick(); } catch (e) { console.error('[CtxMenu]', e); }
+            });
+            menu.appendChild(btn);
+        }
+        // Positionierung (am Viewport-Rand abklemmen)
+        menu.classList.add('open');
+        const rect = menu.getBoundingClientRect();
+        const maxX = window.innerWidth  - rect.width  - 8;
+        const maxY = window.innerHeight - rect.height - 8;
+        menu.style.left = Math.max(4, Math.min(x, maxX)) + 'px';
+        menu.style.top  = Math.max(4, Math.min(y, maxY)) + 'px';
+    }
+
+    function setupBubbleContextMenu(targetEl, getItems) {
+        if (!targetEl || typeof getItems !== 'function') return;
+        targetEl.addEventListener('contextmenu', (e) => {
+            // Edit-Mode aktiv? Dann kein Menue
+            if (targetEl.classList.contains('editing') ||
+                targetEl.querySelector('.editing')) return;
+            const items = getItems();
+            if (!items || items.length === 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            _showCtxMenuAt(e.clientX, e.clientY, items);
+        });
+        // Long-Press fuer Touch-Geraete (~550ms)
+        let _touchTimer = null;
+        let _touchStartXY = null;
+        targetEl.addEventListener('touchstart', (e) => {
+            if (!e.touches || e.touches.length !== 1) return;
+            const t = e.touches[0];
+            _touchStartXY = { x: t.clientX, y: t.clientY };
+            _touchTimer = setTimeout(() => {
+                const items = getItems();
+                if (!items || items.length === 0) return;
+                _showCtxMenuAt(_touchStartXY.x, _touchStartXY.y, items);
+                // haptisches Feedback (falls vorhanden)
+                try { navigator.vibrate && navigator.vibrate(30); } catch(_) {}
+            }, 550);
+        }, { passive: true });
+        const _cancelTouch = () => { if (_touchTimer) { clearTimeout(_touchTimer); _touchTimer = null; } };
+        targetEl.addEventListener('touchend',    _cancelTouch);
+        targetEl.addEventListener('touchcancel', _cancelTouch);
+        targetEl.addEventListener('touchmove', (e) => {
+            if (!_touchStartXY || !e.touches || e.touches.length !== 1) return _cancelTouch();
+            const t = e.touches[0];
+            const dx = Math.abs(t.clientX - _touchStartXY.x);
+            const dy = Math.abs(t.clientY - _touchStartXY.y);
+            if (dx > 8 || dy > 8) _cancelTouch();
+        }, { passive: true });
+    }
+
+    /* ── Clipboard-Helfer (Best-Effort, fallback auf execCommand) ──── */
+    async function copyTextToClipboard(text) {
+        if (text == null) text = '';
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            }
+        } catch (_) {}
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity  = '0';
+            document.body.appendChild(ta);
+            ta.focus(); ta.select();
+            const ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            return ok;
+        } catch (_) { return false; }
+    }
+
     /* ── Namespace exponieren ─────────────────────────────────── */
     global.JarvisChatLib = {
         escapeHtml: escapeHtml,
@@ -312,5 +436,8 @@
         removeRowsAfter: removeRowsAfter,
         enterEditMode: enterEditMode,
         exitEditMode: exitEditMode,
+        setupBubbleContextMenu: setupBubbleContextMenu,
+        hideBubbleContextMenu: _hideCtxMenu,
+        copyTextToClipboard: copyTextToClipboard,
     };
 })(typeof window !== 'undefined' ? window : this);

@@ -1036,6 +1036,66 @@ async def userchat_ws(ws: WebSocket):
                 if to_user:
                     await _uc_send_to_user(to_user, {"type": "typing", "from": username})
 
+            elif msg_type == "dm_edit":
+                # Eigene Nachricht editieren (nur Text). Aenderungen werden
+                # an beide Seiten der Konversation gepusht.
+                to_user = data.get("to", "")
+                msg_id  = data.get("msg_id", "")
+                new_text = (data.get("text", "") or "").strip()
+                if not to_user or not msg_id or not new_text:
+                    continue
+                key = _uc_conv_key(username, to_user)
+                edited = None
+                for m in _uc_history.get(key, []):
+                    if m.get("msg_id") == msg_id and m.get("from") == username:
+                        m["text"] = new_text[:5000]
+                        m["edited_at"] = int(time.time() * 1000)
+                        edited = m
+                        break
+                if not edited:
+                    continue
+                _uc_save_history()
+                evt = {
+                    "type": "dm_edit",
+                    "msg_id": msg_id,
+                    "from": username,
+                    "to":   to_user,
+                    "text": edited["text"],
+                    "edited_at": edited["edited_at"],
+                }
+                await _uc_send_to_user(to_user, evt)
+                await _uc_send(ws, evt)
+
+            elif msg_type == "dm_delete":
+                # Eigene Nachricht loeschen. Beide Seiten erhalten das Event;
+                # Anhaenge werden mitentfernt.
+                to_user = data.get("to", "")
+                msg_id  = data.get("msg_id", "")
+                if not to_user or not msg_id:
+                    continue
+                key = _uc_conv_key(username, to_user)
+                removed_msg = None
+                if key in _uc_history:
+                    new_list = []
+                    for m in _uc_history[key]:
+                        if m.get("msg_id") == msg_id and m.get("from") == username:
+                            removed_msg = m
+                            continue
+                        new_list.append(m)
+                    if removed_msg:
+                        _uc_history[key] = new_list
+                        _uc_save_history()
+                if not removed_msg:
+                    continue
+                evt = {
+                    "type": "dm_delete",
+                    "msg_id": msg_id,
+                    "from": username,
+                    "to":   to_user,
+                }
+                await _uc_send_to_user(to_user, evt)
+                await _uc_send(ws, evt)
+
             elif msg_type == "reaction":
                 to_user = data.get("to", "")
                 msg_id  = data.get("msg_id", "")

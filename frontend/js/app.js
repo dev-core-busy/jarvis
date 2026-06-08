@@ -1122,9 +1122,20 @@
     });
 
     function applyLogZoom() {
-        logContainer.style.fontSize = (logZoom / 100 * 0.84).toFixed(3) + 'rem';
+        const scale = logZoom / 100;
+        // Skaliert .log-entry (font-size: inherit) UND alle .jv-bubble*-Elemente,
+        // die per calc(... * var(--jv-zoom)) auf diese Custom Property reagieren.
+        logContainer.style.setProperty('--jv-zoom', scale.toFixed(3));
+        logContainer.style.fontSize = (scale * 0.84).toFixed(3) + 'rem';
         btnZoomReset.textContent = logZoom + '%';
+        try { localStorage.setItem('jv_log_zoom', String(logZoom)); } catch(_) {}
     }
+    // Zoom-Stufe aus letzter Sitzung wiederherstellen
+    try {
+        const saved = parseInt(localStorage.getItem('jv_log_zoom') || '', 10);
+        if (Number.isFinite(saved) && saved >= 50 && saved <= 200) logZoom = saved;
+    } catch(_) {}
+    applyLogZoom();
 
     btnZoomIn.addEventListener('click', () => {
         if (logZoom < 200) { logZoom += 10; applyLogZoom(); }
@@ -1484,19 +1495,19 @@
 .jv-bubble-row.user .jv-bubble-col{align-items:flex-end;max-width:min(480px,85%);}
 .jv-bubble-row.bot  .jv-bubble-col{align-items:flex-start;max-width:92%;}
 .jv-bubble-avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#9B59B6,#6A0DAD);
-  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;font-size:calc(12px * var(--jv-zoom,1));font-weight:700;
   color:#fff;flex-shrink:0;align-self:flex-end;}
-.jv-bubble{padding:9px 13px;font-size:14px;line-height:1.55;color:#fff;
+.jv-bubble{padding:9px 13px;font-size:calc(14px * var(--jv-zoom,1));line-height:1.55;color:#fff;
   overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;}
 .jv-bubble-row.user .jv-bubble{background:rgba(155,89,182,.4);border-radius:16px 4px 16px 16px;}
 .jv-bubble-row.bot  .jv-bubble{background:rgba(255,255,255,.08);border-radius:4px 16px 16px 16px;white-space:normal;}
-.jv-bubble-time{font-size:10px;color:rgba(255,255,255,.32);padding:1px 4px;}
+.jv-bubble-time{font-size:calc(10px * var(--jv-zoom,1));color:rgba(255,255,255,.32);padding:1px 4px;}
 .jv-bubble-row.user .jv-bubble-time{text-align:right;}
-.jv-bubble-stats{font-size:11px;color:rgba(165,180,252,.55);font-style:italic;padding:2px 4px;}
+.jv-bubble-stats{font-size:calc(11px * var(--jv-zoom,1));color:rgba(165,180,252,.55);font-style:italic;padding:2px 4px;}
 .jv-date-sep{display:flex;align-items:center;gap:10px;padding:8px 0;margin:4px 0;}
 .jv-date-sep::before,.jv-date-sep::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.1);}
-.jv-date-sep span{font-size:11px;color:rgba(255,255,255,.38);white-space:nowrap;}
-.jv-streaming-dots{font-size:10px;color:rgba(255,255,255,.35);
+.jv-date-sep span{font-size:calc(11px * var(--jv-zoom,1));color:rgba(255,255,255,.38);white-space:nowrap;}
+.jv-streaming-dots{font-size:calc(10px * var(--jv-zoom,1));color:rgba(255,255,255,.35);
   animation:jvDotPulse .6s ease-in-out infinite alternate;}
 @keyframes jvDotPulse{from{opacity:.25}to{opacity:.9}}
 /* Markdown in Bot-Bubbles */
@@ -1504,9 +1515,9 @@
 .jv-bubble em,.jv-bubble i{font-style:italic;}
 .jv-bubble del{text-decoration:line-through;opacity:.7;}
 .jv-bubble code{background:rgba(255,255,255,.1);padding:1px 5px;border-radius:4px;
-  font-family:'Courier New',monospace;font-size:12px;}
+  font-family:'Courier New',monospace;font-size:calc(12px * var(--jv-zoom,1));}
 .jv-bubble pre{background:rgba(0,0,0,.3);padding:9px 11px;border-radius:7px;
-  overflow-x:auto;margin:5px 0;font-size:12px;line-height:1.4;white-space:pre;}
+  overflow-x:auto;margin:5px 0;font-size:calc(12px * var(--jv-zoom,1));line-height:1.4;white-space:pre;}
 .jv-bubble pre code{background:none;padding:0;}
 .jv-bubble h1{font-size:1.2em;font-weight:700;margin:8px 0 3px;}
 .jv-bubble h2{font-size:1.1em;font-weight:700;margin:7px 0 3px;}
@@ -1519,7 +1530,7 @@
   color:rgba(255,255,255,.6);font-style:italic;background:rgba(155,89,182,.06);border-radius:0 4px 4px 0;}
 .jv-bubble a{color:#BB86FC;text-decoration:underline;text-underline-offset:2px;word-break:break-all;}
 .jv-bubble hr{border:none;border-top:1px solid rgba(255,255,255,.15);margin:7px 0;}
-.jv-bubble table{border-collapse:collapse;font-size:12px;margin:6px 0;display:block;overflow-x:auto;}
+.jv-bubble table{border-collapse:collapse;font-size:calc(12px * var(--jv-zoom,1));margin:6px 0;display:block;overflow-x:auto;}
 .jv-bubble th,.jv-bubble td{border:1px solid rgba(255,255,255,.18);padding:4px 8px;white-space:nowrap;}
 .jv-bubble th{background:rgba(155,89,182,.15);font-weight:600;}
 .jv-bubble tr:nth-child(even) td{background:rgba(255,255,255,.03);}
@@ -1618,7 +1629,104 @@
         logContainer.appendChild(row);
         logContainer.scrollTop = logContainer.scrollHeight;
 
+        // ── Kontextmenue (Rechtsklick / Long-Press) ────────────────
+        if (window.JarvisChatLib && window.JarvisChatLib.setupBubbleContextMenu) {
+            window.JarvisChatLib.setupBubbleContextMenu(row, () => _buildBubbleCtxItems(row, bubble, role));
+        }
+
         return { row, col, bubble };
+    }
+
+    // Kontextmenue-Items je nach Bubble-Rolle (user vs. bot)
+    function _buildBubbleCtxItems(row, bubble, role) {
+        const items = [];
+        const txt = (row.dataset && row.dataset.rawText) ||
+                    (bubble && (bubble.textContent || '')) || '';
+        if (role === 'user') {
+            items.push({
+                label: 'Bearbeiten',
+                icon: '✏',
+                onClick: () => _editUserBubble(row, bubble),
+            });
+        }
+        items.push({
+            label: 'Text kopieren',
+            icon: '⧉',
+            onClick: () => {
+                if (window.JarvisChatLib && window.JarvisChatLib.copyTextToClipboard) {
+                    window.JarvisChatLib.copyTextToClipboard(txt);
+                }
+            },
+        });
+        items.push({
+            label: 'Loeschen',
+            icon: '🗑',
+            danger: true,
+            onClick: () => _deleteBubble(row, role),
+        });
+        return items;
+    }
+
+    // Bubble loeschen: User-Bubble = harter Cut (alle folgenden + Backend-Truncate),
+    // Loescht NUR die angeklickte Bubble (analog Android-App-Verhalten).
+    // Backend-Agent-History bleibt komplett unberuehrt – User-Anker und
+    // Tool-Call-Verkettung muessen erhalten bleiben. Nachfolgende Dialoge
+    // werden NICHT mitgeloescht. (Edit-Workflow truncated weiterhin bewusst,
+    // da eine geaenderte Frage neue Antworten erfordert.)
+    function _deleteBubble(row, role) {
+        if (!row || !row.parentNode) return;
+
+        // Edit-Modus auf einer anderen Row beenden
+        if (_editingRow && _editingRow !== row) {
+            try { _restoreBubble(_editingRow.querySelector('.jv-bubble'), _editingRow); } catch(_) {}
+        }
+
+        const isUser = (role === 'user');
+        const promptTxt = isUser ? 'Diese Frage loeschen?' : 'Diese Antwort loeschen?';
+        if (!confirm(promptTxt)) return;
+
+        // Position dieser Row unter allen Rows der gleichen Rolle ermitteln,
+        // damit wir den passenden _mainHistory-Eintrag finden.
+        const rowSel = isUser ? '.jv-bubble-row.user' : '.jv-bubble-row.bot';
+        const sameRoleRows = logContainer.querySelectorAll(rowSel);
+        const roleIndex    = Array.from(sameRoleRows).indexOf(row);
+
+        // Falls die aktuell streamende Bot-Bubble geloescht wird, Stream-State leeren
+        if (!isUser && (row.contains(_currentBotBubble) || _currentBotBubbleCol === row.querySelector('.jv-bubble-col'))) {
+            _currentBotBubble    = null;
+            _currentBotBubbleCol = null;
+            _currentBotRaw       = '';
+        }
+        if (_editingRow === row) _editingRow = null;
+
+        // Nur diese Row entfernen
+        row.parentNode.removeChild(row);
+
+        // _mainHistory: nur den passenden Eintrag entfernen (kein Truncate!)
+        if (Array.isArray(_mainHistory) && roleIndex >= 0) {
+            const wantRoles = isUser ? ['user'] : ['bot', 'assistant'];
+            let seen = 0;
+            for (let i = 0; i < _mainHistory.length; i++) {
+                const e = _mainHistory[i];
+                if (e && wantRoles.includes(e.role)) {
+                    if (seen === roleIndex) { _mainHistory.splice(i, 1); break; }
+                    seen++;
+                }
+            }
+            _saveHistory();
+        }
+
+        // Falls Container leer → Welcome wieder einblenden
+        if (!logContainer.querySelector('.jv-bubble-row')) {
+            const w = logContainer.querySelector('.log-welcome');
+            if (!w) {
+                const welcome = document.createElement('div');
+                welcome.className = 'log-welcome';
+                welcome.innerHTML = '<p>👋 Willkommen bei Jarvis!</p>' +
+                                    '<p class="log-hint">Gib unten eine Aufgabe ein, um loszulegen.</p>';
+                logContainer.appendChild(welcome);
+            }
+        }
     }
 
     // ─── Edit-Modus für User-Bubbles (delegiert an chatlib.js) ───
@@ -3164,10 +3272,15 @@
     function _appendFeedbackToLog(targetEl, userTask, botText) {
         const row = document.createElement('div');
         row.className = 'log-feedback-row';
+        // SVG-Icons statt Emoji (System-Emoji-Font kann fehlen / inkonsistent sein,
+        // SVG rendert ueberall identisch). Gelb fuer Thumbs (Emoji-Optik), Rot fuer X.
+        const SVG_UP   = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>`;
+        const SVG_DOWN = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>`;
+        const SVG_X    = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#E74C3C"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`;
         row.innerHTML =
-            `<button class="log-fb-btn" data-r="positive" title="Gute Antwort">👍</button>` +
-            `<button class="log-fb-btn" data-r="negative" title="Schlechte Antwort">👎</button>` +
-            `<button class="log-fb-btn" data-r="wrong"    title="Falsche Antwort">❌</button>`;
+            `<button class="log-fb-btn" data-r="positive" title="Gute Antwort">${SVG_UP}</button>` +
+            `<button class="log-fb-btn" data-r="negative" title="Schlechte Antwort">${SVG_DOWN}</button>` +
+            `<button class="log-fb-btn" data-r="wrong"    title="Falsche Antwort">${SVG_X}</button>`;
         targetEl.after(row);
 
         row.querySelectorAll('.log-fb-btn').forEach(btn => {
@@ -3203,13 +3316,14 @@
         const s = document.createElement('style');
         s.id = 'jarvis-app-fb-css';
         s.textContent = `
-.log-feedback-row{display:flex;gap:4px;margin:2px 0 2px 8px;}
-.log-fb-btn{background:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;
-  padding:1px 7px;font-size:.78rem;cursor:pointer;color:rgba(255,255,255,.4);
-  transition:all .15s;}
-.log-fb-btn:hover:not(:disabled){border-color:rgba(255,255,255,.3);color:#fff;transform:scale(1.1);}
-.log-fb-btn:disabled{cursor:default;opacity:.4;}
-.log-fb-btn.log-fb-active{border-color:rgba(124,58,237,.6);background:rgba(124,58,237,.18);color:#fff;}
+.log-feedback-row{display:flex;gap:4px;margin:2px 0 2px 8px;align-items:center;}
+.log-fb-btn{background:none;border:1px solid rgba(255,255,255,.1);border-radius:50%;
+  width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;
+  padding:0;cursor:pointer;transition:all .15s;line-height:0;}
+.log-fb-btn svg{display:block;}
+.log-fb-btn:hover:not(:disabled){border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.06);transform:scale(1.12);}
+.log-fb-btn:disabled{cursor:default;opacity:.45;}
+.log-fb-btn.log-fb-active{border-color:rgba(124,58,237,.7);background:rgba(124,58,237,.18);}
 .log-fb-info{font-size:.72rem;color:rgba(255,255,255,.4);margin:2px 0 2px 8px;}
 .log-entry.log-task{color:rgba(167,139,250,.9);font-weight:500;
   background:rgba(124,58,237,.07);border-left:2px solid rgba(124,58,237,.45);

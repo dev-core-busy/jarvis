@@ -586,7 +586,7 @@ func (ja *JarvisApp) showAvatarWindow() {
 		ja.avatarWin.Show()
 		return
 	}
-	win := ja.fyneApp.NewWindow("Jarvis")
+	win := ja.fyneApp.NewWindow("Jarvis v" + AppVersion)
 	win.SetFixedSize(true)
 	win.Resize(fyne.NewSize(260, 260))
 	ja.avatarWin = win
@@ -635,7 +635,7 @@ func (ja *JarvisApp) refreshChatWindow() {
 }
 
 func (ja *JarvisApp) openChatWindowLocked() {
-	win := ja.fyneApp.NewWindow("Jarvis – Chat")
+	win := ja.fyneApp.NewWindow("Jarvis – Chat v" + AppVersion)
 	win.Resize(fyne.NewSize(float32(ja.cfg.WindowW), float32(ja.cfg.WindowH)))
 	win.SetIcon(fyne.NewStaticResource("jarvis_icon", jarvisIconPNG))
 	win.SetContent(ja.chat.Layout(ja.cfg))

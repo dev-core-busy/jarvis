@@ -648,7 +648,74 @@
         messagesEl.appendChild(row);
         scrollToBottom();
 
+        // ── Kontextmenue (Rechtsklick / Long-Press) ────────────────
+        if (window.JarvisChatLib && window.JarvisChatLib.setupBubbleContextMenu) {
+            window.JarvisChatLib.setupBubbleContextMenu(row, () => _buildBubbleCtxItems(row, bubble, role));
+        }
+
         return bubble;
+    }
+
+    // Kontextmenue-Items (Bearbeiten/Kopieren/Loeschen)
+    function _buildBubbleCtxItems(row, bubble, role) {
+        const items = [];
+        const txt = (row.dataset && row.dataset.rawText) ||
+                    (bubble && (bubble.textContent || '')) || '';
+        if (role === 'user') {
+            items.push({
+                label: 'Bearbeiten', icon: '✏',
+                onClick: () => _editUserBubble(row, bubble),
+            });
+        }
+        items.push({
+            label: 'Text kopieren', icon: '⧉',
+            onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
+        });
+        items.push({
+            label: 'Loeschen', icon: '🗑', danger: true,
+            onClick: () => _deleteBubble(row, role),
+        });
+        return items;
+    }
+
+    // Loescht NUR die angeklickte Bubble (analog Android-App-Verhalten).
+    // Nachfolgende Antworten/Dialoge bleiben erhalten. Backend-Agent-History
+    // wird nicht angetastet (User-Anker/Tool-Call-Verkettung bleibt intakt).
+    function _deleteBubble(row, role) {
+        if (!row || !row.parentNode) return;
+        if (_editingRow && _editingRow !== row) {
+            try { _restoreBubble(_editingRow.querySelector('.msg-bubble'), _editingRow); } catch(_) {}
+        }
+
+        const isUser = (role === 'user');
+        const promptTxt = isUser ? 'Diese Frage loeschen?' : 'Diese Antwort loeschen?';
+        if (!confirm(promptTxt)) return;
+
+        const rowSel = isUser ? '.msg-row.user' : '.msg-row.bot';
+        const sameRoleRows = messagesEl.querySelectorAll(rowSel);
+        const roleIndex    = Array.from(sameRoleRows).indexOf(row);
+
+        // Streaming-State leeren, falls die aktive Bot-Bubble entfernt wird
+        if (!isUser && row.contains(currentBotBubble)) {
+            currentBotBubble = null;
+            _lastBotCol = null; _lastBotResp = ''; _lastStats = '';
+        }
+        if (_editingRow === row) _editingRow = null;
+
+        row.parentNode.removeChild(row);
+
+        if (Array.isArray(_chatHistory) && roleIndex >= 0) {
+            const wantRoles = isUser ? ['user'] : ['bot', 'assistant'];
+            let seen = 0;
+            for (let i = 0; i < _chatHistory.length; i++) {
+                const e = _chatHistory[i];
+                if (e && wantRoles.includes(e.role)) {
+                    if (seen === roleIndex) { _chatHistory.splice(i, 1); break; }
+                    seen++;
+                }
+            }
+            _saveHistory();
+        }
     }
 
     // ─── Edit-Modus für User-Bubbles (delegiert an chatlib.js) ───
@@ -1076,6 +1143,12 @@
 
         row.appendChild(col);
         messagesEl.appendChild(row);
+
+        // Kontextmenue auch fuer restaurierte Bubbles aktivieren (vorher fehlte
+        // dieser Hook, weshalb Rechtsklick im /chat-Popup nur Browser-Menue zeigte).
+        if (window.JarvisChatLib && window.JarvisChatLib.setupBubbleContextMenu) {
+            window.JarvisChatLib.setupBubbleContextMenu(row, () => _buildBubbleCtxItems(row, bubble, entry.role));
+        }
     }
 
     function _restoreHistory() {
@@ -1356,10 +1429,14 @@
     function _appendFeedbackRow(col, userMsg, botResp) {
         const row = document.createElement('div');
         row.className = 'msg-feedback-row';
+        // SVG-Icons statt Emoji – konsistent zu Windows-App + Hauptfenster.
+        const SVG_UP   = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>`;
+        const SVG_DOWN = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>`;
+        const SVG_X    = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#E74C3C"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`;
         row.innerHTML =
-            `<button class="msg-fb-btn" data-r="positive" title="Gute Antwort">👍</button>` +
-            `<button class="msg-fb-btn" data-r="negative" title="Schlechte Antwort">👎</button>` +
-            `<button class="msg-fb-btn" data-r="wrong"    title="Falsche Antwort">❌</button>`;
+            `<button class="msg-fb-btn" data-r="positive" title="Gute Antwort">${SVG_UP}</button>` +
+            `<button class="msg-fb-btn" data-r="negative" title="Schlechte Antwort">${SVG_DOWN}</button>` +
+            `<button class="msg-fb-btn" data-r="wrong"    title="Falsche Antwort">${SVG_X}</button>`;
         col.appendChild(row);
 
         row.querySelectorAll('.msg-fb-btn').forEach(btn => {
@@ -1397,13 +1474,14 @@
         const s = document.createElement('style');
         s.id = id;
         s.textContent = `
-.msg-feedback-row{display:flex;gap:4px;margin-top:4px;padding-left:2px;}
-.msg-fb-btn{background:none;border:1px solid rgba(255,255,255,.12);border-radius:8px;
-  padding:2px 8px;font-size:.8rem;cursor:pointer;color:rgba(255,255,255,.5);
-  transition:all .15s;}
-.msg-fb-btn:hover:not(:disabled){border-color:rgba(255,255,255,.35);color:#fff;transform:scale(1.1);}
+.msg-feedback-row{display:flex;gap:4px;margin-top:4px;padding-left:2px;align-items:center;}
+.msg-fb-btn{background:none;border:1px solid rgba(255,255,255,.12);border-radius:50%;
+  width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;
+  padding:0;cursor:pointer;transition:all .15s;line-height:0;}
+.msg-fb-btn svg{display:block;}
+.msg-fb-btn:hover:not(:disabled){border-color:rgba(255,255,255,.4);background:rgba(255,255,255,.06);transform:scale(1.12);}
 .msg-fb-btn:disabled{cursor:default;opacity:.5;}
-.msg-fb-btn.msg-fb-active{border-color:rgba(124,58,237,.7);background:rgba(124,58,237,.2);color:#fff;}
+.msg-fb-btn.msg-fb-active{border-color:rgba(124,58,237,.7);background:rgba(124,58,237,.2);}
 .msg-fb-info{font-size:.75rem;color:rgba(255,255,255,.45);margin-top:4px;padding-left:2px;}
         `;
         document.head.appendChild(s);

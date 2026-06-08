@@ -37,6 +37,8 @@ type iconBtn struct {
 	icon    fyne.Resource
 	onTap   func()
 	hovered bool
+	size    float32 // 0 → Default 36
+	disabled bool
 }
 
 func newIconBtn(icon fyne.Resource, onTap func()) *iconBtn {
@@ -45,7 +47,29 @@ func newIconBtn(icon fyne.Resource, onTap func()) *iconBtn {
 	return b
 }
 
+// newIconBtnSized erlaubt eigene Kantengroesse (z.B. fuer kompakte Feedback-Buttons).
+func newIconBtnSized(icon fyne.Resource, size float32, onTap func()) *iconBtn {
+	b := &iconBtn{icon: icon, onTap: onTap, size: size}
+	b.ExtendBaseWidget(b)
+	return b
+}
+
+// SetIcon tauscht das Resource zur Laufzeit (z.B. nach Klick auf einen Feedback-Button).
+func (b *iconBtn) SetIcon(res fyne.Resource) {
+	b.icon = res
+	b.Refresh()
+}
+
+// SetDisabled blockt weitere Klicks (Mehrfach-Feedback verhindern).
+func (b *iconBtn) SetDisabled(d bool) {
+	b.disabled = d
+	b.Refresh()
+}
+
 func (b *iconBtn) Tapped(_ *fyne.PointEvent) {
+	if b.disabled {
+		return
+	}
 	if b.onTap != nil {
 		b.onTap()
 	}
@@ -60,7 +84,12 @@ func (b *iconBtn) MouseOut() {
 	b.hovered = false
 	b.Refresh()
 }
-func (b *iconBtn) MinSize() fyne.Size { return fyne.NewSize(36, 36) }
+func (b *iconBtn) MinSize() fyne.Size {
+	if b.size > 0 {
+		return fyne.NewSize(b.size, b.size)
+	}
+	return fyne.NewSize(36, 36)
+}
 
 func (b *iconBtn) CreateRenderer() fyne.WidgetRenderer {
 	bg := canvas.NewCircle(color.RGBA{0xFF, 0xFF, 0xFF, 0x18})
@@ -79,15 +108,30 @@ type iconBtnRenderer struct {
 func (r *iconBtnRenderer) Layout(size fyne.Size) {
 	r.bg.Move(fyne.NewPos(0, 0))
 	r.bg.Resize(size)
-	pad := float32(6)
+	// Padding proportional zur Buttongroesse (1/6) → bei 36px → 6px (unveraendert),
+	// bei 24px (Feedback-Buttons) → 4px → 16x16 Icon-Flaeche.
+	pad := size.Width / 6
+	if pad < 3 {
+		pad = 3
+	}
 	r.img.Move(fyne.NewPos(pad, pad))
 	r.img.Resize(fyne.NewSize(size.Width-pad*2, size.Height-pad*2))
 }
-func (r *iconBtnRenderer) MinSize() fyne.Size { return fyne.NewSize(36, 36) }
+func (r *iconBtnRenderer) MinSize() fyne.Size {
+	if r.btn.size > 0 {
+		return fyne.NewSize(r.btn.size, r.btn.size)
+	}
+	return fyne.NewSize(36, 36)
+}
 func (r *iconBtnRenderer) Refresh() {
-	r.bg.Hidden = !r.btn.hovered
+	r.bg.Hidden = !r.btn.hovered || r.btn.disabled
 	r.bg.Refresh()
 	r.img.Resource = r.btn.icon
+	if r.btn.disabled {
+		r.img.Translucency = 0.55
+	} else {
+		r.img.Translucency = 0
+	}
 	r.img.Refresh()
 }
 func (r *iconBtnRenderer) Objects() []fyne.CanvasObject { return []fyne.CanvasObject{r.bg, r.img} }
@@ -1109,9 +1153,12 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 		timeLabel := canvas.NewText(msg.Time.Format("15:04"), jc.muted)
 		timeLabel.TextSize = 10
 
-		// Feedback-Buttons (nur wenn kein Selektionsmodus + Callback gesetzt)
+		// Feedback-Buttons – immer rendern (Click-Handler prueft OnFeedback != nil).
+		// Frueher: c.OnFeedback != nil als Bedingung; das schlug fehl, wenn buildRow
+		// VOR der OnFeedback-Zuweisung in main.go lief (Init-Race) → Zeile entfiel
+		// komplett und konnte nie nachgereicht werden.
 		var feedbackRow fyne.CanvasObject
-		if !c.selMode && c.OnFeedback != nil {
+		if !c.selMode {
 			feedbackRow = c.newFeedbackRow(msg.Text)
 		} else {
 			feedbackRow = container.NewGridWrap(fyne.NewSize(1, 1), canvas.NewRectangle(colorTransparent))
@@ -1180,40 +1227,45 @@ func (b *emojiBtn) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(inner)
 }
 
-// newFeedbackRow erstellt eine Zeile mit 👍/👎/❌-Buttons für Jarvis-Antworten.
+// newFeedbackRow erstellt eine Zeile mit Bewertungsbuttons für Jarvis-Antworten.
+//
+// Frueher: canvas.NewText("👍", ...) – die in Fyne gebundelte NotoSans-Regular.ttf
+// enthaelt KEINE Emoji-Glyphen, weshalb die Buttons unsichtbar gerendert wurden
+// (User-Report v0.886: "thumbs fehlen"). Jetzt: widget.NewButtonWithIcon mit
+// theme.* SVG-Icons (rendern garantiert) + sprechenden Text-Labels.
 func (c *ChatWidget) newFeedbackRow(botText string) fyne.CanvasObject {
 	infoLbl := canvas.NewText("", jc.muted)
 	infoLbl.TextSize = 11
 
 	rated := false
+	var btnUp, btnDn, btnWrg *iconBtn
 
-	makeBtn := func(emoji, rating, confirmTxt string) *emojiBtn {
-		var btn *emojiBtn
-		btn = newEmojiBtn(emoji, 22, func() {
+	handler := func(rating, confirmTxt string) func() {
+		return func() {
 			if rated {
 				return
 			}
 			rated = true
-			btn.bgRef.Hidden = true
-			btn.bgRef.Refresh()
-			c.mu.Lock()
-			lastUser := c.lastUserMsg
-			c.mu.Unlock()
+			btnUp.SetDisabled(true)
+			btnDn.SetDisabled(true)
+			btnWrg.SetDisabled(true)
 			if c.OnFeedback != nil {
 				c.OnFeedback(rating, botText)
-				_ = lastUser
 			}
 			infoLbl.Text = confirmTxt
 			infoLbl.Refresh()
-		})
-		return btn
+		}
 	}
 
-	btnUp  := makeBtn("👍", "positive", "👍 Danke!")
-	btnDn  := makeBtn("👎", "negative", "🔧 ich lerne daraus…")
-	btnWrg := makeBtn("❌", "wrong",    "🔧 analysiere die Antwort…")
+	// Kompakte runde Icon-Buttons (24px ≈ 70% des Standard-iconBtn von 36px,
+	// User-Report v0.890). Echte Thumb-up/down SVGs in Emoji-Gelb + rotes X
+	// damit die Symbolik den 👍/👎-Buttons der anderen Module entspricht.
+	const fbSize = float32(24)
+	btnUp = newIconBtnSized(ThumbUpIcon, fbSize, handler("positive", t("Danke!", "Thanks!")))
+	btnDn = newIconBtnSized(ThumbDownIcon, fbSize, handler("negative", t("Ich lerne daraus…", "Learning from it…")))
+	btnWrg = newIconBtnSized(WrongIcon, fbSize, handler("wrong", t("Analysiere die Antwort…", "Analyzing answer…")))
 
-	row := container.NewHBox(btnUp, btnDn, btnWrg, infoLbl)
+	row := container.NewHBox(btnUp, btnDn, btnWrg, container.NewCenter(infoLbl))
 	return row
 }
 

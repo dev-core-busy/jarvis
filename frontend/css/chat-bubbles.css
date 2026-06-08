@@ -133,3 +133,117 @@
     opacity: .4;
     cursor: not-allowed;
 }
+
+/* ───────────────────────────────────────────────────────────── *
+ * Floating Kontextmenue (Rechtsklick / Long-Press auf Bubble)
+ * Wird einmal im document.body erzeugt und wiederverwendet.
+ * ───────────────────────────────────────────────────────────── */
+.jv-bubble-ctx-menu {
+    position: fixed;
+    z-index: 99999;
+    min-width: 180px;
+    background: rgba(20, 24, 36, 0.96);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+    padding: 6px;
+    opacity: 0;
+    transform: scale(0.96);
+    pointer-events: none;
+    transition: opacity .12s ease, transform .12s ease;
+    font-family: inherit;
+    color: #e7eaf3;
+}
+.jv-bubble-ctx-menu.open {
+    opacity: 1;
+    transform: scale(1);
+    pointer-events: auto;
+}
+.jv-bubble-ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 12px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    font-size: 0.9rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background .1s;
+    font-family: inherit;
+}
+.jv-bubble-ctx-item:hover,
+.jv-bubble-ctx-item:focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    outline: none;
+}
+.jv-bubble-ctx-item.danger {
+    color: #ff6b7a;
+}
+.jv-bubble-ctx-item.danger:hover {
+    background: rgba(255, 80, 90, 0.14);
+}
+.jv-bubble-ctx-icon {
+    display: inline-block;
+    width: 18px;
+    text-align: center;
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+/* ───────────────────────────────────────────────────────────── *
+ * User-Chat (DM) Edit-Mode – uc-edit-* Klassen
+ * Wird via enterEditMode(... { areaClass: 'uc-edit-area', ... })
+ * aus frontend/js/userchat.js erzeugt.
+ * ───────────────────────────────────────────────────────────── */
+.uc-edit-area {
+    width: 100%;
+    min-height: 60px;
+    background: rgba(0, 0, 0, .25);
+    border: 1px solid rgba(124, 58, 237, .55);
+    border-radius: 8px;
+    color: #e7eaf3;
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    padding: 8px 10px;
+    resize: vertical;
+    outline: none;
+    box-sizing: border-box;
+}
+.uc-edit-area:focus {
+    border-color: rgba(124, 58, 237, .9);
+    box-shadow: 0 0 8px rgba(124, 58, 237, .25);
+}
+.uc-edit-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    justify-content: flex-end;
+}
+.uc-edit-actions button {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    border: none;
+    color: #fff;
+    transition: opacity .15s;
+    font-family: inherit;
+}
+.uc-edit-save   { background: #7c3aed; }
+.uc-edit-cancel { background: rgba(255, 255, 255, .15); }
+.uc-edit-actions button:hover { opacity: .85; }
+.uc-edit-actions button:disabled { opacity: .4; cursor: not-allowed; }
+
+.uc-edited {
+    opacity: .65;
+    font-size: 0.75em;
+    margin-left: 6px;
+    font-style: italic;
+}

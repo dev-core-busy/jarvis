@@ -348,6 +348,54 @@
                 }
                 break;
 
+            case 'dm_edit': {
+                const partner = msg.from === myUser ? msg.to : msg.from;
+                if (_msgs[partner]) {
+                    for (const m of _msgs[partner]) {
+                        if (m.msg_id === msg.msg_id) {
+                            m.text = msg.text;
+                            m.edited_at = msg.edited_at;
+                            break;
+                        }
+                    }
+                }
+                if (partner === activePartner) {
+                    const row = messages.querySelector(`[data-msgid="${msg.msg_id}"]`);
+                    if (row) {
+                        const bub = row.querySelector('.uc-bubble');
+                        if (bub) {
+                            // Anhaenge bleiben - nur Text-Teil austauschen.
+                            // Wir entfernen die fuehrenden Text-Nodes vor evt. Galerie/File-Chip.
+                            const atts = bub.querySelectorAll('.uc-img-gallery, .uc-file-chip');
+                            bub.innerHTML = linkify((msg.text || '').trim() || '');
+                            atts.forEach(a => bub.appendChild(a));
+                        }
+                        // "(bearbeitet)" Marker im Footer ergaenzen
+                        const footer = row.querySelector('.uc-msg-footer');
+                        if (footer && !footer.querySelector('.uc-edited')) {
+                            const mark = document.createElement('span');
+                            mark.className = 'uc-edited';
+                            mark.textContent = '(bearbeitet)';
+                            mark.title = 'Nachricht wurde bearbeitet';
+                            footer.insertBefore(mark, footer.firstChild);
+                        }
+                    }
+                }
+                break;
+            }
+
+            case 'dm_delete': {
+                const partner = msg.from === myUser ? msg.to : msg.from;
+                if (_msgs[partner]) {
+                    _msgs[partner] = _msgs[partner].filter(m => m.msg_id !== msg.msg_id);
+                }
+                if (partner === activePartner) {
+                    const row = messages.querySelector(`[data-msgid="${msg.msg_id}"]`);
+                    if (row && row.parentNode) row.parentNode.removeChild(row);
+                }
+                break;
+            }
+
             case 'error':
                 if (msg.message === 'Nicht autorisiert') {
                     localStorage.removeItem('jarvis_uc_token');
@@ -532,6 +580,13 @@
         // Footer: Zeitstempel + ggf. Ticks
         const footer = document.createElement('div');
         footer.className = 'uc-msg-footer' + (mine ? ' mine' : '');
+        if (msg.edited_at) {
+            const mark = document.createElement('span');
+            mark.className = 'uc-edited';
+            mark.textContent = '(bearbeitet)';
+            mark.title = 'Nachricht wurde bearbeitet';
+            footer.appendChild(mark);
+        }
         const ts = document.createElement('span');
         ts.className = 'uc-ts';
         ts.textContent = formatTime(msg.ts);
@@ -548,6 +603,78 @@
         row.appendChild(wrap);
         row.appendChild(footer);
         messages.appendChild(row);
+
+        // ── Kontextmenue (Rechtsklick / Long-Press) ────────────────
+        if (window.JarvisChatLib && window.JarvisChatLib.setupBubbleContextMenu) {
+            window.JarvisChatLib.setupBubbleContextMenu(row, () => _buildDmCtxItems(row, bubble, msg));
+        }
+    }
+
+    // ─── Kontextmenue: Bearbeiten/Loeschen/Kopieren/Antworten ─────
+    function _buildDmCtxItems(row, bubble, msg) {
+        const items = [];
+        const mine = msg.from === myUser;
+        const txt  = (msg.text || '').trim();
+        if (mine) {
+            // Edit nur fuer reine Text-Nachrichten (Anhaenge bleiben unangetastet)
+            if (txt) {
+                items.push({
+                    label: 'Bearbeiten', icon: '✏',
+                    onClick: () => _editDmBubble(row, bubble, msg),
+                });
+            }
+        }
+        if (txt) {
+            items.push({
+                label: 'Text kopieren', icon: '⧉',
+                onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
+            });
+        }
+        if (mine && msg.msg_id) {
+            items.push({
+                label: 'Loeschen', icon: '🗑', danger: true,
+                onClick: () => _deleteDmBubble(row, msg),
+            });
+        }
+        return items;
+    }
+
+    let _dmEditingMsgId = null;
+    function _editDmBubble(row, bubble, msg) {
+        if (_dmEditingMsgId) return;
+        if (!window.JarvisChatLib || !window.JarvisChatLib.enterEditMode) {
+            alert('Edit-Bibliothek nicht geladen.');
+            return;
+        }
+        row.dataset.rawText = msg.text || '';
+        const ok = window.JarvisChatLib.enterEditMode(row, bubble, {
+            editBtnSelector: '.__noop__',  // kein Edit-Button vorhanden
+            areaClass:    'uc-edit-area',
+            actionsClass: 'uc-edit-actions',
+            saveClass:    'uc-edit-save',
+            cancelClass:  'uc-edit-cancel',
+            saveLabel:    'Speichern',
+            cancelLabel:  'Abbrechen',
+            onCommit: (newText) => {
+                wsSend({ type: 'dm_edit', to: activePartner, msg_id: msg.msg_id, text: newText });
+                // Bubble visuell zuruecksetzen (Echo vom Server aktualisiert dann den Text)
+                bubble.classList.remove('editing');
+                bubble.innerHTML = linkify(newText);
+                _renderAttachments(bubble, Object.assign({}, msg, { text: newText }));
+                delete bubble.dataset.origHtml;
+                _dmEditingMsgId = null;
+            },
+            onCancel: () => { _dmEditingMsgId = null; },
+        });
+        if (ok) _dmEditingMsgId = msg.msg_id;
+    }
+
+    function _deleteDmBubble(row, msg) {
+        if (!msg.msg_id || !activePartner) return;
+        if (!confirm('Diese Nachricht fuer beide Seiten loeschen?')) return;
+        wsSend({ type: 'dm_delete', to: activePartner, msg_id: msg.msg_id });
+        // DOM nicht sofort entfernen – warten auf Server-Echo, damit Fehlerfälle
+        // (z.B. fremde Nachricht / nicht gefunden) sichtbar bleiben.
     }
 
     // ─── Reaktionen rendern ───────────────────────────────────────

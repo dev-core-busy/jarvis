@@ -691,6 +691,18 @@ body {
     color: var(--on-surface);
 }
 
+/* Globale Lesbarkeit aller Dropdown-Eintraege im /chat-Frontend */
+select option,
+select optgroup {
+    background-color: var(--surface, #111827);
+    color: var(--on-surface, #f8fafc);
+}
+select option:checked,
+select option:hover {
+    background-color: var(--surface-2, #1e293b);
+    color: #ffffff;
+}
+
 .btn-totp-setup {
     background: none; border: none;
     font-size: 18px; cursor: pointer;

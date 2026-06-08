@@ -533,6 +533,22 @@ const _I18N = {
         'chat.send':            'Senden',
         'chat.ctx_label':       'Kontext Speicher: {n} Einträge · {pct} %',
 
+        // ── Bubble-Kontextmenue + Edit + Delete-Confirms ─────────────────────
+        'bubble.ctx.edit':        'Bearbeiten',
+        'bubble.ctx.copy':        'Text kopieren',
+        'bubble.ctx.delete':      'Löschen',
+        'bubble.edit_msg':        'Nachricht bearbeiten',
+        'bubble.del_user_q':      'Diese Frage löschen?',
+        'bubble.del_bot_a':       'Diese Antwort löschen?',
+        'bubble.block_running':   'Bitte stoppe zuerst die laufende Aufgabe.',
+        'bubble.block_running_btn':'Bitte stoppe zuerst die laufende Aufgabe (■-Button).',
+
+        // ── Feedback (Thumb-Up/Down) ─────────────────────────────────────────
+        'feedback.good':          'Gute Antwort',
+        'feedback.bad':           'Schlechte Antwort',
+        'feedback.wrong':         'Falsche Antwort',
+        'feedback.thanks':        'Danke!',
+
         // ── Vision ───────────────────────────────────────────────────────────
         'vis.feed_title':       'Kamera-Feed',
         'vis.stopped':          'Gestoppt',
@@ -1245,6 +1261,22 @@ const _I18N = {
         'chat.mic':             'Speech Input',
         'chat.send':            'Send',
         'chat.ctx_label':       'Context Memory: {n} entries · {pct} %',
+
+        // ── Bubble context menu + edit + delete confirms ─────────────────────
+        'bubble.ctx.edit':        'Edit',
+        'bubble.ctx.copy':        'Copy text',
+        'bubble.ctx.delete':      'Delete',
+        'bubble.edit_msg':        'Edit message',
+        'bubble.del_user_q':      'Delete this question?',
+        'bubble.del_bot_a':       'Delete this answer?',
+        'bubble.block_running':   'Please stop the running task first.',
+        'bubble.block_running_btn':'Please stop the running task first (■ button).',
+
+        // ── Feedback (Thumb-Up/Down) ─────────────────────────────────────────
+        'feedback.good':          'Good answer',
+        'feedback.bad':           'Bad answer',
+        'feedback.wrong':         'Wrong answer',
+        'feedback.thanks':        'Thanks!',
 
         // ── Vision ───────────────────────────────────────────────────────────
         'vis.feed_title':       'Camera Feed',

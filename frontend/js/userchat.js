@@ -619,20 +619,20 @@
             // Edit nur fuer reine Text-Nachrichten (Anhaenge bleiben unangetastet)
             if (txt) {
                 items.push({
-                    label: 'Bearbeiten', icon: '✏',
+                    label: (window.t ? window.t('bubble.ctx.edit') : 'Bearbeiten'), icon: '✏',
                     onClick: () => _editDmBubble(row, bubble, msg),
                 });
             }
         }
         if (txt) {
             items.push({
-                label: 'Text kopieren', icon: '⧉',
+                label: (window.t ? window.t('bubble.ctx.copy') : 'Text kopieren'), icon: '⧉',
                 onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
             });
         }
         if (mine && msg.msg_id) {
             items.push({
-                label: 'Loeschen', icon: '🗑', danger: true,
+                label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: '🗑', danger: true,
                 onClick: () => _deleteDmBubble(row, msg),
             });
         }

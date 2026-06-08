@@ -1602,8 +1602,8 @@
             const editBtn = document.createElement('button');
             editBtn.type = 'button';
             editBtn.className = 'jv-bubble-edit-btn';
-            editBtn.title = 'Nachricht bearbeiten';
-            editBtn.setAttribute('aria-label', 'Nachricht bearbeiten');
+            editBtn.title = (window.t ? window.t('bubble.edit_msg') : 'Nachricht bearbeiten');
+            editBtn.setAttribute('aria-label', editBtn.title);
             editBtn.textContent = '✏';
             editBtn.addEventListener('click', () => _editUserBubble(row, bubble));
             timeEl.appendChild(editBtn);
@@ -1644,13 +1644,13 @@
                     (bubble && (bubble.textContent || '')) || '';
         if (role === 'user') {
             items.push({
-                label: 'Bearbeiten',
+                label: (window.t ? window.t('bubble.ctx.edit') : 'Bearbeiten'),
                 icon: '✏',
                 onClick: () => _editUserBubble(row, bubble),
             });
         }
         items.push({
-            label: 'Text kopieren',
+            label: (window.t ? window.t('bubble.ctx.copy') : 'Text kopieren'),
             icon: '⧉',
             onClick: () => {
                 if (window.JarvisChatLib && window.JarvisChatLib.copyTextToClipboard) {
@@ -1659,7 +1659,7 @@
             },
         });
         items.push({
-            label: 'Loeschen',
+            label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'),
             icon: '🗑',
             danger: true,
             onClick: () => _deleteBubble(row, role),
@@ -1682,7 +1682,9 @@
         }
 
         const isUser = (role === 'user');
-        const promptTxt = isUser ? 'Diese Frage loeschen?' : 'Diese Antwort loeschen?';
+        const promptTxt = window.t
+            ? (isUser ? window.t('bubble.del_user_q') : window.t('bubble.del_bot_a'))
+            : (isUser ? 'Diese Frage löschen?' : 'Diese Antwort löschen?');
         if (!confirm(promptTxt)) return;
 
         // Position dieser Row unter allen Rows der gleichen Rolle ermitteln,
@@ -1749,7 +1751,7 @@
                 const _stopBtn = document.getElementById('btn-stop');
                 return !!(_stopBtn && !_stopBtn.disabled);
             },
-            blockMessage: 'Bitte stoppe zuerst die laufende Aufgabe (■-Button).',
+            blockMessage: (window.t ? window.t('bubble.block_running_btn') : 'Bitte stoppe zuerst die laufende Aufgabe (■-Button).'),
             onCommit: (newText) => _submitEdit(row, bubble, newText),
             onCancel: () => { _editingRow = null; },
         });
@@ -3277,10 +3279,13 @@
         const SVG_UP   = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>`;
         const SVG_DOWN = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>`;
         const SVG_X    = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#E74C3C"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`;
+        const _tGood  = window.t ? window.t('feedback.good')  : 'Gute Antwort';
+        const _tBad   = window.t ? window.t('feedback.bad')   : 'Schlechte Antwort';
+        const _tWrong = window.t ? window.t('feedback.wrong') : 'Falsche Antwort';
         row.innerHTML =
-            `<button class="log-fb-btn" data-r="positive" title="Gute Antwort">${SVG_UP}</button>` +
-            `<button class="log-fb-btn" data-r="negative" title="Schlechte Antwort">${SVG_DOWN}</button>` +
-            `<button class="log-fb-btn" data-r="wrong"    title="Falsche Antwort">${SVG_X}</button>`;
+            `<button class="log-fb-btn" data-r="positive" title="${_tGood}">${SVG_UP}</button>` +
+            `<button class="log-fb-btn" data-r="negative" title="${_tBad}">${SVG_DOWN}</button>` +
+            `<button class="log-fb-btn" data-r="wrong"    title="${_tWrong}">${SVG_X}</button>`;
         targetEl.after(row);
 
         row.querySelectorAll('.log-fb-btn').forEach(btn => {
@@ -3297,7 +3302,7 @@
                     const data = await res.json();
                     const info = document.createElement('div');
                     info.className = 'log-fb-info';
-                    info.textContent = data.message || 'Danke!';
+                    info.textContent = data.message || (window.t ? window.t('feedback.thanks') : 'Danke!');
                     row.replaceWith(info);
                     // LLM-Analyse mit Alternativen als highlight-Eintrag einblenden
                     if (data.analysis) {

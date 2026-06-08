@@ -214,7 +214,7 @@
         opts = opts || {};
         if (!row || !bubble) return false;
         if (typeof opts.isBlocked === 'function' && opts.isBlocked()) {
-            alert(opts.blockMessage || 'Bitte stoppe zuerst die laufende Aufgabe.');
+            alert(opts.blockMessage || (window.t ? window.t('bubble.block_running') : 'Bitte stoppe zuerst die laufende Aufgabe.'));
             return false;
         }
 

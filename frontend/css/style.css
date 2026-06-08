@@ -2285,6 +2285,18 @@ select.input-field {
     padding-right: 40px;
 }
 
+/* Globale Lesbarkeit der Dropdown-Eintraege (Browser ignorieren meist andere CSS-Regeln auf <option>) */
+select option,
+select optgroup {
+    background-color: #111827;   /* dunkel, passend zu --bg-secondary */
+    color: #f8fafc;              /* hell, passend zu --text-primary */
+}
+select option:checked,
+select option:hover {
+    background-color: #1e293b;
+    color: #ffffff;
+}
+
 .modal-actions {
     display: flex;
     gap: 12px;

@@ -231,19 +231,32 @@ class OpenAICompatibleProvider(LLMProvider):
     async def _generate_native(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
         messages = [{"role": "system", "content": system_prompt}]
 
+        # KRITISCH: Tool-Call-IDs muessen zwischen assistant-Message (tool_calls[i].id)
+        # und tool-Message (tool_call_id) konsistent sein. Wir generieren pro Tool-Name
+        # eine FIFO-Queue von IDs (genau wie AnthropicProvider) und vergeben sie strikt
+        # in der Reihenfolge wie sie auftreten. Ohne diese Verkettung sieht der LLM
+        # ein verwaistes Tool-Ergebnis und ruft das Tool erneut auf (Endlosschleife!).
+        from collections import deque, defaultdict
+        tool_id_queues: dict[str, deque] = defaultdict(deque)
+        _step_counter = 0
+
         for content in contents:
+            _step_counter += 1
             role = "assistant" if content.role == "model" else "user"
-            content_str = ""
-            tool_call_id = None
+            text_parts = []
+            fn_calls = []
+            fn_responses = []
             image_blocks = []
 
             for part in content.parts:
-                if part.text:
-                    content_str += part.text
-                if part.function_response:
-                    role = "tool"
-                    tool_call_id = "call_" + part.function_response.name
-                    content_str = json.dumps(part.function_response.response)
+                if getattr(part, "text", None):
+                    text_parts.append(part.text)
+                fc = getattr(part, "function_call", None)
+                if fc and getattr(fc, "name", None):
+                    fn_calls.append(fc)
+                fr = getattr(part, "function_response", None)
+                if fr and getattr(fr, "name", None):
+                    fn_responses.append(fr)
                 _id_obj = getattr(part, "inline_data", None)
                 if _id_obj:
                     _mime = getattr(_id_obj, "mime_type", "")
@@ -255,17 +268,60 @@ class OpenAICompatibleProvider(LLMProvider):
                             "image_url": {"url": f"data:{_mime};base64,{_b64m.b64encode(_data).decode()}"}
                         })
 
-            if image_blocks and not tool_call_id:
+            # ── 1) Tool-Result (role=tool): muss EINE eigene Message pro Result sein ──
+            if fn_responses:
+                for fr in fn_responses:
+                    ids = tool_id_queues.get(fr.name)
+                    if ids:
+                        tc_id = ids.popleft()
+                    else:
+                        # Orphan-Result (z.B. nach History-Kompression) – stabile ID,
+                        # damit der LLM die Verkettung wenigstens lokal erkennt.
+                        tc_id = f"call_{fr.name}_orphan_{_step_counter}"
+                    resp_data = fr.response if isinstance(fr.response, dict) else {"result": str(fr.response)}
+                    result_str = resp_data.get("result", json.dumps(resp_data, ensure_ascii=False))
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": str(result_str),
+                    })
+                continue
+
+            # ── 2) Assistant mit Tool-Call(s) ────────────────────────────────
+            if fn_calls:
+                tool_calls_block = []
+                for fc in fn_calls:
+                    tc_id = f"call_{fc.name}_{_step_counter}_{len(tool_calls_block)}"
+                    tool_id_queues[fc.name].append(tc_id)
+                    args = dict(fc.args) if fc.args else {}
+                    tool_calls_block.append({
+                        "id": tc_id,
+                        "type": "function",
+                        "function": {
+                            "name": fc.name,
+                            "arguments": json.dumps(args, ensure_ascii=False),
+                        },
+                    })
+                asst_msg = {
+                    "role": "assistant",
+                    # OpenAI-Spec: content darf bei tool_calls null sein – aber manche
+                    # OpenAI-kompatiblen Server (Ollama) brauchen leeren String.
+                    "content": "\n".join(text_parts) if text_parts else "",
+                    "tool_calls": tool_calls_block,
+                }
+                messages.append(asst_msg)
+                continue
+
+            # ── 3) Normaler Text (ggf. mit Bild) ─────────────────────────────
+            content_str = "\n".join(text_parts)
+            if image_blocks:
                 _content_list = []
                 if content_str:
                     _content_list.append({"type": "text", "text": content_str})
                 _content_list.extend(image_blocks)
-                msg = {"role": role, "content": _content_list}
-            else:
-                msg = {"role": role, "content": content_str}
-            if tool_call_id:
-                msg["tool_call_id"] = tool_call_id
-            messages.append(msg)
+                messages.append({"role": role, "content": _content_list})
+            elif content_str:
+                messages.append({"role": role, "content": content_str})
 
         payload = {
             "model": model,

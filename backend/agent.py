@@ -541,6 +541,11 @@ KRITISCH – Autonomie-Regeln:
                     _log(f"  Part[{i}]: text={bool(p.text)} fc={bool(p.function_call)} text_preview={str(p.text)[:100] if p.text else 'None'}")
 
             steps = 0
+            # Loop-Detector: tracked die letzten Tool-Aufrufe (name+args) um
+            # Endlosschleifen frueh abzufangen (z.B. nach History-Kompression
+            # wenn der LLM seine Tool-Historie "vergisst" und Calls wiederholt).
+            _recent_calls: list[str] = []
+            _loop_break = False
             while steps < config.MAX_AGENT_STEPS:
                 # Pause/Stop prüfen
                 await self._check_controls(ws)
@@ -592,6 +597,30 @@ KRITISCH – Autonomie-Regeln:
                         if _resp_parts:
                             chat_history.append(types.Content(role="model", parts=_resp_parts))
                     await self._send_status(ws, "✅ Aufgabe abgeschlossen")
+                    break
+
+                # ── Loop-Detector ──────────────────────────────────────
+                # Wenn dieselbe Tool+Args-Kombination 3x in Folge aufgerufen
+                # wird, ist der LLM in einer Schleife. Abbruch + finale
+                # Antwort erzwingen (siehe MAX_STEPS-Pfad).
+                try:
+                    _call_sig = "|".join(
+                        f"{fc.name}({json.dumps(dict(fc.args) if fc.args else {}, ensure_ascii=False, sort_keys=True)})"
+                        for fc in function_calls
+                    )
+                except Exception:
+                    _call_sig = "|".join(getattr(fc, "name", "?") for fc in function_calls)
+                _recent_calls.append(_call_sig)
+                if len(_recent_calls) > 5:
+                    _recent_calls.pop(0)
+                if len(_recent_calls) >= 3 and len(set(_recent_calls[-3:])) == 1:
+                    _log(f"Loop erkannt: Tool-Signatur '{_call_sig[:200]}' 3x in Folge → Abbruch")
+                    await self._send_status(
+                        ws,
+                        "⚠️ Endlosschleife erkannt (derselbe Tool-Aufruf 3× in Folge) – "
+                        "erzeuge finale Antwort aus bisherigem Kontext …"
+                    )
+                    _loop_break = True
                     break
 
                 # Function Calls ausführen
@@ -704,16 +733,18 @@ KRITISCH – Autonomie-Regeln:
 
                 steps += 1
 
-            if steps >= config.MAX_AGENT_STEPS and not self._stop_flag:
-                # Max-Steps erreicht: einen finalen LLM-Call OHNE Tools erzwingen,
+            if (steps >= config.MAX_AGENT_STEPS or _loop_break) and not self._stop_flag:
+                # Max-Steps erreicht ODER Loop-Detector hat angeschlagen:
+                # einen finalen LLM-Call OHNE Tools erzwingen,
                 # damit der User mit dem bisherigen Kontext eine Antwort bekommt.
                 # Mehrstufiger Fallback, weil ein simpler tools=[]-Call bei langer
                 # Tool-Historie oft leeren Text liefert (LLM erkennt das letzte
                 # Turn-Ende als function_response und antwortet nicht).
-                await self._send_status(
-                    ws,
-                    f"⚠️ Maximale Schrittanzahl ({config.MAX_AGENT_STEPS}) erreicht – erzeuge finale Antwort ohne weitere Tools …"
-                )
+                if not _loop_break:
+                    await self._send_status(
+                        ws,
+                        f"⚠️ Maximale Schrittanzahl ({config.MAX_AGENT_STEPS}) erreicht – erzeuge finale Antwort ohne weitere Tools …"
+                    )
 
                 async def _try_final(label: str, contents_, system_):
                     try:
@@ -1229,7 +1260,10 @@ KRITISCH – Autonomie-Regeln:
         keep = chat_history[-4:]
         to_summarize = chat_history[:-4]
 
-        # Bisherigen Dialog für die Zusammenfassung als Text extrahieren
+        # Bisherigen Dialog für die Zusammenfassung als Text extrahieren.
+        # WICHTIG: Tool-Aufrufe und Tool-Ergebnisse MUESSEN mit aufgenommen werden,
+        # sonst verliert der Agent das Gedaechtnis was er bereits ausgefuehrt hat
+        # und wiederholt dieselben Tool-Calls bis MAX_STEPS erreicht ist.
         dialog_text = []
         for entry in to_summarize:
             try:
@@ -1237,8 +1271,23 @@ KRITISCH – Autonomie-Regeln:
                 parts = getattr(entry, "parts", [])
                 for p in parts:
                     t = getattr(p, "text", None)
+                    fc = getattr(p, "function_call", None)
+                    fr = getattr(p, "function_response", None)
                     if t:
                         dialog_text.append(f"[{role}] {t[:300]}")
+                    elif fc is not None:
+                        try:
+                            args_preview = json.dumps(dict(fc.args), ensure_ascii=False)[:200] if fc.args else ""
+                        except Exception:
+                            args_preview = str(getattr(fc, "args", ""))[:200]
+                        dialog_text.append(f"[tool_call] {fc.name}({args_preview})")
+                    elif fr is not None:
+                        try:
+                            resp_obj = getattr(fr, "response", {}) or {}
+                            resp_str = json.dumps(resp_obj, ensure_ascii=False) if isinstance(resp_obj, dict) else str(resp_obj)
+                        except Exception:
+                            resp_str = str(getattr(fr, "response", ""))
+                        dialog_text.append(f"[tool_result {fr.name}] {resp_str[:300]}")
             except Exception:
                 pass
 

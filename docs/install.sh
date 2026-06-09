@@ -593,6 +593,21 @@ PYTHON_BIN="$INSTALL_DIR/venv/bin/python3"
 
 if command -v systemctl &>/dev/null; then
 
+    # ── Stale Symlinks/Units aus frueheren Installationen aufraeumen ─────────
+    # Verhindert, dass nach 'rm /etc/systemd/system/<name>.service' tote Wants-
+    # Symlinks zurueckbleiben (systemd meldet sonst dauerhaft "not-found / failed").
+    for STALE_UNIT in jarvis.service whatsapp-bridge.service jarvis-vision-install.service; do
+        STALE_LINK="/etc/systemd/system/multi-user.target.wants/$STALE_UNIT"
+        STALE_TARGET="/etc/systemd/system/$STALE_UNIT"
+        if [[ -L "$STALE_LINK" && ! -e "$STALE_TARGET" ]]; then
+            warn "Entferne toten Wants-Symlink: $STALE_LINK (Ziel fehlt)"
+            $SUDO rm -f "$STALE_LINK"
+        fi
+    done
+    # Failed-State zuruecksetzen, damit Neuinstallation sauber startet
+    $SUDO systemctl reset-failed jarvis.service whatsapp-bridge.service 2>/dev/null || true
+    $SUDO systemctl daemon-reload 2>/dev/null || true
+
     # ── jarvis.service ────────────────────────────────────────────────────────
     SERVICE_FILE="/etc/systemd/system/jarvis.service"
     $SUDO tee "$SERVICE_FILE" >/dev/null << UNIT

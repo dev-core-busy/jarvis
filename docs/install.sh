@@ -421,7 +421,17 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 step "Jarvis klonen"
 
-INSTALL_DIR="${JARVIS_DIR:-$HOME/jarvis}"
+# Default-Installationspfad:
+#   - JARVIS_DIR ueberschreibt alles
+#   - Root → /opt/jarvis (system-wide lesbar, vermeidet /root/jarvis mit Mode 0700)
+#   - Sonst → ~/jarvis
+if [[ -n "${JARVIS_DIR:-}" ]]; then
+    INSTALL_DIR="$JARVIS_DIR"
+elif [[ $EUID -eq 0 ]]; then
+    INSTALL_DIR="/opt/jarvis"
+else
+    INSTALL_DIR="$HOME/jarvis"
+fi
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
     warn "Verzeichnis $INSTALL_DIR existiert bereits – aktualisiere via git."

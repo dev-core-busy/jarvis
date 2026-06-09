@@ -424,8 +424,23 @@ step "Jarvis klonen"
 INSTALL_DIR="${JARVIS_DIR:-$HOME/jarvis}"
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
-    warn "Verzeichnis $INSTALL_DIR existiert bereits – führe git pull durch."
-    git -C "$INSTALL_DIR" pull --ff-only
+    warn "Verzeichnis $INSTALL_DIR existiert bereits – aktualisiere via git."
+    # Eigentumsverhaeltnisse (manche Installationen laufen unter anderem User als root)
+    git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+    git -C "$INSTALL_DIR" fetch origin --tags --prune
+    # Lokale Aenderungen an getrackten Dateien (z.B. durch fruehere Hot-Patches)
+    # werden hart auf origin/master zurueckgesetzt. Settings/Daten sind ueber
+    # .gitignore geschuetzt (settings.json, data/, certs/, .env) und bleiben erhalten.
+    DEFAULT_BRANCH=$(git -C "$INSTALL_DIR" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || echo master)
+    if git -C "$INSTALL_DIR" diff --quiet HEAD -- && git -C "$INSTALL_DIR" diff --cached --quiet HEAD --; then
+        # Sauberer Arbeitsbaum → klassisches Fast-Forward
+        git -C "$INSTALL_DIR" pull --ff-only origin "$DEFAULT_BRANCH"
+    else
+        warn "Lokale Aenderungen an getrackten Dateien gefunden – setze hart auf origin/$DEFAULT_BRANCH zurueck."
+        warn "Eigene Konfiguration (settings.json, data/, .env) bleibt erhalten."
+        git -C "$INSTALL_DIR" reset --hard "origin/$DEFAULT_BRANCH"
+        git -C "$INSTALL_DIR" clean -fd -e settings.json -e .env -e data -e certs -e services/whatsapp-bridge/auth
+    fi
 else
     git clone https://github.com/dev-core-busy/jarvis.git "$INSTALL_DIR"
 fi

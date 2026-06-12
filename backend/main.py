@@ -2080,17 +2080,19 @@ async def get_profile_key(profile_id: str, user: str = Depends(require_local_aut
     return JSONResponse({"error": "Profil nicht gefunden"}, status_code=404)
 
 
-@app.post("/api/profiles/test")
-async def test_profile_connection(request: Request, user: str = Depends(require_auth)):
-    """Testet die Verbindung mit den aktuellen Formularwerten (nicht gespeicherten)."""
-    body = await request.json()
-    provider    = body.get("provider", "")
-    api_url     = body.get("api_url", "").rstrip("/")
-    api_key     = body.get("api_key", "")
-    model       = body.get("model", "")
-    auth_method = body.get("auth_method", "api_key")
+async def _probe_llm_connection(provider: str, api_url: str, api_key: str,
+                                model: str, auth_method: str = "api_key",
+                                session_key: str = "") -> dict:
+    """Prüft die Erreichbarkeit eines LLM-Endpoints und ob das Modell existiert.
 
-    session_key = body.get("session_key", "")
+    Rückgabe-Dict (kompatibel zu /api/profiles/test):
+      success: bool          – Endpoint grundsätzlich erreichbar?
+      model_found: bool      – konfiguriertes Modell verfügbar?
+      message / error: str
+      latency_ms: int
+    Wird sowohl vom Formular-Test (POST) als auch vom Profil-Status (GET) genutzt.
+    """
+    api_url = (api_url or "").rstrip("/")
     headers = {"Content-Type": "application/json"}
     if auth_method == "session" and session_key:
         headers["Authorization"] = f"Bearer {session_key}"
@@ -2108,11 +2110,11 @@ async def test_profile_connection(request: Request, user: str = Depends(require_
                 resp = await client.get(gemini_url, timeout=httpx.Timeout(10.0, connect=5.0))
                 latency = int((time.monotonic() - t0) * 1000)
                 if resp.status_code == 400:
-                    return JSONResponse({"success": False, "error": "API-Key ungültig (400 Bad Request)", "latency_ms": latency})
+                    return {"success": False, "error": "API-Key ungültig (400 Bad Request)", "latency_ms": latency}
                 if resp.status_code == 403:
-                    return JSONResponse({"success": False, "error": "API-Key ungültig oder keine Berechtigung (403 Forbidden)", "latency_ms": latency})
+                    return {"success": False, "error": "API-Key ungültig oder keine Berechtigung (403 Forbidden)", "latency_ms": latency}
                 if resp.status_code >= 400:
-                    return JSONResponse({"success": False, "error": f"Gemini API Fehler {resp.status_code}: {resp.text[:120]}", "latency_ms": latency})
+                    return {"success": False, "error": f"Gemini API Fehler {resp.status_code}: {resp.text[:120]}", "latency_ms": latency}
                 data = resp.json()
                 model_ids = sorted([m.get("name", "").replace("models/", "") for m in data.get("models", []) if "generateContent" in m.get("supportedGenerationMethods", [])])
                 model_found = model in model_ids
@@ -2122,13 +2124,13 @@ async def test_profile_connection(request: Request, user: str = Depends(require_
                     flash_models = [m for m in model_ids if "flash" in m.lower()]
                     hint = "Verfügbare Flash-Modelle: " + ", ".join(flash_models[:8]) if flash_models else "Verfügbare Modelle: " + ", ".join(model_ids[:8])
                     msg = f"Gemini API OK aber '{model}' nicht gefunden!\n{hint}"
-                return JSONResponse({
+                return {
                     "success": True,
                     "message": msg,
                     "latency_ms": latency,
                     "model_found": model_found,
                     "available_models": model_ids,
-                })
+                }
             elif provider in ("anthropic", "anthropic_session"):
                 t0 = time.monotonic()
                 anthropic_url = "https://api.anthropic.com/v1/models"
@@ -2136,52 +2138,94 @@ async def test_profile_connection(request: Request, user: str = Depends(require_
                 resp = await client.get(anthropic_url, headers=anthropic_headers, timeout=httpx.Timeout(10.0, connect=5.0))
                 latency = int((time.monotonic() - t0) * 1000)
                 if resp.status_code == 401:
-                    return JSONResponse({"success": False, "error": "API-Key ungültig (401 Unauthorized)", "latency_ms": latency})
+                    return {"success": False, "error": "API-Key ungültig (401 Unauthorized)", "latency_ms": latency}
                 if resp.status_code >= 400:
-                    return JSONResponse({"success": False, "error": f"Anthropic API Fehler {resp.status_code}: {resp.text[:120]}", "latency_ms": latency})
+                    return {"success": False, "error": f"Anthropic API Fehler {resp.status_code}: {resp.text[:120]}", "latency_ms": latency}
                 data = resp.json()
                 model_ids = [m.get("id", "") for m in data.get("data", [])]
                 model_found = model in model_ids
-                return JSONResponse({
+                return {
                     "success": True,
                     "message": f"Anthropic API OK – {len(model_ids)} Modelle verfügbar" + (f", '{model}' ✓" if model_found else f" – '{model}' nicht gefunden!"),
                     "latency_ms": latency,
                     "model_found": model_found,
-                })
+                }
             elif provider == "openrouter":
                 models_url = "https://openrouter.ai/api/v1/models"
             else:
-                return JSONResponse({"success": False, "error": f"Unbekannter Provider: {provider}"})
+                return {"success": False, "error": f"Unbekannter Provider: {provider}"}
 
             t0 = time.monotonic()
             resp = await client.get(models_url, headers=headers)
             latency = int((time.monotonic() - t0) * 1000)
 
             if resp.status_code == 401:
-                return JSONResponse({"success": False, "error": "API (Application Programming Interface)-Key ungültig (401 Unauthorized)", "latency_ms": latency})
+                return {"success": False, "error": "API (Application Programming Interface)-Key ungültig (401 Unauthorized)", "latency_ms": latency}
             if resp.status_code == 404:
-                return JSONResponse({"success": False, "error": f"Endpunkt nicht gefunden: {models_url}", "latency_ms": latency})
+                return {"success": False, "error": f"Endpunkt nicht gefunden: {models_url}", "latency_ms": latency}
             if resp.status_code >= 400:
-                return JSONResponse({"success": False, "error": f"HTTP (Hypertext Transfer Protocol) {resp.status_code}: {resp.text[:100]}", "latency_ms": latency})
+                return {"success": False, "error": f"HTTP (Hypertext Transfer Protocol) {resp.status_code}: {resp.text[:100]}", "latency_ms": latency}
 
             data = resp.json()
             model_ids = [m["id"] for m in data.get("data", [])]
             model_found = model in model_ids
 
-            return JSONResponse({
+            return {
                 "success": True,
                 "message": f"Verbindung OK – {len(model_ids)} Modell(e) verfügbar" + (f", Modell '{model}' gefunden ✓" if model_found else f" – Modell '{model}' NICHT gefunden!"),
                 "latency_ms": latency,
                 "model_found": model_found,
                 "models": model_ids[:10],
-            })
+            }
 
     except httpx.ConnectError as e:
-        return JSONResponse({"success": False, "error": f"Verbindung fehlgeschlagen: {e}"})
+        return {"success": False, "error": f"Verbindung fehlgeschlagen: {e}"}
     except httpx.TimeoutException:
-        return JSONResponse({"success": False, "error": "Timeout (Zeitüberschreitung) – Server antwortet nicht innerhalb von 15s"})
+        return {"success": False, "error": "Timeout (Zeitüberschreitung) – Server antwortet nicht innerhalb von 15s"}
     except Exception as e:
-        return JSONResponse({"success": False, "error": str(e)})
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/profiles/test")
+async def test_profile_connection(request: Request, user: str = Depends(require_auth)):
+    """Testet die Verbindung mit den aktuellen Formularwerten (nicht gespeicherten)."""
+    body = await request.json()
+    result = await _probe_llm_connection(
+        provider=body.get("provider", ""),
+        api_url=body.get("api_url", ""),
+        api_key=body.get("api_key", ""),
+        model=body.get("model", ""),
+        auth_method=body.get("auth_method", "api_key"),
+        session_key=body.get("session_key", ""),
+    )
+    return JSONResponse(result)
+
+
+@app.get("/api/profiles/{profile_id}/test")
+async def test_saved_profile_connection(profile_id: str, user: str = Depends(require_auth)):
+    """Prüft die Erreichbarkeit eines GESPEICHERTEN Profils (Status-Pill in der Übersicht).
+
+    Nutzt den serverseitig hinterlegten Key → der echte Key verlässt den Server nicht.
+    Liefert zusätzlich 'status' (ok/degraded/down) für die Ampel-Anzeige im Frontend.
+    """
+    prof = next((p for p in config.profiles if p.get("id") == profile_id), None)
+    if not prof:
+        return JSONResponse({"success": False, "error": "Profil nicht gefunden", "status": "down"}, status_code=404)
+
+    result = await _probe_llm_connection(
+        provider=prof.get("provider", ""),
+        api_url=prof.get("api_url", ""),
+        api_key=prof.get("api_key", ""),
+        model=prof.get("model", ""),
+        auth_method=prof.get("auth_method", "api_key"),
+        session_key=prof.get("session_key", ""),
+    )
+    # Ampel: erreichbar + Modell vorhanden → grün; erreichbar aber Modell fehlt → gelb; nicht erreichbar → rot
+    if result.get("success"):
+        result["status"] = "ok" if result.get("model_found", True) else "degraded"
+    else:
+        result["status"] = "down"
+    return JSONResponse(result)
 
 
 @app.post("/api/profiles/{profile_id}/activate")

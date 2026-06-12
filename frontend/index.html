@@ -348,6 +348,13 @@ sudo update-ca-certificates</code></pre>
                         </button>
                     </div>
 
+                    <button class="btn-icon btn-small" id="btn-select-msgs" title="Nachrichten auswählen" data-i18n-title="select.toggle">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="9 11 12 14 22 4" />
+                            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                        </svg>
+                    </button>
                     <button class="btn-icon btn-small" id="btn-clear-log" title="Log leeren" data-i18n-title="panel.clear">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
@@ -355,6 +362,11 @@ sudo update-ca-certificates</code></pre>
                             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                         </svg>
                     </button>
+                </div>
+                <div id="msg-select-bar" class="msg-select-bar" hidden>
+                    <span class="msg-select-info"><span id="msg-select-count">0</span> <span data-i18n="select.selected">ausgewählt</span></span>
+                    <button class="msg-select-btn danger" id="btn-msg-del-sel" data-i18n="select.delete">Löschen</button>
+                    <button class="msg-select-btn" id="btn-msg-sel-cancel" data-i18n="select.cancel">Abbrechen</button>
                 </div>
                 <div id="llm-thinking-bar" class="llm-thinking-bar" hidden></div>
                 <div class="log-wrapper" id="log-wrapper">
@@ -1921,7 +1933,7 @@ sudo update-ca-certificates</code></pre>
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=11"></script>
+    <script src="/static/js/i18n.js?v=12"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=11"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -1936,7 +1948,7 @@ sudo update-ca-certificates</code></pre>
     <script src="/static/js/telemetry.js?v=4"></script>
     <script src="/static/js/chatlib.js?v=3"></script>
     <script src="/static/js/issues.js?v=1"></script>
-    <script src="/static/js/app.js?v=102"></script>
+    <script src="/static/js/app.js?v=103"></script>
 </body>
 
 </html>

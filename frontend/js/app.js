@@ -42,6 +42,11 @@
     const btnResume = document.getElementById('btn-resume');
     const btnStop = document.getElementById('btn-stop');
     const btnClearLog = document.getElementById('btn-clear-log');
+    const btnSelectMsgs = document.getElementById('btn-select-msgs');
+    const msgSelectBar = document.getElementById('msg-select-bar');
+    const msgSelectCount = document.getElementById('msg-select-count');
+    const btnMsgDelSel = document.getElementById('btn-msg-del-sel');
+    const btnMsgSelCancel = document.getElementById('btn-msg-sel-cancel');
     const btnLogout = document.getElementById('btn-logout');
     const btnAttach = document.getElementById('btn-attach');
     const attachInput = document.getElementById('attach-input');
@@ -1535,6 +1540,12 @@
 .jv-bubble th{background:rgba(155,89,182,.15);font-weight:600;}
 .jv-bubble tr:nth-child(even) td{background:rgba(255,255,255,.03);}
 /* Edit-Button/Edit-Area-Styles ausgelagert nach /css/chat-bubbles.css (siehe index.html). */
+/* ── Mehrfachauswahl (Checkbox-Loeschen) ── */
+.jv-msg-check{flex:0 0 auto;align-self:center;width:18px;height:18px;margin:0 2px;cursor:pointer;
+  accent-color:#9B59B6;}
+.log-container.select-mode .jv-bubble-row{cursor:pointer;}
+.log-container.select-mode .jv-bubble-row.user .jv-msg-check{margin-right:auto;}
+.log-container.select-mode .jv-bubble-edit-btn{display:none;}
         `;
         document.head.appendChild(s);
     })();
@@ -1634,6 +1645,9 @@
             window.JarvisChatLib.setupBubbleContextMenu(row, () => _buildBubbleCtxItems(row, bubble, role));
         }
 
+        // Im Auswahlmodus neue Bubble direkt mit Checkbox versehen
+        if (_selectMode) _addCheckboxToRow(row);
+
         return { row, col, bubble };
     }
 
@@ -1730,6 +1744,129 @@
             }
         }
     }
+
+    // ─── Mehrfachauswahl: Nachrichten per Checkbox loeschen ──────
+    let _selectMode = false;
+
+    function _msgRowCheckbox(row) {
+        return row.querySelector('.jv-msg-check');
+    }
+
+    function _updateSelectCount() {
+        const n = logContainer.querySelectorAll('.jv-msg-check:checked').length;
+        if (msgSelectCount) msgSelectCount.textContent = String(n);
+        if (btnMsgDelSel) btnMsgDelSel.disabled = (n === 0);
+    }
+
+    function _addCheckboxToRow(row) {
+        if (!row || _msgRowCheckbox(row)) return;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'jv-msg-check';
+        cb.addEventListener('change', _updateSelectCount);
+        // Checkbox als erstes Element der Row → immer links
+        row.insertBefore(cb, row.firstChild);
+    }
+
+    function _enterSelectMode() {
+        if (_selectMode) return;
+        // Laufenden Edit-Modus beenden
+        if (_editingRow) { try { _restoreBubble(_editingRow.querySelector('.jv-bubble'), _editingRow); } catch(_) {} }
+        _selectMode = true;
+        logContainer.classList.add('select-mode');
+        logContainer.querySelectorAll('.jv-bubble-row').forEach(_addCheckboxToRow);
+        if (msgSelectBar) msgSelectBar.hidden = false;
+        if (btnSelectMsgs) btnSelectMsgs.classList.add('active');
+        _updateSelectCount();
+    }
+
+    function _exitSelectMode() {
+        _selectMode = false;
+        logContainer.classList.remove('select-mode');
+        logContainer.querySelectorAll('.jv-msg-check').forEach(cb => cb.remove());
+        if (msgSelectBar) msgSelectBar.hidden = true;
+        if (btnSelectMsgs) btnSelectMsgs.classList.remove('active');
+    }
+
+    function _toggleSelectMode() {
+        if (_selectMode) _exitSelectMode();
+        else _enterSelectMode();
+    }
+
+    function _deleteSelectedMsgs() {
+        const checked = Array.from(logContainer.querySelectorAll('.jv-msg-check:checked'))
+            .map(cb => cb.closest('.jv-bubble-row'))
+            .filter(Boolean);
+        if (checked.length === 0) return;
+        const q = window.t ? window.t('select.confirm') : 'Ausgewählte Nachrichten löschen?';
+        if (!confirm(q.replace('{n}', String(checked.length)))) return;
+
+        // Role-Indizes ALLER markierten Rows VOR dem Entfernen ermitteln
+        const userRows = Array.from(logContainer.querySelectorAll('.jv-bubble-row.user'));
+        const botRows  = Array.from(logContainer.querySelectorAll('.jv-bubble-row.bot'));
+        const delUser = new Set();
+        const delBot  = new Set();
+        for (const row of checked) {
+            if (row.classList.contains('user')) {
+                const i = userRows.indexOf(row);
+                if (i >= 0) delUser.add(i);
+            } else {
+                const i = botRows.indexOf(row);
+                if (i >= 0) delBot.add(i);
+                // Streaming-State leeren, falls aktive Bot-Bubble betroffen
+                if (row.contains(_currentBotBubble)) {
+                    _currentBotBubble = null; _currentBotBubbleCol = null; _currentBotRaw = '';
+                }
+            }
+            if (_editingRow === row) _editingRow = null;
+        }
+
+        // _mainHistory: passende Eintraege je Rolle entfernen
+        if (Array.isArray(_mainHistory)) {
+            let uSeen = 0, bSeen = 0;
+            _mainHistory = _mainHistory.filter(e => {
+                if (!e) return false;
+                if (e.role === 'user') {
+                    const keep = !delUser.has(uSeen); uSeen++; return keep;
+                }
+                if (e.role === 'bot' || e.role === 'assistant') {
+                    const keep = !delBot.has(bSeen); bSeen++; return keep;
+                }
+                return true;
+            });
+            _saveHistory();
+        }
+
+        // DOM-Rows entfernen
+        checked.forEach(row => { if (row.parentNode) row.parentNode.removeChild(row); });
+
+        // Verwaiste Datums-Separatoren entfernen (kein Bubble dahinter)
+        logContainer.querySelectorAll('.jv-date-sep').forEach(sep => {
+            let n = sep.nextElementSibling;
+            while (n && !n.classList.contains('jv-bubble-row')) {
+                if (n.classList.contains('jv-date-sep')) { n = null; break; }
+                n = n.nextElementSibling;
+            }
+            if (!n) sep.remove();
+        });
+
+        // Falls Container leer → Welcome wieder einblenden
+        if (!logContainer.querySelector('.jv-bubble-row')) {
+            const w = logContainer.querySelector('.log-welcome');
+            if (!w) {
+                const welcome = document.createElement('div');
+                welcome.className = 'log-welcome';
+                welcome.innerHTML = '<p>👋 Willkommen bei Jarvis!</p>' +
+                                    '<p class="log-hint">Gib unten eine Aufgabe ein, um loszulegen.</p>';
+                logContainer.appendChild(welcome);
+            }
+        }
+        _exitSelectMode();
+    }
+
+    if (btnSelectMsgs) btnSelectMsgs.addEventListener('click', _toggleSelectMode);
+    if (btnMsgSelCancel) btnMsgSelCancel.addEventListener('click', _exitSelectMode);
+    if (btnMsgDelSel) btnMsgDelSel.addEventListener('click', _deleteSelectedMsgs);
 
     // ─── Edit-Modus für User-Bubbles (delegiert an chatlib.js) ───
     let _editingRow = null;   // verhindert gleichzeitiges Editieren mehrerer Bubbles

@@ -402,6 +402,140 @@
         }, { passive: true });
     }
 
+    /* ───────────────────────────────────────────────────────────── *
+     *  Auswahlmodus (Mehrfachauswahl zum Loeschen von Nachrichten)
+     *
+     *  Kapselt den kompletten Lebenszyklus, der vorher in app.js,
+     *  chat.js und userchat.js jeweils nahezu identisch dupliziert war:
+     *    - Modus betreten/verlassen/umschalten
+     *    - Checkbox je Row einfuegen/entfernen
+     *    - Auswahl-Zaehler aktualisieren + Loesch-Button (de)aktivieren
+     *    - Vorauswahl aus dem Kontextmenue ("Loeschen")
+     *    - Bestaetigungsdialog (select.confirm)
+     *
+     *  Die SEITENSPEZIFISCHE Loeschlogik (lokale History filtern + DOM
+     *  entfernen vs. WebSocket dm_delete) wird per opts.onDelete(rows)
+     *  Callback delegiert.
+     *
+     *  opts = {
+     *    container,            // DOM-Element mit den Rows (Pflicht)
+     *    rowSelector,          // z.B. '.jv-bubble-row' (Pflicht)
+     *    checkboxClass,        // z.B. 'jv-msg-check'   (Pflicht)
+     *    selectModeClass,      // Klasse am Container, Default 'select-mode'
+     *    bar, countEl, delBtn, // Aktionsleiste, Zaehler, Loesch-Button
+     *    toggleBtn, cancelBtn, // optionale Buttons
+     *    canSelectRow(row),    // Filter: welche Rows bekommen eine Checkbox
+     *                          //   (Default: alle); userchat: nur eigene
+     *    onEnter(),            // Hook beim Betreten (z.B. Edit-Modus beenden)
+     *    onDelete(rows),       // Pflicht-Callback: loescht die markierten Rows
+     *  }
+     *
+     *  Rueckgabe: Controller mit isActive(), enter(), exit(), toggle(),
+     *  startSelectionDelete(row), addCheckboxToRow(row), updateCount(),
+     *  checkbox(row).
+     * ───────────────────────────────────────────────────────────── */
+    function createSelectionController(opts) {
+        opts = opts || {};
+        const container       = opts.container;
+        const rowSelector     = opts.rowSelector;
+        const checkboxClass   = opts.checkboxClass;
+        const selectModeClass = opts.selectModeClass || 'select-mode';
+        const bar       = opts.bar       || null;
+        const countEl   = opts.countEl   || null;
+        const delBtn    = opts.delBtn    || null;
+        const toggleBtn = opts.toggleBtn || null;
+        const cancelBtn = opts.cancelBtn || null;
+        const canSelectRow = typeof opts.canSelectRow === 'function' ? opts.canSelectRow : () => true;
+        const onEnter  = typeof opts.onEnter  === 'function' ? opts.onEnter  : null;
+        const onDelete = typeof opts.onDelete === 'function' ? opts.onDelete : () => {};
+
+        if (!container || !rowSelector || !checkboxClass) {
+            console.error('[SelectionController] container/rowSelector/checkboxClass erforderlich');
+            const noop = () => {};
+            return { isActive: () => false, enter: noop, exit: noop, toggle: noop,
+                     startSelectionDelete: noop, addCheckboxToRow: noop, updateCount: noop,
+                     checkbox: () => null };
+        }
+
+        const checkSel = '.' + checkboxClass;
+        let active = false;
+
+        function checkbox(row) { return row ? row.querySelector(checkSel) : null; }
+
+        function updateCount() {
+            const n = container.querySelectorAll(checkSel + ':checked').length;
+            if (countEl) countEl.textContent = String(n);
+            if (delBtn) delBtn.disabled = (n === 0);
+        }
+
+        function addCheckboxToRow(row) {
+            if (!row || !canSelectRow(row) || checkbox(row)) return;
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = checkboxClass;
+            cb.addEventListener('change', updateCount);
+            // Checkbox als erstes Element der Row → immer links
+            row.insertBefore(cb, row.firstChild);
+        }
+
+        function enter() {
+            if (active) return;
+            if (onEnter) { try { onEnter(); } catch (_) {} }
+            active = true;
+            container.classList.add(selectModeClass);
+            container.querySelectorAll(rowSelector).forEach(addCheckboxToRow);
+            if (bar) bar.hidden = false;
+            if (toggleBtn) toggleBtn.classList.add('active');
+            updateCount();
+        }
+
+        function exit() {
+            active = false;
+            container.classList.remove(selectModeClass);
+            container.querySelectorAll(checkSel).forEach(cb => cb.remove());
+            if (bar) bar.hidden = true;
+            if (toggleBtn) toggleBtn.classList.remove('active');
+        }
+
+        function toggle() { active ? exit() : enter(); }
+
+        // Aus dem Kontextmenue "Loeschen": Modus starten und die
+        // angeklickte Nachricht direkt vorauswaehlen (wie Android/Windows-App).
+        function startSelectionDelete(row) {
+            enter();
+            if (row) {
+                const cb = checkbox(row);
+                if (cb) { cb.checked = true; updateCount(); }
+            }
+        }
+
+        function deleteSelected() {
+            const checked = Array.from(container.querySelectorAll(checkSel + ':checked'))
+                .map(cb => cb.closest(rowSelector))
+                .filter(Boolean);
+            if (checked.length === 0) return;
+            const q = window.t ? window.t('select.confirm') : 'Ausgewählte Nachrichten löschen?';
+            if (!confirm(q.replace('{n}', String(checked.length)))) return;
+            try { onDelete(checked); } catch (e) { console.error('[SelectionController] onDelete', e); }
+            exit();
+        }
+
+        if (toggleBtn) toggleBtn.addEventListener('click', toggle);
+        if (cancelBtn) cancelBtn.addEventListener('click', exit);
+        if (delBtn)    delBtn.addEventListener('click', deleteSelected);
+
+        return {
+            isActive: () => active,
+            enter: enter,
+            exit: exit,
+            toggle: toggle,
+            startSelectionDelete: startSelectionDelete,
+            addCheckboxToRow: addCheckboxToRow,
+            updateCount: updateCount,
+            checkbox: checkbox,
+        };
+    }
+
     /* ── Clipboard-Helfer (Best-Effort, fallback auf execCommand) ──── */
     async function copyTextToClipboard(text) {
         if (text == null) text = '';
@@ -439,5 +573,6 @@
         setupBubbleContextMenu: setupBubbleContextMenu,
         hideBubbleContextMenu: _hideCtxMenu,
         copyTextToClipboard: copyTextToClipboard,
+        createSelectionController: createSelectionController,
     };
 })(typeof window !== 'undefined' ? window : this);

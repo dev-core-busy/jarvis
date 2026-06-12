@@ -197,9 +197,17 @@
     _wireEyeBtn('btn-toggle-login-pw', document.getElementById('login-password'));
 
     // ─── Screen-Wechsel ─────────────────────────────────────────
+    function _updateUserBadge() {
+        const badge = document.getElementById('header-user-badge');
+        if (!badge) return;
+        badge.textContent = currentUser || '';
+        badge.style.display = currentUser ? '' : 'none';
+    }
+
     function showMainScreen() {
         loginScreen.classList.remove('active');
         mainScreen.classList.add('active');
+        _updateUserBadge();
         _restoreHistory();
         connectWebSocket();
         initVNC();

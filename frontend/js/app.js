@@ -2462,7 +2462,10 @@
                 card.className = 'profile-card' + (p.id === activeProfileId ? ' active' : '');
                 card.innerHTML = `
                     <div class="profile-info" data-id="${p.id}">
-                        <span class="profile-name">${escapeHtml(p.name)}</span>
+                        <span class="profile-name-row">
+                            <span class="llm-status-pill checking" data-id="${p.id}" title="${window.t('profile.status_checking')}"></span>
+                            <span class="profile-name">${escapeHtml(p.name)}</span>
+                        </span>
                         <span class="profile-detail">${PROVIDER_LABELS[p.provider] || p.provider} · ${escapeHtml(p.model)}</span>
                     </div>
                     <div class="profile-actions">
@@ -2486,6 +2489,38 @@
                 });
                 profilesContainer.appendChild(card);
             });
+            // Erreichbarkeit aller Profile asynchron prüfen (Ampel-Pills aktualisieren)
+            _refreshProfileStatuses();
+        }
+
+        // ── LLM-Erreichbarkeit pro Profil prüfen (grün/gelb/rot Pill) ──
+        async function _refreshProfileStatuses() {
+            await Promise.all(profiles.map(async (p) => {
+                const pill = profilesContainer.querySelector(`.llm-status-pill[data-id="${p.id}"]`);
+                if (!pill) return;
+                try {
+                    const res = await fetch(`/api/profiles/${p.id}/test`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const d = await res.json();
+                    // status: ok (grün) | degraded (gelb) | down (rot)
+                    const status = d.status || (d.success ? 'ok' : 'down');
+                    pill.classList.remove('checking', 'ok', 'degraded', 'down');
+                    pill.classList.add(status);
+                    const latency = d.latency_ms != null ? ` (${d.latency_ms} ms)` : '';
+                    if (status === 'ok') {
+                        pill.title = window.t('profile.status_online') + latency;
+                    } else if (status === 'degraded') {
+                        pill.title = (d.message || window.t('profile.status_model_missing')) + latency;
+                    } else {
+                        pill.title = (d.error || window.t('profile.status_offline')) + latency;
+                    }
+                } catch (err) {
+                    pill.classList.remove('checking', 'ok', 'degraded', 'down');
+                    pill.classList.add('down');
+                    pill.title = window.t('profile.status_offline');
+                }
+            }));
         }
 
         // ── Profil aktivieren ──

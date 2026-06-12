@@ -105,6 +105,10 @@
     const typingEl      = $('uc-typing');
     const inputEl       = $('uc-input');
     const sendBtn       = $('uc-send-btn');
+    const msgSelectBar   = $('msg-select-bar');
+    const msgSelectCount = $('msg-select-count');
+    const btnMsgDelSel   = $('btn-msg-del-sel');
+    const btnMsgSelCancel = $('btn-msg-sel-cancel');
 
     // ─── Hilfsfunktionen ────────────────────────────────────────
     function initial(name) {
@@ -608,6 +612,9 @@
         if (window.JarvisChatLib && window.JarvisChatLib.setupBubbleContextMenu) {
             window.JarvisChatLib.setupBubbleContextMenu(row, () => _buildDmCtxItems(row, bubble, msg));
         }
+
+        // Im Auswahlmodus neue eigene Bubble direkt mit Checkbox versehen
+        if (_selectMode && mine) _addCheckboxToRow(row);
     }
 
     // ─── Kontextmenue: Bearbeiten/Loeschen/Kopieren/Antworten ─────
@@ -633,11 +640,77 @@
         if (mine && msg.msg_id) {
             items.push({
                 label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: '🗑', danger: true,
-                onClick: () => _deleteDmBubble(row, msg),
+                onClick: () => _startSelectionDelete(row),
             });
         }
         return items;
     }
+
+    // ─── Mehrfachauswahl: eigene Nachrichten per Checkbox loeschen ─
+    let _selectMode = false;
+
+    function _updateSelectCount() {
+        const n = messages.querySelectorAll('.uc-msg-check:checked').length;
+        if (msgSelectCount) msgSelectCount.textContent = String(n);
+        if (btnMsgDelSel) btnMsgDelSel.disabled = (n === 0);
+    }
+
+    // Nur eigene Nachrichten (.mine) sind loeschbar → nur dort Checkbox.
+    function _addCheckboxToRow(row) {
+        if (!row || !row.classList.contains('mine') || !row.dataset.msgid) return;
+        if (row.querySelector('.uc-msg-check')) return;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'uc-msg-check';
+        cb.addEventListener('change', _updateSelectCount);
+        row.insertBefore(cb, row.firstChild);
+    }
+
+    function _enterSelectMode() {
+        if (_selectMode) return;
+        _selectMode = true;
+        messages.classList.add('select-mode');
+        messages.querySelectorAll('.uc-msg-row.mine').forEach(_addCheckboxToRow);
+        if (msgSelectBar) msgSelectBar.hidden = false;
+        _updateSelectCount();
+    }
+
+    function _exitSelectMode() {
+        _selectMode = false;
+        messages.classList.remove('select-mode');
+        messages.querySelectorAll('.uc-msg-check').forEach(cb => cb.remove());
+        if (msgSelectBar) msgSelectBar.hidden = true;
+    }
+
+    // Aus dem Kontextmenue "Loeschen": Auswahlmodus starten und die
+    // angeklickte Nachricht direkt vorauswaehlen (analog Android/Windows-App).
+    function _startSelectionDelete(row) {
+        _enterSelectMode();
+        if (row) {
+            const cb = row.querySelector('.uc-msg-check');
+            if (cb) { cb.checked = true; _updateSelectCount(); }
+        }
+    }
+
+    function _deleteSelectedMsgs() {
+        if (!activePartner) return;
+        const ids = Array.from(messages.querySelectorAll('.uc-msg-check:checked'))
+            .map(cb => cb.closest('.uc-msg-row'))
+            .filter(Boolean)
+            .map(r => r.dataset.msgid)
+            .filter(Boolean);
+        if (ids.length === 0) return;
+        const q = window.t ? window.t('select.confirm') : 'Ausgewählte Nachrichten löschen?';
+        if (!confirm(q.replace('{n}', String(ids.length)))) return;
+        // Server-Echo (dm_delete) entfernt die Rows fuer beide Seiten.
+        for (const id of ids) {
+            wsSend({ type: 'dm_delete', to: activePartner, msg_id: id });
+        }
+        _exitSelectMode();
+    }
+
+    if (btnMsgSelCancel) btnMsgSelCancel.addEventListener('click', _exitSelectMode);
+    if (btnMsgDelSel) btnMsgDelSel.addEventListener('click', _deleteSelectedMsgs);
 
     let _dmEditingMsgId = null;
     function _editDmBubble(row, bubble, msg) {

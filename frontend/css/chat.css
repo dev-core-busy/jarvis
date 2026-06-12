@@ -367,6 +367,22 @@ body {
 .msg-select-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 #btn-select-msgs.active { color: var(--purple, #9B59B6); }
 
+/* ─── Mehrfachauswahl im Benutzer-Chat (uc-msg-row) ──────────── */
+.uc-msg-check {
+    flex: 0 0 auto;
+    align-self: center;
+    width: 18px; height: 18px;
+    margin: 0 2px;
+    cursor: pointer;
+    accent-color: var(--purple, #7c3aed);
+}
+.uc-messages.select-mode .uc-msg-row.mine {
+    flex-direction: row;
+    justify-content: flex-start;
+    cursor: pointer;
+}
+.uc-messages.select-mode .uc-msg-row.theirs { opacity: 0.55; }
+
 /* ─── Edit-Button (nur User-Bubbles) ──────────────────────────── */
 .msg-edit-btn {
     background: none;

@@ -1676,7 +1676,7 @@
             label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'),
             icon: '🗑',
             danger: true,
-            onClick: () => _deleteBubble(row, role),
+            onClick: () => _startSelectionDelete(row),
         });
         return items;
     }
@@ -1791,6 +1791,16 @@
     function _toggleSelectMode() {
         if (_selectMode) _exitSelectMode();
         else _enterSelectMode();
+    }
+
+    // Aus dem Kontextmenue "Loeschen": Auswahlmodus starten und die
+    // angeklickte Nachricht direkt vorauswaehlen (analog Android/Windows-App).
+    function _startSelectionDelete(row) {
+        _enterSelectMode();
+        if (row) {
+            const cb = _msgRowCheckbox(row);
+            if (cb) { cb.checked = true; _updateSelectCount(); }
+        }
     }
 
     function _deleteSelectedMsgs() {

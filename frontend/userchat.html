@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Jarvis – Benutzer-Chat</title>
-    <link rel="stylesheet" href="/static/css/chat.css?v=14">
+    <link rel="stylesheet" href="/static/css/chat.css?v=16">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=3">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="manifest" href="/static/manifest.json">
@@ -756,6 +756,11 @@
                         <div class="uc-chat-status" id="uc-partner-status">offline</div>
                     </div>
                 </div>
+                <div id="msg-select-bar" class="msg-select-bar" hidden>
+                    <span class="msg-select-info"><span id="msg-select-count">0</span> <span data-i18n="select.selected">ausgewählt</span></span>
+                    <button class="msg-select-btn danger" id="btn-msg-del-sel" data-i18n="select.delete">Löschen</button>
+                    <button class="msg-select-btn" id="btn-msg-sel-cancel" data-i18n="select.cancel">Abbrechen</button>
+                </div>
                 <div class="uc-messages" id="uc-messages"></div>
                 <div class="uc-typing" id="uc-typing"></div>
                 <!-- Anhang-Vorschau (versteckt wenn leer) -->
@@ -823,9 +828,9 @@
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=10"></script>
+<script src="/static/js/i18n.js?v=11"></script>
 <script src="/static/js/issues.js?v=1"></script>
 <script src="/static/js/chatlib.js?v=3"></script>
-<script src="/static/js/userchat.js?v=10"></script>
+<script src="/static/js/userchat.js?v=12"></script>
 </body>
 </html>

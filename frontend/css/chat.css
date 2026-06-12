@@ -324,6 +324,49 @@ body {
 }
 .msg-row.bot .msg-time { text-align: left; }
 
+/* ─── Mehrfachauswahl (Checkbox-Loeschen) ────────────────────── */
+.msg-check {
+    flex: 0 0 auto;
+    align-self: center;
+    width: 18px; height: 18px;
+    margin: 0 2px;
+    cursor: pointer;
+    accent-color: var(--purple, #9B59B6);
+}
+.messages.select-mode .msg-row { cursor: pointer; }
+.messages.select-mode .msg-row.user .msg-check { margin-right: auto; }
+.messages.select-mode .msg-edit-btn { display: none; }
+
+.msg-select-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    background: var(--bubble-bot, rgba(255, 255, 255, 0.06));
+    border-bottom: 1px solid rgba(127, 127, 127, 0.18);
+}
+.msg-select-bar[hidden] { display: none; }
+.msg-select-info { font-size: 0.82rem; color: var(--muted); margin-right: auto; }
+.msg-select-info #msg-select-count { font-weight: 700; color: var(--bubble-text); }
+.msg-select-btn {
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(127, 127, 127, 0.25);
+    background: rgba(127, 127, 127, 0.1);
+    color: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, opacity .15s;
+}
+.msg-select-btn:hover { background: rgba(127, 127, 127, 0.2); }
+.msg-select-btn.danger { border-color: rgba(239, 68, 68, 0.5); color: #e0524a; }
+.msg-select-btn.danger:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.8);
+}
+.msg-select-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#btn-select-msgs.active { color: var(--purple, #9B59B6); }
+
 /* ─── Edit-Button (nur User-Bubbles) ──────────────────────────── */
 .msg-edit-btn {
     background: none;

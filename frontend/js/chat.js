@@ -7,6 +7,7 @@
 
     // ─── State ──────────────────────────────────────────────────
     let token = localStorage.getItem('jarvis_chat_token') || '';
+    let _currentUser = localStorage.getItem('jarvis_chat_user') || '';
     let ws = null;
     let reconnectAttempts = 0;
     const MAX_RECONNECT = 20;
@@ -220,6 +221,8 @@
             if (data.success && data.token) {
                 token = data.token;
                 localStorage.setItem('jarvis_chat_token', token);
+                _currentUser = data.username || loginUser.value.trim();
+                localStorage.setItem('jarvis_chat_user', _currentUser);
                 totpRow.classList.add('hidden');
                 loginTotp.value = '';
                 showChat();
@@ -244,6 +247,8 @@
     function showChat() {
         loginScreen.classList.add('hidden');
         chatScreen.classList.remove('hidden');
+        const _ownBadge = $('chat-own-badge');
+        if (_ownBadge) _ownBadge.textContent = _currentUser || '';
         connectWS();
         _restoreHistory();
         msgInput.focus();

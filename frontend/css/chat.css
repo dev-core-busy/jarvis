@@ -205,6 +205,24 @@ body {
 .topbar-dot.connecting   { background: #FFFF00; }
 .topbar-dot.disconnected { background: var(--error); }
 
+/* Angemeldeter Benutzer im Header */
+.chat-own-badge {
+    display: inline-flex;
+    align-items: center;
+    max-width: 140px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--muted, #94a3b8);
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.chat-own-badge:empty { display: none; }
+
 .btn-logout {
     background: none; border: none;
     color: var(--muted);

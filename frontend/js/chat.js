@@ -664,7 +664,7 @@
         }
 
         // Im Auswahlmodus neue Bubble direkt mit Checkbox versehen
-        if (_selectMode) _addCheckboxToRow(row);
+        if (_selCtl && _selCtl.isActive()) _selCtl.addCheckboxToRow(row);
 
         return bubble;
     }
@@ -686,7 +686,7 @@
         });
         items.push({
             label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: '🗑', danger: true,
-            onClick: () => _startSelectionDelete(row),
+            onClick: () => _selCtl.startSelectionDelete(row),
         });
         return items;
     }
@@ -734,111 +734,63 @@
     }
 
     // ─── Mehrfachauswahl: Nachrichten per Checkbox loeschen ──────
-    let _selectMode = false;
-
-    function _updateSelectCount() {
-        const n = messagesEl.querySelectorAll('.msg-check:checked').length;
-        if (msgSelectCount) msgSelectCount.textContent = String(n);
-        if (btnMsgDelSel) btnMsgDelSel.disabled = (n === 0);
-    }
-
-    function _addCheckboxToRow(row) {
-        if (!row || row.querySelector('.msg-check')) return;
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.className = 'msg-check';
-        cb.addEventListener('change', _updateSelectCount);
-        row.insertBefore(cb, row.firstChild);
-    }
-
-    function _enterSelectMode() {
-        if (_selectMode) return;
-        if (_editingRow) { try { _restoreBubble(_editingRow.querySelector('.msg-bubble'), _editingRow); } catch(_) {} }
-        _selectMode = true;
-        messagesEl.classList.add('select-mode');
-        messagesEl.querySelectorAll('.msg-row').forEach(_addCheckboxToRow);
-        if (msgSelectBar) msgSelectBar.hidden = false;
-        if (btnSelectMsgs) btnSelectMsgs.classList.add('active');
-        _updateSelectCount();
-    }
-
-    function _exitSelectMode() {
-        _selectMode = false;
-        messagesEl.classList.remove('select-mode');
-        messagesEl.querySelectorAll('.msg-check').forEach(cb => cb.remove());
-        if (msgSelectBar) msgSelectBar.hidden = true;
-        if (btnSelectMsgs) btnSelectMsgs.classList.remove('active');
-    }
-
-    function _toggleSelectMode() {
-        if (_selectMode) _exitSelectMode(); else _enterSelectMode();
-    }
-
-    // Aus dem Kontextmenue "Loeschen": Auswahlmodus starten und die
-    // angeklickte Nachricht direkt vorauswaehlen (analog Android/Windows-App).
-    function _startSelectionDelete(row) {
-        _enterSelectMode();
-        if (row) {
-            const cb = row.querySelector('.msg-check');
-            if (cb) { cb.checked = true; _updateSelectCount(); }
-        }
-    }
-
-    function _deleteSelectedMsgs() {
-        const checked = Array.from(messagesEl.querySelectorAll('.msg-check:checked'))
-            .map(cb => cb.closest('.msg-row'))
-            .filter(Boolean);
-        if (checked.length === 0) return;
-        const q = window.t ? window.t('select.confirm') : 'Ausgewählte Nachrichten löschen?';
-        if (!confirm(q.replace('{n}', String(checked.length)))) return;
-
-        const userRows = Array.from(messagesEl.querySelectorAll('.msg-row.user'));
-        const botRows  = Array.from(messagesEl.querySelectorAll('.msg-row.bot'));
-        const delUser = new Set();
-        const delBot  = new Set();
-        for (const row of checked) {
-            if (row.classList.contains('user')) {
-                const i = userRows.indexOf(row);
-                if (i >= 0) delUser.add(i);
-            } else {
-                const i = botRows.indexOf(row);
-                if (i >= 0) delBot.add(i);
-                if (row.contains(currentBotBubble)) {
-                    currentBotBubble = null; _lastBotCol = null; _lastBotResp = ''; _lastStats = '';
+    //  Lebenszyklus in chatlib.js (createSelectionController). Hier nur
+    //  die seitenspezifische Loeschlogik (lokale History + DOM).
+    const _selCtl = window.JarvisChatLib.createSelectionController({
+        container: messagesEl,
+        rowSelector: '.msg-row',
+        checkboxClass: 'msg-check',
+        bar: msgSelectBar,
+        countEl: msgSelectCount,
+        delBtn: btnMsgDelSel,
+        toggleBtn: btnSelectMsgs,
+        cancelBtn: btnMsgSelCancel,
+        onEnter: () => {
+            if (_editingRow) { try { _restoreBubble(_editingRow.querySelector('.msg-bubble'), _editingRow); } catch(_) {} }
+        },
+        onDelete: (checked) => {
+            const userRows = Array.from(messagesEl.querySelectorAll('.msg-row.user'));
+            const botRows  = Array.from(messagesEl.querySelectorAll('.msg-row.bot'));
+            const delUser = new Set();
+            const delBot  = new Set();
+            for (const row of checked) {
+                if (row.classList.contains('user')) {
+                    const i = userRows.indexOf(row);
+                    if (i >= 0) delUser.add(i);
+                } else {
+                    const i = botRows.indexOf(row);
+                    if (i >= 0) delBot.add(i);
+                    if (row.contains(currentBotBubble)) {
+                        currentBotBubble = null; _lastBotCol = null; _lastBotResp = ''; _lastStats = '';
+                    }
                 }
+                if (_editingRow === row) _editingRow = null;
             }
-            if (_editingRow === row) _editingRow = null;
-        }
 
-        if (Array.isArray(_chatHistory)) {
-            let uSeen = 0, bSeen = 0;
-            _chatHistory = _chatHistory.filter(e => {
-                if (!e) return false;
-                if (e.role === 'user') { const keep = !delUser.has(uSeen); uSeen++; return keep; }
-                if (e.role === 'bot' || e.role === 'assistant') { const keep = !delBot.has(bSeen); bSeen++; return keep; }
-                return true;
+            if (Array.isArray(_chatHistory)) {
+                let uSeen = 0, bSeen = 0;
+                _chatHistory = _chatHistory.filter(e => {
+                    if (!e) return false;
+                    if (e.role === 'user') { const keep = !delUser.has(uSeen); uSeen++; return keep; }
+                    if (e.role === 'bot' || e.role === 'assistant') { const keep = !delBot.has(bSeen); bSeen++; return keep; }
+                    return true;
+                });
+                _saveHistory();
+            }
+
+            checked.forEach(row => { if (row.parentNode) row.parentNode.removeChild(row); });
+
+            // Verwaiste Datums-Separatoren entfernen
+            messagesEl.querySelectorAll('.date-sep').forEach(sep => {
+                let n = sep.nextElementSibling;
+                while (n && !n.classList.contains('msg-row')) {
+                    if (n.classList.contains('date-sep')) { n = null; break; }
+                    n = n.nextElementSibling;
+                }
+                if (!n) sep.remove();
             });
-            _saveHistory();
-        }
-
-        checked.forEach(row => { if (row.parentNode) row.parentNode.removeChild(row); });
-
-        // Verwaiste Datums-Separatoren entfernen
-        messagesEl.querySelectorAll('.date-sep').forEach(sep => {
-            let n = sep.nextElementSibling;
-            while (n && !n.classList.contains('msg-row')) {
-                if (n.classList.contains('date-sep')) { n = null; break; }
-                n = n.nextElementSibling;
-            }
-            if (!n) sep.remove();
-        });
-
-        _exitSelectMode();
-    }
-
-    if (btnSelectMsgs) btnSelectMsgs.addEventListener('click', _toggleSelectMode);
-    if (btnMsgSelCancel) btnMsgSelCancel.addEventListener('click', _exitSelectMode);
-    if (btnMsgDelSel) btnMsgDelSel.addEventListener('click', _deleteSelectedMsgs);
+        },
+    });
 
     // ─── Edit-Modus für User-Bubbles (delegiert an chatlib.js) ───
     let _editingRow = null;

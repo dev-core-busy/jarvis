@@ -2186,6 +2186,13 @@ body {
     min-width: 0;
 }
 
+.profile-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
 .profile-name {
     font-weight: 600;
     font-size: 0.95rem;
@@ -2193,6 +2200,38 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* ── LLM-Erreichbarkeits-Ampel (grün/gelb/rot) ────────────────────────── */
+.llm-status-pill {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--text-muted, #94a3b8);
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+    transition: background 0.3s, box-shadow 0.3s;
+    cursor: help;
+}
+.llm-status-pill.checking {
+    background: #64748b;
+    animation: llm-pill-pulse 1s ease-in-out infinite;
+}
+.llm-status-pill.ok {
+    background: #22c55e;            /* grün – erreichbar + Modell vorhanden */
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.7);
+}
+.llm-status-pill.degraded {
+    background: #f59e0b;            /* gelb – erreichbar, Modell fehlt */
+    box-shadow: 0 0 6px rgba(245, 158, 11, 0.7);
+}
+.llm-status-pill.down {
+    background: #ef4444;            /* rot – nicht erreichbar */
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
+}
+@keyframes llm-pill-pulse {
+    0%, 100% { opacity: 0.35; }
+    50%      { opacity: 1; }
 }
 
 .profile-detail {

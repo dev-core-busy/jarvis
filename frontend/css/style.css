@@ -2233,6 +2233,25 @@ body {
     0%, 100% { opacity: 0.35; }
     50%      { opacity: 1; }
 }
+/* Nicht-aktive Profile: Pills abgedunkelt. Nur aktives Profil hat helle Pills. */
+.profile-card .llm-status-pill {
+    opacity: 0.4;
+    filter: saturate(0.55) brightness(0.8);
+    box-shadow: none;
+}
+.profile-card.active .llm-status-pill {
+    opacity: 1;
+    filter: none;
+}
+.profile-card.active .llm-status-pill.ok {
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.7);
+}
+.profile-card.active .llm-status-pill.degraded {
+    box-shadow: 0 0 6px rgba(245, 158, 11, 0.7);
+}
+.profile-card.active .llm-status-pill.down {
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
+}
 
 .profile-detail {
     font-size: 0.8rem;

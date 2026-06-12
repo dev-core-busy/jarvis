@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Jarvis Chat</title>
-    <link rel="stylesheet" href="/static/css/chat.css?v=15">
+    <link rel="stylesheet" href="/static/css/chat.css?v=16">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=3">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <!-- PWA -->
@@ -111,11 +111,6 @@
             <button class="btn-theme" id="btn-chat-issues" title="Issues / Feedback" onclick="window.JarvisIssues && window.JarvisIssues.open()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
-            </button>
-            <button class="btn-theme" id="btn-select-msgs" data-i18n-title="select.toggle" title="Nachrichten auswählen">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
                 </svg>
             </button>
             <button class="btn-theme" id="btn-cert" data-i18n-title="chat.ssl_cert" title="SSL-Zertifikat">
@@ -293,6 +288,6 @@ sudo update-ca-certificates</code></pre>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=3"></script>
 <script src="/static/js/issues.js?v=1"></script>
-<script src="/static/js/chat.js?v=30"></script>
+<script src="/static/js/chat.js?v=31"></script>
 </body>
 </html>

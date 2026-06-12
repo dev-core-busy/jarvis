@@ -2253,6 +2253,24 @@ body {
     box-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
 }
 
+/* ── Angemeldeter Benutzer im Header ── */
+.header-user-badge {
+    display: inline-flex;
+    align-items: center;
+    max-width: 140px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    background: var(--bg-glass, rgba(255, 255, 255, 0.06));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary, #cbd5e1);
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.header-user-badge:empty { display: none; }
+
 /* ── Aktionsleiste fuer Nachrichten-Mehrfachauswahl ── */
 .msg-select-bar {
     display: flex;

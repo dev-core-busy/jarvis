@@ -88,3 +88,6 @@ windows-app-go/jarvis-windows
 # FTPS-Deploy-Zugang (build.sh) – niemals committen
 windows-app-go/.ftps_credentials
 .ftps_credentials
+
+# Generierte Bilder (Bildgenerierung)
+data/generated_images/

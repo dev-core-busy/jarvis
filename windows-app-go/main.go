@@ -83,6 +83,7 @@ func main() {
 	// Gespeicherte TTS-Stimme aktivieren
 	SetTTSVoice(cfg.TTSVoice)
 	SetTTSServer(cfg.ServerURL, cfg.APIKey)
+	SetImageServer(cfg.ServerURL)
 
 	// Gewähltes STT-Modell setzen und Whisper-Server starten
 	SetActiveSTTModel(cfg.STTModel)

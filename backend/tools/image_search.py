@@ -8,7 +8,7 @@ import re
 import uuid
 
 from backend.tools.base import BaseTool
-from backend.tools.image_gen import _IMG_DIR  # gemeinsames Ausgabe-Verzeichnis
+from backend.tools.image_gen import _IMG_DIR, record_task_image  # gemeinsames Ausgabe-Verzeichnis
 
 _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
@@ -98,6 +98,7 @@ class SearchImageTool(BaseTool):
                     fname = f"{uuid.uuid4().hex}.{ext}"
                     (_IMG_DIR / fname).write_bytes(resp.content)
                     local = f"/api/generated/{fname}"
+                    record_task_image(_IMG_DIR / fname, local)
                     return (
                         "BILD_GEFUNDEN. Gib in deiner finalen Antwort EXAKT die folgende "
                         "Markdown-Bildreferenz unveraendert aus (mit einem kurzen Satz), damit das "

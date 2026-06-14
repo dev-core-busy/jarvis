@@ -4448,16 +4448,30 @@ async def _run_wa_task(task_text: str, sender: str, source_info: str, auto_reply
 
         # Antwort an WhatsApp senden
         if auto_reply and result:
-            # Ergebnis kürzen falls zu lang (WhatsApp-Limit ~65000 Zeichen)
-            reply = result[:4000]
-            if len(result) > 4000:
-                reply += "\n\n... (gekürzt)"
+            from backend.tools.image_gen import strip_image_refs
+            images = getattr(agent_instance, "last_task_images", []) or []
+            text = strip_image_refs(result) if images else result
 
-            _wa_bridge_request("/send", method="POST", data={
-                "to": f"+{sender}",
-                "message": reply,
-            })
-            wa_log("INFO", "outgoing", f"Antwort an +{sender} gesendet ({len(reply)} Zeichen)")
+            # Erzeugte/gesuchte Bilder als Medien senden (erstes traegt den Text als Caption)
+            caption_sent = False
+            for img in images:
+                cap = text[:1000] if (not caption_sent and text) else ""
+                r = _wa_bridge_request("/send-media", method="POST", data={
+                    "to": f"+{sender}", "media_path": img.get("path"), "caption": cap,
+                })
+                if r and not r.get("error"):
+                    caption_sent = caption_sent or bool(cap)
+                    wa_log("INFO", "outgoing", f"Bild an +{sender} gesendet: {img.get('url')}")
+                else:
+                    wa_log("ERROR", "outgoing", f"Bild-Senden fehlgeschlagen: {r}")
+
+            # Text senden, falls kein Bild ihn als Caption getragen hat
+            if text and not caption_sent:
+                reply = text[:4000] + ("\n\n... (gekürzt)" if len(text) > 4000 else "")
+                _wa_bridge_request("/send", method="POST", data={
+                    "to": f"+{sender}", "message": reply,
+                })
+                wa_log("INFO", "outgoing", f"Antwort an +{sender} gesendet ({len(reply)} Zeichen)")
 
     except Exception as e:
         wa_log("ERROR", "agent", f"Task-Fehler: {e}", meta={"sender": sender, "task": task_text[:200]})

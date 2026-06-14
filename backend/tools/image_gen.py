@@ -4,7 +4,9 @@ Wichtig: Es wird NIEMALS der Provider/das Profil gewechselt. Kann das aktive
 Profil keine Bilder erzeugen, bekommt der Nutzer eine klare Meldung.
 """
 
+import re
 import uuid
+import contextvars
 from pathlib import Path
 
 from backend.tools.base import BaseTool
@@ -13,6 +15,31 @@ from backend.llm import get_provider, ImageGenNotSupported
 
 # Generierte Bilder liegen hier und werden ueber /api/generated/<name> ausgeliefert.
 _IMG_DIR = Path(__file__).parent.parent.parent / "data" / "generated_images"
+
+# Pro Agent-Task erzeugte/gefundene Bilder. Wird in run_task_headless mit einer
+# frischen Liste gesetzt; die Bild-Tools tragen sich hier ein. So koennen Kanaele,
+# die kein Markdown rendern (WhatsApp/Telegram/native Apps), das Bild als Medium senden.
+current_task_images: contextvars.ContextVar = contextvars.ContextVar(
+    "current_task_images", default=None)
+
+
+def record_task_image(path, url: str) -> None:
+    """Merkt ein erzeugtes/gefundenes Bild fuer den aktuellen Task."""
+    lst = current_task_images.get()
+    if lst is not None:
+        lst.append({"path": str(path), "url": url})
+
+
+_IMG_MD_RE = re.compile(r"!\[[^\]]*\]\([^)]*?/api/generated/[0-9a-f]{32}\.[a-z]+\)")
+_IMG_URL_RE = re.compile(r"\S*?/api/generated/[0-9a-f]{32}\.[a-z]+")
+
+
+def strip_image_refs(text: str) -> str:
+    """Entfernt Markdown-Bildreferenzen/URLs auf generierte Bilder aus einem Text
+    (fuer Kanaele, die das Bild separat als Medium senden)."""
+    t = _IMG_MD_RE.sub("", text or "")
+    t = _IMG_URL_RE.sub("", t)
+    return re.sub(r"\n{3,}", "\n\n", t).strip()
 
 
 class GenerateImageTool(BaseTool):
@@ -78,6 +105,7 @@ class GenerateImageTool(BaseTool):
             return f"HINWEIS_AN_NUTZER: Bild konnte nicht gespeichert werden: {e}"
 
         url = f"/api/generated/{fname}"
+        record_task_image(_IMG_DIR / fname, url)
         # Der Agent soll diese Markdown-Bildreferenz UNVERAENDERT in die finale Antwort
         # uebernehmen – alle Frontends rendern sie als Bild.
         return (

@@ -18,7 +18,7 @@ Dieser Workflow definiert den Prozess, wie ein gewünschter Skill in natürliche
 
 ## 3. Entschärfen und Lokalisieren
 - **Agent:** Sobald der Nutzer zustimmt, wandle den Skill in eine rein **lokale, geschlossene Umgebung** um.
-- **Agent:** Lege das finale Verzeichnis für den Skill **immer** mit dem Präfix `openclaw_` an (Bsp: `/home/bender/ai_jarvis/skills_from_openclaw/openclaw_<skill_name>/`).
+- **Agent:** Lege das finale Verzeichnis für den Skill **immer** mit dem Präfix `openclaw_` an (Bsp: `skills_from_openclaw/openclaw_<skill_name>/` im Projektverzeichnis).
 - **Agent:** Falls der Skill Binärdateien erfordert (wie z.B. `gogcli`), lade diese manuell und verifiziert aus deren Originalquelle (z. B. GitHub Release) für die Systemarchitektur (`linux_amd64`) in das neu angelegte Skill-Verzeichnis herunter.
 - **Agent:** Mache die Binärdatei ausführbar (`chmod +x`).
 

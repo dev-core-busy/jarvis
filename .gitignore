@@ -84,3 +84,7 @@ windows-app-go/Jarvis.exe
 windows-app-go/dist/
 windows-app/
 windows-app-go/jarvis-windows
+
+# FTPS-Deploy-Zugang (build.sh) – niemals committen
+windows-app-go/.ftps_credentials
+.ftps_credentials

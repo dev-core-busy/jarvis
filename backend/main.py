@@ -1724,6 +1724,23 @@ async def download_cert():
     return JSONResponse({"error": "Zertifikat nicht gefunden"}, status_code=404)
 
 
+@app.get("/api/generated/{name}")
+async def get_generated_image(name: str):
+    """Liefert ein generiertes Bild aus.
+
+    Auth via Capability-URL: der Dateiname ist ein nicht erratbarer 32-stelliger
+    Hex-UUID. So funktionieren <img>-Tags in allen Frontends ohne Token-Handling.
+    """
+    stem = name[:-4] if name.endswith(".png") else ""
+    if not (len(stem) == 32 and all(c in "0123456789abcdef" for c in stem)):
+        return JSONResponse({"error": "ungueltiger Name"}, status_code=400)
+    p = Path(__file__).parent.parent / "data" / "generated_images" / name
+    if not p.exists():
+        return JSONResponse({"error": "nicht gefunden"}, status_code=404)
+    return FileResponse(str(p), media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/api/settings")
 async def get_settings(user: str = Depends(require_auth)):
     """Gibt aktuelle Einstellungen, Profile und Provider-Optionen zurück."""

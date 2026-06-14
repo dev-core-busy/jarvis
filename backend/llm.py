@@ -32,10 +32,28 @@ class MockFC:
         self.args = args
 
 
+class ImageGenNotSupported(Exception):
+    """Wird geworfen, wenn das aktive Profil keine Bildgenerierung beherrscht."""
+    def __init__(self, label: str = "Das aktive LLM-Profil"):
+        self.label = label
+        super().__init__(f"{label} kann keine Bilder generieren")
+
+
 class LLMProvider(ABC):
+    # Label fuer Fehlermeldungen (z.B. "Das aktive Google-Profil")
+    image_label: str = "Das aktive LLM-Profil"
+
     @abstractmethod
     async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
         pass
+
+    async def generate_image(self, model: str, prompt: str) -> bytes:
+        """Generiert ein Bild (PNG-Bytes) aus einem Text-Prompt.
+
+        Default: NICHT unterstuetzt – der jeweilige Provider muss dies ueberschreiben,
+        wenn er Bildgenerierung kann. Es wird NIEMALS auf ein anderes Profil gewechselt.
+        """
+        raise ImageGenNotSupported(self.image_label)
 
 
 def _parse_sse_to_completion(sse_text: str) -> dict:
@@ -147,9 +165,38 @@ def _normalize_schema(schema: dict) -> dict:
 # ═══════════════════════════════════════════════════════════════════
 
 class GeminiProvider(LLMProvider):
+    image_label = "Das aktive Google-Profil"
 
     def __init__(self, api_key: str):
         self.client = genai.Client(api_key=api_key)
+
+    async def generate_image(self, model: str, prompt: str) -> bytes:
+        """Bildgenerierung via Google Imagen – gleicher API-Key, KEIN Profilwechsel.
+
+        Das aktive Text-Modell (z.B. gemini-2.5-flash) generiert selbst keine Bilder;
+        der Google-Provider nutzt dafuer sein Bildmodell (Imagen). Schlaegt der Zugriff
+        fehl (Key ohne Imagen-Freigabe), wird der Fehler nach oben gereicht.
+        """
+        img_models = ["imagen-3.0-generate-002", "imagen-3.0-generate-001"]
+
+        def _call(m):
+            resp = self.client.models.generate_images(
+                model=m,
+                prompt=prompt,
+                config=types.GenerateImagesConfig(number_of_images=1),
+            )
+            imgs = getattr(resp, "generated_images", None) or []
+            if not imgs:
+                raise RuntimeError("Keine Bilddaten vom Modell erhalten")
+            return imgs[0].image.image_bytes
+
+        last_err = None
+        for m in img_models:
+            try:
+                return await asyncio.to_thread(_call, m)
+            except Exception as e:
+                last_err = e
+        raise RuntimeError(f"Bildgenerierung fehlgeschlagen: {last_err}")
 
     async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
         gemini_tools = [types.Tool(function_declarations=tools)] if tools else None

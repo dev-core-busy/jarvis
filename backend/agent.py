@@ -302,6 +302,13 @@ KRITISCH – Autonomie-Regeln:
         except Exception as e:
             print(f"[AGENT {self.agent_id}] ClipboardTools nicht geladen: {e}", flush=True)
 
+        # Bildgenerierung (ueber das aktive LLM-Profil; kein Provider-Wechsel)
+        try:
+            from backend.tools.image_gen import GenerateImageTool
+            self._tool_instances.append(GenerateImageTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] GenerateImageTool nicht geladen: {e}", flush=True)
+
         # Screenshot-Diff / Wartelogik
         try:
             from backend.tools.screenshot import WaitForChangeTool

@@ -64,6 +64,14 @@
         s = s.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
 
         function _inline(t) {
+            // Bilder ![alt](url) – VOR Links/Formatierung, sonst greift die Link-Regex
+            t = t.replace(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g, (_, alt, url) => {
+                const raw = url.replace(/&amp;/g, '&');
+                const safe = /^https?:\/\/|^\/|^data:image\//.test(raw) ? raw : '';
+                if (!safe) return '';
+                return `<img src="${safe}" alt="${alt}" class="chat-img" loading="lazy" `
+                     + `style="max-width:100%;border-radius:10px;margin:6px 0;display:block;">`;
+            });
             t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
             t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
             t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');

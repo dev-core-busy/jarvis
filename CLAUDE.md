@@ -4,11 +4,16 @@
 Autonomer KI-Agent auf einem Linux-Server (Debian 13) mit Web-Frontend, Desktop-Steuerung via VNC und WhatsApp-Integration.
 
 ## Server & Deployment
-- **Server:** root@191.100.144.1, SSH: `ssh -i /c/users/bender/.ssh/id_rsa root@191.100.144.1`
-- **Zwei Pfade:** `/opt/jarvis/` (systemd Service) + `/home/jarvis/jarvis/` (Entwicklung) – Dateien an BEIDE deployen!
-- **Desktop-User:** `jarvis` (autologin via lightdm), Web-Login: `jarvis/jarvis`
+- **App-Server:** root@191.100.144.1 (Debian 13), SSH: `ssh -i /c/users/bender/.ssh/id_rsa root@191.100.144.1`
+- **Zwei Pfade:** `/opt/jarvis/` (systemd Service, WorkingDirectory) + `/home/jarvis/jarvis/` (Entwicklung) – Dateien an BEIDE deployen!
 - **Deploy:** Lokal schreiben + `scp` (keine Heredocs ueber SSH – Quoting-Probleme mit f-strings)
+  - HINWEIS: Auf dem Server wird NICHT committet → der Git-HEAD dort bleibt alt und ist KEIN Versionsindikator. Massgeblich ist der Datei-Inhalt (md5-Vergleich), nicht `git rev-parse`.
+- **Landing-Page:** `jarvis-ai.info` ist ein SEPARATER Host (89.110.149.134, nginx) – NICHT der App-Server.
+  - Quelle der Wahrheit ist die per FTPS deployte Datei; Repo-Kopie `docs/landing-page/index.html` driftet und muss manuell nachgezogen werden.
+  - Deploy via `windows-app-go/build.sh` (FTPS). ⚠️ FTPS-Passwort steht dort im Klartext und ist ins oeffentliche Repo committet – sollte rotiert/ausgelagert werden.
+- **Desktop-User:** `jarvis` (autologin via lightdm), Web-Login: `jarvis/jarvis`
 - **Services:** `systemctl restart jarvis.service` + `systemctl restart whatsapp-bridge.service`
+- ⚠️ **Git-Remote** enthaelt einen GitHub-PAT im Klartext in `.git/config` – beim Anzeigen redigieren, nicht in Logs ausgeben.
 
 ## Architektur
 ```
@@ -38,6 +43,14 @@ backend/
   llm.py           – Multi-Provider LLM Client
   config.py        – Konfiguration (env + settings.json)
   security.py      – SSL-Zertifikate
+  scheduler.py     – Zeitgesteuerte Auftraege (Cron-Backend)
+  update_manager.py – Auto-Update via git (stash vor Pull)
+  learning.py      – Konversations-Lernsystem (Faktenextraktion in FAISS)
+  issues.py        – Issue-Tracker (Bugs/Features/Verbesserungen)
+  mcp_client.py    – MCP-Client (Model Context Protocol)
+  google_auth.py   – Google OAuth (Calendar/Drive/Gmail)
+  webdav.py, web_extractor.py, file_watcher.py
+  audit_log.py, conv_log.py, telemetry.py – Logging/Telemetrie
   skills/
     manager.py     – SkillManager (enable/disable/config/reload)
     loader.py      – Dynamisches Skill-Loading
@@ -47,22 +60,38 @@ backend/
     subagent.py    – spawn_agent Tool (Hauptagent startet Sub-Agents)
     vector_store.py – ChromaDB Vektor-Datenbank fuer Wissenssuche
     desktop.py, filesystem.py, screenshot.py, knowledge.py, memory.py
+    android_desktop.py, windows_desktop.py – Remote-Desktop-Steuerung
+    google_calendar.py, google_drive.py, google_gmail.py, google_auth.py
+    clipboard.py, cron_tool.py, reflection.py
     whatsapp.py    – WhatsApp Send/Status Tools
     wa_logger.py   – Strukturiertes WhatsApp-Logging (JSON-Lines)
 frontend/
   index.html       – Single-Page App
-  css/style.css    – Glassmorphism Dark Theme (CSS Custom Properties)
+  css/style.css, css/chat.css, css/chat-bubbles.css – Glassmorphism Dark Theme
   js/app.js        – Haupt-UI + WebSocket + Login
+  js/chat.js, js/chatlib.js, js/userchat.js – Chat-UI (Bubbles, Multi-Select, History)
+  js/i18n.js       – DE/EN-Sprachschalter (alle UI-Strings)
   js/skills.js     – Skills Settings UI
   js/whatsapp.js   – WhatsApp Settings + Log-Viewer
   js/vision.js     – Vision Settings (Dashboard/Training/Profile/Aktionen)
+  js/google.js, js/mcp.js, js/cron.js, js/issues.js, js/telemetry.js, js/audit.js
   js/vnc.js        – noVNC Integration
   js/websocket.js  – WebSocket Manager
-skills/
+skills/             – 18 Skills, u.a.:
   browser_control/ – xdotool-basierte Browser-Automation + CDP
   whatsapp/        – WhatsApp Skill (send + status Tools)
-  vision/          – Gesichtserkennung (face_recognition/dlib, USB/IP-Kamera)
+  telegram/        – Telegram Bot (Empfang + Antwort)
+  google/          – Google Calendar/Drive/Gmail
+  vision/, jarvis-vision/ – Gesichtserkennung (face_recognition/dlib, USB/IP-Kamera)
+  cron/            – Zeitgesteuerte Auftraege
+  agent_orchestrator/ – Zerlegt Aufgaben in koordinierte Sub-Agenten (inbox/outbox)
+  agent_autonomy_kit/ – Proaktives Aufgaben-Management via QUEUE.md
+  cognitive_evolution/ – Selbstverbessernder Agent (schreibt/validiert eigene Skills)
+  claude_bridge/   – Delegiert Aufgaben an Claude Desktop-App (xdotool)
   example_skill/   – Template fuer neue Skills
+android/           – Android-App (Kotlin/Jetpack Compose, signiert via .jks)
+windows-app-go/    – Nativer Windows-Client (Go, Tray, lokale STT, Avatar, WS-Client)
+docs/landing-page/ – Statische Landing-Page fuer jarvis-ai.info (FTP-Deploy via build.sh)
 services/
   whatsapp-bridge/index.js – Baileys Bridge mit Express API
 data/

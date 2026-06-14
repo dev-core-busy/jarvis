@@ -1138,7 +1138,7 @@ func (c *ChatWidget) buildRowAt(msg ChatMessage, idx int) fyne.CanvasObject {
 	default: // RoleJarvis
 		bg := canvas.NewRectangle(color.RGBA{0xFF, 0xFF, 0xFF, 0x38})
 		bg.CornerRadius = 18
-		inner := container.NewStack(bg, container.NewPadded(newBoldWhiteText(msg.Text, true)))
+		inner := container.NewStack(bg, container.NewPadded(buildJarvisBody(msg.Text)))
 		bubble := newTappableBubble(inner, msg.Text, leftClickFn, rightClickFn)
 		avatar := newJAvatarSmall()
 		gap := container.NewGridWrap(fyne.NewSize(8, 1), canvas.NewRectangle(colorTransparent))

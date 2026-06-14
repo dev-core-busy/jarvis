@@ -35,7 +35,7 @@ from backend.config import config
 from backend.security import get_certificate_path
 
 # ─── App erstellen ────────────────────────────────────────────────────
-JARVIS_VERSION = "0.8.0"
+JARVIS_VERSION = "0.9.0"
 app = FastAPI(title="Jarvis", version=JARVIS_VERSION)
 
 # ─── CORS: Nur Same-Origin und explizit konfigurierte Domains erlauben ──
@@ -246,9 +246,15 @@ def _unlock_desktop_screen(target_user: str = "jarvis") -> None:
                 env=dbus_env, capture_output=True, timeout=3,
             )
 
-        # ── 5. DPMS aufwecken ──────────────────────────────────────────────────
+        # ── 5. DPMS aufwecken UND Blanking dauerhaft deaktivieren ──────────────
+        #    "force on" weckt nur einmalig; bei ferngesteuertem Desktop zusaetzlich
+        #    Screensaver/DPMS komplett abschalten, damit nichts wieder blankt
+        #    (verhindert auch das DPMS-bedingte "Redscreen" bei VNC-Fullscreen).
         subprocess.run(["xset", "-display", ":0", "dpms", "force", "on"], env=_xenv, capture_output=True, timeout=5)
         subprocess.run(["xset", "-display", ":0", "s", "reset"],          env=_xenv, capture_output=True, timeout=5)
+        subprocess.run(["xset", "-display", ":0", "s", "off"],            env=_xenv, capture_output=True, timeout=5)
+        subprocess.run(["xset", "-display", ":0", "s", "noblank"],        env=_xenv, capture_output=True, timeout=5)
+        subprocess.run(["xset", "-display", ":0", "-dpms"],               env=_xenv, capture_output=True, timeout=5)
 
         # ── 6. Greeter-Fall: kein aktiver User auf :0 → jarvis einloggen ──────
         # Pruefen ob Greeter laeuft (kein normaler User auf :0)

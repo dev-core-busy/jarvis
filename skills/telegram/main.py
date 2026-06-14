@@ -124,6 +124,7 @@ class TelegramBotManager:
 
         # Agent-Task ausführen
         result = "Fehler: AgentManager nicht verfügbar"
+        images = []
         if self._agent_manager:
             try:
                 main_loop = None
@@ -138,21 +139,42 @@ class TelegramBotManager:
                     future = asyncio.run_coroutine_threadsafe(
                         self._run_agent(text), main_loop
                     )
-                    result = future.result(timeout=120)
+                    result, images = future.result(timeout=120)
                 else:
-                    result = await self._run_agent(text)
+                    result, images = await self._run_agent(text)
             except Exception as e:
                 result = f"Fehler: {e}"
 
-        # Antwort senden (max. 4096 Zeichen)
-        if result and len(result) > 4000:
-            result = result[:4000] + "…"
-        await update.message.reply_text(result or "✅ Erledigt.")
+        # Erzeugte/gesuchte Bilder als Fotos senden (erstes traegt den Text als Caption)
+        try:
+            from backend.tools.image_gen import strip_image_refs
+            text_out = strip_image_refs(result) if images else (result or "")
+        except Exception:
+            text_out = result or ""
+        caption_sent = False
+        for img in images:
+            try:
+                cap = text_out[:1000] if (not caption_sent and text_out) else None
+                with open(img["path"], "rb") as fh:
+                    await update.message.reply_photo(photo=fh, caption=cap)
+                caption_sent = caption_sent or bool(cap)
+            except Exception as e:
+                print(f"[Telegram] Bild-Senden fehlgeschlagen: {e}", flush=True)
 
-    async def _run_agent(self, task_text: str) -> str:
-        """Führt einen Agent-Task headless aus."""
+        # Text senden, falls kein Bild ihn als Caption getragen hat
+        if text_out and not caption_sent:
+            if len(text_out) > 4000:
+                text_out = text_out[:4000] + "…"
+            await update.message.reply_text(text_out)
+        elif not images and not text_out:
+            await update.message.reply_text("✅ Erledigt.")
+
+    async def _run_agent(self, task_text: str):
+        """Führt einen Agent-Task headless aus. Gibt (Text, Bilder-Liste) zurück."""
         agent = self._agent_manager.get_or_create_main()
-        return await agent.run_task_headless(task_text)
+        result = await agent.run_task_headless(task_text)
+        images = list(getattr(agent, "last_task_images", []) or [])
+        return result, images
 
     async def send_message(self, chat_id: int, text: str) -> bool:
         """Sendet eine Nachricht an einen Chat."""

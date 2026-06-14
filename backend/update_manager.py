@@ -80,14 +80,30 @@ def check_update() -> dict:
     }
 
 
+def _stash_count() -> int:
+    """Anzahl der vorhandenen Stash-Einträge (locale-unabhängig)."""
+    rc, out, _ = _git("stash", "list")
+    if rc != 0 or not out:
+        return 0
+    return len(out.splitlines())
+
+
 def apply_update() -> dict:
     """Führt git pull aus. Lokal geänderte Dateien werden per stash/pop bewahrt."""
-    # 1. Lokale Änderungen stashen – verhindert Merge-Konflikte bei data/-Dateien
-    stash_rc, stash_out, _ = _git("stash", "push", "-m", "jarvis-auto-pre-update")
-    stashed = stash_rc == 0 and "No local changes to save" not in stash_out
+    # Aktuellen Branch ermitteln (für gezieltes Pull ohne Upstream-Tracking)
+    _, branch, _ = _git("rev-parse", "--abbrev-ref", "HEAD")
+    branch = branch or "master"
 
-    # 2. Pull
-    rc, out, err = _git("pull", "origin", timeout=60)
+    # 1. Lokale Änderungen stashen – verhindert Merge-Konflikte bei data/-Dateien
+    #    Locale-unabhängig: Stash-Anzahl vor/nach push vergleichen statt den
+    #    lokalisierten Git-Text ("No local changes to save" / "Keine lokalen
+    #    Änderungen zum Speichern") zu parsen.
+    count_before = _stash_count()
+    _git("stash", "push", "-m", "jarvis-auto-pre-update")
+    stashed = _stash_count() > count_before
+
+    # 2. Pull (mit explizitem Branch – funktioniert auch ohne Upstream-Tracking)
+    rc, out, err = _git("pull", "origin", branch, timeout=60)
     if rc != 0:
         # Pull fehlgeschlagen → Stash sofort zurückspielen
         if stashed:

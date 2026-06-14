@@ -197,6 +197,35 @@ app.post('/send', async (req, res) => {
     }
 });
 
+// Bild/Medium senden (fuer von Jarvis generierte/gesuchte Bilder)
+app.post('/send-media', async (req, res) => {
+    const { to, media_path, caption } = req.body;
+
+    if (!sock || connectionState !== 'connected') {
+        return res.status(503).json({ error: 'WhatsApp nicht verbunden' });
+    }
+    if (!to || !media_path) {
+        return res.status(400).json({ error: 'to und media_path sind Pflichtfelder' });
+    }
+
+    try {
+        const fs = require('fs');
+        if (!fs.existsSync(media_path)) {
+            return res.status(404).json({ error: 'Datei nicht gefunden' });
+        }
+        const jid = to.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+        const buffer = fs.readFileSync(media_path);
+        const result = await sock.sendMessage(jid, { image: buffer, caption: caption || '' });
+        if (result?.key?.id) {
+            sentByBridge.add(result.key.id);
+            setTimeout(() => sentByBridge.delete(result.key.id), 60000);
+        }
+        res.json({ success: true, to: jid });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Logout / Verbindung trennen
 app.post('/logout', async (req, res) => {
     try {

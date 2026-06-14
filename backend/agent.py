@@ -953,6 +953,11 @@ KRITISCH – Autonomie-Regeln:
         self._stop_flag = False
         self._pause_event.set()
 
+        # Pro-Task Bild-Erfassung (Kanaele ohne Markdown senden das Bild als Medium)
+        from backend.tools.image_gen import current_task_images
+        self.last_task_images = []
+        _img_token = current_task_images.set([])
+
         # Provider neu initialisieren
         self.provider = get_provider(
             config.LLM_PROVIDER,
@@ -1160,6 +1165,11 @@ KRITISCH – Autonomie-Regeln:
             collected_texts.append(f"Fehler: {str(e)}")
         finally:
             self.state = AgentState.IDLE
+            try:
+                self.last_task_images = list(current_task_images.get() or [])
+                current_task_images.reset(_img_token)
+            except Exception:
+                pass
 
         return "\n".join(collected_texts) if collected_texts else "Aufgabe ausgefuehrt (keine Textausgabe)."
 

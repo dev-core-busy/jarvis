@@ -42,6 +42,23 @@
         return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
+    /* Wird vom onload eines Chat-Bildes aufgerufen: scrollt den scrollbaren
+       Vorfahren ans Ende, damit das frisch geladene Bild vollstaendig sichtbar ist.
+       Funktioniert in allen Web-Chats (eigener Scroll-Container je Chat). */
+    window.__jarvisImgScroll = function (el) {
+        try {
+            let p = el && el.parentElement;
+            while (p) {
+                const oy = getComputedStyle(p).overflowY;
+                if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight) {
+                    p.scrollTop = p.scrollHeight;
+                    return;
+                }
+                p = p.parentElement;
+            }
+        } catch (_e) { /* ignore */ }
+    };
+
     /* ── Markdown-Renderer ────────────────────────────────────── *
      *  Unterstuetzt: Ueberschriften (#–####), Listen (- / 1.),
      *  Blockquotes (>), Links, Tabellen, **bold**, *italic*,
@@ -70,6 +87,7 @@
                 const safe = /^https?:\/\/|^\/|^data:image\//.test(raw) ? raw : '';
                 if (!safe) return '';
                 return `<img src="${safe}" alt="${alt}" class="chat-img" loading="lazy" `
+                     + `onload="window.__jarvisImgScroll&&window.__jarvisImgScroll(this)" `
                      + `style="max-width:100%;border-radius:10px;margin:6px 0;display:block;">`;
             });
             t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');

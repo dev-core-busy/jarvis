@@ -1726,18 +1726,21 @@ async def download_cert():
 
 @app.get("/api/generated/{name}")
 async def get_generated_image(name: str):
-    """Liefert ein generiertes Bild aus.
+    """Liefert ein generiertes/gesuchtes Bild aus.
 
     Auth via Capability-URL: der Dateiname ist ein nicht erratbarer 32-stelliger
     Hex-UUID. So funktionieren <img>-Tags in allen Frontends ohne Token-Handling.
     """
-    stem = name[:-4] if name.endswith(".png") else ""
-    if not (len(stem) == 32 and all(c in "0123456789abcdef" for c in stem)):
+    _MEDIA = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+              "gif": "image/gif", "webp": "image/webp"}
+    stem, _, ext = name.rpartition(".")
+    ext = ext.lower()
+    if ext not in _MEDIA or not (len(stem) == 32 and all(c in "0123456789abcdef" for c in stem)):
         return JSONResponse({"error": "ungueltiger Name"}, status_code=400)
     p = Path(__file__).parent.parent / "data" / "generated_images" / name
     if not p.exists():
         return JSONResponse({"error": "nicht gefunden"}, status_code=404)
-    return FileResponse(str(p), media_type="image/png",
+    return FileResponse(str(p), media_type=_MEDIA[ext],
                         headers={"Cache-Control": "public, max-age=86400"})
 
 

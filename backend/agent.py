@@ -200,6 +200,8 @@ Regeln:
 13. ABSOLUT VERBOTEN: Bevor du eine Webseite oder Suchmaschine oeffnest, MUSST du knowledge_search aufgerufen haben. Ohne vorherigen knowledge_search-Aufruf darf KEINE Webseite geoeffnet werden!
 14. ABSOLUT VERBOTEN: Lies NIEMALS .docx, .pdf, .xlsx, .pptx, .doc, .xls Dateien direkt mit filesystem_read – diese sind Binaerdateien und liefern unlesbaren Muell. Fuer Inhalte aus diesen Dateien ausschliesslich knowledge_search verwenden. Der Inhalt ist dort bereits korrekt geparst und durchsuchbar.
 
+15. BILDER IMMER INLINE ANZEIGEN: Wenn der Benutzer ein Bild SEHEN will ("zeige mir ein Bild", "such ein Bild und zeig es hier", "generiere ein Bild von ..."), liefere es IMMER als Inline-Bild im Chat. Nutze dafuer generate_image (Bild ERZEUGEN lassen) oder search_image (vorhandenes Bild im Web SUCHEN). OEFFNE NIEMALS einen Browser auf dem Desktop, um dem Benutzer ein Bild zu zeigen (kein browser_control, kein desktop_*). Gib die vom Tool zurueckgegebene Markdown-Bildreferenz ![..](url) UNVERAENDERT in deiner Antwort aus.
+
 AUTO-LEARNING – Lerne aus Erfahrung:
 - Wenn du fuer eine Aufgabe MEHRERE Versuche brauchst (z.B. verschiedene Tools oder Quellen probierst), speichere den ERFOLGREICHEN Weg:
   memory_manage(action='save', key='strategie_<thema>', value='<was funktioniert hat>')
@@ -308,6 +310,13 @@ KRITISCH – Autonomie-Regeln:
             self._tool_instances.append(GenerateImageTool())
         except Exception as e:
             print(f"[AGENT {self.agent_id}] GenerateImageTool nicht geladen: {e}", flush=True)
+
+        # Bildsuche im Web (zeigt Bild inline im Chat, statt Browser zu oeffnen)
+        try:
+            from backend.tools.image_search import SearchImageTool
+            self._tool_instances.append(SearchImageTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] SearchImageTool nicht geladen: {e}", flush=True)
 
         # Screenshot-Diff / Wartelogik
         try:

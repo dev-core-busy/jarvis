@@ -278,6 +278,7 @@ fun ChatScreen(
                             onFeedback = { rating -> viewModel.sendFeedback(msg, rating) },
                             onEdit = { newText -> viewModel.editUserMessage(msg.id, newText) },
                             lang = settings.uiLang,
+                            serverUrl = settings.serverUrl,
                         )
                     }
                 }
@@ -481,6 +482,7 @@ fun MessageBubble(
     onFeedback: (String) -> Unit = {},
     onEdit: (String) -> Unit = {},
     lang: String = "de",
+    serverUrl: String = "",
 ) {
     val isUser = msg.role == MessageRole.USER
     var showEditDialog by remember(msg.id) { mutableStateOf(false) }
@@ -640,16 +642,21 @@ fun MessageBubble(
                         val statsText = msg.segments
                             .filter { it.type == SegmentType.STATS }
                             .joinToString(" ") { it.text }
-                        if (answerText.isNotBlank()) {
+                        // Bild-Referenzen (/api/generated/...) aus dem Text loesen
+                        val (imgUrls, cleanAnswer) = extractGenImages(answerText)
+                        if (cleanAnswer.isNotBlank()) {
                             // Antwort vorhanden → anzeigen, KEINE Punkte
                             Text(
-                                text = answerText,
+                                text = cleanAnswer,
                                 color = Color.White,
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 15.sp,
                                 lineHeight = 22.sp,
                             )
-                        } else if (msg.isStreaming) {
+                        }
+                        // Generierte/gesuchte Bilder inline anzeigen
+                        imgUrls.forEach { p -> GeneratedImage(serverUrl = serverUrl, path = p) }
+                        if (cleanAnswer.isBlank() && imgUrls.isEmpty() && msg.isStreaming) {
                             // Noch keine Antwort → Punkte als Platzhalter
                             Spacer(modifier = Modifier.height(4.dp))
                             StreamingDots()

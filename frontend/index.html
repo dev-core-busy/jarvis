@@ -204,13 +204,21 @@
 
                 <div class="tab-content" id="tab-linux">
                     <div class="code-block">
-                        <pre><code># Copy certificate
-sudo cp jarvis.crt /usr/local/share/ca-certificates/jarvis.crt
+                        <pre><code># jarvis.cer liegt im DER-Format vor -> nach PEM konvertieren
+openssl x509 -inform DER -in jarvis.cer -out jarvis-ca.crt
 
-# Update store
-sudo update-ca-certificates</code></pre>
+# 1) System-CA-Store (fuer curl/wget/git etc.) – .crt-Endung ist Pflicht
+sudo cp jarvis-ca.crt /usr/local/share/ca-certificates/jarvis-ca.crt
+sudo update-ca-certificates
+
+# 2) Chrome/Chromium nutzen einen EIGENEN Store (NSS) – Pflicht fuer Autofill
+sudo apt install -y libnss3-tools   # falls 'certutil' fehlt
+mkdir -p $HOME/.pki/nssdb
+certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
+
+# danach Chrome komplett neu starten</code></pre>
                     </div>
-                    <p class="tab-note" data-i18n="cert.linux.note">Für Chromium/Chrome unter Linux muss oft zusätzlich der Browser-Import (siehe Tab "Browser-Import") durchgeführt werden, da diese eigene Stores nutzen.</p>
+                    <p class="tab-note" data-i18n="cert.linux.note">Wichtig: Chrome/Chromium unter Linux vertrauen NUR dem NSS-Store (Schritt 2) – der System-Store allein reicht fuer das Passwort-Autofill nicht. Firefox: siehe Tab "Browser-Import".</p>
                 </div>
 
                 <div class="tab-content" id="tab-browser">

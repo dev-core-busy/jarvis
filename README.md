@@ -429,9 +429,15 @@ def get_tools(config: dict) -> list:
 |-------|-------------|
 | `browser_control` | CDP + xdotool browser automation |
 | `whatsapp` | Send/receive WhatsApp messages |
+| `telegram` | Telegram bot integration (receive messages, send replies) |
+| `google` | Google Calendar, Drive and Gmail integration |
 | `vision` | Real-time face recognition (USB/IP camera) |
+| `cron` | Schedule recurring/timed tasks (cron jobs) |
 | `cognitive_evolution` | Self-improving agent (analyze → propose → validate → apply) |
+| `claude_bridge` | Delegate tasks to the Claude desktop app (xdotool) |
 | `example_skill` | Template for new skill development |
+
+Beyond skills, the backend also exposes an **MCP client** (`backend/mcp_client.py`) so Jarvis can connect to external Model Context Protocol servers.
 
 ### Installing a Skill
 

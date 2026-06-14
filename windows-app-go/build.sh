@@ -20,7 +20,15 @@ go build -ldflags="-H windowsgui -s -w -X main.AppVersion=$VERSION" -o jarvis.ex
 echo "Fertig: $(ls -lh jarvis.exe)  [Build $VERSION]"
 
 # ── Deploy auf jarvis-ai.info ─────────────────────────────────────────────────
-FTPS_USER='jarvis:FrLz%$w3iby36aZc'
+# FTPS-Zugang NICHT hier hardcoden (oeffentliches Repo!). Quelle (erste gewinnt):
+#   1) Umgebungsvariable JARVIS_FTPS_USER  (Format "user:passwort")
+#   2) gitignore-te Datei  windows-app-go/.ftps_credentials  (setzt JARVIS_FTPS_USER=...)
+CRED_FILE="$(dirname "$0")/.ftps_credentials"
+if [ -z "$JARVIS_FTPS_USER" ] && [ -f "$CRED_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$CRED_FILE"
+fi
+FTPS_USER="${JARVIS_FTPS_USER:?FTPS-Zugang fehlt – JARVIS_FTPS_USER setzen oder windows-app-go/.ftps_credentials anlegen (Format: JARVIS_FTPS_USER='jarvis:PASSWORT')}"
 FTPS_BASE='ftp://jarvis-ai.info/www'
 
 echo "Deploying $VERSION auf jarvis-ai.info..."

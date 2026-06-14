@@ -73,6 +73,30 @@ def _collect_server_ips():
     ips.add("127.0.0.1")
 
     return sorted(ips)
+
+
+def _collect_server_names():
+    """Sammelt DNS-Namen für das SSL-Zertifikat (SAN) – inkl. System-Hostname/FQDN."""
+    names = ["jarvis", "jarvis.local", "localhost"]
+    try:
+        hn = socket.gethostname()
+        if hn:
+            names.append(hn)
+        fqdn = socket.getfqdn()
+        # FQDN nur wenn echter Name (keine IP) und nicht schon enthalten
+        if fqdn and not fqdn.replace(".", "").isdigit():
+            names.append(fqdn)
+    except Exception:
+        pass
+    # Dedup unter Beibehaltung der Reihenfolge
+    seen, out = set(), []
+    for n in names:
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
 CERT_FILE = CERTS_DIR / "server.crt"
 KEY_FILE = CERTS_DIR / "server.key"
 CERT_DER_FILE = CERTS_DIR / "jarvis.cer"  # DER-Format für Windows
@@ -93,6 +117,11 @@ def ensure_certificates():
 
     # IP-Einträge für OpenSSL SAN generieren
     ip_lines = "\n".join(f"IP.{i+1} = {ip}" for i, ip in enumerate(ips))
+
+    # DNS-Namen für SAN (inkl. System-Hostname/FQDN)
+    names = _collect_server_names()
+    print(f"   DNS-Namen im Zertifikat: {', '.join(names)}")
+    dns_lines = "\n".join(f"DNS.{i+1} = {n}" for i, n in enumerate(names))
 
     # OpenSSL Konfigurationsdatei mit allen nötigen Extensions
     ext_file = CERTS_DIR / "openssl.cnf"
@@ -120,9 +149,7 @@ extendedKeyUsage = serverAuth, clientAuth
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = jarvis
-DNS.2 = jarvis.local
-DNS.3 = localhost
+{dns_lines}
 {ip_lines}
 """)
 

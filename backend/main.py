@@ -1780,6 +1780,32 @@ async def get_generated_image(name: str):
                         headers={"Cache-Control": "public, max-age=86400"})
 
 
+@app.get("/api/documents/{name}")
+async def get_document(name: str):
+    """Liefert ein erzeugtes Office-Dokument aus (Office-Skill).
+
+    Auth via Capability-URL: der Name hat das Schema <32-Hex>__<Basis>.<ext>.
+    Der Download traegt den lesbaren Originalnamen (Content-Disposition).
+    """
+    import re
+    _MEDIA = {
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "pdf":  "application/pdf",
+    }
+    m = re.fullmatch(r"([0-9a-f]{32})__([A-Za-z0-9_\-]+)\.(docx|xlsx|pptx|pdf)", name)
+    if not m:
+        return JSONResponse({"error": "ungueltiger Name"}, status_code=400)
+    base, ext = m.group(2), m.group(3)
+    p = Path(__file__).parent.parent / "data" / "documents" / name
+    if not p.exists():
+        return JSONResponse({"error": "nicht gefunden"}, status_code=404)
+    return FileResponse(str(p), media_type=_MEDIA[ext],
+                        filename=f"{base}.{ext}",
+                        headers={"Cache-Control": "private, max-age=3600"})
+
+
 # ─── Geteilte Anzeige-History (Hauptfenster + jarvis/chat teilen denselben Verlauf) ───
 @app.get("/api/chat/shared-history")
 async def chat_history_get(user: str = Depends(require_auth)):

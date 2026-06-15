@@ -1,0 +1,33 @@
+{
+    "name": "Office",
+    "description": "Erstellt und liest Office-Dokumente: Word (.docx), Excel (.xlsx), PowerPoint (.pptx) – programmatisch, headless. Exportiert zusaetzlich nach PDF (via LibreOffice). Dateien liegen im Server-Dateisystem (data/documents/) und sind per Download-URL abrufbar.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["office_create_word", "office_create_excel", "office_create_powerpoint", "office_read", "office_to_pdf"],
+    "category": "automation",
+    "icon": "book",
+    "system": false,
+    "enabled": false,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": ["python-docx", "openpyxl", "python-pptx"],
+    "permissions": ["filesystem"],
+    "help": {
+        "details": "Der Office-Skill erzeugt Dokumente programmatisch (deterministisch, ohne sichtbare GUI): Word ueber python-docx, Excel ueber openpyxl, PowerPoint ueber python-pptx. Der PDF-Export nutzt das auf dem Server installierte LibreOffice (soffice --headless --convert-to pdf) mit eigenem Profil, um Konflikte mit dem Desktop zu vermeiden. Erzeugte Dateien werden unter data/documents/ mit einem nicht erratbaren Capability-Namen gespeichert und ueber /api/documents/{name} zum Download bereitgestellt; der Download traegt den lesbaren Originalnamen.",
+        "tools": [
+            {"name": "office_create_word", "label": "Word erstellen", "desc": "Erzeugt ein .docx aus Text mit einfacher Markdown-Syntax (Ueberschriften, Listen, Absaetze)."},
+            {"name": "office_create_excel", "label": "Excel erstellen", "desc": "Erzeugt ein .xlsx aus Zeilen/Kopfzeile (ein Blatt) oder mehreren Blaettern."},
+            {"name": "office_create_powerpoint", "label": "PowerPoint erstellen", "desc": "Erzeugt ein .pptx aus Titelfolie und Inhaltsfolien mit Bulletpoints."},
+            {"name": "office_read", "label": "Dokument lesen", "desc": "Liest den Textinhalt eines .docx/.xlsx/.pptx aus."},
+            {"name": "office_to_pdf", "label": "PDF-Export", "desc": "Konvertiert ein Office-Dokument nach PDF (LibreOffice)."}
+        ],
+        "use_cases": [
+            "Erstelle ein Word-Dokument 'Projektbericht' mit Ueberschrift und drei Abschnitten",
+            "Erstelle eine Excel-Tabelle 'Umsatz' mit Spalten Monat und Betrag",
+            "Erstelle eine PowerPoint 'Quartalsupdate' mit 4 Folien",
+            "Exportiere data/documents/<datei>.docx nach PDF"
+        ],
+        "notes": "Benoetigt python-docx, openpyxl und python-pptx (auf dem Server vorhanden). PDF-Export benoetigt LibreOffice (soffice). Dateien werden serverseitig unter data/documents/ abgelegt."
+    }
+}

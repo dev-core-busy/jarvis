@@ -205,6 +205,12 @@ Regeln:
     - SUCHEN/ZEIGEN eines vorhandenen Bildes ("bitte ein Bild von ...", "such/finde ein Bild von ...", "zeig mir ein Bild von ...") -> IMMER search_image.
     OEFFNE NIEMALS einen Browser auf dem Desktop, um ein Bild zu zeigen (kein browser_control, kein desktop_*). Gib die vom Tool zurueckgegebene Markdown-Bildreferenz ![..](url) UNVERAENDERT in deiner Antwort aus.
 
+16. OFFICE-DOKUMENTE (Word/Excel/PowerPoint/PDF):
+    - Fuer EINFACHE Dokumente (Text, Tabellen, Bullet-Folien) die office_*-Tools nutzen: office_create_word / office_create_excel / office_create_powerpoint, PDF-Export via office_to_pdf.
+    - Fuer KOMPLEXE Inhalte, die diese Tools nicht abdecken (z.B. Diagramme/Schemata, Formen, individuelles Layout), darfst du python-docx/python-pptx/openpyxl via shell_execute verwenden.
+    - Das System erkennt JEDE erzeugte Office-Datei automatisch (auch in /tmp) und liefert sie dem Nutzer als Download-Chip aus – DU musst dich darum nicht kuemmern.
+    - Praesentiere das Ergebnis NIEMALS als blossen lokalen Pfad ("liegt unter /tmp/..."), sondern als fertige Datei zum Download. Liefert dir ein Tool einen Download-Link ([📥 ...](/api/documents/...)), gib ihn UNVERAENDERT aus.
+
 AUTO-LEARNING – Lerne aus Erfahrung:
 - Wenn du fuer eine Aufgabe MEHRERE Versuche brauchst (z.B. verschiedene Tools oder Quellen probierst), speichere den ERFOLGREICHEN Weg:
   memory_manage(action='save', key='strategie_<thema>', value='<was funktioniert hat>')
@@ -521,6 +527,7 @@ KRITISCH – Autonomie-Regeln:
             task_start_time = _task_start_time
             _total_input_tokens  = 0
             _total_output_tokens = 0
+            _delivered_docs = set()   # bereits als Download-Chip ausgelieferte /api/documents-URLs
 
             # Modus-Hinweis (hilfreich bei langsamen lokalen Modellen)
             mode_hint = " [Prompt-Tool-Modus]" if getattr(self.provider, "prompt_tool_calling", False) else ""
@@ -601,8 +608,14 @@ KRITISCH – Autonomie-Regeln:
                 is_intermediate = bool(function_calls)
                 for text in text_parts:
                     if text.strip():
-                        await self._send_status(ws, text.strip(), highlight=True, intermediate=is_intermediate)
+                        # Dokument-Links/-Pfade aus dem Anzeigetext entfernen – der Download
+                        # kommt ausschliesslich als verifizierter Chip via _deliver_docs.
+                        _display = self._clean_doc_refs(text.strip()).strip()
+                        if _display:
+                            await self._send_status(ws, _display, highlight=True, intermediate=is_intermediate)
                         _conv_messages.append({"role": "assistant", "content": text.strip()})
+                        # In der Antwort genannte Dokumente (auch /tmp-Pfade) als Chip ausliefern
+                        await self._deliver_docs(ws, text, _delivered_docs)
 
                 # Wenn keine Function Calls → fertig; User+Antwort in History eintragen
                 if not function_calls:
@@ -678,8 +691,8 @@ KRITISCH – Autonomie-Regeln:
                         "success": not is_error, "args_preview": json.dumps(tool_args, ensure_ascii=False)[:100]
                     })
 
-                    # Sub-Agent Spawn erkennen
-                    if tool_name == "spawn_agent" and "_spawn_agent" in result_str:
+                    # Sub-Agent Spawn erkennen (spawn_agent, coding_agent, …) – nur Hauptagent
+                    if (not self.is_sub_agent) and "_spawn_agent" in result_str:
                         try:
                             spawn_data = json.loads(result_str)
                             _log(f"spawn_data: label={spawn_data.get('label')} task_len={len(spawn_data.get('task',''))} task_start={spawn_data.get('task','')[:120]}")
@@ -694,6 +707,11 @@ KRITISCH – Autonomie-Regeln:
                     await self._send_status(
                         ws, f"📋 Ergebnis: {result_str[:300]}{'...' if len(result_str) > 300 else ''}"
                     )
+
+                    # Office-Dokumente DIREKT als Download-Chip ausliefern (Seitenkanal,
+                    # erkennt auch per Shell erzeugte Dateien in /tmp etc.).
+                    await self._deliver_docs(ws, result_str, _delivered_docs)
+
                     _conv_messages.append({"role": "tool", "tool": tool_name, "content": result_str})
 
                     function_response_parts.append(
@@ -1387,6 +1405,101 @@ KRITISCH – Autonomie-Regeln:
             await ws.send_json(msg)
         except Exception:
             pass
+
+    def _clean_doc_refs(self, text):
+        """Entfernt Dokument-Links/-Pfade aus dem ANZEIGE-Text des LLM.
+
+        Der Download wird ausschliesslich ueber den verifizierten Backend-Chip
+        (_deliver_docs) ausgeliefert. So entstehen keine konkurrierenden, oft
+        kaputten LLM-Links (z.B. /tmp/x.pptx oder gekuerzte /api/documents-URLs).
+        Markdown-Links auf Dokumente werden auf ihr Label reduziert, nackte
+        Dokumentpfade entfernt.
+        """
+        if not text:
+            return text
+        # Markdown-Link auf Dokument-URL/-Pfad -> nur Label behalten
+        text = re.sub(
+            r"\[([^\]\n]*)\]\((?:/api/documents/[^)\n]+|[^)\n]*\.(?:docx|xlsx|pptx|pdf))\)",
+            r"\1", text)
+        # Nackte lokale Dokumentpfade entfernen – EINE Regex mit optionalem fuehrenden
+        # Slash, damit sowohl /tmp/x.pptx als auch data/documents/x.pptx VOLLSTAENDIG
+        # (inkl. Slash/Prefix) verschwinden und keine Fragmente ('/', 'data') bleiben.
+        text = re.sub(r"/?(?:[\w.\-]+/)+[\w.\-]+\.(?:docx|xlsx|pptx|pdf)", "", text)
+        # Aufraeumen: leere Klammern, haengende 'unter/in/:' vor Satzende, doppelte Spaces
+        text = re.sub(r"\(\s*\)", "", text)
+        text = re.sub(r"\s+([.,;:])", r"\1", text)
+        text = re.sub(r"\b(unter|in|nach|als|hier|datei)\s*([.,;:])", r"\2", text, flags=re.IGNORECASE)
+        text = re.sub(r"[ \t]{2,}", " ", text)
+        return text
+
+    async def _deliver_docs(self, ws, text, delivered):
+        """Liefert erzeugte Office-Dokumente als Download-Chip ans Frontend –
+        UNABHAENGIG davon, ob sie via office_*-Tool oder per Shell-Skript (z.B.
+        python-pptx fuer Diagramme) erzeugt wurden.
+
+        Erkennt in 'text' (Tool-Ergebnis ODER finale Antwort):
+          (a) fertige /api/documents/<cap>-URLs,
+          (b) lokale Pfade zu existierenden .docx/.xlsx/.pptx/.pdf – diese werden
+              nach data/documents/ mit Capability-Namen kopiert.
+        Sendet je Fund EINEN Markdown-Download-Link (highlight) -> Frontend-Chip.
+        Verlaesst sich NICHT auf woertliche URL-Wiedergabe durch das LLM.
+        """
+        if not text or self.is_sub_agent:
+            return
+        import os as _os, uuid as _uuid, shutil as _shutil
+        from pathlib import Path as _Path
+        proj = _Path(__file__).resolve().parent.parent
+        docs_dir = proj / "data" / "documents"
+        _UML = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue",
+                              "Ä": "Ae", "Ö": "Oe", "Ü": "Ue", "ß": "ss"})
+
+        async def _emit(name, url):
+            await self._send_status(ws, f"[📥 {name} herunterladen]({url})", highlight=True)
+
+        # (a) Fertige Capability-URLs (Dedup per physischem Pfad)
+        for m in re.finditer(r"/api/documents/[0-9a-f]{32}__[A-Za-z0-9_\-]+\.(?:docx|xlsx|pptx|pdf)", text):
+            url = m.group(0)
+            cap = docs_dir / url.split("/api/documents/")[1]
+            try:
+                key = str(cap.resolve())
+            except Exception:
+                key = url
+            if key in delivered or not cap.exists():
+                continue
+            delivered.add(key)
+            await _emit(url.rsplit("__", 1)[-1], url)
+
+        # (b) Lokale Dateipfade zu existierenden Dokumenten -> nach data/documents/ ziehen
+        for m in re.finditer(r"(?:/[\w.\-]+)+\.(?:docx|xlsx|pptx|pdf)|data/documents/[\w.\-]+\.(?:docx|xlsx|pptx|pdf)", text):
+            raw = m.group(0)
+            p = _Path(raw) if raw.startswith("/") else (proj / raw)
+            try:
+                if not p.is_file():
+                    continue
+                key = str(p.resolve())
+            except Exception:
+                continue
+            if key in delivered:
+                continue
+            # Bereits eine Capability-Datei in data/documents? -> via (a) erledigt
+            if p.parent == docs_dir and re.fullmatch(r"[0-9a-f]{32}__.+", p.name):
+                delivered.add(key)
+                continue
+            delivered.add(key)
+            ext = p.suffix.lower().lstrip(".")
+            base = _os.path.splitext(_os.path.basename(raw))[0].translate(_UML)
+            base = re.sub(r"[^A-Za-z0-9_\- ]+", "", base).strip().replace(" ", "_") or "dokument"
+            token = _uuid.uuid4().hex
+            fname = f"{token}__{base}.{ext}"
+            try:
+                docs_dir.mkdir(parents=True, exist_ok=True)
+                # VERSCHIEBEN (nicht kopieren): Original (z.B. /tmp/x.pptx oder Roh-Name
+                # in data/documents) wird zur Capability-Datei -> es bleibt nur EINE Datei.
+                _shutil.move(str(p), str(docs_dir / fname))
+            except Exception as e:
+                _log(f"Doc-Ingest fehlgeschlagen fuer {raw}: {e}")
+                continue
+            await _emit(f"{base}.{ext}", f"/api/documents/{fname}")
 
     async def _send_llm_stats(self, ws, duration_ms: int, input_tokens: int, output_tokens: int, steps: int):
         """Sendet LLM-Statistiken (Dauer + Token-Verbrauch) an alle Clients."""

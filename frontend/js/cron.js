@@ -129,6 +129,7 @@ window.cronManager = new (class JarvisCronManager {
                                 <select id="watcher-trigger-type" class="kb-input">
                                     <option value="file">Datei-Ereignis</option>
                                     <option value="llm_down">LLM nicht erreichbar</option>
+                                    <option value="issue_created">Neuer Issue-Eintrag</option>
                                 </select>
                             </div>
                         </div>
@@ -166,7 +167,7 @@ window.cronManager = new (class JarvisCronManager {
                                 <option value="email">E-Mail senden</option>
                                 <option value="webhook">Webhook (HTTP POST)</option>
                             </select>
-                            <p class="kb-hint" style="margin-top:4px;">Platzhalter: <code>{filename}</code> <code>{filepath}</code> <code>{event}</code></p>
+                            <p class="kb-hint" style="margin-top:4px;">Platzhalter: <code>{filename}</code> <code>{filepath}</code> <code>{event}</code> · Issue: <code>{issue_title}</code> <code>{issue_author}</code> <code>{issue_type}</code></p>
                         </div>
 
                         <!-- Aktion: Jarvis-Aufgabe -->
@@ -504,7 +505,7 @@ window.cronManager = new (class JarvisCronManager {
             const dotCls    = w.enabled ? 'active' : 'inactive';
             const trig      = w.trigger_type || 'file';
             const act       = w.action_type || 'agent_task';
-            const trigLabel = trig === 'llm_down' ? '⚡ LLM nicht erreichbar' : '📂 Datei';
+            const trigLabel = trig === 'llm_down' ? '⚡ LLM nicht erreichbar' : (trig === 'issue_created' ? '🐞 Neuer Issue' : '📂 Datei');
             const actLabel  = act === 'whatsapp' ? '📱 WhatsApp' : (act === 'webhook' ? '🔗 Webhook' : (act === 'email' ? '✉️ E-Mail' : '🤖 Jarvis-Aufgabe'));
             const evBadges  = (trig === 'file') ? (w.events || []).map(ev => `<span class="cron-event-badge">${ev}</span>`).join('') : '';
             const trigDetail = (trig === 'file')

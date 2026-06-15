@@ -1,0 +1,32 @@
+{
+    "name": "Coding Agent",
+    "description": "Startet autonome Coding-Agenten nach dem Staff-Engineer-Workflow (verhalte_dich_wie_claude.md). Plant, implementiert und verifiziert Entwicklungsaufgaben eigenstaendig; mehrere Coding-Agenten laufen parallel.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["coding_agent"],
+    "category": "entwicklung",
+    "icon": "code",
+    "system": false,
+    "enabled": false,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "Der Coding-Agent-Skill startet fuer eine Entwicklungsaufgabe einen autonomen Sub-Agenten, der strikt dem Staff-Engineer-Workflow aus verhalte_dich_wie_claude.md folgt: Planungs-Phase, Subagenten-Strategie, autonome Fehlerbehebung (Root-Cause statt Hack), Reflexion (Advocatus Diaboli) und Verifizierung. Der Agent fuehrt Code/Tests direkt aus und meldet am Ende Ergebnis und geaenderte Dateien. Mehrere coding_agent-Aufrufe laufen als eigene Agenten parallel.",
+        "tools": [
+            {
+                "name": "coding_agent",
+                "label": "Coding-Agent",
+                "desc": "Startet einen autonomen Coding-Agenten fuer eine Entwicklungsaufgabe (Code schreiben/aendern, Bug fixen, refactoren)."
+            }
+        ],
+        "use_cases": [
+            "Implementiere Feature X im Backend und schreibe einen kurzen Test dazu",
+            "Finde und behebe den Bug in Modul Y (Root-Cause, kein Workaround)",
+            "Refactore Datei Z und verifiziere, dass nichts kaputt geht"
+        ],
+        "notes": "Der gestartete Coding-Agent arbeitet vollstaendig autonom (kein Rueckfragen). Fuer triviale Einzeiler ist ein normaler Tool-Aufruf schneller; der Coding-Agent lohnt sich bei mehrstufigen Aufgaben (3+ Schritte)."
+    }
+}

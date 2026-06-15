@@ -80,6 +80,9 @@
         // 3) Inline-Code
         s = s.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
 
+        // Download-Icon (Office-Chip)
+        const _DL_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
+
         function _inline(t) {
             // Bilder ![alt](url) – VOR Links/Formatierung, sonst greift die Link-Regex
             t = t.replace(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g, (_, alt, url) => {
@@ -90,6 +93,23 @@
                      + `onload="window.__jarvisImgScroll&&window.__jarvisImgScroll(this)" `
                      + `style="max-width:100%;border-radius:10px;margin:6px 0;display:block;">`;
             });
+
+            // WICHTIG: Office-Download-Chips ZUERST als Platzhalter extrahieren, BEVOR
+            // **/_/* -Formatierung laeuft. Capability-URLs enthalten '__' – die Kursiv-
+            // Regex /_(..)_/ wuerde die URL sonst mit <em> zerstoeren -> kaputter Link.
+            const _chips = [];
+            const _chip = (label, url) => {
+                const safe = (label || 'Datei').replace(/^[📥\s]+/, '').trim() || 'Datei';
+                _chips.push(`<a href="${url}" download class="chat-doc-dl">${_DL_SVG}<span>${safe}</span></a>`);
+                return `\x02DLCHIP${_chips.length - 1}\x02`;
+            };
+            // Markdown-Form [label](/api/documents/..)
+            t = t.replace(/\[([^\]\n]*)\]\((\/api\/documents\/[A-Za-z0-9_\-]+\.(?:docx|xlsx|pptx|pdf))\)/g,
+                (_, tit, url) => _chip(tit, url));
+            // Nackte URL /api/documents/..
+            t = t.replace(/(^|[\s(])(\/api\/documents\/[A-Za-z0-9_\-]+\.(?:docx|xlsx|pptx|pdf))/g,
+                (_, pre, url) => pre + _chip('Download', url));
+
             t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
             t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
             t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
@@ -100,6 +120,9 @@
                 const safe = /^https?:\/\/|^\//.test(raw) ? raw : '#';
                 return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${tit}</a>`;
             });
+
+            // Chips am Ende wiederherstellen (nach jeder Formatierung)
+            t = t.replace(/\x02DLCHIP(\d+)\x02/g, (_, i) => _chips[+i]);
             return t;
         }
 

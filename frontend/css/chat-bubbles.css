@@ -247,3 +247,26 @@
     margin-left: 6px;
     font-style: italic;
 }
+
+/* Office-Dokument Download-Chip (Word/Excel/PowerPoint/PDF) */
+.chat-doc-dl {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+    padding: 8px 14px;
+    border-radius: 10px;
+    background: rgba(124, 58, 237, 0.14);
+    border: 1px solid rgba(124, 58, 237, 0.45);
+    color: var(--text-primary, #fff);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9em;
+    transition: background .15s, border-color .15s, transform .1s;
+}
+.chat-doc-dl:hover {
+    background: rgba(124, 58, 237, 0.28);
+    border-color: rgba(124, 58, 237, 0.7);
+}
+.chat-doc-dl:active { transform: scale(0.98); }
+.chat-doc-dl svg { flex-shrink: 0; opacity: .9; }

@@ -103,10 +103,26 @@ CERT_DER_FILE = CERTS_DIR / "jarvis.cer"  # DER-Format für Windows
 
 
 def ensure_certificates():
-    """Generiert selbstsignierte Zertifikate, falls nicht vorhanden."""
+    """Generiert selbstsignierte Zertifikate, falls nicht vorhanden.
+
+    Idempotent: ein BESTEHENDES TLS-Cert (server.crt + server.key) wird NIEMALS neu
+    erzeugt – sonst bricht bei jedem Start/Update das im Browser hinterlegte Vertrauen.
+    Fehlt nur die DER-Datei (jarvis.cer), wird sie aus dem vorhandenen Cert abgeleitet.
+    Voll neu generiert wird nur, wenn server.crt ODER server.key fehlt.
+    """
     CERTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    if CERT_FILE.exists() and KEY_FILE.exists() and CERT_DER_FILE.exists():
+    # Bestehendes Cert beibehalten – nur fehlende DER nachziehen.
+    if CERT_FILE.exists() and KEY_FILE.exists():
+        if not CERT_DER_FILE.exists():
+            try:
+                subprocess.run([
+                    "openssl", "x509", "-in", str(CERT_FILE),
+                    "-outform", "DER", "-out", str(CERT_DER_FILE),
+                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print("🔒 DER-Zertifikat aus bestehendem Cert abgeleitet (Cert/Trust unveraendert).")
+            except Exception as e:
+                print(f"⚠️  DER-Ableitung fehlgeschlagen: {e}")
         return
 
     print("🔒 Generiere SSL-Zertifikate (Windows 11 kompatibel)...")

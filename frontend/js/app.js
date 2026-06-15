@@ -211,22 +211,47 @@
         if (!connectionDot) return;
         try {
             const res = await fetch('/api/llm/active-status', { headers: { 'Authorization': 'Bearer ' + token } });
-            if (!res.ok) { connectionDot.classList.remove('connected'); connectionDot.title = 'LLM-Status nicht abrufbar'; return; }
+            const H = ' · Doppelklick: LLM-Profile';
+            if (!res.ok) { connectionDot.classList.remove('connected'); connectionDot.title = 'LLM-Status nicht abrufbar' + H; return; }
             const d = await res.json();
             const reachable = (d.status === 'ok' || d.status === 'degraded');
             connectionDot.classList.toggle('connected', reachable);
             const name = d.profile_name ? ' – ' + d.profile_name : '';
-            if (d.status === 'ok')            connectionDot.title = 'LLM erreichbar' + name;
-            else if (d.status === 'degraded') connectionDot.title = 'LLM erreichbar (Modell fehlt)' + name;
-            else                              connectionDot.title = 'LLM nicht erreichbar' + name;
+            if (d.status === 'ok')            connectionDot.title = 'LLM erreichbar' + name + H;
+            else if (d.status === 'degraded') connectionDot.title = 'LLM erreichbar (Modell fehlt)' + name + H;
+            else                              connectionDot.title = 'LLM nicht erreichbar' + name + H;
         } catch (e) {
             connectionDot.classList.remove('connected');
-            connectionDot.title = 'LLM nicht erreichbar';
+            connectionDot.title = 'LLM nicht erreichbar · Doppelklick: LLM-Profile';
         }
     }
     function _startLlmStatusIndicator() {
         _checkLlmStatus();
         if (!_llmStatusTimer) _llmStatusTimer = setInterval(_checkLlmStatus, 30000);
+        // Doppelklick auf die Pill -> Einstellungen oeffnen + LLM-Profile-Tab aktivieren
+        if (connectionDot && !connectionDot._dblBound) {
+            connectionDot._dblBound = true;
+            connectionDot.style.cursor = 'pointer';
+            connectionDot.addEventListener('dblclick', () => {
+                // openModal (btn-settings) oeffnet bereits den LLM-Profile-Tab UND
+                // rendert die Profile (await loadProfiles). Ein zusaetzlicher Tab-Klick
+                // wuerde waehrend des Ladens dazwischenfunken und die Liste leeren.
+                const openBtn = document.getElementById('btn-settings');
+                if (openBtn) openBtn.click();
+                // Zusaetzlich den eingeklappten "LLM Profile"-Listenabschnitt aufklappen,
+                // damit die Profile direkt sichtbar sind (zweifach wg. async loadProfiles).
+                const _expandProfileList = () => {
+                    const body = document.getElementById('prof-sect-list-body');
+                    const hdr  = document.getElementById('prof-sect-list-hdr');
+                    const tog  = document.getElementById('prof-sect-list-tog');
+                    if (body) body.style.display = '';
+                    if (hdr)  hdr.classList.remove('is-collapsed');
+                    if (tog)  tog.textContent = '▼';
+                };
+                _expandProfileList();
+                setTimeout(_expandProfileList, 250);
+            });
+        }
     }
     // Nach Profilwechsel sofort neu pruefen
     window._refreshLlmStatusPill = _checkLlmStatus;

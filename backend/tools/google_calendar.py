@@ -14,6 +14,7 @@ Aktionen:
 
 from datetime import datetime, timezone, timedelta
 
+import asyncio
 from backend.tools.base import BaseTool
 
 
@@ -39,7 +40,34 @@ class GoogleCalendarTool(BaseTool):
         "find_free_time, list_calendars."
     )
 
-    def execute(self, action: str, **kwargs) -> str:
+    def parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list_events", "get_event", "create_event", "update_event",
+                             "delete_event", "find_free_time", "list_calendars"],
+                    "description": "Kalender-Aktion",
+                },
+                "calendar_id": {"type": "string", "description": "Kalender-ID (Default: primary)"},
+                "event_id": {"type": "string", "description": "Termin-ID"},
+                "title": {"type": "string", "description": "Titel (create_event)"},
+                "start": {"type": "string", "description": "Start ISO, z.B. 2025-03-15T10:00:00"},
+                "end": {"type": "string", "description": "Ende ISO"},
+                "description": {"type": "string", "description": "Beschreibung"},
+                "location": {"type": "string", "description": "Ort"},
+                "attendees": {"type": "array", "items": {"type": "string"}, "description": "Teilnehmer-E-Mails"},
+                "max_results": {"type": "integer", "description": "Anzahl Ergebnisse (list_events)"},
+                "days_ahead": {"type": "integer", "description": "Tage voraus (list_events)"},
+            },
+            "required": ["action"],
+        }
+
+    async def execute(self, action: str = "", **kwargs) -> str:
+        return await asyncio.to_thread(self._execute_sync, action, kwargs)
+
+    def _execute_sync(self, action: str, kwargs: dict) -> str:
         try:
             svc = _get_service()
         except RuntimeError as e:

@@ -732,6 +732,7 @@
                 }
             }
             _saveHistory();
+            _syncReplace();
         }
     }
 
@@ -778,6 +779,7 @@
                     return true;
                 });
                 _saveHistory();
+                _syncReplace();
             }
 
             checked.forEach(row => { if (row.parentNode) row.parentNode.removeChild(row); });
@@ -849,6 +851,7 @@
             );
         }
         _saveHistory();
+        _syncReplace();
 
         // Bubble visuell zurücksetzen mit neuem Text
         bubble.classList.remove('editing');
@@ -1231,6 +1234,12 @@
     function _syncAppend(msg) {
         if (window.JarvisChatLib && window.JarvisChatLib.sharedAppend && token) {
             window.JarvisChatLib.sharedAppend(token, msg);
+        }
+    }
+    // Komplette Liste ins Backend schreiben (fuer Editieren/Loeschen)
+    function _syncReplace() {
+        if (window.JarvisChatLib && window.JarvisChatLib.sharedReplace && token) {
+            window.JarvisChatLib.sharedReplace(token, _chatHistory);
         }
     }
     async function _restoreHistory() {

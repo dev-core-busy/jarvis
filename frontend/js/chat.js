@@ -218,7 +218,10 @@
             });
             const data = await resp.json();
 
-            if (data.success && data.token) {
+            if (data.success && data.token && data.must_change_password) {
+                // Lokaler Erst-Login: Kennwortaenderung ist nur im Hauptfenster moeglich.
+                loginError.textContent = 'Bitte zuerst im Hauptfenster (Startseite) das Kennwort aendern, dann hier anmelden.';
+            } else if (data.success && data.token) {
                 token = data.token;
                 localStorage.setItem('jarvis_chat_token', token);
                 _currentUser = data.username || loginUser.value.trim();

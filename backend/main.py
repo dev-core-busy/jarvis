@@ -111,8 +111,12 @@ async def vnc_websocket_proxy(websocket: WebSocket):
     """
     # Auth: Token als Query-Parameter prüfen (WebSocket kann keine Header setzen)
     token = websocket.query_params.get("token", "")
-    if not verify_token(token):
+    _vnc_user = verify_token(token)
+    if not _vnc_user:
         await websocket.close(code=4001, reason="Nicht authentifiziert")
+        return
+    if _user_must_change(_vnc_user):
+        await websocket.close(code=4003, reason="Kennwort muss zuerst geaendert werden")
         return
 
     # Subprotocol nur setzen wenn Client es anbietet (noVNC kann "binary" senden oder nicht)
@@ -434,7 +438,21 @@ def verify_token(token: str) -> str | None:
 
 
 async def require_auth(request: Request) -> str:
-    """FastAPI Dependency: Prueft Bearer-Token und gibt Username zurueck."""
+    """FastAPI Dependency: Prueft Bearer-Token und gibt Username zurueck.
+    Sperrt zusaetzlich den lokalen jarvis-User, solange das Erst-Kennwort nicht
+    geaendert wurde (serverseitig erzwungen, NICHT per F5/API umgehbar)."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = verify_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Nicht authentifiziert")
+    if _user_must_change(username):
+        raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
+    return username
+
+
+async def require_auth_pwchange(request: Request) -> str:
+    """Wie require_auth, aber OHNE die must_change-Sperre – nur fuer den
+    Kennwort-Aendern-Endpoint (sonst Deadlock)."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     username = verify_token(token)
     if not username:
@@ -450,6 +468,8 @@ async def require_local_auth(request: Request) -> str:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
     if username not in ALLOWED_USERS:
         raise HTTPException(status_code=403, detail="Nur lokale Administratoren dürfen diese Aktion ausführen.")
+    if _user_must_change(username):
+        raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
     return username
 
 
@@ -504,6 +524,8 @@ async def require_auth_or_query(request: Request) -> str:
         username = verify_token(token)
     if not username:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
+    if _user_must_change(username):
+        raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
     return username
 
 
@@ -741,6 +763,14 @@ def _set_user_auth_state(username: str, updates: dict):
     state["users"][username].update(updates)
     _save_auth_state(state)
 
+def _user_must_change(username: str) -> bool:
+    """True, wenn der LOKALE jarvis-Benutzer bei der ersten Anmeldung das Kennwort
+    noch aendern muss. Domaenen-/AD-Benutzer: IMMER False (wird NIE erzwungen).
+    Dient als serverseitige Sperre – nicht per F5/API umgehbar."""
+    if username not in ALLOWED_USERS:
+        return False
+    return bool(_get_user_auth_state(username).get("must_change_password", True))
+
 def _validate_password_strength(password: str, username: str) -> list[str]:
     """Prüft Kennwort-Stärke (mittlere Sicherheit). Gibt Fehlerliste zurück."""
     import re
@@ -935,6 +965,10 @@ async def userchat_ws(ws: WebSocket):
         username = verify_token(token_str)
         if not username:
             await ws.send_json({"type": "error", "message": "Nicht autorisiert"})
+            await ws.close()
+            return
+        if _user_must_change(username):
+            await ws.send_json({"type": "error", "message": "Kennwort muss zuerst geaendert werden."})
             await ws.close()
             return
 
@@ -1193,7 +1227,9 @@ async def login(request: Request):
         )
 
     user_state = _get_user_auth_state(username)
-    must_change = user_state.get("must_change_password", True)
+    # Nur der lokale jarvis-Benutzer muss bei der ersten Anmeldung aendern;
+    # Domaenen-/AD-Benutzer NIEMALS.
+    must_change = _user_must_change(username)
 
     # 2FA aktiviert? → TOTP-Code prüfen
     if user_state.get("totp_enabled") and user_state.get("totp_secret"):
@@ -1304,7 +1340,7 @@ async def totp_disable(request: Request, username: str = Depends(require_auth)):
 
 
 @app.post("/api/change-password")
-async def change_password(request: Request, username: str = Depends(require_auth)):
+async def change_password(request: Request, username: str = Depends(require_auth_pwchange)):
     """Kennwort ändern – benötigt altes Kennwort zur Verifikation."""
     body = await request.json()
     old_password = body.get("old_password", "")
@@ -2464,7 +2500,8 @@ async def verify_token_endpoint(request: Request):
             remaining = 86400 - (time.time() - int(ts))
         except Exception:
             remaining = 0
-        return JSONResponse({"valid": True, "username": username, "remaining_seconds": int(remaining)})
+        return JSONResponse({"valid": True, "username": username, "remaining_seconds": int(remaining),
+                             "must_change_password": _user_must_change(username)})
     return JSONResponse({"valid": False}, status_code=401)
 
 
@@ -4586,6 +4623,10 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Username pro WS-Verbindung merken
         if token_username:
             _ws_usernames[id(ws)] = token_username
+            # Serverseitige Sperre: lokaler jarvis-User muss erst das Kennwort aendern
+            if _user_must_change(token_username):
+                await ws.send_json({"type": "error", "message": "Kennwort muss zuerst geaendert werden."})
+                return
 
     if msg_type == "task":
         # Neue Aufgabe starten

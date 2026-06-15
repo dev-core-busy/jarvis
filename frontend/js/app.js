@@ -3204,14 +3204,20 @@
         }).then(r => r.json()).then(data => {
             if (data.valid) {
                 currentUser = data.username || currentUser;
-                showMainScreen();
-                // Token-Expiry Warnung einrichten
-                if (data.remaining_seconds && data.remaining_seconds < 3600) {
-                    _showTokenExpiryWarning(data.remaining_seconds);
-                } else if (data.remaining_seconds) {
-                    // Timer fuer Warnung 1h vor Ablauf
-                    const warnIn = (data.remaining_seconds - 3600) * 1000;
-                    if (warnIn > 0) setTimeout(() => _showTokenExpiryWarning(3600), warnIn);
+                if (data.must_change_password) {
+                    // Erst-Kennwort noch nicht geaendert -> Maske erzwingen.
+                    // Auch nach F5/Reload (serverseitig zusaetzlich gesperrt).
+                    showChangePwModal(true);
+                } else {
+                    showMainScreen();
+                    // Token-Expiry Warnung einrichten
+                    if (data.remaining_seconds && data.remaining_seconds < 3600) {
+                        _showTokenExpiryWarning(data.remaining_seconds);
+                    } else if (data.remaining_seconds) {
+                        // Timer fuer Warnung 1h vor Ablauf
+                        const warnIn = (data.remaining_seconds - 3600) * 1000;
+                        if (warnIn > 0) setTimeout(() => _showTokenExpiryWarning(3600), warnIn);
+                    }
                 }
             } else {
                 showLoginScreen();

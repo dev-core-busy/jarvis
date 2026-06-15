@@ -205,7 +205,11 @@ class WatcherManager:
         action = watcher.get("action_type", "agent_task")
 
         def _fill(s: str) -> str:
-            return (s or "").replace("{filepath}", filepath).replace("{filename}", filename).replace("{event}", event_type)
+            out = s or ""
+            for k, v in context.items():
+                if not k.startswith("_"):
+                    out = out.replace("{" + k + "}", str(v))
+            return out.replace("{event}", str(event_type))
 
         print(f"[TriggerWatcher] Event '{event_type}' → '{label}' (Aktion: {action})", flush=True)
 
@@ -315,6 +319,23 @@ class WatcherManager:
                 break
             except Exception as e:
                 print(f"[TriggerWatcher] LLM-Poll Fehler: {e}", flush=True)
+
+    # ─── Issue-Trigger ───────────────────────────────────────────────────────
+    def on_issue_created(self, issue: dict):
+        """Wird beim Erstellen eines Issues aufgerufen -> issue_created-Trigger feuern."""
+        if not (_loop and _loop.is_running()):
+            return
+        ctx = {
+            "event_type": "issue_created",
+            "issue_title": issue.get("title", ""),
+            "issue_author": issue.get("author", ""),
+            "issue_type": issue.get("type", ""),
+            "issue_id": issue.get("id", ""),
+            "filepath": "", "filename": "",
+        }
+        for w in self._watchers:
+            if w.get("enabled") and w.get("trigger_type") == "issue_created":
+                asyncio.run_coroutine_threadsafe(self._execute(w["id"], dict(ctx)), _loop)
 
     def _load(self):
         if WATCHERS_FILE.exists():

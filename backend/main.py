@@ -5151,6 +5151,11 @@ async def api_issues_create(request: Request, user: str = Depends(require_auth))
     issue, err = _issues_mod.create_issue(user, data or {})
     if not issue:
         raise HTTPException(400, err)
+    # Trigger-Watcher benachrichtigen (Trigger-Typ "issue_created")
+    try:
+        watcher_manager.on_issue_created(issue)
+    except Exception as _e:
+        print(f"[issues] Trigger-Notify Fehler: {_e}", flush=True)
     return JSONResponse({"ok": True, "issue": issue})
 
 

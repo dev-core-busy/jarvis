@@ -493,8 +493,9 @@
 
         // Benutzernachricht im Verlauf speichern (nur Text + Hinweis, kein base64)
         const attNote = _pendingAttachments.length > 0 ? ` [+ ${_pendingAttachments.length} Datei(en)]` : '';
-        _chatHistory.push({ role: 'user', text: finalText + attNote, time: timeStr(), date: _currentDateStr() });
+        _chatHistory.push({ role: 'user', text: finalText + attNote, time: timeStr(), date: _currentDateStr(), ts: Date.now() });
         _saveHistory();
+        _syncAppend(_chatHistory[_chatHistory.length - 1]);
         const msg = { type: 'task', text: finalText, lang: window._lang || 'de' };
         if (_pendingAttachments.length > 0) {
             msg.attachments = _pendingAttachments.map(a => ({ name: a.name, mime_type: a.mime_type, data: a.data }));
@@ -594,8 +595,9 @@
             if (toSpeak) speak(toSpeak);
             // Bot-Antwort im Verlauf speichern
             if (_lastBotResp) {
-                _chatHistory.push({ role: 'bot', text: _lastBotResp, time: timeStr(), date: _currentDateStr(), stats: _lastStats });
+                _chatHistory.push({ role: 'bot', text: _lastBotResp, time: timeStr(), date: _currentDateStr(), stats: _lastStats, ts: Date.now() });
                 _saveHistory();
+                _syncAppend(_chatHistory[_chatHistory.length - 1]);
             }
             // Feedback-Buttons anfügen
             if (_lastBotCol && _lastBotResp) {
@@ -1225,8 +1227,24 @@
         }
     }
 
-    function _restoreHistory() {
-        _chatHistory = _loadHistory();
+    // Neue Nachricht in die geteilte Backend-History anhaengen (additiv, fensteruebergreifend)
+    function _syncAppend(msg) {
+        if (window.JarvisChatLib && window.JarvisChatLib.sharedAppend && token) {
+            window.JarvisChatLib.sharedAppend(token, msg);
+        }
+    }
+    async function _restoreHistory() {
+        // Geteilte Anzeige-History pro Benutzer (Hauptfenster + jarvis/chat identisch).
+        const _CL = window.JarvisChatLib;
+        if (_CL && _CL.sharedMigrate && token) {
+            try {
+                await _CL.sharedMigrate(token, ['jarvis_main_history_v1', 'jarvis_chat_history_v1']);
+                const shared = await _CL.sharedLoad(token);
+                _chatHistory = (shared !== null) ? shared : _loadHistory();
+            } catch (_e) { _chatHistory = _loadHistory(); }
+        } else {
+            _chatHistory = _loadHistory();
+        }
         if (_chatHistory.length === 0) return;
 
         removeWelcome();

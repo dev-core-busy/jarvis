@@ -1744,6 +1744,36 @@ async def get_generated_image(name: str):
                         headers={"Cache-Control": "public, max-age=86400"})
 
 
+# ─── Geteilte Anzeige-History (Hauptfenster + jarvis/chat teilen denselben Verlauf) ───
+@app.get("/api/chat/shared-history")
+async def chat_history_get(user: str = Depends(require_auth)):
+    import backend.chat_history as ch
+    return JSONResponse({"messages": ch.load(user)})
+
+
+@app.post("/api/chat/shared-history/append")
+async def chat_history_append(request: Request, user: str = Depends(require_auth)):
+    import backend.chat_history as ch
+    body = await request.json()
+    msg = body.get("message")
+    return JSONResponse({"messages": ch.append(user, msg)})
+
+
+@app.put("/api/chat/shared-history")
+async def chat_history_replace(request: Request, user: str = Depends(require_auth)):
+    import backend.chat_history as ch
+    body = await request.json()
+    msgs = body.get("messages", [])
+    return JSONResponse({"messages": ch.replace(user, msgs)})
+
+
+@app.delete("/api/chat/shared-history")
+async def chat_history_clear(user: str = Depends(require_auth)):
+    import backend.chat_history as ch
+    ch.clear(user)
+    return JSONResponse({"ok": True})
+
+
 @app.get("/api/settings")
 async def get_settings(user: str = Depends(require_auth)):
     """Gibt aktuelle Einstellungen, Profile und Provider-Optionen zurück."""

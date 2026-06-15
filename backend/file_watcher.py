@@ -118,6 +118,7 @@ class WatcherManager:
                     path: str = "", pattern: str = "*", events: list = None,
                     task: str = "", wa_to: str = "", wa_message: str = "",
                     webhook_url: str = "", webhook_body: str = "",
+                    email_to: str = "", email_subject: str = "", email_body: str = "",
                     enabled: bool = True) -> dict:
         watcher = {
             "id": str(uuid.uuid4()),
@@ -132,6 +133,9 @@ class WatcherManager:
             "wa_message": wa_message,
             "webhook_url": webhook_url,
             "webhook_body": webhook_body,
+            "email_to": email_to,
+            "email_subject": email_subject,
+            "email_body": email_body,
             "enabled": enabled,
             "last_triggered": None,
             "last_result": None,
@@ -219,6 +223,10 @@ class WatcherManager:
                 result = await self._do_whatsapp(watcher.get("wa_to", ""), _fill(watcher.get("wa_message", "")))
             elif action == "webhook":
                 result = await self._do_webhook(watcher.get("webhook_url", ""), _fill(watcher.get("webhook_body", "")), context)
+            elif action == "email":
+                result = await self._do_email(watcher.get("email_to", ""),
+                                              _fill(watcher.get("email_subject", "")),
+                                              _fill(watcher.get("email_body", "")))
             else:  # agent_task
                 if _agent_manager:
                     agent = _agent_manager.get_or_create_main()
@@ -261,6 +269,23 @@ class WatcherManager:
         async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
             resp = await client.post(url, json=payload)
         return f"Webhook {url} → HTTP {resp.status_code}"
+
+    async def _do_email(self, to: str, subject: str, body: str) -> str:
+        """E-Mail via Gmail-Tool (OAuth) – LLM-unabhaengig. Erfordert verbundenes Google-Konto."""
+        if not to:
+            return "E-Mail: kein Empfänger angegeben"
+
+        def _send():
+            try:
+                from backend.tools.google_gmail import GoogleGmailTool
+                return GoogleGmailTool().execute(
+                    action="send_mail", to=to,
+                    subject=subject or "Jarvis Trigger", body=body or "",
+                )
+            except Exception as e:
+                return f"E-Mail nicht möglich (Google verbunden?): {e}"
+
+        return await asyncio.to_thread(_send)
 
     # ─── LLM-down Poller ─────────────────────────────────────────────────────
     async def _llm_poll_loop(self):

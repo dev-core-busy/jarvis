@@ -5076,6 +5076,9 @@ async def watcher_create(req: Request, user: str = Depends(require_auth)):
             wa_message=body.get("wa_message", ""),
             webhook_url=body.get("webhook_url", ""),
             webhook_body=body.get("webhook_body", ""),
+            email_to=body.get("email_to", ""),
+            email_subject=body.get("email_subject", ""),
+            email_body=body.get("email_body", ""),
             enabled=body.get("enabled", True),
         )
         return JSONResponse(w, status_code=201)

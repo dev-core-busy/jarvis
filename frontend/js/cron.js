@@ -163,6 +163,7 @@ window.cronManager = new (class JarvisCronManager {
                             <select id="watcher-action-type" class="kb-input">
                                 <option value="agent_task">Jarvis-Aufgabe ausführen</option>
                                 <option value="whatsapp">WhatsApp senden</option>
+                                <option value="email">E-Mail senden</option>
                                 <option value="webhook">Webhook (HTTP POST)</option>
                             </select>
                             <p class="kb-hint" style="margin-top:4px;">Platzhalter: <code>{filename}</code> <code>{filepath}</code> <code>{event}</code></p>
@@ -199,6 +200,26 @@ window.cronManager = new (class JarvisCronManager {
                                 <textarea id="watcher-webhook-body" rows="2" class="kb-input"
                                     placeholder="LLM down: {event}"></textarea>
                             </div>
+                        </div>
+
+                        <!-- Aktion: E-Mail -->
+                        <div id="watcher-action-email" style="display:none;">
+                            <div class="kb-form-grid-2">
+                                <div class="kb-form-field">
+                                    <label class="kb-label" for="watcher-email-to">Empfänger (E-Mail)</label>
+                                    <input id="watcher-email-to" type="text" placeholder="empfaenger@example.com" class="kb-input">
+                                </div>
+                                <div class="kb-form-field">
+                                    <label class="kb-label" for="watcher-email-subject">Betreff</label>
+                                    <input id="watcher-email-subject" type="text" placeholder="Jarvis: LLM nicht erreichbar" class="kb-input">
+                                </div>
+                            </div>
+                            <div class="kb-form-row">
+                                <label class="kb-label" for="watcher-email-body">Nachricht</label>
+                                <textarea id="watcher-email-body" rows="2" class="kb-input"
+                                    placeholder="Das aktive LLM ist nicht erreichbar ({event})."></textarea>
+                            </div>
+                            <p class="kb-hint" style="margin-top:4px;">Versand über das verbundene Google-Konto (Einstellungen → Google).</p>
                         </div>
 
                         <div class="kb-form-footer">
@@ -484,7 +505,7 @@ window.cronManager = new (class JarvisCronManager {
             const trig      = w.trigger_type || 'file';
             const act       = w.action_type || 'agent_task';
             const trigLabel = trig === 'llm_down' ? '⚡ LLM nicht erreichbar' : '📂 Datei';
-            const actLabel  = act === 'whatsapp' ? '📱 WhatsApp' : (act === 'webhook' ? '🔗 Webhook' : '🤖 Jarvis-Aufgabe');
+            const actLabel  = act === 'whatsapp' ? '📱 WhatsApp' : (act === 'webhook' ? '🔗 Webhook' : (act === 'email' ? '✉️ E-Mail' : '🤖 Jarvis-Aufgabe'));
             const evBadges  = (trig === 'file') ? (w.events || []).map(ev => `<span class="cron-event-badge">${ev}</span>`).join('') : '';
             const trigDetail = (trig === 'file')
                 ? `<div class="cron-item-path">📂 ${this._esc(w.path || '')} <code class="cron-item-code">${this._esc(w.pattern || '*')}</code></div>` : '';
@@ -492,6 +513,7 @@ window.cronManager = new (class JarvisCronManager {
             if (act === 'agent_task')      detail = this._esc(w.task || '');
             else if (act === 'whatsapp')   detail = `→ ${this._esc(w.wa_to || '')}: ${this._esc(w.wa_message || '')}`;
             else if (act === 'webhook')    detail = this._esc(w.webhook_url || '');
+            else if (act === 'email')      detail = `→ ${this._esc(w.email_to || '')}: ${this._esc(w.email_subject || '')}`;
             return `
             <div class="cron-item" data-id="${w.id}">
                 <div class="cron-item-row">
@@ -537,6 +559,9 @@ window.cronManager = new (class JarvisCronManager {
         document.getElementById('watcher-wa-message').value   = w ? (w.wa_message || '') : '';
         document.getElementById('watcher-webhook-url').value  = w ? (w.webhook_url || '') : '';
         document.getElementById('watcher-webhook-body').value = w ? (w.webhook_body || '') : '';
+        document.getElementById('watcher-email-to').value      = w ? (w.email_to || '') : '';
+        document.getElementById('watcher-email-subject').value = w ? (w.email_subject || '') : '';
+        document.getElementById('watcher-email-body').value    = w ? (w.email_body || '') : '';
         this._updateWatcherFormVisibility();
         document.getElementById('watcher-form-error').style.display = 'none';
         document.getElementById('watcher-form-wrap').style.display  = '';
@@ -550,6 +575,7 @@ window.cronManager = new (class JarvisCronManager {
         document.getElementById('watcher-action-agent').style.display    = (act === 'agent_task') ? '' : 'none';
         document.getElementById('watcher-action-whatsapp').style.display = (act === 'whatsapp') ? '' : 'none';
         document.getElementById('watcher-action-webhook').style.display  = (act === 'webhook') ? '' : 'none';
+        document.getElementById('watcher-action-email').style.display    = (act === 'email') ? '' : 'none';
     }
 
     _hideWatcherForm() {
@@ -573,6 +599,9 @@ window.cronManager = new (class JarvisCronManager {
         const wa_message   = document.getElementById('watcher-wa-message').value.trim();
         const webhook_url  = document.getElementById('watcher-webhook-url').value.trim();
         const webhook_body = document.getElementById('watcher-webhook-body').value.trim();
+        const email_to      = document.getElementById('watcher-email-to').value.trim();
+        const email_subject = document.getElementById('watcher-email-subject').value.trim();
+        const email_body    = document.getElementById('watcher-email-body').value.trim();
         const enabled      = document.getElementById('watcher-enabled').checked;
         const events       = [...document.querySelectorAll('.watcher-event-cb:checked')].map(cb => cb.value);
         const errEl        = document.getElementById('watcher-form-error');
@@ -586,6 +615,7 @@ window.cronManager = new (class JarvisCronManager {
         if (action_type === 'agent_task' && !task) return fail('Bitte eine Aufgabe für Jarvis angeben.');
         if (action_type === 'whatsapp' && (!wa_to || !wa_message)) return fail('Bitte WhatsApp-Empfänger und Nachricht angeben.');
         if (action_type === 'webhook' && !webhook_url) return fail('Bitte eine Webhook-URL angeben.');
+        if (action_type === 'email' && !email_to) return fail('Bitte einen E-Mail-Empfänger angeben.');
         errEl.style.display = 'none';
         try {
             const method = this._editingWatcherId ? 'PUT' : 'POST';
@@ -594,7 +624,8 @@ window.cronManager = new (class JarvisCronManager {
                 method,
                 headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
                 body: JSON.stringify({ label, trigger_type, action_type, path, pattern, events, task,
-                                       wa_to, wa_message, webhook_url, webhook_body, enabled })
+                                       wa_to, wa_message, webhook_url, webhook_body,
+                                       email_to, email_subject, email_body, enabled })
             });
             if (!r.ok) {
                 const e = await r.json().catch(() => ({}));

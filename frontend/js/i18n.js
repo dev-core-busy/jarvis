@@ -96,7 +96,7 @@ const _I18N = {
         'settings.tab.vision':      'Vision',
         'settings.tab.telemetry':   'Telemetry',
         'settings.tab.security':    'Sicherheit',
-        'settings.tab.cron':        'Cron',
+        'settings.tab.cron':        'Tasks',
 
         // ── Profile Settings ──────────────────────────────────
         'profile.new':               'Neues Profil',
@@ -835,7 +835,7 @@ const _I18N = {
         'settings.tab.vision':      'Vision',
         'settings.tab.telemetry':   'Telemetry',
         'settings.tab.security':    'Security',
-        'settings.tab.cron':        'Cron',
+        'settings.tab.cron':        'Tasks',
 
         // ── Profile Settings ──────────────────────────────────
         'profile.new':               'New Profile',

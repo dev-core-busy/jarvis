@@ -1740,6 +1740,7 @@
                 }
             }
             _saveHistory();
+            _syncReplace();
         }
 
         // Falls Container leer → Welcome wieder einblenden
@@ -1808,6 +1809,7 @@
                     return true;
                 });
                 _saveHistory();
+                _syncReplace();
             }
 
             // DOM-Rows entfernen
@@ -1895,6 +1897,7 @@
             );
         }
         _saveHistory();
+        _syncReplace();
 
         // 4) Bubble visuell zurücksetzen mit neuem Text
         bubble.classList.remove('editing');
@@ -1984,6 +1987,12 @@
     function _syncAppend(msg) {
         if (window.JarvisChatLib && window.JarvisChatLib.sharedAppend && token) {
             window.JarvisChatLib.sharedAppend(token, msg);
+        }
+    }
+    // Komplette Liste ins Backend schreiben (fuer Editieren/Loeschen)
+    function _syncReplace() {
+        if (window.JarvisChatLib && window.JarvisChatLib.sharedReplace && token) {
+            window.JarvisChatLib.sharedReplace(token, _mainHistory);
         }
     }
     async function _restoreHistory() {

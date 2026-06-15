@@ -271,21 +271,27 @@ class WatcherManager:
         return f"Webhook {url} → HTTP {resp.status_code}"
 
     async def _do_email(self, to: str, subject: str, body: str) -> str:
-        """E-Mail via Gmail-Tool (OAuth) – LLM-unabhaengig. Erfordert verbundenes Google-Konto."""
+        """E-Mail via Gmail-API (OAuth) – LLM-unabhaengig. Erfordert verbundenes Google-Konto."""
         if not to:
             return "E-Mail: kein Empfänger angegeben"
+        subject = subject or "Jarvis Trigger"
 
         def _send():
-            try:
-                from backend.tools.google_gmail import GoogleGmailTool
-                return GoogleGmailTool().execute(
-                    action="send_mail", to=to,
-                    subject=subject or "Jarvis Trigger", body=body or "",
-                )
-            except Exception as e:
-                return f"E-Mail nicht möglich (Google verbunden?): {e}"
+            import base64
+            from email.mime.text import MIMEText
+            from backend.tools.google_gmail import _get_service
+            svc = _get_service()  # wirft, wenn Google nicht verbunden
+            msg = MIMEText(body or "", "plain", "utf-8")
+            msg["To"] = to
+            msg["Subject"] = subject
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+            return f"E-Mail an {to} gesendet"
 
-        return await asyncio.to_thread(_send)
+        try:
+            return await asyncio.to_thread(_send)
+        except Exception as e:
+            return f"E-Mail nicht möglich (Google verbunden?): {e}"
 
     # ─── LLM-down Poller ─────────────────────────────────────────────────────
     async def _llm_poll_loop(self):

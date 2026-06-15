@@ -53,10 +53,13 @@ class SearchImageTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Sucht ein vorhandenes Bild im Web (DuckDuckGo) und zeigt es INLINE im Chat an. "
-            "IMMER nutzen, wenn der Nutzer ein Bild SUCHEN/finden und sehen will "
-            "('such ein Bild von ...', 'zeig mir ein Bild von ...'). "
-            "OEFFNE dafuer NIEMALS einen Browser auf dem Desktop."
+            "Sucht ein VORHANDENES Bild im Web (DuckDuckGo) und zeigt es INLINE im Chat an. "
+            "Verwenden, wenn der Nutzer ein bereits existierendes Bild SUCHEN/finden/anzeigen will – "
+            "Ausloeser: 'bitte ein Bild von ...', 'such ein Bild von ...', 'finde ein Foto von ...', "
+            "'zeig mir ein Bild von ...'. "
+            "NICHT verwenden, wenn der Nutzer ein Bild GENERIEREN/erstellen lassen will "
+            "(generiere/erstelle/male) – dafuer gibt es generate_image. "
+            "OEFFNE NIEMALS einen Browser auf dem Desktop."
         )
 
     def parameters_schema(self) -> dict:

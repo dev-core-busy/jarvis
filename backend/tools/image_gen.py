@@ -50,10 +50,12 @@ class GenerateImageTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Generiert ein Bild aus einer Textbeschreibung mit dem aktuell aktiven LLM-Profil "
-            "und gibt es zur Anzeige im Chat zurueck. IMMER aufrufen, wenn der Nutzer ein Bild "
-            "moechte (z.B. 'bitte ein Bild von einem Berg', 'generiere ein Bild von ...'). "
-            "Erfindet keine Bilder selbst – nutze ausschliesslich dieses Tool."
+            "Erzeugt (generiert) ein NEUES Bild per KI aus einer Textbeschreibung, mit dem aktuell "
+            "aktiven LLM-Profil. NUR verwenden, wenn der Nutzer ein Bild ERSTELLEN/GENERIEREN lassen "
+            "will – Ausloeser-Verben: generiere, erstelle, erzeuge, male, zeichne "
+            "(z.B. 'generiere ein Bild von ...', 'erstelle ein Bild von ...', 'male mir ...'). "
+            "NICHT verwenden, um vorhandene Bilder zu SUCHEN/anzuzeigen – dafuer gibt es search_image. "
+            "Niemals als Ersatz fuer search_image aufrufen."
         )
 
     def parameters_schema(self) -> dict:

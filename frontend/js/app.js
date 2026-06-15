@@ -204,6 +204,33 @@
         badge.style.display = currentUser ? '' : 'none';
     }
 
+    // ── Verbindungsstatus-Pill = Erreichbarkeit des AKTIVEN LLM-Profils ──
+    //    LLM erreichbar -> gruen (.connected), nicht erreichbar -> rot (Default).
+    let _llmStatusTimer = null;
+    async function _checkLlmStatus() {
+        if (!connectionDot) return;
+        try {
+            const res = await fetch('/api/llm/active-status', { headers: { 'Authorization': 'Bearer ' + token } });
+            if (!res.ok) { connectionDot.classList.remove('connected'); connectionDot.title = 'LLM-Status nicht abrufbar'; return; }
+            const d = await res.json();
+            const reachable = (d.status === 'ok' || d.status === 'degraded');
+            connectionDot.classList.toggle('connected', reachable);
+            const name = d.profile_name ? ' – ' + d.profile_name : '';
+            if (d.status === 'ok')            connectionDot.title = 'LLM erreichbar' + name;
+            else if (d.status === 'degraded') connectionDot.title = 'LLM erreichbar (Modell fehlt)' + name;
+            else                              connectionDot.title = 'LLM nicht erreichbar' + name;
+        } catch (e) {
+            connectionDot.classList.remove('connected');
+            connectionDot.title = 'LLM nicht erreichbar';
+        }
+    }
+    function _startLlmStatusIndicator() {
+        _checkLlmStatus();
+        if (!_llmStatusTimer) _llmStatusTimer = setInterval(_checkLlmStatus, 30000);
+    }
+    // Nach Profilwechsel sofort neu pruefen
+    window._refreshLlmStatusPill = _checkLlmStatus;
+
     function showMainScreen() {
         loginScreen.classList.remove('active');
         mainScreen.classList.add('active');
@@ -214,6 +241,7 @@
         loadVersion();
         updateWidget.init();
         _startContextIndicator();
+        _startLlmStatusIndicator();
         // Sprachübersetzungen nach Screen-Wechsel anwenden
         if (window.applyLang) window.applyLang();
     }
@@ -685,7 +713,7 @@
         ws = new JarvisWebSocket(wsUrl);
 
         ws.on('connected', () => {
-            connectionDot.classList.add('connected');
+            // Pill zeigt jetzt den LLM-Status (s. _checkLlmStatus), nicht den WS-Status.
             addLogEntry('🔗 ' + (window.t ? window.t('notif.connected') : 'Verbindung hergestellt'), 'system');
             // Nach Reconnect VNC neu verbinden, falls nicht schon verbunden/probiert
             if (vnc && !vnc.connected && !vnc._probingActive) {
@@ -694,7 +722,6 @@
         });
 
         ws.on('disconnected', () => {
-            connectionDot.classList.remove('connected');
             // VNC-Probing starten — verbindet automatisch sobald Server zurück
             if (vnc && !vnc._probingActive) {
                 vnc.startProbing(3000, 40);

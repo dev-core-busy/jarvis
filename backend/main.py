@@ -2320,6 +2320,29 @@ async def test_saved_profile_connection(profile_id: str, user: str = Depends(req
     return JSONResponse(result)
 
 
+@app.get("/api/llm/active-status")
+async def llm_active_status(user: str = Depends(require_auth)):
+    """Erreichbarkeit des AKTIVEN LLM-Profils – fuer die Verbindungsstatus-Pill.
+    status: ok (erreichbar) | degraded (erreichbar, Modell fehlt) | down (nicht erreichbar)."""
+    prof = config.active_profile
+    if not prof:
+        return JSONResponse({"success": False, "status": "down", "error": "Kein aktives Profil"})
+    result = await _probe_llm_connection(
+        provider=prof.get("provider", ""),
+        api_url=prof.get("api_url", ""),
+        api_key=prof.get("api_key", ""),
+        model=prof.get("model", ""),
+        auth_method=prof.get("auth_method", "api_key"),
+        session_key=prof.get("session_key", ""),
+    )
+    if result.get("success"):
+        result["status"] = "ok" if result.get("model_found", True) else "degraded"
+    else:
+        result["status"] = "down"
+    result["profile_name"] = prof.get("name", "")
+    return JSONResponse(result)
+
+
 @app.post("/api/profiles/{profile_id}/activate")
 async def activate_profile(profile_id: str, user: str = Depends(require_local_auth)):
     """Setzt ein Profil als aktiv."""

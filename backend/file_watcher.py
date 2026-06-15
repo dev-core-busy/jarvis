@@ -17,12 +17,16 @@ WATCHERS_FILE = Path("data/file_watchers.json")
 _agent_manager = None
 _broadcast_fn = None  # async fn(msg: dict) → sendet an alle WS-Clients
 _loop = None          # asyncio Event-Loop (wird beim Start gespeichert)
+_llm_check_fn = None  # async () -> bool : aktives LLM-Profil erreichbar?
+_wa_send_fn = None     # async (path, method, data) -> dict : WhatsApp-Bridge
 
 
-def init(agent_manager, broadcast_fn):
-    global _agent_manager, _broadcast_fn
+def init(agent_manager, broadcast_fn, llm_check_fn=None, wa_send_fn=None):
+    global _agent_manager, _broadcast_fn, _llm_check_fn, _wa_send_fn
     _agent_manager = agent_manager
     _broadcast_fn = broadcast_fn
+    _llm_check_fn = llm_check_fn
+    _wa_send_fn = wa_send_fn
 
 
 class _JarvisFileHandler(FileSystemEventHandler):
@@ -60,10 +64,12 @@ class _JarvisFileHandler(FileSystemEventHandler):
                 self._trigger(event.dest_path, "moved", src=event.src_path)
 
     def _trigger(self, filepath: str, event_type: str, src: str = None):
-        """Task asynchron ausführen."""
+        """Aktion asynchron ausführen."""
         if _loop and _loop.is_running():
+            ctx = {"filepath": filepath, "filename": Path(filepath).name,
+                   "event_type": event_type, "src": src or ""}
             asyncio.run_coroutine_threadsafe(
-                self._manager._execute(self._watcher["id"], filepath, event_type),
+                self._manager._execute(self._watcher["id"], ctx),
                 _loop,
             )
 
@@ -73,6 +79,8 @@ class WatcherManager:
         self._observer = Observer()
         self._watchers: list[dict] = []
         self._watches: dict[str, object] = {}  # id → watchdog-Watch
+        self._llm_poll_task = None
+        self._llm_poll_interval = 60  # Sekunden zwischen LLM-Erreichbarkeitschecks
 
     # ─── Lifecycle ───────────────────────────────────────────────────────────
 
@@ -85,7 +93,10 @@ class WatcherManager:
         for w in self._watchers:
             if w.get("enabled"):
                 self._register(w)
-        print(f"[FileWatcher] gestartet – {len(self._watchers)} Watcher geladen", flush=True)
+        print(f"[TriggerWatcher] gestartet – {len(self._watchers)} Trigger geladen", flush=True)
+        # Hintergrund-Poller fuer llm_down-Trigger
+        if self._llm_poll_task is None:
+            self._llm_poll_task = _loop.create_task(self._llm_poll_loop())
 
     def stop(self):
         try:
@@ -102,18 +113,29 @@ class WatcherManager:
     def get_watcher(self, watcher_id: str) -> Optional[dict]:
         return next((w for w in self._watchers if w["id"] == watcher_id), None)
 
-    def add_watcher(self, label: str, path: str, pattern: str, events: list,
-                    task: str, enabled: bool = True) -> dict:
+    def add_watcher(self, label: str, trigger_type: str = "file",
+                    action_type: str = "agent_task",
+                    path: str = "", pattern: str = "*", events: list = None,
+                    task: str = "", wa_to: str = "", wa_message: str = "",
+                    webhook_url: str = "", webhook_body: str = "",
+                    enabled: bool = True) -> dict:
         watcher = {
             "id": str(uuid.uuid4()),
             "label": label,
+            "trigger_type": trigger_type,      # "file" | "llm_down"
+            "action_type": action_type,        # "agent_task" | "whatsapp" | "webhook"
             "path": path,
             "pattern": pattern,
-            "events": events,
+            "events": events or ["created"],
             "task": task,
+            "wa_to": wa_to,
+            "wa_message": wa_message,
+            "webhook_url": webhook_url,
+            "webhook_body": webhook_body,
             "enabled": enabled,
             "last_triggered": None,
             "last_result": None,
+            "_llm_state": None,                # interner Zustand fuer llm_down
         }
         self._watchers.append(watcher)
         if enabled:
@@ -143,7 +165,9 @@ class WatcherManager:
     # ─── Interna ─────────────────────────────────────────────────────────────
 
     def _register(self, watcher: dict):
-        """Watcher im Observer registrieren."""
+        """Watcher im Observer registrieren (nur Datei-Trigger; llm_down via Poller)."""
+        if watcher.get("trigger_type", "file") != "file":
+            return
         path = watcher.get("path", "")
         if not Path(path).is_dir():
             print(f"[FileWatcher] Pfad existiert nicht: '{path}' – Watcher '{watcher['label']}' deaktiviert", flush=True)
@@ -164,58 +188,102 @@ class WatcherManager:
             except Exception:
                 pass
 
-    async def _execute(self, watcher_id: str, filepath: str, event_type: str) -> str:
-        """Watcher-Task ausführen."""
+    async def _execute(self, watcher_id: str, context: dict) -> str:
+        """Aktion eines Triggers ausführen (Agent-Task / WhatsApp / Webhook)."""
         watcher = self.get_watcher(watcher_id)
         if not watcher:
             return "Watcher nicht gefunden"
 
-        filename = Path(filepath).name
-        task_text = watcher["task"].replace("{filepath}", filepath).replace("{filename}", filename)
+        filepath = context.get("filepath", "")
+        filename = context.get("filename", "")
+        event_type = context.get("event_type", "")
         label = watcher["label"]
+        action = watcher.get("action_type", "agent_task")
 
-        print(f"[FileWatcher] Event '{event_type}' → '{label}': {filename}", flush=True)
+        def _fill(s: str) -> str:
+            return (s or "").replace("{filepath}", filepath).replace("{filename}", filename).replace("{event}", event_type)
 
-        # Broadcast: gestartet
+        print(f"[TriggerWatcher] Event '{event_type}' → '{label}' (Aktion: {action})", flush=True)
+
         if _broadcast_fn:
             await _broadcast_fn({
-                "type": "watcher_event",
-                "event": "started",
-                "watcher_id": watcher_id,
-                "label": label,
-                "filepath": filepath,
-                "filename": filename,
-                "event_type": event_type,
+                "type": "watcher_event", "event": "started",
+                "watcher_id": watcher_id, "label": label,
+                "filepath": filepath, "filename": filename, "event_type": event_type,
             })
 
-        result = "Fehler: AgentManager nicht verfügbar"
+        result = ""
         t0 = time.time()
         try:
-            if _agent_manager:
-                agent = _agent_manager.get_or_create_main()
-                result = await agent.run_task_headless(task_text)
+            if action == "whatsapp":
+                result = await self._do_whatsapp(watcher.get("wa_to", ""), _fill(watcher.get("wa_message", "")))
+            elif action == "webhook":
+                result = await self._do_webhook(watcher.get("webhook_url", ""), _fill(watcher.get("webhook_body", "")), context)
+            else:  # agent_task
+                if _agent_manager:
+                    agent = _agent_manager.get_or_create_main()
+                    result = await agent.run_task_headless(_fill(watcher.get("task", "")))
+                else:
+                    result = "Fehler: AgentManager nicht verfügbar"
             duration = round(time.time() - t0, 1)
-            print(f"[FileWatcher] '{label}' abgeschlossen in {duration}s", flush=True)
+            print(f"[TriggerWatcher] '{label}' abgeschlossen in {duration}s", flush=True)
         except Exception as e:
             result = f"Fehler: {e}"
-            print(f"[FileWatcher] '{label}' Fehler: {e}", flush=True)
+            print(f"[TriggerWatcher] '{label}' Fehler: {e}", flush=True)
 
-        # Ergebnis speichern
         watcher["last_triggered"] = int(time.time())
-        watcher["last_result"] = result[:500] if result else ""
+        watcher["last_result"] = (result or "")[:500]
         self._save()
 
-        # Broadcast: fertig
         if _broadcast_fn:
             await _broadcast_fn({
-                "type": "watcher_event",
-                "event": "finished",
-                "watcher_id": watcher_id,
-                "label": label,
-                "result": watcher["last_result"],
+                "type": "watcher_event", "event": "finished",
+                "watcher_id": watcher_id, "label": label, "result": watcher["last_result"],
             })
-
         return result
+
+    # ─── Aktionen ────────────────────────────────────────────────────────────
+    async def _do_whatsapp(self, to: str, message: str) -> str:
+        if not _wa_send_fn:
+            return "WhatsApp nicht verfügbar (Bridge nicht initialisiert)"
+        if not to or not message:
+            return "WhatsApp: Empfänger oder Nachricht fehlt"
+        r = await _wa_send_fn("/send", method="POST", data={"to": to, "message": message})
+        if isinstance(r, dict) and r.get("error"):
+            return f"WhatsApp-Fehler: {r.get('error')}"
+        return f"WhatsApp an {to} gesendet"
+
+    async def _do_webhook(self, url: str, body: str, context: dict) -> str:
+        if not url:
+            return "Webhook: keine URL"
+        import httpx
+        payload = {"text": body, **{k: v for k, v in context.items() if not k.startswith('_')}}
+        async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+            resp = await client.post(url, json=payload)
+        return f"Webhook {url} → HTTP {resp.status_code}"
+
+    # ─── LLM-down Poller ─────────────────────────────────────────────────────
+    async def _llm_poll_loop(self):
+        """Prüft periodisch das aktive LLM-Profil; feuert llm_down-Trigger beim Übergang erreichbar→down."""
+        while True:
+            try:
+                await asyncio.sleep(self._llm_poll_interval)
+                llm_watchers = [w for w in self._watchers
+                                if w.get("enabled") and w.get("trigger_type") == "llm_down"]
+                if not llm_watchers or not _llm_check_fn:
+                    continue
+                reachable = bool(await _llm_check_fn())
+                for w in llm_watchers:
+                    prev = w.get("_llm_state")
+                    w["_llm_state"] = reachable
+                    # Trigger nur wenn es jetzt down ist UND vorher nicht schon down war (kein Spam)
+                    if (not reachable) and (prev is not False):
+                        await self._execute(w["id"], {"event_type": "llm_down",
+                                                      "filepath": "", "filename": ""})
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"[TriggerWatcher] LLM-Poll Fehler: {e}", flush=True)
 
     def _load(self):
         if WATCHERS_FILE.exists():

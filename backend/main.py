@@ -5065,15 +5065,21 @@ async def watcher_create(req: Request, user: str = Depends(require_auth)):
     body = await req.json()
     try:
         w = watcher_manager.add_watcher(
-            label=body.get("label", "Watcher"),
-            path=body["path"],
+            label=body.get("label", "Trigger"),
+            trigger_type=body.get("trigger_type", "file"),
+            action_type=body.get("action_type", "agent_task"),
+            path=body.get("path", ""),
             pattern=body.get("pattern", "*"),
             events=body.get("events", ["created"]),
-            task=body["task"],
+            task=body.get("task", ""),
+            wa_to=body.get("wa_to", ""),
+            wa_message=body.get("wa_message", ""),
+            webhook_url=body.get("webhook_url", ""),
+            webhook_body=body.get("webhook_body", ""),
             enabled=body.get("enabled", True),
         )
         return JSONResponse(w, status_code=201)
-    except (ValueError, KeyError) as e:
+    except (ValueError, KeyError, TypeError) as e:
         raise HTTPException(400, str(e))
 
 
@@ -5402,7 +5408,25 @@ async def startup():
             for d in dead:
                 _active_ws.discard(d)
 
-        watcher_init(agent_manager, _watcher_broadcast)
+        async def _watcher_llm_reachable() -> bool:
+            """True, wenn das aktive LLM-Profil erreichbar ist (fuer llm_down-Trigger)."""
+            prof = config.active_profile
+            if not prof:
+                return False
+            try:
+                r = await _probe_llm_connection(
+                    provider=prof.get("provider", ""), api_url=prof.get("api_url", ""),
+                    api_key=prof.get("api_key", ""), model=prof.get("model", ""),
+                    auth_method=prof.get("auth_method", "api_key"),
+                    session_key=prof.get("session_key", ""),
+                )
+                return bool(r.get("success"))
+            except Exception:
+                return False
+
+        watcher_init(agent_manager, _watcher_broadcast,
+                     llm_check_fn=_watcher_llm_reachable,
+                     wa_send_fn=_wa_bridge_async)
         watcher_manager.start()
     except Exception as e:
         print(f"⚠️  Datei-Watcher konnte nicht gestartet werden: {e}")

@@ -465,7 +465,7 @@ const _I18N = {
 
         // ── Cron ─────────────────────────────────────────────
         'cron.section_jobs':    'Cron-Aufgaben',
-        'cron.section_watcher': 'Datei-Watcher',
+        'cron.section_watcher': 'Trigger-Watcher',
         'cron.jobs_hint':       'Jarvis führt die angegebene Aufgabe automatisch zum geplanten Zeitpunkt aus.',
         'cron.add_job_btn':     '+ Neue Aufgabe',
         'cron.label_label':     'Bezeichnung',
@@ -474,7 +474,7 @@ const _I18N = {
         'cron.form_title_edit': 'Aufgabe bearbeiten',
         'cron.save_btn':        'Speichern',
         'cron.cancel_btn':      'Abbrechen',
-        'cron.watcher_hint':    'Jarvis reagiert automatisch, wenn Dateien in einem Ordner erstellt, geändert oder gelöscht werden.',
+        'cron.watcher_hint':    'Jarvis reagiert automatisch auf Ereignisse (Datei erstellt/geändert/gelöscht oder LLM nicht erreichbar) und löst eine Aktion aus: Jarvis-Aufgabe, WhatsApp, E-Mail oder Webhook.',
         'cron.add_watcher_btn': '+ Neuer Watcher',
         'cron.watcher_path':    'Ordnerpfad',
         'cron.watcher_pattern': 'Datei-Muster',
@@ -493,7 +493,7 @@ const _I18N = {
         'cron.last_run':        'Letzter Lauf',
         'cron.last_trigger':    'Letzter Trigger',
         'cron.no_jobs':         'Noch keine geplanten Aufgaben. Klicke <strong>+ Neue Aufgabe</strong> um loszulegen.',
-        'cron.no_watchers':     'Noch keine Datei-Watcher. Klicke <strong>+ Neuer Watcher</strong> um loszulegen.',
+        'cron.no_watchers':     'Noch keine Trigger. Klicke <strong>+ Neuer Watcher</strong> um loszulegen.',
 
         // ── Common ────────────────────────────────────────────
         'common.save':          'Speichern',
@@ -1204,7 +1204,7 @@ const _I18N = {
 
         // ── Cron ─────────────────────────────────────────────
         'cron.section_jobs':    'Cron Jobs',
-        'cron.section_watcher': 'File Watcher',
+        'cron.section_watcher': 'Trigger Watcher',
         'cron.jobs_hint':       'Jarvis executes the specified task automatically at the scheduled time.',
         'cron.add_job_btn':     '+ New Job',
         'cron.label_label':     'Label',
@@ -1213,7 +1213,7 @@ const _I18N = {
         'cron.form_title_edit': 'Edit Job',
         'cron.save_btn':        'Save',
         'cron.cancel_btn':      'Cancel',
-        'cron.watcher_hint':    'Jarvis reacts automatically when files in a folder are created, modified or deleted.',
+        'cron.watcher_hint':    'Jarvis reacts automatically to events (file created/modified/deleted or LLM unreachable) and runs an action: Jarvis task, WhatsApp, email or webhook.',
         'cron.add_watcher_btn': '+ New Watcher',
         'cron.watcher_path':    'Folder Path',
         'cron.watcher_pattern': 'File Pattern',
@@ -1232,7 +1232,7 @@ const _I18N = {
         'cron.last_run':        'Last run',
         'cron.last_trigger':    'Last trigger',
         'cron.no_jobs':         'No scheduled jobs yet. Click <strong>+ New Job</strong> to get started.',
-        'cron.no_watchers':     'No file watchers yet. Click <strong>+ New Watcher</strong> to get started.',
+        'cron.no_watchers':     'No triggers yet. Click <strong>+ New Watcher</strong> to get started.',
 
         // ── Common ────────────────────────────────────────────
         'common.save':          'Save',

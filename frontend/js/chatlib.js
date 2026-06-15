@@ -168,6 +168,63 @@
         }
     }
 
+    /* ── Geteilte Anzeige-History (Backend, pro Benutzer) ─────────── *
+     *  Hauptfenster und jarvis/chat teilen denselben Verlauf serverseitig.
+     *  Neue Nachrichten werden ANGEHAENGT (additiv, fensteruebergreifend in
+     *  Ankunftsreihenfolge); beim Oeffnen/Aktualisieren wird geladen.        */
+    const _SHARED_URL = '/api/chat/shared-history';
+
+    async function sharedLoad(token) {
+        try {
+            const r = await fetch(_SHARED_URL, { headers: { 'Authorization': 'Bearer ' + token } });
+            if (!r.ok) return null;
+            const d = await r.json();
+            return Array.isArray(d.messages) ? d.messages : [];
+        } catch (_e) { return null; }
+    }
+
+    async function sharedAppend(token, msg) {
+        try {
+            await fetch(_SHARED_URL + '/append', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: msg }),
+            });
+        } catch (_e) { /* offline -> nur lokal */ }
+    }
+
+    async function sharedReplace(token, messages) {
+        try {
+            await fetch(_SHARED_URL, {
+                method: 'PUT',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: messages || [] }),
+            });
+        } catch (_e) { /* offline */ }
+    }
+
+    /* Einmalige Zusammenfuehrung der bisherigen getrennten localStorage-Verlaeufe
+       ins Backend (nur wenn dort noch leer). keys = beide alten History-Keys. */
+    async function sharedMigrate(token, keys) {
+        try {
+            if (localStorage.getItem('jarvis_shared_migrated') === '1') return;
+            const backend = await sharedLoad(token);
+            if (backend === null) return;          // Backend nicht erreichbar -> spaeter erneut
+            if (backend.length === 0) {
+                let merged = [];
+                (keys || []).forEach(function (k) {
+                    try {
+                        const raw = localStorage.getItem(k);
+                        if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr)) merged = merged.concat(arr); }
+                    } catch (_e) {}
+                });
+                merged.sort(function (a, b) { return ((a && a.ts) || 0) - ((b && b.ts) || 0); });
+                if (merged.length > 0) await sharedReplace(token, merged);
+            }
+            localStorage.setItem('jarvis_shared_migrated', '1');
+        } catch (_e) {}
+    }
+
     /* ── History-Trim fuer "Nachricht editieren" ──────────────── *
      *  Kuerzt eine History-Liste so, dass die ersten (userIndex+1)
      *  User-Eintraege erhalten bleiben und alles danach entfernt
@@ -592,6 +649,10 @@
         currentDateStr: currentDateStr,
         saveHistory: saveHistory,
         loadHistory: loadHistory,
+        sharedLoad: sharedLoad,
+        sharedAppend: sharedAppend,
+        sharedReplace: sharedReplace,
+        sharedMigrate: sharedMigrate,
         truncateHistoryToUserIndex: truncateHistoryToUserIndex,
         removeRowsAfter: removeRowsAfter,
         enterEditMode: enterEditMode,

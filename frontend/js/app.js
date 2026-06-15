@@ -988,8 +988,9 @@
         // Benutzer-Bubble anzeigen und in History speichern
         const _uTime = _timeStr(), _uDate = _currentDateStr();
         _addBubble(finalText + (attInfo || ''), 'user', _uTime, false);
-        _mainHistory.push({ role: 'user', text: finalText + (attInfo || ''), time: _uTime, date: _uDate });
+        _mainHistory.push({ role: 'user', text: finalText + (attInfo || ''), time: _uTime, date: _uDate, ts: Date.now() });
         _saveHistory();
+        _syncAppend(_mainHistory[_mainHistory.length - 1]);
         taskInput.value = '';
         taskInput.style.height = 'auto';
         _pendingAttachments = [];
@@ -1347,8 +1348,9 @@
                 // Bot-Bubble abschließen und in History speichern
                 _finalizeBotBubble();
                 if (_currentBotRaw.trim()) {
-                    _mainHistory.push({ role: 'bot', text: _currentBotRaw.trim(), time: _timeStr(), date: _currentDateStr() });
+                    _mainHistory.push({ role: 'bot', text: _currentBotRaw.trim(), time: _timeStr(), date: _currentDateStr(), ts: Date.now() });
                     _saveHistory();
+                    _syncAppend(_mainHistory[_mainHistory.length - 1]);
                     _currentBotRaw = '';
                 }
             }
@@ -1978,8 +1980,24 @@
             return raw ? (JSON.parse(raw) || []) : [];
         } catch(e) { return []; }
     }
-    function _restoreHistory() {
-        _mainHistory = _loadHistory();
+    // Neue Nachricht in die geteilte Backend-History anhaengen (additiv, fensteruebergreifend)
+    function _syncAppend(msg) {
+        if (window.JarvisChatLib && window.JarvisChatLib.sharedAppend && token) {
+            window.JarvisChatLib.sharedAppend(token, msg);
+        }
+    }
+    async function _restoreHistory() {
+        // Geteilte Anzeige-History pro Benutzer (Hauptfenster + jarvis/chat identisch).
+        const _CL = window.JarvisChatLib;
+        if (_CL && _CL.sharedMigrate && token) {
+            try {
+                await _CL.sharedMigrate(token, ['jarvis_main_history_v1', 'jarvis_chat_history_v1']);
+                const shared = await _CL.sharedLoad(token);
+                _mainHistory = (shared !== null) ? shared : _loadHistory();
+            } catch (_e) { _mainHistory = _loadHistory(); }
+        } else {
+            _mainHistory = _loadHistory();
+        }
         if (_mainHistory.length === 0) return;
         const welcome = logContainer.querySelector('.log-welcome');
         if (welcome) welcome.remove();

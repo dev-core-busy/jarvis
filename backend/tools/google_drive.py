@@ -10,6 +10,7 @@ Aktionen:
   get_link       – Freigabe-Link einer Datei abrufen
 """
 
+import asyncio
 from backend.tools.base import BaseTool
 
 
@@ -28,7 +29,29 @@ class GoogleDriveTool(BaseTool):
         "Aktionen: list_files, search_files, read_file, create_folder, get_link."
     )
 
-    def execute(self, action: str, **kwargs) -> str:
+    def parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list_files", "search_files", "read_file", "create_folder", "get_link"],
+                    "description": "Drive-Aktion",
+                },
+                "folder_id": {"type": "string", "description": "Ordner-ID (list_files)"},
+                "query": {"type": "string", "description": "Drive-Suchausdruck (search_files)"},
+                "file_id": {"type": "string", "description": "Datei-ID (read_file/get_link)"},
+                "name": {"type": "string", "description": "Ordnername (create_folder)"},
+                "parent_id": {"type": "string", "description": "Übergeordneter Ordner (create_folder)"},
+                "max_results": {"type": "integer", "description": "Anzahl Ergebnisse"},
+            },
+            "required": ["action"],
+        }
+
+    async def execute(self, action: str = "", **kwargs) -> str:
+        return await asyncio.to_thread(self._execute_sync, action, kwargs)
+
+    def _execute_sync(self, action: str, kwargs: dict) -> str:
         try:
             svc = _get_service()
         except RuntimeError as e:

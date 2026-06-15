@@ -11,6 +11,7 @@ Aktionen:
   list_labels  – Alle Labels anzeigen
 """
 
+import asyncio
 import base64
 import email as _email_lib
 from email.mime.text import MIMEText
@@ -59,7 +60,30 @@ class GoogleGmailTool(BaseTool):
         "Aktionen: read_inbox, read_mail, search_mail, send_mail, reply_mail, list_labels."
     )
 
-    def execute(self, action: str, **kwargs) -> str:
+    def parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["read_inbox", "read_mail", "search_mail", "send_mail", "reply_mail", "list_labels"],
+                    "description": "Gmail-Aktion",
+                },
+                "to": {"type": "string", "description": "Empfänger-Adresse (send_mail)"},
+                "subject": {"type": "string", "description": "Betreff (send_mail)"},
+                "body": {"type": "string", "description": "Nachrichtentext (send_mail/reply_mail)"},
+                "query": {"type": "string", "description": "Gmail-Suchausdruck (search_mail)"},
+                "message_id": {"type": "string", "description": "Nachrichten-ID (read_mail/reply_mail)"},
+                "max_results": {"type": "integer", "description": "Anzahl Ergebnisse (read_inbox/search_mail)"},
+            },
+            "required": ["action"],
+        }
+
+    async def execute(self, action: str = "", **kwargs) -> str:
+        # Gmail-API-Aufrufe sind blockierend -> in Thread auslagern (Agent ruft await execute)
+        return await asyncio.to_thread(self._execute_sync, action, kwargs)
+
+    def _execute_sync(self, action: str, kwargs: dict) -> str:
         try:
             svc = _get_service()
         except RuntimeError as e:

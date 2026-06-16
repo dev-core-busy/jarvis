@@ -53,6 +53,7 @@
     "knowledge_docs": [],
     "dependencies": ["faster-whisper", "httpx"],
     "permissions": ["network"],
+    "systemd_service": "whatsapp-bridge",
     "help": {
         "details": "Verbindet Jarvis mit WhatsApp über die Baileys-Bridge (Node.js). Nachrichten können gesendet und empfangen werden. Eingehende Sprachnachrichten werden automatisch per faster-whisper transkribiert und stehen als Text zur Verfügung.",
         "tools": [

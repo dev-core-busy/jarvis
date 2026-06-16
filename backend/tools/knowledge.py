@@ -570,7 +570,7 @@ def _get_static_stats() -> dict:
     with _stats_cache_lock:
         if _stats_cache is not None:
             return _stats_cache
-        has_pdf = has_docx = has_xlsx = has_pptx = has_video = False
+        has_pdf = has_docx = has_xlsx = has_pptx = has_video = has_image = False
         try:
             import pdfplumber; has_pdf = True
         except ImportError: pass
@@ -587,11 +587,15 @@ def _get_static_stats() -> dict:
             from faster_whisper import WhisperModel
             if shutil.which("ffmpeg"): has_video = True
         except ImportError: pass
+        try:
+            import pytesseract  # noqa: F401
+            if shutil.which("tesseract"): has_image = True
+        except ImportError: pass
 
         _stats_cache = {
             "pdf_support": has_pdf, "docx_support": has_docx,
             "xlsx_support": has_xlsx, "pptx_support": has_pptx,
-            "video_support": has_video,
+            "video_support": has_video, "image_support": has_image,
         }
         return _stats_cache
 

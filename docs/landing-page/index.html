@@ -97,7 +97,7 @@
         {
           "@type": "Question",
           "name": "How does the RAG knowledge base work?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Jarvis indexes your documents (PDF, DOCX, TXT, Excel, PPTX) using TF-IDF for small collections. As your data grows, it automatically switches to ChromaDB vector database with sentence-transformer embeddings for semantic search. All data stays local – no cloud required." }
+          "acceptedAnswer": { "@type": "Answer", "text": "Jarvis indexes your documents (PDF, DOCX, TXT, Excel, PPTX, images via OCR) using TF-IDF for small collections. As your data grows, it automatically switches to ChromaDB vector database with sentence-transformer embeddings for semantic search. All data stays local – no cloud required." }
         }
       ]
     }
@@ -521,8 +521,8 @@
                 <div class="feature-icon">📚</div>
                 <div class="feature-title t-de">Wissensdatenbank (RAG)</div>
                 <div class="feature-title t-en">Knowledge Base (RAG)</div>
-                <div class="feature-desc t-de">Eigene Dokumente (PDF, DOCX, TXT, Excel, PPTX) durchsuchen – TF-IDF für kleine Bestände, automatischer Wechsel auf ChromaDB-Vektordatenbank bei wachsenden Datenmengen. RAG direkt auf deinen Daten, keine Cloud, kein Datenleck.</div>
-                <div class="feature-desc t-en">Search your own documents (PDF, DOCX, TXT, Excel, PPTX) – TF-IDF for small collections, automatic switch to ChromaDB vector database as data grows. RAG directly on your data, no cloud, no data leak.</div>
+                <div class="feature-desc t-de">Eigene Dokumente (PDF, DOCX, TXT, Excel, PPTX, Bilder per OCR) durchsuchen – TF-IDF für kleine Bestände, automatischer Wechsel auf ChromaDB-Vektordatenbank bei wachsenden Datenmengen. Bilder werden per Tesseract-OCR gelesen und vom LLM aufbereitet. RAG direkt auf deinen Daten, keine Cloud, kein Datenleck.</div>
+                <div class="feature-desc t-en">Search your own documents (PDF, DOCX, TXT, Excel, PPTX, images via OCR) – TF-IDF for small collections, automatic switch to ChromaDB vector database as data grows. Images are read via Tesseract OCR and refined by the LLM. RAG directly on your data, no cloud, no data leak.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">📄</div>

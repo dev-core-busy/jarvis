@@ -175,6 +175,8 @@ class JarvisKnowledgeManager {
         const pptxTitle = stats.pptx_support ? 'PowerPoint-Support aktiv' : 'python-pptx nicht installiert';
         const videoIcon = stats.video_support ? '✅' : '⚠️';
         const videoTitle = stats.video_support ? 'Video/Audio-Support aktiv (ffmpeg + faster-whisper)' : 'ffmpeg oder faster-whisper fehlt';
+        const imageIcon = stats.image_support ? '✅' : '⚠️';
+        const imageTitle = stats.image_support ? 'Bild-OCR aktiv (Tesseract + pytesseract)' : 'tesseract-ocr oder pytesseract fehlt';
         const vectorAvail = stats.vector_db_available;
         const vectorIcon = vectorAvail ? '✅' : (stats.indexing ? '🔄' : '⚠️');
         const vectorDbLabel = stats.vector_db_name
@@ -268,6 +270,7 @@ class JarvisKnowledgeManager {
                 <span class="kb-format-badge" title="${docxTitle}">${docxIcon} Word</span>
                 <span class="kb-format-badge" title="${xlsxTitle}">${xlsxIcon} Excel</span>
                 <span class="kb-format-badge" title="${pptxTitle}">${pptxIcon} PowerPoint</span>
+                <span class="kb-format-badge" title="${imageTitle}">${imageIcon} Bilder/OCR</span>
                 <span class="kb-format-badge" title="${videoTitle}">${videoIcon} Video/Audio</span>
                 <span class="kb-format-badge" title="${vectorTitle}">${vectorIcon} ${window.t('knowledge.vektor_db')}</span>
             </div>

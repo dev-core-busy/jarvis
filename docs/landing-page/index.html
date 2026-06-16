@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/png" href="favicon.png">
     <title>Jarvis – Autonomer KI Desktop-Agent | Open Source AI Agent für Linux</title>
-    <meta name="description" content="Jarvis ist ein autonomer Open-Source KI-Agent für Linux – Desktop-Steuerung via VNC, Multi-LLM (Gemini, Claude, Ollama), WhatsApp-Integration, RAG-Wissensdatenbank und das OpenClaw Skill-Ökosystem. Selbst gehostet, lokal, erweiterbar.">
+    <meta name="description" content="Jarvis ist ein autonomer Open-Source KI-Agent für Linux – Desktop-Steuerung via VNC, Multi-LLM (Gemini, Claude, Ollama), WhatsApp-Integration, RAG-Wissensdatenbank und das OpenClaw Skill-Ökosystem. Selbst gehostet und datenschutzfreundlich: OCR, Sprachtranskription, Embeddings und Gesichtserkennung laufen lokal; mit lokalem Modell bleibt alles offline.">
     <meta name="keywords" content="AI Agent, KI Agent, autonomous agent, desktop automation, LLM, Gemini, Claude, Anthropic, OpenAI, Ollama, RAG, WhatsApp Bot, Python, FastAPI, Linux, self-hosted, open source, VNC, multi-agent, skill system, chatbot, voice assistant, AGPL, jarvis">
     <meta name="author" content="Andreas Bender">
     <meta name="robots" content="index, follow">
@@ -376,6 +376,8 @@
     <div class="nav-links">
         <a href="#features"    class="t-de">Funktionen</a>
         <a href="#features"    class="t-en">Features</a>
+        <a href="#privacy"     class="t-de">Datenschutz</a>
+        <a href="#privacy"     class="t-en">Privacy</a>
         <a href="#openclaw">OpenClaw</a>
         <a href="#screenshots" class="t-de">Screenshots</a>
         <a href="#screenshots" class="t-en">Screenshots</a>
@@ -607,6 +609,56 @@
                 <div class="feature-title t-en">Proactive Rating System &amp; Self-Improvement</div>
                 <div class="feature-desc t-de"><strong>Jarvis lernt von dir – nach jeder Antwort.</strong> Mit einem Klick auf 👍, 👎 oder ❌ gibst du direktes Feedback. Bei negativer Bewertung analysiert Jarvis seine Antwort automatisch mit einem zweiten LLM, generiert <strong>3–5 konkret bessere Alternativen</strong> und leitet eine Lernregel ab, die dauerhaft in die Wissensbasis einfliesst. Keine manuelle Konfiguration – echte Verbesserung durch echtes Feedback. Verfügbar in Web-Chat, Android-App, iOS-PWA und Windows-App.</div>
                 <div class="feature-desc t-en"><strong>Jarvis learns from you – after every single answer.</strong> One tap on 👍, 👎 or ❌ sends instant feedback. On negative ratings, Jarvis automatically analyses its response with a second LLM, generates <strong>3–5 concretely better alternatives</strong> and derives a learning rule that permanently feeds into the knowledge base. No manual configuration – real improvement from real feedback. Available in Web Chat, Android App, iOS PWA and Windows App.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="privacy">
+    <div class="container">
+        <h2 class="section-title reveal">
+            <span class="t-de">Datenschutz by Design</span>
+            <span class="t-en">Privacy by Design</span>
+        </h2>
+        <p class="section-sub reveal">
+            <span class="t-de">Selbst-gehostet auf deinem eigenen Server – du behältst die Kontrolle über deine Daten.</span>
+            <span class="t-en">Self-hosted on your own server – you stay in control of your data.</span>
+        </p>
+        <div class="features-grid">
+            <div class="feature-card reveal">
+                <div class="feature-icon">🏠</div>
+                <div class="feature-title t-de">Selbst-gehostet</div>
+                <div class="feature-title t-en">Self-hosted</div>
+                <div class="feature-desc t-de">Jarvis läuft komplett auf deinem eigenen Linux-Server – keine fremde Cloud, kein Konto, kein Abo. Alle Dateien, Logs und Einstellungen liegen bei dir.</div>
+                <div class="feature-desc t-en">Jarvis runs entirely on your own Linux server – no third-party cloud, no account, no subscription. All files, logs and settings stay with you.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🔒</div>
+                <div class="feature-title t-de">Lokale Verarbeitung</div>
+                <div class="feature-title t-en">Local Processing</div>
+                <div class="feature-desc t-de">Volltextsuche &amp; Embeddings (RAG/ChromaDB), Bild-OCR (Tesseract), Sprachtranskription (Whisper) und Gesichtserkennung laufen <strong>vollständig auf deiner Maschine</strong> – ganz ohne externe Dienste.</div>
+                <div class="feature-desc t-en">Full-text search &amp; embeddings (RAG/ChromaDB), image OCR (Tesseract), speech transcription (Whisper) and face recognition run <strong>entirely on your machine</strong> – with no external services.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🧠</div>
+                <div class="feature-title t-de">Dein Gedächtnis bleibt bei dir</div>
+                <div class="feature-title t-en">Your Memory Stays With You</div>
+                <div class="feature-desc t-de">Wissensdatenbank, Gedächtnis und Konversations-Verlauf werden lokal als Dateien gespeichert. Nichts davon wird zu einem Anbieter hochgeladen.</div>
+                <div class="feature-desc t-en">Knowledge base, memory and conversation history are stored locally as files. None of it is uploaded to any provider.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🌐</div>
+                <div class="feature-title t-de">Du entscheidest über die KI</div>
+                <div class="feature-title t-en">You Decide on the AI</div>
+                <div class="feature-desc t-de">Mit einem <strong>lokalen Modell (Ollama/LM Studio) bleibt auch die KI-Verarbeitung offline</strong> – kein Byte verlässt deinen Server. Wählst du einen Cloud-Anbieter (Gemini/Claude/…), wird nur der jeweilige Prompt dorthin gesendet – pro Profil einstellbar.</div>
+                <div class="feature-desc t-en">With a <strong>local model (Ollama/LM Studio), the AI processing also stays offline</strong> – not a byte leaves your server. If you pick a cloud provider (Gemini/Claude/…), only the respective prompt is sent there – configurable per profile.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">⚙️</div>
+                <div class="feature-title t-de">Transparente Ausnahmen</div>
+                <div class="feature-title t-en">Transparent Exceptions</div>
+                <div class="feature-desc t-de">Internet nutzen nur Funktionen, die es erfordern – z. B. Websuche, Browser, WhatsApp/Telegram, Gmail oder ein Cloud-LLM. Diese Skills aktivierst du bewusst selbst; standardmäßig bleibt Jarvis bei sich.</div>
+                <div class="feature-desc t-en">Only features that require it use the internet – e.g. web search, browser, WhatsApp/Telegram, Gmail or a cloud LLM. You enable these skills deliberately; by default Jarvis keeps to itself.</div>
             </div>
         </div>
     </div>

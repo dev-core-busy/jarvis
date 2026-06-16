@@ -60,18 +60,59 @@ class SkillManager:
     def enable_skill(self, name: str) -> bool:
         """Aktiviert einen Skill."""
         config.save_skill_state(name, {"enabled": True})
+        ok = True
         try:
             self.loader.load_skill(name)
-            return True
         except Exception as e:
             print(f"Skill '{name}' konnte nicht aktiviert werden: {e}")
-            return False
+            ok = False
+        # An den Skill gekoppelten systemd-Dienst (z.B. whatsapp-bridge) mitstarten
+        self._control_skill_service(name, start=True)
+        return ok
 
     def disable_skill(self, name: str) -> bool:
         """Deaktiviert einen Skill."""
         config.save_skill_state(name, {"enabled": False})
         self.loader.unload_skill(name)
+        # Gekoppelten systemd-Dienst ebenfalls stoppen+deaktivieren
+        self._control_skill_service(name, start=False)
         return True
+
+    def _skill_service(self, name: str) -> str | None:
+        """Liest das Feld 'systemd_service' aus dem Skill-Manifest, falls vorhanden."""
+        for s in self.loader.discover_skills():
+            if "error" in s:
+                continue
+            if Path(s["path"]).name == name:
+                svc = s.get("systemd_service")
+                return svc.strip() if isinstance(svc, str) and svc.strip() else None
+        return None
+
+    def _control_skill_service(self, name: str, start: bool):
+        """Koppelt einen optionalen systemd-Dienst an den Skill-Zustand.
+
+        Skill aktiviert -> Dienst 'enable --now', deaktiviert -> 'disable --now'.
+        Best-effort: schlaegt fehl lautlos (kein systemctl, kein Root, keine Unit),
+        damit das Aktivieren/Deaktivieren des Skills nie daran scheitert.
+        """
+        svc = self._skill_service(name)
+        if not svc:
+            return
+        if not shutil.which("systemctl"):
+            return
+        unit = svc if svc.endswith(".service") else svc + ".service"
+        action = ["enable", "--now"] if start else ["disable", "--now"]
+        try:
+            r = subprocess.run(["systemctl", *action, unit],
+                               capture_output=True, text=True, timeout=20)
+            verb = "gestartet+aktiviert" if start else "gestoppt+deaktiviert"
+            if r.returncode == 0:
+                print(f"Skill '{name}': Dienst {unit} {verb}.")
+            else:
+                print(f"Skill '{name}': Dienst {unit} konnte nicht {verb} werden "
+                      f"(rc={r.returncode}): {(r.stderr or '').strip()[:200]}")
+        except Exception as e:
+            print(f"Skill '{name}': Dienststeuerung ({unit}) fehlgeschlagen: {e}")
 
     def get_skill_config(self, name: str) -> dict:
         """Gibt die Konfiguration eines Skills zurück."""

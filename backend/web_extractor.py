@@ -60,11 +60,25 @@ _CT_TO_SUFFIX: dict[str, str] = {
     "video/mp4":    ".mp4",
     "video/quicktime": ".mov",
     "video/x-matroska": ".mkv",
+    "image/jpeg":   ".jpg",
+    "image/png":    ".png",
+    "image/gif":    ".gif",
+    "image/bmp":    ".bmp",
+    "image/webp":   ".webp",
+    "image/tiff":   ".tiff",
 }
 _FILE_SUFFIXES: frozenset[str] = frozenset(
     ".pdf .docx .doc .xlsx .xls .ods .pptx .csv "
-    ".mp3 .m4a .wav .ogg .mp4 .mov .mkv .avi".split()
+    ".mp3 .m4a .wav .ogg .mp4 .mov .mkv .avi "
+    ".jpg .jpeg .png .gif .bmp .tif .tiff .webp".split()
 )
+
+# Bild-Endung -> MIME (fuer den optionalen Vision-Pass an das LLM)
+_IMAGE_MIME: dict[str, str] = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".gif": "image/gif", ".bmp": "image/bmp", ".webp": "image/webp",
+    ".tif": "image/tiff", ".tiff": "image/tiff",
+}
 
 
 # ─── URL abrufen ─────────────────────────────────────────────────────────────
@@ -363,15 +377,27 @@ async def extract_from_file(filename: str, content: bytes, source_url: str | Non
         except Exception:
             pass
 
-    if not text or not text.strip():
-        raise ValueError(
-            f"Datei enthält keinen extrahierbaren Text (Format: {suffix}). "
-            "Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, "
-            "MP3/M4A/WAV (Transkription via Whisper), MP4/MOV/MKV."
-        )
+    is_image = suffix in _IMAGE_MIME
+    ocr_text = (text or "").strip()
 
-    # Auf 8 000 Zeichen kürzen (LLM-Kontext)
-    text = text[:8000]
+    if is_image:
+        # Bilder: NICHT abbrechen, wenn OCR leer ist – ein vision-faehiges LLM kann das
+        # Bild trotzdem auswerten. Der OCR-Text wird zur Pruefung/Korrektur mitgegeben.
+        content_for_llm = (
+            f"[Bild: {filename}]\n\n"
+            f"Per OCR (Tesseract) erkannter Text:\n{ocr_text or '(kein Text per OCR erkannt)'}\n\n"
+            "Aufgabe: Pruefe und korrigiere den OCR-Text anhand des Bildes und beschreibe "
+            "relevante visuelle Inhalte (Diagramme, Tabellen, Objekte, Beschriftungen). "
+            "Extrahiere daraus das Wissen."
+        )[:8000]
+    else:
+        if not ocr_text:
+            raise ValueError(
+                f"Datei enthält keinen extrahierbaren Text (Format: {suffix}). "
+                "Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, Bilder (OCR via Tesseract), "
+                "MP3/M4A/WAV (Transkription via Whisper), MP4/MOV/MKV."
+            )
+        content_for_llm = f"[Datei: {filename}]\n\n{ocr_text[:8000]}"
 
     # LLM-Extraktion – gleiche Pipeline wie URL-Extraktion
     from backend.config import config
@@ -386,13 +412,32 @@ async def extract_from_file(filename: str, content: bytes, source_url: str | Non
         prompt_tool_calling=False,
     )
 
-    prompt = _EXTRACT_PROMPT.replace("{content}", f"[Datei: {filename}]\n\n{text}")
-    response = await provider.generate_response(
-        model=config.current_model,
-        system_prompt="Du bist ein Wissensextraktor. Antworte ausschließlich mit dem angeforderten JSON.",
-        contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
-        tools=[],
-    )
+    prompt = _EXTRACT_PROMPT.replace("{content}", content_for_llm)
+
+    # Bild nur anhaengen, wenn nicht zu gross (Provider-Limits); sonst nur OCR-Text
+    _vision = is_image and len(content) <= 8 * 1024 * 1024
+
+    async def _call_llm(with_image: bool):
+        parts = []
+        if with_image:
+            parts.append(types.Part.from_bytes(data=content, mime_type=_IMAGE_MIME[suffix]))
+        parts.append(types.Part.from_text(text=prompt))
+        return await provider.generate_response(
+            model=config.current_model,
+            system_prompt="Du bist ein Wissensextraktor. Antworte ausschließlich mit dem angeforderten JSON.",
+            contents=[types.Content(role="user", parts=parts)],
+            tools=[],
+        )
+
+    if _vision:
+        try:
+            response = await _call_llm(with_image=True)
+        except Exception as _img_err:
+            # Profil nicht vision-faehig o.ae. -> Text-only-Fallback (nur OCR-Text/Beschreibung)
+            print(f"⚠️  Vision-Pass fehlgeschlagen, nutze nur OCR-Text: {_img_err}")
+            response = await _call_llm(with_image=False)
+    else:
+        response = await _call_llm(with_image=False)
 
     raw_text = ""
     if response.parts:

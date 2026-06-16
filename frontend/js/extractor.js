@@ -123,7 +123,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                 <div id="ext-panel-file" style="display:none;">
                     <div class="ext-drop-zone" id="ext-drop-zone">
                         <input type="file" id="ext-file-input"
-                            accept=".pdf,.txt,.md,.rst,.csv,.docx,.doc,.xlsx,.ods,.pptx,.mp3,.m4a,.wav,.ogg,.mp4,.mov,.mkv,.avi">
+                            accept=".pdf,.txt,.md,.rst,.csv,.docx,.doc,.xlsx,.ods,.pptx,.jpg,.jpeg,.png,.gif,.bmp,.tif,.tiff,.webp,.mp3,.m4a,.wav,.ogg,.mp4,.mov,.mkv,.avi">
                         <div style="font-size:1.8rem;line-height:1;">📄</div>
                         <div class="ext-drop-zone-label">Datei hierher ziehen oder <span style="color:var(--accent);text-decoration:underline;cursor:pointer;">durchsuchen</span></div>
                         <div class="ext-drop-zone-hint">PDF · DOCX · XLSX · PPTX · TXT · MD · CSV · MP3 · MP4 · MOV · max. 50 MB</div>

@@ -31,6 +31,7 @@ EXTENSIONS_XLSX = {".xlsx", ".xls"}
 EXTENSIONS_PPTX = {".pptx"}
 EXTENSIONS_VIDEO = {".mp4", ".mkv", ".avi", ".webm", ".mov", ".m4v", ".flv", ".wmv"}
 EXTENSIONS_AUDIO = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".opus"}
+EXTENSIONS_IMAGE = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp"}
 
 _cache_lock = threading.Lock()
 _log = logging.getLogger("jarvis.knowledge")
@@ -266,8 +267,40 @@ def _transcribe_media(filepath: Path) -> str | None:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def _ocr_image(filepath: Path) -> str | None:
+    """OCR auf einem Bild via Tesseract (Deutsch+Englisch). Gibt erkannten Text zurueck.
+
+    Lokal, kein LLM. Voraussetzung: System-Paket 'tesseract-ocr' (+ Sprachpakete)
+    und Python-Pakete 'pytesseract' + 'Pillow'. Fehlt etwas, wird None zurueckgegeben
+    (das LLM kann dann ggf. noch das Bild selbst auswerten – siehe extract_from_file).
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        _log.warning("pytesseract/Pillow nicht installiert – Bild-OCR deaktiviert")
+        return None
+    try:
+        # Sprachen auf verfuegbare beschraenken (deu/eng), sonst Tesseract-Default
+        lang = None
+        try:
+            avail = set(pytesseract.get_languages(config=""))
+            sel = [l for l in ("deu", "eng") if l in avail]
+            lang = "+".join(sel) if sel else None
+        except Exception:
+            lang = "deu+eng"
+        with Image.open(str(filepath)) as img:
+            img.load()
+            text = pytesseract.image_to_string(img, lang=lang) if lang else pytesseract.image_to_string(img)
+        text = (text or "").strip()
+        return text or None
+    except Exception as e:
+        _log.warning(f"Bild-OCR fehlgeschlagen ({filepath.name}): {e}")
+        return None
+
+
 def _extract_text(filepath: Path, max_bytes: int) -> str | None:
-    """Extrahiert Text aus einer Datei (Text/PDF/DOCX/XLSX/PPTX/Video/Audio)."""
+    """Extrahiert Text aus einer Datei (Text/PDF/DOCX/XLSX/PPTX/Bild-OCR/Video/Audio)."""
     try:
         if filepath.stat().st_size > max_bytes:
             return None
@@ -350,6 +383,9 @@ def _extract_text(filepath: Path, max_bytes: int) -> str | None:
             return None
         except Exception:
             return None
+
+    if suffix in EXTENSIONS_IMAGE:
+        return _ocr_image(filepath)
 
     if suffix in EXTENSIONS_VIDEO | EXTENSIONS_AUDIO:
         # Video/Audio: max_bytes-Check großzügiger (200MB Default für Medien)
@@ -902,6 +938,15 @@ class KnowledgeManageTool(BaseTool):
                 formats.append("Video/Audio")
             else:
                 formats.append("Video/Audio ⚠️ (ffmpeg + faster-whisper nötig)")
+            # Bild-OCR (Tesseract)
+            try:
+                import pytesseract as _pt  # noqa: F401
+                import shutil as _sh
+                _ocr_ok = bool(_sh.which("tesseract"))
+            except Exception:
+                _ocr_ok = False
+            formats.append("Bilder/OCR" if _ocr_ok
+                           else "Bilder/OCR ⚠️ (tesseract-ocr + pytesseract nötig)")
             size_mb = stats["total_size_bytes"] / (1024 * 1024)
 
             # Vektor-Info

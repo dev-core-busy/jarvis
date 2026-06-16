@@ -3008,10 +3008,12 @@ async def upload_knowledge_files(
         _get_folders, PROJECT_ROOT,
         EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,
         EXTENSIONS_XLSX, EXTENSIONS_PPTX, EXTENSIONS_VIDEO, EXTENSIONS_AUDIO,
+        EXTENSIONS_IMAGE,
     )
 
     all_exts = (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX |
-                EXTENSIONS_XLSX | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO)
+                EXTENSIONS_XLSX | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO |
+                EXTENSIONS_IMAGE)
 
     # Zielordner validieren
     target = None
@@ -3112,6 +3114,7 @@ async def knowledge_extract_upload(
     _SUPPORTED = {
         ".pdf", ".txt", ".md", ".rst", ".csv",
         ".docx", ".doc", ".xlsx", ".ods", ".pptx",
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp",
         ".mp3", ".m4a", ".wav", ".ogg",
         ".mp4", ".mov", ".mkv", ".avi",
     }

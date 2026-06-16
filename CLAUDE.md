@@ -13,7 +13,7 @@ Autonomer KI-Agent auf einem Linux-Server (Debian 13) mit Web-Frontend, Desktop-
   - Deploy via `windows-app-go/build.sh` (FTPS). ⚠️ FTPS-Passwort steht dort im Klartext und ist ins oeffentliche Repo committet – sollte rotiert/ausgelagert werden.
 - **Desktop-User:** `jarvis` (autologin via lightdm), Web-Login: `jarvis/jarvis`
 - **Services:** `systemctl restart jarvis.service` + `systemctl restart whatsapp-bridge.service`
-- ⚠️ **Git-Remote** enthaelt einen GitHub-PAT im Klartext in `.git/config` – beim Anzeigen redigieren, nicht in Logs ausgeben.
+- **Git-Remote:** lokaler Clone nutzt SSH (`git@github.com:dev-core-busy/jarvis.git`) – kein Token mehr in `.git/config` (Stand 2026-06-16). Repo ist public; Server ziehen token-los per HTTPS.
 
 ## Architektur
 ```

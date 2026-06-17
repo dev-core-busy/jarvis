@@ -1,0 +1,79 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Jarvis – Gemeinsame Theme-Variablen (Single Source of Truth)
+   ───────────────────────────────────────────────────────────────────
+   Wird VOR style.css / chat.css auf ALLEN Seiten eingebunden.
+   Dark = :root (Default), Hell = body.light.
+   Der Branding-Skill (branding.js) ueberschreibt diese Variablen zur
+   Laufzeit inline auf <body> → wirkt dadurch einheitlich auf allen Seiten.
+   chat.css aliast seine eigenen Namen (--purple/--bg/--surface/…) auf
+   diese Variablen, damit Branding + Dark/Light ueberall identisch greifen.
+   ═══════════════════════════════════════════════════════════════════ */
+:root {
+    /* Tinten-/Schatten-Basis (Dark = Weiss/Schwarz); im Light-Theme gekippt.
+       Alle rgba(var(--fg-rgb), …)-Raender/-Overlays folgen automatisch. */
+    --fg-rgb: 255, 255, 255;
+    --shadow-rgb: 0, 0, 0;
+
+    --bg-primary: #0a0e17;
+    --bg-secondary: #111827;
+    --bg-glass: rgba(15, 23, 42, 0.75);
+    --bg-glass-heavy: rgba(15, 23, 42, 0.9);
+
+    --border: rgba(var(--fg-rgb), 0.08);
+    --border-hover: rgba(var(--fg-rgb), 0.15);
+
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+
+    /* Akzent = Markenfarbe (Default Lila, von Branding ueberschrieben) */
+    --accent: #9B59B6;
+    --accent-hover: #BB86FC;
+    --accent-dark: #6A0DAD;
+    --accent-glow: rgba(155, 89, 182, 0.4);
+    --accent-light: rgba(155, 89, 182, 0.1);
+    /* RGB-Tripel des Akzents fuer Toenungen rgba(var(--accent-rgb), …).
+       Wird von branding.js aus der Markenfarbe mitgesetzt. */
+    --accent-rgb: 155, 89, 182;
+    /* Akzent-Verlauf fuer Primaer-Buttons (.btn-primary). Akzentbasiert,
+       damit Branding automatisch greift. */
+    --gradient: linear-gradient(135deg, var(--accent), var(--accent-dark));
+
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --info: #3b82f6;
+
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+
+    --shadow-sm: 0 2px 8px rgba(var(--shadow-rgb), 0.3);
+    --shadow-md: 0 4px 16px rgba(var(--shadow-rgb), 0.4);
+    --shadow-lg: 0 8px 32px rgba(var(--shadow-rgb), 0.5);
+    --shadow-glow: 0 0 30px var(--accent-glow);
+
+    --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── Hell-Theme: kippt nur die Basis-Variablen, alles andere folgt ─── */
+body.light {
+    --fg-rgb: 17, 24, 39;
+    --shadow-rgb: 15, 23, 42;
+
+    --bg-primary: #f4f5f7;
+    --bg-secondary: #ffffff;
+    --bg-glass: rgba(255, 255, 255, 0.78);
+    --bg-glass-heavy: rgba(255, 255, 255, 0.92);
+
+    --border: rgba(var(--fg-rgb), 0.12);
+    --border-hover: rgba(var(--fg-rgb), 0.22);
+
+    --text-primary: #1a2233;
+    --text-secondary: #4a5568;
+    --text-muted: #7a8599;
+}

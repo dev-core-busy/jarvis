@@ -267,6 +267,8 @@
         updateWidget.init();
         _startContextIndicator();
         _startLlmStatusIndicator();
+        _initHeaderTts();
+        _startIssuesBadge();
         // Sprachübersetzungen nach Screen-Wechsel anwenden
         if (window.applyLang) window.applyLang();
     }
@@ -1243,7 +1245,8 @@
         const clean = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
         if (!clean) return;
         stopSpeak();
-        const voice = document.getElementById('setting-tts-voice')?.value || '';
+        const voice = document.getElementById('hdr-tts-voice')?.value
+                   || document.getElementById('setting-tts-voice')?.value || '';
         try {
             const resp = await fetch('/api/tts', {
                 method: 'POST',
@@ -1266,26 +1269,142 @@
     const SVG_SPEAKER_OFF = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>`;
 
     function _updateTtsBtn() {
-        if (!btnTts) return;
-        btnTts.classList.toggle('tts-active', _ttsEnabled);
-        btnTts.title = _ttsEnabled ? window.t('tts.on') : window.t('tts.off');
-        btnTts.innerHTML = _ttsEnabled ? SVG_SPEAKER_ON : SVG_SPEAKER_OFF;
+        if (btnTts) {
+            btnTts.classList.toggle('tts-active', _ttsEnabled);
+            btnTts.title = _ttsEnabled ? window.t('tts.on') : window.t('tts.off');
+            btnTts.innerHTML = _ttsEnabled ? SVG_SPEAKER_ON : SVG_SPEAKER_OFF;
+        }
+        // Header-Audio-Cluster (wie jarvis/chat) synchron halten
+        const _on   = document.getElementById('hdr-tts-on');
+        const _off  = document.getElementById('hdr-tts-off');
+        const _wrap = document.getElementById('hdr-tts-voicewrap');
+        const _hbtn = document.getElementById('btn-tts-hdr');
+        if (_on)   _on.style.display   = _ttsEnabled ? '' : 'none';
+        if (_off)  _off.style.display  = _ttsEnabled ? 'none' : '';
+        if (_wrap) _wrap.style.display = _ttsEnabled ? 'inline-flex' : 'none';
+        if (_hbtn) {
+            _hbtn.classList.toggle('tts-active', _ttsEnabled);
+            _hbtn.title = _ttsEnabled ? window.t('tts.on') : window.t('tts.off');
+        }
     }
 
-    if (btnTts) {
-        btnTts.addEventListener('click', async () => {
-            _ttsEnabled = !_ttsEnabled;
-            _updateTtsBtn();
-            if (!_ttsEnabled) stopSpeak();
-            // Persistieren
-            try {
-                await fetch('/api/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ tts_enabled: _ttsEnabled })
-                });
-            } catch (e) { /* ignore */ }
+    async function _toggleTts() {
+        _ttsEnabled = !_ttsEnabled;
+        _updateTtsBtn();
+        if (!_ttsEnabled) stopSpeak();
+        try {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ tts_enabled: _ttsEnabled })
+            });
+        } catch (e) { /* ignore */ }
+    }
+
+    if (btnTts) btnTts.addEventListener('click', _toggleTts);
+    {
+        const _hbtn = document.getElementById('btn-tts-hdr');
+        if (_hbtn) _hbtn.addEventListener('click', _toggleTts);
+    }
+
+    // ── Issue-Benachrichtigungs-Badge (roter Kreis mit Anzahl ueber dem Issue-Icon) ──
+    let _issuesBadgeTimer = null;
+    async function _refreshIssuesBadge() {
+        const badge = document.getElementById('issues-badge');
+        if (!badge) return;
+        try {
+            const r = await fetch('/api/issues/notifications', { headers: { 'Authorization': 'Bearer ' + token } });
+            if (!r.ok) { badge.style.display = 'none'; return; }
+            const d = await r.json();
+            const n = d.count || 0;
+            if (n > 0) { badge.textContent = n > 99 ? '99+' : String(n); badge.style.display = ''; }
+            else { badge.style.display = 'none'; }
+        } catch (e) { /* ignore */ }
+    }
+    function _startIssuesBadge() {
+        _refreshIssuesBadge();
+        if (!_issuesBadgeTimer) _issuesBadgeTimer = setInterval(_refreshIssuesBadge, 60000);
+    }
+    window._refreshIssuesBadge = _refreshIssuesBadge;
+    // Beim Oeffnen des Issue-Trackers gelten die Status-Aenderungen als gesehen
+    {
+        const _bi = document.getElementById('btn-issues');
+        if (_bi) _bi.addEventListener('click', () => {
+            const badge = document.getElementById('issues-badge');
+            if (badge) badge.style.display = 'none';
+            fetch('/api/issues/notifications/seen', {
+                method: 'POST', headers: { 'Authorization': 'Bearer ' + token }
+            }).catch(() => {});
         });
+    }
+
+    // Header-Audio-Cluster eigenstaendig initialisieren (unabhaengig vom Settings-Modal)
+    let _hdrTtsInit = false;
+    async function _initHeaderTts() {
+        const hv   = document.getElementById('hdr-tts-voice');
+        const prev = document.getElementById('btn-tts-preview-hdr');
+        let savedVoice = '';
+        try {
+            const r = await fetch('/api/settings', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (r.ok) {
+                const d = await r.json();
+                _ttsEnabled = d.tts_enabled || false;
+                savedVoice  = d.tts_voice || '';
+            }
+        } catch (e) { /* ignore */ }
+        _updateTtsBtn();
+        if (hv) {
+            try {
+                const rv = await fetch('/api/tts/voices', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (rv.ok) {
+                    const voices = await rv.json();
+                    hv.innerHTML = '<option value="">Standard</option>';
+                    voices.forEach(v => {
+                        const o = document.createElement('option');
+                        o.value = v.name; o.textContent = v.display || v.name;
+                        hv.appendChild(o);
+                    });
+                    if (savedVoice) hv.value = savedVoice;
+                }
+            } catch (e) { /* ignore */ }
+        }
+        if (_hdrTtsInit) return;   // Event-Handler nur einmal binden
+        _hdrTtsInit = true;
+        if (hv) {
+            hv.addEventListener('change', async () => {
+                const sv = document.getElementById('setting-tts-voice');
+                if (sv) sv.value = hv.value;
+                try {
+                    await fetch('/api/settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ tts_voice: hv.value })
+                    });
+                } catch (e) { /* ignore */ }
+            });
+        }
+        if (prev && hv) {
+            prev.addEventListener('click', async () => {
+                const previewText = window._lang === 'en'
+                    ? 'Hello, I am Jarvis, your autonomous AI assistant.'
+                    : 'Hallo, ich bin Jarvis, dein autonomer KI-Assistent.';
+                const orig = prev.innerHTML;
+                prev.disabled = true; prev.innerHTML = '⏳';
+                try {
+                    const resp = await fetch('/api/tts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ text: previewText, voice: hv.value || '' })
+                    });
+                    if (!resp.ok) throw new Error('tts');
+                    const url = URL.createObjectURL(await resp.blob());
+                    const a = new Audio(url); prev.innerHTML = '🔊';
+                    a.onended = () => { URL.revokeObjectURL(url); prev.innerHTML = orig; prev.disabled = false; };
+                    a.onerror = () => { URL.revokeObjectURL(url); prev.innerHTML = orig; prev.disabled = false; };
+                    await a.play();
+                } catch (e) { prev.innerHTML = orig; prev.disabled = false; }
+            });
+        }
     }
 
     // ─── Multi-Agent State ──────────────────────────────────────
@@ -3079,6 +3198,9 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         // ── TTS-Stimme speichern ──
         if (selectTtsVoice) {
             selectTtsVoice.addEventListener('change', async () => {
+                // Header-Stimme synchron halten
+                const hv = document.getElementById('hdr-tts-voice');
+                if (hv) hv.value = selectTtsVoice.value;
                 try {
                     await fetch('/api/settings', {
                         method: 'POST',

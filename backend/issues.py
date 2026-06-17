@@ -180,6 +180,7 @@ def create_issue(user: str, data: dict) -> tuple[dict | None, str]:
         "body": (data.get("body") or "").strip(),
         "type": data.get("type", "bug").strip().lower(),
         "status": "open",
+        "status_seen": "open",   # vom Autor zuletzt gesehener Status (fuer Badge-Benachrichtigung)
         "priority": data.get("priority", "medium").strip().lower(),
         "jarvis_comment": "",
         "attachments": [],
@@ -254,6 +255,45 @@ def update_issue(user: str, issue_id: str, patch: dict) -> tuple[dict | None, st
         issues[idx] = current
         _save_all(issues)
         return current, ""
+
+
+def unseen_count(user: str) -> int:
+    """Anzahl eigener Issues, deren Status sich seit dem letzten Ansehen geaendert hat.
+
+    Grundlage fuer die Badge-Benachrichtigung beim meldenden Benutzer.
+    """
+    u = (user or "").strip().lower()
+    if not u:
+        return 0
+    with _lock:
+        issues = _load_all()
+    n = 0
+    for i in issues:
+        if i.get("author", "").strip().lower() != u:
+            continue
+        if i.get("status") != i.get("status_seen", "open"):
+            n += 1
+    return n
+
+
+def mark_seen(user: str) -> int:
+    """Markiert alle eigenen Issues als 'Status gesehen' (loescht die Badge-Benachrichtigung).
+    Gibt die Anzahl aktualisierter Issues zurueck."""
+    u = (user or "").strip().lower()
+    if not u:
+        return 0
+    with _lock:
+        issues = _load_all()
+        changed = 0
+        for i in issues:
+            if i.get("author", "").strip().lower() != u:
+                continue
+            if i.get("status_seen", "open") != i.get("status"):
+                i["status_seen"] = i.get("status")
+                changed += 1
+        if changed:
+            _save_all(issues)
+    return changed
 
 
 def delete_issue(user: str, issue_id: str) -> tuple[bool, str]:

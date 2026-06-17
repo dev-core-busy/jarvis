@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=3">
-    <link rel="stylesheet" href="/static/css/style.css?v=86">
+    <link rel="stylesheet" href="/static/css/style.css?v=88">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -285,6 +285,19 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
             <div class="header-right">
                 <div class="connection-indicator" id="connection-dot" title="LLM-Verbindungsstatus"></div>
 
+                <!-- Audio / Sprachausgabe (wie jarvis/chat): Stimme + Soundtest + Lautsprecher-Toggle -->
+                <div id="hdr-tts-voicewrap" style="display:none;align-items:center;gap:4px;">
+                    <select id="hdr-tts-voice" data-i18n-title="chat.tts_toggle" title="Stimme wählen"
+                            style="max-width:150px;padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.8rem;">
+                        <option value="">Standard</option>
+                    </select>
+                    <button class="btn-icon" id="btn-tts-preview-hdr" data-i18n-title="profile.voice_preview" title="Soundtest">▶</button>
+                </div>
+                <button class="btn-icon" id="btn-tts-hdr" data-i18n-title="input.tts" title="Sprachausgabe ein/aus">
+                    <svg id="hdr-tts-on" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                    <svg id="hdr-tts-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                </button>
+
                 <!-- Sprach-Toggle im Header -->
                 <div class="lang-toggle header-lang" id="header-lang-toggle">
                     <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang('de')" title="Deutsch">DE</button>
@@ -308,6 +321,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <line x1="12" y1="8" x2="12" y2="12"/>
                         <line x1="12" y1="16" x2="12.01" y2="16"/>
                     </svg>
+                    <span class="issues-badge" id="issues-badge" style="display:none;"></span>
                 </button>
                 <button class="btn-icon" id="btn-settings" data-i18n-title="header.settings" title="KI-Einstellungen">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2016,17 +2030,17 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/extractor.js?v=10"></script>
     <script src="/static/js/vnc.js?v=16"></script>
-    <script src="/static/js/skills.js?v=24"></script>
+    <script src="/static/js/skills.js?v=25"></script>
     <script src="/static/js/whatsapp.js?v=9"></script>
     <script src="/static/js/knowledge.js?v=37"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/telemetry.js?v=4"></script>
     <script src="/static/js/chatlib.js?v=9"></script>
-    <script src="/static/js/issues.js?v=1"></script>
-    <script src="/static/js/branding.js?v=7"></script>
+    <script src="/static/js/issues.js?v=2"></script>
+    <script src="/static/js/branding.js?v=8"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/app.js?v=117"></script>
+    <script src="/static/js/app.js?v=119"></script>
 </body>
 
 </html>

@@ -92,20 +92,25 @@
         if (colors.text_primary) root.setProperty('--text-primary', colors.text_primary);
     }
 
-    // Setzt den Text reiner Marken-Labels (nicht über i18n gesteuert)
+    // Setzt den Text reiner Marken-Labels (nicht über i18n gesteuert).
+    // Originaltexte werden in data-brand-orig gemerkt, damit resetBranding()
+    // beim Deaktivieren des Skills exakt den Ausgangszustand wiederherstellt.
     function setBrandLabels(name) {
         if (!name) return;
         ['.login-title', '.header-title', '.topbar-title'].forEach(function (sel) {
             document.querySelectorAll(sel).forEach(function (el) {
+                if (el.dataset.brandOrig === undefined) el.dataset.brandOrig = el.textContent;
                 el.textContent = name;
             });
         });
         // Seitentitel + Begrüßungs-/Hinweistexte: 'Jarvis' → Firmenname
         if (document.title) {
+            if (window.__brandOrigTitle === undefined) window.__brandOrigTitle = document.title;
             document.title = document.title.replace(/jarvis/ig, name);
         }
         document.querySelectorAll('[placeholder]').forEach(function (el) {
             if (/jarvis/i.test(el.placeholder)) {
+                if (el.dataset.brandOrigPh === undefined) el.dataset.brandOrigPh = el.placeholder;
                 el.placeholder = el.placeholder.replace(/jarvis/ig, name);
             }
         });
@@ -113,9 +118,41 @@
         ['.log-welcome p', '[data-i18n="chat.greeting"]'].forEach(function (sel) {
             document.querySelectorAll(sel).forEach(function (el) {
                 if (/jarvis/i.test(el.textContent)) {
+                    if (el.dataset.brandOrig === undefined) el.dataset.brandOrig = el.textContent;
                     el.textContent = el.textContent.replace(/jarvis/ig, name);
                 }
             });
+        });
+    }
+
+    // Macht jegliches angewandte Branding rueckgaengig → Standard-Jarvis-Design.
+    // Wird bei /api/branding active:false und beim Deaktivieren des Skills gerufen.
+    function resetBranding() {
+        _current = null;
+        // 1) Inline-CSS-Variablen entfernen (Themes/Defaults greifen wieder)
+        var root = (document.body || document.documentElement).style;
+        ['--accent', '--accent-glow', '--accent-light', '--accent-rgb',
+         '--accent-dark', '--accent-hover', '--bg-primary', '--bg-secondary',
+         '--text-primary'].forEach(function (p) { root.removeProperty(p); });
+        // 2) Marken-Labels wiederherstellen
+        document.querySelectorAll('[data-brand-orig]').forEach(function (el) {
+            el.textContent = el.dataset.brandOrig;
+            delete el.dataset.brandOrig;
+        });
+        document.querySelectorAll('[data-brand-orig-ph]').forEach(function (el) {
+            el.placeholder = el.dataset.brandOrigPh;
+            delete el.dataset.brandOrigPh;
+        });
+        if (window.__brandOrigTitle !== undefined) {
+            document.title = window.__brandOrigTitle;
+            window.__brandOrigTitle = undefined;
+        }
+        // 3) Logos/Avatare auf das Standard-'J' zuruecksetzen
+        document.querySelectorAll(AVATAR_SELECTOR).forEach(function (core) {
+            core.classList.remove('branding-logo-img');
+            core._brandedUrl = '';
+            core.style.background = '';
+            core.textContent = 'J';
         });
     }
 
@@ -198,8 +235,10 @@
             .then(function (b) {
                 try { localStorage.setItem(CACHE_KEY, JSON.stringify(b)); } catch (e) {}
                 if (!b || !b.active) {
-                    // Skill deaktiviert → Cache leeren, Standard bleibt
+                    // Skill deaktiviert → Cache leeren UND angewandtes Branding
+                    // vollstaendig zuruecksetzen (Standard-Jarvis-Design).
                     try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
+                    resetBranding();
                     return;
                 }
                 applyBranding(b);
@@ -217,6 +256,7 @@
     }
 
     window.refreshBranding = refreshBranding;
+    window.resetBranding = resetBranding;
     window.brandAvatar = brandAvatar;
 
     // Bei Hell/Dunkel-Wechsel das passende Farb-/Logo-Set neu anwenden

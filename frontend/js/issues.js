@@ -290,7 +290,7 @@
                     <span class="jv-iss-badge" style="background:${_statusColor(i.status)}">${_statusLabel(i.status)}</span>
                 </div>
                 <div class="jv-iss-item-meta">
-                    <span class="jv-iss-item-author">${_escape(i.author)}</span>
+                    <span class="jv-iss-item-author" title="Melder">👤 ${_escape(i.author || '—')}</span>
                     <span>${_fmtDate(i.created)}</span>
                     ${(i.attachments && i.attachments.length) ? `<span>📎 ${i.attachments.length}</span>` : ''}
                 </div>
@@ -356,7 +356,7 @@
                 </div>
                 <div class="jv-iss-detail-value" style="font-size:16px;font-weight:600;color:#fff;">${_escape(issue.title)}</div>
                 <div class="jv-iss-item-meta" style="margin-top:6px;">
-                    <span class="jv-iss-item-author">${_escape(issue.author)}</span>
+                    <span class="jv-iss-item-author" title="Melder">👤 Gemeldet von: ${_escape(issue.author || '—')}</span>
                     <span>Erstellt: ${_fmtDate(issue.created)}</span>
                     <span>Aktualisiert: ${_fmtDate(issue.updated)}</span>
                 </div>

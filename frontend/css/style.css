@@ -868,6 +868,25 @@ body {
     transition: all var(--transition);
 }
 
+/* Benachrichtigungs-Badge (roter Kreis mit Anzahl) ueber dem Issue-Tracker-Icon */
+.issues-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: #dc2626;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--bg-base, #0b0f17);
+    pointer-events: none;
+}
+
 .btn-icon:hover {
     background: var(--bg-input);
     color: var(--text-primary);
@@ -2241,7 +2260,7 @@ body {
 .header-user-badge {
     display: inline-flex;
     align-items: center;
-    max-width: 140px;
+    max-width: 220px;
     padding: 3px 10px;
     border-radius: 12px;
     background: var(--bg-glass, rgba(var(--fg-rgb), 0.06));

@@ -220,7 +220,7 @@ body {
 .chat-own-badge {
     display: inline-flex;
     align-items: center;
-    max-width: 140px;
+    max-width: 220px;
     padding: 3px 10px;
     border-radius: 12px;
     background: rgba(var(--fg-rgb), 0.06);

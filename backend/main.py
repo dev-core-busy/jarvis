@@ -1743,6 +1743,12 @@ async def get_config():
         "websockify_port": config.WEBSOCKIFY_PORT,
         "vnc_available": vnc_ok,
     })
+
+
+@app.get("/api/me")
+async def get_me(user: str = Depends(require_auth)):
+    """Gibt den aktuell angemeldeten Benutzernamen zurueck (fuer Titelleisten-Anzeige)."""
+    return JSONResponse({"username": user})
 @app.get("/api/cert")
 async def download_cert():
     """Zertifikat zum Download anbieten (DER-Format .cer für Windows)."""
@@ -2660,6 +2666,118 @@ async def reload_skills(user: str = Depends(require_local_auth)):
     if agent_instance:
         agent_instance.reload_skills()
     return JSONResponse({"success": True})
+
+
+# ─── Branding / White-Label ──────────────────────────────────────────
+_BRANDING_DIR = Path(__file__).parent.parent / "data" / "branding"
+_BRANDING_LOGO_EXTS = {"png", "jpg", "jpeg", "svg", "webp", "gif"}
+
+
+def _branding_state() -> tuple[bool, dict]:
+    """Gibt (enabled, config) des Branding-Skills zurück."""
+    states = config.get_skill_states()
+    st = states.get("branding", {})
+    return bool(st.get("enabled", False)), (st.get("config", {}) or {})
+
+
+def _branding_logo_stem(variant: str) -> str:
+    """Dateistamm je Logo-Variante (dark = Standard, light = Hell-Modus)."""
+    return "logo_light" if variant == "light" else "logo"
+
+
+def _branding_logo_path(variant: str = "dark") -> Path | None:
+    """Sucht eine vorhandene Logo-Datei (data/branding/<stem>.<ext>)."""
+    stem = _branding_logo_stem(variant)
+    for ext in _BRANDING_LOGO_EXTS:
+        p = _BRANDING_DIR / f"{stem}.{ext}"
+        if p.exists():
+            return p
+    return None
+
+
+@app.get("/api/branding")
+async def get_branding():
+    """Liefert das aktive Branding (öffentlich – wird schon auf der Loginseite gebraucht).
+
+    Nur wenn der Branding-Skill aktiviert ist, werden Werte geliefert; sonst
+    ``active: false`` → Frontend rendert das Standard-Jarvis-Design.
+
+    Farben und Logo gibt es getrennt für Dunkel- (``colors``/``logo_url``) und
+    Hell-Modus (``colors_light``/``logo_url_light``). Fehlt eine Hell-Variante,
+    faellt das Frontend auf die Dunkel-Variante zurueck.
+    """
+    enabled, cfg = _branding_state()
+    if not enabled:
+        return JSONResponse({"active": False})
+
+    ts = int(time.time())
+    logo = _branding_logo_path("dark")
+    logo_light = _branding_logo_path("light")
+    return JSONResponse({
+        "active": True,
+        "company_name": cfg.get("company_name", ""),
+        "core_letter": cfg.get("core_letter", ""),
+        "logo_mode": cfg.get("logo_mode", "letter"),
+        "colors": cfg.get("colors", {}) or {},
+        "colors_light": cfg.get("colors_light", {}) or {},
+        "logo_url": ("/api/branding/logo?t=%d" % ts) if logo else "",
+        "logo_url_light": ("/api/branding/logo?variant=light&t=%d" % ts) if logo_light else "",
+    })
+
+
+@app.get("/api/branding/logo")
+async def get_branding_logo(variant: str = "dark"):
+    """Serviert das hochgeladene Firmenlogo (öffentlich)."""
+    logo = _branding_logo_path(variant)
+    if not logo:
+        return JSONResponse({"error": "kein Logo"}, status_code=404)
+    media = {
+        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "svg": "image/svg+xml", "webp": "image/webp", "gif": "image/gif",
+    }.get(logo.suffix.lstrip(".").lower(), "application/octet-stream")
+    return FileResponse(str(logo), media_type=media)
+
+
+@app.post("/api/branding/logo")
+async def upload_branding_logo(file: UploadFile = File(...),
+                               variant: str = Form("dark"),
+                               user: str = Depends(require_local_auth)):
+    """Lädt ein Firmenlogo hoch (ersetzt ein vorhandenes der gleichen Variante)."""
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in _BRANDING_LOGO_EXTS:
+        return JSONResponse(
+            {"success": False, "error": f"Format .{ext} nicht erlaubt"},
+            status_code=400)
+    variant = "light" if variant == "light" else "dark"
+    stem = _branding_logo_stem(variant)
+    _BRANDING_DIR.mkdir(parents=True, exist_ok=True)
+    # Alte Logos dieser Variante (egal welche Endung) entfernen
+    for old in _BRANDING_DIR.glob(f"{stem}.*"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    data = await file.read()
+    (_BRANDING_DIR / f"{stem}.{ext}").write_bytes(data)
+    suffix = "&variant=light" if variant == "light" else ""
+    return JSONResponse({"success": True,
+                         "logo_url": "/api/branding/logo?t=%d%s" % (int(time.time()), suffix)})
+
+
+@app.delete("/api/branding/logo")
+async def delete_branding_logo(variant: str = "dark",
+                               user: str = Depends(require_local_auth)):
+    """Entfernt das hochgeladene Firmenlogo der angegebenen Variante."""
+    variant = "light" if variant == "light" else "dark"
+    stem = _branding_logo_stem(variant)
+    removed = False
+    for old in _BRANDING_DIR.glob(f"{stem}.*"):
+        try:
+            old.unlink()
+            removed = True
+        except OSError:
+            pass
+    return JSONResponse({"success": True, "removed": removed})
 
 
 # ─── Agent Task API (extern, z.B. für Vision-Aktionen) ───────────────

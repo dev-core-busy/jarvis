@@ -1561,12 +1561,12 @@
 .jv-bubble-col{display:flex;flex-direction:column;}
 .jv-bubble-row.user .jv-bubble-col{align-items:flex-end;max-width:min(480px,85%);}
 .jv-bubble-row.bot  .jv-bubble-col{align-items:flex-start;max-width:92%;}
-.jv-bubble-avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#9B59B6,#6A0DAD);
+.jv-bubble-avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-dark));
   display:flex;align-items:center;justify-content:center;font-size:calc(12px * var(--jv-zoom,1));font-weight:700;
   color:#fff;flex-shrink:0;align-self:flex-end;}
 .jv-bubble{padding:9px 13px;font-size:calc(14px * var(--jv-zoom,1));line-height:1.55;color:#fff;
   overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;}
-.jv-bubble-row.user .jv-bubble{background:rgba(155,89,182,.4);border-radius:16px 4px 16px 16px;}
+.jv-bubble-row.user .jv-bubble{background:rgba(var(--accent-rgb), .4);border-radius:16px 4px 16px 16px;}
 .jv-bubble-row.bot  .jv-bubble{background:rgba(255,255,255,.08);border-radius:4px 16px 16px 16px;white-space:normal;}
 .jv-bubble-time{font-size:calc(10px * var(--jv-zoom,1));color:rgba(255,255,255,.32);padding:1px 4px;}
 .jv-bubble-row.user .jv-bubble-time{text-align:right;}
@@ -1593,21 +1593,40 @@
 .jv-bubble h1:first-child,.jv-bubble h2:first-child,.jv-bubble h3:first-child,.jv-bubble h4:first-child{margin-top:0;}
 .jv-bubble ul,.jv-bubble ol{padding-left:18px;margin:3px 0;}
 .jv-bubble li{margin:2px 0;line-height:1.45;}
-.jv-bubble blockquote{border-left:3px solid #9B59B6;padding:3px 9px;margin:5px 0;
-  color:rgba(255,255,255,.6);font-style:italic;background:rgba(155,89,182,.06);border-radius:0 4px 4px 0;}
-.jv-bubble a{color:#BB86FC;text-decoration:underline;text-underline-offset:2px;word-break:break-all;}
+.jv-bubble blockquote{border-left:3px solid var(--accent);padding:3px 9px;margin:5px 0;
+  color:rgba(255,255,255,.6);font-style:italic;background:rgba(var(--accent-rgb), .06);border-radius:0 4px 4px 0;}
+.jv-bubble a{color:var(--accent-hover);text-decoration:underline;text-underline-offset:2px;word-break:break-all;}
 .jv-bubble hr{border:none;border-top:1px solid rgba(255,255,255,.15);margin:7px 0;}
 .jv-bubble table{border-collapse:collapse;font-size:calc(12px * var(--jv-zoom,1));margin:6px 0;display:block;overflow-x:auto;}
 .jv-bubble th,.jv-bubble td{border:1px solid rgba(255,255,255,.18);padding:4px 8px;white-space:nowrap;}
-.jv-bubble th{background:rgba(155,89,182,.15);font-weight:600;}
+.jv-bubble th{background:rgba(var(--accent-rgb), .15);font-weight:600;}
 .jv-bubble tr:nth-child(even) td{background:rgba(255,255,255,.03);}
 /* Edit-Button/Edit-Area-Styles ausgelagert nach /css/chat-bubbles.css (siehe index.html). */
 /* ── Mehrfachauswahl (Checkbox-Loeschen) ── */
 .jv-msg-check{flex:0 0 auto;align-self:center;width:18px;height:18px;margin:0 2px;cursor:pointer;
-  accent-color:#9B59B6;}
+  accent-color:var(--accent);}
 .log-container.select-mode .jv-bubble-row{cursor:pointer;}
 .log-container.select-mode .jv-bubble-row.user .jv-msg-check{margin-right:auto;}
 .log-container.select-mode .jv-bubble-edit-btn{display:none;}
+/* ── Light-Mode: Bot-Bubbles haben fest color:#fff auf hellem bg → unsichtbar.
+   Hier auf dunklen Text + helle Flaechen kippen (analog Echt-System /chat). ── */
+body.light .jv-bubble{color:#1a2233;}
+body.light .jv-bubble-row.bot  .jv-bubble{background:rgba(0,0,0,.06);}
+body.light .jv-bubble-row.user .jv-bubble{background:rgba(var(--accent-rgb), .20);}
+body.light .jv-bubble-time{color:rgba(0,0,0,.40);}
+body.light .jv-bubble-stats{color:rgba(0,0,0,.45);}
+body.light .jv-date-sep::before,body.light .jv-date-sep::after{background:rgba(0,0,0,.12);}
+body.light .jv-date-sep span{color:rgba(0,0,0,.45);}
+body.light .jv-streaming-dots{color:rgba(0,0,0,.40);}
+body.light .jv-bubble code{background:rgba(0,0,0,.07);}
+body.light .jv-bubble pre{background:rgba(0,0,0,.06);}
+body.light .jv-bubble pre code{background:none;}
+body.light .jv-bubble blockquote{color:rgba(0,0,0,.6);background:rgba(var(--accent-rgb), .08);}
+body.light .jv-bubble a{color:var(--accent);}
+body.light .jv-bubble hr{border-top-color:rgba(0,0,0,.15);}
+body.light .jv-bubble th,body.light .jv-bubble td{border-color:rgba(0,0,0,.18);}
+body.light .jv-bubble th{background:rgba(var(--accent-rgb), .15);}
+body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         `;
         document.head.appendChild(s);
     })();
@@ -1696,6 +1715,8 @@
             const avatar = document.createElement('div');
             avatar.className = 'jv-bubble-avatar';
             avatar.textContent = 'J';
+            // Aktives Firmen-Branding (Logo/Buchstabe) auf den Avatar anwenden
+            if (window.brandAvatar) window.brandAvatar(avatar);
             row.appendChild(avatar);
         }
         row.appendChild(col);
@@ -2364,12 +2385,13 @@
         const tabKnowledge = document.getElementById('settings-tab-knowledge');
         const tabGoogle = document.getElementById('settings-tab-google');
         const tabVision = document.getElementById('settings-tab-vision');
+        const tabBranding = document.getElementById('settings-tab-branding');
         const tabMcp = document.getElementById('settings-tab-mcp');
         const tabTelemetry = document.getElementById('settings-tab-telemetry');
         const tabInstructions = document.getElementById('settings-tab-instructions');
         const tabSecurity = document.getElementById('settings-tab-security');
         const tabCron    = document.getElementById('settings-tab-cron');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabMcp, tabTelemetry, tabSecurity, tabCron];
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabMcp, tabTelemetry, tabSecurity, tabCron];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -2417,6 +2439,10 @@
                     tabVision.classList.add('active');
                     _initVisionCollapse();
                     if (window.visionManager) window.visionManager.refresh();
+                } else if (target === 'branding' && tabBranding) {
+                    tabBranding.style.display = '';
+                    tabBranding.classList.add('active');
+                    if (window.brandingAdmin) window.brandingAdmin.init();
                 } else if (target === 'telemetry' && tabTelemetry) {
                     tabTelemetry.style.display = '';
                     tabTelemetry.classList.add('active');
@@ -2500,6 +2526,34 @@
             }
         }
 
+        // ── Branding-Tab-Button: nur sichtbar wenn 'branding'-Skill aktiviert ──
+        const brandingTabBtn = document.getElementById('settings-tab-btn-branding');
+
+        window.updateBrandingTabVisibility = async function updateBrandingTabVisibility() {
+            if (!brandingTabBtn) return;
+            try {
+                const resp = await fetch('/api/skills', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json();
+                const skills = data.skills || data || [];
+                const brSkill = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'branding')
+                    : null;
+                const isEnabled = brSkill && brSkill.enabled;
+                brandingTabBtn.style.display = isEnabled ? '' : 'none';
+                // Falls Branding-Tab aktiv war und Skill nun deaktiviert → zu Profilen wechseln
+                if (!isEnabled && tabBranding && tabBranding.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
         // ── SSL-Status laden ──
         async function loadSslStatus() {
             try {
@@ -2568,6 +2622,7 @@
             await updateGoogleTabVisibility();
             await updateWhatsAppTabVisibility();
             await updateVisionTabVisibility();
+            await updateBrandingTabVisibility();
             loadSslStatus();
             showListView();
             // Ersten Tab aktivieren
@@ -3552,10 +3607,10 @@
 .log-fb-btn svg{display:block;}
 .log-fb-btn:hover:not(:disabled){border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.06);transform:scale(1.12);}
 .log-fb-btn:disabled{cursor:default;opacity:.45;}
-.log-fb-btn.log-fb-active{border-color:rgba(124,58,237,.7);background:rgba(124,58,237,.18);}
+.log-fb-btn.log-fb-active{border-color:rgba(var(--accent-rgb), .7);background:rgba(var(--accent-rgb), .18);}
 .log-fb-info{font-size:.72rem;color:rgba(255,255,255,.4);margin:2px 0 2px 8px;}
 .log-entry.log-task{color:rgba(167,139,250,.9);font-weight:500;
-  background:rgba(124,58,237,.07);border-left:2px solid rgba(124,58,237,.45);
+  background:rgba(var(--accent-rgb), .07);border-left:2px solid rgba(var(--accent-rgb), .45);
   padding-left:6px;margin:4px 0;}
 .log-container.hide-debug .log-entry.log-task{display:block!important;}
         `;

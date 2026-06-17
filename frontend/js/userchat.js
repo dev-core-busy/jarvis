@@ -571,7 +571,8 @@
         const displayText = (msg.text || '').trim();
         if (displayText && displayText !== ' ') bubble.innerHTML = linkify(displayText);
         _renderAttachments(bubble, msg);
-        wrap.appendChild(bubble);
+        // Leere Bubble (weder Text noch Anhang) nicht als leere Pille rendern
+        if (bubble.childNodes.length > 0) wrap.appendChild(bubble);
 
         // Reaktions-Pills (leer wenn keine vorhanden)
         const reactEl = document.createElement('div');

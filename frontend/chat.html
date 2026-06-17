@@ -4,12 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Jarvis Chat</title>
-    <link rel="stylesheet" href="/static/css/chat.css?v=17">
-    <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=3">
+    <link rel="stylesheet" href="/static/css/theme.css?v=3">
+    <link rel="stylesheet" href="/static/css/chat.css?v=22">
+    <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <!-- PWA -->
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#7c3aed">
+    <meta name="theme-color" content="#6366f1">
     <!-- iOS PWA -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -18,6 +19,7 @@
     <link rel="apple-touch-icon" sizes="512x512" href="/static/icons/icon-512.png">
 </head>
 <body>
+<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
 
 <!-- Login Screen -->
 <div id="login-screen" class="login-screen">
@@ -285,10 +287,11 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=12"></script>
+<script src="/static/js/i18n.js?v=13"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=7"></script>
 <script src="/static/js/issues.js?v=1"></script>
-<script src="/static/js/chat.js?v=36"></script>
+<script src="/static/js/branding.js?v=7"></script>
+<script src="/static/js/chat.js?v=41"></script>
 </body>
 </html>

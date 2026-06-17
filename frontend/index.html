@@ -12,11 +12,13 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/style.css?v=80">
-    <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=4">
+    <link rel="stylesheet" href="/static/css/theme.css?v=3">
+    <link rel="stylesheet" href="/static/css/style.css?v=86">
+    <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
 <body>
+<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
     <!-- ═══ Security Banner ═══ -->
     <div id="security-banner" class="security-banner" hidden>
         <div class="banner-content">
@@ -289,6 +291,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang('en')" title="English">EN</button>
                 </div>
 
+                <!-- Hell/Dunkel-Umschalter -->
+                <button class="btn-icon" id="btn-theme-toggle" data-i18n-title="header.theme" title="Hell/Dunkel umschalten">
+                    <svg class="theme-icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                    <svg class="theme-icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                </button>
+
                 <a href="/userchat?from=main" target="_blank" class="btn-icon" data-i18n-title="header.user_chat" title="Benutzer-Chat" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -534,6 +542,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="knowledge" data-i18n="settings.tab.knowledge">Wissen</button>
                 <button class="settings-tab-btn" data-settings-tab="mcp" data-i18n="settings.tab.mcp">MCP</button>
                 <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;" data-i18n="settings.tab.vision">Vision</button>
+                <button class="settings-tab-btn" data-settings-tab="branding" id="settings-tab-btn-branding" style="display:none;">Branding</button>
                 <button class="settings-tab-btn" data-settings-tab="telemetry" data-i18n="settings.tab.telemetry">Telemetry</button>
                 <button class="settings-tab-btn" data-settings-tab="security" data-i18n="settings.tab.security">Sicherheit</button>
                 <button class="settings-tab-btn" data-settings-tab="cron" data-i18n="settings.tab.cron">Tasks</button>
@@ -1281,6 +1290,71 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 </div>
 
 
+                <!-- ═══ Tab: Branding / White-Label ═══ -->
+                <div id="settings-tab-branding" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Ersetzt Name, Farben und Logo der Oberfläche durch ein eigenes Firmen-Branding (Hauptseite, Chat, User-Chat). Änderungen werden live in der Vorschau angezeigt und nach dem Speichern beim nächsten Laden überall angewendet. Beim Deaktivieren des Branding-Skills erscheint wieder das Standard-Jarvis-Design.</p>
+
+                        <div class="form-group" style="margin-top:16px;">
+                            <label>Firmenname (statt „JARVIS")</label>
+                            <input type="text" id="br-name" class="config-input" placeholder="z.B. ACME AI" style="width:100%;box-sizing:border-box;">
+                        </div>
+
+                        <h4 style="margin:18px 0 8px;">Logo / Kreis-Element</h4>
+                        <div class="form-group">
+                            <label class="checkbox-group" style="display:inline-flex;gap:6px;margin-right:18px;">
+                                <input type="radio" name="br-logo-mode" value="letter" checked><span>Buchstabe im Ring</span>
+                            </label>
+                            <label class="checkbox-group" style="display:inline-flex;gap:6px;">
+                                <input type="radio" name="br-logo-mode" value="image"><span>Logo-Bild statt Ring</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>Buchstabe im Ring (1–2 Zeichen)</label>
+                            <input type="text" id="br-letter" class="config-input" maxlength="2" placeholder="z.B. A" style="width:120px;">
+                        </div>
+                        <div class="form-group">
+                            <label>Logo-Bild – Dunkelmodus (PNG/JPG/SVG/WEBP)</label>
+                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                <input type="file" id="br-logo-file" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif">
+                                <img id="br-logo-preview" alt="Logo dunkel" style="display:none;width:48px;height:48px;border-radius:50%;object-fit:contain;background:#0a0e17;border:1px solid var(--border);">
+                                <button class="btn-secondary" id="br-logo-del" type="button">Entfernen</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Logo-Bild – Hellmodus (optional, sonst wird das dunkle verwendet)</label>
+                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                <input type="file" id="br-logo-file-light" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif">
+                                <img id="br-logo-preview-light" alt="Logo hell" style="display:none;width:48px;height:48px;border-radius:50%;object-fit:contain;background:#ffffff;border:1px solid var(--border);">
+                                <button class="btn-secondary" id="br-logo-del-light" type="button">Entfernen</button>
+                            </div>
+                        </div>
+
+                        <h4 style="margin:18px 0 8px;">Farben – Dunkelmodus</h4>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;">
+                            <div class="form-group"><label>Text</label><input type="color" id="br-text-primary" value="#f8fafc" style="width:100%;height:38px;"></div>
+                            <div class="form-group"><label>Hintergrund</label><input type="color" id="br-bg-primary" value="#0a0e17" style="width:100%;height:38px;"></div>
+                            <div class="form-group"><label>Hintergrund (sekundär)</label><input type="color" id="br-bg-secondary" value="#111827" style="width:100%;height:38px;"></div>
+                            <div class="form-group"><label>Akzent</label><input type="color" id="br-accent" value="#6366f1" style="width:100%;height:38px;"></div>
+                            <div class="form-group"><label>Akzent (Hover)</label><input type="color" id="br-accent-hover" value="#818cf8" style="width:100%;height:38px;"></div>
+                        </div>
+
+                        <h4 style="margin:18px 0 8px;">Farben – Hellmodus</h4>
+                        <p class="kb-hint" style="margin:0 0 8px;">Der Akzent gilt für beide Modi (oben gesetzt). Hier nur Hintergrund- und Textfarben für den Hell-Modus.</p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;">
+                            <div class="form-group"><label>Text</label><input type="color" id="br-text-primary-light" value="#1a2233" style="width:100%;height:38px;"></div>
+                            <div class="form-group"><label>Hintergrund</label><input type="color" id="br-bg-primary-light" value="#f4f5f7" style="width:100%;height:38px;"></div>
+                            <div class="form-group"><label>Hintergrund (sekundär)</label><input type="color" id="br-bg-secondary-light" value="#ffffff" style="width:100%;height:38px;"></div>
+                        </div>
+
+                        <div style="display:flex;align-items:center;gap:14px;margin-top:18px;">
+                            <button class="btn-primary" id="br-save" type="button">Speichern & anwenden</button>
+                            <span id="br-status" style="color:var(--success);font-size:0.9em;"></span>
+                        </div>
+                        <p class="tab-note" style="margin-top:10px;opacity:0.7;">Hinweis: Die Vorschau wirkt sofort im aktuellen Fenster. Chat &amp; User-Chat übernehmen das Branding beim nächsten Laden.</p>
+                    </div>
+                </div>
+
                 <!-- ═══ Tab: Telemetry ═══ -->
                 <div id="settings-tab-telemetry" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
@@ -1935,14 +2009,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=15"></script>
+    <script src="/static/js/i18n.js?v=16"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=14"></script>
     <script src="/static/js/context.js?v=4"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/extractor.js?v=10"></script>
     <script src="/static/js/vnc.js?v=16"></script>
-    <script src="/static/js/skills.js?v=23"></script>
+    <script src="/static/js/skills.js?v=24"></script>
     <script src="/static/js/whatsapp.js?v=9"></script>
     <script src="/static/js/knowledge.js?v=37"></script>
     <script src="/static/js/mcp.js?v=3"></script>
@@ -1950,7 +2024,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=4"></script>
     <script src="/static/js/chatlib.js?v=9"></script>
     <script src="/static/js/issues.js?v=1"></script>
-    <script src="/static/js/app.js?v=113"></script>
+    <script src="/static/js/branding.js?v=7"></script>
+    <script src="/static/js/theme.js?v=2"></script>
+    <script src="/static/js/app.js?v=117"></script>
 </body>
 
 </html>

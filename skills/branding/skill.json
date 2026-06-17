@@ -1,0 +1,31 @@
+{
+    "name": "Branding / White-Label",
+    "description": "Ersetzt Name, Farben und Logo der Oberfläche durch ein eigenes Firmen-Branding. Beim Deaktivieren erscheint wieder das Standard-Jarvis-Design.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["branding_info"],
+    "category": "sonstige",
+    "icon": "palette",
+    "system": false,
+    "enabled": false,
+    "config_schema": {},
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "White-Label-Skill: Überschreibt Firmenname (statt 'JARVIS'), Akzent-/Hintergrund-/Textfarben sowie das runde Logo-Element (Buchstabe oder hochgeladenes Bild) in Hauptseite, Chat und User-Chat. Die HTML/CSS-Dateien bleiben unverändert – das Branding wird beim Laden zur Laufzeit angewendet. Beim Deaktivieren des Skills wird automatisch wieder das Standard-Jarvis-Design angezeigt. Konfiguration erfolgt über den 'Branding'-Tab in den Einstellungen (erscheint nur bei aktiviertem Skill).",
+        "tools": [
+            {
+                "name": "branding_info",
+                "label": "Branding-Status",
+                "desc": "Gibt das aktuell aktive Branding (Firmenname, Farben, Logo-Modus) zurück."
+            }
+        ],
+        "use_cases": [
+            "Aktiviere ein eigenes Firmen-Branding (Name/Farben/Logo)",
+            "Wie lautet das aktuelle Branding?"
+        ],
+        "notes": "Nach dem Aktivieren erscheint der 'Branding'-Tab in den Einstellungen. Farben dort als Hex-Werte wählen, optional ein Logo hochladen. Änderungen werden beim nächsten Neuladen der Seite sichtbar."
+    }
+}

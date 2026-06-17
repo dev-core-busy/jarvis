@@ -247,12 +247,44 @@
         }
     });
 
+    // ── Status-Dot = Erreichbarkeit des AKTIVEN LLM-Profils (wie Hauptseite) ──
+    //    erreichbar -> gruen (.connected), sonst rot (.disconnected). Kein Doppelklick.
+    let _llmStatusTimer = null;
+    async function _checkLlmStatus() {
+        if (!statusDot) return;
+        try {
+            const res = await fetch('/api/llm/active-status', {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            if (!res.ok) {
+                statusDot.className = 'topbar-dot disconnected';
+                statusDot.title = 'LLM-Status nicht abrufbar';
+                return;
+            }
+            const d = await res.json();
+            const reachable = (d.status === 'ok' || d.status === 'degraded');
+            statusDot.className = 'topbar-dot ' + (reachable ? 'connected' : 'disconnected');
+            const name = d.profile_name ? ' – ' + d.profile_name : '';
+            if (d.status === 'ok')            statusDot.title = 'LLM erreichbar' + name;
+            else if (d.status === 'degraded') statusDot.title = 'LLM erreichbar (Modell fehlt)' + name;
+            else                              statusDot.title = 'LLM nicht erreichbar' + name;
+        } catch (e) {
+            statusDot.className = 'topbar-dot disconnected';
+            statusDot.title = 'LLM nicht erreichbar';
+        }
+    }
+    function _startLlmStatusIndicator() {
+        _checkLlmStatus();
+        if (!_llmStatusTimer) _llmStatusTimer = setInterval(_checkLlmStatus, 30000);
+    }
+
     function showChat() {
         loginScreen.classList.add('hidden');
         chatScreen.classList.remove('hidden');
         const _ownBadge = $('chat-own-badge');
         if (_ownBadge) _ownBadge.textContent = _currentUser || '';
         connectWS();
+        _startLlmStatusIndicator();
         _restoreHistory();
         msgInput.focus();
         _startContextIndicator();
@@ -332,10 +364,9 @@
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         ws = new WebSocket(`${proto}//${location.host}/ws`);
 
-        statusDot.className = 'topbar-dot connecting';
+        // #status-dot zeigt den LLM-Profil-Status (s. _checkLlmStatus), nicht den WS-Status.
 
         ws.onopen = () => {
-            statusDot.className = 'topbar-dot connected';
             reconnectAttempts = 0;
         };
 
@@ -347,20 +378,16 @@
         };
 
         ws.onclose = () => {
-            statusDot.className = 'topbar-dot disconnected';
             scheduleReconnect();
         };
 
-        ws.onerror = () => {
-            statusDot.className = 'topbar-dot disconnected';
-        };
+        ws.onerror = () => {};
     }
 
     function scheduleReconnect() {
         if (reconnectAttempts >= MAX_RECONNECT) return;
         reconnectAttempts++;
         const delay = 2000 * Math.min(reconnectAttempts, 5);
-        statusDot.className = 'topbar-dot connecting';
         setTimeout(connectWS, delay);
     }
 
@@ -656,6 +683,7 @@
             const avatar = document.createElement('div');
             avatar.className = 'msg-avatar';
             avatar.textContent = 'J';
+            if (window.brandAvatar) window.brandAvatar(avatar);
             row.appendChild(avatar);
         }
 
@@ -1213,6 +1241,7 @@
             const avatar = document.createElement('div');
             avatar.className = 'msg-avatar';
             avatar.textContent = 'J';
+            if (window.brandAvatar) window.brandAvatar(avatar);
             row.appendChild(avatar);
 
             if (entry.stats) {
@@ -1321,11 +1350,13 @@
             if (moon) moon.classList.toggle('hidden', light);
             if (sun)  sun.classList.toggle('hidden', !light);
         });
-        localStorage.setItem('jarvis_chat_theme', light ? 'light' : 'dark');
+        localStorage.setItem('jarvis_theme', light ? 'light' : 'dark');
+        // Branding ueber den Theme-Wechsel informieren (Logo/Farben neu waehlen)
+        try { document.dispatchEvent(new CustomEvent('jarvis:themechange', { detail: { light: light } })); } catch (e) {}
     }
 
-    // Gespeicherte Präferenz laden
-    const savedTheme = localStorage.getItem('jarvis_chat_theme');
+    // Gespeicherte Präferenz laden (seitenuebergreifender Schluessel)
+    const savedTheme = localStorage.getItem('jarvis_theme');
     if (savedTheme === 'light') applyTheme(true);
 
     // Beide Theme-Buttons registrieren
@@ -1594,13 +1625,20 @@
         document.head.appendChild(s);
     })();
 
-    // Token vorhanden? → direkt zum Chat (Token wird beim ersten WS-Send validiert)
+    // Token vorhanden? → Benutzer vom Server holen (validiert Token + liefert Namen
+    // fuer die Titelleiste), dann direkt zum Chat. Offline (PWA) → graceful Fallback.
     if (token) {
-        fetch('/api/config', {
+        fetch('/api/me', {
             headers: { 'Authorization': `Bearer ${token}` }
         }).then(r => {
-            if (r.ok) showChat();
-            else logout();
+            if (!r.ok) { logout(); return null; }
+            return r.json();
+        }).then(d => {
+            if (d && d.username) {
+                _currentUser = d.username;
+                localStorage.setItem('jarvis_chat_user', _currentUser);
+            }
+            if (d !== null) showChat();
         }).catch(() => showChat());
     }
 

@@ -11,6 +11,13 @@ from enum import Enum
 from pathlib import Path
 
 
+def _log(msg):
+    """Modul-weiter Fallback-Logger. In run_task wird er durch einen lokalen
+    _log (mit agent_id) ueberschattet; andere Methoden (run_task_headless,
+    _deliver_docs, …) nutzen diesen hier – verhindert NameError."""
+    print(f"[AGENT] {msg}", flush=True)
+
+
 def _friendly_api_error(exc: Exception) -> str:
     """Wandelt rohe API-Fehler in verständliche Meldungen um."""
     raw = str(exc)
@@ -1474,15 +1481,25 @@ KRITISCH – Autonomie-Regeln:
             delivered.add(key)
             await _emit(url.rsplit("__", 1)[-1], url)
 
-        # (b) Lokale Dateipfade zu existierenden Dokumenten -> nach data/documents/ ziehen
+        # (b) Lokale Dateipfade zu AGENT-ERZEUGTEN Dokumenten -> nach data/documents/ ziehen
+        import tempfile as _tempfile
+        _tmp_root = _Path(_tempfile.gettempdir()).resolve()
+        _docs_root = docs_dir.resolve()
         for m in re.finditer(r"(?:/[\w.\-]+)+\.(?:docx|xlsx|pptx|pdf)|data/documents/[\w.\-]+\.(?:docx|xlsx|pptx|pdf)", text):
             raw = m.group(0)
             p = _Path(raw) if raw.startswith("/") else (proj / raw)
             try:
                 if not p.is_file():
                     continue
-                key = str(p.resolve())
+                rp = p.resolve()
+                key = str(rp)
             except Exception:
+                continue
+            # NUR erzeugte Dateien ausliefern: unter /tmp oder data/documents.
+            # NIEMALS Eingabe-/Quelldateien anfassen (z.B. read-only Wissens-Shares
+            # wie /mnt/...). Sonst wuerde shutil.move die Quelle zerstoeren/fehlschlagen.
+            if not (rp == _docs_root or _docs_root in rp.parents
+                    or rp == _tmp_root or _tmp_root in rp.parents):
                 continue
             if key in delivered:
                 continue

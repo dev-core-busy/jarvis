@@ -299,6 +299,40 @@ def _ocr_image(filepath: Path) -> str | None:
         return None
 
 
+def _ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 20) -> str:
+    """OCR-Fallback fuer gescannte/bildbasierte PDFs (ohne Text-Layer).
+
+    Rendert die Seiten via pdf2image/poppler zu Bildern und liest sie per
+    Tesseract (deu+eng). Gibt erkannten Text zurueck oder '' wenn nicht moeglich.
+    """
+    try:
+        from pdf2image import convert_from_bytes
+        import pytesseract
+    except ImportError:
+        _log.warning("pdf2image/pytesseract fehlt – PDF-OCR-Fallback deaktiviert")
+        return ""
+    try:
+        images = convert_from_bytes(pdf_bytes, dpi=200, first_page=1, last_page=max_pages)
+    except Exception as e:
+        _log.warning("PDF->Bild fehlgeschlagen: %s", e)
+        return ""
+    try:
+        avail = set(pytesseract.get_languages(config=""))
+        lang = "+".join([l for l in ("deu", "eng") if l in avail]) or None
+    except Exception:
+        lang = "deu+eng"
+    out = []
+    for idx, img in enumerate(images, 1):
+        try:
+            t = pytesseract.image_to_string(img, lang=lang) if lang else pytesseract.image_to_string(img)
+            t = (t or "").strip()
+            if t:
+                out.append(f"[Seite {idx} (OCR)]\n{t}")
+        except Exception:
+            continue
+    return "\n\n".join(out)
+
+
 def _extract_text(filepath: Path, max_bytes: int) -> str | None:
     """Extrahiert Text aus einer Datei (Text/PDF/DOCX/XLSX/PPTX/Bild-OCR/Video/Audio)."""
     try:
@@ -320,7 +354,13 @@ def _extract_text(filepath: Path, max_bytes: int) -> str | None:
             import pdfplumber
             with pdfplumber.open(str(filepath)) as pdf:
                 texts = [p.extract_text() for p in pdf.pages if p.extract_text()]
-            return "\n\n".join(texts) or None
+            combined = "\n\n".join(texts)
+            # OCR-Fallback bei gescannten/bildbasierten PDFs (kein/zu wenig Text-Layer)
+            if len(combined.strip()) < 80:
+                ocr = _ocr_pdf_bytes(filepath.read_bytes())
+                if len(ocr.strip()) > len(combined.strip()):
+                    return ocr or None
+            return combined or None
         except ImportError:
             return None
         except Exception:

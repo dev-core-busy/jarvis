@@ -1038,7 +1038,10 @@
             }));
         }
         ws.send(msg);
-        const attInfo = _pendingAttachments.length > 0 ? ` [+ ${_pendingAttachments.length} Datei(en)]` : '';
+        const _attIcon = m => { m = (m || '').toLowerCase(); return m.startsWith('image/') ? '🖼️' : m === 'application/pdf' ? '📄' : m.startsWith('audio/') ? '🎵' : m.startsWith('video/') ? '🎬' : '📎'; };
+        const attInfo = _pendingAttachments.length > 0
+            ? ' [' + _pendingAttachments.map(a => `${_attIcon(a.mime_type)} ${a.name || 'Datei'}`).join(', ') + ']'
+            : '';
         // Benutzer-Bubble anzeigen und in History speichern
         const _uTime = _timeStr(), _uDate = _currentDateStr();
         _addBubble(finalText + (attInfo || ''), 'user', _uTime, false);

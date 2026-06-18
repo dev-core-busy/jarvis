@@ -50,6 +50,11 @@ class SkillManager:
             state = skill_states.get(skill_name, {})
 
             skill_info["enabled"] = state.get("enabled", skill_info.get("enabled", True))
+            # "installed" steuert die UI-Einordnung (Installierte vs. Moegliche).
+            # Getrennt von "enabled": ein installierter Skill kann ausgeschaltet
+            # sein und bleibt trotzdem unter "Installierte". Fallback (kein Flag
+            # gesetzt) = enabled-Zustand → abwaertskompatibel.
+            skill_info["installed"] = state.get("installed", skill_info["enabled"])
             skill_info["config"] = state.get("config", {})
             skill_info["loaded"] = skill_name in self.loader.loaded_skills
 
@@ -58,8 +63,8 @@ class SkillManager:
         return skills
 
     def enable_skill(self, name: str) -> bool:
-        """Aktiviert einen Skill."""
-        config.save_skill_state(name, {"enabled": True})
+        """Aktiviert einen Skill (und markiert ihn als installiert)."""
+        config.save_skill_state(name, {"enabled": True, "installed": True})
         ok = True
         try:
             self.loader.load_skill(name)
@@ -71,10 +76,20 @@ class SkillManager:
         return ok
 
     def disable_skill(self, name: str) -> bool:
-        """Deaktiviert einen Skill."""
-        config.save_skill_state(name, {"enabled": False})
+        """Deaktiviert einen Skill, laesst ihn aber installiert (bleibt unter
+        'Installierte Skills', nur ausgeschaltet)."""
+        config.save_skill_state(name, {"enabled": False, "installed": True})
         self.loader.unload_skill(name)
         # Gekoppelten systemd-Dienst ebenfalls stoppen+deaktivieren
+        self._control_skill_service(name, start=False)
+        return True
+
+    def remove_skill(self, name: str) -> bool:
+        """Entfernt einen Skill aus 'Installierte' (→ zurueck zu 'Moegliche'),
+        OHNE die Dateien zu loeschen. Nicht-destruktive Alternative zum 'x':
+        deaktiviert + markiert als nicht installiert."""
+        config.save_skill_state(name, {"enabled": False, "installed": False})
+        self.loader.unload_skill(name)
         self._control_skill_service(name, start=False)
         return True
 

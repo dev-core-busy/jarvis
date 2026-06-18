@@ -522,7 +522,10 @@
         }
 
         // Benutzernachricht im Verlauf speichern (nur Text + Hinweis, kein base64)
-        const attNote = _pendingAttachments.length > 0 ? ` [+ ${_pendingAttachments.length} Datei(en)]` : '';
+        const _attIcon = m => { m = (m || '').toLowerCase(); return m.startsWith('image/') ? '🖼️' : m === 'application/pdf' ? '📄' : m.startsWith('audio/') ? '🎵' : m.startsWith('video/') ? '🎬' : '📎'; };
+        const attNote = _pendingAttachments.length > 0
+            ? ' [' + _pendingAttachments.map(a => `${_attIcon(a.mime_type)} ${a.name || 'Datei'}`).join(', ') + ']'
+            : '';
         _chatHistory.push({ role: 'user', text: finalText + attNote, time: timeStr(), date: _currentDateStr(), ts: Date.now() });
         _saveHistory();
         _syncAppend(_chatHistory[_chatHistory.length - 1]);

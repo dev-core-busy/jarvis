@@ -2601,9 +2601,20 @@ async def enable_skill(name: str, user: str = Depends(require_local_auth)):
 
 @app.post("/api/skills/{name}/disable")
 async def disable_skill(name: str, user: str = Depends(require_local_auth)):
-    """Deaktiviert einen Skill."""
+    """Deaktiviert einen Skill (bleibt installiert)."""
     sm = _get_skill_manager()
     success = sm.disable_skill(name)
+    if agent_instance:
+        agent_instance.reload_skills()
+    return JSONResponse({"success": success})
+
+
+@app.post("/api/skills/{name}/remove")
+async def remove_skill(name: str, user: str = Depends(require_local_auth)):
+    """Entfernt einen Skill aus 'Installierte' (→ 'Moegliche'), ohne Dateien
+    zu loeschen. Pendant zum 'x'-Button (vs. Toggle = nur deaktivieren)."""
+    sm = _get_skill_manager()
+    success = sm.remove_skill(name)
     if agent_instance:
         agent_instance.reload_skills()
     return JSONResponse({"success": success})
@@ -4872,7 +4883,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                     if len(_data) > 20_000_000:    # max ~15 MB binary
                         continue
                     try:
-                        await ws.send_json({"type": "status", "message": f"📄 Lese PDF {_name}…"})
+                        await ws.send_json({"type": "status", "message": f"📄 Lese PDF {_name} (ggf. OCR)…"})
                         _pdf_bytes = _b64att.b64decode(_data)
                         def _extract_pdf_text(pdf_bytes: bytes) -> str:
                             import pypdf, io
@@ -4882,12 +4893,22 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                                 text = page.extract_text() or ""
                                 if text.strip():
                                     pages.append(f"[Seite {i+1}]\n{text.strip()}")
-                            return "\n\n".join(pages)
+                            combined = "\n\n".join(pages)
+                            # OCR-Fallback bei gescannten/bildbasierten PDFs (kein/zu wenig Text-Layer)
+                            if len(combined.strip()) < 80:
+                                try:
+                                    from backend.tools.knowledge import _ocr_pdf_bytes
+                                    ocr = _ocr_pdf_bytes(pdf_bytes)
+                                    if len(ocr.strip()) > len(combined.strip()):
+                                        return ocr
+                                except Exception as _oe:
+                                    print(f"[attach] PDF-OCR-Fallback fehlgeschlagen: {_oe}", flush=True)
+                            return combined
                         _pdf_text = await asyncio.to_thread(_extract_pdf_text, _pdf_bytes)
                         if _pdf_text.strip():
                             _text_prepend.append(f"[PDF-Inhalt von {_name}]:\n{_pdf_text}")
                         else:
-                            _text_prepend.append(f"[PDF {_name}: Kein extrahierbarer Text gefunden (gescanntes/bildbasiertes PDF)]")
+                            _text_prepend.append(f"[PDF {_name}: Kein Text gefunden – auch OCR lieferte nichts (evtl. leeres/unleserliches PDF)]")
                     except Exception as _pe:
                         print(f"[attach] PDF-Extraktion fehlgeschlagen ({_name}): {_pe}", flush=True)
                         _text_prepend.append(f"[PDF {_name}: Konnte nicht gelesen werden – {_pe}]")

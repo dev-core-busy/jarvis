@@ -57,7 +57,8 @@ class JarvisWhatsAppManager {
 
     async _fetchStatus() {
         try {
-            const resp = await fetch('/api/whatsapp/status');
+            const token = localStorage.getItem('jarvis_token') || '';
+            const resp = await fetch('/api/whatsapp/status', { headers: { 'Authorization': 'Bearer ' + token } });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
             this._updateUI(data);
@@ -167,7 +168,8 @@ class JarvisWhatsAppManager {
 
     async _fetchQR() {
         try {
-            const resp = await fetch('/api/whatsapp/qr');
+            const token = localStorage.getItem('jarvis_token') || '';
+            const resp = await fetch('/api/whatsapp/qr', { headers: { 'Authorization': 'Bearer ' + token } });
             if (!resp.ok) return;
             const data = await resp.json();
 
@@ -373,7 +375,8 @@ class JarvisWhatsAppManager {
 
     async reconnect() {
         try {
-            const resp = await fetch('/api/whatsapp/reconnect', { method: 'POST' });
+            const token = localStorage.getItem('jarvis_token') || '';
+            const resp = await fetch('/api/whatsapp/reconnect', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
             const data = await resp.json();
             if (data.success) {
                 // Warte kurz, dann Status neu laden
@@ -388,7 +391,8 @@ class JarvisWhatsAppManager {
         if (!confirm('WhatsApp wirklich abmelden? Du musst den QR-Code erneut scannen.')) return;
 
         try {
-            const resp = await fetch('/api/whatsapp/logout', { method: 'POST' });
+            const token = localStorage.getItem('jarvis_token') || '';
+            const resp = await fetch('/api/whatsapp/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
             const data = await resp.json();
             if (data.success) {
                 setTimeout(() => this._fetchStatus(), 3000);

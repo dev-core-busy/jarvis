@@ -148,7 +148,9 @@
         _renderInstalled() {
             const el = document.getElementById('sk-installed-list');
             if (!el) return;
-            const installed = this.skills.filter(s => s.enabled);
+            // "Installierte" = installiert (kann ein- ODER ausgeschaltet sein);
+            // Fallback auf enabled fuer Skills ohne installed-Flag.
+            const installed = this.skills.filter(s => (s.installed !== undefined ? s.installed : s.enabled));
             if (installed.length === 0) {
                 el.innerHTML = `<div class="kb-empty">${window.t('skills.none_installed')}</div>`;
                 return;
@@ -251,7 +253,7 @@
         _renderAvailable() {
             const el = document.getElementById('sk-available-list');
             if (!el) return;
-            const available = this.skills.filter(s => !s.enabled);
+            const available = this.skills.filter(s => !(s.installed !== undefined ? s.installed : s.enabled));
 
             // Kategorie-Filter anwenden
             let filtered = this.categoryFilter === 'all'
@@ -721,7 +723,8 @@
             if (!confirm(`"${name}" ${window.t('skills.deinstall_confirm')}`)) return;
             const token = localStorage.getItem('jarvis_token') || '';
             try {
-                await fetch(`/api/skills/${name}/disable`, {
+                // 'x' = aus 'Installierte' entfernen (→ 'Moegliche'), nicht nur deaktivieren
+                await fetch(`/api/skills/${name}/remove`, {
                     method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
                 });
                 this._notify(`"${name}" ${window.t('skills.uninstalled')}`, 'success');

@@ -7,6 +7,7 @@ psutil==6.1.1
 pyautogui==0.9.54
 pillow==11.1.0
 pytesseract==0.3.13   # Bild-OCR fuer Wissensbasis; benoetigt System-Paket: tesseract-ocr (+ tesseract-ocr-deu/-eng)
+pdf2image==1.17.0     # OCR-Fallback fuer gescannte PDFs (rendert Seiten zu Bildern); benoetigt System-Paket: poppler-utils
 python-multipart==0.0.20
 websockets==14.2
 python-pam>=2.0.2

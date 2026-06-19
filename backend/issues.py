@@ -271,7 +271,13 @@ def unseen_count(user: str) -> int:
     for i in issues:
         if i.get("author", "").strip().lower() != u:
             continue
-        if i.get("status") != i.get("status_seen", "open"):
+        seen = i.get("status_seen")
+        # Alt-Issues ohne status_seen (vor dem Feature angelegt) NICHT als
+        # Benachrichtigung zaehlen – sonst Pseudo-Badge fuer laengst bekannte Status.
+        # Neue Issues erhalten status_seen="open" und werden korrekt verfolgt.
+        if not seen:
+            continue
+        if i.get("status") != seen:
             n += 1
     return n
 

@@ -437,6 +437,17 @@ def verify_token(token: str) -> str | None:
         return None
 
 
+def _group_cn_prefix(group_dn: str) -> str:
+    """Baut 'cn=<wert>,' (lowercase) aus einem Gruppen-DN fuer den Praefix-Vergleich
+    gegen memberOf-Eintraege. Bewusst KEIN lstrip('cn=') – das entfernt die Zeichen-
+    menge {c,n,=} und wuerde z.B. 'cn=network-...' faelschlich zu 'etwork-...'
+    verstuemmeln (das 'n' von 'network' faellt mit weg)."""
+    g = (group_dn or "").strip().lower()
+    if g.startswith("cn="):
+        g = g[3:]
+    return f"cn={g.split(',')[0]},"
+
+
 async def require_auth(request: Request) -> str:
     """FastAPI Dependency: Prueft Bearer-Token und gibt Username zurueck.
     Sperrt zusaetzlich den lokalen jarvis-User, solange das Erst-Kennwort nicht
@@ -578,7 +589,7 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
         # Vergleich case-insensitiv
         group_lower = allowed_group.lower()
         for g in member_of:
-            if g.lower() == group_lower or g.lower().startswith(f"cn={group_lower.lstrip('cn=').split(',')[0].lower()},"):
+            if g.lower() == group_lower or g.lower().startswith(_group_cn_prefix(allowed_group)):
                 print(f"[AUTH] AD-Gruppe: '{plain}' ist Mitglied von '{allowed_group}' – Zugriff erlaubt", flush=True)
                 return True
         print(f"[AUTH] AD-Gruppe: '{plain}' NICHT Mitglied von '{allowed_group}' – Zugriff verweigert", flush=True)
@@ -633,8 +644,7 @@ def _check_knowledge_edit_permission_with_conn(username: str, conn, base_dn: str
                 member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
                 group_lower = editors_group.lower()
                 for g in member_of:
-                    if g.lower() == group_lower or g.lower().startswith(
-                            f"cn={group_lower.lstrip('cn=').split(',')[0].lower()},"):
+                    if g.lower() == group_lower or g.lower().startswith(_group_cn_prefix(editors_group)):
                         print(f"[AUTH] Knowledge-Editor Gruppe: '{plain}' darf Wissen bearbeiten", flush=True)
                         return True
             print(f"[AUTH] Knowledge-Editor Gruppe: '{plain}' NICHT in Gruppe '{editors_group}'", flush=True)
@@ -680,8 +690,7 @@ def _check_internet_access_with_conn(username: str, conn, base_dn: str) -> bool:
                 member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
                 group_lower = grp.lower()
                 for g in member_of:
-                    if g.lower() == group_lower or g.lower().startswith(
-                            f"cn={group_lower.lstrip('cn=').split(',')[0].lower()},"):
+                    if g.lower() == group_lower or g.lower().startswith(_group_cn_prefix(grp)):
                         print(f"[AUTH] Internet-Zugang Gruppe: '{plain}' erlaubt", flush=True)
                         return True
             print(f"[AUTH] Internet-Zugang Gruppe: '{plain}' NICHT in Gruppe '{grp}'", flush=True)

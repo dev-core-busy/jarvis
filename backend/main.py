@@ -2701,7 +2701,10 @@ async def verify_token_endpoint(request: Request):
     if username:
         try:
             _, ts, _ = tok.split(":", 2)
-            remaining = 86400 - (time.time() - int(ts))
+            # Token ist 30 Tage gueltig (siehe verify_token) – verbleibende Zeit
+            # MUSS mit derselben Lebensdauer gerechnet werden, sonst werden gueltige
+            # Sitzungen > 24h faelschlich als negativ ("laeuft in -xxx Min ab") angezeigt.
+            remaining = max(0, 2592000 - (time.time() - int(ts)))
         except Exception:
             remaining = 0
         return JSONResponse({"valid": True, "username": username, "remaining_seconds": int(remaining),

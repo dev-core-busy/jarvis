@@ -399,6 +399,27 @@ class OpenAICompatibleProvider(LLMProvider):
                 err_detail = err_body.get("detail") or err_body.get("message") or err_body.get("error") or resp.text[:300]
             except Exception:
                 err_detail = resp.text[:300]
+            # vLLM/llama.cpp ohne --enable-auto-tool-choice / --tool-call-parser lehnen
+            # tools-Requests mit 400 ab (z.B. Gemma-Server). In dem Fall transparent auf
+            # Prompt-basiertes Tool-Calling zurueckfallen – der Agent behaelt so volle
+            # Tool-Faehigkeit ueber das XML-Protokoll, ohne Server-Neustart noetig.
+            _d = str(err_detail).lower()
+            if resp.status_code == 400 and tools and (
+                "tool choice" in _d or "tool_choice" in _d
+                or "auto-tool-choice" in _d or "tool-call-parser" in _d
+                or "does not support tool" in _d or "tool calling" in _d
+            ):
+                print(f"[LLM] {self.base_url}: 400 bei nativem Tool-Calling "
+                      f"({err_detail}) → Fallback auf Prompt-Modus", flush=True)
+                return await self._generate_prompt_mode(model, system_prompt, contents, tools)
+            if "context length" in _d or "maximum context" in _d or "input_tokens" in _d or "max_model_len" in _d:
+                raise ValueError(
+                    "Das gewählte Modell hat ein zu kleines Kontextfenster für den "
+                    "Jarvis-Agenten (System-Prompt + Tools passen nicht hinein). "
+                    f"Server-Meldung: {err_detail}. "
+                    "Abhilfe: vLLM-Server mit größerem --max-model-len starten oder ein "
+                    "Modell/Profil mit mehr Kontext verwenden."
+                )
             raise ValueError(f"HTTP {resp.status_code} von {self.base_url}: {err_detail}")
 
         try:
@@ -529,7 +550,24 @@ class OpenAICompatibleProvider(LLMProvider):
 
         client = await _get_shared_client()
         resp = await client.post(self.base_url, headers=self._build_headers(), json=payload, timeout=self._get_timeout())
-        resp.raise_for_status()
+        if not resp.is_success:
+            try:
+                err_body = resp.json()
+                err_detail = err_body.get("detail") or err_body.get("message") or err_body.get("error") or resp.text[:300]
+            except Exception:
+                err_detail = resp.text[:300]
+            _d = str(err_detail).lower()
+            # Kontextfenster zu klein (z.B. vLLM --max-model-len 8192): klare, handlungs-
+            # bezogene Meldung statt rohem httpx-Fehler.
+            if "context length" in _d or "maximum context" in _d or "input_tokens" in _d or "max_model_len" in _d:
+                raise ValueError(
+                    "Das gewählte Modell hat ein zu kleines Kontextfenster für den "
+                    "Jarvis-Agenten (System-Prompt + Tools passen nicht hinein). "
+                    f"Server-Meldung: {err_detail}. "
+                    "Abhilfe: vLLM-Server mit größerem --max-model-len starten oder ein "
+                    "Modell/Profil mit mehr Kontext verwenden."
+                )
+            raise ValueError(f"HTTP {resp.status_code} von {self.base_url}: {err_detail}")
         try:
             data = resp.json()
         except Exception:

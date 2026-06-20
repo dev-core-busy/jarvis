@@ -1654,6 +1654,36 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </div>
 
+                                <!-- ── Internet-Zugang ── -->
+                                <hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:14px 0 12px;">
+                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                                    <span style="font-size:1rem;">🌐</span>
+                                    <span style="font-weight:600;font-size:0.92rem;">Internet-Zugang</span>
+                                    <span style="color:var(--text-muted);font-size:0.78rem;">– Wer darf Abfragen mit Internet-Ergebnissen machen?</span>
+                                </div>
+                                <p class="kb-hint" style="margin-bottom:10px;">Leer lassen = alle angemeldeten Benutzer dürfen das Internet nutzen. Lokale Admins sind immer berechtigt. Eingeschränkte Benutzer können Web-Suche, Browser und Bildersuche nicht nutzen.</p>
+
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Erlaubte Benutzer</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
+                                    </label>
+                                    <input type="text" id="ad-internet-users" placeholder="Leer = alle Benutzer dürfen ins Internet" style="width:60%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Internet-Gruppe (AD-Gruppe)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                                    </label>
+                                    <input type="text" id="ad-internet-group" placeholder="z.B. CN=Internet-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                        ⚠ Gruppenprüfung wird beim Login gecacht – Änderungen erfordern Neuanmeldung der betroffenen Benutzer.
+                                    </div>
+                                </div>
+
+                                <!-- Internet-Zugang Status -->
+                                <div id="ad-internet-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:10px;border:1px solid;"></div>
+
                                 <!-- Wissens-Editor Status -->
                                 <div id="ad-knowledge-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:4px;border:1px solid;"></div>
 
@@ -1681,6 +1711,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             document.getElementById('ad-allowed-group').value = d.allowed_group || '';
                                             document.getElementById('ad-knowledge-editors').value = d.knowledge_editors || '';
                                             document.getElementById('ad-knowledge-editors-group').value = d.knowledge_editors_group || '';
+                                            document.getElementById('ad-internet-users').value = d.internet_users || '';
+                                            document.getElementById('ad-internet-group').value = d.internet_group || '';
                                             _adUpdateStatus(d);
                                         } catch(e) {}
                                     }
@@ -1742,6 +1774,31 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                 kst.style.display = 'none';
                                             }
                                         }
+                                        // Internet-Zugang Status
+                                        const ist = document.getElementById('ad-internet-status');
+                                        if (ist) {
+                                            if (!d.internet_users && !d.internet_group) {
+                                                ist.style.display = 'block';
+                                                ist.style.borderColor = '#f59e0b';
+                                                ist.style.background  = 'rgba(245,158,11,0.06)';
+                                                ist.style.color       = '#f59e0b';
+                                                ist.textContent = '🌐 Internet-Zugang: Alle angemeldeten Benutzer dürfen Internet-Abfragen machen';
+                                            } else if (d.internet_mode === 'users') {
+                                                ist.style.display = 'block';
+                                                ist.style.borderColor = '#34d399';
+                                                ist.style.background  = 'rgba(52,211,153,0.06)';
+                                                ist.style.color       = '#34d399';
+                                                ist.textContent = '🌐 Internet-Benutzer: ' + d.internet_users;
+                                            } else if (d.internet_mode === 'group') {
+                                                ist.style.display = 'block';
+                                                ist.style.borderColor = '#6366f1';
+                                                ist.style.background  = 'rgba(99,102,241,0.06)';
+                                                ist.style.color       = '#a5b4fc';
+                                                ist.textContent = '🌐 Internet-Gruppe: ' + d.internet_group;
+                                            } else {
+                                                ist.style.display = 'none';
+                                            }
+                                        }
                                     }
 
                                     window._adSave = async function() {
@@ -1760,6 +1817,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                     ad_allowed_group:          document.getElementById('ad-allowed-group').value.trim(),
                                                     ad_knowledge_editors:      document.getElementById('ad-knowledge-editors').value.trim(),
                                                     ad_knowledge_editors_group: document.getElementById('ad-knowledge-editors-group').value.trim(),
+                                                    ad_internet_users:         document.getElementById('ad-internet-users').value.trim(),
+                                                    ad_internet_group:         document.getElementById('ad-internet-group').value.trim(),
                                                 })
                                             });
                                             if (!r.ok) throw new Error('HTTP ' + r.status);

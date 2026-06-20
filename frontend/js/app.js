@@ -3561,7 +3561,10 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                 } else {
                     showMainScreen();
                     // Token-Expiry Warnung einrichten
-                    if (data.remaining_seconds && data.remaining_seconds < 3600) {
+                    if (data.remaining_seconds <= 0) {
+                        // Bereits abgelaufen -> keine Countdown-Warnung, direkt neu anmelden
+                        showLoginScreen();
+                    } else if (data.remaining_seconds && data.remaining_seconds < 3600) {
                         _showTokenExpiryWarning(data.remaining_seconds);
                     } else if (data.remaining_seconds) {
                         // Timer fuer Warnung 1h vor Ablauf
@@ -3577,7 +3580,8 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         });
     }
     function _showTokenExpiryWarning(remainingSec) {
-        const mins = Math.round(remainingSec / 60);
+        if (remainingSec <= 0) { showLoginScreen(); return; }
+        const mins = Math.max(0, Math.round(remainingSec / 60));
         const bar = document.createElement('div');
         bar.className = 'token-expiry-bar';
         bar.innerHTML = `⏱ Sitzung laeuft in ${mins} Min. ab. <button onclick="this.parentElement.remove();showLoginScreen()">Neu anmelden</button>`;

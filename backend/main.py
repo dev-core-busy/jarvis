@@ -644,6 +644,76 @@ def _check_knowledge_edit_permission_with_conn(username: str, conn, base_dn: str
     return False
 
 
+_internet_access_cache: dict[str, bool] = {}
+
+
+def _check_internet_access_with_conn(username: str, conn, base_dn: str) -> bool:
+    """Prüft ob ein AD-User Internet-Abfragen machen darf (nur beim Login – LDAP-Bind aktiv).
+
+    Gibt True zurück wenn: weder Liste noch Gruppe konfiguriert (alle dürfen),
+    Benutzer in ad_internet_users-Liste, oder Mitglied der ad_internet_group.
+    """
+    users_raw = config.get_setting("ad_internet_users", "").strip()
+    grp = config.get_setting("ad_internet_group", "").strip()
+    if not users_raw and not grp:
+        return True
+
+    plain = username.split("@")[0].split("\\")[-1].lower()
+
+    if users_raw:
+        allowed = {u.strip().lower() for u in users_raw.split(",") if u.strip()}
+        if plain in allowed:
+            return True
+        if not grp:
+            return False
+
+    if grp and conn is not None:
+        safe_plain = plain.replace("\\", "\\5c").replace("*", "\\2a").replace(
+            "(", "\\28").replace(")", "\\29").replace("\x00", "\\00")
+        try:
+            conn.search(
+                search_base=base_dn,
+                search_filter=f"(sAMAccountName={safe_plain})",
+                attributes=["memberOf"],
+            )
+            if conn.entries:
+                member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
+                group_lower = grp.lower()
+                for g in member_of:
+                    if g.lower() == group_lower or g.lower().startswith(
+                            f"cn={group_lower.lstrip('cn=').split(',')[0].lower()},"):
+                        print(f"[AUTH] Internet-Zugang Gruppe: '{plain}' erlaubt", flush=True)
+                        return True
+            print(f"[AUTH] Internet-Zugang Gruppe: '{plain}' NICHT in Gruppe '{grp}'", flush=True)
+        except Exception as e:
+            print(f"[AUTH] Internet-Zugang Gruppen-Check Fehler: {e}", flush=True)
+
+    return False
+
+
+def _user_has_internet_access(user: str) -> bool:
+    """Laufzeit-Check: Darf dieser Benutzer Internet-Abfragen machen?
+
+    Lokale/privilegierte User immer. Sonst: keine Einschränkung konfiguriert → alle;
+    in ad_internet_users-Liste → ja; Gruppen-Mitgliedschaft via Login-Cache.
+    """
+    u = (user or "").strip()
+    if not u or u in ALLOWED_USERS or u in {"jarvis", "root"}:
+        return True
+    users_raw = config.get_setting("ad_internet_users", "").strip()
+    grp = config.get_setting("ad_internet_group", "").strip()
+    if not users_raw and not grp:
+        return True
+    plain = u.split("@")[0].split("\\")[-1].lower()
+    if users_raw:
+        allowed = {x.strip().lower() for x in users_raw.split(",") if x.strip()}
+        if plain in allowed:
+            return True
+        if not grp:
+            return False
+    return _internet_access_cache.get(plain, False)
+
+
 def authenticate_linux_user(username: str, password: str) -> bool:
     """Authentifiziert einen Benutzer – erst PAM/lokal, dann AD/LDAP (wenn konfiguriert)."""
 
@@ -697,6 +767,9 @@ def authenticate_linux_user(username: str, password: str) -> bool:
                 # Wissens-Bearbeitungsrecht während des aktiven Binds ermitteln und cachen
                 plain_key = username.split("@")[0].split("\\")[-1].lower()
                 _knowledge_editor_cache[plain_key] = _check_knowledge_edit_permission_with_conn(
+                    username, conn, base_dn
+                )
+                _internet_access_cache[plain_key] = _check_internet_access_with_conn(
                     username, conn, base_dn
                 )
                 conn.unbind()
@@ -1882,6 +1955,12 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
     if "ad_knowledge_editors_group" in body:
         config.save_setting("ad_knowledge_editors_group", body["ad_knowledge_editors_group"])
         _knowledge_editor_cache.clear()
+    if "ad_internet_users" in body:
+        config.save_setting("ad_internet_users", body["ad_internet_users"])
+        _internet_access_cache.clear()
+    if "ad_internet_group" in body:
+        config.save_setting("ad_internet_group", body["ad_internet_group"])
+        _internet_access_cache.clear()
     return JSONResponse({"success": True})
 
 
@@ -1932,6 +2011,13 @@ async def get_ad_status(user: str = Depends(require_auth)):
             "group"     if knowledge_editors_group else
             "users"     if knowledge_editors else
             "all"       # alle authentifizierten Benutzer dürfen
+        ),
+        "internet_users": config.get_setting("ad_internet_users", ""),
+        "internet_group": config.get_setting("ad_internet_group", ""),
+        "internet_mode": (
+            "group"     if config.get_setting("ad_internet_group", "") else
+            "users"     if config.get_setting("ad_internet_users", "") else
+            "all"       # alle Benutzer haben Internet-Zugang
         ),
     })
 
@@ -2319,6 +2405,69 @@ async def test_profile_connection(request: Request, user: str = Depends(require_
         api_url=body.get("api_url", ""),
         api_key=body.get("api_key", ""),
         model=body.get("model", ""),
+        auth_method=body.get("auth_method", "api_key"),
+        session_key=body.get("session_key", ""),
+    )
+    return JSONResponse(result)
+
+
+async def _list_llm_models(provider: str, api_url: str, api_key: str,
+                           auth_method: str = "api_key", session_key: str = "") -> dict:
+    """Liefert die VOLLE Liste verfuegbarer Modelle eines Providers (fuer 'Discover')."""
+    api_url = (api_url or "").rstrip("/")
+    key = session_key if (auth_method == "session" and session_key) else api_key
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+            if provider == "google":
+                if not key:
+                    return {"success": False, "error": "API-Key fehlt"}
+                r = await client.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={key}")
+                if r.status_code >= 400:
+                    return {"success": False, "error": f"Gemini {r.status_code}: {r.text[:120]}"}
+                models = sorted({m.get("name", "").replace("models/", "")
+                                 for m in r.json().get("models", [])
+                                 if "generateContent" in m.get("supportedGenerationMethods", [])})
+            elif provider in ("anthropic", "anthropic_session"):
+                if not key:
+                    return {"success": False, "error": "API-Key fehlt"}
+                r = await client.get("https://api.anthropic.com/v1/models",
+                                     headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
+                if r.status_code >= 400:
+                    return {"success": False, "error": f"Anthropic {r.status_code}: {r.text[:120]}"}
+                models = [m.get("id", "") for m in r.json().get("data", [])]
+            elif provider == "openrouter":
+                r = await client.get("https://openrouter.ai/api/v1/models")
+                if r.status_code >= 400:
+                    return {"success": False, "error": f"OpenRouter {r.status_code}: {r.text[:120]}"}
+                models = sorted(m.get("id", "") for m in r.json().get("data", []))
+            elif provider == "openai_compatible":
+                headers = {}
+                if key:
+                    headers["Authorization"] = f"Bearer {key}"
+                r = await client.get(f"{api_url}/models", headers=headers)
+                if r.status_code >= 400:
+                    return {"success": False, "error": f"HTTP {r.status_code}: {r.text[:120]}"}
+                models = sorted(m.get("id", "") for m in r.json().get("data", []))
+            else:
+                return {"success": False, "error": f"Unbekannter Provider: {provider}"}
+        models = [m for m in models if m]
+        return {"success": True, "models": models}
+    except httpx.ConnectError as e:
+        return {"success": False, "error": f"Verbindung fehlgeschlagen: {e}"}
+    except httpx.TimeoutException:
+        return {"success": False, "error": "Timeout – Server antwortet nicht"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/profiles/models")
+async def list_profile_models(request: Request, user: str = Depends(require_auth)):
+    """Liefert verfuegbare Modelle fuer die aktuellen Formularwerte (Discover-Button)."""
+    body = await request.json()
+    result = await _list_llm_models(
+        provider=body.get("provider", ""),
+        api_url=body.get("api_url", ""),
+        api_key=body.get("api_key", ""),
         auth_method=body.get("auth_method", "api_key"),
         session_key=body.get("session_key", ""),
     )
@@ -4930,13 +5079,17 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
 
         # Wenn agent_id angegeben und es ein existierender Sub-Agent ist:
         # Nachricht als Follow-Up an den Sub-Agent senden (neuer Task)
+        _ws_user = _get_ws_username(ws)
+        _ws_internet = _user_has_internet_access(_ws_user)
         if target_agent_id and agent_manager.get_agent(target_agent_id):
             target = agent_manager.get_agent(target_agent_id)
             if target.is_sub_agent:
-                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang, attachments=image_attachments))
+                target._current_user_internet = _ws_internet
+                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments))
                 return
 
         agent = agent_manager.get_or_create_main()
+        agent._current_user_internet = _ws_internet
         agent_instance = agent  # Kompatibilitaet
 
         # ── Edit-Modus: vor neuem Task History trimmen ─────────────────

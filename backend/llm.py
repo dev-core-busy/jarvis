@@ -396,7 +396,10 @@ class OpenAICompatibleProvider(LLMProvider):
         if not resp.is_success:
             try:
                 err_body = resp.json()
-                err_detail = err_body.get("detail") or err_body.get("message") or err_body.get("error") or resp.text[:300]
+                _err = err_body.get("error")
+                if isinstance(_err, dict):  # OpenAI-Stil: {"error": {"message": ...}}
+                    _err = _err.get("message") or _err.get("type") or str(_err)
+                err_detail = err_body.get("detail") or err_body.get("message") or _err or resp.text[:300]
             except Exception:
                 err_detail = resp.text[:300]
             # vLLM/llama.cpp ohne --enable-auto-tool-choice / --tool-call-parser lehnen
@@ -553,7 +556,10 @@ class OpenAICompatibleProvider(LLMProvider):
         if not resp.is_success:
             try:
                 err_body = resp.json()
-                err_detail = err_body.get("detail") or err_body.get("message") or err_body.get("error") or resp.text[:300]
+                _err = err_body.get("error")
+                if isinstance(_err, dict):  # OpenAI-Stil: {"error": {"message": ...}}
+                    _err = _err.get("message") or _err.get("type") or str(_err)
+                err_detail = err_body.get("detail") or err_body.get("message") or _err or resp.text[:300]
             except Exception:
                 err_detail = resp.text[:300]
             _d = str(err_detail).lower()

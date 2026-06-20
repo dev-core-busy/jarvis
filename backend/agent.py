@@ -141,13 +141,53 @@ _LDAP_SHELL_SECRET_PATHS = re.compile(
 
 # Tools, die Internet-Ergebnisse liefern – fuer Benutzer ohne Internet-Zugang gesperrt
 _INTERNET_TOOLS = {"browser_control", "browser_cdp", "search_image"}
-# Shell-Befehle, die ins Internet greifen (curl/wget auf externe Hosts) – ohne
-# Internet-Zugang gesperrt; localhost/127.0.0.1 bleibt erlaubt.
-_INTERNET_SHELL = re.compile(
-    r'\b(?:curl|wget|lynx|w3m|aria2c|youtube-dl|yt-dlp)\b[^\n]*?https?://'
-    r'(?!(?:127\.0\.0\.1|localhost|0\.0\.0\.0)\b)',
-    re.IGNORECASE,
-)
+
+# ── Shell-Egress-Erkennung (best effort) ──────────────────────────────────
+# HINWEIS: Eine Regex kann ausgehenden Netzwerkverkehr NICHT lueckenlos
+# verhindern (z.B. selbstgebaute Sockets, Base64-kodierte Befehle). Fuer harte
+# Garantien muessen eingeschraenkte Benutzer auf OS-/Firewall-Ebene isoliert
+# werden. Diese Heuristik deckt die gaengigen Wege ab.
+_LOOPBACK = r'(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)'
+# Reine Netzwerk-Werkzeuge (fast immer extern) -> immer blocken
+_NET_TOOLS = re.compile(
+    r'\b(?:nc|ncat|netcat|socat|telnet|ssh|scp|sftp|ftp|ftps|tftp|rsync)\b', re.IGNORECASE)
+# git ueber Netzwerk
+_GIT_NET = re.compile(r'\bgit\s+(?:clone|fetch|pull|push|remote\s+add)\b', re.IGNORECASE)
+# Netzwerkzugriff aus Skriptsprachen (python/perl/ruby/node-Einzeiler etc.)
+_SCRIPT_NET = re.compile(
+    r'(?:urllib\.request|urlopen\(|requests\.(?:get|post|put|patch|delete|head|request)\s*\(|'
+    r'httpx\.|http\.client|socket\.(?:create_connection|connect)|Net::HTTP|open-uri|'
+    r'LWP::|WWW::Mechanize|XMLHttpRequest|\bfetch\s*\()', re.IGNORECASE)
+# Download-Werkzeuge (nehmen eine URL/Host als Argument)
+_DL_TOOLS = re.compile(
+    r'\b(?:curl|wget|aria2c|lynx|w3m|youtube-dl|yt-dlp|httpie|http)\b', re.IGNORECASE)
+# Externe URL mit Schema – Loopback wird mit korrektem Terminator ausgenommen
+# (verhindert die Umgehung via '127.0.0.1.attacker.com').
+_URL_EXTERNAL = re.compile(
+    r'(?:https?|ftps?|wss?)://(?!' + _LOOPBACK + r'(?:[:/]|\s|$))', re.IGNORECASE)
+# Schemenloser externer Host als Argument (z.B. 'curl example.com'); local/relative
+# Pfade (-flag, /abs, ./rel, ~) und Loopback sind ausgenommen.
+_BARE_EXTERNAL_HOST = re.compile(
+    r'(?:^|\s)(?![-/.~]|' + _LOOPBACK + r'\b)'
+    r'(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\b', re.IGNORECASE)
+
+
+def _shell_hits_internet(cmd: str) -> bool:
+    """Heuristik: Greift dieser Shell-Befehl (vermutlich) ins Internet?
+    Loopback-Ziele bleiben erlaubt."""
+    if not cmd:
+        return False
+    if _SCRIPT_NET.search(cmd) or _NET_TOOLS.search(cmd) or _GIT_NET.search(cmd):
+        return True
+    if _DL_TOOLS.search(cmd):
+        if _URL_EXTERNAL.search(cmd):
+            return True
+        # Schemenloser externer Host (z.B. 'curl example.com'). Nur pruefen, wenn
+        # gar kein Schema vorkommt – sonst wuerden Datei-Argumente wie 'out.json'
+        # bei erlaubten localhost-URLs Fehlalarme ausloesen.
+        if '://' not in cmd and _BARE_EXTERNAL_HOST.search(cmd):
+            return True
+    return False
 
 # ── Instructions aus data/instructions/*.md laden ─────────────────────────
 INSTRUCTIONS_DIR = Path(__file__).parent.parent / "data" / "instructions"
@@ -421,7 +461,9 @@ KRITISCH – Autonomie-Regeln:
         from backend.telemetry import tracer
         def _log(msg): print(f"[AGENT {self.agent_id}] {msg}", flush=True)
         _log(f"run_task gestartet: {task_text[:100]}... (sub={self.is_sub_agent})")
-        self._current_username = username
+        # Sub-Agents werden ohne username gestartet – dann den vom Eltern-Agent
+        # geerbten Namen behalten (nicht mit "" ueberschreiben), damit LDAP-Gating greift.
+        self._current_username = username or getattr(self, '_current_username', '')
         # Task im Audit-Log festhalten (unabhängig ob Tools genutzt werden)
         try:
             from backend.audit_log import log_task as _audit_task
@@ -1285,9 +1327,9 @@ KRITISCH – Autonomie-Regeln:
                     print(f"[AGENT] BLOCKED Internet-Tool '{name}' fuer User '{_uname}' (kein Internet-Zugang)", flush=True)
                     result = "Zugriff verweigert: Internet-Abfragen sind fuer deinen Benutzer nicht freigeschaltet."
                     _ldap_blocked = True
-                elif name == "shell_execute" and _INTERNET_SHELL.search(args.get("command", "")):
+                elif name == "shell_execute" and _shell_hits_internet(args.get("command", "")):
                     print(f"[AGENT] BLOCKED Internet-Shell fuer User '{_uname}' (kein Internet-Zugang)", flush=True)
-                    result = "Zugriff verweigert: Internet-Zugriff (curl/wget) ist fuer deinen Benutzer nicht freigeschaltet."
+                    result = "Zugriff verweigert: Internet-Zugriff (curl/wget/ssh/git/…) ist fuer deinen Benutzer nicht freigeschaltet."
                     _ldap_blocked = True
 
             if not _ldap_blocked:
@@ -1659,6 +1701,12 @@ class AgentManager:
             is_sub_agent=True,
             parent_id=parent.agent_id if parent else None,
         )
+        # Sicherheits-Kontext vom Eltern-Agent erben, sonst koennte ein gesperrter
+        # Benutzer die Internet-/LDAP-Restriktion durch Delegation an einen frisch
+        # gespawnten Sub-Agent umgehen (Default waere 'erlaubt').
+        if parent is not None:
+            agent._current_user_internet = getattr(parent, '_current_user_internet', True)
+            agent._current_username = getattr(parent, '_current_username', '')
         self.agents[agent.agent_id] = agent
         return agent
 

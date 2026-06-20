@@ -3567,9 +3567,16 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                     } else if (data.remaining_seconds && data.remaining_seconds < 3600) {
                         _showTokenExpiryWarning(data.remaining_seconds);
                     } else if (data.remaining_seconds) {
-                        // Timer fuer Warnung 1h vor Ablauf
+                        // Timer fuer Warnung 1h vor Ablauf.
+                        // setTimeout-Delays > 2^31-1 ms (~24,8 Tage) laufen ueber und
+                        // feuern SOFORT. Bei 30-Tage-Tokens (remaining ~2,59e6 s) waere
+                        // warnIn ~2,59e9 ms -> Overflow -> sofortige Fehlwarnung + 1h-
+                        // Auto-Logout. Daher nur planen, wenn der Delay sicher passt;
+                        // weiter entfernte Ablaeufe brauchen jetzt noch keine Warnung.
                         const warnIn = (data.remaining_seconds - 3600) * 1000;
-                        if (warnIn > 0) setTimeout(() => _showTokenExpiryWarning(3600), warnIn);
+                        if (warnIn > 0 && warnIn <= 2147483647) {
+                            setTimeout(() => _showTokenExpiryWarning(3600), warnIn);
+                        }
                     }
                 }
             } else {
@@ -3762,6 +3769,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             leftPanel.style.flex = '';
             rightPanel.style.flex = '1';
             rightPanel.style.maxWidth = '';
+            rightPanel.style.width = '';   // veraltetes 100% aus _showOnly zuruecksetzen
         }
 
         // Ansichtsmodus anwenden + merken.
@@ -3774,6 +3782,15 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             if (persist) { try { localStorage.setItem('jarvis_view_mode', mode); } catch (_) {} }
             // Header-Symbol hervorheben, wenn Desktop sichtbar ist
             if (toggleBtn) toggleBtn.classList.toggle('active', mode !== 'chat');
+            // noVNC initialisiert im versteckten (display:none) iframe evtl. mit 0x0.
+            // Beim Einblenden ein Resize im iframe ausloesen, damit resize=scale neu
+            // berechnet (nach Ablauf der 0.3s-Breitentransition).
+            if (mode !== 'chat') {
+                const f = document.getElementById('vnc-iframe');
+                if (f && f.contentWindow) {
+                    setTimeout(() => { try { f.contentWindow.dispatchEvent(new Event('resize')); } catch (_) {} }, 350);
+                }
+            }
         }
         window.applyViewMode = applyViewMode;
 

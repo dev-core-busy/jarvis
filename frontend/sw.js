@@ -3,7 +3,7 @@
  * Cached statische Assets für Offline-Nutzung.
  */
 
-const CACHE_NAME = 'jarvis-pwa-v3';
+const CACHE_NAME = 'jarvis-pwa-v4';
 
 // Nur wirklich cachbare statische Assets (kein HTML – Server setzt no-store)
 const PRECACHE_ASSETS = [
@@ -58,18 +58,25 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-First für HTML (immer aktuell), Cache-First für statische Assets
   const isHtml = url.pathname.endsWith('.html') || url.pathname === '/' || url.pathname === '/chat';
   const isStatic = url.pathname.startsWith('/static/');
+  // JS/CSS IMMER frisch laden (Network-First). Cache-First hatte zu stale
+  // Assets gefuehrt (alte CSS/JS trotz neuem ?v). Bilder/Icons bleiben Cache-First.
+  const isCode = isStatic && /\.(js|css)(\?|$)/.test(url.pathname + url.search);
 
-  if (isHtml) {
-    // Network-First: versuche zuerst netzwerk, fallback auf cache
+  if (isHtml || isCode) {
+    // Network-First: frisch holen, bei Offline Fallback auf Cache; Cache aktualisieren.
     event.respondWith(
-      fetch(event.request)
-        .catch(() => caches.match(event.request))
+      fetch(event.request).then((response) => {
+        if (response && response.status === 200 && isCode) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return response;
+      }).catch(() => caches.match(event.request))
     );
   } else if (isStatic) {
-    // Cache-First: cache zuerst, dann netzwerk und cache aktualisieren
+    // Cache-First nur fuer selten wechselnde Assets (Bilder/Icons/Fonts).
     event.respondWith(
       caches.match(event.request).then((cached) => {
         if (cached) return cached;

@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=3">
-    <link rel="stylesheet" href="/static/css/style.css?v=88">
+    <link rel="stylesheet" href="/static/css/style.css?v=92">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -685,12 +685,16 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
                     </div>
 
-                    <!-- Modell: Freitext mit Vorschlägen -->
+                    <!-- Modell: Freitext mit Vorschlägen; Discover-Symbol als Geschwister am Label -->
                     <div class="form-group">
-                        <label data-i18n="profile.model_label">KI-Modell</label>
-                        <div class="input-group">
+                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 0.5rem;">
+                            <label data-i18n="profile.model_label" style="margin: 0;">KI-Modell</label>
+                            <button type="button" id="btn-discover-models" data-i18n-title="profile.discover_models_title" title="Verfügbare Modelle vom Anbieter abrufen" style="background: none; border: none; cursor: pointer; font-size: 0.95rem; line-height: 1; padding: 0; opacity: 0.7;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">🔍</button>
+                        </div>
+                        <div class="input-group" style="position: relative;">
                             <input type="text" id="profile-model-input" list="model-suggestions" data-i18n-placeholder="profile.model_ph" placeholder="Modellname eingeben oder aus Liste wählen" autocomplete="off">
                             <datalist id="model-suggestions"></datalist>
+                            <div id="model-discover-list" class="model-discover-list" style="display: none;"></div>
                         </div>
                     </div>
 
@@ -2082,7 +2086,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=16"></script>
+    <script src="/static/js/i18n.js?v=17"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=14"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -2099,7 +2103,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/issues.js?v=2"></script>
     <script src="/static/js/branding.js?v=8"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/app.js?v=120"></script>
+    <script src="/static/js/app.js?v=123"></script>
 </body>
 
 </html>

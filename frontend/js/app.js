@@ -3174,6 +3174,124 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             });
         }
 
+        // ── Discover-Button: verfuegbare Modelle abrufen + per Klick uebernehmen ──
+        const btnDiscoverModels = document.getElementById('btn-discover-models');
+        const modelDiscoverList = document.getElementById('model-discover-list');
+        const _hideModelDiscover = () => { if (modelDiscoverList) modelDiscoverList.style.display = 'none'; };
+        if (btnDiscoverModels && modelDiscoverList) {
+            // Farben/Deckung direkt inline per !important setzen – unabhaengig von
+            // CSS-Datei/Service-Worker-Cache. Theme-bewusst (dark/light).
+            const _mdColors = () => {
+                const light = document.body.classList.contains('light');
+                return {
+                    bg:  light ? '#ffffff' : '#141a28',
+                    bgh: light ? '#eef0f4' : '#20283c',
+                    fg:  light ? '#1f2937' : '#e5e7eb',
+                    fgm: light ? '#475569' : '#cbd5e1',
+                    acc: light ? '#4f46e5' : '#a5b4fc',
+                    brd: light ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.18)',
+                };
+            };
+            const _mdSolid = (el, c, textColor) => {
+                el.style.setProperty('background-color', c.bg, 'important');
+                if (textColor) el.style.setProperty('color', textColor, 'important');
+            };
+            const _mdMsg = (txt, isErr) => {
+                const c = _mdColors();
+                modelDiscoverList.innerHTML = '';
+                const d = document.createElement('div');
+                d.textContent = txt;
+                d.style.cssText = 'padding:9px 12px;font-size:0.8rem;';
+                _mdSolid(d, c, isErr ? '#f87171' : c.fgm);
+                modelDiscoverList.appendChild(d);
+            };
+            // Popup an document.body haengen + per position:fixed unter dem Eingabefeld
+            // platzieren. So entkommt es dem Stacking-Context von .input-group
+            // (backdrop-filter), der sonst nachfolgende Formularelemente DARUEBER malt.
+            const _mdPlace = () => {
+                const c = _mdColors();
+                if (modelDiscoverList.parentElement !== document.body) {
+                    document.body.appendChild(modelDiscoverList);
+                }
+                const r = inputModel.getBoundingClientRect();
+                const s = modelDiscoverList.style;
+                s.setProperty('position', 'fixed', 'important');
+                s.setProperty('top', (r.bottom + 4) + 'px', 'important');
+                s.setProperty('left', r.left + 'px', 'important');
+                s.setProperty('width', r.width + 'px', 'important');
+                s.setProperty('right', 'auto', 'important');
+                s.setProperty('max-height', '260px', 'important');
+                s.setProperty('overflow-y', 'auto', 'important');
+                s.setProperty('z-index', '2147483600', 'important');
+                s.setProperty('background-color', c.bg, 'important');
+                s.setProperty('border', '1px solid ' + c.brd, 'important');
+                s.setProperty('border-radius', '10px', 'important');
+                s.setProperty('box-shadow', '0 12px 34px rgba(0,0,0,0.7)', 'important');
+                s.setProperty('display', 'block', 'important');
+            };
+            btnDiscoverModels.addEventListener('click', async () => {
+                const c = _mdColors();
+                const origHtml = btnDiscoverModels.innerHTML;
+                btnDiscoverModels.disabled = true;
+                btnDiscoverModels.innerHTML = '⏳';
+                _mdPlace();
+                _mdMsg('Lade Modelle…', false);
+                try {
+                    const payload = {
+                        provider: selectProvider.value,
+                        api_url: inputUrl.value.trim(),
+                        api_key: inputKey.value.trim(),
+                        auth_method: (radioSession && radioSession.checked) ? 'session' : 'api_key',
+                        session_key: inputSessionKey ? inputSessionKey.value.trim() : '',
+                    };
+                    const res = await fetch('/api/profiles/models', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await res.json();
+                    const models = (data.success && Array.isArray(data.models)) ? data.models : [];
+                    if (models.length) {
+                        modelSuggestions.innerHTML = '';
+                        models.forEach(m => { const o = document.createElement('option'); o.value = m; modelSuggestions.appendChild(o); });
+                        modelDiscoverList.innerHTML = '';
+                        const head = document.createElement('div');
+                        head.textContent = models.length + ' Modelle – zum Übernehmen anklicken';
+                        head.style.cssText = 'position:sticky;top:0;padding:7px 12px;font-size:0.72rem;border-bottom:1px solid ' + c.brd + ';';
+                        _mdSolid(head, c, c.fgm);
+                        modelDiscoverList.appendChild(head);
+                        const cur = (inputModel.value || '').trim();
+                        models.forEach(m => {
+                            const item = document.createElement('div');
+                            item.textContent = m;
+                            item.style.cssText = 'padding:7px 12px;font-size:0.85rem;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                            _mdSolid(item, c, m === cur ? c.acc : c.fg);
+                            if (m === cur) item.style.fontWeight = '600';
+                            item.addEventListener('mouseenter', () => item.style.setProperty('background-color', c.bgh, 'important'));
+                            item.addEventListener('mouseleave', () => item.style.setProperty('background-color', c.bg, 'important'));
+                            item.addEventListener('click', () => { inputModel.value = m; _hideModelDiscover(); });
+                            modelDiscoverList.appendChild(item);
+                        });
+                    } else {
+                        _mdMsg('✗ ' + (data.error || 'Keine Modelle gefunden'), true);
+                    }
+                } catch (e) {
+                    _mdMsg('✗ ' + e.message, true);
+                } finally {
+                    btnDiscoverModels.disabled = false;
+                    btnDiscoverModels.innerHTML = origHtml;
+                }
+            });
+            // Klick ausserhalb schliesst die Liste
+            document.addEventListener('click', (e) => {
+                if (modelDiscoverList.style.display !== 'none'
+                    && !modelDiscoverList.contains(e.target)
+                    && !btnDiscoverModels.contains(e.target)) {
+                    _hideModelDiscover();
+                }
+            });
+        }
+
         // ── TTS-Stimmen laden ──
         async function _loadTtsVoices(savedVoice) {
             if (!selectTtsVoice) return;

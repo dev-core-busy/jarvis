@@ -915,6 +915,13 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     transition: all var(--transition);
 }
 
+/* Aktiver Zustand (z.B. Desktop-Toggle wenn Desktop sichtbar) */
+.btn-icon.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-glow);
+}
+
 /* Benachrichtigungs-Badge (roter Kreis mit Anzahl) ueber dem Issue-Tracker-Icon */
 .issues-badge {
     position: absolute;

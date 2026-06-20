@@ -3734,6 +3734,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         const rightPanel = document.getElementById('panel-right');
         const leftPanel = document.getElementById('panel-left');
         const handle = document.getElementById('resize-handle');
+        const toggleBtn = document.getElementById('btn-toggle-desktop');
 
         if (!rightPanel || !leftPanel || !handle) return;
 
@@ -3742,7 +3743,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         rightPanel.style.transition = 'width 0.3s ease, max-width 0.3s ease';
 
         // Hilfsfunktion: Panel ausblenden, anderes auf 100%
-        function hidePanel(panelToHide, panelToExpand) {
+        function _showOnly(panelToHide, panelToExpand) {
             panelToHide.style.display = 'none';
             handle.style.display = 'none';
             panelToExpand.style.display = 'flex';
@@ -3751,40 +3752,51 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             panelToExpand.style.width = '100%';
         }
 
-        // Linkes Panel: Minimieren = linkes Panel verstecken, rechtes expandieren
-        leftPanel.querySelector('.btn-win-minimize').addEventListener('click', () => {
-            hidePanel(leftPanel, rightPanel);
-        });
+        // Split-Ansicht: beide Panels sichtbar, 50/50
+        function _showSplit() {
+            leftPanel.style.display = 'flex';
+            rightPanel.style.display = 'flex';
+            handle.style.display = '';
+            leftPanel.style.maxWidth = '';
+            leftPanel.style.width = '50%';
+            leftPanel.style.flex = '';
+            rightPanel.style.flex = '1';
+            rightPanel.style.maxWidth = '';
+        }
 
-        // Linkes Panel: Maximieren = linkes Panel auf 100%, rechtes verstecken
-        leftPanel.querySelector('.btn-win-maximize').addEventListener('click', () => {
-            hidePanel(rightPanel, leftPanel);
-        });
+        // Ansichtsmodus anwenden + merken.
+        // mode: 'chat' (nur Chat) | 'desktop' (nur Desktop) | 'split' (beide)
+        function applyViewMode(mode, persist = true) {
+            if (mode === 'desktop')      _showOnly(leftPanel, rightPanel);
+            else if (mode === 'split')   _showSplit();
+            else { mode = 'chat';        _showOnly(rightPanel, leftPanel); }
+            window._jarvisViewMode = mode;
+            if (persist) { try { localStorage.setItem('jarvis_view_mode', mode); } catch (_) {} }
+            // Header-Symbol hervorheben, wenn Desktop sichtbar ist
+            if (toggleBtn) toggleBtn.classList.toggle('active', mode !== 'chat');
+        }
+        window.applyViewMode = applyViewMode;
 
-        // Rechtes Panel: Minimieren = rechtes Panel verstecken, linkes expandieren
-        rightPanel.querySelector('.btn-win-minimize').addEventListener('click', () => {
-            hidePanel(rightPanel, leftPanel);
-        });
-
-        // Rechtes Panel: Maximieren = rechtes Panel auf 100%, linkes verstecken
-        rightPanel.querySelector('.btn-win-maximize').addEventListener('click', () => {
-            hidePanel(leftPanel, rightPanel);
-        });
-
-        // Wiederherstellen (Split Screen): Beide Panels sichtbar, 50/50
-        document.querySelectorAll('.btn-win-restore').forEach(btn => {
-            btn.addEventListener('click', () => {
-                leftPanel.style.display = 'flex';
-                rightPanel.style.display = 'flex';
-                handle.style.display = '';
-
-                // Zurücksetzen auf Standardwerte
-                leftPanel.style.maxWidth = '';
-                leftPanel.style.width = '50%';
-                rightPanel.style.flex = '1';
-                rightPanel.style.maxWidth = '';
+        // Header-Symbol: Desktop ein-/ausblenden (Chat <-> Split)
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                applyViewMode((window._jarvisViewMode || 'chat') === 'chat' ? 'split' : 'chat');
             });
+        }
+
+        // Fenster-Steuerung der Panels (persistiert ebenfalls)
+        leftPanel.querySelector('.btn-win-minimize').addEventListener('click', () => applyViewMode('desktop'));
+        leftPanel.querySelector('.btn-win-maximize').addEventListener('click', () => applyViewMode('chat'));
+        rightPanel.querySelector('.btn-win-minimize').addEventListener('click', () => applyViewMode('chat'));
+        rightPanel.querySelector('.btn-win-maximize').addEventListener('click', () => applyViewMode('desktop'));
+        document.querySelectorAll('.btn-win-restore').forEach(btn => {
+            btn.addEventListener('click', () => applyViewMode('split'));
         });
+
+        // Gespeicherten Modus anwenden – Standard: nur Chat (Desktop ausgeblendet)
+        let saved = 'chat';
+        try { saved = localStorage.getItem('jarvis_view_mode') || 'chat'; } catch (_) {}
+        applyViewMode(saved, false);
     }
 
 

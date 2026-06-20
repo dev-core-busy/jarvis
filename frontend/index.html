@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=3">
-    <link rel="stylesheet" href="/static/css/style.css?v=92">
+    <link rel="stylesheet" href="/static/css/style.css?v=93">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -308,6 +308,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="btn-icon" id="btn-theme-toggle" data-i18n-title="header.theme" title="Hell/Dunkel umschalten">
                     <svg class="theme-icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                     <svg class="theme-icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                </button>
+
+                <!-- Desktop ein-/ausblenden (Standard: nur Chat) -->
+                <button class="btn-icon" id="btn-toggle-desktop" data-i18n-title="header.toggle_desktop" title="Desktop ein-/ausblenden">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                        <line x1="8" y1="21" x2="16" y2="21"/>
+                        <line x1="12" y1="17" x2="12" y2="21"/>
+                    </svg>
                 </button>
 
                 <a href="/userchat?from=main" target="_blank" class="btn-icon" data-i18n-title="header.user_chat" title="Benutzer-Chat" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
@@ -2086,7 +2095,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=17"></script>
+    <script src="/static/js/i18n.js?v=18"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=14"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -2103,7 +2112,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/issues.js?v=2"></script>
     <script src="/static/js/branding.js?v=8"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/app.js?v=123"></script>
+    <script src="/static/js/app.js?v=125"></script>
 </body>
 
 </html>

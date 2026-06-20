@@ -139,6 +139,16 @@ _LDAP_SHELL_SECRET_PATHS = re.compile(
     re.IGNORECASE,
 )
 
+# Tools, die Internet-Ergebnisse liefern – fuer Benutzer ohne Internet-Zugang gesperrt
+_INTERNET_TOOLS = {"browser_control", "browser_cdp", "search_image"}
+# Shell-Befehle, die ins Internet greifen (curl/wget auf externe Hosts) – ohne
+# Internet-Zugang gesperrt; localhost/127.0.0.1 bleibt erlaubt.
+_INTERNET_SHELL = re.compile(
+    r'\b(?:curl|wget|lynx|w3m|aria2c|youtube-dl|yt-dlp)\b[^\n]*?https?://'
+    r'(?!(?:127\.0\.0\.1|localhost|0\.0\.0\.0)\b)',
+    re.IGNORECASE,
+)
+
 # ── Instructions aus data/instructions/*.md laden ─────────────────────────
 INSTRUCTIONS_DIR = Path(__file__).parent.parent / "data" / "instructions"
 
@@ -1267,6 +1277,19 @@ KRITISCH – Autonomie-Regeln:
                         print(f"[AGENT] BLOCKED shell secret-path for LDAP-User '{_uname}': {_cmd[:80]}", flush=True)
                         result = "Zugriff verweigert: Zugriff auf diese Datei ist für LDAP-Benutzer nicht erlaubt."
                         _ldap_blocked = True
+
+            # Internet-Zugang: Tools mit Internet-Ergebnissen fuer nicht freigeschaltete
+            # Benutzer blockieren (selektiv per Einstellungen -> Sicherheit -> Internet-Zugang).
+            if not _ldap_blocked and not getattr(self, '_current_user_internet', True):
+                if name in _INTERNET_TOOLS:
+                    print(f"[AGENT] BLOCKED Internet-Tool '{name}' fuer User '{_uname}' (kein Internet-Zugang)", flush=True)
+                    result = "Zugriff verweigert: Internet-Abfragen sind fuer deinen Benutzer nicht freigeschaltet."
+                    _ldap_blocked = True
+                elif name == "shell_execute" and _INTERNET_SHELL.search(args.get("command", "")):
+                    print(f"[AGENT] BLOCKED Internet-Shell fuer User '{_uname}' (kein Internet-Zugang)", flush=True)
+                    result = "Zugriff verweigert: Internet-Zugriff (curl/wget) ist fuer deinen Benutzer nicht freigeschaltet."
+                    _ldap_blocked = True
+
             if not _ldap_blocked:
                 result = await tool.execute(**exec_args)
             _dur_ms = int((_time.monotonic() - _t0) * 1000)

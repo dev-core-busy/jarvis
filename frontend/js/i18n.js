@@ -35,6 +35,7 @@ const _I18N = {
         'header.user_chat':      'Benutzer-Chat',
         'header.settings':       'KI-Einstellungen',
         'header.theme':          'Hell/Dunkel umschalten',
+        'header.toggle_desktop': 'Desktop ein-/ausblenden',
         'header.logout':         'Abmelden',
         'header.connection':     'Verbindungsstatus',
 
@@ -777,6 +778,7 @@ const _I18N = {
         'header.user_chat':      'User Chat',
         'header.settings':       'AI Settings',
         'header.theme':          'Toggle Light/Dark',
+        'header.toggle_desktop': 'Show/hide desktop',
         'header.logout':         'Sign Out',
         'header.connection':     'Connection Status',
 

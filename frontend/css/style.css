@@ -198,6 +198,53 @@ body {
     transition: border-color var(--transition), box-shadow var(--transition);
 }
 
+/* Discover-Modelle Dropdown (LLM-Profil-Editor) */
+.model-discover-list {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    max-height: 260px;
+    overflow-y: auto;
+    background-color: #141a28 !important;   /* hart deckend – nie transparent */
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+.model-discover-head {
+    position: sticky;
+    top: 0;
+    padding: 7px 12px;
+    font-size: 0.72rem;
+    color: #cbd5e1;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    background-color: #141a28 !important;
+}
+body.light .model-discover-list,
+body.light .model-discover-head {
+    background-color: #ffffff !important;
+    border-color: rgba(0, 0, 0, 0.15);
+    color: #1f2937;
+}
+.model-discover-item {
+    padding: 7px 12px;
+    font-size: 0.85rem;
+    color: #e5e7eb;
+    background-color: #141a28 !important;   /* jede Zeile deckend */
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.model-discover-item:hover { background-color: #20283c !important; }
+.model-discover-item.active { color: #a5b4fc; font-weight: 600; }
+.model-discover-msg { padding: 9px 12px; font-size: 0.8rem; color: #cbd5e1; background-color: #141a28 !important; }
+.model-discover-msg.error { color: #f87171; }
+body.light .model-discover-item,
+body.light .model-discover-msg { background-color: #ffffff !important; color: #1f2937; }
+body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
+
 .input-group:focus-within {
     border-color: var(--border-focus);
     box-shadow: var(--shadow-glow);

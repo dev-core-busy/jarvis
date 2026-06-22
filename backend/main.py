@@ -3316,13 +3316,18 @@ async def list_learned_files(user: str = Depends(require_auth)):
     return JSONResponse(result)
 
 
-@app.get("/api/knowledge/learned/export")
-async def export_learned_zip(user: str = Depends(require_auth)):
-    """Exportiert alle automatisch gelernten Konversations-Fakten als JSON, gepackt
-    in einer ZIP-Datei (Download)."""
+def _build_knowledge_export(embeddings: bool) -> bytes:
+    """Baut die komplette Wissens-Export-ZIP (blockierend – via to_thread aufrufen).
+
+    Enthaelt: (1) alle gelernten Konversations-Dateien (Volltext) und (2) den
+    KOMPLETTEN Vektor-DB-Inhalt (alle indexierten Text-Chunks mit Metadaten aus
+    ALLEN Quellen: hochgeladene Dateien, gemountete Ordner, gelernte Konversationen).
+    Mit embeddings=True zusaetzlich die Roh-Vektoren (gross, sonst regenerierbar)."""
     from backend.learning import LEARNED_DIR, PROJECT_ROOT as LRN_ROOT
     import io as _io, zipfile as _zip, datetime as _dt
-    entries = []
+
+    # (1) Gelernte Konversationen
+    learned = []
     if LEARNED_DIR.exists():
         for md in sorted(LEARNED_DIR.rglob("conv_*.md"), reverse=True):
             try:
@@ -3333,29 +3338,64 @@ async def export_learned_zip(user: str = Depends(require_auth)):
                     rel = str(md.relative_to(LRN_ROOT))
                 except ValueError:
                     rel = str(md)
-                entries.append({
-                    "path": rel,
-                    "name": md.name,
-                    "title": first_line[:120],
-                    "size_kb": round(stat.st_size / 1024, 1),
-                    "mtime": stat.st_mtime,
+                learned.append({
+                    "path": rel, "name": md.name, "title": first_line[:120],
+                    "size_kb": round(stat.st_size / 1024, 1), "mtime": stat.st_mtime,
                     "mtime_iso": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
                     "content": content,
                 })
             except Exception:
                 continue
+
+    # (2) Vektor-DB-Inhalt (alle Chunks + optional Roh-Vektoren)
+    vector = {"available": False, "file_count": 0, "chunk_count": 0,
+              "embeddings_included": bool(embeddings), "chunks": []}
+    try:
+        from backend.tools.knowledge import _get_vector_store
+        vs = _get_vector_store()
+        if vs is not None:
+            meta = list(getattr(vs, "_meta", []) or [])
+            vector["available"] = True
+            vector["file_count"] = vs.file_count()
+            vector["chunk_count"] = vs.chunk_count()
+            vecs = None
+            if embeddings and meta:
+                try:
+                    vecs = vs._vectors_at(list(range(len(meta))))
+                except Exception as _ve:
+                    vector["embeddings_error"] = str(_ve)
+            for i, m in enumerate(meta):
+                c = {"file_path": m.get("file_path"), "chunk_index": m.get("chunk_index"),
+                     "mtime": m.get("mtime"), "text": m.get("text", "")}
+                if vecs is not None:
+                    try:
+                        c["embedding"] = [round(float(x), 6) for x in vecs[i]]
+                    except Exception:
+                        pass
+                vector["chunks"].append(c)
+    except Exception as e:
+        vector["error"] = str(e)
+
     payload = {
         "exported_at": _dt.datetime.now().isoformat(timespec="seconds"),
-        "count": len(entries),
-        "entries": entries,
+        "learned": {"count": len(learned), "entries": learned},
+        "vector_store": vector,
     }
     buf = _io.BytesIO()
     with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
         zf.writestr("gelerntes_wissen.json",
                     json.dumps(payload, ensure_ascii=False, indent=2))
-    buf.seek(0)
-    fname = f"jarvis_gelerntes_wissen_{_dt.datetime.now():%Y%m%d_%H%M%S}.zip"
-    return Response(content=buf.getvalue(), media_type="application/zip",
+    return buf.getvalue()
+
+
+@app.get("/api/knowledge/export")
+async def export_knowledge_zip(embeddings: int = 0, user: str = Depends(require_auth)):
+    """Exportiert die KOMPLETTE Wissensbasis (gelernte Konversationen + gesamter
+    Vektor-DB-Inhalt) als JSON in einer ZIP. ?embeddings=1 fuegt die Roh-Vektoren bei."""
+    import datetime as _dt
+    data = await asyncio.to_thread(_build_knowledge_export, bool(embeddings))
+    fname = f"jarvis_wissen_{_dt.datetime.now():%Y%m%d_%H%M%S}.zip"
+    return Response(content=data, media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 

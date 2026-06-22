@@ -617,7 +617,8 @@
                     const errEl = document.createElement('p');
                     errEl.className = 'kb-hint';
                     errEl.style.cssText = 'color:#e74c3c;white-space:pre-wrap;word-break:break-word;';
-                    errEl.textContent = window.t('update.error').replace('{msg}', d.error || window.t('update.unknown_error'));
+                    // d.detail = FastAPI-Fehler (z.B. 403 "nur lokale Admins"), d.error = Git-Fehler
+                    errEl.textContent = window.t('update.error').replace('{msg}', d.error || d.detail || window.t('update.unknown_error'));
                     if (body) { body.prepend(errEl); body.scrollTop = 0; }
                     if (btn) { btn.disabled = false; btn.textContent = window.t('update.apply_btn'); }
                 }

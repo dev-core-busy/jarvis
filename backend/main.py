@@ -3476,6 +3476,23 @@ async def export_knowledge_zip(embeddings: int = 0, llm: int = 0, user: str = De
         "document_count": len(documents),
         "documents": documents,
     }
+    if embeddings:
+        # Roh-Vektoren sind modellspezifisch -> ohne diese Angaben unbrauchbar.
+        try:
+            from backend.tools.vector_store import MODEL_NAME as _EMB_MODEL, EMBEDDING_DIM as _EMB_DIM
+        except Exception:
+            _EMB_MODEL, _EMB_DIM = "unbekannt", 0
+        payload["embedding_model"] = {
+            "name": _EMB_MODEL,
+            "dim": _EMB_DIM,
+            "normalized": True,
+            "similarity": "cosine (Inner Product auf normierten Vektoren)",
+            "passage_prefix": "passage: ",
+            "query_prefix": "query: ",
+            "note": ("Die 'embedding'-Vektoren sind NUR mit exakt diesem Modell sinnvoll "
+                     "(gleicher Vektorraum). Ein anderes Zielsystem sollte sie ignorieren und "
+                     "stattdessen 'text'/'content' mit dem eigenen Embedding-Modell neu einbetten."),
+        }
     data = await asyncio.to_thread(_zip_knowledge_export, payload)
     fname = f"jarvis_wissen_{_dt.datetime.now():%Y%m%d_%H%M%S}.zip"
     return Response(content=data, media_type="application/zip",

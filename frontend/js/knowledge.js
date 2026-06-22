@@ -307,7 +307,7 @@ class JarvisKnowledgeManager {
         const orig = btn ? btn.textContent : '';
         if (btn) { btn.disabled = true; btn.textContent = window.t('knowledge.learned.exporting'); }
         try {
-            const resp = await fetch('/api/knowledge/learned/export', {
+            const resp = await fetch('/api/knowledge/export', {
                 headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);

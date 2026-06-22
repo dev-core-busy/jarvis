@@ -1895,6 +1895,18 @@ async def get_document(name: str):
 
 
 # ─── Geteilte Anzeige-History (Hauptfenster + jarvis/chat teilen denselben Verlauf) ───
+async def _broadcast_shared_history(user: str, payload: dict):
+    """Sendet ein Shared-History-Event an ALLE /ws-Verbindungen dieses Benutzers
+    (Live-Sync zwischen Hauptfenster und /chat ohne Neuladen). Das Ursprungs-
+    Fenster ignoriert sein eigenes Event anhand der mitgesendeten client_id."""
+    for w in list(_active_ws):
+        try:
+            if _ws_usernames.get(id(w)) == user:
+                await w.send_json(payload)
+        except Exception:
+            pass
+
+
 @app.get("/api/chat/shared-history")
 async def chat_history_get(user: str = Depends(require_auth)):
     import backend.chat_history as ch
@@ -1906,7 +1918,15 @@ async def chat_history_append(request: Request, user: str = Depends(require_auth
     import backend.chat_history as ch
     body = await request.json()
     msg = body.get("message")
-    return JSONResponse({"messages": ch.append(user, msg)})
+    result = ch.append(user, msg)
+    # Live-Sync: die neue Nachricht an die anderen Fenster desselben Benutzers pushen
+    if msg:
+        await _broadcast_shared_history(user, {
+            "type": "shared_history_append",
+            "message": msg,
+            "origin": body.get("client_id", ""),
+        })
+    return JSONResponse({"messages": result})
 
 
 @app.put("/api/chat/shared-history")
@@ -4970,6 +4990,10 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                 await ws.send_json({"type": "error", "message": "Kennwort muss zuerst geaendert werden."})
                 return
 
+    # Reiner Registrierungs-Handshake: setzt nur _ws_usernames (oben) fuer Live-Sync
+    if msg_type == "hello":
+        return
+
     if msg_type == "task":
         # Neue Aufgabe starten
         task_text = msg.get("text", "").strip()
@@ -4980,7 +5004,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Spracheingabe von Windows/Desktop-Client: [Voice]\n<audio>BASE64</audio>
         # → Whisper transkribiert das Audio, task_text wird durch das Transkript ersetzt
         if task_text.startswith("[Voice]") and "<audio>" in task_text:
-            import base64, tempfile, os, re as _re
+            import base64, tempfile, re as _re  # os ist modulglobal (sonst UnboundLocalError)
             m = _re.search(r"<audio>(.*?)</audio>", task_text, _re.DOTALL)
             if m:
                 await ws.send_json({"type": "status", "message": "🎤 Transkribiere Spracheingabe…"})
@@ -5018,7 +5042,9 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                 _mime  = (_a.get("mime_type","") or "").strip().lower()
                 _data  = _a.get("data","")
                 _name  = _a.get("name","datei")
-                if not _mime or not _data:
+                # Office-Dateien (xlsx/docx/pptx) melden im Browser oft KEINEN MIME-Typ –
+                # daher nur auf vorhandene Daten pruefen; Klassifizierung sonst per Endung.
+                if not _data:
                     continue
                 if _mime in _ALLOWED_IMG_MIME:
                     if len(_data) <= 14_000_000:   # max ~10 MB binary
@@ -5073,6 +5099,50 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                     except Exception as _pe:
                         print(f"[attach] PDF-Extraktion fehlgeschlagen ({_name}): {_pe}", flush=True)
                         _text_prepend.append(f"[PDF {_name}: Konnte nicht gelesen werden – {_pe}]")
+                else:
+                    # Office-/Text-/CSV-/sonstige Dokumente (xlsx/docx/pptx/csv/txt/…):
+                    # Datei nach data/documents/ speichern, damit der Agent sie mit den
+                    # passenden Tools (office_read, Shell/pandas) lesen UND ein bearbeitetes
+                    # Ergebnis als Download liefern kann. Frueher wurden diese Anhaenge
+                    # komplett verworfen ("keine Tabelle angehaengt").
+                    _ext = os.path.splitext(_name)[1].lower().lstrip(".")
+                    _DOC_EXT = {"xlsx","xls","ods","csv","tsv","docx","doc","odt","rtf",
+                                "pptx","ppt","odp","txt","md","json","xml","html","htm","log"}
+                    _is_doc = (_ext in _DOC_EXT or "officedocument" in _mime
+                               or "opendocument" in _mime
+                               or _mime in {"text/csv","text/plain","application/json",
+                                            "text/markdown","text/xml","application/xml"})
+                    if not _is_doc:
+                        continue
+                    if len(_data) > 30_000_000:    # ~22 MB binary
+                        _text_prepend.append(f"[Datei {_name}: zu gross zum Verarbeiten]")
+                        continue
+                    try:
+                        import uuid as _uuidatt
+                        _doc_bytes = _b64att.b64decode(_data)
+                        _docs_dir = Path(__file__).parent.parent / "data" / "documents"
+                        _docs_dir.mkdir(parents=True, exist_ok=True)
+                        _safe = "".join(c if (c.isalnum() or c in "._-") else "_"
+                                        for c in os.path.basename(_name)).strip("_") or "datei"
+                        _dest = _docs_dir / _safe
+                        if _dest.exists():
+                            _stem, _sfx = os.path.splitext(_safe)
+                            _dest = _docs_dir / f"{_stem}_{_uuidatt.uuid4().hex[:8]}{_sfx}"
+                        _dest.write_bytes(_doc_bytes)
+                        _note = (f"[Angehängte Datei '{_name}' wurde gespeichert unter: {_dest.as_posix()} "
+                                 f"(als Dateiname '{_dest.name}' auch via office_read erreichbar). "
+                                 f"Lies/bearbeite sie wie gewünscht und liefere das Ergebnis als Download-Datei.]")
+                        # Kleine Text-/CSV-Dateien direkt einblenden, damit der LLM die Daten sofort sieht
+                        if _ext in {"csv","tsv","txt","md","json","xml","html","htm","log"} and len(_doc_bytes) <= 200_000:
+                            try:
+                                _note += f"\n[Inhalt von {_name}]:\n{_doc_bytes.decode('utf-8', errors='replace')}"
+                            except Exception:
+                                pass
+                        _text_prepend.append(_note)
+                        await ws.send_json({"type": "status", "message": f"📎 Datei {_name} bereitgestellt"})
+                    except Exception as _de:
+                        print(f"[attach] Dokument speichern fehlgeschlagen ({_name}): {_de}", flush=True)
+                        _text_prepend.append(f"[Datei {_name}: konnte nicht bereitgestellt werden – {_de}]")
             if _text_prepend:
                 task_text = "\n\n".join(_text_prepend) + "\n\n" + task_text
 
@@ -5233,7 +5303,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
     elif msg_type == "transcribe_only":
         # Nur Transkription (kein Agent): Audio → Whisper → voice_transcript zurück
         # Wird von der Windows-App verwendet wenn AutoSend deaktiviert ist
-        import base64, tempfile, os
+        import base64, tempfile  # os ist modulglobal (sonst UnboundLocalError)
         audio_b64 = msg.get("audio", "")
         if not audio_b64:
             await ws.send_json({"type": "error", "message": "Kein Audio angegeben"})
@@ -5257,7 +5327,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
 
     elif msg_type == "wakeword_check":
         # Wake-Word-Erkennung via Whisper: Audio transkribieren + Phrase prüfen
-        import base64, tempfile, os
+        import base64, tempfile  # os ist modulglobal (sonst UnboundLocalError)
         audio_b64 = msg.get("audio", "")
         phrase = msg.get("phrase", "").strip().lower()
         if not audio_b64 or not phrase:

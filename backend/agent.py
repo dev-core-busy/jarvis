@@ -1642,6 +1642,53 @@ KRITISCH – Autonomie-Regeln:
                 continue
             await _emit(f"{base}.{ext}", f"/api/documents/{fname}")
 
+        # (c) BLOSSE Dateinamen ohne Pfad (z.B. "Ergebnis: b45_bearbeitet.xlsx").
+        # Per Shell/pandas erzeugte Dateien landen oft im Arbeitsverzeichnis und
+        # werden vom LLM nur mit Namen genannt. In bekannten, agent-schreibbaren
+        # Verzeichnissen suchen und als Download ausliefern (KOPIEREN, nicht moven –
+        # koennte die hochgeladene Eingabedatei sein).
+        _search_dirs = [docs_dir, proj, _Path.cwd(), _tmp_root]
+        for m in re.finditer(r"(?<![\w./\\-])([\w.\-]+\.(?:docx|xlsx|pptx|pdf))\b", text):
+            raw = m.group(1)
+            if "/" in raw or "\\" in raw:
+                continue  # Pfade sind in (b) abgedeckt
+            found = None
+            for d in _search_dirs:
+                try:
+                    cand = d / raw
+                    if cand.is_file():
+                        found = cand.resolve()
+                        break
+                except Exception:
+                    continue
+            if not found:
+                continue
+            key = str(found)
+            if key in delivered:
+                continue
+            # Nur agent-schreibbare Orte (kein read-only Quell-Share)
+            _proj_root = proj.resolve()
+            if not (found == _docs_root or _docs_root in found.parents
+                    or found == _tmp_root or _tmp_root in found.parents
+                    or _proj_root in found.parents or found == _proj_root):
+                continue
+            # Schon eine Capability-Datei? -> via (a) erledigt
+            if found.parent == docs_dir and re.fullmatch(r"[0-9a-f]{32}__.+", found.name):
+                delivered.add(key)
+                continue
+            delivered.add(key)
+            ext = found.suffix.lower().lstrip(".")
+            base = _os.path.splitext(found.name)[0].translate(_UML)
+            base = re.sub(r"[^A-Za-z0-9_\- ]+", "", base).strip().replace(" ", "_") or "dokument"
+            fname = f"{_uuid.uuid4().hex}__{base}.{ext}"
+            try:
+                docs_dir.mkdir(parents=True, exist_ok=True)
+                _shutil.copy(str(found), str(docs_dir / fname))
+            except Exception as e:
+                _log(f"Doc-Ingest (bare) fehlgeschlagen fuer {raw}: {e}")
+                continue
+            await _emit(f"{base}.{ext}", f"/api/documents/{fname}")
+
     async def _send_llm_stats(self, ws, duration_ms: int, input_tokens: int, output_tokens: int, steps: int):
         """Sendet LLM-Statistiken (Dauer + Token-Verbrauch) an alle Clients."""
         try:

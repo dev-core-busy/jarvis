@@ -161,11 +161,31 @@ _LDAP_SHELL_SECRET_PATHS = re.compile(
 )
 
 
+def _strip_heredocs(cmd: str) -> str:
+    """Entfernt Heredoc-Koerper (<< 'EOF' ... EOF) aus einem Shell-Befehl, damit deren
+    Inhalt (z.B. eingebetteter Python-Code mit '>'/'<' fuer Vergleiche) NICHT als
+    Shell-Redirect fehlinterpretiert wird. Die Heredoc-START-Zeile (mit dem echten
+    '> /tmp/datei'-Redirect) bleibt erhalten, nur die Koerperzeilen werden entfernt."""
+    out, delim = [], None
+    for line in cmd.split("\n"):
+        if delim is None:
+            out.append(line)
+            m = re.search(r'<<-?\s*["\']?([A-Za-z_][A-Za-z0-9_]*)["\']?', line)
+            if m:
+                delim = m.group(1)
+        else:
+            # innerhalb Heredoc: Koerper verwerfen, bis die Delimiter-Zeile kommt
+            if line.strip() == delim:
+                delim = None
+    return "\n".join(out)
+
+
 def _ldap_redirects_safe(cmd: str) -> bool:
     """True, wenn ALLE Schreib-Redirects in cmd auf den temporaeren Arbeitsbereich
     /tmp zielen (kein '..'). LDAP-Benutzer duerfen so temporaere Skripte/Ausgaben
     fuer die Dokumentenverarbeitung erzeugen, ohne System-/App-Dateien schreiben zu
-    koennen. Leere Trefferliste -> nicht sicher (z.B. fd-Redirects)."""
+    koennen. Leere Trefferliste -> nicht sicher (z.B. fd-Redirects).
+    Erwartet einen bereits Heredoc-bereinigten Befehl (siehe _strip_heredocs)."""
     targets = _REDIRECT_TARGETS.findall(cmd)
     if not targets:
         return False
@@ -1375,11 +1395,14 @@ KRITISCH – Autonomie-Regeln:
                     _ldap_blocked = True
                 elif name == "shell_execute":
                     _cmd = args.get("command", "")
+                    # Heredoc-Koerper (z.B. eingebetteter Python-Code) NICHT als Shell-
+                    # Redirects fehlinterpretieren -> nur die Shell-Struktur pruefen.
+                    _cmd_sh = _strip_heredocs(_cmd)
                     if _LDAP_SHELL_FORBIDDEN.search(_cmd):
                         print(f"[AGENT] BLOCKED shell command for LDAP-User '{_uname}': {_cmd[:80]}", flush=True)
                         result = "Zugriff verweigert: Dieser Shell-Befehl ist für LDAP-Benutzer nicht erlaubt (keine System-Änderungen)."
                         _ldap_blocked = True
-                    elif _LDAP_SHELL_WRITE_REDIRECT.search(_cmd) and not _ldap_redirects_safe(_cmd):
+                    elif _LDAP_SHELL_WRITE_REDIRECT.search(_cmd_sh) and not _ldap_redirects_safe(_cmd_sh):
                         print(f"[AGENT] BLOCKED shell write-redirect for LDAP-User '{_uname}': {_cmd[:80]}", flush=True)
                         result = ("Zugriff verweigert: Datei-Schreiben via Shell ist für LDAP-Benutzer nur "
                                   "im temporären Arbeitsbereich /tmp erlaubt (z.B. > /tmp/skript.py).")

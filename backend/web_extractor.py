@@ -41,6 +41,44 @@ Inhalt:
 ---
 """
 
+async def extract_structured_from_text(text: str, fallback_title: str = "") -> dict:
+    """Schickt beliebigen Text durch den Wissensextraktor-LLM und liefert
+    {title, summary, facts, qa_pairs}. Wiederverwendbar – u.a. fuer die
+    LLM-Anreicherung beim Wissens-Export."""
+    from backend.config import config
+    from backend.llm import get_provider
+    from google.genai import types
+    content = (text or "")[:8000]
+    if not content.strip():
+        return {"title": fallback_title, "summary": "", "facts": [], "qa_pairs": []}
+    provider = get_provider(
+        config.LLM_PROVIDER, config.current_api_key,
+        auth_method=config.current_auth_method,
+        session_key=config.current_session_key, prompt_tool_calling=False,
+    )
+    prompt = _EXTRACT_PROMPT.replace("{content}", content)
+    response = await provider.generate_response(
+        model=config.current_model,
+        system_prompt="Du bist ein Wissensextraktor. Antworte ausschließlich mit dem angeforderten JSON.",
+        contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+        tools=[],
+    )
+    raw_text = "".join(p.text for p in (response.parts or []) if getattr(p, "text", None))
+    m = re.search(r'\{[\s\S]*\}', raw_text)
+    if not m:
+        raise ValueError(f"LLM lieferte kein gültiges JSON: {raw_text[:200]}")
+    data = json.loads(m.group(0))
+    return {
+        "title": str(data.get("title", fallback_title)).strip()[:300],
+        "summary": str(data.get("summary", "")).strip(),
+        "facts": [str(f).strip() for f in data.get("facts", []) if str(f).strip()],
+        "qa_pairs": [
+            {"q": str(p.get("q", "")).strip(), "a": str(p.get("a", "")).strip()}
+            for p in data.get("qa_pairs", []) if str(p.get("q", "")).strip()
+        ],
+    }
+
+
 # ─── Datei-Typ Erkennung ─────────────────────────────────────────────────────
 
 # Content-Type → Dateiendung für direkte Datei-Downloads via URL

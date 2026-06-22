@@ -3316,84 +3316,167 @@ async def list_learned_files(user: str = Depends(require_auth)):
     return JSONResponse(result)
 
 
-def _build_knowledge_export(embeddings: bool) -> bytes:
-    """Baut die komplette Wissens-Export-ZIP (blockierend – via to_thread aufrufen).
+def _kb_first_heading(content: str) -> str:
+    """Erste Markdown-Ueberschrift bzw. erste nicht-leere Zeile als Titel."""
+    for line in content.splitlines():
+        s = line.strip()
+        if s.startswith("#"):
+            return s.lstrip("# ").strip()
+    for line in content.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
 
-    Enthaelt: (1) alle gelernten Konversations-Dateien (Volltext) und (2) den
-    KOMPLETTEN Vektor-DB-Inhalt (alle indexierten Text-Chunks mit Metadaten aus
-    ALLEN Quellen: hochgeladene Dateien, gemountete Ordner, gelernte Konversationen).
-    Mit embeddings=True zusaetzlich die Roh-Vektoren (gross, sonst regenerierbar)."""
-    from backend.learning import LEARNED_DIR, PROJECT_ROOT as LRN_ROOT
-    import io as _io, zipfile as _zip, datetime as _dt
 
-    # (1) Gelernte Konversationen
-    learned = []
-    if LEARNED_DIR.exists():
-        for md in sorted(LEARNED_DIR.rglob("conv_*.md"), reverse=True):
-            try:
-                stat = md.stat()
-                content = md.read_text(encoding="utf-8")
-                first_line = content.splitlines()[0].lstrip("# ").strip() if content else md.name
-                try:
-                    rel = str(md.relative_to(LRN_ROOT))
-                except ValueError:
-                    rel = str(md)
-                learned.append({
-                    "path": rel, "name": md.name, "title": first_line[:120],
-                    "size_kb": round(stat.st_size / 1024, 1), "mtime": stat.st_mtime,
-                    "mtime_iso": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-                    "content": content,
-                })
-            except Exception:
-                continue
+def _kb_struct_summary(content: str) -> str:
+    """Strukturelle Zusammenfassung: erster Fliesstext-Absatz (ohne Ueberschriften)."""
+    for para in content.split("\n\n"):
+        p = " ".join(l.strip() for l in para.splitlines() if not l.strip().startswith("#")).strip()
+        if len(p) >= 30:
+            return p[:400]
+    return ""
 
-    # (2) Vektor-DB-Inhalt (alle Chunks + optional Roh-Vektoren)
-    vector = {"available": False, "file_count": 0, "chunk_count": 0,
-              "embeddings_included": bool(embeddings), "chunks": []}
+
+def _kb_struct_facts(content: str) -> list[str]:
+    """Strukturelle Fakten: Aufzaehlungs-/Inhaltszeilen (ohne Ueberschriften), dedupliziert."""
+    facts, seen = [], set()
+    for line in content.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        s = s.lstrip("-*•0123456789. \t").strip()
+        if len(s) < 8 or s in seen:
+            continue
+        seen.add(s)
+        facts.append(s)
+        if len(facts) >= 60:
+            break
+    return facts
+
+
+def _collect_knowledge_documents(include_embeddings: bool) -> tuple[list[dict], dict]:
+    """Sammelt die Wissensbasis als Dokumente im Extraktor-Schema (strukturell, ohne LLM).
+    Gruppiert die Vektor-DB-Chunks pro Quelldatei; ergaenzt gelernte conv_*.md, die
+    (noch) nicht indexiert sind. Gibt (documents, vector_meta)."""
+    import hashlib as _hl
+    from pathlib import Path as _P
+    docs_by_file: dict[str, dict] = {}
+    vmeta = {"available": False, "file_count": 0, "chunk_count": 0}
     try:
         from backend.tools.knowledge import _get_vector_store
         vs = _get_vector_store()
         if vs is not None:
             meta = list(getattr(vs, "_meta", []) or [])
-            vector["available"] = True
-            vector["file_count"] = vs.file_count()
-            vector["chunk_count"] = vs.chunk_count()
+            vmeta.update(available=True, file_count=vs.file_count(), chunk_count=vs.chunk_count())
             vecs = None
-            if embeddings and meta:
+            if include_embeddings and meta:
                 try:
                     vecs = vs._vectors_at(list(range(len(meta))))
                 except Exception as _ve:
-                    vector["embeddings_error"] = str(_ve)
+                    vmeta["embeddings_error"] = str(_ve)
             for i, m in enumerate(meta):
-                c = {"file_path": m.get("file_path"), "chunk_index": m.get("chunk_index"),
-                     "mtime": m.get("mtime"), "text": m.get("text", "")}
+                fp = m.get("file_path") or "unbekannt"
+                d = docs_by_file.setdefault(fp, {"chunks": [], "mtime": m.get("mtime")})
+                ch = {"chunk_index": m.get("chunk_index"), "text": m.get("text", "")}
                 if vecs is not None:
                     try:
-                        c["embedding"] = [round(float(x), 6) for x in vecs[i]]
+                        ch["embedding"] = [round(float(x), 6) for x in vecs[i]]
                     except Exception:
                         pass
-                vector["chunks"].append(c)
+                d["chunks"].append(ch)
     except Exception as e:
-        vector["error"] = str(e)
+        vmeta["error"] = str(e)
 
-    payload = {
-        "exported_at": _dt.datetime.now().isoformat(timespec="seconds"),
-        "learned": {"count": len(learned), "entries": learned},
-        "vector_store": vector,
-    }
+    # Gelernte Konversationen ergaenzen, falls nicht im Vektor-Index
+    try:
+        from backend.learning import LEARNED_DIR
+        if LEARNED_DIR.exists():
+            indexed = {str(_P(fp).resolve()) for fp in docs_by_file}
+            for md in LEARNED_DIR.rglob("conv_*.md"):
+                if str(md.resolve()) in indexed:
+                    continue
+                try:
+                    docs_by_file[str(md)] = {
+                        "chunks": [{"chunk_index": 0, "text": md.read_text(encoding="utf-8")}],
+                        "mtime": md.stat().st_mtime,
+                    }
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    documents = []
+    for fp, d in docs_by_file.items():
+        chunks = sorted(d["chunks"], key=lambda c: (c.get("chunk_index") or 0))
+        content = "\n\n".join(c["text"] for c in chunks if c.get("text"))
+        title = _kb_first_heading(content) or _P(fp).name
+        doc = {
+            "id": _hl.md5(fp.encode("utf-8")).hexdigest()[:8],
+            "source": fp,
+            "source_name": _P(fp).name,
+            "title": title[:300],
+            "summary": _kb_struct_summary(content),
+            "facts": _kb_struct_facts(content),
+            "qa_pairs": [],
+            "content": content,
+            "chunk_count": len(chunks),
+            "mtime": d.get("mtime"),
+            "enriched": False,
+        }
+        if include_embeddings:
+            doc["chunks"] = chunks
+        documents.append(doc)
+    documents.sort(key=lambda x: (x.get("mtime") or 0), reverse=True)
+    return documents, vmeta
+
+
+def _zip_knowledge_export(payload: dict) -> bytes:
+    import io as _io, zipfile as _zip
     buf = _io.BytesIO()
     with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
-        zf.writestr("gelerntes_wissen.json",
-                    json.dumps(payload, ensure_ascii=False, indent=2))
+        zf.writestr("wissen_export.json", json.dumps(payload, ensure_ascii=False, indent=2))
     return buf.getvalue()
 
 
 @app.get("/api/knowledge/export")
-async def export_knowledge_zip(embeddings: int = 0, user: str = Depends(require_auth)):
-    """Exportiert die KOMPLETTE Wissensbasis (gelernte Konversationen + gesamter
-    Vektor-DB-Inhalt) als JSON in einer ZIP. ?embeddings=1 fuegt die Roh-Vektoren bei."""
+async def export_knowledge_zip(embeddings: int = 0, llm: int = 0, user: str = Depends(require_auth)):
+    """Exportiert die komplette Wissensbasis als JSON (ZIP) im Informationsextraktor-
+    Schema (ein Dokument je Quelle mit title/summary/facts/qa_pairs/content).
+    ?embeddings=1 = Roh-Vektoren je Chunk; ?llm=1 = facts/qa_pairs per LLM nachextrahieren."""
     import datetime as _dt
-    data = await asyncio.to_thread(_build_knowledge_export, bool(embeddings))
+    documents, vmeta = await asyncio.to_thread(_collect_knowledge_documents, bool(embeddings))
+
+    enrich_errors = 0
+    if llm and documents:
+        from backend.web_extractor import extract_structured_from_text
+        sem = asyncio.Semaphore(4)   # begrenzte Parallelitaet gegen Token-/Last-Spitzen
+
+        async def _enrich(doc):
+            nonlocal enrich_errors
+            async with sem:
+                try:
+                    ex = await extract_structured_from_text(doc["content"], doc["title"])
+                    doc["title"] = ex["title"] or doc["title"]
+                    doc["summary"] = ex["summary"]
+                    doc["facts"] = ex["facts"]
+                    doc["qa_pairs"] = ex["qa_pairs"]
+                    doc["enriched"] = True
+                except Exception:
+                    enrich_errors += 1
+        await asyncio.gather(*[_enrich(d) for d in documents[:80]])  # Cap gegen Extremlaeufe
+
+    payload = {
+        "schema": "jarvis-knowledge-export/v1",
+        "format": "informationsextraktor",
+        "exported_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        "llm_enriched": bool(llm),
+        "embeddings_included": bool(embeddings),
+        "enrich_errors": enrich_errors,
+        "vector_store": vmeta,
+        "document_count": len(documents),
+        "documents": documents,
+    }
+    data = await asyncio.to_thread(_zip_knowledge_export, payload)
     fname = f"jarvis_wissen_{_dt.datetime.now():%Y%m%d_%H%M%S}.zip"
     return Response(content=data, media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})

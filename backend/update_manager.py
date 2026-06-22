@@ -108,7 +108,8 @@ def apply_update() -> dict:
         # Pull fehlgeschlagen → Stash sofort zurückspielen
         if stashed:
             _git("stash", "pop")
-        return {"ok": False, "error": err or out, "output": out}
+        # NIE leer zurueckgeben, sonst zeigt das Frontend nur "Unbekannter Fehler".
+        return {"ok": False, "error": err or out or f"git pull fehlgeschlagen (Code {rc}, keine Ausgabe)", "output": out}
 
     # 3. Stash zurückspielen
     pop_note = ""

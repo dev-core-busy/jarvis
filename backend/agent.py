@@ -21,6 +21,15 @@ def _log(msg):
 def _friendly_api_error(exc: Exception) -> str:
     """Wandelt rohe API-Fehler in verständliche Meldungen um."""
     raw = str(exc)
+    _type = type(exc).__name__
+    _mod = type(exc).__module__ or ""
+    # WICHTIG: Viele Netzwerk-Exceptions (httpx.ReadTimeout, ConnectTimeout,
+    # ConnectError, ...) haben einen LEEREN str(exc). Dann den Klassennamen als
+    # Grund verwenden, sonst bleibt im Chat nur ein nichtssagendes "Fehler".
+    if not raw.strip():
+        raw = _type
+    # Fuer die Mustererkennung Modul+Typ mit einbeziehen (z.B. 'httpx.readtimeout').
+    hay = f"{_mod}.{_type} {raw}".lower()
 
     # ── Anthropic-spezifische Fehler ─────────────────────────────────────
     if "invalid_request_error" in raw or "anthropic" in raw.lower() or "claude" in raw.lower():
@@ -76,11 +85,18 @@ def _friendly_api_error(exc: Exception) -> str:
     if "429" in raw or "rate limit" in raw.lower() or "RESOURCE_EXHAUSTED" in raw:
         return "🟡 **Rate-Limit**: Zu viele Anfragen – bitte kurz warten und nochmal versuchen."
 
-    # ── Netzwerk-/Verbindungsfehler ───────────────────────────────────────
-    if "timeout" in raw.lower() or "timed out" in raw.lower():
-        return "🟡 **Timeout**: Der LLM-Server hat nicht rechtzeitig geantwortet. Bitte nochmal versuchen."
-    if "connection" in raw.lower() and ("refused" in raw.lower() or "error" in raw.lower()):
-        return "🔴 **Verbindungsfehler**: LLM-Server nicht erreichbar. Bei lokalem Modell: Ist Ollama gestartet?"
+    # ── Netzwerk-/Verbindungsfehler (httpx/httpcore-Typen haben oft leeren str()) ──
+    if "timeout" in hay or "timed out" in hay:
+        return (f"🟡 **Timeout** ({_type}): Der LLM-Server hat nicht rechtzeitig geantwortet. "
+                "Modell evtl. zu langsam/ausgelastet – nochmal versuchen oder kleineres Modell wählen.")
+    if ("nameresolution" in hay or "getaddrinfo" in hay or "name or service not known" in hay
+            or "could not resolve" in hay):
+        return f"🔴 **DNS-Fehler** ({_type}): Der LLM-Server-Hostname konnte nicht aufgelöst werden. API-URL prüfen."
+    if ("connecterror" in hay or "connecttimeout" in hay or "refused" in hay
+            or ("connection" in hay and ("refused" in hay or "error" in hay))):
+        return f"🔴 **Verbindungsfehler** ({_type}): LLM-Server nicht erreichbar. URL/Port prüfen; bei lokalem Modell: läuft der Server?"
+    if "remoteprotocolerror" in hay or "readerror" in hay or "writeerror" in hay or "pooltimeout" in hay:
+        return f"🔴 **Netzwerkfehler** ({_type}): Verbindung zum LLM-Server wurde unterbrochen. Bitte nochmal versuchen."
 
     # ── Generischer HTTP-Fehler mit Status-Code ───────────────────────────
     m = re.search(r"HTTP (\d{3})", raw)
@@ -98,8 +114,11 @@ def _friendly_api_error(exc: Exception) -> str:
         hint = hints.get(code, f"HTTP-Fehler {code}")
         return f"🔴 **API-Fehler {code}**: {hint}"
 
-    # ── Fallback: originale Meldung, aber kompakt ─────────────────────────
-    return f"❌ **Fehler**: {raw[:400]}"
+    # ── Fallback: IMMER einen konkreten Grund nennen (Typ + Meldung), nie nur "Fehler" ──
+    if raw == _type:
+        # str(exc) war leer -> nur der Klassenname ist bekannt
+        return f"❌ **Fehler** ({_mod}.{_type}): keine Detail-Meldung vom Provider/Netzwerk."
+    return f"❌ **Fehler** ({_type}): {raw[:400]}"
 
 from google.genai import types
 from fastapi import WebSocket
@@ -268,7 +287,12 @@ Regeln:
     - Das System erkennt JEDE erzeugte Office-Datei automatisch (auch in /tmp) und liefert sie dem Nutzer als Download-Chip aus – DU musst dich darum nicht kuemmern.
     - Praesentiere das Ergebnis NIEMALS als blossen lokalen Pfad ("liegt unter /tmp/..."), sondern als fertige Datei zum Download. Liefert dir ein Tool einen Download-Link ([📥 ...](/api/documents/...)), gib ihn UNVERAENDERT aus.
 
-17. SPRACHAUSGABE / VORLESEN – passiert IMMER CLIENTSEITIG, niemals auf dem Server:
+17. CODE & SKRIPTE – IMMER direkt im Chat ausliefern:
+    - Erzeugst du Code oder ein Skript fuer den Benutzer (Python, Bash, SQL, JavaScript, …), gib den VOLLSTAENDIGEN Inhalt IMMER direkt in deiner Antwort als Markdown-Codeblock aus (```sprache … ```).
+    - Verweise NIEMALS nur auf einen lokalen Pfad ("das Skript liegt unter /tmp/exceltomysql.py") – der Benutzer hat darauf KEINEN Zugriff. Ein blosser Pfad ist KEINE gueltige Antwort.
+    - Du darfst das Skript zusaetzlich in eine Datei schreiben oder ausfuehren, aber der Quellcode MUSS im Chat sichtbar sein. (Das gilt fuer Code/Skripte; reine Office-Dateien siehe Punkt 16 = Download-Chip.)
+
+18. SPRACHAUSGABE / VORLESEN – passiert IMMER CLIENTSEITIG, niemals auf dem Server:
     - Das Vorlesen der Antwort uebernimmt der CLIENT (Chat-UI bzw. Windows-App haben eine TTS-Funktion / Lautsprecher-Symbol). Der Server ist headless und hat KEIN Audiogeraet.
     - Versuche NIEMALS, Audio serverseitig zu erzeugen UND abzuspielen (kein edge-tts/espeak + aplay/mpv/ffplay/ALSA via shell_execute). Das schlaegt zwangslaeufig fehl ("cannot open audio device") und ist der falsche Weg.
     - Fragt der Nutzer, ob die Antwort vorgelesen wird ("lies vor", "vorlesen", "Sprachausgabe testen"): antworte einfach normal mit Text. Der Client liest diesen Text vor, wenn die Sprachausgabe dort aktiviert ist (Lautsprecher-Symbol). Weise ggf. genau darauf hin – behaupte NICHT, Sprachausgabe sei nicht moeglich.
@@ -603,8 +627,38 @@ KRITISCH – Autonomie-Regeln:
             for _att in (attachments or []):
                 try:
                     _att_bytes = base64.b64decode(_att["data"])
-                    _user_parts.append(types.Part.from_bytes(data=_att_bytes, mime_type=_att["mime_type"]))
-                    _log(f"Anhang hinzugefügt: {_att.get('name','?')} ({_att['mime_type']})")
+                    _mime = (_att.get("mime_type") or "").lower()
+                    _name = _att.get("name", "Datei")
+                    # LLM-native Formate (Bild/PDF/Audio/Video) direkt inline anhaengen.
+                    if _mime.startswith(("image/", "audio/", "video/")) or _mime == "application/pdf":
+                        _user_parts.append(types.Part.from_bytes(data=_att_bytes, mime_type=_mime))
+                        _log(f"Anhang inline: {_name} ({_mime})")
+                    else:
+                        # Office-/Textdateien (xlsx, docx, pptx, ods, csv, txt, …) akzeptiert das
+                        # LLM nicht inline → Text extrahieren (openpyxl/python-docx/…) und als Text-Part anhaengen.
+                        import os as _os, tempfile as _tf
+                        from pathlib import Path as _P
+                        _suffix = _P(_name).suffix.lower() or ".bin"
+                        _fd, _tmp = _tf.mkstemp(suffix=_suffix, prefix="jarvis_att_")
+                        try:
+                            _os.close(_fd)
+                            _P(_tmp).write_bytes(_att_bytes)
+                            from backend.tools.knowledge import _extract_text
+                            _txt = (await asyncio.to_thread(_extract_text, _P(_tmp), 25 * 1024 * 1024)) or ""
+                        finally:
+                            try:
+                                _os.unlink(_tmp)
+                            except Exception:
+                                pass
+                        _txt = _txt.strip()
+                        if _txt:
+                            _user_parts.append(types.Part.from_text(
+                                text=f"\n\n[Angehängte Datei: {_name}]\n{_txt[:50000]}"))
+                            _log(f"Anhang als Text extrahiert: {_name} ({len(_txt)} Zeichen)")
+                        else:
+                            _user_parts.append(types.Part.from_text(
+                                text=f"\n\n[Angehängte Datei: {_name} – kein Text extrahierbar]"))
+                            _log(f"Anhang ohne extrahierbaren Text: {_name}")
                 except Exception as _att_err:
                     _log(f"Anhang übersprungen ({_att.get('name','?')}): {_att_err}")
             _user_msg = types.Content(role="user", parts=_user_parts)

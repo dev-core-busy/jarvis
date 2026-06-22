@@ -307,36 +307,53 @@ class JarvisKnowledgeManager {
                     ${window.t('knowledge.learned.embeddings_label')}
                 </label>
             </div>
+            <div id="kb-export-status" style="display:none;font-size:0.8rem;margin-top:8px;"></div>
             <div id="kb-learned-list" style="display:none;"></div>`;
         }
     }
 
     async downloadLearnedJson(btn) {
         const orig = btn ? btn.textContent : '';
+        const st = document.getElementById('kb-export-status');
+        const setStatus = (msg, color) => {
+            if (!st) return;
+            st.style.display = 'block';
+            st.style.color = color || 'var(--text-muted)';
+            st.textContent = msg;
+        };
+        const withEmb = document.getElementById('kb-export-embeddings')?.checked;
+        const withLlm = document.getElementById('kb-export-llm')?.checked;
         if (btn) { btn.disabled = true; btn.textContent = window.t('knowledge.learned.exporting'); }
+        setStatus(withLlm ? window.t('knowledge.learned.export_running_llm')
+                          : window.t('knowledge.learned.export_running'), '#f59e0b');
         try {
-            const withEmb = document.getElementById('kb-export-embeddings')?.checked;
-            const withLlm = document.getElementById('kb-export-llm')?.checked;
             const params = [];
             if (withEmb) params.push('embeddings=1');
             if (withLlm) params.push('llm=1');
             const resp = await fetch('/api/knowledge/export' + (params.length ? '?' + params.join('&') : ''), {
                 headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            if (!resp.ok) {
+                let detail = 'HTTP ' + resp.status;
+                if (resp.status === 404) detail += ' – Echt-System evtl. nicht aktuell (Update nötig)';
+                throw new Error(detail);
+            }
             const blob = await resp.blob();
             // Dateinamen aus Content-Disposition lesen, sonst Fallback
             let fname = 'jarvis_gelerntes_wissen.zip';
             const cd = resp.headers.get('Content-Disposition') || '';
             const m = cd.match(/filename="?([^"]+)"?/);
             if (m) fname = m[1];
+            const sizeKb = Math.max(1, Math.round(blob.size / 1024));
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url; a.download = fname;
             document.body.appendChild(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(url), 2000);
+            setStatus(`✓ ${fname} (${sizeKb} KB)`, '#34d399');
+            setTimeout(() => { if (st) st.style.display = 'none'; }, 6000);
         } catch (e) {
-            alert((window.t('knowledge.learned.export_fail') || 'Export fehlgeschlagen') + ': ' + e.message);
+            setStatus('✗ ' + (window.t('knowledge.learned.export_fail') || 'Export fehlgeschlagen') + ': ' + e.message, '#ef4444');
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = orig; }
         }

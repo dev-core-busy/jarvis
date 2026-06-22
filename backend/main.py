@@ -448,6 +448,15 @@ def _group_cn_prefix(group_dn: str) -> str:
     return f"cn={g.split(',')[0]},"
 
 
+def _norm_login(name: str) -> str:
+    """Normalisiert einen Login ODER Listen-Eintrag auf den blossen sAMAccountName:
+    entfernt Domain-Praefix (DOMAIN\\user), UPN-Suffix (user@domain) und Whitespace,
+    lowercased. WICHTIG: muss auf BEIDE Seiten (eingeloggter User UND konfigurierte
+    Allowlist-Eintraege) angewandt werden, sonst matcht 'nexus\\andreas.bender' aus
+    der Liste nie gegen den eingeloggten 'andreas.bender'."""
+    return (name or "").split("@")[0].split("\\")[-1].strip().lower()
+
+
 async def require_auth(request: Request) -> str:
     """FastAPI Dependency: Prueft Bearer-Token und gibt Username zurueck.
     Sperrt zusaetzlich den lokalen jarvis-User, solange das Erst-Kennwort nicht
@@ -509,7 +518,7 @@ async def require_knowledge_editor(request: Request, user: str = Depends(require
 
     # Benutzerliste (kein LDAP nötig, sofort wirksam)
     if editors_raw:
-        allowed_list = {u.strip().lower() for u in editors_raw.split(",") if u.strip()}
+        allowed_list = {_norm_login(u) for u in editors_raw.split(",") if u.strip()}
         if plain in allowed_list:
             return user
         if not editors_group:
@@ -564,7 +573,7 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
     # ── Benutzerliste prüfen ──────────────────────────────────────────
     allowed_users_raw = config.get_setting("ad_allowed_users", "")
     if allowed_users_raw.strip():
-        allowed = {u.strip().lower() for u in allowed_users_raw.split(",") if u.strip()}
+        allowed = {_norm_login(u) for u in allowed_users_raw.split(",") if u.strip()}
         if plain not in allowed:
             print(f"[AUTH] AD-Whitelist: '{plain}' nicht in erlaubten Benutzern {allowed}", flush=True)
             return False
@@ -625,7 +634,7 @@ def _check_knowledge_edit_permission_with_conn(username: str, conn, base_dn: str
 
     # Benutzerliste prüfen
     if editors_raw:
-        allowed = {u.strip().lower() for u in editors_raw.split(",") if u.strip()}
+        allowed = {_norm_login(u) for u in editors_raw.split(",") if u.strip()}
         if plain in allowed:
             return True
         if not editors_group:
@@ -673,7 +682,7 @@ def _check_internet_access_with_conn(username: str, conn, base_dn: str) -> bool:
     plain = username.split("@")[0].split("\\")[-1].lower()
 
     if users_raw:
-        allowed = {u.strip().lower() for u in users_raw.split(",") if u.strip()}
+        allowed = {_norm_login(u) for u in users_raw.split(",") if u.strip()}
         if plain in allowed:
             return True
         if not grp:
@@ -717,7 +726,7 @@ def _user_has_internet_access(user: str) -> bool:
         return True
     plain = u.split("@")[0].split("\\")[-1].lower()
     if users_raw:
-        allowed = {x.strip().lower() for x in users_raw.split(",") if x.strip()}
+        allowed = {_norm_login(x) for x in users_raw.split(",") if x.strip()}
         if plain in allowed:
             return True
         if not grp:
@@ -739,7 +748,7 @@ def _check_admin_with_conn(username: str, conn, base_dn: str) -> bool:
     plain = username.split("@")[0].split("\\")[-1].lower()
 
     if users_raw:
-        allowed = {u.strip().lower() for u in users_raw.split(",") if u.strip()}
+        allowed = {_norm_login(u) for u in users_raw.split(",") if u.strip()}
         if plain in allowed:
             return True
         if not grp:
@@ -786,7 +795,7 @@ def _user_is_admin(user: str) -> bool:
         return False
     plain = u.split("@")[0].split("\\")[-1].lower()
     if users_raw:
-        allowed = {x.strip().lower() for x in users_raw.split(",") if x.strip()}
+        allowed = {_norm_login(x) for x in users_raw.split(",") if x.strip()}
         if plain in allowed:
             return True
         if not grp:

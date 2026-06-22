@@ -295,8 +295,37 @@ class JarvisKnowledgeManager {
                 <button class="kb-learned-open-btn" onclick="window.knowledgeManager.toggleLearnedList()">
                     ${lf > 0 ? window.t('knowledge.learned.show') : window.t('knowledge.learned.list_btn')}
                 </button>
+                <button class="kb-learned-open-btn" onclick="window.knowledgeManager.downloadLearnedJson(this)" title="${window.t('knowledge.learned.export_title')}">
+                    ${window.t('knowledge.learned.export_btn')}
+                </button>
             </div>
             <div id="kb-learned-list" style="display:none;"></div>`;
+        }
+    }
+
+    async downloadLearnedJson(btn) {
+        const orig = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = window.t('knowledge.learned.exporting'); }
+        try {
+            const resp = await fetch('/api/knowledge/learned/export', {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const blob = await resp.blob();
+            // Dateinamen aus Content-Disposition lesen, sonst Fallback
+            let fname = 'jarvis_gelerntes_wissen.zip';
+            const cd = resp.headers.get('Content-Disposition') || '';
+            const m = cd.match(/filename="?([^"]+)"?/);
+            if (m) fname = m[1];
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = fname;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+        } catch (e) {
+            alert((window.t('knowledge.learned.export_fail') || 'Export fehlgeschlagen') + ': ' + e.message);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = orig; }
         }
     }
 

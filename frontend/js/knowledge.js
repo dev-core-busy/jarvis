@@ -298,6 +298,10 @@ class JarvisKnowledgeManager {
                 <button class="kb-learned-open-btn" onclick="window.knowledgeManager.downloadLearnedJson(this)" title="${window.t('knowledge.learned.export_title')}">
                     ${window.t('knowledge.learned.export_btn')}
                 </button>
+                <label class="kb-learned-embed-opt" title="${window.t('knowledge.learned.llm_title')}" style="display:inline-flex;align-items:center;gap:5px;font-size:0.78rem;color:var(--text-muted);margin-left:8px;cursor:pointer;">
+                    <input type="checkbox" id="kb-export-llm" style="margin:0;cursor:pointer;">
+                    ${window.t('knowledge.learned.llm_label')}
+                </label>
                 <label class="kb-learned-embed-opt" title="${window.t('knowledge.learned.embeddings_title')}" style="display:inline-flex;align-items:center;gap:5px;font-size:0.78rem;color:var(--text-muted);margin-left:8px;cursor:pointer;">
                     <input type="checkbox" id="kb-export-embeddings" style="margin:0;cursor:pointer;">
                     ${window.t('knowledge.learned.embeddings_label')}
@@ -312,7 +316,11 @@ class JarvisKnowledgeManager {
         if (btn) { btn.disabled = true; btn.textContent = window.t('knowledge.learned.exporting'); }
         try {
             const withEmb = document.getElementById('kb-export-embeddings')?.checked;
-            const resp = await fetch('/api/knowledge/export' + (withEmb ? '?embeddings=1' : ''), {
+            const withLlm = document.getElementById('kb-export-llm')?.checked;
+            const params = [];
+            if (withEmb) params.push('embeddings=1');
+            if (withLlm) params.push('llm=1');
+            const resp = await fetch('/api/knowledge/export' + (params.length ? '?' + params.join('&') : ''), {
                 headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);

@@ -477,8 +477,9 @@ async def require_local_auth(request: Request) -> str:
     username = verify_token(token)
     if not username:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
-    if username not in ALLOWED_USERS:
-        raise HTTPException(status_code=403, detail="Nur lokale Administratoren dürfen diese Aktion ausführen.")
+    # Lokaler jarvis ODER per Sicherheitseinstellungen freigeschalteter AD-Admin
+    if username not in ALLOWED_USERS and not _user_is_admin(username):
+        raise HTTPException(status_code=403, detail="Nur Administratoren dürfen diese Aktion ausführen (Sicherheit → LDAP → Administratoren).")
     if _user_must_change(username):
         raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
     return username
@@ -655,6 +656,7 @@ def _check_knowledge_edit_permission_with_conn(username: str, conn, base_dn: str
 
 
 _internet_access_cache: dict[str, bool] = {}
+_admin_access_cache: dict[str, bool] = {}
 
 
 def _check_internet_access_with_conn(username: str, conn, base_dn: str) -> bool:
@@ -723,6 +725,75 @@ def _user_has_internet_access(user: str) -> bool:
     return _internet_access_cache.get(plain, False)
 
 
+def _check_admin_with_conn(username: str, conn, base_dn: str) -> bool:
+    """Prüft ob ein AD-User Admin-Aktionen ausfuehren darf (nur beim Login – Bind aktiv).
+
+    Gibt True zurück wenn: Benutzer in ad_admins-Liste, oder Mitglied der
+    ad_admins_group. Ohne Konfiguration: False (nur lokale Admins).
+    """
+    users_raw = config.get_setting("ad_admins", "").strip()
+    grp = config.get_setting("ad_admins_group", "").strip()
+    if not users_raw and not grp:
+        return False
+
+    plain = username.split("@")[0].split("\\")[-1].lower()
+
+    if users_raw:
+        allowed = {u.strip().lower() for u in users_raw.split(",") if u.strip()}
+        if plain in allowed:
+            return True
+        if not grp:
+            return False
+
+    if grp and conn is not None:
+        safe_plain = plain.replace("\\", "\\5c").replace("*", "\\2a").replace(
+            "(", "\\28").replace(")", "\\29").replace("\x00", "\\00")
+        try:
+            conn.search(
+                search_base=base_dn,
+                search_filter=f"(sAMAccountName={safe_plain})",
+                attributes=["memberOf"],
+            )
+            if conn.entries:
+                member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
+                group_lower = grp.lower()
+                for g in member_of:
+                    if g.lower() == group_lower or g.lower().startswith(_group_cn_prefix(grp)):
+                        print(f"[AUTH] Admin-Recht Gruppe: '{plain}' erlaubt", flush=True)
+                        return True
+            print(f"[AUTH] Admin-Recht Gruppe: '{plain}' NICHT in Gruppe '{grp}'", flush=True)
+        except Exception as e:
+            print(f"[AUTH] Admin-Recht Gruppen-Check Fehler: {e}", flush=True)
+
+    return False
+
+
+def _user_is_admin(user: str) -> bool:
+    """Darf dieser Benutzer Admin-Aktionen (Update, Profile, Skills, MCP, …) ausfuehren?
+
+    Lokale Admins (ALLOWED_USERS/jarvis/root) immer. AD-Benutzer nur, wenn in
+    ad_admins-Liste oder Mitglied der ad_admins_group (Login-Cache). Ohne
+    Konfiguration: KEINE AD-Admins (nur lokal) – bewusst restriktiver Default.
+    """
+    u = (user or "").strip()
+    if not u:
+        return False
+    if u in ALLOWED_USERS or u in {"jarvis", "root"}:
+        return True
+    users_raw = config.get_setting("ad_admins", "").strip()
+    grp = config.get_setting("ad_admins_group", "").strip()
+    if not users_raw and not grp:
+        return False
+    plain = u.split("@")[0].split("\\")[-1].lower()
+    if users_raw:
+        allowed = {x.strip().lower() for x in users_raw.split(",") if x.strip()}
+        if plain in allowed:
+            return True
+        if not grp:
+            return False
+    return _admin_access_cache.get(plain, False)
+
+
 def authenticate_linux_user(username: str, password: str) -> bool:
     """Authentifiziert einen Benutzer – erst PAM/lokal, dann AD/LDAP (wenn konfiguriert)."""
 
@@ -779,6 +850,9 @@ def authenticate_linux_user(username: str, password: str) -> bool:
                     username, conn, base_dn
                 )
                 _internet_access_cache[plain_key] = _check_internet_access_with_conn(
+                    username, conn, base_dn
+                )
+                _admin_access_cache[plain_key] = _check_admin_with_conn(
                     username, conn, base_dn
                 )
                 conn.unbind()
@@ -1990,6 +2064,12 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
     if "ad_internet_group" in body:
         config.save_setting("ad_internet_group", body["ad_internet_group"])
         _internet_access_cache.clear()
+    if "ad_admins" in body:
+        config.save_setting("ad_admins", body["ad_admins"])
+        _admin_access_cache.clear()
+    if "ad_admins_group" in body:
+        config.save_setting("ad_admins_group", body["ad_admins_group"])
+        _admin_access_cache.clear()
     return JSONResponse({"success": True})
 
 
@@ -2047,6 +2127,13 @@ async def get_ad_status(user: str = Depends(require_auth)):
             "group"     if config.get_setting("ad_internet_group", "") else
             "users"     if config.get_setting("ad_internet_users", "") else
             "all"       # alle Benutzer haben Internet-Zugang
+        ),
+        "admins": config.get_setting("ad_admins", ""),
+        "admins_group": config.get_setting("ad_admins_group", ""),
+        "admin_mode": (
+            "group"     if config.get_setting("ad_admins_group", "") else
+            "users"     if config.get_setting("ad_admins", "") else
+            "none"      # nur lokaler jarvis
         ),
     })
 

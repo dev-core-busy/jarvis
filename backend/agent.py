@@ -153,10 +153,23 @@ _LDAP_SHELL_FORBIDDEN = re.compile(
 )
 # Schreib-Redirects und Secret-Pfade als separate Pattern
 _LDAP_SHELL_WRITE_REDIRECT = re.compile(r'(?<![<|&])>\s*\S')
+# Ziel-Pfade von >/>>-Redirects (ohne fd-Praefix wie 2>, ohne <|&)
+_REDIRECT_TARGETS = re.compile(r'(?<![<|&\d])>>?\s*([^\s"\'|&;<>]+)')
 _LDAP_SHELL_SECRET_PATHS = re.compile(
     r'(?:/opt/jarvis/\.env\b|/home/jarvis/jarvis/\.env\b|auth_state\.json\b)',
     re.IGNORECASE,
 )
+
+
+def _ldap_redirects_safe(cmd: str) -> bool:
+    """True, wenn ALLE Schreib-Redirects in cmd auf den temporaeren Arbeitsbereich
+    /tmp zielen (kein '..'). LDAP-Benutzer duerfen so temporaere Skripte/Ausgaben
+    fuer die Dokumentenverarbeitung erzeugen, ohne System-/App-Dateien schreiben zu
+    koennen. Leere Trefferliste -> nicht sicher (z.B. fd-Redirects)."""
+    targets = _REDIRECT_TARGETS.findall(cmd)
+    if not targets:
+        return False
+    return all((t == "/tmp" or t.startswith("/tmp/")) and ".." not in t for t in targets)
 
 # Tools, die Internet-Ergebnisse liefern – fuer Benutzer ohne Internet-Zugang gesperrt
 _INTERNET_TOOLS = {"browser_control", "browser_cdp", "search_image"}
@@ -284,6 +297,7 @@ Regeln:
 16. OFFICE-DOKUMENTE (Word/Excel/PowerPoint/PDF):
     - Fuer EINFACHE Dokumente (Text, Tabellen, Bullet-Folien) die office_*-Tools nutzen: office_create_word / office_create_excel / office_create_powerpoint, PDF-Export via office_to_pdf.
     - Fuer KOMPLEXE Inhalte, die diese Tools nicht abdecken (z.B. Diagramme/Schemata, Formen, individuelles Layout), darfst du python-docx/python-pptx/openpyxl via shell_execute verwenden.
+    - WICHTIG: Temporaere Skripte UND Ausgabedateien IMMER unter /tmp anlegen (z.B. > /tmp/verarbeitung.py, df.to_excel("/tmp/ergebnis.xlsx")). NIEMALS in das Arbeitsverzeichnis schreiben (relative Pfade wie "> skript.py") – das ist fuer eingeschraenkte Benutzer gesperrt und schlaegt fehl.
     - Das System erkennt JEDE erzeugte Office-Datei automatisch (auch in /tmp) und liefert sie dem Nutzer als Download-Chip aus – DU musst dich darum nicht kuemmern.
     - Praesentiere das Ergebnis NIEMALS als blossen lokalen Pfad ("liegt unter /tmp/..."), sondern als fertige Datei zum Download. Liefert dir ein Tool einen Download-Link ([📥 ...](/api/documents/...)), gib ihn UNVERAENDERT aus.
 
@@ -1365,9 +1379,10 @@ KRITISCH – Autonomie-Regeln:
                         print(f"[AGENT] BLOCKED shell command for LDAP-User '{_uname}': {_cmd[:80]}", flush=True)
                         result = "Zugriff verweigert: Dieser Shell-Befehl ist für LDAP-Benutzer nicht erlaubt (keine System-Änderungen)."
                         _ldap_blocked = True
-                    elif _LDAP_SHELL_WRITE_REDIRECT.search(_cmd):
+                    elif _LDAP_SHELL_WRITE_REDIRECT.search(_cmd) and not _ldap_redirects_safe(_cmd):
                         print(f"[AGENT] BLOCKED shell write-redirect for LDAP-User '{_uname}': {_cmd[:80]}", flush=True)
-                        result = "Zugriff verweigert: Datei-Schreiben via Shell ist für LDAP-Benutzer nicht erlaubt."
+                        result = ("Zugriff verweigert: Datei-Schreiben via Shell ist für LDAP-Benutzer nur "
+                                  "im temporären Arbeitsbereich /tmp erlaubt (z.B. > /tmp/skript.py).")
                         _ldap_blocked = True
                     elif _LDAP_SHELL_SECRET_PATHS.search(_cmd):
                         print(f"[AGENT] BLOCKED shell secret-path for LDAP-User '{_uname}': {_cmd[:80]}", flush=True)

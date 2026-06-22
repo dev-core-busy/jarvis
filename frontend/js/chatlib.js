@@ -206,22 +206,22 @@
         } catch (_e) { return null; }
     }
 
-    async function sharedAppend(token, msg) {
+    async function sharedAppend(token, msg, clientId) {
         try {
             await fetch(_SHARED_URL + '/append', {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: msg }),
+                body: JSON.stringify({ message: msg, client_id: clientId || '' }),
             });
         } catch (_e) { /* offline -> nur lokal */ }
     }
 
-    async function sharedReplace(token, messages) {
+    async function sharedReplace(token, messages, clientId) {
         try {
             await fetch(_SHARED_URL, {
                 method: 'PUT',
                 headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ messages: messages || [] }),
+                body: JSON.stringify({ messages: messages || [], client_id: clientId || '' }),
             });
         } catch (_e) { /* offline */ }
     }
@@ -548,9 +548,10 @@
         const selectModeClass = opts.selectModeClass || 'select-mode';
         const bar       = opts.bar       || null;
         const countEl   = opts.countEl   || null;
-        const delBtn    = opts.delBtn    || null;
-        const toggleBtn = opts.toggleBtn || null;
-        const cancelBtn = opts.cancelBtn || null;
+        const delBtn      = opts.delBtn      || null;
+        const toggleBtn   = opts.toggleBtn   || null;
+        const cancelBtn   = opts.cancelBtn   || null;
+        const selectAllBtn = opts.selectAllBtn || null;
         const canSelectRow = typeof opts.canSelectRow === 'function' ? opts.canSelectRow : () => true;
         const onEnter  = typeof opts.onEnter  === 'function' ? opts.onEnter  : null;
         const onDelete = typeof opts.onDelete === 'function' ? opts.onDelete : () => {};
@@ -615,6 +616,15 @@
             }
         }
 
+        // Alle auswaehlbaren Nachrichten markieren bzw. (wenn schon alle markiert)
+        // die Auswahl wieder aufheben.
+        function selectAll() {
+            const boxes = Array.from(container.querySelectorAll(checkSel));
+            const allChecked = boxes.length > 0 && boxes.every(cb => cb.checked);
+            boxes.forEach(cb => { cb.checked = !allChecked; });
+            updateCount();
+        }
+
         function deleteSelected() {
             const checked = Array.from(container.querySelectorAll(checkSel + ':checked'))
                 .map(cb => cb.closest(rowSelector))
@@ -626,9 +636,10 @@
             exit();
         }
 
-        if (toggleBtn) toggleBtn.addEventListener('click', toggle);
-        if (cancelBtn) cancelBtn.addEventListener('click', exit);
-        if (delBtn)    delBtn.addEventListener('click', deleteSelected);
+        if (toggleBtn)    toggleBtn.addEventListener('click', toggle);
+        if (cancelBtn)    cancelBtn.addEventListener('click', exit);
+        if (delBtn)       delBtn.addEventListener('click', deleteSelected);
+        if (selectAllBtn) selectAllBtn.addEventListener('click', selectAll);
 
         return {
             isActive: () => active,
@@ -638,6 +649,7 @@
             startSelectionDelete: startSelectionDelete,
             addCheckboxToRow: addCheckboxToRow,
             updateCount: updateCount,
+            selectAll: selectAll,
             checkbox: checkbox,
         };
     }

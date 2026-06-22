@@ -7,6 +7,8 @@
 
     // ─── State ──────────────────────────────────────────────────
     let token = localStorage.getItem('jarvis_token') || '';
+    // Eindeutige Fenster-ID fuer Live-Sync (eigene Echo-Events ignorieren)
+    const _clientId = 'main-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     let currentUser = localStorage.getItem('jarvis_user') || '';
     let ws = null;
     let vnc = null;
@@ -41,12 +43,12 @@
     const btnPause = document.getElementById('btn-pause');
     const btnResume = document.getElementById('btn-resume');
     const btnStop = document.getElementById('btn-stop');
-    const btnClearLog = document.getElementById('btn-clear-log');
     const btnSelectMsgs = document.getElementById('btn-select-msgs');
     const msgSelectBar = document.getElementById('msg-select-bar');
     const msgSelectCount = document.getElementById('msg-select-count');
     const btnMsgDelSel = document.getElementById('btn-msg-del-sel');
     const btnMsgSelCancel = document.getElementById('btn-msg-sel-cancel');
+    const btnMsgSelAll = document.getElementById('btn-msg-sel-all');
     const btnLogout = document.getElementById('btn-logout');
     const btnAttach = document.getElementById('btn-attach');
     const attachInput = document.getElementById('attach-input');
@@ -740,6 +742,8 @@
         ws = new JarvisWebSocket(wsUrl);
 
         ws.on('connected', () => {
+            // Beim Server registrieren (setzt Benutzer der WS) → Live-Sync-Events empfangen
+            if (token) ws.send({ type: 'hello', token });
             // Pill zeigt jetzt den LLM-Status (s. _checkLlmStatus), nicht den WS-Status.
             addLogEntry('🔗 ' + (window.t ? window.t('notif.connected') : 'Verbindung hergestellt'), 'system');
             // Nach Reconnect VNC neu verbinden, falls nicht schon verbunden/probiert
@@ -805,6 +809,11 @@
 
         ws.on('agent_event', (data) => {
             _handleAgentEvent(data);
+        });
+
+        // Live-Sync der geteilten Anzeige-History (vom /chat-Fenster)
+        ws.on('shared_history_append', (data) => {
+            _applyRemoteAppend(data.message, data.origin);
         });
 
         ws.on('agent_list', (data) => {
@@ -915,7 +924,16 @@
             } else {
                 const ico = document.createElement('span');
                 ico.className = 'attach-chip-icon';
-                ico.textContent = att.type === 'audio' ? '🎵' : att.type === 'pdf' ? '📄' : '🎬';
+                const _ext = (att.name.split('.').pop() || '').toLowerCase();
+                let icon = '📎';
+                if (att.type === 'audio') icon = '🎵';
+                else if (att.type === 'pdf') icon = '📄';
+                else if (att.type === 'video') icon = '🎬';
+                else if (['xlsx','xls','ods','csv','tsv'].includes(_ext)) icon = '📊';
+                else if (['docx','doc','odt','rtf'].includes(_ext)) icon = '📝';
+                else if (['pptx','ppt','odp'].includes(_ext)) icon = '📑';
+                else if (['txt','md','rst','json'].includes(_ext)) icon = '📄';
+                ico.textContent = icon;
                 chip.appendChild(ico);
             }
             const nm = document.createElement('span');
@@ -945,6 +963,24 @@
         'video/mp4','video/webm','video/ogg','video/quicktime','video/x-msvideo','video/mpeg',
         // Dokumente
         'application/pdf',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',      // xlsx
+        'application/vnd.ms-excel',                                               // xls
+        'application/vnd.oasis.opendocument.spreadsheet',                         // ods
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',// docx
+        'application/msword',                                                     // doc
+        'application/vnd.oasis.opendocument.text',                                // odt
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation', // pptx
+        'application/vnd.ms-powerpoint',                                          // ppt
+        'text/plain','text/markdown','text/csv','application/json',
+    ]);
+    // Endungs-Fallback: Browser melden fuer Office-Dateien (v.a. per Drag&Drop)
+    // oft einen leeren oder falschen MIME-Typ → zusaetzlich ueber die Endung erlauben.
+    const _SUPPORTED_EXT = new Set([
+        'pdf','txt','md','rst','csv','json',
+        'docx','doc','odt','rtf','xlsx','xls','ods','pptx','ppt','odp',
+        'jpg','jpeg','png','gif','bmp','tif','tiff','webp',
+        'mp3','m4a','wav','ogg','aac','flac',
+        'mp4','mov','mkv','avi','webm','mpeg',
     ]);
 
     async function _addFilesToAttachments(files) {
@@ -952,20 +988,23 @@
         const unsupported = [];
         for (const file of Array.from(files)) {
             const mime = (file.type || '').toLowerCase();
-            // Nicht unterstütztes Format?
-            if (!_SUPPORTED_MIME.has(mime) && !mime.startsWith('image/') && !mime.startsWith('audio/') && !mime.startsWith('video/')) {
-                const ext = file.name.includes('.') ? '.' + file.name.split('.').pop().toUpperCase() : mime || 'Unbekannt';
-                unsupported.push(ext);
+            const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+            // Unterstuetzt per MIME-Typ ODER per Endung (Office-Dateien melden oft leeren MIME)
+            const okMime = _SUPPORTED_MIME.has(mime) || mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('video/');
+            if (!okMime && !_SUPPORTED_EXT.has(ext)) {
+                unsupported.push(ext ? '.' + ext.toUpperCase() : (mime || 'Unbekannt'));
                 continue;
             }
             if (_pendingAttachments.length >= MAX_FILES) {
                 showAttachToast(`Maximal ${MAX_FILES} Dateien gleichzeitig erlaubt.`);
                 break;
             }
-            let type = 'video';
-            if (mime.startsWith('image/')) type = 'image';
-            else if (mime.startsWith('audio/')) type = 'audio';
-            else if (mime === 'application/pdf') type = 'pdf';
+            let type = 'file';
+            if (mime.startsWith('image/') || ['jpg','jpeg','png','gif','bmp','tif','tiff','webp'].includes(ext)) type = 'image';
+            else if (mime.startsWith('audio/') || ['mp3','m4a','wav','ogg','aac','flac'].includes(ext)) type = 'audio';
+            else if (mime.startsWith('video/') || ['mp4','mov','mkv','avi','webm','mpeg'].includes(ext)) type = 'video';
+            else if (mime === 'application/pdf' || ext === 'pdf') type = 'pdf';
+            else type = 'document';
             try {
                 const b64 = await new Promise((res, rej) => {
                     const r = new FileReader();
@@ -981,7 +1020,7 @@
         }
         if (unsupported.length > 0) {
             const fmts = [...new Set(unsupported)].join(', ');
-            showAttachToast(`Format nicht unterstützt: ${fmts} – Erlaubt: Bilder, Audio, Video, PDF`);
+            showAttachToast(`Format nicht unterstützt: ${fmts} – Erlaubt: Bilder, Audio, Video, PDF, Office (xlsx/docx/pptx), Text`);
         }
         _renderAttachPreviews();
     }
@@ -1218,14 +1257,6 @@
 
     btnZoomReset.addEventListener('click', () => {
         logZoom = 100; applyLogZoom();
-    });
-
-    btnClearLog.addEventListener('click', () => {
-        // Eintraege des aktiven Agents + pre-agent Eintraege ('_main') entfernen
-        const entries = logContainer.querySelectorAll(`.log-entry[data-agent-id="${_activeAgentId}"], .log-entry[data-agent-id="_main"]`);
-        entries.forEach(e => e.remove());
-        if (_agentLogs[_activeAgentId]) _agentLogs[_activeAgentId] = [];
-        if (_agentLogs['_main']) _agentLogs['_main'] = [];
     });
 
     btnLogout.addEventListener('click', () => {
@@ -1965,6 +1996,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         delBtn: btnMsgDelSel,
         toggleBtn: btnSelectMsgs,
         cancelBtn: btnMsgSelCancel,
+        selectAllBtn: btnMsgSelAll,
         // Laufenden Edit-Modus beenden, bevor der Auswahlmodus startet
         onEnter: () => {
             if (_editingRow) { try { _restoreBubble(_editingRow.querySelector('.jv-bubble'), _editingRow); } catch(_) {} }
@@ -2181,14 +2213,35 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
     // Neue Nachricht in die geteilte Backend-History anhaengen (additiv, fensteruebergreifend)
     function _syncAppend(msg) {
         if (window.JarvisChatLib && window.JarvisChatLib.sharedAppend && token) {
-            window.JarvisChatLib.sharedAppend(token, msg);
+            window.JarvisChatLib.sharedAppend(token, msg, _clientId);
         }
     }
     // Komplette Liste ins Backend schreiben (fuer Editieren/Loeschen)
     function _syncReplace() {
         if (window.JarvisChatLib && window.JarvisChatLib.sharedReplace && token) {
-            window.JarvisChatLib.sharedReplace(token, _mainHistory);
+            window.JarvisChatLib.sharedReplace(token, _mainHistory, _clientId);
         }
+    }
+
+    // Live-Sync: vom anderen Fenster (gleicher Benutzer) angehaengte Nachricht
+    // sofort darstellen, ohne sie erneut ans Backend zu senden.
+    function _applyRemoteAppend(entry, origin) {
+        if (origin && origin === _clientId) return;       // eigenes Echo ignorieren
+        if (!entry || (entry.role !== 'user' && entry.role !== 'bot')) return;
+        if (entry.ts && _mainHistory.some(m => m && m.ts === entry.ts)) return;  // Dedup
+        if (entry.role === 'user') {
+            _addBubble(entry.text, 'user', entry.time || '', false);
+        } else {
+            const { col } = _addBubble(entry.text, 'bot', entry.time || '', true);
+            if (entry.stats) {
+                const s = document.createElement('div');
+                s.className = 'jv-bubble-stats';
+                s.textContent = entry.stats;
+                col.appendChild(s);
+            }
+        }
+        _mainHistory.push(entry);
+        logContainer.scrollTop = logContainer.scrollHeight;
     }
     async function _restoreHistory() {
         // Geteilte Anzeige-History pro Benutzer (Hauptfenster + jarvis/chat identisch).

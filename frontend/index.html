@@ -388,16 +388,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </button>
                     </div>
 
-                    <button class="btn-icon btn-small" id="btn-clear-log" title="Log leeren" data-i18n-title="panel.clear">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                        </svg>
-                    </button>
                 </div>
                 <div id="msg-select-bar" class="msg-select-bar" hidden>
                     <span class="msg-select-info"><span id="msg-select-count">0</span> <span data-i18n="select.selected">ausgewählt</span></span>
+                    <button class="msg-select-btn" id="btn-msg-sel-all" data-i18n="select.select_all">Alle markieren</button>
                     <button class="msg-select-btn danger" id="btn-msg-del-sel" data-i18n="select.delete">Löschen</button>
                     <button class="msg-select-btn" id="btn-msg-sel-cancel" data-i18n="select.cancel">Abbrechen</button>
                 </div>
@@ -468,7 +462,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
                         </svg>
                     </button>
-                    <input type="file" id="attach-input" multiple accept="image/*,audio/*,video/*,application/pdf" style="display:none">
+                    <input type="file" id="attach-input" multiple accept="image/*,audio/*,video/*,application/pdf,.xlsx,.xls,.ods,.docx,.doc,.odt,.pptx,.ppt,.odp,.csv,.txt,.md,.json,.rtf" style="display:none">
                     <textarea id="task-input" placeholder="Aufgabe für Jarvis eingeben..." rows="2"></textarea>
                     <button class="btn-mic" id="btn-mic" title="Spracheingabe" data-i18n-title="input.mic">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -2095,7 +2089,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=18"></script>
+    <script src="/static/js/i18n.js?v=19"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=14"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -2108,11 +2102,11 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/telemetry.js?v=4"></script>
-    <script src="/static/js/chatlib.js?v=9"></script>
+    <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=2"></script>
     <script src="/static/js/branding.js?v=8"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/app.js?v=126"></script>
+    <script src="/static/js/app.js?v=129"></script>
 </body>
 
 </html>

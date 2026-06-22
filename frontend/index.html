@@ -1691,6 +1691,36 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <!-- Internet-Zugang Status -->
                                 <div id="ad-internet-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:10px;border:1px solid;"></div>
 
+                                <!-- ── Administratoren ── -->
+                                <hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:14px 0 12px;">
+                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                                    <span style="font-size:1rem;">🛡️</span>
+                                    <span style="font-weight:600;font-size:0.92rem;">Administratoren</span>
+                                    <span style="color:var(--text-muted);font-size:0.78rem;">– Wer darf Admin-Aktionen (Update, Profile, Skills, MCP) ausführen?</span>
+                                </div>
+                                <p class="kb-hint" style="margin-bottom:10px;">Leer lassen = nur der lokale Benutzer <code>jarvis</code> ist Administrator. Hier eingetragene AD-Benutzer/Gruppen dürfen zusätzlich Updates auslösen und Einstellungen ändern.</p>
+
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Admin-Benutzer</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>andreas.bender,mueller</code></span>
+                                    </label>
+                                    <input type="text" id="ad-admins" placeholder="Leer = nur lokaler jarvis ist Admin" style="width:60%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Admin-Gruppe (AD-Gruppe)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                                    </label>
+                                    <input type="text" id="ad-admins-group" placeholder="z.B. CN=Jarvis-Admins,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                        ⚠ Gruppenprüfung wird beim Login gecacht – Änderungen erfordern Neuanmeldung der betroffenen Benutzer.
+                                    </div>
+                                </div>
+
+                                <!-- Administratoren Status -->
+                                <div id="ad-admins-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:10px;border:1px solid;"></div>
+
                                 <!-- Wissens-Editor Status -->
                                 <div id="ad-knowledge-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:4px;border:1px solid;"></div>
 
@@ -1720,6 +1750,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             document.getElementById('ad-knowledge-editors-group').value = d.knowledge_editors_group || '';
                                             document.getElementById('ad-internet-users').value = d.internet_users || '';
                                             document.getElementById('ad-internet-group').value = d.internet_group || '';
+                                            document.getElementById('ad-admins').value = d.admins || '';
+                                            document.getElementById('ad-admins-group').value = d.admins_group || '';
                                             _adUpdateStatus(d);
                                         } catch(e) {}
                                     }
@@ -1806,6 +1838,31 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                 ist.style.display = 'none';
                                             }
                                         }
+                                        // Administratoren Status
+                                        const ast = document.getElementById('ad-admins-status');
+                                        if (ast) {
+                                            if (!d.admins && !d.admins_group) {
+                                                ast.style.display = 'block';
+                                                ast.style.borderColor = '#f59e0b';
+                                                ast.style.background  = 'rgba(245,158,11,0.06)';
+                                                ast.style.color       = '#f59e0b';
+                                                ast.textContent = '🛡️ Administratoren: nur lokaler Benutzer jarvis';
+                                            } else if (d.admin_mode === 'users') {
+                                                ast.style.display = 'block';
+                                                ast.style.borderColor = '#34d399';
+                                                ast.style.background  = 'rgba(52,211,153,0.06)';
+                                                ast.style.color       = '#34d399';
+                                                ast.textContent = '🛡️ Admin-Benutzer: ' + d.admins + ' (+ lokaler jarvis)';
+                                            } else if (d.admin_mode === 'group') {
+                                                ast.style.display = 'block';
+                                                ast.style.borderColor = '#6366f1';
+                                                ast.style.background  = 'rgba(99,102,241,0.06)';
+                                                ast.style.color       = '#a5b4fc';
+                                                ast.textContent = '🛡️ Admin-Gruppe: ' + d.admins_group + ' (+ lokaler jarvis)';
+                                            } else {
+                                                ast.style.display = 'none';
+                                            }
+                                        }
                                     }
 
                                     window._adSave = async function() {
@@ -1826,6 +1883,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                     ad_knowledge_editors_group: document.getElementById('ad-knowledge-editors-group').value.trim(),
                                                     ad_internet_users:         document.getElementById('ad-internet-users').value.trim(),
                                                     ad_internet_group:         document.getElementById('ad-internet-group').value.trim(),
+                                                    ad_admins:                 document.getElementById('ad-admins').value.trim(),
+                                                    ad_admins_group:           document.getElementById('ad-admins-group').value.trim(),
                                                 })
                                             });
                                             if (!r.ok) throw new Error('HTTP ' + r.status);

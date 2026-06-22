@@ -3316,6 +3316,49 @@ async def list_learned_files(user: str = Depends(require_auth)):
     return JSONResponse(result)
 
 
+@app.get("/api/knowledge/learned/export")
+async def export_learned_zip(user: str = Depends(require_auth)):
+    """Exportiert alle automatisch gelernten Konversations-Fakten als JSON, gepackt
+    in einer ZIP-Datei (Download)."""
+    from backend.learning import LEARNED_DIR, PROJECT_ROOT as LRN_ROOT
+    import io as _io, zipfile as _zip, datetime as _dt
+    entries = []
+    if LEARNED_DIR.exists():
+        for md in sorted(LEARNED_DIR.rglob("conv_*.md"), reverse=True):
+            try:
+                stat = md.stat()
+                content = md.read_text(encoding="utf-8")
+                first_line = content.splitlines()[0].lstrip("# ").strip() if content else md.name
+                try:
+                    rel = str(md.relative_to(LRN_ROOT))
+                except ValueError:
+                    rel = str(md)
+                entries.append({
+                    "path": rel,
+                    "name": md.name,
+                    "title": first_line[:120],
+                    "size_kb": round(stat.st_size / 1024, 1),
+                    "mtime": stat.st_mtime,
+                    "mtime_iso": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                    "content": content,
+                })
+            except Exception:
+                continue
+    payload = {
+        "exported_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        "count": len(entries),
+        "entries": entries,
+    }
+    buf = _io.BytesIO()
+    with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+        zf.writestr("gelerntes_wissen.json",
+                    json.dumps(payload, ensure_ascii=False, indent=2))
+    buf.seek(0)
+    fname = f"jarvis_gelerntes_wissen_{_dt.datetime.now():%Y%m%d_%H%M%S}.zip"
+    return Response(content=buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
 @app.get("/api/knowledge/file_read")
 async def read_knowledge_file(path: str, user: str = Depends(require_auth)):
     """Liest den Inhalt einer Text-Datei aus dem Knowledge-Verzeichnis."""

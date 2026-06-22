@@ -7,6 +7,8 @@
 
     // ─── State ──────────────────────────────────────────────────
     let token = localStorage.getItem('jarvis_chat_token') || '';
+    // Eindeutige Fenster-ID fuer Live-Sync (eigene Echo-Events ignorieren)
+    const _clientId = 'chat-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     let _currentUser = localStorage.getItem('jarvis_chat_user') || '';
     let ws = null;
     let reconnectAttempts = 0;
@@ -368,6 +370,8 @@
 
         ws.onopen = () => {
             reconnectAttempts = 0;
+            // Beim Server registrieren (setzt Benutzer der WS) → Live-Sync-Events empfangen
+            wsSend({ type: 'hello' });
         };
 
         ws.onmessage = (evt) => {
@@ -408,6 +412,23 @@
         'audio/wav','audio/mp3','audio/mpeg','audio/ogg','audio/webm','audio/aac','audio/flac','audio/m4a','audio/x-m4a',
         'video/mp4','video/webm','video/ogg','video/quicktime','video/x-msvideo','video/mpeg',
         'application/pdf',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',      // xlsx
+        'application/vnd.ms-excel',                                               // xls
+        'application/vnd.oasis.opendocument.spreadsheet',                         // ods
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',// docx
+        'application/msword',                                                     // doc
+        'application/vnd.oasis.opendocument.text',                                // odt
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation', // pptx
+        'application/vnd.ms-powerpoint',                                          // ppt
+        'text/plain','text/markdown','text/csv','application/json',
+    ]);
+    // Endungs-Fallback (Office-Dateien melden per Drag&Drop oft leeren MIME-Typ)
+    const _SUPPORTED_EXT = new Set([
+        'pdf','txt','md','rst','csv','json',
+        'docx','doc','odt','rtf','xlsx','xls','ods','pptx','ppt','odp',
+        'jpg','jpeg','png','gif','bmp','tif','tiff','webp',
+        'mp3','m4a','wav','ogg','aac','flac',
+        'mp4','mov','mkv','avi','webm','mpeg',
     ]);
 
     let _toastTimer = null;
@@ -441,7 +462,16 @@
             } else {
                 const ico = document.createElement('span');
                 ico.className = 'attach-chip-icon';
-                ico.textContent = att.type === 'audio' ? '🎵' : att.type === 'pdf' ? '📄' : '🎬';
+                const _ext = (att.name.split('.').pop() || '').toLowerCase();
+                let icon = '📎';
+                if (att.type === 'audio') icon = '🎵';
+                else if (att.type === 'pdf') icon = '📄';
+                else if (att.type === 'video') icon = '🎬';
+                else if (['xlsx','xls','ods','csv','tsv'].includes(_ext)) icon = '📊';
+                else if (['docx','doc','odt','rtf'].includes(_ext)) icon = '📝';
+                else if (['pptx','ppt','odp'].includes(_ext)) icon = '📑';
+                else if (['txt','md','rst','json'].includes(_ext)) icon = '📄';
+                ico.textContent = icon;
                 chip.appendChild(ico);
             }
             const nm = document.createElement('span');
@@ -463,15 +493,18 @@
         const unsupported = [];
         for (const file of Array.from(files)) {
             const mime = (file.type || '').toLowerCase();
-            if (!_SUPPORTED.has(mime) && !mime.startsWith('image/') && !mime.startsWith('audio/') && !mime.startsWith('video/')) {
-                const ext = file.name.includes('.') ? '.'+file.name.split('.').pop().toUpperCase() : mime||'?';
-                unsupported.push(ext); continue;
+            const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+            const okMime = _SUPPORTED.has(mime) || mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('video/');
+            if (!okMime && !_SUPPORTED_EXT.has(ext)) {
+                unsupported.push(ext ? '.'+ext.toUpperCase() : (mime||'?')); continue;
             }
             if (_pendingAttachments.length >= 5) { showToast('Max. 5 Dateien erlaubt.'); break; }
-            let type = 'video';
-            if (mime.startsWith('image/')) type = 'image';
-            else if (mime.startsWith('audio/')) type = 'audio';
-            else if (mime === 'application/pdf') type = 'pdf';
+            let type = 'file';
+            if (mime.startsWith('image/') || ['jpg','jpeg','png','gif','bmp','tif','tiff','webp'].includes(ext)) type = 'image';
+            else if (mime.startsWith('audio/') || ['mp3','m4a','wav','ogg','aac','flac'].includes(ext)) type = 'audio';
+            else if (mime.startsWith('video/') || ['mp4','mov','mkv','avi','webm','mpeg'].includes(ext)) type = 'video';
+            else if (mime === 'application/pdf' || ext === 'pdf') type = 'pdf';
+            else type = 'document';
             try {
                 const b64 = await new Promise((res,rej) => {
                     const r = new FileReader();
@@ -484,7 +517,7 @@
         }
         if (unsupported.length > 0) {
             const fmts = [...new Set(unsupported)].join(', ');
-            showToast(`Format nicht unterstützt: ${fmts} – Erlaubt: Bilder, Audio, Video, PDF`);
+            showToast(`Format nicht unterstützt: ${fmts} – Erlaubt: Bilder, Audio, Video, PDF, Office (xlsx/docx/pptx), Text`);
         }
         renderPreviews();
     }
@@ -575,6 +608,10 @@
 
             case 'agent_event':
                 handleAgentEvent(msg);
+                break;
+
+            case 'shared_history_append':
+                _applyRemoteAppend(msg.message, msg.origin);
                 break;
 
             case 'llm_stats':
@@ -1268,14 +1305,27 @@
     // Neue Nachricht in die geteilte Backend-History anhaengen (additiv, fensteruebergreifend)
     function _syncAppend(msg) {
         if (window.JarvisChatLib && window.JarvisChatLib.sharedAppend && token) {
-            window.JarvisChatLib.sharedAppend(token, msg);
+            window.JarvisChatLib.sharedAppend(token, msg, _clientId);
         }
     }
     // Komplette Liste ins Backend schreiben (fuer Editieren/Loeschen)
     function _syncReplace() {
         if (window.JarvisChatLib && window.JarvisChatLib.sharedReplace && token) {
-            window.JarvisChatLib.sharedReplace(token, _chatHistory);
+            window.JarvisChatLib.sharedReplace(token, _chatHistory, _clientId);
         }
+    }
+
+    // Live-Sync: vom anderen Fenster (gleicher Benutzer) angehaengte Nachricht
+    // sofort darstellen, ohne sie erneut ans Backend zu senden.
+    function _applyRemoteAppend(entry, origin) {
+        if (origin && origin === _clientId) return;       // eigenes Echo ignorieren
+        if (!entry || (entry.role !== 'user' && entry.role !== 'bot')) return;
+        if (entry.ts && _chatHistory.some(m => m && m.ts === entry.ts)) return;  // Dedup
+        removeWelcome();
+        maybeAddDateSep();
+        _addHistoryBubble(entry);
+        _chatHistory.push(entry);
+        scrollToBottom();
     }
     async function _restoreHistory() {
         // Geteilte Anzeige-History pro Benutzer (Hauptfenster + jarvis/chat identisch).

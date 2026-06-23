@@ -1,0 +1,56 @@
+{
+    "name": "Confluence",
+    "description": "Verbindung zu Atlassian Confluence (Cloud oder Server). Sucht und liest Seiten ueber die Confluence-REST-API.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["confluence_test_connection", "confluence_list_spaces", "confluence_search", "confluence_get_page", "confluence_create_page", "confluence_update_page", "confluence_delete_page", "confluence_add_comment", "confluence_list_attachments", "confluence_upload_attachment"],
+    "category": "wissen",
+    "icon": "book",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "base_url": {
+            "type": "string",
+            "label": "Confluence-URL",
+            "description": "Basis-URL der Confluence-Instanz, z.B. https://confluence.firma.de (ohne /rest-Pfad)",
+            "required": true
+        },
+        "api_token": {
+            "type": "string",
+            "label": "Personal Access Token (PAT)",
+            "description": "In Confluence unter Profil → Personal Access Tokens erzeugen. Wird als Bearer-Token gesendet.",
+            "secret": true,
+            "required": true
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "Stellt eine Verbindung zu Atlassian Confluence her und erlaubt dem Agenten, Seiten zu suchen und zu lesen. Authentifizierung per Personal Access Token (Bearer). Konfiguration ueber den Konfigurations-Dialog des Skills (Zahnrad in der Skill-Karte).",
+        "tools": [
+            {
+                "name": "confluence_test_connection",
+                "label": "Verbindung testen",
+                "desc": "Prueft URL und Zugangsdaten gegen die Confluence-API und meldet zugaengliche Spaces."
+            },
+            {
+                "name": "confluence_search",
+                "label": "Seiten suchen",
+                "desc": "Volltext-/CQL-Suche nach Seiten. Liefert Titel, ID und Link."
+            },
+            {
+                "name": "confluence_get_page",
+                "label": "Seite abrufen",
+                "desc": "Holt den Inhalt einer Seite per ID (oder Titel + Space-Key)."
+            }
+        ],
+        "use_cases": [
+            "Teste die Confluence-Verbindung",
+            "Suche in Confluence nach 'Onboarding'",
+            "Hole die Confluence-Seite mit der ID 123456"
+        ],
+        "notes": "Cloud-Basis-URL endet meist auf /wiki. API-Token niemals teilen. Der Token wird verschluesselt in der Skill-Config gespeichert."
+    }
+}

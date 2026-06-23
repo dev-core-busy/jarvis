@@ -2567,7 +2567,8 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         const tabInstructions = document.getElementById('settings-tab-instructions');
         const tabSecurity = document.getElementById('settings-tab-security');
         const tabCron    = document.getElementById('settings-tab-cron');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabMcp, tabTelemetry, tabSecurity, tabCron];
+        const tabConfluence = document.getElementById('settings-tab-confluence');
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabMcp, tabTelemetry, tabSecurity, tabCron];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -2619,6 +2620,10 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                     tabBranding.style.display = '';
                     tabBranding.classList.add('active');
                     if (window.brandingAdmin) window.brandingAdmin.init();
+                } else if (target === 'confluence' && tabConfluence) {
+                    tabConfluence.style.display = '';
+                    tabConfluence.classList.add('active');
+                    if (window.ConfluenceManager) window.ConfluenceManager.onShow();
                 } else if (target === 'telemetry' && tabTelemetry) {
                     tabTelemetry.style.display = '';
                     tabTelemetry.classList.add('active');
@@ -2730,6 +2735,35 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             }
         }
 
+        const confluenceTabBtn = document.getElementById('settings-tab-btn-confluence');
+        window.updateConfluenceTabVisibility = async function updateConfluenceTabVisibility() {
+            if (!confluenceTabBtn) return;
+            try {
+                const resp = await fetch('/api/skills', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json();
+                const skills = data.skills || data || [];
+                const cf = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'confluence')
+                    : null;
+                const isEnabled = cf && cf.enabled;
+                confluenceTabBtn.style.display = isEnabled ? '' : 'none';
+                // Confluence-Importquelle im Extraktor nur bei aktivem Skill zeigen
+                if (window.extractorManager && window.extractorManager.setConfluenceEnabled) {
+                    window.extractorManager.setConfluenceEnabled(!!isEnabled);
+                }
+                if (!isEnabled && tabConfluence && tabConfluence.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
         // ── SSL-Status laden ──
         async function loadSslStatus() {
             try {
@@ -2799,6 +2833,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             await updateWhatsAppTabVisibility();
             await updateVisionTabVisibility();
             await updateBrandingTabVisibility();
+            await updateConfluenceTabVisibility();
             loadSslStatus();
             showListView();
             // Ersten Tab aktivieren

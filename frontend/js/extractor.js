@@ -14,6 +14,12 @@ window.extractorManager = new (class JarvisExtractorManager {
         this._initialized      = false;
         this._activeInputTab   = 'url';
         this._dropFile         = null;   // Datei die per DnD reingekommen ist
+        this._cfEnabled        = false;  // Confluence-Sub-Tab sichtbar?
+        this._cfSpaces         = null;   // gecachte Bereichsliste
+        this._selectedSpaceKey = '';     // aktuell gewählter Bereich
+        this._ddOpen           = false;  // Bereichs-Dropdown offen?
+        this._ddIndex          = -1;     // Tastatur-Markierung im Dropdown
+        this._ddList           = [];     // aktuell angezeigte Treffer
     }
 
     init() {
@@ -25,6 +31,8 @@ window.extractorManager = new (class JarvisExtractorManager {
             this._setupDnD();
             this._initialized = true;
         }
+        // Confluence-Sichtbarkeit erneut anwenden (Button existiert erst nach Render)
+        this.setConfluenceEnabled(this._cfEnabled);
         this._loadPending();
     }
 
@@ -48,7 +56,9 @@ window.extractorManager = new (class JarvisExtractorManager {
                             <strong>URL:</strong> Adresse einer öffentlich erreichbaren Webseite eingeben.<br>
                             <strong>Datei:</strong> Datei per Drag &amp; Drop ablegen oder über den Datei-Browser wählen.
                             Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV,
-                            sowie Audio/Video (MP3, MP4, MOV …) via Whisper-Transkription.
+                            sowie Audio/Video (MP3, MP4, MOV …) via Whisper-Transkription.<br>
+                            <strong>Confluence:</strong> (nur bei aktivem Skill) Bereich wählen, dann eine einzelne
+                            Seite oder den ganzen Bereich importieren.
                         </span>
                     </div>
                 </div>
@@ -109,6 +119,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                 <div class="ext-input-tabs">
                     <button class="ext-input-tab active" id="ext-tab-url">🌐 URL</button>
                     <button class="ext-input-tab"        id="ext-tab-file">📄 Datei</button>
+                    <button class="ext-input-tab"        id="ext-tab-confluence" style="display:none;">📘 Confluence</button>
                 </div>
 
                 <!-- Panel: URL -->
@@ -135,6 +146,34 @@ window.extractorManager = new (class JarvisExtractorManager {
                         <span class="ext-drop-banner-size" id="ext-drop-size"></span>
                         <button id="ext-drop-analyse-btn" class="kb-btn-action" style="padding:.35rem .9rem;font-size:.8rem;flex-shrink:0;">${window.t('ext.analyse_btn')}</button>
                         <button id="ext-drop-cancel-btn"  class="kb-btn-secondary" style="padding:.35rem .6rem;font-size:.8rem;flex-shrink:0;">✕</button>
+                    </div>
+                </div>
+
+                <!-- Panel: Confluence -->
+                <div id="ext-panel-confluence" style="display:none;">
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+                        <div id="ext-cf-space-box" style="position:relative;flex:1;min-width:180px;">
+                            <input type="text" id="ext-cf-space-search" class="kb-input" placeholder="Bereich suchen…"
+                                   autocomplete="off" style="width:100%;box-sizing:border-box;">
+                            <div id="ext-cf-space-dd" style="display:none;position:absolute;z-index:50;left:0;right:0;
+                                 top:calc(100% + 2px);max-height:260px;overflow-y:auto;background:var(--bg-secondary);
+                                 border:1px solid var(--border);border-radius:8px;
+                                 box-shadow:0 8px 24px rgba(var(--shadow-rgb),0.4);"></div>
+                        </div>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;white-space:nowrap;cursor:pointer;">
+                            <input type="checkbox" id="ext-cf-personal"> persönliche
+                        </label>
+                        <button id="ext-cf-refresh" class="kb-btn-secondary" title="Bereiche neu laden" style="flex-shrink:0;">🔄</button>
+                    </div>
+                    <div id="ext-cf-page-wrap" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                        <select id="ext-cf-page" class="kb-input" style="flex:1;min-width:180px;">
+                            <option value="">– Seite wählen –</option>
+                        </select>
+                        <button id="ext-cf-import-page" class="kb-btn-action" style="flex-shrink:0;">Seite importieren</button>
+                    </div>
+                    <div id="ext-cf-bulk-wrap" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <button id="ext-cf-import-space" class="kb-btn-secondary">Ganzen Bereich importieren</button>
+                        <span class="kb-hint" id="ext-cf-bulk-hint" style="margin:0;"></span>
                     </div>
                 </div>
 
@@ -199,6 +238,18 @@ window.extractorManager = new (class JarvisExtractorManager {
         // Tab-Buttons
         document.getElementById('ext-tab-url').onclick  = () => this._switchInputTab('url');
         document.getElementById('ext-tab-file').onclick = () => this._switchInputTab('file');
+        document.getElementById('ext-tab-confluence').onclick = () => this._switchInputTab('confluence');
+
+        // Confluence-Tab
+        document.getElementById('ext-cf-refresh').onclick   = () => this._loadCfSpaces(true);
+        document.getElementById('ext-cf-personal').onchange = () => { if (this._ddOpen) this._renderCfSpaceDropdown(); };
+        const cfSearch = document.getElementById('ext-cf-space-search');
+        cfSearch.addEventListener('input', () => this._onSpaceSearchInput());
+        cfSearch.addEventListener('focus', () => this._openSpaceDropdown());
+        cfSearch.addEventListener('keydown', e => this._spaceSearchKey(e));
+        cfSearch.addEventListener('blur', () => setTimeout(() => this._closeSpaceDropdown(), 150));
+        document.getElementById('ext-cf-import-page').onclick  = () => this._importCfPage();
+        document.getElementById('ext-cf-import-space').onclick = () => this._importCfSpace();
 
         // URL-Tab
         document.getElementById('ext-info-btn').onclick    = () => this._showInfo();
@@ -234,9 +285,262 @@ window.extractorManager = new (class JarvisExtractorManager {
         this._activeInputTab = tab;
         document.getElementById('ext-tab-url').classList.toggle('active', tab === 'url');
         document.getElementById('ext-tab-file').classList.toggle('active', tab === 'file');
+        const cfTab = document.getElementById('ext-tab-confluence');
+        if (cfTab) cfTab.classList.toggle('active', tab === 'confluence');
         document.getElementById('ext-panel-url').style.display  = tab === 'url'  ? '' : 'none';
         document.getElementById('ext-panel-file').style.display = tab === 'file' ? '' : 'none';
+        const cfPanel = document.getElementById('ext-panel-confluence');
+        if (cfPanel) cfPanel.style.display = tab === 'confluence' ? '' : 'none';
+        if (tab === 'confluence' && !this._cfSpaces) this._loadCfSpaces(false);
     }
+
+    // ─── Confluence-Importquelle ───────────────────────────────────────────────
+
+    /** Blendet den Confluence-Sub-Tab ein/aus (je nach Skill-Aktivierung). */
+    setConfluenceEnabled(on) {
+        this._cfEnabled = !!on;
+        const btn = document.getElementById('ext-tab-confluence');
+        if (btn) btn.style.display = on ? '' : 'none';
+        // Falls der aktive Tab wegfällt → zurück auf URL
+        if (!on && this._activeInputTab === 'confluence') this._switchInputTab('url');
+    }
+
+    _loadCfSpaces(force) {
+        const input = document.getElementById('ext-cf-space-search');
+        if (!input) return;
+        if (this._cfSpaces && !force) { if (this._ddOpen) this._renderCfSpaceDropdown(); return; }
+        input.placeholder = 'Lädt Bereiche…';
+        fetch('/api/confluence/spaces', { headers: this._authHeaders() })
+            .then(r => r.json())
+            .then(d => {
+                if (!d || !d.ok) { input.placeholder = (d && d.error) || 'Fehler beim Laden'; return; }
+                this._cfSpaces = d.spaces || [];
+                input.placeholder = 'Bereich suchen… (' + this._filteredSpaces().length + ')';
+                if (this._ddOpen) this._renderCfSpaceDropdown();
+            })
+            .catch(() => { input.placeholder = 'Fehler beim Laden'; });
+    }
+
+    /** Bereiche gemäß Suchtext + "persönliche"-Schalter gefiltert. */
+    _filteredSpaces() {
+        if (!this._cfSpaces) return [];
+        const inclPersonal = document.getElementById('ext-cf-personal')?.checked;
+        const q = (document.getElementById('ext-cf-space-search')?.value || '').trim().toLowerCase();
+        return this._cfSpaces.filter(s => {
+            if (!inclPersonal && s.type === 'personal') return false;
+            if (q) {
+                const hay = ((s.name || '') + ' ' + (s.key || '')).toLowerCase();
+                if (hay.indexOf(q) === -1) return false;
+            }
+            return true;
+        });
+    }
+
+    _onSpaceSearchInput() {
+        // Tippen = Auswahl zurücksetzen, Seitenbereich verbergen, Liste eingrenzen
+        this._selectedSpaceKey = '';
+        const pw = document.getElementById('ext-cf-page-wrap'); if (pw) pw.style.display = 'none';
+        const bw = document.getElementById('ext-cf-bulk-wrap'); if (bw) bw.style.display = 'none';
+        this._ddIndex = -1;
+        this._openSpaceDropdown();
+    }
+
+    _openSpaceDropdown() {
+        this._ddOpen = true;
+        if (!this._cfSpaces) { this._loadCfSpaces(false); return; }
+        this._renderCfSpaceDropdown();
+    }
+
+    _closeSpaceDropdown() {
+        this._ddOpen = false;
+        const dd = document.getElementById('ext-cf-space-dd');
+        if (dd) dd.style.display = 'none';
+    }
+
+    _renderCfSpaceDropdown() {
+        const dd = document.getElementById('ext-cf-space-dd');
+        if (!dd) return;
+        const list = this._filteredSpaces();
+        const CAP = 200;
+        const shown = list.slice(0, CAP);
+        this._ddList = shown;
+        if (this._ddIndex >= shown.length) this._ddIndex = -1;
+        if (!shown.length) {
+            dd.innerHTML = '<div style="padding:8px 10px;color:var(--text-secondary);font-size:0.85rem;">Keine Treffer</div>';
+            dd.style.display = '';
+            return;
+        }
+        dd.innerHTML = shown.map((s, i) =>
+            '<div class="ext-cf-opt" data-key="' + this._attr(s.key) + '" data-i="' + i + '" '
+            + 'style="padding:7px 10px;cursor:pointer;font-size:0.86rem;'
+            + (i === this._ddIndex ? 'background:rgba(var(--accent-rgb),0.18);' : '') + '">'
+            + this._esc(s.name) + ' <span style="color:var(--text-secondary);">('
+            + this._esc(s.key) + (s.type === 'personal' ? ', persönlich' : '') + ')</span></div>'
+        ).join('')
+        + (list.length > CAP
+            ? '<div style="padding:6px 10px;color:var(--text-secondary);font-size:0.78rem;">… '
+              + (list.length - CAP) + ' weitere – weiter tippen zum Eingrenzen</div>'
+            : '');
+        dd.style.display = '';
+        dd.querySelectorAll('.ext-cf-opt').forEach(el => {
+            el.addEventListener('mousedown', ev => {
+                ev.preventDefault();   // verhindert blur vor der Auswahl
+                this._selectSpace(el.getAttribute('data-key'));
+            });
+            el.addEventListener('mouseover', () => {
+                this._ddIndex = parseInt(el.getAttribute('data-i'), 10);
+                this._highlightDd();
+            });
+        });
+    }
+
+    _highlightDd() {
+        const dd = document.getElementById('ext-cf-space-dd');
+        if (!dd) return;
+        dd.querySelectorAll('.ext-cf-opt').forEach(el => {
+            const i = parseInt(el.getAttribute('data-i'), 10);
+            el.style.background = (i === this._ddIndex) ? 'rgba(var(--accent-rgb),0.18)' : '';
+        });
+    }
+
+    _spaceSearchKey(e) {
+        if (!this._ddOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { this._openSpaceDropdown(); return; }
+        const n = (this._ddList || []).length;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault(); this._ddIndex = Math.min(this._ddIndex + 1, n - 1);
+            this._highlightDd(); this._scrollDdIntoView();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault(); this._ddIndex = Math.max(this._ddIndex - 1, 0);
+            this._highlightDd(); this._scrollDdIntoView();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const pick = (this._ddList || [])[this._ddIndex] || (this._ddList || [])[0];
+            if (pick) this._selectSpace(pick.key);
+        } else if (e.key === 'Escape') {
+            this._closeSpaceDropdown();
+        }
+    }
+
+    _scrollDdIntoView() {
+        const dd = document.getElementById('ext-cf-space-dd');
+        const el = dd && dd.querySelector('.ext-cf-opt[data-i="' + this._ddIndex + '"]');
+        if (el) el.scrollIntoView({ block: 'nearest' });
+    }
+
+    _selectSpace(key) {
+        const sp = (this._cfSpaces || []).find(s => s.key === key);
+        if (!sp) return;
+        this._selectedSpaceKey = key;
+        const input = document.getElementById('ext-cf-space-search');
+        if (input) input.value = sp.name + ' (' + sp.key + ')';
+        this._closeSpaceDropdown();
+        this._onCfSpaceChange();
+    }
+
+    _onCfSpaceChange() {
+        const space = this._selectedSpaceKey || '';
+        const pageWrap = document.getElementById('ext-cf-page-wrap');
+        const bulkWrap = document.getElementById('ext-cf-bulk-wrap');
+        const pageSel  = document.getElementById('ext-cf-page');
+        if (!space) {
+            if (pageWrap) pageWrap.style.display = 'none';
+            if (bulkWrap) bulkWrap.style.display = 'none';
+            return;
+        }
+        if (pageWrap) pageWrap.style.display = 'flex';
+        if (bulkWrap) bulkWrap.style.display = 'flex';
+        if (pageSel) { pageSel.disabled = true; pageSel.innerHTML = '<option value="">Lädt…</option>'; }
+        document.getElementById('ext-cf-bulk-hint').textContent = '';
+        fetch('/api/confluence/pages?space=' + encodeURIComponent(space), { headers: this._authHeaders() })
+            .then(r => r.json())
+            .then(d => {
+                if (!d || !d.ok) {
+                    if (pageSel) pageSel.innerHTML = '<option value="">' + ((d && d.error) || 'Fehler') + '</option>';
+                    return;
+                }
+                const pages = d.pages || [];
+                if (pageSel) {
+                    pageSel.disabled = false;
+                    pageSel.innerHTML = '<option value="">– Seite wählen –</option>'
+                        + pages.map(p => '<option value="' + this._attr(p.id) + '">'
+                            + this._esc(p.title) + '</option>').join('');
+                }
+                document.getElementById('ext-cf-bulk-hint').textContent =
+                    pages.length + ' Seite(n) im Bereich';
+            })
+            .catch(() => { if (pageSel) pageSel.innerHTML = '<option value="">Fehler</option>'; });
+    }
+
+    _setExtractStatus(msg, show) {
+        const status = document.getElementById('ext-extract-status');
+        if (!status) return;
+        status.textContent = msg || '';
+        status.style.display = show ? 'block' : 'none';
+    }
+
+    _importCfPage() {
+        const pageId = document.getElementById('ext-cf-page')?.value || '';
+        if (!pageId) { this._notify('Bitte zuerst eine Seite wählen.', 'error'); return; }
+        const btn = document.getElementById('ext-cf-import-page');
+        if (btn) btn.disabled = true;
+        this._setExtractStatus('⏳ Importiere Seite…', true);
+        fetch('/api/knowledge/extract/confluence', {
+            method: 'POST',
+            headers: this._authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ page_id: pageId }),
+        })
+            .then(r => r.json().then(j => ({ ok: r.ok, j })))
+            .then(({ ok, j }) => {
+                this._setExtractStatus('', false);
+                if (btn) btn.disabled = false;
+                if (!ok) { this._notify('Fehler: ' + (j.error || 'Import fehlgeschlagen'), 'error'); return; }
+                this._notify(`✅ Seite importiert: „${j.title}"`);
+                this._loadPending();
+                setTimeout(() => this._openReview(j), 300);
+            })
+            .catch(() => {
+                this._setExtractStatus('', false);
+                if (btn) btn.disabled = false;
+                this._notify('Netzwerkfehler beim Import', 'error');
+            });
+    }
+
+    _importCfSpace() {
+        const space = this._selectedSpaceKey || '';
+        if (!space) { this._notify('Bitte zuerst einen Bereich wählen.', 'error'); return; }
+        if (!confirm('Alle Seiten dieses Bereichs importieren? Das kann je nach Größe dauern.')) return;
+        const btn = document.getElementById('ext-cf-import-space');
+        if (btn) btn.disabled = true;
+        this._setExtractStatus('⏳ Starte Bereichs-Import…', true);
+        fetch('/api/knowledge/extract/confluence', {
+            method: 'POST',
+            headers: this._authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ space: space }),
+        })
+            .then(r => r.json().then(j => ({ ok: r.ok, j })))
+            .then(({ ok, j }) => {
+                this._setExtractStatus('', false);
+                if (btn) btn.disabled = false;
+                if (!ok) { this._notify('Fehler: ' + (j.error || 'Import fehlgeschlagen'), 'error'); return; }
+                this._notify('⏳ Import von ' + j.total
+                    + ' Seite(n) gestartet – sie erscheinen nach und nach unten in den Pending-Dokumenten.');
+                setTimeout(() => this._loadPending(), 3000);
+            })
+            .catch(() => {
+                this._setExtractStatus('', false);
+                if (btn) btn.disabled = false;
+                this._notify('Netzwerkfehler beim Import', 'error');
+            });
+    }
+
+    _authHeaders(extra) {
+        const t = localStorage.getItem('jarvis_token') || '';
+        return Object.assign({ 'Authorization': 'Bearer ' + t }, extra || {});
+    }
+    _esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    }
+    _attr(s) { return this._esc(s).replace(/"/g, '&quot;'); }
 
     // ─── Drag & Drop ─────────────────────────────────────────────────────────
 

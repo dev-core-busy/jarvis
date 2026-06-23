@@ -2715,7 +2715,7 @@ async def _feedback_self_improve(user_msg: str, bot_resp: str, rating: str) -> s
     """LLM analysiert schlechte Antwort, speichert Lernnotiz und gibt Analyse zurück."""
     import datetime
     try:
-        from backend import config as _cfg
+        from backend.config import config as _cfg
         from backend.llm import get_provider
 
         try:
@@ -2732,7 +2732,10 @@ async def _feedback_self_improve(user_msg: str, bot_resp: str, rating: str) -> s
         provider = get_provider(
             _cfg.LLM_PROVIDER,
             _cfg.current_api_key,
-            _cfg.current_model,
+            _cfg.current_api_url,
+            auth_method=_cfg.current_auth_method,
+            session_key=_cfg.current_session_key,
+            prompt_tool_calling=_cfg.current_prompt_tool_calling,
         )
         reason = "falsch" if rating == "wrong" else "schlecht/unzureichend"
         prompt = (
@@ -2749,14 +2752,16 @@ async def _feedback_self_improve(user_msg: str, bot_resp: str, rating: str) -> s
             f"(1-2 Sätze: Welche Regel soll Jarvis für zukünftige ähnliche Fragen beachten?)"
         )
         contents = [_mk_part(prompt)]
-        analysis = ""
-        async for chunk in provider.generate_stream(
-            system="Du bist ein KI-Assistent der eigene Fehler analysiert, bessere Alternativen formuliert und daraus Lernregeln ableitet.",
+        response = await provider.generate_response(
+            model=_cfg.current_model,
+            system_prompt="Du bist ein KI-Assistent der eigene Fehler analysiert, bessere Alternativen formuliert und daraus Lernregeln ableitet.",
             contents=contents,
             tools=[],
-        ):
-            if hasattr(chunk, "text"):
-                analysis += chunk.text
+        )
+        analysis = ""
+        for part in (response.parts or []):
+            if getattr(part, "text", None):
+                analysis += part.text
 
         if not analysis.strip():
             return ""
@@ -3066,6 +3071,115 @@ async def delete_branding_logo(variant: str = "dark",
         except OSError:
             pass
     return JSONResponse({"success": True, "removed": removed})
+
+
+# ─── Confluence (für den Confluence-Reiter; teilt sich Client mit dem Skill) ──
+
+def _confluence_client():
+    from backend.confluence_client import ConfluenceClient
+    return ConfluenceClient()
+
+
+# Referenzen auf laufende Bereichs-Import-Jobs halten (sonst GC durch asyncio)
+_bg_confluence_tasks: set = set()
+
+
+@app.get("/api/confluence/test")
+async def confluence_test(user: str = Depends(require_auth)):
+    """Prueft die gespeicherte Confluence-Verbindung (fuer den Reiter)."""
+    from backend.confluence_client import ConfluenceError
+    c = _confluence_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "configured": False,
+                             "error": "Nicht konfiguriert (URL/Token fehlen)."})
+    try:
+        spaces = await asyncio.to_thread(c.spaces, 50)
+        return JSONResponse({"ok": True, "configured": True, "base": c.base,
+                             "count": len(spaces),
+                             "spaces": [{"key": s.get("key"), "name": s.get("name")} for s in spaces]})
+    except ConfluenceError as e:
+        return JSONResponse({"ok": False, "configured": True, "status": e.status,
+                             "error": str(e)})
+
+
+@app.get("/api/confluence/spaces")
+async def confluence_spaces_api(user: str = Depends(require_auth)):
+    """Listet alle Confluence-Bereiche (Spaces) mit Link – fuer den Wissen-Reiter."""
+    from backend.confluence_client import ConfluenceError
+    c = _confluence_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "configured": False,
+                             "error": "Nicht konfiguriert (URL/Token fehlen)."})
+    try:
+        spaces = await asyncio.to_thread(c.spaces_detailed, 500)
+        spaces.sort(key=lambda s: (s.get("name") or "").lower())
+        return JSONResponse({"ok": True, "configured": True, "base": c.base,
+                             "count": len(spaces), "spaces": spaces})
+    except ConfluenceError as e:
+        return JSONResponse({"ok": False, "configured": True, "status": e.status,
+                             "error": str(e)})
+
+
+@app.get("/api/confluence/pages")
+async def confluence_pages_api(space: str = "", user: str = Depends(require_auth)):
+    """Listet die Seiten eines Bereichs (Space) – fuer die Auswahl im Extraktor."""
+    from backend.confluence_client import ConfluenceError
+    c = _confluence_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
+    if not space.strip():
+        return JSONResponse({"ok": False, "error": "Space-Key fehlt."}, status_code=400)
+    try:
+        pages = await asyncio.to_thread(c.pages_in_space, space.strip(), 500)
+        pages.sort(key=lambda p: (p.get("title") or "").lower())
+        return JSONResponse({"ok": True, "count": len(pages), "pages": pages})
+    except ConfluenceError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+
+
+@app.get("/api/confluence/search")
+async def confluence_search_api(q: str = "", space: str = "", label: str = "",
+                                limit: int = 20, user: str = Depends(require_auth)):
+    """Suche fuer den Reiter – liefert Treffer mit Link."""
+    from backend.confluence_client import ConfluenceError
+    c = _confluence_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        data = await asyncio.to_thread(c.search, q.strip(), space.strip() or None,
+                                       label.strip() or None, limit)
+        items = [{
+            "id": r.get("id"), "title": r.get("title"),
+            "type": r.get("type"), "link": c.link_for(data, r),
+        } for r in data.get("results", [])]
+        return JSONResponse({"ok": True, "results": items})
+    except ConfluenceError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+
+
+@app.get("/api/confluence/page")
+async def confluence_page_api(id: str = "", title: str = "", space: str = "",
+                              user: str = Depends(require_auth)):
+    """Seiteninhalt fuer den Reiter (als Text)."""
+    from backend.confluence_client import ConfluenceError, html_to_text
+    c = _confluence_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
+    try:
+        page = await asyncio.to_thread(c.get_page, id.strip() or None,
+                                       title.strip() or None, space.strip() or None)
+        body = (((page.get("body") or {}).get("storage") or {}).get("value")) or ""
+        return JSONResponse({"ok": True,
+                             "id": page.get("id"), "title": page.get("title"),
+                             "space": (page.get("space") or {}).get("key"),
+                             "link": c.link_for(page, page),
+                             "text": html_to_text(body, 8000)})
+    except ConfluenceError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
 
 
 # ─── Agent Task API (extern, z.B. für Vision-Aktionen) ───────────────
@@ -3722,6 +3836,69 @@ async def knowledge_extract_upload(
         return JSONResponse(doc, status_code=201)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/knowledge/extract/confluence")
+async def knowledge_extract_confluence(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Importiert Confluence-Inhalte in den Extraktor (Pending → Audit → Wissens-DB).
+
+    Body: ``{"page_id": "123"}`` fuer eine Einzelseite (synchron) oder
+    ``{"space": "KEY"}`` fuer einen ganzen Bereich (Hintergrund-Job).
+    """
+    from backend.confluence_client import ConfluenceError, html_to_text
+    from backend.web_extractor import extract_to_pending
+    body = await request.json()
+    page_id = (body.get("page_id") or "").strip()
+    space = (body.get("space") or "").strip()
+    c = _confluence_client()
+    if not c.configured:
+        return JSONResponse({"error": "Confluence ist nicht konfiguriert."}, status_code=400)
+
+    def _page_text(page: dict) -> str:
+        raw = (((page.get("body") or {}).get("storage") or {}).get("value")) or ""
+        return html_to_text(raw, 8000)
+
+    # ── Einzelseite (synchron) ──────────────────────────────────────────
+    if page_id:
+        try:
+            page = await asyncio.to_thread(c.get_page, page_id, None, None)
+            text = _page_text(page)
+            if not text.strip():
+                return JSONResponse({"error": "Seite enthält keinen lesbaren Text."}, status_code=422)
+            doc = await extract_to_pending(text, page.get("title", ""), c.link_for(page, page))
+            return JSONResponse(doc, status_code=201)
+        except ConfluenceError as e:
+            return JSONResponse({"error": str(e)}, status_code=502)
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    # ── Ganzer Bereich (Hintergrund-Job) ────────────────────────────────
+    if space:
+        try:
+            pages = await asyncio.to_thread(c.pages_in_space, space, 500)
+        except ConfluenceError as e:
+            return JSONResponse({"error": str(e)}, status_code=502)
+        if not pages:
+            return JSONResponse({"error": "Bereich enthält keine Seiten."}, status_code=404)
+
+        async def _bulk(space_key: str, page_list: list):
+            for p in page_list:
+                try:
+                    full = await asyncio.to_thread(c.get_page, p["id"], None, None)
+                    text = _page_text(full)
+                    if text.strip():
+                        await extract_to_pending(text, full.get("title", ""),
+                                                 c.link_for(full, full))
+                except Exception as ex:
+                    print(f"[Confluence-Bulk] Seite {p.get('id')} übersprungen: {ex}", flush=True)
+
+        task = asyncio.create_task(_bulk(space, pages))
+        _bg_confluence_tasks.add(task)
+        task.add_done_callback(_bg_confluence_tasks.discard)
+        return JSONResponse({"ok": True, "started": True, "total": len(pages),
+                             "space": space}, status_code=202)
+
+    return JSONResponse({"error": "page_id oder space erforderlich."}, status_code=400)
 
 
 @app.get("/api/knowledge/pending")

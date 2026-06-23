@@ -714,6 +714,7 @@
                 if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
                 if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
+                if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
                 if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
             } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
@@ -732,6 +733,7 @@
                 if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
                 if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
+                if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
                 if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
             } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
@@ -754,6 +756,7 @@
                 if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
                 if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
+                if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
                 if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
             } catch (e) { console.error('Toggle fehlgeschlagen:', e); }

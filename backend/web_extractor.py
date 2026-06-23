@@ -53,6 +53,7 @@ async def extract_structured_from_text(text: str, fallback_title: str = "") -> d
         return {"title": fallback_title, "summary": "", "facts": [], "qa_pairs": []}
     provider = get_provider(
         config.LLM_PROVIDER, config.current_api_key,
+        config.current_api_url,
         auth_method=config.current_auth_method,
         session_key=config.current_session_key, prompt_tool_calling=False,
     )
@@ -77,6 +78,33 @@ async def extract_structured_from_text(text: str, fallback_title: str = "") -> d
             for p in data.get("qa_pairs", []) if str(p.get("q", "")).strip()
         ],
     }
+
+
+async def extract_to_pending(text: str, title: str = "", source: str = "") -> dict:
+    """Beliebigen Text → strukturierte Extraktion → gespeichertes Pending-Dokument.
+
+    Wiederverwendbar fuer Quellen ohne eigene Datei-/HTTP-Pipeline (z.B. Confluence).
+    ``source`` wird als Herkunft/Link im Pending-Dokument hinterlegt.
+    """
+    structured = await extract_structured_from_text(text, fallback_title=title)
+    doc_id = str(uuid.uuid4())[:8]
+    qa_pairs = [
+        {"id": str(uuid.uuid4())[:6], "q": p.get("q", ""), "a": p.get("a", ""),
+         "approved": True}
+        for p in structured.get("qa_pairs", []) if p.get("q")
+    ]
+    pending = {
+        "id": doc_id,
+        "url": source,
+        "title": (structured.get("title") or title or "Dokument")[:300],
+        "summary": structured.get("summary", ""),
+        "facts": structured.get("facts", []),
+        "qa_pairs": qa_pairs,
+        "created_at": int(time.time()),
+        "status": "pending",
+    }
+    save_pending(pending)
+    return pending
 
 
 # ─── Datei-Typ Erkennung ─────────────────────────────────────────────────────
@@ -209,6 +237,7 @@ async def extract_from_url(url: str) -> dict:
     provider = get_provider(
         config.LLM_PROVIDER,
         config.current_api_key,
+        config.current_api_url,
         auth_method=config.current_auth_method,
         session_key=config.current_session_key,
         prompt_tool_calling=False,
@@ -445,6 +474,7 @@ async def extract_from_file(filename: str, content: bytes, source_url: str | Non
     provider = get_provider(
         config.LLM_PROVIDER,
         config.current_api_key,
+        config.current_api_url,
         auth_method=config.current_auth_method,
         session_key=config.current_session_key,
         prompt_tool_calling=False,

@@ -32,12 +32,24 @@
                 .then(function (d) {
                     var c = (d && d.config) || {};
                     if ($('support-prompt')) $('support-prompt').value = c.system_prompt || '';
+                    if ($('support-lines')) $('support-lines').value = c.summary_lines || 5;
+                    if ($('support-result-lines')) $('support-result-lines').value = c.result_lines || 2;
                 })
                 .catch(function () {});
         },
 
         save: function () {
-            var body = { system_prompt: ($('support-prompt') ? $('support-prompt').value : '') };
+            var lines = parseInt(($('support-lines') ? $('support-lines').value : '5'), 10);
+            if (!lines || lines < 1) lines = 5;
+            if (lines > 20) lines = 20;
+            var rlines = parseInt(($('support-result-lines') ? $('support-result-lines').value : '2'), 10);
+            if (!rlines || rlines < 1) rlines = 2;
+            if (rlines > 20) rlines = 20;
+            var body = {
+                system_prompt: ($('support-prompt') ? $('support-prompt').value : ''),
+                summary_lines: lines,
+                result_lines: rlines
+            };
             status('Speichere…');
             fetch('/api/skills/support_assistant/config', {
                 method: 'POST',

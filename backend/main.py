@@ -3182,6 +3182,80 @@ async def confluence_page_api(id: str = "", title: str = "", space: str = "",
         return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
 
 
+# ─── Jira (Reiter: Ticketsuche) ──────────────────────────────────────
+
+def _jira_client():
+    from backend.jira_client import JiraClient
+    return JiraClient()
+
+
+@app.get("/api/jira/test")
+async def jira_test(user: str = Depends(require_auth)):
+    """Prueft die gespeicherte Jira-Verbindung (fuer den Reiter)."""
+    from backend.jira_client import JiraError
+    c = _jira_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "configured": False,
+                             "error": "Nicht konfiguriert (URL/Token fehlen)."})
+    try:
+        me = await asyncio.to_thread(c.myself)
+        return JSONResponse({"ok": True, "configured": True, "base": c.base,
+                             "user": me.get("displayName") or me.get("name"),
+                             "email": me.get("emailAddress", "")})
+    except JiraError as e:
+        return JSONResponse({"ok": False, "configured": True, "status": e.status,
+                             "error": str(e)})
+
+
+@app.get("/api/jira/search")
+async def jira_search_api(q: str = "", project: str = "", status: str = "",
+                          issuetype: str = "", assignee: str = "", jql: str = "",
+                          limit: int = 25, user: str = Depends(require_auth)):
+    """Ticketsuche fuer den Reiter – liefert Treffer mit Link."""
+    from backend.jira_client import JiraError, issue_brief
+    c = _jira_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 25
+    query = (jql or "").strip() or c.build_jql(
+        q.strip(), project.strip() or None, status.strip() or None,
+        issuetype.strip() or None, assignee.strip() or None)
+    try:
+        data = await asyncio.to_thread(c.search, query, limit)
+        items = [issue_brief(it, c.base) for it in data.get("issues", [])]
+        return JSONResponse({"ok": True, "total": data.get("total", len(items)),
+                             "jql": query, "results": items})
+    except JiraError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e), "jql": query})
+
+
+@app.get("/api/jira/issue")
+async def jira_issue_api(key: str = "", user: str = Depends(require_auth)):
+    """Ticketdetails fuer den Reiter (Beschreibung als Text + Kommentare)."""
+    from backend.jira_client import JiraError, html_to_text, issue_brief
+    c = _jira_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
+    if not key.strip():
+        return JSONResponse({"ok": False, "error": "key fehlt."}, status_code=400)
+    try:
+        it = await asyncio.to_thread(c.get_issue, key.strip())
+        b = issue_brief(it, c.base)
+        f = it.get("fields", {}) or {}
+        comments = [{
+            "author": (cm.get("author") or {}).get("displayName", "?"),
+            "body": html_to_text(cm.get("body") or "", 1500),
+        } for cm in (((f.get("comment") or {}).get("comments")) or [])[-10:]]
+        b["description"] = html_to_text(f.get("description") or "", 8000)
+        b["comments"] = comments
+        return JSONResponse({"ok": True, **b})
+    except JiraError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+
+
 # ─── Agent Task API (extern, z.B. für Vision-Aktionen) ───────────────
 
 def _verify_agent_api_key(request: Request) -> bool:

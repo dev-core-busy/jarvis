@@ -1,0 +1,57 @@
+{
+    "name": "Jira",
+    "description": "Verbindung zu Atlassian Jira (Server/Data-Center). Schwerpunkt: Ticketsuche nach Inhalten ueber die Jira-REST-API (JQL).",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["jira_test_connection", "jira_search", "jira_get_issue", "jira_list_projects", "jira_add_comment", "jira_create_issue"],
+    "category": "wissen",
+    "icon": "ticket",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "base_url": {
+            "type": "string",
+            "label": "Jira-URL",
+            "description": "Basis-URL der Jira-Instanz, z.B. https://servicedesk.firma.de (ohne /rest-Pfad)",
+            "required": true
+        },
+        "api_token": {
+            "type": "string",
+            "label": "Personal Access Token (PAT)",
+            "description": "In Jira unter Profil → Personal Access Tokens erzeugen. Wird als Bearer-Token gesendet.",
+            "secret": true,
+            "required": true
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "Stellt eine Verbindung zu Atlassian Jira (Server/DC) her. Schwerpunkt ist die Ticketsuche nach Inhalten (Volltext/JQL). Der Agent kann zusaetzlich einzelne Tickets lesen, Projekte auflisten, kommentieren und neue Tickets anlegen. Authentifizierung per Personal Access Token (Bearer). Konfiguration ueber den Konfigurations-Dialog des Skills (Zahnrad in der Skill-Karte).",
+        "tools": [
+            {
+                "name": "jira_test_connection",
+                "label": "Verbindung testen",
+                "desc": "Prueft URL und Token gegen die Jira-API und meldet den angemeldeten Benutzer."
+            },
+            {
+                "name": "jira_search",
+                "label": "Tickets suchen",
+                "desc": "Volltextsuche nach Tickets (optional gefiltert nach Projekt/Status/Typ/Bearbeiter oder per JQL)."
+            },
+            {
+                "name": "jira_get_issue",
+                "label": "Ticket abrufen",
+                "desc": "Holt ein Ticket per Key inkl. Beschreibung und letzten Kommentaren."
+            }
+        ],
+        "use_cases": [
+            "Teste die Jira-Verbindung",
+            "Suche in Jira nach Tickets zu 'Befundkommunikation'",
+            "Suche offene Bugs im Projekt PROJ",
+            "Hole das Jira-Ticket PROJ-1234"
+        ],
+        "notes": "API-Token niemals teilen. Der Token wird in der Skill-Config gespeichert und als Bearer gesendet. Fokus liegt auf der Ticketsuche."
+    }
+}

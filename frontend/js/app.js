@@ -2578,7 +2578,8 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         const tabSecurity = document.getElementById('settings-tab-security');
         const tabCron    = document.getElementById('settings-tab-cron');
         const tabConfluence = document.getElementById('settings-tab-confluence');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabMcp, tabTelemetry, tabSecurity, tabCron];
+        const tabJira    = document.getElementById('settings-tab-jira');
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabMcp, tabTelemetry, tabSecurity, tabCron];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -2634,6 +2635,10 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                     tabConfluence.style.display = '';
                     tabConfluence.classList.add('active');
                     if (window.ConfluenceManager) window.ConfluenceManager.onShow();
+                } else if (target === 'jira' && tabJira) {
+                    tabJira.style.display = '';
+                    tabJira.classList.add('active');
+                    if (window.JiraManager) window.JiraManager.onShow();
                 } else if (target === 'telemetry' && tabTelemetry) {
                     tabTelemetry.style.display = '';
                     tabTelemetry.classList.add('active');
@@ -2774,6 +2779,31 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             }
         }
 
+        const jiraTabBtn = document.getElementById('settings-tab-btn-jira');
+        window.updateJiraTabVisibility = async function updateJiraTabVisibility() {
+            if (!jiraTabBtn) return;
+            try {
+                const resp = await fetch('/api/skills', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json();
+                const skills = data.skills || data || [];
+                const jr = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'jira')
+                    : null;
+                const isEnabled = jr && jr.enabled;
+                jiraTabBtn.style.display = isEnabled ? '' : 'none';
+                if (!isEnabled && tabJira && tabJira.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
         // ── SSL-Status laden ──
         async function loadSslStatus() {
             try {
@@ -2844,6 +2874,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             await updateVisionTabVisibility();
             await updateBrandingTabVisibility();
             await updateConfluenceTabVisibility();
+            await updateJiraTabVisibility();
             loadSslStatus();
             showListView();
             // Ersten Tab aktivieren

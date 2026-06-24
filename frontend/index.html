@@ -561,6 +561,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="vision" id="settings-tab-btn-vision" style="display:none;" data-i18n="settings.tab.vision">Vision</button>
                 <button class="settings-tab-btn" data-settings-tab="branding" id="settings-tab-btn-branding" style="display:none;">Branding</button>
                 <button class="settings-tab-btn" data-settings-tab="confluence" id="settings-tab-btn-confluence" style="display:none;">Confluence</button>
+                <button class="settings-tab-btn" data-settings-tab="jira" id="settings-tab-btn-jira" style="display:none;">Jira</button>
                 <button class="settings-tab-btn" data-settings-tab="telemetry" data-i18n="settings.tab.telemetry">Telemetry</button>
                 <button class="settings-tab-btn" data-settings-tab="security" data-i18n="settings.tab.security">Sicherheit</button>
                 <button class="settings-tab-btn" data-settings-tab="cron" data-i18n="settings.tab.cron">Tasks</button>
@@ -1414,6 +1415,48 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     </div>
                 </div>
 
+                <!-- ═══ Tab: Jira (Ticketsuche) ═══ -->
+                <div id="settings-tab-jira" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Verbindung zu Atlassian Jira (Server/Data-Center) per Personal Access Token (PAT). Schwerpunkt: Ticketsuche nach Inhalten. Der Agent kann zusätzlich Tickets lesen, kommentieren und anlegen.</p>
+
+                        <h4 style="margin:16px 0 8px;">Verbindung</h4>
+                        <div class="form-group">
+                            <label>Jira-URL</label>
+                            <input type="text" id="jira-url" class="config-input" placeholder="https://servicedesk.firma.de" style="width:100%;box-sizing:border-box;">
+                        </div>
+                        <div class="form-group">
+                            <label>Personal Access Token (PAT)</label>
+                            <input type="password" id="jira-token" class="config-input" placeholder="••••••••" autocomplete="new-password" style="width:100%;box-sizing:border-box;">
+                        </div>
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
+                            <button class="btn-primary" id="jira-save" type="button" style="flex:0 0 auto;">Speichern</button>
+                            <button class="btn-secondary" id="jira-test" type="button" style="flex:0 0 auto;">Verbindung testen</button>
+                            <span id="jira-status" style="font-size:0.9em;"></span>
+                        </div>
+
+                        <h4 style="margin:22px 0 8px;">Tickets suchen</h4>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                            <input type="text" id="jira-search-q" class="config-input" placeholder="Suchbegriff (Volltext)…" style="flex:1;min-width:180px;">
+                            <input type="text" id="jira-search-project" class="config-input" placeholder="Projekt-Key (optional)" style="width:170px;">
+                            <button class="btn-secondary" id="jira-search-btn" type="button">Suchen</button>
+                        </div>
+                        <div style="margin-top:8px;">
+                            <input type="text" id="jira-search-jql" class="config-input" placeholder="Erweitert: vollständige JQL (überschreibt die Felder oben)" style="width:100%;box-sizing:border-box;font-family:var(--font-mono);font-size:0.82rem;">
+                        </div>
+                        <div id="jira-results" style="margin-top:12px;display:flex;flex-direction:column;gap:6px;"></div>
+                        <div id="jira-issue-view" style="margin-top:12px;display:none;border:1px solid var(--border);border-radius:8px;padding:14px;background:var(--bg-secondary);">
+                            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px;">
+                                <strong id="jira-issue-title"></strong>
+                                <a id="jira-issue-link" href="#" target="_blank" rel="noopener" class="kb-hint" style="white-space:nowrap;">In Jira öffnen ↗</a>
+                            </div>
+                            <div id="jira-issue-meta" class="kb-hint" style="margin-bottom:8px;"></div>
+                            <pre id="jira-issue-text" style="white-space:pre-wrap;word-break:break-word;margin:0;font-family:var(--font-body);font-size:0.88rem;max-height:300px;overflow:auto;"></pre>
+                            <div id="jira-issue-comments"></div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- ═══ Tab: Telemetry ═══ -->
                 <div id="settings-tab-telemetry" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
@@ -2193,18 +2236,19 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/extractor.js?v=15"></script>
     <script src="/static/js/vnc.js?v=16"></script>
-    <script src="/static/js/skills.js?v=27"></script>
+    <script src="/static/js/skills.js?v=28"></script>
     <script src="/static/js/whatsapp.js?v=10"></script>
     <script src="/static/js/knowledge.js?v=43"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/confluence.js?v=5"></script>
+    <script src="/static/js/jira.js?v=1"></script>
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=3"></script>
     <script src="/static/js/branding.js?v=8"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/app.js?v=134"></script>
+    <script src="/static/js/app.js?v=135"></script>
 </body>
 
 </html>

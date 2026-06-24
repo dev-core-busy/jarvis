@@ -52,7 +52,7 @@ window.cronManager = new (class JarvisCronManager {
                     </div>
 
                     <!-- Formular -->
-                    <div id="cron-form-wrap" style="display:none;margin:10px 0;padding:14px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:8px;">
+                    <div id="cron-form-wrap" style="display:none;margin:10px 0;padding:14px 16px;background:rgba(var(--fg-rgb),0.03);border:1px solid var(--border-color);border-radius:8px;">
                         <h3 id="cron-form-title" style="margin:0 0 12px;font-size:.9rem;">${window.t('cron.form_title_new')}</h3>
 
                         <div class="kb-form-grid-2">
@@ -116,7 +116,7 @@ window.cronManager = new (class JarvisCronManager {
                     </div>
 
                     <!-- Watcher-Formular -->
-                    <div id="watcher-form-wrap" style="display:none;margin:10px 0;padding:14px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:8px;">
+                    <div id="watcher-form-wrap" style="display:none;margin:10px 0;padding:14px 16px;background:rgba(var(--fg-rgb),0.03);border:1px solid var(--border-color);border-radius:8px;">
                         <h3 id="watcher-form-title" style="margin:0 0 12px;font-size:.9rem;">${window.t('cron.form_title_new_watcher')}</h3>
 
                         <div class="kb-form-grid-2">

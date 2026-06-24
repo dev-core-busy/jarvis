@@ -62,6 +62,14 @@
             color: var(--text-secondary); cursor: pointer; }
         .sup-opts input { accent-color: var(--accent); width: 16px; height: 16px; }
 
+        .sup-filters { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px;
+            padding-top: 12px; border-top: 1px solid var(--border); }
+        .sup-filters label { display: flex; align-items: center; gap: 6px; font-size: 0.78rem;
+            color: var(--text-muted); }
+        .sup-filters select { background: rgba(var(--fg-rgb), .05); border: 1px solid var(--border);
+            color: var(--text-primary); border-radius: 8px; padding: 5px 8px; font-size: 0.82rem;
+            font-family: var(--font-body); cursor: pointer; }
+
         .sup-meta { color: var(--text-secondary); font-size: 0.84rem; margin: 18px 2px 12px; }
 
         .sup-ai-card {
@@ -160,7 +168,41 @@
             </div>
             <div class="sup-opts">
                 <label id="sup-opt-jira-wrap" class="hidden"><input type="checkbox" id="sup-opt-jira" checked> Jira Tickets</label>
+                <label id="sup-opt-conf-wrap" class="hidden"><input type="checkbox" id="sup-opt-conf" checked> Confluence</label>
                 <label><input type="checkbox" id="sup-opt-rag" checked> RAG einbeziehen</label>
+            </div>
+            <div class="sup-filters" id="sup-filters">
+                <label>Quelle
+                    <select id="sup-f-source">
+                        <option value="">Alle</option>
+                        <option value="WISSEN">Wissen</option>
+                        <option value="JIRA">Jira</option>
+                        <option value="CONFLUENCE">Confluence</option>
+                    </select>
+                </label>
+                <label>Relevanz
+                    <select id="sup-f-rel">
+                        <option value="0">Alle</option>
+                        <option value="50">≥ 50&nbsp;%</option>
+                        <option value="70">≥ 70&nbsp;%</option>
+                        <option value="90">≥ 90&nbsp;%</option>
+                    </select>
+                </label>
+                <label>Sortierung
+                    <select id="sup-f-sort">
+                        <option value="score">Relevanz</option>
+                        <option value="source">Quelle</option>
+                        <option value="title">Titel A–Z</option>
+                    </select>
+                </label>
+                <label>Anzahl
+                    <select id="sup-f-limit">
+                        <option value="0">Alle</option>
+                        <option value="5">Top 5</option>
+                        <option value="10">Top 10</option>
+                        <option value="20">Top 20</option>
+                    </select>
+                </label>
             </div>
         </div>
 
@@ -171,6 +213,6 @@
 
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=8"></script>
-<script src="/static/js/support.js?v=1"></script>
+<script src="/static/js/support.js?v=3"></script>
 </body>
 </html>

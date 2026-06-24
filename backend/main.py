@@ -3294,6 +3294,7 @@ async def support_status(user: str = Depends(require_auth)):
     return JSONResponse({
         "active": _skill_active("support_assistant"),
         "jira_active": _skill_active("jira"),
+        "confluence_active": _skill_active("confluence"),
         "has_prompt": bool((cfg.get("system_prompt") or "").strip()),
     })
 
@@ -3345,6 +3346,7 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
     query = (body.get("text") or body.get("query") or "").strip()
     use_rag = body.get("rag", True)
     use_jira = body.get("jira", True)
+    use_conf = body.get("confluence", True)
     if not query:
         return JSONResponse({"ok": False, "error": "Bitte eine Anfrage eingeben."}, status_code=400)
 
@@ -3382,10 +3384,11 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
             if c.configured:
                 jql = c.build_jql(query)
                 data = await asyncio.to_thread(c.search, jql, 10)
-                for it in data.get("issues", []):
+                for i, it in enumerate(data.get("issues", [])):
                     b = issue_brief(it, c.base)
                     overlap = len(qtokens & _support_tokens(b.get("summary") or "")) / (len(qtokens) or 1)
-                    pct = max(20, min(round(overlap * 100), 95))
+                    # Treffer sind relevanz-sortiert → Rang-Komponente, durch Titel-Overlap angehoben
+                    pct = max(20, min(round(max(overlap * 100, 85 - i * 8)), 96))
                     meta = " · ".join(x for x in [b.get("status"), b.get("type"),
                                                   b.get("assignee")] if x)
                     summary = (b.get("summary") or "")
@@ -3399,6 +3402,33 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
         except Exception as e:
             print("[Support] Jira-Suche Fehler: %s" % e, flush=True)
 
+    # ── Confluence-Seiten ───────────────────────────────────────────
+    if use_conf and _skill_active("confluence"):
+        from backend.confluence_client import ConfluenceError as _CErr, html_to_text as _cf_html
+        try:
+            cc = _confluence_client()
+            if cc.configured:
+                data = await asyncio.to_thread(cc.search, query, None, None, 6)
+                for i, r in enumerate(data.get("results", [])):
+                    title = r.get("title") or "Seite"
+                    summary = ""
+                    try:
+                        pg = await asyncio.to_thread(cc.get_page, r.get("id"), None, None)
+                        raw = (((pg.get("body") or {}).get("storage") or {}).get("value")) or ""
+                        summary = _cf_html(raw, 220)
+                    except Exception:
+                        pass
+                    overlap = len(qtokens & _support_tokens(title + " " + summary)) / (len(qtokens) or 1)
+                    # relevanz-sortiert → Rang-Komponente, durch Overlap angehoben
+                    pct = max(20, min(round(max(overlap * 100, 86 - i * 9)), 96))
+                    blocks.append({"source": "CONFLUENCE", "title": title,
+                                   "summary": _two_line(summary or title), "score": pct,
+                                   "link": cc.link_for(data, r)})
+        except _CErr as e:
+            print("[Support] Confluence-Suche fehlgeschlagen: %s" % e, flush=True)
+        except Exception as e:
+            print("[Support] Confluence-Suche Fehler: %s" % e, flush=True)
+
     blocks.sort(key=lambda b: b["score"], reverse=True)
 
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
@@ -3407,6 +3437,7 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
     return JSONResponse({
         "ok": True, "query": query,
         "jira_active": _skill_active("jira"),
+        "confluence_active": _skill_active("confluence"),
         "blocks": blocks,
         "ai_summary": ai_summary,
         "took_ms": int((_t.time() - t0) * 1000),

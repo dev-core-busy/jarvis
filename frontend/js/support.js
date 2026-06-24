@@ -29,13 +29,27 @@
         if (window.refreshBranding) try { window.refreshBranding(); } catch (e) {}
     }
 
+    // ── Checkbox-Vorbelegung pro Browser/Session merken ──
+    function getPref(key) {
+        var v = localStorage.getItem('jarvis_support_' + key);
+        return v === null ? true : v === '1';  // Default: an
+    }
+    function setPref(key, on) {
+        localStorage.setItem('jarvis_support_' + key, on ? '1' : '0');
+    }
+
     function loadStatus() {
         fetch('/api/support/status', { headers: authHeaders() })
             .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
             .then(function (d) {
                 if (!d) return;
-                if (d.jira_active) $('sup-opt-jira-wrap').classList.remove('hidden');
-                else $('sup-opt-jira-wrap').classList.add('hidden');
+                // Sichtbarkeit je nach aktivem Skill
+                $('sup-opt-jira-wrap').classList.toggle('hidden', !d.jira_active);
+                $('sup-opt-conf-wrap').classList.toggle('hidden', !d.confluence_active);
+                // Gespeicherte Vorbelegung anwenden (Default: an)
+                $('sup-opt-jira').checked = getPref('jira');
+                $('sup-opt-conf').checked = getPref('conf');
+                $('sup-opt-rag').checked = getPref('rag');
             })
             .catch(function () {});
     }
@@ -53,13 +67,24 @@
         $('sup-input').addEventListener('keydown', function (e) {
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); search(); }
         });
+        // Checkbox-Werte als Vorbelegung fuer die naechste Session merken
+        $('sup-opt-jira').addEventListener('change', function () { setPref('jira', this.checked); });
+        $('sup-opt-conf').addEventListener('change', function () { setPref('conf', this.checked); });
+        $('sup-opt-rag').addEventListener('change', function () { setPref('rag', this.checked); });
+        // Eingrenzungs-Pulldowns → Ergebnis live neu filtern (clientseitig)
+        ['sup-f-source', 'sup-f-rel', 'sup-f-sort', 'sup-f-limit'].forEach(function (id) {
+            var el = $(id);
+            if (el) el.addEventListener('change', renderBlocks);
+        });
     }
 
     function search() {
         var text = ($('sup-input').value || '').trim();
         if (!text) { $('sup-input').focus(); return; }
         var jiraWrap = $('sup-opt-jira-wrap');
+        var confWrap = $('sup-opt-conf-wrap');
         var useJira = !jiraWrap.classList.contains('hidden') && $('sup-opt-jira').checked;
+        var useConf = !confWrap.classList.contains('hidden') && $('sup-opt-conf').checked;
         var useRag = $('sup-opt-rag').checked;
 
         var btn = $('sup-search-btn'); btn.disabled = true;
@@ -72,7 +97,7 @@
         fetch('/api/support/query', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ text: text, jira: useJira, rag: useRag })
+            body: JSON.stringify({ text: text, jira: useJira, confluence: useConf, rag: useRag })
         })
             .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
             .then(function (d) {
@@ -92,22 +117,57 @@
             });
     }
 
+    var _lastData = null;
+
     function render(d) {
-        var blocks = d.blocks || [];
-        $('sup-meta').innerHTML = 'Ergebnis für <strong>"' + esc(d.query) + '"</strong> ('
-            + blocks.length + ' Treffer in ' + (d.took_ms || 0) + ' ms)';
+        _lastData = d;
         var html = '';
-        // KI-Zusammenfassung
         if (d.ai_summary) {
             html += '<div class="sup-ai-card"><div class="sup-ai-label">KI-Zusammenfassung</div>'
                 + '<div class="sup-ai-text">' + esc(d.ai_summary) + '</div></div>';
         }
-        if (!blocks.length) {
-            html += '<div class="sup-empty">Keine passenden Quellen gefunden.</div>';
-            $('sup-results').innerHTML = html;
+        html += '<div id="sup-blocks"></div>';
+        $('sup-results').innerHTML = html;
+        renderBlocks();
+    }
+
+    // Wendet die 4 Pulldown-Filter (Quelle, Relevanz, Sortierung, Anzahl) an.
+    function renderBlocks() {
+        if (!_lastData) return;
+        var all = (_lastData.blocks || []).slice();
+        var src = $('sup-f-source') ? $('sup-f-source').value : '';
+        var minRel = parseInt(($('sup-f-rel') ? $('sup-f-rel').value : '0'), 10) || 0;
+        var sort = $('sup-f-sort') ? $('sup-f-sort').value : 'score';
+        var limit = parseInt(($('sup-f-limit') ? $('sup-f-limit').value : '0'), 10) || 0;
+
+        var list = all.filter(function (b) {
+            if (src && b.source !== src) return false;
+            if (minRel && b.score < minRel) return false;
+            return true;
+        });
+        if (sort === 'source') list.sort(function (a, b) {
+            return a.source === b.source ? b.score - a.score : a.source.localeCompare(b.source);
+        });
+        else if (sort === 'title') list.sort(function (a, b) {
+            return String(a.title).localeCompare(String(b.title), 'de');
+        });
+        else list.sort(function (a, b) { return b.score - a.score; });
+        if (limit) list = list.slice(0, limit);
+
+        $('sup-meta').innerHTML = 'Ergebnis für <strong>"' + esc(_lastData.query) + '"</strong> ('
+            + list.length + ' von ' + all.length + ' Treffer'
+            + (_lastData.took_ms ? ' · ' + _lastData.took_ms + ' ms' : '') + ')';
+
+        var box = $('sup-blocks');
+        if (!box) return;
+        if (!list.length) {
+            box.innerHTML = '<div class="sup-empty">'
+                + (all.length ? 'Keine Treffer mit diesen Filtern.' : 'Keine passenden Quellen gefunden.')
+                + '</div>';
             return;
         }
-        blocks.forEach(function (b, i) {
+        var html = '';
+        list.forEach(function (b, i) {
             html += '<div class="sup-block">'
                 + '<div class="sup-block-head">'
                 + '<span class="sup-block-num">' + (i + 1) + '.</span>'
@@ -120,7 +180,7 @@
                     + '" target="_blank" rel="noopener">Öffnen ↗</a>' : '')
                 + '</div>';
         });
-        $('sup-results').innerHTML = html;
+        box.innerHTML = html;
     }
 
     // ── Login ──

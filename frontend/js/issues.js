@@ -77,40 +77,41 @@
         const s = document.createElement('style');
         s.id = 'jv-issues-css';
         s.textContent = `
-.jv-iss-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;
+.jv-iss-overlay{position:fixed;inset:0;background:rgba(var(--shadow-rgb),.6);z-index:99999;
   display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);}
-.jv-iss-modal{background:#1a1a24;color:#e4e4e7;border:1px solid rgba(155,89,182,.4);
+.jv-iss-modal{background:var(--bg-secondary);color:var(--text-primary);
+  border:1px solid rgba(var(--accent-rgb),.4);
   border-radius:12px;width:min(900px,95vw);max-height:90vh;display:flex;flex-direction:column;
-  box-shadow:0 20px 60px rgba(0,0,0,.6);font-family:system-ui,-apple-system,sans-serif;}
+  box-shadow:0 20px 60px rgba(var(--shadow-rgb),.6);font-family:system-ui,-apple-system,sans-serif;}
 .jv-iss-header{display:flex;align-items:center;justify-content:space-between;
-  padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.08);}
-.jv-iss-title{font-size:16px;font-weight:600;color:#fff;margin:0;}
-.jv-iss-close{background:none;border:none;color:#a1a1aa;font-size:22px;cursor:pointer;
+  padding:14px 18px;border-bottom:1px solid rgba(var(--fg-rgb),.08);}
+.jv-iss-title{font-size:16px;font-weight:600;color:var(--text-primary);margin:0;}
+.jv-iss-close{background:none;border:none;color:var(--text-secondary);font-size:22px;cursor:pointer;
   line-height:1;padding:0 4px;}
-.jv-iss-close:hover{color:#fff;}
+.jv-iss-close:hover{color:var(--text-primary);}
 .jv-iss-body{padding:14px 18px;overflow-y:auto;flex:1;min-height:0;}
-.jv-iss-footer{padding:12px 18px;border-top:1px solid rgba(255,255,255,.08);
+.jv-iss-footer{padding:12px 18px;border-top:1px solid rgba(var(--fg-rgb),.08);
   display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;}
 .jv-iss-btn{padding:7px 14px;border-radius:6px;font-size:13px;cursor:pointer;
-  border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#e4e4e7;
+  border:1px solid rgba(var(--fg-rgb),.15);background:rgba(var(--fg-rgb),.06);color:var(--text-primary);
   transition:background .15s,border-color .15s;font-family:inherit;}
-.jv-iss-btn:hover{background:rgba(255,255,255,.12);}
-.jv-iss-btn.primary{background:#6A0DAD;border-color:#6A0DAD;color:#fff;}
-.jv-iss-btn.primary:hover{background:#7c2dbd;}
+.jv-iss-btn:hover{background:rgba(var(--fg-rgb),.12);}
+.jv-iss-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+.jv-iss-btn.primary:hover{background:var(--accent-hover);}
 .jv-iss-btn.danger{background:#dc2626;border-color:#dc2626;color:#fff;}
 .jv-iss-btn.danger:hover{background:#ef4444;}
 .jv-iss-btn:disabled{opacity:.4;cursor:not-allowed;}
 .jv-iss-toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;}
-.jv-iss-toolbar select,.jv-iss-toolbar input{background:rgba(0,0,0,.3);
-  border:1px solid rgba(255,255,255,.12);border-radius:5px;color:#e4e4e7;
+.jv-iss-toolbar select,.jv-iss-toolbar input{background:rgba(var(--fg-rgb),.06);
+  border:1px solid rgba(var(--fg-rgb),.12);border-radius:5px;color:var(--text-primary);
   padding:5px 9px;font-size:13px;font-family:inherit;}
-.jv-iss-toolbar label{font-size:12px;color:#a1a1aa;display:flex;align-items:center;gap:6px;}
+.jv-iss-toolbar label{font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;}
 .jv-iss-list{display:flex;flex-direction:column;gap:6px;}
-.jv-iss-item{padding:10px 12px;border:1px solid rgba(255,255,255,.08);
-  border-radius:8px;background:rgba(255,255,255,.02);cursor:pointer;transition:background .15s;}
-.jv-iss-item:hover{background:rgba(155,89,182,.08);border-color:rgba(155,89,182,.3);}
+.jv-iss-item{padding:10px 12px;border:1px solid rgba(var(--fg-rgb),.08);
+  border-radius:8px;background:rgba(var(--fg-rgb),.02);cursor:pointer;transition:background .15s;}
+.jv-iss-item:hover{background:rgba(var(--accent-rgb),.08);border-color:rgba(var(--accent-rgb),.3);}
 .jv-iss-item-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.jv-iss-item-title{font-weight:600;color:#fff;font-size:14px;flex:1;min-width:0;
+.jv-iss-item-title{font-weight:600;color:var(--text-primary);font-size:14px;flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .jv-iss-badge{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600;
   text-transform:uppercase;letter-spacing:.04em;color:#fff;}
@@ -120,34 +121,34 @@
 .jv-iss-badge.prio-low{background:#6b7280;}
 .jv-iss-badge.prio-medium{background:#f59e0b;}
 .jv-iss-badge.prio-high{background:#dc2626;}
-.jv-iss-item-meta{font-size:11px;color:#71717a;margin-top:3px;display:flex;
+.jv-iss-item-meta{font-size:11px;color:var(--text-muted);margin-top:3px;display:flex;
   gap:10px;flex-wrap:wrap;}
-.jv-iss-item-author{color:#a1a1aa;}
-.jv-iss-empty{text-align:center;padding:40px 16px;color:#71717a;}
+.jv-iss-item-author{color:var(--text-secondary);}
+.jv-iss-empty{text-align:center;padding:40px 16px;color:var(--text-muted);}
 .jv-iss-form-row{margin-bottom:12px;}
-.jv-iss-form-row label{display:block;font-size:12px;color:#a1a1aa;
+.jv-iss-form-row label{display:block;font-size:12px;color:var(--text-secondary);
   margin-bottom:4px;font-weight:500;}
 .jv-iss-form-row input[type="text"],
 .jv-iss-form-row textarea,
-.jv-iss-form-row select{width:100%;background:rgba(0,0,0,.3);
-  border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#e4e4e7;
+.jv-iss-form-row select{width:100%;background:rgba(var(--fg-rgb),.06);
+  border:1px solid rgba(var(--fg-rgb),.12);border-radius:6px;color:var(--text-primary);
   padding:7px 10px;font-size:13px;font-family:inherit;box-sizing:border-box;}
 .jv-iss-form-row textarea{min-height:100px;resize:vertical;line-height:1.5;}
 .jv-iss-form-row input:focus,
 .jv-iss-form-row textarea:focus,
-.jv-iss-form-row select:focus{outline:none;border-color:#9B59B6;}
+.jv-iss-form-row select:focus{outline:none;border-color:var(--accent);}
 .jv-iss-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 .jv-iss-detail-section{margin-bottom:14px;}
-.jv-iss-detail-label{font-size:11px;color:#71717a;text-transform:uppercase;
+.jv-iss-detail-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;
   letter-spacing:.05em;margin-bottom:4px;}
-.jv-iss-detail-value{color:#e4e4e7;line-height:1.5;font-size:13px;white-space:pre-wrap;
+.jv-iss-detail-value{color:var(--text-primary);line-height:1.5;font-size:13px;white-space:pre-wrap;
   word-break:break-word;}
-.jv-iss-jarvis-comment{background:rgba(155,89,182,.08);border-left:3px solid #9B59B6;
+.jv-iss-jarvis-comment{background:rgba(var(--accent-rgb),.08);border-left:3px solid var(--accent);
   border-radius:0 6px 6px 0;padding:10px 14px;}
 .jv-iss-attach-list{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
 .jv-iss-attach-item{display:flex;align-items:center;gap:10px;padding:6px 10px;
-  background:rgba(255,255,255,.04);border-radius:6px;font-size:12px;}
-.jv-iss-attach-item a{color:#BB86FC;text-decoration:none;flex:1;
+  background:rgba(var(--fg-rgb),.04);border-radius:6px;font-size:12px;}
+.jv-iss-attach-item a{color:var(--accent-hover);text-decoration:none;flex:1;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .jv-iss-attach-item a:hover{text-decoration:underline;}
 .jv-iss-attach-thumb{max-width:120px;max-height:120px;border-radius:4px;cursor:pointer;}
@@ -253,7 +254,7 @@
                 </label>
                 <label><input type="checkbox" id="jv-iss-flt-mine"> nur meine</label>
                 <span style="flex:1"></span>
-                <span style="font-size:11px;color:#71717a;">${issues.length} Issue(s)</span>
+                <span style="font-size:11px;color:var(--text-muted);">${issues.length} Issue(s)</span>
             </div>
             <div class="jv-iss-list" id="jv-iss-list"></div>
         `;
@@ -354,7 +355,7 @@
                     <span class="jv-iss-badge prio-${_escape(issue.priority)}">${_prioLabel(issue.priority)}</span>
                     <span class="jv-iss-badge" style="background:${_statusColor(issue.status)}">${_statusLabel(issue.status)}</span>
                 </div>
-                <div class="jv-iss-detail-value" style="font-size:16px;font-weight:600;color:#fff;">${_escape(issue.title)}</div>
+                <div class="jv-iss-detail-value" style="font-size:16px;font-weight:600;color:var(--text-primary);">${_escape(issue.title)}</div>
                 <div class="jv-iss-item-meta" style="margin-top:6px;">
                     <span class="jv-iss-item-author" title="Melder">👤 Gemeldet von: ${_escape(issue.author || '—')}</span>
                     <span>Erstellt: ${_fmtDate(issue.created)}</span>
@@ -363,7 +364,7 @@
             </div>
             <div class="jv-iss-detail-section">
                 <div class="jv-iss-detail-label">Beschreibung</div>
-                <div class="jv-iss-detail-value">${_escape(issue.body) || '<em style="color:#71717a">(leer)</em>'}</div>
+                <div class="jv-iss-detail-value">${_escape(issue.body) || '<em style="color:var(--text-muted)">(leer)</em>'}</div>
             </div>
             ${issue.jarvis_comment ? `
             <div class="jv-iss-detail-section">
@@ -373,12 +374,12 @@
             <div class="jv-iss-detail-section">
                 <div class="jv-iss-detail-label">Anhaenge</div>
                 ${attHtml ? `<div class="jv-iss-attach-list">${attHtml}</div>` :
-                    '<div style="color:#71717a;font-size:12px;">(keine)</div>'}
+                    '<div style="color:var(--text-muted);font-size:12px;">(keine)</div>'}
                 ${canEdit ? `
                     <div style="margin-top:8px;">
                         <input type="file" id="jv-iss-att-input" multiple style="display:none;">
                         <button class="jv-iss-btn" id="jv-iss-att-btn">+ Anhang hinzufuegen</button>
-                        <span id="jv-iss-att-status" style="margin-left:8px;font-size:11px;color:#71717a;"></span>
+                        <span id="jv-iss-att-status" style="margin-left:8px;font-size:11px;color:var(--text-muted);"></span>
                     </div>` : ''}
             </div>
         `;
@@ -552,7 +553,7 @@
         const footer = document.getElementById('jv-iss-footer');
 
         body.innerHTML = `
-            <div style="margin-bottom:14px;color:#a1a1aa;font-size:12px;">
+            <div style="margin-bottom:14px;color:var(--text-secondary);font-size:12px;">
                 Hier kann nur Jarvis Status setzen und einen oeffentlichen Kommentar hinterlassen.
             </div>
             <div class="jv-iss-form-row">

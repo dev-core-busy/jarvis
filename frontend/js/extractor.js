@@ -85,7 +85,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                     </div>
                 </div>
 
-                <div style="background:rgba(255,255,255,0.04);border-radius:8px;padding:10px 14px;margin-top:4px;">
+                <div style="background:rgba(var(--fg-rgb),0.04);border-radius:8px;padding:10px 14px;margin-top:4px;">
                     <p class="kb-hint" style="margin:0;">
                         <strong>Hinweis:</strong> Nicht gespeicherte Extraktionen bleiben im Bereich <em>${window.t('ext.pending')}</em>.
                         Audio/Video-Transkription erfordert faster-whisper + ffmpeg auf dem Server.

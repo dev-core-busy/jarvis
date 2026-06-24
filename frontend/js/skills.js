@@ -32,6 +32,7 @@
         message:  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
         palette:  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".5"></circle><circle cx="17.5" cy="10.5" r=".5"></circle><circle cx="8.5" cy="7.5" r=".5"></circle><circle cx="6.5" cy="12.5" r=".5"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg>',
         ticket:   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>',
+        lifebuoy: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="4"></circle><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"></line><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"></line><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"></line><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"></line></svg>',
     };
 
     // Große Icons für das Info-Popup (28px)
@@ -48,6 +49,7 @@
         message:  '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
         palette:  '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="13.5" cy="6.5" r=".5"></circle><circle cx="17.5" cy="10.5" r=".5"></circle><circle cx="8.5" cy="7.5" r=".5"></circle><circle cx="6.5" cy="12.5" r=".5"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg>',
         ticket:   '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>',
+        lifebuoy: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="4"></circle><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"></line><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"></line><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"></line><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"></line></svg>',
     };
 
     const CATEGORY_LABELS = {
@@ -718,6 +720,7 @@
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
+                if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
                 if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
             } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
@@ -738,6 +741,7 @@
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
+                if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
                 if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
             } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
@@ -762,6 +766,7 @@
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
+                if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
                 if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
             } catch (e) { console.error('Toggle fehlgeschlagen:', e); }

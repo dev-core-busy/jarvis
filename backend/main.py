@@ -3256,6 +3256,163 @@ async def jira_issue_api(key: str = "", user: str = Depends(require_auth)):
         return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
 
 
+# ─── Support-Assistent (/support) ────────────────────────────────────
+
+def _skill_active(name: str) -> bool:
+    """True, wenn der Skill installiert UND aktiviert ist."""
+    try:
+        st = config.get_skill_states().get(name, {}) or {}
+        return bool(st.get("enabled"))
+    except Exception:
+        return False
+
+
+_SUPPORT_STOP = set("der die das und oder ist mit fuer für von im in den dem ein eine "
+                    "auf zu wie was wer wann wo bei aus the a an of to and or is".split())
+
+
+def _support_tokens(s: str) -> set:
+    import re
+    return {t for t in re.split(r"[^0-9a-zA-ZäöüÄÖÜß]+", (s or "").lower())
+            if len(t) > 2 and t not in _SUPPORT_STOP}
+
+
+@app.get("/support", response_class=HTMLResponse)
+async def support_page():
+    """Support-Oberflaeche ausliefern – nur wenn der Skill aktiv ist."""
+    if not _skill_active("support_assistant"):
+        return HTMLResponse("<h1>404 – Support-Assistent nicht aktiv</h1>", status_code=404)
+    f = FRONTEND_DIR / "support.html"
+    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/api/support/status")
+async def support_status(user: str = Depends(require_auth)):
+    """Status fuer die Support-Oberflaeche (Checkbox-Sichtbarkeit)."""
+    cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
+    return JSONResponse({
+        "active": _skill_active("support_assistant"),
+        "jira_active": _skill_active("jira"),
+        "has_prompt": bool((cfg.get("system_prompt") or "").strip()),
+    })
+
+
+def _two_line(text: str, limit: int = 180) -> str:
+    import re
+    t = re.sub(r"\s+", " ", (text or "")).strip()
+    return (t[:limit] + "…") if len(t) > limit else t
+
+
+async def _support_ai_summary(query: str, blocks: list, system_prompt: str) -> str:
+    """LLM-Kurzzusammenfassung der Top-Quellen (best effort). Stellt das
+    konfigurierte Prompt der Instruktion voran."""
+    if not blocks:
+        return ""
+    try:
+        from backend.llm import get_provider
+        from google.genai import types
+        base = ("Du bist ein Support-Assistent. Beantworte die Anfrage knapp (2-4 Saetze) "
+                "auf Basis der gelieferten Quellen. Antworte auf Deutsch und nenne keine "
+                "Quellen-IDs.")
+        sysp = ((system_prompt.strip() + "\n\n") if system_prompt.strip() else "") + base
+        src = "\n".join("- [%s] %s: %s" % (b["source"], b["title"], b["summary"])
+                        for b in blocks[:6])
+        user_text = "Anfrage:\n%s\n\nGefundene Quellen:\n%s" % (query, src)
+        provider = get_provider(
+            config.LLM_PROVIDER, config.current_api_key, config.current_api_url,
+            auth_method=config.current_auth_method,
+            session_key=config.current_session_key, prompt_tool_calling=False)
+        resp = await provider.generate_response(
+            model=config.current_model, system_prompt=sysp,
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_text)])],
+            tools=[])
+        return "".join(p.text for p in (resp.parts or []) if getattr(p, "text", None)).strip()
+    except Exception as e:
+        print("[Support] AI-Zusammenfassung fehlgeschlagen: %s" % e, flush=True)
+        return ""
+
+
+@app.post("/api/support/query")
+async def support_query(request: Request, user: str = Depends(require_auth)):
+    """Support-Anfrage: RAG- und/oder Jira-Treffer, nach Relevanz (%) sortiert,
+    plus optionale LLM-Kurzzusammenfassung (mit vorangestelltem Prompt)."""
+    import time as _t
+    t0 = _t.time()
+    if not _skill_active("support_assistant"):
+        return JSONResponse({"ok": False, "error": "Support-Assistent ist nicht aktiv."}, status_code=403)
+    body = await request.json()
+    query = (body.get("text") or body.get("query") or "").strip()
+    use_rag = body.get("rag", True)
+    use_jira = body.get("jira", True)
+    if not query:
+        return JSONResponse({"ok": False, "error": "Bitte eine Anfrage eingeben."}, status_code=400)
+
+    qtokens = _support_tokens(query)
+    blocks: list[dict] = []
+
+    # ── RAG (Wissensdatenbank) ──────────────────────────────────────
+    if use_rag:
+        try:
+            from backend.tools.knowledge import rag_search
+            import re as _re
+            results = await rag_search(query, 8)
+            rag_max = max((s for s, _, _ in results), default=1.0) or 1.0
+            for score, rel, chunk in results:
+                pct = round(score * 100) if rag_max <= 1.0 else round(score / rag_max * 100)
+                pct = max(1, min(int(pct), 100))
+                stem = rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+                title = _re.sub(r"^extract_[0-9a-f]+_", "", stem).replace("_", " ").strip()
+                if _re.fullmatch(r"[0-9a-f]{6,}", title or ""):
+                    # uninformativer Hash-Dateiname → erste sinnvolle Chunk-Zeile als Titel
+                    first = next((ln.strip(" #*->") for ln in (chunk or "").splitlines()
+                                  if len(ln.strip(" #*->")) > 3
+                                  and not ln.lstrip().startswith(('"', '{', '}', '[', ']'))), "")
+                    title = _two_line(first, 70) or title
+                blocks.append({"source": "WISSEN", "title": title or rel,
+                               "summary": _two_line(chunk), "score": pct, "link": ""})
+        except Exception as e:
+            print("[Support] RAG-Suche fehlgeschlagen: %s" % e, flush=True)
+
+    # ── Jira-Tickets ────────────────────────────────────────────────
+    if use_jira and _skill_active("jira"):
+        try:
+            from backend.jira_client import JiraError, issue_brief
+            c = _jira_client()
+            if c.configured:
+                jql = c.build_jql(query)
+                data = await asyncio.to_thread(c.search, jql, 10)
+                for it in data.get("issues", []):
+                    b = issue_brief(it, c.base)
+                    overlap = len(qtokens & _support_tokens(b.get("summary") or "")) / (len(qtokens) or 1)
+                    pct = max(20, min(round(overlap * 100), 95))
+                    meta = " · ".join(x for x in [b.get("status"), b.get("type"),
+                                                  b.get("assignee")] if x)
+                    summary = (b.get("summary") or "")
+                    if meta:
+                        summary += " — " + meta
+                    blocks.append({"source": "JIRA", "title": b.get("key") or "Ticket",
+                                   "summary": _two_line(summary), "score": pct,
+                                   "link": b.get("link") or ""})
+        except JiraError as e:
+            print("[Support] Jira-Suche fehlgeschlagen: %s" % e, flush=True)
+        except Exception as e:
+            print("[Support] Jira-Suche Fehler: %s" % e, flush=True)
+
+    blocks.sort(key=lambda b: b["score"], reverse=True)
+
+    cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
+    ai_summary = await _support_ai_summary(query, blocks, cfg.get("system_prompt") or "")
+
+    return JSONResponse({
+        "ok": True, "query": query,
+        "jira_active": _skill_active("jira"),
+        "blocks": blocks,
+        "ai_summary": ai_summary,
+        "took_ms": int((_t.time() - t0) * 1000),
+    })
+
+
 # ─── Agent Task API (extern, z.B. für Vision-Aktionen) ───────────────
 
 def _verify_agent_api_key(request: Request) -> bool:

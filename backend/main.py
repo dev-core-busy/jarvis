@@ -3434,6 +3434,8 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
     ai_summary = await _support_ai_summary(query, blocks, cfg.get("system_prompt") or "")
 
+    _record_support_history(user, query, len(blocks))
+
     return JSONResponse({
         "ok": True, "query": query,
         "jira_active": _skill_active("jira"),
@@ -3442,6 +3444,73 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
         "ai_summary": ai_summary,
         "took_ms": int((_t.time() - t0) * 1000),
     })
+
+
+# ─── Support-Verlauf (benutzerabhaengig) ─────────────────────────────
+
+_SUPPORT_HIST_FILE = Path(__file__).parent.parent / "data" / "support_history.json"
+_support_hist_lock = None
+_SUPPORT_HIST_MAX = 50
+
+
+def _get_hist_lock():
+    global _support_hist_lock
+    if _support_hist_lock is None:
+        import threading as _thr
+        _support_hist_lock = _thr.Lock()
+    return _support_hist_lock
+
+
+def _load_support_history() -> dict:
+    try:
+        if _SUPPORT_HIST_FILE.exists():
+            return json.loads(_SUPPORT_HIST_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _record_support_history(user: str, query: str, total: int):
+    """Fuegt eine Anfrage dem benutzerabhaengigen Verlauf hinzu (Deduplizierung,
+    Cap auf _SUPPORT_HIST_MAX)."""
+    query = (query or "").strip()
+    if not query:
+        return
+    with _get_hist_lock():
+        data = _load_support_history()
+        entries = data.get(user, [])
+        # gleiche Anfrage entfernen (kommt neu nach oben)
+        entries = [e for e in entries if (e.get("query") or "").strip().lower() != query.lower()]
+        entries.insert(0, {"query": query, "ts": int(time.time()), "total": total})
+        data[user] = entries[:_SUPPORT_HIST_MAX]
+        try:
+            _SUPPORT_HIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _SUPPORT_HIST_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                          encoding="utf-8")
+        except Exception as e:
+            print("[Support] Verlauf speichern fehlgeschlagen: %s" % e, flush=True)
+
+
+@app.get("/api/support/history")
+async def support_history_get(user: str = Depends(require_auth)):
+    """Liefert den Such-Verlauf des angemeldeten Benutzers (neueste zuerst)."""
+    data = _load_support_history()
+    return JSONResponse({"ok": True, "entries": data.get(user, [])})
+
+
+@app.delete("/api/support/history")
+async def support_history_clear(user: str = Depends(require_auth)):
+    """Loescht den Such-Verlauf des angemeldeten Benutzers."""
+    with _get_hist_lock():
+        data = _load_support_history()
+        if user in data:
+            data.pop(user, None)
+            try:
+                _SUPPORT_HIST_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                              encoding="utf-8")
+            except Exception:
+                pass
+    return JSONResponse({"ok": True})
 
 
 # ─── Agent Task API (extern, z.B. für Vision-Aktionen) ───────────────

@@ -36,6 +36,33 @@
         .btn-theme svg { width: 18px; height: 18px; }
         .hidden { display: none !important; }
 
+        .sup-hist-wrap { position: relative; }
+        .sup-hist-btn {
+            background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            height: 34px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+            font-size: 0.85rem; display: flex; align-items: center; gap: 6px; font-family: var(--font-body);
+        }
+        .sup-hist-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .sup-hist-panel {
+            position: absolute; right: 0; top: calc(100% + 6px); width: 320px; max-width: 80vw;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-lg); z-index: 50;
+            max-height: 60vh; overflow-y: auto;
+        }
+        .sup-hist-head { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 14px; border-bottom: 1px solid var(--border); position: sticky; top: 0;
+            background: var(--bg-secondary); }
+        .sup-hist-head strong { font-size: 0.85rem; }
+        .sup-hist-clear { background: none; border: none; color: var(--text-muted); cursor: pointer;
+            font-size: 0.78rem; }
+        .sup-hist-clear:hover { color: var(--danger); }
+        .sup-hist-item { padding: 9px 14px; cursor: pointer; border-bottom: 1px solid rgba(var(--fg-rgb), .05); }
+        .sup-hist-item:hover { background: rgba(var(--accent-rgb), .08); }
+        .sup-hist-q { font-size: 0.86rem; color: var(--text-primary);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sup-hist-meta { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+        .sup-hist-empty { padding: 22px 14px; text-align: center; color: var(--text-muted); font-size: 0.84rem; }
+
         .sup-wrap { max-width: 760px; margin: 0 auto; padding: 28px 20px 60px; }
 
         .sup-search-card {
@@ -154,6 +181,16 @@
         <div class="sup-logo logo-core">J</div>
         <div class="sup-title brand-app-name">Support Assistent</div>
         <div class="sup-spacer"></div>
+        <div class="sup-hist-wrap">
+            <button class="sup-hist-btn" id="sup-hist-btn" title="Suchverlauf">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+                Verlauf
+            </button>
+            <div class="sup-hist-panel hidden" id="sup-hist-panel">
+                <div class="sup-hist-head"><strong>Verlauf</strong><button class="sup-hist-clear" id="sup-hist-clear" type="button">Leeren</button></div>
+                <div id="sup-hist-list"></div>
+            </div>
+        </div>
         <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten">
             <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             <svg class="theme-icon-sun hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -213,6 +250,6 @@
 
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=8"></script>
-<script src="/static/js/support.js?v=3"></script>
+<script src="/static/js/support.js?v=4"></script>
 </body>
 </html>

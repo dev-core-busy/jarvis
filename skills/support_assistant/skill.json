@@ -1,0 +1,32 @@
+{
+    "name": "Support Assistent",
+    "description": "Eigene Support-Oberflaeche (/support) mit RAG- und Jira-Ticket-Suche. Ergebnisse werden nach Relevanz gewichtet; ein konfigurierbares Prompt wird LLM-Anfragen vorangestellt.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": [],
+    "category": "wissen",
+    "icon": "lifebuoy",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "system_prompt": {
+            "type": "string",
+            "label": "Vorangestelltes Prompt (LLM-Instruktion)",
+            "description": "Mehrzeiliges Prompt, das LLM-Anfragen des Support-Assistenten als Instruktion vorangestellt wird.",
+            "required": false
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "Aktiviert die Support-Oberflaeche unter /support (analog /chat). Dort koennen mehrzeilige Anfragen gestellt werden, die wahlweise die Wissensdatenbank (RAG) und/oder Jira-Tickets durchsuchen. Treffer werden nach 'Zutreffend in %' gewichtet, absteigend sortiert und als Bloecke (Ueberschrift + Kurzfassung) angezeigt. Ein im Konfigurationsreiter hinterlegtes Prompt wird LLM-Anfragen vorangestellt.",
+        "tools": [],
+        "use_cases": [
+            "Support-Oberflaeche unter /support oeffnen",
+            "Anfrage mit RAG und Jira-Tickets beantworten"
+        ],
+        "notes": "Die Jira-Checkbox erscheint nur, wenn der Jira-Skill aktiv ist. Das vorangestellte Prompt wird im Konfigurationsreiter gepflegt."
+    }
+}

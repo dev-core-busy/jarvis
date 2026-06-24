@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Support Assistent</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=4">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        .sup-topbar {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 20px; border-bottom: 1px solid var(--border);
+            background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 10;
+        }
+        .sup-logo {
+            width: 34px; height: 34px; border-radius: 50%;
+            background: var(--gradient); display: flex; align-items: center;
+            justify-content: center; font-weight: 700; color: #fff; flex-shrink: 0;
+            overflow: hidden;
+        }
+        .sup-title { font-size: 1.05rem; font-weight: 600; }
+        .sup-spacer { flex: 1; }
+        .btn-theme {
+            background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            width: 34px; height: 34px; border-radius: 8px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .btn-theme svg { width: 18px; height: 18px; }
+        .hidden { display: none !important; }
+
+        .sup-wrap { max-width: 760px; margin: 0 auto; padding: 28px 20px 60px; }
+
+        .sup-search-card {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-md);
+        }
+        .sup-search-row { display: flex; gap: 10px; align-items: stretch; }
+        #sup-input {
+            flex: 1; resize: vertical; min-height: 46px; max-height: 220px;
+            background: rgba(var(--fg-rgb), .05); border: 1px solid var(--border);
+            border-radius: var(--radius-md); color: var(--text-primary);
+            padding: 12px 14px; font-size: 0.95rem; font-family: var(--font-body);
+            line-height: 1.4; outline: none;
+        }
+        #sup-input:focus { border-color: var(--accent); }
+        .sup-btn {
+            background: var(--gradient); color: #fff; border: none; cursor: pointer;
+            border-radius: var(--radius-md); padding: 0 22px; font-size: 0.95rem;
+            font-weight: 600; white-space: nowrap;
+        }
+        .sup-btn:disabled { opacity: .55; cursor: default; }
+        .sup-opts { display: flex; gap: 18px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+        .sup-opts label { display: flex; align-items: center; gap: 7px; font-size: 0.88rem;
+            color: var(--text-secondary); cursor: pointer; }
+        .sup-opts input { accent-color: var(--accent); width: 16px; height: 16px; }
+
+        .sup-meta { color: var(--text-secondary); font-size: 0.84rem; margin: 18px 2px 12px; }
+
+        .sup-ai-card {
+            background: var(--bg-secondary); border: 1px solid rgba(var(--accent-rgb), .35);
+            border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 16px;
+            position: relative; overflow: hidden;
+        }
+        .sup-ai-card::before {
+            content: ''; position: absolute; left: 0; top: 0; height: 3px; width: 100%;
+            background: var(--gradient);
+        }
+        .sup-ai-label { font-size: 0.72rem; letter-spacing: .12em; font-weight: 700;
+            color: var(--accent-hover); text-transform: uppercase; margin-bottom: 8px; }
+        .sup-ai-text { font-size: 0.92rem; line-height: 1.55; white-space: pre-wrap; }
+
+        .sup-block {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 12px;
+        }
+        .sup-block-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .sup-block-num { color: var(--text-muted); font-weight: 600; }
+        .sup-block-title { font-weight: 600; font-size: 1rem; flex: 1; min-width: 0; }
+        .sup-badge-src {
+            font-size: 0.66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+            padding: 2px 8px; border-radius: 6px; background: rgba(var(--accent-rgb), .15);
+            color: var(--accent-hover);
+        }
+        .sup-badge-score {
+            font-size: 0.78rem; font-weight: 700; color: #fff; background: var(--accent);
+            padding: 3px 9px; border-radius: 6px; white-space: nowrap;
+        }
+        .sup-block-body {
+            margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-md);
+            background: rgba(var(--fg-rgb), .04); font-size: 0.88rem; line-height: 1.5;
+            color: var(--text-secondary);
+        }
+        .sup-block-link { font-size: 0.8rem; margin-top: 8px; display: inline-block;
+            color: var(--accent-hover); text-decoration: none; }
+        .sup-block-link:hover { text-decoration: underline; }
+        .sup-empty { text-align: center; color: var(--text-muted); padding: 40px 0; }
+        .sup-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(var(--fg-rgb),.2);
+            border-top-color: var(--accent); border-radius: 50%; animation: supspin .7s linear infinite;
+            vertical-align: -2px; margin-right: 6px; }
+        @keyframes supspin { to { transform: rotate(360deg); } }
+
+        /* Login */
+        .sup-login { position: fixed; inset: 0; display: flex; align-items: center;
+            justify-content: center; background: var(--bg-primary); z-index: 100; }
+        .sup-login-card { background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 30px; width: min(360px, 90vw);
+            box-shadow: var(--shadow-lg); text-align: center; }
+        .sup-login-avatar { width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 14px;
+            background: var(--gradient); display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem; font-weight: 700; color: #fff; }
+        .sup-login-card h1 { font-size: 1.2rem; margin-bottom: 18px; }
+        .sup-login-card input { width: 100%; margin-bottom: 10px; padding: 11px 13px;
+            border-radius: var(--radius-md); border: 1px solid var(--border);
+            background: rgba(var(--fg-rgb), .05); color: var(--text-primary); font-size: 0.92rem; }
+        .sup-login-err { color: var(--danger); font-size: 0.82rem; min-height: 18px; }
+    </style>
+</head>
+<body>
+<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+
+<!-- Login -->
+<div id="sup-login" class="sup-login hidden">
+    <div class="sup-login-card">
+        <div class="sup-login-avatar logo-core">J</div>
+        <h1 class="brand-app-name">Support Assistent</h1>
+        <form id="sup-login-form">
+            <input type="text" id="sup-login-user" placeholder="Benutzername" autocomplete="username" required>
+            <input type="password" id="sup-login-pass" placeholder="Passwort" autocomplete="current-password" required>
+            <button class="sup-btn" type="submit" style="width:100%;padding:11px;">Anmelden</button>
+            <div class="sup-login-err" id="sup-login-err"></div>
+        </form>
+    </div>
+</div>
+
+<!-- App -->
+<div id="sup-app" class="hidden">
+    <div class="sup-topbar">
+        <div class="sup-logo logo-core">J</div>
+        <div class="sup-title brand-app-name">Support Assistent</div>
+        <div class="sup-spacer"></div>
+        <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten">
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <svg class="theme-icon-sun hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+    </div>
+
+    <div class="sup-wrap">
+        <div class="sup-search-card">
+            <div class="sup-search-row">
+                <textarea id="sup-input" placeholder="Anfrage eingeben … (mehrzeilig möglich)"></textarea>
+                <button class="sup-btn" id="sup-search-btn" type="button">Suchen</button>
+            </div>
+            <div class="sup-opts">
+                <label id="sup-opt-jira-wrap" class="hidden"><input type="checkbox" id="sup-opt-jira" checked> Jira Tickets</label>
+                <label><input type="checkbox" id="sup-opt-rag" checked> RAG einbeziehen</label>
+            </div>
+        </div>
+
+        <div id="sup-meta" class="sup-meta hidden"></div>
+        <div id="sup-results"></div>
+    </div>
+</div>
+
+<script src="/static/js/theme.js?v=2"></script>
+<script src="/static/js/branding.js?v=8"></script>
+<script src="/static/js/support.js?v=1"></script>
+</body>
+</html>

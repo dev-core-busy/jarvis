@@ -610,6 +610,41 @@ def _search(query: str, cache: dict, max_results: int) -> list[tuple[float, str,
     return scored[:max_results]
 
 
+async def rag_search(query: str, max_results: int = 8) -> list[tuple[float, str, str]]:
+    """Strukturierte RAG-Suche fuer externe Aufrufer (z.B. Support-Assistent).
+
+    Liefert eine Liste von (score, relativer_pfad, chunk). Nutzt denselben
+    Vektor-/TF-IDF-Dispatch wie das knowledge_search-Tool, gibt aber Rohdaten
+    statt formatiertem Text zurueck.
+    """
+    query = (query or "").strip()
+    if not query:
+        return []
+    folders = _get_folders()
+    max_bytes = _get_max_bytes()
+    cfg = _get_skill_config()
+    search_mode_cfg = cfg.get("search_mode", "auto")
+
+    vs = _get_vector_store()
+    vector_index_ready = vs is not None and vs.chunk_count() > 0
+    need_tfidf_cache = search_mode_cfg == "tfidf" or (
+        search_mode_cfg == "auto" and not vector_index_ready)
+
+    cache = await asyncio.to_thread(_rebuild_cache, folders, max_bytes, False) \
+        if need_tfidf_cache else _load_cache()
+
+    results = None
+    if search_mode_cfg in ("auto", "vector"):
+        has_vector = await asyncio.to_thread(_rebuild_vector_index, folders, max_bytes)
+        if has_vector:
+            results = await asyncio.to_thread(_vector_search, query, max_results)
+        elif search_mode_cfg == "auto":
+            results = _search(query, cache, max_results)
+    elif search_mode_cfg == "tfidf":
+        results = _search(query, cache, max_results)
+    return results or []
+
+
 def _get_static_stats() -> dict:
     """Format-Support + ChromaDB-Client – wird einmalig gecacht (ändert sich nicht)."""
     global _stats_cache

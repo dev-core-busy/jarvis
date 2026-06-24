@@ -562,6 +562,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="branding" id="settings-tab-btn-branding" style="display:none;">Branding</button>
                 <button class="settings-tab-btn" data-settings-tab="confluence" id="settings-tab-btn-confluence" style="display:none;">Confluence</button>
                 <button class="settings-tab-btn" data-settings-tab="jira" id="settings-tab-btn-jira" style="display:none;">Jira</button>
+                <button class="settings-tab-btn" data-settings-tab="support" id="settings-tab-btn-support" style="display:none;">Support</button>
                 <button class="settings-tab-btn" data-settings-tab="telemetry" data-i18n="settings.tab.telemetry">Telemetry</button>
                 <button class="settings-tab-btn" data-settings-tab="security" data-i18n="settings.tab.security">Sicherheit</button>
                 <button class="settings-tab-btn" data-settings-tab="cron" data-i18n="settings.tab.cron">Tasks</button>
@@ -1457,6 +1458,22 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     </div>
                 </div>
 
+                <!-- ═══ Tab: Support-Assistent ═══ -->
+                <div id="settings-tab-support" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Konfiguration des Support-Assistenten. Die Oberfläche ist erreichbar unter <a href="/support" target="_blank" rel="noopener" style="color:var(--accent-hover);">/support</a> (nur bei aktivem Skill). Dort können Anfragen gestellt werden, die wahlweise die Wissensdatenbank (RAG) und Jira-Tickets durchsuchen.</p>
+
+                        <h4 style="margin:16px 0 8px;">Vorangestelltes Prompt (LLM-Instruktion)</h4>
+                        <p class="kb-hint">Dieser Text wird LLM-Anfragen des Support-Assistenten (z.&nbsp;B. der KI-Zusammenfassung) als Instruktion vorangestellt.</p>
+                        <textarea id="support-prompt" class="config-input" rows="8" placeholder="z.B. Du bist der Support-Assistent der Firma X. Antworte sachlich, kurz und auf Deutsch …" style="width:100%;box-sizing:border-box;font-family:var(--font-body);line-height:1.5;resize:vertical;"></textarea>
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;">
+                            <button class="btn-primary" id="support-save" type="button" style="flex:0 0 auto;">Speichern</button>
+                            <a class="btn-secondary" href="/support" target="_blank" rel="noopener" style="flex:0 0 auto;text-decoration:none;">Support-Oberfläche öffnen ↗</a>
+                            <span id="support-status" style="font-size:0.9em;"></span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- ═══ Tab: Telemetry ═══ -->
                 <div id="settings-tab-telemetry" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
@@ -2236,19 +2253,20 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/extractor.js?v=15"></script>
     <script src="/static/js/vnc.js?v=16"></script>
-    <script src="/static/js/skills.js?v=28"></script>
+    <script src="/static/js/skills.js?v=29"></script>
     <script src="/static/js/whatsapp.js?v=10"></script>
     <script src="/static/js/knowledge.js?v=43"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/confluence.js?v=5"></script>
     <script src="/static/js/jira.js?v=1"></script>
+    <script src="/static/js/support_admin.js?v=1"></script>
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=3"></script>
     <script src="/static/js/branding.js?v=8"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/app.js?v=135"></script>
+    <script src="/static/js/app.js?v=136"></script>
 </body>
 
 </html>

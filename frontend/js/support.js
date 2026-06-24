@@ -76,6 +76,60 @@
             var el = $(id);
             if (el) el.addEventListener('change', renderBlocks);
         });
+        // Verlauf (benutzerabhaengig)
+        $('sup-hist-btn').addEventListener('click', function (e) {
+            e.stopPropagation();
+            var panel = $('sup-hist-panel');
+            if (panel.classList.contains('hidden')) { loadHistory(); panel.classList.remove('hidden'); }
+            else panel.classList.add('hidden');
+        });
+        $('sup-hist-clear').addEventListener('click', clearHistory);
+        document.addEventListener('click', function (e) {
+            var w = document.querySelector('.sup-hist-wrap');
+            if (w && !w.contains(e.target)) $('sup-hist-panel').classList.add('hidden');
+        });
+    }
+
+    function relTime(ts) {
+        var diff = Math.floor(Date.now() / 1000) - (ts || 0);
+        if (diff < 60) return 'gerade eben';
+        if (diff < 3600) return 'vor ' + Math.floor(diff / 60) + ' Min';
+        if (diff < 86400) return 'vor ' + Math.floor(diff / 3600) + ' Std';
+        if (diff < 604800) return 'vor ' + Math.floor(diff / 86400) + ' Tg';
+        try { return new Date(ts * 1000).toLocaleDateString(); } catch (e) { return ''; }
+    }
+
+    function loadHistory() {
+        var list = $('sup-hist-list');
+        list.innerHTML = '<div class="sup-hist-empty"><span class="sup-spinner"></span></div>';
+        fetch('/api/support/history', { headers: authHeaders() })
+            .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
+            .then(function (d) {
+                if (!d) return;
+                var entries = (d && d.entries) || [];
+                if (!entries.length) { list.innerHTML = '<div class="sup-hist-empty">Noch keine Anfragen.</div>'; return; }
+                list.innerHTML = '';
+                entries.forEach(function (e) {
+                    var item = document.createElement('div');
+                    item.className = 'sup-hist-item';
+                    item.innerHTML = '<div class="sup-hist-q">' + esc(e.query) + '</div>'
+                        + '<div class="sup-hist-meta">' + relTime(e.ts)
+                        + (typeof e.total === 'number' ? ' · ' + e.total + ' Treffer' : '') + '</div>';
+                    item.addEventListener('click', function () {
+                        $('sup-hist-panel').classList.add('hidden');
+                        $('sup-input').value = e.query;
+                        search();
+                    });
+                    list.appendChild(item);
+                });
+            })
+            .catch(function () { list.innerHTML = '<div class="sup-hist-empty">Fehler beim Laden.</div>'; });
+    }
+
+    function clearHistory() {
+        fetch('/api/support/history', { method: 'DELETE', headers: authHeaders() })
+            .then(function () { loadHistory(); })
+            .catch(function () {});
     }
 
     function search() {

@@ -118,7 +118,9 @@
         }
         .sup-block-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .sup-block-num { color: var(--text-muted); font-weight: 600; }
-        .sup-block-title { font-weight: 600; font-size: 1rem; flex: 1; min-width: 0; }
+        .sup-block-title { font-weight: 600; font-size: 1rem; flex: 1; min-width: 0;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+            overflow: hidden; line-height: 1.3; word-break: break-word; }
         .sup-badge-src {
             font-size: 0.66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
             padding: 2px 8px; border-radius: 6px; background: rgba(var(--accent-rgb), .15);
@@ -132,11 +134,29 @@
             margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-md);
             background: rgba(var(--fg-rgb), .04); font-size: 0.88rem; line-height: 1.5;
             color: var(--text-secondary);
+            display: -webkit-box; -webkit-line-clamp: var(--sup-rl, 2);
+            -webkit-box-orient: vertical; overflow: hidden;
         }
+        .sup-block-src { margin-top: 8px; font-size: 0.8rem; color: var(--text-muted); }
+        .sup-block-src a { color: var(--accent-hover); text-decoration: none; word-break: break-all; }
+        .sup-block-src a:hover { text-decoration: underline; }
         .sup-block-link { font-size: 0.8rem; margin-top: 8px; display: inline-block;
             color: var(--accent-hover); text-decoration: none; }
         .sup-block-link:hover { text-decoration: underline; }
         .sup-empty { text-align: center; color: var(--text-muted); padding: 40px 0; }
+
+        /* Drei Spalten: Jira | Confluence | RAG */
+        .sup-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px; align-items: start; }
+        .sup-col { min-width: 0; }
+        .sup-col-head { font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .06em; color: var(--accent-hover); padding: 0 2px 8px;
+            border-bottom: 2px solid rgba(var(--accent-rgb), .3); margin-bottom: 12px;
+            display: flex; align-items: center; gap: 8px; }
+        .sup-col-count { background: rgba(var(--accent-rgb), .15); color: var(--accent-hover);
+            border-radius: 10px; padding: 1px 8px; font-size: 0.72rem; font-weight: 700; }
+        .sup-col .sup-block { padding: 12px 13px; }
+        .sup-col .sup-block-title { font-size: 0.9rem; }
         .sup-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(var(--fg-rgb),.2);
             border-top-color: var(--accent); border-radius: 50%; animation: supspin .7s linear infinite;
             vertical-align: -2px; margin-right: 6px; }
@@ -207,6 +227,7 @@
                 <label id="sup-opt-jira-wrap" class="hidden"><input type="checkbox" id="sup-opt-jira" checked> Jira Tickets</label>
                 <label id="sup-opt-conf-wrap" class="hidden"><input type="checkbox" id="sup-opt-conf" checked> Confluence</label>
                 <label><input type="checkbox" id="sup-opt-rag" checked> RAG einbeziehen</label>
+                <label><input type="checkbox" id="sup-opt-ai" checked> KI-Zusammenfassung</label>
             </div>
             <div class="sup-filters" id="sup-filters">
                 <label>Quelle
@@ -250,6 +271,6 @@
 
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=8"></script>
-<script src="/static/js/support.js?v=4"></script>
+<script src="/static/js/support.js?v=7"></script>
 </body>
 </html>

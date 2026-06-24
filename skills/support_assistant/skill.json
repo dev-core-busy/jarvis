@@ -15,6 +15,20 @@
             "label": "Vorangestelltes Prompt (LLM-Instruktion)",
             "description": "Mehrzeiliges Prompt, das LLM-Anfragen des Support-Assistenten als Instruktion vorangestellt wird.",
             "required": false
+        },
+        "summary_lines": {
+            "type": "number",
+            "label": "Länge der KI-Zusammenfassung (Zeilen)",
+            "description": "Maximale Länge der KI-Zusammenfassung in Sätzen/Zeilen (Standard 5).",
+            "default": 5,
+            "required": false
+        },
+        "result_lines": {
+            "type": "number",
+            "label": "Antwortzeilen pro Treffer",
+            "description": "Auf wie viele Zeilen die Kurzfassung je Ergebnisblock begrenzt wird (Standard 2).",
+            "default": 2,
+            "required": false
         }
     },
     "knowledge_docs": [],

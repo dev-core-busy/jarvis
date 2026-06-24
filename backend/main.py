@@ -3305,17 +3305,95 @@ def _two_line(text: str, limit: int = 180) -> str:
     return (t[:limit] + "…") if len(t) > limit else t
 
 
-async def _support_ai_summary(query: str, blocks: list, system_prompt: str) -> str:
+def _first_url(text: str) -> str:
+    import re
+    m = re.search(r"https?://[^\s)\]}>\"']+", text or "")
+    return m.group(0) if m else ""
+
+
+_RAG_TITLE_KEYS = ["topic", "title", "titel", "name", "subject", "betreff",
+                   "frage", "question", "summary", "category", "kategorie"]
+_RAG_BODY_KEYS = ["content_text", "content", "text", "antwort", "answer", "body",
+                  "description", "beschreibung", "inhalt", "value"]
+
+
+def _support_readable(stem: str, chunk: str) -> tuple[str, str]:
+    """Macht einen Wissens-Chunk lesbar: liefert (Titel, Zusammenfassung).
+
+    JSON-Inhalte (z.B. faq.json, Konversations-Logs) werden geparst und sinnvolle
+    Felder extrahiert, statt rohes JSON anzuzeigen. Hash-/leere Titel werden durch
+    ein passendes Inhaltsfeld ersetzt.
+    """
+    import json as _json
+    import re as _re
+    text = chunk or ""
+    title = _re.sub(r"^extract_[0-9a-f]+_", "", stem or "").replace("_", " ").strip()
+    is_weak = (not title) or len(title) < 4 or bool(_re.fullmatch(r"[0-9a-f]{6,}", title))
+
+    # JSON erkennen (ganzer Chunk oder eingebettetes Objekt)
+    obj = None
+    s = text.strip()
+    for cand in (s, (_re.search(r"\{.*\}", s, _re.S).group(0) if _re.search(r"\{.*\}", s, _re.S) else None)):
+        if not cand:
+            continue
+        try:
+            d = _json.loads(cand)
+        except Exception:
+            continue
+        if isinstance(d, list) and d:
+            d = next((x for x in d if isinstance(x, dict)), None)
+        if isinstance(d, dict):
+            obj = d
+            break
+
+    def _pick(d, keys):
+        low = {k.lower(): v for k, v in d.items()}
+        for k in keys:
+            v = low.get(k)
+            if isinstance(v, (str, int, float)) and str(v).strip():
+                return str(v).strip()
+        return ""
+
+    summary = text
+    if obj is not None:
+        t = _pick(obj, _RAG_TITLE_KEYS)
+        body = _pick(obj, _RAG_BODY_KEYS)
+        if t and is_weak:
+            title = t
+        if body:
+            summary = body
+        elif is_weak:
+            # kein bekanntes Textfeld → erstes laengeres String-Feld als Inhalt
+            for v in obj.values():
+                if isinstance(v, str) and len(v.strip()) > 20:
+                    summary = v.strip()
+                    break
+    elif is_weak:
+        # Klartext: erste sinnvolle (nicht JSON-artige) Zeile als Titel
+        first = next((ln.strip(" #*->") for ln in text.splitlines()
+                      if len(ln.strip(" #*->")) > 3
+                      and not ln.lstrip().startswith(('"', '{', '}', '[', ']'))), "")
+        if first:
+            title = first
+
+    return (_two_line(title, 90) or (stem or "Dokument")), _two_line(summary, 600)
+
+
+async def _support_ai_summary(query: str, blocks: list, system_prompt: str, lines: int = 5) -> str:
     """LLM-Kurzzusammenfassung der Top-Quellen (best effort). Stellt das
-    konfigurierte Prompt der Instruktion voran."""
+    konfigurierte Prompt der Instruktion voran. ``lines`` begrenzt die Laenge."""
     if not blocks:
         return ""
     try:
+        lines = max(1, min(int(lines or 5), 20))
+    except (TypeError, ValueError):
+        lines = 5
+    try:
         from backend.llm import get_provider
         from google.genai import types
-        base = ("Du bist ein Support-Assistent. Beantworte die Anfrage knapp (2-4 Saetze) "
-                "auf Basis der gelieferten Quellen. Antworte auf Deutsch und nenne keine "
-                "Quellen-IDs.")
+        base = ("Du bist ein Support-Assistent. Beantworte die Anfrage in hoechstens %d "
+                "Saetzen auf Basis der gelieferten Quellen. Antworte auf Deutsch in "
+                "lesbarem Fliesstext (kein JSON, keine Quellen-IDs)." % lines)
         sysp = ((system_prompt.strip() + "\n\n") if system_prompt.strip() else "") + base
         src = "\n".join("- [%s] %s: %s" % (b["source"], b["title"], b["summary"])
                         for b in blocks[:6])
@@ -3347,6 +3425,7 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
     use_rag = body.get("rag", True)
     use_jira = body.get("jira", True)
     use_conf = body.get("confluence", True)
+    use_ai = body.get("ai", True)
     if not query:
         return JSONResponse({"ok": False, "error": "Bitte eine Anfrage eingeben."}, status_code=400)
 
@@ -3357,22 +3436,17 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
     if use_rag:
         try:
             from backend.tools.knowledge import rag_search
-            import re as _re
             results = await rag_search(query, 8)
             rag_max = max((s for s, _, _ in results), default=1.0) or 1.0
             for score, rel, chunk in results:
                 pct = round(score * 100) if rag_max <= 1.0 else round(score / rag_max * 100)
                 pct = max(1, min(int(pct), 100))
                 stem = rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-                title = _re.sub(r"^extract_[0-9a-f]+_", "", stem).replace("_", " ").strip()
-                if _re.fullmatch(r"[0-9a-f]{6,}", title or ""):
-                    # uninformativer Hash-Dateiname → erste sinnvolle Chunk-Zeile als Titel
-                    first = next((ln.strip(" #*->") for ln in (chunk or "").splitlines()
-                                  if len(ln.strip(" #*->")) > 3
-                                  and not ln.lstrip().startswith(('"', '{', '}', '[', ']'))), "")
-                    title = _two_line(first, 70) or title
-                blocks.append({"source": "WISSEN", "title": title or rel,
-                               "summary": _two_line(chunk), "score": pct, "link": ""})
+                title, summary = _support_readable(stem, chunk)
+                blocks.append({"source": "WISSEN", "title": title,
+                               "summary": summary, "score": pct,
+                               "link": _first_url(chunk),
+                               "source_label": title})
         except Exception as e:
             print("[Support] RAG-Suche fehlgeschlagen: %s" % e, flush=True)
 
@@ -3395,8 +3469,9 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
                     if meta:
                         summary += " — " + meta
                     blocks.append({"source": "JIRA", "title": b.get("key") or "Ticket",
-                                   "summary": _two_line(summary), "score": pct,
-                                   "link": b.get("link") or ""})
+                                   "summary": _two_line(summary, 600), "score": pct,
+                                   "link": b.get("link") or "",
+                                   "source_label": b.get("key") or "Ticket"})
         except JiraError as e:
             print("[Support] Jira-Suche fehlgeschlagen: %s" % e, flush=True)
         except Exception as e:
@@ -3415,15 +3490,15 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
                     try:
                         pg = await asyncio.to_thread(cc.get_page, r.get("id"), None, None)
                         raw = (((pg.get("body") or {}).get("storage") or {}).get("value")) or ""
-                        summary = _cf_html(raw, 220)
+                        summary = _cf_html(raw, 600)
                     except Exception:
                         pass
                     overlap = len(qtokens & _support_tokens(title + " " + summary)) / (len(qtokens) or 1)
                     # relevanz-sortiert → Rang-Komponente, durch Overlap angehoben
                     pct = max(20, min(round(max(overlap * 100, 86 - i * 9)), 96))
                     blocks.append({"source": "CONFLUENCE", "title": title,
-                                   "summary": _two_line(summary or title), "score": pct,
-                                   "link": cc.link_for(data, r)})
+                                   "summary": _two_line(summary or title, 600), "score": pct,
+                                   "link": cc.link_for(data, r), "source_label": title})
         except _CErr as e:
             print("[Support] Confluence-Suche fehlgeschlagen: %s" % e, flush=True)
         except Exception as e:
@@ -3432,7 +3507,14 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
     blocks.sort(key=lambda b: b["score"], reverse=True)
 
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
-    ai_summary = await _support_ai_summary(query, blocks, cfg.get("system_prompt") or "")
+    ai_summary = ""
+    if use_ai:
+        ai_summary = await _support_ai_summary(query, blocks, cfg.get("system_prompt") or "",
+                                               cfg.get("summary_lines") or 5)
+    try:
+        result_lines = max(1, min(int(cfg.get("result_lines") or 2), 20))
+    except (TypeError, ValueError):
+        result_lines = 2
 
     _record_support_history(user, query, len(blocks))
 
@@ -3442,6 +3524,7 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
         "confluence_active": _skill_active("confluence"),
         "blocks": blocks,
         "ai_summary": ai_summary,
+        "result_lines": result_lines,
         "took_ms": int((_t.time() - t0) * 1000),
     })
 

@@ -1466,6 +1466,18 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <h4 style="margin:16px 0 8px;">Vorangestelltes Prompt (LLM-Instruktion)</h4>
                         <p class="kb-hint">Dieser Text wird LLM-Anfragen des Support-Assistenten (z.&nbsp;B. der KI-Zusammenfassung) als Instruktion vorangestellt.</p>
                         <textarea id="support-prompt" class="config-input" rows="8" placeholder="z.B. Du bist der Support-Assistent der Firma X. Antworte sachlich, kurz und auf Deutsch …" style="width:100%;box-sizing:border-box;font-family:var(--font-body);line-height:1.5;resize:vertical;"></textarea>
+
+                        <h4 style="margin:18px 0 8px;">Darstellung</h4>
+                        <div style="display:flex;gap:14px;flex-wrap:wrap;">
+                            <div class="form-group" style="max-width:240px;">
+                                <label>KI-Zusammenfassung – Länge (Zeilen/Sätze)</label>
+                                <input type="number" id="support-lines" class="config-input" min="1" max="20" step="1" value="5" style="width:100%;box-sizing:border-box;">
+                            </div>
+                            <div class="form-group" style="max-width:240px;">
+                                <label>Antwortzeilen pro Treffer</label>
+                                <input type="number" id="support-result-lines" class="config-input" min="1" max="20" step="1" value="2" style="width:100%;box-sizing:border-box;">
+                            </div>
+                        </div>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;">
                             <button class="btn-primary" id="support-save" type="button" style="flex:0 0 auto;">Speichern</button>
                             <a class="btn-secondary" href="/support" target="_blank" rel="noopener" style="flex:0 0 auto;text-decoration:none;">Support-Oberfläche öffnen ↗</a>
@@ -2260,7 +2272,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/confluence.js?v=5"></script>
     <script src="/static/js/jira.js?v=1"></script>
-    <script src="/static/js/support_admin.js?v=1"></script>
+    <script src="/static/js/support_admin.js?v=3"></script>
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=3"></script>

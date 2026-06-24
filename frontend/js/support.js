@@ -20,6 +20,16 @@
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
         });
     }
+    // Escapen + http(s)-URLs als klickbare Links umwandeln
+    function escLink(s) {
+        return esc(s).replace(/(https?:\/\/[^\s<]+)/g, function (u) {
+            var tail = '';
+            var m = u.match(/[)\].,;:!?]+$/);
+            if (m) { tail = m[0]; u = u.slice(0, -tail.length); }
+            return '<a href="' + u + '" target="_blank" rel="noopener" '
+                + 'style="color:var(--accent-hover);word-break:break-all;">' + u + '</a>' + tail;
+        });
+    }
 
     function showApp() {
         $('sup-login').classList.add('hidden');
@@ -50,6 +60,7 @@
                 $('sup-opt-jira').checked = getPref('jira');
                 $('sup-opt-conf').checked = getPref('conf');
                 $('sup-opt-rag').checked = getPref('rag');
+                $('sup-opt-ai').checked = getPref('ai');
             })
             .catch(function () {});
     }
@@ -71,6 +82,7 @@
         $('sup-opt-jira').addEventListener('change', function () { setPref('jira', this.checked); });
         $('sup-opt-conf').addEventListener('change', function () { setPref('conf', this.checked); });
         $('sup-opt-rag').addEventListener('change', function () { setPref('rag', this.checked); });
+        $('sup-opt-ai').addEventListener('change', function () { setPref('ai', this.checked); });
         // Eingrenzungs-Pulldowns → Ergebnis live neu filtern (clientseitig)
         ['sup-f-source', 'sup-f-rel', 'sup-f-sort', 'sup-f-limit'].forEach(function (id) {
             var el = $(id);
@@ -140,18 +152,21 @@
         var useJira = !jiraWrap.classList.contains('hidden') && $('sup-opt-jira').checked;
         var useConf = !confWrap.classList.contains('hidden') && $('sup-opt-conf').checked;
         var useRag = $('sup-opt-rag').checked;
+        var useAi = $('sup-opt-ai').checked;
 
         var btn = $('sup-search-btn'); btn.disabled = true;
         var meta = $('sup-meta'); meta.classList.remove('hidden');
         meta.innerHTML = '<span class="sup-spinner"></span>Suche läuft…';
         var box = $('sup-results');
-        box.innerHTML = '<div class="sup-ai-card"><div class="sup-ai-label">KI-Zusammenfassung</div>'
-            + '<div class="sup-ai-text"><span class="sup-spinner"></span>Quellen werden ausgewertet…</div></div>';
+        box.innerHTML = useAi
+            ? '<div class="sup-ai-card"><div class="sup-ai-label">KI-Zusammenfassung</div>'
+              + '<div class="sup-ai-text"><span class="sup-spinner"></span>Quellen werden ausgewertet…</div></div>'
+            : '<div class="sup-empty"><span class="sup-spinner"></span>Suche läuft…</div>';
 
         fetch('/api/support/query', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ text: text, jira: useJira, confluence: useConf, rag: useRag })
+            body: JSON.stringify({ text: text, jira: useJira, confluence: useConf, rag: useRag, ai: useAi })
         })
             .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
             .then(function (d) {
@@ -175,17 +190,38 @@
 
     function render(d) {
         _lastData = d;
+        // Zeilen-Begrenzung pro Treffer aus der Skill-Config anwenden
+        try { document.documentElement.style.setProperty('--sup-rl', String(d.result_lines || 2)); } catch (e) {}
         var html = '';
         if (d.ai_summary) {
             html += '<div class="sup-ai-card"><div class="sup-ai-label">KI-Zusammenfassung</div>'
-                + '<div class="sup-ai-text">' + esc(d.ai_summary) + '</div></div>';
+                + '<div class="sup-ai-text">' + escLink(d.ai_summary) + '</div></div>';
         }
         html += '<div id="sup-blocks"></div>';
         $('sup-results').innerHTML = html;
         renderBlocks();
     }
 
-    // Wendet die 4 Pulldown-Filter (Quelle, Relevanz, Sortierung, Anzahl) an.
+    function blockHtml(b, i) {
+        var label = b.source_label || b.title || 'Quelle';
+        var srcHtml = b.link
+            ? '<div class="sup-block-src">Quelle: <a href="' + esc(b.link)
+              + '" target="_blank" rel="noopener">' + esc(label) + ' ↗</a></div>'
+            : '<div class="sup-block-src">Quelle: ' + esc(label) + '</div>';
+        return '<div class="sup-block">'
+            + '<div class="sup-block-head">'
+            + '<span class="sup-block-num">' + (i + 1) + '.</span>'
+            + '<span class="sup-block-title">' + esc(b.title) + '</span>'
+            + '<span class="sup-badge-src">' + esc(b.source) + '</span>'
+            + '<span class="sup-badge-score" title="Zutreffend">' + b.score + '%</span>'
+            + '</div>'
+            + '<div class="sup-block-body">' + escLink(b.summary) + '</div>'
+            + srcHtml
+            + '</div>';
+    }
+
+    // Eine Liste, nach Relevanz (%) sortiert; Pulldown-Filter
+    // (Quelle, Relevanz, Sortierung, Anzahl) wirken auf die gesamte Liste.
     function renderBlocks() {
         if (!_lastData) return;
         var all = (_lastData.blocks || []).slice();
@@ -220,21 +256,7 @@
                 + '</div>';
             return;
         }
-        var html = '';
-        list.forEach(function (b, i) {
-            html += '<div class="sup-block">'
-                + '<div class="sup-block-head">'
-                + '<span class="sup-block-num">' + (i + 1) + '.</span>'
-                + '<span class="sup-block-title">' + esc(b.title) + '</span>'
-                + '<span class="sup-badge-src">' + esc(b.source) + '</span>'
-                + '<span class="sup-badge-score" title="Zutreffend">' + b.score + '%</span>'
-                + '</div>'
-                + '<div class="sup-block-body">' + esc(b.summary) + '</div>'
-                + (b.link ? '<a class="sup-block-link" href="' + esc(b.link)
-                    + '" target="_blank" rel="noopener">Öffnen ↗</a>' : '')
-                + '</div>';
-        });
-        box.innerHTML = html;
+        box.innerHTML = list.map(blockHtml).join('');
     }
 
     // ── Login ──

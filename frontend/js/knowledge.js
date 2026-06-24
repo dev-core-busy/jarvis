@@ -798,13 +798,17 @@ class JarvisKnowledgeManager {
         const vDone  = p.vector_done  || 0;
         const grand  = tTotal + vTotal;
         const done   = tDone  + vDone;
-        const pctVal = grand > 0 ? Math.round((done / grand) * 100) : (p.phase === 'Fertig' ? 100 : 0);
+        // Defensiv auf 0–100% klemmen: bei (eigentlich verhinderten) inkonsistenten
+        // Zaehlerstaenden niemals >100% / >grand anzeigen.
+        const pctRaw = grand > 0 ? Math.round((done / grand) * 100) : (p.phase === 'Fertig' ? 100 : 0);
+        const pctVal = Math.min(100, Math.max(0, pctRaw));
+        const doneClamped = Math.min(done, grand);
 
         bar.style.width = pctVal + '%';
         if (pct)   pct.textContent   = pctVal + '%';
         if (phase) phase.textContent = p.phase || '';
         if (p.error && count) count.textContent = '⚠ ' + p.error.slice(0, 60);
-        else if (count) count.textContent = grand > 0 ? `${done} / ${grand}` : '';
+        else if (count) count.textContent = grand > 0 ? `${doneClamped} / ${grand}` : '';
 
         if (label) {
             if (p.phase === 'Fertig')      label.textContent = window.t('knowledge.indexing_done');

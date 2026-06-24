@@ -337,9 +337,11 @@ def update_pending(doc_id: str, data: dict) -> bool:
     return True
 
 
-def approve_pending(doc_id: str) -> dict:
+def approve_pending(doc_id: str, reindex: bool = True) -> dict:
     """Genehmigte Items als .md in die Wissens-DB schreiben.
-    Das Pending-Dokument bleibt erhalten (status='approved') fuer die Verlaufsansicht."""
+    Das Pending-Dokument bleibt erhalten (status='approved') fuer die Verlaufsansicht.
+    ``reindex=False`` ueberspringt den Reindex (fuer Bulk-Importe, die am Ende
+    EINMAL reindizieren)."""
     doc = get_pending(doc_id)
     if not doc:
         raise FileNotFoundError(f"Pending-Dokument {doc_id} nicht gefunden")
@@ -388,16 +390,17 @@ def approve_pending(doc_id: str) -> dict:
     save_pending(doc)
 
     # Wissens-Index neu aufbauen (im Hintergrund-Thread)
-    def _reindex_and_trim():
-        force_reindex()
-        try:
-            from backend.tools.vector_store import release_memory_to_os
-            release_memory_to_os()
-        except Exception:
-            pass
+    if reindex:
+        def _reindex_and_trim():
+            force_reindex()
+            try:
+                from backend.tools.vector_store import release_memory_to_os
+                release_memory_to_os()
+            except Exception:
+                pass
 
-    import threading
-    threading.Thread(target=_reindex_and_trim, daemon=True).start()
+        import threading
+        threading.Thread(target=_reindex_and_trim, daemon=True).start()
 
     return {
         "file": doc["file"],

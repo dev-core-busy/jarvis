@@ -58,7 +58,8 @@ window.extractorManager = new (class JarvisExtractorManager {
                             Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV,
                             sowie Audio/Video (MP3, MP4, MOV …) via Whisper-Transkription.<br>
                             <strong>Confluence:</strong> (nur bei aktivem Skill) Bereich wählen, dann eine einzelne
-                            Seite oder den ganzen Bereich importieren.
+                            Seite oder den ganzen Bereich importieren – wahlweise mit Review oder
+                            <em>ohne Audit</em> direkt in die Wissens-DB.
                         </span>
                     </div>
                 </div>
@@ -165,6 +166,9 @@ window.extractorManager = new (class JarvisExtractorManager {
                         </label>
                         <button id="ext-cf-refresh" class="kb-btn-secondary" title="Bereiche neu laden" style="flex-shrink:0;">🔄</button>
                     </div>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;margin-bottom:10px;cursor:pointer;">
+                        <input type="checkbox" id="ext-cf-no-audit"> ohne Audit – direkt in die Wissens-DB (kein Review)
+                    </label>
                     <div id="ext-cf-page-wrap" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
                         <select id="ext-cf-page" class="kb-input" style="flex:1;min-width:180px;">
                             <option value="">– Seite wählen –</option>
@@ -478,25 +482,35 @@ window.extractorManager = new (class JarvisExtractorManager {
         status.style.display = show ? 'block' : 'none';
     }
 
+    _cfAudit() {
+        // true = mit Review (Pending), false = auditlos direkt in die Wissens-DB
+        return !document.getElementById('ext-cf-no-audit')?.checked;
+    }
+
     _importCfPage() {
         const pageId = document.getElementById('ext-cf-page')?.value || '';
         if (!pageId) { this._notify('Bitte zuerst eine Seite wählen.', 'error'); return; }
+        const audit = this._cfAudit();
         const btn = document.getElementById('ext-cf-import-page');
         if (btn) btn.disabled = true;
-        this._setExtractStatus('⏳ Importiere Seite…', true);
+        this._setExtractStatus(audit ? '⏳ Importiere Seite…' : '⏳ Importiere direkt…', true);
         fetch('/api/knowledge/extract/confluence', {
             method: 'POST',
             headers: this._authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ page_id: pageId }),
+            body: JSON.stringify({ page_id: pageId, audit }),
         })
             .then(r => r.json().then(j => ({ ok: r.ok, j })))
             .then(({ ok, j }) => {
                 this._setExtractStatus('', false);
                 if (btn) btn.disabled = false;
                 if (!ok) { this._notify('Fehler: ' + (j.error || 'Import fehlgeschlagen'), 'error'); return; }
-                this._notify(`✅ Seite importiert: „${j.title}"`);
                 this._loadPending();
-                setTimeout(() => this._openReview(j), 300);
+                if (audit) {
+                    this._notify(`✅ Seite importiert: „${j.title}"`);
+                    setTimeout(() => this._openReview(j), 300);
+                } else {
+                    this._notify(`✅ Direkt in die Wissens-DB übernommen: „${j.title}"`);
+                }
             })
             .catch(() => {
                 this._setExtractStatus('', false);
@@ -508,22 +522,32 @@ window.extractorManager = new (class JarvisExtractorManager {
     _importCfSpace() {
         const space = this._selectedSpaceKey || '';
         if (!space) { this._notify('Bitte zuerst einen Bereich wählen.', 'error'); return; }
-        if (!confirm('Alle Seiten dieses Bereichs importieren? Das kann je nach Größe dauern.')) return;
+        const audit = this._cfAudit();
+        const warn = audit
+            ? 'Alle Seiten dieses Bereichs importieren? Das kann je nach Größe dauern.'
+            : 'Alle Seiten dieses Bereichs OHNE Audit direkt in die Wissens-DB schreiben? '
+              + 'Das kann je nach Größe dauern und überspringt die Prüfung.';
+        if (!confirm(warn)) return;
         const btn = document.getElementById('ext-cf-import-space');
         if (btn) btn.disabled = true;
         this._setExtractStatus('⏳ Starte Bereichs-Import…', true);
         fetch('/api/knowledge/extract/confluence', {
             method: 'POST',
             headers: this._authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ space: space }),
+            body: JSON.stringify({ space: space, audit }),
         })
             .then(r => r.json().then(j => ({ ok: r.ok, j })))
             .then(({ ok, j }) => {
                 this._setExtractStatus('', false);
                 if (btn) btn.disabled = false;
                 if (!ok) { this._notify('Fehler: ' + (j.error || 'Import fehlgeschlagen'), 'error'); return; }
-                this._notify('⏳ Import von ' + j.total
-                    + ' Seite(n) gestartet – sie erscheinen nach und nach unten in den Pending-Dokumenten.');
+                if (audit) {
+                    this._notify('⏳ Import von ' + j.total
+                        + ' Seite(n) gestartet – sie erscheinen nach und nach unten in den Pending-Dokumenten.');
+                } else {
+                    this._notify('⏳ Auditloser Import von ' + j.total
+                        + ' Seite(n) gestartet – sie werden direkt in die Wissens-DB geschrieben (Reindex am Ende).');
+                }
                 setTimeout(() => this._loadPending(), 3000);
             })
             .catch(() => {

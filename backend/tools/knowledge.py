@@ -39,6 +39,12 @@ _log = logging.getLogger("jarvis.knowledge")
 # ─── Indizierungs-Fortschritt (thread-sicher) ────────────────────────────────
 _index_progress: dict = {"running": False, "phase": "", "done": 0, "total": 0, "vector_done": 0, "vector_total": 0, "error": ""}
 _progress_lock = threading.Lock()
+# Verhindert PARALLELE Reindex-Laeufe – sonst teilen sie sich _index_progress und
+# die Zaehler ueberschreiben sich (z.B. vector_done=48 / vector_total=10 -> 480%).
+_reindex_lock = threading.Lock()
+# Kam waehrend eines laufenden Reindex eine weitere Anfrage, wird GENAU EINMAL
+# nachgeholt (coalesced) – so gehen frisch hinzugefuegte Dateien nicht verloren.
+_reindex_rerun = threading.Event()
 
 def get_index_progress() -> dict:
     with _progress_lock:
@@ -723,6 +729,25 @@ def force_reindex() -> dict:
     - FAISS verfuegbar → nur Vektor-Index (schneller, besser bei 600+ Dateien)
     - FAISS nicht verfuegbar → TF-IDF-Index
     """
+    # Re-Entrancy-Schutz: laeuft bereits ein Reindex, NICHT parallel starten
+    # (sonst ueberschreiben sich die Fortschritts-Zaehler -> >100%). Stattdessen
+    # einen Rerun vormerken, damit neu hinzugefuegte Dateien danach indexiert werden.
+    if not _reindex_lock.acquire(blocking=False):
+        _reindex_rerun.set()
+        _log.info("force_reindex: laeuft bereits – Rerun vorgemerkt")
+        return {"skipped": True, "reason": "reindex already running, rerun scheduled"}
+    try:
+        result = _do_force_reindex()
+        # Waehrenddessen weitere Anfragen? -> genau einmal nachholen (coalesced).
+        while _reindex_rerun.is_set():
+            _reindex_rerun.clear()
+            result = _do_force_reindex()
+        return result
+    finally:
+        _reindex_lock.release()
+
+
+def _do_force_reindex() -> dict:
     _set_progress(running=True, phase="Starte...", done=0, total=0, vector_done=0, vector_total=0, error="")
     try:
         folders = _get_folders()

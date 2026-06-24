@@ -9,6 +9,9 @@
    diese Variablen, damit Branding + Dark/Light ueberall identisch greifen.
    ═══════════════════════════════════════════════════════════════════ */
 :root {
+    /* Native Controls (Select-Popups, Scrollbars, Date-Picker) folgen dem Theme. */
+    color-scheme: dark;
+
     /* Tinten-/Schatten-Basis (Dark = Weiss/Schwarz); im Light-Theme gekippt.
        Alle rgba(var(--fg-rgb), …)-Raender/-Overlays folgen automatisch. */
     --fg-rgb: 255, 255, 255;
@@ -62,6 +65,8 @@
 
 /* ─── Hell-Theme: kippt nur die Basis-Variablen, alles andere folgt ─── */
 body.light {
+    color-scheme: light;
+
     --fg-rgb: 17, 24, 39;
     --shadow-rgb: 15, 23, 42;
 

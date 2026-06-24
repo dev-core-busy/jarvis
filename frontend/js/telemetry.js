@@ -80,7 +80,7 @@ class JarvisTelemetryManager {
                             </thead>
                             <tbody>
                                 ${tools.sort((a,b) => b[1].calls - a[1].calls).map(([name, t]) => `
-                                    <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),0.04);">
                                         <td style="padding:6px 10px;color:var(--text-primary);font-family:var(--font-mono);">${name}</td>
                                         <td style="padding:6px 10px;text-align:right;color:var(--accent-hover);">${t.calls}</td>
                                         <td style="padding:6px 10px;text-align:right;">${t.avg_ms}</td>
@@ -206,7 +206,7 @@ class JarvisTelemetryManager {
                       : 'rgba(74,222,128,0.4)';
             const lbl = m.role === 'tool' ? `🔧 ${m.tool || 'tool'}` : m.role === 'assistant' ? window.t('telemetry.role_assistant') : '👤 User';
             const prev = (m.preview || m.content || '').replace(/</g,'&lt;');
-            return `<div style="display:flex;gap:8px;font-size:0.78rem;padding:4px 8px;border-radius:5px;background:rgba(255,255,255,0.03);border-left:2px solid ${col};">
+            return `<div style="display:flex;gap:8px;font-size:0.78rem;padding:4px 8px;border-radius:5px;background:rgba(var(--fg-rgb),0.03);border-left:2px solid ${col};">
                 <span style="flex-shrink:0;color:var(--text-muted);font-size:0.71rem;min-width:88px;">${lbl}</span>
                 <span style="color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${prev}</span>
             </div>`;
@@ -267,7 +267,7 @@ class JarvisTelemetryManager {
                     </thead>
                     <tbody>
                         ${[...errors].reverse().map(sp => `
-                            <tr style="border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:top;">
+                            <tr style="border-bottom:1px solid rgba(var(--fg-rgb),0.04);vertical-align:top;">
                                 <td style="padding:6px 10px;font-family:var(--font-mono);color:var(--text-primary);white-space:nowrap;">${sp.name}</td>
                                 <td style="padding:6px 10px;color:#f87171;word-break:break-word;">${(sp.error||'').replace(/</g,'&lt;')}</td>
                                 <td style="padding:6px 10px;text-align:right;color:var(--text-muted);">${sp.duration_ms}</td>
@@ -311,9 +311,9 @@ class JarvisTelemetryManager {
                         </thead>
                         <tbody>
                             ${[...spans].reverse().map(sp => `
-                                <tr style="border-bottom:1px solid rgba(255,255,255,0.04);" title="${(sp.error||'').replace(/"/g,"'")}">
+                                <tr style="border-bottom:1px solid rgba(var(--fg-rgb),0.04);" title="${(sp.error||'').replace(/"/g,"'")}">
                                     <td style="padding:5px 8px;font-family:var(--font-mono);color:var(--text-primary);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${sp.name}</td>
-                                    <td style="padding:5px 8px;"><span style="font-size:0.7rem;padding:2px 6px;border-radius:99px;background:rgba(255,255,255,0.07);color:${kindColor[sp.kind]||'var(--text-secondary)'};">${sp.kind}</span></td>
+                                    <td style="padding:5px 8px;"><span style="font-size:0.7rem;padding:2px 6px;border-radius:99px;background:rgba(var(--fg-rgb),0.07);color:${kindColor[sp.kind]||'var(--text-secondary)'};">${sp.kind}</span></td>
                                     <td style="padding:5px 8px;text-align:right;color:${sp.duration_ms>1000?'#f59e0b':'var(--text-primary)'};">${sp.duration_ms}</td>
                                     <td style="padding:5px 8px;color:${sp.status==='error'?'#ef4444':'#34d399'};">${sp.status}${sp.error ? ' ⚠' : ''}</td>
                                 </tr>

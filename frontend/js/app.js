@@ -1769,6 +1769,16 @@ body.light .jv-bubble-row.bot  .jv-bubble{background:rgba(0,0,0,.06);}
 body.light .jv-bubble-row.user .jv-bubble{background:rgba(var(--accent-rgb), .20);}
 body.light .jv-bubble-time{color:rgba(0,0,0,.40);}
 body.light .jv-bubble-stats{color:rgba(0,0,0,.45);}
+/* Markdown-Elemente: helle Flaechen statt weisser Overlays (sonst dunkel-auf-dunkel). */
+body.light .jv-bubble code{background:rgba(0,0,0,.07);}
+body.light .jv-bubble pre{background:rgba(0,0,0,.06);}
+body.light .jv-bubble blockquote{color:rgba(0,0,0,.6);}
+body.light .jv-bubble hr{border-top-color:rgba(0,0,0,.15);}
+body.light .jv-bubble th,body.light .jv-bubble td{border-color:rgba(0,0,0,.18);}
+body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
+body.light .jv-date-sep::before,body.light .jv-date-sep::after{background:rgba(0,0,0,.1);}
+body.light .jv-date-sep span{color:rgba(0,0,0,.45);}
+body.light .jv-streaming-dots{color:rgba(0,0,0,.4);}
 body.light .jv-date-sep::before,body.light .jv-date-sep::after{background:rgba(0,0,0,.12);}
 body.light .jv-date-sep span{color:rgba(0,0,0,.45);}
 body.light .jv-streaming-dots{color:rgba(0,0,0,.40);}
@@ -3206,8 +3216,8 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                 btnTestProfile.disabled = true;
                 btnTestProfile.textContent = window.t('common.testing');
                 profileTestResult.style.display = '';
-                profileTestResult.style.background = 'rgba(255,255,255,0.05)';
-                profileTestResult.style.border = '1px solid rgba(255,255,255,0.1)';
+                profileTestResult.style.background = 'rgba(var(--fg-rgb),0.05)';
+                profileTestResult.style.border = '1px solid rgba(var(--fg-rgb),0.1)';
                 profileTestResult.style.color = 'var(--text-muted)';
                 profileTestResult.textContent = window.t('profile.testing');
                 try {
@@ -3966,14 +3976,14 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         s.id = 'jarvis-app-fb-css';
         s.textContent = `
 .log-feedback-row{display:flex;gap:4px;margin:2px 0 2px 8px;align-items:center;}
-.log-fb-btn{background:none;border:1px solid rgba(255,255,255,.1);border-radius:50%;
+.log-fb-btn{background:none;border:1px solid rgba(var(--fg-rgb),.12);border-radius:50%;
   width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;
   padding:0;cursor:pointer;transition:all .15s;line-height:0;}
 .log-fb-btn svg{display:block;}
-.log-fb-btn:hover:not(:disabled){border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.06);transform:scale(1.12);}
+.log-fb-btn:hover:not(:disabled){border-color:var(--accent);background:rgba(var(--fg-rgb),.06);transform:scale(1.12);}
 .log-fb-btn:disabled{cursor:default;opacity:.45;}
 .log-fb-btn.log-fb-active{border-color:rgba(var(--accent-rgb), .7);background:rgba(var(--accent-rgb), .18);}
-.log-fb-info{font-size:.72rem;color:rgba(255,255,255,.4);margin:2px 0 2px 8px;}
+.log-fb-info{font-size:.72rem;color:rgba(var(--fg-rgb),.5);margin:2px 0 2px 8px;}
 .log-entry.log-task{color:rgba(167,139,250,.9);font-weight:500;
   background:rgba(var(--accent-rgb), .07);border-left:2px solid rgba(var(--accent-rgb), .45);
   padding-left:6px;margin:4px 0;}

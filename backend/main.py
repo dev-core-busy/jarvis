@@ -3840,16 +3840,20 @@ async def knowledge_extract_upload(
 
 @app.post("/api/knowledge/extract/confluence")
 async def knowledge_extract_confluence(request: Request, user: str = Depends(require_knowledge_editor)):
-    """Importiert Confluence-Inhalte in den Extraktor (Pending → Audit → Wissens-DB).
+    """Importiert Confluence-Inhalte in den Extraktor.
 
-    Body: ``{"page_id": "123"}`` fuer eine Einzelseite (synchron) oder
-    ``{"space": "KEY"}`` fuer einen ganzen Bereich (Hintergrund-Job).
+    Body:
+    - ``{"page_id": "123"}`` – Einzelseite (synchron)
+    - ``{"space": "KEY"}``  – ganzer Bereich (Hintergrund-Job)
+    - ``{"audit": false}``  – auditlos: direkt in die Wissens-DB schreiben
+      (ohne Pending/Review). Standard ist ``audit: true`` (mit Review).
     """
     from backend.confluence_client import ConfluenceError, html_to_text
-    from backend.web_extractor import extract_to_pending
+    from backend.web_extractor import extract_to_pending, approve_pending
     body = await request.json()
     page_id = (body.get("page_id") or "").strip()
     space = (body.get("space") or "").strip()
+    audit = body.get("audit", True)  # False = auditloser Direkt-Import
     c = _confluence_client()
     if not c.configured:
         return JSONResponse({"error": "Confluence ist nicht konfiguriert."}, status_code=400)
@@ -3866,6 +3870,12 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
             if not text.strip():
                 return JSONResponse({"error": "Seite enthält keinen lesbaren Text."}, status_code=422)
             doc = await extract_to_pending(text, page.get("title", ""), c.link_for(page, page))
+            if not audit:
+                # auditlos: sofort in die Wissens-DB schreiben
+                res = await asyncio.to_thread(approve_pending, doc["id"], True)
+                return JSONResponse({"ok": True, "audited": False, "id": doc["id"],
+                                     "title": doc["title"], "file": res.get("file")},
+                                    status_code=201)
             return JSONResponse(doc, status_code=201)
         except ConfluenceError as e:
             return JSONResponse({"error": str(e)}, status_code=502)
@@ -3881,22 +3891,32 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
         if not pages:
             return JSONResponse({"error": "Bereich enthält keine Seiten."}, status_code=404)
 
-        async def _bulk(space_key: str, page_list: list):
+        async def _bulk(space_key: str, page_list: list, do_audit: bool):
             for p in page_list:
                 try:
                     full = await asyncio.to_thread(c.get_page, p["id"], None, None)
                     text = _page_text(full)
                     if text.strip():
-                        await extract_to_pending(text, full.get("title", ""),
-                                                 c.link_for(full, full))
+                        doc = await extract_to_pending(text, full.get("title", ""),
+                                                       c.link_for(full, full))
+                        if not do_audit:
+                            # auditlos: schreiben, aber NICHT pro Seite reindizieren
+                            await asyncio.to_thread(approve_pending, doc["id"], False)
                 except Exception as ex:
                     print(f"[Confluence-Bulk] Seite {p.get('id')} übersprungen: {ex}", flush=True)
+            if not do_audit:
+                # nach allen Seiten EINMAL reindizieren
+                try:
+                    from backend.tools.knowledge import force_reindex
+                    await asyncio.to_thread(force_reindex)
+                except Exception as ex:
+                    print(f"[Confluence-Bulk] Reindex fehlgeschlagen: {ex}", flush=True)
 
-        task = asyncio.create_task(_bulk(space, pages))
+        task = asyncio.create_task(_bulk(space, pages, audit))
         _bg_confluence_tasks.add(task)
         task.add_done_callback(_bg_confluence_tasks.discard)
         return JSONResponse({"ok": True, "started": True, "total": len(pages),
-                             "space": space}, status_code=202)
+                             "audited": bool(audit), "space": space}, status_code=202)
 
     return JSONResponse({"error": "page_id oder space erforderlich."}, status_code=400)
 

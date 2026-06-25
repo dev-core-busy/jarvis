@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+# Drift-sicheres Veroeffentlichen von LANDING-PAGE-INHALTEN auf jarvis-ai.info.
+#
+# Anders als build.sh (lädt jarvis.exe + patcht nur den Versionsstring) fuegt
+# dieses Skript NEUE Feature-Karten in das LIVE index.html ein, OHNE andere
+# Live-Inhalte zu verlieren: Live laden -> Karten nach der Office-Karte
+# einsetzen (idempotent) -> per FTPS zurueckladen -> verifizieren.
+#
+# FTPS-Zugang: Umgebungsvariable JARVIS_FTPS_USER (Format "user:pass") ODER
+# gitignore-te Datei windows-app-go/.ftps_credentials.
+# ─────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+cd "$(dirname "$0")"
+
+CRED_FILE="./.ftps_credentials"
+if [ -z "${JARVIS_FTPS_USER:-}" ] && [ -f "$CRED_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$CRED_FILE"
+fi
+if [ -z "${JARVIS_FTPS_USER:-}" ]; then
+  echo "FTPS-Zugang fehlt – JARVIS_FTPS_USER setzen oder .ftps_credentials anlegen." >&2
+  exit 1
+fi
+
+BASE='ftp://jarvis-ai.info/www'
+TMP_LIVE="$(mktemp)"
+TMP_NEW="$(mktemp)"
+trap 'rm -f "$TMP_LIVE" "$TMP_NEW"' EXIT
+
+echo "1) Live index.html laden …"
+curl -fsS --ssl-reqd --insecure --ftp-pasv --user "$JARVIS_FTPS_USER" \
+  "$BASE/index.html" -o "$TMP_LIVE"
+
+echo "2) Feature-Karten einsetzen (idempotent) …"
+python3 - "$TMP_LIVE" "$TMP_NEW" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+html = open(src, encoding="utf-8").read()
+
+CARDS = '''
+            <div class="feature-card reveal">
+                <div class="feature-icon">🔗</div>
+                <div class="feature-title t-de">Confluence &amp; Jira</div>
+                <div class="feature-title t-en">Confluence &amp; Jira</div>
+                <div class="feature-desc t-de">Durchsucht Confluence-Seiten und Jira-Tickets read-only direkt im Chat – nach Relevanz sortiert, mit Quell-Links. Confluence-Seiten lassen sich zudem als Wissensquelle in die RAG-Datenbank importieren. Read-only: keine ungewollten Änderungen an deinen Systemen.</div>
+                <div class="feature-desc t-en">Searches Confluence pages and Jira tickets read-only directly in the chat – ranked by relevance, with source links. Confluence pages can also be imported into the RAG knowledge base. Read-only: no unintended changes to your systems.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🎧</div>
+                <div class="feature-title t-de">Support-Portal &amp; -Assistent</div>
+                <div class="feature-title t-en">Support Portal &amp; Assistant</div>
+                <div class="feature-desc t-de">Eigene Support-Oberfläche (/support &amp; /portal): durchsucht Wissensdatenbank, Jira und Confluence gleichzeitig, sortiert nach Relevanz (%) und fasst per LLM zusammen – mit Quell-Links zum Original. Auch als externe Support-API (API-Key) für andere Anwendungen.</div>
+                <div class="feature-desc t-en">A dedicated support interface (/support &amp; /portal): searches the knowledge base, Jira and Confluence simultaneously, ranked by relevance (%) and summarized by the LLM – with source links to the original. Also available as an external support API (API key) for other applications.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">📦</div>
+                <div class="feature-title t-de">Wissens-Export (JSON)</div>
+                <div class="feature-title t-en">Knowledge Export (JSON)</div>
+                <div class="feature-desc t-de">Exportiere die komplette Wissensbasis als strukturiertes JSON (title/summary/facts/qa_pairs/content) – als eine Datei oder je eine JSON pro Dokument (ZIP). Optional per LLM angereichert oder inkl. Roh-Vektoren. So lässt sich dein Wissen in Fremdsysteme übernehmen.</div>
+                <div class="feature-desc t-en">Export the entire knowledge base as structured JSON (title/summary/facts/qa_pairs/content) – as a single file or one JSON per document (ZIP). Optionally LLM-enriched or including raw vectors. Take your knowledge into other systems.</div>
+            </div>'''
+
+if "Support-Portal &amp; -Assistent" in html or "Knowledge Export (JSON)" in html:
+    print("   -> Karten bereits vorhanden, nichts zu tun.")
+    open(dst, "w", encoding="utf-8").write(html)
+    sys.exit(0)
+
+# Anker: Ende der Office-Karte (engl. Beschreibung), danach folgt das schliessende </div> der Karte.
+anchor = "not just a path.</div>"
+i = html.find(anchor)
+if i < 0:
+    sys.stderr.write("FEHLER: Office-Karte (Anker) im Live-HTML nicht gefunden – Abbruch.\n")
+    sys.exit(2)
+# Naechstes </div> nach dem Anker schliesst die Karte; danach einfuegen.
+close = html.find("</div>", i + len(anchor))
+if close < 0:
+    sys.stderr.write("FEHLER: Karten-Abschluss nicht gefunden – Abbruch.\n")
+    sys.exit(3)
+ins = close + len("</div>")
+new = html[:ins] + CARDS + html[ins:]
+open(dst, "w", encoding="utf-8").write(new)
+print("   -> 3 Karten eingefuegt.")
+PY
+
+# Wenn keine Aenderung noetig war (idempotent), trotzdem nichts hochladen-Schaden:
+if cmp -s "$TMP_LIVE" "$TMP_NEW"; then
+  echo "   Keine Aenderung – Upload uebersprungen."
+  exit 0
+fi
+
+echo "3) index.html per FTPS hochladen …"
+curl -fsS --ssl-reqd --insecure --ftp-pasv -T "$TMP_NEW" \
+  --user "$JARVIS_FTPS_USER" "$BASE/index.html"
+
+echo "4) Verifizieren (HTTPS) …"
+if curl -fsS --insecure "https://jarvis-ai.info/?t=$(date +%s)" | grep -q "Knowledge Export (JSON)"; then
+  echo "   ✓ Veroeffentlicht – neue Karten sind live."
+else
+  echo "   ⚠ Upload erfolgt, aber Verifikation fand die Karten (noch) nicht (Cache?)." >&2
+fi

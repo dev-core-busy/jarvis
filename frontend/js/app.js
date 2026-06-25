@@ -145,6 +145,9 @@
                 if (totpInput) totpInput.value = '';
                 if (data.must_change_password) {
                     showChangePwModal(true);
+                } else if (data.is_admin === false) {
+                    // Nicht-Admins → Portal (Chat / Benutzer-Chat / Support)
+                    window.location.replace('/portal');
                 } else {
                     showMainScreen();
                 }
@@ -3719,6 +3722,9 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                     // Erst-Kennwort noch nicht geaendert -> Maske erzwingen.
                     // Auch nach F5/Reload (serverseitig zusaetzlich gesperrt).
                     showChangePwModal(true);
+                } else if (data.is_admin === false) {
+                    // Nicht-Admins haben keinen Zugriff auf die Hauptseite → Portal
+                    window.location.replace('/portal');
                 } else {
                     showMainScreen();
                     // Token-Expiry Warnung einrichten

@@ -3990,11 +3990,40 @@ def _zip_knowledge_export(payload: dict) -> bytes:
     return buf.getvalue()
 
 
+def _zip_knowledge_export_split(payload: dict) -> bytes:
+    """ZIP mit je EINER JSON-Datei pro Originaldokument (Verzeichnis 'dokumente/')
+    plus _manifest.json (Metadaten + Dateiliste, ohne die Dokumente selbst)."""
+    import io as _io, zipfile as _zip
+    docs = payload.get("documents", [])
+    manifest = {k: v for k, v in payload.items() if k != "documents"}
+    files, seen = [], set()
+    buf = _io.BytesIO()
+    with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+        for doc in docs:
+            base = "".join(c if (c.isalnum() or c in "._-") else "_"
+                           for c in str(doc.get("source_name") or doc.get("id") or "dokument"))
+            base = base.strip("_")[:80] or "dokument"
+            did = str(doc.get("id") or "")
+            name = f"dokumente/{did}__{base}.json"
+            n, i = name, 1
+            while n in seen:   # Kollisionen vermeiden
+                n = f"dokumente/{did}_{i}__{base}.json"
+                i += 1
+            seen.add(n)
+            zf.writestr(n, json.dumps(doc, ensure_ascii=False, indent=2))
+            files.append({"file": n, "id": doc.get("id"),
+                          "title": doc.get("title"), "source": doc.get("source")})
+        manifest["files"] = files
+        zf.writestr("_manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+    return buf.getvalue()
+
+
 @app.get("/api/knowledge/export")
-async def export_knowledge_zip(embeddings: int = 0, llm: int = 0, user: str = Depends(require_auth)):
+async def export_knowledge_zip(embeddings: int = 0, llm: int = 0, split: int = 0, user: str = Depends(require_auth)):
     """Exportiert die komplette Wissensbasis als JSON (ZIP) im Informationsextraktor-
     Schema (ein Dokument je Quelle mit title/summary/facts/qa_pairs/content).
-    ?embeddings=1 = Roh-Vektoren je Chunk; ?llm=1 = facts/qa_pairs per LLM nachextrahieren."""
+    ?embeddings=1 = Roh-Vektoren je Chunk; ?llm=1 = facts/qa_pairs per LLM nachextrahieren;
+    ?split=1 = je eine JSON-Datei pro Dokument (Verzeichnis 'dokumente/') statt einer grossen."""
     import datetime as _dt
     documents, vmeta = await asyncio.to_thread(_collect_knowledge_documents, bool(embeddings))
 
@@ -4045,8 +4074,10 @@ async def export_knowledge_zip(embeddings: int = 0, llm: int = 0, user: str = De
                      "(gleicher Vektorraum). Ein anderes Zielsystem sollte sie ignorieren und "
                      "stattdessen 'text'/'content' mit dem eigenen Embedding-Modell neu einbetten."),
         }
-    data = await asyncio.to_thread(_zip_knowledge_export, payload)
-    fname = f"jarvis_wissen_{_dt.datetime.now():%Y%m%d_%H%M%S}.zip"
+    _builder = _zip_knowledge_export_split if split else _zip_knowledge_export
+    data = await asyncio.to_thread(_builder, payload)
+    _sfx = "_pro_dokument" if split else ""
+    fname = f"jarvis_wissen{_sfx}_{_dt.datetime.now():%Y%m%d_%H%M%S}.zip"
     return Response(content=data, media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 

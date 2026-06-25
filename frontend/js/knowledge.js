@@ -298,6 +298,9 @@ class JarvisKnowledgeManager {
                 <button class="kb-learned-open-btn" onclick="window.knowledgeManager.downloadLearnedJson(this)" title="${window.t('knowledge.learned.export_title')}">
                     ${window.t('knowledge.learned.export_btn')}
                 </button>
+                <button class="kb-learned-open-btn" onclick="window.knowledgeManager.downloadLearnedJson(this, true)" title="${window.t('knowledge.learned.export_split_title')}">
+                    ${window.t('knowledge.learned.export_split_btn')}
+                </button>
                 <label class="kb-learned-embed-opt" title="${window.t('knowledge.learned.llm_title')}" style="display:inline-flex;align-items:center;gap:5px;font-size:0.78rem;color:var(--text-muted);margin-left:8px;cursor:pointer;">
                     <input type="checkbox" id="kb-export-llm" style="margin:0;cursor:pointer;">
                     ${window.t('knowledge.learned.llm_label')}
@@ -312,7 +315,7 @@ class JarvisKnowledgeManager {
         }
     }
 
-    async downloadLearnedJson(btn) {
+    async downloadLearnedJson(btn, split) {
         const orig = btn ? btn.textContent : '';
         const st = document.getElementById('kb-export-status');
         const setStatus = (msg, color) => {
@@ -330,6 +333,7 @@ class JarvisKnowledgeManager {
             const params = [];
             if (withEmb) params.push('embeddings=1');
             if (withLlm) params.push('llm=1');
+            if (split)   params.push('split=1');
             const resp = await fetch('/api/knowledge/export' + (params.length ? '?' + params.join('&') : ''), {
                 headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });

@@ -2419,6 +2419,71 @@ async def get_agent_key(user: str = Depends(require_local_auth)):
     return JSONResponse({"agent_api_key": config.AGENT_API_KEY or ""})
 
 
+# ─── Mehrere benannte Agent-API-Keys ─────────────────────────────────
+
+def _load_agent_keys() -> list:
+    keys = config.get_setting("agent_api_keys", [])
+    return keys if isinstance(keys, list) else []
+
+
+def _save_agent_keys(keys: list):
+    config.save_setting("agent_api_keys", keys)
+
+
+@app.get("/api/agent/keys")
+async def agent_keys_list(user: str = Depends(require_local_auth)):
+    """Listet die benannten API-Keys (Admin)."""
+    return JSONResponse({"keys": _load_agent_keys(), "legacy": bool(config.AGENT_API_KEY)})
+
+
+@app.post("/api/agent/keys")
+async def agent_keys_create(request: Request, user: str = Depends(require_local_auth)):
+    """Erzeugt einen neuen benannten API-Key."""
+    import secrets, uuid
+    body = await request.json()
+    name = (body.get("name") or "").strip() or "Unbenannt"
+    keys = _load_agent_keys()
+    entry = {"id": uuid.uuid4().hex[:8], "name": name,
+             "key": secrets.token_urlsafe(32), "created": int(time.time())}
+    keys.append(entry)
+    _save_agent_keys(keys)
+    return JSONResponse({"ok": True, "key": entry})
+
+
+@app.put("/api/agent/keys/{kid}")
+async def agent_keys_update(kid: str, request: Request, user: str = Depends(require_local_auth)):
+    """Benennt einen Key um bzw. generiert ihn neu (body: name und/oder regenerate)."""
+    import secrets
+    body = await request.json()
+    keys = _load_agent_keys()
+    found = None
+    for k in keys:
+        if k.get("id") == kid:
+            if "name" in body:
+                k["name"] = (body.get("name") or "").strip() or k.get("name", "Unbenannt")
+            if body.get("regenerate"):
+                k["key"] = secrets.token_urlsafe(32)
+            elif body.get("key"):
+                k["key"] = str(body["key"]).strip()
+            found = k
+            break
+    if not found:
+        return JSONResponse({"ok": False, "error": "Key nicht gefunden"}, status_code=404)
+    _save_agent_keys(keys)
+    return JSONResponse({"ok": True, "key": found})
+
+
+@app.delete("/api/agent/keys/{kid}")
+async def agent_keys_delete(kid: str, user: str = Depends(require_local_auth)):
+    """Löscht einen benannten API-Key."""
+    keys = _load_agent_keys()
+    new = [k for k in keys if k.get("id") != kid]
+    if len(new) == len(keys):
+        return JSONResponse({"ok": False, "error": "Key nicht gefunden"}, status_code=404)
+    _save_agent_keys(new)
+    return JSONResponse({"ok": True})
+
+
 @app.get("/api/profiles/{profile_id}/key")
 async def get_profile_key(profile_id: str, user: str = Depends(require_local_auth)):
     """Gibt die unmasked API- und Session-Keys eines Profils zurück (für Eye-Button)."""
@@ -3651,21 +3716,22 @@ async def support_history_clear(user: str = Depends(require_auth)):
 # ─── Agent Task API (extern, z.B. für Vision-Aktionen) ───────────────
 
 def _verify_agent_api_key(request: Request) -> bool:
-    """Prüft API-Key aus X-API-Key Header oder Bearer Token."""
-    agent_key = config.AGENT_API_KEY
-    if not agent_key:
+    """Prüft API-Key aus X-API-Key Header oder Bearer Token gegen den
+    Legacy-Key (AGENT_API_KEY) ODER einen der benannten Keys."""
+    candidates = []
+    if config.AGENT_API_KEY:
+        candidates.append(config.AGENT_API_KEY)
+    candidates.extend(k.get("key", "") for k in _load_agent_keys() if k.get("key"))
+    if not candidates:
         return False  # Kein Key konfiguriert → Endpunkt gesperrt
 
-    # X-API-Key Header (bevorzugt)
-    header_key = request.headers.get("X-API-Key", "")
-    if header_key and hmac.compare_digest(header_key, agent_key):
-        return True
-
-    # Fallback: Bearer Token
-    bearer = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if bearer and hmac.compare_digest(bearer, agent_key):
-        return True
-
+    presented = request.headers.get("X-API-Key", "") \
+        or request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not presented:
+        return False
+    for c in candidates:
+        if hmac.compare_digest(presented, c):
+            return True
     return False
 
 

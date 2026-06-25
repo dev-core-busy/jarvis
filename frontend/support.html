@@ -158,6 +158,14 @@
             word-break: break-word; font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5;
             color: var(--text-primary); }
         #sup-doc-body a { color: var(--accent-hover); }
+        .sup-help-body { padding: 16px 18px; overflow: auto; font-size: 0.9rem; line-height: 1.55;
+            color: var(--text-primary); }
+        .sup-help-body h4 { margin: 14px 0 6px; font-size: 0.92rem; color: var(--accent-hover); }
+        .sup-help-body h4:first-child { margin-top: 0; }
+        .sup-help-body ul { margin: 0 0 4px; padding-left: 20px; }
+        .sup-help-body li { margin: 4px 0; }
+        .sup-help-body code { background: rgba(var(--fg-rgb), .08); padding: 1px 5px; border-radius: 4px;
+            font-size: 0.82rem; }
         .sup-block-link { font-size: 0.8rem; margin-top: 8px; display: inline-block;
             color: var(--accent-hover); text-decoration: none; }
         .sup-block-link:hover { text-decoration: underline; }
@@ -219,6 +227,7 @@
         <div class="sup-logo logo-core">J</div>
         <div class="sup-title brand-app-name">Support Assistent</div>
         <div class="sup-spacer"></div>
+        <button class="btn-theme" id="sup-help-btn" title="Hilfe: Score & Trefferzahl" style="font-weight:700;">?</button>
         <div class="sup-hist-wrap">
             <button class="sup-hist-btn" id="sup-hist-btn" title="Suchverlauf">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
@@ -288,6 +297,30 @@
 </div>
 
 <!-- Dokument-Viewer (lokale Wissensquellen) -->
+<!-- Hilfe: Score & Trefferzahl -->
+<div id="sup-help-modal" class="sup-doc-modal hidden">
+    <div class="sup-doc-card">
+        <div class="sup-doc-head"><strong>Wie funktionieren Score und Trefferzahl?</strong><button id="sup-help-close" type="button" title="Schließen">✕</button></div>
+        <div class="sup-help-body">
+            <h4>Score („Zutreffend in %")</h4>
+            <ul>
+                <li>Der Score zeigt, wie gut ein Treffer zur Anfrage passt – er wird je Quelle unterschiedlich berechnet.</li>
+                <li><strong>Wissen (RAG):</strong> semantische Ähnlichkeit zwischen Anfrage und Textabschnitt (Vektor-Suche, 0–100&nbsp;%); ohne Vektor-Index ersatzweise die TF-IDF-Trefferstärke relativ zum besten Treffer.</li>
+                <li><strong>Jira &amp; Confluence:</strong> die Such-API liefert bereits nach Relevanz sortiert – daher ein rangbasierter Wert (erster Treffer am höchsten, dann absteigend), zusätzlich angehoben durch die Wort-Überlappung zwischen Anfrage und Titel/Zusammenfassung.</li>
+                <li>Die Werte liegen im Bereich ca. <code>20–96&nbsp;%</code>: ein gefundener Treffer ist nie 0&nbsp;% und selten exakt 100&nbsp;%.</li>
+                <li>Alle Quellen werden danach gemeinsam nach Score absteigend sortiert und als eine Liste angezeigt.</li>
+            </ul>
+            <h4>Anzahl der Treffer</h4>
+            <ul>
+                <li>Pro Suche werden bis zu <strong>8 Wissens-</strong>, <strong>10 Jira-</strong> und <strong>6 Confluence-</strong>Treffer geholt.</li>
+                <li>Die Ergebniszeile zeigt „<strong>X von Y Treffer</strong>": Y = insgesamt gefunden, X = nach den aktuellen Filtern angezeigt.</li>
+                <li>Die vier Pulldowns grenzen die Anzeige nachträglich ein (ohne neue Suche): <strong>Quelle</strong>, <strong>Mindest-Relevanz</strong> (z.&nbsp;B. ≥&nbsp;70&nbsp;%), <strong>Sortierung</strong> und <strong>Anzahl</strong> (Top&nbsp;5/10/20).</li>
+                <li>Welche Quellen durchsucht werden, steuern die Checkboxen <em>Jira Tickets</em>, <em>Confluence</em> und <em>RAG einbeziehen</em> – das verändert Trefferzahl und Score-Mix direkt.</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
 <div id="sup-doc-modal" class="sup-doc-modal hidden">
     <div class="sup-doc-card">
         <div class="sup-doc-head"><strong id="sup-doc-title">Dokument</strong><button id="sup-doc-close" type="button" title="Schließen">✕</button></div>
@@ -297,6 +330,6 @@
 
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=8"></script>
-<script src="/static/js/support.js?v=8"></script>
+<script src="/static/js/support.js?v=9"></script>
 </body>
 </html>

@@ -131,6 +131,15 @@ import backend.conv_log as conv_log
 
 # ── Sicherheit: LDAP-Benutzer duerfen diese Tools NICHT verwenden ─────────
 _LOCAL_PRIVILEGED_USERS = {"jarvis", "root", ""}
+
+# Confluence/Jira sind im Chat ausschliesslich lesend nutzbar: schreibende Tools
+# werden dem Agenten gar nicht erst angeboten (gezielte read-only Abfragen).
+_EXTERNAL_WRITE_TOOLS = {
+    "confluence_create_page", "confluence_update_page", "confluence_delete_page",
+    "confluence_add_comment", "confluence_upload_attachment",
+    "jira_create_issue", "jira_add_comment",
+}
+
 _BLOCKED_TOOLS_FOR_LDAP = {
     "write_file",          # Kein Dateisystem-Schreibzugriff
     "spawn_agent",         # Keine Sub-Agents (koennten Shell nutzen)
@@ -473,6 +482,8 @@ KRITISCH – Autonomie-Regeln:
 
         self.tools_map: dict[str, object] = {}
         for tool in self._tool_instances:
+            if tool.name in _EXTERNAL_WRITE_TOOLS:
+                continue  # Confluence/Jira nur lesend im Chat
             self.tools_map[tool.name] = tool
 
         # Provider initialisieren
@@ -498,6 +509,8 @@ KRITISCH – Autonomie-Regeln:
             pass
         self.tools_map.clear()
         for tool in self._tool_instances:
+            if tool.name in _EXTERNAL_WRITE_TOOLS:
+                continue  # Confluence/Jira nur lesend im Chat
             self.tools_map[tool.name] = tool
 
     def _build_tool_declarations(self) -> list[types.FunctionDeclaration]:
@@ -597,6 +610,22 @@ KRITISCH – Autonomie-Regeln:
         else:
             # Browser: Linux-Desktop ist der richtige Kontext (Standard)
             pass
+
+        # Confluence/Jira: gezielte read-only Recherche (nur wenn Skill aktiv → Tools vorhanden)
+        _ext_sources = []
+        if "confluence_search" in self.tools_map:
+            _ext_sources.append("Confluence (confluence_search, confluence_get_page)")
+        if "jira_search" in self.tools_map:
+            _ext_sources.append("Jira (jira_search, jira_get_issue, jira_list_projects)")
+        if _ext_sources:
+            system_prompt += (
+                "\n\nEXTERNE WISSENSQUELLEN (NUR LESEND): Bei passenden Fragen kannst du "
+                "gezielte read-only Abfragen an " + " und ".join(_ext_sources) + " stellen, "
+                "um mit aktuellen Inhalten aus diesen Systemen zu antworten. Formuliere "
+                "präzise Suchbegriffe, fasse die Treffer zusammen und nenne Titel/Key und Link. "
+                "Du darfst dort NICHTS anlegen, ändern oder löschen – schreibende Aktionen "
+                "sind bewusst deaktiviert."
+            )
 
         # Antwortsprache gemäß UI-Sprache des Nutzers
         if lang == "en":

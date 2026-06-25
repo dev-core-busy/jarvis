@@ -1111,6 +1111,16 @@ async def userchat_page():
     )
 
 
+@app.get("/portal", response_class=HTMLResponse)
+async def portal_page():
+    """Portal-/Startseite fuer Nicht-Admins (Chat / Benutzer-Chat / Support)."""
+    f = FRONTEND_DIR / "portal.html"
+    return HTMLResponse(
+        content=f.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
 @app.get("/api/users/online")
 async def get_online_users(user: str = Depends(require_auth)):
     """Gibt Liste der aktuell im User-Chat verbundenen User zurück."""
@@ -1418,7 +1428,8 @@ async def login(request: Request):
     if not _DOCKER_MODE:
         asyncio.get_event_loop().run_in_executor(None, switch_desktop_session, username)
     return JSONResponse({"success": True, "token": token, "username": username,
-                         "must_change_password": must_change})
+                         "must_change_password": must_change,
+                         "is_admin": _is_admin_user(username)})
 
 
 # ─── 2FA / TOTP (Google Authenticator etc.) ──────────────────────────
@@ -1910,10 +1921,15 @@ async def get_config():
     })
 
 
+def _is_admin_user(username: str) -> bool:
+    """True fuer lokalen jarvis (ALLOWED_USERS) oder freigeschaltete AD-Admins."""
+    return (username in ALLOWED_USERS) or _user_is_admin(username)
+
+
 @app.get("/api/me")
 async def get_me(user: str = Depends(require_auth)):
     """Gibt den aktuell angemeldeten Benutzernamen zurueck (fuer Titelleisten-Anzeige)."""
-    return JSONResponse({"username": user})
+    return JSONResponse({"username": user, "is_admin": _is_admin_user(user)})
 @app.get("/api/cert")
 async def download_cert():
     """Zertifikat zum Download anbieten (DER-Format .cer für Windows)."""
@@ -2838,7 +2854,8 @@ async def verify_token_endpoint(request: Request):
         except Exception:
             remaining = 0
         return JSONResponse({"valid": True, "username": username, "remaining_seconds": int(remaining),
-                             "must_change_password": _user_must_change(username)})
+                             "must_change_password": _user_must_change(username),
+                             "is_admin": _is_admin_user(username)})
     return JSONResponse({"valid": False}, status_code=401)
 
 
@@ -3429,11 +3446,22 @@ async def _support_ai_summary(query: str, blocks: list, system_prompt: str, line
 
 
 @app.post("/api/support/query")
-async def support_query(request: Request, user: str = Depends(require_auth)):
-    """Support-Anfrage: RAG- und/oder Jira-Treffer, nach Relevanz (%) sortiert,
-    plus optionale LLM-Kurzzusammenfassung (mit vorangestelltem Prompt)."""
+async def support_query(request: Request):
+    """Support-Anfrage: RAG-, Jira- und/oder Confluence-Treffer, nach Relevanz (%)
+    sortiert, plus optionale LLM-Kurzzusammenfassung (mit vorangestelltem Prompt).
+
+    Auth: Benutzer-Token (Bearer) ODER externer API-Key (Header ``X-API-Key`` bzw.
+    Bearer = ``AGENT_API_KEY``) – fuer Aufrufe aus anderen Anwendungen.
+    """
     import time as _t
     t0 = _t.time()
+    # ── Auth: Benutzer-Token oder externer API-Key ──────────────────
+    _bearer = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = verify_token(_bearer)
+    if not user:
+        user = "api" if _verify_agent_api_key(request) else None
+    if not user:
+        return JSONResponse({"ok": False, "error": "Nicht authentifiziert"}, status_code=401)
     if not _skill_active("support_assistant"):
         return JSONResponse({"ok": False, "error": "Support-Assistent ist nicht aktiv."}, status_code=403)
     body = await request.json()

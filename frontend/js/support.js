@@ -107,7 +107,13 @@
         });
         $('sup-doc-close').addEventListener('click', closeDoc);
         $('sup-doc-modal').addEventListener('click', function (e) { if (e.target === this) closeDoc(); });
-        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDoc(); });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') { closeDoc(); $('sup-help-modal').classList.add('hidden'); }
+        });
+        // Hilfe-Popup (Score & Trefferzahl)
+        $('sup-help-btn').addEventListener('click', function () { $('sup-help-modal').classList.remove('hidden'); });
+        $('sup-help-close').addEventListener('click', function () { $('sup-help-modal').classList.add('hidden'); });
+        $('sup-help-modal').addEventListener('click', function (e) { if (e.target === this) this.classList.add('hidden'); });
     }
 
     function closeDoc() { $('sup-doc-modal').classList.add('hidden'); }

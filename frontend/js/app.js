@@ -3544,7 +3544,73 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             });
         }
 
-        // ── Agent API Key: Generieren ──
+        // ── Agent API Keys (mehrere, benannt) ──
+        (function initAgentKeys() {
+            const listEl = document.getElementById('agent-keys-list');
+            const addBtn = document.getElementById('btn-agent-key-add');
+            const nameInput = document.getElementById('agent-key-newname');
+            const hdr = document.getElementById('prof-sect-api-hdr');
+            if (!listEl) return;
+            const EYE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+            const COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+            const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            const api = (path, opts) => fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token } }, opts || {}));
+
+            function render(keys) {
+                if (!keys.length) { listEl.innerHTML = '<div style="opacity:.6;font-size:.8rem;">Noch keine Keys.</div>'; return; }
+                listEl.innerHTML = '';
+                keys.forEach(k => {
+                    const row = document.createElement('div');
+                    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px;';
+                    row.dataset.id = k.id;
+                    row.innerHTML =
+                        '<input class="ak-name" value="' + esc(k.name) + '" title="Name" style="width:130px;">' +
+                        '<input class="ak-key" type="password" value="' + esc(k.key) + '" readonly style="flex:1;font-family:monospace;font-size:.78rem;">' +
+                        '<button class="btn-icon btn-small ak-show" title="Anzeigen/Verbergen">' + EYE + '</button>' +
+                        '<button class="btn-icon btn-small ak-copy" title="Kopieren">' + COPY + '</button>' +
+                        '<button class="btn-icon btn-small ak-regen" title="Neu generieren">🔄</button>' +
+                        '<button class="btn-icon btn-small ak-del" title="Löschen">🗑️</button>';
+                    listEl.appendChild(row);
+                });
+            }
+            function load() {
+                api('/api/agent/keys').then(r => r.json()).then(d => render((d && d.keys) || []))
+                    .catch(() => { listEl.innerHTML = '<div style="opacity:.6;font-size:.8rem;color:var(--danger);">Fehler beim Laden.</div>'; });
+            }
+            let _loaded = false;
+            function loadOnce() { if (_loaded) return; _loaded = true; load(); }
+            if (hdr) hdr.addEventListener('click', () => setTimeout(loadOnce, 50));
+
+            listEl.addEventListener('click', e => {
+                const row = e.target.closest('[data-id]'); if (!row) return;
+                const id = row.dataset.id, keyInput = row.querySelector('.ak-key');
+                if (e.target.closest('.ak-show')) {
+                    keyInput.type = keyInput.type === 'password' ? 'text' : 'password';
+                } else if (e.target.closest('.ak-copy')) {
+                    navigator.clipboard.writeText(keyInput.value);
+                    const b = e.target.closest('.ak-copy'), o = b.title; b.title = 'Kopiert'; setTimeout(() => b.title = o, 1500);
+                } else if (e.target.closest('.ak-regen')) {
+                    if (!confirm('Diesen Key neu generieren? Der alte Key wird ungültig.')) return;
+                    api('/api/agent/keys/' + id, { method: 'PUT', body: JSON.stringify({ regenerate: true }) }).then(() => load());
+                } else if (e.target.closest('.ak-del')) {
+                    if (!confirm('Diesen Key löschen?')) return;
+                    api('/api/agent/keys/' + id, { method: 'DELETE' }).then(() => load());
+                }
+            });
+            listEl.addEventListener('change', e => {
+                if (e.target.classList.contains('ak-name')) {
+                    const row = e.target.closest('[data-id]');
+                    api('/api/agent/keys/' + row.dataset.id, { method: 'PUT', body: JSON.stringify({ name: e.target.value }) });
+                }
+            });
+            if (addBtn) addBtn.addEventListener('click', () => {
+                const name = (nameInput && nameInput.value.trim()) || '';
+                api('/api/agent/keys', { method: 'POST', body: JSON.stringify({ name: name }) })
+                    .then(r => r.json()).then(() => { if (nameInput) nameInput.value = ''; _loaded = true; load(); });
+            });
+        })();
+
+        // ── Agent API Key: Generieren (Legacy – Element entfernt, no-op) ──
         if (btnGenKey) {
             btnGenKey.addEventListener('click', async () => {
                 // Kryptographisch sicheren Key generieren (Browser Crypto API)

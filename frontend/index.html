@@ -1478,7 +1478,23 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <input type="number" id="support-result-lines" class="config-input" min="1" max="20" step="1" value="2" style="width:100%;box-sizing:border-box;">
                             </div>
                         </div>
-                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;">
+                        <h4 style="margin:18px 0 8px;">Confluence-Eingrenzung</h4>
+                        <p class="kb-hint">Nur wirksam bei aktivem Confluence-Skill. <strong>Whitelist</strong> = nur die gewählten Bereiche durchsuchen; <strong>Blacklist</strong> = alle Bereiche außer den gewählten.</p>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="off">Aus</button>
+                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="whitelist">Whitelist</button>
+                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="blacklist">Blacklist</button>
+                        </div>
+                        <div id="sup-cf-spaces-wrap" style="display:none;">
+                            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+                                <input type="text" id="sup-cf-space-search" class="config-input" placeholder="Bereich suchen…" style="flex:1;min-width:180px;box-sizing:border-box;">
+                                <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="sup-cf-personal"> persönliche</label>
+                            </div>
+                            <div id="sup-cf-space-list" style="max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px;"></div>
+                            <div class="kb-hint" id="sup-cf-selected" style="margin-top:6px;"></div>
+                        </div>
+
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;">
                             <button class="btn-primary" id="support-save" type="button" style="flex:0 0 auto;">Speichern</button>
                             <a class="btn-secondary" href="/support" target="_blank" rel="noopener" style="flex:0 0 auto;text-decoration:none;">Support-Oberfläche öffnen ↗</a>
                             <span id="support-status" style="font-size:0.9em;"></span>
@@ -2272,7 +2288,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/confluence.js?v=5"></script>
     <script src="/static/js/jira.js?v=1"></script>
-    <script src="/static/js/support_admin.js?v=3"></script>
+    <script src="/static/js/support_admin.js?v=4"></script>
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=3"></script>

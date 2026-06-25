@@ -3311,6 +3311,22 @@ def _first_url(text: str) -> str:
     return m.group(0) if m else ""
 
 
+def _rag_source_link(rel: str, chunk: str) -> str:
+    """Quell-Link fuer einen Wissens-Treffer: URL aus dem Chunk, sonst aus der
+    Quelldatei (z.B. der ``> Quelle: <url>``-Kopf importierter Dokumente)."""
+    u = _first_url(chunk)
+    if u:
+        return u
+    try:
+        from backend.tools.knowledge import PROJECT_ROOT
+        p = PROJECT_ROOT / rel
+        if p.is_file() and p.stat().st_size < 300_000:
+            return _first_url(p.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        pass
+    return ""
+
+
 _RAG_TITLE_KEYS = ["topic", "title", "titel", "name", "subject", "betreff",
                    "frage", "question", "summary", "category", "kategorie"]
 _RAG_BODY_KEYS = ["content_text", "content", "text", "antwort", "answer", "body",
@@ -3443,10 +3459,10 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
                 pct = max(1, min(int(pct), 100))
                 stem = rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
                 title, summary = _support_readable(stem, chunk)
+                link = await asyncio.to_thread(_rag_source_link, rel, chunk)
                 blocks.append({"source": "WISSEN", "title": title,
                                "summary": summary, "score": pct,
-                               "link": _first_url(chunk),
-                               "source_label": title})
+                               "link": link, "source_label": title})
         except Exception as e:
             print("[Support] RAG-Suche fehlgeschlagen: %s" % e, flush=True)
 
@@ -3483,7 +3499,14 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
         try:
             cc = _confluence_client()
             if cc.configured:
-                data = await asyncio.to_thread(cc.search, query, None, None, 6)
+                _sa = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
+                _mode = _sa.get("conf_filter_mode") or "off"
+                _spaces = _sa.get("conf_spaces") or []
+                if _mode in ("whitelist", "blacklist") and _spaces:
+                    data = await asyncio.to_thread(cc.search_spaces, query, _spaces,
+                                                   _mode == "blacklist", 6)
+                else:
+                    data = await asyncio.to_thread(cc.search, query, None, None, 6)
                 for i, r in enumerate(data.get("results", [])):
                     title = r.get("title") or "Seite"
                     summary = ""

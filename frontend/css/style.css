@@ -1970,6 +1970,13 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     -webkit-text-fill-color: transparent;
 }
 
+/* Hellmodus: weiss->grau Gradient-Text waere unsichtbar -> solide dunkle Schrift */
+body.light .modal-header h2 {
+    background: none;
+    -webkit-text-fill-color: var(--text-primary);
+    color: var(--text-primary);
+}
+
 .modal-body {
     padding: 2rem;
     overflow-y: auto;
@@ -2019,7 +2026,7 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     font-size: 1.1rem;
     margin-bottom: 0.5rem;
     font-weight: 700;
-    color: #fff;
+    color: var(--text-primary);
 }
 
 .cert-info p {
@@ -2033,7 +2040,7 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     display: inline-flex;
     align-items: center;
     gap: 0.75rem;
-    background: linear-gradient(135deg, var(--accent), var(--secondary));
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
     color: white;
     padding: 0.75rem 1.5rem;
     border-radius: var(--radius-md);
@@ -2080,7 +2087,7 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
 
 .tab-btn.active {
     background: rgba(var(--fg-rgb), 0.05);
-    color: #fff;
+    color: var(--text-primary);
     box-shadow: 0 2px 8px rgba(var(--shadow-rgb), 0.2);
 }
 

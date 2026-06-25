@@ -114,7 +114,7 @@
 .jv-iss-item-title{font-weight:600;color:var(--text-primary);font-size:14px;flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .jv-iss-badge{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600;
-  text-transform:uppercase;letter-spacing:.04em;color:#fff;}
+  text-transform:uppercase;letter-spacing:.04em;color:#fff;background:#6b7280;}
 .jv-iss-badge.bug{background:#dc2626;}
 .jv-iss-badge.feature{background:#3b82f6;}
 .jv-iss-badge.improvement{background:#10b981;}
@@ -553,6 +553,20 @@
         const footer = document.getElementById('jv-iss-footer');
 
         body.innerHTML = `
+            <div class="jv-iss-detail-section" style="background:rgba(var(--fg-rgb),0.03);border-radius:8px;padding:12px;margin-bottom:14px;">
+                <div class="jv-iss-item-head" style="margin-bottom:8px;">
+                    <span class="jv-iss-badge ${_escape(issue.type)}">${_typeLabel(issue.type)}</span>
+                    <span class="jv-iss-badge prio-${_escape(issue.priority)}">${_prioLabel(issue.priority)}</span>
+                    <span class="jv-iss-badge" style="background:${_statusColor(issue.status)}">${_statusLabel(issue.status)}</span>
+                </div>
+                <div class="jv-iss-detail-value" style="font-size:15px;font-weight:600;color:var(--text-primary);">${_escape(issue.title)}</div>
+                <div class="jv-iss-item-meta" style="margin-top:6px;">
+                    <span>👤 ${_escape(issue.author || '—')}</span>
+                    <span>Erstellt: ${_fmtDate(issue.created)}</span>
+                </div>
+                <div class="jv-iss-detail-label" style="margin-top:10px;">Ursprünglicher Text</div>
+                <div class="jv-iss-detail-value" style="white-space:pre-wrap;">${_escape(issue.body) || '<em style="color:var(--text-muted)">(leer)</em>'}</div>
+            </div>
             <div style="margin-bottom:14px;color:var(--text-secondary);font-size:12px;">
                 Hier kann nur Jarvis Status setzen und einen oeffentlichen Kommentar hinterlassen.
             </div>

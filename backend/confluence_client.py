@@ -164,6 +164,21 @@ class ConfluenceClient:
         return self._request("GET", "/rest/api/content/search",
                              params={"cql": cql, "limit": limit})
 
+    def search_spaces(self, query: str = "", spaces: list | None = None,
+                      exclude: bool = False, limit: int = 25) -> dict:
+        """Volltextsuche mit Space-Whitelist (``exclude=False``) bzw.
+        -Blacklist (``exclude=True``). Ohne ``spaces`` wie ``search()``."""
+        clauses = ["type=page"]
+        if query:
+            clauses.append('text ~ "%s"' % query.replace('"', "'"))
+        keys = [s.strip() for s in (spaces or []) if s and s.strip()]
+        if keys:
+            keylist = ", ".join('"%s"' % k.replace('"', "'") for k in keys)
+            clauses.append('space %s (%s)' % ("not in" if exclude else "in", keylist))
+        cql = " and ".join(clauses) + " order by lastmodified desc"
+        return self._request("GET", "/rest/api/content/search",
+                             params={"cql": cql, "limit": limit})
+
     def get_page(self, page_id: str | None = None, title: str | None = None,
                  space: str | None = None) -> dict:
         if page_id:

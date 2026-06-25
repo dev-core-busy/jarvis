@@ -4113,7 +4113,7 @@ def _zip_knowledge_export_split(payload: dict) -> bytes:
 
 
 @app.get("/api/knowledge/export")
-async def export_knowledge_zip(embeddings: int = 0, llm: int = 0, split: int = 0, user: str = Depends(require_auth)):
+async def export_knowledge_zip(embeddings: int = 0, llm: int = 0, split: int = 0, user: str = Depends(require_knowledge_editor)):
     """Exportiert die komplette Wissensbasis als JSON (ZIP) im Informationsextraktor-
     Schema (ein Dokument je Quelle mit title/summary/facts/qa_pairs/content).
     ?embeddings=1 = Roh-Vektoren je Chunk; ?llm=1 = facts/qa_pairs per LLM nachextrahieren;

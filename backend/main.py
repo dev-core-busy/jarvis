@@ -3462,7 +3462,8 @@ async def support_query(request: Request, user: str = Depends(require_auth)):
                 link = await asyncio.to_thread(_rag_source_link, rel, chunk)
                 blocks.append({"source": "WISSEN", "title": title,
                                "summary": summary, "score": pct,
-                               "link": link, "source_label": title})
+                               "link": link, "source_label": title,
+                               "doc": rel, "doc_name": rel.rsplit("/", 1)[-1]})
         except Exception as e:
             print("[Support] RAG-Suche fehlgeschlagen: %s" % e, flush=True)
 

@@ -100,6 +100,36 @@
             var w = document.querySelector('.sup-hist-wrap');
             if (w && !w.contains(e.target)) $('sup-hist-panel').classList.add('hidden');
         });
+        // Dokument-Viewer (lokale Wissensquellen)
+        $('sup-results').addEventListener('click', function (e) {
+            var a = e.target.closest ? e.target.closest('.sup-doc-link') : null;
+            if (a) { e.preventDefault(); openDoc(a.getAttribute('data-doc'), a.getAttribute('data-label')); }
+        });
+        $('sup-doc-close').addEventListener('click', closeDoc);
+        $('sup-doc-modal').addEventListener('click', function (e) { if (e.target === this) closeDoc(); });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDoc(); });
+    }
+
+    function closeDoc() { $('sup-doc-modal').classList.add('hidden'); }
+
+    function openDoc(path, label) {
+        var modal = $('sup-doc-modal');
+        $('sup-doc-title').textContent = label || 'Dokument';
+        $('sup-doc-body').innerHTML = '<span class="sup-spinner"></span> Lade…';
+        modal.classList.remove('hidden');
+        fetch('/api/knowledge/file_read?path=' + encodeURIComponent(path), { headers: authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.ok) {
+                    $('sup-doc-body').textContent = (d && d.error) || 'Dokument konnte nicht geladen werden.';
+                    return;
+                }
+                var content = d.content || '';
+                // JSON hübsch formatieren, falls parsebar
+                try { content = JSON.stringify(JSON.parse(content), null, 2); } catch (e) {}
+                $('sup-doc-body').innerHTML = escLink(content);
+            })
+            .catch(function () { $('sup-doc-body').textContent = 'Dokument konnte nicht geladen werden.'; });
     }
 
     function relTime(ts) {
@@ -204,10 +234,18 @@
 
     function blockHtml(b, i) {
         var label = b.source_label || b.title || 'Quelle';
-        var srcHtml = b.link
-            ? '<div class="sup-block-src">Quelle: <a href="' + esc(b.link)
-              + '" target="_blank" rel="noopener">' + esc(label) + ' ↗</a></div>'
-            : '<div class="sup-block-src">Quelle: ' + esc(label) + '</div>';
+        var inner;
+        if (b.link) {
+            inner = '<a href="' + esc(b.link) + '" target="_blank" rel="noopener">' + esc(label) + ' ↗</a>';
+        } else if (b.doc) {
+            // lokales Wissensdokument → im Viewer öffnen
+            var dl = label + (b.doc_name ? ' (' + b.doc_name + ')' : '');
+            inner = '<a href="#" class="sup-doc-link" data-doc="' + esc(b.doc)
+                + '" data-label="' + esc(dl) + '">' + esc(dl) + '</a>';
+        } else {
+            inner = esc(label);
+        }
+        var srcHtml = '<div class="sup-block-src">Quelle: ' + inner + '</div>';
         return '<div class="sup-block">'
             + '<div class="sup-block-head">'
             + '<span class="sup-block-num">' + (i + 1) + '.</span>'

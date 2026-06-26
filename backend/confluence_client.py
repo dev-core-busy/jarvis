@@ -179,6 +179,23 @@ class ConfluenceClient:
         return self._request("GET", "/rest/api/content/search",
                              params={"cql": cql, "limit": limit})
 
+    def search_advanced(self, terms: list | None = None, spaces: list | None = None,
+                        exclude: bool = False, limit: int = 25) -> dict:
+        """Volltextsuche mit mehreren OR-verknuepften Begriffen + optionalem
+        Space-Filter (Whitelist/Blacklist). Sucht NICHT die ganze Phrase."""
+        clauses = ["type=page"]
+        tt = [t for t in (terms or []) if t and t.strip()]
+        if tt:
+            ors = " OR ".join('text ~ "%s"' % t.replace('"', "'") for t in tt)
+            clauses.append("(%s)" % ors)
+        keys = [s.strip() for s in (spaces or []) if s and s.strip()]
+        if keys:
+            keylist = ", ".join('"%s"' % k.replace('"', "'") for k in keys)
+            clauses.append('space %s (%s)' % ("not in" if exclude else "in", keylist))
+        cql = " and ".join(clauses) + " order by lastmodified desc"
+        return self._request("GET", "/rest/api/content/search",
+                             params={"cql": cql, "limit": limit})
+
     def get_page(self, page_id: str | None = None, title: str | None = None,
                  space: str | None = None) -> dict:
         if page_id:

@@ -3359,6 +3359,43 @@ def _support_tokens(s: str) -> set:
             if len(t) > 2 and t not in _SUPPORT_STOP}
 
 
+def _support_terms(query: str) -> list:
+    """Extrahiert sinnvolle Suchbegriffe aus der Anfrage – Codes/Identifier
+    (z.B. CRM-10550, NXDCS-357), Kunden-/Auftragsnummern, zitierte Phrasen,
+    sonst bedeutungstragende Woerter. Verhindert, dass die ganze Anfrage als
+    Phrase gesucht wird (was bei Saetzen 0 Treffer liefert)."""
+    import re
+    q = query or ""
+    terms: list[str] = []
+
+    def _add(x):
+        x = (x or "").strip()
+        if x and x not in terms:
+            terms.append(x)
+
+    for m in re.findall(r"\b[A-Za-zÄÖÜäöü]{2,}-?\d{2,}\b", q):  # CRM-10550, ABC123
+        _add(m)
+    for m in re.findall(r"\b\d{4,}\b", q):                       # lange Zahlen
+        _add(m)
+    for m in re.findall(r'"([^"]{2,})"', q):                     # zitierte Phrasen
+        _add(m)
+    if terms:
+        return terms[:6]
+    for w in re.split(r"[^0-9A-Za-zäöüÄÖÜß]+", q):               # sonst: Woerter
+        if len(w) > 3 and w.lower() not in _SUPPORT_STOP:
+            _add(w)
+    return terms[:6] or ([q.strip()] if q.strip() else [])
+
+
+def _support_jira_jql(query: str) -> str:
+    """JQL aus den extrahierten Begriffen (OR-verknuepft), nach Aktualitaet."""
+    terms = _support_terms(query)
+    if not terms:
+        return 'ORDER BY updated DESC'
+    ors = " OR ".join('text ~ "%s"' % t.replace('"', "'") for t in terms)
+    return "(%s) ORDER BY updated DESC" % ors
+
+
 @app.get("/support", response_class=HTMLResponse)
 async def support_page():
     """Support-Oberflaeche ausliefern – nur wenn der Skill aktiv ist."""
@@ -3566,8 +3603,8 @@ async def support_query(request: Request):
             from backend.jira_client import JiraError, issue_brief
             c = _jira_client()
             if c.configured:
-                jql = c.build_jql(query)
-                data = await asyncio.to_thread(c.search, jql, 10)
+                jql = _support_jira_jql(query)
+                data = await asyncio.to_thread(c.search, jql, 12)
                 for i, it in enumerate(data.get("issues", [])):
                     b = issue_brief(it, c.base)
                     overlap = len(qtokens & _support_tokens(b.get("summary") or "")) / (len(qtokens) or 1)
@@ -3596,11 +3633,10 @@ async def support_query(request: Request):
                 _sa = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
                 _mode = _sa.get("conf_filter_mode") or "off"
                 _spaces = _sa.get("conf_spaces") or []
-                if _mode in ("whitelist", "blacklist") and _spaces:
-                    data = await asyncio.to_thread(cc.search_spaces, query, _spaces,
-                                                   _mode == "blacklist", 6)
-                else:
-                    data = await asyncio.to_thread(cc.search, query, None, None, 6)
+                _terms = _support_terms(query)
+                _filt_spaces = _spaces if (_mode in ("whitelist", "blacklist") and _spaces) else None
+                data = await asyncio.to_thread(cc.search_advanced, _terms, _filt_spaces,
+                                               _mode == "blacklist", 6)
                 for i, r in enumerate(data.get("results", [])):
                     title = r.get("title") or "Seite"
                     summary = ""

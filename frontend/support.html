@@ -227,6 +227,9 @@
         <div class="sup-logo logo-core">J</div>
         <div class="sup-title brand-app-name">Support Assistent</div>
         <div class="sup-spacer"></div>
+        <button class="btn-theme" id="sup-issues-btn" title="Issues / Feedback" onclick="window.JarvisIssues && window.JarvisIssues.open()" style="position:relative;">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </button>
         <button class="btn-theme" id="sup-help-btn" title="Hilfe: Score & Trefferzahl" style="font-weight:700;">?</button>
         <div class="sup-hist-wrap">
             <button class="sup-hist-btn" id="sup-hist-btn" title="Suchverlauf">
@@ -289,6 +292,17 @@
                     </select>
                 </label>
             </div>
+            <div class="sup-filters" id="sup-user-display" style="border-top:none;padding-top:6px;">
+                <label>KI-Zeilen
+                    <input type="number" id="sup-u-sumlines" min="2" step="1"
+                        style="width:58px;background:rgba(var(--fg-rgb),.05);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:5px 6px;font-size:0.82rem;font-family:var(--font-body);">
+                </label>
+                <label>Antwortzeilen
+                    <input type="number" id="sup-u-reslines" min="2" step="1"
+                        style="width:58px;background:rgba(var(--fg-rgb),.05);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:5px 6px;font-size:0.82rem;font-family:var(--font-body);">
+                </label>
+                <span id="sup-u-hint" style="font-size:0.72rem;color:var(--text-muted);align-self:center;"></span>
+            </div>
         </div>
 
         <div id="sup-meta" class="sup-meta hidden"></div>
@@ -330,6 +344,7 @@
 
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=8"></script>
-<script src="/static/js/support.js?v=9"></script>
+<script src="/static/js/issues.js?v=3"></script>
+<script src="/static/js/support.js?v=10"></script>
 </body>
 </html>

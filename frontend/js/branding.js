@@ -123,6 +123,13 @@
                 }
             });
         });
+        // Produkt-/Seitenname (z.B. /support, /portal): 'Jarvis' → Firmenname
+        document.querySelectorAll('.brand-app-name').forEach(function (el) {
+            if (/jarvis/i.test(el.textContent)) {
+                if (el.dataset.brandOrig === undefined) el.dataset.brandOrig = el.textContent;
+                el.textContent = el.textContent.replace(/jarvis/ig, name);
+            }
+        });
     }
 
     // Macht jegliches angewandte Branding rueckgaengig → Standard-Jarvis-Design.

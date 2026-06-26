@@ -81,11 +81,16 @@
         }
         #sup-input:focus { border-color: var(--accent); }
         .sup-btn {
-            background: var(--gradient); color: #fff; border: none; cursor: pointer;
+            background: var(--accent); color: #fff; border: none; cursor: pointer;
             border-radius: var(--radius-md); padding: 0 22px; font-size: 0.95rem;
             font-weight: 600; white-space: nowrap;
         }
+        .sup-btn:hover { background: var(--accent-hover); }
         .sup-btn:disabled { opacity: .55; cursor: default; }
+        .lang-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; height: 34px; }
+        .lang-toggle-btn { background: none; border: none; color: var(--text-secondary); padding: 0 9px;
+            cursor: pointer; font-size: 0.78rem; font-weight: 700; font-family: var(--font-body); }
+        .lang-toggle-btn.active { background: var(--accent); color: #fff; }
         .sup-opts { display: flex; gap: 18px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
         .sup-opts label { display: flex; align-items: center; gap: 7px; font-size: 0.88rem;
             color: var(--text-secondary); cursor: pointer; }
@@ -211,7 +216,7 @@
 <!-- Login -->
 <div id="sup-login" class="sup-login hidden">
     <div class="sup-login-card">
-        <div class="sup-login-avatar logo-core">J</div>
+        <div class="sup-login-avatar login-avatar">J</div>
         <h1 class="brand-app-name">Support Assistent</h1>
         <form id="sup-login-form">
             <input type="text" id="sup-login-user" placeholder="Benutzername" autocomplete="username" required>
@@ -225,9 +230,13 @@
 <!-- App -->
 <div id="sup-app" class="hidden">
     <div class="sup-topbar">
-        <div class="sup-logo logo-core">J</div>
-        <div class="sup-title brand-app-name">Support Assistent</div>
+        <div class="sup-logo topbar-avatar">J</div>
+        <div class="sup-title"><span class="brand-app-name">Jarvis</span> Support</div>
         <div class="sup-spacer"></div>
+        <div class="lang-toggle" id="sup-lang-toggle">
+            <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
+            <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang && window.setLang('en')" title="English">EN</button>
+        </div>
         <button class="btn-theme" id="sup-issues-btn" title="Issues / Feedback" onclick="window.JarvisIssues && window.JarvisIssues.open()" style="position:relative;">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         </button>
@@ -343,9 +352,10 @@
     </div>
 </div>
 
+<script src="/static/js/i18n.js?v=26"></script>
 <script src="/static/js/theme.js?v=2"></script>
-<script src="/static/js/branding.js?v=8"></script>
+<script src="/static/js/branding.js?v=9"></script>
 <script src="/static/js/issues.js?v=3"></script>
-<script src="/static/js/support.js?v=10"></script>
+<script src="/static/js/support.js?v=11"></script>
 </body>
 </html>

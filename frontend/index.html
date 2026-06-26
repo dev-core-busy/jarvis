@@ -1463,14 +1463,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <textarea id="support-prompt" class="config-input" rows="8" placeholder="z.B. Du bist der Support-Assistent der Firma X. Antworte sachlich, kurz und auf Deutsch …" style="width:100%;box-sizing:border-box;font-family:var(--font-body);line-height:1.5;resize:vertical;"></textarea>
 
                         <h4 style="margin:18px 0 8px;">Darstellung</h4>
+                        <p class="kb-hint">Diese Werte sind das <strong>Maximum</strong>. Benutzer können auf der Support-Oberfläche ihren eigenen Wert zwischen 2 und diesem Maximum wählen (sitzungsüberdauernd gespeichert).</p>
                         <div style="display:flex;gap:14px;flex-wrap:wrap;">
                             <div class="form-group" style="max-width:240px;">
-                                <label>KI-Zusammenfassung – Länge (Zeilen/Sätze)</label>
-                                <input type="number" id="support-lines" class="config-input" min="1" max="20" step="1" value="5" style="width:100%;box-sizing:border-box;">
+                                <label>KI-Zusammenfassung – max. Länge (Zeilen/Sätze)</label>
+                                <input type="number" id="support-lines" class="config-input" min="2" max="20" step="1" value="5" style="width:100%;box-sizing:border-box;">
                             </div>
                             <div class="form-group" style="max-width:240px;">
-                                <label>Antwortzeilen pro Treffer</label>
-                                <input type="number" id="support-result-lines" class="config-input" min="1" max="20" step="1" value="2" style="width:100%;box-sizing:border-box;">
+                                <label>Max. Antwortzeilen pro Treffer</label>
+                                <input type="number" id="support-result-lines" class="config-input" min="2" max="20" step="1" value="2" style="width:100%;box-sizing:border-box;">
                             </div>
                         </div>
                         <h4 style="margin:18px 0 8px;">Confluence-Eingrenzung</h4>

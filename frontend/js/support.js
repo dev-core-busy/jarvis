@@ -47,6 +47,10 @@
     function setPref(key, on) {
         localStorage.setItem('jarvis_support_' + key, on ? '1' : '0');
     }
+    function clampNum(v, lo, hi) { v = parseInt(v, 10); if (isNaN(v)) v = hi; return Math.max(lo, Math.min(v, hi)); }
+    function getNumPref(key) { var v = localStorage.getItem('jarvis_support_' + key); return v === null ? null : parseInt(v, 10); }
+    function setNumPref(key, n) { localStorage.setItem('jarvis_support_' + key, String(n)); }
+    var _supMax = { sum: 5, res: 2 };
 
     function loadStatus() {
         fetch('/api/support/status', { headers: authHeaders() })
@@ -61,6 +65,20 @@
                 $('sup-opt-conf').checked = getPref('conf');
                 $('sup-opt-rag').checked = getPref('rag');
                 $('sup-opt-ai').checked = getPref('ai');
+                // Darstellungs-Parameter: Maxima vom Server, Nutzerwert aus localStorage
+                _supMax.sum = parseInt(d.summary_lines_max, 10) || 5;
+                _supMax.res = parseInt(d.result_lines_max, 10) || 2;
+                var sEl = $('sup-u-sumlines'), rEl = $('sup-u-reslines');
+                if (sEl) {
+                    sEl.max = _supMax.sum;
+                    var sp = getNumPref('sumlines'); sEl.value = clampNum(sp === null ? _supMax.sum : sp, 2, _supMax.sum);
+                }
+                if (rEl) {
+                    rEl.max = _supMax.res;
+                    var rp = getNumPref('reslines'); rEl.value = clampNum(rp === null ? _supMax.res : rp, 2, _supMax.res);
+                }
+                var hint = $('sup-u-hint');
+                if (hint) hint.textContent = '(max. ' + _supMax.sum + ' / ' + _supMax.res + ')';
             })
             .catch(function () {});
     }
@@ -83,6 +101,15 @@
         $('sup-opt-conf').addEventListener('change', function () { setPref('conf', this.checked); });
         $('sup-opt-rag').addEventListener('change', function () { setPref('rag', this.checked); });
         $('sup-opt-ai').addEventListener('change', function () { setPref('ai', this.checked); });
+        // Darstellungs-Parameter (Nutzerwert 2 … Maximum, sitzungsüberdauernd)
+        var sEl = $('sup-u-sumlines'), rEl = $('sup-u-reslines');
+        if (sEl) sEl.addEventListener('change', function () {
+            var v = clampNum(this.value, 2, _supMax.sum); this.value = v; setNumPref('sumlines', v);
+        });
+        if (rEl) rEl.addEventListener('change', function () {
+            var v = clampNum(this.value, 2, _supMax.res); this.value = v; setNumPref('reslines', v);
+            try { document.documentElement.style.setProperty('--sup-rl', String(v)); } catch (e) {}  // sofort anwenden
+        });
         // Eingrenzungs-Pulldowns → Ergebnis live neu filtern (clientseitig)
         ['sup-f-source', 'sup-f-rel', 'sup-f-sort', 'sup-f-limit'].forEach(function (id) {
             var el = $(id);
@@ -202,7 +229,8 @@
         fetch('/api/support/query', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ text: text, jira: useJira, confluence: useConf, rag: useRag, ai: useAi })
+            body: JSON.stringify({ text: text, jira: useJira, confluence: useConf, rag: useRag, ai: useAi,
+                                   summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) })
         })
             .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
             .then(function (d) {
@@ -226,8 +254,10 @@
 
     function render(d) {
         _lastData = d;
-        // Zeilen-Begrenzung pro Treffer aus der Skill-Config anwenden
-        try { document.documentElement.style.setProperty('--sup-rl', String(d.result_lines || 2)); } catch (e) {}
+        // Antwortzeilen: Nutzerwert, begrenzt auf das Admin-Maximum
+        var rMax = parseInt(d.result_lines_max || d.result_lines, 10) || 2;
+        var rUser = clampNum(getNumPref('reslines') === null ? rMax : getNumPref('reslines'), 2, rMax);
+        try { document.documentElement.style.setProperty('--sup-rl', String(rUser)); } catch (e) {}
         var html = '';
         if (d.ai_summary) {
             html += '<div class="sup-ai-card"><div class="sup-ai-label">KI-Zusammenfassung</div>'

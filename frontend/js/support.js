@@ -230,6 +230,7 @@
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ text: text, jira: useJira, confluence: useConf, rag: useRag, ai: useAi,
+                                   lang: (localStorage.getItem('jarvis_lang') || 'de'),
                                    summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) })
         })
             .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })

@@ -3521,7 +3521,8 @@ def _support_readable(stem: str, chunk: str) -> tuple[str, str]:
     return (_two_line(title, 90) or (stem or "Dokument")), _two_line(summary, 600)
 
 
-async def _support_ai_summary(query: str, blocks: list, system_prompt: str, lines: int = 5) -> str:
+async def _support_ai_summary(query: str, blocks: list, system_prompt: str, lines: int = 5,
+                              lang: str = "de") -> str:
     """LLM-Kurzzusammenfassung der Top-Quellen (best effort). Stellt das
     konfigurierte Prompt der Instruktion voran. ``lines`` begrenzt die Laenge."""
     if not blocks:
@@ -3533,9 +3534,14 @@ async def _support_ai_summary(query: str, blocks: list, system_prompt: str, line
     try:
         from backend.llm import get_provider
         from google.genai import types
-        base = ("Du bist ein Support-Assistent. Beantworte die Anfrage in hoechstens %d "
-                "Saetzen auf Basis der gelieferten Quellen. Antworte auf Deutsch in "
-                "lesbarem Fliesstext (kein JSON, keine Quellen-IDs)." % lines)
+        if str(lang).lower().startswith("en"):
+            base = ("You are a support assistant. Answer the request in at most %d "
+                    "sentences based on the provided sources. Reply in English as "
+                    "readable prose (no JSON, no source IDs)." % lines)
+        else:
+            base = ("Du bist ein Support-Assistent. Beantworte die Anfrage in hoechstens %d "
+                    "Saetzen auf Basis der gelieferten Quellen. Antworte auf Deutsch in "
+                    "lesbarem Fliesstext (kein JSON, keine Quellen-IDs)." % lines)
         sysp = ((system_prompt.strip() + "\n\n") if system_prompt.strip() else "") + base
         src = "\n".join("- [%s] %s: %s" % (b["source"], b["title"], b["summary"])
                         for b in blocks[:6])
@@ -3579,6 +3585,7 @@ async def support_query(request: Request):
     use_jira = body.get("jira", True)
     use_conf = body.get("confluence", True)
     use_ai = body.get("ai", True)
+    lang = (body.get("lang") or "de")
     if not query:
         return JSONResponse({"ok": False, "error": "Bitte eine Anfrage eingeben."}, status_code=400)
 
@@ -3682,7 +3689,7 @@ async def support_query(request: Request):
 
     ai_summary = ""
     if use_ai:
-        ai_summary = await _support_ai_summary(query, blocks, cfg.get("system_prompt") or "", eff_sum)
+        ai_summary = await _support_ai_summary(query, blocks, cfg.get("system_prompt") or "", eff_sum, lang)
 
     _record_support_history(user, query, len(blocks))
 

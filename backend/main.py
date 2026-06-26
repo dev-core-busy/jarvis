@@ -3410,11 +3410,18 @@ async def support_page():
 async def support_status(user: str = Depends(require_auth)):
     """Status fuer die Support-Oberflaeche (Checkbox-Sichtbarkeit)."""
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
+    def _cap(v, d):
+        try:
+            return max(2, min(int(v), 20))
+        except (TypeError, ValueError):
+            return d
     return JSONResponse({
         "active": _skill_active("support_assistant"),
         "jira_active": _skill_active("jira"),
         "confluence_active": _skill_active("confluence"),
         "has_prompt": bool((cfg.get("system_prompt") or "").strip()),
+        "summary_lines_max": _cap(cfg.get("summary_lines"), 5),
+        "result_lines_max": _cap(cfg.get("result_lines"), 2),
     })
 
 
@@ -3660,14 +3667,22 @@ async def support_query(request: Request):
     blocks.sort(key=lambda b: b["score"], reverse=True)
 
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
+
+    def _cap(v, d):
+        try:
+            return max(2, min(int(v), 20))
+        except (TypeError, ValueError):
+            return d
+    sum_max = _cap(cfg.get("summary_lines"), 5)   # Admin-Maximum
+    res_max = _cap(cfg.get("result_lines"), 2)
+    # Benutzer-Vorgabe (sitzungsueberdauernd im Browser) – auf [2, Maximum] begrenzt
+    eff_sum = sum_max
+    if body.get("summary_lines") is not None:
+        eff_sum = max(2, min(_cap(body.get("summary_lines"), sum_max), sum_max))
+
     ai_summary = ""
     if use_ai:
-        ai_summary = await _support_ai_summary(query, blocks, cfg.get("system_prompt") or "",
-                                               cfg.get("summary_lines") or 5)
-    try:
-        result_lines = max(1, min(int(cfg.get("result_lines") or 2), 20))
-    except (TypeError, ValueError):
-        result_lines = 2
+        ai_summary = await _support_ai_summary(query, blocks, cfg.get("system_prompt") or "", eff_sum)
 
     _record_support_history(user, query, len(blocks))
 
@@ -3677,7 +3692,9 @@ async def support_query(request: Request):
         "confluence_active": _skill_active("confluence"),
         "blocks": blocks,
         "ai_summary": ai_summary,
-        "result_lines": result_lines,
+        "result_lines": res_max,           # Maximum (Anzeige-Begrenzung clientseitig)
+        "summary_lines_max": sum_max,
+        "result_lines_max": res_max,
         "took_ms": int((_t.time() - t0) * 1000),
     })
 

@@ -143,13 +143,13 @@
         save: function () {
             var lines = parseInt(($('support-lines') ? $('support-lines').value : '5'), 10);
             if (!lines || lines < 1) lines = 5;
-            if (lines > 20) lines = 20;
+            if (lines > 50) lines = 50;
             var rlines = parseInt(($('support-result-lines') ? $('support-result-lines').value : '2'), 10);
             if (!rlines || rlines < 1) rlines = 2;
-            if (rlines > 20) rlines = 20;
+            if (rlines > 50) rlines = 50;
             var jlimit = parseInt(($('support-jira-limit') ? $('support-jira-limit').value : '12'), 10);
             if (!jlimit || jlimit < 1) jlimit = 12;
-            if (jlimit > 50) jlimit = 50;
+            if (jlimit > 1000) jlimit = 1000;
             var body = {
                 system_prompt: ($('support-prompt') ? $('support-prompt').value : ''),
                 summary_lines: lines,

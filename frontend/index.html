@@ -237,8 +237,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         </div>
     </div>
 
-    <!-- ═══ Support-API Hilfe-Modal ═══ -->
-    <div id="support-api-modal" class="modal">
+    <!-- ═══ Support-API Hilfe-Modal (ueber dem Settings-Modal, daher hoeherer z-index) ═══ -->
+    <div id="support-api-modal" class="modal" style="z-index:10000;">
         <div class="modal-content glass">
             <div class="modal-header">
                 <h2>🔌 Support-API – REST-Zugriffe</h2>
@@ -2369,7 +2369,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=33"></script>
+    <script src="/static/js/i18n.js?v=34"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=15"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -2387,7 +2387,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=4"></script>
-    <script src="/static/js/branding.js?v=10"></script>
+    <script src="/static/js/branding.js?v=11"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/app.js?v=138"></script>
 </body>

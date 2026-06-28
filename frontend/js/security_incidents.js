@@ -153,6 +153,9 @@
             var rEl = $('blocked-reason');
             if (rEl) rEl.textContent = reason ? (T('security.blocked_reason_label', 'Grund: ') + reason) : '';
             Mgr.renderIncidents($('blocked-incidents'), incidents || []);
+            // CSS-unabhaengig anzeigen (funktioniert auf allen Seiten, auch ohne
+            // .modal-Styles wie portal.html).
+            m.style.display = 'flex';
             m.classList.add('open');
             if (window.applyLang) window.applyLang();
         },

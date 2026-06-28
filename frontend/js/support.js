@@ -20,6 +20,8 @@
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
         });
     }
+    // Übersetzung mit Fallback (deutscher Text), falls i18n nicht geladen
+    function T(key, def) { return (window.t && window.t(key)) || def; }
     // Escapen + http(s)-URLs als klickbare Links umwandeln
     function escLink(s) {
         return esc(s).replace(/(https?:\/\/[^\s<]+)/g, function (u) {
@@ -59,12 +61,14 @@
                 if (!d) return;
                 // Sichtbarkeit je nach aktivem Skill
                 $('sup-opt-jira-wrap').classList.toggle('hidden', !d.jira_active);
+                $('sup-opt-open-wrap').classList.toggle('hidden', !d.jira_active);
                 $('sup-opt-conf-wrap').classList.toggle('hidden', !d.confluence_active);
                 // Gespeicherte Vorbelegung anwenden (Default: an)
                 $('sup-opt-jira').checked = getPref('jira');
                 $('sup-opt-conf').checked = getPref('conf');
                 $('sup-opt-rag').checked = getPref('rag');
                 $('sup-opt-ai').checked = getPref('ai');
+                $('sup-opt-open').checked = getPref('open');
                 // Darstellungs-Parameter: Maxima vom Server, Nutzerwert aus localStorage
                 _supMax.sum = parseInt(d.summary_lines_max, 10) || 5;
                 _supMax.res = parseInt(d.result_lines_max, 10) || 2;
@@ -101,6 +105,16 @@
         $('sup-opt-conf').addEventListener('change', function () { setPref('conf', this.checked); });
         $('sup-opt-rag').addEventListener('change', function () { setPref('rag', this.checked); });
         $('sup-opt-ai').addEventListener('change', function () { setPref('ai', this.checked); });
+        $('sup-opt-open').addEventListener('change', function () { setPref('open', this.checked); });
+        // Sprachwechsel: statische Labels via applyLang (i18n.js), dynamische Treffer neu rendern
+        if (window.setLang && !window._supLangWrapped) {
+            window._supLangWrapped = true;
+            var _origSetLang = window.setLang;
+            window.setLang = function (l) {
+                _origSetLang(l);
+                try { if (_lastData) render(_lastData); } catch (e) {}
+            };
+        }
         // Darstellungs-Parameter (Nutzerwert 2 … Maximum, sitzungsüberdauernd)
         var sEl = $('sup-u-sumlines'), rEl = $('sup-u-reslines');
         if (sEl) sEl.addEventListener('change', function () {
@@ -167,10 +181,12 @@
 
     function relTime(ts) {
         var diff = Math.floor(Date.now() / 1000) - (ts || 0);
-        if (diff < 60) return 'gerade eben';
-        if (diff < 3600) return 'vor ' + Math.floor(diff / 60) + ' Min';
-        if (diff < 86400) return 'vor ' + Math.floor(diff / 3600) + ' Std';
-        if (diff < 604800) return 'vor ' + Math.floor(diff / 86400) + ' Tg';
+        var en = (localStorage.getItem('jarvis_lang') || 'de') === 'en';
+        var pre = en ? '' : 'vor ', post = en ? ' ago' : '';
+        if (diff < 60) return T('sup.now', 'gerade eben');
+        if (diff < 3600) return pre + Math.floor(diff / 60) + ' ' + T('sup.min', 'Min') + post;
+        if (diff < 86400) return pre + Math.floor(diff / 3600) + ' ' + T('sup.hours', 'Std') + post;
+        if (diff < 604800) return pre + Math.floor(diff / 86400) + ' ' + T('sup.days', 'Tg') + post;
         try { return new Date(ts * 1000).toLocaleDateString(); } catch (e) { return ''; }
     }
 
@@ -182,14 +198,14 @@
             .then(function (d) {
                 if (!d) return;
                 var entries = (d && d.entries) || [];
-                if (!entries.length) { list.innerHTML = '<div class="sup-hist-empty">Noch keine Anfragen.</div>'; return; }
+                if (!entries.length) { list.innerHTML = '<div class="sup-hist-empty">' + esc(T('sup.hist_empty', 'Noch keine Anfragen.')) + '</div>'; return; }
                 list.innerHTML = '';
                 entries.forEach(function (e) {
                     var item = document.createElement('div');
                     item.className = 'sup-hist-item';
                     item.innerHTML = '<div class="sup-hist-q">' + esc(e.query) + '</div>'
                         + '<div class="sup-hist-meta">' + relTime(e.ts)
-                        + (typeof e.total === 'number' ? ' · ' + e.total + ' Treffer' : '') + '</div>';
+                        + (typeof e.total === 'number' ? ' · ' + e.total + ' ' + T('sup.hits', 'Treffer') : '') + '</div>';
                     item.addEventListener('click', function () {
                         $('sup-hist-panel').classList.add('hidden');
                         $('sup-input').value = e.query;
@@ -198,7 +214,7 @@
                     list.appendChild(item);
                 });
             })
-            .catch(function () { list.innerHTML = '<div class="sup-hist-empty">Fehler beim Laden.</div>'; });
+            .catch(function () { list.innerHTML = '<div class="sup-hist-empty">' + esc(T('sup.hist_err', 'Fehler beim Laden.')) + '</div>'; });
     }
 
     function clearHistory() {
@@ -216,20 +232,22 @@
         var useConf = !confWrap.classList.contains('hidden') && $('sup-opt-conf').checked;
         var useRag = $('sup-opt-rag').checked;
         var useAi = $('sup-opt-ai').checked;
+        var useOpen = $('sup-opt-open').checked;
 
         var btn = $('sup-search-btn'); btn.disabled = true;
         var meta = $('sup-meta'); meta.classList.remove('hidden');
-        meta.innerHTML = '<span class="sup-spinner"></span>Suche läuft…';
+        meta.innerHTML = '<span class="sup-spinner"></span>' + esc(T('sup.searching', 'Suche läuft…'));
         var box = $('sup-results');
         box.innerHTML = useAi
-            ? '<div class="sup-ai-card"><div class="sup-ai-label">KI-Zusammenfassung</div>'
-              + '<div class="sup-ai-text"><span class="sup-spinner"></span>Quellen werden ausgewertet…</div></div>'
-            : '<div class="sup-empty"><span class="sup-spinner"></span>Suche läuft…</div>';
+            ? '<div class="sup-ai-card"><div class="sup-ai-label">' + esc(T('sup.ai_label', 'KI-Zusammenfassung')) + '</div>'
+              + '<div class="sup-ai-text"><span class="sup-spinner"></span>' + esc(T('sup.evaluating', 'Quellen werden ausgewertet…')) + '</div></div>'
+            : '<div class="sup-empty"><span class="sup-spinner"></span>' + esc(T('sup.searching', 'Suche läuft…')) + '</div>';
 
         fetch('/api/support/query', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ text: text, jira: useJira, confluence: useConf, rag: useRag, ai: useAi,
+                                   open_only: useOpen,
                                    lang: (localStorage.getItem('jarvis_lang') || 'de'),
                                    summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) })
         })
@@ -239,7 +257,7 @@
                 if (!d) return;
                 if (!d.ok) {
                     meta.textContent = '';
-                    box.innerHTML = '<div class="sup-empty">' + esc(d.error || 'Suche fehlgeschlagen') + '</div>';
+                    box.innerHTML = '<div class="sup-empty">' + esc(d.error || T('sup.search_failed', 'Suche fehlgeschlagen.')) + '</div>';
                     return;
                 }
                 render(d);
@@ -247,7 +265,7 @@
             .catch(function () {
                 btn.disabled = false;
                 meta.textContent = '';
-                box.innerHTML = '<div class="sup-empty">Suche fehlgeschlagen.</div>';
+                box.innerHTML = '<div class="sup-empty">' + esc(T('sup.search_failed', 'Suche fehlgeschlagen.')) + '</div>';
             });
     }
 
@@ -261,7 +279,7 @@
         try { document.documentElement.style.setProperty('--sup-rl', String(rUser)); } catch (e) {}
         var html = '';
         if (d.ai_summary) {
-            html += '<div class="sup-ai-card"><div class="sup-ai-label">KI-Zusammenfassung</div>'
+            html += '<div class="sup-ai-card"><div class="sup-ai-label">' + esc(T('sup.ai_label', 'KI-Zusammenfassung')) + '</div>'
                 + '<div class="sup-ai-text">' + escLink(d.ai_summary) + '</div></div>';
         }
         html += '<div id="sup-blocks"></div>';
@@ -282,7 +300,7 @@
         } else {
             inner = esc(label);
         }
-        var srcHtml = '<div class="sup-block-src">Quelle: ' + inner + '</div>';
+        var srcHtml = '<div class="sup-block-src">' + esc(T('sup.source_prefix', 'Quelle:')) + ' ' + inner + '</div>';
         return '<div class="sup-block">'
             + '<div class="sup-block-head">'
             + '<span class="sup-block-num">' + (i + 1) + '.</span>'
@@ -319,15 +337,16 @@
         else list.sort(function (a, b) { return b.score - a.score; });
         if (limit) list = list.slice(0, limit);
 
-        $('sup-meta').innerHTML = 'Ergebnis für <strong>"' + esc(_lastData.query) + '"</strong> ('
-            + list.length + ' von ' + all.length + ' Treffer'
+        $('sup-meta').innerHTML = T('sup.result_for', 'Ergebnis für') + ' <strong>"' + esc(_lastData.query) + '"</strong> ('
+            + list.length + ' ' + T('sup.of', 'von') + ' ' + all.length + ' ' + T('sup.hits', 'Treffer')
             + (_lastData.took_ms ? ' · ' + _lastData.took_ms + ' ms' : '') + ')';
 
         var box = $('sup-blocks');
         if (!box) return;
         if (!list.length) {
             box.innerHTML = '<div class="sup-empty">'
-                + (all.length ? 'Keine Treffer mit diesen Filtern.' : 'Keine passenden Quellen gefunden.')
+                + esc(all.length ? T('sup.no_filter', 'Keine Treffer mit diesen Filtern.')
+                                 : T('sup.no_results', 'Keine passenden Quellen gefunden.'))
                 + '</div>';
             return;
         }

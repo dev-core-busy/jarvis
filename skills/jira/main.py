@@ -84,10 +84,12 @@ class JiraSearchTool(_Base):
 
     @property
     def description(self):
-        return ("Sucht Jira-Tickets nach Inhalten (Volltext ueber Zusammenfassung, "
-                "Beschreibung, Kommentare). Optional gefiltert nach Projekt, Status, "
-                "Typ und Bearbeiter. Alternativ kann eine vollstaendige JQL uebergeben "
-                "werden. Liefert Key, Titel, Status, Typ und Link.")
+        return ("Sucht Jira-Tickets. Volltext ueber Zusammenfassung/Beschreibung/Kommentare, "
+                "ODER – wenn die Query eine KUNDEN-/ORGANISATIONS-ID wie 'crm-10550' ist – "
+                "alle diesem Kunden zugeordneten Tickets (Organisationsfeld). Genau hierfuer "
+                "verwenden bei Fragen wie 'Tickets von/zu crm-XXXX'. Optional gefiltert nach "
+                "Projekt, Status, Typ, Bearbeiter; oder vollstaendige JQL. Liefert Key, Titel, "
+                "Status, Typ, Link.")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
@@ -137,11 +139,13 @@ class JiraGetIssueTool(_Base):
 
     @property
     def description(self):
-        return "Ruft ein Jira-Ticket per Key ab (Titel, Status, Beschreibung, letzte Kommentare)."
+        return ("Ruft EIN Jira-Ticket per Issue-Key ab (z.B. NXCIS-1234). "
+                "NICHT fuer Kunden-/Organisations-IDs wie 'crm-10550' verwenden – dafuer "
+                "jira_search nutzen (das findet alle Tickets des Kunden).")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
-            "key": {"type": "STRING", "description": "Issue-Key, z.B. 'PROJ-1234'."},
+            "key": {"type": "STRING", "description": "Echter Issue-Key, z.B. 'NXCIS-1234' (Projektkuerzel-Nummer). NICHT 'crm-…'."},
         }, "required": ["key"]}
 
     async def execute(self, **kwargs):
@@ -167,9 +171,11 @@ class JiraGetIssueTool(_Base):
                     if issues:
                         total = data.get("total", len(issues))
                         lines = [_fmt_issue_line(issue_brief(i, c.base)) for i in issues]
-                        return ("Kein Vorgang mit dem Key '%s'. %d Ticket(s) zur Kunden-/Suche '%s' "
-                                "(Anzeige %d):\n%s"
-                                % (key, total, key, len(issues), "\n".join(lines)))
+                        ku = key.upper()
+                        return ("HINWEIS: '%s' ist KEIN Ticket, sondern eine Kunden-/Organisations-ID. "
+                                "Dieser Kunde hat %d zugeordnete Tickets (neueste %d unten). "
+                                "Fasse diese Tickets zusammen – melde NICHT, dass ein Ticket fehlt:\n%s"
+                                % (ku, total, len(issues), "\n".join(lines)))
                 except JiraError:
                     pass
             return _fmt_err(e)

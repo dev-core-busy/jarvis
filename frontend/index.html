@@ -237,6 +237,104 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         </div>
     </div>
 
+    <!-- ═══ Support-API Hilfe-Modal ═══ -->
+    <div id="support-api-modal" class="modal">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h2>🔌 Support-API – REST-Zugriffe</h2>
+                <button class="btn-icon" id="support-api-close" aria-label="Schließen">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body" style="overflow-y:auto;">
+                <p class="kb-hint">Der Support-Assistent ist auch ohne Web-Oberfläche per REST erreichbar – z.&nbsp;B. aus
+                    Ticketsystemen, Skripten oder anderen Anwendungen. Basis-URL ist dein Jarvis-Host
+                    (<code>https://DEIN-JARVIS-HOST</code>). Alle Bodies sind JSON (<code>Content-Type: application/json</code>).</p>
+
+                <h4 style="margin:16px 0 6px;">Authentifizierung</h4>
+                <ul class="kb-hint" style="margin:0 0 4px 18px;line-height:1.7;">
+                    <li><strong>Angemeldeter Benutzer</strong> (Browser/Sitzung): Header <code>Authorization: Bearer &lt;token&gt;</code></li>
+                    <li><strong>Externe Anwendung</strong>: Header <code>X-API-Key: &lt;API-Key&gt;</code> – API-Keys werden in den
+                        Einstellungen verwaltet. Nur <code>/query</code> und <code>/summarize</code> akzeptieren API-Keys;
+                        die übrigen Endpunkte erfordern ein Benutzer-Token.</li>
+                </ul>
+
+                <h4 style="margin:18px 0 6px;">Endpunkte</h4>
+                <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.84rem;">
+                    <thead>
+                        <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                            <th style="padding:6px 8px;">Methode</th><th style="padding:6px 8px;">Pfad</th>
+                            <th style="padding:6px 8px;">Zweck</th><th style="padding:6px 8px;">Auth</th>
+                        </tr>
+                    </thead>
+                    <tbody style="color:var(--text-primary);">
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>POST</code></td><td style="padding:6px 8px;"><code>/api/support/query</code></td><td style="padding:6px 8px;">Suche über RAG + Jira + Confluence, optional KI-Zusammenfassung</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>POST</code></td><td style="padding:6px 8px;"><code>/api/support/summarize</code></td><td style="padding:6px 8px;">KI-Zusammenfassung eines einzelnen Jira-Tickets</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/support/status</code></td><td style="padding:6px 8px;">Aktive Quellen + Maxima (Zeilen, Ticketanzahl)</td><td style="padding:6px 8px;">Token</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET/POST</code></td><td style="padding:6px 8px;"><code>/api/support/instructions</code></td><td style="padding:6px 8px;">Persönliche Anweisungen lesen/speichern (Markdown)</td><td style="padding:6px 8px;">Token</td></tr>
+                        <tr><td style="padding:6px 8px;"><code>GET/DELETE</code></td><td style="padding:6px 8px;"><code>/api/support/history</code></td><td style="padding:6px 8px;">Suchverlauf des Benutzers lesen/löschen</td><td style="padding:6px 8px;">Token</td></tr>
+                    </tbody>
+                </table>
+                </div>
+
+                <h4 style="margin:20px 0 6px;">Beispiel 1 – Suche mit KI-Zusammenfassung</h4>
+                <p class="kb-hint" style="margin:0 0 6px;">Durchsucht Wissensdatenbank und (nur offene) Jira-Tickets, holt bis zu 10 Tickets
+                    und lässt eine KI-Gesamtzusammenfassung erstellen.</p>
+                <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>curl -sk https://DEIN-JARVIS-HOST/api/support/query \
+  -H "X-API-Key: DEIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "text": "Drucker im 2. OG offline",
+        "rag": true,
+        "jira": true,
+        "confluence": false,
+        "ai": true,
+        "open_only": true,
+        "jira_limit": 10,
+        "summary_lines": 5,
+        "lang": "de"
+      }'</code></pre>
+                <p class="kb-hint" style="margin:6px 0 4px;">Antwort (gekürzt):</p>
+                <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>{
+  "ok": true,
+  "query": "Drucker im 2. OG offline",
+  "ai_summary": "Mögliche Ursache ist ein Netzwerk-Timeout des Druckers …",
+  "jira_total": 7,
+  "blocks": [
+    { "source": "JIRA",   "key": "SUP-1234", "title": "SUP-1234",
+      "score": 92, "summary": "Drucker reagiert nicht …" },
+    { "source": "WISSEN", "title": "Drucker-Reset Anleitung",
+      "score": 80, "summary": "Schritt 1: …" }
+  ]
+}</code></pre>
+                <p class="kb-hint" style="margin:6px 0 0;"><code>blocks[].source</code> ist <code>WISSEN</code>, <code>JIRA</code> oder <code>CONFLUENCE</code>;
+                    <code>score</code> ist die Relevanz in&nbsp;%. Felder: <code>text</code> (Pflicht),
+                    <code>rag</code>/<code>jira</code>/<code>confluence</code>/<code>ai</code>/<code>open_only</code> (bool),
+                    <code>jira_limit</code> (1…Maximum), <code>summary_lines</code>, <code>lang</code> (<code>de</code>/<code>en</code>).</p>
+
+                <h4 style="margin:20px 0 6px;">Beispiel 2 – Einzelnes Ticket zusammenfassen</h4>
+                <p class="kb-hint" style="margin:0 0 6px;">Lädt ein konkretes Jira-Ticket (Beschreibung + Kommentare) und fasst es in wenigen Sätzen zusammen.</p>
+                <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>curl -sk https://DEIN-JARVIS-HOST/api/support/summarize \
+  -H "X-API-Key: DEIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "source": "JIRA", "key": "SUP-1234", "lang": "de" }'</code></pre>
+                <p class="kb-hint" style="margin:6px 0 4px;">Antwort:</p>
+                <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>{
+  "ok": true,
+  "key": "SUP-1234",
+  "summary": "Das Ticket beschreibt einen Druckerausfall im 2. OG …"
+}</code></pre>
+                <p class="kb-hint" style="margin:8px 0 0;">Hinweise: <code>-k</code> akzeptiert das selbstsignierte Zertifikat (für Tests).
+                    Fehler liefern <code>{ "ok": false, "error": "…" }</code> mit Status&nbsp;401 (Auth),
+                    403 (Skill inaktiv) oder 400 (ungültige Eingabe).</p>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══ Hauptansicht ═══ -->
     <div id="main-screen" class="screen">
         <!-- Header -->
@@ -1456,7 +1554,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <!-- ═══ Tab: Support-Assistent ═══ -->
                 <div id="settings-tab-support" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
-                        <p class="kb-hint">Konfiguration des Support-Assistenten. Die Oberfläche ist erreichbar unter <a href="/support" target="_blank" rel="noopener" style="color:var(--accent-hover);">/support</a> (nur bei aktivem Skill). Dort können Anfragen gestellt werden, die wahlweise die Wissensdatenbank (RAG) und Jira-Tickets durchsuchen.</p>
+                        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+                            <p class="kb-hint" style="margin:0;flex:1;">Konfiguration des Support-Assistenten. Die Oberfläche ist erreichbar unter <a href="/support" target="_blank" rel="noopener" style="color:var(--accent-hover);">/support</a> (nur bei aktivem Skill). Dort können Anfragen gestellt werden, die wahlweise die Wissensdatenbank (RAG) und Jira-Tickets durchsuchen.</p>
+                            <button type="button" id="support-api-help-btn" title="API-Zugriffe (REST) anzeigen" aria-label="API-Zugriffe anzeigen" style="flex:0 0 auto;width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:700;font-size:1rem;cursor:pointer;line-height:1;">?</button>
+                        </div>
 
                         <h4 style="margin:16px 0 8px;">Vorangestelltes Prompt (LLM-Instruktion)</h4>
                         <p class="kb-hint">Dieser Text wird LLM-Anfragen des Support-Assistenten (z.&nbsp;B. der KI-Zusammenfassung) als Instruktion vorangestellt.</p>
@@ -2282,7 +2383,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/confluence.js?v=5"></script>
     <script src="/static/js/jira.js?v=1"></script>
-    <script src="/static/js/support_admin.js?v=6"></script>
+    <script src="/static/js/support_admin.js?v=7"></script>
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=4"></script>

@@ -46,6 +46,23 @@
             if (srch) srch.addEventListener('input', function () { self._renderSpaces(); });
             var pers = $('sup-cf-personal');
             if (pers) pers.addEventListener('change', function () { self._renderSpaces(); });
+            // API-Hilfe-Modal (REST-Zugriffe)
+            var helpBtn = $('support-api-help-btn');
+            if (helpBtn) helpBtn.addEventListener('click', function () { self._apiHelp(true); });
+            var helpClose = $('support-api-close');
+            if (helpClose) helpClose.addEventListener('click', function () { self._apiHelp(false); });
+            var helpModal = $('support-api-modal');
+            if (helpModal) helpModal.addEventListener('click', function (e) {
+                if (e.target === helpModal) self._apiHelp(false);
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && helpModal && helpModal.classList.contains('open')) self._apiHelp(false);
+            });
+        },
+
+        _apiHelp: function (show) {
+            var m = $('support-api-modal');
+            if (m) m.classList.toggle('open', !!show);
         },
 
         _setMode: function (mode, loadIfNeeded) {

@@ -3925,24 +3925,28 @@ async def support_history_clear(user: str = Depends(require_auth)):
 
 # ─── Agent Task API (extern, z.B. für Vision-Aktionen) ───────────────
 
-def _verify_agent_api_key(request: Request) -> bool:
-    """Prüft API-Key aus X-API-Key Header oder Bearer Token gegen den
-    Legacy-Key (AGENT_API_KEY) ODER einen der benannten Keys."""
+def _is_valid_agent_key(presented: str) -> bool:
+    """Prüft einen präsentierten Key timing-sicher gegen den Legacy-Key
+    (AGENT_API_KEY) ODER einen der benannten Keys. Genutzt von HTTP- UND
+    WebSocket-Auth (Konsistenz: benannte Keys gelten ueberall)."""
+    if not presented:
+        return False
     candidates = []
     if config.AGENT_API_KEY:
         candidates.append(config.AGENT_API_KEY)
     candidates.extend(k.get("key", "") for k in _load_agent_keys() if k.get("key"))
-    if not candidates:
-        return False  # Kein Key konfiguriert → Endpunkt gesperrt
-
-    presented = request.headers.get("X-API-Key", "") \
-        or request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not presented:
-        return False
     for c in candidates:
-        if hmac.compare_digest(presented, c):
+        if c and hmac.compare_digest(presented, c):
             return True
     return False
+
+
+def _verify_agent_api_key(request: Request) -> bool:
+    """Prüft API-Key aus X-API-Key Header oder Bearer Token gegen Legacy- ODER
+    benannte Keys."""
+    presented = request.headers.get("X-API-Key", "") \
+        or request.headers.get("Authorization", "").replace("Bearer ", "")
+    return _is_valid_agent_key(presented)
 
 
 @app.post("/api/agent/task")
@@ -6227,7 +6231,8 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
     if msg_type != "ping":
         token_username = verify_token(token)
         is_login_token = token_username is not None
-        is_api_key = bool(config.AGENT_API_KEY) and hmac.compare_digest(token, config.AGENT_API_KEY)
+        # Login-Token ODER ein gueltiger Agent-API-Key (Legacy ODER benannt).
+        is_api_key = _is_valid_agent_key(token)
         if not is_login_token and not is_api_key:
             await ws.send_json({"type": "error", "message": "Nicht autorisiert"})
             return

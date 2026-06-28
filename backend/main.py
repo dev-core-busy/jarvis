@@ -6234,7 +6234,13 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Login-Token ODER ein gueltiger Agent-API-Key (Legacy ODER benannt).
         is_api_key = _is_valid_agent_key(token)
         if not is_login_token and not is_api_key:
-            await ws.send_json({"type": "error", "message": "Nicht autorisiert"})
+            # Hilfreiche Unterscheidung: sieht es wie ein (abgelaufener/ungueltiger)
+            # Login-Token aus (user:ts:sig), oder fehlt eine gueltige Credential ganz?
+            _looks_like_token = token.count(":") >= 2
+            _msg = ("Sitzung ungültig oder abgelaufen – bitte in der App neu anmelden "
+                    "(Domänen-Login)." if _looks_like_token else
+                    "Nicht autorisiert: kein gültiger Login-Token oder API-Key hinterlegt.")
+            await ws.send_json({"type": "error", "message": _msg})
             return
         # Username pro WS-Verbindung merken
         if token_username:

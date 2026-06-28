@@ -1464,15 +1464,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                         <h4 style="margin:18px 0 8px;">Darstellung</h4>
                         <p class="kb-hint">Diese Werte sind das <strong>Maximum</strong>. Benutzer können auf der Support-Oberfläche ihren eigenen Wert zwischen 2 und diesem Maximum wählen (sitzungsüberdauernd gespeichert).</p>
-                        <div style="display:flex;gap:14px;flex-wrap:wrap;">
-                            <div class="form-group" style="max-width:240px;">
-                                <label>KI-Zusammenfassung – max. Länge (Zeilen/Sätze)</label>
-                                <input type="number" id="support-lines" class="config-input" min="2" max="20" step="1" value="5" style="width:100%;box-sizing:border-box;">
-                            </div>
-                            <div class="form-group" style="max-width:240px;">
-                                <label>Max. Antwortzeilen pro Treffer</label>
-                                <input type="number" id="support-result-lines" class="config-input" min="2" max="20" step="1" value="2" style="width:100%;box-sizing:border-box;">
-                            </div>
+                        <div style="display:grid;grid-template-columns:1fr 110px;gap:10px 16px;align-items:center;max-width:520px;">
+                            <label style="margin:0;">KI-Gesamtzusammenfassung – max. Länge (Zeilen/Sätze)</label>
+                            <input type="number" id="support-lines" class="config-input" min="2" max="20" step="1" value="5" style="width:100%;box-sizing:border-box;">
+                            <label style="margin:0;">Max. Antwortzeilen pro Treffer</label>
+                            <input type="number" id="support-result-lines" class="config-input" min="2" max="20" step="1" value="2" style="width:100%;box-sizing:border-box;">
+                            <label style="margin:0;">Jira-Treffer (max.)</label>
+                            <input type="number" id="support-jira-limit" class="config-input" min="1" max="50" step="1" value="12" style="width:100%;box-sizing:border-box;">
                         </div>
                         <h4 style="margin:18px 0 8px;">Confluence-Eingrenzung</h4>
                         <p class="kb-hint">Nur wirksam bei aktivem Confluence-Skill. <strong>Whitelist</strong> = nur die gewählten Bereiche durchsuchen; <strong>Blacklist</strong> = alle Bereiche außer den gewählten.</p>
@@ -2270,7 +2268,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=26"></script>
+    <script src="/static/js/i18n.js?v=31"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=15"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -2284,7 +2282,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/confluence.js?v=5"></script>
     <script src="/static/js/jira.js?v=1"></script>
-    <script src="/static/js/support_admin.js?v=4"></script>
+    <script src="/static/js/support_admin.js?v=5"></script>
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=4"></script>

@@ -79,20 +79,27 @@
         } catch (e) { return null; }
     }
 
-    // Setzt das Favicon passend zum Branding (Bild-Logo bzw. Buchstaben-Icon)
+    // Setzt das Favicon passend zum Branding (Bild-Logo bzw. Buchstaben-Icon).
+    // Dedup ueber einen billigen Schluessel ZUERST – das teure Canvas/toDataURL
+    // im Buchstaben-Modus wird nur bei tatsaechlicher Aenderung erzeugt
+    // (applyBranding laeuft mehrfach: Cache, Fetch, setTimeout, load, themechange).
     function applyFavicon(b, logoUrl) {
-        var href = null, type = 'image/png';
+        var key, type = 'image/png';
         if (b.logo_mode === 'image' && logoUrl) {
-            href = logoUrl;
+            key = 'img:' + logoUrl;
             if (/\.svg($|\?)/i.test(logoUrl)) type = 'image/svg+xml';
         } else if (b.core_letter) {
-            href = letterFavicon(b.core_letter, (b.colors || {}).accent);
+            key = 'ltr:' + b.core_letter + ':' + ((b.colors || {}).accent || '');
+        } else {
+            return;
         }
-        if (!href) return;
         var el = faviconEl();
         if (_origFavicon === null) _origFavicon = el.getAttribute('href') || '';
-        if (el._brandHref === href) return; // schon gesetzt
-        el._brandHref = href;
+        if (el._brandKey === key) return; // unveraendert – kein Neu-Rendern
+        var href = (b.logo_mode === 'image') ? logoUrl
+            : letterFavicon(b.core_letter, (b.colors || {}).accent);
+        if (!href) return;
+        el._brandKey = key;
         el.setAttribute('type', type);
         el.setAttribute('href', href);
     }
@@ -102,8 +109,9 @@
         if (_origFavicon === null) return;
         var el = faviconEl();
         el.setAttribute('type', 'image/png');
-        el.setAttribute('href', _origFavicon);
-        el._brandHref = '';
+        if (_origFavicon) el.setAttribute('href', _origFavicon);
+        else el.removeAttribute('href'); // es gab original kein Favicon
+        el._brandKey = '';
         _origFavicon = null;
     }
 

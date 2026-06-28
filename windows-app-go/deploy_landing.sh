@@ -13,24 +13,19 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-CRED_FILE="./.ftps_credentials"
-if [ -z "${JARVIS_FTPS_USER:-}" ] && [ -f "$CRED_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$CRED_FILE"
-fi
-if [ -z "${JARVIS_FTPS_USER:-}" ]; then
-  echo "FTPS-Zugang fehlt – JARVIS_FTPS_USER setzen oder .ftps_credentials anlegen." >&2
-  exit 1
-fi
+# Deploy via SSH (keyless Public-Key). FTP/FTPS ist ueber manche Netze unbrauchbar
+# (FTP-ALG kapert AUTH). Ueberschreibbar via JARVIS_SSH_HOST / JARVIS_SSH_KEY / JARVIS_DOCROOT.
+SSH_HOST="${JARVIS_SSH_HOST:-jarvis@jarvis-ai.info}"
+SSH_KEY="${JARVIS_SSH_KEY:-$HOME/.ssh/id_rsa}"
+DOCROOT="${JARVIS_DOCROOT:-/var/www/vhosts/jarvis-ai.info/www}"
+SCP=(scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20)
 
-BASE='ftp://jarvis-ai.info/www'
 TMP_LIVE="$(mktemp)"
 TMP_NEW="$(mktemp)"
 trap 'rm -f "$TMP_LIVE" "$TMP_NEW"' EXIT
 
-echo "1) Live index.html laden …"
-curl -fsS --ssl-reqd --insecure --ftp-pasv --user "$JARVIS_FTPS_USER" \
-  "$BASE/index.html" -o "$TMP_LIVE"
+echo "1) Live index.html laden (SSH) …"
+"${SCP[@]}" "$SSH_HOST:$DOCROOT/index.html" "$TMP_LIVE"
 
 echo "2) Feature-Karten einsetzen (idempotent) …"
 python3 - "$TMP_LIVE" "$TMP_NEW" <<'PY'
@@ -89,9 +84,8 @@ if cmp -s "$TMP_LIVE" "$TMP_NEW"; then
   exit 0
 fi
 
-echo "3) index.html per FTPS hochladen …"
-curl -fsS --ssl-reqd --insecure --ftp-pasv -T "$TMP_NEW" \
-  --user "$JARVIS_FTPS_USER" "$BASE/index.html"
+echo "3) index.html per SSH hochladen …"
+"${SCP[@]}" "$TMP_NEW" "$SSH_HOST:$DOCROOT/index.html"
 
 echo "4) Verifizieren (HTTPS) …"
 if curl -fsS --insecure "https://jarvis-ai.info/?t=$(date +%s)" | grep -q "Knowledge Export (JSON)"; then

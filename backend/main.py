@@ -1151,6 +1151,11 @@ async def userchat_ws(ws: WebSocket):
             await ws.send_json({"type": "error", "message": "Kennwort muss zuerst geaendert werden."})
             await ws.close()
             return
+        # Sicherheitsschicht: gesperrtes Konto darf auch den Benutzer-Chat nicht nutzen
+        if security_guard.is_blocked(username):
+            await ws.send_json({"type": "security_blocked", "message": "Konto wegen eines Sicherheitsverstosses gesperrt. Bitte an einen lokalen Administrator wenden."})
+            await ws.close()
+            return
 
         # Client registrieren
         if username not in _uc_clients:
@@ -6463,7 +6468,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             # Sicherheitsschicht: gesperrter Account darf den Agenten nicht nutzen
             if security_guard.is_blocked(token_username):
                 await ws.send_json({"type": "security_blocked",
-                                    "message": "Account gesperrt."})
+                                    "message": "Konto wegen eines Sicherheitsverstosses gesperrt. Bitte an einen lokalen Administrator wenden."})
                 return
 
     # Reiner Registrierungs-Handshake: setzt nur _ws_usernames (oben) fuer Live-Sync
@@ -6631,7 +6636,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         _sec_user = _get_ws_username(ws)
         if _sec_user and await _sec_inspect_user(task_text, _sec_user, "chat"):
             await ws.send_json({"type": "security_blocked",
-                                "message": "Account gesperrt."})
+                                "message": "Konto wegen eines Sicherheitsverstosses gesperrt. Bitte an einen lokalen Administrator wenden."})
             return
 
         # Client-Typ bestimmen: wer hat diese WS-Verbindung aufgebaut?

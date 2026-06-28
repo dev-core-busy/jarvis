@@ -157,6 +157,20 @@ class ChatRepository @Inject constructor(
                 }
                 saveMessages()
             }
+            // Sicherheitsschicht: Konto wegen Jailbreak-/Sicherheitsverstoss gesperrt
+            "security_blocked" -> {
+                finalizeStream()
+                _isAgentRunning.value = false
+                val txt = "🔒 ${event.message}"
+                _messages.update {
+                    it + ChatMessage(
+                        role = MessageRole.JARVIS,
+                        text = txt,
+                        segments = listOf(MessageSegment(SegmentType.ANSWER, txt)),
+                    )
+                }
+                saveMessages()
+            }
             "llm_stats" -> {
                 val sec = event.duration_ms / 1000.0
                 val sb = StringBuilder("⏱ ${"%.1f".format(sec)}s")

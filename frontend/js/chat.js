@@ -220,7 +220,12 @@
             });
             const data = await resp.json();
 
-            if (data.success && data.token && data.must_change_password) {
+            if (data.success && data.token && data.account_blocked) {
+                // Sicherheitsschicht: Konto gesperrt → nur Hinweis + Protokoll
+                token = data.token;
+                localStorage.setItem('jarvis_chat_token', token);
+                if (window.SecurityIncidents) window.SecurityIncidents.showBlockedScreen(data.block_reason, data.block_incidents);
+            } else if (data.success && data.token && data.must_change_password) {
                 // Lokaler Erst-Login: Kennwortaenderung ist nur im Hauptfenster moeglich.
                 loginError.textContent = 'Bitte zuerst im Hauptfenster (Startseite) das Kennwort aendern, dann hier anmelden.';
             } else if (data.success && data.token) {
@@ -622,6 +627,10 @@
                 if (msg.message === 'Nicht autorisiert') {
                     logout();
                 }
+                break;
+
+            case 'security_blocked':
+                if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked();
                 break;
 
             case 'cpu':

@@ -407,6 +407,10 @@
                     location.reload();
                 }
                 break;
+
+            case 'security_blocked':
+                if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked();
+                break;
         }
     }
 

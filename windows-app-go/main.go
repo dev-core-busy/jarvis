@@ -502,6 +502,17 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 			ja.dialog.MuteWhileSpeaking(false)
 		}
 
+	// Sicherheitsschicht: Konto wegen Jailbreak-/Sicherheitsverstoss gesperrt
+	case "security_blocked":
+		ja.ttsBufMu.Lock()
+		ja.ttsBuf.Reset()
+		ja.ttsBufMu.Unlock()
+		ja.chat.AddMessage(RoleStatus, "🔒 "+msg.Message)
+		ja.avatar.SetMode(ModeIdle)
+		if ja.dialog != nil {
+			ja.dialog.MuteWhileSpeaking(false)
+		}
+
 	case "agent_event":
 		if msg.Event == "started" {
 			// Neuer Durchlauf: laufende TTS abbrechen + Puffer zurücksetzen

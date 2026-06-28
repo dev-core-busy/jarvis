@@ -3395,10 +3395,18 @@ def _support_terms(query: str) -> list:
 def _support_jira_jql(query: str, open_only: bool = True) -> str:
     """JQL aus den extrahierten Begriffen (OR-verknuepft), nach Aktualitaet.
     ``open_only`` beschraenkt auf unaufgeloeste (offene) Vorgaenge."""
+    from backend.jira_client import crm_org_clause
     terms = _support_terms(query)
     clauses = []
     if terms:
-        clauses.append("(" + " OR ".join('text ~ "%s"' % t.replace('"', "'") for t in terms) + ")")
+        # Ist eine CRM-Kunden-ID dabei -> NUR exakte Organisationsfeld-Suche (alle
+        # Tickets des Kunden, praezise). Sonst Volltext ueber alle Begriffe (OR).
+        crm_clauses = [c for c in (crm_org_clause(t) for t in terms) if c]
+        if crm_clauses:
+            parts = crm_clauses
+        else:
+            parts = ['text ~ "%s"' % t.replace('"', "'") for t in terms]
+        clauses.append("(" + " OR ".join(parts) + ")")
     if open_only:
         clauses.append("resolution = Unresolved")
     jql = " AND ".join(clauses)

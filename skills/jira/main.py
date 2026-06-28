@@ -11,7 +11,7 @@ Netzwerkaufrufe laufen ueber ``asyncio.to_thread`` (Event-Loop nicht blockieren)
 import asyncio
 
 from backend.tools.base import BaseTool
-from backend.jira_client import JiraClient, JiraError, html_to_text, issue_brief
+from backend.jira_client import JiraClient, JiraError, html_to_text, issue_brief, crm_org_clause
 
 
 def _client() -> JiraClient:
@@ -158,14 +158,18 @@ class JiraGetIssueTool(_Base):
             # nach Tickets, die diese ID referenzieren (wie der Support-Assistent).
             if e.status == 404:
                 try:
-                    jql = 'text ~ "%s" ORDER BY updated DESC' % key.replace('"', "'")
-                    data = await _to_thread(c.search, jql, 25)
+                    # CRM-Kunden-ID -> Organisationsfeld (alle Tickets des Kunden),
+                    # sonst Volltextsuche.
+                    org = crm_org_clause(key)
+                    jql = (org if org else 'text ~ "%s"' % key.replace('"', "'")) + " ORDER BY updated DESC"
+                    data = await _to_thread(c.search, jql, 50)
                     issues = data.get("issues", [])
                     if issues:
+                        total = data.get("total", len(issues))
                         lines = [_fmt_issue_line(issue_brief(i, c.base)) for i in issues]
-                        return ("Kein Vorgang mit dem Key '%s'. Gefundene Tickets, die '%s' "
-                                "referenzieren (%d):\n%s"
-                                % (key, key, data.get("total", len(issues)), "\n".join(lines)))
+                        return ("Kein Vorgang mit dem Key '%s'. %d Ticket(s) zur Kunden-/Suche '%s' "
+                                "(Anzeige %d):\n%s"
+                                % (key, total, key, len(issues), "\n".join(lines)))
                 except JiraError:
                     pass
             return _fmt_err(e)

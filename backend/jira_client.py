@@ -48,6 +48,20 @@ def _q(v: str) -> str:
     return (v or "").replace('"', "'")
 
 
+# Insight/Assets-Feld, das die CRM-Kunden-ID traegt (Wert z.B. "Name (CRM-10550)").
+# Exakte Suche 'Organisation = "CRM-10550"' findet ALLE Tickets dieses Kunden.
+_ORG_FIELD = "Organisation"
+_CRM_RE = re.compile(r"(?i)^\s*crm-\d+\s*$")
+
+
+def crm_org_clause(term: str) -> str | None:
+    """Ist `term` eine CRM-Kunden-ID (z.B. 'crm-10550'), liefert die JQL-Klausel
+    fuer das Insight-Organisationsfeld, sonst None. CRM-IDs sind KEINE Issue-Keys
+    und stehen nicht im Volltext – nur dieses Feld findet alle zugeordneten Tickets."""
+    t = (term or "").strip()
+    return ('%s = "%s"' % (_ORG_FIELD, t.upper())) if _CRM_RE.match(t) else None
+
+
 class JiraError(Exception):
     """Fehler bei einer Jira-Anfrage (mit HTTP-Status)."""
 
@@ -111,10 +125,11 @@ class JiraClient:
         """Baut aus einfachen Filtern eine JQL-Query (Volltext + Felder)."""
         clauses: list[str] = []
         if query:
-            # IMMER Volltextsuche: Begriffe wie 'crm-10550' sind KUNDEN-/IDs, denen
-            # Tickets zugeordnet sind – KEINE Jira-Issue-Keys. Eine Key-Suche wuerde
-            # 0 Treffer liefern. Echte Issue-Keys liest man ueber jira_get_issue.
-            clauses.append('text ~ "%s"' % _q(query))
+            # CRM-Kunden-ID (crm-10550) -> exakte Suche im Organisationsfeld (findet
+            # ALLE Tickets des Kunden). Sonst Volltextsuche. Echte Issue-Keys liest
+            # man ueber jira_get_issue.
+            org = crm_org_clause(query)
+            clauses.append(org if org else 'text ~ "%s"' % _q(query))
         if project:
             clauses.append('project = "%s"' % _q(project))
         if status:

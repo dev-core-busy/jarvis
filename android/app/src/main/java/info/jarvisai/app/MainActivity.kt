@@ -10,12 +10,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
 import info.jarvisai.app.ui.chat.ChatScreen
 import info.jarvisai.app.ui.issues.IssuesScreen
+import info.jarvisai.app.ui.security.BlockViewModel
+import info.jarvisai.app.ui.security.BlockedScreen
 import info.jarvisai.app.ui.settings.SettingsScreen
 import info.jarvisai.app.ui.theme.JarvisTheme
 
@@ -61,6 +66,14 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun JarvisNavGraph() {
+    // Sicherheitsschicht: ist das Konto gesperrt, alles durch den Sperr-Screen ersetzen.
+    val blockVm: BlockViewModel = hiltViewModel()
+    val blockInfo by blockVm.blockInfo.collectAsState()
+    if (blockInfo?.blocked == true) {
+        BlockedScreen(blockInfo!!)
+        return
+    }
+
     val navController = rememberNavController()
     NavHost(navController = navController, startDestination = "chat") {
         composable("chat") {

@@ -512,6 +512,8 @@ func (ja *JarvisApp) onMessage(msg WSMessage) {
 		if ja.dialog != nil {
 			ja.dialog.MuteWhileSpeaking(false)
 		}
+		// Volle Sperr-Ansicht (Grund + Protokoll) per Dialog nachladen+zeigen
+		ja.showBlockedDialog()
 
 	case "agent_event":
 		if msg.Event == "started" {

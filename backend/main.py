@@ -3373,6 +3373,11 @@ def _support_terms(query: str) -> list:
         if x and x not in terms:
             terms.append(x)
 
+    # Zusammengesetzte Tokens mit Bindestrich als PHRASE behandeln
+    # (z.B. ibsv3-server, e-arztbrief, dc-vserver) – nicht in Einzelwörter zerlegen.
+    for m in re.findall(r"\b[0-9A-Za-zÄÖÜäöü]+(?:-[0-9A-Za-zÄÖÜäöü]+)+\b", q):
+        if re.search(r"[A-Za-zÄÖÜäöü]", m):
+            _add(m)
     for m in re.findall(r"\b[A-Za-zÄÖÜäöü]{2,}-?\d{2,}\b", q):  # CRM-10550, ABC123
         _add(m)
     for m in re.findall(r"\b\d{4,}\b", q):                       # lange Zahlen
@@ -3387,13 +3392,17 @@ def _support_terms(query: str) -> list:
     return terms[:6] or ([q.strip()] if q.strip() else [])
 
 
-def _support_jira_jql(query: str) -> str:
-    """JQL aus den extrahierten Begriffen (OR-verknuepft), nach Aktualitaet."""
+def _support_jira_jql(query: str, open_only: bool = True) -> str:
+    """JQL aus den extrahierten Begriffen (OR-verknuepft), nach Aktualitaet.
+    ``open_only`` beschraenkt auf unaufgeloeste (offene) Vorgaenge."""
     terms = _support_terms(query)
-    if not terms:
-        return 'ORDER BY updated DESC'
-    ors = " OR ".join('text ~ "%s"' % t.replace('"', "'") for t in terms)
-    return "(%s) ORDER BY updated DESC" % ors
+    clauses = []
+    if terms:
+        clauses.append("(" + " OR ".join('text ~ "%s"' % t.replace('"', "'") for t in terms) + ")")
+    if open_only:
+        clauses.append("resolution = Unresolved")
+    jql = " AND ".join(clauses)
+    return (jql + " ORDER BY updated DESC") if jql else "ORDER BY updated DESC"
 
 
 @app.get("/support", response_class=HTMLResponse)
@@ -3535,17 +3544,26 @@ async def _support_ai_summary(query: str, blocks: list, system_prompt: str, line
         from backend.llm import get_provider
         from google.genai import types
         if str(lang).lower().startswith("en"):
-            base = ("You are a support assistant. Answer the request in at most %d "
-                    "sentences based on the provided sources. Reply in English as "
-                    "readable prose (no JSON, no source IDs)." % lines)
+            base = ("You are a support assistant. Matching results (tickets, "
+                    "knowledge/Confluence pages) for the query were ALREADY found and "
+                    "are listed below. In at most %d sentences, give a helpful overview: "
+                    "what the results are about, which topics/cases are relevant. Refer "
+                    "concretely to the listed content. There ARE results — do NOT claim "
+                    "that no information is available. Reply in English, readable prose "
+                    "(no JSON)." % lines)
         else:
-            base = ("Du bist ein Support-Assistent. Beantworte die Anfrage in hoechstens %d "
-                    "Saetzen auf Basis der gelieferten Quellen. Antworte auf Deutsch in "
-                    "lesbarem Fliesstext (kein JSON, keine Quellen-IDs)." % lines)
+            base = ("Du bist ein Support-Assistent. Zu der Anfrage wurden bereits passende "
+                    "Treffer (Tickets, Wissens-/Confluence-Seiten) gefunden – sie stehen "
+                    "unten. Gib in hoechstens %d Saetzen einen hilfreichen Ueberblick: "
+                    "worum es in den Treffern geht und welche Themen/Vorgaenge relevant "
+                    "sind. Beziehe dich konkret auf die gelisteten Inhalte. Es liegen "
+                    "Treffer vor – behaupte NICHT, es gaebe keine Informationen. Antworte "
+                    "auf Deutsch in lesbarem Fliesstext (kein JSON)." % lines)
         sysp = ((system_prompt.strip() + "\n\n") if system_prompt.strip() else "") + base
-        src = "\n".join("- [%s] %s: %s" % (b["source"], b["title"], b["summary"])
-                        for b in blocks[:6])
-        user_text = "Anfrage:\n%s\n\nGefundene Quellen:\n%s" % (query, src)
+        src = "\n".join("- [%s] %s — %s" % (b.get("source", ""), b.get("title", ""),
+                                            b.get("summary", ""))
+                        for b in blocks[:10])
+        user_text = "Anfrage: %s\n\nGefundene Treffer (%d):\n%s" % (query, len(blocks), src)
         provider = get_provider(
             config.LLM_PROVIDER, config.current_api_key, config.current_api_url,
             auth_method=config.current_auth_method,
@@ -3585,6 +3603,7 @@ async def support_query(request: Request):
     use_jira = body.get("jira", True)
     use_conf = body.get("confluence", True)
     use_ai = body.get("ai", True)
+    open_only = body.get("open_only", True)
     lang = (body.get("lang") or "de")
     if not query:
         return JSONResponse({"ok": False, "error": "Bitte eine Anfrage eingeben."}, status_code=400)
@@ -3617,7 +3636,7 @@ async def support_query(request: Request):
             from backend.jira_client import JiraError, issue_brief
             c = _jira_client()
             if c.configured:
-                jql = _support_jira_jql(query)
+                jql = _support_jira_jql(query, open_only)
                 data = await asyncio.to_thread(c.search, jql, 12)
                 for i, it in enumerate(data.get("issues", [])):
                     b = issue_brief(it, c.base)

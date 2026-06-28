@@ -217,11 +217,11 @@
 <div id="sup-login" class="sup-login hidden">
     <div class="sup-login-card">
         <div class="sup-login-avatar login-avatar">J</div>
-        <h1 class="brand-app-name">Support Assistent</h1>
+        <h1><span class="brand-app-name">Jarvis</span> <span data-i18n="sup.assistant">Support Assistent</span></h1>
         <form id="sup-login-form">
-            <input type="text" id="sup-login-user" placeholder="Benutzername" autocomplete="username" required>
-            <input type="password" id="sup-login-pass" placeholder="Passwort" autocomplete="current-password" required>
-            <button class="sup-btn" type="submit" style="width:100%;padding:11px;">Anmelden</button>
+            <input type="text" id="sup-login-user" data-i18n-placeholder="sup.login_user" placeholder="Benutzername" autocomplete="username" required>
+            <input type="password" id="sup-login-pass" data-i18n-placeholder="sup.login_pass" placeholder="Passwort" autocomplete="current-password" required>
+            <button class="sup-btn" type="submit" style="width:100%;padding:11px;" data-i18n="sup.login_submit">Anmelden</button>
             <div class="sup-login-err" id="sup-login-err"></div>
         </form>
     </div>
@@ -231,27 +231,27 @@
 <div id="sup-app" class="hidden">
     <div class="sup-topbar">
         <div class="sup-logo topbar-avatar">J</div>
-        <div class="sup-title"><span class="brand-app-name">Jarvis</span> Support</div>
+        <div class="sup-title"><span class="brand-app-name">Jarvis</span> <span data-i18n="sup.assistant">Support Assistent</span></div>
         <div class="sup-spacer"></div>
         <div class="lang-toggle" id="sup-lang-toggle">
             <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
             <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang && window.setLang('en')" title="English">EN</button>
         </div>
-        <button class="btn-theme" id="sup-issues-btn" title="Issues / Feedback" onclick="window.JarvisIssues && window.JarvisIssues.open()" style="position:relative;">
+        <button class="btn-theme" id="sup-issues-btn" data-i18n-title="sup.issues" title="Issues / Feedback" onclick="window.JarvisIssues && window.JarvisIssues.open()" style="position:relative;">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         </button>
-        <button class="btn-theme" id="sup-help-btn" title="Hilfe: Score & Trefferzahl" style="font-weight:700;">?</button>
+        <button class="btn-theme" id="sup-help-btn" data-i18n-title="sup.help_title" title="Hilfe: Score & Trefferzahl" style="font-weight:700;">?</button>
         <div class="sup-hist-wrap">
-            <button class="sup-hist-btn" id="sup-hist-btn" title="Suchverlauf">
+            <button class="sup-hist-btn" id="sup-hist-btn" data-i18n-title="sup.history" title="Suchverlauf">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
-                Verlauf
+                <span data-i18n="sup.history">Verlauf</span>
             </button>
             <div class="sup-hist-panel hidden" id="sup-hist-panel">
-                <div class="sup-hist-head"><strong>Verlauf</strong><button class="sup-hist-clear" id="sup-hist-clear" type="button">Leeren</button></div>
+                <div class="sup-hist-head"><strong data-i18n="sup.history">Verlauf</strong><button class="sup-hist-clear" id="sup-hist-clear" type="button" data-i18n="sup.clear">Leeren</button></div>
                 <div id="sup-hist-list"></div>
             </div>
         </div>
-        <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten">
+        <button class="btn-theme" id="btn-theme-toggle" data-i18n-title="sup.theme" title="Hell/Dunkel umschalten">
             <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
         </button>
@@ -260,42 +260,43 @@
     <div class="sup-wrap">
         <div class="sup-search-card">
             <div class="sup-search-row">
-                <textarea id="sup-input" placeholder="Anfrage eingeben … (mehrzeilig möglich)"></textarea>
-                <button class="sup-btn" id="sup-search-btn" type="button">Suchen</button>
+                <textarea id="sup-input" data-i18n-placeholder="sup.input_ph" placeholder="Anfrage eingeben … (mehrzeilig möglich)"></textarea>
+                <button class="sup-btn" id="sup-search-btn" type="button" data-i18n="sup.search">Suchen</button>
             </div>
             <div class="sup-opts">
-                <label id="sup-opt-jira-wrap" class="hidden"><input type="checkbox" id="sup-opt-jira" checked> Jira Tickets</label>
-                <label id="sup-opt-conf-wrap" class="hidden"><input type="checkbox" id="sup-opt-conf" checked> Confluence</label>
-                <label><input type="checkbox" id="sup-opt-rag" checked> RAG einbeziehen</label>
-                <label><input type="checkbox" id="sup-opt-ai" checked> KI-Zusammenfassung</label>
+                <label id="sup-opt-jira-wrap" class="hidden"><input type="checkbox" id="sup-opt-jira" checked> <span data-i18n="sup.opt_jira">Jira Tickets</span></label>
+                <label id="sup-opt-open-wrap" class="hidden"><input type="checkbox" id="sup-opt-open" checked> <span data-i18n="sup.opt_open">nur offene Tickets</span></label>
+                <label id="sup-opt-conf-wrap" class="hidden"><input type="checkbox" id="sup-opt-conf" checked> <span data-i18n="sup.opt_conf">Confluence</span></label>
+                <label><input type="checkbox" id="sup-opt-rag" checked> <span data-i18n="sup.opt_rag">RAG einbeziehen</span></label>
+                <label><input type="checkbox" id="sup-opt-ai" checked> <span data-i18n="sup.opt_ai">KI-Zusammenfassung</span></label>
             </div>
             <div class="sup-filters" id="sup-filters">
-                <label>Quelle
+                <label><span data-i18n="sup.f_source">Quelle</span>
                     <select id="sup-f-source">
-                        <option value="">Alle</option>
-                        <option value="WISSEN">Wissen</option>
+                        <option value="" data-i18n="sup.all">Alle</option>
+                        <option value="WISSEN" data-i18n="sup.knowledge">Wissen</option>
                         <option value="JIRA">Jira</option>
                         <option value="CONFLUENCE">Confluence</option>
                     </select>
                 </label>
-                <label>Relevanz
+                <label><span data-i18n="sup.f_rel">Relevanz</span>
                     <select id="sup-f-rel">
-                        <option value="0">Alle</option>
+                        <option value="0" data-i18n="sup.all">Alle</option>
                         <option value="50">≥ 50&nbsp;%</option>
                         <option value="70">≥ 70&nbsp;%</option>
                         <option value="90">≥ 90&nbsp;%</option>
                     </select>
                 </label>
-                <label>Sortierung
+                <label><span data-i18n="sup.f_sort">Sortierung</span>
                     <select id="sup-f-sort">
-                        <option value="score">Relevanz</option>
-                        <option value="source">Quelle</option>
-                        <option value="title">Titel A–Z</option>
+                        <option value="score" data-i18n="sup.sort_rel">Relevanz</option>
+                        <option value="source" data-i18n="sup.sort_source">Quelle</option>
+                        <option value="title" data-i18n="sup.sort_title">Titel A–Z</option>
                     </select>
                 </label>
-                <label>Anzahl
+                <label><span data-i18n="sup.f_count">Anzahl</span>
                     <select id="sup-f-limit">
-                        <option value="0">Alle</option>
+                        <option value="0" data-i18n="sup.all">Alle</option>
                         <option value="5">Top 5</option>
                         <option value="10">Top 10</option>
                         <option value="20">Top 20</option>
@@ -303,11 +304,11 @@
                 </label>
             </div>
             <div class="sup-filters" id="sup-user-display" style="border-top:none;padding-top:6px;">
-                <label>KI-Zeilen
+                <label><span data-i18n="sup.ki_lines">KI-Zeilen</span>
                     <input type="number" id="sup-u-sumlines" min="2" step="1"
                         style="width:58px;background:rgba(var(--fg-rgb),.05);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:5px 6px;font-size:0.82rem;font-family:var(--font-body);">
                 </label>
-                <label>Antwortzeilen
+                <label><span data-i18n="sup.answer_lines">Antwortzeilen</span>
                     <input type="number" id="sup-u-reslines" min="2" step="1"
                         style="width:58px;background:rgba(var(--fg-rgb),.05);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:5px 6px;font-size:0.82rem;font-family:var(--font-body);">
                 </label>
@@ -352,10 +353,10 @@
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=26"></script>
+<script src="/static/js/i18n.js?v=28"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=9"></script>
 <script src="/static/js/issues.js?v=3"></script>
-<script src="/static/js/support.js?v=11"></script>
+<script src="/static/js/support.js?v=13"></script>
 </body>
 </html>

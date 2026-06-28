@@ -10,7 +10,11 @@ import info.jarvisai.app.data.model.MessageRole
 import info.jarvisai.app.data.model.MessageSegment
 import info.jarvisai.app.data.model.SegmentType
 import info.jarvisai.app.data.model.WsEvent
+import info.jarvisai.app.data.model.BlockInfo
 import info.jarvisai.app.data.prefs.SettingsDataStore
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 import info.jarvisai.app.desktop.AndroidDesktopExecutor
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +45,7 @@ class ChatRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val ws: JarvisWebSocket,
     private val settingsDataStore: SettingsDataStore,
+    private val okHttpClient: OkHttpClient,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -58,6 +63,10 @@ class ChatRepository @Inject constructor(
 
     private val _isAgentRunning = MutableStateFlow(false)
     val isAgentRunning: StateFlow<Boolean> = _isAgentRunning
+
+    // Sicherheitsschicht: gesetzt, wenn dieses Konto gesperrt wurde (UI zeigt Sperr-Screen)
+    private val _blockInfo = MutableStateFlow<BlockInfo?>(null)
+    val blockInfo: StateFlow<BlockInfo?> = _blockInfo
 
     // @Volatile: sicher lesbar vom Main-Thread (sendMessage) und Dispatchers.Default (handleEvent)
     @Volatile private var streamingMsgId: String? = null
@@ -86,6 +95,32 @@ class ChatRepository @Inject constructor(
     }
 
     fun disconnect() = ws.disconnect()
+
+    // Holt die eigene Sperr-Info (Grund + Protokoll) vom Server. Nutzt den
+    // injizierten OkHttpClient (self-signed TLS bereits erlaubt). Auth: Bearer-Token.
+    private suspend fun fetchMyBlock() {
+        try {
+            val settings = settingsDataStore.settings.first()
+            val baseUrl = settings.serverUrl
+                .replace("wss://", "https://").replace("ws://", "http://")
+                .removeSuffix("/ws").removeSuffix("/ws/")
+            val client = okHttpClient.newBuilder()
+                .readTimeout(20, TimeUnit.SECONDS).build()
+            val req = Request.Builder()
+                .url("$baseUrl/api/security/my-block")
+                .header("Authorization", "Bearer ${settings.apiKey}")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                val body = resp.body?.string()
+                if (resp.isSuccessful && body != null) {
+                    val info = json.decodeFromString(BlockInfo.serializer(), body)
+                    if (info.blocked) _blockInfo.value = info
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ChatRepository", "fetchMyBlock fehlgeschlagen: ${e.message}")
+        }
+    }
 
     fun sendMessage(text: String) {
         pendingStatus.clear()
@@ -161,15 +196,11 @@ class ChatRepository @Inject constructor(
             "security_blocked" -> {
                 finalizeStream()
                 _isAgentRunning.value = false
-                val txt = "🔒 ${event.message}"
-                _messages.update {
-                    it + ChatMessage(
-                        role = MessageRole.JARVIS,
-                        text = txt,
-                        segments = listOf(MessageSegment(SegmentType.ANSWER, txt)),
-                    )
+                // Sofort sperren (UI zeigt Sperr-Screen), Details (Protokoll) nachladen.
+                if (_blockInfo.value == null) {
+                    _blockInfo.value = BlockInfo(blocked = true, reason = event.message)
                 }
-                saveMessages()
+                scope.launch { fetchMyBlock() }
             }
             "llm_stats" -> {
                 val sec = event.duration_ms / 1000.0

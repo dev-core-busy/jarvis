@@ -56,6 +56,25 @@ data class WsEvent(
     val steps: Int = 0,
 )
 
+// ─── Sicherheitsschicht: Konto-Sperre ─────────────────────────────────
+
+@Serializable
+data class SecIncident(
+    val ts: Long = 0,
+    val channel: String = "",
+    val method: String = "",
+    val pattern: String = "",
+    val snippet: String = "",
+)
+
+@Serializable
+data class BlockInfo(
+    val blocked: Boolean = false,
+    val reason: String = "",
+    val at: Long = 0,
+    val incidents: List<SecIncident> = emptyList(),
+)
+
 // ─── Agent-Status ─────────────────────────────────────────────────────
 
 @Serializable

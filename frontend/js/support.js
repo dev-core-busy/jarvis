@@ -68,7 +68,8 @@
     function clampNum(v, lo, hi) { v = parseInt(v, 10); if (isNaN(v)) v = hi; return Math.max(lo, Math.min(v, hi)); }
     function getNumPref(key) { var v = localStorage.getItem('jarvis_support_' + key); return v === null ? null : parseInt(v, 10); }
     function setNumPref(key, n) { localStorage.setItem('jarvis_support_' + key, String(n)); }
-    var _supMax = { sum: 5, res: 2 };
+    var _supMax = { sum: 5, res: 2, tickets: 50 };
+    var _supDefault = { tickets: 12 };
 
     function loadStatus() {
         fetch('/api/support/status', { headers: authHeaders() })
@@ -88,7 +89,9 @@
                 // Darstellungs-Parameter: Maxima vom Server, Nutzerwert aus localStorage
                 _supMax.sum = parseInt(d.summary_lines_max, 10) || 5;
                 _supMax.res = parseInt(d.result_lines_max, 10) || 2;
-                var sEl = $('sup-u-sumlines'), rEl = $('sup-u-reslines');
+                _supMax.tickets = parseInt(d.ticket_count_max, 10) || 50;
+                _supDefault.tickets = parseInt(d.ticket_count_default, 10) || 12;
+                var sEl = $('sup-u-sumlines'), rEl = $('sup-u-reslines'), tEl = $('sup-u-tickets');
                 if (sEl) {
                     sEl.max = _supMax.sum;
                     var sp = getNumPref('sumlines'); sEl.value = clampNum(sp === null ? _supMax.sum : sp, 2, _supMax.sum);
@@ -97,8 +100,12 @@
                     rEl.max = _supMax.res;
                     var rp = getNumPref('reslines'); rEl.value = clampNum(rp === null ? _supMax.res : rp, 2, _supMax.res);
                 }
+                if (tEl) {
+                    tEl.max = _supMax.tickets;
+                    var tp = getNumPref('tickets'); tEl.value = clampNum(tp === null ? _supDefault.tickets : tp, 1, _supMax.tickets);
+                }
                 var hint = $('sup-u-hint');
-                if (hint) hint.textContent = '(max. ' + _supMax.sum + ' / ' + _supMax.res + ')';
+                if (hint) hint.textContent = '(max. ' + _supMax.sum + ' / ' + _supMax.res + ' Zeilen · ' + _supMax.tickets + ' Tickets)';
             })
             .catch(function () {});
     }
@@ -139,6 +146,10 @@
         if (rEl) rEl.addEventListener('change', function () {
             var v = clampNum(this.value, 2, _supMax.res); this.value = v; setNumPref('reslines', v);
             try { document.documentElement.style.setProperty('--sup-rl', String(v)); } catch (e) {}  // sofort anwenden
+        });
+        var tEl = $('sup-u-tickets');
+        if (tEl) tEl.addEventListener('change', function () {
+            var v = clampNum(this.value, 1, _supMax.tickets); this.value = v; setNumPref('tickets', v);
         });
         // Eingrenzungs-Pulldowns → Ergebnis live neu filtern (clientseitig)
         ['sup-f-source', 'sup-f-rel', 'sup-f-sort', 'sup-f-limit'].forEach(function (id) {
@@ -304,6 +315,7 @@
             body: JSON.stringify({ text: text, jira: useJira, confluence: useConf, rag: useRag, ai: useAi,
                                    open_only: useOpen,
                                    lang: (localStorage.getItem('jarvis_lang') || 'de'),
+                                   jira_limit: clampNum(getNumPref('tickets') === null ? _supDefault.tickets : getNumPref('tickets'), 1, _supMax.tickets),
                                    summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) })
         })
             .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })

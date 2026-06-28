@@ -3439,6 +3439,8 @@ async def support_status(user: str = Depends(require_auth)):
         "has_prompt": bool((cfg.get("system_prompt") or "").strip()),
         "summary_lines_max": _cap(cfg.get("summary_lines"), 5),
         "result_lines_max": _cap(cfg.get("result_lines"), 2),
+        "ticket_count_max": 50,  # harte API-Obergrenze
+        "ticket_count_default": max(1, min(int(cfg.get("jira_limit") or 12), 50)),
     })
 
 
@@ -3721,9 +3723,14 @@ async def support_query(request: Request):
     lang = (body.get("lang") or "de")
     _sacfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
     try:
-        jira_limit = max(1, min(int(_sacfg.get("jira_limit") or 12), 50))
+        _jl_default = max(1, min(int(_sacfg.get("jira_limit") or 12), 50))
     except (TypeError, ValueError):
-        jira_limit = 12
+        _jl_default = 12
+    # User-gewaehlte Ticketanzahl (Eingabefeld im UI) hat Vorrang; hart auf 1..50 begrenzt.
+    try:
+        jira_limit = max(1, min(int(body.get("jira_limit")), 50)) if body.get("jira_limit") else _jl_default
+    except (TypeError, ValueError):
+        jira_limit = _jl_default
     if not query:
         return JSONResponse({"ok": False, "error": "Bitte eine Anfrage eingeben."}, status_code=400)
 

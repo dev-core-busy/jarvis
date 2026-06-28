@@ -54,7 +54,33 @@
         $('sup-app').classList.remove('hidden');
         loadStatus();
         bind();
+        startLlmStatus();
         if (window.refreshBranding) try { window.refreshBranding(); } catch (e) {}
+    }
+
+    // ── LLM-Verbindungsanzeige (wie jarvis/chat): Punkt gruen/rot, alle 30s ──
+    var _llmStatusTimer = null;
+    function checkLlmStatus() {
+        var dot = $('sup-status-dot');
+        if (!dot) return;
+        fetch('/api/llm/active-status', { headers: authHeaders() })
+            .then(function (r) { if (!r.ok) throw new Error('http'); return r.json(); })
+            .then(function (d) {
+                var reachable = (d.status === 'ok' || d.status === 'degraded');
+                dot.className = 'sup-status-dot ' + (reachable ? 'connected' : 'disconnected');
+                var name = d.profile_name ? ' – ' + d.profile_name : '';
+                dot.title = (d.status === 'ok' ? T('sup.llm_ok', 'LLM erreichbar')
+                    : d.status === 'degraded' ? T('sup.llm_degraded', 'LLM erreichbar (Modell fehlt)')
+                    : T('sup.llm_down', 'LLM nicht erreichbar')) + name;
+            })
+            .catch(function () {
+                dot.className = 'sup-status-dot disconnected';
+                dot.title = T('sup.llm_down', 'LLM nicht erreichbar');
+            });
+    }
+    function startLlmStatus() {
+        checkLlmStatus();
+        if (!_llmStatusTimer) _llmStatusTimer = setInterval(checkLlmStatus, 30000);
     }
 
     // ── Checkbox-Vorbelegung pro Browser/Session merken ──
@@ -105,7 +131,9 @@
                     var tp = getNumPref('tickets'); tEl.value = clampNum(tp === null ? _supDefault.tickets : tp, 1, _supMax.tickets);
                 }
                 var hint = $('sup-u-hint');
-                if (hint) hint.textContent = '(max. ' + _supMax.sum + ' / ' + _supMax.res + ' Zeilen · ' + _supMax.tickets + ' Tickets)';
+                if (hint) hint.textContent = '(max. ' + _supMax.sum + ' / ' + _supMax.res + ' Zeilen)';
+                var thint = $('sup-u-thint');
+                if (thint && tEl) thint.textContent = '(' + tEl.value + '/' + _supMax.tickets + ')';
             })
             .catch(function () {});
     }
@@ -150,6 +178,7 @@
         var tEl = $('sup-u-tickets');
         if (tEl) tEl.addEventListener('change', function () {
             var v = clampNum(this.value, 1, _supMax.tickets); this.value = v; setNumPref('tickets', v);
+            var th = $('sup-u-thint'); if (th) th.textContent = '(' + v + '/' + _supMax.tickets + ')';
         });
         // Eingrenzungs-Pulldowns → Ergebnis live neu filtern (clientseitig)
         ['sup-f-source', 'sup-f-rel', 'sup-f-sort', 'sup-f-limit'].forEach(function (id) {

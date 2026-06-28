@@ -3578,6 +3578,78 @@ async def _support_ai_summary(query: str, blocks: list, system_prompt: str, line
         return ""
 
 
+async def _support_summarize_block(b: dict, lines: int, lang: str, system_prompt: str):
+    """Erzeugt eine mehrzeilige KI-Zusammenfassung EINES Treffers (Ticket /
+    Confluence-Seite / Wissens-Chunk) und schreibt sie in ``b['summary']``.
+    Bei Jira wird zusaetzlich die Beschreibung + die letzten Kommentare nachgeladen.
+    Best effort – Fehler lassen die urspruengliche Kurzfassung unveraendert."""
+    try:
+        lines = max(2, min(int(lines or 4), 20))
+    except (TypeError, ValueError):
+        lines = 4
+    content = (b.get("_content") or b.get("summary") or "").strip()
+    # Jira: vollstaendigen Vorgang (Beschreibung + Kommentare) nachladen
+    if b.get("source") == "JIRA" and b.get("_key"):
+        try:
+            from backend.jira_client import html_to_text as _jt
+            c = _jira_client()
+            it = await asyncio.to_thread(c.get_issue, b["_key"])
+            f = it.get("fields", {}) or {}
+            parts = [b.get("title", ""), f.get("summary") or ""]
+            desc = _jt(f.get("description") or "", 3000)
+            if desc:
+                parts.append(desc)
+            for cm in (((f.get("comment") or {}).get("comments")) or [])[-3:]:
+                parts.append("Kommentar: " + _jt(cm.get("body") or "", 500))
+            content = "\n".join(p for p in parts if p).strip()
+        except Exception as e:
+            print("[Support] Jira-Detail %s fehlgeschlagen: %s" % (b.get("_key"), e), flush=True)
+    if not content:
+        return
+    try:
+        from backend.llm import get_provider
+        from google.genai import types
+        if str(lang).lower().startswith("en"):
+            base = ("Summarize the following item (support ticket, knowledge/Confluence "
+                    "page) in at most %d sentences as readable English prose (no JSON, no "
+                    "bullet points). Focus on the essential facts, the problem and any "
+                    "solution. Reply only with the summary." % lines)
+        else:
+            base = ("Fasse den folgenden Eintrag (Support-Ticket, Wissens-/Confluence-Seite) "
+                    "in hoechstens %d Saetzen als lesbaren deutschen Fliesstext zusammen "
+                    "(kein JSON, keine Aufzaehlung). Konzentriere dich auf die wesentlichen "
+                    "Fakten, das Problem und – falls vorhanden – die Loesung. Antworte nur "
+                    "mit der Zusammenfassung." % lines)
+        sysp = ((system_prompt.strip() + "\n\n") if (system_prompt or "").strip() else "") + base
+        user_text = "%s\n\n%s" % (b.get("title", ""), content[:6000])
+        provider = get_provider(
+            config.LLM_PROVIDER, config.current_api_key, config.current_api_url,
+            auth_method=config.current_auth_method,
+            session_key=config.current_session_key, prompt_tool_calling=False)
+        resp = await provider.generate_response(
+            model=config.current_model, system_prompt=sysp,
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_text)])],
+            tools=[])
+        txt = "".join(p.text for p in (resp.parts or []) if getattr(p, "text", None)).strip()
+        if txt:
+            b["summary"] = txt
+    except Exception as e:
+        print("[Support] Pro-Treffer-Zusammenfassung fehlgeschlagen: %s" % e, flush=True)
+
+
+def _support_jira_base() -> str:
+    """Basis-URL der Jira-Instanz (fuer das Verlinken von Ticket-Keys in
+    Ausgabetexten), oder leer wenn Jira nicht aktiv/konfiguriert."""
+    try:
+        if _skill_active("jira"):
+            c = _jira_client()
+            if c.configured:
+                return (c.base or "").rstrip("/")
+    except Exception:
+        pass
+    return ""
+
+
 @app.post("/api/support/query")
 async def support_query(request: Request):
     """Support-Anfrage: RAG-, Jira- und/oder Confluence-Treffer, nach Relevanz (%)
@@ -3605,11 +3677,17 @@ async def support_query(request: Request):
     use_ai = body.get("ai", True)
     open_only = body.get("open_only", True)
     lang = (body.get("lang") or "de")
+    _sacfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
+    try:
+        jira_limit = max(1, min(int(_sacfg.get("jira_limit") or 12), 50))
+    except (TypeError, ValueError):
+        jira_limit = 12
     if not query:
         return JSONResponse({"ok": False, "error": "Bitte eine Anfrage eingeben."}, status_code=400)
 
     qtokens = _support_tokens(query)
     blocks: list[dict] = []
+    jira_total = None   # Gesamtzahl gefundener Jira-Treffer (vor 12er-Deckelung)
 
     # ── RAG (Wissensdatenbank) ──────────────────────────────────────
     if use_rag:
@@ -3637,7 +3715,8 @@ async def support_query(request: Request):
             c = _jira_client()
             if c.configured:
                 jql = _support_jira_jql(query, open_only)
-                data = await asyncio.to_thread(c.search, jql, 12)
+                data = await asyncio.to_thread(c.search, jql, jira_limit)
+                jira_total = data.get("total")
                 for i, it in enumerate(data.get("issues", [])):
                     b = issue_brief(it, c.base)
                     overlap = len(qtokens & _support_tokens(b.get("summary") or "")) / (len(qtokens) or 1)
@@ -3651,7 +3730,8 @@ async def support_query(request: Request):
                     blocks.append({"source": "JIRA", "title": b.get("key") or "Ticket",
                                    "summary": _two_line(summary, 600), "score": pct,
                                    "link": b.get("link") or "",
-                                   "source_label": b.get("key") or "Ticket"})
+                                   "source_label": b.get("key") or "Ticket",
+                                   "key": b.get("key")})
         except JiraError as e:
             print("[Support] Jira-Suche fehlgeschlagen: %s" % e, flush=True)
         except Exception as e:
@@ -3716,13 +3796,64 @@ async def support_query(request: Request):
         "ok": True, "query": query,
         "jira_active": _skill_active("jira"),
         "confluence_active": _skill_active("confluence"),
+        "jira_base": _support_jira_base(),  # fuer Ticket-Key-Links in Ausgabetexten
         "blocks": blocks,
         "ai_summary": ai_summary,
         "result_lines": res_max,           # Maximum (Anzeige-Begrenzung clientseitig)
         "summary_lines_max": sum_max,
         "result_lines_max": res_max,
+        "jira_total": jira_total,          # Gesamtzahl gefundener Jira-Treffer
+        "open_only": bool(open_only),
         "took_ms": int((_t.time() - t0) * 1000),
     })
+
+
+@app.post("/api/support/summarize")
+async def support_summarize(request: Request):
+    """On-Demand-KI-Zusammenfassung EINES Treffers (Button je Ergebnisbox).
+    Aktuell fuer Jira-Tickets: laedt den Vorgang (Beschreibung + Kommentare) und
+    fasst ihn in ``result_lines`` Saetzen zusammen.
+
+    Auth: Benutzer-Token (Bearer) ODER externer API-Key (analog /api/support/query).
+    """
+    _bearer = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = verify_token(_bearer)
+    if not user:
+        user = "api" if _verify_agent_api_key(request) else None
+    if not user:
+        return JSONResponse({"ok": False, "error": "Nicht authentifiziert"}, status_code=401)
+    if not _skill_active("support_assistant"):
+        return JSONResponse({"ok": False, "error": "Support-Assistent ist nicht aktiv."}, status_code=403)
+    body = await request.json()
+    source = (body.get("source") or "JIRA").upper()
+    key = (body.get("key") or "").strip()
+    lang = body.get("lang") or "de"
+    if source != "JIRA" or not key:
+        return JSONResponse({"ok": False, "error": "Nur Jira-Tickets werden unterstuetzt."},
+                            status_code=400)
+    if not _skill_active("jira"):
+        return JSONResponse({"ok": False, "error": "Jira-Skill ist nicht aktiv."}, status_code=403)
+
+    cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
+
+    def _cap(v, d):
+        try:
+            return max(2, min(int(v), 20))
+        except (TypeError, ValueError):
+            return d
+    res_max = _cap(cfg.get("result_lines"), 2)
+    lines = res_max
+    if body.get("lines") is not None:
+        lines = max(2, min(_cap(body.get("lines"), res_max), res_max))
+
+    b = {"source": "JIRA", "key": key, "_key": key, "title": key, "summary": ""}
+    await _support_summarize_block(b, lines, lang, cfg.get("system_prompt") or "")
+    summary = (b.get("summary") or "").strip()
+    if not summary:
+        return JSONResponse({"ok": False, "error": "Zusammenfassung fehlgeschlagen."},
+                            status_code=502)
+    return JSONResponse({"ok": True, "key": key, "summary": summary,
+                         "jira_base": _support_jira_base()})
 
 
 # ─── Support-Verlauf (benutzerabhaengig) ─────────────────────────────

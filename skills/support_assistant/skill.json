@@ -26,8 +26,15 @@
         "result_lines": {
             "type": "number",
             "label": "Antwortzeilen pro Treffer",
-            "description": "Auf wie viele Zeilen die Kurzfassung je Ergebnisblock begrenzt wird (Standard 2).",
+            "description": "Auf wie viele Zeilen die Kurzfassung je Ergebnisblock begrenzt wird; zugleich die Laenge (Saetze) der per Button 'KI-Zusammenfassung' erzeugten Ticket-Analyse (Standard 2, max. 20).",
             "default": 2,
+            "required": false
+        },
+        "jira_limit": {
+            "type": "number",
+            "label": "Jira-Treffer (max.)",
+            "description": "Maximale Anzahl angezeigter Jira-Tickets pro Anfrage (Standard 12, max. 50).",
+            "default": 12,
             "required": false
         }
     },

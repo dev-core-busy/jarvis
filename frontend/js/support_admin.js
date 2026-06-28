@@ -70,6 +70,7 @@
                     if ($('support-prompt')) $('support-prompt').value = c.system_prompt || '';
                     if ($('support-lines')) $('support-lines').value = c.summary_lines || 5;
                     if ($('support-result-lines')) $('support-result-lines').value = c.result_lines || 2;
+                    if ($('support-jira-limit')) $('support-jira-limit').value = c.jira_limit || 12;
                     self._cfSel = {};
                     (c.conf_spaces || []).forEach(function (k) { self._cfSel[k] = true; });
                     self._setMode(c.conf_filter_mode || 'off', false);
@@ -146,10 +147,14 @@
             var rlines = parseInt(($('support-result-lines') ? $('support-result-lines').value : '2'), 10);
             if (!rlines || rlines < 1) rlines = 2;
             if (rlines > 20) rlines = 20;
+            var jlimit = parseInt(($('support-jira-limit') ? $('support-jira-limit').value : '12'), 10);
+            if (!jlimit || jlimit < 1) jlimit = 12;
+            if (jlimit > 50) jlimit = 50;
             var body = {
                 system_prompt: ($('support-prompt') ? $('support-prompt').value : ''),
                 summary_lines: lines,
                 result_lines: rlines,
+                jira_limit: jlimit,
                 conf_filter_mode: this._cfMode || 'off',
                 conf_spaces: Object.keys(this._cfSel || {})
             };

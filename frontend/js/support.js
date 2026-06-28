@@ -22,15 +22,31 @@
     }
     // Übersetzung mit Fallback (deutscher Text), falls i18n nicht geladen
     function T(key, def) { return (window.t && window.t(key)) || def; }
-    // Escapen + http(s)-URLs als klickbare Links umwandeln
+    // Basis-URL der Jira-Instanz (vom Backend) – fuer Ticket-Key-Links
+    var _jiraBase = '';
+    // Escapen + http(s)-URLs UND Jira-Ticket-Keys (z.B. NXDISPATHO-19706) verlinken
     function escLink(s) {
-        return esc(s).replace(/(https?:\/\/[^\s<]+)/g, function (u) {
+        var html = esc(s);
+        // 1) http(s)-URLs sichern (Platzhalter), damit die Ticket-Erkennung sie
+        //    nicht im href/Text zerreisst.
+        var urls = [];
+        html = html.replace(/(https?:\/\/[^\s<]+)/g, function (u) {
             var tail = '';
             var m = u.match(/[)\].,;:!?]+$/);
             if (m) { tail = m[0]; u = u.slice(0, -tail.length); }
-            return '<a href="' + u + '" target="_blank" rel="noopener" '
-                + 'style="color:var(--accent-hover);word-break:break-all;">' + u + '</a>' + tail;
+            urls.push('<a href="' + u + '" target="_blank" rel="noopener" '
+                + 'style="color:var(--accent-hover);word-break:break-all;">' + u + '</a>' + tail);
+            return '@@URL' + (urls.length - 1) + '@@';
         });
+        // 2) Ticket-Keys (PROJEKT-NUMMER) als Links, wenn Jira-Basis bekannt
+        if (_jiraBase) {
+            html = html.replace(/\b([A-Z][A-Z0-9]+-\d+)\b/g, function (key) {
+                return '<a href="' + _jiraBase + '/browse/' + key + '" target="_blank" '
+                    + 'rel="noopener" style="color:var(--accent-hover);">' + key + '</a>';
+            });
+        }
+        // 3) gesicherte URLs wiederherstellen
+        return html.replace(/@@URL(\d+)@@/g, function (_, i) { return urls[+i]; });
     }
 
     function showApp() {
@@ -144,7 +160,9 @@
         // Dokument-Viewer (lokale Wissensquellen)
         $('sup-results').addEventListener('click', function (e) {
             var a = e.target.closest ? e.target.closest('.sup-doc-link') : null;
-            if (a) { e.preventDefault(); openDoc(a.getAttribute('data-doc'), a.getAttribute('data-label')); }
+            if (a) { e.preventDefault(); openDoc(a.getAttribute('data-doc'), a.getAttribute('data-label')); return; }
+            var btn = e.target.closest ? e.target.closest('.sup-ai-btn') : null;
+            if (btn) { e.preventDefault(); summarizeTicket(btn); }
         });
         $('sup-doc-close').addEventListener('click', closeDoc);
         $('sup-doc-modal').addEventListener('click', function (e) { if (e.target === this) closeDoc(); });
@@ -239,7 +257,7 @@
         meta.innerHTML = '<span class="sup-spinner"></span>' + esc(T('sup.searching', 'Suche läuft…'));
         var box = $('sup-results');
         box.innerHTML = useAi
-            ? '<div class="sup-ai-card"><div class="sup-ai-label">' + esc(T('sup.ai_label', 'KI-Zusammenfassung')) + '</div>'
+            ? '<div class="sup-ai-card"><div class="sup-ai-label">' + esc(T('sup.ai_label', 'KI-Gesamtzusammenfassung')) + '</div>'
               + '<div class="sup-ai-text"><span class="sup-spinner"></span>' + esc(T('sup.evaluating', 'Quellen werden ausgewertet…')) + '</div></div>'
             : '<div class="sup-empty"><span class="sup-spinner"></span>' + esc(T('sup.searching', 'Suche läuft…')) + '</div>';
 
@@ -273,13 +291,14 @@
 
     function render(d) {
         _lastData = d;
-        // Antwortzeilen: Nutzerwert, begrenzt auf das Admin-Maximum
+        if (d.jira_base) _jiraBase = d.jira_base;   // fuer Ticket-Key-Links in Texten
+        // Antwortzeilen: Nutzerwert, begrenzt auf das Admin-Maximum (Anzeige-Kappung)
         var rMax = parseInt(d.result_lines_max || d.result_lines, 10) || 2;
         var rUser = clampNum(getNumPref('reslines') === null ? rMax : getNumPref('reslines'), 2, rMax);
         try { document.documentElement.style.setProperty('--sup-rl', String(rUser)); } catch (e) {}
         var html = '';
         if (d.ai_summary) {
-            html += '<div class="sup-ai-card"><div class="sup-ai-label">' + esc(T('sup.ai_label', 'KI-Zusammenfassung')) + '</div>'
+            html += '<div class="sup-ai-card"><div class="sup-ai-label">' + esc(T('sup.ai_label', 'KI-Gesamtzusammenfassung')) + '</div>'
                 + '<div class="sup-ai-text">' + escLink(d.ai_summary) + '</div></div>';
         }
         html += '<div id="sup-blocks"></div>';
@@ -301,12 +320,19 @@
             inner = esc(label);
         }
         var srcHtml = '<div class="sup-block-src">' + esc(T('sup.source_prefix', 'Quelle:')) + ' ' + inner + '</div>';
+        // Jira-Tickets: On-Demand-Button "KI-Zusammenfassung" rechts in der Kopfzeile
+        var aiBtn = '';
+        if (b.source === 'JIRA' && (b.key || b.title)) {
+            aiBtn = '<button type="button" class="sup-ai-btn" data-key="' + esc(b.key || b.title) + '">'
+                + esc(T('sup.ai_btn', 'KI-Zusammenfassung')) + '</button>';
+        }
         return '<div class="sup-block">'
             + '<div class="sup-block-head">'
             + '<span class="sup-block-num">' + (i + 1) + '.</span>'
             + '<span class="sup-block-title">' + esc(b.title) + '</span>'
             + '<span class="sup-badge-src">' + esc(b.source) + '</span>'
             + '<span class="sup-badge-score" title="Zutreffend">' + b.score + '%</span>'
+            + aiBtn
             + '</div>'
             + '<div class="sup-block-body">' + escLink(b.summary) + '</div>'
             + srcHtml
@@ -337,9 +363,18 @@
         else list.sort(function (a, b) { return b.score - a.score; });
         if (limit) list = list.slice(0, limit);
 
-        $('sup-meta').innerHTML = T('sup.result_for', 'Ergebnis für') + ' <strong>"' + esc(_lastData.query) + '"</strong> ('
+        var metaStr = T('sup.result_for', 'Ergebnis für') + ' <strong>"' + esc(_lastData.query) + '"</strong> ('
             + list.length + ' ' + T('sup.of', 'von') + ' ' + all.length + ' ' + T('sup.hits', 'Treffer')
             + (_lastData.took_ms ? ' · ' + _lastData.took_ms + ' ms' : '') + ')';
+        // Jira-Gesamtzahl (vor 12er-Deckelung) anzeigen, wenn mehr gefunden als angezeigt
+        if (_lastData.jira_total != null) {
+            var jiraShown = list.filter(function (b) { return b.source === 'JIRA'; }).length;
+            if (jiraShown && _lastData.jira_total > jiraShown) {
+                var word = _lastData.open_only ? T('sup.open_word', 'offenen') : T('sup.found_word', 'gefunden');
+                metaStr += ' · Jira: ' + jiraShown + ' ' + T('sup.of', 'von') + ' ' + _lastData.jira_total + ' ' + word;
+            }
+        }
+        $('sup-meta').innerHTML = metaStr;
 
         var box = $('sup-blocks');
         if (!box) return;
@@ -351,6 +386,43 @@
             return;
         }
         box.innerHTML = list.map(blockHtml).join('');
+    }
+
+    // On-Demand-KI-Zusammenfassung eines Jira-Tickets (Button je Ergebnisbox)
+    function summarizeTicket(btn) {
+        var key = btn.getAttribute('data-key');
+        if (!key || btn.disabled) return;
+        var block = btn.closest ? btn.closest('.sup-block') : null;
+        var bodyEl = block ? block.querySelector('.sup-block-body') : null;
+        if (!bodyEl) return;
+        var orig = btn.textContent;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="sup-spinner"></span>' + esc(T('sup.analyzing', 'Analysiere…'));
+        var lines = clampNum(getNumPref('reslines') === null ? _supMax.res : getNumPref('reslines'), 2, _supMax.res);
+        fetch('/api/support/summarize', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ key: key, source: 'JIRA',
+                lang: (localStorage.getItem('jarvis_lang') || 'de'), lines: lines })
+        })
+            .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
+            .then(function (d) {
+                btn.disabled = false;
+                if (!d) return;
+                if (!d.ok) {
+                    btn.textContent = orig;
+                    bodyEl.classList.add('expanded');
+                    bodyEl.innerHTML = '<span style="color:var(--danger);">'
+                        + esc(d.error || T('sup.search_failed', 'Suche fehlgeschlagen.')) + '</span>';
+                    return;
+                }
+                if (d.jira_base) _jiraBase = d.jira_base;
+                bodyEl.classList.add('expanded');
+                bodyEl.innerHTML = escLink(d.summary);
+                btn.textContent = T('sup.ai_btn_again', 'Neu zusammenfassen');
+                btn.classList.add('done');   // farblich abgesetzter Zustand
+            })
+            .catch(function () { btn.disabled = false; btn.textContent = orig; });
     }
 
     // ── Login ──

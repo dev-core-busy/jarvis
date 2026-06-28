@@ -123,7 +123,9 @@ for b in res["blocks"]:
 
 - **Antwortzeit:** Mit `ai=true` ist ein LLM-Aufruf enthalten (typisch einige
   Sekunden). Für reine Trefferlisten `ai=false` setzen.
-- **Trefferzahl:** intern bis zu 8 RAG-, 10 Jira- und 6 Confluence-Treffer.
+- **Trefferzahl:** bis zu 8 RAG- und 6 Confluence-Treffer; die Jira-Trefferzahl
+  steuert der Body-Parameter `jira_limit` (Standard 12, Obergrenze per Skill-Config
+  konfigurierbar bis 1000).
 - **Score:** RAG = semantische Ähnlichkeit; Jira/Confluence = rangbasiert +
   Wort-Überlappung; Bereich ca. 20–96 %.
 - **TLS:** Jarvis nutzt ein selbstsigniertes Zertifikat – in Fremdanwendungen

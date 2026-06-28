@@ -200,6 +200,10 @@ class SettingsViewModel @Inject constructor(
                 val json = JSONObject(responseStr)
                 if (json.getBoolean("success")) {
                     onApiKeyChange(json.getString("token"))
+                    // Frischen Token SOFORT persistieren – sonst bleibt er nur im
+                    // Speicher und der WebSocket (liest aus dem DataStore) verbindet
+                    // weiter mit dem alten Token -> "Sitzung ungueltig/abgelaufen".
+                    save()
                     _loginState.value = "ok"
                 } else {
                     _loginState.value = "error: ${json.optString("error", "Anmeldung fehlgeschlagen")}"

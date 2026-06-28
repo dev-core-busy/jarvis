@@ -111,7 +111,13 @@ class JiraClient:
         """Baut aus einfachen Filtern eine JQL-Query (Volltext + Felder)."""
         clauses: list[str] = []
         if query:
-            clauses.append('text ~ "%s"' % _q(query))
+            q = query.strip()
+            # Sieht die Query wie ein Issue-Key aus (z.B. 'crm-10550')? -> exakte
+            # Key-Suche (gross) statt Volltext, sonst wird das Ticket nicht gefunden.
+            if re.fullmatch(r"[A-Za-z][A-Za-z0-9]*-\d+", q):
+                clauses.append('key = "%s"' % q.upper())
+            else:
+                clauses.append('text ~ "%s"' % _q(query))
         if project:
             clauses.append('project = "%s"' % _q(project))
         if status:
@@ -132,7 +138,10 @@ class JiraClient:
             "fields": self._SEARCH_FIELDS})
 
     def get_issue(self, key: str) -> dict:
-        """Einzelnes Issue inkl. Beschreibung und Kommentaren."""
+        """Einzelnes Issue inkl. Beschreibung und Kommentaren.
+        Jira-Keys sind GROSSGESCHRIEBEN -> normalisieren, damit z.B. 'crm-10550'
+        nicht in einen 404 laeuft."""
+        key = (key or "").strip().upper()
         return self._request("GET", "/rest/api/2/issue/%s" % key, params={
             "fields": self._SEARCH_FIELDS + ",description,comment,labels,resolution"})
 

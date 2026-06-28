@@ -3432,6 +3432,10 @@ async def support_status(user: str = Depends(require_auth)):
             return max(2, min(int(v), 20))
         except (TypeError, ValueError):
             return d
+    try:
+        _tdef = max(1, min(int(cfg.get("jira_limit") or 12), 50))
+    except (TypeError, ValueError):
+        _tdef = 12
     return JSONResponse({
         "active": _skill_active("support_assistant"),
         "jira_active": _skill_active("jira"),
@@ -3440,7 +3444,7 @@ async def support_status(user: str = Depends(require_auth)):
         "summary_lines_max": _cap(cfg.get("summary_lines"), 5),
         "result_lines_max": _cap(cfg.get("result_lines"), 2),
         "ticket_count_max": 50,  # harte API-Obergrenze
-        "ticket_count_default": max(1, min(int(cfg.get("jira_limit") or 12), 50)),
+        "ticket_count_default": _tdef,
     })
 
 

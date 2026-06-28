@@ -243,13 +243,13 @@
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (d && d.ok) {
-                    if (st) { st.textContent = '✓ ' + T('sup.instr_saved', 'Gespeichert'); st.style.color = '#34d399'; }
+                    if (st) { st.textContent = '✓ ' + T('sup.instr_saved', 'Gespeichert'); st.style.color = 'var(--success)'; }
                     setTimeout(function () { if (st) { st.textContent = ''; st.style.color = ''; } $('sup-instr-overlay').classList.add('hidden'); }, 1200);
                 } else {
-                    if (st) { st.textContent = '✗ ' + ((d && d.error) || T('sup.instr_save_fail', 'Speichern fehlgeschlagen')); st.style.color = '#ef4444'; }
+                    if (st) { st.textContent = '✗ ' + ((d && d.error) || T('sup.instr_save_fail', 'Speichern fehlgeschlagen')); st.style.color = 'var(--danger)'; }
                 }
             })
-            .catch(function (e) { if (st) { st.textContent = '✗ ' + e.message; st.style.color = '#ef4444'; } });
+            .catch(function (e) { if (st) { st.textContent = '✗ ' + e.message; st.style.color = 'var(--danger)'; } });
     }
 
     function closeDoc() { $('sup-doc-modal').classList.add('hidden'); }

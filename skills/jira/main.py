@@ -176,8 +176,8 @@ class JiraGetIssueTool(_Base):
                                 "Dieser Kunde hat %d zugeordnete Tickets (neueste %d unten). "
                                 "Fasse diese Tickets zusammen – melde NICHT, dass ein Ticket fehlt:\n%s"
                                 % (ku, total, len(issues), "\n".join(lines)))
-                except JiraError:
-                    pass
+                except Exception:
+                    pass  # Fallback-Suche fehlgeschlagen -> sauber den 404 melden
             return _fmt_err(e)
         b = issue_brief(it, c.base)
         f = it.get("fields", {}) or {}

@@ -5,10 +5,10 @@
 # Anders als build.sh (lädt jarvis.exe + patcht nur den Versionsstring) fuegt
 # dieses Skript NEUE Feature-Karten in das LIVE index.html ein, OHNE andere
 # Live-Inhalte zu verlieren: Live laden -> Karten nach der Office-Karte
-# einsetzen (idempotent) -> per FTPS zurueckladen -> verifizieren.
+# einsetzen (idempotent) -> per SSH zurueckspielen -> verifizieren.
 #
-# FTPS-Zugang: Umgebungsvariable JARVIS_FTPS_USER (Format "user:pass") ODER
-# gitignore-te Datei windows-app-go/.ftps_credentials.
+# Auth: SSH Public-Key (keyless). Override via JARVIS_SSH_HOST / JARVIS_SSH_KEY /
+# JARVIS_DOCROOT. FTP/FTPS wird bewusst NICHT genutzt (FTP-ALG kapert AUTH).
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 cd "$(dirname "$0")"

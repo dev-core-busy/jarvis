@@ -49,9 +49,19 @@ def _q(v: str) -> str:
 
 
 # Insight/Assets-Feld, das die CRM-Kunden-ID traegt (Wert z.B. "Name (CRM-10550)").
-# Exakte Suche 'Organisation = "CRM-10550"' findet ALLE Tickets dieses Kunden.
-_ORG_FIELD = "Organisation"
+# Exakte Suche '<Feld> = "CRM-10550"' findet ALLE Tickets dieses Kunden. Der Feldname
+# ist instanzspezifisch -> per Jira-Skill-Config 'org_field' ueberschreibbar.
+_ORG_FIELD_DEFAULT = "Organisation"
 _CRM_RE = re.compile(r"(?i)^\s*crm-\d+\s*$")
+
+
+def _org_field() -> str:
+    try:
+        from backend.config import config
+        f = (config.get_skill_states().get("jira", {}).get("config", {}) or {}).get("org_field")
+        return (f or "").strip() or _ORG_FIELD_DEFAULT
+    except Exception:
+        return _ORG_FIELD_DEFAULT
 
 
 def crm_org_clause(term: str) -> str | None:
@@ -59,7 +69,7 @@ def crm_org_clause(term: str) -> str | None:
     fuer das Insight-Organisationsfeld, sonst None. CRM-IDs sind KEINE Issue-Keys
     und stehen nicht im Volltext – nur dieses Feld findet alle zugeordneten Tickets."""
     t = (term or "").strip()
-    return ('%s = "%s"' % (_ORG_FIELD, t.upper())) if _CRM_RE.match(t) else None
+    return ('%s = "%s"' % (_org_field(), t.upper())) if _CRM_RE.match(t) else None
 
 
 class JiraError(Exception):

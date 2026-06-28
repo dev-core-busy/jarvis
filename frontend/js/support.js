@@ -112,6 +112,10 @@
                 $('sup-opt-rag').checked = getPref('rag');
                 $('sup-opt-ai').checked = getPref('ai');
                 $('sup-opt-open').checked = getPref('open');
+                // Exklusiv: nie 'alle' UND 'offene' zugleich → Standard 'offene'
+                if ($('sup-opt-jira').checked && $('sup-opt-open').checked) {
+                    $('sup-opt-jira').checked = false; setPref('jira', false);
+                }
                 // Darstellungs-Parameter: Maxima vom Server, Nutzerwert aus localStorage
                 _supMax.sum = parseInt(d.summary_lines_max, 10) || 5;
                 _supMax.res = parseInt(d.result_lines_max, 10) || 2;
@@ -152,11 +156,18 @@
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); search(); }
         });
         // Checkbox-Werte als Vorbelegung fuer die naechste Session merken
-        $('sup-opt-jira').addEventListener('change', function () { setPref('jira', this.checked); });
+        // 'alle Jira' und 'offene Jira' schliessen sich gegenseitig aus
+        $('sup-opt-jira').addEventListener('change', function () {
+            if (this.checked && $('sup-opt-open').checked) { $('sup-opt-open').checked = false; setPref('open', false); }
+            setPref('jira', this.checked);
+        });
+        $('sup-opt-open').addEventListener('change', function () {
+            if (this.checked && $('sup-opt-jira').checked) { $('sup-opt-jira').checked = false; setPref('jira', false); }
+            setPref('open', this.checked);
+        });
         $('sup-opt-conf').addEventListener('change', function () { setPref('conf', this.checked); });
         $('sup-opt-rag').addEventListener('change', function () { setPref('rag', this.checked); });
         $('sup-opt-ai').addEventListener('change', function () { setPref('ai', this.checked); });
-        $('sup-opt-open').addEventListener('change', function () { setPref('open', this.checked); });
         // Sprachwechsel: statische Labels via applyLang (i18n.js), dynamische Treffer neu rendern
         if (window.setLang && !window._supLangWrapped) {
             window._supLangWrapped = true;
@@ -323,11 +334,15 @@
         if (!text) { $('sup-input').focus(); return; }
         var jiraWrap = $('sup-opt-jira-wrap');
         var confWrap = $('sup-opt-conf-wrap');
-        var useJira = !jiraWrap.classList.contains('hidden') && $('sup-opt-jira').checked;
+        var jiraHidden = jiraWrap.classList.contains('hidden');
+        // Zwei exklusive Modi: alle Jira-Tickets ODER nur offene (oder keins)
+        var allJira = !jiraHidden && $('sup-opt-jira').checked;
+        var openJira = !jiraHidden && $('sup-opt-open').checked;
+        var useJira = allJira || openJira;
+        var useOpen = openJira;
         var useConf = !confWrap.classList.contains('hidden') && $('sup-opt-conf').checked;
         var useRag = $('sup-opt-rag').checked;
         var useAi = $('sup-opt-ai').checked;
-        var useOpen = $('sup-opt-open').checked;
 
         var btn = $('sup-search-btn'); btn.disabled = true;
         var meta = $('sup-meta'); meta.classList.remove('hidden');

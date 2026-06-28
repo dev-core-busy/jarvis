@@ -3429,13 +3429,16 @@ async def support_status(user: str = Depends(require_auth)):
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
     def _cap(v, d):
         try:
-            return max(2, min(int(v), 20))
+            return max(2, min(int(v), 50))
         except (TypeError, ValueError):
             return d
+    # Admin-Feld "Jira-Treffer (max.)" ist das MAXIMUM (harte Obergrenze 1000);
+    # der Default fuer das User-Eingabefeld liegt bei min(12, Maximum).
     try:
-        _tdef = max(1, min(int(cfg.get("jira_limit") or 12), 50))
+        _tmax = max(1, min(int(cfg.get("jira_limit") or 12), 1000))
     except (TypeError, ValueError):
-        _tdef = 12
+        _tmax = 12
+    _tdef = min(12, _tmax)
     return JSONResponse({
         "active": _skill_active("support_assistant"),
         "jira_active": _skill_active("jira"),
@@ -3443,7 +3446,7 @@ async def support_status(user: str = Depends(require_auth)):
         "has_prompt": bool((cfg.get("system_prompt") or "").strip()),
         "summary_lines_max": _cap(cfg.get("summary_lines"), 5),
         "result_lines_max": _cap(cfg.get("result_lines"), 2),
-        "ticket_count_max": 50,  # harte API-Obergrenze
+        "ticket_count_max": _tmax,
         "ticket_count_default": _tdef,
     })
 
@@ -3726,13 +3729,15 @@ async def support_query(request: Request):
     open_only = body.get("open_only", True)
     lang = (body.get("lang") or "de")
     _sacfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
+    # Admin-Feld "Jira-Treffer (max.)" ist das Maximum (harte Decke 1000).
     try:
-        _jl_default = max(1, min(int(_sacfg.get("jira_limit") or 12), 50))
+        _jl_max = max(1, min(int(_sacfg.get("jira_limit") or 12), 1000))
     except (TypeError, ValueError):
-        _jl_default = 12
-    # User-gewaehlte Ticketanzahl (Eingabefeld im UI) hat Vorrang; hart auf 1..50 begrenzt.
+        _jl_max = 12
+    _jl_default = min(12, _jl_max)
+    # User-gewaehlte Ticketanzahl (Eingabefeld im UI) hat Vorrang; auf 1..Maximum begrenzt.
     try:
-        jira_limit = max(1, min(int(body.get("jira_limit")), 50)) if body.get("jira_limit") else _jl_default
+        jira_limit = max(1, min(int(body.get("jira_limit")), _jl_max)) if body.get("jira_limit") else _jl_default
     except (TypeError, ValueError):
         jira_limit = _jl_default
     if not query:
@@ -3829,7 +3834,7 @@ async def support_query(request: Request):
 
     def _cap(v, d):
         try:
-            return max(2, min(int(v), 20))
+            return max(2, min(int(v), 50))
         except (TypeError, ValueError):
             return d
     sum_max = _cap(cfg.get("summary_lines"), 5)   # Admin-Maximum
@@ -3896,7 +3901,7 @@ async def support_summarize(request: Request):
 
     def _cap(v, d):
         try:
-            return max(2, min(int(v), 20))
+            return max(2, min(int(v), 50))
         except (TypeError, ValueError):
             return d
     res_max = _cap(cfg.get("result_lines"), 2)

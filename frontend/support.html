@@ -148,6 +148,22 @@
         .sup-block-src { margin-top: 8px; font-size: 0.8rem; color: var(--text-muted); }
         .sup-block-src a { color: var(--accent-hover); text-decoration: none; word-break: break-all; cursor: pointer; }
         .sup-block-src a:hover { text-decoration: underline; }
+        .sup-ai-btn {
+            font-size: 0.74rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+            padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(var(--accent-rgb), .45);
+            background: rgba(var(--accent-rgb), .12); color: var(--accent-hover);
+        }
+        .sup-ai-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), .22); }
+        .sup-ai-btn:disabled { opacity: .6; cursor: default; }
+        /* Zustand nach erfolgter Analyse: neutral/sekundaer abgesetzt (kein Akzent) */
+        .sup-ai-btn.done {
+            border-color: var(--border); background: transparent; color: var(--text-muted);
+        }
+        .sup-ai-btn.done:hover:not(:disabled) {
+            background: rgba(var(--fg-rgb), .06); color: var(--text-secondary);
+        }
+        /* nach KI-Analyse: Box nicht mehr auf --sup-rl Zeilen kappen */
+        .sup-block-body.expanded { display: block; -webkit-line-clamp: unset; }
 
         .sup-doc-modal { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center;
             justify-content: center; background: rgba(var(--shadow-rgb), .6); backdrop-filter: blur(4px); padding: 20px; }
@@ -268,7 +284,7 @@
                 <label id="sup-opt-open-wrap" class="hidden"><input type="checkbox" id="sup-opt-open" checked> <span data-i18n="sup.opt_open">nur offene Tickets</span></label>
                 <label id="sup-opt-conf-wrap" class="hidden"><input type="checkbox" id="sup-opt-conf" checked> <span data-i18n="sup.opt_conf">Confluence</span></label>
                 <label><input type="checkbox" id="sup-opt-rag" checked> <span data-i18n="sup.opt_rag">RAG einbeziehen</span></label>
-                <label><input type="checkbox" id="sup-opt-ai" checked> <span data-i18n="sup.opt_ai">KI-Zusammenfassung</span></label>
+                <label><input type="checkbox" id="sup-opt-ai" checked> <span data-i18n="sup.opt_ai">KI-Gesamtzusammenfassung</span></label>
             </div>
             <div class="sup-filters" id="sup-filters">
                 <label><span data-i18n="sup.f_source">Quelle</span>
@@ -353,10 +369,10 @@
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=28"></script>
+<script src="/static/js/i18n.js?v=31"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=9"></script>
 <script src="/static/js/issues.js?v=3"></script>
-<script src="/static/js/support.js?v=13"></script>
+<script src="/static/js/support.js?v=19"></script>
 </body>
 </html>

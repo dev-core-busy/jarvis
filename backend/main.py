@@ -3423,29 +3423,45 @@ async def support_page():
                         headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
+# ── Support-Darstellungsgrenzen: EINE Quelle der Wahrheit (gegen Drift) ──
+# Frontend (frontend/js/support_admin.js Clamps + frontend/index.html input max=)
+# MUSS dieselben Obergrenzen spiegeln.
+_SUPPORT_LINES_MAX = 50      # Zeilen je Zusammenfassung / Antwort pro Treffer
+_SUPPORT_JIRA_MAX = 1000     # Jira-Trefferzahl (Admin-Maximum)
+_SUPPORT_JIRA_DEFAULT = 12   # Default-Ticketanzahl, falls User nichts waehlt
+
+
+def _support_cap(v, d, hi=_SUPPORT_LINES_MAX):
+    """Begrenzt einen Zeilen-/Anzeigewert auf 2..hi (Default d bei ungueltig)."""
+    try:
+        return max(2, min(int(v), hi))
+    except (TypeError, ValueError):
+        return d
+
+
+def _support_jira_limits(cfg):
+    """(max, default) der Jira-Trefferzahl aus der Skill-Config.
+    Admin-Feld 'jira_limit' ist das MAXIMUM (harte Decke _SUPPORT_JIRA_MAX);
+    Default fuers User-Eingabefeld = min(_SUPPORT_JIRA_DEFAULT, Maximum)."""
+    try:
+        jmax = max(1, min(int(cfg.get("jira_limit") or _SUPPORT_JIRA_DEFAULT), _SUPPORT_JIRA_MAX))
+    except (TypeError, ValueError):
+        jmax = _SUPPORT_JIRA_DEFAULT
+    return jmax, min(_SUPPORT_JIRA_DEFAULT, jmax)
+
+
 @app.get("/api/support/status")
 async def support_status(user: str = Depends(require_auth)):
     """Status fuer die Support-Oberflaeche (Checkbox-Sichtbarkeit)."""
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
-    def _cap(v, d):
-        try:
-            return max(2, min(int(v), 50))
-        except (TypeError, ValueError):
-            return d
-    # Admin-Feld "Jira-Treffer (max.)" ist das MAXIMUM (harte Obergrenze 1000);
-    # der Default fuer das User-Eingabefeld liegt bei min(12, Maximum).
-    try:
-        _tmax = max(1, min(int(cfg.get("jira_limit") or 12), 1000))
-    except (TypeError, ValueError):
-        _tmax = 12
-    _tdef = min(12, _tmax)
+    _tmax, _tdef = _support_jira_limits(cfg)
     return JSONResponse({
         "active": _skill_active("support_assistant"),
         "jira_active": _skill_active("jira"),
         "confluence_active": _skill_active("confluence"),
         "has_prompt": bool((cfg.get("system_prompt") or "").strip()),
-        "summary_lines_max": _cap(cfg.get("summary_lines"), 5),
-        "result_lines_max": _cap(cfg.get("result_lines"), 2),
+        "summary_lines_max": _support_cap(cfg.get("summary_lines"), 5),
+        "result_lines_max": _support_cap(cfg.get("result_lines"), 2),
         "ticket_count_max": _tmax,
         "ticket_count_default": _tdef,
     })
@@ -3729,15 +3745,12 @@ async def support_query(request: Request):
     open_only = body.get("open_only", True)
     lang = (body.get("lang") or "de")
     _sacfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
-    # Admin-Feld "Jira-Treffer (max.)" ist das Maximum (harte Decke 1000).
+    _jl_max, _jl_default = _support_jira_limits(_sacfg)
+    # User-gewaehlte Ticketanzahl (Eingabefeld im UI) hat Vorrang; auf 1..Maximum
+    # begrenzt. ``is not None`` statt truthy, damit 0 nicht still zum Default wird.
+    _jl_req = body.get("jira_limit")
     try:
-        _jl_max = max(1, min(int(_sacfg.get("jira_limit") or 12), 1000))
-    except (TypeError, ValueError):
-        _jl_max = 12
-    _jl_default = min(12, _jl_max)
-    # User-gewaehlte Ticketanzahl (Eingabefeld im UI) hat Vorrang; auf 1..Maximum begrenzt.
-    try:
-        jira_limit = max(1, min(int(body.get("jira_limit")), _jl_max)) if body.get("jira_limit") else _jl_default
+        jira_limit = max(1, min(int(_jl_req), _jl_max)) if _jl_req is not None else _jl_default
     except (TypeError, ValueError):
         jira_limit = _jl_default
     if not query:
@@ -3832,17 +3845,12 @@ async def support_query(request: Request):
 
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
 
-    def _cap(v, d):
-        try:
-            return max(2, min(int(v), 50))
-        except (TypeError, ValueError):
-            return d
-    sum_max = _cap(cfg.get("summary_lines"), 5)   # Admin-Maximum
-    res_max = _cap(cfg.get("result_lines"), 2)
+    sum_max = _support_cap(cfg.get("summary_lines"), 5)   # Admin-Maximum
+    res_max = _support_cap(cfg.get("result_lines"), 2)
     # Benutzer-Vorgabe (sitzungsueberdauernd im Browser) – auf [2, Maximum] begrenzt
     eff_sum = sum_max
     if body.get("summary_lines") is not None:
-        eff_sum = max(2, min(_cap(body.get("summary_lines"), sum_max), sum_max))
+        eff_sum = max(2, min(_support_cap(body.get("summary_lines"), sum_max), sum_max))
 
     ai_summary = ""
     if use_ai:
@@ -3899,15 +3907,10 @@ async def support_summarize(request: Request):
 
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
 
-    def _cap(v, d):
-        try:
-            return max(2, min(int(v), 50))
-        except (TypeError, ValueError):
-            return d
-    res_max = _cap(cfg.get("result_lines"), 2)
+    res_max = _support_cap(cfg.get("result_lines"), 2)
     lines = res_max
     if body.get("lines") is not None:
-        lines = max(2, min(_cap(body.get("lines"), res_max), res_max))
+        lines = max(2, min(_support_cap(body.get("lines"), res_max), res_max))
 
     b = {"source": "JIRA", "key": key, "_key": key, "title": key, "summary": ""}
     await _support_summarize_block(b, lines, lang, cfg.get("system_prompt") or "")

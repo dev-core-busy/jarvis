@@ -111,13 +111,10 @@ class JiraClient:
         """Baut aus einfachen Filtern eine JQL-Query (Volltext + Felder)."""
         clauses: list[str] = []
         if query:
-            q = query.strip()
-            # Sieht die Query wie ein Issue-Key aus (z.B. 'crm-10550')? -> exakte
-            # Key-Suche (gross) statt Volltext, sonst wird das Ticket nicht gefunden.
-            if re.fullmatch(r"[A-Za-z][A-Za-z0-9]*-\d+", q):
-                clauses.append('key = "%s"' % q.upper())
-            else:
-                clauses.append('text ~ "%s"' % _q(query))
+            # IMMER Volltextsuche: Begriffe wie 'crm-10550' sind KUNDEN-/IDs, denen
+            # Tickets zugeordnet sind – KEINE Jira-Issue-Keys. Eine Key-Suche wuerde
+            # 0 Treffer liefern. Echte Issue-Keys liest man ueber jira_get_issue.
+            clauses.append('text ~ "%s"' % _q(query))
         if project:
             clauses.append('project = "%s"' % _q(project))
         if status:

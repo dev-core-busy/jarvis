@@ -19,30 +19,28 @@ go build -ldflags="-H windowsgui -s -w -X main.AppVersion=$VERSION" -o jarvis.ex
 
 echo "Fertig: $(ls -lh jarvis.exe)  [Build $VERSION]"
 
-# ── Deploy auf jarvis-ai.info ─────────────────────────────────────────────────
-# FTPS-Zugang NICHT hier hardcoden (oeffentliches Repo!). Quelle (erste gewinnt):
-#   1) Umgebungsvariable JARVIS_FTPS_USER  (Format "user:passwort")
-#   2) gitignore-te Datei  windows-app-go/.ftps_credentials  (setzt JARVIS_FTPS_USER=...)
-CRED_FILE="$(dirname "$0")/.ftps_credentials"
-if [ -z "$JARVIS_FTPS_USER" ] && [ -f "$CRED_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$CRED_FILE"
-fi
-FTPS_USER="${JARVIS_FTPS_USER:?FTPS-Zugang fehlt – JARVIS_FTPS_USER setzen oder windows-app-go/.ftps_credentials anlegen (Format: JARVIS_FTPS_USER='jarvis:PASSWORT')}"
-FTPS_BASE='ftp://jarvis-ai.info/www'
+# ── Deploy auf jarvis-ai.info via SSH/SCP ─────────────────────────────────────
+# FTP/FTPS ist ueber manche Netze unbrauchbar (FTP-ALG kapert das AUTH-Kommando);
+# Deploy laeuft daher per SSH mit Public-Key (keyless) – kein Secret im Repo.
+# Ueberschreibbar via JARVIS_SSH_HOST / JARVIS_SSH_KEY / JARVIS_DOCROOT.
+SSH_HOST="${JARVIS_SSH_HOST:-jarvis@jarvis-ai.info}"
+SSH_KEY="${JARVIS_SSH_KEY:-$HOME/.ssh/id_rsa}"
+DOCROOT="${JARVIS_DOCROOT:-/var/www/vhosts/jarvis-ai.info/www}"
+SSH=(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20)
+SCP=(scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20)
 
-echo "Deploying $VERSION auf jarvis-ai.info..."
+echo "Deploying $VERSION auf $SSH_HOST:$DOCROOT ..."
 
 # EXE hochladen
-curl --ssl-reqd --insecure -T jarvis.exe --user "$FTPS_USER" "$FTPS_BASE/downloads/jarvis.exe"
+"${SCP[@]}" jarvis.exe "$SSH_HOST:$DOCROOT/downloads/jarvis.exe"
 echo "EXE hochgeladen"
 
 # version_windows.json aktualisieren (PFAD: /downloads/ – UpdateChecker liest von dort)
-echo "{\"versionCode\":$NUM,\"versionName\":\"$VERSION\",\"downloadUrl\":\"https://jarvis-ai.info/downloads/jarvis.exe\"}" \
-  | curl --ssl-reqd --insecure -T - --user "$FTPS_USER" "$FTPS_BASE/downloads/version_windows.json"
+printf '%s' "{\"versionCode\":$NUM,\"versionName\":\"$VERSION\",\"downloadUrl\":\"https://jarvis-ai.info/downloads/jarvis.exe\"}" \
+  | "${SSH[@]}" "$SSH_HOST" "cat > '$DOCROOT/downloads/version_windows.json'"
 echo "version_windows.json aktualisiert"
 
-# Verify version_windows.json
+# Verify version_windows.json (HTTPS)
 ACTUAL=$(curl -s "https://jarvis-ai.info/downloads/version_windows.json?t=$(date +%s)" --insecure | grep -o "\"versionCode\":$NUM" || true)
 if [ -z "$ACTUAL" ]; then
   echo "⚠ WARNUNG: version_windows.json Verifikation fehlgeschlagen!"
@@ -50,12 +48,12 @@ else
   echo "✓ version_windows.json verifiziert: versionCode=$NUM"
 fi
 
-# index.html: Versionsstring im Download-Button aktualisieren
+# index.html: Versionsstring im Download-Button aktualisieren (drift-sicher: live laden, patchen, zurueck)
 TMPHTML=$(mktemp)
-curl -s --ssl-reqd --insecure --user "$FTPS_USER" "$FTPS_BASE/index.html" -o "$TMPHTML"
+"${SCP[@]}" "$SSH_HOST:$DOCROOT/index.html" "$TMPHTML"
 # Pattern: "Portable EXE · v0.XXX" (mit v-Präfix wie in der Landing Page)
 sed -i "s/Portable EXE · v[0-9]\+\.[0-9]\+/Portable EXE · v$VERSION/g" "$TMPHTML"
-curl --ssl-reqd --insecure -T "$TMPHTML" --user "$FTPS_USER" "$FTPS_BASE/index.html"
+"${SCP[@]}" "$TMPHTML" "$SSH_HOST:$DOCROOT/index.html"
 rm "$TMPHTML"
 
 # Verify index.html

@@ -154,6 +154,20 @@ class JiraGetIssueTool(_Base):
         try:
             it = await _to_thread(c.get_issue, key)
         except JiraError as e:
+            # Kein echter Issue-Key (z.B. Kunden-ID 'crm-10550')? -> Volltextsuche
+            # nach Tickets, die diese ID referenzieren (wie der Support-Assistent).
+            if e.status == 404:
+                try:
+                    jql = 'text ~ "%s" ORDER BY updated DESC' % key.replace('"', "'")
+                    data = await _to_thread(c.search, jql, 25)
+                    issues = data.get("issues", [])
+                    if issues:
+                        lines = [_fmt_issue_line(issue_brief(i, c.base)) for i in issues]
+                        return ("Kein Vorgang mit dem Key '%s'. Gefundene Tickets, die '%s' "
+                                "referenzieren (%d):\n%s"
+                                % (key, key, data.get("total", len(issues)), "\n".join(lines)))
+                except JiraError:
+                    pass
             return _fmt_err(e)
         b = issue_brief(it, c.base)
         f = it.get("fields", {}) or {}

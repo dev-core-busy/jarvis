@@ -143,7 +143,12 @@
                 localStorage.setItem('jarvis_user', currentUser);
                 if (totpRow) totpRow.style.display = 'none';
                 if (totpInput) totpInput.value = '';
-                if (data.must_change_password) {
+                if (data.account_blocked) {
+                    // Sicherheitsschicht: Konto gesperrt → nur Hinweis + Protokoll
+                    if (window.SecurityIncidents) {
+                        window.SecurityIncidents.showBlockedScreen(data.block_reason, data.block_incidents);
+                    }
+                } else if (data.must_change_password) {
                     showChangePwModal(true);
                 } else if (data.is_admin === false) {
                     // Nicht-Admins → Portal (Chat / Benutzer-Chat / Support)
@@ -813,6 +818,11 @@
 
         ws.on('agent_event', (data) => {
             _handleAgentEvent(data);
+        });
+
+        // Sicherheitsschicht: Konto wurde (gerade) gesperrt → Sperr-Bildschirm
+        ws.on('security_blocked', () => {
+            if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked();
         });
 
         // Live-Sync der geteilten Anzeige-History (vom /chat-Fenster)
@@ -2535,6 +2545,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                 { hdr: 'sec-sect-pw-hdr',  body: 'sec-sect-pw-body',  tog: 'sec-sect-pw-tog'  },
                 { hdr: 'sec-sect-ad-hdr',  body: 'sec-sect-ad-body',  tog: 'sec-sect-ad-tog'  },
                 { hdr: 'sec-sect-2fa-hdr', body: 'sec-sect-2fa-body', tog: 'sec-sect-2fa-tog' },
+                { hdr: 'sec-sect-incidents-hdr', body: 'sec-sect-incidents-body', tog: 'sec-sect-incidents-tog' },
             ]);
         }
 
@@ -2656,6 +2667,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                     tabSecurity.classList.add('active');
                     _initSecCollapse();
                     _initSecurityTab();
+                    if (window.SecurityIncidents) window.SecurityIncidents.onShow();
                 } else if (target === 'cron' && tabCron) {
                     tabCron.style.display = '';
                     tabCron.classList.add('active');

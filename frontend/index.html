@@ -150,6 +150,26 @@
         </div>
     </div>
 
+    <!-- ═══ Konto-gesperrt-Bildschirm (Sicherheitsschicht) ═══ -->
+    <div id="blocked-screen" class="modal" style="z-index:100000;">
+        <div class="modal-content glass" style="max-width:560px;">
+            <div class="modal-header">
+                <h2 data-i18n="security.blocked_title">🚫 Konto gesperrt</h2>
+            </div>
+            <div class="modal-body">
+                <p style="color:var(--text-secondary);font-size:0.92rem;line-height:1.6;margin-bottom:14px;" data-i18n="security.blocked_msg">
+                    Dein Konto wurde wegen eines erkannten Sicherheitsverstoßes (Jailbreak-/Manipulationsversuch) gesperrt. Es ist nur noch diese Ansicht verfügbar. Bitte wende dich an einen lokalen Administrator, um das Konto wieder freischalten zu lassen.
+                </p>
+                <div id="blocked-reason" style="font-size:0.88rem;color:var(--danger);margin-bottom:14px;"></div>
+                <h3 style="font-size:0.95rem;margin:0 0 8px;" data-i18n="security.blocked_log">Protokoll der verdächtigen Aktivitäten</h3>
+                <div id="blocked-incidents" style="max-height:46vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg-primary);"></div>
+                <div style="display:flex;justify-content:flex-end;margin-top:16px;">
+                    <button class="btn-secondary" id="blocked-logout" data-i18n="header.logout">Abmelden</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══ Cert Help Modal ═══ -->
     <div id="cert-modal" class="modal">
         <div class="modal-content">
@@ -2243,6 +2263,40 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- ── Sicherheitsvorfälle (Jailbreak-Schutz) ── -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-incidents-hdr">
+                                <h3 data-i18n="security.section_incidents">Sicherheitsvorfälle</h3>
+                                <span class="sk-openclaw-toggle" id="sec-sect-incidents-tog">▶</span>
+                            </div>
+                            <div id="sec-sect-incidents-body" class="kb-collapse-body" style="display:none;">
+                                <p class="kb-hint" data-i18n="security.incidents_desc">Erkennt Jailbreak- und Prompt-Injection-Versuche in Chat, Support und WhatsApp. Betroffene Konten werden sofort gesperrt – sie können sich noch anmelden und sehen dort nur den Sperr-Hinweis samt Protokoll. Nur ein lokaler Benutzer kann wieder freischalten.</p>
+
+                                <label class="sec-guard-opt" style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;font-weight:600;">
+                                    <input type="checkbox" id="sec-guard-enabled" style="width:16px;height:16px;accent-color:var(--accent);">
+                                    <span data-i18n="security.guard_enabled">Sicherheitsschicht aktiv</span>
+                                </label>
+                                <p class="kb-hint" style="margin:2px 0 10px 24px;" data-i18n="security.guard_enabled_desc">Master-Schalter. Ist die Schicht aus, werden keine Eingaben geprüft und keine Konten gesperrt.</p>
+
+                                <label class="sec-guard-opt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <input type="checkbox" id="sec-guard-heuristic" style="width:16px;height:16px;accent-color:var(--accent);">
+                                    <span data-i18n="security.guard_heuristic">Muster-Erkennung (Heuristik)</span>
+                                </label>
+                                <p class="kb-hint" style="margin:2px 0 10px 24px;" data-i18n="security.guard_heuristic_desc">Schnelle, lokale Prüfung gegen bekannte Jailbreak-/Injection-Signaturen (z. B. „ignore all previous instructions"). Kostenlos und sofort; im Protokoll ist nachvollziehbar, welches Muster ausgelöst hat.</p>
+
+                                <label class="sec-guard-opt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <input type="checkbox" id="sec-guard-llm" style="width:16px;height:16px;accent-color:var(--accent);">
+                                    <span data-i18n="security.guard_llm">LLM-Klassifikator</span>
+                                </label>
+                                <p class="kb-hint" style="margin:2px 0 6px 24px;" data-i18n="security.guard_llm_desc">Zusätzliche Bewertung per LLM. Sind beide Optionen aktiv (Hybrid), bestätigt das LLM jeden Heuristik-Verdacht, bevor gesperrt wird (weniger Fehlalarme). Nur LLM aktiv: jede Eingabe wird klassifiziert (robuster, aber Kosten/Latenz je Nachricht).</p>
+
+                                <span id="sec-guard-status" style="font-size:0.82rem;color:var(--text-muted);"></span>
+
+                                <h4 style="margin:18px 0 6px;" data-i18n="security.blocked_accounts">Gesperrte Konten</h4>
+                                <div id="sec-blocked-list"></div>
+                            </div>
+                        </div>
+
                     </div><!-- /kb-container -->
                 </div><!-- /settings-tab-security -->
 
@@ -2369,7 +2423,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=34"></script>
+    <script src="/static/js/i18n.js?v=35"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=15"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -2389,7 +2443,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/issues.js?v=4"></script>
     <script src="/static/js/branding.js?v=11"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/app.js?v=138"></script>
+    <script src="/static/js/security_incidents.js?v=1"></script>
+    <script src="/static/js/app.js?v=139"></script>
 </body>
 
 </html>

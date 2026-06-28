@@ -44,6 +44,69 @@
         return b.logo_url || '';
     }
 
+    // ── Favicon (Browser-Tab-Icon) markensensitiv ──────────────────
+    // Original-Favicon (Standard-Jarvis) wird gemerkt, damit resetBranding()
+    // es exakt wiederherstellen kann.
+    var _origFavicon = null;
+
+    function faviconEl() {
+        var el = document.querySelector('link[rel~="icon"]');
+        if (!el) {
+            el = document.createElement('link');
+            el.rel = 'icon';
+            document.head.appendChild(el);
+        }
+        return el;
+    }
+
+    // Erzeugt im Buchstaben-Modus ein Favicon (runder Akzent-Kreis + Initiale)
+    function letterFavicon(letter, accent) {
+        try {
+            var size = 64;
+            var cv = document.createElement('canvas');
+            cv.width = size; cv.height = size;
+            var ctx = cv.getContext('2d');
+            ctx.fillStyle = accent || '#6366f1';
+            ctx.beginPath();
+            ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 38px system-ui, Arial, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText((letter || 'J').slice(0, 1).toUpperCase(), size / 2, size / 2 + 2);
+            return cv.toDataURL('image/png');
+        } catch (e) { return null; }
+    }
+
+    // Setzt das Favicon passend zum Branding (Bild-Logo bzw. Buchstaben-Icon)
+    function applyFavicon(b, logoUrl) {
+        var href = null, type = 'image/png';
+        if (b.logo_mode === 'image' && logoUrl) {
+            href = logoUrl;
+            if (/\.svg($|\?)/i.test(logoUrl)) type = 'image/svg+xml';
+        } else if (b.core_letter) {
+            href = letterFavicon(b.core_letter, (b.colors || {}).accent);
+        }
+        if (!href) return;
+        var el = faviconEl();
+        if (_origFavicon === null) _origFavicon = el.getAttribute('href') || '';
+        if (el._brandHref === href) return; // schon gesetzt
+        el._brandHref = href;
+        el.setAttribute('type', type);
+        el.setAttribute('href', href);
+    }
+
+    // Stellt das Standard-Jarvis-Favicon wieder her
+    function resetFavicon() {
+        if (_origFavicon === null) return;
+        var el = faviconEl();
+        el.setAttribute('type', 'image/png');
+        el.setAttribute('href', _origFavicon);
+        el._brandHref = '';
+        _origFavicon = null;
+    }
+
     // ── Hilfsfunktionen ─────────────────────────────────────────────
     function hexToRgba(hex, alpha) {
         if (!hex) return null;
@@ -161,6 +224,8 @@
             core.style.background = '';
             core.textContent = 'J';
         });
+        // 4) Favicon auf Standard-Jarvis zuruecksetzen
+        resetFavicon();
     }
 
     // Alle runden „J"-Logo-/Avatar-Elemente, die gebrandet werden sollen
@@ -221,7 +286,9 @@
         var isLight = currentIsLight();
         applyColors(effectiveColors(b, isLight));
         setBrandLabels(b.company_name);
-        applyLogo(b, effectiveLogoUrl(b, isLight));
+        var lu = effectiveLogoUrl(b, isLight);
+        applyLogo(b, lu);
+        applyFavicon(b, lu);
     }
 
     // ── Laufzeit: Branding laden & anwenden ─────────────────────────
@@ -232,7 +299,9 @@
             _current = cached;
             var _il = currentIsLight();
             applyColors(effectiveColors(cached, _il));
-            applyLogo(cached, effectiveLogoUrl(cached, _il));
+            var _lu = effectiveLogoUrl(cached, _il);
+            applyLogo(cached, _lu);
+            applyFavicon(cached, _lu);
         }
     } catch (e) { /* ignorieren */ }
 

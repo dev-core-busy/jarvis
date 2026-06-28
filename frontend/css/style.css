@@ -274,8 +274,8 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
 }
 
 .input-group select option {
-    background: #1e293b;
-    color: white;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
 }
 
 .input-group input::placeholder {
@@ -1100,8 +1100,8 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     font-family: inherit;
 }
 .upd-schedule-select option {
-    background: #1e293b;
-    color: #f8fafc;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
 }
 .upd-schedule-select:focus {
     border-color: var(--accent, #6366f1);
@@ -2466,15 +2466,17 @@ select.input-field {
     padding-right: 40px;
 }
 
-/* Globale Lesbarkeit der Dropdown-Eintraege (Browser ignorieren meist andere CSS-Regeln auf <option>) */
+/* Globale Lesbarkeit der Dropdown-Eintraege. Theme-Variablen statt harter Farben,
+   damit das native Dropdown auch im Hell-Modus passt (sonst dunkles Menue auf
+   heller Seite). --bg-secondary/--text-primary schalten via body.light um. */
 select option,
 select optgroup {
-    background-color: #111827;   /* dunkel, passend zu --bg-secondary */
-    color: #f8fafc;              /* hell, passend zu --text-primary */
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
 }
 select option:checked,
 select option:hover {
-    background-color: #1e293b;
+    background-color: var(--accent);
     color: #ffffff;
 }
 
@@ -3443,8 +3445,8 @@ select option:hover {
 }
 
 .wa-log-select option {
-    background: #1e293b;
-    color: #f8fafc;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
 }
 
 .wa-log-select:focus {

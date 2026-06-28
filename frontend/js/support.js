@@ -173,6 +173,43 @@
         $('sup-help-btn').addEventListener('click', function () { $('sup-help-modal').classList.remove('hidden'); });
         $('sup-help-close').addEventListener('click', function () { $('sup-help-modal').classList.add('hidden'); });
         $('sup-help-modal').addEventListener('click', function (e) { if (e.target === this) this.classList.add('hidden'); });
+
+        // ── Eigene Anweisungen (userspezifisch, dauerhaft) ──
+        if ($('sup-instr-btn')) $('sup-instr-btn').addEventListener('click', openInstructions);
+        if ($('sup-instr-close')) $('sup-instr-close').addEventListener('click', function () { $('sup-instr-overlay').classList.add('hidden'); });
+        if ($('sup-instr-overlay')) $('sup-instr-overlay').addEventListener('click', function (e) { if (e.target === this) this.classList.add('hidden'); });
+        if ($('sup-instr-save')) $('sup-instr-save').addEventListener('click', saveInstructions);
+    }
+
+    function openInstructions() {
+        var st = $('sup-instr-status'); if (st) st.textContent = T('common.loading', 'Lädt…');
+        $('sup-instr-overlay').classList.remove('hidden');
+        fetch('/api/support/instructions', { headers: authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                $('sup-instr-text').value = (d && d.instructions) || '';
+                if (st) st.textContent = '';
+            })
+            .catch(function () { if (st) st.textContent = '✗ ' + T('sup.instr_load_fail', 'Laden fehlgeschlagen'); });
+    }
+
+    function saveInstructions() {
+        var st = $('sup-instr-status'); if (st) st.textContent = T('common.saving', 'Speichert…');
+        fetch('/api/support/instructions', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ instructions: $('sup-instr-text').value })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d && d.ok) {
+                    if (st) { st.textContent = '✓ ' + T('sup.instr_saved', 'Gespeichert'); st.style.color = '#34d399'; }
+                    setTimeout(function () { if (st) { st.textContent = ''; st.style.color = ''; } $('sup-instr-overlay').classList.add('hidden'); }, 1200);
+                } else {
+                    if (st) { st.textContent = '✗ ' + ((d && d.error) || T('sup.instr_save_fail', 'Speichern fehlgeschlagen')); st.style.color = '#ef4444'; }
+                }
+            })
+            .catch(function (e) { if (st) { st.textContent = '✗ ' + e.message; st.style.color = '#ef4444'; } });
     }
 
     function closeDoc() { $('sup-doc-modal').classList.add('hidden'); }

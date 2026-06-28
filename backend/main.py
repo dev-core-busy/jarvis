@@ -3658,6 +3658,40 @@ def _support_jira_base() -> str:
     return ""
 
 
+# ─── Userspezifische Support-Anweisungen (dauerhaft, sessionuebergreifend) ────
+def _support_instr_path(user: str) -> Path:
+    safe = "".join(c if (c.isalnum() or c in "._-") else "_" for c in (user or "anon")).strip("_") or "anon"
+    d = Path(__file__).parent.parent / "data" / "support_instructions"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / (safe + ".md")
+
+
+def _load_support_instructions(user: str) -> str:
+    try:
+        p = _support_instr_path(user)
+        return p.read_text(encoding="utf-8") if p.exists() else ""
+    except Exception:
+        return ""
+
+
+@app.get("/api/support/instructions")
+async def support_instructions_get(user: str = Depends(require_auth)):
+    """Liest die persoenlichen Support-Anweisungen des Benutzers (Markdown)."""
+    return JSONResponse({"ok": True, "instructions": _load_support_instructions(user)})
+
+
+@app.post("/api/support/instructions")
+async def support_instructions_set(request: Request, user: str = Depends(require_auth)):
+    """Speichert die persoenlichen Support-Anweisungen (dauerhaft, je Benutzer)."""
+    body = await request.json()
+    text = (body.get("instructions") or "")[:20000]
+    try:
+        _support_instr_path(user).write_text(text, encoding="utf-8")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/api/support/query")
 async def support_query(request: Request):
     """Support-Anfrage: RAG-, Jira- und/oder Confluence-Treffer, nach Relevanz (%)
@@ -3796,7 +3830,12 @@ async def support_query(request: Request):
 
     ai_summary = ""
     if use_ai:
-        ai_summary = await _support_ai_summary(query, blocks, cfg.get("system_prompt") or "", eff_sum, lang)
+        _sys = cfg.get("system_prompt") or ""
+        _user_instr = _load_support_instructions(user)
+        if _user_instr.strip():
+            _sys = ((_sys + "\n\n") if _sys.strip() else "") + \
+                "Persoenliche Anweisungen des Benutzers (immer beachten):\n" + _user_instr.strip()
+        ai_summary = await _support_ai_summary(query, blocks, _sys, eff_sum, lang)
 
     _record_support_history(user, query, len(blocks))
 

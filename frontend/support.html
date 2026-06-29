@@ -61,13 +61,14 @@
         }
         .sup-spacer { flex: 1; }
         .btn-theme {
-            background: none; border: none; color: var(--text-secondary);
+            background: none; border: none; color: #888899;
             padding: 4px 8px; border-radius: 8px; cursor: pointer;
             display: flex; align-items: center; justify-content: center;
             transition: color .2s, background .2s;
         }
-        .btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--text-primary); }
+        .btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
         .btn-theme svg { width: 20px; height: 20px; }
+        body.light .btn-theme { color: #777788; }
         .hidden { display: none !important; }
 
         .sup-hist-wrap { position: relative; }

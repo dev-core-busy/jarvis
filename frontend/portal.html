@@ -151,7 +151,7 @@
         }
         if (d.is_admin) {
             var s = document.getElementById('pt-settings');
-            if (s) { s.style.display = ''; s.addEventListener('click', function(){ window.location.href = '/settings'; }); }
+            if (s) { s.style.display = ''; s.addEventListener('click', function(){ try{sessionStorage.setItem('jarvis_settings_return','/portal');}catch(e){} window.location.href = '/settings'; }); }
         }
     }).catch(function(){});
 

@@ -305,7 +305,7 @@
             _setupBtn.style.display = _isAdmin ? '' : 'none';
             if (_isAdmin && !_setupBtn._wired) {
                 _setupBtn._wired = true;
-                _setupBtn.addEventListener('click', () => { window.location.href = '/settings'; });
+                _setupBtn.addEventListener('click', () => { try{sessionStorage.setItem('jarvis_settings_return','/chat');}catch(e){} window.location.href = '/settings'; });
             }
         }
         // Update-Pill nur fuer Admins (jarvis/lokaler Admin) einblenden + starten
@@ -328,7 +328,7 @@
             _dot._adminWired = true;
             _dot.style.cursor = 'pointer';
             _dot.title = (window.t ? window.t('chat.llm_settings') : 'LLM-Profile öffnen');
-            _dot.addEventListener('click', () => { window.location.href = '/settings'; });
+            _dot.addEventListener('click', () => { try{sessionStorage.setItem('jarvis_settings_return','/chat');}catch(e){} window.location.href = '/settings'; });
         }
         connectWS();
         _startLlmStatusIndicator();

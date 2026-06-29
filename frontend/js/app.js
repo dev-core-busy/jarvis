@@ -20,14 +20,22 @@
     // unter / werden alle Rollen aufs Portal geleitet (Konsolidierung).
     const _isSettingsPage = location.pathname.replace(/\/+$/, '') === '/settings';
 
-    // Oeffnet die App-Shell und sofort das Settings-Modal; Schliessen -> Portal.
+    // Rücksprung-Ziel beim Schliessen der Einstellungen: der auslösende Bereich
+    // (von chat/userchat/support/portal via sessionStorage gesetzt), sonst /portal.
+    function _settingsReturn() {
+        var allowed = ['/chat', '/userchat', '/support', '/portal'];
+        var r = '';
+        try { r = sessionStorage.getItem('jarvis_settings_return') || ''; } catch (e) {}
+        return allowed.indexOf(r) !== -1 ? r : '/portal';
+    }
+    // Oeffnet die App-Shell und sofort das Settings-Modal; Schliessen -> Ursprungsbereich.
     function _enterSettingsPage() {
         showMainScreen();
         setTimeout(function () {
             const b = document.getElementById('btn-settings');
             if (b) b.click();
             const c = document.getElementById('btn-close-settings');
-            if (c) c.addEventListener('click', function () { window.location.replace('/portal'); }, { once: true });
+            if (c) c.addEventListener('click', function () { window.location.replace(_settingsReturn()); }, { once: true });
         }, 60);
     }
     let ws = null;

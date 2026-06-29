@@ -83,9 +83,13 @@
 
     <!-- Marken-Animation (Branding-Skill): wird unter der Bereichsauswahl
          abgespielt, sobald im Branding eine Portal-Animation hinterlegt ist. -->
-    <div id="brand-portal-anim" style="display:none;margin:36px auto 0;max-width:200px;">
-        <video id="brand-portal-video" muted loop autoplay playsinline preload="metadata"
-               style="width:100%;height:auto;max-height:150px;object-fit:contain;border-radius:var(--radius-lg);display:block;box-shadow:var(--shadow-md);"></video>
+    <div id="brand-portal-anim" style="display:none;margin-top:18px;">
+        <!-- Gleiches Spalten-Raster wie .pt-cards (auto-fill, damit ein einzelnes
+             Element genau EINE Kartenbreite einnimmt und linksbündig sitzt). -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px;">
+            <video id="brand-portal-video" muted loop autoplay playsinline preload="metadata"
+                   style="width:100%;height:auto;object-fit:contain;border-radius:var(--radius-lg);display:block;box-shadow:var(--shadow-md);"></video>
+        </div>
     </div>
 </div>
 

@@ -251,6 +251,38 @@ body {
 
 .btn-logout svg { width: 18px; height: 18px; display: block; }
 
+/* ─── CPU-Auslastung (Admin, Topbar) ─────────────────────────── */
+.cpu-bar.chat-cpu-bar {
+    width: 130px;
+    height: 18px;
+    margin-left: 8px;
+    background: var(--bg-input, rgba(255,255,255,.06));
+    border-radius: 999px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.cpu-bar.chat-cpu-bar .cpu-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #10b981, #22c55e, #84cc16, #eab308, #f97316, #ef4444);
+    background-size: 300% 100%;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.cpu-bar.chat-cpu-bar .cpu-bar-label {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.62rem;
+    font-weight: 600;
+    font-family: var(--font-mono, monospace);
+    color: var(--text-primary);
+    text-shadow: 0 1px 3px rgba(var(--shadow-rgb, 0,0,0), 0.8);
+    z-index: 1;
+    white-space: nowrap;
+}
+
 /* ─── Messages Container ─────────────────────────────────────── */
 .messages {
     flex: 1;

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Jarvis Chat</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=4">
-    <link rel="stylesheet" href="/static/css/chat.css?v=24">
+    <link rel="stylesheet" href="/static/css/chat.css?v=25">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=1">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
@@ -83,6 +83,11 @@
                     <div class="update-dropdown-header"><span>Jarvis Updates</span><button id="upd-close" class="update-close-btn">✕</button></div>
                     <div id="upd-body" class="update-dropdown-body"><p class="kb-hint" style="margin:0;">Prüfe…</p></div>
                 </div>
+            </div>
+            <!-- CPU-Auslastung: nur fuer Admins sichtbar (wie im Hauptfenster) -->
+            <div class="cpu-bar chat-cpu-bar" id="cpu-bar" style="display:none;" title="CPU-Auslastung">
+                <div class="cpu-bar-fill" id="cpu-bar-fill" style="width:0%"></div>
+                <span class="cpu-bar-label" id="cpu-bar-label">CPU: 0%</span>
             </div>
             <a href="https://jarvis-ai.info" target="_blank" rel="noopener noreferrer"
                style="font-size:0.65rem;color:var(--muted);text-decoration:none;opacity:0.6;margin-left:2px;"
@@ -350,6 +355,6 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/security_incidents.js?v=1"></script>
 <script src="/static/js/update_widget.js?v=1"></script>
 <script src="/static/js/vnc.js?v=17"></script>
-<script src="/static/js/chat.js?v=51"></script>
+<script src="/static/js/chat.js?v=52"></script>
 </body>
 </html>

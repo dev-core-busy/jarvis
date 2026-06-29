@@ -249,6 +249,8 @@ body {
     background: rgba(231, 76, 60, .1);
 }
 
+.btn-logout svg { width: 18px; height: 18px; display: block; }
+
 /* ─── Messages Container ─────────────────────────────────────── */
 .messages {
     flex: 1;

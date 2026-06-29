@@ -6,7 +6,9 @@
     'use strict';
 
     // ─── State ──────────────────────────────────────────────────
-    let token = localStorage.getItem('jarvis_chat_token') || '';
+    // SSO: jeden gueltigen Login-Token akzeptieren (kein Re-Login bei Seitenwechsel)
+    let token = localStorage.getItem('jarvis_chat_token') || localStorage.getItem('jarvis_token') || localStorage.getItem('jarvis_uc_token') || '';
+    if (token) localStorage.setItem('jarvis_chat_token', token);
     // Eindeutige Fenster-ID fuer Live-Sync (eigene Echo-Events ignorieren)
     const _clientId = 'chat-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     let _currentUser = localStorage.getItem('jarvis_chat_user') || '';
@@ -366,7 +368,10 @@
 
     function logout() {
         token = '';
+        // Global abmelden (SSO): alle Seiten-Token entfernen
         localStorage.removeItem('jarvis_chat_token');
+        localStorage.removeItem('jarvis_token');
+        localStorage.removeItem('jarvis_uc_token');
         if (ws) { ws.close(); ws = null; }
         chatScreen.classList.add('hidden');
         loginScreen.classList.remove('hidden');

@@ -36,8 +36,11 @@ class JarvisVNC {
 
         // noVNC über Same-Origin laden (kein separates SSL-Zertifikat nötig)
         // WebSocket-Pfad: /ws/vnc → FastAPI proxied zu x11vnc TCP 5900
-        // Token für VNC-Auth mitgeben
-        const t = localStorage.getItem('jarvis_token') || '';
+        // Token für VNC-Auth mitgeben (seitenuebergreifend: Haupt-App / Chat / Userchat)
+        const t = window.authToken
+            || localStorage.getItem('jarvis_token')
+            || localStorage.getItem('jarvis_chat_token')
+            || localStorage.getItem('jarvis_uc_token') || '';
         const wsPath = encodeURIComponent(`ws/vnc?token=${encodeURIComponent(t)}`);
         const vncUrl = `/novnc/vnc.html?autoconnect=true&resize=scale&view_only=false&host=${host}&port=${port}&path=${wsPath}&encrypt=1`;
 
@@ -51,7 +54,10 @@ class JarvisVNC {
         this.statusEl.style.color = '#f59e0b';
 
         // Desktop-Sperre beim VNC-Verbinden automatisch aufheben
-        const _tok = localStorage.getItem('jarvis_token') || '';
+        const _tok = window.authToken
+            || localStorage.getItem('jarvis_token')
+            || localStorage.getItem('jarvis_chat_token')
+            || localStorage.getItem('jarvis_uc_token') || '';
         fetch('/api/vnc/unlock', {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + _tok }

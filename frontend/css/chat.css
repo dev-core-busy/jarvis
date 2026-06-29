@@ -251,6 +251,63 @@ body {
 
 .btn-logout svg { width: 18px; height: 18px; display: block; }
 
+/* ─── SSL-/Verbindungs-Sicherheit (Banner + Badge) ───────────── */
+.security-banner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 2000;
+    background: linear-gradient(90deg, #ef4444, #f97316);
+    color: #fff;
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: none;
+    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+}
+.banner-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+.btn-banner-action {
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    color: #fff;
+    padding: 0.25rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+}
+.btn-banner-action:hover { background: #fff; color: #ef4444; }
+.btn-close-banner {
+    background: none; border: none; color: #fff;
+    font-size: 1.25rem; cursor: pointer; margin-left: auto; opacity: 0.7;
+}
+.btn-close-banner:hover { opacity: 1; }
+
+.security-badge {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    cursor: pointer;
+    transition: all 0.3s;
+    flex-shrink: 0;
+}
+.security-badge.secure {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+    border-color: rgba(16, 185, 129, 0.2);
+}
+.security-badge:hover { transform: scale(1.1); filter: brightness(1.2); }
+
 /* ─── CPU-Auslastung (Admin, Topbar) ─────────────────────────── */
 .cpu-bar.chat-cpu-bar {
     width: 130px;

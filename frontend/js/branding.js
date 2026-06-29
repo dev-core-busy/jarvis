@@ -179,7 +179,10 @@
     function setBrandLabels(name, skipVisualName) {
         if (!name) return;
         if (!skipVisualName) {
-            ['.login-title', '.header-title', '.topbar-title'].forEach(function (sel) {
+            // .topbar-title bewusst NICHT branden: dort steht der Seitenname
+            // (Chat / Benutzerchat). Marke bleibt via Avatar-Logo, Farben und
+            // Login-/Header-Titel erhalten.
+            ['.login-title', '.header-title'].forEach(function (sel) {
                 document.querySelectorAll(sel).forEach(function (el) {
                     if (el.dataset.brandOrig === undefined) el.dataset.brandOrig = el.textContent;
                     el.textContent = name;
@@ -219,7 +222,7 @@
 
     // Marken-Namen (Topbar/Header/Login/Seitenname) durch ein Schriftzug-Logo
     // (Bild) ersetzen. Ohne URL bleibt der Text-Name (via setBrandLabels).
-    var NAME_LABEL_SELECTOR = '.login-title, .header-title, .topbar-title, .brand-app-name';
+    var NAME_LABEL_SELECTOR = '.login-title, .header-title, .brand-app-name';
     function applyNameLogo(b, url) {
         if (!url) return;
         document.querySelectorAll(NAME_LABEL_SELECTOR).forEach(function (el) {

@@ -29,7 +29,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # buildx-Boot zieht moby/buildkit von Docker Hub -> gelegentlich Timeout.
+      # Erstversuch weich (continue-on-error), bei Fehler ein Zweitversuch.
       - name: Docker Buildx einrichten
+        id: buildx
+        continue-on-error: true
+        uses: docker/setup-buildx-action@v4
+
+      - name: Docker Buildx einrichten (Retry)
+        if: steps.buildx.outcome == 'failure'
         uses: docker/setup-buildx-action@v4
 
       - name: Bei GHCR anmelden
@@ -51,7 +59,22 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # Build/Push mit einem Zweitversuch gegen transiente Registry-/Pull-Timeouts.
       - name: Image bauen und pushen
+        id: build
+        continue-on-error: true
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image bauen und pushen (Retry)
+        if: steps.build.outcome == 'failure'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -74,7 +97,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # buildx-Boot zieht moby/buildkit von Docker Hub -> gelegentlich Timeout.
+      # Erstversuch weich (continue-on-error), bei Fehler ein Zweitversuch.
       - name: Docker Buildx einrichten
+        id: buildx
+        continue-on-error: true
+        uses: docker/setup-buildx-action@v4
+
+      - name: Docker Buildx einrichten (Retry)
+        if: steps.buildx.outcome == 'failure'
         uses: docker/setup-buildx-action@v4
 
       - name: Bei GHCR anmelden
@@ -95,7 +126,22 @@ jobs:
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # Build/Push mit einem Zweitversuch gegen transiente Registry-/Pull-Timeouts.
       - name: Image bauen und pushen
+        id: build
+        continue-on-error: true
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: services/whatsapp-bridge/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image bauen und pushen (Retry)
+        if: steps.build.outcome == 'failure'
         uses: docker/build-push-action@v7
         with:
           context: .

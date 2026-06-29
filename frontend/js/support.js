@@ -209,13 +209,13 @@
                     if (dot) {
                         dot.style.cursor = 'pointer';
                         dot.title = T('chat.llm_settings', 'LLM-Profile öffnen');
-                        dot.addEventListener('click', function () { window.location.href = '/settings'; });
+                        dot.addEventListener('click', function () { try{sessionStorage.setItem('jarvis_settings_return','/support');}catch(e){} window.location.href = '/settings'; });
                     }
                     // Setup-Button (direkt vor Logout) fuer Admins einblenden
                     var sb = $('sup-settings-btn');
                     if (sb) {
                         sb.style.display = '';
-                        sb.addEventListener('click', function () { window.location.href = '/settings'; });
+                        sb.addEventListener('click', function () { try{sessionStorage.setItem('jarvis_settings_return','/support');}catch(e){} window.location.href = '/settings'; });
                     }
                 }
             }).catch(function () {});

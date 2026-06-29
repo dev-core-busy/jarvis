@@ -304,9 +304,11 @@
             _updWrap.style.display = '';
             if (window.JarvisUpdateWidget) window.JarvisUpdateWidget.init();
         }
-        // Desktop/VNC-Button nur fuer Admins
+        // Desktop/VNC-Button nur fuer den lokalen Benutzer 'jarvis' (dessen Desktop
+        // per VNC gespiegelt wird). Andere (AD-)Admins sehen ihn nicht.
         const _vncBtn = $('btn-vnc');
-        if (_isAdmin && _vncBtn) _vncBtn.style.display = '';
+        const _isLocalJarvis = (_currentUser || '').trim().toLowerCase() === 'jarvis';
+        if (_vncBtn) _vncBtn.style.display = _isLocalJarvis ? '' : 'none';
         // CPU-Auslastung nur fuer Admins (Werte kommen via WS-Event 'cpu')
         const _cpuBar = $('cpu-bar');
         if (_isAdmin && _cpuBar) _cpuBar.style.display = '';

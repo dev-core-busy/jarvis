@@ -14,7 +14,9 @@
 const _I18N = {
     de: {
         // ── Support-Assistent (/support) ───────────────────────
-        'sup.assistant': 'Support Assistent',
+        'sup.assistant': 'Support-Assistent',
+        'portal.title': 'KI-Portal',
+        'chat.title': 'Chat',
         'sup.search': 'Suchen',
         'sup.input_ph': 'Anfrage eingeben … (mehrzeilig möglich)',
         'sup.opt_jira': 'alle Jira Tickets',
@@ -862,7 +864,9 @@ const _I18N = {
 
     en: {
         // ── Support-Assistent (/support) ───────────────────────
-        'sup.assistant': 'Support Assistant',
+        'sup.assistant': 'Support-Assistant',
+        'portal.title': 'AI-Portal',
+        'chat.title': 'Chat',
         'sup.search': 'Search',
         'sup.input_ph': 'Enter your request … (multiline allowed)',
         'sup.opt_jira': 'all Jira tickets',
@@ -1351,7 +1355,7 @@ const _I18N = {
         'telemetry.audit_tool_label':'Tool',
 
         // ── User-Chat ────────────────────────────────────────
-        'uc.title':             'User Chat',
+        'uc.title':             'User-Chat',
         'uc.select_user':       'Select a user on the left',
         'uc.back':              'Back to Jarvis',
         'nav.home':             'Home',

@@ -1150,6 +1150,19 @@ async def portal_page():
     )
 
 
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page():
+    """Admin-Einstellungen als eigene Seite. Nutzt die App-Shell (index.html);
+    app.js erkennt den /settings-Pfad, oeffnet das Settings-Modal und leitet
+    Nicht-Admins aufs Portal um. Server-seitig sind alle Settings-APIs ohnehin
+    durch require_local_auth geschuetzt."""
+    index_file = FRONTEND_DIR / "index.html"
+    return HTMLResponse(
+        content=index_file.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
 @app.get("/api/users/online")
 async def get_online_users(user: str = Depends(require_auth)):
     """Gibt Liste der aktuell im User-Chat verbundenen User zurück."""

@@ -1112,10 +1112,12 @@ def switch_desktop_session(username: str):
 # ─── HTTP Routes ──────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    """Hauptseite ausliefern (kein Browser-Cache)."""
-    index_file = FRONTEND_DIR / "index.html"
+    """Login-Einstieg / App-Shell ausliefern (kein Browser-Cache).
+    index.html wurde durch settings.html ersetzt (Konsolidierung); nach Login
+    leitet app.js auf /portal um. Der alte Haupt-Chat ist nicht mehr erreichbar."""
+    shell = FRONTEND_DIR / "settings.html"
     return HTMLResponse(
-        content=index_file.read_text(encoding="utf-8"),
+        content=shell.read_text(encoding="utf-8"),
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )
 
@@ -1152,13 +1154,13 @@ async def portal_page():
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page():
-    """Admin-Einstellungen als eigene Seite. Nutzt die App-Shell (index.html);
+    """Admin-Einstellungen als eigene Seite. Nutzt die App-Shell (settings.html);
     app.js erkennt den /settings-Pfad, oeffnet das Settings-Modal und leitet
     Nicht-Admins aufs Portal um. Server-seitig sind alle Settings-APIs ohnehin
     durch require_local_auth geschuetzt."""
-    index_file = FRONTEND_DIR / "index.html"
+    shell = FRONTEND_DIR / "settings.html"
     return HTMLResponse(
-        content=index_file.read_text(encoding="utf-8"),
+        content=shell.read_text(encoding="utf-8"),
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )
 

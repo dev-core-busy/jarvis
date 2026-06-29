@@ -503,7 +503,7 @@ const _I18N = {
         'telemetry.audit_tool_label':'Tool',
 
         // ── User-Chat ────────────────────────────────────────
-        'uc.title':             'Benutzer-Chat',
+        'uc.title':             'Benutzerchat',
         'uc.select_user':       'Wähle einen Benutzer links aus',
         'uc.back':              'Zurück zu Jarvis',
         'nav.home':             'Startseite',

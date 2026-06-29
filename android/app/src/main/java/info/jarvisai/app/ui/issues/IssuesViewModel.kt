@@ -29,7 +29,15 @@ data class IssueItem(
     val canDelete: Boolean,
 ) {
     companion object {
-        fun from(o: JSONObject): IssueItem {
+        fun from(raw: JSONObject): IssueItem {
+            // GET/POST /api/issues[/{id}] liefern den Issue gewrappt:
+            // {"ok":true,"issue":{...},"can_edit":...}. Listen-Eintraege sind
+            // dagegen direkt das Issue-Objekt. Beides unterstuetzen.
+            val o = raw.optJSONObject("issue") ?: raw
+            val canEdit = if (raw.has("can_edit")) raw.optBoolean("can_edit", false)
+                          else o.optBoolean("can_edit", false)
+            val canDelete = if (raw.has("can_delete")) raw.optBoolean("can_delete", false)
+                            else o.optBoolean("can_delete", false)
             val atts = o.optJSONArray("attachments") ?: JSONArray()
             val list = (0 until atts.length()).mapNotNull { atts.optString(it) }
             return IssueItem(
@@ -44,8 +52,8 @@ data class IssueItem(
                 updated = o.optString("updated"),
                 jarvisComment = o.optString("jarvis_comment"),
                 attachments = list,
-                canEdit = o.optBoolean("can_edit", false),
-                canDelete = o.optBoolean("can_delete", false),
+                canEdit = canEdit,
+                canDelete = canDelete,
             )
         }
     }

@@ -133,10 +133,15 @@
         }
         .sup-btn:hover { background: var(--accent-hover); }
         .sup-btn:disabled { opacity: .55; cursor: default; }
-        .lang-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; height: 34px; }
-        .lang-toggle-btn { background: none; border: none; color: var(--text-secondary); padding: 0 9px;
-            cursor: pointer; font-size: 0.78rem; font-weight: 700; font-family: var(--font-body); }
-        .lang-toggle-btn.active { background: var(--accent); color: #fff; }
+        /* de/en-Umschalter exakt wie in /chat (Groesse) */
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), 0.05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), 0.1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: var(--font-body);
+            transition: background 0.15s, color 0.15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), 0.35); color: var(--text-primary); }
         .sup-opts { display: flex; gap: 18px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
         .sup-opts label { display: flex; align-items: center; gap: 7px; font-size: 0.88rem;
             color: var(--text-secondary); cursor: pointer; }

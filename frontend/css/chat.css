@@ -757,7 +757,7 @@ body {
     width: 42px; height: 42px;
     border: none;
     border-radius: 50%;
-    background: var(--purple);
+    background: var(--accent, var(--purple));
     color: #fff;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
@@ -766,7 +766,7 @@ body {
 }
 
 .btn-send:disabled { opacity: .35; cursor: not-allowed; }
-.btn-send:not(:disabled):hover { background: var(--purple-light); }
+.btn-send:not(:disabled):hover { background: var(--accent-hover, var(--purple-light)); }
 
 .btn-mic {
     width: 42px; height: 42px;

@@ -2230,6 +2230,7 @@ async def get_settings(user: str = Depends(require_auth)):
         "tts_enabled": config.TTS_ENABLED,
         "tts_voice": config.TTS_VOICE,
         "use_physical_desktop": config.USE_PHYSICAL_DESKTOP,
+        "llm_timeout": config.LLM_TIMEOUT,
         "agent_api_key": _mask_key(config.AGENT_API_KEY),
         "defaults": config.DEFAULT_PROVIDERS,
     })

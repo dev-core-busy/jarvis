@@ -83,6 +83,9 @@ class Config:
     TTS_ENABLED: bool = False
     TTS_VOICE: str = ""          # z.B. "de-DE-ConradNeural", "" = Server-Standard
     USE_PHYSICAL_DESKTOP: bool = False
+    # Timeout (Sekunden) fuer LLM-Anfragen (read/total). Langsame lokale Modelle
+    # brauchen mehr Zeit als Cloud-APIs – daher konfigurierbar (10..1800).
+    LLM_TIMEOUT: int = int(os.getenv("LLM_TIMEOUT", "180"))
 
     def __init__(self):
         self.profiles: list[dict] = []
@@ -183,6 +186,10 @@ class Config:
         self.TTS_ENABLED = data.get("tts_enabled", False)
         self.TTS_VOICE = data.get("tts_voice", "")
         self.USE_PHYSICAL_DESKTOP = data.get("use_physical_desktop", False)
+        try:
+            self.LLM_TIMEOUT = max(10, min(int(data.get("llm_timeout") or 180), 1800))
+        except (TypeError, ValueError):
+            self.LLM_TIMEOUT = 180
         self._skill_states = data.get("skills", {})
         self._mcp_servers = data.get("mcp_servers", [])
         # AGENT_API_KEY: aus settings.json laden, ENV hat Vorrang
@@ -253,6 +260,7 @@ class Config:
             "tts_enabled": self.TTS_ENABLED,
             "tts_voice": self.TTS_VOICE,
             "use_physical_desktop": self.USE_PHYSICAL_DESKTOP,
+            "llm_timeout": self.LLM_TIMEOUT,
             "agent_api_key": self.AGENT_API_KEY,
             "profiles": self.profiles,
             "skills": self._skill_states,
@@ -270,6 +278,11 @@ class Config:
             self.TTS_VOICE = settings["tts_voice"]
         if "use_physical_desktop" in settings:
             self.USE_PHYSICAL_DESKTOP = settings["use_physical_desktop"]
+        if "llm_timeout" in settings:
+            try:
+                self.LLM_TIMEOUT = max(10, min(int(settings["llm_timeout"]), 1800))
+            except (TypeError, ValueError):
+                pass
         if "agent_api_key" in settings:
             self.AGENT_API_KEY = settings["agent_api_key"]
         self._save_to_file()

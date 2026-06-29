@@ -242,6 +242,10 @@ const _I18N = {
         'profile.voice_label':      'Stimme',
         'profile.section_list':     'LLM-Profile',
         'profile.section_tts':      'Sprachausgabe (TTS)',
+        'profile.section_timeout':  'Antwort-Timeout',
+        'profile.timeout_label':    'Timeout für LLM-Anfragen (Sekunden)',
+        'profile.timeout_hint':     'Wie lange auf die Antwort des Modells gewartet wird, bevor abgebrochen wird. Langsame lokale Modelle brauchen höhere Werte (10–1800 s). Gilt global für alle Profile.',
+        'profile.save_btn':         'Speichern',
         'profile.section_key':      'Agent API Key',
         'profile.section_ssl':      'HTTPS / SSL-Zertifikat',
 
@@ -1080,6 +1084,10 @@ const _I18N = {
         'profile.voice_label':      'Voice',
         'profile.section_list':     'LLM Profiles',
         'profile.section_tts':      'Text-to-Speech (TTS)',
+        'profile.section_timeout':  'Response Timeout',
+        'profile.timeout_label':    'Timeout for LLM requests (seconds)',
+        'profile.timeout_hint':     'How long to wait for the model\'s response before aborting. Slow local models need higher values (10–1800 s). Applies globally to all profiles.',
+        'profile.save_btn':         'Save',
         'profile.section_key':      'Agent API Key',
         'profile.section_ssl':      'HTTPS / SSL Certificate',
 

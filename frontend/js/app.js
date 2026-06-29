@@ -2580,6 +2580,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             _collapseInit([
                 { hdr: 'prof-sect-list-hdr', body: 'prof-sect-list-body', tog: 'prof-sect-list-tog' },
                 { hdr: 'prof-sect-tts-hdr',  body: 'prof-sect-tts-body',  tog: 'prof-sect-tts-tog'  },
+                { hdr: 'prof-sect-timeout-hdr', body: 'prof-sect-timeout-body', tog: 'prof-sect-timeout-tog' },
                 { hdr: 'prof-sect-api-hdr',  body: 'prof-sect-api-body',  tog: 'prof-sect-api-tog'  },
                 { hdr: 'prof-sect-ssl-hdr',  body: 'prof-sect-ssl-body',  tog: 'prof-sect-ssl-tog'  },
             ]);
@@ -2954,6 +2955,29 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             if (settingsTabs[0]) settingsTabs[0].classList.add('active');
             if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
             _initProfilesCollapse();
+            // LLM-Timeout speichern (einmalig verdrahten)
+            const _btnTm = document.getElementById('btn-save-llm-timeout');
+            if (_btnTm && !_btnTm._wired) {
+                _btnTm._wired = true;
+                _btnTm.addEventListener('click', async () => {
+                    const el = document.getElementById('setting-llm-timeout');
+                    const st = document.getElementById('llm-timeout-status');
+                    let v = parseInt(el && el.value, 10);
+                    if (isNaN(v) || v < 10) v = 10;
+                    if (v > 1800) v = 1800;
+                    if (el) el.value = v;
+                    try {
+                        await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ llm_timeout: v })
+                        });
+                        if (st) { st.textContent = '✓ ' + (window.t ? window.t('profile.save_btn') : 'Gespeichert'); setTimeout(() => { st.textContent = ''; }, 2000); }
+                    } catch (e) {
+                        if (st) st.textContent = '✗';
+                    }
+                });
+            }
             if (tabSkills) { tabSkills.style.display = 'none'; tabSkills.classList.remove('active'); }
             if (tabWhatsApp) { tabWhatsApp.style.display = 'none'; tabWhatsApp.classList.remove('active'); }
             if (tabKnowledge) { tabKnowledge.style.display = 'none'; tabKnowledge.classList.remove('active'); }
@@ -2996,6 +3020,9 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                 defaults = data.defaults || {};
                 _ttsEnabled = data.tts_enabled || false;
                 _updateTtsBtn();
+                // LLM-Timeout (global) ins Eingabefeld
+                const _tmEl = document.getElementById('setting-llm-timeout');
+                if (_tmEl) _tmEl.value = data.llm_timeout || 180;
                 // Stimmen laden und gespeicherte Auswahl setzen
                 _loadTtsVoices(data.tts_voice || '');
                 // Agent API Key: vollen Key vom Server holen → type=password zeigt korrekte Sternanzahl

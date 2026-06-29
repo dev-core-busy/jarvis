@@ -257,3 +257,9 @@ class JarvisVNC {
         this.startProbing(3000, 40);
     }
 }
+
+// Als globale Eigenschaft verfuegbar machen: top-level `class`-Deklarationen
+// landen NICHT automatisch am window-Objekt. /chat (chat.js) prueft jedoch
+// `window.JarvisVNC`, daher hier explizit exportieren (app.js nutzt die bare
+// Referenz und funktioniert unabhaengig davon weiter).
+window.JarvisVNC = JarvisVNC;

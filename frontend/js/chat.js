@@ -298,6 +298,9 @@
             _updWrap.style.display = '';
             if (window.JarvisUpdateWidget) window.JarvisUpdateWidget.init();
         }
+        // Desktop/VNC-Button nur fuer Admins
+        const _vncBtn = $('btn-vnc');
+        if (_isAdmin && _vncBtn) _vncBtn.style.display = '';
         connectWS();
         _startLlmStatusIndicator();
         _restoreHistory();
@@ -1561,6 +1564,26 @@
     $('btn-cert-close')?.addEventListener('click', () => certModal.classList.add('hidden'));
     certModal?.addEventListener('click', (e) => {
         if (e.target === certModal) certModal.classList.add('hidden');
+    });
+
+    // ── Desktop/VNC-Overlay (nur Admin; Button wird in showChat eingeblendet) ──
+    let _vnc = null;
+    $('btn-vnc')?.addEventListener('click', async () => {
+        const ov = $('vnc-overlay');
+        if (ov) ov.style.display = 'flex';
+        if (!_vnc && window.JarvisVNC) {
+            _vnc = new JarvisVNC();
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                if (data.vnc_available) _vnc.connect(data.websockify_port);
+                else if (_vnc.showError) _vnc.showError();
+            } catch (e) { if (_vnc.showError) _vnc.showError(); }
+        }
+    });
+    $('vnc-close')?.addEventListener('click', () => {
+        const ov = $('vnc-overlay');
+        if (ov) ov.style.display = 'none';
     });
 
     // Tab-Wechsel

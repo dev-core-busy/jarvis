@@ -36,6 +36,27 @@
             "description": "Maximale Anzahl angezeigter Jira-Tickets pro Anfrage; dieser Wert ist die Obergrenze, die Benutzer im Feld 'Ticketanzahl' waehlen koennen (Standard 12, max. 1000).",
             "default": 12,
             "required": false
+        },
+        "rag_results": {
+            "type": "number",
+            "label": "Wissens-/RAG-Treffer (max.)",
+            "description": "Maximale Anzahl der aus der Wissensdatenbank (RAG) je Anfrage geholten Treffer (Standard 8, max. 50).",
+            "default": 8,
+            "required": false
+        },
+        "confluence_results": {
+            "type": "number",
+            "label": "Confluence-Treffer (max.)",
+            "description": "Maximale Anzahl der je Anfrage geholten Confluence-Seiten (Standard 6, max. 50).",
+            "default": 6,
+            "required": false
+        },
+        "summary_sources": {
+            "type": "number",
+            "label": "KI-Ueberblick: einbezogene Top-Treffer (max.)",
+            "description": "Wie viele der bestbewerteten Treffer der KI-Gesamtueberblick beruecksichtigt (Standard 10, max. 50). Die angezeigte Trefferliste bleibt davon unberuehrt.",
+            "default": 10,
+            "required": false
         }
     },
     "knowledge_docs": [],

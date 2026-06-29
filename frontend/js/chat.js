@@ -307,6 +307,9 @@
         // Desktop/VNC-Button nur fuer Admins
         const _vncBtn = $('btn-vnc');
         if (_isAdmin && _vncBtn) _vncBtn.style.display = '';
+        // CPU-Auslastung nur fuer Admins (Werte kommen via WS-Event 'cpu')
+        const _cpuBar = $('cpu-bar');
+        if (_isAdmin && _cpuBar) _cpuBar.style.display = '';
         // LLM-Status-Pill fuer Admins klickbar -> Einstellungen (LLM-Profile)
         const _dot = $('status-dot');
         if (_isAdmin && _dot && !_dot._adminWired) {
@@ -664,9 +667,23 @@
                 break;
 
             case 'cpu':
+                updateCPU(msg.value);
+                break;
+
             case 'pong':
                 break; // ignorieren
         }
+    }
+
+    // CPU-Bar (Admin) aus WS-Event aktualisieren
+    function updateCPU(percent) {
+        const fill = $('cpu-bar-fill');
+        const label = $('cpu-bar-label');
+        if (!fill || !label) return;
+        const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+        fill.style.width = pct + '%';
+        fill.style.backgroundPosition = pct + '% 0';
+        label.textContent = 'CPU: ' + Math.round(pct) + '%';
     }
 
     function handleStatus(msg) {

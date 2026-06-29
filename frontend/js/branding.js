@@ -284,6 +284,8 @@
             if (av) { av.removeAttribute('src'); av._brandedSrc = ''; try { av.load(); } catch (e) {} }
             animWrap.style.display = 'none';
         }
+        // 6) 'dp-'-Titel-Praefix ausblenden
+        applyTitlePrefix(null);
     }
 
     // Alle runden „J"-Logo-/Avatar-Elemente, die gebrandet werden sollen
@@ -359,10 +361,20 @@
         }
     }
 
+    // 'dp-'-Titel-Praefix nur zeigen, wenn Branding aktiv UND Firmenname 'nexus'
+    // enthaelt (z.B. 'Nexus AG'). Sonst ausgeblendet.
+    function applyTitlePrefix(b) {
+        var show = !!(b && b.active && (b.company_name || '').toLowerCase().indexOf('nexus') !== -1);
+        document.querySelectorAll('.title-prefix').forEach(function (el) {
+            el.style.display = show ? '' : 'none';
+        });
+    }
+
     function applyBranding(b) {
-        if (!b || !b.active) return;
+        if (!b || !b.active) { applyTitlePrefix(b); return; }
         _current = b;
         var isLight = currentIsLight();
+        applyTitlePrefix(b);
         applyColors(effectiveColors(b, isLight));
         var nlu = effectiveNameLogoUrl(b, isLight);
         setBrandLabels(b.company_name, !!nlu);

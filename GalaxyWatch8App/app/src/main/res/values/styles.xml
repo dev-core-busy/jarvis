@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Theme der MainActivity. Erbt vom Geraete-Standard und setzt einen
+        schwarzen Hintergrund (energiesparend auf OLED) sowie den Splashscreen.
+    -->
+    <style name="MainActivityTheme" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@android:color/black</item>
+        <item name="postSplashScreenTheme">@android:style/Theme.DeviceDefault</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>

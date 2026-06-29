@@ -1688,6 +1688,45 @@
         if (e.target === certModal) certModal.classList.add('hidden');
     });
 
+    // ── SSL-/Verbindungs-Sicherheit: Warnbanner + Badge (wie im Hauptfenster) ──
+    function _openCertModal() { if (certModal) certModal.classList.remove('hidden'); }
+    function checkSecurity() {
+        const banner = $('security-banner');
+        const bannerText = $('security-banner-text');
+        const indicator = $('security-indicator');
+        const isHttps = location.protocol === 'https:';
+        const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        const certDismissed = localStorage.getItem('jarvis_cert_dismissed') === 'true';
+
+        if (!isHttps && !isLocal) {
+            if (banner) {
+                banner.hidden = false;
+                banner.style.display = 'block';
+                if (bannerText) bannerText.textContent = (window.t ? window.t('panel.security_banner') : 'Verbindung unsicher');
+            }
+            if (indicator) {
+                indicator.className = 'security-badge';
+                indicator.title = (window.t ? window.t('panel.security_critical') : 'Kritisch: Keine Verschlüsselung');
+            }
+            // Beim ersten unsicheren Aufruf das Zertifikat-Modal automatisch öffnen
+            if (!certDismissed) setTimeout(_openCertModal, 600);
+        } else {
+            if (banner) { banner.hidden = true; banner.style.display = 'none'; }
+            if (indicator) {
+                indicator.className = 'security-badge secure';
+                indicator.title = (window.t ? window.t('panel.security_secure') : 'Gesichert');
+            }
+        }
+    }
+    $('security-indicator')?.addEventListener('click', _openCertModal);
+    $('btn-banner-help')?.addEventListener('click', _openCertModal);
+    $('btn-close-banner')?.addEventListener('click', () => {
+        const banner = $('security-banner');
+        if (banner) banner.style.display = 'none';
+        try { localStorage.setItem('jarvis_cert_dismissed', 'true'); } catch (e) {}
+    });
+    checkSecurity();
+
     // ── Desktop/VNC-Overlay (nur Admin; Button wird in showChat eingeblendet) ──
     let _vnc = null;
     $('btn-vnc')?.addEventListener('click', async () => {

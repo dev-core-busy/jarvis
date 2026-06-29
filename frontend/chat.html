@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Jarvis Chat</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=4">
-    <link rel="stylesheet" href="/static/css/chat.css?v=25">
+    <link rel="stylesheet" href="/static/css/chat.css?v=26">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=1">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
@@ -21,6 +21,16 @@
 </head>
 <body>
 <script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+
+<!-- Sicherheits-Warnbanner bei unverschlüsselter Verbindung (wie im Hauptfenster) -->
+<div id="security-banner" class="security-banner" hidden>
+    <div class="banner-content">
+        <span class="banner-icon">⚠️</span>
+        <span class="banner-text" id="security-banner-text">Verbindung unsicher</span>
+        <button class="btn-banner-action" id="btn-banner-help" data-i18n="cert.banner.btn">Zertifikat installieren</button>
+        <button class="btn-close-banner" id="btn-close-banner">&times;</button>
+    </div>
+</div>
 
 <!-- Login Screen -->
 <div id="login-screen" class="login-screen">
@@ -73,6 +83,12 @@
             <div class="topbar-avatar">J</div>
             <span class="topbar-title">Jarvis</span>
             <span class="topbar-dot" id="status-dot" title="LLM-Status"></span>
+            <!-- SSL-/Verbindungs-Sicherheitsstatus (für alle sichtbar, wie im Hauptfenster) -->
+            <div id="security-indicator" class="security-badge" title="Sicherheitsstatus" data-i18n-title="security.status">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                </svg>
+            </div>
             <!-- Versions-/Update-Pill: nur fuer Admins (jarvis/lokaler Admin) sichtbar -->
             <div class="update-widget-wrap" id="chat-update-wrap" style="display:none;">
                 <div id="version-pill" class="header-version-pill upd-pill-clickable" title="Updates &amp; Version">
@@ -355,6 +371,6 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/security_incidents.js?v=1"></script>
 <script src="/static/js/update_widget.js?v=1"></script>
 <script src="/static/js/vnc.js?v=17"></script>
-<script src="/static/js/chat.js?v=52"></script>
+<script src="/static/js/chat.js?v=53"></script>
 </body>
 </html>

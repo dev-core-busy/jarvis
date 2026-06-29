@@ -10,6 +10,22 @@
     // Eindeutige Fenster-ID fuer Live-Sync (eigene Echo-Events ignorieren)
     const _clientId = 'main-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     let currentUser = localStorage.getItem('jarvis_user') || '';
+
+    // Diese App-Shell wird unter / UND unter /settings ausgeliefert. Unter
+    // /settings oeffnet sich direkt das Einstellungen-Modal (eigene Admin-Seite);
+    // unter / werden alle Rollen aufs Portal geleitet (Konsolidierung).
+    const _isSettingsPage = location.pathname.replace(/\/+$/, '') === '/settings';
+
+    // Oeffnet die App-Shell und sofort das Settings-Modal; Schliessen -> Portal.
+    function _enterSettingsPage() {
+        showMainScreen();
+        setTimeout(function () {
+            const b = document.getElementById('btn-settings');
+            if (b) b.click();
+            const c = document.getElementById('btn-close-settings');
+            if (c) c.addEventListener('click', function () { window.location.replace('/portal'); }, { once: true });
+        }, 60);
+    }
     let ws = null;
     let vnc = null;
     let _ttsEnabled = false;   // TTS-Status (kein Checkbox mehr – btn-tts ist alleiniger Toggle)
@@ -150,11 +166,13 @@
                     }
                 } else if (data.must_change_password) {
                     showChangePwModal(true);
-                } else if (data.is_admin === false) {
-                    // Nicht-Admins → Portal (Chat / Benutzer-Chat / Support)
-                    window.location.replace('/portal');
+                } else if (_isSettingsPage) {
+                    // Eigene /settings-Seite: nur Admins; sonst aufs Portal.
+                    if (data.is_admin === false) window.location.replace('/portal');
+                    else _enterSettingsPage();
                 } else {
-                    showMainScreen();
+                    // Konsolidierung: alle Rollen landen auf dem Portal (kein Haupt-Chat mehr).
+                    window.location.replace('/portal');
                 }
             } else if (data.requires_totp) {
                 // Passwort korrekt, 2FA-Code nötig → TOTP-Feld einblenden
@@ -450,7 +468,8 @@
                 if (data.success) {
                     hideChangePwModal();
                     if (_cpwMandatory) {
-                        showMainScreen();
+                        // Erst-Login abgeschlossen -> Portal (Konsolidierung, kein Haupt-Chat)
+                        window.location.replace('/portal');
                     } else {
                         addLogEntry(window.t('security.password_changed'), 'system');
                     }
@@ -3800,29 +3819,14 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                     // Erst-Kennwort noch nicht geaendert -> Maske erzwingen.
                     // Auch nach F5/Reload (serverseitig zusaetzlich gesperrt).
                     showChangePwModal(true);
-                } else if (data.is_admin === false) {
-                    // Nicht-Admins haben keinen Zugriff auf die Hauptseite → Portal
-                    window.location.replace('/portal');
+                } else if (_isSettingsPage) {
+                    // Eigene /settings-Seite: nur Admins; sonst aufs Portal.
+                    if (data.is_admin === false) window.location.replace('/portal');
+                    else _enterSettingsPage();
                 } else {
-                    showMainScreen();
-                    // Token-Expiry Warnung einrichten
-                    if (data.remaining_seconds <= 0) {
-                        // Bereits abgelaufen -> keine Countdown-Warnung, direkt neu anmelden
-                        showLoginScreen();
-                    } else if (data.remaining_seconds && data.remaining_seconds < 3600) {
-                        _showTokenExpiryWarning(data.remaining_seconds);
-                    } else if (data.remaining_seconds) {
-                        // Timer fuer Warnung 1h vor Ablauf.
-                        // setTimeout-Delays > 2^31-1 ms (~24,8 Tage) laufen ueber und
-                        // feuern SOFORT. Bei 30-Tage-Tokens (remaining ~2,59e6 s) waere
-                        // warnIn ~2,59e9 ms -> Overflow -> sofortige Fehlwarnung + 1h-
-                        // Auto-Logout. Daher nur planen, wenn der Delay sicher passt;
-                        // weiter entfernte Ablaeufe brauchen jetzt noch keine Warnung.
-                        const warnIn = (data.remaining_seconds - 3600) * 1000;
-                        if (warnIn > 0 && warnIn <= 2147483647) {
-                            setTimeout(() => _showTokenExpiryWarning(3600), warnIn);
-                        }
-                    }
+                    // Konsolidierung: Wurzel-Seite leitet alle Rollen aufs Portal
+                    // (kein Haupt-Chat mehr). Chat/Userchat/Support/Settings dort verlinkt.
+                    window.location.replace('/portal');
                 }
             } else {
                 showLoginScreen();

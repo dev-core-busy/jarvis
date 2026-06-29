@@ -53,14 +53,19 @@
                     var c = (d && d.config) || {};
                     if ($('jira-url')) $('jira-url').value = c.base_url || '';
                     if ($('jira-token')) $('jira-token').value = c.api_token || '';
+                    if ($('jira-max-results')) $('jira-max-results').value = c.max_results || 50;
                 })
                 .catch(function () {});
         },
 
         save: function () {
+            var mr = parseInt(($('jira-max-results') ? $('jira-max-results').value : '') || '50', 10);
+            if (isNaN(mr) || mr < 1) mr = 50;
+            if (mr > 1000) mr = 1000;
             var body = {
                 base_url: ($('jira-url') ? $('jira-url').value : '').trim(),
-                api_token: ($('jira-token') ? $('jira-token').value : '').trim()
+                api_token: ($('jira-token') ? $('jira-token').value : '').trim(),
+                max_results: mr
             };
             status('Speichere…');
             fetch('/api/skills/jira/config', {

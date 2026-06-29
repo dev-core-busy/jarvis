@@ -22,6 +22,12 @@
             "description": "In Jira unter Profil → Personal Access Tokens erzeugen. Wird als Bearer-Token gesendet.",
             "secret": true,
             "required": true
+        },
+        "max_results": {
+            "type": "number",
+            "label": "Max. Trefferzahl pro Suche",
+            "description": "Zentrale Obergrenze fuer die Ticketsuche des Agenten (z.B. 'alle Tickets von crm-XXXX'). Standard 50, Maximum 1000. Hoeher setzen, wenn vollstaendige Kunden-Auswertungen noetig sind.",
+            "default": 50
         }
     },
     "knowledge_docs": [],

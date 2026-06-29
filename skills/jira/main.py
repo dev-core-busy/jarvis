@@ -18,6 +18,18 @@ def _client() -> JiraClient:
     return JiraClient()
 
 
+def _max_results() -> int:
+    """Vom Administrator zentral konfigurierte Obergrenze fuer Trefferzahlen
+    (Skill-Config 'max_results'). Standard 50, Untergrenze 1, Sicherheits-Deckel
+    1000 (Schutz vor versehentlich riesigen Abfragen)."""
+    try:
+        from backend.jira_client import get_jira_config
+        v = int(get_jira_config().get("max_results") or 50)
+    except Exception:
+        v = 50
+    return max(1, min(v, 1000))
+
+
 async def _to_thread(fn, *a, **kw):
     return await asyncio.to_thread(fn, *a, **kw)
 
@@ -99,17 +111,18 @@ class JiraSearchTool(_Base):
             "issuetype": {"type": "STRING", "description": "Optional: Vorgangstyp (z.B. 'Bug', 'Task')."},
             "assignee": {"type": "STRING", "description": "Optional: Bearbeiter (Benutzername)."},
             "jql": {"type": "STRING", "description": "Optional: vollstaendige JQL-Query (ueberschreibt die obigen Filter)."},
-            "limit": {"type": "INTEGER", "description": "Max. Trefferzahl (Standard 15, max. 50)."},
+            "limit": {"type": "INTEGER", "description": "Max. Trefferzahl. Standard 15. Fuer vollstaendige Auswertungen (z.B. 'alle Tickets von crm-XXXX') hoch setzen – die zentrale Admin-Obergrenze wird automatisch durchgesetzt."},
         }, "required": []}
 
     async def execute(self, **kwargs):
         c = self._guard()
         if not c:
             return "Jira ist nicht konfiguriert."
+        cap = _max_results()
         try:
-            limit = max(1, min(int(kwargs.get("limit") or 15), 50))
+            limit = max(1, min(int(kwargs.get("limit") or 15), cap))
         except (TypeError, ValueError):
-            limit = 15
+            limit = min(15, cap)
         jql = (kwargs.get("jql") or "").strip()
         if not jql:
             query = (kwargs.get("query") or "").strip()
@@ -166,7 +179,7 @@ class JiraGetIssueTool(_Base):
                     # sonst Volltextsuche.
                     org = crm_org_clause(key)
                     jql = (org if org else 'text ~ "%s"' % key.replace('"', "'")) + " ORDER BY updated DESC"
-                    data = await _to_thread(c.search, jql, 50)
+                    data = await _to_thread(c.search, jql, _max_results())
                     issues = data.get("issues", [])
                     if issues:
                         total = data.get("total", len(issues))

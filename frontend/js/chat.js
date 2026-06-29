@@ -10,6 +10,7 @@
     // Eindeutige Fenster-ID fuer Live-Sync (eigene Echo-Events ignorieren)
     const _clientId = 'chat-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     let _currentUser = localStorage.getItem('jarvis_chat_user') || '';
+    let _isAdmin = false;   // jarvis/lokaler Admin -> Update-Pill sichtbar
     let ws = null;
     let reconnectAttempts = 0;
     const MAX_RECONNECT = 20;
@@ -233,6 +234,7 @@
                 localStorage.setItem('jarvis_chat_token', token);
                 _currentUser = data.username || loginUser.value.trim();
                 localStorage.setItem('jarvis_chat_user', _currentUser);
+                _isAdmin = !!data.is_admin;
                 totpRow.classList.add('hidden');
                 loginTotp.value = '';
                 showChat();
@@ -290,6 +292,12 @@
         chatScreen.classList.remove('hidden');
         const _ownBadge = $('chat-own-badge');
         if (_ownBadge) _ownBadge.textContent = _currentUser || '';
+        // Update-Pill nur fuer Admins (jarvis/lokaler Admin) einblenden + starten
+        const _updWrap = $('chat-update-wrap');
+        if (_isAdmin && _updWrap) {
+            _updWrap.style.display = '';
+            if (window.JarvisUpdateWidget) window.JarvisUpdateWidget.init();
+        }
         connectWS();
         _startLlmStatusIndicator();
         _restoreHistory();
@@ -1548,6 +1556,8 @@
 
     const certModal = $('cert-modal');
     $('btn-cert')?.addEventListener('click', () => certModal.classList.remove('hidden'));
+    // Sicherheits-Indikator im Header oeffnet dieselbe Zertifikat-Hilfe
+    $('security-indicator')?.addEventListener('click', () => certModal && certModal.classList.remove('hidden'));
     $('btn-cert-close')?.addEventListener('click', () => certModal.classList.add('hidden'));
     certModal?.addEventListener('click', (e) => {
         if (e.target === certModal) certModal.classList.add('hidden');
@@ -1700,6 +1710,7 @@
                 _currentUser = d.username;
                 localStorage.setItem('jarvis_chat_user', _currentUser);
             }
+            if (d) _isAdmin = !!d.is_admin;
             if (d !== null) showChat();
         }).catch(() => showChat());
     }

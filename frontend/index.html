@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=4">
-    <link rel="stylesheet" href="/static/css/style.css?v=97">
+    <link rel="stylesheet" href="/static/css/style.css?v=98">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -46,7 +46,7 @@
                     <input type="text" id="login-username" name="username" placeholder="Benutzername" data-i18n-placeholder="login.username.ph"
                         autocomplete="username" required
                         style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
-                        onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(99,102,241,0.2)'"
+                        onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(var(--accent-rgb),0.2)'"
                         onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
                 </div>
                 <div class="form-group" style="text-align:left;margin-bottom:20px;">
@@ -55,7 +55,7 @@
                         <input type="password" id="login-password" name="password" placeholder="Kennwort" data-i18n-placeholder="login.password.ph"
                             autocomplete="current-password" required
                             style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 42px 11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
-                            onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(99,102,241,0.2)'"
+                            onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(var(--accent-rgb),0.2)'"
                             onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
                         <button type="button" id="btn-toggle-login-pw"
                             style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;display:flex;align-items:center;transition:color 0.2s;"
@@ -69,7 +69,7 @@
                     <input type="text" id="login-totp" placeholder="6-stelliger Code" data-i18n-placeholder="login.totp.ph"
                         autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
                         style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:1.2rem;font-family:var(--font-mono);text-align:center;letter-spacing:8px;font-weight:600;outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
-                        onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(99,102,241,0.2)'"
+                        onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(var(--accent-rgb),0.2)'"
                         onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
                 </div>
                 <button type="submit" class="btn-login" id="login-btn" style="width:100%;">
@@ -551,7 +551,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                 <!-- Kontext-Indikator -->
                 <div id="ctx-indicator" style="display:none;align-items:center;gap:8px;padding:4px 10px 2px;flex-shrink:0;">
-                    <span id="ctx-indicator-pill" style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);font-size:0.73rem;color:var(--accent);cursor:default;user-select:none;">
+                    <span id="ctx-indicator-pill" style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:rgba(var(--accent-rgb),0.12);border:1px solid rgba(var(--accent-rgb),0.3);font-size:0.73rem;color:var(--accent);cursor:default;user-select:none;">
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                         <span id="ctx-indicator-text">Kontext aktiv</span>
                         <button id="ctx-indicator-clear" title="Kontext zurücksetzen" data-i18n-title="input.reset_ctx" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:var(--text-muted);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()">✕</button>
@@ -2077,7 +2077,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             hint.textContent       = window.t('security.ad_users_active') + ' ' + d.allowed_users;
                                         } else if (d.access_mode === 'group') {
                                             hint.style.borderColor = '#6366f1';
-                                            hint.style.background  = 'rgba(99,102,241,0.08)';
+                                            hint.style.background  = 'rgba(var(--accent-rgb),0.08)';
                                             hint.style.color       = '#a5b4fc';
                                             hint.textContent       = window.t('security.ad_group_active') + ' ' + d.allowed_group;
                                         }
@@ -2099,7 +2099,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             } else if (d.knowledge_edit_mode === 'group') {
                                                 kst.style.display = 'block';
                                                 kst.style.borderColor = '#6366f1';
-                                                kst.style.background  = 'rgba(99,102,241,0.06)';
+                                                kst.style.background  = 'rgba(var(--accent-rgb),0.06)';
                                                 kst.style.color       = '#a5b4fc';
                                                 kst.textContent = '📚 Editor-Gruppe: ' + d.knowledge_editors_group;
                                             } else {
@@ -2124,7 +2124,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             } else if (d.internet_mode === 'group') {
                                                 ist.style.display = 'block';
                                                 ist.style.borderColor = '#6366f1';
-                                                ist.style.background  = 'rgba(99,102,241,0.06)';
+                                                ist.style.background  = 'rgba(var(--accent-rgb),0.06)';
                                                 ist.style.color       = '#a5b4fc';
                                                 ist.textContent = '🌐 Internet-Gruppe: ' + d.internet_group;
                                             } else {
@@ -2149,7 +2149,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             } else if (d.admin_mode === 'group') {
                                                 ast.style.display = 'block';
                                                 ast.style.borderColor = '#6366f1';
-                                                ast.style.background  = 'rgba(99,102,241,0.06)';
+                                                ast.style.background  = 'rgba(var(--accent-rgb),0.06)';
                                                 ast.style.color       = '#a5b4fc';
                                                 ast.textContent = '🛡️ Admin-Gruppe: ' + d.admins_group + ' (+ lokaler jarvis)';
                                             } else {
@@ -2385,12 +2385,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     .btn-attach:hover {
         color: var(--accent);
         border-color: var(--accent);
-        background: rgba(99,102,241,0.08);
+        background: rgba(var(--accent-rgb),0.08);
     }
     .btn-attach.has-files {
         color: var(--accent);
         border-color: var(--accent);
-        background: rgba(99,102,241,0.12);
+        background: rgba(var(--accent-rgb),0.12);
     }
     /* ── Anhang-Vorschau-Leiste ──────────────────────────────────── */
     #attach-preview-bar {
@@ -2447,7 +2447,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     .panel-left.drag-over {
         outline: 2px dashed var(--accent);
         outline-offset: -4px;
-        background: rgba(99,102,241,0.04);
+        background: rgba(var(--accent-rgb),0.04);
     }
     /* ── Attach-Toast ────────────────────────────────────────────── */
     #attach-toast {

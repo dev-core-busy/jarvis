@@ -10,8 +10,12 @@
     // Eindeutige Fenster-ID fuer Live-Sync (eigene Echo-Events ignorieren)
     const _clientId = 'chat-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     let _currentUser = localStorage.getItem('jarvis_chat_user') || '';
-    let _isAdmin = false;   // jarvis/lokaler Admin -> Update-Pill sichtbar
+    let _isAdmin = false;   // jarvis/lokaler Admin -> Update-Pill/VNC/Multi-Agent sichtbar
     let ws = null;
+    // Multi-Agent (nur Admin): Agent-Infos + aktive Ansicht + Sub-Agent-Streams
+    let _activeAgentId = '_main';
+    const _agentInfos = {};   // agent_id -> {label, state, is_sub_agent}
+    const _subBubbles = {};   // agent_id -> Streaming-Bubble eines Sub-Agenten
     let reconnectAttempts = 0;
     const MAX_RECONNECT = 20;
     let agentRunning = false;
@@ -563,7 +567,7 @@
         _lastBotCol  = null;
         _lastStats   = '';
 
-        const userBubble = addBubble(finalText, 'user');
+        const userBubble = addBubble(finalText, 'user', null, _activeAgentId);
         if (_pendingAttachments.length > 0) {
             // Snapshot der Anhänge für Rendering (vor dem Leeren von _pendingAttachments)
             const attSnap = _pendingAttachments.map(a => ({ name: a.name, mime_type: a.mime_type, data: a.data }));
@@ -579,6 +583,8 @@
         _saveHistory();
         _syncAppend(_chatHistory[_chatHistory.length - 1]);
         const msg = { type: 'task', text: finalText, lang: window._lang || 'de' };
+        // Multi-Agent: an aktiven Sub-Agenten richten (sonst Hauptagent)
+        if (_activeAgentId && _activeAgentId !== '_main') msg.agent_id = _activeAgentId;
         if (_pendingAttachments.length > 0) {
             msg.attachments = _pendingAttachments.map(a => ({ name: a.name, mime_type: a.mime_type, data: a.data }));
         }
@@ -658,23 +664,54 @@
         const STATUS_PREFIXES = ['🚀','🔧','📋','⏳','💬','💻','✅','⚠️','❌','🧠','⏸','▶','⏹'];
         const isStatus = STATUS_PREFIXES.some(p => text.startsWith(p));
 
+        // Multi-Agent: Sub-Agent-Ausgabe in eine eigene (getaggte) Bubble lenken
+        const _aid = msg.agent_id || '_main';
+        const _isSub = _aid !== '_main' && _agentInfos[_aid] && _agentInfos[_aid].is_sub_agent;
+
         if (msg.highlight && !isStatus) {
-            // Echter LLM-Antwort-Text (highlight=true, kein Status-Emoji) → Bot-Bubble + TTS
-            _ttsBuf += (text + ' ');
-            appendToBotBubble(text);
+            if (_isSub) {
+                _appendSubBubble(_aid, text);   // Sub-Agent: getaggt, kein TTS
+            } else {
+                // Echter LLM-Antwort-Text (highlight=true, kein Status-Emoji) → Bot-Bubble + TTS
+                _ttsBuf += (text + ' ');
+                appendToBotBubble(text);
+            }
         } else if (isStatus && (text.startsWith('⏸') || text.startsWith('▶') || text.startsWith('⏹'))) {
             addStatusLine(text);
         }
         // Alle anderen Status-Nachrichten still ignorieren
     }
 
+    // Streaming-Bubble eines Sub-Agenten (getaggt; nur sichtbar wenn aktiv)
+    function _appendSubBubble(agentId, text) {
+        let b = _subBubbles[agentId];
+        if (!b) {
+            b = addBubble(text, 'bot', null, agentId);
+            b._rawText = text;
+            _subBubbles[agentId] = b;
+        } else {
+            b._rawText = (b._rawText || '') + '\n' + text;
+            b.innerHTML = renderMarkdown(b._rawText.trim());
+            if ((b.closest('.msg-row')?.dataset.agentId || '_main') === _activeAgentId) scrollToBottom();
+        }
+    }
+
     function handleAgentEvent(msg) {
-        if (msg.event === 'started') {
+        const ev = msg.event;
+        const agent = msg.agent || {};
+        const isSub = !!agent.is_sub_agent;
+
+        if (ev === 'started' && !isSub) {
+            // Hauptagent: neuer Lauf -> Agent-Infos/Sub-Streams zuruecksetzen
             agentRunning = true;
             _ttsBuf = '';
             stopBtn.classList.remove('hidden');
             currentBotBubble = null;
-        } else if (msg.event === 'finished') {
+            Object.keys(_agentInfos).forEach(k => delete _agentInfos[k]);
+            Object.keys(_subBubbles).forEach(k => delete _subBubbles[k]);
+            _activeAgentId = '_main';
+            if (agent.agent_id) _agentInfos[agent.agent_id] = { label: agent.label || 'Jarvis', state: 'running', is_sub_agent: false };
+        } else if (ev === 'finished' && !isSub) {
             agentRunning = false;
             stopBtn.classList.add('hidden');
             removeStreamingDots();
@@ -683,30 +720,87 @@
             const toSpeak = _ttsBuf.trim();
             _ttsBuf = '';
             if (toSpeak) speak(toSpeak);
-            // Bot-Antwort im Verlauf speichern
             if (_lastBotResp) {
                 _chatHistory.push({ role: 'bot', text: _lastBotResp, time: timeStr(), date: _currentDateStr(), stats: _lastStats, ts: Date.now() });
                 _saveHistory();
                 _syncAppend(_chatHistory[_chatHistory.length - 1]);
             }
-            // Feedback-Buttons anfügen
             if (_lastBotCol && _lastBotResp) {
                 _appendFeedbackRow(_lastBotCol, _lastUserMsg, _lastBotResp);
                 _lastBotCol = null;
             }
         }
+
+        // ── Sub-Agent-Lebenszyklus (Multi-Agent-Sidebar, nur Admin sichtbar) ──
+        if ((ev === 'started' || ev === 'spawned') && isSub) {
+            _agentInfos[agent.agent_id] = { label: agent.label || agent.agent_id, state: 'running', is_sub_agent: true };
+        }
+        if (ev === 'finished' && isSub && _agentInfos[agent.agent_id]) {
+            _agentInfos[agent.agent_id].state = 'idle';
+            if (_activeAgentId === agent.agent_id) _switchToAgent('_main');
+            const rid = agent.agent_id;
+            setTimeout(() => {
+                if (_agentInfos[rid] && _agentInfos[rid].state !== 'paused') { delete _agentInfos[rid]; _renderAgentPanel(); }
+            }, 8000);
+        }
+        if (ev === 'paused' && isSub && _agentInfos[agent.agent_id]) _agentInfos[agent.agent_id].state = 'paused';
+
+        // Gesamtliste aus dem Event uebernehmen (falls mitgeliefert)
+        (msg.agents || []).forEach(a => { _agentInfos[a.agent_id] = { label: a.label, state: a.state, is_sub_agent: a.is_sub_agent }; });
+
+        _renderAgentPanel();
+    }
+
+    // Wechselt die angezeigte Agenten-Ansicht (filtert Nachrichten per data-agent-id)
+    function _switchToAgent(agentId) {
+        _activeAgentId = agentId;
+        messagesEl.querySelectorAll('.msg-row').forEach(r => {
+            const a = r.dataset.agentId || '_main';
+            r.style.display = (a === agentId) ? '' : 'none';
+        });
+        _renderAgentPanel();
+        scrollToBottom();
+    }
+
+    // Rendert das Multi-Agent-Panel (nur Admin, nur wenn Sub-Agenten existieren)
+    function _renderAgentPanel() {
+        const panel = $('agent-panel'), list = $('agent-panel-list');
+        if (!panel || !list) return;
+        const subs = Object.keys(_agentInfos).filter(id => _agentInfos[id].is_sub_agent);
+        if (!_isAdmin || subs.length === 0) { panel.style.display = 'none'; return; }
+        panel.style.display = '';
+        const ids = ['_main'].concat(subs);
+        const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+        list.innerHTML = ids.map(id => {
+            const info = id === '_main'
+                ? { label: 'Jarvis', state: agentRunning ? 'running' : 'idle', is_sub_agent: false }
+                : _agentInfos[id];
+            if (!info) return '';
+            const dot = info.state === 'running' ? '#f59e0b' : info.state === 'paused' ? '#a855f7' : '#22c55e';
+            const act = id === _activeAgentId;
+            return '<div class="agent-card" data-agent-id="' + esc(id) + '" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;cursor:pointer;margin-bottom:4px;'
+                + (act ? 'background:rgba(var(--accent-rgb,99,102,241),0.18);' : '') + '">'
+                + '<span style="width:8px;height:8px;border-radius:50%;background:' + dot + ';flex-shrink:0;"></span>'
+                + '<span style="font-size:0.82rem;color:var(--text-primary,#f8fafc);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(info.label || id) + (info.is_sub_agent ? '' : '') + '</span>'
+                + '</div>';
+        }).join('');
+        list.querySelectorAll('.agent-card').forEach(c => c.addEventListener('click', () => _switchToAgent(c.dataset.agentId)));
     }
 
     // ═════════════════════════════════════════════════════════════
     //  BUBBLES RENDERN
     // ═════════════════════════════════════════════════════════════
 
-    function addBubble(text, role, customTime) {
+    function addBubble(text, role, customTime, agentId) {
         removeWelcome();
         maybeAddDateSep();
 
         const row = document.createElement('div');
         row.className = `msg-row ${role}`;
+        // Multi-Agent: Zeile dem Agenten zuordnen; nicht aktive Agenten ausblenden
+        const _aid = agentId || '_main';
+        row.dataset.agentId = _aid;
+        if (_aid !== _activeAgentId) row.style.display = 'none';
 
         // Timestamp
         const timeEl = document.createElement('div');

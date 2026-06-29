@@ -101,14 +101,29 @@ _shared_client: httpx.AsyncClient | None = None
 _client_lock = asyncio.Lock()
 
 
+def _llm_timeout() -> "httpx.Timeout":
+    """Read/Total-Timeout fuer LLM-Anfragen aus der (zur Laufzeit aenderbaren)
+    Konfiguration. connect/write bleiben fest; nur die eigentliche Antwortzeit
+    (read/total) ist ueber Einstellungen -> LLM anpassbar."""
+    try:
+        from backend.config import config
+        total = max(10, min(int(getattr(config, "LLM_TIMEOUT", 180) or 180), 1800))
+    except Exception:
+        total = 180
+    return httpx.Timeout(float(total), connect=10.0, read=float(total), write=30.0)
+
+
 async def _get_shared_client() -> httpx.AsyncClient:
-    """Gibt den shared AsyncClient zurueck (lazy init, thread-safe)."""
+    """Gibt den shared AsyncClient zurueck (lazy init, thread-safe).
+
+    Der Default-Timeout des Clients wird pro Anfrage ohnehin durch
+    ``_get_timeout()`` ueberschrieben; hier nur als Fallback gesetzt."""
     global _shared_client
     if _shared_client is None or _shared_client.is_closed:
         async with _client_lock:
             if _shared_client is None or _shared_client.is_closed:
                 _shared_client = httpx.AsyncClient(
-                    timeout=httpx.Timeout(180.0, connect=10.0, read=180.0, write=30.0),
+                    timeout=_llm_timeout(),
                     limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
                     follow_redirects=True,
                 )
@@ -262,8 +277,9 @@ class OpenAICompatibleProvider(LLMProvider):
         return headers
 
     def _get_timeout(self) -> httpx.Timeout:
-        # Lokale Modelle brauchen mehr Zeit als Cloud-APIs (Application Programming Interfaces)
-        return httpx.Timeout(180.0, connect=10.0, read=180.0, write=30.0)
+        # Lokale Modelle brauchen mehr Zeit als Cloud-APIs – Timeout konfigurierbar
+        # (Einstellungen -> LLM -> Timeout).
+        return _llm_timeout()
 
     async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
         """Wählt zwischen nativem und Prompt-basiertem Tool-Calling (mit Retry bei 429/503)."""
@@ -638,8 +654,8 @@ class OpenRouterProvider(OpenAICompatibleProvider):
         headers["X-Title"] = "Jarvis Agent"
         return headers
 
-    def _get_timeout(self) -> float:
-        return 60.0
+    def _get_timeout(self) -> httpx.Timeout:
+        return _llm_timeout()
 
 
 # ═══════════════════════════════════════════════════════════════════

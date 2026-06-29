@@ -724,6 +724,23 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- LLM-Antwort-Timeout -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-timeout-hdr">
+                                <h3 data-i18n="profile.section_timeout">Antwort-Timeout</h3>
+                                <span class="sk-openclaw-toggle" id="prof-sect-timeout-tog">▶</span>
+                            </div>
+                            <div id="prof-sect-timeout-body" class="kb-collapse-body" style="display:none;">
+                                <label style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;" data-i18n="profile.timeout_label">Timeout für LLM-Anfragen (Sekunden)</label>
+                                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                    <input type="number" id="setting-llm-timeout" min="10" max="1800" step="5" value="180" style="width:120px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.85rem;">
+                                    <button class="btn-secondary btn-small" id="btn-save-llm-timeout" type="button" style="flex-shrink:0;padding:4px 12px;font-size:0.78rem;" data-i18n="profile.save_btn">Speichern</button>
+                                    <span id="llm-timeout-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
+                                </div>
+                                <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="profile.timeout_hint">Wie lange auf die Antwort des Modells gewartet wird, bevor abgebrochen wird. Langsame lokale Modelle brauchen höhere Werte (10–1800&nbsp;s). Gilt global für alle Profile.</small>
+                            </div>
+                        </div>
+
                         <!-- Agent API Key -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-api-hdr">
@@ -1466,7 +1483,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <label>Animation für die Portalseite (MOV/MP4/WEBM – wird unter der Bereichsauswahl abgespielt)</label>
                             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                                 <input type="file" id="br-portal-video-file" accept="video/quicktime,video/mp4,video/webm,.mov,.mp4,.m4v,.webm,.ogv">
-                                <video id="br-portal-video-preview" muted loop playsinline style="display:none;width:120px;height:68px;border-radius:8px;object-fit:cover;background:#000;border:1px solid var(--border);"></video>
+                                <video id="br-portal-video-preview" muted loop playsinline style="display:none;width:48px;height:48px;border-radius:50%;object-fit:cover;background:#000;border:1px solid var(--border);"></video>
                                 <button class="btn-secondary" id="br-portal-video-del" type="button">Entfernen</button>
                             </div>
                             <p class="kb-hint" style="margin:4px 0 0;">Empfehlung: MP4 (H.264) oder WEBM für zuverlässige Wiedergabe in allen Browsern (.mov spielt nicht überall ab). Wird stummgeschaltet in Endlosschleife abgespielt.</p>
@@ -2439,7 +2456,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=35"></script>
+    <script src="/static/js/i18n.js?v=36"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=15"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -2460,7 +2477,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/branding.js?v=12"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=1"></script>
-    <script src="/static/js/app.js?v=141"></script>
+    <script src="/static/js/app.js?v=142"></script>
 </body>
 
 </html>

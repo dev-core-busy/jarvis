@@ -88,6 +88,9 @@
                     if ($('support-lines')) $('support-lines').value = c.summary_lines || 5;
                     if ($('support-result-lines')) $('support-result-lines').value = c.result_lines || 2;
                     if ($('support-jira-limit')) $('support-jira-limit').value = c.jira_limit || 12;
+                    if ($('support-rag-results')) $('support-rag-results').value = c.rag_results || 8;
+                    if ($('support-confluence-results')) $('support-confluence-results').value = c.confluence_results || 6;
+                    if ($('support-summary-sources')) $('support-summary-sources').value = c.summary_sources || 10;
                     self._cfSel = {};
                     (c.conf_spaces || []).forEach(function (k) { self._cfSel[k] = true; });
                     self._setMode(c.conf_filter_mode || 'off', false);
@@ -167,11 +170,23 @@
             var jlimit = parseInt(($('support-jira-limit') ? $('support-jira-limit').value : '12'), 10);
             if (!jlimit || jlimit < 1) jlimit = 12;
             if (jlimit > 1000) jlimit = 1000;
+            function _cnt(id, def) {
+                var v = parseInt(($(id) ? $(id).value : '') || String(def), 10);
+                if (!v || v < 1) v = def;
+                if (v > 50) v = 50;
+                return v;
+            }
+            var rag = _cnt('support-rag-results', 8);
+            var conf = _cnt('support-confluence-results', 6);
+            var ssrc = _cnt('support-summary-sources', 10);
             var body = {
                 system_prompt: ($('support-prompt') ? $('support-prompt').value : ''),
                 summary_lines: lines,
                 result_lines: rlines,
                 jira_limit: jlimit,
+                rag_results: rag,
+                confluence_results: conf,
+                summary_sources: ssrc,
                 conf_filter_mode: this._cfMode || 'off',
                 conf_spaces: Object.keys(this._cfSel || {})
             };

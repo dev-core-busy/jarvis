@@ -3601,6 +3601,10 @@ async def support_page():
 _SUPPORT_LINES_MAX = 50      # Zeilen je Zusammenfassung / Antwort pro Treffer
 _SUPPORT_JIRA_MAX = 1000     # Jira-Trefferzahl (Admin-Maximum)
 _SUPPORT_JIRA_DEFAULT = 12   # Default-Ticketanzahl, falls User nichts waehlt
+_SUPPORT_SOURCE_MAX = 50               # gemeinsame Obergrenze fuer die Treffer-/Quellen-Caps
+_SUPPORT_SUMMARY_SOURCES_DEFAULT = 10  # KI-Ueberblick: max. einbezogene Top-Treffer
+_SUPPORT_RAG_DEFAULT = 8               # Wissens-/RAG-Treffer
+_SUPPORT_CONFLUENCE_DEFAULT = 6        # Confluence-Treffer
 
 
 def _support_cap(v, d, hi=_SUPPORT_LINES_MAX):
@@ -3609,6 +3613,16 @@ def _support_cap(v, d, hi=_SUPPORT_LINES_MAX):
         return max(2, min(int(v), hi))
     except (TypeError, ValueError):
         return d
+
+
+def _support_count(cfg, key, default):
+    """Anzahl-Wert (1.._SUPPORT_SOURCE_MAX) aus der Skill-Config.
+    Default bei leerem/ungueltigem Wert. Fuer die Treffer-/Quellen-Obergrenzen
+    (Wissen/RAG, Confluence, KI-Ueberblick), die der Admin zentral setzen kann."""
+    try:
+        return max(1, min(int(cfg.get(key) or default), _SUPPORT_SOURCE_MAX))
+    except (TypeError, ValueError):
+        return default
 
 
 def _support_jira_limits(cfg):
@@ -3736,7 +3750,7 @@ def _support_readable(stem: str, chunk: str) -> tuple[str, str]:
 
 
 async def _support_ai_summary(query: str, blocks: list, system_prompt: str, lines: int = 5,
-                              lang: str = "de") -> str:
+                              lang: str = "de", max_sources: int = 10) -> str:
     """LLM-Kurzzusammenfassung der Top-Quellen (best effort). Stellt das
     konfigurierte Prompt der Instruktion voran. ``lines`` begrenzt die Laenge."""
     if not blocks:
@@ -3767,7 +3781,7 @@ async def _support_ai_summary(query: str, blocks: list, system_prompt: str, line
         sysp = ((system_prompt.strip() + "\n\n") if system_prompt.strip() else "") + base
         src = "\n".join("- [%s] %s — %s" % (b.get("source", ""), b.get("title", ""),
                                             b.get("summary", ""))
-                        for b in blocks[:10])
+                        for b in blocks[:max(1, max_sources)])
         user_text = "Anfrage: %s\n\nGefundene Treffer (%d):\n%s" % (query, len(blocks), src)
         provider = get_provider(
             config.LLM_PROVIDER, config.current_api_key, config.current_api_url,
@@ -3942,7 +3956,7 @@ async def support_query(request: Request):
     if use_rag:
         try:
             from backend.tools.knowledge import rag_search
-            results = await rag_search(query, 8)
+            results = await rag_search(query, _support_count(_sacfg, "rag_results", _SUPPORT_RAG_DEFAULT))
             rag_max = max((s for s, _, _ in results), default=1.0) or 1.0
             for score, rel, chunk in results:
                 pct = round(score * 100) if rag_max <= 1.0 else round(score / rag_max * 100)
@@ -3998,7 +4012,8 @@ async def support_query(request: Request):
                 _terms = _support_terms(query)
                 _filt_spaces = _spaces if (_mode in ("whitelist", "blacklist") and _spaces) else None
                 data = await asyncio.to_thread(cc.search_advanced, _terms, _filt_spaces,
-                                               _mode == "blacklist", 6)
+                                               _mode == "blacklist",
+                                               _support_count(_sacfg, "confluence_results", _SUPPORT_CONFLUENCE_DEFAULT))
                 for i, r in enumerate(data.get("results", [])):
                     title = r.get("title") or "Seite"
                     summary = ""
@@ -4037,7 +4052,9 @@ async def support_query(request: Request):
         if _user_instr.strip():
             _sys = ((_sys + "\n\n") if _sys.strip() else "") + \
                 "Persoenliche Anweisungen des Benutzers (immer beachten):\n" + _user_instr.strip()
-        ai_summary = await _support_ai_summary(query, blocks, _sys, eff_sum, lang)
+        ai_summary = await _support_ai_summary(
+            query, blocks, _sys, eff_sum, lang,
+            _support_count(cfg, "summary_sources", _SUPPORT_SUMMARY_SOURCES_DEFAULT))
 
     _record_support_history(user, query, len(blocks))
 

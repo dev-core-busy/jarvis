@@ -9,7 +9,8 @@
     // SSO: jeden gueltigen Login-Token akzeptieren (kein Re-Login bei Seitenwechsel)
     let token     = localStorage.getItem('jarvis_uc_token') || localStorage.getItem('jarvis_token') || localStorage.getItem('jarvis_chat_token') || '';
     if (token) localStorage.setItem('jarvis_uc_token', token);
-    let myUser    = localStorage.getItem('jarvis_uc_user')  || '';
+    // Benutzername seitenuebergreifend (SSO): andere Seiten speichern unter eigenen Keys
+    let myUser    = localStorage.getItem('jarvis_uc_user') || localStorage.getItem('jarvis_chat_user') || localStorage.getItem('jarvis_user') || '';
     let ws        = null;
     let wsReady   = false;
     let activePartner = null;       // Username des aktiven Gesprächspartners
@@ -147,7 +148,21 @@
 
     // ─── Login ──────────────────────────────────────────────────
     if (token && myUser) {
+        localStorage.setItem('jarvis_uc_user', myUser);
         showChat();
+    } else if (token) {
+        // SSO: Token von anderer Seite vorhanden, Benutzername lokal noch unbekannt
+        // -> per /api/me holen (validiert zugleich den Token). Ungueltig -> Login bleibt.
+        fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + token } })
+            .then(r => r.ok ? r.json() : null)
+            .then(d => {
+                if (d && d.username) {
+                    myUser = d.username;
+                    localStorage.setItem('jarvis_uc_user', myUser);
+                    showChat();
+                }
+            })
+            .catch(() => {});
     }
 
     loginForm.addEventListener('submit', async (e) => {

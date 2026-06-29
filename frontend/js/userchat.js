@@ -213,7 +213,42 @@
         chatScreen.classList.remove('hidden');
         if (ownBadge) ownBadge.textContent = myUser;
         _requestNotifyPermission();
+        _startLlmStatus();
         connectWS();
+    }
+
+    // ── LLM-Status-Pill (analog /chat): erreichbar -> gruen, sonst rot ──
+    let _llmStatusTimer = null;
+    function _checkLlmStatus() {
+        var dot = $('status-dot');
+        if (!dot) return;
+        fetch('/api/llm/active-status', { headers: { 'Authorization': 'Bearer ' + token } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) { dot.className = 'topbar-dot disconnected'; dot.title = 'LLM-Status nicht abrufbar'; return; }
+                var reachable = (d.status === 'ok' || d.status === 'degraded');
+                dot.className = 'topbar-dot ' + (reachable ? 'connected' : 'disconnected');
+                var name = d.profile_name ? ' – ' + d.profile_name : '';
+                dot.title = (d.status === 'ok' ? 'LLM erreichbar' : d.status === 'degraded' ? 'LLM erreichbar (Modell fehlt)' : 'LLM nicht erreichbar') + name;
+            })
+            .catch(function () { dot.className = 'topbar-dot disconnected'; dot.title = 'LLM nicht erreichbar'; });
+        // Admin: Pill klickbar -> Einstellungen (LLM-Profile)
+        if (!dot._adminChecked) {
+            dot._adminChecked = true;
+            fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + token } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    if (d && d.is_admin) {
+                        dot.style.cursor = 'pointer';
+                        dot.title = (window.t ? window.t('chat.llm_settings') : 'LLM-Profile öffnen');
+                        dot.addEventListener('click', function () { window.location.href = '/settings'; });
+                    }
+                }).catch(function () {});
+        }
+    }
+    function _startLlmStatus() {
+        _checkLlmStatus();
+        if (!_llmStatusTimer) _llmStatusTimer = setInterval(_checkLlmStatus, 30000);
     }
 
     // ─── WebSocket ──────────────────────────────────────────────

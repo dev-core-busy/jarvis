@@ -3218,6 +3218,11 @@ async def reload_skills(user: str = Depends(require_local_auth)):
 # ─── Branding / White-Label ──────────────────────────────────────────
 _BRANDING_DIR = Path(__file__).parent.parent / "data" / "branding"
 _BRANDING_LOGO_EXTS = {"png", "jpg", "jpeg", "svg", "webp", "gif"}
+_BRANDING_VIDEO_EXTS = {"mov", "mp4", "m4v", "webm", "ogv"}
+_BRANDING_VIDEO_MEDIA = {
+    "mov": "video/quicktime", "mp4": "video/mp4", "m4v": "video/x-m4v",
+    "webm": "video/webm", "ogv": "video/ogg",
+}
 
 
 def _branding_state() -> tuple[bool, dict]:
@@ -3242,6 +3247,15 @@ def _branding_logo_path(variant: str = "dark") -> Path | None:
     return None
 
 
+def _branding_video_path() -> Path | None:
+    """Sucht eine vorhandene Portal-Animation (data/branding/portal_anim.<ext>)."""
+    for ext in _BRANDING_VIDEO_EXTS:
+        p = _BRANDING_DIR / f"portal_anim.{ext}"
+        if p.exists():
+            return p
+    return None
+
+
 @app.get("/api/branding")
 async def get_branding():
     """Liefert das aktive Branding (öffentlich – wird schon auf der Loginseite gebraucht).
@@ -3260,6 +3274,7 @@ async def get_branding():
     ts = int(time.time())
     logo = _branding_logo_path("dark")
     logo_light = _branding_logo_path("light")
+    video = _branding_video_path()
     return JSONResponse({
         "active": True,
         "company_name": cfg.get("company_name", ""),
@@ -3269,6 +3284,7 @@ async def get_branding():
         "colors_light": cfg.get("colors_light", {}) or {},
         "logo_url": ("/api/branding/logo?t=%d" % ts) if logo else "",
         "logo_url_light": ("/api/branding/logo?variant=light&t=%d" % ts) if logo_light else "",
+        "portal_video_url": ("/api/branding/portal-video?t=%d" % ts) if video else "",
     })
 
 
@@ -3319,6 +3335,51 @@ async def delete_branding_logo(variant: str = "dark",
     stem = _branding_logo_stem(variant)
     removed = False
     for old in _BRANDING_DIR.glob(f"{stem}.*"):
+        try:
+            old.unlink()
+            removed = True
+        except OSError:
+            pass
+    return JSONResponse({"success": True, "removed": removed})
+
+
+@app.get("/api/branding/portal-video")
+async def get_branding_portal_video():
+    """Serviert die hochgeladene Portal-Animation (öffentlich; Range-fähig via FileResponse)."""
+    video = _branding_video_path()
+    if not video:
+        return JSONResponse({"error": "kein Video"}, status_code=404)
+    media = _BRANDING_VIDEO_MEDIA.get(video.suffix.lstrip(".").lower(), "application/octet-stream")
+    return FileResponse(str(video), media_type=media)
+
+
+@app.post("/api/branding/portal-video")
+async def upload_branding_portal_video(file: UploadFile = File(...),
+                                       user: str = Depends(require_local_auth)):
+    """Lädt eine Portal-Animation hoch (MOV/MP4/WEBM …; ersetzt eine vorhandene)."""
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in _BRANDING_VIDEO_EXTS:
+        return JSONResponse(
+            {"success": False, "error": f"Format .{ext} nicht erlaubt"},
+            status_code=400)
+    _BRANDING_DIR.mkdir(parents=True, exist_ok=True)
+    # Alte Animation (egal welche Endung) entfernen
+    for old in _BRANDING_DIR.glob("portal_anim.*"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    data = await file.read()
+    (_BRANDING_DIR / f"portal_anim.{ext}").write_bytes(data)
+    return JSONResponse({"success": True,
+                         "portal_video_url": "/api/branding/portal-video?t=%d" % int(time.time())})
+
+
+@app.delete("/api/branding/portal-video")
+async def delete_branding_portal_video(user: str = Depends(require_local_auth)):
+    """Entfernt die hochgeladene Portal-Animation."""
+    removed = False
+    for old in _BRANDING_DIR.glob("portal_anim.*"):
         try:
             old.unlink()
             removed = True

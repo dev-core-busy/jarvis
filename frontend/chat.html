@@ -95,6 +95,13 @@
                 <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang('de')" title="Deutsch">DE</button>
                 <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang('en')" title="English">EN</button>
             </div>
+            <button class="btn-totp-setup" id="btn-totp-setup" data-i18n-title="chat.setup_2fa" title="2FA einrichten">🔐</button>
+            <!-- Desktop/VNC: nur fuer Admins sichtbar -->
+            <button class="btn-theme" id="btn-vnc" title="Desktop (VNC)" data-i18n-title="chat.desktop" style="display:none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+            </button>
             <div class="tts-voice-wrap" id="tts-voice-wrap" style="display:none;align-items:center;gap:4px;">
                 <span class="tts-voice-label" data-i18n="chat.voice_label">Stimme</span>
                 <select id="chat-tts-voice" class="tts-voice-select" data-i18n-title="chat.tts_toggle" title="Stimme wählen">
@@ -124,12 +131,6 @@
                     <polyline points="9 22 9 12 15 12 15 22"/>
                 </svg>
             </a>
-            <!-- Desktop/VNC: nur fuer Admins sichtbar -->
-            <button class="btn-theme" id="btn-vnc" title="Desktop (VNC)" data-i18n-title="chat.desktop" style="display:none;">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-                </svg>
-            </button>
             <button class="btn-theme" id="btn-chat-issues" title="Issues / Feedback" onclick="window.JarvisIssues && window.JarvisIssues.open()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
@@ -140,7 +141,6 @@
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                 </svg>
             </button>
-            <button class="btn-totp-setup" id="btn-totp-setup" data-i18n-title="chat.setup_2fa" title="2FA einrichten">🔐</button>
             <button class="btn-logout" id="btn-logout" data-i18n-title="chat.logout" title="Abmelden">⏻</button>
         </div>
     </header>

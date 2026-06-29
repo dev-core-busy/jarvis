@@ -80,6 +80,13 @@
             <div class="pt-card-desc">Administration &amp; Konfiguration (Admin).</div>
         </a>
     </div>
+
+    <!-- Marken-Animation (Branding-Skill): wird unter der Bereichsauswahl
+         abgespielt, sobald im Branding eine Portal-Animation hinterlegt ist. -->
+    <div id="brand-portal-anim" style="display:none;margin-top:44px;">
+        <video id="brand-portal-video" muted loop autoplay playsinline preload="metadata"
+               style="width:100%;border-radius:var(--radius-lg);display:block;box-shadow:var(--shadow-md);"></video>
+    </div>
 </div>
 
 <!-- ═══ Konto-gesperrt-Bildschirm (Sicherheitsschicht, CSS-unabhängig) ═══ -->
@@ -98,7 +105,7 @@
 
 <script src="/static/js/i18n.js?v=15"></script>
 <script src="/static/js/theme.js?v=2"></script>
-<script src="/static/js/branding.js?v=11"></script>
+<script src="/static/js/branding.js?v=12"></script>
 <script src="/static/js/security_incidents.js?v=1"></script>
 <script>
 (function () {

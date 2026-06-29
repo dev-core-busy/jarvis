@@ -234,6 +234,13 @@
         });
         // 4) Favicon auf Standard-Jarvis zuruecksetzen
         resetFavicon();
+        // 5) Portal-Animation ausblenden/entfernen
+        var animWrap = document.getElementById('brand-portal-anim');
+        if (animWrap) {
+            var av = document.getElementById('brand-portal-video');
+            if (av) { av.removeAttribute('src'); av._brandedSrc = ''; try { av.load(); } catch (e) {} }
+            animWrap.style.display = 'none';
+        }
     }
 
     // Alle runden „J"-Logo-/Avatar-Elemente, die gebrandet werden sollen
@@ -288,6 +295,27 @@
         brandOne(el, _current, effectiveLogoUrl(_current, currentIsLight()));
     }
 
+    // Portal-Animation (nur auf Seiten mit #brand-portal-anim, z.B. /portal):
+    // Setzt die Videoquelle und blendet den Container ein, wenn ein Branding-
+    // Video hinterlegt ist – sonst bleibt er ausgeblendet.
+    function applyPortalVideo(b) {
+        var wrap = document.getElementById('brand-portal-anim');
+        if (!wrap) return;
+        var vid = document.getElementById('brand-portal-video');
+        var url = (b && b.active && b.portal_video_url) ? b.portal_video_url : '';
+        if (url && vid) {
+            if (vid._brandedSrc !== url) {
+                vid._brandedSrc = url;
+                vid.src = url;
+                try { vid.play(); } catch (e) { /* Autoplay ggf. blockiert */ }
+            }
+            wrap.style.display = '';
+        } else {
+            if (vid) { vid.removeAttribute('src'); vid._brandedSrc = ''; try { vid.load(); } catch (e) {} }
+            wrap.style.display = 'none';
+        }
+    }
+
     function applyBranding(b) {
         if (!b || !b.active) return;
         _current = b;
@@ -297,6 +325,7 @@
         var lu = effectiveLogoUrl(b, isLight);
         applyLogo(b, lu);
         applyFavicon(b, lu);
+        applyPortalVideo(b);
     }
 
     // ── Laufzeit: Branding laden & anwenden ─────────────────────────
@@ -379,6 +408,10 @@
             if (logoInputL) logoInputL.addEventListener('change', function (ev) { BrandingAdmin.uploadLogo(ev, 'light'); });
             var logoDelL = document.getElementById('br-logo-del-light');
             if (logoDelL) logoDelL.addEventListener('click', function () { BrandingAdmin.deleteLogo('light'); });
+            var vidInput = document.getElementById('br-portal-video-file');
+            if (vidInput) vidInput.addEventListener('change', function (ev) { BrandingAdmin.uploadPortalVideo(ev); });
+            var vidDel = document.getElementById('br-portal-video-del');
+            if (vidDel) vidDel.addEventListener('click', function () { BrandingAdmin.deletePortalVideo(); });
             // Live-Vorschau bei Farb-/Text-/Logo-Änderung
             ['br-accent', 'br-accent-hover', 'br-bg-primary', 'br-bg-secondary', 'br-text-primary',
              'br-bg-primary-light', 'br-bg-secondary-light', 'br-text-primary-light',
@@ -435,6 +468,11 @@
                     if (imgL) {
                         if (b.logo_url_light) { imgL.src = b.logo_url_light; imgL.style.display = ''; BrandingAdmin._logoUrlLight = b.logo_url_light; }
                         else { imgL.style.display = 'none'; BrandingAdmin._logoUrlLight = ''; }
+                    }
+                    var vid = document.getElementById('br-portal-video-preview');
+                    if (vid) {
+                        if (b.portal_video_url) { vid.src = b.portal_video_url; vid.style.display = ''; try { vid.play(); } catch (e) {} }
+                        else { vid.removeAttribute('src'); vid.style.display = 'none'; }
                     }
                 }).catch(function () {});
         },
@@ -520,6 +558,35 @@
         deleteLogo: function (variant) {
             variant = variant === 'light' ? 'light' : 'dark';
             fetch('/api/branding/logo?variant=' + variant, {
+                method: 'DELETE',
+                headers: { 'Authorization': 'Bearer ' + token() }
+            }).then(function () {
+                BrandingAdmin.refreshLogoPreview();
+            }).catch(function () {});
+        },
+        uploadPortalVideo: function (ev) {
+            var f = ev.target.files && ev.target.files[0];
+            if (!f) return;
+            var st = document.getElementById('br-status');
+            if (st) st.textContent = '… Animation wird hochgeladen';
+            var fd = new FormData();
+            fd.append('file', f);
+            fetch('/api/branding/portal-video', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token() },
+                body: fd
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                  if (d && d.success) {
+                      BrandingAdmin.refreshLogoPreview();
+                      if (st) { st.textContent = '✓ Animation hochgeladen'; setTimeout(function () { st.textContent = ''; }, 2500); }
+                  } else if (st) {
+                      st.textContent = '✗ ' + ((d && d.error) || 'Upload fehlgeschlagen');
+                  }
+              }).catch(function () { if (st) st.textContent = '✗ Upload fehlgeschlagen'; });
+        },
+        deletePortalVideo: function () {
+            fetch('/api/branding/portal-video', {
                 method: 'DELETE',
                 headers: { 'Authorization': 'Bearer ' + token() }
             }).then(function () {

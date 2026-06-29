@@ -1437,7 +1437,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <input type="radio" name="br-logo-mode" value="letter" checked><span>Buchstabe im Ring</span>
                             </label>
                             <label class="checkbox-group" style="display:inline-flex;gap:6px;">
-                                <input type="radio" name="br-logo-mode" value="image"><span>Logo-Bild statt Ring</span>
+                                <input type="radio" name="br-logo-mode" value="image"><span>Logo (kompakt) statt Ring</span>
                             </label>
                         </div>
                         <div class="form-group">
@@ -1445,7 +1445,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <input type="text" id="br-letter" class="config-input" maxlength="2" placeholder="z.B. A" style="width:120px;">
                         </div>
                         <div class="form-group">
-                            <label>Logo-Bild – Dunkelmodus (PNG/JPG/SVG/WEBP)</label>
+                            <label>Logo (kompakt) – Dunkelmodus (PNG/JPG/SVG/WEBP)</label>
                             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                                 <input type="file" id="br-logo-file" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif">
                                 <img id="br-logo-preview" alt="Logo dunkel" style="display:none;width:48px;height:48px;border-radius:50%;object-fit:contain;background:#0a0e17;border:1px solid var(--border);">
@@ -1453,12 +1453,23 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
                         <div class="form-group">
-                            <label>Logo-Bild – Hellmodus (optional, sonst wird das dunkle verwendet)</label>
+                            <label>Logo (kompakt) – Hellmodus (optional, sonst wird das dunkle verwendet)</label>
                             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                                 <input type="file" id="br-logo-file-light" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif">
                                 <img id="br-logo-preview-light" alt="Logo hell" style="display:none;width:48px;height:48px;border-radius:50%;object-fit:contain;background:#ffffff;border:1px solid var(--border);">
                                 <button class="btn-secondary" id="br-logo-del-light" type="button">Entfernen</button>
                             </div>
+                        </div>
+
+                        <h4 style="margin:18px 0 8px;">Portalseiten-Animation</h4>
+                        <div class="form-group">
+                            <label>Animation für die Portalseite (MOV/MP4/WEBM – wird unter der Bereichsauswahl abgespielt)</label>
+                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                <input type="file" id="br-portal-video-file" accept="video/quicktime,video/mp4,video/webm,.mov,.mp4,.m4v,.webm,.ogv">
+                                <video id="br-portal-video-preview" muted loop playsinline style="display:none;width:120px;height:68px;border-radius:8px;object-fit:cover;background:#000;border:1px solid var(--border);"></video>
+                                <button class="btn-secondary" id="br-portal-video-del" type="button">Entfernen</button>
+                            </div>
+                            <p class="kb-hint" style="margin:4px 0 0;">Empfehlung: MP4 (H.264) oder WEBM für zuverlässige Wiedergabe in allen Browsern (.mov spielt nicht überall ab). Wird stummgeschaltet in Endlosschleife abgespielt.</p>
                         </div>
 
                         <h4 style="margin:18px 0 8px;">Farben – Dunkelmodus</h4>
@@ -2446,7 +2457,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=4"></script>
-    <script src="/static/js/branding.js?v=11"></script>
+    <script src="/static/js/branding.js?v=12"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=1"></script>
     <script src="/static/js/app.js?v=141"></script>

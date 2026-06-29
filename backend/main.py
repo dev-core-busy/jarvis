@@ -475,6 +475,24 @@ async def require_auth(request: Request) -> str:
     return username
 
 
+async def require_auth_or_agent(request: Request) -> str:
+    """Wie require_auth, akzeptiert aber zusaetzlich einen gueltigen Agent-API-Key
+    (X-API-Key ODER Bearer) und gibt dann den Benutzer ``api`` zurueck. Fuer
+    Endpunkte, die auch native Clients per API-Key nutzen (analog WebSocket /
+    /api/support/query), z.B. der Issue-Tracker."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = verify_token(token)
+    if username:
+        if _user_must_change(username):
+            raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
+        if security_guard.is_blocked(username):
+            raise HTTPException(status_code=403, detail="ACCOUNT_BLOCKED")
+        return username
+    if _verify_agent_api_key(request):
+        return "api"
+    raise HTTPException(status_code=401, detail="Nicht authentifiziert")
+
+
 async def require_auth_pwchange(request: Request) -> str:
     """Wie require_auth, aber OHNE die must_change-Sperre – nur fuer den
     Kennwort-Aendern-Endpoint (sonst Deadlock)."""
@@ -542,17 +560,23 @@ async def require_knowledge_editor(request: Request, user: str = Depends(require
 
 
 async def require_auth_or_query(request: Request) -> str:
-    """Auth via Header ODER ?token= Query-Parameter (fuer img/audio Tags)."""
+    """Auth via Header ODER ?token= Query-Parameter (fuer img/audio Tags) ODER
+    Agent-API-Key (Header/Query) -> Benutzer ``api`` (native Clients)."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     username = verify_token(token)
     if not username:
         token = request.query_params.get("token", "")
         username = verify_token(token)
-    if not username:
-        raise HTTPException(status_code=401, detail="Nicht authentifiziert")
-    if _user_must_change(username):
-        raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
-    return username
+    if username:
+        if _user_must_change(username):
+            raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
+        if security_guard.is_blocked(username):
+            raise HTTPException(status_code=403, detail="ACCOUNT_BLOCKED")
+        return username
+    # Agent-API-Key: Header (X-API-Key/Bearer) ODER ?token=<key>
+    if _verify_agent_api_key(request) or _is_valid_agent_key(request.query_params.get("token", "")):
+        return "api"
+    raise HTTPException(status_code=401, detail="Nicht authentifiziert")
 
 
 def _mask_key(key: str) -> str:
@@ -7006,7 +7030,7 @@ from backend import issues as _issues_mod
 
 
 @app.get("/api/issues")
-async def api_issues_list(request: Request, user: str = Depends(require_auth)):
+async def api_issues_list(request: Request, user: str = Depends(require_auth_or_agent)):
     """Liste aller Issues. Optionale Filter: ?mine=1 &status=open &type=bug"""
     mine = request.query_params.get("mine", "") in ("1", "true", "yes")
     status = request.query_params.get("status") or None
@@ -7021,20 +7045,20 @@ async def api_issues_list(request: Request, user: str = Depends(require_auth)):
 
 
 @app.get("/api/issues/notifications")
-async def api_issues_notifications(user: str = Depends(require_auth)):
+async def api_issues_notifications(user: str = Depends(require_auth_or_agent)):
     """Anzahl eigener Issues mit ungesehener Status-Aenderung (fuer Badge)."""
     return JSONResponse({"ok": True, "count": _issues_mod.unseen_count(user)})
 
 
 @app.post("/api/issues/notifications/seen")
-async def api_issues_notifications_seen(user: str = Depends(require_auth)):
+async def api_issues_notifications_seen(user: str = Depends(require_auth_or_agent)):
     """Markiert die Status-Aenderungen der eigenen Issues als gesehen (Badge zuruecksetzen)."""
     _issues_mod.mark_seen(user)
     return JSONResponse({"ok": True, "count": 0})
 
 
 @app.get("/api/issues/{issue_id}")
-async def api_issues_get(issue_id: str, user: str = Depends(require_auth)):
+async def api_issues_get(issue_id: str, user: str = Depends(require_auth_or_agent)):
     issue = _issues_mod.get_issue(issue_id)
     if not issue:
         raise HTTPException(404, "Issue nicht gefunden")
@@ -7049,7 +7073,7 @@ async def api_issues_get(issue_id: str, user: str = Depends(require_auth)):
 
 
 @app.post("/api/issues")
-async def api_issues_create(request: Request, user: str = Depends(require_auth)):
+async def api_issues_create(request: Request, user: str = Depends(require_auth_or_agent)):
     try:
         data = await request.json()
     except Exception:
@@ -7067,7 +7091,7 @@ async def api_issues_create(request: Request, user: str = Depends(require_auth))
 
 @app.patch("/api/issues/{issue_id}")
 async def api_issues_update(issue_id: str, request: Request,
-                            user: str = Depends(require_auth)):
+                            user: str = Depends(require_auth_or_agent)):
     try:
         patch = await request.json()
     except Exception:
@@ -7084,7 +7108,7 @@ async def api_issues_update(issue_id: str, request: Request,
 
 
 @app.delete("/api/issues/{issue_id}")
-async def api_issues_delete(issue_id: str, user: str = Depends(require_auth)):
+async def api_issues_delete(issue_id: str, user: str = Depends(require_auth_or_agent)):
     ok, err = _issues_mod.delete_issue(user, issue_id)
     if not ok:
         if "Jarvis" in err or "Berechtigung" in err:
@@ -7095,7 +7119,7 @@ async def api_issues_delete(issue_id: str, user: str = Depends(require_auth)):
 
 @app.post("/api/issues/{issue_id}/attachments")
 async def api_issues_attach(issue_id: str, file: UploadFile = File(...),
-                            user: str = Depends(require_auth)):
+                            user: str = Depends(require_auth_or_agent)):
     content = await file.read()
     saved, err = _issues_mod.add_attachment(user, issue_id, file.filename or "file", content)
     if not saved:
@@ -7119,7 +7143,7 @@ async def api_issues_get_attachment(issue_id: str, filename: str,
 
 @app.delete("/api/issues/{issue_id}/attachments/{filename}")
 async def api_issues_del_attachment(issue_id: str, filename: str,
-                                    user: str = Depends(require_auth)):
+                                    user: str = Depends(require_auth_or_agent)):
     ok, err = _issues_mod.delete_attachment(user, issue_id, filename)
     if not ok:
         if "Berechtigung" in err:

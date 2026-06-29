@@ -214,7 +214,26 @@
         if (ownBadge) ownBadge.textContent = myUser;
         _requestNotifyPermission();
         _startLlmStatus();
+        _startCpu();
         connectWS();
+    }
+
+    // ── CPU-Auslastung (fuer alle): /api/cpu pollen ──
+    let _cpuTimer = null;
+    function _updateCpu(pct) {
+        const fill = $('cpu-bar-fill'), label = $('cpu-bar-label');
+        if (!fill || !label) return;
+        const p = Math.max(0, Math.min(100, Number(pct) || 0));
+        fill.style.width = p + '%';
+        fill.style.backgroundPosition = p + '% 0';
+        label.textContent = 'CPU: ' + Math.round(p) + '%';
+    }
+    function _startCpu() {
+        if (_cpuTimer) return;
+        const poll = () => fetch('/api/cpu', { headers: { 'Authorization': 'Bearer ' + token } })
+            .then(r => r.ok ? r.json() : null).then(d => { if (d) _updateCpu(d.cpu); }).catch(() => {});
+        poll();
+        _cpuTimer = setInterval(poll, 3000);
     }
 
     // ── LLM-Status-Pill (analog /chat): erreichbar -> gruen, sonst rot ──

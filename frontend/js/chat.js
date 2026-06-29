@@ -309,9 +309,9 @@
         const _vncBtn = $('btn-vnc');
         const _isLocalJarvis = (_currentUser || '').trim().toLowerCase() === 'jarvis';
         if (_vncBtn) _vncBtn.style.display = _isLocalJarvis ? '' : 'none';
-        // CPU-Auslastung nur fuer Admins (Werte kommen via WS-Event 'cpu')
+        // CPU-Auslastung fuer alle (Werte kommen via WS-Event 'cpu')
         const _cpuBar = $('cpu-bar');
-        if (_isAdmin && _cpuBar) _cpuBar.style.display = '';
+        if (_cpuBar) _cpuBar.style.display = '';
         // LLM-Status-Pill fuer Admins klickbar -> Einstellungen (LLM-Profile)
         const _dot = $('status-dot');
         if (_isAdmin && _dot && !_dot._adminWired) {

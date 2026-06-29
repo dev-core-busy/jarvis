@@ -201,15 +201,21 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!d) return;
-                // Angemeldeten Benutzer anzeigen
-                var ob = $('sup-own-badge');
-                if (ob && d.username) ob.textContent = d.username;
+                // Angemeldeten Benutzer als Tooltip am Logout-Button ('<user> abmelden')
+                var lo = $('sup-logout-btn');
+                if (lo && d.username) lo.title = d.username + ' abmelden';
                 if (d.is_admin) {
                     var dot = $('sup-status-dot');
                     if (dot) {
                         dot.style.cursor = 'pointer';
                         dot.title = T('chat.llm_settings', 'LLM-Profile öffnen');
                         dot.addEventListener('click', function () { window.location.href = '/settings'; });
+                    }
+                    // Setup-Button (direkt vor Logout) fuer Admins einblenden
+                    var sb = $('sup-settings-btn');
+                    if (sb) {
+                        sb.style.display = '';
+                        sb.addEventListener('click', function () { window.location.href = '/settings'; });
                     }
                 }
             }).catch(function () {});

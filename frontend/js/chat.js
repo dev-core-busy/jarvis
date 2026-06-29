@@ -307,6 +307,14 @@
         // Desktop/VNC-Button nur fuer Admins
         const _vncBtn = $('btn-vnc');
         if (_isAdmin && _vncBtn) _vncBtn.style.display = '';
+        // LLM-Status-Pill fuer Admins klickbar -> Einstellungen (LLM-Profile)
+        const _dot = $('status-dot');
+        if (_isAdmin && _dot && !_dot._adminWired) {
+            _dot._adminWired = true;
+            _dot.style.cursor = 'pointer';
+            _dot.title = (window.t ? window.t('chat.llm_settings') : 'LLM-Profile öffnen');
+            _dot.addEventListener('click', () => { window.location.href = '/settings'; });
+        }
         connectWS();
         _startLlmStatusIndicator();
         _restoreHistory();
@@ -1658,8 +1666,6 @@
 
     const certModal = $('cert-modal');
     $('btn-cert')?.addEventListener('click', () => certModal.classList.remove('hidden'));
-    // Sicherheits-Indikator im Header oeffnet dieselbe Zertifikat-Hilfe
-    $('security-indicator')?.addEventListener('click', () => certModal && certModal.classList.remove('hidden'));
     $('btn-cert-close')?.addEventListener('click', () => certModal.classList.add('hidden'));
     certModal?.addEventListener('click', (e) => {
         if (e.target === certModal) certModal.classList.add('hidden');

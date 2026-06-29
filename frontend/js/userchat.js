@@ -211,7 +211,8 @@
         // display:flex damit flex-direction:column + flex:1 korrekt funktionieren
         chatScreen.style.display  = 'flex';
         chatScreen.classList.remove('hidden');
-        if (ownBadge) ownBadge.textContent = myUser;
+        var _ucLogout = $('btn-uc-logout');
+        if (_ucLogout && myUser) _ucLogout.title = myUser + ' abmelden';
         _requestNotifyPermission();
         _startLlmStatus();
         _startCpu();
@@ -261,6 +262,12 @@
                         dot.style.cursor = 'pointer';
                         dot.title = (window.t ? window.t('chat.llm_settings') : 'LLM-Profile öffnen');
                         dot.addEventListener('click', function () { window.location.href = '/settings'; });
+                        // Setup-Button (direkt vor Logout) fuer Admins einblenden
+                        var sb = $('btn-uc-settings');
+                        if (sb) {
+                            sb.style.display = '';
+                            sb.addEventListener('click', function () { window.location.href = '/settings'; });
+                        }
                     }
                 }).catch(function () {});
         }
@@ -309,7 +316,8 @@
         switch (msg.type) {
             case 'connected':
                 myUser = msg.username || myUser;
-                if (ownBadge) ownBadge.textContent = myUser;
+                var _ucLogout = $('btn-uc-logout');
+        if (_ucLogout && myUser) _ucLogout.title = myUser + ' abmelden';
                 updatePresence(msg.users || []);
                 break;
 

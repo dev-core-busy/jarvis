@@ -507,6 +507,7 @@ const _I18N = {
         'uc.select_user':       'Wähle einen Benutzer links aus',
         'uc.back':              'Zurück zu Jarvis',
         'nav.home':             'Startseite',
+        'nav.settings':         'Einstellungen',
         'uc.placeholder':       'Nachricht schreiben…',
 
         // ── Skills ───────────────────────────────────────────
@@ -1354,6 +1355,7 @@ const _I18N = {
         'uc.select_user':       'Select a user on the left',
         'uc.back':              'Back to Jarvis',
         'nav.home':             'Home',
+        'nav.settings':         'Settings',
         'uc.placeholder':       'Write a message…',
 
         // ── Skills ───────────────────────────────────────────

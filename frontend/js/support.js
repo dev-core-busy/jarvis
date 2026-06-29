@@ -168,6 +168,26 @@
         $('sup-opt-conf').addEventListener('change', function () { setPref('conf', this.checked); });
         $('sup-opt-rag').addEventListener('change', function () { setPref('rag', this.checked); });
         $('sup-opt-ai').addEventListener('change', function () { setPref('ai', this.checked); });
+        // Abmelden (global: alle Token-Keys) -> zurueck zum Portal
+        var _lo = $('sup-logout-btn');
+        if (_lo) _lo.addEventListener('click', function () {
+            TOKEN_KEYS.forEach(function (k) { localStorage.removeItem(k); });
+            ['jarvis_user', 'jarvis_chat_user', 'jarvis_uc_user'].forEach(function (k) { localStorage.removeItem(k); });
+            window.location.href = '/portal';
+        });
+        // LLM-Status-Pill: nur fuer Admins klickbar -> Einstellungen (LLM-Profile)
+        fetch('/api/me', { headers: authHeaders() })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (d && d.is_admin) {
+                    var dot = $('sup-status-dot');
+                    if (dot) {
+                        dot.style.cursor = 'pointer';
+                        dot.title = T('chat.llm_settings', 'LLM-Profile öffnen');
+                        dot.addEventListener('click', function () { window.location.href = '/settings'; });
+                    }
+                }
+            }).catch(function () {});
         // Sprachwechsel: statische Labels via applyLang (i18n.js), dynamische Treffer neu rendern
         if (window.setLang && !window._supLangWrapped) {
             window._supLangWrapped = true;

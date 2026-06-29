@@ -72,11 +72,7 @@
         <div class="topbar-left">
             <div class="topbar-avatar">J</div>
             <span class="topbar-title">Jarvis</span>
-            <span class="topbar-dot" id="status-dot"></span>
-            <!-- Sicherheits-Indikator: oeffnet die Zertifikat-Hilfe (wie Hauptseite) -->
-            <div id="security-indicator" class="security-badge" title="Sicherheitsstatus" data-i18n-title="security.status">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-            </div>
+            <span class="topbar-dot" id="status-dot" title="LLM-Status"></span>
             <!-- Versions-/Update-Pill: nur fuer Admins (jarvis/lokaler Admin) sichtbar -->
             <div class="update-widget-wrap" id="chat-update-wrap" style="display:none;">
                 <div id="version-pill" class="header-version-pill upd-pill-clickable" title="Updates &amp; Version">
@@ -344,7 +340,7 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=17"></script>
+<script src="/static/js/i18n.js?v=18"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=8"></script>
 <script src="/static/js/issues.js?v=3"></script>
@@ -352,6 +348,6 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/security_incidents.js?v=1"></script>
 <script src="/static/js/update_widget.js?v=1"></script>
 <script src="/static/js/vnc.js?v=16"></script>
-<script src="/static/js/chat.js?v=50"></script>
+<script src="/static/js/chat.js?v=51"></script>
 </body>
 </html>

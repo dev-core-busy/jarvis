@@ -3037,6 +3037,13 @@ async def _feedback_self_improve(user_msg: str, bot_resp: str, rating: str) -> s
         return ""
 
 
+@app.get("/api/cpu")
+async def get_cpu(user: str = Depends(require_auth)):
+    """Leichtgewichtige CPU-Auslastung (gecachter Wert, kein Messaufwand) –
+    fuer die Topbar-Anzeige in /chat, /userchat und /support."""
+    return JSONResponse({"cpu": _cached_cpu_percent})
+
+
 @app.get("/api/health")
 async def health():
     """Erweiterter Health-Check mit System- und Service-Status."""

@@ -15,26 +15,51 @@
             min-height: 100vh;
         }
         .sup-topbar {
-            display: flex; align-items: center; gap: 12px;
-            padding: 12px 20px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 16px; border-bottom: 1px solid var(--border);
             background: var(--bg-glass); backdrop-filter: blur(8px);
             position: sticky; top: 0; z-index: 10;
         }
         .sup-logo {
-            width: 34px; height: 34px; border-radius: 50%;
+            width: 32px; height: 32px; border-radius: 50%;
             background: var(--gradient); display: flex; align-items: center;
-            justify-content: center; font-weight: 700; color: #fff; flex-shrink: 0;
+            justify-content: center; font-size: 14px; font-weight: 700; color: #fff; flex-shrink: 0;
             overflow: hidden;
         }
-        .sup-title { font-size: 1.05rem; font-weight: 600; }
-        .sup-status-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+        .sup-title { font-size: 17px; font-weight: 600; }
+        .sup-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
             background: var(--text-muted); transition: background .3s ease; }
         .sup-status-dot.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
         .sup-status-dot.disconnected { background: var(--danger); }
+        .sup-own-badge {
+            display: inline-flex; align-items: center; max-width: 220px;
+            padding: 3px 10px; border-radius: 12px;
+            background: rgba(var(--fg-rgb, 148,163,184), 0.06);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), 0.1);
+            color: var(--text-secondary); font-size: 0.78rem; font-weight: 600;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .sup-own-badge:empty { display: none; }
+        .cpu-bar.sup-cpu-bar {
+            width: 130px; height: 18px; border-radius: 999px;
+            background: var(--bg-input, rgba(255,255,255,.06));
+            position: relative; overflow: hidden; border: 1px solid var(--border); flex-shrink: 0;
+        }
+        .cpu-bar.sup-cpu-bar .cpu-bar-fill {
+            height: 100%; border-radius: 999px;
+            background: linear-gradient(90deg, #10b981, #22c55e, #84cc16, #eab308, #f97316, #ef4444);
+            background-size: 300% 100%;
+            transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .cpu-bar.sup-cpu-bar .cpu-bar-label {
+            position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+            font-size: 0.62rem; font-weight: 600; font-family: var(--font-mono, monospace);
+            color: var(--text-primary); white-space: nowrap; z-index: 1;
+        }
         .sup-spacer { flex: 1; }
         .btn-theme {
             background: transparent; border: 1px solid var(--border); color: var(--text-secondary);
-            width: 36px; height: 36px; border-radius: var(--radius-sm, 8px); cursor: pointer;
+            width: 32px; height: 32px; border-radius: var(--radius-sm, 8px); cursor: pointer;
             display: flex; align-items: center; justify-content: center;
             transition: all var(--transition, 0.2s ease);
         }
@@ -45,7 +70,7 @@
         .sup-hist-wrap { position: relative; }
         .sup-hist-btn {
             background: none; border: 1px solid var(--border); color: var(--text-secondary);
-            height: 34px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+            height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
             font-size: 0.85rem; display: flex; align-items: center; gap: 6px; font-family: var(--font-body);
         }
         .sup-hist-btn:hover { border-color: var(--accent); color: var(--text-primary); }
@@ -267,6 +292,13 @@
         <div class="sup-logo topbar-avatar">J</div>
         <div class="sup-title"><span class="brand-app-name">Jarvis</span> <span data-i18n="sup.assistant">Support Assistent</span></div>
         <span class="sup-status-dot" id="sup-status-dot" title="LLM-Status"></span>
+        <!-- CPU-Auslastung (fuer alle sichtbar) -->
+        <div class="cpu-bar sup-cpu-bar" id="cpu-bar" title="CPU-Auslastung">
+            <div class="cpu-bar-fill" id="cpu-bar-fill" style="width:0%"></div>
+            <span class="cpu-bar-label" id="cpu-bar-label">CPU: 0%</span>
+        </div>
+        <!-- Angemeldeter Benutzer -->
+        <span class="sup-own-badge" id="sup-own-badge" data-i18n-title="header.logged_in_as" title="Angemeldet als"></span>
         <div class="sup-spacer"></div>
         <div class="lang-toggle" id="sup-lang-toggle">
             <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
@@ -425,6 +457,6 @@
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=13"></script>
 <script src="/static/js/issues.js?v=3"></script>
-<script src="/static/js/support.js?v=25"></script>
+<script src="/static/js/support.js?v=26"></script>
 </body>
 </html>

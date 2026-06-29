@@ -313,11 +313,11 @@ body {
     width: 130px;
     height: 18px;
     margin-left: 8px;
-    background: var(--bg-input, rgba(var(--fg-rgb, 255,255,255), .06));
+    background: rgba(148, 163, 184, .14);
     border-radius: 999px;
     position: relative;
     overflow: hidden;
-    border: 1px solid rgba(var(--fg-rgb, 255,255,255), .30);
+    border: 1px solid rgba(148, 163, 184, .55);
     flex-shrink: 0;
 }
 .cpu-bar.chat-cpu-bar .cpu-bar-fill {
@@ -1036,21 +1036,22 @@ select option:hover {
 .lang-toggle-btn {
     background: transparent;
     border: none;
-    color: rgba(224,224,240,0.45);
+    color: var(--text-secondary);
     font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.04em;
     padding: 3px 10px;
     border-radius: 6px;
     cursor: pointer;
+    font-family: var(--font-body);
     transition: background 0.15s, color 0.15s;
 }
-.lang-toggle-btn:hover { color: #e0e0f0; }
+.lang-toggle-btn:hover { color: var(--text-primary); }
 .lang-toggle-btn.active {
     background: rgba(var(--accent-rgb), 0.35);
-    color: #e0e0f0;
+    color: var(--text-primary);
 }
-.lang-toggle.header-lang { border-color: rgba(var(--fg-rgb), 0.08); }
+.lang-toggle.header-lang { border-color: rgba(var(--fg-rgb), 0.1); }
 
 /* ─── Datei-Anhang Button ───────────────────────────────────── */
 .btn-attach {

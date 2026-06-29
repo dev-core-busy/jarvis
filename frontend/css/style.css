@@ -283,7 +283,7 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
 }
 
 .btn-login {
-    background: linear-gradient(135deg, var(--accent), #818cf8);
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
     color: white;
     border: none;
     padding: 0.75rem 1.5rem;
@@ -2489,13 +2489,13 @@ select option:hover {
 .btn-primary {
     flex: 1;
     padding: 12px;
-    background: var(--gradient);
+    background: var(--accent);
     border: none;
     border-radius: 8px;
     color: white;
     font-weight: 600;
     cursor: pointer;
-    transition: opacity 0.2s;
+    transition: background 0.2s, opacity 0.2s;
 }
 
 .btn-primary:hover {

@@ -3,7 +3,7 @@
  * Cached statische Assets für Offline-Nutzung.
  */
 
-const CACHE_NAME = 'jarvis-pwa-v4';
+const CACHE_NAME = 'jarvis-pwa-v5';
 
 // Nur wirklich cachbare statische Assets (kein HTML – Server setzt no-store)
 const PRECACHE_ASSETS = [

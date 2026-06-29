@@ -497,6 +497,7 @@ const _I18N = {
         'uc.title':             'Benutzer-Chat',
         'uc.select_user':       'Wähle einen Benutzer links aus',
         'uc.back':              'Zurück zu Jarvis',
+        'nav.home':             'Startseite',
         'uc.placeholder':       'Nachricht schreiben…',
 
         // ── Skills ───────────────────────────────────────────
@@ -1332,6 +1333,7 @@ const _I18N = {
         'uc.title':             'User Chat',
         'uc.select_user':       'Select a user on the left',
         'uc.back':              'Back to Jarvis',
+        'nav.home':             'Home',
         'uc.placeholder':       'Write a message…',
 
         // ── Skills ───────────────────────────────────────────

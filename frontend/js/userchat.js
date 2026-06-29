@@ -6,7 +6,9 @@
     'use strict';
 
     // ─── State ──────────────────────────────────────────────────
-    let token     = localStorage.getItem('jarvis_uc_token') || '';
+    // SSO: jeden gueltigen Login-Token akzeptieren (kein Re-Login bei Seitenwechsel)
+    let token     = localStorage.getItem('jarvis_uc_token') || localStorage.getItem('jarvis_token') || localStorage.getItem('jarvis_chat_token') || '';
+    if (token) localStorage.setItem('jarvis_uc_token', token);
     let myUser    = localStorage.getItem('jarvis_uc_user')  || '';
     let ws        = null;
     let wsReady   = false;
@@ -402,7 +404,10 @@
 
             case 'error':
                 if (msg.message === 'Nicht autorisiert') {
+                    // Token wirklich ungueltig -> ALLE Keys leeren (sonst Reload-Schleife durch SSO-Spiegelung)
                     localStorage.removeItem('jarvis_uc_token');
+                    localStorage.removeItem('jarvis_token');
+                    localStorage.removeItem('jarvis_chat_token');
                     localStorage.removeItem('jarvis_uc_user');
                     location.reload();
                 }
@@ -845,7 +850,10 @@
     const logoutBtn = $('btn-uc-logout');
     if (logoutBtn) {
         logoutBtn.addEventListener('click', () => {
+            // Global abmelden (SSO): alle Seiten-Token entfernen
             localStorage.removeItem('jarvis_uc_token');
+            localStorage.removeItem('jarvis_token');
+            localStorage.removeItem('jarvis_chat_token');
             localStorage.removeItem('jarvis_uc_user');
             if (ws) ws.close();
             location.reload();

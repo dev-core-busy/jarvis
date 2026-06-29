@@ -6,7 +6,11 @@
     'use strict';
 
     // ─── State ──────────────────────────────────────────────────
-    let token = localStorage.getItem('jarvis_token') || '';
+    // Single-Sign-On ueber alle Seiten: jeder gueltige Login-Token (egal von
+    // welcher Seite gesetzt) wird akzeptiert und unter dem eigenen Key gespiegelt,
+    // damit kein erneuter Login bei Seitenwechsel noetig ist.
+    let token = localStorage.getItem('jarvis_token') || localStorage.getItem('jarvis_chat_token') || localStorage.getItem('jarvis_uc_token') || '';
+    if (token) localStorage.setItem('jarvis_token', token);
     // Eindeutige Fenster-ID fuer Live-Sync (eigene Echo-Events ignorieren)
     const _clientId = 'main-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     let currentUser = localStorage.getItem('jarvis_user') || '';
@@ -756,7 +760,10 @@
         loginScreen.classList.add('active');
         token = '';
         currentUser = '';
+        // Global abmelden (SSO): alle Seiten-Token entfernen
         localStorage.removeItem('jarvis_token');
+        localStorage.removeItem('jarvis_chat_token');
+        localStorage.removeItem('jarvis_uc_token');
         localStorage.removeItem('jarvis_user');
         if (ws) ws.disconnect();
         if (vnc) vnc.disconnect();

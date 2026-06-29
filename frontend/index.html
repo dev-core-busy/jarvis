@@ -1448,6 +1448,25 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <input type="text" id="br-name" class="config-input" placeholder="z.B. ACME AI" style="width:100%;box-sizing:border-box;">
                         </div>
 
+                        <h4 style="margin:18px 0 8px;" data-i18n="branding.namelogo_heading">Logo statt Firmenname</h4>
+                        <p class="kb-hint" data-i18n="branding.namelogo_hint">Optionales Schriftzug-/Wortmarken-Logo, das den Firmennamen-Text in Kopfzeile und Login durch ein Bild ersetzt. Ohne Angabe wird der Firmenname als Text angezeigt.</p>
+                        <div class="form-group">
+                            <label data-i18n="branding.namelogo_dark">Logo – Dunkelmodus (PNG/JPG/SVG/WEBP)</label>
+                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                <input type="file" id="br-name-logo-file" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif">
+                                <img id="br-name-logo-preview" alt="" style="display:none;height:32px;max-width:180px;object-fit:contain;background:#0a0e17;border:1px solid var(--border);border-radius:6px;padding:2px 6px;">
+                                <button class="btn-secondary" id="br-name-logo-del" type="button" data-i18n="branding.remove">Entfernen</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label data-i18n="branding.namelogo_light">Logo – Hellmodus (optional, sonst wird das dunkle verwendet)</label>
+                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                <input type="file" id="br-name-logo-file-light" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif">
+                                <img id="br-name-logo-preview-light" alt="" style="display:none;height:32px;max-width:180px;object-fit:contain;background:#ffffff;border:1px solid var(--border);border-radius:6px;padding:2px 6px;">
+                                <button class="btn-secondary" id="br-name-logo-del-light" type="button" data-i18n="branding.remove">Entfernen</button>
+                            </div>
+                        </div>
+
                         <h4 style="margin:18px 0 8px;">Logo / Kreis-Element</h4>
                         <div class="form-group">
                             <label class="checkbox-group" style="display:inline-flex;gap:6px;margin-right:18px;">
@@ -2456,7 +2475,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=36"></script>
+    <script src="/static/js/i18n.js?v=37"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=15"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -2474,7 +2493,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=4"></script>
-    <script src="/static/js/branding.js?v=12"></script>
+    <script src="/static/js/branding.js?v=13"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=1"></script>
     <script src="/static/js/app.js?v=142"></script>

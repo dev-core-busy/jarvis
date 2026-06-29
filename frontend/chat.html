@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=4">
     <link rel="stylesheet" href="/static/css/chat.css?v=23">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
+    <link rel="stylesheet" href="/static/css/update_widget.css?v=1">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <!-- PWA -->
     <link rel="manifest" href="/manifest.json">
@@ -72,6 +73,21 @@
             <div class="topbar-avatar">J</div>
             <span class="topbar-title">Jarvis</span>
             <span class="topbar-dot" id="status-dot"></span>
+            <!-- Sicherheits-Indikator: oeffnet die Zertifikat-Hilfe (wie Hauptseite) -->
+            <div id="security-indicator" class="security-badge" title="Sicherheitsstatus" data-i18n-title="security.status">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            </div>
+            <!-- Versions-/Update-Pill: nur fuer Admins (jarvis/lokaler Admin) sichtbar -->
+            <div class="update-widget-wrap" id="chat-update-wrap" style="display:none;">
+                <div id="version-pill" class="header-version-pill upd-pill-clickable" title="Updates &amp; Version">
+                    <span id="update-version" class="upd-pill-ver">v?</span>
+                    <span id="update-badge" class="update-badge" style="display:none;">●</span>
+                </div>
+                <div id="update-dropdown" class="update-dropdown hidden">
+                    <div class="update-dropdown-header"><span>Jarvis Updates</span><button id="upd-close" class="update-close-btn">✕</button></div>
+                    <div id="upd-body" class="update-dropdown-body"><p class="kb-hint" style="margin:0;">Prüfe…</p></div>
+                </div>
+            </div>
             <a href="https://jarvis-ai.info" target="_blank" rel="noopener noreferrer"
                style="font-size:0.65rem;color:var(--muted);text-decoration:none;opacity:0.6;margin-left:2px;"
                onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">jarvis-ai.info</a>
@@ -307,6 +323,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/issues.js?v=3"></script>
 <script src="/static/js/branding.js?v=11"></script>
 <script src="/static/js/security_incidents.js?v=1"></script>
-<script src="/static/js/chat.js?v=46"></script>
+<script src="/static/js/update_widget.js?v=1"></script>
+<script src="/static/js/chat.js?v=47"></script>
 </body>
 </html>

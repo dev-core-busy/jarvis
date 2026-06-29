@@ -313,11 +313,11 @@ body {
     width: 130px;
     height: 18px;
     margin-left: 8px;
-    background: var(--bg-input, rgba(255,255,255,.06));
+    background: var(--bg-input, rgba(var(--fg-rgb, 255,255,255), .06));
     border-radius: 999px;
     position: relative;
     overflow: hidden;
-    border: 1px solid var(--border);
+    border: 1px solid rgba(var(--fg-rgb, 255,255,255), .18);
     flex-shrink: 0;
 }
 .cpu-bar.chat-cpu-bar .cpu-bar-fill {

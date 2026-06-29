@@ -22,6 +22,27 @@
     }
     // Übersetzung mit Fallback (deutscher Text), falls i18n nicht geladen
     function T(key, def) { return (window.t && window.t(key)) || def; }
+    // CPU-Auslastung: /api/cpu pollen und Topbar-Bar aktualisieren
+    var _cpuTimer = null;
+    function _updateCpu(pct) {
+        var fill = $('cpu-bar-fill'), label = $('cpu-bar-label');
+        if (!fill || !label) return;
+        var p = Math.max(0, Math.min(100, Number(pct) || 0));
+        fill.style.width = p + '%';
+        fill.style.backgroundPosition = p + '% 0';
+        label.textContent = 'CPU: ' + Math.round(p) + '%';
+    }
+    function _pollCpu() {
+        fetch('/api/cpu', { headers: authHeaders() })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) _updateCpu(d.cpu); })
+            .catch(function () {});
+    }
+    function _startCpu() {
+        if (_cpuTimer) return;
+        _pollCpu();
+        _cpuTimer = setInterval(_pollCpu, 3000);
+    }
     // Basis-URL der Jira-Instanz (vom Backend) – fuer Ticket-Key-Links
     var _jiraBase = '';
     // Escapen + http(s)-URLs UND Jira-Ticket-Keys (z.B. NXDISPATHO-19706) verlinken
@@ -179,7 +200,11 @@
         fetch('/api/me', { headers: authHeaders() })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
-                if (d && d.is_admin) {
+                if (!d) return;
+                // Angemeldeten Benutzer anzeigen
+                var ob = $('sup-own-badge');
+                if (ob && d.username) ob.textContent = d.username;
+                if (d.is_admin) {
                     var dot = $('sup-status-dot');
                     if (dot) {
                         dot.style.cursor = 'pointer';
@@ -188,6 +213,8 @@
                     }
                 }
             }).catch(function () {});
+        // CPU-Auslastung (fuer alle): /api/cpu pollen und Bar aktualisieren
+        _startCpu();
         // Sprachwechsel: statische Labels via applyLang (i18n.js), dynamische Treffer neu rendern
         if (window.setLang && !window._supLangWrapped) {
             window._supLangWrapped = true;

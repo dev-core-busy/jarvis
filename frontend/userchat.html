@@ -272,7 +272,7 @@
             transition: background 0.15s, transform 0.1s;
         }
         .uc-send-btn:hover:not(:disabled) { background: var(--accent-dark); transform: scale(1.05); }
-        .uc-send-btn:disabled { background: #334155; cursor: not-allowed; transform: none; }
+        .uc-send-btn:disabled { background: var(--accent); opacity: 0.4; cursor: not-allowed; transform: none; }
         .uc-send-btn svg { width: 18px; height: 18px; }
 
         /* Kein Chat gewählt */
@@ -722,6 +722,11 @@
             <div class="topbar-avatar">J</div>
             <span class="topbar-title" data-i18n="uc.title">Benutzer-Chat</span>
             <span class="topbar-dot" id="status-dot" title="LLM-Status"></span>
+            <!-- CPU-Auslastung (fuer alle sichtbar) -->
+            <div class="cpu-bar chat-cpu-bar" id="cpu-bar" title="CPU-Auslastung">
+                <div class="cpu-bar-fill" id="cpu-bar-fill" style="width:0%"></div>
+                <span class="cpu-bar-label" id="cpu-bar-label">CPU: 0%</span>
+            </div>
             <span id="uc-own-badge" class="uc-myself-badge" style="font-size:0.72rem;color:#64748b;margin-left:6px;"></span>
         </div>
         <div class="topbar-right">
@@ -876,6 +881,6 @@
 <script src="/static/js/branding.js?v=13"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/security_incidents.js?v=1"></script>
-<script src="/static/js/userchat.js?v=18"></script>
+<script src="/static/js/userchat.js?v=19"></script>
 </body>
 </html>

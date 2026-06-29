@@ -12,10 +12,10 @@
 /* ── Versions-/Update-Pill ────────────────────────────────────────── */
 .update-widget-wrap { position:relative;display:flex;align-items:center; }
 .header-version-pill { font-size:0.7rem;font-weight:500;padding:0.2rem 0.55rem;border-radius:999px;
-    background:rgba(99,102,241,0.06);color:var(--text-muted,#94a3b8);border:1px solid var(--border,rgba(255,255,255,.12));
+    background:rgba(var(--accent-rgb),0.06);color:var(--text-muted,#94a3b8);border:1px solid var(--border,rgba(255,255,255,.12));
     cursor:default;user-select:none; }
 .upd-pill-clickable { cursor:pointer;display:inline-flex;align-items:center;gap:4px;transition:background .15s,border-color .15s,color .15s; }
-.upd-pill-clickable:hover { background:rgba(99,102,241,0.15);border-color:rgba(99,102,241,0.5);color:var(--accent,#6366f1); }
+.upd-pill-clickable:hover { background:rgba(var(--accent-rgb),0.15);border-color:rgba(var(--accent-rgb),0.5);color:var(--accent,#6366f1); }
 .upd-pill-clickable.has-update { background:rgba(46,204,113,0.10);border-color:rgba(46,204,113,0.4);color:#2ecc71; }
 .upd-pill-ver { font-family:monospace;letter-spacing:0.02em; }
 .update-badge { font-size:0.55rem;color:#f39c12;animation:upd-pulse 2s infinite;line-height:1; }

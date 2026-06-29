@@ -44,6 +44,13 @@
         return b.logo_url || '';
     }
 
+    // Theme-aufgeloeste Namens-/Schriftzug-Logo-URL (ersetzt den Marken-Namen
+    // durch ein Bild; Hell faellt auf Dunkel zurueck).
+    function effectiveNameLogoUrl(b, isLight) {
+        if (isLight) return b.name_logo_url_light || b.name_logo_url || '';
+        return b.name_logo_url || '';
+    }
+
     // ── Favicon (Browser-Tab-Icon) markensensitiv ──────────────────
     // Original-Favicon (Standard-Jarvis) wird gemerkt, damit resetBranding()
     // es exakt wiederherstellen kann.
@@ -166,14 +173,19 @@
     // Setzt den Text reiner Marken-Labels (nicht über i18n gesteuert).
     // Originaltexte werden in data-brand-orig gemerkt, damit resetBranding()
     // beim Deaktivieren des Skills exakt den Ausgangszustand wiederherstellt.
-    function setBrandLabels(name) {
+    // skipVisualName: true, wenn ein Namens-Logo (Bild) die sichtbaren
+    // Marken-Namen ersetzt – dann hier NICHT den Text setzen (das uebernimmt
+    // applyNameLogo). Seitentitel/Placeholder/Begruessung nutzen weiter den Text.
+    function setBrandLabels(name, skipVisualName) {
         if (!name) return;
-        ['.login-title', '.header-title', '.topbar-title'].forEach(function (sel) {
-            document.querySelectorAll(sel).forEach(function (el) {
-                if (el.dataset.brandOrig === undefined) el.dataset.brandOrig = el.textContent;
-                el.textContent = name;
+        if (!skipVisualName) {
+            ['.login-title', '.header-title', '.topbar-title'].forEach(function (sel) {
+                document.querySelectorAll(sel).forEach(function (el) {
+                    if (el.dataset.brandOrig === undefined) el.dataset.brandOrig = el.textContent;
+                    el.textContent = name;
+                });
             });
-        });
+        }
         // Seitentitel + Begrüßungs-/Hinweistexte: 'Jarvis' → Firmenname
         if (document.title) {
             if (window.__brandOrigTitle === undefined) window.__brandOrigTitle = document.title;
@@ -195,11 +207,39 @@
             });
         });
         // Produkt-/Seitenname (z.B. /support, /portal): 'Jarvis' → Firmenname
-        document.querySelectorAll('.brand-app-name').forEach(function (el) {
-            if (/jarvis/i.test(el.textContent)) {
-                if (el.dataset.brandOrig === undefined) el.dataset.brandOrig = el.textContent;
-                el.textContent = el.textContent.replace(/jarvis/ig, name);
-            }
+        if (!skipVisualName) {
+            document.querySelectorAll('.brand-app-name').forEach(function (el) {
+                if (/jarvis/i.test(el.textContent)) {
+                    if (el.dataset.brandOrig === undefined) el.dataset.brandOrig = el.textContent;
+                    el.textContent = el.textContent.replace(/jarvis/ig, name);
+                }
+            });
+        }
+    }
+
+    // Marken-Namen (Topbar/Header/Login/Seitenname) durch ein Schriftzug-Logo
+    // (Bild) ersetzen. Ohne URL bleibt der Text-Name (via setBrandLabels).
+    var NAME_LABEL_SELECTOR = '.login-title, .header-title, .topbar-title, .brand-app-name';
+    function applyNameLogo(b, url) {
+        if (!url) return;
+        document.querySelectorAll(NAME_LABEL_SELECTOR).forEach(function (el) {
+            // Sub-Zeile auf /portal ('Wähle einen Bereich') nicht ersetzen
+            if (el.classList.contains('brand-app-name-sub')) return;
+            var existing = el.querySelector('img.brand-name-logo');
+            if (existing && existing.getAttribute('src') === url) return;
+            if (el.dataset.brandOrig === undefined) el.dataset.brandOrig = el.textContent;
+            el.innerHTML = '';
+            var img = document.createElement('img');
+            img.src = url;
+            img.alt = b.company_name || '';
+            img.className = 'brand-name-logo';
+            img.style.height = '1.4em';
+            img.style.width = 'auto';
+            img.style.maxWidth = '240px';
+            img.style.objectFit = 'contain';
+            img.style.verticalAlign = 'middle';
+            img.style.display = 'inline-block';
+            el.appendChild(img);
         });
     }
 
@@ -321,9 +361,11 @@
         _current = b;
         var isLight = currentIsLight();
         applyColors(effectiveColors(b, isLight));
-        setBrandLabels(b.company_name);
+        var nlu = effectiveNameLogoUrl(b, isLight);
+        setBrandLabels(b.company_name, !!nlu);
         var lu = effectiveLogoUrl(b, isLight);
         applyLogo(b, lu);
+        applyNameLogo(b, nlu);
         applyFavicon(b, lu);
         applyPortalVideo(b);
     }
@@ -401,13 +443,22 @@
             var saveBtn = document.getElementById('br-save');
             if (saveBtn) saveBtn.addEventListener('click', this.save.bind(this));
             var logoInput = document.getElementById('br-logo-file');
-            if (logoInput) logoInput.addEventListener('change', function (ev) { BrandingAdmin.uploadLogo(ev, 'dark'); });
+            if (logoInput) logoInput.addEventListener('change', function (ev) { BrandingAdmin.uploadLogo(ev, 'dark', 'compact'); });
             var logoDel = document.getElementById('br-logo-del');
-            if (logoDel) logoDel.addEventListener('click', function () { BrandingAdmin.deleteLogo('dark'); });
+            if (logoDel) logoDel.addEventListener('click', function () { BrandingAdmin.deleteLogo('dark', 'compact'); });
             var logoInputL = document.getElementById('br-logo-file-light');
-            if (logoInputL) logoInputL.addEventListener('change', function (ev) { BrandingAdmin.uploadLogo(ev, 'light'); });
+            if (logoInputL) logoInputL.addEventListener('change', function (ev) { BrandingAdmin.uploadLogo(ev, 'light', 'compact'); });
             var logoDelL = document.getElementById('br-logo-del-light');
-            if (logoDelL) logoDelL.addEventListener('click', function () { BrandingAdmin.deleteLogo('light'); });
+            if (logoDelL) logoDelL.addEventListener('click', function () { BrandingAdmin.deleteLogo('light', 'compact'); });
+            // Namens-/Schriftzug-Logo (ersetzt den Firmennamen-Text durch ein Bild)
+            var nameInput = document.getElementById('br-name-logo-file');
+            if (nameInput) nameInput.addEventListener('change', function (ev) { BrandingAdmin.uploadLogo(ev, 'dark', 'name'); });
+            var nameDel = document.getElementById('br-name-logo-del');
+            if (nameDel) nameDel.addEventListener('click', function () { BrandingAdmin.deleteLogo('dark', 'name'); });
+            var nameInputL = document.getElementById('br-name-logo-file-light');
+            if (nameInputL) nameInputL.addEventListener('change', function (ev) { BrandingAdmin.uploadLogo(ev, 'light', 'name'); });
+            var nameDelL = document.getElementById('br-name-logo-del-light');
+            if (nameDelL) nameDelL.addEventListener('click', function () { BrandingAdmin.deleteLogo('light', 'name'); });
             var vidInput = document.getElementById('br-portal-video-file');
             if (vidInput) vidInput.addEventListener('change', function (ev) { BrandingAdmin.uploadPortalVideo(ev); });
             var vidDel = document.getElementById('br-portal-video-del');
@@ -468,6 +519,16 @@
                     if (imgL) {
                         if (b.logo_url_light) { imgL.src = b.logo_url_light; imgL.style.display = ''; BrandingAdmin._logoUrlLight = b.logo_url_light; }
                         else { imgL.style.display = 'none'; BrandingAdmin._logoUrlLight = ''; }
+                    }
+                    var nimg = document.getElementById('br-name-logo-preview');
+                    if (nimg) {
+                        if (b.name_logo_url) { nimg.src = b.name_logo_url; nimg.style.display = ''; }
+                        else { nimg.removeAttribute('src'); nimg.style.display = 'none'; }
+                    }
+                    var nimgL = document.getElementById('br-name-logo-preview-light');
+                    if (nimgL) {
+                        if (b.name_logo_url_light) { nimgL.src = b.name_logo_url_light; nimgL.style.display = ''; }
+                        else { nimgL.removeAttribute('src'); nimgL.style.display = 'none'; }
                     }
                     var vid = document.getElementById('br-portal-video-preview');
                     if (vid) {
@@ -531,12 +592,14 @@
                   if (st) st.textContent = '✗ Fehler beim Speichern';
               });
         },
-        uploadLogo: function (ev, variant) {
+        uploadLogo: function (ev, variant, kind) {
             var f = ev.target.files && ev.target.files[0];
             if (!f) return;
+            kind = kind === 'name' ? 'name' : 'compact';
             var fd = new FormData();
             fd.append('file', f);
             fd.append('variant', variant === 'light' ? 'light' : 'dark');
+            fd.append('kind', kind);
             fetch('/api/branding/logo', {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + token() },
@@ -545,8 +608,11 @@
               .then(function (d) {
                   if (d && d.success) {
                       BrandingAdmin.refreshLogoPreview();
-                      var modeImg = document.querySelector('input[name="br-logo-mode"][value="image"]');
-                      if (modeImg) modeImg.checked = true;
+                      // Nur fuer das runde Kompakt-Logo automatisch den Bild-Modus aktivieren
+                      if (kind === 'compact') {
+                          var modeImg = document.querySelector('input[name="br-logo-mode"][value="image"]');
+                          if (modeImg) modeImg.checked = true;
+                      }
                       var st = document.getElementById('br-status');
                       if (st) { st.textContent = '✓ Logo hochgeladen'; setTimeout(function () { st.textContent = ''; }, 2500); }
                   } else {
@@ -555,9 +621,10 @@
                   }
               }).catch(function () {});
         },
-        deleteLogo: function (variant) {
+        deleteLogo: function (variant, kind) {
             variant = variant === 'light' ? 'light' : 'dark';
-            fetch('/api/branding/logo?variant=' + variant, {
+            kind = kind === 'name' ? 'name' : 'compact';
+            fetch('/api/branding/logo?variant=' + variant + '&kind=' + kind, {
                 method: 'DELETE',
                 headers: { 'Authorization': 'Bearer ' + token() }
             }).then(function () {

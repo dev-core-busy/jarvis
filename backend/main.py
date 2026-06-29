@@ -3233,14 +3233,18 @@ def _branding_state() -> tuple[bool, dict]:
     return bool(st.get("enabled", False)), (st.get("config", {}) or {})
 
 
-def _branding_logo_stem(variant: str) -> str:
-    """Dateistamm je Logo-Variante (dark = Standard, light = Hell-Modus)."""
-    return "logo_light" if variant == "light" else "logo"
+def _branding_logo_stem(variant: str, kind: str = "compact") -> str:
+    """Dateistamm je Logo-Art und -Variante.
+    kind 'compact' = rundes Kreis-/Avatar-Logo (logo/logo_light);
+    kind 'name' = Schriftzug-Logo, das den Firmennamen ersetzt
+    (name_logo/name_logo_light). variant 'light' = Hell-Modus."""
+    base = "name_logo" if kind == "name" else "logo"
+    return f"{base}_light" if variant == "light" else base
 
 
-def _branding_logo_path(variant: str = "dark") -> Path | None:
+def _branding_logo_path(variant: str = "dark", kind: str = "compact") -> Path | None:
     """Sucht eine vorhandene Logo-Datei (data/branding/<stem>.<ext>)."""
-    stem = _branding_logo_stem(variant)
+    stem = _branding_logo_stem(variant, kind)
     for ext in _BRANDING_LOGO_EXTS:
         p = _BRANDING_DIR / f"{stem}.{ext}"
         if p.exists():
@@ -3275,6 +3279,8 @@ async def get_branding():
     ts = int(time.time())
     logo = _branding_logo_path("dark")
     logo_light = _branding_logo_path("light")
+    name_logo = _branding_logo_path("dark", "name")
+    name_logo_light = _branding_logo_path("light", "name")
     video = _branding_video_path()
     return JSONResponse({
         "active": True,
@@ -3285,14 +3291,18 @@ async def get_branding():
         "colors_light": cfg.get("colors_light", {}) or {},
         "logo_url": ("/api/branding/logo?t=%d" % ts) if logo else "",
         "logo_url_light": ("/api/branding/logo?variant=light&t=%d" % ts) if logo_light else "",
+        "name_logo_url": ("/api/branding/logo?kind=name&t=%d" % ts) if name_logo else "",
+        "name_logo_url_light": ("/api/branding/logo?kind=name&variant=light&t=%d" % ts) if name_logo_light else "",
         "portal_video_url": ("/api/branding/portal-video?t=%d" % ts) if video else "",
     })
 
 
 @app.get("/api/branding/logo")
-async def get_branding_logo(variant: str = "dark"):
-    """Serviert das hochgeladene Firmenlogo (öffentlich)."""
-    logo = _branding_logo_path(variant)
+async def get_branding_logo(variant: str = "dark", kind: str = "compact"):
+    """Serviert ein hochgeladenes Firmenlogo (öffentlich).
+    kind 'compact' = rundes Logo, kind 'name' = Schriftzug-Logo (statt Name)."""
+    kind = "name" if kind == "name" else "compact"
+    logo = _branding_logo_path(variant, kind)
     if not logo:
         return JSONResponse({"error": "kein Logo"}, status_code=404)
     media = {
@@ -3305,17 +3315,20 @@ async def get_branding_logo(variant: str = "dark"):
 @app.post("/api/branding/logo")
 async def upload_branding_logo(file: UploadFile = File(...),
                                variant: str = Form("dark"),
+                               kind: str = Form("compact"),
                                user: str = Depends(require_local_auth)):
-    """Lädt ein Firmenlogo hoch (ersetzt ein vorhandenes der gleichen Variante)."""
+    """Lädt ein Firmenlogo hoch (ersetzt ein vorhandenes gleicher Art/Variante).
+    kind 'compact' = rundes Logo, kind 'name' = Schriftzug-Logo (statt Name)."""
     ext = (file.filename or "").rsplit(".", 1)[-1].lower()
     if ext not in _BRANDING_LOGO_EXTS:
         return JSONResponse(
             {"success": False, "error": f"Format .{ext} nicht erlaubt"},
             status_code=400)
     variant = "light" if variant == "light" else "dark"
-    stem = _branding_logo_stem(variant)
+    kind = "name" if kind == "name" else "compact"
+    stem = _branding_logo_stem(variant, kind)
     _BRANDING_DIR.mkdir(parents=True, exist_ok=True)
-    # Alte Logos dieser Variante (egal welche Endung) entfernen
+    # Alte Logos gleicher Art/Variante (egal welche Endung) entfernen
     for old in _BRANDING_DIR.glob(f"{stem}.*"):
         try:
             old.unlink()
@@ -3323,17 +3336,23 @@ async def upload_branding_logo(file: UploadFile = File(...),
             pass
     data = await file.read()
     (_BRANDING_DIR / f"{stem}.{ext}").write_bytes(data)
-    suffix = "&variant=light" if variant == "light" else ""
+    parts = []
+    if kind == "name":
+        parts.append("kind=name")
+    if variant == "light":
+        parts.append("variant=light")
+    suffix = ("&" + "&".join(parts)) if parts else ""
     return JSONResponse({"success": True,
                          "logo_url": "/api/branding/logo?t=%d%s" % (int(time.time()), suffix)})
 
 
 @app.delete("/api/branding/logo")
-async def delete_branding_logo(variant: str = "dark",
+async def delete_branding_logo(variant: str = "dark", kind: str = "compact",
                                user: str = Depends(require_local_auth)):
-    """Entfernt das hochgeladene Firmenlogo der angegebenen Variante."""
+    """Entfernt das hochgeladene Firmenlogo der angegebenen Art/Variante."""
     variant = "light" if variant == "light" else "dark"
-    stem = _branding_logo_stem(variant)
+    kind = "name" if kind == "name" else "compact"
+    stem = _branding_logo_stem(variant, kind)
     removed = False
     for old in _BRANDING_DIR.glob(f"{stem}.*"):
         try:

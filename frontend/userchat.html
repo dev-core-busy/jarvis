@@ -746,31 +746,7 @@
                     <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                 </svg>
             </button>
-            <script>
-                // Back-Link je nach Herkunft setzen:
-                //   ?from=main → /            (Jarvis Hauptseite)
-                //   ?from=chat → /chat        (Jarvis Chat)
-                //   sonst: document.referrer auswerten, Fallback /chat
-                (function () {
-                    try {
-                        var p = new URLSearchParams(window.location.search).get('from');
-                        var target = '/chat';
-                        if (p === 'main') target = '/';
-                        else if (p === 'chat') target = '/chat';
-                        else if (document.referrer) {
-                            try {
-                                var ref = new URL(document.referrer);
-                                if (ref.origin === window.location.origin) {
-                                    if (ref.pathname === '/' || ref.pathname === '/index.html') target = '/';
-                                    else if (ref.pathname === '/chat' || ref.pathname === '/chat.html') target = '/chat';
-                                }
-                            } catch (e) {}
-                        }
-                        var el = document.getElementById('uc-back-link');
-                        if (el) el.setAttribute('href', target);
-                    } catch (e) {}
-                })();
-            </script>
+            <!-- Home-Link fuehrt fest aufs Portal (Konsolidierung); kein Herkunfts-Override mehr -->
             <button id="btn-uc-logout" class="btn-logout" data-i18n-title="header.logout" title="Abmelden">⏻</button>
         </div>
     </header>

@@ -43,6 +43,35 @@
         _pollCpu();
         _cpuTimer = setInterval(_pollCpu, 3000);
     }
+    // KI-Zusammenfassung ab >10 Zeilen einklappen + 'mehr'/'weniger'-Umschalter
+    function _applyAiClamp() {
+        var el = document.querySelector('.sup-ai-text.sup-ai-md');
+        if (!el) return;
+        var cs = window.getComputedStyle(el);
+        var lh = parseFloat(cs.lineHeight);
+        if (!lh || isNaN(lh)) lh = (parseFloat(cs.fontSize) || 15) * 1.55;
+        var maxH = Math.round(lh * 10);   // 10 Zeilen
+        if (el.scrollHeight <= maxH + 8) return;   // ≤10 Zeilen → nichts tun
+        el.classList.add('sup-ai-collapsed');
+        el.style.maxHeight = maxH + 'px';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'sup-ai-more';
+        btn.textContent = T('sup.more', 'mehr');
+        btn.addEventListener('click', function () {
+            if (el.classList.contains('sup-ai-collapsed')) {
+                el.classList.remove('sup-ai-collapsed');
+                el.style.maxHeight = 'none';
+                btn.textContent = T('sup.less', 'weniger');
+            } else {
+                el.classList.add('sup-ai-collapsed');
+                el.style.maxHeight = maxH + 'px';
+                btn.textContent = T('sup.more', 'mehr');
+                var card = el.closest('.sup-ai-card'); if (card) card.scrollIntoView({ block: 'nearest' });
+            }
+        });
+        el.parentNode.insertBefore(btn, el.nextSibling);
+    }
     // Basis-URL der Jira-Instanz (vom Backend) – fuer Ticket-Key-Links
     var _jiraBase = '';
     // Escapen + http(s)-URLs UND Jira-Ticket-Keys (z.B. NXDISPATHO-19706) verlinken
@@ -455,6 +484,7 @@
         html += '<div id="sup-blocks"></div>';
         $('sup-results').innerHTML = html;
         renderBlocks();
+        _applyAiClamp();
     }
 
     function blockHtml(b, i) {

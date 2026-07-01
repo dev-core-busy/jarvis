@@ -657,6 +657,9 @@ const _I18N = {
         // ── Bubble-Kontextmenue + Edit + Delete-Confirms ─────────────────────
         'bubble.ctx.edit':        'Bearbeiten',
         'bubble.ctx.copy':        'Text kopieren',
+        'bubble.copy_clip':       'In Zwischenablage kopieren',
+        'bubble.export_pdf':      'Als PDF exportieren',
+        'bubble.popup_blocked':   'Bitte Pop-ups erlauben, um als PDF zu exportieren.',
         'bubble.ctx.delete':      'Löschen',
         'bubble.edit_msg':        'Nachricht bearbeiten',
         'bubble.del_user_q':      'Diese Frage löschen?',
@@ -1507,6 +1510,9 @@ const _I18N = {
         // ── Bubble context menu + edit + delete confirms ─────────────────────
         'bubble.ctx.edit':        'Edit',
         'bubble.ctx.copy':        'Copy text',
+        'bubble.copy_clip':       'Copy to clipboard',
+        'bubble.export_pdf':      'Export as PDF',
+        'bubble.popup_blocked':   'Please allow pop-ups to export as PDF.',
         'bubble.ctx.delete':      'Delete',
         'bubble.edit_msg':        'Edit message',
         'bubble.del_user_q':      'Delete this question?',

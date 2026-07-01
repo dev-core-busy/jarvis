@@ -251,6 +251,23 @@ body {
 
 .btn-logout svg { width: 18px; height: 18px; display: block; }
 
+/* ─── Dezente Aktions-Buttons unter Bot-Bubbles (Kopieren / PDF) ─── */
+.bubble-actions {
+    display: flex; gap: 2px; margin-top: 3px;
+    opacity: 0.32; transition: opacity .15s;
+}
+.msg-row.bot:hover .bubble-actions,
+.bubble-actions:focus-within { opacity: 1; }
+.bubble-act-btn {
+    background: transparent; border: none; color: var(--muted);
+    cursor: pointer; padding: 3px; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: color .15s, background .15s;
+}
+.bubble-act-btn:hover { color: var(--accent); background: rgba(var(--accent-rgb), .12); }
+.bubble-act-btn.ok { color: var(--green, #22c55e); }
+.bubble-act-btn svg { width: 15px; height: 15px; }
+
 /* ─── SSL-/Verbindungs-Sicherheit (Banner + Badge) ───────────── */
 .security-banner {
     position: fixed;

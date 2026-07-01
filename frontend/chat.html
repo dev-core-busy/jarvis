@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=4">
     <link rel="stylesheet" href="/static/css/chat.css?v=34">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
-    <link rel="stylesheet" href="/static/css/update_widget.css?v=2">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <!-- PWA -->
     <link rel="manifest" href="/manifest.json">
@@ -21,16 +20,6 @@
 </head>
 <body>
 <script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
-
-<!-- Sicherheits-Warnbanner bei unverschlüsselter Verbindung (wie im Hauptfenster) -->
-<div id="security-banner" class="security-banner" hidden>
-    <div class="banner-content">
-        <span class="banner-icon">⚠️</span>
-        <span class="banner-text" id="security-banner-text">Verbindung unsicher</span>
-        <button class="btn-banner-action" id="btn-banner-help" data-i18n="cert.banner.btn">Zertifikat installieren</button>
-        <button class="btn-close-banner" id="btn-close-banner">&times;</button>
-    </div>
-</div>
 
 <!-- Login Screen -->
 <div id="login-screen" class="login-screen">
@@ -83,23 +72,6 @@
             <div class="topbar-avatar">J</div>
             <span class="topbar-title"><span class="brand-app-name">Jarvis</span> <span data-i18n="chat.title">Chat</span></span>
             <span class="topbar-dot" id="status-dot" title="LLM-Status"></span>
-            <!-- SSL-/Verbindungs-Sicherheitsstatus (für alle sichtbar, wie im Hauptfenster) -->
-            <div id="security-indicator" class="security-badge" title="Sicherheitsstatus" data-i18n-title="security.status">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                </svg>
-            </div>
-            <!-- Versions-/Update-Pill: nur fuer Admins (jarvis/lokaler Admin) sichtbar -->
-            <div class="update-widget-wrap" id="chat-update-wrap" style="display:none;">
-                <div id="version-pill" class="header-version-pill upd-pill-clickable" title="Updates &amp; Version">
-                    <span id="update-version" class="upd-pill-ver">v?</span>
-                    <span id="update-badge" class="update-badge" style="display:none;">●</span>
-                </div>
-                <div id="update-dropdown" class="update-dropdown hidden">
-                    <div class="update-dropdown-header"><span>Jarvis Updates</span><button id="upd-close" class="update-close-btn">✕</button></div>
-                    <div id="upd-body" class="update-dropdown-body"><p class="kb-hint" style="margin:0;">Prüfe…</p></div>
-                </div>
-            </div>
             <!-- CPU-Auslastung: fuer alle sichtbar -->
             <div class="cpu-bar chat-cpu-bar" id="cpu-bar" style="display:none;" title="CPU-Auslastung">
                 <div class="cpu-bar-fill" id="cpu-bar-fill" style="width:0%"></div>
@@ -112,7 +84,6 @@
                 <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang('de')" title="Deutsch">DE</button>
                 <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang('en')" title="English">EN</button>
             </div>
-            <button class="btn-totp-setup" id="btn-totp-setup" data-i18n-title="chat.setup_2fa" title="2FA einrichten">🔐</button>
             <!-- Desktop/VNC: nur fuer Admins sichtbar -->
             <button class="btn-theme" id="btn-vnc" title="Desktop (VNC)" data-i18n-title="chat.desktop" style="display:none;">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -237,38 +208,6 @@
     <button class="uc-ctx-item" id="uc-ctx-save-btn">💾 Speichern</button>
 </div>
 
-<!-- 2FA Setup Modal -->
-<div id="totp-modal" class="modal-overlay hidden">
-    <div class="modal-card">
-        <h2 class="modal-title">Zwei-Faktor-Authentifizierung</h2>
-
-        <!-- Status: 2FA aktiv → Deaktivieren -->
-        <div id="totp-active" class="hidden">
-            <p class="totp-info">✅ 2FA ist <strong>aktiviert</strong>.</p>
-            <input type="password" id="totp-disable-pass" placeholder="Kennwort zur Bestätigung">
-            <button class="btn-login btn-danger" id="btn-totp-disable">2FA deaktivieren</button>
-        </div>
-
-        <!-- Status: 2FA inaktiv → Setup -->
-        <div id="totp-setup-flow" class="hidden">
-            <!-- Schritt 1: QR-Code scannen -->
-            <div id="totp-step1">
-                <p class="totp-info">Scanne den QR-Code mit <strong>Google Authenticator</strong>, Authy oder einer anderen TOTP-App.</p>
-                <div id="totp-qr" class="totp-qr"></div>
-                <p class="totp-secret-label">Oder manuell eingeben:</p>
-                <code id="totp-secret-code" class="totp-secret-code"></code>
-                <p class="totp-info" style="margin-top:16px">Gib den 6-stelligen Code aus der App ein:</p>
-                <input type="text" id="totp-verify-code" placeholder="000000" inputmode="numeric"
-                       pattern="[0-9]*" maxlength="6" autocomplete="one-time-code">
-                <button class="btn-login" id="btn-totp-verify">Bestätigen &amp; aktivieren</button>
-            </div>
-        </div>
-
-        <p class="login-error" id="totp-modal-error"></p>
-        <button class="btn-modal-close" id="btn-totp-close">Schließen</button>
-    </div>
-</div>
-
 <!-- SSL-Zertifikat Modal -->
 <div id="cert-modal" class="modal-overlay hidden">
     <div class="modal-card" style="max-width:480px;text-align:left;">
@@ -369,8 +308,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/issues.js?v=3"></script>
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/security_incidents.js?v=1"></script>
-<script src="/static/js/update_widget.js?v=1"></script>
 <script src="/static/js/vnc.js?v=17"></script>
-<script src="/static/js/chat.js?v=60"></script>
+<script src="/static/js/chat.js?v=61"></script>
 </body>
 </html>

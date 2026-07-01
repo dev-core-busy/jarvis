@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jarvis – Start</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=4">
+    <link rel="stylesheet" href="/static/css/update_widget.css?v=2">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -51,15 +52,72 @@
         .pt-card-icon svg { width: 24px; height: 24px; }
         .pt-card-title { font-size: 1.1rem; font-weight: 600; color: var(--text-primary); }
         .pt-card-desc { font-size: 0.86rem; color: var(--text-secondary); line-height: 1.45; }
+
+        /* ── Sicherheitsstatus-Badge + Banner (von /chat verschoben) ── */
+        .security-badge { width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(239,68,68,.12);color:#ef4444;border:1px solid rgba(239,68,68,.25);cursor:pointer;transition:all .2s;flex-shrink:0; }
+        .security-badge.secure { background:rgba(16,185,129,.12);color:#10b981;border-color:rgba(16,185,129,.25); }
+        .security-badge:hover { transform:scale(1.1); }
+        .security-badge svg { width:14px;height:14px; }
+        .security-banner { position:fixed;top:0;left:0;right:0;z-index:2000;background:linear-gradient(90deg,#ef4444,#f97316);color:#fff;padding:.5rem 1rem;font-size:.85rem;font-weight:600;display:none;box-shadow:0 4px 15px rgba(239,68,68,.3); }
+        .banner-content { max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:1rem; }
+        .btn-banner-action { background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);color:#fff;padding:.25rem .75rem;border-radius:6px;font-size:.75rem;font-weight:700;cursor:pointer;text-transform:uppercase; }
+        .btn-banner-action:hover { background:#fff;color:#ef4444; }
+        .btn-close-banner { background:none;border:none;color:#fff;font-size:1.25rem;cursor:pointer;margin-left:auto;opacity:.7; }
+        .btn-close-banner:hover { opacity:1; }
+
+        /* ── Modals: 2FA + Zertifikat (portal-nativ) ── */
+        .modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(4px); }
+        .modal-overlay.hidden { display:none; }
+        .modal-card { background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:28px 26px;width:400px;max-width:92vw;text-align:center;max-height:88vh;overflow:auto; }
+        .modal-title { font-size:18px;font-weight:600;margin-bottom:18px;color:var(--text-primary); }
+        .modal-card input { display:block;width:100%;padding:12px 16px;margin-bottom:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-primary);color:var(--text-primary);font-size:14px;outline:none; }
+        .modal-card input:focus { border-color:var(--accent); }
+        .modal-card input[inputmode="numeric"] { text-align:center;font-size:22px;letter-spacing:8px;font-weight:600; }
+        .btn-login { width:100%;padding:12px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:background .2s,opacity .2s;margin-top:4px; }
+        .btn-login:hover { background:var(--accent-hover); }
+        .btn-danger { background:var(--danger) !important; }
+        .btn-modal-close { display:block;width:100%;margin-top:12px;padding:10px;background:none;border:1px solid var(--border);border-radius:10px;color:var(--text-secondary);font-size:14px;cursor:pointer; }
+        .btn-modal-close:hover { border-color:var(--text-primary);color:var(--text-primary); }
+        .login-error { margin-top:12px;font-size:13px;color:var(--danger);min-height:20px; }
+        .totp-info { font-size:13px;color:var(--text-primary);margin-bottom:16px;line-height:1.5; }
+        .totp-qr { margin:16px auto; } .totp-qr img { border-radius:8px;max-width:200px; }
+        .totp-secret-label { font-size:11px;color:var(--text-secondary);margin-bottom:4px; }
+        .totp-secret-code { display:block;font-size:14px;letter-spacing:2px;color:var(--accent-hover);background:rgba(var(--fg-rgb,148,163,184),.08);padding:8px 12px;border-radius:8px;user-select:all;cursor:pointer;margin-bottom:8px; }
+        .cert-tab { background:none;border:1px solid var(--border);color:var(--text-secondary);padding:5px 10px;border-radius:8px;cursor:pointer;font-size:.8rem; }
+        .cert-tab.active { background:rgba(var(--accent-rgb),.15);color:var(--accent-hover);border-color:var(--accent); }
+        .cert-tab-content.hidden { display:none; }
     </style>
 </head>
 <body>
 <script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
 
+<!-- Sicherheits-Warnbanner bei unverschlüsselter Verbindung -->
+<div id="security-banner" class="security-banner" hidden>
+    <div class="banner-content">
+        <span>⚠️</span>
+        <span class="banner-text" id="security-banner-text">Verbindung unsicher</span>
+        <button class="btn-banner-action" id="btn-banner-help" data-i18n="cert.banner.btn">Zertifikat installieren</button>
+        <button class="btn-close-banner" id="btn-close-banner">&times;</button>
+    </div>
+</div>
+
 <div class="pt-topbar">
     <div class="pt-logo topbar-avatar">J</div>
     <div class="pt-title"><span class="brand-app-name">Jarvis</span> <span data-i18n="portal.title">KI-Portal</span></div>
     <span class="pt-status-dot" id="pt-status-dot" title="LLM-Status"></span>
+    <div id="security-indicator" class="security-badge" title="Sicherheitsstatus" data-i18n-title="security.status">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    </div>
+    <div class="update-widget-wrap" id="chat-update-wrap" style="display:none;">
+        <div id="version-pill" class="header-version-pill upd-pill-clickable" title="Updates &amp; Version">
+            <span id="update-version" class="upd-pill-ver">v?</span>
+            <span id="update-badge" class="update-badge" style="display:none;">●</span>
+        </div>
+        <div id="update-dropdown" class="update-dropdown hidden">
+            <div class="update-dropdown-header"><span>Jarvis Updates</span><button id="upd-close" class="update-close-btn">✕</button></div>
+            <div id="upd-body" class="update-dropdown-body"><p class="kb-hint" style="margin:0;">Prüfe…</p></div>
+        </div>
+    </div>
     <div class="pt-spacer"></div>
     <div class="lang-toggle" id="pt-lang-toggle">
         <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
@@ -72,6 +130,7 @@
         <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
     </button>
+    <button class="pt-btn" id="btn-totp-setup" title="2FA einrichten" data-i18n-title="chat.setup_2fa" style="font-size:1rem;">🔐</button>
     <button class="pt-btn" id="pt-settings" title="Einstellungen" data-i18n-title="nav.settings" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
@@ -127,10 +186,82 @@
     </div>
 </div>
 
+<!-- 2FA Setup Modal -->
+<div id="totp-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+        <h2 class="modal-title">Zwei-Faktor-Authentifizierung</h2>
+        <div id="totp-active" class="hidden">
+            <p class="totp-info">✅ 2FA ist <strong>aktiviert</strong>.</p>
+            <input type="password" id="totp-disable-pass" placeholder="Kennwort zur Bestätigung">
+            <button class="btn-login btn-danger" id="btn-totp-disable">2FA deaktivieren</button>
+        </div>
+        <div id="totp-setup-flow" class="hidden">
+            <div id="totp-step1">
+                <p class="totp-info">Scanne den QR-Code mit <strong>Google Authenticator</strong>, Authy oder einer anderen TOTP-App.</p>
+                <div id="totp-qr" class="totp-qr"></div>
+                <p class="totp-secret-label">Oder manuell eingeben:</p>
+                <code id="totp-secret-code" class="totp-secret-code"></code>
+                <p class="totp-info" style="margin-top:16px">Gib den 6-stelligen Code aus der App ein:</p>
+                <input type="text" id="totp-verify-code" placeholder="000000" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code">
+                <button class="btn-login" id="btn-totp-verify">Bestätigen &amp; aktivieren</button>
+            </div>
+        </div>
+        <p class="login-error" id="totp-modal-error"></p>
+        <button class="btn-modal-close" id="btn-totp-close">Schließen</button>
+    </div>
+</div>
+
+<!-- SSL-Zertifikat Modal -->
+<div id="cert-modal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width:480px;text-align:left;">
+        <h2 class="modal-title" style="text-align:center;">SSL-Zertifikat installieren</h2>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px;background:var(--bg-primary);border-radius:12px;">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--success,#10b981)" stroke-width="1.5" style="flex-shrink:0;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+            <div>
+                <div style="font-size:14px;font-weight:600;color:var(--text-primary);">Selbstsigniertes Zertifikat</div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">Muss einmalig installiert werden, damit der Browser die Verbindung als sicher einstuft.</div>
+            </div>
+        </div>
+        <a href="/api/cert" class="btn-login" style="display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;margin-bottom:16px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Zertifikat herunterladen (jarvis.cer)
+        </a>
+        <div style="display:flex;gap:4px;margin-bottom:12px;">
+            <button class="cert-tab active" data-cert-tab="win">Windows</button>
+            <button class="cert-tab" data-cert-tab="linux">Linux</button>
+            <button class="cert-tab" data-cert-tab="browser">Browser</button>
+        </div>
+        <div id="cert-tab-win" class="cert-tab-content">
+            <ol style="font-size:13px;color:var(--text-primary);line-height:1.7;padding-left:18px;">
+                <li>Lade <code>jarvis.cer</code> herunter.</li>
+                <li>Rechtsklick → <strong>Zertifikat installieren</strong>.</li>
+                <li>Wähle <strong>Lokaler Computer</strong>.</li>
+                <li><strong>Alle Zertifikate in folgendem Speicher speichern</strong> → Durchsuchen → <strong>Vertrauenswürdige Stammzertifizierungsstellen</strong>.</li>
+                <li>Fertigstellen + <strong>Browser komplett neu starten</strong>.</li>
+            </ol>
+        </div>
+        <div id="cert-tab-linux" class="cert-tab-content hidden">
+            <pre style="background:var(--bg-primary);padding:10px 12px;border-radius:8px;font-size:12px;color:var(--text-primary);overflow-x:auto;"><code>sudo cp jarvis.cer /usr/local/share/ca-certificates/jarvis.crt
+sudo update-ca-certificates</code></pre>
+        </div>
+        <div id="cert-tab-browser" class="cert-tab-content hidden">
+            <ol style="font-size:13px;color:var(--text-primary);line-height:1.7;padding-left:18px;">
+                <li>Browser-Einstellungen öffnen.</li>
+                <li>Nach <strong>Zertifikate</strong> suchen.</li>
+                <li><strong>Importieren</strong> im Reiter Zertifizierungsstellen.</li>
+                <li>Datei <code>jarvis.cer</code> auswählen.</li>
+                <li>Haken bei <strong>Dieser CA vertrauen…</strong>.</li>
+            </ol>
+        </div>
+        <button class="btn-modal-close" id="btn-cert-close">Schließen</button>
+    </div>
+</div>
+
 <script src="/static/js/i18n.js?v=17"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/security_incidents.js?v=1"></script>
+<script src="/static/js/update_widget.js?v=1"></script>
 <script>
 (function () {
     var KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
@@ -152,6 +283,9 @@
         if (d.is_admin) {
             var s = document.getElementById('pt-settings');
             if (s) { s.style.display = ''; s.addEventListener('click', function(){ try{sessionStorage.setItem('jarvis_settings_return','/portal');}catch(e){} window.location.href = '/settings'; }); }
+            // Versions-/Update-Pill (Admin) – verschoben von /chat
+            var uw = document.getElementById('chat-update-wrap');
+            if (uw) { uw.style.display = ''; if (window.JarvisUpdateWidget) window.JarvisUpdateWidget.init(); }
         }
     }).catch(function(){});
 
@@ -174,6 +308,85 @@
         }).catch(function(){ dot.className='pt-status-dot disconnected'; dot.title='LLM nicht erreichbar'; });
     }
     pollLlm(); setInterval(pollLlm, 30000);
+
+    // ── SSL-/Verbindungs-Sicherheit: Badge + Warnbanner + Zertifikat-Modal ──
+    var certModal = document.getElementById('cert-modal');
+    function openCert(){ if (certModal) certModal.classList.remove('hidden'); }
+    function closeCert(){ if (certModal) certModal.classList.add('hidden'); }
+    var _bh = document.getElementById('btn-cert-close'); if (_bh) _bh.addEventListener('click', closeCert);
+    if (certModal) certModal.addEventListener('click', function(e){ if (e.target === certModal) closeCert(); });
+    document.querySelectorAll('.cert-tab').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            document.querySelectorAll('.cert-tab').forEach(function(b){ b.classList.remove('active'); });
+            btn.classList.add('active');
+            var tt = btn.getAttribute('data-cert-tab');
+            ['win','linux','browser'].forEach(function(t){
+                var el = document.getElementById('cert-tab-' + t);
+                if (el) el.classList.toggle('hidden', t !== tt);
+            });
+        });
+    });
+    var _si = document.getElementById('security-indicator'); if (_si) _si.addEventListener('click', openCert);
+    var _bhelp = document.getElementById('btn-banner-help'); if (_bhelp) _bhelp.addEventListener('click', openCert);
+    var _bclose = document.getElementById('btn-close-banner');
+    if (_bclose) _bclose.addEventListener('click', function(){ var b=document.getElementById('security-banner'); if(b) b.style.display='none'; try{localStorage.setItem('jarvis_cert_dismissed','true');}catch(e){} });
+    (function checkSecurity(){
+        var banner = document.getElementById('security-banner');
+        var ind = document.getElementById('security-indicator');
+        var isHttps = location.protocol === 'https:';
+        var isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        var dismissed = false; try { dismissed = localStorage.getItem('jarvis_cert_dismissed') === 'true'; } catch(e){}
+        if (!isHttps && !isLocal) {
+            if (banner) { var bt=document.getElementById('security-banner-text'); if(bt) bt.textContent=(window.t?window.t('panel.security_banner'):'⚠️ UNSICHERE VERBINDUNG! Bitte HTTPS verwenden.'); banner.hidden=false; banner.style.display='block'; }
+            if (ind) { ind.className='security-badge'; ind.title=(window.t?window.t('panel.security_critical'):'Kritisch: Keine Verschlüsselung'); }
+            if (!dismissed) setTimeout(openCert, 600);
+        } else {
+            if (banner) { banner.hidden=true; banner.style.display='none'; }
+            if (ind) { ind.className='security-badge secure'; ind.title=(window.t?window.t('panel.security_secure'):'Gesichert'); }
+        }
+    })();
+
+    // ── 2FA-Setup (verschoben von /chat) ──
+    var totpModal = document.getElementById('totp-modal');
+    var totpBtn = document.getElementById('btn-totp-setup');
+    if (totpModal && totpBtn) {
+        var tErr = document.getElementById('totp-modal-error');
+        var tActive = document.getElementById('totp-active');
+        var tFlow = document.getElementById('totp-setup-flow');
+        totpBtn.addEventListener('click', function(){
+            tErr.textContent=''; tActive.classList.add('hidden'); tFlow.classList.add('hidden');
+            fetch('/api/auth/totp/status', { headers: H }).then(function(r){ return r.json(); }).then(function(d){
+                if (d.enabled) { tActive.classList.remove('hidden'); }
+                else {
+                    fetch('/api/auth/totp/setup', { method:'POST', headers: H }).then(function(r){ return r.json(); }).then(function(sd){
+                        document.getElementById('totp-qr').innerHTML = '<img src="'+sd.qr_code+'" alt="QR-Code">';
+                        document.getElementById('totp-secret-code').textContent = sd.secret;
+                        document.getElementById('totp-verify-code').value = '';
+                        tFlow.classList.remove('hidden');
+                    });
+                }
+            }).catch(function(){ tErr.textContent='Verbindungsfehler'; });
+            totpModal.classList.remove('hidden');
+        });
+        document.getElementById('btn-totp-close').addEventListener('click', function(){ totpModal.classList.add('hidden'); });
+        totpModal.addEventListener('click', function(e){ if (e.target === totpModal) totpModal.classList.add('hidden'); });
+        document.getElementById('btn-totp-verify').addEventListener('click', function(){
+            var code = document.getElementById('totp-verify-code').value.trim(); if (!code) return; tErr.textContent='';
+            fetch('/api/auth/totp/verify', { method:'POST', headers: Object.assign({'Content-Type':'application/json'}, H), body: JSON.stringify({ code }) })
+                .then(function(r){ return r.json(); }).then(function(d){
+                    if (d.success) { totpModal.classList.add('hidden'); }
+                    else { tErr.textContent = d.error || 'Verifizierung fehlgeschlagen'; }
+                }).catch(function(){ tErr.textContent='Verbindungsfehler'; });
+        });
+        document.getElementById('btn-totp-disable').addEventListener('click', function(){
+            var pw = document.getElementById('totp-disable-pass').value; if (!pw) return; tErr.textContent='';
+            fetch('/api/auth/totp/disable', { method:'POST', headers: Object.assign({'Content-Type':'application/json'}, H), body: JSON.stringify({ password: pw }) })
+                .then(function(r){ return r.json(); }).then(function(d){
+                    if (d.success) { totpModal.classList.add('hidden'); document.getElementById('totp-disable-pass').value=''; }
+                    else { tErr.textContent = d.error || 'Deaktivierung fehlgeschlagen'; }
+                }).catch(function(){ tErr.textContent='Verbindungsfehler'; });
+        });
+    }
 
     if (window.refreshBranding) try { window.refreshBranding(); } catch(e){}
 })();

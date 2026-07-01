@@ -1661,6 +1661,8 @@
     //  2FA SETUP MODAL
     // ═════════════════════════════════════════════════════════════
 
+    // 2FA nach /portal verschoben – Block nur aktiv, falls Elemente vorhanden.
+    if (totpSetupBtn && totpModal) {
     const totpModalError = $('totp-modal-error');
     const totpActive     = $('totp-active');
     const totpSetupFlow  = $('totp-setup-flow');
@@ -1761,6 +1763,7 @@
             totpModalError.textContent = 'Verbindungsfehler';
         }
     });
+    }  // Ende 2FA-Guard
 
     // ═════════════════════════════════════════════════════════════
     //  INIT

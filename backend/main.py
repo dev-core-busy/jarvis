@@ -4009,8 +4009,6 @@ async def support_query(request: Request):
     Auth: Benutzer-Token (Bearer) ODER externer API-Key (Header ``X-API-Key`` bzw.
     Bearer = ``AGENT_API_KEY``) – fuer Aufrufe aus anderen Anwendungen.
     """
-    import time as _t
-    t0 = _t.time()
     # ── Auth: Benutzer-Token oder externer API-Key ──────────────────
     _bearer = request.headers.get("Authorization", "").replace("Bearer ", "")
     user = verify_token(_bearer)
@@ -4021,6 +4019,16 @@ async def support_query(request: Request):
     if not _skill_active("support_assistant"):
         return JSONResponse({"ok": False, "error": "Support-Assistent ist nicht aktiv."}, status_code=403)
     body = await request.json()
+    res = await _support_run_query(body, user)
+    return JSONResponse(res, status_code=res.pop("_status", 200))
+
+
+async def _support_run_query(body: dict, user: str) -> dict:
+    """Volle Support-Pipeline (RAG + Jira + Confluence + KI-Gesamtzusammenfassung).
+    Gemeinsame Logik fuer /api/support/query UND /api/support/summarize (CRM-Anfragen).
+    Rueckgabe = fertiges Antwort-Dict; ``_status`` (falls gesetzt) ist der HTTP-Code."""
+    import time as _t
+    t0 = _t.time()
     query = (body.get("text") or body.get("query") or "").strip()
     use_rag = body.get("rag", True)
     use_jira = body.get("jira", True)
@@ -4038,13 +4046,12 @@ async def support_query(request: Request):
     except (TypeError, ValueError):
         jira_limit = _jl_default
     if not query:
-        return JSONResponse({"ok": False, "error": "Bitte eine Anfrage eingeben."}, status_code=400)
+        return {"ok": False, "error": "Bitte eine Anfrage eingeben.", "_status": 400}
 
     # ── Sicherheitsschicht: Support-Anfrage pruefen (echte Accounts sperren) ──
     if user and user != "api" and await _sec_inspect_user(query, user, "support"):
-        return JSONResponse({"ok": False, "account_blocked": True,
-                             "error": "Account wegen Sicherheitsverstoss gesperrt."},
-                            status_code=403)
+        return {"ok": False, "account_blocked": True,
+                "error": "Account wegen Sicherheitsverstoss gesperrt.", "_status": 403}
 
     qtokens = _support_tokens(query)
     blocks: list[dict] = []
@@ -4159,7 +4166,7 @@ async def support_query(request: Request):
 
     _record_support_history(user, query, len(blocks))
 
-    return JSONResponse({
+    return {
         "ok": True, "query": query,
         "jira_active": _skill_active("jira"),
         "confluence_active": _skill_active("confluence"),
@@ -4172,14 +4179,18 @@ async def support_query(request: Request):
         "jira_total": jira_total,          # Gesamtzahl gefundener Jira-Treffer
         "open_only": bool(open_only),
         "took_ms": int((_t.time() - t0) * 1000),
-    })
+    }
 
 
 @app.post("/api/support/summarize")
 async def support_summarize(request: Request):
-    """On-Demand-KI-Zusammenfassung EINES Treffers (Button je Ergebnisbox).
-    Aktuell fuer Jira-Tickets: laedt den Vorgang (Beschreibung + Kommentare) und
-    fasst ihn in ``result_lines`` Saetzen zusammen.
+    """Zwei Modi:
+    1. **Freitext mit Ticket-Key** (``text``/``query`` enthaelt z.B. 'CRM-10408')
+       → wird EXAKT wie unter /support beantwortet (volle Pipeline, siehe
+       :func:`_support_run_query`): RAG + Jira + Confluence + KI-Gesamtzusammenfassung.
+    2. **Einzel-Treffer** (``key`` + ``source=JIRA``, kein Freitext) → On-Demand-
+       KI-Zusammenfassung EINES Jira-Vorgangs (Beschreibung + Kommentare) in
+       ``result_lines`` Saetzen. Genutzt vom Button je Ergebnisbox.
 
     Auth: Benutzer-Token (Bearer) ODER externer API-Key (analog /api/support/query).
     """
@@ -4192,6 +4203,15 @@ async def support_summarize(request: Request):
     if not _skill_active("support_assistant"):
         return JSONResponse({"ok": False, "error": "Support-Assistent ist nicht aktiv."}, status_code=403)
     body = await request.json()
+    # CRM-/Ticket-Anfrage per Freitext (z.B. 'CRM-10408' oder 'Status zu CRM-10408?')
+    # wird EXAKT wie unter /support beantwortet: volle Pipeline inkl. KI-Gesamt-
+    # zusammenfassung ueber RAG + Jira + Confluence. Der Einzel-Ticket-Button
+    # (nur ``key``+``source``, KEIN Freitext) bleibt unveraendert.
+    import re as _re
+    _q = (body.get("text") or body.get("query") or "").strip()
+    if _q and _re.search(r"\b[A-Z][A-Z0-9]*-\d+\b", _q):
+        res = await _support_run_query(body, user)
+        return JSONResponse(res, status_code=res.pop("_status", 200))
     source = (body.get("source") or "JIRA").upper()
     key = (body.get("key") or "").strip()
     lang = body.get("lang") or "de"

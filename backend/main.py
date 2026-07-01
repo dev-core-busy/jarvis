@@ -3869,10 +3869,12 @@ async def _support_ai_summary(query: str, blocks: list, system_prompt: str, line
                     "Treffer vor – behaupte NICHT, es gaebe keine Informationen. Antworte "
                     "auf Deutsch in lesbarem Fliesstext (kein JSON)." % lines)
         sysp = ((system_prompt.strip() + "\n\n") if system_prompt.strip() else "") + base
+        # Fuer die KI-Zusammenfassung wenn vorhanden den (gekappten) Volltext nutzen
+        # – z.B. Confluence-Seiten liefern 'full_text' statt nur eines Snippets.
         src = "\n".join("- [%s] %s — %s" % (b.get("source", ""), b.get("title", ""),
-                                            b.get("summary", ""))
+                                            (b.get("full_text") or b.get("summary") or ""))
                         for b in blocks[:max(1, max_sources)])
-        user_text = "Anfrage: %s\n\nGefundene Treffer (%d):\n%s" % (query, len(blocks), src)
+        user_text = "Anfrage: %s\n\nGefundene Treffer (%d):\n%s" % (query, len(blocks), src[:120000])
         provider = get_provider(
             config.LLM_PROVIDER, config.current_api_key, config.current_api_url,
             auth_method=config.current_auth_method,
@@ -4107,10 +4109,12 @@ async def support_query(request: Request):
                 for i, r in enumerate(data.get("results", [])):
                     title = r.get("title") or "Seite"
                     summary = ""
+                    full_text = ""
                     try:
                         pg = await asyncio.to_thread(cc.get_page, r.get("id"), None, None)
                         raw = (((pg.get("body") or {}).get("storage") or {}).get("value")) or ""
                         summary = _cf_html(raw, 600)
+                        full_text = _cf_html(raw, 6000)   # Volltext (gekappt) fuer die KI-Zusammenfassung
                     except Exception:
                         pass
                     overlap = len(qtokens & _support_tokens(title + " " + summary)) / (len(qtokens) or 1)
@@ -4118,6 +4122,7 @@ async def support_query(request: Request):
                     pct = max(20, min(round(max(overlap * 100, 86 - i * 9)), 96))
                     blocks.append({"source": "CONFLUENCE", "title": title,
                                    "summary": _two_line(summary or title, 600), "score": pct,
+                                   "full_text": full_text,
                                    "link": cc.link_for(data, r), "source_label": title})
         except _CErr as e:
             print("[Support] Confluence-Suche fehlgeschlagen: %s" % e, flush=True)

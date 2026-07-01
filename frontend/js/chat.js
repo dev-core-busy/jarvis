@@ -881,6 +881,7 @@
             avatar.textContent = 'J';
             if (window.brandAvatar) window.brandAvatar(avatar);
             row.appendChild(avatar);
+            col.appendChild(_botActions(bubble));
         }
 
         row.appendChild(col);
@@ -896,6 +897,56 @@
         if (_selCtl && _selCtl.isActive()) _selCtl.addCheckboxToRow(row);
 
         return bubble;
+    }
+
+    // Dezente Aktions-Buttons unter Bot-Bubbles: Kopieren + PDF-Export.
+    function _botActions(bubble) {
+        const bar = document.createElement('div');
+        bar.className = 'bubble-actions';
+        // In Zwischenablage kopieren
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'bubble-act-btn';
+        copyBtn.title = (window.t ? window.t('bubble.copy_clip') : 'In Zwischenablage kopieren');
+        copyBtn.setAttribute('aria-label', copyBtn.title);
+        copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        copyBtn.addEventListener('click', () => {
+            const t = bubble.textContent || '';
+            const done = () => { copyBtn.classList.add('ok'); setTimeout(() => copyBtn.classList.remove('ok'), 1200); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(t).then(done).catch(() => { window.JarvisChatLib && window.JarvisChatLib.copyTextToClipboard && window.JarvisChatLib.copyTextToClipboard(t); done(); });
+            } else { window.JarvisChatLib && window.JarvisChatLib.copyTextToClipboard && window.JarvisChatLib.copyTextToClipboard(t); done(); }
+        });
+        bar.appendChild(copyBtn);
+        // Als PDF exportieren (Druckfenster -> "Als PDF speichern")
+        const pdfBtn = document.createElement('button');
+        pdfBtn.type = 'button';
+        pdfBtn.className = 'bubble-act-btn';
+        pdfBtn.title = (window.t ? window.t('bubble.export_pdf') : 'Als PDF exportieren');
+        pdfBtn.setAttribute('aria-label', pdfBtn.title);
+        pdfBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>';
+        pdfBtn.addEventListener('click', () => _exportBubblePdf(bubble));
+        bar.appendChild(pdfBtn);
+        return bar;
+    }
+
+    // PDF-Export ohne externe Libs: Druckfenster mit gerendertem Bubble-Inhalt.
+    function _exportBubblePdf(bubble) {
+        const w = window.open('', '_blank');
+        if (!w) { alert(window.t ? window.t('bubble.popup_blocked') : 'Bitte Pop-ups erlauben, um als PDF zu exportieren.'); return; }
+        const title = (window.t ? window.t('chat.title') : 'Chat');
+        w.document.write(
+            '<!doctype html><html><head><meta charset="utf-8"><title>' + title + '</title>'
+            + '<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.55;color:#111;max-width:820px;margin:0 auto;padding:28px;}'
+            + 'pre{background:#f4f4f5;border-radius:8px;padding:12px;overflow:auto;white-space:pre-wrap;word-break:break-word;}'
+            + 'code{background:#f4f4f5;border-radius:4px;padding:1px 4px;} pre code{padding:0;background:none;}'
+            + 'img,video{max-width:100%;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #ccc;padding:5px 9px;text-align:left;}'
+            + 'a{color:#4338ca;word-break:break-all;} h1,h2,h3{line-height:1.25;}</style></head><body>'
+            + (bubble.innerHTML || '') + '</body></html>'
+        );
+        w.document.close();
+        w.focus();
+        setTimeout(() => { try { w.print(); } catch (e) {} }, 350);
     }
 
     // Kontextmenue-Items (Bearbeiten/Kopieren/Loeschen)
@@ -1446,6 +1497,7 @@
                 stats.textContent = entry.stats;
                 col.appendChild(stats);
             }
+            col.appendChild(_botActions(bubble));
         }
 
         row.appendChild(col);

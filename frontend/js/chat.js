@@ -1988,12 +1988,18 @@
         }).catch(() => showChat());
     }
 
-    // PWA Service Worker registrieren
+    // PWA Service Worker DEAKTIVIERT: der Offline-Cache hatte wiederholt veraltete
+    // CSS/JS ausgeliefert (z.B. Branding am Senden-Button, CPU-Rahmen). Die App
+    // braucht ohnehin durchgehend Netz (WebSocket/LLM). Daher aktiv abmelden +
+    // Caches leeren, damit Updates IMMER sofort greifen.
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/static/sw.js').then((reg) => {
-            console.log('[PWA] Service Worker registriert:', reg.scope);
-        }).catch((err) => {
-            console.warn('[PWA] Service Worker Fehler:', err);
-        });
+        try {
+            navigator.serviceWorker.getRegistrations().then((regs) => {
+                regs.forEach((r) => r.unregister());
+            }).catch(() => {});
+            if (window.caches && caches.keys) {
+                caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
+            }
+        } catch (e) { /* ignorieren */ }
     }
 })();

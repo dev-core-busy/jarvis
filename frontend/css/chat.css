@@ -251,6 +251,22 @@ body {
 
 .btn-logout svg { width: 18px; height: 18px; display: block; }
 
+/* ─── Live-Aktivitäts-/Fortschrittszeile ─────────────────────── */
+.chat-activity {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px; margin: 2px 8px;
+    font-size: 0.8rem; color: var(--muted);
+}
+.chat-activity-spinner {
+    width: 13px; height: 13px; flex-shrink: 0;
+    border: 2px solid rgba(var(--accent-rgb), .25);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: chat-activity-spin .7s linear infinite;
+}
+@keyframes chat-activity-spin { to { transform: rotate(360deg); } }
+.chat-activity-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* ─── Dezente Aktions-Buttons unter Bot-Bubbles (Kopieren / PDF) ─── */
 .bubble-actions {
     display: flex; gap: 2px; margin-top: 3px;

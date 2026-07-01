@@ -146,6 +146,7 @@
     function setNumPref(key, n) { localStorage.setItem('jarvis_support_' + key, String(n)); }
     var _supMax = { sum: 5, res: 2, tickets: 50 };
     var _supDefault = { tickets: 12 };
+    var _me = null;  // angemeldeter Benutzer (fuer benutzerbasierte Prefs)
 
     function loadStatus() {
         fetch('/api/support/status', { headers: authHeaders() })
@@ -230,6 +231,8 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!d) return;
+                // Angemeldeten Benutzer merken -> erweiterte Einstellungen benutzerbasiert
+                if (d.username) { _me = d.username; applyAdvState(); }
                 // Angemeldeten Benutzer als Tooltip am Logout-Button ('<user> abmelden')
                 var lo = $('sup-logout-btn');
                 if (lo && d.username) lo.title = d.username + ' abmelden';
@@ -312,6 +315,26 @@
         if ($('sup-instr-close')) $('sup-instr-close').addEventListener('click', function () { $('sup-instr-overlay').classList.add('hidden'); });
         if ($('sup-instr-overlay')) $('sup-instr-overlay').addEventListener('click', function (e) { if (e.target === this) this.classList.add('hidden'); });
         if ($('sup-instr-save')) $('sup-instr-save').addEventListener('click', saveInstructions);
+
+        // ── Erweiterte Einstellungen ein-/ausklappen (benutzerbasiert gespeichert) ──
+        var advBtn = $('sup-adv-toggle');
+        if (advBtn) advBtn.addEventListener('click', function () { setAdvOpen(!_advOpen); });
+        applyAdvState();
+    }
+
+    // Zustand der erweiterten Einstellungen: benutzerbasiert (Key enthaelt Benutzername)
+    var _advOpen = false;
+    function _advKey() { return 'jarvis_support_adv_open_' + (_me || 'anon'); }
+    function applyAdvState() {
+        var v = localStorage.getItem(_advKey());
+        setAdvOpen(v === '1', true);  // Default: eingeklappt
+    }
+    function setAdvOpen(open, silent) {
+        _advOpen = !!open;
+        var panel = $('sup-adv'), btn = $('sup-adv-toggle');
+        if (panel) panel.classList.toggle('hidden', !_advOpen);
+        if (btn) btn.setAttribute('aria-expanded', _advOpen ? 'true' : 'false');
+        if (!silent) localStorage.setItem(_advKey(), _advOpen ? '1' : '0');
     }
 
     function openInstructions() {
@@ -321,6 +344,12 @@
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 $('sup-instr-text').value = (d && d.instructions) || '';
+                var wrap = $('sup-instr-admin'), box = $('sup-instr-admin-box');
+                var adm = (d && d.admin_prompt) || '';
+                if (wrap && box) {
+                    if (adm) { box.textContent = adm; wrap.classList.remove('hidden'); }
+                    else { box.textContent = ''; wrap.classList.add('hidden'); }
+                }
                 if (st) st.textContent = '';
             })
             .catch(function () { if (st) st.textContent = '✗ ' + T('sup.instr_load_fail', 'Laden fehlgeschlagen'); });

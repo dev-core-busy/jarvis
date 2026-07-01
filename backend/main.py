@@ -3979,8 +3979,14 @@ def _load_support_instructions(user: str) -> str:
 
 @app.get("/api/support/instructions")
 async def support_instructions_get(user: str = Depends(require_auth)):
-    """Liest die persoenlichen Support-Anweisungen des Benutzers (Markdown)."""
-    return JSONResponse({"ok": True, "instructions": _load_support_instructions(user)})
+    """Liest die persoenlichen Support-Anweisungen des Benutzers (Markdown)
+    plus das zentral in den Einstellungen gepflegte Admin-Prompt (read-only)."""
+    cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
+    return JSONResponse({
+        "ok": True,
+        "instructions": _load_support_instructions(user),
+        "admin_prompt": (cfg.get("system_prompt") or "").strip(),
+    })
 
 
 @app.post("/api/support/instructions")

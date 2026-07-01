@@ -304,11 +304,134 @@ class JiraCreateIssueTool(_Base):
         return "✅ Ticket angelegt: %s\n%s" % (key, c.browse_url(key))
 
 
+class JiraOrgProfileTool(_Base):
+    @property
+    def name(self): return "jira_org_profile"
+
+    @property
+    def description(self):
+        return ("Aggregiert ALLE Tickets einer Kunden-/Organisations-ID (z.B. 'crm-10408') "
+                "seitenweise (Paginierung, umgeht das 100er-Seitenlimit) und liefert "
+                "deterministische Kennzahlen ueber den GESAMTBESTAND: Gesamtzahl, Verteilung "
+                "nach Prioritaet/Status/Typ, Anzahl unterschiedlicher Bearbeiter und Melder, "
+                "Erstellzeitraum und Durchschnittsalter, plus die komplette Ticket-Liste. "
+                "IMMER dieses Tool fuer vollstaendige Kunden-/Eskalationsprofile verwenden – "
+                "es deckt ALLE Tickets ab (keine Stichprobe). Kommentar-Inhalte/Tonalitaet "
+                "sind NICHT enthalten (dafuer einzelne Tickets per jira_get_issue nachladen).")
+
+    def parameters_schema(self):
+        return {"type": "OBJECT", "properties": {
+            "query": {"type": "STRING", "description": "Kunden-/Organisations-ID, z.B. 'crm-10408'."},
+        }, "required": ["query"]}
+
+    async def execute(self, **kwargs):
+        c = self._guard()
+        if not c:
+            return "Jira ist nicht konfiguriert."
+        term = (kwargs.get("query") or kwargs.get("key") or "").strip()
+        if not term:
+            return "Bitte eine Kunden-/Organisations-ID angeben (z.B. crm-10408)."
+        org = crm_org_clause(term)
+        jql = (org if org else 'text ~ "%s"' % term.replace('"', "'")) + " ORDER BY created ASC"
+        cap = _max_results()
+        issues = []
+        total = None
+        start = 0
+        try:
+            while len(issues) < cap:
+                want = min(100, cap - len(issues))
+                data = await _to_thread(c.search, jql, want, start)
+                if total is None:
+                    total = data.get("total", 0)
+                batch = data.get("issues", [])
+                if not batch:
+                    break
+                issues.extend(batch)
+                start += len(batch)
+                if start >= (total or 0):
+                    break
+        except JiraError as e:
+            return _fmt_err(e)
+        if not issues:
+            return "Keine Tickets gefunden.\nJQL: %s" % jql
+
+        import datetime as _dt
+        from collections import Counter
+
+        def _nm(f, k):
+            v = (f or {}).get(k)
+            return (v or {}).get("name") if isinstance(v, dict) else v
+
+        def _parse(s):
+            if not s:
+                return None
+            try:
+                return _dt.datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                return None
+
+        prio, status, typ = Counter(), Counter(), Counter()
+        assignees, reporters = set(), set()
+        created, updated = [], []
+        for it in issues:
+            f = it.get("fields", {}) or {}
+            prio[_nm(f, "priority") or "—"] += 1
+            status[_nm(f, "status") or "—"] += 1
+            typ[_nm(f, "issuetype") or "—"] += 1
+            a = f.get("assignee")
+            if a and a.get("displayName"):
+                assignees.add(a["displayName"])
+            r = f.get("reporter")
+            if r and r.get("displayName"):
+                reporters.add(r["displayName"])
+            cd = _parse(f.get("created"))
+            if cd:
+                created.append(cd)
+            ud = _parse(f.get("updated"))
+            if ud:
+                updated.append(ud)
+
+        now = _dt.datetime.utcnow()
+        ages = [(now - d).days for d in created]
+        avg_age = round(sum(ages) / len(ages)) if ages else 0
+
+        def _c(cnt):
+            return ", ".join("%s: %d" % (k, v) for k, v in cnt.most_common())
+
+        L = []
+        L.append("KUNDEN-TICKET-PROFIL – vollstaendig aggregiert ueber ALLE Tickets (deterministisch)")
+        L.append("Organisation/ID: %s" % term.upper())
+        L.append("Tickets gesamt (Jira 'total'): %s | tatsaechlich ausgewertet: %d%s" % (
+            total, len(issues),
+            "" if len(issues) >= (total or 0) else " ⚠️ durch Obergrenze max_results=%d begrenzt" % cap))
+        L.append("Prioritaeten: %s" % _c(prio))
+        L.append("Status: %s" % _c(status))
+        L.append("Typen: %s" % _c(typ))
+        L.append("Unterschiedliche Bearbeiter: %d | unterschiedliche Melder: %d" % (len(assignees), len(reporters)))
+        if created:
+            L.append("Erstellzeitraum: %s bis %s | Durchschnittsalter: %d Tage" % (
+                min(created).date(), max(created).date(), avg_age))
+        if updated:
+            L.append("Letzte Aktivitaet (spaetestes 'updated'): %s" % max(updated).date())
+        L.append("")
+        L.append("HINWEIS: Kommentar-Anzahl sowie oeffentliche/interne Kommentar-INHALTE und "
+                 "Tonalitaet sind hier NICHT enthalten – dafuer einzelne Tickets per "
+                 "jira_get_issue nachladen (qualitative Bewertung).")
+        L.append("")
+        L.append("Alle %d Tickets (Key | Prioritaet | Status | Typ):" % len(issues))
+        for it in issues:
+            b = issue_brief(it, c.base)
+            L.append("- %s | %s | %s | %s" % (b.get("key"), b.get("priority") or "—",
+                                               b.get("status") or "—", b.get("type") or "—"))
+        return "\n".join(L)
+
+
 def get_tools():
     return [
         JiraTestConnectionTool(),
         JiraSearchTool(),
         JiraGetIssueTool(),
+        JiraOrgProfileTool(),
         JiraListProjectsTool(),
         JiraAddCommentTool(),
         JiraCreateIssueTool(),

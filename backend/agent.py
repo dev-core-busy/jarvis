@@ -616,7 +616,7 @@ KRITISCH – Autonomie-Regeln:
         if "confluence_search" in self.tools_map:
             _ext_sources.append("Confluence (confluence_search, confluence_get_page)")
         if "jira_search" in self.tools_map:
-            _ext_sources.append("Jira (jira_search, jira_get_issue, jira_list_projects)")
+            _ext_sources.append("Jira (jira_search, jira_get_issue, jira_org_profile, jira_list_projects)")
         if _ext_sources:
             system_prompt += (
                 "\n\nEXTERNE WISSENSQUELLEN (NUR LESEND): Bei passenden Fragen kannst du "
@@ -625,6 +625,22 @@ KRITISCH – Autonomie-Regeln:
                 "präzise Suchbegriffe, fasse die Treffer zusammen und nenne Titel/Key und Link. "
                 "Du darfst dort NICHTS anlegen, ändern oder löschen – schreibende Aktionen "
                 "sind bewusst deaktiviert."
+            )
+        if "jira_org_profile" in self.tools_map:
+            system_prompt += (
+                "\n\nKUNDEN-/ORGANISATIONS-ANALYSE (Jira): Wenn du ALLE Tickets einer Kunden-/"
+                "Organisations-ID (z.B. 'crm-10408') auswerten sollst, rufe ZUERST jira_org_profile "
+                "auf – es liefert paginiert die vollständige Ticketmenge samt deterministischer "
+                "Kennzahlen (Prioritäten, Status, Typen, Bearbeiter/Melder, Zeitraum) über ALLE "
+                "Tickets. Nutze diese Kennzahlen als Basis. Für qualitative Aspekte (Kommentar-"
+                "Inhalte, Tonalität, Eskalation) lade danach so viele Einzeltickets per "
+                "jira_get_issue nach, wie im Rahmen möglich. "
+                "WICHTIG – EHRLICHKEIT ÜBER VOLLSTÄNDIGKEIT: Wenn du aufgrund von Schritt-/"
+                "Kontextgrenzen NICHT jedes Ticket im Detail lesen konntest, verkaufe eine "
+                "Teilmenge NIEMALS als 'repräsentativ' ohne das offenzulegen. Nenne exakt, wie "
+                "viele Tickets es insgesamt gibt, wie viele du quantitativ (via jira_org_profile) "
+                "und wie viele du qualitativ (Einzelabruf) ausgewertet hast, und kennzeichne "
+                "verbleibende Unsicherheiten ausdrücklich."
             )
 
         # Antwortsprache gemäß UI-Sprache des Nutzers

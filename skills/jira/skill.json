@@ -4,7 +4,7 @@
     "version": "1.0.0",
     "author": "Jarvis",
     "module": "main",
-    "tools": ["jira_test_connection", "jira_search", "jira_get_issue", "jira_list_projects", "jira_add_comment", "jira_create_issue"],
+    "tools": ["jira_test_connection", "jira_search", "jira_get_issue", "jira_org_profile", "jira_list_projects", "jira_add_comment", "jira_create_issue"],
     "category": "wissen",
     "icon": "ticket",
     "system": false,
@@ -50,6 +50,11 @@
                 "name": "jira_get_issue",
                 "label": "Ticket abrufen",
                 "desc": "Holt ein Ticket per Key inkl. Beschreibung und letzten Kommentaren."
+            },
+            {
+                "name": "jira_org_profile",
+                "label": "Kunden-Profil (alle Tickets)",
+                "desc": "Aggregiert ALLE Tickets einer Kunden-/Organisations-ID (Paginierung) zu Kennzahlen: Prioritaets-/Status-/Typ-Verteilung, Bearbeiter/Melder, Zeitraum. Fuer vollstaendige Kunden-/Eskalationsprofile."
             }
         ],
         "use_cases": [

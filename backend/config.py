@@ -73,7 +73,7 @@ class Config:
     SERVER_PORT: int = int(os.getenv("SERVER_PORT", "443"))
     VNC_PORT: int = int(os.getenv("VNC_PORT", "5900"))
     WEBSOCKIFY_PORT: int = int(os.getenv("WEBSOCKIFY_PORT", "6080"))
-    MAX_AGENT_STEPS: int = int(os.getenv("MAX_AGENT_STEPS", "25"))
+    MAX_AGENT_STEPS: int = int(os.getenv("MAX_AGENT_STEPS", "40"))
     COMMAND_TIMEOUT: int = int(os.getenv("COMMAND_TIMEOUT", "120"))
     # Im Docker-Modus settings.json im persistenten Data-Volume speichern
     _data_dir = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data")))

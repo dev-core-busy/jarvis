@@ -443,6 +443,8 @@ async def _jira_llm(system_prompt: str, user_text: str) -> str:
 
 
 class JiraOrgAnalysisTool(_Base):
+    supports_streaming = True
+
     @property
     def name(self): return "jira_org_analysis"
 
@@ -463,7 +465,13 @@ class JiraOrgAnalysisTool(_Base):
             "query": {"type": "STRING", "description": "Kunden-/Organisations-ID, z.B. 'crm-10408'."},
         }, "required": ["query"]}
 
-    async def execute(self, **kwargs):
+    async def execute(self, _status_callback=None, **kwargs):
+        async def _emit(msg):
+            if _status_callback:
+                try:
+                    await _status_callback(msg)
+                except Exception:
+                    pass
         c = self._guard()
         if not c:
             return "Jira ist nicht konfiguriert."
@@ -474,6 +482,7 @@ class JiraOrgAnalysisTool(_Base):
         jql = (org if org else 'text ~ "%s"' % term.replace('"', "'")) + " ORDER BY created ASC"
         cap = _max_results()
         fields = "summary,status,issuetype,priority,assignee,reporter,updated,created,description,comment,resolutiondate"
+        await _emit("📊 %s: lade alle Tickets aus Jira …" % term.upper())
         issues, total, start = [], None, 0
         try:
             while len(issues) < cap:
@@ -486,6 +495,7 @@ class JiraOrgAnalysisTool(_Base):
                     break
                 issues.extend(batch)
                 start += len(batch)
+                await _emit("📊 %s: %d/%s Tickets geladen …" % (term.upper(), len(issues), total))
                 if start >= (total or 0):
                     break
         except JiraError as e:
@@ -552,15 +562,23 @@ class JiraOrgAnalysisTool(_Base):
                    "(schnelle Nachfragen?); 5) wiederkehrende Themen/Parallelthemen; 6) positive "
                    "Aspekte/Lob. Nur was belegbar ist. Antworte kompakt in Stichpunkten.")
         sem = _aio.Semaphore(5)
+        _done = [0]
+        _nb = len(batches)
+        await _emit("🧠 %s: %d Tickets in %d Batches – werte Inhalte/Kommentare aus …" % (
+            term.upper(), len(issues), _nb))
 
         async def _map_one(idx, chunk):
             async with sem:
                 try:
-                    return await _jira_llm(map_sys, ("Tickets (Batch %d):\n\n" % (idx + 1)) + "\n\n---\n\n".join(chunk))
+                    r = await _jira_llm(map_sys, ("Tickets (Batch %d):\n\n" % (idx + 1)) + "\n\n---\n\n".join(chunk))
                 except Exception as e:
-                    return "(Batch %d fehlgeschlagen: %s)" % (idx + 1, e)
+                    r = "(Batch %d fehlgeschlagen: %s)" % (idx + 1, e)
+                _done[0] += 1
+                await _emit("🧠 %s: Batch %d/%d ausgewertet …" % (term.upper(), _done[0], _nb))
+                return r
 
         partials = await _aio.gather(*[_map_one(i, ch) for i, ch in enumerate(batches)])
+        await _emit("🧩 %s: erstelle Gesamtprofil (JSON) …" % term.upper())
         map_summary = "\n\n".join("### Batch %d\n%s" % (i + 1, p) for i, p in enumerate(partials))
 
         # ── REDUCE: finales JSON exakt nach Schema ──

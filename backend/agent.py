@@ -627,19 +627,21 @@ KRITISCH – Autonomie-Regeln:
                 "sind bewusst deaktiviert."
             )
         if "jira_org_profile" in self.tools_map:
+            _has_analysis = "jira_org_analysis" in self.tools_map
             system_prompt += (
                 "\n\nKUNDEN-/ORGANISATIONS-ANALYSE (Jira): Wenn du ALLE Tickets einer Kunden-/"
-                "Organisations-ID (z.B. 'crm-10408') auswerten sollst, rufe ZUERST jira_org_profile "
-                "auf – es liefert paginiert die vollständige Ticketmenge samt deterministischer "
-                "Kennzahlen (Prioritäten, Status, Typen, Bearbeiter/Melder, Zeitraum) über ALLE "
-                "Tickets. Nutze diese Kennzahlen als Basis. Für qualitative Aspekte (Kommentar-"
-                "Inhalte, Tonalität, Eskalation) lade danach so viele Einzeltickets per "
-                "jira_get_issue nach, wie im Rahmen möglich. "
-                "WICHTIG – EHRLICHKEIT ÜBER VOLLSTÄNDIGKEIT: Wenn du aufgrund von Schritt-/"
-                "Kontextgrenzen NICHT jedes Ticket im Detail lesen konntest, verkaufe eine "
-                "Teilmenge NIEMALS als 'repräsentativ' ohne das offenzulegen. Nenne exakt, wie "
-                "viele Tickets es insgesamt gibt, wie viele du quantitativ (via jira_org_profile) "
-                "und wie viele du qualitativ (Einzelabruf) ausgewertet hast, und kennzeichne "
+                "Organisations-ID (z.B. 'crm-10408') auswerten sollst:"
+                + ("\n• Für ein vollständiges Eskalations-/Kundenprofil (Scores/JSON über ALLE "
+                   "Tickets inkl. Kommentaren/Tonalität) rufe jira_org_analysis auf – es macht "
+                   "serverseitig Map-Reduce über wirklich ALLE Tickets und liefert das fertige "
+                   "JSON. Gib dieses JSON dann UNVERÄNDERT zurück (keine eigene Nach-Analyse "
+                   "einer Stichprobe)." if _has_analysis else "")
+                + "\n• Für reine Kennzahlen/Überblick nutze jira_org_profile (paginiert, "
+                "deterministische Prioritäts-/Status-/Typ-Verteilung, Bearbeiter/Melder, Zeitraum "
+                "über ALLE Tickets); qualitative Details bei Bedarf per jira_get_issue nachladen."
+                "\nWICHTIG – EHRLICHKEIT ÜBER VOLLSTÄNDIGKEIT: Verkaufe eine Teilmenge NIEMALS als "
+                "'repräsentativ' ohne das offenzulegen. Nenne die Gesamtzahl der Tickets, wie viele "
+                "quantitativ und wie viele qualitativ ausgewertet wurden, und kennzeichne "
                 "verbleibende Unsicherheiten ausdrücklich."
             )
 

@@ -426,12 +426,185 @@ class JiraOrgProfileTool(_Base):
         return "\n".join(L)
 
 
+async def _jira_llm(system_prompt: str, user_text: str) -> str:
+    """Ein LLM-Aufruf über das aktive Profil (fuer die Map-Reduce-Analyse)."""
+    from backend.config import config
+    from backend.llm import get_provider
+    from google.genai import types
+    provider = get_provider(
+        config.LLM_PROVIDER, config.current_api_key, config.current_api_url,
+        auth_method=config.current_auth_method,
+        session_key=config.current_session_key, prompt_tool_calling=False)
+    resp = await provider.generate_response(
+        model=config.current_model, system_prompt=system_prompt,
+        contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_text)])],
+        tools=[])
+    return "".join(p.text for p in (resp.parts or []) if getattr(p, "text", None)).strip()
+
+
+class JiraOrgAnalysisTool(_Base):
+    @property
+    def name(self): return "jira_org_analysis"
+
+    @property
+    def description(self):
+        return ("Vollständige Kunden-/Eskalationsprofil-Analyse einer Organisations-/CRM-ID "
+                "(z.B. 'crm-10408') über ALLE Tickets per serverseitigem Map-Reduce: holt "
+                "paginiert alle Tickets inkl. Beschreibung und Kommentaren, wertet sie "
+                "batchweise mit dem LLM aus und erzeugt am Ende ein zusammenfassendes JSON "
+                "(Scores 0–10 für Kommunikation/Eskalation/Tonalität/Kooperation/Geduld/"
+                "Kritikalität/Komplexität/Supportaufwand, Auffälligkeiten, Zusammenfassung). "
+                "Schritt-/kontextunabhängig – die einzige Methode, die WIRKLICH alle Tickets "
+                "berücksichtigt. Für 'analysiere alle Tickets von crm-XXXX' immer dieses Tool "
+                "verwenden und das gelieferte JSON unverändert zurückgeben.")
+
+    def parameters_schema(self):
+        return {"type": "OBJECT", "properties": {
+            "query": {"type": "STRING", "description": "Kunden-/Organisations-ID, z.B. 'crm-10408'."},
+        }, "required": ["query"]}
+
+    async def execute(self, **kwargs):
+        c = self._guard()
+        if not c:
+            return "Jira ist nicht konfiguriert."
+        term = (kwargs.get("query") or kwargs.get("key") or "").strip()
+        if not term:
+            return "Bitte eine Kunden-/Organisations-ID angeben (z.B. crm-10408)."
+        org = crm_org_clause(term)
+        jql = (org if org else 'text ~ "%s"' % term.replace('"', "'")) + " ORDER BY created ASC"
+        cap = _max_results()
+        fields = "summary,status,issuetype,priority,assignee,reporter,updated,created,description,comment,resolutiondate"
+        issues, total, start = [], None, 0
+        try:
+            while len(issues) < cap:
+                want = min(50, cap - len(issues))
+                data = await _to_thread(c.search, jql, want, start, fields)
+                if total is None:
+                    total = data.get("total", 0)
+                batch = data.get("issues", [])
+                if not batch:
+                    break
+                issues.extend(batch)
+                start += len(batch)
+                if start >= (total or 0):
+                    break
+        except JiraError as e:
+            return _fmt_err(e)
+        if not issues:
+            return "Keine Tickets gefunden.\nJQL: %s" % jql
+
+        import datetime as _dt
+        from collections import Counter
+
+        def _nm(f, k):
+            v = (f or {}).get(k)
+            return (v or {}).get("name") if isinstance(v, dict) else v
+
+        # ── Quantitative Aggregation (deterministisch, über ALLE) ──
+        prio, status, typ = Counter(), Counter(), Counter()
+        assignees, reporters = set(), set()
+        total_comments = 0
+        blobs = []
+        for it in issues:
+            f = it.get("fields", {}) or {}
+            prio[_nm(f, "priority") or "—"] += 1
+            status[_nm(f, "status") or "—"] += 1
+            typ[_nm(f, "issuetype") or "—"] += 1
+            a = f.get("assignee");  r = f.get("reporter")
+            if a and a.get("displayName"): assignees.add(a["displayName"])
+            if r and r.get("displayName"): reporters.add(r["displayName"])
+            cmts = ((f.get("comment") or {}).get("comments")) or []
+            total_comments += len(cmts)
+            # kompakter Ticket-Blob fuer die qualitative Analyse
+            parts = ["[%s | %s | %s | %s]" % (it.get("key"), _nm(f, "priority") or "—",
+                                              _nm(f, "status") or "—", _nm(f, "issuetype") or "—")]
+            parts.append("Titel: " + (f.get("summary") or ""))
+            desc = html_to_text(f.get("description") or "", 350)
+            if desc:
+                parts.append("Beschreibung: " + desc)
+            for cm in cmts[:6]:
+                who = ((cm.get("author") or {}).get("displayName")) or "?"
+                vis = "intern" if cm.get("jsdPublic") is False else "öffentlich"
+                body = html_to_text(cm.get("body") or "", 200)
+                parts.append("Kommentar (%s, %s): %s" % (who, vis, body))
+            blobs.append("\n".join(parts)[:1500])
+
+        def _c(cnt):
+            return ", ".join("%s: %d" % (k, v) for k, v in cnt.most_common())
+
+        quant = (
+            "Organisation: %s\nTickets gesamt: %s (ausgewertet: %d%s)\n"
+            "Prioritäten: %s\nStatus: %s\nTypen: %s\n"
+            "Kommentare gesamt: %d\nUnterschiedliche Bearbeiter: %d | Melder: %d"
+        ) % (term.upper(), total, len(issues),
+             "" if len(issues) >= (total or 0) else ", durch max_results begrenzt",
+             _c(prio), _c(status), _c(typ), total_comments, len(assignees), len(reporters))
+
+        # ── MAP: batchweise qualitative Signale extrahieren ──
+        import asyncio as _aio
+        BATCH = 40
+        batches = [blobs[i:i + BATCH] for i in range(0, len(blobs), BATCH)]
+        map_sys = ("Du analysierst Support-Tickets EINES Kunden. Extrahiere NUR beobachtbare "
+                   "Signale aus den folgenden Tickets (keine Spekulation). Fasse knapp zusammen: "
+                   "1) Eskalationen (Management gefordert, Fristen, Beschwerden, Druck, Drohungen, "
+                   "Kündigungs-/Rechtshinweise) mit Ticket-Key; 2) Tonalität (freundlich/sachlich/"
+                   "konfrontativ) mit kurzen Zitaten; 3) Kooperationsbereitschaft; 4) Geduld "
+                   "(schnelle Nachfragen?); 5) wiederkehrende Themen/Parallelthemen; 6) positive "
+                   "Aspekte/Lob. Nur was belegbar ist. Antworte kompakt in Stichpunkten.")
+        sem = _aio.Semaphore(5)
+
+        async def _map_one(idx, chunk):
+            async with sem:
+                try:
+                    return await _jira_llm(map_sys, ("Tickets (Batch %d):\n\n" % (idx + 1)) + "\n\n---\n\n".join(chunk))
+                except Exception as e:
+                    return "(Batch %d fehlgeschlagen: %s)" % (idx + 1, e)
+
+        partials = await _aio.gather(*[_map_one(i, ch) for i, ch in enumerate(batches)])
+        map_summary = "\n\n".join("### Batch %d\n%s" % (i + 1, p) for i, p in enumerate(partials))
+
+        # ── REDUCE: finales JSON exakt nach Schema ──
+        schema = (
+            '{\n  "crm_id": "", "organisation": "",\n'
+            '  "scores": {"kommunikation":0,"eskalation":0,"tonalitaet":0,"kooperation":0,'
+            '"geduld":0,"kritikalitaet":0,"komplexitaet":0,"supportaufwand":0},\n'
+            '  "gesamteindruck": "unkritisch | aufmerksam beobachten | anspruchsvoll | '
+            'eskalationsgefährdet | Hochrisikokunde",\n'
+            '  "auffaelligkeiten": [], "positive_aspekte": [], "kritische_aspekte": [],\n'
+            '  "begruendung": "", "zusammenfassung": ""\n}'
+        )
+        reduce_sys = (
+            "Du erstellst ein Kunden-Eskalationsprofil. Nutze AUSSCHLIESSLICH die gelieferten "
+            "quantitativen Kennzahlen (über ALLE Tickets) und die qualitativen Batch-Signale. "
+            "Keine Spekulation; fehlende Daten ausdrücklich in 'begruendung' erwähnen. Bewertungen "
+            "0–10, vergleichbar. Antworte AUSSCHLIESSLICH mit folgendem JSON (kein weiterer Text):\n"
+            + schema)
+        reduce_user = ("QUANTITATIVE KENNZAHLEN (deterministisch, alle Tickets):\n" + quant
+                       + "\n\nQUALITATIVE SIGNALE (Batch-Auswertung aller Tickets):\n" + map_summary
+                       + "\n\ncrm_id = " + term.upper())
+        try:
+            final = await _jira_llm(reduce_sys, reduce_user[:120000])
+        except JiraError as e:
+            return _fmt_err(e)
+        except Exception as e:
+            return "Analyse fehlgeschlagen (Reduce): %s\n\nKennzahlen:\n%s" % (e, quant)
+        # nur den JSON-Block zurueckgeben
+        s = final.strip()
+        if "```" in s:
+            import re as _re
+            m = _re.search(r"```(?:json)?\s*(\{.*\})\s*```", s, _re.S)
+            if m:
+                s = m.group(1)
+        return s
+
+
 def get_tools():
     return [
         JiraTestConnectionTool(),
         JiraSearchTool(),
         JiraGetIssueTool(),
         JiraOrgProfileTool(),
+        JiraOrgAnalysisTool(),
         JiraListProjectsTool(),
         JiraAddCommentTool(),
         JiraCreateIssueTool(),

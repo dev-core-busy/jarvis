@@ -153,11 +153,12 @@ class JiraClient:
 
     _SEARCH_FIELDS = "summary,status,project,issuetype,priority,assignee,reporter,updated,created"
 
-    def search(self, jql: str, limit: int = 25, start: int = 0) -> dict:
-        """JQL-Suche. Liefert {total, issues:[…]} mit Kernfeldern."""
+    def search(self, jql: str, limit: int = 25, start: int = 0, fields: str | None = None) -> dict:
+        """JQL-Suche. Liefert {total, issues:[…]}. ``fields`` optional (Default:
+        Kernfelder); z.B. um Beschreibung/Kommentare gebündelt mitzuladen."""
         return self._request("GET", "/rest/api/2/search", params={
             "jql": jql, "startAt": start, "maxResults": limit,
-            "fields": self._SEARCH_FIELDS})
+            "fields": fields or self._SEARCH_FIELDS})
 
     def get_issue(self, key: str) -> dict:
         """Einzelnes Issue inkl. Beschreibung und Kommentaren.

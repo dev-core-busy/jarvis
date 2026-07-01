@@ -444,8 +444,10 @@
         try { document.documentElement.style.setProperty('--sup-rl', String(rUser)); } catch (e) {}
         var html = '';
         if (d.ai_summary) {
+            // **fett** als <strong> darstellen (Markierungen entfernen); Rest wie gehabt
+            var _sum = escLink(d.ai_summary).replace(/\*\*([^\n*][^*]*?)\*\*/g, '<strong>$1</strong>');
             html += '<div class="sup-ai-card"><div class="sup-ai-label">' + esc(T('sup.ai_label', 'KI-Gesamtzusammenfassung')) + '</div>'
-                + '<div class="sup-ai-text">' + escLink(d.ai_summary) + '</div></div>';
+                + '<div class="sup-ai-text">' + _sum + '</div></div>';
         }
         html += '<div id="sup-blocks"></div>';
         $('sup-results').innerHTML = html;

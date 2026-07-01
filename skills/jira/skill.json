@@ -4,7 +4,7 @@
     "version": "1.0.0",
     "author": "Jarvis",
     "module": "main",
-    "tools": ["jira_test_connection", "jira_search", "jira_get_issue", "jira_org_profile", "jira_list_projects", "jira_add_comment", "jira_create_issue"],
+    "tools": ["jira_test_connection", "jira_search", "jira_get_issue", "jira_org_profile", "jira_org_analysis", "jira_list_projects", "jira_add_comment", "jira_create_issue"],
     "category": "wissen",
     "icon": "ticket",
     "system": false,
@@ -55,6 +55,11 @@
                 "name": "jira_org_profile",
                 "label": "Kunden-Profil (alle Tickets)",
                 "desc": "Aggregiert ALLE Tickets einer Kunden-/Organisations-ID (Paginierung) zu Kennzahlen: Prioritaets-/Status-/Typ-Verteilung, Bearbeiter/Melder, Zeitraum. Fuer vollstaendige Kunden-/Eskalationsprofile."
+            },
+            {
+                "name": "jira_org_analysis",
+                "label": "Eskalationsprofil (Map-Reduce, alle Tickets)",
+                "desc": "Vollstaendige Kunden-Eskalationsprofil-Analyse ueber ALLE Tickets per serverseitigem Map-Reduce (Beschreibung+Kommentare batchweise); liefert das zusammenfassende JSON mit Scores 0-10."
             }
         ],
         "use_cases": [

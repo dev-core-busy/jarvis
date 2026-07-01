@@ -703,7 +703,7 @@
         if (!text) return;
 
         // Status-Nachrichten erkennen: beginnen immer mit einem bekannten Emoji
-        const STATUS_PREFIXES = ['🚀','🔧','📋','⏳','💬','💻','✅','⚠️','❌','🧠','⏸','▶','⏹'];
+        const STATUS_PREFIXES = ['🚀','🔧','📋','⏳','💬','💻','✅','⚠️','❌','🧠','⏸','▶','⏹','📊','🧩','🔎'];
         const isStatus = STATUS_PREFIXES.some(p => text.startsWith(p));
 
         // Multi-Agent: Sub-Agent-Ausgabe in eine eigene (getaggte) Bubble lenken
@@ -718,10 +718,33 @@
                 _ttsBuf += (text + ' ');
                 appendToBotBubble(text);
             }
-        } else if (isStatus && (text.startsWith('⏸') || text.startsWith('▶') || text.startsWith('⏹'))) {
-            addStatusLine(text);
+        } else if (isStatus) {
+            if (text.startsWith('⏸') || text.startsWith('▶') || text.startsWith('⏹')) {
+                addStatusLine(text);
+            } else {
+                // Laufende Aktivität (Start / LLM-Warten / Tool / Fortschritt) live anzeigen
+                _setActivity(text);
+            }
         }
-        // Alle anderen Status-Nachrichten still ignorieren
+    }
+
+    // ── Live-Aktivitäts-/Fortschrittszeile (Spinner + aktueller Status) ──
+    let _activityEl = null;
+    function _setActivity(text) {
+        if (!messagesEl) return;
+        if (!_activityEl) {
+            _activityEl = document.createElement('div');
+            _activityEl.className = 'chat-activity';
+            _activityEl.innerHTML = '<span class="chat-activity-spinner"></span><span class="chat-activity-text"></span>';
+        }
+        const t = _activityEl.querySelector('.chat-activity-text');
+        if (t) t.textContent = text;
+        messagesEl.appendChild(_activityEl);   // immer ans Ende
+        scrollToBottom();
+    }
+    function _clearActivity() {
+        if (_activityEl && _activityEl.parentNode) _activityEl.parentNode.removeChild(_activityEl);
+        _activityEl = null;
     }
 
     // Streaming-Bubble eines Sub-Agenten (getaggt; nur sichtbar wenn aktiv)
@@ -756,6 +779,7 @@
         } else if (ev === 'finished' && !isSub) {
             agentRunning = false;
             stopBtn.classList.add('hidden');
+            _clearActivity();
             removeStreamingDots();
             currentBotBubble = null;
             _updateContextIndicator();
@@ -1156,6 +1180,7 @@
     }
 
     function appendToBotBubble(text) {
+        _clearActivity();   // finale Antwort kommt → Aktivitätszeile entfernen
         if (!currentBotBubble) {
             currentBotBubble = addBubble(text, 'bot');
             _lastBotCol = currentBotBubble.parentElement; // .msg-col merken

@@ -4006,6 +4006,14 @@ async def support_query(request: Request):
     """Support-Anfrage: RAG-, Jira- und/oder Confluence-Treffer, nach Relevanz (%)
     sortiert, plus optionale LLM-Kurzzusammenfassung (mit vorangestelltem Prompt).
 
+    Jira-Quellen ueber eindeutige Keys steuern:
+    - ``jira_all``  (bool): 'alle Jira Tickets' (offen + geschlossen)
+    - ``jira_open`` (bool): 'nur offene Jira Tickets'
+    Sind beide gesetzt, gewinnt 'alle'. (Alte Keys ``jira``/``open_only`` werden aus
+    Rueckwaertskompatibilitaet weiterhin akzeptiert, falls die neuen fehlen.)
+    Enthaelt ``text`` einen Vorgangs-/CRM-Key (z.B. 'CRM-10550'), wird Jira in jedem
+    Fall konsultiert.
+
     Auth: Benutzer-Token (Bearer) ODER externer API-Key (Header ``X-API-Key`` bzw.
     Bearer = ``AGENT_API_KEY``) – fuer Aufrufe aus anderen Anwendungen.
     """
@@ -4031,10 +4039,19 @@ async def _support_run_query(body: dict, user: str) -> dict:
     t0 = _t.time()
     query = (body.get("text") or body.get("query") or "").strip()
     use_rag = body.get("rag", True)
-    use_jira = body.get("jira", True)
     use_conf = body.get("confluence", True)
     use_ai = body.get("ai", True)
-    open_only = body.get("open_only", True)
+    # Jira-Modi ueber EINDEUTIGE Keys: ``jira_all`` = 'alle Jira Tickets'
+    # (offen + geschlossen), ``jira_open`` = 'nur offene Jira Tickets'. Sind beide
+    # gesetzt, gewinnt 'alle'. Rueckwaertskompatibel zu den alten Keys jira/open_only.
+    if "jira_all" in body or "jira_open" in body:
+        jira_all = bool(body.get("jira_all"))
+        jira_open = bool(body.get("jira_open"))
+        use_jira = jira_all or jira_open
+        open_only = jira_open and not jira_all
+    else:
+        use_jira = body.get("jira", True)
+        open_only = body.get("open_only", True)
     lang = (body.get("lang") or "de")
     _sacfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
     _jl_max, _jl_default = _support_jira_limits(_sacfg)

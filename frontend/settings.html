@@ -287,7 +287,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     </thead>
                     <tbody style="color:var(--text-primary);">
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>POST</code></td><td style="padding:6px 8px;"><code>/api/support/query</code></td><td style="padding:6px 8px;">Suche über RAG + Jira + Confluence, optional KI-Zusammenfassung</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
-                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>POST</code></td><td style="padding:6px 8px;"><code>/api/support/summarize</code></td><td style="padding:6px 8px;">KI-Zusammenfassung eines einzelnen Jira-Tickets</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>POST</code></td><td style="padding:6px 8px;"><code>/api/support/summarize</code></td><td style="padding:6px 8px;">KI-Zusammenfassung eines einzelnen Jira-Tickets – ODER Freitext mit Ticket-Key (z.&nbsp;B. <code>CRM-10550</code>) wird wie <code>/query</code> beantwortet</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/support/status</code></td><td style="padding:6px 8px;">Aktive Quellen + Maxima (Zeilen, Ticketanzahl)</td><td style="padding:6px 8px;">Token</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET/POST</code></td><td style="padding:6px 8px;"><code>/api/support/instructions</code></td><td style="padding:6px 8px;">Persönliche Anweisungen lesen/speichern (Markdown)</td><td style="padding:6px 8px;">Token</td></tr>
                         <tr><td style="padding:6px 8px;"><code>GET/DELETE</code></td><td style="padding:6px 8px;"><code>/api/support/history</code></td><td style="padding:6px 8px;">Suchverlauf des Benutzers lesen/löschen</td><td style="padding:6px 8px;">Token</td></tr>
@@ -304,10 +304,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
   -d '{
         "text": "Drucker im 2. OG offline",
         "rag": true,
-        "jira": true,
         "confluence": false,
         "ai": true,
-        "open_only": true,
+        "jira_all": false,
+        "jira_open": true,
         "jira_limit": 10,
         "summary_lines": 5,
         "lang": "de"
@@ -327,8 +327,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 }</code></pre>
                 <p class="kb-hint" style="margin:6px 0 0;"><code>blocks[].source</code> ist <code>WISSEN</code>, <code>JIRA</code> oder <code>CONFLUENCE</code>;
                     <code>score</code> ist die Relevanz in&nbsp;%. Felder: <code>text</code> (Pflicht),
-                    <code>rag</code>/<code>jira</code>/<code>confluence</code>/<code>ai</code>/<code>open_only</code> (bool),
-                    <code>jira_limit</code> (1…Maximum), <code>summary_lines</code>, <code>lang</code> (<code>de</code>/<code>en</code>).</p>
+                    <code>rag</code>/<code>confluence</code>/<code>ai</code> (bool),
+                    <code>jira_all</code> = „alle Jira Tickets" (offen&nbsp;+&nbsp;geschlossen),
+                    <code>jira_open</code> = „nur offene Jira Tickets" (beide gesetzt → „alle" gewinnt),
+                    <code>jira_limit</code> (1…Maximum), <code>summary_lines</code>, <code>lang</code> (<code>de</code>/<code>en</code>).
+                    Enthält <code>text</code> einen Vorgangs-/CRM-Key (z.&nbsp;B. <code>CRM-10550</code>), wird Jira immer konsultiert.
+                    <br>(Die alten Keys <code>jira</code>/<code>open_only</code> werden aus Rückwärtskompatibilität weiterhin akzeptiert.)</p>
 
                 <h4 style="margin:20px 0 6px;">Beispiel 2 – Einzelnes Ticket zusammenfassen</h4>
                 <p class="kb-hint" style="margin:0 0 6px;">Lädt ein konkretes Jira-Ticket (Beschreibung + Kommentare) und fasst es in wenigen Sätzen zusammen.</p>
@@ -342,6 +346,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
   "key": "SUP-1234",
   "summary": "Das Ticket beschreibt einen Druckerausfall im 2. OG …"
 }</code></pre>
+                <p class="kb-hint" style="margin:8px 0 0;">Alternativ akzeptiert <code>/summarize</code> auch einen <b>Freitext mit Ticket-Key</b>
+                    (Feld <code>text</code>/<code>query</code>, z.&nbsp;B. <code>{ "text": "CRM-10550" }</code>) – dann wird die Anfrage exakt wie
+                    <code>/api/support/query</code> beantwortet (volle Pipeline inkl. KI-Gesamtzusammenfassung, gleiche Antwortstruktur).</p>
                 <p class="kb-hint" style="margin:8px 0 0;">Hinweise: <code>-k</code> akzeptiert das selbstsignierte Zertifikat (für Tests).
                     Fehler liefern <code>{ "ok": false, "error": "…" }</code> mit Status&nbsp;401 (Auth),
                     403 (Skill inaktiv) oder 400 (ungültige Eingabe).</p>
@@ -2493,7 +2500,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=4"></script>
-    <script src="/static/js/branding.js?v=15"></script>
+    <script src="/static/js/branding.js?v=16"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=1"></script>
     <script src="/static/js/app.js?v=143"></script>

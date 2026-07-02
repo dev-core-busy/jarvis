@@ -575,14 +575,31 @@
             + list.length + ' ' + T('sup.of', 'von') + ' ' + all.length + ' ' + T('sup.hits', 'Treffer')
             + (_lastData.took_ms ? ' · ' + _lastData.took_ms + ' ms' : '') + ')';
         // Jira-Gesamtzahl (vor 12er-Deckelung) anzeigen, wenn mehr gefunden als angezeigt
+        var _capped = false;
         if (_lastData.jira_total != null) {
             var jiraShown = list.filter(function (b) { return b.source === 'JIRA'; }).length;
             if (jiraShown && _lastData.jira_total > jiraShown) {
                 var word = _lastData.open_only ? T('sup.open_word', 'offenen') : T('sup.found_word', 'gefunden');
                 metaStr += ' · Jira: ' + jiraShown + ' ' + T('sup.of', 'von') + ' ' + _lastData.jira_total + ' ' + word;
+                // Hinweis: es gibt mehr Treffer als geladen -> Ticketanzahl-Deckel
+                metaStr += ' · <a href="#" id="sup-more-tickets" class="sup-meta-more">'
+                    + esc(T('sup.more_tickets', 'Ticketanzahl erhöhen')) + '</a>';
+                _capped = true;
             }
         }
         $('sup-meta').innerHTML = metaStr;
+        if (_capped) {
+            var moreLink = $('sup-more-tickets');
+            if (moreLink) moreLink.addEventListener('click', function (e) {
+                e.preventDefault();
+                setAdvOpen(true);                       // erweiterte Einstellungen aufklappen
+                var tEl = $('sup-u-tickets');
+                if (tEl) {
+                    try { tEl.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_e) {}
+                    tEl.focus(); if (tEl.select) tEl.select();
+                }
+            });
+        }
 
         var box = $('sup-blocks');
         if (!box) return;

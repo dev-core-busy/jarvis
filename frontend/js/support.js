@@ -203,6 +203,10 @@
     function bind() {
         if (_bound) return; _bound = true;
         $('sup-search-btn').addEventListener('click', search);
+        var _cancelBtn = $('sup-cancel-btn');
+        if (_cancelBtn) _cancelBtn.addEventListener('click', function () {
+            if (_searchAbort) { try { _searchAbort.abort(); } catch (e) {} }
+        });
         $('sup-input').addEventListener('keydown', function (e) {
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); search(); }
         });
@@ -507,9 +511,20 @@
             .catch(function () {});
     }
 
+    var _searchAbort = null;
+    // UI nach Abschluss/Abbruch zuruecksetzen (Such-Button aktiv, Abbrechen aus)
+    function _endSearch() {
+        var btn = $('sup-search-btn'); if (btn) btn.disabled = false;
+        var cb = $('sup-cancel-btn'); if (cb) cb.classList.add('hidden');
+        _searchAbort = null;
+    }
+
     function search() {
         var text = ($('sup-input').value || '').trim();
         if (!text) { $('sup-input').focus(); return; }
+        // Laufende Suche abbrechen, bevor eine neue startet
+        if (_searchAbort) { try { _searchAbort.abort(); } catch (e) {} }
+        _searchAbort = new AbortController();
         var jiraWrap = $('sup-opt-jira-wrap');
         var confWrap = $('sup-opt-conf-wrap');
         var jiraHidden = jiraWrap.classList.contains('hidden');
@@ -521,6 +536,7 @@
         var useAi = $('sup-opt-ai').checked;
 
         var btn = $('sup-search-btn'); btn.disabled = true;
+        var cancelBtn = $('sup-cancel-btn'); if (cancelBtn) cancelBtn.classList.remove('hidden');
         var meta = $('sup-meta'); meta.classList.remove('hidden');
         meta.innerHTML = '<span class="sup-spinner"></span>' + esc(T('sup.searching', 'Suche läuft…'));
         var box = $('sup-results');
@@ -536,11 +552,12 @@
                                    confluence: useConf, rag: useRag, ai: useAi,
                                    lang: (localStorage.getItem('jarvis_lang') || 'de'),
                                    jira_limit: clampNum(getNumPref('tickets') === null ? _supDefault.tickets : getNumPref('tickets'), 1, _supMax.tickets),
-                                   summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) })
+                                   summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) }),
+            signal: _searchAbort.signal
         })
             .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
             .then(function (d) {
-                btn.disabled = false;
+                _endSearch();
                 if (!d) return;
                 if (!d.ok) {
                     meta.textContent = '';
@@ -549,8 +566,14 @@
                 }
                 render(d);
             })
-            .catch(function () {
-                btn.disabled = false;
+            .catch(function (e) {
+                _endSearch();
+                // Vom Nutzer abgebrochen: dezenter Hinweis statt Fehlermeldung
+                if (e && e.name === 'AbortError') {
+                    meta.textContent = '';
+                    box.innerHTML = '<div class="sup-empty">' + esc(T('sup.cancelled', 'Suche abgebrochen.')) + '</div>';
+                    return;
+                }
                 meta.textContent = '';
                 box.innerHTML = '<div class="sup-empty">' + esc(T('sup.search_failed', 'Suche fehlgeschlagen.')) + '</div>';
             });

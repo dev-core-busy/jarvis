@@ -310,6 +310,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         "jira_open": true,
         "jira_limit": 10,
         "summary_lines": 5,
+        "prompt": "Antworte in Stichpunkten mit konkreten Lösungsschritten.",
         "lang": "de"
       }'</code></pre>
                 <p class="kb-hint" style="margin:6px 0 4px;">Antwort (gekürzt):</p>
@@ -325,14 +326,63 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
       "score": 80, "summary": "Schritt 1: …" }
   ]
 }</code></pre>
-                <p class="kb-hint" style="margin:6px 0 0;"><code>blocks[].source</code> ist <code>WISSEN</code>, <code>JIRA</code> oder <code>CONFLUENCE</code>;
-                    <code>score</code> ist die Relevanz in&nbsp;%. Felder: <code>text</code> (Pflicht),
-                    <code>rag</code>/<code>confluence</code>/<code>ai</code> (bool),
-                    <code>jira_all</code> = „alle Jira Tickets" (offen&nbsp;+&nbsp;geschlossen),
-                    <code>jira_open</code> = „nur offene Jira Tickets" (beide gesetzt → „alle" gewinnt),
-                    <code>jira_limit</code> (1…Maximum), <code>summary_lines</code>, <code>lang</code> (<code>de</code>/<code>en</code>).
-                    Enthält <code>text</code> einen Vorgangs-/CRM-Key (z.&nbsp;B. <code>CRM-10550</code>), wird Jira immer konsultiert.
-                    <br>(Die alten Keys <code>jira</code>/<code>open_only</code> werden aus Rückwärtskompatibilität weiterhin akzeptiert.)</p>
+                <h4 style="margin:20px 0 6px;">Request-Felder <code>/api/support/query</code></h4>
+                <p class="kb-hint" style="margin:0 0 6px;">Alle Felder außer <code>text</code> sind optional. Die Maxima
+                    (<code>*_max</code>) stammen aus der Skill-Konfiguration und lassen sich über <code>GET /api/support/status</code> abfragen.</p>
+                <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                    <thead>
+                        <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                            <th style="padding:6px 8px;">Feld</th><th style="padding:6px 8px;">Typ</th>
+                            <th style="padding:6px 8px;">Default</th><th style="padding:6px 8px;">Beschreibung</th>
+                        </tr>
+                    </thead>
+                    <tbody style="color:var(--text-primary);">
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>text</code> <span style="color:var(--text-secondary);">(Alias <code>query</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">Die Suchanfrage / der Freitext. Leer → <code>400</code>. Enthält der Text einen Vorgangs-/CRM-Key (Muster <code>ABC-123</code>, z.&nbsp;B. <code>CRM-10550</code>), wird Jira unabhängig von den Jira-Flags <b>immer</b> durchsucht.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>rag</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Wissensdatenbank einbeziehen (RAG – TF-IDF/Vektor-Suche).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>confluence</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Confluence-Seiten durchsuchen (nur wirksam, wenn der Confluence-Skill aktiv ist).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>ai</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">KI-Gesamtzusammenfassung (<code>ai_summary</code>) über alle Treffer erzeugen.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_all</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>false</code></td><td style="padding:6px 8px;">„Alle Jira-Tickets" (offen&nbsp;+&nbsp;geschlossen) durchsuchen.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_open</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>false</code></td><td style="padding:6px 8px;">„Nur offene Jira-Tickets" durchsuchen. Sind <code>jira_all</code> und <code>jira_open</code> beide <code>true</code>, gewinnt <code>jira_all</code>.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_limit</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>ticket_count_default</code> (12)</td><td style="padding:6px 8px;">Max. Anzahl geladener Jira-Tickets, begrenzt auf 1 … <code>ticket_count_max</code> (Admin-Maximum, Standard 50).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>summary_lines</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>summary_lines_max</code> (5)</td><td style="padding:6px 8px;">Max. Satzanzahl der KI-Gesamtzusammenfassung, begrenzt auf 2 … <code>summary_lines_max</code>. Nur wirksam bei <code>ai:true</code>.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>prompt</code> <span style="color:var(--text-secondary);">(Alias <code>instruction</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;">–</td><td style="padding:6px 8px;">Ad-hoc-Anweisung nur für diesen Aufruf; wird zusätzlich zum Admin-Prompt und den persönlichen Anweisungen an die KI-Gesamtzusammenfassung gehängt (z.&nbsp;B. Fokus, Tonfall, Format). Nur wirksam bei <code>ai:true</code>.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>lang</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"de"</code></td><td style="padding:6px 8px;">Sprache der KI-Zusammenfassung: <code>de</code> oder <code>en</code>.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira</code> <span style="color:var(--text-secondary);">(veraltet)</span></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Rückwärtskompatibel – nur ausgewertet, wenn <b>weder</b> <code>jira_all</code> <b>noch</b> <code>jira_open</code> gesendet werden. Entspricht „Jira einbeziehen".</td></tr>
+                        <tr><td style="padding:6px 8px;"><code>open_only</code> <span style="color:var(--text-secondary);">(veraltet)</span></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Rückwärtskompatibel (nur ohne <code>jira_all</code>/<code>jira_open</code>): auf offene Tickets beschränken.</td></tr>
+                    </tbody>
+                </table>
+                </div>
+
+                <h4 style="margin:20px 0 6px;">Antwort-Felder <code>/api/support/query</code></h4>
+                <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                    <thead>
+                        <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                            <th style="padding:6px 8px;">Feld</th><th style="padding:6px 8px;">Typ</th><th style="padding:6px 8px;">Beschreibung</th>
+                        </tr>
+                    </thead>
+                    <tbody style="color:var(--text-primary);">
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>ok</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;">Erfolgskennzeichen. Bei Fehlern <code>false</code> plus <code>error</code>.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>query</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;">Die ausgewertete Anfrage.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>blocks</code></td><td style="padding:6px 8px;">array</td><td style="padding:6px 8px;">Alle Treffer, nach <code>score</code> absteigend (Felder siehe unten).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>ai_summary</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;">KI-Gesamtzusammenfassung (leer bei <code>ai:false</code> oder ohne Treffer).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_total</code></td><td style="padding:6px 8px;">int&nbsp;|&nbsp;null</td><td style="padding:6px 8px;">Gesamtzahl gefundener Jira-Treffer <b>vor</b> der <code>jira_limit</code>-Deckelung (<code>null</code>, wenn Jira nicht abgefragt wurde).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>open_only</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;">Ob nur offene Tickets berücksichtigt wurden.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_active</code>, <code>confluence_active</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;">Ob die jeweilige Quelle serverseitig aktiv ist.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_base</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;">Basis-URL der Jira-Instanz (zum Bauen von Ticket-Links).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>result_lines</code>, <code>result_lines_max</code>, <code>summary_lines_max</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;">Konfigurierte Maxima (für die Anzeige-Begrenzung).</td></tr>
+                        <tr><td style="padding:6px 8px;"><code>took_ms</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;">Server-Laufzeit der Anfrage in Millisekunden.</td></tr>
+                    </tbody>
+                </table>
+                </div>
+                <p class="kb-hint" style="margin:8px 0 0;">Jedes Element in <code>blocks[]</code> hat:
+                    <code>source</code> (<code>WISSEN</code>&nbsp;|&nbsp;<code>JIRA</code>&nbsp;|&nbsp;<code>CONFLUENCE</code>),
+                    <code>title</code>, <code>summary</code> (Kurzfassung), <code>score</code> (Relevanz in&nbsp;%),
+                    <code>source_label</code> und <code>link</code> (URL bzw. interner Abruf-Link).
+                    Quellenspezifisch zusätzlich: <code>key</code> (nur <code>JIRA</code> – Ticket-Key),
+                    <code>doc</code>&nbsp;+&nbsp;<code>doc_name</code> (nur <code>WISSEN</code> – Quelldokument),
+                    <code>full_text</code> (nur <code>CONFLUENCE</code> – gekappter Volltext).</p>
 
                 <h4 style="margin:20px 0 6px;">Beispiel 2 – Einzelnes Ticket zusammenfassen</h4>
                 <p class="kb-hint" style="margin:0 0 6px;">Lädt ein konkretes Jira-Ticket (Beschreibung + Kommentare) und fasst es in wenigen Sätzen zusammen.</p>
@@ -346,12 +396,40 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
   "key": "SUP-1234",
   "summary": "Das Ticket beschreibt einen Druckerausfall im 2. OG …"
 }</code></pre>
-                <p class="kb-hint" style="margin:8px 0 0;">Alternativ akzeptiert <code>/summarize</code> auch einen <b>Freitext mit Ticket-Key</b>
-                    (Feld <code>text</code>/<code>query</code>, z.&nbsp;B. <code>{ "text": "CRM-10550" }</code>) – dann wird die Anfrage exakt wie
-                    <code>/api/support/query</code> beantwortet (volle Pipeline inkl. KI-Gesamtzusammenfassung, gleiche Antwortstruktur).</p>
-                <p class="kb-hint" style="margin:8px 0 0;">Hinweise: <code>-k</code> akzeptiert das selbstsignierte Zertifikat (für Tests).
-                    Fehler liefern <code>{ "ok": false, "error": "…" }</code> mit Status&nbsp;401 (Auth),
-                    403 (Skill inaktiv) oder 400 (ungültige Eingabe).</p>
+                <h4 style="margin:20px 0 6px;">Request-Felder <code>/api/support/summarize</code></h4>
+                <p class="kb-hint" style="margin:0 0 6px;"><b>Modus A – Einzel-Ticket</b> (<code>key</code> gesetzt, kein Ticket-Key im Freitext):</p>
+                <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                    <thead>
+                        <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                            <th style="padding:6px 8px;">Feld</th><th style="padding:6px 8px;">Typ</th>
+                            <th style="padding:6px 8px;">Default</th><th style="padding:6px 8px;">Beschreibung</th>
+                        </tr>
+                    </thead>
+                    <tbody style="color:var(--text-primary);">
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>key</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">Jira-Ticket-Key, z.&nbsp;B. <code>SUP-1234</code>. Beschreibung + letzte Kommentare werden nachgeladen und zusammengefasst.</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>source</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"JIRA"</code></td><td style="padding:6px 8px;">Aktuell wird nur <code>JIRA</code> unterstützt (anderer Wert → <code>400</code>).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>lines</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>result_lines_max</code> (2)</td><td style="padding:6px 8px;">Satzanzahl der Zusammenfassung, begrenzt auf 2 … <code>result_lines_max</code> (Admin-Maximum).</td></tr>
+                        <tr><td style="padding:6px 8px;"><code>lang</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"de"</code></td><td style="padding:6px 8px;">Sprache der Zusammenfassung: <code>de</code> oder <code>en</code>.</td></tr>
+                    </tbody>
+                </table>
+                </div>
+                <p class="kb-hint" style="margin:8px 0 0;">Antwort: <code>{ "ok": true, "key": "…", "summary": "…", "jira_base": "…" }</code>.</p>
+                <p class="kb-hint" style="margin:8px 0 0;"><b>Modus B – Freitext mit Ticket-Key:</b> Enthält <code>text</code>/<code>query</code> einen
+                    Vorgangs-/CRM-Key (z.&nbsp;B. <code>{ "text": "Status zu CRM-10550?" }</code>), wird die Anfrage <b>exakt wie</b>
+                    <code>/api/support/query</code> beantwortet – volle Pipeline inkl. KI-Gesamtzusammenfassung, gleiche Antwortstruktur.
+                    In diesem Modus gelten <b>alle</b> oben genannten <code>/query</code>-Felder (inkl. <code>prompt</code>, <code>jira_limit</code>, …).</p>
+
+                <h4 style="margin:20px 0 6px;">Fehler &amp; Status-Codes</h4>
+                <ul class="kb-hint" style="margin:0 0 4px 18px;line-height:1.7;">
+                    <li><code>200</code> / <code>201</code> – Erfolg. Fehler liefern stets <code>{ "ok": false, "error": "…" }</code>.</li>
+                    <li><code>400</code> – ungültige Eingabe (z.&nbsp;B. leerer <code>text</code>, unbekannte <code>source</code>).</li>
+                    <li><code>401</code> – nicht authentifiziert (Token/API-Key fehlt oder ungültig).</li>
+                    <li><code>403</code> – Support-Skill inaktiv <em>oder</em> Konto gesperrt (Antwort dann mit <code>"account_blocked": true</code>).</li>
+                    <li><code>499</code> – Client hat die Verbindung abgebrochen (z.&nbsp;B. „Abbrechen"); die Anfrage wird serverseitig gestoppt.</li>
+                    <li><code>502</code> – KI-Zusammenfassung fehlgeschlagen (nur <code>/summarize</code>, Einzel-Ticket).</li>
+                </ul>
+                <p class="kb-hint" style="margin:8px 0 0;">Hinweis: <code>-k</code> (curl) akzeptiert das selbstsignierte Zertifikat – nur für Tests.</p>
             </div>
         </div>
     </div>

@@ -128,6 +128,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                     <div style="display:flex;gap:8px;">
                         <input id="ext-url-input" type="url" placeholder="https://beispiel.de/artikel" class="kb-input" style="flex:1;">
                         <button id="ext-extract-btn" class="kb-btn-action">${window.t('ext.extract_btn')}</button>
+                        <button id="ext-extract-cancel-btn" class="kb-btn-danger" style="display:none;">${window.t('common.cancel')}</button>
                     </div>
                 </div>
 
@@ -146,6 +147,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                         <span class="ext-drop-banner-name" id="ext-drop-name">–</span>
                         <span class="ext-drop-banner-size" id="ext-drop-size"></span>
                         <button id="ext-drop-analyse-btn" class="kb-btn-action" style="padding:.35rem .9rem;font-size:.8rem;flex-shrink:0;">${window.t('ext.analyse_btn')}</button>
+                        <button id="ext-drop-abort-btn" class="kb-btn-danger" style="padding:.35rem .9rem;font-size:.8rem;flex-shrink:0;display:none;">${window.t('common.cancel')}</button>
                         <button id="ext-drop-cancel-btn"  class="kb-btn-secondary" style="padding:.35rem .6rem;font-size:.8rem;flex-shrink:0;">✕</button>
                     </div>
                 </div>
@@ -258,6 +260,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         // URL-Tab
         document.getElementById('ext-info-btn').onclick    = () => this._showInfo();
         document.getElementById('ext-extract-btn').onclick = () => this._startExtract();
+        document.getElementById('ext-extract-cancel-btn').onclick = () => this._abortExtract();
         document.getElementById('ext-url-input').addEventListener('keydown', e => {
             if (e.key === 'Enter') this._startExtract();
         });
@@ -272,6 +275,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         document.getElementById('ext-drop-analyse-btn').onclick = () => {
             if (this._dropFile) this._startExtractFile(this._dropFile);
         };
+        document.getElementById('ext-drop-abort-btn').onclick = () => this._abortExtract();
         document.getElementById('ext-drop-cancel-btn').onclick = () => this._hideDropBanner();
 
         // Allgemein
@@ -621,16 +625,20 @@ window.extractorManager = new (class JarvisExtractorManager {
         if (!url) { this._notify(window.t('ext.url_required'), 'error'); return; }
 
         const btn    = document.getElementById('ext-extract-btn');
+        const cancel = document.getElementById('ext-extract-cancel-btn');
         const status = document.getElementById('ext-extract-status');
         btn.disabled = true; btn.textContent = window.t('ext.running');
+        if (cancel) cancel.style.display = '';
         status.textContent = window.t('ext.extracting');
         status.style.display = 'block';
+        this._extractAbort = new AbortController();
 
         try {
             const r = await fetch('/api/knowledge/extract', {
                 method: 'POST',
                 headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
                 body: JSON.stringify({ url }),
+                signal: this._extractAbort.signal,
             });
             const d = await r.json();
             if (!r.ok || d.error) {
@@ -642,11 +650,19 @@ window.extractorManager = new (class JarvisExtractorManager {
                 setTimeout(() => this._openReview(d), 300);
             }
         } catch (e) {
-            this._notify('Netzwerkfehler: ' + e.message, 'error');
+            if (e && e.name === 'AbortError') this._notify(window.t('ext.cancelled'), 'error');
+            else this._notify('Netzwerkfehler: ' + e.message, 'error');
         } finally {
+            this._extractAbort = null;
             btn.disabled = false; btn.textContent = window.t('ext.extract_btn');
+            if (cancel) cancel.style.display = 'none';
             status.style.display = 'none';
         }
+    }
+
+    // Laufende Extraktion (URL oder Datei) abbrechen
+    _abortExtract() {
+        if (this._extractAbort) { try { this._extractAbort.abort(); } catch (e) {} }
     }
 
     // ─── Datei-Extraktion ────────────────────────────────────────────────────
@@ -654,11 +670,14 @@ window.extractorManager = new (class JarvisExtractorManager {
     async _startExtractFile(file) {
         const banner = document.getElementById('ext-drop-banner');
         const btn    = document.getElementById('ext-drop-analyse-btn');
+        const cancel = document.getElementById('ext-drop-abort-btn');
         const status = document.getElementById('ext-extract-status');
 
         btn.disabled = true; btn.textContent = window.t('ext.running');
+        if (cancel) cancel.style.display = '';
         status.textContent = `„${file.name}" ${window.t('ext.running').replace('⏳ ', '')} (${file.type || '?'})…`;
         status.style.display = 'block';
+        this._extractAbort = new AbortController();
 
         try {
             const form = new FormData();
@@ -667,6 +686,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                 method: 'POST',
                 headers: _authHeaders(),   // kein Content-Type – FormData setzt es selbst
                 body: form,
+                signal: this._extractAbort.signal,
             });
             const d = await r.json();
             if (!r.ok || d.error) {
@@ -678,9 +698,12 @@ window.extractorManager = new (class JarvisExtractorManager {
                 setTimeout(() => this._openReview(d), 300);
             }
         } catch (e) {
-            this._notify('Netzwerkfehler: ' + e.message, 'error');
+            if (e && e.name === 'AbortError') this._notify(window.t('ext.cancelled'), 'error');
+            else this._notify('Netzwerkfehler: ' + e.message, 'error');
         } finally {
+            this._extractAbort = null;
             btn.disabled = false; btn.textContent = window.t('ext.analyse_btn');
+            if (cancel) cancel.style.display = 'none';
             status.style.display = 'none';
         }
     }

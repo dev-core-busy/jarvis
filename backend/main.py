@@ -4048,6 +4048,14 @@ async def _support_run_query(body: dict, user: str) -> dict:
     if not query:
         return {"ok": False, "error": "Bitte eine Anfrage eingeben.", "_status": 400}
 
+    # Enthaelt die Anfrage einen Vorgangs-/CRM-Key (z.B. 'CRM-10550'), MUSS Jira
+    # konsultiert werden – CRM-/Ticket-Treffer stammen ausschliesslich aus dieser
+    # Quelle. Macht die API tolerant gegenueber ``jira=false`` aus aufrufenden
+    # Systemen, sodass eine Ticket-Anfrage genau wie unter /support beantwortet wird.
+    import re as _re
+    if _re.search(r"\b[A-Z][A-Z0-9]*-\d+\b", query):
+        use_jira = True
+
     # ── Sicherheitsschicht: Support-Anfrage pruefen (echte Accounts sperren) ──
     if user and user != "api" and await _sec_inspect_user(query, user, "support"):
         return {"ok": False, "account_blocked": True,

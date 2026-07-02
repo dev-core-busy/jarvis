@@ -517,13 +517,17 @@
     function blockHtml(b, i) {
         var label = b.source_label || b.title || 'Quelle';
         var inner;
-        if (b.link) {
+        var isExternal = b.link && /^https?:\/\//i.test(b.link);
+        if (isExternal) {
             inner = '<a href="' + esc(b.link) + '" target="_blank" rel="noopener">' + esc(label) + ' ↗</a>';
         } else if (b.doc) {
-            // lokales Wissensdokument → im Viewer öffnen
+            // lokales Wissensdokument → im Viewer öffnen (Token-Auth via fetch);
+            // der interne file_read-Link in b.link ist nur fuer API-Aufrufer gedacht.
             var dl = label + (b.doc_name ? ' (' + b.doc_name + ')' : '');
             inner = '<a href="#" class="sup-doc-link" data-doc="' + esc(b.doc)
                 + '" data-label="' + esc(dl) + '">' + esc(dl) + '</a>';
+        } else if (b.link) {
+            inner = '<a href="' + esc(b.link) + '" target="_blank" rel="noopener">' + esc(label) + ' ↗</a>';
         } else {
             inner = esc(label);
         }

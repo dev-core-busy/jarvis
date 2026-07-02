@@ -374,26 +374,81 @@
             .catch(function (e) { if (st) { st.textContent = '✗ ' + e.message; st.style.color = 'var(--danger)'; } });
     }
 
-    function closeDoc() { $('sup-doc-modal').classList.add('hidden'); }
+    var _docBlobUrl = null;   // aktuelle Blob-URL des Viewers (zum Freigeben)
+    function _clearDocEmbed() {
+        if (_docBlobUrl) { try { URL.revokeObjectURL(_docBlobUrl); } catch (e) {} _docBlobUrl = null; }
+        var emb = $('sup-doc-embed'); if (emb) { emb.innerHTML = ''; emb.classList.add('hidden'); }
+    }
+    function closeDoc() { $('sup-doc-modal').classList.add('hidden'); _clearDocEmbed(); }
+
+    var _DOC_IMG_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
+    function _docExt(path) {
+        return ((path || '').split('?')[0].split('.').pop() || '').toLowerCase();
+    }
+    // Laedt die Originaldatei (Binaer, mit Token-Auth) und stoesst einen Download an
+    function _downloadDoc(path, name) {
+        fetch('/api/knowledge/file_raw?path=' + encodeURIComponent(path), { headers: authHeaders() })
+            .then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+            .then(function (blob) {
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url; a.download = name || 'dokument';
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(function () { try { URL.revokeObjectURL(url); } catch (e) {} }, 4000);
+            })
+            .catch(function () {});
+    }
 
     function openDoc(path, label) {
         var modal = $('sup-doc-modal');
         $('sup-doc-title').textContent = label || 'Dokument';
-        $('sup-doc-body').innerHTML = '<span class="sup-spinner"></span> Lade…';
+        var body = $('sup-doc-body'), emb = $('sup-doc-embed');
+        _clearDocEmbed();
         modal.classList.remove('hidden');
+        var ext = _docExt(path);
+        var isPdf = ext === 'pdf';
+        var isImg = _DOC_IMG_EXT.indexOf(ext) >= 0;
+
+        // PDFs/Bilder eingebettet anzeigen (per Blob, da file_raw Token-Auth braucht)
+        if (isPdf || isImg) {
+            body.classList.add('hidden');
+            emb.classList.remove('hidden');
+            emb.innerHTML = '<div class="sup-doc-note"><span class="sup-spinner"></span> ' + esc(T('sup.loading', 'Lädt…')) + '</div>';
+            fetch('/api/knowledge/file_raw?path=' + encodeURIComponent(path), { headers: authHeaders() })
+                .then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+                .then(function (blob) {
+                    _docBlobUrl = URL.createObjectURL(blob);
+                    emb.innerHTML = isPdf
+                        ? '<iframe class="sup-doc-frame" src="' + _docBlobUrl + '"></iframe>'
+                        : '<img class="sup-doc-img" src="' + _docBlobUrl + '" alt="">';
+                })
+                .catch(function () {
+                    emb.innerHTML = '<div class="sup-doc-note">' + esc(T('sup.doc_load_fail', 'Dokument konnte nicht geladen werden.')) + '</div>';
+                });
+            return;
+        }
+
+        // Textdokumente wie bisher als Text anzeigen
+        body.classList.remove('hidden');
+        emb.classList.add('hidden');
+        body.innerHTML = '<span class="sup-spinner"></span> ' + esc(T('sup.loading', 'Lädt…'));
         fetch('/api/knowledge/file_read?path=' + encodeURIComponent(path), { headers: authHeaders() })
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (!d || !d.ok) {
-                    $('sup-doc-body').textContent = (d && d.error) || 'Dokument konnte nicht geladen werden.';
+                    // Nicht als Text lesbar (z.B. Binaerdatei) -> Download anbieten
+                    var nm = (path || '').split('/').pop();
+                    body.innerHTML = esc((d && d.error) || T('sup.doc_load_fail', 'Dokument konnte nicht geladen werden.'))
+                        + ' <a href="#" class="sup-doc-dl-link">' + esc(T('sup.doc_download', 'Herunterladen')) + '</a>';
+                    var dl = body.querySelector('.sup-doc-dl-link');
+                    if (dl) dl.addEventListener('click', function (e) { e.preventDefault(); _downloadDoc(path, nm); });
                     return;
                 }
                 var content = d.content || '';
-                // JSON hübsch formatieren, falls parsebar
                 try { content = JSON.stringify(JSON.parse(content), null, 2); } catch (e) {}
-                $('sup-doc-body').innerHTML = escLink(content);
+                body.innerHTML = escLink(content);
             })
-            .catch(function () { $('sup-doc-body').textContent = 'Dokument konnte nicht geladen werden.'; });
+            .catch(function () { body.textContent = T('sup.doc_load_fail', 'Dokument konnte nicht geladen werden.'); });
     }
 
     function relTime(ts) {

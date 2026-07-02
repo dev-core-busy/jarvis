@@ -391,6 +391,9 @@ KRITISCH – Autonomie-Regeln:
         self._pause_event = asyncio.Event()
         self._pause_event.set()  # Nicht pausiert
         self._stop_flag = False
+        # Wird von stop() gesetzt und weckt SOFORT einen laufenden LLM-Call / ein
+        # Tool auf (nicht erst am naechsten Loop-Schritt) -> _await_or_stop().
+        self._stop_event = asyncio.Event()
         self._speed = 1.0
         self._current_task: asyncio.Task | None = None
         self._created_at = time.time()
@@ -549,6 +552,7 @@ KRITISCH – Autonomie-Regeln:
 
         self.state = AgentState.RUNNING
         self._stop_flag = False
+        self._stop_event.clear()
         self._pause_event.set()
         self._tool_cache.clear()  # Cache für diesen Task-Run leeren
 
@@ -745,22 +749,26 @@ KRITISCH – Autonomie-Regeln:
             _user_msg = types.Content(role="user", parts=_user_parts)
             llm_span = tracer.start_span("llm:initial", kind="llm", parent_id=self.agent_id)
             llm_span.attributes["model"] = config.current_model
-            response = await self.provider.generate_response(
+            _stopped, response = await self._await_or_stop(self.provider.generate_response(
                 model=config.current_model,
                 system_prompt=system_prompt,
                 contents=[*chat_history, _user_msg],
                 tools=self._tool_instances
-            )
+            ))
             tracer.end_span(llm_span)
-            if response.usage:
+            if _stopped:
+                # Stop bereits waehrend des ersten LLM-Calls: der Loop bricht sofort
+                # ueber _stop_flag ab (response bleibt None und wird dort nicht genutzt).
+                response = None
+            elif response.usage:
                 _total_input_tokens  += response.usage.get("input_tokens", 0)
                 _total_output_tokens += response.usage.get("output_tokens", 0)
                 self._session_input_tokens  = _total_input_tokens
                 self._session_output_tokens = _total_output_tokens
-            parts_count = len(response.parts) if response.parts else 0
+            parts_count = len(response.parts) if (response and response.parts) else 0
             _log(f"LLM-Antwort erhalten: {parts_count} Parts")
             if parts_count == 0:
-                _log(f"LEERE ANTWORT! raw={response.raw if hasattr(response, 'raw') else 'N/A'}")
+                _log(f"LEERE ANTWORT! raw={response.raw if (response and hasattr(response, 'raw')) else 'N/A'}")
             else:
                 for i, p in enumerate(response.parts):
                     _log(f"  Part[{i}]: text={bool(p.text)} fc={bool(p.function_call)} text_preview={str(p.text)[:100] if p.text else 'None'}")
@@ -856,6 +864,7 @@ KRITISCH – Autonomie-Regeln:
 
                 # Function Calls ausführen
                 function_response_parts = []
+                _tool_stopped = False
                 for fc in function_calls:
                     tool_name = fc.name
                     tool_args = dict(fc.args) if fc.args else {}
@@ -864,8 +873,12 @@ KRITISCH – Autonomie-Regeln:
                         ws, f"🔧 Tool: {tool_name}({json.dumps(tool_args, ensure_ascii=False)[:200]})"
                     )
 
-                    # Tool ausfuehren (mit ws fuer Streaming)
-                    result = await self._execute_tool(tool_name, tool_args, ws=ws)
+                    # Tool ausfuehren (mit ws fuer Streaming) – per Stop-Button abbrechbar
+                    _stopped, result = await self._await_or_stop(
+                        self._execute_tool(tool_name, tool_args, ws=ws))
+                    if _stopped:
+                        _tool_stopped = True
+                        break
                     result_str = str(result)[:5000]
 
                     # Screenshot-Bild erkennen (IMAGE_BASE64:pfad|base64data)
@@ -923,6 +936,11 @@ KRITISCH – Autonomie-Regeln:
                     if image_part:
                         function_response_parts.append(image_part)
 
+                # Tool wurde per Stop-Button abgebrochen -> Loop sofort verlassen
+                if _tool_stopped:
+                    await self._send_status(ws, "⏹️ Agent wurde gestoppt")
+                    break
+
                 # Geschwindigkeits-Verzögerung
                 if self._speed < 1.0:
                     delay = (1.0 / self._speed) - 1.0
@@ -954,13 +972,16 @@ KRITISCH – Autonomie-Regeln:
 
                 llm_span = tracer.start_span(f"llm:step_{steps+1}", kind="llm", parent_id=self.agent_id)
                 llm_span.attributes["model"] = config.current_model
-                response = await self.provider.generate_response(
+                _stopped, response = await self._await_or_stop(self.provider.generate_response(
                     model=config.current_model,
                     system_prompt=system_prompt,
                     contents=chat_history,
                     tools=self._tool_instances
-                )
+                ))
                 tracer.end_span(llm_span)
+                if _stopped:
+                    await self._send_status(ws, "⏹️ Agent wurde gestoppt")
+                    break
                 if response.usage:
                     _total_input_tokens  += response.usage.get("input_tokens", 0)
                     _total_output_tokens += response.usage.get("output_tokens", 0)
@@ -1171,6 +1192,7 @@ KRITISCH – Autonomie-Regeln:
         """
         self.state = AgentState.RUNNING
         self._stop_flag = False
+        self._stop_event.clear()
         self._pause_event.set()
 
         # Pro-Task Bild-Erfassung (Kanaele ohne Markdown senden das Bild als Medium)
@@ -1601,6 +1623,34 @@ KRITISCH – Autonomie-Regeln:
             await self._send_status(ws, "⏸️ Pausiert – warte auf Fortsetzen...")
             await self._pause_event.wait()
 
+    async def _await_or_stop(self, coro):
+        """Wartet auf ``coro``, bricht die Wartung aber SOFORT ab, sobald stop()
+        gerufen wird (Stop-Button). So endet der Agent mitten im LLM-Call oder Tool,
+        statt erst am naechsten Loop-Schritt.
+
+        Rueckgabe: ``(False, ergebnis)`` bei normalem Abschluss, ``(True, None)``
+        bei Stop. Der laufende Coro wird bei Stop gecancelt – bei httpx-basierten
+        LLM-Providern bricht damit auch der HTTP-Request ab; ein Gemini-SDK-Call
+        laeuft im Thread zwar aus, blockiert den Agenten aber nicht mehr.
+        Exceptions aus ``coro`` werden unveraendert durchgereicht."""
+        task = asyncio.ensure_future(coro)
+        stop_waiter = asyncio.ensure_future(self._stop_event.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                {task, stop_waiter}, return_when=asyncio.FIRST_COMPLETED)
+            if task in done:
+                return False, task.result()   # reicht evtl. Exception durch
+            # Stop hat gewonnen -> laufende Arbeit abbrechen
+            task.cancel()
+            try:
+                await task
+            except BaseException:
+                pass
+            return True, None
+        finally:
+            if not stop_waiter.done():
+                stop_waiter.cancel()
+
     async def _send_status(self, ws: WebSocket, message: str, highlight: bool = False, intermediate: bool = False):
         """Sendet Status-Update an Frontend (mit agent_id fuer Multi-Agent).
         intermediate=True: LLM-Text der neben Tool-Aufrufen steht (Zwischenantwort, kein Endergebnis).
@@ -1802,6 +1852,7 @@ KRITISCH – Autonomie-Regeln:
         self._stop_flag = True
         self.state = AgentState.STOPPED
         self._pause_event.set()  # Falls pausiert, aufwecken zum Beenden
+        self._stop_event.set()   # Laufenden LLM-Call / Tool sofort abbrechen
 
     def set_speed(self, speed: float):
         self._speed = max(0.1, min(5.0, speed))

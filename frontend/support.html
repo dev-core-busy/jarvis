@@ -142,8 +142,15 @@
         }
         .sup-btn:hover { background: var(--accent-hover); }
         .sup-btn:disabled { opacity: .55; cursor: default; }
-        .sup-btn-cancel { background: var(--danger); }
-        .sup-btn-cancel:hover { background: var(--danger); filter: brightness(1.1); }
+        /* Abbrechen-Button rechts neben der "Suche läuft…"-Zeile */
+        .sup-meta-row { display: flex; align-items: center; gap: 12px; }
+        .sup-meta-row .sup-meta { margin-bottom: 12px; margin-top: 18px; }
+        .sup-btn-cancel {
+            background: var(--danger); color: #fff; border: none; cursor: pointer;
+            border-radius: var(--radius-md); padding: 5px 14px; font-size: 0.82rem;
+            font-weight: 600; white-space: nowrap; flex: 0 0 auto; line-height: 1.3;
+        }
+        .sup-btn-cancel:hover { filter: brightness(1.1); }
         /* de/en-Umschalter exakt wie in /chat (Groesse) */
         .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), 0.05);
             border: 1px solid rgba(var(--fg-rgb, 148,163,184), 0.1); border-radius: 8px; padding: 2px; }
@@ -428,7 +435,6 @@
             <div class="sup-search-row">
                 <textarea id="sup-input" data-i18n-placeholder="sup.input_ph" placeholder="Anfrage eingeben … (mehrzeilig möglich)"></textarea>
                 <button class="sup-btn" id="sup-search-btn" type="button" data-i18n="sup.search">Suchen</button>
-                <button class="sup-btn sup-btn-cancel hidden" id="sup-cancel-btn" type="button" data-i18n="sup.cancel">Abbrechen</button>
             </div>
             <div class="sup-opts">
                 <label id="sup-opt-jira-wrap" class="hidden"><input type="checkbox" id="sup-opt-jira" checked> <span data-i18n="sup.opt_jira">alle Jira Tickets</span></label>
@@ -494,7 +500,10 @@
             </div>
         </div>
 
-        <div id="sup-meta" class="sup-meta hidden"></div>
+        <div class="sup-meta-row">
+            <div id="sup-meta" class="sup-meta hidden"></div>
+            <button class="sup-btn-cancel hidden" id="sup-cancel-btn" type="button" data-i18n="sup.cancel">Abbrechen</button>
+        </div>
         <div id="sup-results"></div>
     </div>
 </div>

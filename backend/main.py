@@ -4094,6 +4094,11 @@ async def _support_run_query(body: dict, user: str) -> dict:
                 stem = rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
                 title, summary = _support_readable(stem, chunk)
                 link = await asyncio.to_thread(_rag_source_link, rel, chunk)
+                if not link:
+                    # Keine eingebettete Quell-URL -> Link auf die Original-Quelldatei
+                    # (Binaer/PDF-faehig, abrufbar per Token ODER Agent-API-Key).
+                    from urllib.parse import quote as _quote
+                    link = "/api/knowledge/file_raw?path=" + _quote(rel, safe="")
                 blocks.append({"source": "WISSEN", "title": title,
                                "summary": summary, "score": pct,
                                "link": link, "source_label": title,
@@ -4798,8 +4803,10 @@ async def export_knowledge_zip(embeddings: int = 0, llm: int = 0, split: int = 0
 
 
 @app.get("/api/knowledge/file_read")
-async def read_knowledge_file(path: str, user: str = Depends(require_auth)):
-    """Liest den Inhalt einer Text-Datei aus dem Knowledge-Verzeichnis."""
+async def read_knowledge_file(path: str, user: str = Depends(require_auth_or_agent)):
+    """Liest den Inhalt einer Text-Datei aus dem Knowledge-Verzeichnis.
+    Auth: Benutzer-Token ODER Agent-API-Key (dient als Quell-Link fuer
+    Wissens-Treffer aus /api/support/query)."""
     from backend.tools.knowledge import _get_folders, PROJECT_ROOT
     from backend.learning import LEARNED_DIR
     resolved = (PROJECT_ROOT / path).resolve()
@@ -4822,6 +4829,35 @@ async def read_knowledge_file(path: str, user: str = Depends(require_auth)):
         return JSONResponse({"ok": True, "content": content})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/knowledge/file_raw")
+async def read_knowledge_file_raw(path: str, user: str = Depends(require_auth_or_agent)):
+    """Liefert eine Wissens-Quelldatei im Original (Binaer, z.B. PDF) mit korrektem
+    Content-Type. Auth: Benutzer-Token ODER Agent-API-Key. Dient als Quell-Link
+    (``blocks[].link``) fuer Wissens-Treffer aus /api/support/query – anders als
+    file_read funktioniert es auch fuer PDFs/Bilder (kein utf-8-Decode)."""
+    from backend.tools.knowledge import _get_folders, PROJECT_ROOT
+    from backend.learning import LEARNED_DIR
+    import mimetypes
+    resolved = (PROJECT_ROOT / path).resolve()
+    # Sicherheitscheck: Datei muss in Knowledge- oder Learned-Verzeichnis liegen
+    allowed = str(resolved).startswith(str(LEARNED_DIR.resolve()))
+    if not allowed:
+        for folder in _get_folders():
+            try:
+                resolved.relative_to(folder.resolve())
+                allowed = True
+                break
+            except ValueError:
+                continue
+    if not allowed:
+        return JSONResponse({"error": "Zugriff verweigert"}, status_code=403)
+    if not resolved.is_file():
+        return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
+    media, _ = mimetypes.guess_type(str(resolved))
+    return FileResponse(str(resolved), media_type=media or "application/octet-stream",
+                        filename=resolved.name)
 
 
 @app.put("/api/knowledge/file_write")

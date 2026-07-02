@@ -51,6 +51,18 @@
             if (helpBtn) helpBtn.addEventListener('click', function () { self._apiHelp(true); });
             var helpClose = $('support-api-close');
             if (helpClose) helpClose.addEventListener('click', function () { self._apiHelp(false); });
+            // "PDF"-Button: Doku via Druckdialog als PDF speichern (an PDF-Drucker drucken).
+            // body.printing-apidoc blendet per @media print alles ausser dem Modal aus.
+            var pdfBtn = $('support-api-pdf');
+            if (pdfBtn) pdfBtn.addEventListener('click', function () {
+                document.body.classList.add('printing-apidoc');
+                var cleanup = function () {
+                    document.body.classList.remove('printing-apidoc');
+                    window.removeEventListener('afterprint', cleanup);
+                };
+                window.addEventListener('afterprint', cleanup);
+                try { window.print(); } catch (e) { cleanup(); }
+            });
             var helpModal = $('support-api-modal');
             if (helpModal) helpModal.addEventListener('click', function (e) {
                 if (e.target === helpModal) self._apiHelp(false);

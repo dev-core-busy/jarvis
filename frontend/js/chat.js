@@ -469,10 +469,12 @@
         'application/vnd.openxmlformats-officedocument.presentationml.presentation', // pptx
         'application/vnd.ms-powerpoint',                                          // ppt
         'text/plain','text/markdown','text/csv','application/json',
+        'application/xml','text/xml',                                             // xml
+        'application/zip','application/x-zip-compressed',                         // zip
     ]);
     // Endungs-Fallback (Office-Dateien melden per Drag&Drop oft leeren MIME-Typ)
     const _SUPPORTED_EXT = new Set([
-        'pdf','txt','md','rst','csv','json',
+        'pdf','txt','md','rst','csv','json','xml','zip',
         'docx','doc','odt','rtf','xlsx','xls','ods','pptx','ppt','odp',
         'jpg','jpeg','png','gif','bmp','tif','tiff','webp',
         'mp3','m4a','wav','ogg','aac','flac',
@@ -565,7 +567,7 @@
         }
         if (unsupported.length > 0) {
             const fmts = [...new Set(unsupported)].join(', ');
-            showToast(`Format nicht unterstützt: ${fmts} – Erlaubt: Bilder, Audio, Video, PDF, Office (xlsx/docx/pptx), Text`);
+            showToast(`Format nicht unterstützt: ${fmts} – Erlaubt: Bilder, Audio, Video, PDF, Office (xlsx/docx/pptx), Text, XML, ZIP`);
         }
         renderPreviews();
     }

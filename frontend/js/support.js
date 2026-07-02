@@ -449,8 +449,6 @@
         // Zwei exklusive Modi: alle Jira-Tickets ODER nur offene (oder keins)
         var allJira = !jiraHidden && $('sup-opt-jira').checked;
         var openJira = !jiraHidden && $('sup-opt-open').checked;
-        var useJira = allJira || openJira;
-        var useOpen = openJira;
         var useConf = !confWrap.classList.contains('hidden') && $('sup-opt-conf').checked;
         var useRag = $('sup-opt-rag').checked;
         var useAi = $('sup-opt-ai').checked;
@@ -467,8 +465,8 @@
         fetch('/api/support/query', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ text: text, jira: useJira, confluence: useConf, rag: useRag, ai: useAi,
-                                   open_only: useOpen,
+            body: JSON.stringify({ text: text, jira_all: allJira, jira_open: openJira,
+                                   confluence: useConf, rag: useRag, ai: useAi,
                                    lang: (localStorage.getItem('jarvis_lang') || 'de'),
                                    jira_limit: clampNum(getNumPref('tickets') === null ? _supDefault.tickets : getNumPref('tickets'), 1, _supMax.tickets),
                                    summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) })

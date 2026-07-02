@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=4">
-    <link rel="stylesheet" href="/static/css/style.css?v=98">
+    <link rel="stylesheet" href="/static/css/style.css?v=100">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -256,12 +256,16 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         <div class="modal-content glass">
             <div class="modal-header">
                 <h2>🔌 Support-API – REST-Zugriffe</h2>
+                <div style="display:flex;align-items:center;gap:8px;">
+                <button type="button" id="support-api-pdf" title="Als PDF speichern (an PDF-Drucker drucken)" aria-label="Als PDF drucken"
+                        style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:600;font-size:0.82rem;cursor:pointer;line-height:1;">🖨️ PDF</button>
                 <button class="btn-icon" id="support-api-close" aria-label="Schließen">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
                     </svg>
                 </button>
+                </div>
             </div>
             <div class="modal-body" style="overflow-y:auto;">
                 <p class="kb-hint">Der Support-Assistent ist auch ohne Web-Oberfläche per REST erreichbar – z.&nbsp;B. aus
@@ -2574,7 +2578,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/confluence.js?v=5"></script>
     <script src="/static/js/jira.js?v=2"></script>
-    <script src="/static/js/support_admin.js?v=8"></script>
+    <script src="/static/js/support_admin.js?v=9"></script>
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=4"></script>

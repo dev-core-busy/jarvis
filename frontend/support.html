@@ -271,6 +271,12 @@
             word-break: break-word; font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5;
             color: var(--text-primary); }
         #sup-doc-body a { color: var(--accent-hover); }
+        #sup-doc-embed { flex: 1; display: flex; min-height: 0; }
+        #sup-doc-embed.hidden { display: none; }
+        #sup-doc-embed .sup-doc-frame { flex: 1; width: 100%; height: 74vh; border: 0; background: #fff; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+        #sup-doc-embed .sup-doc-img { max-width: 100%; max-height: 74vh; margin: auto; object-fit: contain; }
+        #sup-doc-embed .sup-doc-note { margin: auto; padding: 40px 20px; text-align: center; color: var(--text-secondary); font-size: 0.9rem; }
+        #sup-doc-embed .sup-doc-note a { color: var(--accent-hover); font-weight: 600; cursor: pointer; }
         .sup-help-body { padding: 16px 18px; overflow: auto; font-size: 0.9rem; line-height: 1.55;
             color: var(--text-primary); }
         .sup-help-body h4 { margin: 14px 0 6px; font-size: 0.92rem; color: var(--accent-hover); }
@@ -513,14 +519,15 @@
     <div class="sup-doc-card">
         <div class="sup-doc-head"><strong id="sup-doc-title">Dokument</strong><button id="sup-doc-close" type="button" title="Schließen">✕</button></div>
         <pre id="sup-doc-body"></pre>
+        <div id="sup-doc-embed" class="hidden"></div>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=41"></script>
+<script src="/static/js/i18n.js?v=42"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/issues.js?v=3"></script>
 <script src="/static/js/chatlib.js?v=8"></script>
-<script src="/static/js/support.js?v=35"></script>
+<script src="/static/js/support.js?v=36"></script>
 </body>
 </html>

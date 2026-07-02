@@ -6885,11 +6885,12 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                     # komplett verworfen ("keine Tabelle angehaengt").
                     _ext = os.path.splitext(_name)[1].lower().lstrip(".")
                     _DOC_EXT = {"xlsx","xls","ods","csv","tsv","docx","doc","odt","rtf",
-                                "pptx","ppt","odp","txt","md","json","xml","html","htm","log"}
+                                "pptx","ppt","odp","txt","md","json","xml","html","htm","log","zip"}
                     _is_doc = (_ext in _DOC_EXT or "officedocument" in _mime
                                or "opendocument" in _mime
                                or _mime in {"text/csv","text/plain","application/json",
-                                            "text/markdown","text/xml","application/xml"})
+                                            "text/markdown","text/xml","application/xml",
+                                            "application/zip","application/x-zip-compressed"})
                     if not _is_doc:
                         continue
                     if len(_data) > 30_000_000:    # ~22 MB binary
@@ -6916,6 +6917,19 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                                 _note += f"\n[Inhalt von {_name}]:\n{_doc_bytes.decode('utf-8', errors='replace')}"
                             except Exception:
                                 pass
+                        # ZIP-Archiv: Dateiliste (namelist) einblenden, damit der Agent weiss,
+                        # was drin ist – Entpacken kann er dann gezielt per Shell-Tool.
+                        elif _ext == "zip":
+                            try:
+                                import zipfile as _zipf, io as _zio
+                                with _zipf.ZipFile(_zio.BytesIO(_doc_bytes)) as _z:
+                                    _names = [n for n in _z.namelist() if not n.endswith("/")]
+                                _shown = _names[:200]
+                                _note += (f"\n[ZIP-Archiv mit {len(_names)} Datei(en)"
+                                          + (f", davon {len(_shown)} gelistet" if len(_names) > len(_shown) else "")
+                                          + "]:\n" + "\n".join(_shown))
+                            except Exception as _ze:
+                                _note += f"\n[ZIP-Inhalt konnte nicht gelistet werden: {_ze}]"
                         _text_prepend.append(_note)
                         await ws.send_json({"type": "status", "message": f"📎 Datei {_name} bereitgestellt"})
                     except Exception as _de:

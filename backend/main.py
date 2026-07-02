@@ -4001,6 +4001,42 @@ async def support_instructions_set(request: Request, user: str = Depends(require
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+async def _run_cancellable(request: Request, coro):
+    """Fuehrt ``coro`` als Task aus und bricht sie ab, sobald der Client die
+    HTTP-Verbindung trennt (Nutzer klickt 'Abbrechen' -> fetch().abort()).
+
+    Dadurch rechnet der Server bei einem Abbruch nicht unnoetig weiter: Bei
+    httpx-basierten LLM-Providern wird der laufende Request mit abgebrochen; ein
+    Gemini-SDK-Call laeuft im Hintergrund-Thread zwar aus, der Endpoint blockiert
+    aber nicht mehr darauf und gibt sofort frei.
+
+    Rueckgabe: ``(True, ergebnis)`` bei normalem Abschluss, ``(False, None)`` bei
+    Client-Abbruch. Exceptions aus ``coro`` werden unveraendert durchgereicht.
+    Voraussetzung: der Request-Body wurde bereits gelesen (sonst meldet
+    ``is_disconnected()`` nichts)."""
+    task = asyncio.ensure_future(coro)
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=0.4)
+            if task in done:
+                return True, task.result()   # reicht evtl. Exception durch
+            try:
+                gone = await request.is_disconnected()
+            except Exception:
+                gone = False
+            if gone:
+                task.cancel()
+                try:
+                    await task
+                except BaseException:
+                    pass
+                return False, None
+    except asyncio.CancelledError:
+        # Der Request-Handler selbst wurde abgebrochen -> laufende Arbeit mitnehmen
+        task.cancel()
+        raise
+
+
 @app.post("/api/support/query")
 async def support_query(request: Request):
     """Support-Anfrage: RAG-, Jira- und/oder Confluence-Treffer, nach Relevanz (%)
@@ -4013,6 +4049,11 @@ async def support_query(request: Request):
     Rueckwaertskompatibilitaet weiterhin akzeptiert, falls die neuen fehlen.)
     Enthaelt ``text`` einen Vorgangs-/CRM-Key (z.B. 'CRM-10550'), wird Jira in jedem
     Fall konsultiert.
+
+    - ``prompt`` (str, optional; Alias ``instruction``): Ad-hoc-Anweisung nur fuer
+      diesen Aufruf. Wird zusaetzlich zum Admin-System-Prompt und den persoenlichen
+      Benutzer-Anweisungen an die KI-Gesamtzusammenfassung gehaengt (nur wirksam bei
+      ``ai`` = true). Steuert z.B. Fokus, Tonfall oder Format je Anfrage.
 
     Auth: Benutzer-Token (Bearer) ODER externer API-Key (Header ``X-API-Key`` bzw.
     Bearer = ``AGENT_API_KEY``) – fuer Aufrufe aus anderen Anwendungen.
@@ -4027,7 +4068,9 @@ async def support_query(request: Request):
     if not _skill_active("support_assistant"):
         return JSONResponse({"ok": False, "error": "Support-Assistent ist nicht aktiv."}, status_code=403)
     body = await request.json()
-    res = await _support_run_query(body, user)
+    ok, res = await _run_cancellable(request, _support_run_query(body, user))
+    if not ok:
+        return JSONResponse({"ok": False, "error": "Abgebrochen"}, status_code=499)
     return JSONResponse(res, status_code=res.pop("_status", 200))
 
 
@@ -4190,6 +4233,13 @@ async def _support_run_query(body: dict, user: str) -> dict:
         if _user_instr.strip():
             _sys = ((_sys + "\n\n") if _sys.strip() else "") + \
                 "Persoenliche Anweisungen des Benutzers (immer beachten):\n" + _user_instr.strip()
+        # Ad-hoc-Anweisung fuer DIESEN Aufruf (Feld ``prompt``, Alias ``instruction``);
+        # wird zusaetzlich ans System-Prompt gehaengt – nuetzlich fuer API-Aufrufer,
+        # die je Anfrage Fokus/Tonfall/Format steuern wollen.
+        _req_prompt = (body.get("prompt") or body.get("instruction") or "").strip()
+        if _req_prompt:
+            _sys = ((_sys + "\n\n") if _sys.strip() else "") + \
+                "Zusaetzliche Anweisung fuer diese Anfrage (immer beachten):\n" + _req_prompt
         ai_summary = await _support_ai_summary(
             query, blocks, _sys, eff_sum, lang,
             _support_count(cfg, "summary_sources", _SUPPORT_SUMMARY_SOURCES_DEFAULT))
@@ -4240,7 +4290,9 @@ async def support_summarize(request: Request):
     import re as _re
     _q = (body.get("text") or body.get("query") or "").strip()
     if _q and _re.search(r"\b[A-Z][A-Z0-9]*-\d+\b", _q):
-        res = await _support_run_query(body, user)
+        ok, res = await _run_cancellable(request, _support_run_query(body, user))
+        if not ok:
+            return JSONResponse({"ok": False, "error": "Abgebrochen"}, status_code=499)
         return JSONResponse(res, status_code=res.pop("_status", 200))
     source = (body.get("source") or "JIRA").upper()
     key = (body.get("key") or "").strip()
@@ -4259,7 +4311,10 @@ async def support_summarize(request: Request):
         lines = max(2, min(_support_cap(body.get("lines"), res_max), res_max))
 
     b = {"source": "JIRA", "key": key, "_key": key, "title": key, "summary": ""}
-    await _support_summarize_block(b, lines, lang, cfg.get("system_prompt") or "")
+    ok, _ = await _run_cancellable(
+        request, _support_summarize_block(b, lines, lang, cfg.get("system_prompt") or ""))
+    if not ok:
+        return JSONResponse({"ok": False, "error": "Abgebrochen"}, status_code=499)
     summary = (b.get("summary") or "").strip()
     if not summary:
         return JSONResponse({"ok": False, "error": "Zusammenfassung fehlgeschlagen."},
@@ -5023,7 +5078,9 @@ async def knowledge_extract(request: Request, user: str = Depends(require_knowle
         url = "https://" + url
     try:
         from backend.web_extractor import extract_from_url
-        doc = await extract_from_url(url)
+        ok, doc = await _run_cancellable(request, extract_from_url(url))
+        if not ok:
+            return JSONResponse({"error": "Abgebrochen"}, status_code=499)
         return JSONResponse(doc)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -5031,6 +5088,7 @@ async def knowledge_extract(request: Request, user: str = Depends(require_knowle
 
 @app.post("/api/knowledge/extract/upload")
 async def knowledge_extract_upload(
+    request: Request,
     file: UploadFile = File(...),
     user: str = Depends(require_knowledge_editor),
 ):
@@ -5053,7 +5111,9 @@ async def knowledge_extract_upload(
         return JSONResponse({"error": "Datei zu groß (max. 50 MB)"}, status_code=413)
     try:
         from backend.web_extractor import extract_from_file
-        doc = await extract_from_file(file.filename, content)
+        ok, doc = await _run_cancellable(request, extract_from_file(file.filename, content))
+        if not ok:
+            return JSONResponse({"error": "Abgebrochen"}, status_code=499)
         return JSONResponse(doc, status_code=201)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

@@ -4832,11 +4832,12 @@ async def read_knowledge_file(path: str, user: str = Depends(require_auth_or_age
 
 
 @app.get("/api/knowledge/file_raw")
-async def read_knowledge_file_raw(path: str, user: str = Depends(require_auth_or_agent)):
+async def read_knowledge_file_raw(path: str, user: str = Depends(require_auth_or_query)):
     """Liefert eine Wissens-Quelldatei im Original (Binaer, z.B. PDF) mit korrektem
-    Content-Type. Auth: Benutzer-Token ODER Agent-API-Key. Dient als Quell-Link
-    (``blocks[].link``) fuer Wissens-Treffer aus /api/support/query – anders als
-    file_read funktioniert es auch fuer PDFs/Bilder (kein utf-8-Decode)."""
+    Content-Type. Auth: Benutzer-Token bzw. Agent-API-Key per Header ODER als
+    ``?token=<token|key>`` Query-Parameter – so ist der Quell-Link (``blocks[].link``)
+    auch direkt im Browser (Navigation ohne Header) und in <iframe>/<a> nutzbar.
+    Anders als file_read funktioniert es auch fuer PDFs/Bilder (kein utf-8-Decode)."""
     from backend.tools.knowledge import _get_folders, PROJECT_ROOT
     from backend.learning import LEARNED_DIR
     import mimetypes

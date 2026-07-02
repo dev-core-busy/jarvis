@@ -259,22 +259,28 @@
         .sup-doc-modal { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center;
             justify-content: center; background: rgba(var(--shadow-rgb), .6); backdrop-filter: blur(4px); padding: 20px; }
         .sup-doc-card { background: var(--bg-secondary); border: 1px solid var(--border);
-            border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); width: min(820px, 100%);
-            max-height: 86vh; display: flex; flex-direction: column; }
+            border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); width: min(1000px, 100%);
+            max-height: 88vh; display: flex; flex-direction: column; }
+        /* Vergroessert / Vollbild */
+        .sup-doc-card.sup-doc-max { width: 97vw; max-width: 97vw; height: 95vh; max-height: 95vh; }
+        .sup-doc-card.sup-doc-max #sup-doc-body { flex: 1; }
+        .sup-doc-card.sup-doc-max #sup-doc-embed .sup-doc-frame { height: 100%; }
+        .sup-doc-card.sup-doc-max #sup-doc-embed .sup-doc-img { max-height: 100%; }
         .sup-doc-head { display: flex; align-items: center; justify-content: space-between;
             padding: 12px 16px; border-bottom: 1px solid var(--border); gap: 12px; }
         .sup-doc-head strong { font-size: 0.95rem; min-width: 0; word-break: break-word; }
         .sup-doc-head button { background: none; border: none; color: var(--text-secondary);
             font-size: 1.2rem; cursor: pointer; flex-shrink: 0; }
         .sup-doc-head button:hover { color: var(--text-primary); }
+        .sup-doc-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
         #sup-doc-body { margin: 0; padding: 16px; overflow: auto; white-space: pre-wrap;
             word-break: break-word; font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5;
             color: var(--text-primary); }
         #sup-doc-body a { color: var(--accent-hover); }
         #sup-doc-embed { flex: 1; display: flex; min-height: 0; }
         #sup-doc-embed.hidden { display: none; }
-        #sup-doc-embed .sup-doc-frame { flex: 1; width: 100%; height: 74vh; border: 0; background: #fff; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
-        #sup-doc-embed .sup-doc-img { max-width: 100%; max-height: 74vh; margin: auto; object-fit: contain; }
+        #sup-doc-embed .sup-doc-frame { flex: 1; width: 100%; height: 78vh; border: 0; background: #fff; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+        #sup-doc-embed .sup-doc-img { max-width: 100%; max-height: 78vh; margin: auto; object-fit: contain; }
         #sup-doc-embed .sup-doc-note { margin: auto; padding: 40px 20px; text-align: center; color: var(--text-secondary); font-size: 0.9rem; }
         #sup-doc-embed .sup-doc-note a { color: var(--accent-hover); font-weight: 600; cursor: pointer; }
         .sup-help-body { padding: 16px 18px; overflow: auto; font-size: 0.9rem; line-height: 1.55;
@@ -517,17 +523,21 @@
 
 <div id="sup-doc-modal" class="sup-doc-modal hidden">
     <div class="sup-doc-card">
-        <div class="sup-doc-head"><strong id="sup-doc-title">Dokument</strong><button id="sup-doc-close" type="button" title="Schließen">✕</button></div>
+        <div class="sup-doc-head"><strong id="sup-doc-title">Dokument</strong>
+            <span class="sup-doc-actions">
+                <button id="sup-doc-max" type="button" title="Vergrößern" data-i18n-title="sup.doc_maximize">⛶</button>
+                <button id="sup-doc-close" type="button" title="Schließen">✕</button>
+            </span></div>
         <pre id="sup-doc-body"></pre>
         <div id="sup-doc-embed" class="hidden"></div>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=42"></script>
+<script src="/static/js/i18n.js?v=43"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/issues.js?v=3"></script>
 <script src="/static/js/chatlib.js?v=8"></script>
-<script src="/static/js/support.js?v=36"></script>
+<script src="/static/js/support.js?v=37"></script>
 </body>
 </html>

@@ -686,8 +686,11 @@
             if (src && b.source !== src) return false;
             if (minRel && b.score < minRel) return false;
             if (terms.length) {
-                var hay = [b.title, b.summary, b.key, b.source_label, b.doc, b.doc_name,
-                           b.full_text, b.source].join(' ').toLowerCase();
+                // Nur SICHTBARE Felder durchsuchen (Titel, Kurzfassung, Key, Quelle,
+                // Dokumentname) – sonst passieren Blöcke den Filter, ohne dass die
+                // Hervorhebung irgendetwas markieren kann (full_text wird nie gerendert).
+                var hay = [b.title, b.summary, b.key, b.source_label, b.doc_name,
+                           b.source].join(' ').toLowerCase();
                 for (var i = 0; i < terms.length; i++) {
                     if (hay.indexOf(terms[i]) === -1) return false;
                 }

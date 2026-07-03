@@ -99,6 +99,23 @@
         return html.replace(/@@URL(\d+)@@/g, function (_, i) { return urls[+i]; });
     }
 
+    // Hebt Filter-Begriffe im fertig gerenderten Block-HTML hervor (<mark>). Wirkt nur
+    // auf sichtbaren Text: HTML-Tags (<a …>) und Entities (&amp; …) bleiben unangetastet,
+    // damit weder Attribute/URLs noch Sonderzeichen zerstoert werden. Alle Begriffe
+    // werden in EINEM Durchgang (Alternation) ersetzt – kein Treffer im eingefuegten Markup.
+    function highlightTerms(html, terms) {
+        if (!terms || !terms.length) return html;
+        var re = new RegExp('(' + terms.map(function (t) {
+            return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }).join('|') + ')', 'gi');
+        return html.replace(/(<[^>]+>)|([^<]+)/g, function (m, tag, text) {
+            if (tag) return tag;                       // Tag unveraendert
+            return text.replace(/(&[a-zA-Z#0-9]{1,8};)|([^&]+)/g, function (mm, ent, plain) {
+                return ent ? ent : plain.replace(re, '<mark class="sup-hl">$1</mark>');
+            });
+        });
+    }
+
     function showApp() {
         $('sup-login').classList.add('hidden');
         $('sup-app').classList.remove('hidden');
@@ -725,7 +742,9 @@
                 + '</div>';
             return;
         }
-        box.innerHTML = list.map(blockHtml).join('');
+        var htmlOut = list.map(blockHtml).join('');
+        if (terms.length) htmlOut = highlightTerms(htmlOut, terms);  // Filter-Treffer markieren
+        box.innerHTML = htmlOut;
     }
 
     // On-Demand-KI-Zusammenfassung eines Jira-Tickets (Button je Ergebnisbox)

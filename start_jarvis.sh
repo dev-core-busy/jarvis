@@ -55,8 +55,21 @@ done
 # Screensaver und DPMS deaktivieren (verhindert schwarzen Bildschirm bei VNC)
 xset s off -dpms 2>/dev/null || true
 pkill -f cinnamon-screensaver 2>/dev/null || true
-gsettings set org.cinnamon.desktop.screensaver idle-activation-enabled false 2>/dev/null || true
-gsettings set org.cinnamon.desktop.screensaver lock-enabled false 2>/dev/null || true
+# gsettings als root wirkt NICHT auf die jarvis-Session (falsches dconf-Profil).
+# Stattdessen systemweite dconf-Defaults: Sperre/Screensaver fuer ALLE Benutzer aus.
+if command -v dconf >/dev/null 2>&1; then
+    mkdir -p /etc/dconf/profile /etc/dconf/db/local.d
+    grep -q "^system-db:local" /etc/dconf/profile/user 2>/dev/null || \
+        printf "user-db:user\nsystem-db:local\n" > /etc/dconf/profile/user
+    cat > /etc/dconf/db/local.d/00-jarvis-nolock <<'DCONF'
+[org/cinnamon/desktop/screensaver]
+lock-enabled=false
+idle-activation-enabled=false
+[org/cinnamon/desktop/session]
+idle-delay=uint32 0
+DCONF
+    dconf update 2>/dev/null || true
+fi
 
 # 0. Bereinigung alter Locks
 if [ "$DISPLAY" == ":10" ]; then

@@ -47,6 +47,9 @@
             background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg);
             padding: 22px; box-shadow: var(--shadow-md); transition: transform .15s, border-color .15s; }
         .pt-card:hover { transform: translateY(-3px); border-color: rgba(var(--accent-rgb), .5); }
+        /* Branding-Portal-Video als Karte: gleiche Optik wie .pt-card, aber ohne Hover-Effekt */
+        .pt-card-video { padding: 12px; cursor: default; justify-content: center; }
+        .pt-card-video:hover { transform: none; border-color: var(--border); }
         .pt-card-icon { width: 46px; height: 46px; border-radius: 12px; display: flex; align-items: center;
             justify-content: center; background: rgba(var(--accent-rgb), .15); color: var(--accent-hover); }
         .pt-card-icon svg { width: 24px; height: 24px; }
@@ -165,16 +168,13 @@
             <div class="pt-card-title">Support-Agent</div>
             <div class="pt-card-desc">Windows-Anwendung für Nicht-Swyx-Systeme: Spracherkennung + Jira-Support-Assistent zum Download.</div>
         </a>
-    </div>
-
-    <!-- Marken-Animation (Branding-Skill): wird unter der Bereichsauswahl
-         abgespielt, sobald im Branding eine Portal-Animation hinterlegt ist. -->
-    <div id="brand-portal-anim" style="display:none;margin-top:18px;">
-        <!-- Gleiches Spalten-Raster wie .pt-cards (auto-fill, damit ein einzelnes
-             Element genau EINE Kartenbreite einnimmt und linksbündig sitzt). -->
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px;">
+        <!-- Marken-Animation (Branding-Skill): erscheint als KARTE im selben Karten-Raster
+             (nächste freie Zelle → i.d.R. zweite Zeile), statt in einer eigenen Zeile.
+             class="pt-card" -> Branding blendet sie per display:'' als flex-Karte ein
+             (gleiche Sichtbarkeitslogik wie die übrigen Karten). Nur bei hinterlegtem Video. -->
+        <div id="brand-portal-anim" class="pt-card pt-card-video" style="display:none;">
             <video id="brand-portal-video" muted loop autoplay playsinline preload="metadata"
-                   style="width:100%;height:auto;object-fit:contain;border-radius:var(--radius-lg);display:block;box-shadow:var(--shadow-md);"></video>
+                   style="width:100%;height:auto;object-fit:contain;border-radius:10px;display:block;"></video>
         </div>
     </div>
 </div>

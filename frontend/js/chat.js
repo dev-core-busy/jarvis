@@ -314,11 +314,11 @@
             _updWrap.style.display = '';
             if (window.JarvisUpdateWidget) window.JarvisUpdateWidget.init();
         }
-        // Desktop/VNC-Button nur fuer den lokalen Benutzer 'jarvis' (dessen Desktop
-        // per VNC gespiegelt wird). Andere (AD-)Admins sehen ihn nicht.
+        // Desktop/VNC-Button fuer ALLE Administratoren (lokal + AD-Admins).
+        // Gespiegelt wird immer die Desktop-Session des LOKALEN Benutzers 'jarvis',
+        // unabhaengig davon, welcher Admin zuschaut.
         const _vncBtn = $('btn-vnc');
-        const _isLocalJarvis = (_currentUser || '').trim().toLowerCase() === 'jarvis';
-        if (_vncBtn) _vncBtn.style.display = _isLocalJarvis ? '' : 'none';
+        if (_vncBtn) _vncBtn.style.display = _isAdmin ? '' : 'none';
         // CPU-Auslastung fuer alle (Werte kommen via WS-Event 'cpu')
         const _cpuBar = $('cpu-bar');
         if (_cpuBar) _cpuBar.style.display = '';

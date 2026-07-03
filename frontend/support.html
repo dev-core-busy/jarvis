@@ -196,6 +196,9 @@
         }
         .sup-filter-text:focus { outline: none; border-color: var(--accent-hover); }
         .sup-filter-text::placeholder { color: var(--text-muted); }
+        /* Hervorhebung der Filter-Treffer in den Ergebnissen */
+        .sup-hl { background: rgba(var(--accent-rgb), .38); color: inherit;
+            border-radius: 3px; padding: 0 1px; }
 
         .sup-ai-card {
             background: var(--bg-secondary); border: 1px solid rgba(var(--accent-rgb), .35);
@@ -562,6 +565,6 @@
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/issues.js?v=3"></script>
 <script src="/static/js/chatlib.js?v=8"></script>
-<script src="/static/js/support.js?v=39"></script>
+<script src="/static/js/support.js?v=40"></script>
 </body>
 </html>

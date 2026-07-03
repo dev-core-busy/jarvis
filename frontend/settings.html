@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=4">
-    <link rel="stylesheet" href="/static/css/style.css?v=100">
+    <link rel="stylesheet" href="/static/css/style.css?v=101">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -257,6 +257,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
             <div class="modal-header">
                 <h2>🔌 Support-API – REST-Zugriffe</h2>
                 <div style="display:flex;align-items:center;gap:8px;">
+                <a href="/support-api" target="_blank" rel="noopener" title="Dokumentation als eigene, verlinkbare Seite öffnen (öffentlich abrufbar)"
+                   style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:600;font-size:0.82rem;cursor:pointer;line-height:1;text-decoration:none;">🔗 Als eigene Seite</a>
                 <button type="button" id="support-api-pdf" title="Als PDF speichern (an PDF-Drucker drucken)" aria-label="Als PDF drucken"
                         style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:600;font-size:0.82rem;cursor:pointer;line-height:1;">🖨️ PDF</button>
                 <button class="btn-icon" id="support-api-close" aria-label="Schließen">
@@ -294,7 +296,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>POST</code></td><td style="padding:6px 8px;"><code>/api/support/summarize</code></td><td style="padding:6px 8px;">KI-Zusammenfassung eines einzelnen Jira-Tickets – ODER Freitext mit Ticket-Key (z.&nbsp;B. <code>CRM-10550</code>) wird wie <code>/query</code> beantwortet</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/support/status</code></td><td style="padding:6px 8px;">Aktive Quellen + Maxima (Zeilen, Ticketanzahl)</td><td style="padding:6px 8px;">Token</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET/POST</code></td><td style="padding:6px 8px;"><code>/api/support/instructions</code></td><td style="padding:6px 8px;">Persönliche Anweisungen lesen/speichern (Markdown)</td><td style="padding:6px 8px;">Token</td></tr>
-                        <tr><td style="padding:6px 8px;"><code>GET/DELETE</code></td><td style="padding:6px 8px;"><code>/api/support/history</code></td><td style="padding:6px 8px;">Suchverlauf des Benutzers lesen/löschen</td><td style="padding:6px 8px;">Token</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET/DELETE</code></td><td style="padding:6px 8px;"><code>/api/support/history</code></td><td style="padding:6px 8px;">Suchverlauf des Benutzers lesen/löschen</td><td style="padding:6px 8px;">Token</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/phonenumber</code></td><td style="padding:6px 8px;">CRM-Kundennummer (<code>CRM-xxxxxx</code>) zu einer Telefonnummer ermitteln</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
+                        <tr><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/crm-number</code></td><td style="padding:6px 8px;">Alle Tickets zu einer dedizierten CRM-Kundennummer finden</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
                     </tbody>
                 </table>
                 </div>
@@ -351,9 +355,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_limit</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>ticket_count_default</code> (12)</td><td style="padding:6px 8px;">Max. Anzahl geladener Jira-Tickets, begrenzt auf 1 … <code>ticket_count_max</code> (Admin-Maximum, Standard 50).</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>summary_lines</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>summary_lines_max</code> (5)</td><td style="padding:6px 8px;">Max. Satzanzahl der KI-Gesamtzusammenfassung, begrenzt auf 2 … <code>summary_lines_max</code>. Nur wirksam bei <code>ai:true</code>.</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>prompt</code> <span style="color:var(--text-secondary);">(Alias <code>instruction</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;">–</td><td style="padding:6px 8px;">Ad-hoc-Anweisung nur für diesen Aufruf; wird zusätzlich zum Admin-Prompt und den persönlichen Anweisungen an die KI-Gesamtzusammenfassung gehängt (z.&nbsp;B. Fokus, Tonfall, Format). Nur wirksam bei <code>ai:true</code>.</td></tr>
-                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>lang</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"de"</code></td><td style="padding:6px 8px;">Sprache der KI-Zusammenfassung: <code>de</code> oder <code>en</code>.</td></tr>
-                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira</code> <span style="color:var(--text-secondary);">(veraltet)</span></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Rückwärtskompatibel – nur ausgewertet, wenn <b>weder</b> <code>jira_all</code> <b>noch</b> <code>jira_open</code> gesendet werden. Entspricht „Jira einbeziehen".</td></tr>
-                        <tr><td style="padding:6px 8px;"><code>open_only</code> <span style="color:var(--text-secondary);">(veraltet)</span></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Rückwärtskompatibel (nur ohne <code>jira_all</code>/<code>jira_open</code>): auf offene Tickets beschränken.</td></tr>
+                        <tr><td style="padding:6px 8px;"><code>lang</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"de"</code></td><td style="padding:6px 8px;">Sprache der KI-Zusammenfassung: <code>de</code> oder <code>en</code>.</td></tr>
                     </tbody>
                 </table>
                 </div>
@@ -434,6 +436,98 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <li><code>502</code> – KI-Zusammenfassung fehlgeschlagen (nur <code>/summarize</code>, Einzel-Ticket).</li>
                 </ul>
                 <p class="kb-hint" style="margin:8px 0 0;">Hinweis: <code>-k</code> (curl) akzeptiert das selbstsignierte Zertifikat – nur für Tests.</p>
+
+                <h3 style="margin:26px 0 6px;border-top:1px solid var(--border);padding-top:18px;">🔎 CRM-Lookups (Jira)</h3>
+                <p class="kb-hint" style="margin:0 0 6px;">Direkte Nachschlage-Endpunkte für die Anbindung von Telefonanlage/CTI oder
+                    Ticketsystem: aus einer <b>Telefonnummer</b> die zugehörige CRM-Kundennummer bestimmen bzw. zu einer
+                    <b>CRM-Kundennummer</b> alle Tickets abrufen. Beide sind <code>GET</code>-Aufrufe und akzeptieren
+                    Benutzer-Token <em>oder</em> externen API-Key. Setzt einen aktiven, konfigurierten Jira-Skill voraus.</p>
+
+                <h4 style="margin:16px 0 6px;">Beispiel 3 – CRM-Kundennummer zu einer Telefonnummer</h4>
+                <p class="kb-hint" style="margin:0 0 6px;">Sucht die Telefonnummer im Jira-<b>CRM-Objektschema</b> (Insight/Assets,
+                    Objektschema <code>CRM</code>, Standard-Schema-ID&nbsp;21) – konkret in den Telefon-Attributen der CRM-Objekte
+                    (<code>Zentrale Rufnummer</code>, <code>Telefonnummer</code>, <code>Mobil Nummer</code>, …). Der <b>Objekt-Key ist
+                    die CRM-Kundennummer</b> (<code>CRM-xxxxxx</code>), es werden also ausschließlich CRM-Einträge zurückgegeben.</p>
+                <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>curl -sk "https://DEIN-JARVIS-HOST/api/jira/phonenumber?phone=%2B4920562611" \
+  -H "X-API-Key: DEIN_API_KEY"</code></pre>
+                <p class="kb-hint" style="margin:6px 0 4px;">Die Nummer <code>+4920562611</code> wird zu reinen Ziffern-Varianten normalisiert
+                    (<code>+</code> = <code>%2B</code> in der URL): <code>4920562611</code> (voll international), <code>020562611</code>
+                    (national mit 0), <code>20562611</code> (ohne Vorwahl). Diese werden – von der längsten (eindeutigsten) zur kürzesten –
+                    per IQL <code>like</code> gegen die Telefon-Attribute geprüft; die erste Variante mit Treffern gewinnt.
+                    Telefonnummern liegen im CRM-Schema international/zusammenhängend (z.&nbsp;B. <code>+4920562611</code>).</p>
+                <p class="kb-hint" style="margin:6px 0 4px;">Die Treffer werden nach Objekttyp sortiert: <b>Organisationen zuerst</b>,
+                    dann Organisationen-Produktgruppen, dann Personen. Der erste Treffer (Feld <code>crm</code>) ist damit die
+                    Organisation selbst. Antwort (Namen hier anonymisiert):</p>
+                <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>{
+  "ok": true,
+  "phone": "+4920562611",
+  "crm": "CRM-66648",
+  "found": true,
+  "matches": [
+    { "key": "CRM-66648",  "name": "Muster Klinikum GmbH",   "type": "Organisationen" },
+    { "key": "CRM-421832", "name": "Muster Produktgruppe",    "type": "Organisationen Produktgruppen" },
+    { "key": "CRM-158352", "name": "Muster Ansprechpartner",  "type": "Personen" }
+  ],
+  "total": 8,
+  "variant": "4920562611"
+}</code></pre>
+                <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                    <thead>
+                        <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                            <th style="padding:6px 8px;">Parameter</th><th style="padding:6px 8px;">Typ</th>
+                            <th style="padding:6px 8px;">Default</th><th style="padding:6px 8px;">Beschreibung</th>
+                        </tr>
+                    </thead>
+                    <tbody style="color:var(--text-primary);">
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>phone</code> <span style="color:var(--text-secondary);">(Aliase <code>phonenumber</code>, <code>number</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">Die Telefonnummer (beliebige Schreibweise, z.&nbsp;B. <code>+49 151 123456</code>, <code>0151/123456</code>). In der URL muss <code>+</code> als <code>%2B</code> kodiert werden.</td></tr>
+                        <tr><td style="padding:6px 8px;"><code>limit</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>25</code></td><td style="padding:6px 8px;">Max. Anzahl zurückgegebener CRM-Objekte (1 … 50).</td></tr>
+                    </tbody>
+                </table>
+                </div>
+                <p class="kb-hint" style="margin:8px 0 0;">Antwort-Felder: <code>crm</code> (erste gefundene CRM-Kundennummer bzw. <code>null</code>,
+                    nach Priorisierung die Organisation), <code>found</code> (bool), <code>matches[]</code> (alle Treffer als
+                    <code>key</code>&nbsp;+&nbsp;<code>name</code>&nbsp;+&nbsp;<code>type</code> = Objekttyp), <code>total</code>
+                    (Anzahl passender CRM-Objekte), <code>variant</code> (die Nummern-Variante, die getroffen hat),
+                    <code>iql</code> (ausgeführte IQL-Abfrage). <b>Hinweis:</b> Teilen sich mehrere Kunden dieselbe Rufnummer
+                    (z.&nbsp;B. zentrale Nummer), werden alle zugehörigen CRM-Objekte gelistet. Schema-ID, geprüfte
+                    Telefon-Attribute und die Typ-Reihenfolge sind über die Jira-Skill-Konfiguration (<code>insight_schema_id</code> /
+                    <code>insight_phone_attrs</code> / <code>insight_type_priority</code>) anpassbar.</p>
+
+                <h4 style="margin:20px 0 6px;">Beispiel 4 – Alle Tickets zu einer CRM-Kundennummer</h4>
+                <p class="kb-hint" style="margin:0 0 6px;">Sucht exakt im Insight-Organisationsfeld und liefert damit <b>alle</b> dem
+                    Kunden zugeordneten Tickets (nicht nur Volltext-Treffer), neueste zuerst.</p>
+                <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>curl -sk "https://DEIN-JARVIS-HOST/api/jira/crm-number?crm=CRM-10550&limit=25" \
+  -H "X-API-Key: DEIN_API_KEY"</code></pre>
+                <p class="kb-hint" style="margin:6px 0 4px;">Antwort (gekürzt):</p>
+                <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>{
+  "ok": true,
+  "crm": "CRM-10550",
+  "total": 7,
+  "jql": "Organisation = \"CRM-10550\" ORDER BY updated DESC",
+  "results": [
+    { "key": "NXCIS-42", "summary": "Störung Drucker", "status": "Offen",
+      "type": "Bug", "priority": "Hoch", "assignee": "…", "link": "https://…/browse/NXCIS-42" }
+  ]
+}</code></pre>
+                <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                    <thead>
+                        <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                            <th style="padding:6px 8px;">Parameter</th><th style="padding:6px 8px;">Typ</th>
+                            <th style="padding:6px 8px;">Default</th><th style="padding:6px 8px;">Beschreibung</th>
+                        </tr>
+                    </thead>
+                    <tbody style="color:var(--text-primary);">
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>crm</code> <span style="color:var(--text-secondary);">(Aliase <code>crm_number</code>, <code>number</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">Die CRM-Kundennummer im Muster <code>CRM-xxxxxx</code> (z.&nbsp;B. <code>CRM-10550</code>). Ein anderes Format → <code>400</code>.</td></tr>
+                        <tr><td style="padding:6px 8px;"><code>limit</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>25</code></td><td style="padding:6px 8px;">Max. Anzahl zurückgegebener Tickets (1 … 50).</td></tr>
+                    </tbody>
+                </table>
+                </div>
+                <p class="kb-hint" style="margin:8px 0 0;">Antwort-Felder: <code>crm</code> (normalisierte Nummer), <code>total</code>
+                    (Jira-Gesamttreffer), <code>results[]</code> (Tickets mit <code>key</code>, <code>summary</code>,
+                    <code>status</code>, <code>type</code>, <code>priority</code>, <code>assignee</code>, <code>updated</code>, <code>link</code>),
+                    <code>jql</code>. Das Organisationsfeld ist über die Jira-Skill-Konfiguration (<code>org_field</code>) anpassbar.</p>
             </div>
         </div>
     </div>

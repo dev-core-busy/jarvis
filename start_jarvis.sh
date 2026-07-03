@@ -5,7 +5,18 @@ JARVIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$JARVIS_DIR"
 
 # 1. Display-Erkennung (Priorität: LightDM :1, dann :0, dann :10)
+# Beim Boot startet lightdm PARALLEL zu diesem Dienst. Ohne Warten landet x11vnc
+# dauerhaft auf dem leeren Xvfb :10 (-> schwarzer VNC-Bildschirm), obwohl der
+# echte Desktop Sekunden spaeter da ist. Daher: bis zu 60s auf :0/:1 warten,
+# solange ein Display-Manager aktiviert ist.
 if [ -z "$DISPLAY" ] || [ "$DISPLAY" == ":10" ]; then
+    if systemctl is-enabled lightdm >/dev/null 2>&1; then
+        for _i in $(seq 1 30); do
+            [ -S "/tmp/.X11-unix/X0" ] || [ -S "/tmp/.X11-unix/X1" ] && break
+            echo "Warte auf Display-Manager (:0/:1)... ($_i/30)"
+            sleep 2
+        done
+    fi
     if [ -f "/var/run/lightdm/root/:1" ] && [ -S "/tmp/.X11-unix/X1" ]; then
         export DISPLAY=:1
         export XAUTHORITY="/var/run/lightdm/root/:1"
@@ -78,6 +89,31 @@ if [ -f "backend/security.py" ]; then
     ./venv/bin/python -c "from backend.security import ensure_certificates; ensure_certificates()" 2>/dev/null || true
 fi
 
+# Selbstheilung: Laeuft x11vnc (nur) auf dem leeren Xvfb :10, obwohl lightdm
+# aktiviert ist, zieht dieser Hintergrund-Watcher auf das echte :0 um, sobald
+# dessen X-Socket verfuegbar ist (heilt Boot-Races und lightdm-Neustarts ohne
+# Service-Restart; bis ~10 Minuten).
+_vnc_upgrade_watcher() {
+    systemctl is-enabled lightdm >/dev/null 2>&1 || return 0
+    (
+        for _i in $(seq 1 150); do
+            sleep 4
+            [ -S "/tmp/.X11-unix/X0" ] || continue
+            pkill -x x11vnc 2>/dev/null; sleep 1
+            x11vnc -display :0 -auth guess -shared -forever -nopw -bg -quiet -rfbport 5900
+            sleep 2
+            if pgrep -x x11vnc >/dev/null; then
+                pkill -x Xvfb 2>/dev/null   # leeres Fallback-Display aufraeumen
+                echo "[VNC-Watcher] x11vnc auf :0 umgezogen."
+                exit 0
+            fi
+            # :0 noch nicht bereit -> zurueck auf :10, weiter warten
+            x11vnc -display :10 -rfbport 5900 -shared -forever -nopw -bg -quiet
+        done
+    ) &
+    disown 2>/dev/null || true
+}
+
 # 3. Starte x11vnc
 if ! pgrep -x "x11vnc" > /dev/null; then
     echo "Starte x11vnc für $DISPLAY..."
@@ -99,6 +135,10 @@ if ! pgrep -x "x11vnc" > /dev/null; then
         sleep 2
         openbox --sm-disable &
         x11vnc -display :10 -rfbport 5900 -shared -forever -nopw -bg -quiet
+        _vnc_upgrade_watcher
+    elif [ "$DISPLAY" == ":10" ]; then
+        # von vornherein auf Xvfb gelandet -> ebenfalls auf :0 lauern
+        _vnc_upgrade_watcher
     fi
 fi
 

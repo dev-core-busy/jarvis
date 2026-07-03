@@ -268,20 +268,36 @@ def _unlock_desktop_screen(target_user: str = "jarvis") -> None:
             line.split()[0] for line in who2.stdout.splitlines()
             if "(:0)" in line or "(:0." in line
         ]
-        # Wenn niemand oder nur lightdm auf :0 → Greeter zeigt → jarvis einloggen
+        # Wenn niemand oder nur lightdm auf :0 → Greeter zeigt → jarvis einloggen.
+        # dm-tool ist hier NUTZLOS (braucht XDG_SEAT_PATH und loggt nicht passwortlos
+        # ein) – stattdessen lightdm neu starten: der Autologin (Conf unten) feuert
+        # dann sicher. Da nur der Greeter laeuft, geht dabei keine Session verloren.
         if not display_users or all(u in ("lightdm", "root") for u in display_users):
-            print("[VNC] Greeter aktiv – setze Autologin auf jarvis und starte Session.", flush=True)
+            print("[VNC] Greeter aktiv – stelle Autologin sicher und starte lightdm neu.", flush=True)
             _AUTOLOGIN_CONF = "/etc/lightdm/lightdm.conf.d/50-jarvis-autologin.conf"
             try:
                 import os as _os
                 _os.makedirs(_os.path.dirname(_AUTOLOGIN_CONF), exist_ok=True)
                 with open(_AUTOLOGIN_CONF, "w") as _f:
-                    _f.write("[Seat:*]\nautologin-user=jarvis\nautologin-user-timeout=0\n")
+                    _f.write("[Seat:*]\nautologin-user=%s\nautologin-user-timeout=0\n" % target_user)
             except Exception as _e:
                 print(f"[VNC] Autologin-Datei schreiben fehlgeschlagen: {_e}", flush=True)
-            # dm-tool: jarvis-Session direkt starten (kein LightDM-Neustart noetig)
-            subprocess.run(["dm-tool", "switch-to-user", "jarvis"], capture_output=True, timeout=10)
-            print("[VNC] dm-tool switch-to-user jarvis ausgefuehrt.", flush=True)
+            subprocess.run(["systemctl", "restart", "lightdm"], capture_output=True, timeout=20)
+            # Auf die neue Session warten (Autologin braucht ein paar Sekunden) …
+            import time as _time
+            for _i in range(15):
+                _time.sleep(2)
+                _w = subprocess.run(["who"], capture_output=True, text=True, timeout=5)
+                if any(l.split()[0] == target_user and ("(:0)" in l or "seat0" in l)
+                       for l in _w.stdout.splitlines()):
+                    break
+            # … und x11vnc an den NEUEN X-Server binden (der alte haengt am toten X).
+            subprocess.run(["pkill", "-x", "x11vnc"], capture_output=True, timeout=5)
+            _time.sleep(1)
+            subprocess.run(["x11vnc", "-display", ":0", "-auth", "guess", "-shared",
+                            "-forever", "-nopw", "-bg", "-quiet", "-rfbport", "5900"],
+                           capture_output=True, timeout=15)
+            print("[VNC] lightdm neu gestartet, Autologin ausgeloest, x11vnc neu gebunden.", flush=True)
         else:
             print(f"[VNC] Bildschirmsperre aufgehoben (user={user}, uid={uid})", flush=True)
 

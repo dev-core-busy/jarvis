@@ -82,9 +82,10 @@ def phone_search_variants(phone: str) -> list[str]:
     if len(digits) < 5:
         return []
     variants = {digits}
-    if digits.startswith("00"):          # 0049… -> 49…
-        variants.add(digits[2:])
-    for cc in ("49", "43", "41"):        # DE/AT/CH: 49… -> 0… (national)
+    if digits.startswith("00"):          # 0049… -> 49… (VOR der CC-Pruefung normalisieren,
+        digits = digits[2:]              # sonst greift startswith(cc) nie)
+        variants.add(digits)
+    for cc in _insight_phone_ccs():      # Laendervorwahlen (konfigurierbar): 49… -> 0… (national)
         if digits.startswith(cc) and len(digits) > len(cc) + 3:
             variants.add("0" + digits[len(cc):])
             variants.add(digits[len(cc):])
@@ -108,6 +109,10 @@ _INSIGHT_PHONE_ATTRS_DEFAULT = [
 # dann Produktgruppen, danach Kontaktpersonen. Nicht gelistete Typen behalten ihre
 # Insight-Reihenfolge und landen hinter den priorisierten.
 _INSIGHT_TYPE_PRIORITY_DEFAULT = ["Organisationen", "Organisationen Produktgruppen"]
+# Laendervorwahlen, fuer die nationale Nummern-Varianten (fuehrende 0 / ohne Vorwahl)
+# gebildet werden. Default DACH + ES (spanisches Schema NXSPCRM existiert); per
+# Skill-Config 'insight_phone_ccs' erweiterbar.
+_INSIGHT_PHONE_CCS_DEFAULT = ["49", "43", "41", "34"]
 
 
 def _insight_api_base() -> str:
@@ -135,6 +140,11 @@ def _insight_list_cfg(key: str, default: list[str]) -> list[str]:
 
 def _insight_phone_attrs() -> list[str]:
     return _insight_list_cfg("insight_phone_attrs", _INSIGHT_PHONE_ATTRS_DEFAULT)
+
+
+def _insight_phone_ccs() -> list[str]:
+    return [re.sub(r"\D", "", c) for c in
+            _insight_list_cfg("insight_phone_ccs", _INSIGHT_PHONE_CCS_DEFAULT) if re.sub(r"\D", "", c)]
 
 
 def _insight_type_priority() -> list[str]:
@@ -244,19 +254,22 @@ class JiraClient:
             "iql": iql, "resultPerPage": limit, "page": page,
             "includeAttributes": "true", "includeTypeAttributes": "true"})
 
+    _EMPTY_PHONE_RESULT = {"crm": None, "matches": [], "total": 0, "iql": "", "variant": None}
+
     def find_crm_by_phone(self, phone: str, limit: int = 25) -> dict:
         """Ermittelt die CRM-Kundennummer(n) (Objekt-Key 'CRM-xxxxxx') zu einer
-        Telefonnummer ueber das Insight-CRM-Objektschema. Sucht die Nummer in den
-        Telefon-Attributen der CRM-Objekte (dort international/zusammenhaengend
-        gespeichert). Probiert die Nummern-Varianten von der praezisesten (voll
-        international) zur kuerzesten und nimmt die erste, die Treffer liefert –
-        so gewinnt der laengste, eindeutigste Match. Die Treffer werden nach
-        Objekttyp priorisiert (Organisationen zuerst, dann Produktgruppen, dann
-        Personen; konfigurierbar via ``insight_type_priority``). Liefert
-        {crm, matches:[{key, name, type}], total, iql, variant}."""
+        Telefonnummer ueber das Insight-CRM-Objektschema. Alle Nummern-Varianten
+        (international/national/ohne Vorwahl) werden in EINER OR-verknuepften
+        IQL-Abfrage gesucht (ein HTTP-Roundtrip). Da IQL ``like`` ein Substring-
+        Match ist, wird jeder Treffer nachvalidiert: eine seiner Telefon-Attribut-
+        Werte muss – auf Ziffern normalisiert – auf eine der Varianten ENDEN
+        (verhindert Fehltreffer, bei denen die Ziffernfolge nur mitten in einer
+        fremden Nummer vorkommt). Treffer werden nach Objekttyp priorisiert
+        (Organisationen zuerst; konfigurierbar via ``insight_type_priority``).
+        Liefert {crm, matches:[{key, name, type}], total, iql, variant}."""
         variants = phone_search_variants(phone)
         if not variants:
-            return {"crm": None, "matches": [], "total": 0, "iql": "", "variant": None}
+            return dict(self._EMPTY_PHONE_RESULT)
         attrs = _insight_phone_attrs()
         prio = _insight_type_priority()
 
@@ -264,18 +277,50 @@ class JiraClient:
             t = m.get("type") or ""
             return prio.index(t) if t in prio else len(prio)
 
-        for v in variants:
-            iql = " OR ".join('"%s" like "%s"' % (_iql_str(a), _iql_str(v)) for a in attrs)
-            data = self.insight_search(iql, limit=limit)
-            entries = data.get("objectEntries") or []
-            if entries:
-                matches = [{"key": o.get("objectKey"), "name": o.get("label"),
-                            "type": (o.get("objectType") or {}).get("name")} for o in entries]
-                matches.sort(key=_rank)  # stabil -> Insight-Reihenfolge innerhalb gleicher Prioritaet
-                return {"crm": matches[0]["key"] if matches else None, "matches": matches,
-                        "total": data.get("totalFilterCount", len(matches)),
-                        "iql": iql, "variant": v}
-        return {"crm": None, "matches": [], "total": 0, "iql": "", "variant": None}
+        iql = " OR ".join('"%s" like "%s"' % (_iql_str(a), _iql_str(v))
+                          for a in attrs for v in variants)
+        data = self.insight_search(iql, limit=limit)
+        entries = data.get("objectEntries") or []
+        if not entries:
+            return dict(self._EMPTY_PHONE_RESULT, iql=iql)
+
+        # Attribut-ID -> Anzeigename (aus expand der Typ-Attribute), um die
+        # Telefon-Attributwerte der Treffer fuer die Nachvalidierung zu lesen.
+        attr_names = {ta.get("id"): ta.get("name")
+                      for ta in (data.get("objectTypeAttributes") or [])}
+        phone_attr_set = set(attrs)
+
+        def _phone_digits(obj: dict):
+            """Alle Telefon-Attributwerte eines Treffers als Ziffernfolgen."""
+            for av in obj.get("attributes") or []:
+                if attr_names.get(av.get("objectTypeAttributeId")) in phone_attr_set:
+                    for val in av.get("objectAttributeValues") or []:
+                        d = re.sub(r"\D", "", str(val.get("displayValue") or val.get("value") or ""))
+                        if d:
+                            yield d
+
+        def _matched_variant(obj: dict) -> str | None:
+            """Laengste Variante, auf die eine gespeicherte Nummer endet, sonst None."""
+            nums = list(_phone_digits(obj))
+            for v in variants:  # laengste zuerst
+                if any(n.endswith(v) for n in nums):
+                    return v
+            return None
+
+        matches, best_variant = [], None
+        for o in entries:
+            v = _matched_variant(o)
+            if v is None:
+                continue  # reiner Substring-Fehltreffer (Ziffernfolge mitten in fremder Nummer)
+            matches.append({"key": o.get("objectKey"), "name": o.get("label"),
+                            "type": (o.get("objectType") or {}).get("name")})
+            if best_variant is None or len(v) > len(best_variant):
+                best_variant = v
+        if not matches:
+            return dict(self._EMPTY_PHONE_RESULT, iql=iql)
+        matches.sort(key=_rank)  # stabil -> Insight-Reihenfolge innerhalb gleicher Prioritaet
+        return {"crm": matches[0]["key"], "matches": matches,
+                "total": len(matches), "iql": iql, "variant": best_variant}
 
     def get_issue(self, key: str) -> dict:
         """Einzelnes Issue inkl. Beschreibung und Kommentaren.

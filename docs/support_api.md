@@ -34,9 +34,13 @@ oder `agent_api_key` in `settings.json`). Ohne gültige Auth: `401`.
 |------|-----|---------|--------------|
 | `text` | string | – | **Pflicht.** Anfrage/Kontext (mehrzeilig erlaubt). Alias: `query`. |
 | `rag` | bool | `true` | Wissensdatenbank (RAG) durchsuchen. |
-| `jira` | bool | `true` | Jira-Tickets durchsuchen (nur wenn Jira-Skill aktiv). |
+| `jira_all` | bool | `false` | ALLE Jira-Tickets (offen + geschlossen) durchsuchen (nur wenn Jira-Skill aktiv). |
+| `jira_open` | bool | `true`* | Nur OFFENE Jira-Tickets durchsuchen. *Default gilt, wenn weder `jira_all` noch `jira_open` gesendet werden; `{"jira_all":false,"jira_open":false}` deaktiviert Jira. Sind beide `true`, gewinnt `jira_all`. |
 | `confluence` | bool | `true` | Confluence-Seiten durchsuchen (nur wenn Confluence-Skill aktiv). |
 | `ai` | bool | `true` | LLM-Kurzzusammenfassung erzeugen (`false` = schneller, kein LLM-Aufruf). |
+
+> **Breaking Change:** Die frueheren Keys `jira` und `open_only` werden NICHT mehr
+> ausgewertet – stattdessen `jira_all`/`jira_open` verwenden (s. o.).
 
 Pro Anfrage frei kombinierbar – z. B. nur Jira (`{"rag":false,"confluence":false}`).
 Die im Skill konfigurierte Confluence-White-/Blacklist wird automatisch angewandt.
@@ -87,7 +91,7 @@ curl -sk -X POST "https://jarvis.example.com/api/support/query" \
   -d '{
         "text": "Wie werden KIM eArztbriefe versendet?",
         "rag": true,
-        "jira": true,
+        "jira_open": true,
         "confluence": true,
         "ai": true
       }'
@@ -101,19 +105,21 @@ import requests
 JARVIS = "https://jarvis.example.com"
 API_KEY = "…"   # AGENT_API_KEY
 
-def support_query(text, rag=True, jira=True, confluence=True, ai=True):
+def support_query(text, rag=True, jira_all=False, jira_open=True,
+                  confluence=True, ai=True):
     r = requests.post(
         f"{JARVIS}/api/support/query",
         headers={"X-API-Key": API_KEY},
-        json={"text": text, "rag": rag, "jira": jira,
-              "confluence": confluence, "ai": ai},
+        json={"text": text, "rag": rag, "jira_all": jira_all,
+              "jira_open": jira_open, "confluence": confluence, "ai": ai},
         timeout=60,
         verify=False,   # self-signed Zertifikat; in Produktion CA hinterlegen
     )
     r.raise_for_status()
     return r.json()
 
-res = support_query("KIM eArztbrief Versand", jira=False)  # nur RAG + Confluence
+# nur RAG + Confluence (Jira aus: beide Jira-Keys false)
+res = support_query("KIM eArztbrief Versand", jira_all=False, jira_open=False)
 print("Zusammenfassung:", res.get("ai_summary"))
 for b in res["blocks"]:
     print(f"[{b['source']}] {b['score']}% {b['title']} -> {b.get('link') or b.get('doc_name')}")

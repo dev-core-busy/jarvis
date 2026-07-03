@@ -1522,13 +1522,15 @@ async def login(request: Request):
 
     _auth_details: dict = {}
     if not authenticate_linux_user(username, password, _auth_details):
-        _record_login_attempt(client_ip)
-        # Anmeldedaten korrekt, aber keine Berechtigung (z.B. nicht in AD-Whitelist)
+        # Anmeldedaten korrekt, aber keine Berechtigung (z.B. nicht in AD-Whitelist):
+        # KEIN Brute-Force-Fehlversuch – sonst sperrt eine berechtigungslose, aber
+        # passwortrichtige Anmeldung die Client-IP (hinter NAT auch fuer Dritte).
         if _auth_details.get("reason") == "not_authorized":
             return JSONResponse(
                 {"success": False, "error": "Keine Anmeldeberechtigung"},
                 status_code=403,
             )
+        _record_login_attempt(client_ip)
         return JSONResponse(
             {"success": False, "error": "Benutzername oder Passwort falsch"},
             status_code=401,
@@ -4251,9 +4253,9 @@ async def _support_run_query(body: dict, user: str) -> dict:
     # Jira-Modi ueber EINDEUTIGE Keys: ``jira_all`` = 'alle Jira Tickets'
     # (offen + geschlossen), ``jira_open`` = 'nur offene Jira Tickets'. Sind beide
     # gesetzt, gewinnt 'alle'. Wird KEIN Modus angegeben, gilt der Standard
-    # 'nur offene Tickets'.
+    # 'nur offene Tickets' (Default von jira_open haengt daher an 'jira_all fehlt').
     jira_all = bool(body.get("jira_all"))
-    jira_open = bool(body.get("jira_open")) if ("jira_all" in body or "jira_open" in body) else True
+    jira_open = bool(body.get("jira_open", "jira_all" not in body))
     use_jira = jira_all or jira_open
     open_only = jira_open and not jira_all
     lang = (body.get("lang") or "de")

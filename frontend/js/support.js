@@ -285,6 +285,13 @@
             var el = $(id);
             if (el) el.addEventListener('change', renderBlocks);
         });
+        // Volltext-Live-Filter (rechts in der Ergebniszeile): tippt der Nutzer, werden
+        // die angezeigten Treffer sofort eingegrenzt; Leeren zeigt wieder alle.
+        var ftEl = $('sup-filter-text');
+        if (ftEl) {
+            ftEl.addEventListener('input', renderBlocks);
+            ftEl.addEventListener('search', renderBlocks);  // natives ×-Löschen (type=search)
+        }
         // Verlauf (benutzerabhaengig)
         $('sup-hist-btn').addEventListener('click', function (e) {
             e.stopPropagation();
@@ -583,6 +590,7 @@
 
     function render(d) {
         _lastData = d;
+        var ftEl = $('sup-filter-text'); if (ftEl) ftEl.value = '';  // neue Suche -> Filter leeren
         if (d.jira_base) _jiraBase = d.jira_base;   // fuer Ticket-Key-Links in Texten
         // Antwortzeilen: Nutzerwert, begrenzt auf das Admin-Maximum (Anzeige-Kappung)
         var rMax = parseInt(d.result_lines_max || d.result_lines, 10) || 2;
@@ -651,9 +659,22 @@
         var sort = $('sup-f-sort') ? $('sup-f-sort').value : 'score';
         var limit = parseInt(($('sup-f-limit') ? $('sup-f-limit').value : '0'), 10) || 0;
 
+        // Volltext-Live-Filter: Suchfeld nur bei vorhandenen Treffern zeigen; leerer
+        // Text = alle. Mehrere Wörter werden UND-verknüpft (jedes muss vorkommen).
+        var ftEl = $('sup-filter-text');
+        if (ftEl) ftEl.classList.toggle('hidden', !all.length);
+        var terms = (ftEl ? ftEl.value : '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+
         var list = all.filter(function (b) {
             if (src && b.source !== src) return false;
             if (minRel && b.score < minRel) return false;
+            if (terms.length) {
+                var hay = [b.title, b.summary, b.key, b.source_label, b.doc, b.doc_name,
+                           b.full_text, b.source].join(' ').toLowerCase();
+                for (var i = 0; i < terms.length; i++) {
+                    if (hay.indexOf(terms[i]) === -1) return false;
+                }
+            }
             return true;
         });
         if (sort === 'source') list.sort(function (a, b) {

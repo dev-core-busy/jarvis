@@ -158,6 +158,13 @@
             <div class="pt-card-title">Support-Assistent</div>
             <div class="pt-card-desc">Antworten aus Wissen, Jira und Confluence.</div>
         </a>
+        <a class="pt-card" href="/supportagent">
+            <div class="pt-card-icon" style="background:transparent;padding:0;overflow:hidden;">
+                <img src="/static/jira_agent_symbol.png" alt="" style="width:44px;height:44px;object-fit:contain;">
+            </div>
+            <div class="pt-card-title">Support-Agent</div>
+            <div class="pt-card-desc">Windows-Anwendung für Nicht-Swyx-Systeme: Spracherkennung + Jira-Support-Assistent zum Download.</div>
+        </a>
     </div>
 
     <!-- Marken-Animation (Branding-Skill): wird unter der Bereichsauswahl
@@ -271,8 +278,19 @@ sudo update-ca-certificates</code></pre>
     var H = { 'Authorization': 'Bearer ' + t };
 
     fetch('/api/me', { headers: H }).then(function(r){
-        // Sicherheitsschicht: gesperrtes Konto -> Sperr-Bildschirm statt Portal
-        if (r.status === 403) { if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked(); return null; }
+        // Sicherheitsschicht: gesperrtes Konto -> Sperr-Bildschirm statt Portal.
+        // Entzogene Anmeldeberechtigung (NOT_AUTHORIZED) -> abmelden + zur Loginseite.
+        if (r.status === 403) {
+            return r.json().catch(function(){ return {}; }).then(function(e){
+                if (e && e.detail === 'ACCOUNT_BLOCKED') {
+                    if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked();
+                } else {
+                    KEYS.forEach(function(k){ localStorage.removeItem(k); });
+                    window.location.replace('/');
+                }
+                return null;
+            });
+        }
         return r.ok ? r.json() : null;
     }).then(function(d){
         if (!d) return;
@@ -304,7 +322,15 @@ sudo update-ca-certificates</code></pre>
             var reachable=(d.status==='ok'||d.status==='degraded');
             dot.className='pt-status-dot '+(reachable?'connected':'disconnected');
             var name=d.profile_name?' – '+d.profile_name:'';
-            dot.title=(d.status==='ok'?'LLM erreichbar':d.status==='degraded'?'LLM erreichbar (Modell fehlt)':'LLM nicht erreichbar')+name;
+            var base=(d.status==='ok'?'LLM erreichbar':d.status==='degraded'?'LLM erreichbar (Modell fehlt)':'LLM nicht erreichbar');
+            // Zeitpunkt des letzten Zustandswechsels anzeigen (seit wann erreichbar/nicht)
+            var since='';
+            if(d.since){
+                var dt=new Date(d.since);
+                var s=dt.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+                since='\n'+(reachable?'erreichbar seit ':'nicht erreichbar seit ')+s;
+            }
+            dot.title=base+name+since;
         }).catch(function(){ dot.className='pt-status-dot disconnected'; dot.title='LLM nicht erreichbar'; });
     }
     pollLlm(); setInterval(pollLlm, 30000);

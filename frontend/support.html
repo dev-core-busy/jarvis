@@ -187,6 +187,15 @@
         .sup-meta { color: var(--text-secondary); font-size: 0.84rem; margin: 18px 2px 12px; }
         .sup-meta-more { color: var(--accent-hover); cursor: pointer; text-decoration: none; font-weight: 600; }
         .sup-meta-more:hover { text-decoration: underline; }
+        /* Live-Volltextfilter am rechten Rand der Ergebniszeile */
+        .sup-filter-text {
+            margin-left: auto; flex: 0 0 auto; min-width: 160px; max-width: 260px;
+            background: rgba(var(--fg-rgb), .05); border: 1px solid var(--border);
+            color: var(--text-primary); border-radius: 8px; padding: 6px 10px;
+            font-size: 0.82rem; font-family: var(--font-body);
+        }
+        .sup-filter-text:focus { outline: none; border-color: var(--accent-hover); }
+        .sup-filter-text::placeholder { color: var(--text-muted); }
 
         .sup-ai-card {
             background: var(--bg-secondary); border: 1px solid rgba(var(--accent-rgb), .35);
@@ -503,6 +512,9 @@
         <div class="sup-meta-row">
             <div id="sup-meta" class="sup-meta hidden"></div>
             <button class="sup-btn-cancel hidden" id="sup-cancel-btn" type="button" data-i18n="sup.cancel">Abbrechen</button>
+            <input type="search" id="sup-filter-text" class="sup-filter-text hidden" autocomplete="off"
+                   data-i18n-placeholder="sup.filter_ph" placeholder="Ergebnisse filtern …"
+                   data-i18n-title="sup.filter_title" title="Angezeigte Treffer nach eingegebenem Text filtern (Volltext). Leeren zeigt wieder alle.">
         </div>
         <div id="sup-results"></div>
     </div>
@@ -545,11 +557,11 @@
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=45"></script>
+<script src="/static/js/i18n.js?v=46"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/issues.js?v=3"></script>
 <script src="/static/js/chatlib.js?v=8"></script>
-<script src="/static/js/support.js?v=38"></script>
+<script src="/static/js/support.js?v=39"></script>
 </body>
 </html>

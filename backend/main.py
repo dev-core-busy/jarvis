@@ -458,6 +458,36 @@ def _norm_login(name: str) -> str:
     return (name or "").split("@")[0].split("\\")[-1].strip().lower()
 
 
+def _login_still_allowed(username: str) -> bool:
+    """Prueft, ob ein BEREITS angemeldeter Benutzer WEITERHIN anmeldeberechtigt ist.
+
+    Wird pro Request / WS-Nachricht ausgewertet (analog security_guard.is_blocked),
+    damit ein Entzug der Anmeldeberechtigung SOFORT greift – nicht erst nach dem
+    naechsten Login. Der Token selbst bleibt HMAC-stateless gueltig; statt einer
+    Token-Sperrliste wird die Berechtigung bei jedem Zugriff neu gegen die aktuelle
+    Konfiguration geprueft.
+
+    Grenzen: rein GRUPPEN-basierte AD-Freigaben lassen sich ohne aktiven LDAP-Bind
+    (= ohne das Benutzerpasswort) nicht live pruefen und bleiben bis zum Abmelden
+    bestehen. Die AD-Benutzer-Whitelist (ad_allowed_users) und ALLOWED_USERS werden
+    dagegen sofort durchgesetzt."""
+    if username in ALLOWED_USERS:
+        return True
+    ad_srv = config.get_setting("ad_server", "")
+    ad_dom = config.get_setting("ad_domain", "")
+    if not (ad_srv and ad_dom):
+        # Kein LDAP und kein lokaler User → keine gueltige Berechtigungsgrundlage mehr
+        return False
+    allowed_users_raw = config.get_setting("ad_allowed_users", "")
+    if allowed_users_raw.strip():
+        # Benutzer-Whitelist konfiguriert → Mitgliedschaft ist allein entscheidend
+        # (gleiche Logik wie _ad_user_allowed beim Login).
+        allowed = {_norm_login(u) for u in allowed_users_raw.split(",") if u.strip()}
+        return _norm_login(username) in allowed
+    # Nur Gruppen-Filter oder keine Einschraenkung → Login-Entscheidung bleibt bestehen
+    return True
+
+
 async def require_auth(request: Request) -> str:
     """FastAPI Dependency: Prueft Bearer-Token und gibt Username zurueck.
     Sperrt zusaetzlich den lokalen jarvis-User, solange das Erst-Kennwort nicht
@@ -472,6 +502,9 @@ async def require_auth(request: Request) -> str:
     # /api/security/my-block, die diese Dependency NICHT nutzen).
     if security_guard.is_blocked(username):
         raise HTTPException(status_code=403, detail="ACCOUNT_BLOCKED")
+    # Anmeldeberechtigung laufend pruefen: Entzug greift sofort, nicht erst beim Login.
+    if not _login_still_allowed(username):
+        raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
     return username
 
 
@@ -487,6 +520,8 @@ async def require_auth_or_agent(request: Request) -> str:
             raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
         if security_guard.is_blocked(username):
             raise HTTPException(status_code=403, detail="ACCOUNT_BLOCKED")
+        if not _login_still_allowed(username):
+            raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
         return username
     if _verify_agent_api_key(request):
         return "api"
@@ -514,6 +549,8 @@ async def require_local_auth(request: Request) -> str:
         raise HTTPException(status_code=403, detail="Nur Administratoren dürfen diese Aktion ausführen (Sicherheit → LDAP → Administratoren).")
     if _user_must_change(username):
         raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
+    if not _login_still_allowed(username):
+        raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
     return username
 
 
@@ -572,6 +609,8 @@ async def require_auth_or_query(request: Request) -> str:
             raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
         if security_guard.is_blocked(username):
             raise HTTPException(status_code=403, detail="ACCOUNT_BLOCKED")
+        if not _login_still_allowed(username):
+            raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
         return username
     # Agent-API-Key: Header (X-API-Key/Bearer) ODER ?token=<key>
     if _verify_agent_api_key(request) or _is_valid_agent_key(request.query_params.get("token", "")):
@@ -832,8 +871,13 @@ def _user_is_admin(user: str) -> bool:
     return _admin_access_cache.get(plain, False)
 
 
-def authenticate_linux_user(username: str, password: str) -> bool:
-    """Authentifiziert einen Benutzer – erst PAM/lokal, dann AD/LDAP (wenn konfiguriert)."""
+def authenticate_linux_user(username: str, password: str, details: dict | None = None) -> bool:
+    """Authentifiziert einen Benutzer – erst PAM/lokal, dann AD/LDAP (wenn konfiguriert).
+
+    ``details`` (optional): Dict, das bei Fehlschlag den Grund erhaelt. Aktuell:
+    ``reason='not_authorized'``, wenn die Anmeldedaten korrekt sind, der Benutzer
+    aber keine Zugriffsberechtigung hat (z.B. nicht in der AD-Whitelist). Damit
+    kann der Aufrufer 'Keine Anmeldeberechtigung' statt 'Passwort falsch' melden."""
 
     # ─── 1. Lokale Authentifizierung (PAM / Docker) – immer zuerst ───
     if username in ALLOWED_USERS:
@@ -899,6 +943,9 @@ def authenticate_linux_user(username: str, password: str) -> bool:
                     return True
                 else:
                     print(f"[AUTH] AD-Login verweigert (Whitelist): {bind_user}", flush=True)
+                    # Anmeldedaten korrekt, aber keine Zugriffsberechtigung
+                    if details is not None:
+                        details["reason"] = "not_authorized"
                     return False
             else:
                 _desc = conn.result.get('description', 'ungueltige Anmeldedaten')
@@ -1122,6 +1169,18 @@ async def index():
     )
 
 
+@app.get("/support-api", response_class=HTMLResponse)
+async def support_api_doc():
+    """Oeffentliche, dauerhaft abrufbare REST-Dokumentation der Support-/CRM-API
+    (gleiche Inhalte wie das Hilfe-Modal unter Einstellungen -> Support). Bewusst
+    ohne Auth, damit externe Integratoren (Ticketsystem/CTI) sie verlinken koennen –
+    enthaelt nur generische Platzhalter (DEIN-JARVIS-HOST/DEIN_API_KEY), keine Secrets."""
+    f = FRONTEND_DIR / "support-api.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Dokumentation nicht gefunden</h1>", status_code=404)
+    return HTMLResponse(content=f.read_text(encoding="utf-8"))
+
+
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page():
     """Chat-UI ausliefern (separater Web-Zugang)."""
@@ -1146,6 +1205,19 @@ async def userchat_page():
 async def portal_page():
     """Portal-/Startseite fuer Nicht-Admins (Chat / Benutzer-Chat / Support)."""
     f = FRONTEND_DIR / "portal.html"
+    return HTMLResponse(
+        content=f.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+@app.get("/supportagent", response_class=HTMLResponse)
+async def supportagent_page():
+    """Info-/Download-Seite fuer den Support-Agent (Windows-Anwendung fuer
+    Nicht-Swyx-Systeme, STT-Support-Assistent). Erklaerung + Release-Download-Link."""
+    f = FRONTEND_DIR / "supportagent.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
     return HTMLResponse(
         content=f.read_text(encoding="utf-8"),
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
@@ -1193,6 +1265,11 @@ async def userchat_ws(ws: WebSocket):
         # Sicherheitsschicht: gesperrtes Konto darf auch den Benutzer-Chat nicht nutzen
         if security_guard.is_blocked(username):
             await ws.send_json({"type": "security_blocked", "message": "Konto wegen eines Sicherheitsverstosses gesperrt. Bitte an einen lokalen Administrator wenden."})
+            await ws.close()
+            return
+        # Anmeldeberechtigung entzogen → Benutzer-Chat verwehren
+        if not _login_still_allowed(username):
+            await ws.send_json({"type": "session_invalid", "message": "Keine Anmeldeberechtigung mehr – bitte neu anmelden."})
             await ws.close()
             return
 
@@ -1439,12 +1516,19 @@ async def login(request: Request):
         _record_login_attempt(client_ip)
         print(f"[AUTH] Anmeldung verweigert (kein LDAP, nicht in ALLOWED_USERS): {username}", flush=True)
         return JSONResponse(
-            {"success": False, "error": "Benutzername oder Passwort falsch"},
-            status_code=401,
+            {"success": False, "error": "Keine Anmeldeberechtigung"},
+            status_code=403,
         )
 
-    if not authenticate_linux_user(username, password):
+    _auth_details: dict = {}
+    if not authenticate_linux_user(username, password, _auth_details):
         _record_login_attempt(client_ip)
+        # Anmeldedaten korrekt, aber keine Berechtigung (z.B. nicht in AD-Whitelist)
+        if _auth_details.get("reason") == "not_authorized":
+            return JSONResponse(
+                {"success": False, "error": "Keine Anmeldeberechtigung"},
+                status_code=403,
+            )
         return JSONResponse(
             {"success": False, "error": "Benutzername oder Passwort falsch"},
             status_code=401,
@@ -2882,13 +2966,30 @@ async def test_saved_profile_connection(profile_id: str, user: str = Depends(req
     return JSONResponse(result)
 
 
+# LLM-Erreichbarkeit: seit wann der aktuelle Zustand (erreichbar/nicht) besteht.
+# Wird bei jeder Statusabfrage aktualisiert – so kann die Status-Pill anzeigen,
+# seit wann das LLM nicht bzw. wieder erreichbar ist. In-Memory (Reset bei Neustart).
+_llm_reach_state: dict = {"reachable": None, "since": 0.0}
+
+
+def _track_llm_reach(reachable: bool) -> int:
+    """Merkt sich den Zeitpunkt des letzten Erreichbarkeits-Wechsels.
+    Rueckgabe: Epoch-Millisekunden, seit denen der aktuelle Zustand besteht."""
+    if _llm_reach_state["reachable"] != reachable:
+        _llm_reach_state["reachable"] = reachable
+        _llm_reach_state["since"] = time.time()
+    return int(_llm_reach_state["since"] * 1000)
+
+
 @app.get("/api/llm/active-status")
 async def llm_active_status(user: str = Depends(require_auth)):
     """Erreichbarkeit des AKTIVEN LLM-Profils – fuer die Verbindungsstatus-Pill.
-    status: ok (erreichbar) | degraded (erreichbar, Modell fehlt) | down (nicht erreichbar)."""
+    status: ok (erreichbar) | degraded (erreichbar, Modell fehlt) | down (nicht erreichbar).
+    ``reachable``/``since`` (Epoch-ms): seit wann der aktuelle Zustand besteht."""
     prof = config.active_profile
     if not prof:
-        return JSONResponse({"success": False, "status": "down", "error": "Kein aktives Profil"})
+        return JSONResponse({"success": False, "status": "down", "error": "Kein aktives Profil",
+                             "reachable": False, "since": _track_llm_reach(False)})
     result = await _probe_llm_connection(
         provider=prof.get("provider", ""),
         api_url=prof.get("api_url", ""),
@@ -2902,6 +3003,9 @@ async def llm_active_status(user: str = Depends(require_auth)):
     else:
         result["status"] = "down"
     result["profile_name"] = prof.get("name", "")
+    reachable = result["status"] in ("ok", "degraded")
+    result["reachable"] = reachable
+    result["since"] = _track_llm_reach(reachable)
     return JSONResponse(result)
 
 
@@ -3600,6 +3704,66 @@ async def jira_issue_api(key: str = "", user: str = Depends(require_auth)):
         return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
 
 
+@app.get("/api/jira/phonenumber")
+async def jira_phonenumber_api(phone: str = "", phonenumber: str = "", number: str = "",
+                               limit: int = 25, user: str = Depends(require_auth_or_agent)):
+    """Ermittelt die CRM-Kundennummer(n) (CRM-xxxxxx) zu einer Telefonnummer über das
+    Jira-Insight-CRM-Objektschema (Objekt-Key = CRM-Nummer). Sucht die Nummer in den
+    Telefon-Attributen der CRM-Objekte. Parameter ``phone`` (Aliase ``phonenumber``/
+    ``number``). Auth: Benutzer-Token ODER externer API-Key."""
+    from backend.jira_client import JiraError
+    c = _jira_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
+    ph = (phone or phonenumber or number or "").strip()
+    if not ph:
+        return JSONResponse({"ok": False, "error": "phone fehlt."}, status_code=400)
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 25
+    try:
+        res = await asyncio.to_thread(c.find_crm_by_phone, ph, limit)
+    except JiraError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+    return JSONResponse({"ok": True, "phone": ph, "crm": res.get("crm"),
+                         "found": bool(res.get("crm")), "matches": res.get("matches", []),
+                         "total": res.get("total", 0), "iql": res.get("iql", ""),
+                         "variant": res.get("variant")})
+
+
+@app.get("/api/jira/crm-number")
+async def jira_crm_number_api(crm: str = "", crm_number: str = "", number: str = "",
+                              limit: int = 25, user: str = Depends(require_auth_or_agent)):
+    """Findet alle Jira-Tickets, die einer dedizierten CRM-Kundennummer (CRM-xxxxxx)
+    zugeordnet sind. Sucht exakt im Insight-Organisationsfeld (findet ALLE Tickets des
+    Kunden – nicht nur Volltext-Treffer). Parameter ``crm`` (Aliase ``crm_number``/
+    ``number``), z.B. ``CRM-10550``. Auth: Benutzer-Token ODER externer API-Key."""
+    from backend.jira_client import JiraError, crm_org_clause, issue_brief
+    c = _jira_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
+    raw = (crm or crm_number or number or "").strip()
+    if not raw:
+        return JSONResponse({"ok": False, "error": "crm fehlt."}, status_code=400)
+    org = crm_org_clause(raw)
+    if not org:
+        return JSONResponse({"ok": False, "error": "Keine gueltige CRM-Nummer (erwartet z.B. 'CRM-10550')."},
+                            status_code=400)
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 25
+    jql = org + " ORDER BY updated DESC"
+    try:
+        data = await asyncio.to_thread(c.search, jql, limit)
+    except JiraError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e), "jql": jql})
+    items = [issue_brief(it, c.base) for it in data.get("issues", [])]
+    return JSONResponse({"ok": True, "crm": raw.upper(), "total": data.get("total", len(items)),
+                         "jql": jql, "results": items})
+
+
 # ─── Support-Assistent (/support) ────────────────────────────────────
 
 def _skill_active(name: str) -> bool:
@@ -4045,8 +4209,8 @@ async def support_query(request: Request):
     Jira-Quellen ueber eindeutige Keys steuern:
     - ``jira_all``  (bool): 'alle Jira Tickets' (offen + geschlossen)
     - ``jira_open`` (bool): 'nur offene Jira Tickets'
-    Sind beide gesetzt, gewinnt 'alle'. (Alte Keys ``jira``/``open_only`` werden aus
-    Rueckwaertskompatibilitaet weiterhin akzeptiert, falls die neuen fehlen.)
+    Sind beide gesetzt, gewinnt 'alle'. Wird KEIN Modus angegeben, gilt der Standard
+    'nur offene Tickets'.
     Enthaelt ``text`` einen Vorgangs-/CRM-Key (z.B. 'CRM-10550'), wird Jira in jedem
     Fall konsultiert.
 
@@ -4086,15 +4250,12 @@ async def _support_run_query(body: dict, user: str) -> dict:
     use_ai = body.get("ai", True)
     # Jira-Modi ueber EINDEUTIGE Keys: ``jira_all`` = 'alle Jira Tickets'
     # (offen + geschlossen), ``jira_open`` = 'nur offene Jira Tickets'. Sind beide
-    # gesetzt, gewinnt 'alle'. Rueckwaertskompatibel zu den alten Keys jira/open_only.
-    if "jira_all" in body or "jira_open" in body:
-        jira_all = bool(body.get("jira_all"))
-        jira_open = bool(body.get("jira_open"))
-        use_jira = jira_all or jira_open
-        open_only = jira_open and not jira_all
-    else:
-        use_jira = body.get("jira", True)
-        open_only = body.get("open_only", True)
+    # gesetzt, gewinnt 'alle'. Wird KEIN Modus angegeben, gilt der Standard
+    # 'nur offene Tickets'.
+    jira_all = bool(body.get("jira_all"))
+    jira_open = bool(body.get("jira_open")) if ("jira_all" in body or "jira_open" in body) else True
+    use_jira = jira_all or jira_open
+    open_only = jira_open and not jira_all
     lang = (body.get("lang") or "de")
     _sacfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
     _jl_max, _jl_default = _support_jira_limits(_sacfg)
@@ -6766,6 +6927,11 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             if security_guard.is_blocked(token_username):
                 await ws.send_json({"type": "security_blocked",
                                     "message": "Konto wegen eines Sicherheitsverstosses gesperrt. Bitte an einen lokalen Administrator wenden."})
+                return
+            # Anmeldeberechtigung entzogen → sofort abweisen (nicht erst beim Abmelden)
+            if not _login_still_allowed(token_username):
+                await ws.send_json({"type": "session_invalid",
+                                    "message": "Keine Anmeldeberechtigung mehr – bitte neu anmelden."})
                 return
 
     # Reiner Registrierungs-Handshake: setzt nur _ws_usernames (oben) fuer Live-Sync

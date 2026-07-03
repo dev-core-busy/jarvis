@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Jarvis Support-API – REST-Dokumentation</title>
+    <style>
+        :root {
+            --bg-body: #0b1220;
+            --bg-primary: #0f172a;
+            --bg-glass: rgba(255, 255, 255, 0.04);
+            --border: rgba(255, 255, 255, 0.12);
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --accent-rgb: 99, 102, 241;
+            --accent-hover: #818cf8;
+            --fg-rgb: 255, 255, 255;
+            --danger: #f87171;
+            --success: #34d399;
+        }
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body {
+            margin: 0;
+            background: radial-gradient(1200px 600px at 20% -10%, #16213e 0%, var(--bg-body) 55%);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.55;
+            padding: 0 16px 80px;
+        }
+        .doc-wrap { max-width: 960px; margin: 0 auto; }
+        .doc-header {
+            padding: 40px 0 24px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 8px;
+        }
+        .doc-header h1 { font-size: 1.7rem; margin: 0 0 6px; letter-spacing: -0.01em; }
+        .doc-header .lead { color: var(--text-secondary); font-size: 0.95rem; margin: 0; }
+        h3 { font-size: 1.25rem; }
+        h4 { font-size: 1.02rem; }
+        a { color: var(--accent-hover); }
+        code {
+            font-family: "SF Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+            font-size: 0.86em;
+            background: rgba(var(--fg-rgb), 0.08);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            padding: 1px 5px;
+        }
+        pre { margin: 0; }
+        pre code {
+            display: block;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            overflow-x: auto;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            white-space: pre;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+        th, td { padding: 6px 8px; text-align: left; vertical-align: top; }
+        thead tr { border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+        .kb-hint { color: var(--text-secondary); font-size: 0.88rem; }
+        .doc-toc {
+            background: var(--bg-glass);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin: 18px 0 8px;
+            font-size: 0.9rem;
+        }
+        .doc-toc ul { margin: 6px 0 0 18px; padding: 0; line-height: 1.9; }
+        .doc-footer {
+            margin-top: 40px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 0.82rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="doc-wrap">
+        <div class="doc-header">
+            <h1>🔌 Jarvis Support-API – REST-Zugriffe</h1>
+            <p class="lead">Programmatischer Zugriff auf Support-Suche, KI-Zusammenfassung und CRM-Lookups.</p>
+        </div>
+
+        <div class="doc-toc">
+            <strong>Inhalt</strong>
+            <ul>
+                <li><a href="#auth">Authentifizierung</a></li>
+                <li><a href="#endpoints">Endpunkte (Übersicht)</a></li>
+                <li><a href="#query">Suche mit KI-Zusammenfassung (<code>/api/support/query</code>)</a></li>
+                <li><a href="#summarize">Einzelnes Ticket zusammenfassen (<code>/api/support/summarize</code>)</a></li>
+                <li><a href="#errors">Fehler &amp; Status-Codes</a></li>
+                <li><a href="#crm">CRM-Lookups: Telefonnummer &amp; CRM-Nummer (Jira)</a></li>
+            </ul>
+        </div>
+
+        <div class="doc-body">
+            <p class="kb-hint">Der Support-Assistent ist auch ohne Web-Oberfläche per REST erreichbar – z.&nbsp;B. aus
+                Ticketsystemen, Skripten oder anderen Anwendungen. Basis-URL ist dein Jarvis-Host
+                (<code>https://DEIN-JARVIS-HOST</code>). Alle Bodies sind JSON (<code>Content-Type: application/json</code>).</p>
+
+            <h4 id="auth" style="margin:16px 0 6px;">Authentifizierung</h4>
+            <ul class="kb-hint" style="margin:0 0 4px 18px;line-height:1.7;">
+                <li><strong>Angemeldeter Benutzer</strong> (Browser/Sitzung): Header <code>Authorization: Bearer &lt;token&gt;</code></li>
+                <li><strong>Externe Anwendung</strong>: Header <code>X-API-Key: &lt;API-Key&gt;</code> – API-Keys werden in den
+                    Einstellungen verwaltet. <code>/query</code>, <code>/summarize</code> sowie die CRM-Lookups
+                    (<code>/api/jira/phonenumber</code>, <code>/api/jira/crm-number</code>) akzeptieren API-Keys;
+                    die übrigen Endpunkte erfordern ein Benutzer-Token.</li>
+            </ul>
+
+            <h4 id="endpoints" style="margin:18px 0 6px;">Endpunkte</h4>
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.84rem;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                        <th style="padding:6px 8px;">Methode</th><th style="padding:6px 8px;">Pfad</th>
+                        <th style="padding:6px 8px;">Zweck</th><th style="padding:6px 8px;">Auth</th>
+                    </tr>
+                </thead>
+                <tbody style="color:var(--text-primary);">
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>POST</code></td><td style="padding:6px 8px;"><code>/api/support/query</code></td><td style="padding:6px 8px;">Suche über RAG + Jira + Confluence, optional KI-Zusammenfassung</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>POST</code></td><td style="padding:6px 8px;"><code>/api/support/summarize</code></td><td style="padding:6px 8px;">KI-Zusammenfassung eines einzelnen Jira-Tickets – ODER Freitext mit Ticket-Key (z.&nbsp;B. <code>CRM-10550</code>) wird wie <code>/query</code> beantwortet</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/support/status</code></td><td style="padding:6px 8px;">Aktive Quellen + Maxima (Zeilen, Ticketanzahl)</td><td style="padding:6px 8px;">Token</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET/POST</code></td><td style="padding:6px 8px;"><code>/api/support/instructions</code></td><td style="padding:6px 8px;">Persönliche Anweisungen lesen/speichern (Markdown)</td><td style="padding:6px 8px;">Token</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET/DELETE</code></td><td style="padding:6px 8px;"><code>/api/support/history</code></td><td style="padding:6px 8px;">Suchverlauf des Benutzers lesen/löschen</td><td style="padding:6px 8px;">Token</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/phonenumber</code></td><td style="padding:6px 8px;">CRM-Kundennummer (<code>CRM-xxxxxx</code>) zu einer Telefonnummer ermitteln</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
+                    <tr><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/crm-number</code></td><td style="padding:6px 8px;">Alle Tickets zu einer dedizierten CRM-Kundennummer finden</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h4 id="query" style="margin:20px 0 6px;">Beispiel 1 – Suche mit KI-Zusammenfassung</h4>
+            <p class="kb-hint" style="margin:0 0 6px;">Durchsucht Wissensdatenbank und (nur offene) Jira-Tickets, holt bis zu 10 Tickets
+                und lässt eine KI-Gesamtzusammenfassung erstellen.</p>
+            <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>curl -sk https://DEIN-JARVIS-HOST/api/support/query \
+  -H "X-API-Key: DEIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "text": "Drucker im 2. OG offline",
+        "rag": true,
+        "confluence": false,
+        "ai": true,
+        "jira_all": false,
+        "jira_open": true,
+        "jira_limit": 10,
+        "summary_lines": 5,
+        "prompt": "Antworte in Stichpunkten mit konkreten Lösungsschritten.",
+        "lang": "de"
+      }'</code></pre>
+            <p class="kb-hint" style="margin:6px 0 4px;">Antwort (gekürzt):</p>
+            <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>{
+  "ok": true,
+  "query": "Drucker im 2. OG offline",
+  "ai_summary": "Mögliche Ursache ist ein Netzwerk-Timeout des Druckers …",
+  "jira_total": 7,
+  "blocks": [
+    { "source": "JIRA",   "key": "SUP-1234", "title": "SUP-1234",
+      "score": 92, "summary": "Drucker reagiert nicht …" },
+    { "source": "WISSEN", "title": "Drucker-Reset Anleitung",
+      "score": 80, "summary": "Schritt 1: …" }
+  ]
+}</code></pre>
+            <h4 style="margin:20px 0 6px;">Request-Felder <code>/api/support/query</code></h4>
+            <p class="kb-hint" style="margin:0 0 6px;">Alle Felder außer <code>text</code> sind optional. Die Maxima
+                (<code>*_max</code>) stammen aus der Skill-Konfiguration und lassen sich über <code>GET /api/support/status</code> abfragen.</p>
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                        <th style="padding:6px 8px;">Feld</th><th style="padding:6px 8px;">Typ</th>
+                        <th style="padding:6px 8px;">Default</th><th style="padding:6px 8px;">Beschreibung</th>
+                    </tr>
+                </thead>
+                <tbody style="color:var(--text-primary);">
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>text</code> <span style="color:var(--text-secondary);">(Alias <code>query</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">Die Suchanfrage / der Freitext. Leer → <code>400</code>. Enthält der Text einen Vorgangs-/CRM-Key (Muster <code>ABC-123</code>, z.&nbsp;B. <code>CRM-10550</code>), wird Jira unabhängig von den Jira-Flags <b>immer</b> durchsucht.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>rag</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Wissensdatenbank einbeziehen (RAG – TF-IDF/Vektor-Suche).</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>confluence</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Confluence-Seiten durchsuchen (nur wirksam, wenn der Confluence-Skill aktiv ist).</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>ai</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">KI-Gesamtzusammenfassung (<code>ai_summary</code>) über alle Treffer erzeugen.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_all</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>false</code></td><td style="padding:6px 8px;">„Alle Jira-Tickets" (offen&nbsp;+&nbsp;geschlossen) durchsuchen.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_open</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>false</code></td><td style="padding:6px 8px;">„Nur offene Jira-Tickets" durchsuchen. Sind <code>jira_all</code> und <code>jira_open</code> beide <code>true</code>, gewinnt <code>jira_all</code>.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_limit</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>ticket_count_default</code> (12)</td><td style="padding:6px 8px;">Max. Anzahl geladener Jira-Tickets, begrenzt auf 1 … <code>ticket_count_max</code> (Admin-Maximum, Standard 50).</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>summary_lines</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>summary_lines_max</code> (5)</td><td style="padding:6px 8px;">Max. Satzanzahl der KI-Gesamtzusammenfassung, begrenzt auf 2 … <code>summary_lines_max</code>. Nur wirksam bei <code>ai:true</code>.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>prompt</code> <span style="color:var(--text-secondary);">(Alias <code>instruction</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;">–</td><td style="padding:6px 8px;">Ad-hoc-Anweisung nur für diesen Aufruf; wird zusätzlich zum Admin-Prompt und den persönlichen Anweisungen an die KI-Gesamtzusammenfassung gehängt (z.&nbsp;B. Fokus, Tonfall, Format). Nur wirksam bei <code>ai:true</code>.</td></tr>
+                    <tr><td style="padding:6px 8px;"><code>lang</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"de"</code></td><td style="padding:6px 8px;">Sprache der KI-Zusammenfassung: <code>de</code> oder <code>en</code>.</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h4 style="margin:20px 0 6px;">Antwort-Felder <code>/api/support/query</code></h4>
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                        <th style="padding:6px 8px;">Feld</th><th style="padding:6px 8px;">Typ</th><th style="padding:6px 8px;">Beschreibung</th>
+                    </tr>
+                </thead>
+                <tbody style="color:var(--text-primary);">
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>ok</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;">Erfolgskennzeichen. Bei Fehlern <code>false</code> plus <code>error</code>.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>query</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;">Die ausgewertete Anfrage.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>blocks</code></td><td style="padding:6px 8px;">array</td><td style="padding:6px 8px;">Alle Treffer, nach <code>score</code> absteigend (Felder siehe unten).</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>ai_summary</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;">KI-Gesamtzusammenfassung (leer bei <code>ai:false</code> oder ohne Treffer).</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_total</code></td><td style="padding:6px 8px;">int&nbsp;|&nbsp;null</td><td style="padding:6px 8px;">Gesamtzahl gefundener Jira-Treffer <b>vor</b> der <code>jira_limit</code>-Deckelung (<code>null</code>, wenn Jira nicht abgefragt wurde).</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>open_only</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;">Ob nur offene Tickets berücksichtigt wurden.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_active</code>, <code>confluence_active</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;">Ob die jeweilige Quelle serverseitig aktiv ist.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_base</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;">Basis-URL der Jira-Instanz (zum Bauen von Ticket-Links).</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>result_lines</code>, <code>result_lines_max</code>, <code>summary_lines_max</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;">Konfigurierte Maxima (für die Anzeige-Begrenzung).</td></tr>
+                    <tr><td style="padding:6px 8px;"><code>took_ms</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;">Server-Laufzeit der Anfrage in Millisekunden.</td></tr>
+                </tbody>
+            </table>
+            </div>
+            <p class="kb-hint" style="margin:8px 0 0;">Jedes Element in <code>blocks[]</code> hat:
+                <code>source</code> (<code>WISSEN</code>&nbsp;|&nbsp;<code>JIRA</code>&nbsp;|&nbsp;<code>CONFLUENCE</code>),
+                <code>title</code>, <code>summary</code> (Kurzfassung), <code>score</code> (Relevanz in&nbsp;%),
+                <code>source_label</code> und <code>link</code> (URL bzw. interner Abruf-Link).
+                Quellenspezifisch zusätzlich: <code>key</code> (nur <code>JIRA</code> – Ticket-Key),
+                <code>doc</code>&nbsp;+&nbsp;<code>doc_name</code> (nur <code>WISSEN</code> – Quelldokument),
+                <code>full_text</code> (nur <code>CONFLUENCE</code> – gekappter Volltext).</p>
+
+            <h4 id="summarize" style="margin:20px 0 6px;">Beispiel 2 – Einzelnes Ticket zusammenfassen</h4>
+            <p class="kb-hint" style="margin:0 0 6px;">Lädt ein konkretes Jira-Ticket (Beschreibung + Kommentare) und fasst es in wenigen Sätzen zusammen.</p>
+            <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>curl -sk https://DEIN-JARVIS-HOST/api/support/summarize \
+  -H "X-API-Key: DEIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "source": "JIRA", "key": "SUP-1234", "lang": "de" }'</code></pre>
+            <p class="kb-hint" style="margin:6px 0 4px;">Antwort:</p>
+            <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>{
+  "ok": true,
+  "key": "SUP-1234",
+  "summary": "Das Ticket beschreibt einen Druckerausfall im 2. OG …"
+}</code></pre>
+            <h4 style="margin:20px 0 6px;">Request-Felder <code>/api/support/summarize</code></h4>
+            <p class="kb-hint" style="margin:0 0 6px;"><b>Modus A – Einzel-Ticket</b> (<code>key</code> gesetzt, kein Ticket-Key im Freitext):</p>
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                        <th style="padding:6px 8px;">Feld</th><th style="padding:6px 8px;">Typ</th>
+                        <th style="padding:6px 8px;">Default</th><th style="padding:6px 8px;">Beschreibung</th>
+                    </tr>
+                </thead>
+                <tbody style="color:var(--text-primary);">
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>key</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">Jira-Ticket-Key, z.&nbsp;B. <code>SUP-1234</code>. Beschreibung + letzte Kommentare werden nachgeladen und zusammengefasst.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>source</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"JIRA"</code></td><td style="padding:6px 8px;">Aktuell wird nur <code>JIRA</code> unterstützt (anderer Wert → <code>400</code>).</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>lines</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>result_lines_max</code> (2)</td><td style="padding:6px 8px;">Satzanzahl der Zusammenfassung, begrenzt auf 2 … <code>result_lines_max</code> (Admin-Maximum).</td></tr>
+                    <tr><td style="padding:6px 8px;"><code>lang</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"de"</code></td><td style="padding:6px 8px;">Sprache der Zusammenfassung: <code>de</code> oder <code>en</code>.</td></tr>
+                </tbody>
+            </table>
+            </div>
+            <p class="kb-hint" style="margin:8px 0 0;">Antwort: <code>{ "ok": true, "key": "…", "summary": "…", "jira_base": "…" }</code>.</p>
+            <p class="kb-hint" style="margin:8px 0 0;"><b>Modus B – Freitext mit Ticket-Key:</b> Enthält <code>text</code>/<code>query</code> einen
+                Vorgangs-/CRM-Key (z.&nbsp;B. <code>{ "text": "Status zu CRM-10550?" }</code>), wird die Anfrage <b>exakt wie</b>
+                <code>/api/support/query</code> beantwortet – volle Pipeline inkl. KI-Gesamtzusammenfassung, gleiche Antwortstruktur.
+                In diesem Modus gelten <b>alle</b> oben genannten <code>/query</code>-Felder (inkl. <code>prompt</code>, <code>jira_limit</code>, …).</p>
+
+            <h4 id="errors" style="margin:20px 0 6px;">Fehler &amp; Status-Codes</h4>
+            <ul class="kb-hint" style="margin:0 0 4px 18px;line-height:1.7;">
+                <li><code>200</code> / <code>201</code> – Erfolg. Fehler liefern stets <code>{ "ok": false, "error": "…" }</code>.</li>
+                <li><code>400</code> – ungültige Eingabe (z.&nbsp;B. leerer <code>text</code>, unbekannte <code>source</code>).</li>
+                <li><code>401</code> – nicht authentifiziert (Token/API-Key fehlt oder ungültig).</li>
+                <li><code>403</code> – Support-Skill inaktiv <em>oder</em> Konto gesperrt (Antwort dann mit <code>"account_blocked": true</code>).</li>
+                <li><code>499</code> – Client hat die Verbindung abgebrochen (z.&nbsp;B. „Abbrechen"); die Anfrage wird serverseitig gestoppt.</li>
+                <li><code>502</code> – KI-Zusammenfassung fehlgeschlagen (nur <code>/summarize</code>, Einzel-Ticket).</li>
+            </ul>
+            <p class="kb-hint" style="margin:8px 0 0;">Hinweis: <code>-k</code> (curl) akzeptiert das selbstsignierte Zertifikat – nur für Tests.</p>
+
+            <h3 id="crm" style="margin:26px 0 6px;border-top:1px solid var(--border);padding-top:18px;">🔎 CRM-Lookups (Jira)</h3>
+            <p class="kb-hint" style="margin:0 0 6px;">Direkte Nachschlage-Endpunkte für die Anbindung von Telefonanlage/CTI oder
+                Ticketsystem: aus einer <b>Telefonnummer</b> die zugehörige CRM-Kundennummer bestimmen bzw. zu einer
+                <b>CRM-Kundennummer</b> alle Tickets abrufen. Beide sind <code>GET</code>-Aufrufe und akzeptieren
+                Benutzer-Token <em>oder</em> externen API-Key. Setzt einen aktiven, konfigurierten Jira-Skill voraus.</p>
+
+            <h4 style="margin:16px 0 6px;">Beispiel 3 – CRM-Kundennummer zu einer Telefonnummer</h4>
+            <p class="kb-hint" style="margin:0 0 6px;">Sucht die Telefonnummer im Jira-<b>CRM-Objektschema</b> (Insight/Assets,
+                Objektschema <code>CRM</code>, Standard-Schema-ID&nbsp;21) – konkret in den Telefon-Attributen der CRM-Objekte
+                (<code>Zentrale Rufnummer</code>, <code>Telefonnummer</code>, <code>Mobil Nummer</code>, …). Der <b>Objekt-Key ist
+                die CRM-Kundennummer</b> (<code>CRM-xxxxxx</code>), es werden also ausschließlich CRM-Einträge zurückgegeben.</p>
+            <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>curl -sk "https://DEIN-JARVIS-HOST/api/jira/phonenumber?phone=%2B4920562611" \
+  -H "X-API-Key: DEIN_API_KEY"</code></pre>
+            <p class="kb-hint" style="margin:6px 0 4px;">Die Nummer <code>+4920562611</code> wird zu reinen Ziffern-Varianten normalisiert
+                (<code>+</code> = <code>%2B</code> in der URL): <code>4920562611</code> (voll international), <code>020562611</code>
+                (national mit 0), <code>20562611</code> (ohne Vorwahl). Diese werden – von der längsten (eindeutigsten) zur kürzesten –
+                per IQL <code>like</code> gegen die Telefon-Attribute geprüft; die erste Variante mit Treffern gewinnt.
+                Telefonnummern liegen im CRM-Schema international/zusammenhängend (z.&nbsp;B. <code>+4920562611</code>).</p>
+            <p class="kb-hint" style="margin:6px 0 4px;">Die Treffer werden nach Objekttyp sortiert: <b>Organisationen zuerst</b>,
+                dann Organisationen-Produktgruppen, dann Personen. Der erste Treffer (Feld <code>crm</code>) ist damit die
+                Organisation selbst. Antwort (Namen hier anonymisiert):</p>
+            <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>{
+  "ok": true,
+  "phone": "+4920562611",
+  "crm": "CRM-66648",
+  "found": true,
+  "matches": [
+    { "key": "CRM-66648",  "name": "Muster Klinikum GmbH",   "type": "Organisationen" },
+    { "key": "CRM-421832", "name": "Muster Produktgruppe",    "type": "Organisationen Produktgruppen" },
+    { "key": "CRM-158352", "name": "Muster Ansprechpartner",  "type": "Personen" }
+  ],
+  "total": 8,
+  "variant": "4920562611"
+}</code></pre>
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                        <th style="padding:6px 8px;">Parameter</th><th style="padding:6px 8px;">Typ</th>
+                        <th style="padding:6px 8px;">Default</th><th style="padding:6px 8px;">Beschreibung</th>
+                    </tr>
+                </thead>
+                <tbody style="color:var(--text-primary);">
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>phone</code> <span style="color:var(--text-secondary);">(Aliase <code>phonenumber</code>, <code>number</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">Die Telefonnummer (beliebige Schreibweise, z.&nbsp;B. <code>+49 151 123456</code>, <code>0151/123456</code>). In der URL muss <code>+</code> als <code>%2B</code> kodiert werden.</td></tr>
+                    <tr><td style="padding:6px 8px;"><code>limit</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>25</code></td><td style="padding:6px 8px;">Max. Anzahl zurückgegebener CRM-Objekte (1 … 50).</td></tr>
+                </tbody>
+            </table>
+            </div>
+            <p class="kb-hint" style="margin:8px 0 0;">Antwort-Felder: <code>crm</code> (erste gefundene CRM-Kundennummer bzw. <code>null</code>,
+                nach Priorisierung die Organisation), <code>found</code> (bool), <code>matches[]</code> (alle Treffer als
+                <code>key</code>&nbsp;+&nbsp;<code>name</code>&nbsp;+&nbsp;<code>type</code> = Objekttyp), <code>total</code>
+                (Anzahl passender CRM-Objekte), <code>variant</code> (die Nummern-Variante, die getroffen hat),
+                <code>iql</code> (ausgeführte IQL-Abfrage). <b>Hinweis:</b> Teilen sich mehrere Kunden dieselbe Rufnummer
+                (z.&nbsp;B. zentrale Nummer), werden alle zugehörigen CRM-Objekte gelistet. Schema-ID, geprüfte
+                Telefon-Attribute und die Typ-Reihenfolge sind über die Jira-Skill-Konfiguration (<code>insight_schema_id</code> /
+                <code>insight_phone_attrs</code> / <code>insight_type_priority</code>) anpassbar.</p>
+
+            <h4 style="margin:20px 0 6px;">Beispiel 4 – Alle Tickets zu einer CRM-Kundennummer</h4>
+            <p class="kb-hint" style="margin:0 0 6px;">Sucht exakt im Insight-Organisationsfeld und liefert damit <b>alle</b> dem
+                Kunden zugeordneten Tickets (nicht nur Volltext-Treffer), neueste zuerst.</p>
+            <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>curl -sk "https://DEIN-JARVIS-HOST/api/jira/crm-number?crm=CRM-10550&limit=25" \
+  -H "X-API-Key: DEIN_API_KEY"</code></pre>
+            <p class="kb-hint" style="margin:6px 0 4px;">Antwort (gekürzt):</p>
+            <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>{
+  "ok": true,
+  "crm": "CRM-10550",
+  "total": 7,
+  "jql": "Organisation = \"CRM-10550\" ORDER BY updated DESC",
+  "results": [
+    { "key": "NXCIS-42", "summary": "Störung Drucker", "status": "Offen",
+      "type": "Bug", "priority": "Hoch", "assignee": "…", "link": "https://…/browse/NXCIS-42" }
+  ]
+}</code></pre>
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                        <th style="padding:6px 8px;">Parameter</th><th style="padding:6px 8px;">Typ</th>
+                        <th style="padding:6px 8px;">Default</th><th style="padding:6px 8px;">Beschreibung</th>
+                    </tr>
+                </thead>
+                <tbody style="color:var(--text-primary);">
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>crm</code> <span style="color:var(--text-secondary);">(Aliase <code>crm_number</code>, <code>number</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">Die CRM-Kundennummer im Muster <code>CRM-xxxxxx</code> (z.&nbsp;B. <code>CRM-10550</code>). Ein anderes Format → <code>400</code>.</td></tr>
+                    <tr><td style="padding:6px 8px;"><code>limit</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>25</code></td><td style="padding:6px 8px;">Max. Anzahl zurückgegebener Tickets (1 … 50).</td></tr>
+                </tbody>
+            </table>
+            </div>
+            <p class="kb-hint" style="margin:8px 0 0;">Antwort-Felder: <code>crm</code> (normalisierte Nummer), <code>total</code>
+                (Jira-Gesamttreffer), <code>results[]</code> (Tickets mit <code>key</code>, <code>summary</code>,
+                <code>status</code>, <code>type</code>, <code>priority</code>, <code>assignee</code>, <code>updated</code>, <code>link</code>),
+                <code>jql</code>. Das Organisationsfeld ist über die Jira-Skill-Konfiguration (<code>org_field</code>) anpassbar.</p>
+        </div>
+
+        <div class="doc-footer">
+            Jarvis Support-API · Diese Seite ist öffentlich abrufbar unter <code>/support-api</code>.
+            Ersetze <code>DEIN-JARVIS-HOST</code> durch deinen Host und <code>DEIN_API_KEY</code> durch einen in den Einstellungen erzeugten API-Key.
+        </div>
+    </div>
+</body>
+</html>

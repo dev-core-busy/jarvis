@@ -72,6 +72,80 @@ def crm_org_clause(term: str) -> str | None:
     return ('%s = "%s"' % (_org_field(), t.upper())) if _CRM_RE.match(t) else None
 
 
+def phone_search_variants(phone: str) -> list[str]:
+    """Erzeugt aus einer Telefonnummer Such-Varianten fuer die CRM-Objektsuche.
+    Nummern koennen je nach Eingabe mit/ohne Laendervorwahl bzw. fuehrender 0 kommen –
+    wir liefern reine Ziffernfolgen, absteigend nach Laenge sortiert (praeziseste zuerst,
+    z.B. voll international '4920562611' vor der kurzen Teilnehmernummer). Der Aufrufer
+    probiert sie in dieser Reihenfolge, damit der laengste (eindeutigste) Match gewinnt."""
+    digits = re.sub(r"\D", "", phone or "")
+    if len(digits) < 5:
+        return []
+    variants = {digits}
+    if digits.startswith("00"):          # 0049… -> 49…
+        variants.add(digits[2:])
+    for cc in ("49", "43", "41"):        # DE/AT/CH: 49… -> 0… (national)
+        if digits.startswith(cc) and len(digits) > len(cc) + 3:
+            variants.add("0" + digits[len(cc):])
+            variants.add(digits[len(cc):])
+    if digits.startswith("0"):           # 0… -> ohne fuehrende 0
+        variants.add(digits[1:])
+    return sorted((v for v in variants if len(v) >= 5), key=len, reverse=True)
+
+
+# ── CRM-Objektschema (Jira Insight/Assets) ────────────────────────────
+# Die CRM-xxxx-Eintraege sind Insight-Objekte im Objektschema 'CRM' (Standard-Schema-ID
+# 21) – der Objekt-Key IST die CRM-Kundennummer. Telefonnummern stehen dort international
+# und zusammenhaengend (z.B. '+4920562611', ohne Trennzeichen). Alle Werte per
+# jira-Skill-Config ueberschreibbar (insight_api_base / insight_schema_id / insight_phone_attrs).
+_INSIGHT_API_BASE_DEFAULT = "/rest/insight/1.0"
+_INSIGHT_SCHEMA_ID_DEFAULT = 21
+_INSIGHT_PHONE_ATTRS_DEFAULT = [
+    "Zentrale Rufnummer", "Mobile Rufnummer", "vertrauliche Rufnummer",
+    "Telefonnummer", "Telefonnummer 2", "Mobil Nummer", "Telefon",
+]
+# Reihenfolge der Treffer nach Objekttyp: Organisationen (der Kunde selbst) zuerst,
+# dann Produktgruppen, danach Kontaktpersonen. Nicht gelistete Typen behalten ihre
+# Insight-Reihenfolge und landen hinter den priorisierten.
+_INSIGHT_TYPE_PRIORITY_DEFAULT = ["Organisationen", "Organisationen Produktgruppen"]
+
+
+def _insight_api_base() -> str:
+    return ((get_jira_config().get("insight_api_base") or "").strip().rstrip("/")) or _INSIGHT_API_BASE_DEFAULT
+
+
+def _insight_schema_id() -> int:
+    try:
+        return int(get_jira_config().get("insight_schema_id") or _INSIGHT_SCHEMA_ID_DEFAULT)
+    except (TypeError, ValueError):
+        return _INSIGHT_SCHEMA_ID_DEFAULT
+
+
+def _insight_list_cfg(key: str, default: list[str]) -> list[str]:
+    """Liest eine Liste aus der Jira-Config (Komma-String ODER JSON-Array), sonst Default."""
+    raw = get_jira_config().get(key)
+    if isinstance(raw, str):
+        vals = [a.strip() for a in raw.split(",") if a.strip()]
+    elif isinstance(raw, (list, tuple)):
+        vals = [str(a).strip() for a in raw if str(a).strip()]
+    else:
+        vals = []
+    return vals or list(default)
+
+
+def _insight_phone_attrs() -> list[str]:
+    return _insight_list_cfg("insight_phone_attrs", _INSIGHT_PHONE_ATTRS_DEFAULT)
+
+
+def _insight_type_priority() -> list[str]:
+    return _insight_list_cfg("insight_type_priority", _INSIGHT_TYPE_PRIORITY_DEFAULT)
+
+
+def _iql_str(v: str) -> str:
+    """Maskiert Backslash und Anfuehrungszeichen fuer IQL-String-Literale."""
+    return (v or "").replace("\\", "\\\\").replace('"', '\\"')
+
+
 class JiraError(Exception):
     """Fehler bei einer Jira-Anfrage (mit HTTP-Status)."""
 
@@ -159,6 +233,49 @@ class JiraClient:
         return self._request("GET", "/rest/api/2/search", params={
             "jql": jql, "startAt": start, "maxResults": limit,
             "fields": fields or self._SEARCH_FIELDS})
+
+    def insight_search(self, iql: str, schema_id: int | None = None,
+                       limit: int = 25, page: int = 1) -> dict:
+        """IQL-Suche im Insight/Assets-CRM-Objektschema (Standard-Schema-ID 21).
+        Liefert das rohe API-Objekt inkl. ``objectEntries`` (mit ``objectKey`` =
+        CRM-Nummer und ``label``) sowie ``totalFilterCount``."""
+        return self._request("GET", _insight_api_base() + "/iql/objects", params={
+            "objectSchemaId": schema_id or _insight_schema_id(),
+            "iql": iql, "resultPerPage": limit, "page": page,
+            "includeAttributes": "true", "includeTypeAttributes": "true"})
+
+    def find_crm_by_phone(self, phone: str, limit: int = 25) -> dict:
+        """Ermittelt die CRM-Kundennummer(n) (Objekt-Key 'CRM-xxxxxx') zu einer
+        Telefonnummer ueber das Insight-CRM-Objektschema. Sucht die Nummer in den
+        Telefon-Attributen der CRM-Objekte (dort international/zusammenhaengend
+        gespeichert). Probiert die Nummern-Varianten von der praezisesten (voll
+        international) zur kuerzesten und nimmt die erste, die Treffer liefert –
+        so gewinnt der laengste, eindeutigste Match. Die Treffer werden nach
+        Objekttyp priorisiert (Organisationen zuerst, dann Produktgruppen, dann
+        Personen; konfigurierbar via ``insight_type_priority``). Liefert
+        {crm, matches:[{key, name, type}], total, iql, variant}."""
+        variants = phone_search_variants(phone)
+        if not variants:
+            return {"crm": None, "matches": [], "total": 0, "iql": "", "variant": None}
+        attrs = _insight_phone_attrs()
+        prio = _insight_type_priority()
+
+        def _rank(m: dict) -> int:
+            t = m.get("type") or ""
+            return prio.index(t) if t in prio else len(prio)
+
+        for v in variants:
+            iql = " OR ".join('"%s" like "%s"' % (_iql_str(a), _iql_str(v)) for a in attrs)
+            data = self.insight_search(iql, limit=limit)
+            entries = data.get("objectEntries") or []
+            if entries:
+                matches = [{"key": o.get("objectKey"), "name": o.get("label"),
+                            "type": (o.get("objectType") or {}).get("name")} for o in entries]
+                matches.sort(key=_rank)  # stabil -> Insight-Reihenfolge innerhalb gleicher Prioritaet
+                return {"crm": matches[0]["key"] if matches else None, "matches": matches,
+                        "total": data.get("totalFilterCount", len(matches)),
+                        "iql": iql, "variant": v}
+        return {"crm": None, "matches": [], "total": 0, "iql": "", "variant": None}
 
     def get_issue(self, key: str) -> dict:
         """Einzelnes Issue inkl. Beschreibung und Kommentaren.

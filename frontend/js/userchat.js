@@ -15,6 +15,7 @@
     let wsReady   = false;
     let activePartner = null;       // Username des aktiven Gesprächspartners
     let reconnectTimer = null;
+    let _sessionInvalid = false;   // Berechtigung entzogen -> kein Auto-Reconnect mehr
     let typingCooldown = false;
 
     // Lokaler Nachrichten-Cache: username → [{from,to,text,ts,mine,msg_id,status}]
@@ -297,6 +298,7 @@
         ws.addEventListener('close', () => {
             wsReady = false;
             clearTimeout(reconnectTimer);
+            if (_sessionInvalid) return;   // Berechtigung entzogen -> nicht wieder verbinden
             reconnectTimer = setTimeout(connectWS, 3000);
         });
 
@@ -492,6 +494,19 @@
 
             case 'security_blocked':
                 if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked();
+                break;
+
+            case 'session_invalid':
+                // Anmeldeberechtigung entzogen -> Hinweis, Keys leeren, KEIN Reconnect
+                // (sonst stille 3s-Reconnect-Schleife gegen den 403).
+                _sessionInvalid = true;
+                clearTimeout(reconnectTimer);
+                if (msg.message) alert(msg.message);
+                localStorage.removeItem('jarvis_uc_token');
+                localStorage.removeItem('jarvis_token');
+                localStorage.removeItem('jarvis_chat_token');
+                localStorage.removeItem('jarvis_uc_user');
+                location.reload();
                 break;
         }
     }

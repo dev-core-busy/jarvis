@@ -676,6 +676,13 @@
                 }
                 break;
 
+            case 'session_invalid':
+                // Anmeldeberechtigung entzogen → abmelden, danach greift die
+                // Login-Sperre ('Keine Anmeldeberechtigung').
+                if (msg.message) alert(msg.message);
+                logout();
+                break;
+
             case 'security_blocked':
                 if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked();
                 break;

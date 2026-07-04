@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jarvis – Start</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=5">
-    <link rel="stylesheet" href="/static/css/update_widget.css?v=2">
+    <link rel="stylesheet" href="/static/css/update_widget.css?v=3">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -126,6 +126,10 @@
         <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
         <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang && window.setLang('en')" title="English">EN</button>
     </div>
+    <!-- Issues/Feedback: Reihenfolge wie in /chat, /userchat, /support (vor dem Zertifikat) -->
+    <button class="pt-btn" id="pt-issues-btn" title="Issues / Feedback" data-i18n-title="sup.issues" onclick="window.JarvisIssues && window.JarvisIssues.open()" style="position:relative;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    </button>
     <a class="pt-btn" href="/api/cert" download data-i18n-title="chat.ssl_cert" title="SSL-Zertifikat" style="text-decoration:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
     </a>
@@ -268,7 +272,8 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/security_incidents.js?v=1"></script>
-<script src="/static/js/update_widget.js?v=1"></script>
+<script src="/static/js/update_widget.js?v=2"></script>
+<script src="/static/js/issues.js?v=5"></script>
 <script>
 (function () {
     var KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];

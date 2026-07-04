@@ -3,8 +3,10 @@
 Berechtigungsmodell:
 - Sehen: jeder authentifizierte Benutzer (alle Issues)
 - Erstellen: jeder authentifizierte Benutzer
-- Eigene Issues editieren: nur solange status != "closed"
-- Alle Issues editieren, Status/Comment setzen, schliessen, loeschen: nur Benutzer "jarvis"
+- Eigene Issues editieren ('editieren'): nur der Ersteller, solange status != "closed"
+- Loesungsbereich ('bearbeiten', status + jarvis_comment): alle Administratoren
+  (is_admin wird vom Aufrufer in main.py via _is_admin_user bestimmt) sowie "jarvis"
+- Alle Issues editieren/loeschen: nur Benutzer "jarvis"
 
 Speicherung:
 - data/issues.json (Atomic-Write via .tmp + replace)
@@ -246,16 +248,26 @@ def update_issue(user: str, issue_id: str, patch: dict,
 
         # Loesungsbereich (Admins + jarvis): status + jarvis_comment
         if allowed_admin:
+            admin_changed = False
             if "status" in patch:
                 s = (patch["status"] or "").strip().lower()
                 if s not in VALID_STATUS:
                     return None, f"Ungueltiger Status."
+                if s != current.get("status"):
+                    admin_changed = True
                 current["status"] = s
             if "jarvis_comment" in patch:
                 c = (patch["jarvis_comment"] or "").strip()
                 if len(c) > MAX_COMMENT_LEN:
                     return None, f"Kommentar zu lang (max {MAX_COMMENT_LEN})."
+                if c != (current.get("jarvis_comment") or ""):
+                    admin_changed = True
                 current["jarvis_comment"] = c
+            # Badge-Benachrichtigung fuer den Ersteller: JEDE Admin-Bearbeitung
+            # (auch reiner Kommentar ohne Statuswechsel) zaehlt – ausser der
+            # Ersteller bearbeitet sein eigenes Issue selbst.
+            if admin_changed and current.get("author", "").strip().lower() != (user or "").strip().lower():
+                current["admin_change_pending"] = True
 
         current["updated"] = _now_iso()
         issues[idx] = current
@@ -264,7 +276,8 @@ def update_issue(user: str, issue_id: str, patch: dict,
 
 
 def unseen_count(user: str) -> int:
-    """Anzahl eigener Issues, deren Status sich seit dem letzten Ansehen geaendert hat.
+    """Anzahl eigener Issues mit ungesehener Bearbeitung (Statuswechsel ODER
+    Admin-Aenderung am Loesungsbereich, z.B. neuer Kommentar).
 
     Grundlage fuer die Badge-Benachrichtigung beim meldenden Benutzer.
     """
@@ -276,6 +289,9 @@ def unseen_count(user: str) -> int:
     n = 0
     for i in issues:
         if i.get("author", "").strip().lower() != u:
+            continue
+        if i.get("admin_change_pending"):
+            n += 1
             continue
         seen = i.get("status_seen")
         # Alt-Issues ohne status_seen (vor dem Feature angelegt) NICHT als
@@ -300,8 +316,14 @@ def mark_seen(user: str) -> int:
         for i in issues:
             if i.get("author", "").strip().lower() != u:
                 continue
+            touched = False
             if i.get("status_seen", "open") != i.get("status"):
                 i["status_seen"] = i.get("status")
+                touched = True
+            if i.get("admin_change_pending"):
+                i["admin_change_pending"] = False
+                touched = True
+            if touched:
                 changed += 1
         if changed:
             _save_all(issues)

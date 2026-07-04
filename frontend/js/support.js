@@ -629,6 +629,17 @@
         _applyAiClamp();
     }
 
+    // Mouse-over am Relevanz-Badge: erklaert je Quelle, wie der %-Wert ermittelt wird
+    function scoreTitle(b) {
+        if (b.source === 'JIRA') {
+            return T('sup.score_info_jira', 'Relevanz: Jira sortiert die Treffer nach Relevanz – der beste Treffer startet bei 85 %, jeder weitere Rang -8. Enthält der Ticket-Titel viele der Suchwörter, hebt deren Anteil den Wert an (Bereich 20–96 %).');
+        }
+        if (b.source === 'CONFLUENCE') {
+            return T('sup.score_info_conf', 'Relevanz: Confluence sortiert die Treffer nach Relevanz – der beste Treffer startet bei 86 %, jeder weitere Rang -9. Enthalten Titel/Textauszug viele der Suchwörter, hebt deren Anteil den Wert an (Bereich 20–96 %).');
+        }
+        return T('sup.score_info_rag', 'Relevanz: Textähnlichkeit zwischen Anfrage und diesem Wissens-Abschnitt (TF-IDF-/Vektor-Suche). Der beste Wissens-Treffer wird auf 100 % skaliert, alle weiteren relativ dazu.');
+    }
+
     function blockHtml(b, i) {
         var label = b.source_label || b.title || 'Quelle';
         var inner;
@@ -658,7 +669,7 @@
             + '<span class="sup-block-num">' + (i + 1) + '.</span>'
             + '<span class="sup-block-title">' + esc(b.title) + '</span>'
             + '<span class="sup-badge-src">' + esc(b.source) + '</span>'
-            + '<span class="sup-badge-score" title="Zutreffend">' + b.score + '%</span>'
+            + '<span class="sup-badge-score" title="' + esc(scoreTitle(b)) + '">' + b.score + '%</span>'
             + aiBtn
             + '</div>'
             + '<div class="sup-block-body">' + escLink(b.summary) + '</div>'

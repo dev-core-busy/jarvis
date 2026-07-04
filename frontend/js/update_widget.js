@@ -64,6 +64,8 @@
         }
         if (widget) {
             widget.classList.toggle('has-update', !!d.has_update);
+            // gruen nur bei bestaetigtem 'aktuell' (ok + kein Update); bei Fehler neutral
+            widget.classList.toggle('up-to-date', !d.has_update && !!d.ok);
             widget.title = d.has_update
                 ? T('update.widget_title_avail', { n: d.commits_behind })
                 : T('update.widget_title_ok');

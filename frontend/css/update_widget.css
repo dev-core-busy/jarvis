@@ -16,10 +16,12 @@
     cursor:default;user-select:none; }
 .upd-pill-clickable { cursor:pointer;display:inline-flex;align-items:center;gap:4px;transition:background .15s,border-color .15s,color .15s; }
 .upd-pill-clickable:hover { background:rgba(var(--accent-rgb),0.15);border-color:rgba(var(--accent-rgb),0.5);color:var(--accent,#6366f1); }
-.upd-pill-clickable.has-update { background:rgba(46,204,113,0.10);border-color:rgba(46,204,113,0.4);color:#2ecc71; }
+/* Ampel-Logik: gruen = System aktuell, rot = Updates stehen bereit */
+.upd-pill-clickable.up-to-date { background:rgba(46,204,113,0.10);border-color:rgba(46,204,113,0.4);color:#2ecc71; }
+.upd-pill-clickable.has-update { background:rgba(239,68,68,0.10);border-color:rgba(239,68,68,0.4);color:#ef4444; }
 .upd-pill-ver { font-family:monospace;letter-spacing:0.02em; }
 .update-badge { font-size:0.55rem;color:#f39c12;animation:upd-pulse 2s infinite;line-height:1; }
-.update-badge.has-update { color:#2ecc71; }
+.update-badge.has-update { color:#ef4444; }
 @keyframes upd-pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
 
 /* ── Dropdown ─────────────────────────────────────────────────────── */

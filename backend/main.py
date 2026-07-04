@@ -7511,7 +7511,7 @@ async def api_issues_list(request: Request, user: str = Depends(require_auth_or_
         "ok": True,
         "issues": issues,
         "current_user": user,
-        "is_admin": _issues_mod.is_jarvis(user),
+        "is_admin": _is_admin_user(user),
     })
 
 
@@ -7537,7 +7537,8 @@ async def api_issues_get(issue_id: str, user: str = Depends(require_auth_or_agen
         "ok": True,
         "issue": issue,
         "current_user": user,
-        "is_admin": _issues_mod.is_jarvis(user),
+        # 'bearbeiten' (Loesungsbereich) steht ALLEN Administratoren zu, nicht nur jarvis
+        "is_admin": _is_admin_user(user),
         "can_edit": _issues_mod.can_edit(issue, user),
         "can_delete": _issues_mod.can_delete(issue, user),
     })
@@ -7567,7 +7568,8 @@ async def api_issues_update(issue_id: str, request: Request,
         patch = await request.json()
     except Exception:
         raise HTTPException(400, "Ungueltiger JSON-Body")
-    issue, err = _issues_mod.update_issue(user, issue_id, patch or {})
+    issue, err = _issues_mod.update_issue(user, issue_id, patch or {},
+                                          is_admin=_is_admin_user(user))
     if not issue:
         # 403 wenn Berechtigung, 404 wenn nicht gefunden, sonst 400
         if "Berechtigung" in err or "geschlossen" in err:

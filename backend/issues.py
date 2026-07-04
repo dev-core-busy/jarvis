@@ -193,13 +193,16 @@ def create_issue(user: str, data: dict) -> tuple[dict | None, str]:
     return issue, ""
 
 
-def update_issue(user: str, issue_id: str, patch: dict) -> tuple[dict | None, str]:
+def update_issue(user: str, issue_id: str, patch: dict,
+                 *, is_admin: bool = False) -> tuple[dict | None, str]:
     """Issue bearbeiten. Gibt (issue, "") oder (None, err).
 
-    Nicht-Jarvis-Benutzer duerfen nur title/body/type/priority aendern und nur
-    bei eigenen Issues mit status != closed.
-    Jarvis darf zusaetzlich status und jarvis_comment setzen.
+    - Inhaltsfelder (title/body/type/priority): nur der Ersteller ('editieren'),
+      solange status != closed; jarvis immer.
+    - Loesungsbereich (status/jarvis_comment): Administratoren ('bearbeiten',
+      is_admin=True vom Aufrufer bestimmt) sowie jarvis.
     """
+    allowed_admin = is_admin or is_jarvis(user)
     with _lock:
         issues = _load_all()
         idx = None
@@ -211,14 +214,17 @@ def update_issue(user: str, issue_id: str, patch: dict) -> tuple[dict | None, st
             return None, "Issue nicht gefunden."
 
         current = issues[idx]
-        if not can_edit(current, user):
+        allowed_content = can_edit(current, user)
+        if not (allowed_content or allowed_admin):
             if current.get("status") == "closed" and not is_jarvis(user):
                 return None, "Issue ist geschlossen – nur Jarvis darf bearbeiten."
             return None, "Keine Berechtigung."
 
-        # Erlaubte Felder fuer alle: title, body, type, priority
+        # Inhaltsfelder: nur Ersteller (bzw. jarvis) – Admins editieren fremde Inhalte NICHT
         for fld in ("title", "body", "type", "priority"):
             if fld in patch:
+                if not allowed_content:
+                    return None, "Keine Berechtigung – Inhalt darf nur der Ersteller editieren."
                 val = (patch[fld] or "").strip() if isinstance(patch[fld], str) else patch[fld]
                 if fld == "title":
                     if not val:
@@ -238,8 +244,8 @@ def update_issue(user: str, issue_id: str, patch: dict) -> tuple[dict | None, st
                         return None, f"Ungueltige Prioritaet."
                 current[fld] = val
 
-        # Nur Jarvis: status + jarvis_comment
-        if is_jarvis(user):
+        # Loesungsbereich (Admins + jarvis): status + jarvis_comment
+        if allowed_admin:
             if "status" in patch:
                 s = (patch["status"] or "").strip().lower()
                 if s not in VALID_STATUS:

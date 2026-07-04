@@ -2,9 +2,12 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- interactive-widget=resizes-content: Android-Chrome verkleinert bei offener
+         Tastatur das Layout (100dvh) statt die Seite zu verschieben - die Titelleiste
+         bleibt dadurch immer sichtbar. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>Jarvis Chat</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=4">
+    <link rel="stylesheet" href="/static/css/theme.css?v=5">
     <link rel="stylesheet" href="/static/css/chat.css?v=34">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
@@ -158,10 +161,11 @@
     <div class="input-bar">
         <!-- Kontext-Indikator -->
         <div id="ctx-indicator" style="display:none;align-items:center;padding:3px 10px 1px;">
-            <span id="ctx-indicator-pill" style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:rgba(var(--accent-rgb),0.12);border:1px solid rgba(var(--accent-rgb),0.3);font-size:0.73rem;color:var(--accent-light);cursor:default;user-select:none;">
+            <!-- Textfarbe: var(--accent) (Branding-Farbe, in Hell UND Dunkel lesbar).
+                 var(--accent-light) ist nur eine 10%-Alpha-Toenung fuer Hintergruende! --><span id="ctx-indicator-pill" data-i18n-title="chat.ctx_info" title="Kurzzeitgedächtnis dieses Chats: Anzahl der gemerkten Gesprächseinträge und Füllstand in % bis zur automatischen Komprimierung. Die KI nutzt diese Einträge als Kontext für ihre Antworten." style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:rgba(var(--accent-rgb),0.12);border:1px solid rgba(var(--accent-rgb),0.3);font-size:0.73rem;color:var(--accent);cursor:help;user-select:none;">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                 <span id="ctx-indicator-text" data-i18n="chat.ctx_active">Kontext aktiv</span>
-                <button id="ctx-indicator-clear" data-i18n-title="chat.ctx_reset" title="Kontext zurücksetzen" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:rgba(255,255,255,0.4);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()">✕</button>
+                <button id="ctx-indicator-clear" data-i18n-title="chat.ctx_reset" title="Kontext zurücksetzen" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:var(--text-secondary);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()">✕</button>
             </span>
         </div>
         <!-- Anhang-Vorschau (versteckt wenn leer) -->
@@ -302,13 +306,13 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=22"></script>
+<script src="/static/js/i18n.js?v=23"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=8"></script>
-<script src="/static/js/issues.js?v=3"></script>
+<script src="/static/js/issues.js?v=4"></script>
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/security_incidents.js?v=1"></script>
 <script src="/static/js/vnc.js?v=17"></script>
-<script src="/static/js/chat.js?v=64"></script>
+<script src="/static/js/chat.js?v=65"></script>
 </body>
 </html>

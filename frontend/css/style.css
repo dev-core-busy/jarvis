@@ -673,10 +673,16 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     border-color: rgba(var(--accent-rgb), 0.5);
     color: var(--accent);
 }
-.upd-pill-clickable.has-update {
+/* Ampel-Logik: gruen = System aktuell, rot = Updates stehen bereit */
+.upd-pill-clickable.up-to-date {
     background: rgba(46, 204, 113, 0.1);
     border-color: rgba(46, 204, 113, 0.4);
     color: #2ecc71;
+}
+.upd-pill-clickable.has-update {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #ef4444;
 }
 .upd-pill-ver {
     font-family: monospace;
@@ -987,7 +993,7 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     line-height: 1;
 }
 .update-badge.has-update {
-    color: #2ecc71;
+    color: #ef4444;
 }
 @keyframes upd-pulse {
     0%, 100% { opacity: 1; }

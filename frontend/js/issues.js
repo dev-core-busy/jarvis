@@ -1,12 +1,14 @@
 /* ============================================================
  * issues.js – Issue-Tracker UI (shared)
  *
- * Wird in /index.html, /chat, /userchat geladen. Stellt einen Modal-Dialog
- * mit Liste, Detail, Erstellen, Editieren, Attachments bereit.
+ * Wird in /chat, /userchat, /support, /portal und /settings geladen.
+ * Stellt einen Modal-Dialog mit Liste, Detail, Erstellen, Editieren,
+ * Attachments bereit und pflegt das Benachrichtigungs-Badge am Issues-Button.
  *
  * API:
- *   JarvisIssues.open()      – Modal oeffnen (Listenansicht)
- *   JarvisIssues.create()    – Modal oeffnen + direkt im Erstell-Modus
+ *   JarvisIssues.open()         – Modal oeffnen (Listenansicht)
+ *   JarvisIssues.create()       – Modal oeffnen + direkt im Erstell-Modus
+ *   JarvisIssues.refreshBadge() – Badge-Zaehler sofort aktualisieren
  *
  * Auth: erwartet localStorage["jarvis_token"] (von app.js/chat.js gesetzt).
  * ============================================================ */
@@ -113,6 +115,9 @@
 .jv-iss-item-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .jv-iss-item-title{font-weight:600;color:var(--text-primary);font-size:14px;flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.jv-iss-notif{position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:8px;
+  background:#ef4444;color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center;
+  padding:0 4px;pointer-events:none;box-shadow:0 0 0 2px var(--bg-primary,#0a0e17);}
 .jv-iss-badge{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600;
   text-transform:uppercase;letter-spacing:.04em;color:#fff;background:#6b7280;}
 .jv-iss-badge.bug{background:#dc2626;}
@@ -197,6 +202,9 @@
     function open(initialView) {
         _ensureModal();
         _modal.style.display = 'flex';
+        // Mit dem Oeffnen gelten Status-/Kommentar-Aenderungen als gesehen
+        fetch('/api/issues/notifications/seen', { method: 'POST', headers: _headers() }).catch(() => {});
+        document.querySelectorAll('.jv-iss-notif').forEach(b => { b.style.display = 'none'; });
         if (initialView === 'create') {
             _showForm(null);
         } else {
@@ -618,10 +626,62 @@
         };
     }
 
+    // ─── Benachrichtigungs-Badge am Issues-Button ─────────────────────
+    // Roter Zaehler ueber dem Issues-Icon: eigene Issues, die seit dem letzten
+    // Ansehen von einem Admin bearbeitet wurden (Status/Kommentar). Wird auf
+    // allen Seiten automatisch aktiv, sobald einer der Buttons existiert.
+    const BADGE_BTN_IDS = ['btn-chat-issues', 'btn-uc-issues', 'sup-issues-btn', 'pt-issues-btn', 'btn-issues'];
+    let _badgeTimer = null;
+
+    function _badgeEls() {
+        const els = [];
+        for (const id of BADGE_BTN_IDS) {
+            const btn = document.getElementById(id);
+            if (!btn) continue;
+            let b = btn.querySelector('.jv-iss-notif');
+            if (!b) {
+                if (!btn.style.position) btn.style.position = 'relative';
+                b = document.createElement('span');
+                b.className = 'jv-iss-notif';
+                b.style.display = 'none';
+                btn.appendChild(b);
+            }
+            els.push(b);
+        }
+        return els;
+    }
+
+    async function refreshBadge() {
+        const els = _badgeEls();
+        if (!els.length || !_token()) return;
+        try {
+            const r = await fetch('/api/issues/notifications', { headers: _headers() });
+            if (!r.ok) return;
+            const d = await r.json();
+            const n = d.count || 0;
+            els.forEach(b => {
+                if (n > 0) { b.textContent = n > 99 ? '99+' : String(n); b.style.display = ''; }
+                else { b.style.display = 'none'; }
+            });
+        } catch (e) { /* offline */ }
+    }
+
+    function _startBadge() {
+        _injectCss();
+        refreshBadge();
+        if (!_badgeTimer) _badgeTimer = setInterval(refreshBadge, 60000);
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _startBadge);
+    } else {
+        _startBadge();
+    }
+
     // ─── Public API ───────────────────────────────────────────────────
     window.JarvisIssues = {
         open: () => open('list'),
         create: () => open('create'),
         close: close,
+        refreshBadge: refreshBadge,
     };
 })();

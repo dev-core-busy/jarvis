@@ -637,7 +637,7 @@
         if (b.source === 'CONFLUENCE') {
             return T('sup.score_info_conf', 'Relevanz: Confluence sortiert die Treffer nach Relevanz – der beste Treffer startet bei 86 %, jeder weitere Rang -9. Enthalten Titel/Textauszug viele der Suchwörter, hebt deren Anteil den Wert an (Bereich 20–96 %).');
         }
-        return T('sup.score_info_rag', 'Relevanz: Textähnlichkeit zwischen Anfrage und diesem Wissens-Abschnitt (TF-IDF-/Vektor-Suche). Der beste Wissens-Treffer wird auf 100 % skaliert, alle weiteren relativ dazu.');
+        return T('sup.score_info_rag', 'Relevanz: Textähnlichkeit zwischen Anfrage und diesem Wissens-Abschnitt. Bei Vektor-Suche ist der Wert die absolute Ähnlichkeit (100 % = nahezu identischer Text) – auch der beste Treffer kann darunter liegen. Bei TF-IDF-Suche wird relativ zum besten Treffer auf 100 % skaliert.');
     }
 
     function blockHtml(b, i) {

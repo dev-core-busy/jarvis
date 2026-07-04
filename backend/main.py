@@ -3970,7 +3970,12 @@ def _support_readable(stem: str, chunk: str) -> tuple[str, str]:
     import re as _re
     text = chunk or ""
     title = _re.sub(r"^extract_[0-9a-f]+_", "", stem or "").replace("_", " ").strip()
-    is_weak = (not title) or len(title) < 4 or bool(_re.fullmatch(r"[0-9a-f]{6,}", title))
+    # 'Schwacher' Titel = nichtssagender Auto-Dateiname: leer/kurz, Hex-Hash oder
+    # generisches Praefix + Zahl (z.B. 'conv 1783082859' aus Konversations-Logs).
+    # Dann wird stattdessen eine Ueberschrift/erste Zeile aus dem Inhalt verwendet.
+    is_weak = ((not title) or len(title) < 4
+               or bool(_re.fullmatch(r"[0-9a-f]{6,}", title))
+               or bool(_re.fullmatch(r"(?:[A-Za-z]{2,12}\s+)?\d{6,}", title)))
 
     # JSON erkennen (ganzer Chunk oder eingebettetes Objekt)
     obj = None
@@ -4016,7 +4021,11 @@ def _support_readable(stem: str, chunk: str) -> tuple[str, str]:
                       if len(ln.strip(" #*->")) > 3
                       and not ln.lstrip().startswith(('"', '{', '}', '[', ']'))), "")
         if first:
-            title = first
+            # Lange Fliesstext-Zeilen (z.B. Konversations-Logs) auf den Kernsatz
+            # kuerzen: Metadaten wie ' Datum: …' und ' - [Abschnitt]: …' abschneiden.
+            first = _re.split(r"\s+Datum:\s", first)[0]
+            first = _re.split(r"\s+-\s+\[", first)[0]
+            title = first.strip(" -–—:") or first
 
     return (_two_line(title, 90) or (stem or "Dokument")), _two_line(summary, 600)
 

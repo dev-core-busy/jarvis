@@ -86,6 +86,19 @@
         .totp-qr { margin:16px auto; } .totp-qr img { border-radius:8px;max-width:200px; }
         .totp-secret-label { font-size:11px;color:var(--text-secondary);margin-bottom:4px; }
         .totp-secret-code { display:block;font-size:14px;letter-spacing:2px;color:var(--accent-hover);background:rgba(var(--fg-rgb,148,163,184),.08);padding:8px 12px;border-radius:8px;user-select:all;cursor:pointer;margin-bottom:8px; }
+        /* ── Desktop/VNC-Overlay (von /chat verschoben): Warte-Overlay aus vnc.js ── */
+        .vnc-reconnect-overlay { position:absolute;inset:0;background:rgba(10,14,23,.92);backdrop-filter:blur(8px);
+            display:flex;align-items:center;justify-content:center;z-index:100; }
+        .vnc-reconnect-content { text-align:center;color:var(--text-primary); }
+        .vnc-reconnect-spinner { width:48px;height:48px;border:3px solid var(--border);border-top-color:var(--accent);
+            border-radius:50%;margin:0 auto 1.5rem;animation:vncSpin 1s linear infinite; }
+        @keyframes vncSpin { to { transform:rotate(360deg); } }
+        .vnc-reconnect-text { font-size:1.1rem;font-weight:500;margin-bottom:1.5rem;color:var(--text-primary); }
+        .vnc-reconnect-sub { font-size:.85rem;color:var(--text-secondary);margin-bottom:1.5rem; }
+        .vnc-reconnect-btn { padding:.5rem 1.5rem;background:transparent;border:1px solid var(--border-hover);
+            color:var(--text-secondary);border-radius:6px;cursor:pointer;font-size:.8rem;transition:all .2s ease; }
+        .vnc-reconnect-btn:hover { background:rgba(var(--accent-rgb),.15);border-color:var(--accent);color:var(--text-primary); }
+
         .cert-tab { background:none;border:1px solid var(--border);color:var(--text-secondary);padding:5px 10px;border-radius:8px;cursor:pointer;font-size:.8rem; }
         .cert-tab.active { background:rgba(var(--accent-rgb),.15);color:var(--accent-hover);border-color:var(--accent); }
         .cert-tab-content.hidden { display:none; }
@@ -126,6 +139,16 @@
         <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
         <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang && window.setLang('en')" title="English">EN</button>
     </div>
+    <!-- Desktop (VNC): nur fuer Admins (von /chat hierher verschoben);
+         gespiegelt wird immer die Desktop-Session des lokalen Benutzers 'jarvis' -->
+    <button class="pt-btn" id="pt-vnc-btn" title="Desktop (VNC)" data-i18n-title="chat.desktop" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+    </button>
+    <button class="pt-btn" id="btn-totp-setup" title="2FA einrichten" data-i18n-title="chat.setup_2fa" style="font-size:1rem;">🔐</button>
+    <button class="pt-btn" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+        <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
     <!-- Issues/Feedback: Reihenfolge wie in /chat, /userchat, /support (vor dem Zertifikat) -->
     <button class="pt-btn" id="pt-issues-btn" title="Issues / Feedback" data-i18n-title="sup.issues" onclick="window.JarvisIssues && window.JarvisIssues.open()" style="position:relative;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -133,11 +156,6 @@
     <a class="pt-btn" href="/api/cert" download data-i18n-title="chat.ssl_cert" title="SSL-Zertifikat" style="text-decoration:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
     </a>
-    <button class="pt-btn" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
-        <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-        <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-    </button>
-    <button class="pt-btn" id="btn-totp-setup" title="2FA einrichten" data-i18n-title="chat.setup_2fa" style="font-size:1rem;">🔐</button>
     <button class="pt-btn" id="pt-settings" title="Einstellungen" data-i18n-title="nav.settings" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
@@ -180,6 +198,20 @@
             <video id="brand-portal-video" muted loop autoplay playsinline preload="metadata"
                    style="width:100%;height:auto;object-fit:contain;border-radius:10px;display:block;"></video>
         </div>
+    </div>
+</div>
+
+<!-- ═══ Desktop/VNC-Overlay (nur Admin, von /chat hierher verschoben) ═══ -->
+<div id="vnc-overlay" style="display:none;position:fixed;inset:0;z-index:9000;background:var(--bg-primary,#0a0e17);flex-direction:column;">
+    <div style="display:flex;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid var(--border,rgba(255,255,255,.12));">
+        <strong style="color:var(--text-primary,#f8fafc);">Desktop</strong>
+        <span class="vnc-status" id="vnc-status" style="font-size:0.8rem;color:var(--text-secondary,#94a3b8);" data-i18n="panel.desktop.notconn">Nicht verbunden</span>
+        <span style="flex:1;"></span>
+        <button class="pt-btn" id="vnc-close" title="Schließen" data-i18n-title="common.close">✕</button>
+    </div>
+    <div class="desktop-preview" id="desktop-preview" style="flex:1;position:relative;display:flex;align-items:center;justify-content:center;">
+        <div class="desktop-placeholder" id="desktop-placeholder" style="color:var(--text-secondary,#94a3b8);">Desktop wird geladen…</div>
+        <iframe id="vnc-iframe" class="vnc-iframe" hidden style="position:absolute;inset:0;width:100%;height:100%;border:0;"></iframe>
     </div>
 </div>
 
@@ -274,6 +306,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/security_incidents.js?v=1"></script>
 <script src="/static/js/update_widget.js?v=2"></script>
 <script src="/static/js/issues.js?v=5"></script>
+<script src="/static/js/vnc.js?v=17"></script>
 <script>
 (function () {
     var KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
@@ -309,6 +342,9 @@ sudo update-ca-certificates</code></pre>
             // Versions-/Update-Pill (Admin) – verschoben von /chat
             var uw = document.getElementById('chat-update-wrap');
             if (uw) { uw.style.display = ''; if (window.JarvisUpdateWidget) window.JarvisUpdateWidget.init(); }
+            // Desktop/VNC-Button (Admin) – verschoben von /chat
+            var vb = document.getElementById('pt-vnc-btn');
+            if (vb) vb.style.display = '';
         }
     }).catch(function(){});
 
@@ -435,6 +471,26 @@ sudo update-ca-certificates</code></pre>
                 }).catch(function(){ tErr.textContent=(window.t?window.t('portal.conn_error'):'Verbindungsfehler'); });
         });
     }
+
+    // ── Desktop/VNC-Overlay (nur Admin; Button wird nach /api/me eingeblendet) ──
+    var _vnc = null;
+    var _vncBtn = document.getElementById('pt-vnc-btn');
+    if (_vncBtn) _vncBtn.addEventListener('click', function () {
+        var ov = document.getElementById('vnc-overlay');
+        if (ov) ov.style.display = 'flex';
+        if (!_vnc && window.JarvisVNC) {
+            _vnc = new window.JarvisVNC();
+            fetch('/api/config').then(function (r) { return r.json(); }).then(function (data) {
+                if (data.vnc_available) _vnc.connect(data.websockify_port);
+                else if (_vnc.showError) _vnc.showError();
+            }).catch(function () { if (_vnc && _vnc.showError) _vnc.showError(); });
+        }
+    });
+    var _vncClose = document.getElementById('vnc-close');
+    if (_vncClose) _vncClose.addEventListener('click', function () {
+        var ov = document.getElementById('vnc-overlay');
+        if (ov) ov.style.display = 'none';
+    });
 
     if (window.refreshBranding) try { window.refreshBranding(); } catch(e){}
 })();

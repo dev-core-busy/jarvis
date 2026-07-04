@@ -314,11 +314,7 @@
             _updWrap.style.display = '';
             if (window.JarvisUpdateWidget) window.JarvisUpdateWidget.init();
         }
-        // Desktop/VNC-Button fuer ALLE Administratoren (lokal + AD-Admins).
-        // Gespiegelt wird immer die Desktop-Session des LOKALEN Benutzers 'jarvis',
-        // unabhaengig davon, welcher Admin zuschaut.
-        const _vncBtn = $('btn-vnc');
-        if (_vncBtn) _vncBtn.style.display = _isAdmin ? '' : 'none';
+        // Desktop/VNC-Button: nach /portal verschoben (dort fuer alle Admins)
         // CPU-Auslastung fuer alle (Werte kommen via WS-Event 'cpu')
         const _cpuBar = $('cpu-bar');
         if (_cpuBar) _cpuBar.style.display = '';
@@ -1830,25 +1826,7 @@
     });
     checkSecurity();
 
-    // ── Desktop/VNC-Overlay (nur Admin; Button wird in showChat eingeblendet) ──
-    let _vnc = null;
-    $('btn-vnc')?.addEventListener('click', async () => {
-        const ov = $('vnc-overlay');
-        if (ov) ov.style.display = 'flex';
-        if (!_vnc && window.JarvisVNC) {
-            _vnc = new JarvisVNC();
-            try {
-                const res = await fetch('/api/config');
-                const data = await res.json();
-                if (data.vnc_available) _vnc.connect(data.websockify_port);
-                else if (_vnc.showError) _vnc.showError();
-            } catch (e) { if (_vnc.showError) _vnc.showError(); }
-        }
-    });
-    $('vnc-close')?.addEventListener('click', () => {
-        const ov = $('vnc-overlay');
-        if (ov) ov.style.display = 'none';
-    });
+    // Desktop/VNC-Overlay: nach /portal verschoben (portal.html + vnc.js)
 
     // Tab-Wechsel
     document.querySelectorAll('.cert-tab').forEach(btn => {

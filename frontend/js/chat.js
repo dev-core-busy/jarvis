@@ -333,7 +333,9 @@
         connectWS();
         _startLlmStatusIndicator();
         _restoreHistory();
-        msgInput.focus();
+        // Auto-Focus nur auf Geraeten mit Maus/Tastatur: auf Touch-Geraeten oeffnet
+        // focus() die Bildschirmtastatur und Chrome schiebt die Titelleiste aus dem Bild.
+        if (!window.matchMedia('(pointer: coarse)').matches) msgInput.focus();
         _startContextIndicator();
         // TTS-Einstellungen laden: LocalStorage hat Vorrang vor Backend
         const lsEnabled = localStorage.getItem('jarvis_chat_tts_enabled');

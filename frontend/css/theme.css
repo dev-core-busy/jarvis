@@ -63,6 +63,11 @@
     --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* ─── Sprachbloecke (lange Fliesstext-Inhalte, z.B. API-Doku) ─────────
+   i18n.js applyLang() setzt html[data-lang]. Default (kein Attribut) = DE. */
+html[data-lang="en"] .i18n-de { display: none !important; }
+html:not([data-lang="en"]) .i18n-en { display: none !important; }
+
 /* ─── Hell-Theme: kippt nur die Basis-Variablen, alles andere folgt ─── */
 body.light {
     color-scheme: light;

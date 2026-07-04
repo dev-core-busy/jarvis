@@ -16,6 +16,56 @@ const _I18N = {
         // ── Support-Assistent (/support) ───────────────────────
         'sup.assistant': 'Support-Assistent',
         'portal.title': 'KI-Portal',
+
+        // ── Portal (/portal) ───────────────────────────────────
+        'portal.welcome':            'Willkommen',
+        'portal.choose':             'Wähle einen Bereich:',
+        'portal.card_chat':          'Chat',
+        'portal.card_chat_desc':     'Mit dem KI-Assistenten chatten.',
+        'portal.card_userchat_desc': 'Mit anderen Benutzern austauschen.',
+        'portal.card_support':       'Support-Assistent',
+        'portal.card_support_desc':  'Antworten aus Wissen, Jira und Confluence.',
+        'portal.card_agent':         'Support-Agent',
+        'portal.card_agent_desc':    'Windows-Anwendung für Nicht-Swyx-Systeme: Spracherkennung + Jira-Support-Assistent zum Download.',
+        'portal.llm_status':         'LLM-Status',
+        'portal.llm_unavail':        'LLM-Status nicht abrufbar',
+        'portal.llm_since_ok':       'erreichbar seit ',
+        'portal.llm_since_down':     'nicht erreichbar seit ',
+        'portal.logout_suffix':      'abmelden',
+        'portal.conn_error':         'Verbindungsfehler',
+
+        // ── 2FA-Modal (Portal) ─────────────────────────────────
+        'totp.title':          'Zwei-Faktor-Authentifizierung',
+        'totp.active_html':    '✅ 2FA ist <strong>aktiviert</strong>.',
+        'totp.pw_ph':          'Kennwort zur Bestätigung',
+        'totp.disable':        '2FA deaktivieren',
+        'totp.scan_html':      'Scanne den QR-Code mit <strong>Google Authenticator</strong>, Authy oder einer anderen TOTP-App.',
+        'totp.manual':         'Oder manuell eingeben:',
+        'totp.enter_code':     'Gib den 6-stelligen Code aus der App ein:',
+        'totp.verify':         'Bestätigen & aktivieren',
+        'totp.verify_failed':  'Verifizierung fehlgeschlagen',
+        'totp.disable_failed': 'Deaktivierung fehlgeschlagen',
+
+        // ── Zertifikat-Modal (Portal, Kurzfassung) ─────────────
+        'cert.selfsigned':      'Selbstsigniertes Zertifikat',
+        'cert.selfsigned_desc': 'Muss einmalig installiert werden, damit der Browser die Verbindung als sicher einstuft.',
+        'cert.pwin.1':          'Lade <code>jarvis.cer</code> herunter.',
+        'cert.pwin.2':          'Rechtsklick → <strong>Zertifikat installieren</strong>.',
+        'cert.pwin.3':          'Wähle <strong>Lokaler Computer</strong>.',
+        'cert.pwin.4':          '<strong>Alle Zertifikate in folgendem Speicher speichern</strong> → Durchsuchen → <strong>Vertrauenswürdige Stammzertifizierungsstellen</strong>.',
+        'cert.pwin.5':          'Fertigstellen + <strong>Browser komplett neu starten</strong>.',
+        'cert.pbrowser.1':      'Browser-Einstellungen öffnen.',
+        'cert.pbrowser.2':      'Nach <strong>Zertifikate</strong> suchen.',
+        'cert.pbrowser.3':      '<strong>Importieren</strong> im Reiter Zertifizierungsstellen.',
+        'cert.pbrowser.4':      'Datei <code>jarvis.cer</code> auswählen.',
+        'cert.pbrowser.5':      'Haken bei <strong>Dieser CA vertrauen…</strong>.',
+
+        // ── Support-API-Doku (Modal-Kopf; Inhalt via .i18n-de/.i18n-en-Bloecke) ──
+        'supapi.title':          '🔌 Support-API – REST-Zugriffe',
+        'supapi.own_page':       '🔗 Als eigene Seite',
+        'supapi.own_page_title': 'Dokumentation als eigene, verlinkbare Seite öffnen (öffentlich abrufbar)',
+        'supapi.pdf_title':      'Als PDF speichern (an PDF-Drucker drucken)',
+
         'chat.title': 'Chat',
         'sup.search': 'Suchen',
         'sup.input_ph': 'Anfrage eingeben … (mehrzeilig möglich)',
@@ -667,6 +717,7 @@ const _I18N = {
         'chat.mic':             'Spracheingabe',
         'chat.send':            'Senden',
         'chat.ctx_label':       'Kontext Speicher: {n} Einträge · {pct} %',
+        'chat.ctx_info':        'Kurzzeitgedächtnis dieses Chats: Anzahl der gemerkten Gesprächseinträge und Füllstand in % bis zur automatischen Komprimierung. Die KI nutzt diese Einträge als Kontext für ihre Antworten.',
 
         // ── Bubble-Kontextmenue + Edit + Delete-Confirms ─────────────────────
         'bubble.ctx.edit':        'Bearbeiten',
@@ -884,6 +935,56 @@ const _I18N = {
         // ── Support-Assistent (/support) ───────────────────────
         'sup.assistant': 'Support-Assistant',
         'portal.title': 'AI-Portal',
+
+        // ── Portal (/portal) ───────────────────────────────────
+        'portal.welcome':            'Welcome',
+        'portal.choose':             'Choose an area:',
+        'portal.card_chat':          'Chat',
+        'portal.card_chat_desc':     'Chat with the AI assistant.',
+        'portal.card_userchat_desc': 'Talk to other users.',
+        'portal.card_support':       'Support Assistant',
+        'portal.card_support_desc':  'Answers from knowledge, Jira and Confluence.',
+        'portal.card_agent':         'Support Agent',
+        'portal.card_agent_desc':    'Windows application for non-Swyx systems: speech recognition + Jira support assistant for download.',
+        'portal.llm_status':         'LLM status',
+        'portal.llm_unavail':        'LLM status unavailable',
+        'portal.llm_since_ok':       'reachable since ',
+        'portal.llm_since_down':     'unreachable since ',
+        'portal.logout_suffix':      'sign out',
+        'portal.conn_error':         'Connection error',
+
+        // ── 2FA modal (portal) ─────────────────────────────────
+        'totp.title':          'Two-Factor Authentication',
+        'totp.active_html':    '✅ 2FA is <strong>enabled</strong>.',
+        'totp.pw_ph':          'Password to confirm',
+        'totp.disable':        'Disable 2FA',
+        'totp.scan_html':      'Scan the QR code with <strong>Google Authenticator</strong>, Authy or another TOTP app.',
+        'totp.manual':         'Or enter manually:',
+        'totp.enter_code':     'Enter the 6-digit code from the app:',
+        'totp.verify':         'Confirm & enable',
+        'totp.verify_failed':  'Verification failed',
+        'totp.disable_failed': 'Deactivation failed',
+
+        // ── Certificate modal (portal, short version) ──────────
+        'cert.selfsigned':      'Self-signed certificate',
+        'cert.selfsigned_desc': 'Must be installed once so the browser treats the connection as secure.',
+        'cert.pwin.1':          'Download <code>jarvis.cer</code>.',
+        'cert.pwin.2':          'Right-click → <strong>Install certificate</strong>.',
+        'cert.pwin.3':          'Choose <strong>Local Machine</strong>.',
+        'cert.pwin.4':          '<strong>Place all certificates in the following store</strong> → Browse → <strong>Trusted Root Certification Authorities</strong>.',
+        'cert.pwin.5':          'Finish + <strong>fully restart the browser</strong>.',
+        'cert.pbrowser.1':      'Open the browser settings.',
+        'cert.pbrowser.2':      'Search for <strong>certificates</strong>.',
+        'cert.pbrowser.3':      '<strong>Import</strong> in the Authorities tab.',
+        'cert.pbrowser.4':      'Select the <code>jarvis.cer</code> file.',
+        'cert.pbrowser.5':      'Check <strong>Trust this CA…</strong>.',
+
+        // ── Support API docs (modal chrome; body via .i18n-de/.i18n-en blocks) ──
+        'supapi.title':          '🔌 Support API – REST Access',
+        'supapi.own_page':       '🔗 Open as page',
+        'supapi.own_page_title': 'Open the documentation as its own linkable page (publicly accessible)',
+        'supapi.pdf_title':      'Save as PDF (print to a PDF printer)',
+
         'chat.title': 'Chat',
         'sup.search': 'Search',
         'sup.input_ph': 'Enter your request … (multiline allowed)',
@@ -1535,6 +1636,7 @@ const _I18N = {
         'chat.mic':             'Speech Input',
         'chat.send':            'Send',
         'chat.ctx_label':       'Context Memory: {n} entries · {pct} %',
+        'chat.ctx_info':        'Short-term memory of this chat: number of stored conversation entries and fill level in % until automatic compression. The AI uses these entries as context for its replies.',
 
         // ── Bubble context menu + edit + delete confirms ─────────────────────
         'bubble.ctx.edit':        'Edit',
@@ -1762,6 +1864,10 @@ window.t = function(key) {
 
 /** Wendet alle data-i18n-Attribute auf das Dokument an. */
 window.applyLang = function() {
+    // Sprach-Attribut fuer CSS-Sprachbloecke (.i18n-de / .i18n-en):
+    // html[data-lang="en"] blendet .i18n-de aus und umgekehrt. Wird fuer
+    // lange Fliesstext-Inhalte (z.B. API-Dokumentation) statt Einzel-Keys genutzt.
+    document.documentElement.setAttribute('data-lang', window._lang);
     // Textinhalt
     document.querySelectorAll('[data-i18n]').forEach(el => {
         el.textContent = window.t(el.dataset.i18n);

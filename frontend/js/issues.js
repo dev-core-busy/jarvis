@@ -439,8 +439,10 @@
 
         // Footer-Buttons
         const buttons = [`<button class="jv-iss-btn" id="jv-iss-back-btn">← Zurueck</button>`];
-        if (canEdit) buttons.push(`<button class="jv-iss-btn primary" id="jv-iss-edit-btn">Bearbeiten</button>`);
-        if (_isAdmin) buttons.push(`<button class="jv-iss-btn primary" id="jv-iss-jarvis-btn">Jarvis-Bereich</button>`);
+        // 'editieren' = Ersteller aendert den Inhalt; 'bearbeiten' = Administrator
+        // pflegt den Loesungsbereich (Status + oeffentlicher Kommentar)
+        if (canEdit) buttons.push(`<button class="jv-iss-btn primary" id="jv-iss-edit-btn">editieren</button>`);
+        if (_isAdmin) buttons.push(`<button class="jv-iss-btn primary" id="jv-iss-jarvis-btn">bearbeiten</button>`);
         if (canDelete) buttons.push(`<button class="jv-iss-btn danger" id="jv-iss-del-btn">Loeschen</button>`);
         footer.innerHTML = buttons.join('');
 
@@ -469,7 +471,7 @@
     // ─── Erstellen / Bearbeiten (User-Felder) ─────────────────────────
     function _showForm(issue) {
         const isEdit = !!issue;
-        document.getElementById('jv-iss-title').textContent = isEdit ? 'Issue bearbeiten' : 'Neues Issue';
+        document.getElementById('jv-iss-title').textContent = isEdit ? 'Issue editieren' : 'Neues Issue';
         const body = document.getElementById('jv-iss-body');
         const footer = document.getElementById('jv-iss-footer');
 
@@ -548,7 +550,7 @@
 
     // ─── Jarvis-Bereich (Status + Comment) ────────────────────────────
     function _showJarvisForm(issue) {
-        document.getElementById('jv-iss-title').textContent = 'Issue – Jarvis-Bereich';
+        document.getElementById('jv-iss-title').textContent = 'Issue bearbeiten (Lösungsbereich)';
         const body = document.getElementById('jv-iss-body');
         const footer = document.getElementById('jv-iss-footer');
 
@@ -568,7 +570,7 @@
                 <div class="jv-iss-detail-value" style="white-space:pre-wrap;">${_escape(issue.body) || '<em style="color:var(--text-muted)">(leer)</em>'}</div>
             </div>
             <div style="margin-bottom:14px;color:var(--text-secondary);font-size:12px;">
-                Hier kann nur Jarvis Status setzen und einen oeffentlichen Kommentar hinterlassen.
+                Hier koennen Administratoren den Status setzen und einen oeffentlichen Kommentar hinterlassen.
             </div>
             <div class="jv-iss-form-row">
                 <label>Status</label>

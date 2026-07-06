@@ -30,14 +30,25 @@ def get_confluence_config() -> dict:
 
 
 def html_to_text(s: str, limit: int = 4000) -> str:
-    """Reduziert Confluence-Storage-HTML auf lesbaren Text."""
+    """Reduziert Confluence-Storage-HTML auf lesbaren (Markdown-aehnlichen) Text.
+    Block-Elemente werden mit Zeilenumbruechen abgetrennt, Ueberschriften als
+    ``##`` markiert und Listenpunkte mit ``- `` versehen, damit das Frontend die
+    Struktur rendern kann (frueher klebten Ueberschriften am Folgetext)."""
     if not s:
         return ""
     s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
-    s = re.sub(r"</p\s*>", "\n", s, flags=re.I)
+    s = re.sub(r"<h[1-6][^>]*>", "\n\n## ", s, flags=re.I)   # Ueberschriften markieren
+    s = re.sub(r"</h[1-6]\s*>", "\n\n", s, flags=re.I)
+    s = re.sub(r"<li[^>]*>", "\n- ", s, flags=re.I)          # Listenpunkte
+    s = re.sub(r"</p\s*>", "\n\n", s, flags=re.I)
     s = re.sub(r"</li\s*>", "\n", s, flags=re.I)
+    s = re.sub(r"</tr\s*>", "\n", s, flags=re.I)             # Tabellenzeilen
+    s = re.sub(r"</(div|table|thead|tbody|section|article|blockquote|ul|ol)\s*>",
+               "\n", s, flags=re.I)
     s = re.sub(r"<[^>]+>", "", s)
     s = html.unescape(s)
+    s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r" *\n *", "\n", s)
     s = re.sub(r"\n{3,}", "\n\n", s).strip()
     if len(s) > limit:
         s = s[:limit] + " …[gekuerzt]"

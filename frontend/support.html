@@ -254,10 +254,10 @@
             margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-md);
             background: rgba(var(--fg-rgb), .04); font-size: 0.88rem; line-height: 1.5;
             color: var(--text-secondary);
-            /* Eingeklappt hoechstens 6 Zeilen; laengerer Inhalt bekommt 'mehr'/'weniger' */
-            display: -webkit-box; -webkit-line-clamp: 6;
-            -webkit-box-orient: vertical; overflow: hidden;
+            /* Inhalt als Markdown; eingeklappt via max-height (JS _applyHeightClamp) */
         }
+        .sup-block-body.sup-ai-md > :first-child { margin-top: 0; }
+        .sup-block-body.sup-ai-md > :last-child { margin-bottom: 0; }
         .sup-block-src { margin-top: 8px; font-size: 0.8rem; color: var(--text-muted); }
         .sup-block-src a { color: var(--accent-hover); text-decoration: none; word-break: break-all; cursor: pointer; }
         .sup-block-src a:hover { text-decoration: underline; }
@@ -275,8 +275,6 @@
         .sup-ai-btn.done:hover:not(:disabled) {
             background: rgba(var(--fg-rgb), .06); color: var(--text-secondary);
         }
-        /* nach KI-Analyse: Box nicht mehr auf --sup-rl Zeilen kappen */
-        .sup-block-body.expanded { display: block; -webkit-line-clamp: unset; }
 
         .sup-doc-modal { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center;
             justify-content: center; background: rgba(var(--shadow-rgb), .6); backdrop-filter: blur(4px); padding: 20px; }
@@ -564,6 +562,6 @@
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/issues.js?v=5"></script>
 <script src="/static/js/chatlib.js?v=8"></script>
-<script src="/static/js/support.js?v=46"></script>
+<script src="/static/js/support.js?v=47"></script>
 </body>
 </html>

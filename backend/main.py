@@ -3937,9 +3937,15 @@ def _two_line(text: str, limit: int = 180) -> str:
 
 def _flatten(text: str) -> str:
     """Normalisiert Whitespace, OHNE zu kuerzen – fuer den vollstaendigen
-    Treffer-Text (keine Antwortzeilen-Begrenzung mehr)."""
+    Treffer-Text (keine Antwortzeilen-Begrenzung mehr). Die Absatz-/Zeilen-
+    Struktur bleibt erhalten (fuer die Markdown-Darstellung im Frontend);
+    nur horizontale Leerraeume und ueberzaehlige Leerzeilen werden geglaettet."""
     import re
-    return re.sub(r"\s+", " ", (text or "")).strip()
+    t = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    t = re.sub(r"[ \t]+", " ", t)      # horizontale Leerraum-Laeufe
+    t = re.sub(r" *\n *", "\n", t)     # Leerraum an Zeilenraendern
+    t = re.sub(r"\n{3,}", "\n\n", t)   # hoechstens eine Leerzeile
+    return t.strip()
 
 
 def _first_url(text: str) -> str:

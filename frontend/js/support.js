@@ -530,6 +530,17 @@
             .catch(function () { body.textContent = T('sup.doc_load_fail', 'Dokument konnte nicht geladen werden.'); });
     }
 
+    // Jira liefert ISO-8601-Strings (z.B. "2024-03-15T10:30:00.000+0100").
+    // Kurz als lokales Datum + Uhrzeit darstellen; leere/ungueltige Werte -> ''.
+    function fmtDate(iso) {
+        if (!iso) return '';
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        try {
+            return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch (e) { return d.toLocaleDateString(); }
+    }
+
     function relTime(ts) {
         var diff = Math.floor(Date.now() / 1000) - (ts || 0);
         var en = (localStorage.getItem('jarvis_lang') || 'de') === 'en';
@@ -697,6 +708,15 @@
             inner = esc(label);
         }
         var srcHtml = '<div class="sup-block-src">' + esc(T('sup.source_prefix', 'Quelle:')) + ' ' + inner + '</div>';
+        // Jira: Erstellungs- und Änderungsdatum unter der Quelle anzeigen
+        var datesHtml = '';
+        var cDate = fmtDate(b.created), uDate = fmtDate(b.updated);
+        if (cDate || uDate) {
+            var parts = [];
+            if (cDate) parts.push(esc(T('sup.created', 'Erstellt')) + ': ' + esc(cDate));
+            if (uDate) parts.push(esc(T('sup.updated', 'Geändert')) + ': ' + esc(uDate));
+            datesHtml = '<div class="sup-block-dates">' + parts.join(' · ') + '</div>';
+        }
         // Jira-Tickets: On-Demand-Button "KI-Zusammenfassung" rechts in der Kopfzeile
         var aiBtn = '';
         if (b.source === 'JIRA' && (b.key || b.title)) {
@@ -713,6 +733,7 @@
             + '</div>'
             + '<div class="sup-block-body sup-ai-md">' + renderBlockBody(b.summary) + '</div>'
             + srcHtml
+            + datesHtml
             + '</div>';
     }
 

@@ -3924,7 +3924,6 @@ async def support_status(user: str = Depends(require_auth)):
         "ibs_configured": _ibs_ok,
         "has_prompt": bool((cfg.get("system_prompt") or "").strip()),
         "summary_lines_max": _support_cap(cfg.get("summary_lines"), 5),
-        "result_lines_max": _support_cap(cfg.get("result_lines"), 2),
         "ticket_count_max": _tmax,
         "ticket_count_default": _tdef,
     })
@@ -3934,6 +3933,13 @@ def _two_line(text: str, limit: int = 180) -> str:
     import re
     t = re.sub(r"\s+", " ", (text or "")).strip()
     return (t[:limit] + "…") if len(t) > limit else t
+
+
+def _flatten(text: str) -> str:
+    """Normalisiert Whitespace, OHNE zu kuerzen – fuer den vollstaendigen
+    Treffer-Text (keine Antwortzeilen-Begrenzung mehr)."""
+    import re
+    return re.sub(r"\s+", " ", (text or "")).strip()
 
 
 def _first_url(text: str) -> str:
@@ -4032,7 +4038,7 @@ def _support_readable(stem: str, chunk: str) -> tuple[str, str]:
             first = _re.split(r"\s+-\s+\[", first)[0]
             title = first.strip(" -–—:") or first
 
-    return (_two_line(title, 90) or (stem or "Dokument")), _two_line(summary, 600)
+    return (_two_line(title, 90) or (stem or "Dokument")), _flatten(summary)
 
 
 async def _support_ai_summary(query: str, blocks: list, system_prompt: str, lines: int = 5,
@@ -4362,7 +4368,7 @@ async def _support_run_query(body: dict, user: str) -> dict:
                     if meta:
                         summary += " — " + meta
                     blocks.append({"source": "JIRA", "title": b.get("key") or "Ticket",
-                                   "summary": _two_line(summary, 600), "score": pct,
+                                   "summary": _flatten(summary), "score": pct,
                                    "link": b.get("link") or "",
                                    "source_label": b.get("key") or "Ticket",
                                    "key": b.get("key")})
@@ -4392,15 +4398,15 @@ async def _support_run_query(body: dict, user: str) -> dict:
                     try:
                         pg = await asyncio.to_thread(cc.get_page, r.get("id"), None, None)
                         raw = (((pg.get("body") or {}).get("storage") or {}).get("value")) or ""
-                        summary = _cf_html(raw, 600)
-                        full_text = _cf_html(raw, 6000)   # Volltext (gekappt) fuer die KI-Zusammenfassung
+                        summary = _cf_html(raw, 600)      # kurzer Auszug fuer das Relevanz-Scoring
+                        full_text = _cf_html(raw, 200000)  # praktisch vollstaendiger Seitentext
                     except Exception:
                         pass
                     overlap = len(qtokens & _support_tokens(title + " " + summary)) / (len(qtokens) or 1)
                     # relevanz-sortiert → Rang-Komponente, durch Overlap angehoben
                     pct = max(20, min(round(max(overlap * 100, 86 - i * 9)), 96))
                     blocks.append({"source": "CONFLUENCE", "title": title,
-                                   "summary": _two_line(summary or title, 600), "score": pct,
+                                   "summary": _flatten(full_text or summary or title), "score": pct,
                                    "full_text": full_text,
                                    "link": cc.link_for(data, r), "source_label": title})
         except _CErr as e:
@@ -4413,7 +4419,6 @@ async def _support_run_query(body: dict, user: str) -> dict:
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
 
     sum_max = _support_cap(cfg.get("summary_lines"), 5)   # Admin-Maximum
-    res_max = _support_cap(cfg.get("result_lines"), 2)
     # Benutzer-Vorgabe (sitzungsueberdauernd im Browser) – auf [2, Maximum] begrenzt
     eff_sum = sum_max
     if body.get("summary_lines") is not None:
@@ -4446,9 +4451,7 @@ async def _support_run_query(body: dict, user: str) -> dict:
         "jira_base": _support_jira_base(),  # fuer Ticket-Key-Links in Ausgabetexten
         "blocks": blocks,
         "ai_summary": ai_summary,
-        "result_lines": res_max,           # Maximum (Anzeige-Begrenzung clientseitig)
         "summary_lines_max": sum_max,
-        "result_lines_max": res_max,
         "jira_total": jira_total,          # Gesamtzahl gefundener Jira-Treffer
         "open_only": bool(open_only),
         "took_ms": int((_t.time() - t0) * 1000),
@@ -4463,7 +4466,7 @@ async def support_summarize(request: Request):
        :func:`_support_run_query`): RAG + Jira + Confluence + KI-Gesamtzusammenfassung.
     2. **Einzel-Treffer** (``key`` + ``source=JIRA``, kein Freitext) → On-Demand-
        KI-Zusammenfassung EINES Jira-Vorgangs (Beschreibung + Kommentare) in
-       ``result_lines`` Saetzen. Genutzt vom Button je Ergebnisbox.
+       ``summary_lines`` Saetzen. Genutzt vom Button je Ergebnisbox.
 
     Auth: Benutzer-Token (Bearer) ODER externer API-Key (analog /api/support/query).
     """
@@ -4498,10 +4501,11 @@ async def support_summarize(request: Request):
 
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
 
-    res_max = _support_cap(cfg.get("result_lines"), 2)
-    lines = res_max
+    # Laenge der KI-Ticket-Zusammenfassung folgt 'Sätze (Zusammenfassung)' (summary_lines)
+    sum_max = _support_cap(cfg.get("summary_lines"), 5)
+    lines = sum_max
     if body.get("lines") is not None:
-        lines = max(2, min(_support_cap(body.get("lines"), res_max), res_max))
+        lines = max(2, min(_support_cap(body.get("lines"), sum_max), sum_max))
 
     b = {"source": "JIRA", "key": key, "_key": key, "title": key, "summary": ""}
     ok, _ = await _run_cancellable(

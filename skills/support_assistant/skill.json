@@ -18,16 +18,9 @@
         },
         "summary_lines": {
             "type": "number",
-            "label": "Länge der KI-Zusammenfassung (Zeilen)",
-            "description": "Maximale Länge der KI-Zusammenfassung in Sätzen/Zeilen (Standard 5).",
+            "label": "Länge der KI-Zusammenfassung (Sätze)",
+            "description": "Maximale Länge der KI-Zusammenfassung in Sätzen (Standard 5); zugleich die Laenge der per Button 'KI-Zusammenfassung' erzeugten Ticket-Analyse.",
             "default": 5,
-            "required": false
-        },
-        "result_lines": {
-            "type": "number",
-            "label": "Antwortzeilen pro Treffer",
-            "description": "Auf wie viele Zeilen die Kurzfassung je Ergebnisblock begrenzt wird; zugleich die Laenge (Saetze) der per Button 'KI-Zusammenfassung' erzeugten Ticket-Analyse (Standard 2, max. 50).",
-            "default": 2,
             "required": false
         },
         "jira_limit": {

@@ -19,6 +19,16 @@
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
         });
     }
+    // Jira liefert ISO-8601-Strings (z.B. "2024-03-15T10:30:00.000+0100").
+    // Kurz als lokales Datum + Uhrzeit; leere/ungueltige Werte -> ''.
+    function fmtDate(iso) {
+        if (!iso) return '';
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        try {
+            return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch (e) { return d.toLocaleDateString(); }
+    }
     function status(msg, kind) {
         var el = $('jira-status'); if (!el) return;
         el.textContent = msg || '';
@@ -128,8 +138,11 @@
                         row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;'
                             + 'gap:10px;padding:8px 10px;margin-bottom:6px;border:1px solid var(--border);'
                             + 'border-radius:8px;cursor:pointer;background:var(--bg-glass);';
+                        var rC = fmtDate(r.created), rU = fmtDate(r.updated);
                         var meta = [r.status, r.type, r.priority ? ('Prio ' + r.priority) : '',
-                                    r.assignee ? ('→ ' + r.assignee) : ''].filter(Boolean).join(' · ');
+                                    r.assignee ? ('→ ' + r.assignee) : '',
+                                    rC ? ('Erstellt ' + rC) : '',
+                                    rU ? ('Geändert ' + rU) : ''].filter(Boolean).join(' · ');
                         row.innerHTML = '<span style="min-width:0;"><span style="font-weight:600;">'
                             + esc(r.key) + '</span> ' + esc(r.summary || '')
                             + '<br><span class="kb-hint">' + esc(meta) + '</span></span>'
@@ -157,8 +170,11 @@
                         if ($('jira-issue-text')) $('jira-issue-text').textContent = (d && d.error) || 'Ticket konnte nicht geladen werden.';
                         return;
                     }
+                    var dC = fmtDate(d.created), dU = fmtDate(d.updated);
                     var meta = [d.status, d.type, d.priority ? ('Prio ' + d.priority) : '',
-                                d.assignee ? ('Bearbeiter: ' + d.assignee) : ''].filter(Boolean).join(' · ');
+                                d.assignee ? ('Bearbeiter: ' + d.assignee) : '',
+                                dC ? ('Erstellt: ' + dC) : '',
+                                dU ? ('Geändert: ' + dU) : ''].filter(Boolean).join(' · ');
                     if ($('jira-issue-title')) $('jira-issue-title').textContent = d.key + ' — ' + (d.summary || '');
                     if ($('jira-issue-meta')) $('jira-issue-meta').textContent = meta;
                     var link = $('jira-issue-link');

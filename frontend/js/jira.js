@@ -20,14 +20,14 @@
         });
     }
     // Jira liefert ISO-8601-Strings (z.B. "2024-03-15T10:30:00.000+0100").
-    // Kurz als lokales Datum + Uhrzeit; leere/ungueltige Werte -> ''.
+    // Festes Format tt.mm.jjjj HH:MM (24h, null-gepolstert); leer/ungueltig -> ''.
     function fmtDate(iso) {
         if (!iso) return '';
         var d = new Date(iso);
         if (isNaN(d.getTime())) return '';
-        try {
-            return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        } catch (e) { return d.toLocaleDateString(); }
+        function p(n) { return (n < 10 ? '0' : '') + n; }
+        return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear()
+            + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
     }
     function status(msg, kind) {
         var el = $('jira-status'); if (!el) return;

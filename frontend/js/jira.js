@@ -53,6 +53,8 @@
                     var c = (d && d.config) || {};
                     if ($('jira-url')) $('jira-url').value = c.base_url || '';
                     if ($('jira-token')) $('jira-token').value = c.api_token || '';
+                    if ($('ibs-api-url')) $('ibs-api-url').value = c.ibs_api_url || '';
+                    if ($('ibs-api-key')) $('ibs-api-key').value = c.ibs_api_key || '';
                     if ($('jira-max-results')) $('jira-max-results').value = c.max_results || 50;
                 })
                 .catch(function () {});
@@ -65,6 +67,8 @@
             var body = {
                 base_url: ($('jira-url') ? $('jira-url').value : '').trim(),
                 api_token: ($('jira-token') ? $('jira-token').value : '').trim(),
+                ibs_api_url: ($('ibs-api-url') ? $('ibs-api-url').value : '').trim(),
+                ibs_api_key: ($('ibs-api-key') ? $('ibs-api-key').value : '').trim(),
                 max_results: mr
             };
             status('Speichere…');

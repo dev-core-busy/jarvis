@@ -4377,6 +4377,7 @@ async def _support_run_query(body: dict, user: str) -> dict:
                                    "summary": _flatten(summary), "score": pct,
                                    "link": b.get("link") or "",
                                    "source_label": b.get("key") or "Ticket",
+                                   "created": b.get("created"), "updated": b.get("updated"),
                                    "key": b.get("key")})
         except JiraError as e:
             print("[Support] Jira-Suche fehlgeschlagen: %s" % e, flush=True)

@@ -84,23 +84,12 @@
         el.parentNode.insertBefore(btn, el.nextSibling);
     }
     function _applyAiClamp() { _applyHeightClamp(document.querySelector('.sup-ai-text.sup-ai-md')); }
-    // Ergebnis-Karten: 'mehr'/'weniger', wenn der Text die Zeilen-Kappung uebersteigt
-    // (nutzt die vorhandene -webkit-line-clamp-Kappung + .expanded zum Aufklappen)
+    // Ergebnis-Karten: ab >6 Zeilen 'mehr'/'weniger' – gleiche Hoehen-Kappung wie
+    // die KI-Zusammenfassung (max-height statt -webkit-line-clamp, da der Inhalt
+    // als Markdown mit Block-Elementen gerendert wird).
     function _clampBlocks() {
         var bodies = document.querySelectorAll('#sup-blocks .sup-block-body');
-        Array.prototype.forEach.call(bodies, function (bodyEl) {
-            if (bodyEl.scrollHeight <= bodyEl.clientHeight + 2) return;   // nicht gekappt
-            var btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'sup-ai-more';
-            btn.textContent = T('sup.more', 'mehr');
-            btn.addEventListener('click', function () {
-                var open = bodyEl.classList.toggle('expanded');
-                btn.textContent = open ? T('sup.less', 'weniger') : T('sup.more', 'mehr');
-                if (!open) { var card = bodyEl.closest('.sup-block'); if (card) card.scrollIntoView({ block: 'nearest' }); }
-            });
-            bodyEl.parentNode.insertBefore(btn, bodyEl.nextSibling);
-        });
+        Array.prototype.forEach.call(bodies, function (bodyEl) { _applyHeightClamp(bodyEl); });
     }
     // Basis-URL der Jira-Instanz (vom Backend) – fuer Ticket-Key-Links
     var _jiraBase = '';
@@ -127,6 +116,22 @@
         }
         // 3) gesicherte URLs wiederherstellen
         return html.replace(/@@URL(\d+)@@/g, function (_, i) { return urls[+i]; });
+    }
+    // Nackte Jira-Ticket-Keys (PROJEKT-NUMMER) zu Markdown-Links machen – aber nur,
+    // wenn nicht bereits Teil eines Links/Pfads (kein '[' oder '/' davor).
+    function _linkifyKeys(t) {
+        if (!_jiraBase) return t;
+        return t.replace(/(^|[^\[\/\w-])([A-Z][A-Z0-9]+-\d+)(?![\w\]-])/g,
+            function (_, pre, key) { return pre + '[' + key + '](' + _jiraBase + '/browse/' + key + ')'; });
+    }
+    // Treffer-Text als Markdown rendern (Überschriften, **fett**, Tabellen, Listen)
+    // – wie die KI-Zusammenfassung; Fallback: nur Escapen + Verlinken.
+    function renderBlockBody(text) {
+        var s = String(text == null ? '' : text);
+        if (window.JarvisChatLib && window.JarvisChatLib.renderMarkdown) {
+            return window.JarvisChatLib.renderMarkdown(_linkifyKeys(s));
+        }
+        return escLink(s);
     }
 
     // Hebt Filter-Begriffe im fertig gerenderten Block-HTML hervor (<mark>). Wirkt nur
@@ -706,7 +711,7 @@
             + '<span class="sup-badge-score" title="' + esc(scoreTitle(b)) + '">' + b.score + '%</span>'
             + aiBtn
             + '</div>'
-            + '<div class="sup-block-body">' + escLink(b.summary) + '</div>'
+            + '<div class="sup-block-body sup-ai-md">' + renderBlockBody(b.summary) + '</div>'
             + srcHtml
             + '</div>';
     }
@@ -820,16 +825,14 @@
                 if (!d) return;
                 if (!d.ok) {
                     btn.textContent = orig;
-                    bodyEl.classList.add('expanded');
                     _resetClamp(bodyEl);
                     bodyEl.innerHTML = '<span style="color:var(--danger);">'
                         + esc(d.error || T('sup.search_failed', 'Suche fehlgeschlagen.')) + '</span>';
                     return;
                 }
                 if (d.jira_base) _jiraBase = d.jira_base;
-                bodyEl.classList.add('expanded');
                 _resetClamp(bodyEl);
-                bodyEl.innerHTML = escLink(d.summary);
+                bodyEl.innerHTML = renderBlockBody(d.summary);
                 _applyHeightClamp(bodyEl);   // KI-Ticket-Zusammenfassung: ab >6 Zeilen einklappen
                 btn.textContent = T('sup.ai_btn_again', 'Neu zusammenfassen');
                 btn.classList.add('done');   // farblich abgesetzter Zustand

@@ -379,7 +379,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>open_only</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;">Ob nur offene Tickets berücksichtigt wurden.</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_active</code>, <code>confluence_active</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;">Ob die jeweilige Quelle serverseitig aktiv ist.</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_base</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;">Basis-URL der Jira-Instanz (zum Bauen von Ticket-Links).</td></tr>
-                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>result_lines</code>, <code>result_lines_max</code>, <code>summary_lines_max</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;">Konfigurierte Maxima (für die Anzeige-Begrenzung).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>summary_lines_max</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;">Maximale Satzanzahl der KI-Zusammenfassung. Der Treffer-Text wird vollständig geliefert (keine Zeilen-Begrenzung).</td></tr>
                         <tr><td style="padding:6px 8px;"><code>took_ms</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;">Server-Laufzeit der Anfrage in Millisekunden.</td></tr>
                     </tbody>
                 </table>
@@ -417,7 +417,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <tbody style="color:var(--text-primary);">
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>key</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">Jira-Ticket-Key, z.&nbsp;B. <code>SUP-1234</code>. Beschreibung + letzte Kommentare werden nachgeladen und zusammengefasst.</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>source</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"JIRA"</code></td><td style="padding:6px 8px;">Aktuell wird nur <code>JIRA</code> unterstützt (anderer Wert → <code>400</code>).</td></tr>
-                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>lines</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>result_lines_max</code> (2)</td><td style="padding:6px 8px;">Satzanzahl der Zusammenfassung, begrenzt auf 2 … <code>result_lines_max</code> (Admin-Maximum).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>lines</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>summary_lines_max</code> (5)</td><td style="padding:6px 8px;">Satzanzahl der Zusammenfassung, begrenzt auf 2 … <code>summary_lines_max</code> (Admin-Maximum).</td></tr>
                         <tr><td style="padding:6px 8px;"><code>lang</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"de"</code></td><td style="padding:6px 8px;">Sprache der Zusammenfassung: <code>de</code> oder <code>en</code>.</td></tr>
                     </tbody>
                 </table>
@@ -640,7 +640,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>open_only</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;">Whether only open tickets were considered.</td></tr>
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_active</code>, <code>confluence_active</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;">Whether the respective source is active server-side.</td></tr>
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_base</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;">Base URL of the Jira instance (for building ticket links).</td></tr>
-        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>result_lines</code>, <code>result_lines_max</code>, <code>summary_lines_max</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;">Configured maxima (for display limiting).</td></tr>
+        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>summary_lines_max</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;">Maximum sentence count of the AI summary. The hit text is returned in full (no line limit).</td></tr>
         <tr><td style="padding:6px 8px;"><code>took_ms</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;">Server processing time of the request in milliseconds.</td></tr>
     </tbody>
 </table>
@@ -678,7 +678,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <tbody style="color:var(--text-primary);">
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>key</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>required</em></td><td style="padding:6px 8px;">Jira ticket key, e.g. <code>SUP-1234</code>. Description + latest comments are fetched and summarized.</td></tr>
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>source</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"JIRA"</code></td><td style="padding:6px 8px;">Currently only <code>JIRA</code> is supported (any other value → <code>400</code>).</td></tr>
-        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>lines</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>result_lines_max</code> (2)</td><td style="padding:6px 8px;">Number of sentences of the summary, limited to 2 … <code>result_lines_max</code> (admin maximum).</td></tr>
+        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>lines</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>summary_lines_max</code> (5)</td><td style="padding:6px 8px;">Number of sentences of the summary, limited to 2 … <code>summary_lines_max</code> (admin maximum).</td></tr>
         <tr><td style="padding:6px 8px;"><code>lang</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>"de"</code></td><td style="padding:6px 8px;">Language of the summary: <code>de</code> or <code>en</code>.</td></tr>
     </tbody>
 </table>
@@ -2089,10 +2089,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <h4 style="margin:18px 0 8px;">Darstellung</h4>
                         <p class="kb-hint">Diese Werte sind das <strong>Maximum</strong>. Benutzer können auf der Support-Oberfläche ihren eigenen Wert zwischen 2 und diesem Maximum wählen (sitzungsüberdauernd gespeichert).</p>
                         <div style="display:grid;grid-template-columns:1fr 110px;gap:10px 16px;align-items:center;max-width:520px;">
-                            <label style="margin:0;">KI-Gesamtzusammenfassung – max. Länge (Zeilen/Sätze)</label>
+                            <label style="margin:0;">KI-Gesamtzusammenfassung – max. Länge (Sätze)</label>
                             <input type="number" id="support-lines" class="config-input" min="2" max="50" step="1" value="5" style="width:100%;box-sizing:border-box;">
-                            <label style="margin:0;">Max. Antwortzeilen pro Treffer</label>
-                            <input type="number" id="support-result-lines" class="config-input" min="2" max="50" step="1" value="2" style="width:100%;box-sizing:border-box;">
                             <label style="margin:0;">Jira-Treffer (max.)</label>
                             <input type="number" id="support-jira-limit" class="config-input" min="1" max="1000" step="1" value="12" style="width:100%;box-sizing:border-box;">
                             <label style="margin:0;">Wissens-/RAG-Treffer (max.)</label>
@@ -2946,7 +2944,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/confluence.js?v=5"></script>
     <script src="/static/js/jira.js?v=3"></script>
-    <script src="/static/js/support_admin.js?v=9"></script>
+    <script src="/static/js/support_admin.js?v=10"></script>
     <script src="/static/js/telemetry.js?v=5"></script>
     <script src="/static/js/chatlib.js?v=11"></script>
     <script src="/static/js/issues.js?v=6"></script>

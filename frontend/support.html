@@ -254,7 +254,8 @@
             margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-md);
             background: rgba(var(--fg-rgb), .04); font-size: 0.88rem; line-height: 1.5;
             color: var(--text-secondary);
-            display: -webkit-box; -webkit-line-clamp: var(--sup-rl, 2);
+            /* Eingeklappt hoechstens 6 Zeilen; laengerer Inhalt bekommt 'mehr'/'weniger' */
+            display: -webkit-box; -webkit-line-clamp: 6;
             -webkit-box-orient: vertical; overflow: hidden;
         }
         .sup-block-src { margin-top: 8px; font-size: 0.8rem; color: var(--text-muted); }
@@ -500,10 +501,6 @@
                     <input type="number" id="sup-u-sumlines" min="2" step="1"
                         style="width:58px;background:rgba(var(--fg-rgb),.05);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:5px 6px;font-size:0.82rem;font-family:var(--font-body);">
                 </label>
-                <label><span data-i18n="sup.answer_lines">Antwortzeilen</span>
-                    <input type="number" id="sup-u-reslines" min="2" step="1"
-                        style="width:58px;background:rgba(var(--fg-rgb),.05);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:5px 6px;font-size:0.82rem;font-family:var(--font-body);">
-                </label>
                 <span id="sup-u-hint" style="font-size:0.72rem;color:var(--text-muted);align-self:center;"></span>
                 <label><span data-i18n="sup.ticket_count">Ticketanzahl</span>
                     <input type="number" id="sup-u-tickets" min="1" step="1"
@@ -567,6 +564,6 @@
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/issues.js?v=5"></script>
 <script src="/static/js/chatlib.js?v=8"></script>
-<script src="/static/js/support.js?v=45"></script>
+<script src="/static/js/support.js?v=46"></script>
 </body>
 </html>

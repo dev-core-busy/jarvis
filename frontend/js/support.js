@@ -228,24 +228,19 @@
                 }
                 // Darstellungs-Parameter: Maxima vom Server, Nutzerwert aus localStorage
                 _supMax.sum = parseInt(d.summary_lines_max, 10) || 5;
-                _supMax.res = parseInt(d.result_lines_max, 10) || 2;
                 _supMax.tickets = parseInt(d.ticket_count_max, 10) || 50;
                 _supDefault.tickets = parseInt(d.ticket_count_default, 10) || 12;
-                var sEl = $('sup-u-sumlines'), rEl = $('sup-u-reslines'), tEl = $('sup-u-tickets');
+                var sEl = $('sup-u-sumlines'), tEl = $('sup-u-tickets');
                 if (sEl) {
                     sEl.max = _supMax.sum;
                     var sp = getNumPref('sumlines'); sEl.value = clampNum(sp === null ? _supMax.sum : sp, 2, _supMax.sum);
-                }
-                if (rEl) {
-                    rEl.max = _supMax.res;
-                    var rp = getNumPref('reslines'); rEl.value = clampNum(rp === null ? _supMax.res : rp, 2, _supMax.res);
                 }
                 if (tEl) {
                     tEl.max = _supMax.tickets;
                     var tp = getNumPref('tickets'); tEl.value = clampNum(tp === null ? _supDefault.tickets : tp, 1, _supMax.tickets);
                 }
                 var hint = $('sup-u-hint');
-                if (hint) hint.textContent = '(max. ' + _supMax.sum + ' / ' + _supMax.res + ' Zeilen)';
+                if (hint) hint.textContent = '(max. ' + _supMax.sum + ' Sätze)';
                 var thint = $('sup-u-thint');
                 if (thint && tEl) thint.textContent = '(' + tEl.value + '/' + _supMax.tickets + ')';
             })
@@ -327,13 +322,9 @@
             };
         }
         // Darstellungs-Parameter (Nutzerwert 2 … Maximum, sitzungsüberdauernd)
-        var sEl = $('sup-u-sumlines'), rEl = $('sup-u-reslines');
+        var sEl = $('sup-u-sumlines');
         if (sEl) sEl.addEventListener('change', function () {
             var v = clampNum(this.value, 2, _supMax.sum); this.value = v; setNumPref('sumlines', v);
-        });
-        if (rEl) rEl.addEventListener('change', function () {
-            var v = clampNum(this.value, 2, _supMax.res); this.value = v; setNumPref('reslines', v);
-            try { document.documentElement.style.setProperty('--sup-rl', String(v)); } catch (e) {}  // sofort anwenden
         });
         var tEl = $('sup-u-tickets');
         if (tEl) tEl.addEventListener('change', function () {
@@ -653,12 +644,9 @@
         _lastData = d;
         var ftEl = $('sup-filter-text'); if (ftEl) ftEl.value = '';  // neue Suche -> Filter leeren
         if (d.jira_base) _jiraBase = d.jira_base;   // fuer Ticket-Key-Links in Texten
-        // Antwortzeilen: Nutzerwert, begrenzt auf das Admin-Maximum (Anzeige-Kappung)
-        var rMax = parseInt(d.result_lines_max || d.result_lines, 10) || 2;
-        var rUser = clampNum(getNumPref('reslines') === null ? rMax : getNumPref('reslines'), 2, rMax);
-        // Karten zeigen eingeklappt hoechstens 6 Zeilen; laengerer Inhalt bekommt
-        // in _clampBlocks() einen 'mehr'/'weniger'-Umschalter (Wunsch: max. 6 Zeilen).
-        try { document.documentElement.style.setProperty('--sup-rl', String(Math.min(rUser, _CLAMP_LINES))); } catch (e) {}
+        // Karten zeigen eingeklappt hoechstens 6 Zeilen (fixe CSS-Kappung); laengerer
+        // Inhalt bekommt in _clampBlocks() einen 'mehr'/'weniger'-Umschalter. Der
+        // vollstaendige Text wird immer geladen (keine Antwortzeilen-Begrenzung mehr).
         var html = '';
         if (d.ai_summary) {
             // Volles Markdown rendern (Tabellen/Überschriften/Listen/**fett**/Links);
@@ -818,7 +806,8 @@
         var orig = btn.textContent;
         btn.disabled = true;
         btn.innerHTML = '<span class="sup-spinner"></span>' + esc(T('sup.analyzing', 'Analysiere…'));
-        var lines = clampNum(getNumPref('reslines') === null ? _supMax.res : getNumPref('reslines'), 2, _supMax.res);
+        // Laenge der KI-Ticket-Zusammenfassung folgt den 'Sätze (Zusammenfassung)'
+        var lines = clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum);
         fetch('/api/support/summarize', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),

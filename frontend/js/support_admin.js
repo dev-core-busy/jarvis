@@ -98,7 +98,6 @@
                     var c = (d && d.config) || {};
                     if ($('support-prompt')) $('support-prompt').value = c.system_prompt || '';
                     if ($('support-lines')) $('support-lines').value = c.summary_lines || 5;
-                    if ($('support-result-lines')) $('support-result-lines').value = c.result_lines || 2;
                     if ($('support-jira-limit')) $('support-jira-limit').value = c.jira_limit || 12;
                     if ($('support-rag-results')) $('support-rag-results').value = c.rag_results || 8;
                     if ($('support-confluence-results')) $('support-confluence-results').value = c.confluence_results || 6;
@@ -176,9 +175,6 @@
             var lines = parseInt(($('support-lines') ? $('support-lines').value : '5'), 10);
             if (!lines || lines < 1) lines = 5;
             if (lines > 50) lines = 50;
-            var rlines = parseInt(($('support-result-lines') ? $('support-result-lines').value : '2'), 10);
-            if (!rlines || rlines < 1) rlines = 2;
-            if (rlines > 50) rlines = 50;
             var jlimit = parseInt(($('support-jira-limit') ? $('support-jira-limit').value : '12'), 10);
             if (!jlimit || jlimit < 1) jlimit = 12;
             if (jlimit > 1000) jlimit = 1000;
@@ -194,7 +190,6 @@
             var body = {
                 system_prompt: ($('support-prompt') ? $('support-prompt').value : ''),
                 summary_lines: lines,
-                result_lines: rlines,
                 jira_limit: jlimit,
                 rag_results: rag,
                 confluence_results: conf,

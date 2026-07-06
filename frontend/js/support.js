@@ -656,7 +656,9 @@
         // Antwortzeilen: Nutzerwert, begrenzt auf das Admin-Maximum (Anzeige-Kappung)
         var rMax = parseInt(d.result_lines_max || d.result_lines, 10) || 2;
         var rUser = clampNum(getNumPref('reslines') === null ? rMax : getNumPref('reslines'), 2, rMax);
-        try { document.documentElement.style.setProperty('--sup-rl', String(rUser)); } catch (e) {}
+        // Karten zeigen eingeklappt hoechstens 6 Zeilen; laengerer Inhalt bekommt
+        // in _clampBlocks() einen 'mehr'/'weniger'-Umschalter (Wunsch: max. 6 Zeilen).
+        try { document.documentElement.style.setProperty('--sup-rl', String(Math.min(rUser, _CLAMP_LINES))); } catch (e) {}
         var html = '';
         if (d.ai_summary) {
             // Volles Markdown rendern (Tabellen/Überschriften/Listen/**fett**/Links);

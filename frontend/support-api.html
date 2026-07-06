@@ -236,7 +236,8 @@
                 <code>source</code> (<code>WISSEN</code>&nbsp;|&nbsp;<code>JIRA</code>&nbsp;|&nbsp;<code>CONFLUENCE</code>),
                 <code>title</code>, <code>summary</code> (Kurzfassung), <code>score</code> (Relevanz in&nbsp;%),
                 <code>source_label</code> und <code>link</code> (URL bzw. interner Abruf-Link).
-                Quellenspezifisch zusätzlich: <code>key</code> (nur <code>JIRA</code> – Ticket-Key),
+                Quellenspezifisch zusätzlich: <code>key</code>, <code>created</code> (Erstellungsdatum) und
+                <code>updated</code> (letzte Änderung) – jeweils nur <code>JIRA</code>, ISO-8601,
                 <code>doc</code>&nbsp;+&nbsp;<code>doc_name</code> (nur <code>WISSEN</code> – Quelldokument),
                 <code>full_text</code> (nur <code>CONFLUENCE</code> – gekappter Volltext).</p>
 
@@ -376,7 +377,7 @@
             </div>
             <p class="kb-hint" style="margin:8px 0 0;">Antwort-Felder: <code>crm</code> (normalisierte Nummer), <code>total</code>
                 (Jira-Gesamttreffer), <code>results[]</code> (Tickets mit <code>key</code>, <code>summary</code>,
-                <code>status</code>, <code>type</code>, <code>priority</code>, <code>assignee</code>, <code>updated</code>, <code>link</code>),
+                <code>status</code>, <code>type</code>, <code>priority</code>, <code>assignee</code>, <code>created</code>, <code>updated</code>, <code>link</code>),
                 <code>jql</code>. Das Organisationsfeld ist über die Jira-Skill-Konfiguration (<code>org_field</code>) anpassbar.</p>
         </div>
 
@@ -521,7 +522,8 @@
     <code>source</code> (<code>WISSEN</code>&nbsp;|&nbsp;<code>JIRA</code>&nbsp;|&nbsp;<code>CONFLUENCE</code>),
     <code>title</code>, <code>summary</code> (short version), <code>score</code> (relevance in&nbsp;%),
     <code>source_label</code> and <code>link</code> (URL or internal fetch link).
-    Source-specific additionally: <code>key</code> (<code>JIRA</code> only – ticket key),
+    Source-specific additionally: <code>key</code>, <code>created</code> (creation date) and
+    <code>updated</code> (last modified) – <code>JIRA</code> only, ISO-8601,
     <code>doc</code>&nbsp;+&nbsp;<code>doc_name</code> (<code>WISSEN</code> only – source document),
     <code>full_text</code> (<code>CONFLUENCE</code> only – truncated full text).</p>
 
@@ -661,7 +663,7 @@
 </div>
 <p class="kb-hint" style="margin:8px 0 0;">Response fields: <code>crm</code> (normalized number), <code>total</code>
     (Jira total hits), <code>results[]</code> (tickets with <code>key</code>, <code>summary</code>,
-    <code>status</code>, <code>type</code>, <code>priority</code>, <code>assignee</code>, <code>updated</code>, <code>link</code>),
+    <code>status</code>, <code>type</code>, <code>priority</code>, <code>assignee</code>, <code>created</code>, <code>updated</code>, <code>link</code>),
     <code>jql</code>. The organization field can be adjusted via the Jira skill configuration (<code>org_field</code>).</p>
         </div>
 

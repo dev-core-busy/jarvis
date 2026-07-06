@@ -366,6 +366,7 @@ def issue_brief(it: dict, base: str = "") -> dict:
         "priority": _n(f.get("priority")),
         "project": (f.get("project") or {}).get("key"),
         "assignee": (f.get("assignee") or {}).get("displayName") if f.get("assignee") else None,
+        "created": f.get("created"),
         "updated": f.get("updated"),
         "link": ("%s/browse/%s" % (base.rstrip("/"), it.get("key"))) if base and it.get("key") else "",
     }

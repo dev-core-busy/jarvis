@@ -3913,10 +3913,15 @@ async def support_status(user: str = Depends(require_auth)):
     """Status fuer die Support-Oberflaeche (Checkbox-Sichtbarkeit)."""
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
     _tmax, _tdef = _support_jira_limits(cfg)
+    # IBS/Kundenverwaltung: Checkbox nur nutzbar, wenn URL + API-Key hinterlegt sind
+    _jira_cfg = config.get_skill_states().get("jira", {}).get("config", {}) or {}
+    _ibs_ok = bool((_jira_cfg.get("ibs_api_url") or "").strip()) and \
+              bool((_jira_cfg.get("ibs_api_key") or "").strip())
     return JSONResponse({
         "active": _skill_active("support_assistant"),
         "jira_active": _skill_active("jira"),
         "confluence_active": _skill_active("confluence"),
+        "ibs_configured": _ibs_ok,
         "has_prompt": bool((cfg.get("system_prompt") or "").strip()),
         "summary_lines_max": _support_cap(cfg.get("summary_lines"), 5),
         "result_lines_max": _support_cap(cfg.get("result_lines"), 2),

@@ -43,15 +43,26 @@
         _pollCpu();
         _cpuTimer = setInterval(_pollCpu, 3000);
     }
-    // KI-Zusammenfassung ab >10 Zeilen einklappen + 'mehr'/'weniger'-Umschalter
-    function _applyAiClamp() {
-        var el = document.querySelector('.sup-ai-text.sup-ai-md');
-        if (!el) return;
+    // Karten bei mehr als 6 Zeilen einklappen + 'mehr'/'weniger'-Umschalter –
+    // gilt für KI-Zusammenfassungen (Gesamt + je Ticket) und Ergebnis-Karten
+    var _CLAMP_LINES = 6;
+    // Frueheren Einklapp-Zustand eines Elements entfernen (vor Neu-Befuellung)
+    function _resetClamp(el) {
+        el._clamped = false;
+        el.classList.remove('sup-ai-collapsed');
+        el.style.maxHeight = '';
+        var sib = el.nextElementSibling;
+        if (sib && sib.classList && sib.classList.contains('sup-ai-more')) sib.remove();
+    }
+    // Klappt ein Element per max-height auf 6 Zeilen ein (KI-Texte, freie Hoehe)
+    function _applyHeightClamp(el) {
+        if (!el || el._clamped) return;
         var cs = window.getComputedStyle(el);
         var lh = parseFloat(cs.lineHeight);
         if (!lh || isNaN(lh)) lh = (parseFloat(cs.fontSize) || 15) * 1.55;
-        var maxH = Math.round(lh * 10);   // 10 Zeilen
-        if (el.scrollHeight <= maxH + 8) return;   // ≤10 Zeilen → nichts tun
+        var maxH = Math.round(lh * _CLAMP_LINES);
+        if (el.scrollHeight <= maxH + 8) return;   // ≤6 Zeilen → nichts tun
+        el._clamped = true;
         el.classList.add('sup-ai-collapsed');
         el.style.maxHeight = maxH + 'px';
         var btn = document.createElement('button');
@@ -67,10 +78,29 @@
                 el.classList.add('sup-ai-collapsed');
                 el.style.maxHeight = maxH + 'px';
                 btn.textContent = T('sup.more', 'mehr');
-                var card = el.closest('.sup-ai-card'); if (card) card.scrollIntoView({ block: 'nearest' });
+                var card = el.closest('.sup-ai-card, .sup-block'); if (card) card.scrollIntoView({ block: 'nearest' });
             }
         });
         el.parentNode.insertBefore(btn, el.nextSibling);
+    }
+    function _applyAiClamp() { _applyHeightClamp(document.querySelector('.sup-ai-text.sup-ai-md')); }
+    // Ergebnis-Karten: 'mehr'/'weniger', wenn der Text die Zeilen-Kappung uebersteigt
+    // (nutzt die vorhandene -webkit-line-clamp-Kappung + .expanded zum Aufklappen)
+    function _clampBlocks() {
+        var bodies = document.querySelectorAll('#sup-blocks .sup-block-body');
+        Array.prototype.forEach.call(bodies, function (bodyEl) {
+            if (bodyEl.scrollHeight <= bodyEl.clientHeight + 2) return;   // nicht gekappt
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'sup-ai-more';
+            btn.textContent = T('sup.more', 'mehr');
+            btn.addEventListener('click', function () {
+                var open = bodyEl.classList.toggle('expanded');
+                btn.textContent = open ? T('sup.less', 'weniger') : T('sup.more', 'mehr');
+                if (!open) { var card = bodyEl.closest('.sup-block'); if (card) card.scrollIntoView({ block: 'nearest' }); }
+            });
+            bodyEl.parentNode.insertBefore(btn, bodyEl.nextSibling);
+        });
     }
     // Basis-URL der Jira-Instanz (vom Backend) – fuer Ticket-Key-Links
     var _jiraBase = '';
@@ -151,9 +181,10 @@
     }
 
     // ── Checkbox-Vorbelegung pro Browser/Session merken ──
-    function getPref(key) {
+    function getPref(key, def) {
         var v = localStorage.getItem('jarvis_support_' + key);
-        return v === null ? true : v === '1';  // Default: an
+        if (v === null) return def === undefined ? true : def;  // Default: an (sofern nicht anders angegeben)
+        return v === '1';
     }
     function setPref(key, on) {
         localStorage.setItem('jarvis_support_' + key, on ? '1' : '0');
@@ -178,6 +209,17 @@
                 $('sup-opt-jira').checked = getPref('jira');
                 $('sup-opt-conf').checked = getPref('conf');
                 $('sup-opt-rag').checked = getPref('rag');
+                // IBS-Tickets: nur klickbar, wenn URL + API-Key der Kundenverwaltung hinterlegt sind; Default AUS
+                var ibsEl = $('sup-opt-ibs');
+                if (ibsEl) {
+                    ibsEl.disabled = !d.ibs_configured;
+                    ibsEl.checked = d.ibs_configured ? getPref('ibs', false) : false;
+                    var ibsWrap = $('sup-opt-ibs-wrap');
+                    if (ibsWrap) {
+                        ibsWrap.style.opacity = d.ibs_configured ? '' : '0.45';
+                        ibsWrap.title = d.ibs_configured ? '' : T('sup.opt_ibs_hint', 'Erst URL und API-Key der Kundenverwaltung in den Einstellungen hinterlegen');
+                    }
+                }
                 $('sup-opt-ai').checked = getPref('ai');
                 $('sup-opt-open').checked = getPref('open');
                 // Exklusiv: nie 'alle' UND 'offene' zugleich → Standard 'offene'
@@ -239,6 +281,7 @@
         });
         $('sup-opt-conf').addEventListener('change', function () { setPref('conf', this.checked); });
         $('sup-opt-rag').addEventListener('change', function () { setPref('rag', this.checked); });
+        if ($('sup-opt-ibs')) $('sup-opt-ibs').addEventListener('change', function () { setPref('ibs', this.checked); });
         $('sup-opt-ai').addEventListener('change', function () { setPref('ai', this.checked); });
         // Abmelden (global: alle Token-Keys) -> zurueck zum Portal
         var _lo = $('sup-logout-btn');
@@ -557,6 +600,7 @@
         var openJira = !jiraHidden && $('sup-opt-open').checked;
         var useConf = !confWrap.classList.contains('hidden') && $('sup-opt-conf').checked;
         var useRag = $('sup-opt-rag').checked;
+        var useIbs = $('sup-opt-ibs') ? $('sup-opt-ibs').checked : false;
         var useAi = $('sup-opt-ai').checked;
 
         var btn = $('sup-search-btn'); btn.disabled = true;
@@ -573,7 +617,7 @@
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ text: text, jira_all: allJira, jira_open: openJira,
-                                   confluence: useConf, rag: useRag, ai: useAi,
+                                   confluence: useConf, rag: useRag, ibs: useIbs, ai: useAi,
                                    lang: (localStorage.getItem('jarvis_lang') || 'de'),
                                    jira_limit: clampNum(getNumPref('tickets') === null ? _supDefault.tickets : getNumPref('tickets'), 1, _supMax.tickets),
                                    summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) }),
@@ -759,6 +803,7 @@
         var htmlOut = list.map(blockHtml).join('');
         if (terms.length) htmlOut = highlightTerms(htmlOut, terms);  // Filter-Treffer markieren
         box.innerHTML = htmlOut;
+        _clampBlocks();   // 'mehr'/'weniger' an gekappte Karten haengen
     }
 
     // On-Demand-KI-Zusammenfassung eines Jira-Tickets (Button je Ergebnisbox)
@@ -785,13 +830,16 @@
                 if (!d.ok) {
                     btn.textContent = orig;
                     bodyEl.classList.add('expanded');
+                    _resetClamp(bodyEl);
                     bodyEl.innerHTML = '<span style="color:var(--danger);">'
                         + esc(d.error || T('sup.search_failed', 'Suche fehlgeschlagen.')) + '</span>';
                     return;
                 }
                 if (d.jira_base) _jiraBase = d.jira_base;
                 bodyEl.classList.add('expanded');
+                _resetClamp(bodyEl);
                 bodyEl.innerHTML = escLink(d.summary);
+                _applyHeightClamp(bodyEl);   // KI-Ticket-Zusammenfassung: ab >6 Zeilen einklappen
                 btn.textContent = T('sup.ai_btn_again', 'Neu zusammenfassen');
                 btn.classList.add('done');   // farblich abgesetzter Zustand
             })

@@ -610,12 +610,16 @@ def _search(query: str, cache: dict, max_results: int) -> list[tuple[float, str,
     return scored[:max_results]
 
 
-async def rag_search(query: str, max_results: int = 8) -> list[tuple[float, str, str]]:
+async def rag_search(query: str, max_results: int = 8, groups=None) -> list[tuple[float, str, str]]:
     """Strukturierte RAG-Suche fuer externe Aufrufer (z.B. Support-Assistent).
 
     Liefert eine Liste von (score, relativer_pfad, chunk). Nutzt denselben
     Vektor-/TF-IDF-Dispatch wie das knowledge_search-Tool, gibt aber Rohdaten
     statt formatiertem Text zurueck.
+
+    ``groups`` (optional): Liste von Gruppen-IDs (Modell B). Ist sie gesetzt,
+    werden nur Treffer aus Dateien dieser Gruppen zurueckgegeben (ODER-Filter;
+    "ungrouped" moeglich). Es wird ueber-abgefragt und danach gefiltert.
     """
     query = (query or "").strip()
     if not query:
@@ -624,6 +628,10 @@ async def rag_search(query: str, max_results: int = 8) -> list[tuple[float, str,
     max_bytes = _get_max_bytes()
     cfg = _get_skill_config()
     search_mode_cfg = cfg.get("search_mode", "auto")
+
+    # Bei aktivem Gruppenfilter ueber-abfragen, damit nach dem Filtern noch
+    # genug Treffer uebrig bleiben.
+    fetch_n = max(max_results * 5, 40) if groups else max_results
 
     vs = _get_vector_store()
     vector_index_ready = vs is not None and vs.chunk_count() > 0
@@ -637,12 +645,21 @@ async def rag_search(query: str, max_results: int = 8) -> list[tuple[float, str,
     if search_mode_cfg in ("auto", "vector"):
         has_vector = await asyncio.to_thread(_rebuild_vector_index, folders, max_bytes)
         if has_vector:
-            results = await asyncio.to_thread(_vector_search, query, max_results)
+            results = await asyncio.to_thread(_vector_search, query, fetch_n)
         elif search_mode_cfg == "auto":
-            results = _search(query, cache, max_results)
+            results = _search(query, cache, fetch_n)
     elif search_mode_cfg == "tfidf":
-        results = _search(query, cache, max_results)
-    return results or []
+        results = _search(query, cache, fetch_n)
+    results = results or []
+
+    if groups:
+        try:
+            from backend import knowledge_groups as kg
+            kept = set(kg.filter_paths_by_groups([r[1] for r in results], groups))
+            results = [r for r in results if r[1] in kept][:max_results]
+        except Exception:
+            results = results[:max_results]
+    return results
 
 
 def _get_static_stats() -> dict:
@@ -788,6 +805,14 @@ def _do_force_reindex() -> dict:
         folders = _get_folders()
         max_bytes = _get_max_bytes()
         vs = _get_vector_store()
+
+        # Verwaiste Gruppen-Zuordnungen (Modell B) entfernen: Dateien, die es
+        # nicht mehr gibt, verlieren ihre logischen Tags.
+        try:
+            from backend import knowledge_groups as _kg
+            _kg.prune(_all_files(folders))
+        except Exception:
+            pass
 
         if vs is not None:
             # ── Nur FAISS aufbauen ──────────────────────────────────────────

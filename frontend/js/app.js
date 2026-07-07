@@ -2565,6 +2565,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         function _initKbCollapse() {
             _collapseInit([
                 { hdr: 'kb-sect-stats-hdr',  body: 'kb-sect-stats-body',  tog: 'kb-sect-stats-tog'  },
+                { hdr: 'kb-sect-groups-hdr', body: 'kb-sect-groups-body', tog: 'kb-sect-groups-tog' },
                 { hdr: 'kb-sect-upload-hdr', body: 'kb-sect-upload-body', tog: 'kb-sect-upload-tog' },
                 { hdr: 'kb-sect-folder-hdr', body: 'kb-sect-folder-body', tog: 'kb-sect-folder-tog' },
                 { hdr: 'kb-sect-webdav-hdr', body: 'kb-sect-webdav-body', tog: 'kb-sect-webdav-tog' },
@@ -3002,6 +3003,24 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         btnOpen.addEventListener('click', openModal);
         btnClose.addEventListener('click', closeModal);
         // Kein Schließen bei Klick außerhalb oder versehentlichem Drag – nur explizit via X-Button
+
+        // ── Vollbild-Umschalter (gilt für alle Einstellungs-Tabs) ──
+        const btnMax = document.getElementById('btn-maximize-settings');
+        if (btnMax && !btnMax._bound) {
+            btnMax._bound = true;
+            const applyMax = (on) => {
+                modal.classList.toggle('settings-maximized', on);
+                btnMax.textContent = on ? '🗗' : '⛶';
+                btnMax.classList.toggle('active', on);
+            };
+            // Zustand aus localStorage wiederherstellen
+            applyMax(localStorage.getItem('jarvis_settings_maximized') === '1');
+            btnMax.addEventListener('click', () => {
+                const on = !modal.classList.contains('settings-maximized');
+                localStorage.setItem('jarvis_settings_maximized', on ? '1' : '0');
+                applyMax(on);
+            });
+        }
 
         // ── Ansicht wechseln ──
         function showListView() {

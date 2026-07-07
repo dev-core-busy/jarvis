@@ -5184,9 +5184,13 @@ async def open_knowledge_folder(request: Request, user: str = Depends(require_au
 async def upload_knowledge_files(
     files: list[UploadFile] = File(...),
     folder: str = Form("data/knowledge"),
+    groups: str = Form(""),
     user: str = Depends(require_knowledge_editor),
 ):
-    """Dateien per Browser-Upload in einen Knowledge-Ordner hochladen."""
+    """Dateien per Browser-Upload in einen Knowledge-Ordner hochladen.
+
+    ``groups`` (optional): kommagetrennte Gruppen-IDs – hochgeladene Dateien
+    werden diesen Gruppen als logische Tags zugeordnet (Modell B)."""
     from backend.tools.knowledge import (
         _get_folders, PROJECT_ROOT,
         EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,
@@ -5235,12 +5239,96 @@ async def upload_knowledge_files(
         size_str = f"{len(content)/1024:.1f} KB" if len(content) >= 1024 else f"{len(content)} B"
         saved.append({"name": dest.name, "size": size_str})
 
+        # Gruppen-Tags fuer die hochgeladene Datei setzen (Modell B).
+        group_ids = [g.strip() for g in (groups or "").split(",") if g.strip()]
+        if group_ids:
+            try:
+                from backend.tools.knowledge import PROJECT_ROOT as _PR
+                from backend import knowledge_groups as kg
+                kg.set_assignment(str(dest.relative_to(_PR)), group_ids)
+            except Exception:
+                pass
+
     return JSONResponse({
         "saved": saved,
         "rejected": rejected,
         "total_saved": len(saved),
         "total_rejected": len(rejected),
     })
+
+
+# ─── Wissensgruppen (logische Tags, Modell B) ────────────────────────
+
+def _kb_all_rel_paths() -> list:
+    """Alle aktuell in der Knowledge Base liegenden Dateien (relativ zu PROJECT_ROOT)."""
+    from backend.tools.knowledge import _all_files, _get_folders, PROJECT_ROOT
+    out = []
+    for p in _all_files(_get_folders()):
+        try:
+            out.append(str(p.relative_to(PROJECT_ROOT)))
+        except ValueError:
+            out.append(str(p))
+    return out
+
+
+@app.get("/api/knowledge/groups")
+async def knowledge_groups_list(user: str = Depends(require_auth)):
+    from backend import knowledge_groups as kg
+    try:
+        return JSONResponse({"ok": True, **kg.list_groups(_kb_all_rel_paths())})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/knowledge/groups")
+async def knowledge_groups_create(request: Request, user: str = Depends(require_knowledge_editor)):
+    from backend import knowledge_groups as kg
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "Name fehlt"}, status_code=400)
+    color = (body.get("color") or "#64748b").strip()
+    return JSONResponse({"ok": True, "group": kg.create_group(name, color)})
+
+
+@app.patch("/api/knowledge/groups/{gid}")
+async def knowledge_groups_update(gid: str, request: Request, user: str = Depends(require_knowledge_editor)):
+    from backend import knowledge_groups as kg
+    body = await request.json()
+    try:
+        g = kg.update_group(gid, name=body.get("name"), color=body.get("color"), order=body.get("order"))
+        return JSONResponse({"ok": True, "group": g})
+    except KeyError:
+        return JSONResponse({"ok": False, "error": "Gruppe nicht gefunden"}, status_code=404)
+
+
+@app.delete("/api/knowledge/groups/{gid}")
+async def knowledge_groups_delete(gid: str, user: str = Depends(require_knowledge_editor)):
+    from backend import knowledge_groups as kg
+    ok = kg.delete_group(gid)
+    return JSONResponse({"ok": ok}, status_code=200 if ok else 404)
+
+
+@app.get("/api/knowledge/assignments")
+async def knowledge_assignments_get(path: str = "", user: str = Depends(require_auth)):
+    from backend import knowledge_groups as kg
+    if path:
+        return JSONResponse({"ok": True, "path": path, "groups": kg.get_assignment(path)})
+    return JSONResponse({"ok": True, "assignments": kg.get_assignments_map()})
+
+
+@app.post("/api/knowledge/assignments")
+async def knowledge_assignments_set(request: Request, user: str = Depends(require_knowledge_editor)):
+    from backend import knowledge_groups as kg
+    body = await request.json()
+    path = (body.get("path") or "").strip()
+    if not path:
+        return JSONResponse({"ok": False, "error": "Pfad fehlt"}, status_code=400)
+    groups = body.get("groups")
+    if not isinstance(groups, list):
+        return JSONResponse({"ok": False, "error": "groups muss eine Liste sein"}, status_code=400)
+    saved = kg.set_assignment(path, groups)
+    return JSONResponse({"ok": True, "path": path, "groups": saved})
 
 
 # ─── Netzwerk-Freigaben (Mounts) ─────────────────────────────────────
@@ -5430,10 +5518,18 @@ async def knowledge_pending_update(doc_id: str, request: Request, user: str = De
 
 
 @app.post("/api/knowledge/pending/{doc_id}/approve")
-async def knowledge_pending_approve(doc_id: str, user: str = Depends(require_knowledge_editor)):
+async def knowledge_pending_approve(doc_id: str, request: Request, user: str = Depends(require_knowledge_editor)):
     from backend.web_extractor import approve_pending
+    # Optionaler Body {"groups": [...]} – Gruppen-Tags fuers erzeugte Dokument.
+    groups = None
     try:
-        result = approve_pending(doc_id)
+        body = await request.json()
+        if isinstance(body, dict) and isinstance(body.get("groups"), list):
+            groups = body["groups"]
+    except Exception:
+        pass
+    try:
+        result = approve_pending(doc_id, groups=groups)
         return JSONResponse({"ok": True, **result})
     except FileNotFoundError:
         return JSONResponse({"error": "Nicht gefunden"}, status_code=404)

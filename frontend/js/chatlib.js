@@ -84,24 +84,26 @@
         const _DL_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
 
         function _inline(t) {
-            // Bilder ![alt](url) – VOR Links/Formatierung, sonst greift die Link-Regex
+            // Platzhalter fuer fertiges HTML, das die **/_/* -Formatierung UND das
+            // URL-Autolinking NICHT mehr anfassen duerfen (Bilder, Download-Chips):
+            // deren Attribut-URLs enthalten '__' (zerstoert die Kursiv-Regex) bzw.
+            // wuerden vom Autolinker ein zweites Mal verlinkt. Erst ganz am Ende zurueck.
+            const _ph = [];
+            const _hold = (htmlStr) => { _ph.push(htmlStr); return `\x02PH${_ph.length - 1}\x02`; };
+
+            // Bilder ![alt](url)
             t = t.replace(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g, (_, alt, url) => {
                 const raw = url.replace(/&amp;/g, '&');
                 const safe = /^https?:\/\/|^\/|^data:image\//.test(raw) ? raw : '';
                 if (!safe) return '';
-                return `<img src="${safe}" alt="${alt}" class="chat-img" loading="lazy" `
+                return _hold(`<img src="${safe}" alt="${alt}" class="chat-img" loading="lazy" `
                      + `onload="window.__jarvisImgScroll&&window.__jarvisImgScroll(this)" `
-                     + `style="max-width:100%;border-radius:10px;margin:6px 0;display:block;">`;
+                     + `style="max-width:100%;border-radius:10px;margin:6px 0;display:block;">`);
             });
-
-            // WICHTIG: Office-Download-Chips ZUERST als Platzhalter extrahieren, BEVOR
-            // **/_/* -Formatierung laeuft. Capability-URLs enthalten '__' – die Kursiv-
-            // Regex /_(..)_/ wuerde die URL sonst mit <em> zerstoeren -> kaputter Link.
-            const _chips = [];
+            // Office-Download-Chips als Platzhalter extrahieren
             const _chip = (label, url) => {
                 const safe = (label || 'Datei').replace(/^[📥\s]+/, '').trim() || 'Datei';
-                _chips.push(`<a href="${url}" download class="chat-doc-dl">${_DL_SVG}<span>${safe}</span></a>`);
-                return `\x02DLCHIP${_chips.length - 1}\x02`;
+                return _hold(`<a href="${url}" download class="chat-doc-dl">${_DL_SVG}<span>${safe}</span></a>`);
             };
             // Markdown-Form [label](/api/documents/..)
             t = t.replace(/\[([^\]\n]*)\]\((\/api\/documents\/[A-Za-z0-9_\-]+\.(?:docx|xlsx|pptx|pdf))\)/g,
@@ -121,8 +123,23 @@
                 return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${tit}</a>`;
             });
 
-            // Chips am Ende wiederherstellen (nach jeder Formatierung)
-            t = t.replace(/\x02DLCHIP(\d+)\x02/g, (_, i) => _chips[+i]);
+            // Nackte URLs (http/https/www) klickbar machen. Bestehende Markdown-<a>-
+            // und <code>-Bereiche zuerst schuetzen, damit URLs in href-Attributen nicht
+            // ein zweites Mal (und kaputt) verlinkt werden bzw. Code nicht verlinkt wird.
+            // Bilder/Chips sind hier bereits Platzhalter und daher automatisch geschuetzt.
+            const _prot = [];
+            const _protect = (re) => { t = t.replace(re, (m) => { _prot.push(m); return `\x03P${_prot.length - 1}\x03`; }); };
+            _protect(/<a\b[^>]*>[\s\S]*?<\/a>/g);
+            _protect(/<code>[\s\S]*?<\/code>/g);
+            t = t.replace(/(https?:\/\/[^\s<>"{}|\\^`[\]]+|www\.[a-zA-Z0-9][^\s<>"{}|\\^`[\]]*)/gi, (url) => {
+                const raw = url.replace(/&amp;/g, '&');
+                const href = /^www\./i.test(raw) ? 'https://' + raw : raw;
+                return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+            });
+            t = t.replace(/\x03P(\d+)\x03/g, (_, i) => _prot[+i]);
+
+            // Bilder/Chips ganz am Ende wiederherstellen (nach jeder Formatierung)
+            t = t.replace(/\x02PH(\d+)\x02/g, (_, i) => _ph[+i]);
             return t;
         }
 

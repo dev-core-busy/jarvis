@@ -22,6 +22,7 @@ window.KbMatrix = (function () {
     let _rows = [];      // [{path,name,desc,source,docId,doc}]
     let _assign = {};    // path -> [group-ids]
     let _groups = [];
+    let _contentCache = {};  // path -> Inhalts-Vorschau (lazy)
 
     async function open() {
         const KG = window.KbGroups;
@@ -121,9 +122,14 @@ window.KbMatrix = (function () {
                 return `<td class="kbm-gcell${on ? ' on' : ''}" data-gid="${_attr(g.id)}" style="--grp:${_attr(g.color)}">`
                     + `<span class="kbm-check">${on ? '✓' : ''}</span></td>`;
             }).join('');
+            // Beschreibung: liegt keine vor, "Inhalt" anzeigen und den Dateiinhalt
+            // per Hover-Tooltip (lazy geladen) daran hängen.
+            const descTd = row.desc
+                ? `<td class="kbm-c-text" title="${_attr(row.desc)}">${_esc(row.desc)}</td>`
+                : `<td class="kbm-c-text kbm-content">${_esc(T('kbmatrix.content', 'Inhalt'))}</td>`;
             return `<tr data-path="${_attr(row.path)}">
                 <td class="kbm-c-text" title="${_attr(row.path)}">${_esc(row.name)}</td>
-                <td class="kbm-c-text" title="${_attr(row.desc)}">${_esc(row.desc)}</td>
+                ${descTd}
                 <td class="kbm-c-text" title="${_attr(row.source)}">${_esc(row.source)}</td>
                 ${gcells}
                 <td class="kbm-c-act"><button class="kbm-edit" title="${T('kbgroups.rename', 'Bearbeiten')}">✏️</button></td>
@@ -178,6 +184,50 @@ window.KbMatrix = (function () {
         });
 
         _bindResize(ov);
+        _bindContentTip(ov);
+    }
+
+    // ── Hover-Tooltip mit Dateiinhalt für "Inhalt"-Zellen (lazy geladen) ──────
+    function _bindContentTip(ov) {
+        const tbody = ov.querySelector('tbody');
+        const tip = document.createElement('div');
+        tip.className = 'kbm-tip';
+        tip.style.display = 'none';
+        ov.appendChild(tip);
+
+        function place(cell) {
+            const r = cell.getBoundingClientRect();
+            tip.style.left = Math.max(8, Math.min(window.innerWidth - 380, r.left)) + 'px';
+            tip.style.top = (r.bottom + 4) + 'px';
+        }
+        function show(cell) {
+            const path = cell.closest('tr').dataset.path;
+            tip._path = path;
+            place(cell);
+            tip.style.display = 'block';
+            if (_contentCache[path] !== undefined) { tip.textContent = _contentCache[path]; return; }
+            tip.textContent = T('kbmatrix.loading', 'lädt…');
+            fetch('/api/knowledge/file_read?path=' + encodeURIComponent(path), { headers: _auth() })
+                .then(r => r.json()).then(d => {
+                    let txt = (d && d.ok && d.content != null && d.content !== '')
+                        ? String(d.content) : T('kbmatrix.no_content', '(Inhalt nicht als Text lesbar)');
+                    txt = txt.replace(/\s+$/, '');
+                    if (txt.length > 2000) txt = txt.slice(0, 2000) + '\n…';
+                    _contentCache[path] = txt;
+                    if (tip.style.display !== 'none' && tip._path === path) tip.textContent = txt;
+                }).catch(() => {
+                    _contentCache[path] = T('kbmatrix.no_content', '(Inhalt nicht lesbar)');
+                    if (tip._path === path) tip.textContent = _contentCache[path];
+                });
+        }
+        tbody.addEventListener('mouseover', e => {
+            const cell = e.target.closest('.kbm-content');
+            if (cell) show(cell);
+        });
+        tbody.addEventListener('mouseout', e => {
+            const cell = e.target.closest('.kbm-content');
+            if (cell && (!e.relatedTarget || !cell.contains(e.relatedTarget))) tip.style.display = 'none';
+        });
     }
 
     async function _toggle(cell, ov) {

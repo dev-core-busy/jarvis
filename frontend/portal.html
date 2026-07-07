@@ -190,6 +190,12 @@
             <div class="pt-card-title" data-i18n="portal.card_agent">Support-Agent</div>
             <div class="pt-card-desc" data-i18n="portal.card_agent_desc">Windows-Anwendung für Nicht-Swyx-Systeme: Spracherkennung + Jira-Support-Assistent zum Download.</div>
         </a>
+        <!-- API-Dokumentation: nur für Admins (per JS eingeblendet) -->
+        <a class="pt-card hidden" id="pt-card-api" href="/api">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_api">API-Dokumentation</div>
+            <div class="pt-card-desc" data-i18n="portal.card_api_desc">Alle Endpunkte durchsuchen, erklären und direkt testen (nur Admin).</div>
+        </a>
         <!-- Marken-Animation (Branding-Skill): erscheint als KARTE im selben Karten-Raster
              (nächste freie Zelle → i.d.R. zweite Zeile), statt in einer eigenen Zeile.
              class="pt-card" -> Branding blendet sie per display:'' als flex-Karte ein
@@ -300,7 +306,7 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=22"></script>
+<script src="/static/js/i18n.js?v=23"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/security_incidents.js?v=1"></script>
@@ -345,6 +351,9 @@ sudo update-ca-certificates</code></pre>
             // Desktop/VNC-Button (Admin) – verschoben von /chat
             var vb = document.getElementById('pt-vnc-btn');
             if (vb) vb.style.display = '';
+            // API-Dokumentation (Admin)
+            var apiCard = document.getElementById('pt-card-api');
+            if (apiCard) apiCard.classList.remove('hidden');
         }
     }).catch(function(){});
 

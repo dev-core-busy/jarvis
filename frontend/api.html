@@ -224,8 +224,9 @@
             var body = document.createElement('div');
             body.className = 'ep-body';
 
-            if (op.description) {
-                var ds = document.createElement('div'); ds.className = 'ep-desc'; ds.textContent = op.description;
+            var descText = op.description || op.summary || '';
+            if (descText) {
+                var ds = document.createElement('div'); ds.className = 'ep-desc'; ds.textContent = descText;
                 body.appendChild(ds);
             }
 

@@ -1874,10 +1874,12 @@ async def shutdown_mcp():
 
 @app.get("/api/mcp/servers")
 async def get_mcp_servers(user: str = Depends(require_auth)):
+    """Liefert Status und Liste aller konfigurierten MCP-Server."""
     return JSONResponse(mcp_manager.get_status())
 
 @app.post("/api/mcp/servers")
 async def add_mcp_server(request: Request, user: str = Depends(require_local_auth)):
+    """Legt einen neuen MCP-Server an und verbindet ihn, falls aktiviert."""
     data = await request.json()
     server = config.add_mcp_server(data)
     if data.get("enabled", True):
@@ -1886,6 +1888,7 @@ async def add_mcp_server(request: Request, user: str = Depends(require_local_aut
 
 @app.put("/api/mcp/servers/{server_id}")
 async def update_mcp_server(server_id: str, request: Request, user: str = Depends(require_local_auth)):
+    """Aktualisiert einen MCP-Server und verbindet bzw. trennt ihn je nach Aktivierungsstatus."""
     data = await request.json()
     result = config.update_mcp_server(server_id, data)
     if not result:
@@ -1899,6 +1902,7 @@ async def update_mcp_server(server_id: str, request: Request, user: str = Depend
 
 @app.delete("/api/mcp/servers/{server_id}")
 async def remove_mcp_server(server_id: str, user: str = Depends(require_local_auth)):
+    """Löscht einen MCP-Server und trennt zuvor dessen Verbindung."""
     await mcp_manager.disconnect_server(server_id)
     if config.remove_mcp_server(server_id):
         return JSONResponse({"ok": True})
@@ -1906,6 +1910,7 @@ async def remove_mcp_server(server_id: str, user: str = Depends(require_local_au
 
 @app.post("/api/mcp/servers/{server_id}/toggle")
 async def toggle_mcp_server(server_id: str, request: Request, user: str = Depends(require_local_auth)):
+    """Aktiviert oder deaktiviert einen MCP-Server und verbindet bzw. trennt ihn entsprechend."""
     data = await request.json()
     enabled = data.get("enabled", True)
     config.toggle_mcp_server(server_id, enabled)
@@ -1917,6 +1922,7 @@ async def toggle_mcp_server(server_id: str, request: Request, user: str = Depend
 
 @app.post("/api/mcp/servers/{server_id}/reconnect")
 async def reconnect_mcp_server(server_id: str, user: str = Depends(require_local_auth)):
+    """Stellt die Verbindung zu einem MCP-Server neu her."""
     success = await mcp_manager.connect_server(server_id)
     return JSONResponse({"ok": success})
 
@@ -1926,19 +1932,23 @@ from backend.telemetry import tracer
 
 @app.get("/api/telemetry/stats")
 async def get_telemetry_stats(user: str = Depends(require_auth)):
+    """Liefert aggregierte Telemetrie-Statistiken."""
     return JSONResponse(tracer.get_stats())
 
 @app.get("/api/telemetry/spans")
 async def get_telemetry_spans(request: Request, user: str = Depends(require_auth)):
+    """Liefert die letzten Telemetrie-Spans (Anzahl via limit-Parameter)."""
     limit = int(request.query_params.get("limit", "50"))
     return JSONResponse(tracer.get_recent_spans(limit))
 
 @app.get("/api/telemetry/errors")
 async def get_telemetry_errors(user: str = Depends(require_auth)):
+    """Liefert die erfassten Telemetrie-Fehler."""
     return JSONResponse(tracer.get_errors())
 
 @app.delete("/api/telemetry")
 async def clear_telemetry(user: str = Depends(require_auth)):
+    """Löscht alle erfassten Telemetrie-Daten."""
     tracer.clear()
     return JSONResponse({"ok": True})
 
@@ -1948,6 +1958,7 @@ from backend.conv_log import get_conversations, get_known_ips, get_known_users, 
 
 @app.get("/api/conv_log")
 async def api_conv_log(request: Request, user: str = Depends(require_auth)):
+    """Liefert den Konversations-Verlauf, optional gefiltert nach IP oder Benutzer."""
     limit = int(request.query_params.get("limit", "50"))
     ip = request.query_params.get("ip") or None
     username = request.query_params.get("user") or None
@@ -1955,14 +1966,17 @@ async def api_conv_log(request: Request, user: str = Depends(require_auth)):
 
 @app.get("/api/conv_log/ips")
 async def api_conv_log_ips(user: str = Depends(require_auth)):
+    """Liefert die Liste der bekannten IP-Adressen aus dem Konversations-Log."""
     return JSONResponse(get_known_ips())
 
 @app.get("/api/conv_log/users")
 async def api_conv_log_users(user: str = Depends(require_auth)):
+    """Liefert die Liste der bekannten Benutzer aus dem Konversations-Log."""
     return JSONResponse(get_known_users())
 
 @app.delete("/api/conv_log")
 async def api_conv_log_clear(user: str = Depends(require_auth)):
+    """Löscht den kompletten Konversations-Verlauf."""
     clear_conv_log()
     return JSONResponse({"ok": True})
 
@@ -2341,12 +2355,14 @@ async def _broadcast_shared_history(user: str, payload: dict):
 
 @app.get("/api/chat/shared-history")
 async def chat_history_get(user: str = Depends(require_auth)):
+    """Liefert den geteilten Chat-Verlauf des angemeldeten Benutzers."""
     import backend.chat_history as ch
     return JSONResponse({"messages": ch.load(user)})
 
 
 @app.post("/api/chat/shared-history/append")
 async def chat_history_append(request: Request, user: str = Depends(require_auth)):
+    """Hängt eine Nachricht an den geteilten Chat-Verlauf an und synchronisiert sie live an andere Fenster."""
     import backend.chat_history as ch
     body = await request.json()
     msg = body.get("message")
@@ -2363,6 +2379,7 @@ async def chat_history_append(request: Request, user: str = Depends(require_auth
 
 @app.put("/api/chat/shared-history")
 async def chat_history_replace(request: Request, user: str = Depends(require_auth)):
+    """Ersetzt den kompletten geteilten Chat-Verlauf des Benutzers."""
     import backend.chat_history as ch
     body = await request.json()
     msgs = body.get("messages", [])
@@ -2371,6 +2388,7 @@ async def chat_history_replace(request: Request, user: str = Depends(require_aut
 
 @app.delete("/api/chat/shared-history")
 async def chat_history_clear(user: str = Depends(require_auth)):
+    """Löscht den geteilten Chat-Verlauf des Benutzers."""
     import backend.chat_history as ch
     ch.clear(user)
     return JSONResponse({"ok": True})
@@ -5330,6 +5348,7 @@ def _kb_all_rel_paths() -> list:
 
 @app.get("/api/knowledge/groups")
 async def knowledge_groups_list(user: str = Depends(require_auth)):
+    """Liefert alle Wissensgruppen samt zugehöriger Dateizuordnungen."""
     from backend import knowledge_groups as kg
     try:
         return JSONResponse({"ok": True, **kg.list_groups(_kb_all_rel_paths())})
@@ -5339,6 +5358,7 @@ async def knowledge_groups_list(user: str = Depends(require_auth)):
 
 @app.post("/api/knowledge/groups")
 async def knowledge_groups_create(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Legt eine neue Wissensgruppe (Name + Farbe) an."""
     from backend import knowledge_groups as kg
     body = await request.json()
     name = (body.get("name") or "").strip()
@@ -5350,6 +5370,7 @@ async def knowledge_groups_create(request: Request, user: str = Depends(require_
 
 @app.patch("/api/knowledge/groups/{gid}")
 async def knowledge_groups_update(gid: str, request: Request, user: str = Depends(require_knowledge_editor)):
+    """Aktualisiert eine Wissensgruppe (Name, Farbe oder Reihenfolge)."""
     from backend import knowledge_groups as kg
     body = await request.json()
     try:
@@ -5361,6 +5382,7 @@ async def knowledge_groups_update(gid: str, request: Request, user: str = Depend
 
 @app.delete("/api/knowledge/groups/{gid}")
 async def knowledge_groups_delete(gid: str, user: str = Depends(require_knowledge_editor)):
+    """Löscht eine Wissensgruppe."""
     from backend import knowledge_groups as kg
     ok = kg.delete_group(gid)
     return JSONResponse({"ok": ok}, status_code=200 if ok else 404)
@@ -5368,6 +5390,7 @@ async def knowledge_groups_delete(gid: str, user: str = Depends(require_knowledg
 
 @app.get("/api/knowledge/assignments")
 async def knowledge_assignments_get(path: str = "", user: str = Depends(require_auth)):
+    """Liefert die Gruppenzuordnungen einer Datei bzw. die komplette Zuordnungs-Map."""
     from backend import knowledge_groups as kg
     if path:
         return JSONResponse({"ok": True, "path": path, "groups": kg.get_assignment(path)})
@@ -5376,6 +5399,7 @@ async def knowledge_assignments_get(path: str = "", user: str = Depends(require_
 
 @app.post("/api/knowledge/assignments")
 async def knowledge_assignments_set(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Setzt die Gruppenzuordnungen für eine Datei."""
     from backend import knowledge_groups as kg
     body = await request.json()
     path = (body.get("path") or "").strip()
@@ -5553,12 +5577,14 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
 
 @app.get("/api/knowledge/pending")
 async def knowledge_pending_list(user: str = Depends(require_auth)):
+    """Liefert die Liste der zur Freigabe ausstehenden Wissensdokumente."""
     from backend.web_extractor import list_pending
     return JSONResponse(list_pending())
 
 
 @app.get("/api/knowledge/pending/{doc_id}")
 async def knowledge_pending_get(doc_id: str, user: str = Depends(require_auth)):
+    """Liefert ein einzelnes zur Freigabe ausstehendes Wissensdokument."""
     from backend.web_extractor import get_pending
     doc = get_pending(doc_id)
     if not doc:
@@ -5568,6 +5594,7 @@ async def knowledge_pending_get(doc_id: str, user: str = Depends(require_auth)):
 
 @app.patch("/api/knowledge/pending/{doc_id}")
 async def knowledge_pending_update(doc_id: str, request: Request, user: str = Depends(require_knowledge_editor)):
+    """Aktualisiert ein ausstehendes Wissensdokument (z. B. Inhalt/Metadaten)."""
     from backend.web_extractor import update_pending
     data = await request.json()
     ok = update_pending(doc_id, data)
@@ -5576,6 +5603,7 @@ async def knowledge_pending_update(doc_id: str, request: Request, user: str = De
 
 @app.post("/api/knowledge/pending/{doc_id}/approve")
 async def knowledge_pending_approve(doc_id: str, request: Request, user: str = Depends(require_knowledge_editor)):
+    """Gibt ein ausstehendes Wissensdokument frei und übernimmt es (optional mit Gruppen-Tags) in die Wissensbasis."""
     from backend.web_extractor import approve_pending
     # Optionaler Body {"groups": [...]} – Gruppen-Tags fuers erzeugte Dokument.
     groups = None
@@ -5596,6 +5624,7 @@ async def knowledge_pending_approve(doc_id: str, request: Request, user: str = D
 
 @app.delete("/api/knowledge/pending/{doc_id}")
 async def knowledge_pending_delete(doc_id: str, user: str = Depends(require_knowledge_editor)):
+    """Löscht ein zur Freigabe ausstehendes Wissensdokument."""
     from backend.web_extractor import delete_pending
     ok = delete_pending(doc_id)
     return JSONResponse({"ok": ok})
@@ -5626,6 +5655,7 @@ async def knowledge_extract_file_delete(request: Request, user: str = Depends(re
 
 @app.get("/api/knowledge/mounts")
 async def list_mounts(user: str = Depends(require_auth)):
+    """Liefert die konfigurierten Netzwerk-Freigaben inkl. Mount-Status."""
     mounts = _get_mounts_config()
     result = []
     for i, m in enumerate(mounts):
@@ -5642,6 +5672,7 @@ async def list_mounts(user: str = Depends(require_auth)):
 
 @app.post("/api/knowledge/mounts")
 async def add_mount(request: Request, user: str = Depends(require_auth)):
+    """Legt eine neue Netzwerk-Freigabe an und fügt deren Ordner der Wissensbasis hinzu."""
     data = await request.json()
     source = data.get("source", "").strip()
     mount_type = data.get("type", "smb")
@@ -5677,6 +5708,7 @@ async def add_mount(request: Request, user: str = Depends(require_auth)):
 
 @app.delete("/api/knowledge/mounts/{idx}")
 async def remove_mount(idx: int, user: str = Depends(require_auth)):
+    """Löscht eine Netzwerk-Freigabe, hängt sie ggf. aus und entfernt ihren Ordner aus der Wissensbasis."""
     mounts = _get_mounts_config()
     if idx < 0 or idx >= len(mounts):
         return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
@@ -5727,6 +5759,7 @@ async def update_mount(idx: int, request: Request, user: str = Depends(require_a
 
 @app.post("/api/knowledge/mounts/{idx}/mount")
 async def mount_share(idx: int, user: str = Depends(require_auth)):
+    """Bindet eine Netzwerk-Freigabe (SMB/NFS/WebDAV) ein und startet anschließend den Reindex."""
     mounts = _get_mounts_config()
     if idx < 0 or idx >= len(mounts):
         return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
@@ -5786,6 +5819,7 @@ async def mount_share(idx: int, user: str = Depends(require_auth)):
 
 @app.post("/api/knowledge/mounts/{idx}/unmount")
 async def unmount_share(idx: int, user: str = Depends(require_auth)):
+    """Hängt eine Netzwerk-Freigabe aus und deaktiviert deren automatisches Einbinden."""
     mp = _mount_path(idx)
     if not mp.is_mount():
         # Auch bei bereits getrenntem Mount: auto_mount deaktivieren
@@ -7547,11 +7581,13 @@ from backend.scheduler import cron_manager
 
 @app.get("/api/cron")
 async def cron_list(user: str = Depends(require_auth)):
+    """Liefert die Liste aller zeitgesteuerten Aufträge (Cron-Jobs)."""
     return JSONResponse(cron_manager.list_jobs())
 
 
 @app.post("/api/cron")
 async def cron_create_api(req: Request, user: str = Depends(require_auth)):
+    """Legt einen neuen zeitgesteuerten Auftrag (Cron-Job) an."""
     body = await req.json()
     try:
         job = cron_manager.add_job(
@@ -7568,6 +7604,7 @@ async def cron_create_api(req: Request, user: str = Depends(require_auth)):
 
 @app.put("/api/cron/{job_id}")
 async def cron_update(job_id: str, req: Request, user: str = Depends(require_auth)):
+    """Aktualisiert einen zeitgesteuerten Auftrag (Cron-Job)."""
     body = await req.json()
     try:
         job = cron_manager.update_job(job_id, **body)
@@ -7578,6 +7615,7 @@ async def cron_update(job_id: str, req: Request, user: str = Depends(require_aut
 
 @app.delete("/api/cron/{job_id}")
 async def cron_delete_api(job_id: str, user: str = Depends(require_auth)):
+    """Löscht einen zeitgesteuerten Auftrag (Cron-Job)."""
     try:
         cron_manager.delete_job(job_id)
         return JSONResponse({"ok": True})
@@ -7587,6 +7625,7 @@ async def cron_delete_api(job_id: str, user: str = Depends(require_auth)):
 
 @app.post("/api/cron/{job_id}/run")
 async def cron_run_now(job_id: str, user: str = Depends(require_auth)):
+    """Führt einen zeitgesteuerten Auftrag sofort manuell aus."""
     try:
         result = await cron_manager.run_now(job_id)
         return JSONResponse({"ok": True, "result": result[:500] if result else ""})
@@ -7598,6 +7637,7 @@ async def cron_run_now(job_id: str, user: str = Depends(require_auth)):
 @app.get("/api/audit_log")
 async def audit_log_list(request: Request, limit: int = 200, user: str = "", tool: str = "",
                          _u: str = Depends(require_auth)):
+    """Liefert die Audit-Log-Einträge, optional gefiltert nach Benutzer oder Tool."""
     from backend.audit_log import read_log
     entries = read_log(limit=limit, user_filter=user, tool_filter=tool)
     return JSONResponse(entries)
@@ -7623,11 +7663,13 @@ from backend.file_watcher import watcher_manager
 
 @app.get("/api/watchers")
 async def watcher_list(user: str = Depends(require_auth)):
+    """Liefert die Liste aller Trigger-Watcher (Datei-/Ereignis-Trigger)."""
     return JSONResponse(watcher_manager.list_watchers())
 
 
 @app.post("/api/watchers")
 async def watcher_create(req: Request, user: str = Depends(require_auth)):
+    """Legt einen neuen Trigger-Watcher mit Trigger und Aktion an."""
     body = await req.json()
     try:
         w = watcher_manager.add_watcher(
@@ -7654,6 +7696,7 @@ async def watcher_create(req: Request, user: str = Depends(require_auth)):
 
 @app.put("/api/watchers/{watcher_id}")
 async def watcher_update(watcher_id: str, req: Request, user: str = Depends(require_auth)):
+    """Aktualisiert einen bestehenden Trigger-Watcher."""
     body = await req.json()
     try:
         w = watcher_manager.update_watcher(watcher_id, **body)
@@ -7664,6 +7707,7 @@ async def watcher_update(watcher_id: str, req: Request, user: str = Depends(requ
 
 @app.delete("/api/watchers/{watcher_id}")
 async def watcher_delete(watcher_id: str, user: str = Depends(require_auth)):
+    """Löscht einen Trigger-Watcher."""
     try:
         watcher_manager.delete_watcher(watcher_id)
         return JSONResponse({"ok": True})
@@ -7708,6 +7752,7 @@ async def api_issues_notifications_seen(user: str = Depends(require_auth_or_agen
 
 @app.get("/api/issues/{issue_id}")
 async def api_issues_get(issue_id: str, user: str = Depends(require_auth_or_agent)):
+    """Liefert ein einzelnes Issue samt Bearbeitungs-/Löschberechtigungen des Benutzers."""
     issue = _issues_mod.get_issue(issue_id)
     if not issue:
         raise HTTPException(404, "Issue nicht gefunden")
@@ -7724,6 +7769,7 @@ async def api_issues_get(issue_id: str, user: str = Depends(require_auth_or_agen
 
 @app.post("/api/issues")
 async def api_issues_create(request: Request, user: str = Depends(require_auth_or_agent)):
+    """Legt ein neues Issue an und benachrichtigt zugehörige Trigger-Watcher."""
     try:
         data = await request.json()
     except Exception:
@@ -7742,6 +7788,7 @@ async def api_issues_create(request: Request, user: str = Depends(require_auth_o
 @app.patch("/api/issues/{issue_id}")
 async def api_issues_update(issue_id: str, request: Request,
                             user: str = Depends(require_auth_or_agent)):
+    """Aktualisiert ein Issue (z. B. Status/Inhalt) unter Beachtung der Berechtigungen."""
     try:
         patch = await request.json()
     except Exception:
@@ -7760,6 +7807,7 @@ async def api_issues_update(issue_id: str, request: Request,
 
 @app.delete("/api/issues/{issue_id}")
 async def api_issues_delete(issue_id: str, user: str = Depends(require_auth_or_agent)):
+    """Löscht ein Issue (nur mit entsprechender Berechtigung)."""
     ok, err = _issues_mod.delete_issue(user, issue_id)
     if not ok:
         if "Jarvis" in err or "Berechtigung" in err:
@@ -7771,6 +7819,7 @@ async def api_issues_delete(issue_id: str, user: str = Depends(require_auth_or_a
 @app.post("/api/issues/{issue_id}/attachments")
 async def api_issues_attach(issue_id: str, file: UploadFile = File(...),
                             user: str = Depends(require_auth_or_agent)):
+    """Lädt einen Datei-Anhang zu einem Issue hoch."""
     content = await file.read()
     saved, err = _issues_mod.add_attachment(user, issue_id, file.filename or "file", content)
     if not saved:
@@ -7785,6 +7834,7 @@ async def api_issues_attach(issue_id: str, file: UploadFile = File(...),
 @app.get("/api/issues/{issue_id}/attachments/{filename}")
 async def api_issues_get_attachment(issue_id: str, filename: str,
                                     user: str = Depends(require_auth_or_query)):
+    """Liefert einen Datei-Anhang eines Issues zum Ansehen oder Download."""
     p = _issues_mod.get_attachment_path(issue_id, filename)
     if not p:
         raise HTTPException(404, "Anhang nicht gefunden")
@@ -7795,6 +7845,7 @@ async def api_issues_get_attachment(issue_id: str, filename: str,
 @app.delete("/api/issues/{issue_id}/attachments/{filename}")
 async def api_issues_del_attachment(issue_id: str, filename: str,
                                     user: str = Depends(require_auth_or_agent)):
+    """Löscht einen Datei-Anhang eines Issues."""
     ok, err = _issues_mod.delete_attachment(user, issue_id, filename)
     if not ok:
         if "Berechtigung" in err:

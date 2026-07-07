@@ -337,11 +337,12 @@ def update_pending(doc_id: str, data: dict) -> bool:
     return True
 
 
-def approve_pending(doc_id: str, reindex: bool = True) -> dict:
+def approve_pending(doc_id: str, reindex: bool = True, groups=None) -> dict:
     """Genehmigte Items als .md in die Wissens-DB schreiben.
     Das Pending-Dokument bleibt erhalten (status='approved') fuer die Verlaufsansicht.
     ``reindex=False`` ueberspringt den Reindex (fuer Bulk-Importe, die am Ende
-    EINMAL reindizieren)."""
+    EINMAL reindizieren). ``groups`` (optional): Liste von Gruppen-IDs, denen das
+    erzeugte Dokument als logisches Tag zugeordnet wird (Modell B)."""
     doc = get_pending(doc_id)
     if not doc:
         raise FileNotFoundError(f"Pending-Dokument {doc_id} nicht gefunden")
@@ -388,6 +389,14 @@ def approve_pending(doc_id: str, reindex: bool = True) -> dict:
     doc["qa_count"] = len(approved_qa)
     doc["fact_count"] = len(approved_facts)
     save_pending(doc)
+
+    # Gruppenzuordnung (logische Tags) fuer das erzeugte Dokument setzen.
+    if groups:
+        try:
+            from backend import knowledge_groups as kg
+            kg.set_assignment(doc["file"], groups)
+        except Exception:
+            pass
 
     # Wissens-Index neu aufbauen (im Hintergrund-Thread)
     if reindex:

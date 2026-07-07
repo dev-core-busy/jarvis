@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis – API-Dokumentation</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=5">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg-primary, #0a0e17); color: var(--text-primary, #f8fafc);
+               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+
+        /* Topbar */
+        .ad-top { display: flex; align-items: center; gap: 12px; padding: 10px 18px;
+                  border-bottom: 1px solid var(--border, rgba(255,255,255,.12));
+                  position: sticky; top: 0; z-index: 20; background: var(--bg-primary, #0a0e17); }
+        .ad-title { font-size: 1.1rem; font-weight: 700; }
+        .ad-title small { font-weight: 400; color: var(--text-secondary); font-size: .8rem; margin-left: 8px; }
+        .ad-spacer { flex: 1; }
+        .ad-btn { background: var(--bg-glass, rgba(255,255,255,.05)); border: 1px solid var(--border, rgba(255,255,255,.12));
+                  color: var(--text-primary); border-radius: 10px; width: 38px; height: 38px; cursor: pointer;
+                  display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+        .ad-btn:hover { border-color: rgba(var(--accent-rgb), .5); }
+        .ad-btn svg { width: 20px; height: 20px; }
+
+        /* Controls */
+        .ad-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                       padding: 12px 18px; position: sticky; top: 59px; z-index: 15;
+                       background: var(--bg-primary, #0a0e17); border-bottom: 1px solid var(--border, rgba(255,255,255,.08)); }
+        .ad-search { flex: 1; min-width: 220px; padding: 9px 12px; border-radius: 10px;
+                     background: var(--bg-glass); border: 1px solid var(--border); color: var(--text-primary); font-size: .9rem; }
+        .ad-mfilter { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+        .ad-mf { font-size: .72rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; cursor: pointer;
+                 border: 1px solid var(--border); user-select: none; opacity: .45; }
+        .ad-mf.on { opacity: 1; }
+        .ad-hint { padding: 8px 18px; color: var(--text-secondary); font-size: .82rem; }
+        .ad-warn { padding: 8px 18px; color: var(--danger, #ef4444); font-size: .8rem; }
+
+        .ad-wrap { padding: 8px 18px 60px; max-width: 1100px; margin: 0 auto; }
+        .ad-group > summary { list-style: none; cursor: pointer; padding: 12px 4px; font-size: 1.02rem;
+                              font-weight: 700; border-bottom: 1px solid var(--border, rgba(255,255,255,.1));
+                              display: flex; align-items: center; gap: 10px; }
+        .ad-group > summary::-webkit-details-marker { display: none; }
+        .ad-group > summary::before { content: '▸'; opacity: .6; font-size: .9rem; }
+        .ad-group[open] > summary::before { content: '▾'; }
+        .ad-gcount { font-weight: 400; color: var(--text-secondary); font-size: .8rem; }
+
+        .ep { border: 1px solid var(--border, rgba(255,255,255,.1)); border-radius: 10px; margin: 8px 0;
+              overflow: hidden; background: var(--bg-glass, rgba(255,255,255,.03)); }
+        .ep > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+                        padding: 9px 12px; }
+        .ep > summary::-webkit-details-marker { display: none; }
+        .ep-method { font-size: .7rem; font-weight: 800; padding: 3px 7px; border-radius: 5px; color: #fff;
+                     min-width: 54px; text-align: center; flex-shrink: 0; letter-spacing: .5px; }
+        .m-get { background: #10b981; } .m-post { background: #3b82f6; } .m-put { background: #f59e0b; }
+        .m-delete { background: #ef4444; } .m-patch { background: #a855f7; } .m-other { background: #64748b; }
+        .ep-path { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .85rem; }
+        .ep-sum { color: var(--text-secondary); font-size: .8rem; margin-left: auto; text-align: right;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+        .ep-body { padding: 4px 14px 14px; border-top: 1px solid var(--border, rgba(255,255,255,.08)); }
+        .ep-desc { color: var(--text-secondary); font-size: .86rem; line-height: 1.5; margin: 10px 0; white-space: pre-wrap; }
+        .ep-h { font-size: .72rem; text-transform: uppercase; letter-spacing: .6px; color: var(--text-secondary);
+                margin: 14px 0 6px; font-weight: 700; }
+        table.ad-params { width: 100%; border-collapse: collapse; font-size: .82rem; }
+        table.ad-params th, table.ad-params td { text-align: left; padding: 5px 8px;
+                border-bottom: 1px solid var(--border, rgba(255,255,255,.07)); vertical-align: top; }
+        table.ad-params th { color: var(--text-secondary); font-weight: 600; }
+        .ad-req { color: var(--danger, #ef4444); font-weight: 700; }
+        code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+        pre.ad-code { background: rgba(0,0,0,.35); border: 1px solid var(--border, rgba(255,255,255,.1));
+                      border-radius: 8px; padding: 10px 12px; font-size: .8rem; overflow-x: auto; margin: 0;
+                      white-space: pre; }
+        .ad-test { margin-top: 14px; border-top: 1px dashed var(--border, rgba(255,255,255,.15)); padding-top: 12px; }
+        .ad-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+        .ad-field label { font-size: .78rem; color: var(--text-secondary); }
+        .ad-field label .ad-in { font-size: .7rem; opacity: .6; }
+        .ad-input, .ad-textarea { padding: 7px 10px; border-radius: 8px; background: var(--bg-primary);
+                border: 1px solid var(--border); color: var(--text-primary); font-size: .82rem; width: 100%; }
+        .ad-textarea { min-height: 96px; resize: vertical; font-family: ui-monospace, Menlo, monospace; }
+        .ad-send { background: var(--accent, #3b82f6); color: #fff; border: none; border-radius: 8px;
+                   padding: 8px 16px; font-size: .85rem; font-weight: 600; cursor: pointer; }
+        .ad-send:hover { filter: brightness(1.08); }
+        .ad-send:disabled { opacity: .5; cursor: default; }
+        .ad-resp { margin-top: 10px; display: none; }
+        .ad-resp-status { font-size: .8rem; font-weight: 700; margin-bottom: 6px; }
+        .ok { color: #10b981; } .bad { color: #ef4444; } .warn2 { color: #f59e0b; }
+        .ad-loading, .ad-error { padding: 40px 18px; text-align: center; color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <div class="ad-top">
+        <a class="ad-btn" href="/portal" title="Zum Portal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </a>
+        <span class="ad-title">API-Dokumentation<small id="ad-count"></small></span>
+        <span class="ad-spacer"></span>
+        <button class="ad-btn" id="btn-theme-toggle" title="Hell/Dunkel umschalten">
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+        <a class="ad-btn" href="/portal" id="ad-logout" title="Zurück">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </a>
+    </div>
+
+    <div class="ad-controls">
+        <input type="text" class="ad-search" id="ad-search" placeholder="Endpunkt suchen (Pfad, Beschreibung)…">
+        <div class="ad-mfilter" id="ad-mfilter"></div>
+    </div>
+    <div class="ad-warn">⚠️ Testaufrufe werden <b>echt</b> ausgeführt (inkl. POST/PUT/DELETE) und nutzen dein Admin-Token. Mit Bedacht verwenden.</div>
+
+    <div class="ad-wrap" id="ad-wrap">
+        <div class="ad-loading" id="ad-loading">Lade API-Schema…</div>
+    </div>
+
+    <script src="/static/js/theme.js?v=2"></script>
+    <script>
+    (function () {
+        'use strict';
+        var TOKEN = localStorage.getItem('jarvis_token') || '';
+        var H = { 'Authorization': 'Bearer ' + TOKEN };
+        if (!TOKEN) { window.location.replace('/'); return; }
+
+        var METHOD_ORDER = ['get', 'post', 'put', 'patch', 'delete'];
+        var spec = null, endpoints = [], activeMethods = {};
+        METHOD_ORDER.forEach(function (m) { activeMethods[m] = true; });
+        activeMethods['other'] = true;
+
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+        }
+        function mCls(m) {
+            return { get: 'm-get', post: 'm-post', put: 'm-put', delete: 'm-delete', patch: 'm-patch' }[m] || 'm-other';
+        }
+        function groupOf(path) {
+            var parts = path.split('/').filter(Boolean);
+            if (parts[0] === 'api') return parts[1] || 'api';
+            if (!parts.length) return '(Seiten)';
+            return parts[0];
+        }
+
+        // ── JSON-Schema → $ref auflösen + Beispiel erzeugen ──
+        function resolveRef(sch) {
+            if (sch && sch.$ref) {
+                var name = sch.$ref.split('/').pop();
+                var comp = (spec.components && spec.components.schemas) || {};
+                return comp[name] || {};
+            }
+            return sch || {};
+        }
+        function example(sch, depth) {
+            depth = depth || 0;
+            sch = resolveRef(sch);
+            if (depth > 5 || !sch || typeof sch !== 'object') return null;
+            if (sch.example !== undefined) return sch.example;
+            if (sch.default !== undefined) return sch.default;
+            if (sch.enum && sch.enum.length) return sch.enum[0];
+            if (sch.anyOf || sch.oneOf) return example((sch.anyOf || sch.oneOf)[0], depth + 1);
+            if (sch.allOf) { var o = {}; sch.allOf.forEach(function (s) { var e = example(s, depth + 1); if (e && typeof e === 'object') Object.assign(o, e); }); return o; }
+            var t = sch.type;
+            if (t === 'object' || sch.properties) {
+                var out = {};
+                var props = sch.properties || {};
+                Object.keys(props).forEach(function (k) { out[k] = example(props[k], depth + 1); });
+                return out;
+            }
+            if (t === 'array') return [example(sch.items, depth + 1)].filter(function (x) { return x !== null; });
+            if (t === 'integer' || t === 'number') return 0;
+            if (t === 'boolean') return false;
+            if (t === 'string') return sch.format === 'date-time' ? '2026-01-01T00:00:00Z' : '';
+            return null;
+        }
+
+        function bodySchema(op) {
+            try {
+                var c = op.requestBody.content['application/json'];
+                return c ? c.schema : null;
+            } catch (e) { return null; }
+        }
+
+        // ── Rendern ──
+        function render() {
+            var wrap = document.getElementById('ad-wrap');
+            wrap.innerHTML = '';
+            var groups = {};
+            endpoints.forEach(function (ep) {
+                (groups[ep.group] = groups[ep.group] || []).push(ep);
+            });
+            Object.keys(groups).sort().forEach(function (gname) {
+                var list = groups[gname].sort(function (a, b) {
+                    return a.path.localeCompare(b.path) || METHOD_ORDER.indexOf(a.method) - METHOD_ORDER.indexOf(b.method);
+                });
+                var det = document.createElement('details');
+                det.className = 'ad-group';
+                det.setAttribute('data-group', gname);
+                var sum = document.createElement('summary');
+                sum.innerHTML = esc(gname) + ' <span class="ad-gcount">' + list.length + '</span>';
+                det.appendChild(sum);
+                list.forEach(function (ep) { det.appendChild(epNode(ep)); });
+                wrap.appendChild(det);
+            });
+            applyFilter();
+        }
+
+        function epNode(ep) {
+            var op = ep.op;
+            var d = document.createElement('details');
+            d.className = 'ep';
+            d.setAttribute('data-search', (ep.method + ' ' + ep.path + ' ' + (op.summary || '') + ' ' + (op.description || '')).toLowerCase());
+            d.setAttribute('data-method', ep.method);
+
+            var s = document.createElement('summary');
+            s.innerHTML = '<span class="ep-method ' + mCls(ep.method) + '">' + ep.method.toUpperCase() + '</span>'
+                + '<span class="ep-path">' + esc(ep.path) + '</span>'
+                + '<span class="ep-sum">' + esc(op.summary || '') + '</span>';
+            d.appendChild(s);
+
+            var body = document.createElement('div');
+            body.className = 'ep-body';
+
+            if (op.description) {
+                var ds = document.createElement('div'); ds.className = 'ep-desc'; ds.textContent = op.description;
+                body.appendChild(ds);
+            }
+
+            var params = (op.parameters || []);
+            if (params.length) {
+                var ph = document.createElement('div'); ph.className = 'ep-h'; ph.textContent = 'Parameter'; body.appendChild(ph);
+                var tbl = document.createElement('table'); tbl.className = 'ad-params';
+                tbl.innerHTML = '<tr><th>Name</th><th>In</th><th>Typ</th><th>Pflicht</th></tr>' + params.map(function (p) {
+                    var t = (resolveRef(p.schema).type) || '';
+                    return '<tr><td><code>' + esc(p.name) + '</code></td><td>' + esc(p.in) + '</td><td>' + esc(t)
+                        + '</td><td>' + (p.required ? '<span class="ad-req">ja</span>' : 'nein') + '</td></tr>';
+                }).join('');
+                body.appendChild(tbl);
+            }
+
+            var bs = bodySchema(op);
+            var exampleBody = bs ? example(bs) : null;
+            if (bs) {
+                var bh = document.createElement('div'); bh.className = 'ep-h'; bh.textContent = 'Request-Body (Beispiel)'; body.appendChild(bh);
+                var pre = document.createElement('pre'); pre.className = 'ad-code';
+                pre.textContent = JSON.stringify(exampleBody, null, 2);
+                body.appendChild(pre);
+            }
+
+            // cURL-Beispiel
+            var ch = document.createElement('div'); ch.className = 'ep-h'; ch.textContent = 'Beispiel (cURL)'; body.appendChild(ch);
+            var curl = document.createElement('pre'); curl.className = 'ad-code';
+            var cl = "curl -sk -X " + ep.method.toUpperCase() + " '" + location.origin + ep.path + "' \\\n"
+                + "  -H 'Authorization: Bearer <DEIN_TOKEN>'";
+            if (bs) cl += " \\\n  -H 'Content-Type: application/json' \\\n  -d '" + JSON.stringify(exampleBody) + "'";
+            curl.textContent = cl;
+            body.appendChild(curl);
+
+            body.appendChild(testForm(ep, params, bs, exampleBody));
+            d.appendChild(body);
+            return d;
+        }
+
+        function testForm(ep, params, bs, exampleBody) {
+            var box = document.createElement('div');
+            box.className = 'ad-test';
+            var th = document.createElement('div'); th.className = 'ep-h'; th.textContent = 'Testaufruf'; box.appendChild(th);
+
+            var inputs = {};
+            params.forEach(function (p) {
+                var f = document.createElement('div'); f.className = 'ad-field';
+                var lab = document.createElement('label');
+                lab.innerHTML = esc(p.name) + ' <span class="ad-in">(' + esc(p.in) + (p.required ? ', pflicht' : '') + ')</span>';
+                var inp = document.createElement('input'); inp.className = 'ad-input';
+                inp.placeholder = (resolveRef(p.schema).type) || '';
+                f.appendChild(lab); f.appendChild(inp); box.appendChild(f);
+                inputs[p.name] = { el: inp, in: p.in };
+            });
+
+            var bodyEl = null;
+            var allowBody = ep.method !== 'get';
+            if (allowBody) {
+                var bf = document.createElement('div'); bf.className = 'ad-field';
+                var bl = document.createElement('label');
+                bl.innerHTML = 'Request-Body (JSON) ' + (bs ? '' : '<span class="ad-in">(kein Schema hinterlegt – freies JSON, leer lassen wenn ohne Body)</span>');
+                bodyEl = document.createElement('textarea'); bodyEl.className = 'ad-textarea';
+                bodyEl.value = bs ? JSON.stringify(exampleBody, null, 2) : '';
+                if (!bs) bodyEl.placeholder = '{ }';
+                bf.appendChild(bl); bf.appendChild(bodyEl); box.appendChild(bf);
+            }
+
+            var btn = document.createElement('button'); btn.className = 'ad-send'; btn.textContent = '▶ Senden';
+            box.appendChild(btn);
+
+            var resp = document.createElement('div'); resp.className = 'ad-resp';
+            var rstat = document.createElement('div'); rstat.className = 'ad-resp-status';
+            var rpre = document.createElement('pre'); rpre.className = 'ad-code'; rpre.style.marginTop = '6px';
+            resp.appendChild(rstat); resp.appendChild(rpre); box.appendChild(resp);
+
+            btn.addEventListener('click', function () {
+                var url = ep.path;
+                var qs = [];
+                Object.keys(inputs).forEach(function (name) {
+                    var o = inputs[name]; var v = o.el.value;
+                    if (o.in === 'path') { url = url.replace('{' + name + '}', encodeURIComponent(v)); }
+                    else if (o.in === 'query' && v !== '') { qs.push(encodeURIComponent(name) + '=' + encodeURIComponent(v)); }
+                });
+                if (qs.length) url += (url.indexOf('?') >= 0 ? '&' : '?') + qs.join('&');
+
+                var opts = { method: ep.method.toUpperCase(), headers: { 'Authorization': 'Bearer ' + TOKEN } };
+                if (bodyEl) {
+                    opts.headers['Content-Type'] = 'application/json';
+                    if (bodyEl.value.trim()) {
+                        try { opts.body = JSON.stringify(JSON.parse(bodyEl.value)); }
+                        catch (e) { resp.style.display = 'block'; rstat.className = 'ad-resp-status bad'; rstat.textContent = 'Ungültiges JSON im Body: ' + e.message; rpre.textContent = ''; return; }
+                    }
+                }
+                btn.disabled = true; btn.textContent = '… lädt';
+                resp.style.display = 'block'; rstat.className = 'ad-resp-status'; rstat.textContent = 'Sende…'; rpre.textContent = '';
+                var t0 = performance.now();
+                fetch(url, opts).then(function (r) {
+                    var ct = r.headers.get('content-type') || '';
+                    var pr = ct.indexOf('application/json') >= 0 ? r.json().then(function (j) { return JSON.stringify(j, null, 2); })
+                        : r.text().then(function (t) { return t.length > 20000 ? t.slice(0, 20000) + '\n… (gekürzt)' : t; });
+                    return pr.then(function (txt) { return { status: r.status, ok: r.ok, txt: txt }; });
+                }).then(function (res) {
+                    var ms = Math.round(performance.now() - t0);
+                    rstat.className = 'ad-resp-status ' + (res.ok ? 'ok' : (res.status >= 500 ? 'bad' : 'warn2'));
+                    rstat.textContent = 'HTTP ' + res.status + ' · ' + ms + ' ms';
+                    rpre.textContent = res.txt;
+                }).catch(function (e) {
+                    rstat.className = 'ad-resp-status bad'; rstat.textContent = 'Netzwerkfehler'; rpre.textContent = String(e);
+                }).finally(function () { btn.disabled = false; btn.textContent = '▶ Senden'; });
+            });
+
+            return box;
+        }
+
+        // ── Filter (Suche + Methoden) ──
+        function applyFilter() {
+            var q = (document.getElementById('ad-search').value || '').trim().toLowerCase();
+            document.querySelectorAll('.ad-group').forEach(function (g) {
+                var any = false;
+                g.querySelectorAll('.ep').forEach(function (ep) {
+                    var mOk = activeMethods[ep.getAttribute('data-method')] !== false;
+                    var sOk = !q || ep.getAttribute('data-search').indexOf(q) >= 0;
+                    var show = mOk && sOk;
+                    ep.style.display = show ? '' : 'none';
+                    if (show) any = true;
+                });
+                g.style.display = any ? '' : 'none';
+                if (q && any) g.open = true;
+            });
+        }
+
+        function buildMethodFilter() {
+            var box = document.getElementById('ad-mfilter');
+            var present = {};
+            endpoints.forEach(function (e) { present[e.method] = true; });
+            METHOD_ORDER.concat(['other']).forEach(function (m) {
+                if (!present[m]) return;
+                var b = document.createElement('span');
+                b.className = 'ad-mf on ' + mCls(m); b.textContent = m.toUpperCase();
+                b.style.color = '#fff';
+                b.addEventListener('click', function () {
+                    activeMethods[m] = !activeMethods[m];
+                    b.classList.toggle('on', activeMethods[m]);
+                    applyFilter();
+                });
+                box.appendChild(b);
+            });
+        }
+
+        // ── Start: Admin-Gate + Schema laden ──
+        fetch('/api/me', { headers: H }).then(function (r) { return r.ok ? r.json() : null; }).then(function (me) {
+            if (!me) { window.location.replace('/'); return Promise.reject('noauth'); }
+            if (!me.is_admin) { window.location.replace('/portal'); return Promise.reject('noadmin'); }
+            return fetch('/openapi.json', { headers: H });
+        }).then(function (r) { return r.json(); }).then(function (s) {
+            spec = s;
+            var paths = spec.paths || {};
+            Object.keys(paths).forEach(function (path) {
+                Object.keys(paths[path]).forEach(function (m) {
+                    if (['get', 'post', 'put', 'patch', 'delete'].indexOf(m) < 0) return;
+                    endpoints.push({ path: path, method: m, op: paths[path][m], group: groupOf(path) });
+                });
+            });
+            document.getElementById('ad-count').textContent = endpoints.length + ' Endpunkte · Basis ' + location.origin;
+            buildMethodFilter();
+            render();
+            document.getElementById('ad-search').addEventListener('input', applyFilter);
+        }).catch(function (e) {
+            if (e === 'noauth' || e === 'noadmin') return;
+            var l = document.getElementById('ad-loading');
+            if (l) { l.className = 'ad-error'; l.textContent = 'Fehler beim Laden des API-Schemas.'; }
+        });
+    })();
+    </script>
+</body>
+</html>

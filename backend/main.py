@@ -37,7 +37,11 @@ from backend import security_guard
 
 # ─── App erstellen ────────────────────────────────────────────────────
 JARVIS_VERSION = "0.9.0"
-app = FastAPI(title="Jarvis", version=JARVIS_VERSION)
+# Die eingebauten Doku-Endpunkte (/docs, /redoc, /openapi.json) werden deaktiviert
+# und weiter unten durch admin-geschuetzte Varianten ersetzt – so ist die komplette
+# API-Oberflaeche nicht mehr oeffentlich einsehbar.
+app = FastAPI(title="Jarvis", version=JARVIS_VERSION,
+              docs_url=None, redoc_url=None, openapi_url=None)
 
 # ─── CORS: Nur Same-Origin und explizit konfigurierte Domains erlauben ──
 _cors_origins = [
@@ -1251,6 +1255,59 @@ async def settings_page():
         content=shell.read_text(encoding="utf-8"),
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )
+
+
+@app.get("/api", response_class=HTMLResponse)
+async def api_doc_page():
+    """Interaktive API-Dokumentation (Admin). Konsumiert /openapi.json und listet
+    alle Endpunkte mit Erklärung, Beispiel und Testaufruf. Im Portal nur für Admins
+    verlinkt; die Endpunkte selbst bleiben serverseitig auth-geschützt."""
+    f = FRONTEND_DIR / "api.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
+    return HTMLResponse(
+        content=f.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+async def require_admin_or_query(request: Request) -> str:
+    """Admin-Auth via Bearer-Header ODER ?token= (fuer navigierbare Doku-Seiten wie
+    /docs, die keinen Header mitschicken koennen). Nur lokale/als Admin freigeschaltete
+    Benutzer duerfen das API-Schema und die Swagger-/ReDoc-UI sehen."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = verify_token(token)
+    if not username:
+        username = verify_token(request.query_params.get("token", ""))
+    if not username:
+        raise HTTPException(status_code=401, detail="Nicht authentifiziert")
+    if username not in ALLOWED_USERS and not _user_is_admin(username):
+        raise HTTPException(status_code=403, detail="Nur Administratoren dürfen die API-Dokumentation einsehen.")
+    if not _login_still_allowed(username):
+        raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
+    return username
+
+
+@app.get("/openapi.json", include_in_schema=False)
+async def gated_openapi(user: str = Depends(require_admin_or_query)):
+    """OpenAPI-Schema – nur fuer Admins (Bearer-Token oder ?token=)."""
+    return JSONResponse(app.openapi())
+
+
+@app.get("/docs", include_in_schema=False)
+async def gated_docs(request: Request, user: str = Depends(require_admin_or_query)):
+    """Swagger-UI – admin-geschuetzt. Reicht das Token an den openapi-Abruf durch."""
+    from fastapi.openapi.docs import get_swagger_ui_html
+    tok = request.headers.get("Authorization", "").replace("Bearer ", "") or request.query_params.get("token", "")
+    return get_swagger_ui_html(openapi_url=f"/openapi.json?token={tok}", title="Jarvis API – Swagger")
+
+
+@app.get("/redoc", include_in_schema=False)
+async def gated_redoc(request: Request, user: str = Depends(require_admin_or_query)):
+    """ReDoc – admin-geschuetzt."""
+    from fastapi.openapi.docs import get_redoc_html
+    tok = request.headers.get("Authorization", "").replace("Bearer ", "") or request.query_params.get("token", "")
+    return get_redoc_html(openapi_url=f"/openapi.json?token={tok}", title="Jarvis API – ReDoc")
 
 
 @app.get("/api/users/online")

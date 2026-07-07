@@ -230,6 +230,10 @@ window.extractorManager = new (class JarvisExtractorManager {
                     <div id="ext-qa-list" class="ext-qa-list"></div>
                     <button id="ext-add-qa-btn" class="kb-btn-secondary" style="margin-top:6px;font-size:.78rem;">${window.t('ext.add_qa')}</button>
                 </div>
+                <div class="kb-form-field" style="margin-bottom:10px;">
+                    <label class="kb-label">${window.t('kbgroups.target_label') || 'Zielgruppe(n)'}</label>
+                    <div id="ext-groups" class="kb-grp-checks"></div>
+                </div>
 
                 <div class="kb-form-footer" style="margin-top:12px;">
                     <button id="ext-reject-btn" class="kb-btn-danger" style="padding:.45rem 1rem;font-size:.82rem;">${window.t('ext.reject_btn')}</button>
@@ -715,6 +719,11 @@ window.extractorManager = new (class JarvisExtractorManager {
             const r = await fetch('/api/knowledge/pending', { headers: _authHeaders() });
             if (!r.ok) return;
             this._pending = await r.json();
+            // Gruppen + Zuordnungskarte fuer den Inline-Selektor laden
+            if (window.KbGroups) {
+                if (!window.KbGroups.all().length) await window.KbGroups.load();
+                this._grpMap = await window.KbGroups.getMap();
+            }
             this._renderPending();
         } catch (e) { console.error('[Extractor]', e); }
     }
@@ -796,6 +805,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                     <span class="cron-item-dot" style="background:var(--green,#10b981);"></span>
                     <span class="cron-item-label">${this._esc(doc.title)}</span>
                     <div class="cron-item-actions">
+                        ${(window.KbGroups && doc.file) ? window.KbGroups.buttonHtml(doc.file, (this._grpMap || {})[doc.file]) : ''}
                         <button class="kb-btn-secondary ext-edit-btn" data-id="${doc.id}" style="padding:3px 10px;font-size:.75rem;">✏️ Bearbeiten</button>
                         <button class="kb-btn-secondary ext-dl-btn"   data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="JSON herunterladen">⬇️</button>
                         <button class="kb-btn-danger ext-del-btn"     data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="Aus Verlauf und Wissens-DB entfernen">🗑️</button>
@@ -821,6 +831,18 @@ window.extractorManager = new (class JarvisExtractorManager {
         apprEl.querySelectorAll('.ext-del-btn').forEach(btn => {
             btn.onclick = () => this._deleteApproved(btn.dataset.id);
         });
+
+        // Gruppen-Button (öffnet Checkbox-Liste) links neben „Bearbeiten"
+        if (window.KbGroups) {
+            window.KbGroups.bindButtons(apprEl, (path, ids) => {
+                if (!this._grpMap) this._grpMap = {};
+                this._grpMap[path] = ids;
+                // Übersicht im Wissen-Tab aktualisieren, falls vorhanden
+                if (window.knowledgeManager && window.knowledgeManager._renderGroupsOverview) {
+                    window.KbGroups.load().then(() => window.knowledgeManager._renderGroupsOverview());
+                }
+            });
+        }
     }
 
     async _deleteApproved(id) {
@@ -870,6 +892,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         document.getElementById('ext-edit-summary').value = doc.summary || '';
         this._renderFacts(doc.facts || []);
         this._renderQa(doc.qa_pairs || []);
+        this._renderGroups(doc);
 
         const saveBtn   = document.getElementById('ext-save-btn');
         const rejectBtn = document.getElementById('ext-reject-btn');
@@ -887,6 +910,20 @@ window.extractorManager = new (class JarvisExtractorManager {
         const rejectBtn = document.getElementById('ext-reject-btn');
         if (saveBtn)   saveBtn.textContent   = window.t('ext.save_btn');
         if (rejectBtn) rejectBtn.textContent = window.t('ext.reject_btn');
+    }
+
+    // ─── Zielgruppen (logische Tags) ─────────────────────────────────────────
+
+    async _renderGroups(doc) {
+        const el = document.getElementById('ext-groups');
+        if (!el || !window.KbGroups) return;
+        if (!window.KbGroups.all().length) await window.KbGroups.load();
+        // Bei bereits genehmigten Dokumenten die vorhandene Zuordnung vorbelegen.
+        let current = [];
+        if (doc && doc.file) {
+            try { current = await window.KbGroups.getAssignment(doc.file); } catch (e) {}
+        }
+        window.KbGroups.renderCheckboxes(el, current);
     }
 
     // ─── Fakten-Editor ───────────────────────────────────────────────────────
@@ -990,8 +1027,12 @@ window.extractorManager = new (class JarvisExtractorManager {
                 headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
                 body: JSON.stringify(updated),
             });
+            const groupIds = window.KbGroups
+                ? window.KbGroups.readChecked(document.getElementById('ext-groups')) : [];
             const r = await fetch(`/api/knowledge/pending/${id}/approve`, {
-                method: 'POST', headers: _authHeaders(),
+                method: 'POST',
+                headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ groups: groupIds }),
             });
             const d = await r.json();
             if (!r.ok || !d.ok) {

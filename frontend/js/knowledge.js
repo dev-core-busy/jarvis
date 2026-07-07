@@ -29,10 +29,152 @@ class JarvisKnowledgeManager {
 
     async init() {
         await this.fetchStats();
+        await this.initGroups();
         await this.initWebDAV();
         await this.initMounts();
         // Prüfen ob Indizierung gerade läuft (z.B. nach Seiten-Reload)
         await this._checkRunningIndex();
+    }
+
+    // ─── Wissensgruppen (logische Tags) ───────────────────────────────
+
+    async initGroups() {
+        if (!window.KbGroups) return;
+        await window.KbGroups.load();
+        this._renderGroupsOverview();
+        // Upload-Ziel-Gruppen (Mehrfachauswahl) rendern
+        window.KbGroups.renderCheckboxes(document.getElementById('kb-upload-groups'), []);
+    }
+
+    _renderGroupsOverview() {
+        const el = document.getElementById('kb-groups-overview');
+        if (!el || !window.KbGroups) return;
+        const KG = window.KbGroups;
+        const T = (k, d) => (window.t && window.t(k)) || d;
+        const rows = KG.all().map(g => `
+            <div class="kb-grp-manage-row" data-gid="${KG.esc(g.id)}">
+                <input type="color" class="kb-grp-color-input" value="${KG.esc(g.color)}" title="${T('kbgroups.color', 'Farbe ändern')}">
+                <span class="kb-grp-manage-name" title="${T('kbgroups.show_files', 'Dokumente anzeigen')}">${KG.esc(g.name)}</span>
+                <span class="kb-grp-count">${g.count}</span>
+                <span class="kb-grp-manage-spacer"></span>
+                <button class="kb-grp-manage-btn kb-grp-rename" title="${T('kbgroups.rename', 'Umbenennen')}">✏️</button>
+                <button class="kb-grp-manage-btn kb-grp-delete" title="${T('kbgroups.delete', 'Löschen')}">🗑️</button>
+            </div>`).join('');
+        const ung = KG.ungroupedCount();
+        const ungRow = (ung != null) ? `
+            <div class="kb-grp-manage-row kb-grp-row-ung">
+                <span class="kb-grp-dot" style="background:#94a3b8;"></span>
+                <span class="kb-grp-manage-name" style="cursor:default;">${T('kbgroups.ungrouped', 'ungruppiert')}</span>
+                <span class="kb-grp-count">${ung}</span>
+            </div>` : '';
+        el.innerHTML = `
+            <div class="kb-grp-manage">
+                <div class="kb-grp-add-row">
+                    <input type="text" id="kb-grp-new-name" class="kb-input" placeholder="${T('kbgroups.new_ph', 'Neue Gruppe…')}">
+                    <input type="color" id="kb-grp-new-color" class="kb-grp-color-input" value="#3b82f6" title="${T('kbgroups.color', 'Farbe')}">
+                    <button id="kb-grp-add-btn" class="kb-btn-action">${T('kbgroups.add', '+ Hinzufügen')}</button>
+                </div>
+                <div class="kb-grp-manage-list">${rows}${ungRow}</div>
+            </div>`;
+
+        const addBtn = document.getElementById('kb-grp-add-btn');
+        if (addBtn) addBtn.onclick = () => this._addGroup();
+        const nameInp = document.getElementById('kb-grp-new-name');
+        if (nameInp) nameInp.addEventListener('keydown', e => { if (e.key === 'Enter') this._addGroup(); });
+
+        el.querySelectorAll('.kb-grp-manage-row[data-gid]').forEach(row => {
+            const gid = row.dataset.gid;
+            row.querySelector('.kb-grp-manage-name').onclick = () => this._showGroupFiles(gid);
+            row.querySelector('.kb-grp-color-input').onchange = (e) => this._setGroupColor(gid, e.target.value);
+            row.querySelector('.kb-grp-rename').onclick = () => this._renameGroup(gid);
+            row.querySelector('.kb-grp-delete').onclick = () => this._deleteGroup(gid);
+        });
+    }
+
+    async _refreshGroups() {
+        await window.KbGroups.load();
+        this._renderGroupsOverview();
+        window.KbGroups.renderCheckboxes(document.getElementById('kb-upload-groups'), []);
+    }
+
+    async _addGroup() {
+        const nameEl = document.getElementById('kb-grp-new-name');
+        const colorEl = document.getElementById('kb-grp-new-color');
+        const name = (nameEl && nameEl.value || '').trim();
+        if (!name) return;
+        const res = await window.KbGroups.createGroup(name, colorEl ? colorEl.value : '#64748b');
+        if (res && res.ok) {
+            await this._refreshGroups();
+            this._showNotification(window.t('kbgroups.added') || 'Gruppe angelegt', 'success');
+        } else {
+            this._showNotification((res && res.error) || 'Fehler beim Anlegen', 'error');
+        }
+    }
+
+    async _renameGroup(gid) {
+        const g = window.KbGroups.byId(gid);
+        const cur = g ? g.name : '';
+        const name = prompt(window.t('kbgroups.rename_prompt') || 'Neuer Name:', cur);
+        if (name == null) return;
+        const trimmed = name.trim();
+        if (!trimmed || trimmed === cur) return;
+        const res = await window.KbGroups.updateGroup(gid, { name: trimmed });
+        if (res && res.ok) await this._refreshGroups();
+        else this._showNotification((res && res.error) || 'Fehler', 'error');
+    }
+
+    async _setGroupColor(gid, color) {
+        const res = await window.KbGroups.updateGroup(gid, { color });
+        if (res && res.ok) await this._refreshGroups();
+    }
+
+    async _deleteGroup(gid) {
+        const g = window.KbGroups.byId(gid);
+        const nm = g ? g.name : gid;
+        const msg = (window.t('kbgroups.delete_confirm')
+            || 'Gruppe „{name}" löschen? Die Zuordnungen zu dieser Gruppe gehen verloren (die Dokumente bleiben erhalten).').replace('{name}', nm);
+        if (!confirm(msg)) return;
+        const ok = await window.KbGroups.deleteGroup(gid);
+        if (ok) {
+            const box = document.getElementById('kb-groups-files');
+            if (box) box.style.display = 'none';
+            await this._refreshGroups();
+            this._showNotification(window.t('kbgroups.deleted') || 'Gruppe gelöscht', 'success');
+        } else {
+            this._showNotification('Fehler beim Löschen', 'error');
+        }
+    }
+
+    async _showGroupFiles(gid) {
+        const box = document.getElementById('kb-groups-files');
+        if (!box || !window.KbGroups) return;
+        const KG = window.KbGroups;
+        box.style.display = 'block';
+        box.innerHTML = `<div class="kb-files-loading">${window.t('knowledge.loading') || 'Lädt…'}</div>`;
+        const map = await KG.getMap();
+        const files = Object.keys(map).filter(p => (map[p] || []).includes(gid));
+        const title = `<div class="kb-grp-files-head">${KG.pillHtml(gid)}
+            <span class="kb-hint" style="margin:0;">${files.length} ${window.t('kbgroups.docs') || 'Dokument(e)'}</span></div>`;
+        if (!files.length) {
+            box.innerHTML = title + `<div class="kb-files-empty">${window.t('kbgroups.no_docs') || 'Keine Dokumente in dieser Gruppe.'}</div>`;
+            return;
+        }
+        box.innerHTML = title + files.map(p => `
+            <div class="kb-grp-file-row">
+                <span class="kb-file-icon">📄</span>
+                <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
+                <button class="kb-btn-remove kb-grp-untag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.remove') || 'Aus Gruppe entfernen'}">✕</button>
+            </div>`).join('');
+        box.querySelectorAll('.kb-grp-untag').forEach(btn => {
+            btn.onclick = async () => {
+                const path = btn.dataset.path;
+                const cur = await KG.getAssignment(path);
+                await KG.setAssignment(path, cur.filter(x => x !== gid));
+                await KG.load();
+                this._renderGroupsOverview();
+                this._showGroupFiles(gid);
+            };
+        });
     }
 
     async _checkRunningIndex() {
@@ -100,6 +242,11 @@ class JarvisKnowledgeManager {
 
         const formData = new FormData();
         formData.append('folder', folder);
+        // Gewählte Zielgruppen (logische Tags) mitschicken
+        if (window.KbGroups) {
+            const gids = window.KbGroups.readChecked(document.getElementById('kb-upload-groups'));
+            if (gids.length) formData.append('groups', gids.join(','));
+        }
         for (const f of fileList) {
             formData.append('files', f);
         }
@@ -556,11 +703,16 @@ class JarvisKnowledgeManager {
                     ? `<button class="kb-btn-view-file" title="${window.t('knowledge.file_view_title') || 'Inhalt anzeigen'}"
                             onclick="window.knowledgeManager.viewFile('${safePath}', '${f.name}')">👁</button>`
                     : '';
+                const tagBtn = window.KbGroups
+                    ? `<button class="kb-btn-view-file kb-btn-tag-file" title="${window.t('kbgroups.assign_title') || 'Gruppen'}"
+                            onclick="window.knowledgeManager.tagFile(this, '${safePath}')">🏷</button>`
+                    : '';
                 return `
-                <div class="kb-file-item" id="kb-file-${btoa(f.path).replace(/[^a-zA-Z0-9]/g, '')}">
+                <div class="kb-file-item" id="kb-file-${btoa(unescape(encodeURIComponent(f.path))).replace(/[^a-zA-Z0-9]/g, '')}">
                     <span class="kb-file-icon">📄</span>
                     <span class="kb-file-name" title="${f.path}">${f.name}</span>
                     <span class="kb-file-size">${f.size}</span>
+                    ${tagBtn}
                     ${viewBtn}
                     <button class="kb-btn-delete-file" title="${window.t('knowledge.file_delete_title')}"
                         onclick="window.knowledgeManager.deleteFile('${safePath}', ${idx}, '${folderPath}')">✕</button>
@@ -569,6 +721,17 @@ class JarvisKnowledgeManager {
         } catch (e) {
             filesEl.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
         }
+    }
+
+    // ─── Datei einer Gruppe zuordnen ─────────────────────────────────
+
+    tagFile(anchorEl, path) {
+        if (!window.KbGroups) return;
+        window.KbGroups.openTagPopover(anchorEl, path, async () => {
+            // Zähler in der Übersicht nach dem Speichern aktualisieren
+            await window.KbGroups.load();
+            this._renderGroupsOverview();
+        });
     }
 
     // ─── Datei löschen ──────────────────────────────────────────────

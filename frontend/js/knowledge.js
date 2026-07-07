@@ -44,6 +44,12 @@ class JarvisKnowledgeManager {
         this._renderGroupsOverview();
         // Upload-Ziel-Gruppen (Mehrfachauswahl) rendern
         window.KbGroups.renderCheckboxes(document.getElementById('kb-upload-groups'), []);
+        // Tabellen-Symbol öffnet die Massenzuordnungs-Tabelle
+        const mbtn = document.getElementById('kb-grp-matrix-btn');
+        if (mbtn && !mbtn._bound) {
+            mbtn._bound = true;
+            mbtn.onclick = () => { if (window.KbMatrix) window.KbMatrix.open(); };
+        }
     }
 
     _renderGroupsOverview() {

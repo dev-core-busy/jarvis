@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=5">
-    <link rel="stylesheet" href="/static/css/style.css?v=105">
+    <link rel="stylesheet" href="/static/css/style.css?v=107">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -1550,6 +1550,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                             <div id="kb-sect-groups-body" class="kb-collapse-body" style="display:none;">
                                 <p class="kb-hint" data-i18n="kbgroups.hint">Ordne Dokumente logischen Gruppen zu (Mehrfachzuordnung möglich). Eine Datei ohne Gruppe gilt als „ungruppiert".</p>
+                                <div class="kb-grp-matrix-launch">
+                                    <span data-i18n="kbmatrix.launch_desc">Alle Dokumente in einer Tabelle auf einen Blick zuordnen (schnelle Massenbearbeitung):</span>
+                                    <button id="kb-grp-matrix-btn" class="kb-grp-matrix-icon" title="Wissensgruppen-Tabelle öffnen" data-i18n-title="kbmatrix.open_title">▦</button>
+                                </div>
                                 <div id="kb-groups-overview" class="kb-groups-overview">
                                     <div class="kb-loading" data-i18n="knowledge.loading">Lädt…</div>
                                 </div>
@@ -2952,17 +2956,18 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=48"></script>
+    <script src="/static/js/i18n.js?v=51"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=15"></script>
     <script src="/static/js/context.js?v=4"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=3"></script>
-    <script src="/static/js/extractor.js?v=19"></script>
+    <script src="/static/js/kbmatrix.js?v=3"></script>
+    <script src="/static/js/extractor.js?v=21"></script>
     <script src="/static/js/vnc.js?v=17"></script>
     <script src="/static/js/skills.js?v=29"></script>
     <script src="/static/js/whatsapp.js?v=10"></script>
-    <script src="/static/js/knowledge.js?v=46"></script>
+    <script src="/static/js/knowledge.js?v=47"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=28"></script>
     <script src="/static/js/confluence.js?v=5"></script>

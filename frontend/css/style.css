@@ -2333,6 +2333,87 @@ body.light .modal-header h2 {
 }
 .kb-grp-manage-btn:hover { opacity: 1; background: rgba(var(--fg-rgb), 0.08); }
 
+/* Start-Zeile für die Matrix (Beschreibung + großes Tabellen-Symbol) */
+.kb-grp-matrix-launch {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin: 4px 0 14px; font-size: 0.84rem; color: var(--text-secondary);
+}
+.kb-grp-matrix-icon {
+    font-size: 2rem; line-height: 1; padding: 4px 10px; border-radius: 10px;
+    background: rgba(var(--accent-rgb), 0.12);
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    color: var(--accent); cursor: pointer; flex-shrink: 0;
+    transition: background 0.15s ease;
+}
+.kb-grp-matrix-icon:hover { background: rgba(var(--accent-rgb), 0.22); }
+
+/* ── Wissensgruppen-Matrix (Vollbild-Tabelle) ── */
+.kbm-overlay {
+    position: fixed; inset: 0; z-index: 10070;
+    background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center; padding: 3vh 3vw;
+}
+.kbm-panel {
+    background: var(--bg-secondary, #0f172a);
+    border: 1px solid var(--border, rgba(255,255,255,0.12)); border-radius: 12px;
+    width: 100%; height: 94vh; display: flex; flex-direction: column;
+    box-shadow: 0 25px 60px rgba(var(--shadow-rgb), 0.5); overflow: hidden;
+}
+.kbm-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; border-bottom: 1px solid rgba(var(--fg-rgb), 0.08);
+}
+.kbm-title { font-weight: 700; font-size: 0.95rem; color: var(--text-primary); }
+.kbm-count { font-weight: 400; font-size: 0.8rem; color: var(--text-muted); margin-left: 6px; }
+.kbm-filter {
+    margin-left: auto; width: 240px; max-width: 40vw;
+    padding: 6px 10px; border-radius: 8px; font-size: 0.85rem;
+    background: var(--bg-glass); border: 1px solid var(--border); color: var(--text-primary);
+}
+.kbm-close {
+    background: none; border: none; color: var(--text-secondary); font-size: 1.2rem;
+    cursor: pointer; padding: 2px 8px; border-radius: 6px;
+}
+.kbm-close:hover { background: rgba(var(--fg-rgb), 0.1); color: var(--text-primary); }
+.kbm-table-wrap { flex: 1; overflow: auto; }
+.kbm-table {
+    border-collapse: collapse; table-layout: fixed;
+    font-size: 0.8rem;
+}
+.kbm-table th, .kbm-table td {
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.07);
+    border-right: 1px solid rgba(var(--fg-rgb), 0.05);
+    padding: 2px 8px; line-height: 1.35; text-align: left; overflow: hidden;
+    white-space: nowrap; text-overflow: ellipsis;
+}
+.kbm-table thead th {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--bg-secondary, #0f172a);
+    color: var(--text-secondary); font-weight: 600; user-select: none;
+    padding-top: 6px; padding-bottom: 6px;
+}
+.kbm-c-grp, .kbm-c-act { text-align: center; }
+.kbm-th-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.kbm-th-name { vertical-align: middle; }
+.kbm-th-count { display: inline-block; margin-left: 5px; font-size: 0.7rem; opacity: 0.7; }
+.kbm-table tbody tr:hover { background: rgba(var(--fg-rgb), 0.04); }
+.kbm-gcell { text-align: center; cursor: pointer; }
+.kbm-gcell .kbm-check {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 17px; height: 17px; border-radius: 5px; font-size: 0.72rem; color: #fff;
+    border: 1px solid color-mix(in srgb, var(--grp, #64748b) 55%, transparent);
+}
+.kbm-gcell.on .kbm-check { background: var(--grp, #64748b); border-color: var(--grp, #64748b); }
+.kbm-gcell:hover .kbm-check { background: color-mix(in srgb, var(--grp, #64748b) 25%, transparent); }
+.kbm-c-act button { background: none; border: none; cursor: pointer; font-size: 0.9rem; opacity: 0.7; }
+.kbm-c-act button:hover { opacity: 1; }
+.kbm-resizer {
+    position: absolute; top: 0; right: 0; width: 8px; height: 100%;
+    cursor: col-resize; z-index: 4;
+}
+.kbm-resizer:hover { background: rgba(var(--accent-rgb), 0.5); }
+body.kbm-resizing { cursor: col-resize; user-select: none; }
+
 /* ── Profil-Liste ── */
 .profiles-list {
     display: flex;

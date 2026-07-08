@@ -2327,16 +2327,22 @@ async def get_document(name: str):
         "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "pdf":  "application/pdf",
+        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp", "svg": "image/svg+xml",
     }
-    m = re.fullmatch(r"([0-9a-f]{32})__([A-Za-z0-9_\-]+)\.(docx|xlsx|pptx|pdf)", name)
+    _IMG = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"}
+    m = re.fullmatch(r"([0-9a-f]{32})__([A-Za-z0-9_\-]+)\.(docx|xlsx|pptx|pdf|png|jpe?g|gif|webp|bmp|svg)", name)
     if not m:
         return JSONResponse({"error": "ungueltiger Name"}, status_code=400)
     base, ext = m.group(2), m.group(3)
     p = Path(__file__).parent.parent / "data" / "documents" / name
     if not p.exists():
         return JSONResponse({"error": "nicht gefunden"}, status_code=404)
+    # Bilder inline ausliefern (fuer <img> im Chat), Office-Dateien als Download.
+    disp = "inline" if ext in _IMG else "attachment"
     return FileResponse(str(p), media_type=_MEDIA[ext],
                         filename=f"{base}.{ext}",
+                        content_disposition_type=disp,
                         headers={"Cache-Control": "private, max-age=3600"})
 
 

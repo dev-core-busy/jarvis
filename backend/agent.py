@@ -327,8 +327,8 @@ Regeln:
     - Fuer EINFACHE Dokumente (Text, Tabellen, Bullet-Folien) die office_*-Tools nutzen: office_create_word / office_create_excel / office_create_powerpoint, PDF-Export via office_to_pdf.
     - Fuer KOMPLEXE Inhalte, die diese Tools nicht abdecken (z.B. Diagramme/Schemata, Formen, individuelles Layout), darfst du python-docx/python-pptx/openpyxl via shell_execute verwenden.
     - WICHTIG: Temporaere Skripte UND Ausgabedateien IMMER unter /tmp anlegen (z.B. > /tmp/verarbeitung.py, df.to_excel("/tmp/ergebnis.xlsx")). NIEMALS in das Arbeitsverzeichnis schreiben (relative Pfade wie "> skript.py") – das ist fuer eingeschraenkte Benutzer gesperrt und schlaegt fehl.
-    - Das System erkennt JEDE erzeugte Office-Datei automatisch (auch in /tmp) und liefert sie dem Nutzer als Download-Chip aus – DU musst dich darum nicht kuemmern.
-    - Praesentiere das Ergebnis NIEMALS als blossen lokalen Pfad ("liegt unter /tmp/..."), sondern als fertige Datei zum Download. Liefert dir ein Tool einen Download-Link ([📥 ...](/api/documents/...)), gib ihn UNVERAENDERT aus.
+    - Das System erkennt JEDE erzeugte Datei automatisch (auch in /tmp) – Office-Dokumente (docx/xlsx/pptx/pdf) UND Bilder (png/jpg/gif/webp/svg, z.B. Diagramme/Schemata) – und liefert sie dem Nutzer aus: Dokumente als Download-Chip, Bilder als inline-Vorschau im Chat. DU musst dich darum nicht kuemmern.
+    - Praesentiere das Ergebnis NIEMALS als blossen lokalen Pfad ("liegt unter /tmp/...") und fordere den Nutzer NIEMALS auf, einen /tmp-Pfad zu verwenden – solche Pfade sind fuer ihn nicht erreichbar. Beschreibe einfach das Ergebnis; die Datei wird automatisch angehaengt.
 
 17. CODE & SKRIPTE – IMMER direkt im Chat ausliefern:
     - Erzeugst du Code oder ein Skript fuer den Benutzer (Python, Bash, SQL, JavaScript, …), gib den VOLLSTAENDIGEN Inhalt IMMER direkt in deiner Antwort als Markdown-Codeblock aus (```sprache … ```).
@@ -1691,6 +1691,19 @@ KRITISCH – Autonomie-Regeln:
         # Slash, damit sowohl /tmp/x.pptx als auch data/documents/x.pptx VOLLSTAENDIG
         # (inkl. Slash/Prefix) verschwinden und keine Fragmente ('/', 'data') bleiben.
         text = re.sub(r"/?(?:[\w.\-]+/)+[\w.\-]+\.(?:docx|xlsx|pptx|pdf)", "", text)
+        # Bilder: vom LLM genannte LOKALE Bild-Verweise entfernen – sie werden separat
+        # als Chat-Anhang inline ausgeliefert (_deliver_docs). Externe http(s)-Bild-URLs
+        # bleiben unangetastet.
+        # (1) Markdown-Bild/-Link auf lokalen Bildpfad komplett entfernen
+        text = re.sub(
+            r"!?\[[^\]\n]*\]\((?:/[^)\n]*|data/documents/[^)\n]*)\.(?:png|jpe?g|gif|webp|bmp|svg)\)",
+            "", text)
+        # (2) Nackte lokale Bildpfade (z.B. /tmp/x.png) – Lookbehind schuetzt vor
+        #     Treffern innerhalb externer URLs (…://host/bild.png bleibt erhalten).
+        text = re.sub(
+            r"(?<![:/\w])/(?:[\w.\-]+/)*[\w.\-]+\.(?:png|jpe?g|gif|webp|bmp|svg)\b"
+            r"|\bdata/documents/[\w.\-]+\.(?:png|jpe?g|gif|webp|bmp|svg)\b",
+            "", text)
         # Aufraeumen: leere Klammern, haengende 'unter/in/:' vor Satzende, doppelte Spaces
         text = re.sub(r"\(\s*\)", "", text)
         text = re.sub(r"\s+([.,;:])", r"\1", text)
@@ -1719,11 +1732,17 @@ KRITISCH – Autonomie-Regeln:
         _UML = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue",
                               "Ä": "Ae", "Ö": "Oe", "Ü": "Ue", "ß": "ss"})
 
+        _IMG_EXT = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"}
+
         async def _emit(name, url):
-            await self._send_status(ws, f"[📥 {name} herunterladen]({url})", highlight=True)
+            # Bilder inline im Chat anzeigen (Frontend rendert ![..](/api/documents/..)
+            # als <img>), Office-Dokumente als Download-Chip.
+            ext = url.rsplit(".", 1)[-1].lower() if "." in url else ""
+            md = f"![{name}]({url})" if ext in _IMG_EXT else f"[📥 {name} herunterladen]({url})"
+            await self._send_status(ws, md, highlight=True)
 
         # (a) Fertige Capability-URLs (Dedup per physischem Pfad)
-        for m in re.finditer(r"/api/documents/[0-9a-f]{32}__[A-Za-z0-9_\-]+\.(?:docx|xlsx|pptx|pdf)", text):
+        for m in re.finditer(r"/api/documents/[0-9a-f]{32}__[A-Za-z0-9_\-]+\.(?:docx|xlsx|pptx|pdf|png|jpe?g|gif|webp|bmp|svg)", text):
             url = m.group(0)
             cap = docs_dir / url.split("/api/documents/")[1]
             try:
@@ -1739,7 +1758,7 @@ KRITISCH – Autonomie-Regeln:
         import tempfile as _tempfile
         _tmp_root = _Path(_tempfile.gettempdir()).resolve()
         _docs_root = docs_dir.resolve()
-        for m in re.finditer(r"(?:/[\w.\-]+)+\.(?:docx|xlsx|pptx|pdf)|data/documents/[\w.\-]+\.(?:docx|xlsx|pptx|pdf)", text):
+        for m in re.finditer(r"(?:/[\w.\-]+)+\.(?:docx|xlsx|pptx|pdf|png|jpe?g|gif|webp|bmp|svg)|data/documents/[\w.\-]+\.(?:docx|xlsx|pptx|pdf|png|jpe?g|gif|webp|bmp|svg)", text):
             raw = m.group(0)
             p = _Path(raw) if raw.startswith("/") else (proj / raw)
             try:

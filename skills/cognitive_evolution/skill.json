@@ -56,6 +56,6 @@
       "Optimiere die Evolution-Engine um LLM-Calls zu cachen",
       "Baue mir einen Skill der Markdown-Dateien zusammenfasst"
     ],
-    "notes": "Neue Skills werden nach evolution_apply automatisch geladen. Aktivierung via Jarvis-Einstellungen → Skills. Self-Patches (scope=self_patch) werden sofort via importlib.reload() aktiv – kein Service-Restart nötig."
+    "notes": "Neue Skills werden nach evolution_apply automatisch geladen. Aktivierung via Jarvis-Einstellungen → Skills. Self-Patches (scope=self_patch) werden sofort via importlib.reload() aktiv – kein Service-Restart nötig. Sicherheitsschicht: Das Generieren/Ändern von Skill-Code schreibt nach skills/ – das ist nur lokalen Administratoren erlaubt. Für Netzwerk-/Domain-Benutzer wird das Schreiben außerhalb des Arbeitsbereichs (/tmp, data/documents) durch die Sandbox blockiert; dieser Skill ist daher praktisch Admin-only."
   }
 }

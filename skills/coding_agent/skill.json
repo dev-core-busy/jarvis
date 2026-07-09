@@ -27,6 +27,6 @@
             "Finde und behebe den Bug in Modul Y (Root-Cause, kein Workaround)",
             "Refactore Datei Z und verifiziere, dass nichts kaputt geht"
         ],
-        "notes": "Der gestartete Coding-Agent arbeitet vollstaendig autonom (kein Rueckfragen). Fuer triviale Einzeiler ist ein normaler Tool-Aufruf schneller; der Coding-Agent lohnt sich bei mehrstufigen Aufgaben (3+ Schritte)."
+        "notes": "Der gestartete Coding-Agent arbeitet vollstaendig autonom (kein Rueckfragen). Fuer triviale Einzeiler ist ein normaler Tool-Aufruf schneller; der Coding-Agent lohnt sich bei mehrstufigen Aufgaben (3+ Schritte). Sicherheitsschicht: Der Coding-Agent erbt die Rechte des startenden Benutzers – fuer Netzwerk-/Domain-Benutzer greifen dieselben Sandbox-Beschraenkungen (Schreiben nur im Arbeitsbereich, kein Zugriff auf Secrets/Root/Systemaenderungen). Voller Zugriff nur fuer lokale Administratoren."
     }
 }

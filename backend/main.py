@@ -2224,8 +2224,8 @@ async def _sec_inspect_user(text: str, user: str, channel: str) -> bool:
     # Base64-verschleierte Payloads dekodieren + prüfen (umgeht sonst die Guard-Regex).
     marker = security_guard.decode_and_scan(text)
     if marker:
-        security_guard.record_violation(user, channel, "encoded-payload", marker, text,
-                                        exempt=_is_admin_user(user))
+        security_guard.record_violation(user, channel, "encoded-payload", marker,
+                                        snippet=text, task=text, exempt=_is_admin_user(user))
         return True
     return False
 

@@ -549,6 +549,10 @@ KRITISCH – Autonomie-Regeln:
         # Sub-Agents werden ohne username gestartet – dann den vom Eltern-Agent
         # geerbten Namen behalten (nicht mit "" ueberschreiben), damit LDAP-Gating greift.
         self._current_username = username or getattr(self, '_current_username', '')
+        # Kontext für die Verstoß-Protokollierung (ausführliches Logging bei Deny)
+        self._current_task = task_text or getattr(self, '_current_task', '')
+        self._current_client_ip = client_ip or getattr(self, '_current_client_ip', '')
+        self._current_client_type = client_type or getattr(self, '_current_client_type', '')
         # Task im Audit-Log festhalten (unabhängig ob Tools genutzt werden)
         try:
             from backend.audit_log import log_task as _audit_task
@@ -1174,7 +1178,10 @@ KRITISCH – Autonomie-Regeln:
         except Exception as e:
             import traceback; _log(f"EXCEPTION: {e}\n{traceback.format_exc()}")
             err_msg = _friendly_api_error(e)
-            await self._send_status(ws, err_msg)
+            # WICHTIG: als highlight senden -> sichtbare Antwort-Bubble. Ohne highlight
+            # wird die Fehlermeldung nur als dezente Status-Zeile gezeigt (und vom
+            # Debug-Toggle ausgeblendet) -> der Nutzer sieht "keine Antwort".
+            await self._send_status(ws, err_msg, highlight=True)
             tracer.end_span(agent_span, status="error", error=str(e))
             agent_span = None  # Verhindern, dass finally nochmal beendet
             # History auch bei Fehler zurückspeichern
@@ -1530,6 +1537,10 @@ KRITISCH – Autonomie-Regeln:
                         _exempt = False
                     _vr = _sg.record_violation(_uname, "chat", _viol[0], _viol[1],
                                                snippet=_json.dumps(args, ensure_ascii=False)[:200],
+                                               tool=name,
+                                               task=getattr(self, '_current_task', '')[:300],
+                                               ip=getattr(self, '_current_client_ip', ''),
+                                               client_type=getattr(self, '_current_client_type', ''),
                                                exempt=_exempt)
                     if _vr.get("blocked"):
                         result = ("🚫 Konto gesperrt: wiederholte sicherheitsrelevante Zugriffsversuche "

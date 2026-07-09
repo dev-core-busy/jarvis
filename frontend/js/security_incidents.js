@@ -89,13 +89,16 @@
                 return;
             }
             box.innerHTML = list.map(function (v) {
-                return '<div style="padding:6px 0;border-bottom:1px solid rgba(var(--fg-rgb),.08);">'
-                    + '<div style="font-size:0.78rem;color:var(--text-muted);">'
-                    + esc(fmtTs(v.ts)) + ' · <strong style="color:var(--text-primary);">' + esc(v.user) + '</strong> · '
-                    + esc(chanLabel(v.channel)) + ' · ' + esc(v.pattern || '') + '</div>'
-                    + '<div style="font-size:0.82rem;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">'
-                    + esc(v.detail || '') + '</div>'
-                    + '</div>';
+                var meta = esc(fmtTs(v.ts)) + ' · <strong style="color:var(--text-primary);">' + esc(v.user) + '</strong> · '
+                    + esc(chanLabel(v.channel)) + ' · ' + esc(v.pattern || '');
+                if (v.tool) meta += ' · ' + esc(v.tool);
+                if (v.ip) meta += ' · IP ' + esc(v.ip);
+                var html = '<div style="padding:6px 0;border-bottom:1px solid rgba(var(--fg-rgb),.08);">'
+                    + '<div style="font-size:0.78rem;color:var(--text-muted);">' + meta + '</div>';
+                if (v.detail) html += '<div style="font-size:0.82rem;color:var(--text-primary);">' + esc(v.detail) + '</div>';
+                if (v.task) html += '<div style="font-size:0.78rem;color:var(--text-secondary);">'
+                    + esc(T('security.f_request', 'Anfrage')) + ': ' + esc(v.task) + '</div>';
+                return html + '</div>';
             }).join('');
         },
 
@@ -183,13 +186,18 @@
                 return;
             }
             el.innerHTML = incidents.slice().reverse().map(function (it) {
-                return '<div style="padding:8px 0;border-bottom:1px solid rgba(var(--fg-rgb),.08);">'
-                    + '<div style="font-size:0.78rem;color:var(--text-muted);">'
-                    + esc(fmtTs(it.ts)) + ' · ' + esc(chanLabel(it.channel)) + ' · ' + esc(it.method || '') + ' · ' + esc(it.pattern || '')
-                    + '</div>'
-                    + '<div style="font-size:0.84rem;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;margin-top:2px;">'
-                    + esc(it.snippet || '') + '</div>'
-                    + '</div>';
+                var meta = esc(fmtTs(it.ts)) + ' · ' + esc(chanLabel(it.channel))
+                    + ' · ' + esc(it.method || '') + ' · ' + esc(it.pattern || '');
+                if (it.tool) meta += ' · ' + esc(T('security.f_tool', 'Tool')) + ': ' + esc(it.tool);
+                if (it.ip) meta += ' · IP ' + esc(it.ip);
+                var html = '<div style="padding:8px 0;border-bottom:1px solid rgba(var(--fg-rgb),.08);">'
+                    + '<div style="font-size:0.78rem;color:var(--text-muted);">' + meta + '</div>';
+                if (it.detail) html += '<div style="font-size:0.85rem;color:var(--text-primary);margin-top:2px;">' + esc(it.detail) + '</div>';
+                if (it.task) html += '<div style="font-size:0.8rem;color:var(--text-secondary);margin-top:2px;">'
+                    + esc(T('security.f_request', 'Anfrage')) + ': ' + esc(it.task) + '</div>';
+                if (it.snippet && it.snippet !== it.task) html += '<div style="font-size:0.76rem;color:var(--text-muted);'
+                    + 'white-space:pre-wrap;word-break:break-word;margin-top:2px;font-family:monospace;">' + esc(it.snippet) + '</div>';
+                return html + '</div>';
             }).join('');
         },
 

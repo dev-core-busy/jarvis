@@ -81,6 +81,29 @@ def _collect_tool_results(conv_messages: list[dict]) -> list[dict]:
     return results
 
 
+# Sicherheits-/Rechte-bezogene "Fakten" werden NIEMALS gelernt – sonst koennte ein
+# Angreifer per Prompt-Injection dauerhaft eine Rechte-Anhebung "beibringen"
+# (z.B. "root-Verzeichnis ist erlaubt"). Solche Zeilen werden vor dem Speichern verworfen.
+_LEARN_DENY = re.compile(
+    r'(?:\broot\b|\bsudo\b|privileg|berechtigt|uneingeschr|ohne\s+einschr|keine\s+einschr|'
+    r'vollzugriff|full\s+access|\bbypass\b|jailbreak|overrid|ignorier|'
+    r'passwor|\bsecret\b|api[-_ ]?key|\btoken\b|\.env|settings\.json|id_rsa|chmod|/etc/|base64|'
+    r'darf\s+alles|keine\s+regeln)',
+    re.IGNORECASE,
+)
+
+
+def _sanitize_learned(facts_text: str) -> str:
+    """Entfernt sicherheits-/rechte-bezogene Zeilen aus den zu lernenden Fakten."""
+    kept = []
+    for line in (facts_text or "").splitlines():
+        if line.strip() and _LEARN_DENY.search(line):
+            _log.info(f"Lern-Filter: sicherheitsrelevante Zeile verworfen: {line.strip()[:100]}")
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
 def _should_learn(conv_messages: list[dict]) -> bool:
     """Gibt True zurueck wenn die Konversation lernwuerdig ist."""
     ok_results = _collect_tool_results(conv_messages)
@@ -110,6 +133,12 @@ async def learn_from_conversation(
         facts_text = await _extract_facts_llm(task, tool_results, provider, model)
         if not facts_text or facts_text.strip().upper() in ("NICHTS", "KEINE", "NONE", ""):
             _log.debug("Keine lernbaren Fakten extrahiert")
+            return
+
+        # Sicherheits-Filter: rechte-/secret-bezogene "Fakten" niemals lernen
+        facts_text = _sanitize_learned(facts_text)
+        if not facts_text:
+            _log.info("Lernen uebersprungen: nur sicherheitsrelevante/gefilterte Inhalte")
             return
 
         # Fakten-Datei schreiben + sofort in FAISS indexieren

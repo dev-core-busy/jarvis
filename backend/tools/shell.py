@@ -105,6 +105,14 @@ class ShellTool(BaseTool):
         timeout = timeout or config.COMMAND_TIMEOUT
         cwd = working_directory or None
 
+        # OS-Sandbox: Befehl als unprivilegierter OS-User ausfuehren (harte Grenze).
+        # Wird vom Agent-Dispatch nur fuer nicht-privilegierte Benutzer gesetzt.
+        _sandbox_user = (kwargs.get("_sandbox_user") or "").strip()
+        if _sandbox_user:
+            from backend import sandbox as _sbx
+            command = _sbx.wrap_sandboxed(command, _sandbox_user)
+            cwd = "/tmp"   # Arbeitsverzeichnis auf den Sandbox-Bereich zwingen
+
         # Python-Buffering deaktivieren fuer Live-Streaming
         import os
         env = os.environ.copy()

@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=5">
-    <link rel="stylesheet" href="/static/css/style.css?v=108">
+    <link rel="stylesheet" href="/static/css/style.css?v=109">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -2825,6 +2825,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                                 <span id="sec-guard-status" style="font-size:0.82rem;color:var(--text-muted);"></span>
 
+                                <h4 style="margin:18px 0 6px;" data-i18n="security.section_sandbox">Systemschutz / Sandbox (Netzwerk-Benutzer)</h4>
+                                <div id="sec-sandbox-status" class="kb-hint" style="margin:0 0 4px;"></div>
+                                <p class="kb-hint" data-i18n="security.sandbox_desc">Für Netzwerk-/Domain-Benutzer ist der Datei- und Shell-Zugriff im Code beschränkt (Schreiben nur im Arbeitsbereich, Lesen nur in Wissens-/Arbeitsverzeichnissen; Secrets, Root- und System-Bereiche gesperrt; verschleierte/base64-kodierte Ausführung blockiert). Ist die OS-Sandbox aktiv, laufen deren Shell-Befehle zusätzlich als unprivilegierter Betriebssystem-Benutzer – das Betriebssystem erzwingt die Grenze dann hart.</p>
+
+                                <h4 style="margin:18px 0 6px;" data-i18n="security.section_violations">Letzte Zugriffs-Verstöße</h4>
+                                <p class="kb-hint" data-i18n="security.violations_desc">Im Tool-Dispatch verweigerte Zugriffe (Secrets/Root/Base64) von Netzwerk-Benutzern. Nach mehreren Verstößen innerhalb kurzer Zeit wird der Account automatisch gesperrt (lokale Administratoren ausgenommen).</p>
+                                <div id="sec-viol-list"></div>
+
                                 <h4 style="margin:18px 0 6px;" data-i18n="security.blocked_accounts">Gesperrte Konten</h4>
                                 <div id="sec-blocked-list"></div>
                             </div>
@@ -2956,7 +2964,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=53"></script>
+    <script src="/static/js/i18n.js?v=55"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=15"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -2965,7 +2973,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/kbmatrix.js?v=4"></script>
     <script src="/static/js/extractor.js?v=21"></script>
     <script src="/static/js/vnc.js?v=17"></script>
-    <script src="/static/js/skills.js?v=29"></script>
+    <script src="/static/js/skills.js?v=30"></script>
     <script src="/static/js/whatsapp.js?v=10"></script>
     <script src="/static/js/knowledge.js?v=47"></script>
     <script src="/static/js/mcp.js?v=3"></script>
@@ -2978,7 +2986,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/issues.js?v=6"></script>
     <script src="/static/js/branding.js?v=16"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/security_incidents.js?v=1"></script>
+    <script src="/static/js/security_incidents.js?v=2"></script>
     <script src="/static/js/app.js?v=144"></script>
 </body>
 

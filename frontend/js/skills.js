@@ -178,11 +178,13 @@
             const isOpenClaw = skill.source === 'openclaw';
 
             const item = document.createElement('div');
-            item.className = isOpenClaw ? 'sk-item sk-item-oc' : 'sk-item';
+            item.className = 'sk-item' + (isOpenClaw ? ' sk-item-oc' : '')
+                + (skill.enabled ? '' : ' sk-item-disabled');
             item.innerHTML = `
                 <span class="sk-item-icon">${icon}</span>
                 <div class="sk-item-info">
                     <span class="sk-item-name">${skill.name}</span>
+                    ${skill.enabled ? '' : `<span class="sk-badge-off">${window.t('skills.disabled')}</span>`}
                     ${isSystem ? '<span class="sk-badge-sys">System</span>' : ''}
                     ${isOpenClaw ? '<span class="sk-badge-oc">OpenClaw</span>' : ''}
                     <span class="sk-item-cat">${catLabel}</span>
@@ -193,14 +195,14 @@
                     <button class="sk-btn sk-btn-info" title="${window.t('skills.show_info')}">${SVG_INFO}</button>
                     ${hasConfig
                         ? `<button class="sk-btn sk-btn-cfg" title="${window.t('skills.cfg_title')}">${SVG_CFG}</button>`
-                        : ''}
+                        : '<span class="sk-btn sk-btn-ghost" aria-hidden="true"></span>'}
                     <label class="skill-toggle" title="${isSystem ? 'System-Skill' : 'An / Aus'}">
                         <input type="checkbox" ${skill.enabled ? 'checked' : ''}>
                         <span class="skill-toggle-slider"></span>
                     </label>
                     ${!isSystem
                         ? `<button class="sk-btn sk-btn-rm" title="${window.t('common.delete')}">✕</button>`
-                        : ''}
+                        : '<span class="sk-btn sk-btn-ghost" aria-hidden="true"></span>'}
                 </div>`;
 
             // Info
@@ -210,6 +212,7 @@
             });
             // Toggle
             item.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
+                if (!isSystem) this._applyDisabledState(item, e.target.checked);
                 this._toggle(e, dirName, e.target.checked, isSystem);
             });
             // Config
@@ -220,6 +223,23 @@
             if (rmBtn)  rmBtn.addEventListener('click',  () => this._deactivate(dirName));
 
             return item;
+        }
+
+        // Deaktiviert-Optik (Klasse + Badge) live umschalten
+        _applyDisabledState(item, enabled) {
+            item.classList.toggle('sk-item-disabled', !enabled);
+            const info = item.querySelector('.sk-item-info');
+            if (!info) return;
+            let badge = info.querySelector('.sk-badge-off');
+            if (!enabled && !badge) {
+                badge = document.createElement('span');
+                badge.className = 'sk-badge-off';
+                badge.textContent = window.t('skills.disabled');
+                const nameEl = info.querySelector('.sk-item-name');
+                if (nameEl) nameEl.insertAdjacentElement('afterend', badge);
+            } else if (enabled && badge) {
+                badge.remove();
+            }
         }
 
         // ── Kategorie-Pills ───────────────────────────────────────────

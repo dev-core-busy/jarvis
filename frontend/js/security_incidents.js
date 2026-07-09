@@ -50,6 +50,53 @@
                     Mgr.renderBlocked(d.blocked || []);
                 })
                 .catch(function () {});
+            // OS-Sandbox-Status
+            fetch('/api/security/sandbox', { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) { Mgr.renderSandbox(d); })
+                .catch(function () {});
+            // Letzte Zugriffs-Verstöße
+            fetch('/api/security/violations', { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) { Mgr.renderViolations((d && d.violations) || []); })
+                .catch(function () {});
+        },
+
+        renderSandbox: function (d) {
+            var box = $('sec-sandbox-status');
+            if (!box) return;
+            if (!d) { box.innerHTML = ''; return; }
+            var active = !!d.active, exists = !!d.user_exists;
+            var dot = (active && exists) ? '🟢' : (active ? '🟠' : '⚪');
+            var txt;
+            if (active && exists) {
+                txt = T('security.sandbox_on', 'OS-Sandbox aktiv') + ' — '
+                    + T('security.sandbox_user', 'Sandbox-Benutzer') + ': ' + esc(d.user);
+            } else if (active && !exists) {
+                txt = '⚠️ ' + T('security.sandbox_missing', 'Sandbox konfiguriert, aber OS-Benutzer fehlt')
+                    + ': ' + esc(d.user);
+            } else {
+                txt = T('security.sandbox_off', 'OS-Sandbox inaktiv – nur Code-Härtung aktiv');
+            }
+            box.innerHTML = '<span style="font-size:0.9rem;">' + dot + ' ' + txt + '</span>';
+        },
+
+        renderViolations: function (list) {
+            var box = $('sec-viol-list');
+            if (!box) return;
+            if (!list.length) {
+                box.innerHTML = '<p class="kb-hint">' + esc(T('security.no_violations', 'Keine Verstöße protokolliert.')) + '</p>';
+                return;
+            }
+            box.innerHTML = list.map(function (v) {
+                return '<div style="padding:6px 0;border-bottom:1px solid rgba(var(--fg-rgb),.08);">'
+                    + '<div style="font-size:0.78rem;color:var(--text-muted);">'
+                    + esc(fmtTs(v.ts)) + ' · <strong style="color:var(--text-primary);">' + esc(v.user) + '</strong> · '
+                    + esc(chanLabel(v.channel)) + ' · ' + esc(v.pattern || '') + '</div>'
+                    + '<div style="font-size:0.82rem;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">'
+                    + esc(v.detail || '') + '</div>'
+                    + '</div>';
+            }).join('');
         },
 
         saveConfig: function () {

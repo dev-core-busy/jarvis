@@ -2987,6 +2987,35 @@ select option:hover {
     white-space: nowrap;
 }
 
+/* Installiert, aber DEAKTIVIERT – neutral gedämpft (dark/light + branding-sicher,
+   nur --fg-rgb/--text-muted, keine harten Farben, kein Akzent) */
+.sk-item.sk-item-disabled {
+    background: rgba(var(--fg-rgb), 0.02);
+    border-left: 3px solid rgba(var(--fg-rgb), 0.28);
+}
+.sk-item.sk-item-disabled .sk-item-icon { filter: grayscale(1); opacity: 0.5; }
+.sk-item.sk-item-disabled .sk-item-name { color: var(--text-muted); }
+.sk-item.sk-item-disabled .sk-item-desc { opacity: 0.7; }
+.sk-badge-off {
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 0.05rem 0.4rem;
+    border-radius: 4px;
+    background: rgba(var(--fg-rgb), 0.1);
+    color: var(--text-muted);
+    border: 1px solid rgba(var(--fg-rgb), 0.2);
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+/* Unsichtbarer Platzhalter für fehlende Aktions-Buttons (Config/Löschen),
+   damit die Aktionsspalten aller Skill-Zeilen symmetrisch fluchten. */
+.sk-btn.sk-btn-ghost {
+    visibility: hidden;
+    pointer-events: none;
+}
+
 .sk-avail-item {
     background: rgba(var(--fg-rgb), 0.01);
     border-color: rgba(var(--fg-rgb), 0.04);

@@ -2219,7 +2219,15 @@ async def _sec_inspect_user(text: str, user: str, channel: str) -> bool:
     if _sec_exempt(user):
         return False
     detected, _ = await security_guard.inspect(text, user, channel, block=True)
-    return detected
+    if detected:
+        return True
+    # Base64-verschleierte Payloads dekodieren + prüfen (umgeht sonst die Guard-Regex).
+    marker = security_guard.decode_and_scan(text)
+    if marker:
+        security_guard.record_violation(user, channel, "encoded-payload", marker, text,
+                                        exempt=_is_admin_user(user))
+        return True
+    return False
 
 
 @app.get("/api/security/my-block")
@@ -2275,6 +2283,27 @@ async def security_incidents_unblock(request: Request, user: str = Depends(requi
         return JSONResponse({"ok": False, "error": "Kein Benutzer angegeben."}, status_code=400)
     ok = security_guard.unblock(target)
     return JSONResponse({"ok": ok})
+
+
+@app.get("/api/security/violations")
+async def security_violations(user: str = Depends(require_local_auth)):
+    """Letzte Richtlinien-Verstoesse (Sandbox-/Autorisierungs-Deny) – Admin."""
+    return JSONResponse({"violations": security_guard.list_recent_violations(150)})
+
+
+@app.get("/api/security/sandbox")
+async def security_sandbox_status(user: str = Depends(require_local_auth)):
+    """Status der OS-Sandbox: aktiv? welcher OS-Benutzer? existiert er? (Admin)"""
+    sbx = (config.get_setting("sandbox_shell_user", "") or "").strip()
+    exists = False
+    if sbx:
+        try:
+            import pwd
+            pwd.getpwnam(sbx)
+            exists = True
+        except Exception:
+            exists = False
+    return JSONResponse({"active": bool(sbx), "user": sbx, "user_exists": exists})
 
 
 @app.get("/api/cert")

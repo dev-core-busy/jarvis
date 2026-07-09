@@ -54,6 +54,6 @@
             "Recherchiere aktuelle Python-Best-Practices, implementiere sie im Projekt und überprüfe das Ergebnis",
             "Was ist der Status der laufenden Agent-Session 'marktanalyse-2024'?"
         ],
-        "notes": "Die Workspaces liegen unter data/agent-workspaces/<session>/<agent>/. Jarvis bearbeitet jeden Sub-Agenten selbst: inbox lesen → Arbeit ausführen → outbox befüllen → status=completed setzen."
+        "notes": "Die Workspaces liegen unter data/agent-workspaces/<session>/<agent>/. Jarvis bearbeitet jeden Sub-Agenten selbst: inbox lesen → Arbeit ausführen → outbox befüllen → status=completed setzen. Sicherheitsschicht: Sub-Agenten erben die Rechte des startenden Benutzers – für Netzwerk-/Domain-Benutzer gelten dieselben Sandbox-Beschränkungen (Datei-/Shell-Confinement, keine Secrets/Root) wie im Chat; keine Rechteausweitung über Sub-Agenten."
     }
 }

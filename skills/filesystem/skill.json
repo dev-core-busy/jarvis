@@ -14,7 +14,7 @@
     "dependencies": [],
     "permissions": ["filesystem"],
     "help": {
-        "details": "Ermöglicht das Lesen, Schreiben, Anhängen und Verwalten von Dateien und Verzeichnissen auf dem Server. Von einfachen Textdateien über Konfigurationsdateien bis hin zu Logs – der vollständige Dateisystemzugriff ist verfügbar.",
+        "details": "Ermöglicht das Lesen, Schreiben, Anhängen und Verwalten von Dateien und Verzeichnissen auf dem Server. Der Zugriffsumfang hängt vom angemeldeten Benutzer ab: volle Rechte für lokale Administratoren, eingeschränkt für Netzwerk-/Domain-Benutzer – siehe Sicherheitsschicht unter Hinweise.",
         "tools": [
             {
                 "name": "filesystem",
@@ -27,6 +27,6 @@
             "Erstelle eine Datei ~/notizen.txt mit folgendem Inhalt: ...",
             "Liste alle Dateien im Verzeichnis /home/jarvis"
         ],
-        "notes": "Zugriff als root – alle Dateien auf dem System sind lesbar und schreibbar. Kritische Systemdateien immer erst lesen, bevor sie überschrieben werden."
+        "notes": "Sicherheitsschicht: Lokale Administratoren haben vollen Dateizugriff (als root). Für Netzwerk-/Domain-Benutzer gilt Confinement: Schreiben nur im Arbeitsbereich (/tmp und data/documents), Lesen/Auflisten nur in den Wissens-/Arbeitsverzeichnissen. Secrets (.env, settings.json, Schlüssel/Zertifikate), Root-, System- und App-interne Pfade sind gesperrt (Symlinks werden aufgelöst); verweigerte Zugriffe werden protokolliert und können bei Wiederholung das Konto sperren. Die obigen Beispiele (z. B. /etc/hosts, /home/jarvis) gelten daher nur für Administratoren."
     }
 }

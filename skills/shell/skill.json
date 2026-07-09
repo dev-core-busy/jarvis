@@ -14,7 +14,7 @@
     "dependencies": [],
     "permissions": ["shell"],
     "help": {
-        "details": "Führt beliebige Bash-Befehle direkt auf dem Linux-Server aus und gibt stdout sowie stderr zurück. Damit lassen sich Programme starten, Systemzustände prüfen, Dateien verwalten, Dienste steuern und nahezu alle Serveraufgaben automatisieren.",
+        "details": "Führt Bash-Befehle auf dem Linux-Server aus und gibt stdout sowie stderr zurück. Damit lassen sich Programme starten, Systemzustände prüfen, Dateien verwalten und Serveraufgaben automatisieren. Der Zugriffsumfang hängt vom angemeldeten Benutzer ab – siehe Sicherheitsschicht unter Hinweise.",
         "tools": [
             {
                 "name": "shell_execute",
@@ -27,6 +27,6 @@
             "Wie viel Speicherplatz ist noch frei? ('df -h')",
             "Starte den Dienst neu: 'systemctl restart jarvis.service'"
         ],
-        "notes": "Befehle laufen als root – mit vollem Systemzugriff. Interaktive Programme (nano, vim, htop) funktionieren nicht. Für Dateioperationen ist der Dateisystem-Skill komfortabler."
+        "notes": "Sicherheitsschicht: Nur lokale Administratoren führen Befehle mit vollem Systemzugriff (als root) aus. Für Netzwerk-/Domain-Benutzer greift die Sandbox – bei aktiver OS-Sandbox laufen ihre Befehle als unprivilegierter Betriebssystem-Benutzer im Arbeitsbereich /tmp; systemverändernde Befehle (rm, apt, systemctl …), verschleierte/base64-kodierte Ausführung sowie Zugriffe auf Secrets, Root- und Systemverzeichnisse werden blockiert und protokolliert (wiederholte Verstöße sperren das Konto automatisch). Interaktive Programme (nano, vim, htop) funktionieren nicht; für Dateioperationen ist der Dateisystem-Skill komfortabler."
     }
 }

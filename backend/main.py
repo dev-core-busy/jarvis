@@ -2321,7 +2321,7 @@ async def get_document(name: str):
     Auth via Capability-URL: der Name hat das Schema <32-Hex>__<Basis>.<ext>.
     Der Download traegt den lesbaren Originalnamen (Content-Disposition).
     """
-    import re
+    import re, mimetypes
     _MEDIA = {
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2330,17 +2330,20 @@ async def get_document(name: str):
         "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
         "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp", "svg": "image/svg+xml",
     }
-    _IMG = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"}
-    m = re.fullmatch(r"([0-9a-f]{32})__([A-Za-z0-9_\-]+)\.(docx|xlsx|pptx|pdf|png|jpe?g|gif|webp|bmp|svg)", name)
+    # Capability-Name mit beliebiger (kurzer) Endung – die 32-Hex-Capability schuetzt
+    # den Zugriff. So lassen sich auch per Liefer-Marker erzeugte Dateien beliebigen
+    # Typs (zip/csv/json/mp4 …) ausliefern.
+    m = re.fullmatch(r"([0-9a-f]{32})__([A-Za-z0-9_\-]+)\.([A-Za-z0-9]{1,8})", name)
     if not m:
         return JSONResponse({"error": "ungueltiger Name"}, status_code=400)
-    base, ext = m.group(2), m.group(3)
+    base, ext = m.group(2), m.group(3).lower()
     p = Path(__file__).parent.parent / "data" / "documents" / name
     if not p.exists():
         return JSONResponse({"error": "nicht gefunden"}, status_code=404)
-    # Bilder inline ausliefern (fuer <img> im Chat), Office-Dateien als Download.
-    disp = "inline" if ext in _IMG else "attachment"
-    return FileResponse(str(p), media_type=_MEDIA[ext],
+    media = _MEDIA.get(ext) or mimetypes.guess_type(name)[0] or "application/octet-stream"
+    # Bilder inline (fuer <img> im Chat), alles andere als Download.
+    disp = "inline" if media.startswith("image/") else "attachment"
+    return FileResponse(str(p), media_type=media,
                         filename=f"{base}.{ext}",
                         content_disposition_type=disp,
                         headers={"Cache-Control": "private, max-age=3600"})

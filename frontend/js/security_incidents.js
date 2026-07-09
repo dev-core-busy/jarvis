@@ -37,6 +37,31 @@
                 var el = $(id);
                 if (el) el.addEventListener('change', function () { Mgr.saveConfig(); });
             });
+            // Funktionsbeschreibungs-Popup (❓) + PDF-Druck
+            var docBtn = $('sec-secdoc-btn');
+            if (docBtn) docBtn.addEventListener('click', function () { Mgr._showDoc(true); });
+            var docClose = $('sec-secdoc-close');
+            if (docClose) docClose.addEventListener('click', function () { Mgr._showDoc(false); });
+            var docModal = $('sec-secdoc-modal');
+            if (docModal) docModal.addEventListener('click', function (e) { if (e.target === docModal) Mgr._showDoc(false); });
+            var docPdf = $('sec-secdoc-pdf');
+            if (docPdf) docPdf.addEventListener('click', function () {
+                document.body.classList.add('printing-secdoc');
+                var cleanup = function () {
+                    document.body.classList.remove('printing-secdoc');
+                    window.removeEventListener('afterprint', cleanup);
+                };
+                window.addEventListener('afterprint', cleanup);
+                try { window.print(); } catch (e) { cleanup(); }
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && docModal && docModal.classList.contains('open')) Mgr._showDoc(false);
+            });
+        },
+
+        _showDoc: function (show) {
+            var m = $('sec-secdoc-modal');
+            if (m) m.classList.toggle('open', !!show);
         },
 
         load: function () {

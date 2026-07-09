@@ -297,13 +297,19 @@ def _autoblock_cfg() -> dict:
 
 
 def record_violation(user: str, channel: str, kind: str, detail: str = "",
-                     snippet: str = "", exempt: bool = False) -> dict:
+                     snippet: str = "", exempt: bool = False,
+                     tool: str = "", task: str = "", ip: str = "",
+                     client_type: str = "") -> dict:
     """Protokolliert einen Richtlinien-Verstoss und sperrt den Account ab Schwelle.
     exempt=True (lokale/Admin-Konten) -> nur protokollieren, nie sperren.
+    Fuer aussagekraeftiges Logging werden zusaetzlich Tool, ausloesende Anfrage
+    (task/Prompt), IP und Client-Typ festgehalten.
     Rueckgabe: {'blocked': bool, 'count': int}."""
     ts = int(time.time())
     entry = {"ts": ts, "channel": channel, "method": "policy", "pattern": kind,
-             "detail": (detail or "")[:200], "snippet": (snippet or "")[:300]}
+             "detail": (detail or "")[:200], "snippet": (snippet or "")[:300],
+             "tool": tool or "", "task": (task or "")[:300],
+             "ip": ip or "", "client_type": client_type or ""}
     blocked_now = False
     with _lock:
         state = _load()

@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=5">
-    <link rel="stylesheet" href="/static/css/style.css?v=109">
+    <link rel="stylesheet" href="/static/css/style.css?v=112">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -1101,6 +1101,91 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 </div>
             </section>
         </main>
+    </div>
+
+    <!-- ═══ Sicherheitsschicht – Funktionsbeschreibung (Popup) ═══ -->
+    <div id="sec-secdoc-modal" class="modal" style="z-index:10001;">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h2>🛡️ Sicherheitsschicht – technische Funktionsanalyse</h2>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button type="button" id="sec-secdoc-pdf" title="Als PDF speichern (an PDF-Drucker drucken)" aria-label="Als PDF drucken"
+                            style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:600;font-size:0.82rem;cursor:pointer;line-height:1;">🖨️ PDF</button>
+                    <button class="btn-icon" id="sec-secdoc-close" aria-label="Schließen">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body" style="overflow-y:auto;">
+
+                <p class="kb-hint">Diese Sicherheitsschicht schützt den Agenten gegen Rechteausweitung, Datenabfluss und Prompt-Injection durch Netzwerk-/Domain-Benutzer. <b>Leitprinzip:</b> Zugriffskontrolle wird im Code am Tool-Dispatch <b>erzwungen</b> – nicht als Bitte im System-Prompt. Sie ist dadurch <b>nicht</b> per Prompt, Base64-Kodierung oder „gelernten Fakten" umgehbar.</p>
+
+                <h3>1. Rollenmodell</h3>
+                <ul>
+                    <li><b>Lokale Administratoren</b> (<code>ALLOWED_USERS</code> = <code>jarvis</code>/<code>root</code> sowie in <i>Sicherheit → LDAP → Administratoren</i> freigeschaltete AD-Konten): voller Zugriff, keine Einschränkung.</li>
+                    <li><b>Netzwerk-/Domain-Benutzer</b> (LDAP, nicht privilegiert): unterliegen sämtlichen unten beschriebenen Beschränkungen. Erkennung in <code>agent.py</code> über <code>_LOCAL_PRIVILEGED_USERS</code>; die Prüfungen laufen in <code>_execute_tool()</code> pro Tool-Aufruf.</li>
+                </ul>
+
+                <h3>2. Dateisystem-Confinement (<code>filesystem</code>-Tool)</h3>
+                <p class="kb-hint">Umgesetzt in <code>backend/sandbox.py → authorize_fs(action, path)</code>. Pfade werden vollständig aufgelöst (Symlinks), um Ausbrüche wie <code>/tmp/link → /etc/shadow</code> zu verhindern.</p>
+                <table>
+                    <tr><th>Aktion</th><th>Erlaubt für Domain-Benutzer</th></tr>
+                    <tr><td>write / append / mkdir</td><td>nur <code>/tmp</code> und <code>data/documents</code> (<code>WRITE_ROOTS</code>)</td></tr>
+                    <tr><td>read / list / exists</td><td>nur Wissens-/Arbeitsverzeichnisse (<code>READ_ROOTS</code>: <code>/tmp</code>, <code>/mnt/jarvis-kb</code>, <code>data/knowledge</code>, <code>data/documents</code>)</td></tr>
+                </table>
+                <p class="kb-hint"><b>Immer gesperrt</b> (<code>is_sensitive()</code>): Secrets (<code>.env</code>, <code>settings.json</code>, <code>memory.json</code>, <code>auth_state.json</code>, <code>*.key/.pem/.crt/.p12</code>, <code>id_rsa</code>, <code>.ssh/</code>, <code>certs/</code>), System (<code>/root</code>, <code>/etc/shadow</code>, <code>/etc/sudoers</code>, <code>/boot</code>, <code>/proc</code>, <code>/sys</code>) und App-Interna (<code>data/settings.json</code>, <code>data/logs</code>, Audit-/Konversations-Logs).</p>
+
+                <h3>3. Shell-Härtung (<code>shell_execute</code>)</h3>
+                <p class="kb-hint">Mehrstufige Prüfung in <code>agent.py</code> + <code>sandbox.authorize_shell()</code>:</p>
+                <ul>
+                    <li><b>Systemverändernde Befehle</b> blockiert (<code>_LDAP_SHELL_FORBIDDEN</code>): <code>rm, chmod, chown, apt/pip/npm install, systemctl, reboot, dd, mkfs, useradd, passwd, tee</code> …</li>
+                    <li><b>Verschleierung</b> blockiert (<code>SHELL_OBFUSCATION</code>): <code>base64 -d</code>, <code>xxd -r</code>, <code>eval</code>, <code>source</code>, Pipe in <code>bash/sh/python/perl/…</code>. Schließt die Base64-Umgehung.</li>
+                    <li><b>Secret-/Root-Pfade</b> blockiert (<code>SHELL_SECRET_PATHS</code>) – interpreterunabhängig (greift auch bei <code>cat</code> oder <code>python open()</code>).</li>
+                    <li><b>Schreib-Umleitungen</b> (<code>&gt;</code>) nur nach <code>/tmp</code>.</li>
+                </ul>
+
+                <h3>4. OS-Sandbox (harte Grenze)</h3>
+                <p class="kb-hint">Optional, aktiviert über die Einstellung <code>sandbox_shell_user</code>. Ist sie gesetzt, führt <code>backend/tools/shell.py</code> Shell-Befehle von Domain-Benutzern via <code>runuser -u &lt;user&gt; -- /bin/bash -c …</code> als <b>unprivilegierter Betriebssystem-Benutzer</b> mit Arbeitsverzeichnis <code>/tmp</code> aus (<code>wrap_sandboxed()</code>). Damit erzwingt das <b>Betriebssystem</b> die Grenze – unabhängig davon, wie ein Befehl formuliert oder kodiert ist (Python, Base64, …). Provisionierung: unprivilegierten Systembenutzer anlegen und Secrets per Dateirechten (<code>chmod 600</code>, <code>/root</code> = <code>700</code>) unzugänglich machen. Ohne diese Einstellung greift „nur" die Code-Härtung (Punkte 2–3).</p>
+
+                <h3>5. Keine Rechteausweitung über Sub-Agenten</h3>
+                <p class="kb-hint">Beim Start eines Sub-Agenten (z. B. <code>coding_agent</code>, Agent-Orchestrator) werden Benutzeridentität und Internet-Freigabe vererbt. Ein Sub-Agent eines Domain-Benutzers unterliegt denselben Confinement-Regeln; er läuft nicht mit leerem/privilegiertem Kontext.</p>
+
+                <h3>6. Angriffserkennung (Guard)</h3>
+                <p class="kb-hint">In <code>backend/security_guard.py</code>, ausgewertet pro Chat-/Support-/WhatsApp-Eingabe (<code>inspect()</code>):</p>
+                <ul>
+                    <li><b>Heuristik:</b> Regex-Signaturen bekannter Jailbreak-/Injection-Muster („ignore all previous instructions", DAN, „reveal system prompt", „bypass safety" …).</li>
+                    <li><b>LLM-Klassifikator</b> (optional): bewertet Eingaben zusätzlich. <b>Hybrid</b> (beide aktiv): der Klassifikator bestätigt jeden Heuristik-Verdacht vor der Sperre (weniger Fehlalarme).</li>
+                    <li><b>Base64-Erkennung</b> (<code>decode_and_scan()</code>): dekodiert Base64-Blöcke der Eingabe und prüft den Klartext auf Jailbreak-/Shell-/Secret-Indikatoren – schließt die Guard-Umgehung durch Kodierung.</li>
+                </ul>
+
+                <h3>7. Verstoß-Protokoll &amp; automatische Sperre</h3>
+                <p class="kb-hint">Jeder im Dispatch verweigerte Zugriff wird als Verstoß protokolliert (<code>record_violation()</code>) – mit Tool, Klartext-Detail, auslösender Anfrage (Prompt), IP und Kanal. Ab einer Schwelle innerhalb eines Zeitfensters wird das Konto <b>automatisch gesperrt</b>.</p>
+                <ul>
+                    <li>Standard: <b>3 Verstöße in 600 s</b> → Sperre. Konfigurierbar über <code>security_autoblock_enabled</code>, <code>security_autoblock_count</code>, <code>security_autoblock_window</code>.</li>
+                    <li>Lokale Administratoren werden nie automatisch gesperrt (<code>exempt</code>).</li>
+                    <li>Gesperrte Konten können sich noch anmelden, sehen aber nur den Sperr-Bildschirm samt Protokoll. Freischalten ausschließlich durch einen lokalen Benutzer (<i>Gesperrte Konten → Freischalten</i>).</li>
+                    <li>Anzeige: „Letzte Zugriffs-Verstöße" und „Gesperrte Konten" in diesem Bereich; API: <code>/api/security/violations</code>, <code>/api/security/incidents</code>, <code>/api/security/sandbox</code>.</li>
+                </ul>
+
+                <h3>8. Schutz vor Kontext-Vergiftung</h3>
+                <ul>
+                    <li><b>Lern-Filter</b> (<code>learning.py → _sanitize_learned()</code>): sicherheits-/rechte-bezogene „Fakten" (z. B. „root ist erlaubt", Secrets, <code>sudo</code>, <code>base64</code>) werden vor dem Speichern verworfen – es lässt sich keine Rechteausweitung „antrainieren".</li>
+                    <li><b>Untrusted-Rahmung:</b> Gedächtnis/gelernte Fakten werden dem Modell als <code>[UNTRUSTED_CONTEXT]</code> übergeben – reine Information, keine Anweisungen.</li>
+                    <li><b>Unveränderliche Sicherheits-Grundregel</b> an oberster Stelle des System-Prompts: Rechte kommen nur vom System; keine kodierten Anweisungen ausführen; Domain-Benutzer sind keine Administratoren. Diese Regel ist dem Modell übergeordnet, ersetzt aber nicht die Code-Erzwingung.</li>
+                </ul>
+
+                <h3>9. Konfiguration</h3>
+                <ul>
+                    <li><i>Einstellungen → Sicherheit</i>: Sicherheitsschicht (Master), Heuristik, LLM-Klassifikator; Anzeige Sandbox-Status + Verstöße + gesperrte Konten.</li>
+                    <li><code>sandbox_shell_user</code> – OS-Sandbox-Benutzer (leer = OS-Sandbox aus, nur Code-Härtung).</li>
+                    <li><code>security_autoblock_*</code> – Auto-Sperre-Schwelle/-Fenster.</li>
+                </ul>
+
+                <h3>10. Grenzen &amp; Restrisiko</h3>
+                <p class="kb-hint">Die Muster-Prüfungen (Regex, Guard-Heuristik) sind <b>Defense-in-Depth</b>. Die harte Garantie für Shell-Befehle liefert die <b>OS-Sandbox</b> (Punkt 4): Solange Befehle als <code>root</code> laufen (OS-Sandbox aus), bleibt ein prinzipielles Restrisiko, da als root ausgeführter Code Wege finden kann. Empfehlung: OS-Sandbox aktivieren und Secrets per Dateirechten absichern.</p>
+
+            </div>
+        </div>
     </div>
 
     <!-- ═══ Settings Modal ═══ -->
@@ -2799,10 +2884,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <!-- ── Sicherheitsvorfälle (Jailbreak-Schutz) ── -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-incidents-hdr">
-                                <h3 data-i18n="security.section_incidents">Sicherheitsvorfälle</h3>
+                                <h3 data-i18n="security.section_incidents">Angriffsprävention und Sicherheitsvorfälle</h3>
                                 <span class="sk-openclaw-toggle" id="sec-sect-incidents-tog">▶</span>
                             </div>
                             <div id="sec-sect-incidents-body" class="kb-collapse-body" style="display:none;">
+                                <button type="button" id="sec-secdoc-btn" class="kb-btn-secondary"
+                                        title="Technische Funktionsbeschreibung der Sicherheitsschicht"
+                                        data-i18n-title="security.doc_btn_title"
+                                        style="margin:0 0 10px;padding:5px 12px;font-size:0.85rem;line-height:1.4;display:inline-flex;align-items:center;gap:6px;">❓ <span data-i18n="security.doc_btn_label">Funktionsweise &amp; Sicherheitsfeatures</span></button>
                                 <p class="kb-hint" data-i18n="security.incidents_desc">Erkennt Jailbreak- und Prompt-Injection-Versuche in Chat, Support und WhatsApp. Betroffene Konten werden sofort gesperrt – sie können sich noch anmelden und sehen dort nur den Sperr-Hinweis samt Protokoll. Nur ein lokaler Benutzer kann wieder freischalten.</p>
 
                                 <label class="sec-guard-opt" style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;font-weight:600;">
@@ -2964,7 +3053,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=56"></script>
+    <script src="/static/js/i18n.js?v=58"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=15"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -2986,7 +3075,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/issues.js?v=6"></script>
     <script src="/static/js/branding.js?v=16"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/security_incidents.js?v=3"></script>
+    <script src="/static/js/security_incidents.js?v=4"></script>
+    <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/app.js?v=144"></script>
 </body>
 

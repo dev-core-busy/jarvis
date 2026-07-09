@@ -277,3 +277,99 @@ async def inspect(text: str, user: str, channel: str,
 
     incident = _record(user, channel, method, pattern, text)
     return (True, incident)
+
+
+# ── Richtlinien-Verstoesse (Sandbox-/Autorisierungs-Deny) + Auto-Sperre ──────
+# Anders als 'inspect' (Jailbreak-Persona) erfassen diese die im Tool-Dispatch
+# ERZWUNGENEN Zugriffsverweigerungen (Secrets/Root/Base64). Ab einer Schwelle
+# innerhalb eines Zeitfensters wird der Domain-Account automatisch gesperrt.
+def _autoblock_cfg() -> dict:
+    def _int(v, d):
+        try:
+            return int(v)
+        except Exception:
+            return d
+    return {
+        "enabled": _as_bool(config.get_setting("security_autoblock_enabled", None), True),
+        "count": _int(config.get_setting("security_autoblock_count", 3), 3),
+        "window": _int(config.get_setting("security_autoblock_window", 600), 600),
+    }
+
+
+def record_violation(user: str, channel: str, kind: str, detail: str = "",
+                     snippet: str = "", exempt: bool = False) -> dict:
+    """Protokolliert einen Richtlinien-Verstoss und sperrt den Account ab Schwelle.
+    exempt=True (lokale/Admin-Konten) -> nur protokollieren, nie sperren.
+    Rueckgabe: {'blocked': bool, 'count': int}."""
+    ts = int(time.time())
+    entry = {"ts": ts, "channel": channel, "method": "policy", "pattern": kind,
+             "detail": (detail or "")[:200], "snippet": (snippet or "")[:300]}
+    blocked_now = False
+    with _lock:
+        state = _load()
+        allv = state.setdefault("violations", {})
+        key = user or "?"
+        lst = allv.setdefault(key, [])
+        lst.append(entry)
+        allv[key] = lst[-100:]
+        cfg = _autoblock_cfg()
+        if not exempt and user and cfg["enabled"] and user not in state.get("blocked", {}):
+            recent = [e for e in allv[key] if ts - e["ts"] <= cfg["window"]]
+            if len(recent) >= cfg["count"]:
+                blk = state.setdefault("blocked", {})
+                blk[user] = {
+                    "reason": f"policy:{kind}",
+                    "method": "auto-block (policy)",
+                    "channel": channel,
+                    "at": ts,
+                    "incidents": recent[-max(cfg["count"], 10):],
+                }
+                blocked_now = True
+        _save(state)
+    tag = "AUTO-BLOCK" if blocked_now else "VERSTOSS"
+    print(f"[SecurityGuard] {tag} ({kind}) [{channel}/{user}] {(detail or '')[:80]}", flush=True)
+    return {"blocked": blocked_now, "count": len(allv.get(user or "?", []))}
+
+
+def list_recent_violations(limit: int = 100) -> list:
+    """Letzte Richtlinien-Verstoesse (benutzeruebergreifend, neueste zuerst)."""
+    with _lock:
+        allv = _load().get("violations", {})
+    flat = []
+    for user, entries in allv.items():
+        for e in entries:
+            flat.append({"user": user, **e})
+    flat.sort(key=lambda x: x.get("ts", 0), reverse=True)
+    return flat[:limit]
+
+
+# ── Verschleierte (base64-kodierte) Payloads erkennen ────────────────────────
+import base64 as _b64
+
+_B64_RUN = re.compile(r'[A-Za-z0-9+/]{24,}={0,2}')
+_DECODED_DANGER = re.compile(
+    r'\b(?:rm|chmod|chown|curl|wget|bash|sh|zsh|python\d?|perl|eval|exec|base64|xxd|'
+    r'systemctl|useradd|passwd|nc|ncat)\b'
+    r'|/etc/(?:shadow|passwd|sudoers)|\.env\b|settings\.json|id_rsa|(?:^|/)root\b',
+    re.IGNORECASE)
+
+
+def decode_and_scan(text: str):
+    """Sucht base64-Bloecke, dekodiert sie und prueft den Klartext auf
+    Jailbreak-Muster bzw. Shell-/Secret-Indikatoren. Gibt einen Marker
+    zurueck (Grund) oder None. Verhindert die Base64-Umgehung des Guards."""
+    if not text:
+        return None
+    for m in _B64_RUN.finditer(text):
+        blob = m.group(0)
+        try:
+            dec = _b64.b64decode(blob + "=" * (-len(blob) % 4), validate=False)
+        except Exception:
+            continue
+        s = dec.decode("utf-8", errors="ignore").strip()
+        if len(s) < 4:
+            continue
+        hit = heuristic_match(s)
+        if hit or _DECODED_DANGER.search(s):
+            return "base64:" + (hit or "shell/secret")
+    return None

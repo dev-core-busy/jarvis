@@ -1476,12 +1476,14 @@ KRITISCH – Autonomie-Regeln:
             _uname = getattr(self, '_current_username', '')
             _t0 = _time.monotonic()
             _ldap_blocked = False
+            _viol = None   # (kind, detail) eines sicherheitsrelevanten Deny -> Eskalation
             if _uname and _uname not in _LOCAL_PRIVILEGED_USERS:
                 from backend import sandbox as _sbx
                 if name in _BLOCKED_TOOLS_FOR_LDAP:
                     print(f"[AGENT] BLOCKED Tool '{name}' fuer Domain-User '{_uname}'", flush=True)
                     result = f"Zugriff verweigert: Das Tool '{name}' steht Netzwerk-Benutzern nicht zur Verfuegung."
                     _ldap_blocked = True
+                    _viol = ("blocked-tool", name)
                 elif name == "filesystem":
                     # Pfad-Confinement: Schreiben nur /tmp+data/documents, Lesen nur
                     # in Wissens-/Arbeitsverzeichnissen; Secrets/System/Root gesperrt.
@@ -1490,6 +1492,7 @@ KRITISCH – Autonomie-Regeln:
                         print(f"[AGENT] BLOCKED filesystem action={args.get('action')!r} path={args.get('path')!r} fuer '{_uname}': {_why}", flush=True)
                         result = f"Zugriff verweigert: {_why}."
                         _ldap_blocked = True
+                        _viol = ("fs-deny", f"{args.get('action')} {args.get('path')}")
                 elif name == "shell_execute":
                     _cmd = args.get("command", "")
                     # Heredoc-Koerper (z.B. eingebetteter Python-Code) NICHT als Shell-
@@ -1500,16 +1503,39 @@ KRITISCH – Autonomie-Regeln:
                         print(f"[AGENT] BLOCKED shell command for Domain-User '{_uname}': {_cmd[:80]}", flush=True)
                         result = "Zugriff verweigert: Dieser Shell-Befehl ist für Netzwerk-Benutzer nicht erlaubt (keine System-Änderungen)."
                         _ldap_blocked = True
+                        _viol = ("shell-forbidden", _cmd[:120])
                     elif not _shok:
                         # Verschleierung (base64/eval/pipe-in-shell) oder Secret-/Root-Pfad
                         print(f"[AGENT] BLOCKED shell for Domain-User '{_uname}' ({_shwhy}): {_cmd[:80]}", flush=True)
                         result = f"Zugriff verweigert: {_shwhy}."
                         _ldap_blocked = True
+                        _viol = ("shell-illegal", _cmd[:120])
                     elif _LDAP_SHELL_WRITE_REDIRECT.search(_cmd_sh) and not _ldap_redirects_safe(_cmd_sh):
                         print(f"[AGENT] BLOCKED shell write-redirect for Domain-User '{_uname}': {_cmd[:80]}", flush=True)
                         result = ("Zugriff verweigert: Datei-Schreiben via Shell ist für Netzwerk-Benutzer nur "
                                   "im temporären Arbeitsbereich /tmp erlaubt (z.B. > /tmp/skript.py).")
                         _ldap_blocked = True
+                        _viol = ("shell-write", _cmd[:120])
+
+            # Sicherheitsrelevanten Verstoss protokollieren + ggf. Auto-Sperre.
+            # (NICHT die reine Internet-/Feature-Gating-Sperre unten.)
+            if _viol and _uname and _uname not in _LOCAL_PRIVILEGED_USERS:
+                try:
+                    from backend import security_guard as _sg
+                    _exempt = False
+                    try:
+                        from backend.main import _is_admin_user as _isadm
+                        _exempt = bool(_isadm(_uname))
+                    except Exception:
+                        _exempt = False
+                    _vr = _sg.record_violation(_uname, "chat", _viol[0], _viol[1],
+                                               snippet=_json.dumps(args, ensure_ascii=False)[:200],
+                                               exempt=_exempt)
+                    if _vr.get("blocked"):
+                        result = ("🚫 Konto gesperrt: wiederholte sicherheitsrelevante Zugriffsversuche "
+                                  "wurden erkannt. Bitte wende dich an einen lokalen Administrator.")
+                except Exception as _e:
+                    print(f"[AGENT] record_violation fehlgeschlagen: {_e}", flush=True)
 
             # Internet-Zugang: Tools mit Internet-Ergebnissen fuer nicht freigeschaltete
             # Benutzer blockieren (selektiv per Einstellungen -> Sicherheit -> Internet-Zugang).

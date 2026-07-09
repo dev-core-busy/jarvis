@@ -65,6 +65,6 @@
             "Was ist meine nächste Aufgabe mit höchster Priorität?",
             "Schreibe den heutigen Abschlussbericht mit erledigten Aufgaben"
         ],
-        "notes": "Die Queue wird als Markdown-Datei (QUEUE.md) gespeichert und ist direkt lesbar. Pfade sind in den Einstellungen konfigurierbar."
+        "notes": "Die Queue wird als Markdown-Datei (QUEUE.md) gespeichert und ist direkt lesbar. Pfade sind in den Einstellungen konfigurierbar. Sicherheitsschicht: Der Zugriff auf die QUEUE.md läuft über das Dateisystem – für Netzwerk-/Domain-Benutzer greift das Confinement (Schreiben nur im Arbeitsbereich). Liegt die Queue außerhalb (Standard), ist der Skill effektiv nur für lokale Administratoren nutzbar."
     }
 }

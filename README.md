@@ -2,7 +2,7 @@
 
 # 🤖 Jarvis AI Desktop Agent
 
-**An autonomous AI agent with web frontend, desktop control, and multi-LLM support**
+**A self-hosted, autonomous AI agent for Linux — it plans, executes, and gets real work done.**
 
 [![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-green?logo=gnu)](LICENSE)
@@ -17,7 +17,7 @@
 
 ---
 
-![Jarvis Split View](https://jarvis-ai.info/img/split_view.png)
+![Jarvis web interface with optional live desktop view](https://jarvis-ai.info/img/split_view.png)
 
 </div>
 
@@ -51,23 +51,21 @@
 
 ## Overview
 
-Jarvis is a **self-hosted, autonomous AI desktop agent** that runs on a Linux server. It combines a polished web frontend with real desktop control — you can watch and direct the agent as it works, right in your browser.
-
-The core idea: give Jarvis a task (via chat, WhatsApp, or the web UI), and it figures out how to complete it — browsing the web, reading files, writing code, sending emails, managing your calendar — all while you observe through a live VNC split-screen view.
+Jarvis is a **self-hosted, autonomous AI agent** that runs on a Linux server. Give it a goal in plain language — through the web chat, the built-in **Support portal**, or even **WhatsApp** — and it plans and executes: browsing the web, reading and writing files, running code, generating Office documents & diagrams, sending emails, managing your calendar. Whenever you want, you can watch it work live on the desktop via an **optional VNC view**.
 
 ```
 "Find all emails from last week about Project Alpha, summarize them,
  and create a calendar event for the follow-up meeting."
 ```
 
-Jarvis handles it. You watch it happen.
+Jarvis handles it — and because it's **multi-LLM**, **multi-user**, and wrapped in a real **security layer with sandboxed execution**, you can safely open it to a whole team.
 
 ---
 
 ## Key Features
 
-### 🖥️ VNC Split View
-The web interface shows your LLM chat **and a live desktop feed side by side**. The agent can see exactly what it's doing — screenshots feed back into the LLM context automatically. No more blind automation.
+### 🖥️ Real Desktop Control (live VNC view)
+Jarvis drives a real Linux desktop — launching apps, clicking, typing. Toggle the **live desktop view (noVNC)** to watch or take over at any time; screenshots feed straight back into the LLM context, so the agent sees what it's doing. No blind automation.
 
 ### 🔀 Multi-LLM Support
 Switch between AI providers without restarting anything:
@@ -104,10 +102,17 @@ Skills are self-contained Python packages that extend Jarvis with new capabiliti
 ### 👁️ Vision & Face Recognition
 The optional **Vision Skill** adds real-time face recognition via dlib/face_recognition. Define per-person actions (webhook, LLM prompt, log-only) with configurable cooldown and tolerance. Works with USB cameras or IP cameras.
 
-### 🔐 Enterprise Security
+### 🛡️ Security Layer & Sandbox
+Built to be opened to a whole team — every restriction is **enforced in code**, not just requested in the prompt (so it can't be talked around, base64-encoded around, or "learned" around):
+- **Sandboxed execution** for network/domain users — shell commands run as an unprivileged OS user; file access is confined (no system/root/secret paths, symlink-escape safe)
+- **Prompt-injection, jailbreak & Base64-obfuscation detection** across chat, support & WhatsApp (heuristics + LLM classifier)
+- **Automatic account lockout** on repeated attack attempts, with a full, itemized violation log
+- **Role-based rights** (local admins vs. network users) + sub-agents inherit the caller's confinement — no privilege escalation
+
+### 🔐 Authentication & Access
 - **Active Directory / LDAP** authentication (no domain join required)
 - **2FA / TOTP** for all users
-- Granular **knowledge editor permissions** (per user or AD group)
+- Granular **knowledge-editor permissions** (per user or AD group)
 - HTTPS with auto-generated self-signed certificates or Let's Encrypt
 - Token-based auth (HMAC-SHA256, 30-day validity)
 
@@ -122,6 +127,18 @@ After every bot response, one-click **👍 👎 ❌ feedback** triggers automati
 
 ### 🧬 Cognitive Evolution
 The **Cognitive Evolution Skill** lets Jarvis improve and extend itself: it analyzes gaps, proposes new skills or code patches, validates them through a second LLM, and applies them — including hot-reloading its own engine without a service restart.
+
+### 🧭 Role-based Portal, Chat & Support Assistant
+A clean `/portal` hub routes each user to what they're allowed to use: the AI **chat**, the **user-to-user chat**, and a dedicated **Support Assistant** (`/support`) that answers from your knowledge base + Jira/Confluence with relevance-ranked sources. Admin tools (settings, VNC, security) appear only for administrators.
+
+### 📄 Office & File Generation
+Generate **Word, Excel, PowerPoint and PDF** on the fly (python-docx / openpyxl / python-pptx + LibreOffice) — including diagrams with boxes and connectors. Any generated file (or image) is delivered straight into the chat as an inline preview or a one-click download chip.
+
+### 📊 Knowledge Groups & Bulk Tagging
+Organize documents into logical groups (multi-membership), scope searches to a group, and manage everything in a **full-screen tagging matrix** — assign hundreds of documents to groups in seconds.
+
+### 🔌 Interactive API Console
+An admin-only, auto-generated **API explorer** at `/api`: every REST endpoint listed, explained, with examples and a **live test caller**. The OpenAPI schema and Swagger/ReDoc are gated behind admin auth.
 
 ---
 
@@ -579,6 +596,18 @@ Settings → Security → Active Directory / LDAP
 - TLS / StartTLS is attempted automatically
 - Group membership is checked and cached at login time
 - Local admin accounts are always accessible regardless of AD config
+
+### Security Layer & Sandbox
+
+Jarvis is designed to be exposed to non-admin (network/domain) users. All limits are **enforced in the tool dispatch (in code)** — not merely stated in the system prompt — so they can't be bypassed via prompt injection, encoded payloads, or poisoned "learned facts".
+
+- **Shell sandbox:** commands from network users run as an unprivileged OS user (`runuser`) in a scratch workspace; system-changing commands, obfuscation (base64/eval/pipe-to-shell) and secret/root paths are blocked.
+- **Filesystem confinement:** writes limited to the workspace, reads limited to knowledge/work directories; secrets, root and system areas are denied (symlinks resolved to prevent escape).
+- **Attack detection & auto-lockout:** jailbreak / prompt-injection / Base64 attempts are logged as itemized incidents; repeated violations lock the account automatically (local admins are exempt; only a local admin can unlock).
+- **No privilege escalation:** sub-agents inherit the caller's confinement; "learned facts" are treated as untrusted context and a top-priority safety rule can't be overridden.
+- **Configurable** under `Settings → Security` (attack-prevention panel, sandbox status, violation log). Full technical write-up is available in-app via the ❓ button there.
+
+> The hard guarantee comes from the OS sandbox; the pattern-based checks are defense-in-depth. Enable the OS sandbox by provisioning an unprivileged user and tightening file permissions (see in-app docs).
 
 ### Two-Factor Authentication (TOTP)
 

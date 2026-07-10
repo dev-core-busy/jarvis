@@ -157,6 +157,9 @@ Organize documents into logical groups (multi-membership), scope searches to a g
 ### 🔌 Interactive API Console
 An admin-only, auto-generated **API explorer** at `/api`: every REST endpoint listed, explained, with examples and a **live test caller**. The OpenAPI schema and Swagger/ReDoc are gated behind admin auth.
 
+### 📱 Desktop & Mobile Clients
+Use Jarvis anywhere: a **native Windows app** (Go — tray, on-device speech-to-text, animated avatar, auto-update), a **native Android app** (Kotlin/Jetpack Compose — streaming chat, voice, attachments, push), and **iOS** via an installable PWA (native app on the roadmap). All share one login, chat history, and attachments. → [details](#client-apps)
+
 ---
 
 ## Architecture
@@ -721,38 +724,45 @@ Analyze → Propose → Validate → Apply
 
 ## Client Apps
 
-### Android App
+Use Jarvis from anywhere — browser, desktop, or phone. Every client talks to the same server over HTTPS/WebSocket and shares login, chat history, and attachments.
 
-A native Android app is included under `android/`. Features:
-- Full Jarvis chat with streaming responses
-- Attachment support (images, audio, video, PDF)
-- 👍👎❌ feedback
-- Push notifications (optional)
-- Domain login (AD/LDAP supported)
+| Platform | Client | Highlights |
+|----------|--------|-----------|
+| **Web** (any OS) | Built-in web UI / PWA | Full feature set, installable to the home screen |
+| **Windows** | Native Go client (`windows-app-go/`) | Tray, local speech-to-text, animated avatar, auto-update |
+| **Android** | Native app (`android/`, Kotlin/Compose) | Streaming chat, voice input, attachments, push |
+| **iOS** | PWA today · native app on the roadmap | Add-to-Home-Screen, mic input, offline shell |
 
-Build: open `android/` in Android Studio and run.
+### 🪟 Windows App (native, Go)
 
-### Windows App (Go)
+A lightweight **native** Windows client under `windows-app-go/` — no browser required:
+- **System-tray** integration, always a click away
+- **Local speech-to-text** — talk to Jarvis hands-free (runs on-device)
+- **Animated avatar** with spoken/text responses
+- Real-time **WebSocket** connection to the agent
+- **Auto-update** (pulls the latest signed release)
 
-A lightweight Windows desktop client is included under `windows-app-go/`. Features:
-- System tray integration
-- Native WebView-based chat UI
-- Auto-update support
-- Runs as a background service
-
-Build:
 ```bash
-cd windows-app-go
-bash build.sh
+cd windows-app-go && bash build.sh
 ```
 
-### iOS / PWA
+### 🤖 Android App (Kotlin / Jetpack Compose)
 
-No native iOS app is required. Open `https://your-server/chat` in Safari → Add to Home Screen. The PWA supports:
-- Offline-capable (Service Worker)
-- Chat history persistence
-- Microphone input (Web Speech API)
-- File attachments
+A native, **signed** Android app under `android/`:
+- Full Jarvis chat with **streaming** responses
+- **Voice input** and multimedia **attachments** (image / audio / video / PDF)
+- 👍 👎 ❌ feedback, optional **push notifications**
+- **Active Directory / LDAP** domain login
+
+Build: open `android/` in Android Studio and run (release builds are signed via a `.jks` keystore).
+
+### 🍎 iOS
+
+No native iOS app is required today — open `https://your-server/chat` in Safari → **Add to Home Screen** for an app-like PWA:
+- Microphone input (Web Speech API) & attachments
+- Offline-capable shell (Service Worker), persistent chat history
+
+A **native iOS client is on the roadmap** and can be prioritized on request.
 
 ---
 

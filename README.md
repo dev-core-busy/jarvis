@@ -17,7 +17,7 @@
 
 ---
 
-![Jarvis web interface with optional live desktop view](https://jarvis-ai.info/img/split_view.png)
+![Jarvis portal — role-based hub for chat, support and admin tools](docs/screenshots/portal.png)
 
 </div>
 
@@ -26,6 +26,7 @@
 ## 📋 Table of Contents
 
 - [Overview](#overview)
+- [Screenshots](#screenshots)
 - [Key Features](#key-features)
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
@@ -59,6 +60,22 @@ Jarvis is a **self-hosted, autonomous AI agent** that runs on a Linux server. Gi
 ```
 
 Jarvis handles it — and because it's **multi-LLM**, **multi-user**, and wrapped in a real **security layer with sandboxed execution**, you can safely open it to a whole team.
+
+---
+
+## Screenshots
+
+<div align="center">
+
+**Interactive API console** — every REST endpoint listed, explained, with a live test caller (admin-only, `/api`):
+
+![Interactive API console](docs/screenshots/api_console.png)
+
+**Security settings** — attack prevention, sandbox status & incident log under Settings → Security:
+
+![Security settings](docs/screenshots/security.png)
+
+</div>
 
 ---
 

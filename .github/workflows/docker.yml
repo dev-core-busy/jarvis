@@ -13,7 +13,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_JARVIS: ghcr.io/dev-core-busy/jarvis
-  IMAGE_WA:     ghcr.io/dev-core-busy/jarvis-wa
 
 jobs:
 
@@ -85,69 +84,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── WhatsApp Bridge Image ───────────────────────────────────────────────────
-  build-whatsapp:
-    name: Build WhatsApp Bridge Image
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      # buildx-Boot zieht moby/buildkit von Docker Hub -> gelegentlich Timeout.
-      # Erstversuch weich (continue-on-error), bei Fehler ein Zweitversuch.
-      - name: Docker Buildx einrichten
-        id: buildx
-        continue-on-error: true
-        uses: docker/setup-buildx-action@v4
-
-      - name: Docker Buildx einrichten (Retry)
-        if: steps.buildx.outcome == 'failure'
-        uses: docker/setup-buildx-action@v4
-
-      - name: Bei GHCR anmelden
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Docker-Metadaten ermitteln
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.IMAGE_WA }}
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      # Build/Push mit einem Zweitversuch gegen transiente Registry-/Pull-Timeouts.
-      - name: Image bauen und pushen
-        id: build
-        continue-on-error: true
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: services/whatsapp-bridge/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Image bauen und pushen (Retry)
-        if: steps.build.outcome == 'failure'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: services/whatsapp-bridge/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+  # HINWEIS: Frueher gab es hier zusaetzlich ein eigenstaendiges WhatsApp-Bridge-
+  # Image (ghcr.io/dev-core-busy/jarvis-wa). Es war redundant: die Bridge ist im
+  # Haupt-Image 'jarvis' enthalten und wird von docker/entrypoint.sh gestartet;
+  # kein docker-compose referenziert das separate Image. Job entfernt -> nur noch
+  # EIN Package (jarvis). (Fuer echte Microservice-Trennung wieder aufsplitten.)

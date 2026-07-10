@@ -66,7 +66,7 @@
         "Face recognition with dlib",
         "Browser automation via CDP",
         "Real-time telemetry and tracing",
-        "Security layer with jailbreak/prompt-injection detection and account locking"
+        "Security layer with sandbox isolation, jailbreak/prompt-injection/base64 detection, role-based confinement and automatic account locking"
       ]
     }
     </script>
@@ -502,10 +502,10 @@
             <div class="feature-card spotlight reveal">
                 <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">🛡️</div>
-                <div class="feature-title t-de">Sicherheitsschicht – Jailbreak-Schutz</div>
-                <div class="feature-title t-en">Security Layer – Jailbreak Protection</div>
-                <div class="feature-desc t-de">Erkennt Jailbreak- und Prompt-Injection-Versuche in Echtzeit über Chat, Support und WhatsApp – per <strong>Heuristik</strong> und zusätzlichem <strong>LLM-Klassifikator</strong> (Hybrid). Betroffene Konten werden <strong>sofort gesperrt</strong>: Anmeldung bleibt möglich, danach sehen Nutzer nur noch den Sperrhinweis samt Protokoll der verdächtigen Aktivitäten. Freischalten ausschließlich durch einen lokalen Administrator – konfigurierbar unter Einstellungen → Sicherheit.</div>
-                <div class="feature-desc t-en">Detects jailbreak and prompt-injection attempts in real time across chat, support and WhatsApp – via <strong>heuristics</strong> plus an additional <strong>LLM classifier</strong> (hybrid). Affected accounts are <strong>locked instantly</strong>: sign-in stays possible, after which users only see the lock notice and a log of suspicious activity. Restoring access is reserved for a local administrator – configurable under Settings → Security.</div>
+                <div class="feature-title t-de">Sicherheitsschicht – Sandbox &amp; Angriffsschutz</div>
+                <div class="feature-title t-en">Security Layer – Sandbox &amp; Attack Protection</div>
+                <div class="feature-desc t-de">Mehrstufige Absicherung des KI-Agenten: <strong>Sandbox-Isolation</strong> führt Aktionen von Netzwerk-Benutzern unprivilegiert und vom System getrennt aus – ohne Zugriff auf geschützte System- und Konfigurationsbereiche. <strong>Rollenbasierte Rechte- und Dateisystem-Trennung</strong> zwischen Administratoren und Netzwerk-Benutzern. Erkennung von <strong>Jailbreak-, Prompt-Injection- und verschleierten (Base64-)Angriffen</strong> in Echtzeit über Chat, Support und WhatsApp (Heuristik + LLM-Klassifikator). Bei wiederholten Angriffsversuchen wird das Konto <strong>automatisch gesperrt</strong>; alle sicherheitsrelevanten Zugriffe werden <strong>protokolliert</strong>. Freischalten und Konfiguration unter Einstellungen → Sicherheit.</div>
+                <div class="feature-desc t-en">Multi-layered protection for the AI agent: <strong>sandbox isolation</strong> runs network users' actions unprivileged and separated from the system – with no access to protected system and configuration areas. <strong>Role-based rights and file-system separation</strong> between administrators and network users. Real-time detection of <strong>jailbreak, prompt-injection and obfuscated (Base64) attacks</strong> across chat, support and WhatsApp (heuristics + LLM classifier). Repeated attack attempts <strong>lock the account automatically</strong>; all security-relevant access is <strong>logged</strong>. Unlocking and configuration under Settings → Security.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🖥️</div>

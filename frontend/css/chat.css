@@ -1183,3 +1183,24 @@ select option:hover {
 .uc-ctx-menu.open { opacity: 1; pointer-events: all; transform: scale(1); }
 .uc-ctx-item { display: flex; align-items: center; gap: 9px; padding: 10px 14px; cursor: pointer; font-size: 0.88rem; color: #e2e8f0; border: none; background: none; width: 100%; text-align: left; transition: background .12s; }
 .uc-ctx-item:hover { background: rgba(var(--fg-rgb), 0.07); }
+
+/* ─── Interaktive Charts (```chartjs) ────────────────────────── */
+.jarvis-chart {
+    position: relative;
+    width: 100%;
+    max-width: 640px;
+    height: 340px;
+    margin: 12px 0;
+    padding: 12px 14px;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    border-radius: 12px;
+    box-sizing: border-box;
+}
+.jarvis-chart canvas { width: 100% !important; height: 100% !important; }
+.jarvis-chart-err {
+    height: auto;
+    color: var(--text-secondary, #f0a0a0);
+    font-size: 0.85rem;
+    font-style: italic;
+}

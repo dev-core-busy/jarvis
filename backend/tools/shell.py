@@ -105,6 +105,13 @@ class ShellTool(BaseTool):
         timeout = timeout or config.COMMAND_TIMEOUT
         cwd = working_directory or None
 
+        # Grafik-Umgebung fuer matplotlib/seaborn: headless (Agg, kein DISPLAY) +
+        # schreibbarer Cache PRO OS-User unter /tmp. Der Sandbox-User hat kein
+        # schreibbares HOME; der $(id -u)-Suffix vermeidet Rechte-Kollisionen
+        # zwischen privilegierten Usern und dem Sandbox-User. Als Prefix im
+        # Kommando (nicht via Parent-Env), weil runuser die Env nicht durchreicht.
+        command = "export MPLBACKEND=Agg MPLCONFIGDIR=/tmp/.mpl-$(id -u); " + command
+
         # OS-Sandbox: Befehl als unprivilegierter OS-User ausfuehren (harte Grenze).
         # Wird vom Agent-Dispatch nur fuer nicht-privilegierte Benutzer gesetzt.
         _sandbox_user = (kwargs.get("_sandbox_user") or "").strip()

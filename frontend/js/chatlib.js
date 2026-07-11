@@ -66,11 +66,29 @@
     function renderMarkdown(text) {
         const _E = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+        // UTF-8-String -> base64 (fuer die Chart-Spec im data-Attribut, ohne
+        // deprecated unescape; Sonderzeichen stoeren so die Token-Ersetzung nicht)
+        const _toB64 = (str) => {
+            try {
+                const bytes = new TextEncoder().encode(str);
+                let bin = '';
+                for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+                return btoa(bin);
+            } catch (e) { return ''; }
+        };
+
         // 1) Code-Bloecke extrahieren (vor HTML-Escape)
         const codeBlocks = [];
         let s = String(text == null ? '' : text).replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
             const idx = codeBlocks.length;
-            codeBlocks.push(`<pre><code>${_E(code.trim())}</code></pre>`);
+            // ```chartjs / ```jarvis-chart -> interaktives Chart.js-Diagramm.
+            // Die Spec (JSON) wird base64-kodiert ins data-Attribut gelegt und
+            // spaeter von charts.js sicher (JSON.parse, kein eval) gerendert.
+            if (/^(chartjs|jarvis-chart|chart)$/i.test(lang)) {
+                codeBlocks.push(`<div class="jarvis-chart" data-spec="${_toB64(code.trim())}"></div>`);
+            } else {
+                codeBlocks.push(`<pre><code>${_E(code.trim())}</code></pre>`);
+            }
             return `\x01CODE${idx}\x01`;
         });
 

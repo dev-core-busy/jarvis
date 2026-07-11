@@ -57,6 +57,11 @@
             document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape' && docModal && docModal.classList.contains('open')) Mgr._showDoc(false);
             });
+            // Internet-Egress-Sperre: Einrichten / Live-Prüfung
+            var egSetup = $('sec-egress-setup');
+            if (egSetup) egSetup.addEventListener('click', function () { Mgr.setupEgress(); });
+            var egVerify = $('sec-egress-verify');
+            if (egVerify) egVerify.addEventListener('click', function () { Mgr.loadEgress(true); });
         },
 
         _showDoc: function (show) {
@@ -85,6 +90,74 @@
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) { Mgr.renderViolations((d && d.violations) || []); })
                 .catch(function () {});
+            // Internet-Egress-Sperre (Status ohne Live-Test = schnell)
+            Mgr.loadEgress(false);
+        },
+
+        loadEgress: function (live) {
+            var box = $('sec-egress-status');
+            if (box && live) box.innerHTML = '⏳ Live-Test läuft…';
+            fetch('/api/security/egress' + (live ? '?live=1' : ''), { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) { Mgr.renderEgress(d); })
+                .catch(function () {});
+        },
+
+        renderEgress: function (d) {
+            var box = $('sec-egress-status');
+            if (!box) return;
+            if (!d) { box.innerHTML = '<span style="color:var(--text-muted);">Status nicht verfügbar.</span>'; return; }
+            function row(ok, label) {
+                var mark = ok === true ? '✅' : (ok === false ? '❌' : '❔');
+                return '<div>' + mark + ' ' + esc(label) + '</div>';
+            }
+            var head = d.ok
+                ? (d.egress_blocked === false
+                    ? '🟠 <b>Eingerichtet – aber Live-Test: Internet noch erreichbar!</b>'
+                    : '🟢 <b>Aktiv' + (d.egress_blocked === true ? ' &amp; live verifiziert' : '') + '</b>')
+                : '🔴 <b>Nicht (vollständig) eingerichtet</b>';
+            var rows = ''
+                + row(d.configured, 'Einstellung gesetzt (No-Internet-Sandbox-Benutzer)')
+                + row(d.user_exists, 'Gesperrter OS-Benutzer: ' + (d.user || '') + (d.uid != null ? ' (uid ' + d.uid + ')' : ' — fehlt'))
+                + row(d.nft_active, 'Firewall-Regel aktiv (nftables)')
+                + row(d.service_enabled, 'Autostart nach Reboot (systemd)');
+            if (d.egress_blocked === true || d.egress_blocked === false) {
+                rows += row(d.egress_blocked, 'Live-Test: öffentliches Internet ' + (d.egress_blocked ? 'geblockt' : 'ERREICHBAR ⚠'));
+            }
+            var res = (d.resolvers && d.resolvers.length)
+                ? '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">Erlaubte DNS-Resolver: ' + esc(d.resolvers.join(', ')) + '</div>' : '';
+            box.innerHTML = '<div style="margin-bottom:6px;">' + head + '</div>' + rows + res;
+        },
+
+        setupEgress: function () {
+            var btn = $('sec-egress-setup');
+            var out = $('sec-egress-result');
+            var orig = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = 'Wird eingerichtet…'; }
+            fetch('/api/security/egress/setup', { method: 'POST', headers: authHeaders() })
+                .then(function (r) { return r.json().then(function (j) { return j; }); })
+                .then(function (d) {
+                    d = d || {};
+                    if (out) {
+                        out.style.display = 'block';
+                        var good = !!d.ok;
+                        out.style.borderColor = good ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)';
+                        out.style.background = good ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)';
+                        var lines = (d.steps || []).map(function (s) {
+                            return (s.ok ? '✅' : '❌') + ' ' + esc(s.name) + (s.detail && !s.ok ? ' – ' + esc(s.detail) : '');
+                        }).join('<br>');
+                        out.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">'
+                            + (good ? 'Einrichtung erfolgreich &amp; verifiziert.' : 'Einrichtung unvollständig – Details:')
+                            + '</div>' + lines;
+                    }
+                    Mgr.renderEgress(d.status);
+                })
+                .catch(function () {
+                    if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Einrichtung.'; }
+                })
+                .then(function () {
+                    if (btn) { btn.disabled = false; btn.textContent = orig || 'Einrichten / Reparieren'; }
+                });
         },
 
         renderSandbox: function (d) {

@@ -57,6 +57,27 @@
             document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape' && docModal && docModal.classList.contains('open')) Mgr._showDoc(false);
             });
+            // Firewall-Funktionsanalyse-Popup (❓)
+            var fwBtn = $('sec-fwdoc-btn');
+            if (fwBtn) fwBtn.addEventListener('click', function () { Mgr._showFwDoc(true); });
+            var fwClose = $('sec-fwdoc-close');
+            if (fwClose) fwClose.addEventListener('click', function () { Mgr._showFwDoc(false); });
+            var fwModal = $('sec-fwdoc-modal');
+            if (fwModal) fwModal.addEventListener('click', function (e) { if (e.target === fwModal) Mgr._showFwDoc(false); });
+            var fwPdf = $('sec-fwdoc-pdf');
+            if (fwPdf) fwPdf.addEventListener('click', function () {
+                document.body.classList.add('printing-fwdoc');
+                var cleanup = function () {
+                    document.body.classList.remove('printing-fwdoc');
+                    window.removeEventListener('afterprint', cleanup);
+                };
+                window.addEventListener('afterprint', cleanup);
+                try { window.print(); } catch (e) { cleanup(); }
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && fwModal && fwModal.classList.contains('open')) Mgr._showFwDoc(false);
+            });
+
             // Internet-Egress-Sperre: Einrichten / Live-Prüfung
             var egSetup = $('sec-egress-setup');
             if (egSetup) egSetup.addEventListener('click', function () { Mgr.setupEgress(); });
@@ -75,6 +96,11 @@
 
         _showDoc: function (show) {
             var m = $('sec-secdoc-modal');
+            if (m) m.classList.toggle('open', !!show);
+        },
+
+        _showFwDoc: function (show) {
+            var m = $('sec-fwdoc-modal');
             if (m) m.classList.toggle('open', !!show);
         },
 

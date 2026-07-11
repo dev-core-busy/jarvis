@@ -203,8 +203,12 @@ def _ldap_redirects_safe(cmd: str) -> bool:
         return False
     return all((t == "/tmp" or t.startswith("/tmp/")) and ".." not in t for t in targets)
 
-# Tools, die Internet-Ergebnisse liefern – fuer Benutzer ohne Internet-Zugang gesperrt
-_INTERNET_TOOLS = {"browser_control", "browser_cdp", "search_image"}
+# Tools, die Informationen AUS DEM INTERNET holen – fuer Benutzer ohne Internet-
+# Zugang gesperrt. Google (Cloud) zaehlt als Internet. Jira/Confluence sind
+# INTERN (self-hosted) und daher bewusst NICHT enthalten. Zusaetzlich kann ein
+# Tool sich selbst per Attribut `requires_internet = True` deklarieren (s.u.).
+_INTERNET_TOOLS = {"browser_control", "browser_cdp", "search_image",
+                   "google_calendar", "google_drive", "google_gmail"}
 
 # ── Shell-Egress-Erkennung (best effort) ──────────────────────────────────
 # HINWEIS: Eine Regex kann ausgehenden Netzwerkverkehr NICHT lueckenlos
@@ -1567,7 +1571,7 @@ KRITISCH – Autonomie-Regeln:
             # Internet-Zugang: Tools mit Internet-Ergebnissen fuer nicht freigeschaltete
             # Benutzer blockieren (selektiv per Einstellungen -> Sicherheit -> Internet-Zugang).
             if not _ldap_blocked and not getattr(self, '_current_user_internet', True):
-                if name in _INTERNET_TOOLS:
+                if name in _INTERNET_TOOLS or getattr(tool, "requires_internet", False):
                     print(f"[AGENT] BLOCKED Internet-Tool '{name}' fuer User '{_uname}' (kein Internet-Zugang)", flush=True)
                     result = "Zugriff verweigert: Internet-Abfragen sind fuer deinen Benutzer nicht freigeschaltet."
                     _ldap_blocked = True
@@ -1582,6 +1586,14 @@ KRITISCH – Autonomie-Regeln:
             if (name == "shell_execute" and not _ldap_blocked
                     and _uname and _uname not in _LOCAL_PRIVILEGED_USERS):
                 _sbx_user = (config.get_setting("sandbox_shell_user", "") or "").strip()
+                # Benutzer OHNE Internet-Freigabe: netzwerkgesperrten Sandbox-User
+                # verwenden (harte Egress-Grenze via nftables owner-match). Faengt
+                # ab, was die Egress-Heuristik verpasst (z.B. rohe Sockets). Nur
+                # wirksam, wenn dieser Shell-Befehl die Heuristik oben passiert hat.
+                if not getattr(self, '_current_user_internet', True):
+                    _noinet = (config.get_setting("sandbox_shell_user_noinet", "") or "").strip()
+                    if _noinet:
+                        _sbx_user = _noinet
                 if _sbx_user:
                     exec_args['_sandbox_user'] = _sbx_user
 

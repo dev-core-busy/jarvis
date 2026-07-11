@@ -1,0 +1,13 @@
+[Unit]
+Description=Jarvis Egress-Sperre fuer netzwerkgesperrten Sandbox-User (uid 996)
+After=nftables.service network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /etc/nftables-jarvis-egress.conf
+ExecReload=/usr/sbin/nft -f /etc/nftables-jarvis-egress.conf
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

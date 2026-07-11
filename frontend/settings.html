@@ -1165,7 +1165,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <li>Lokale Administratoren werden nie automatisch gesperrt (<code>exempt</code>).</li>
                     <li>Gesperrte Konten können sich noch anmelden, sehen aber nur den Sperr-Bildschirm samt Protokoll. Freischalten ausschließlich durch einen lokalen Benutzer (<i>Gesperrte Konten → Freischalten</i>).</li>
                     <li>Anzeige: „Letzte Zugriffs-Verstöße" und „Gesperrte Konten" in diesem Bereich; API: <code>/api/security/violations</code>, <code>/api/security/incidents</code>, <code>/api/security/sandbox</code>.</li>
-                    <li>Internet-Egress-Sperre (harte Firewall-Grenze für Benutzer ohne Internet-Freigabe): Status via <code>GET /api/security/egress</code> (mit <code>?live=1</code> Live-Test), Ein-Klick-Einrichtung via <code>POST /api/security/egress/setup</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Harte Egress-Sperre</i>.</li>
+                    <li>Internet-Egress-Sperre (harte Firewall-Grenze für Benutzer ohne Internet-Freigabe): Status via <code>GET /api/security/egress</code> (mit <code>?live=1</code> Live-Test), Ein-Klick-Einrichtung via <code>POST /api/security/egress/setup</code>, Deaktivierung via <code>POST /api/security/egress/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Harte Egress-Sperre</i>.</li>
+                    <li>OS-Sandbox (Systemschutz Netzwerk-Benutzer): Status via <code>GET /api/security/sandbox</code> (mit <code>?live=1</code> Isolationstest), Ein-/Ausschalten via <code>POST /api/security/sandbox/setup</code> bzw. <code>/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Systemschutz / Sandbox</i>.</li>
                 </ul>
 
                 <h3>8. Schutz vor Kontext-Vergiftung</h3>
@@ -2934,6 +2935,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <h4 style="margin:18px 0 6px;" data-i18n="security.section_sandbox">Systemschutz / Sandbox (Netzwerk-Benutzer)</h4>
                                 <div id="sec-sandbox-status" class="kb-hint" style="margin:0 0 4px;"></div>
                                 <p class="kb-hint" data-i18n="security.sandbox_desc">Für Netzwerk-/Domain-Benutzer ist der Datei- und Shell-Zugriff im Code beschränkt (Schreiben nur im Arbeitsbereich, Lesen nur in Wissens-/Arbeitsverzeichnissen; Secrets, Root- und System-Bereiche gesperrt; verschleierte/base64-kodierte Ausführung blockiert). Ist die OS-Sandbox aktiv, laufen deren Shell-Befehle zusätzlich als unprivilegierter Betriebssystem-Benutzer – das Betriebssystem erzwingt die Grenze dann hart.</p>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                    <button type="button" id="sec-sandbox-setup" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(139,92,246,0.5);background:rgba(139,92,246,0.15);color:var(--text-primary,#e2e8f0);cursor:pointer;">Aktivieren / Reparieren</button>
+                                    <button type="button" id="sec-sandbox-verify" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.05);color:var(--text-primary,#e2e8f0);cursor:pointer;">Isolation testen</button>
+                                    <button type="button" id="sec-sandbox-teardown" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.12);color:var(--text-primary,#e2e8f0);cursor:pointer;">Deaktivieren</button>
+                                </div>
+                                <div id="sec-sandbox-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
 
                                 <h4 style="margin:18px 0 6px;" data-i18n="security.section_violations">Letzte Zugriffs-Verstöße</h4>
                                 <p class="kb-hint" data-i18n="security.violations_desc">Im Tool-Dispatch verweigerte Zugriffe (Secrets/Root/Base64) von Netzwerk-Benutzern. Nach mehreren Verstößen innerhalb kurzer Zeit wird der Account automatisch gesperrt (lokale Administratoren ausgenommen).</p>
@@ -3092,7 +3099,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/issues.js?v=6"></script>
     <script src="/static/js/branding.js?v=16"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/security_incidents.js?v=6"></script>
+    <script src="/static/js/security_incidents.js?v=7"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/app.js?v=144"></script>
 </body>

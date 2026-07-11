@@ -2335,6 +2335,19 @@ async def security_egress_setup(user: str = Depends(require_local_auth)):
     return JSONResponse(res, status_code=200 if res.get("ok") else 500)
 
 
+@app.post("/api/security/egress/teardown")
+async def security_egress_teardown(user: str = Depends(require_local_auth)):
+    """Deaktiviert die Internet-Egress-Sperre wieder (Admin, root).
+
+    Leert die Einstellung, entfernt die nftables-Regel und deaktiviert den
+    Autostart. Der gesperrte OS-Benutzer bleibt bestehen (Re-Aktivieren per
+    Klick). Die Tool-Ebenen-Sperre (search_image/Browser/Google) bleibt aktiv.
+    """
+    from backend import egress_guard
+    res = egress_guard.teardown()
+    return JSONResponse(res, status_code=200 if res.get("ok") else 500)
+
+
 @app.get("/api/cert")
 async def download_cert():
     """Zertifikat zum Download anbieten (DER-Format .cer für Windows)."""

@@ -211,3 +211,41 @@ def setup():
     st = status(live=True)
     return {"ok": bool(st.get("ok") and st.get("egress_blocked")),
             "steps": steps, "status": st}
+
+
+def teardown():
+    """Deaktiviert die Egress-Sperre wieder (idempotent).
+
+    Leert die Einstellung (Routing aus -> No-Internet-Shell laeuft wieder ueber
+    den normalen Sandbox-User), entfernt die nftables-Regel und deaktiviert den
+    Autostart. Der OS-Benutzer bleibt bestehen (harmlos, ermoeglicht spaeteres
+    Re-Aktivieren per Klick). Die Tool-Ebenen-Sperre (search_image/Browser/
+    Google) bleibt davon UNBERUEHRT aktiv.
+    """
+    steps = []
+
+    def step(name, ok, detail=""):
+        steps.append({"name": name, "ok": bool(ok), "detail": (detail or "")[:300]})
+
+    # 1) Einstellung leeren -> Routing auf netzwerkgesperrten User aus
+    try:
+        from backend.config import config
+        config.save_setting("sandbox_shell_user_noinet", "")
+        step("Einstellung entfernt", True)
+    except Exception as e:  # noqa: BLE001
+        step("Einstellung entfernt", False, str(e))
+
+    # 2) Autostart-Dienst deaktivieren + stoppen (tolerant, falls nicht vorhanden)
+    r = _run([SYSTEMCTL, "disable", "--now", SVC_NAME])
+    step("Autostart deaktiviert", True, r.stderr)
+
+    # 3) Firewall-Regel entfernen (nur wenn vorhanden)
+    if _nft_active():
+        r = _run([NFT, "delete", "table", "inet", NFT_TABLE])
+        step("Firewall-Regel entfernt", r.returncode == 0, r.stderr)
+    else:
+        step("Firewall-Regel entfernt", True, "war nicht aktiv")
+
+    st = status()
+    ok = (not st["configured"]) and (not st["nft_active"])
+    return {"ok": ok, "steps": steps, "status": st}

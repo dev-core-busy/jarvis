@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=5">
-    <link rel="stylesheet" href="/static/css/style.css?v=112">
+    <link rel="stylesheet" href="/static/css/style.css?v=113">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -1185,6 +1185,64 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                 <h3>10. Grenzen &amp; Restrisiko</h3>
                 <p class="kb-hint">Die Muster-Prüfungen (Regex, Guard-Heuristik) sind <b>Defense-in-Depth</b>. Die harte Garantie für Shell-Befehle liefert die <b>OS-Sandbox</b> (Punkt 4): Solange Befehle als <code>root</code> laufen (OS-Sandbox aus), bleibt ein prinzipielles Restrisiko, da als root ausgeführter Code Wege finden kann. Empfehlung: OS-Sandbox aktivieren und Secrets per Dateirechten absichern.</p>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Firewall / Egress-Sperre – technische Funktionsanalyse ═══ -->
+    <div id="sec-fwdoc-modal" class="modal" style="z-index:10001;">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h2>🧱 Harte Egress-Sperre – technische Funktionsanalyse</h2>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button type="button" id="sec-fwdoc-pdf" title="Als PDF speichern (an PDF-Drucker drucken)" aria-label="Als PDF drucken"
+                            style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:600;font-size:0.82rem;cursor:pointer;line-height:1;">🖨️ PDF</button>
+                    <button class="btn-icon" id="sec-fwdoc-close" aria-label="Schließen">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body" style="overflow-y:auto;">
+
+                <p class="kb-hint">Die Egress-Sperre stellt sicher, dass Benutzer <b>ohne</b> Internet-Freigabe wirklich <b>keine Informationen aus dem Internet</b> beziehen oder Daten dorthin abfließen lassen können – auch nicht über Umwege. <b>Leitprinzip:</b> Die weiche Berechtigung (wer darf ins Internet) wird durch eine <b>harte Grenze auf Betriebssystem-Ebene</b> ergänzt, die unabhängig von der Formulierung eines Befehls wirkt.</p>
+
+                <h3>1. Zwei Ebenen</h3>
+                <ul>
+                    <li><b>Tool-Ebene (im Hauptprozess):</b> Tools, die Informationen aus dem Internet holen (<code>search_image</code>, <code>browser_control</code>, <code>browser_cdp</code>, <code>google_calendar/drive/gmail</code> sowie jedes Tool mit <code>requires_internet = True</code>), werden im Dispatch (<code>agent.py → _execute_tool</code>) für nicht freigeschaltete Benutzer blockiert. <b>Jira/Confluence sind intern</b> (self-hosted) und daher bewusst <b>nicht</b> gesperrt.</li>
+                    <li><b>Netzwerk-Ebene (harte Grenze):</b> <code>shell_execute</code> solcher Benutzer läuft als separater, per Firewall netzwerkgesperrter OS-Benutzer. Das ist der Gegenstand dieser Beschreibung.</li>
+                </ul>
+
+                <h3>2. Warum eine zweite Ebene nötig ist</h3>
+                <p class="kb-hint">Die vorgelagerte Egress-Heuristik (<code>_shell_hits_internet()</code>) erkennt gängige Wege (<code>curl</code>, <code>wget</code>, <code>ssh</code>, <code>git</code>, <code>urllib</code>/<code>requests</code>/<code>httpx</code>, <code>socket.connect</code> …) und blockt sie mit klarer Meldung. Eine Regex kann ausgehenden Verkehr aber <b>nicht lückenlos</b> verhindern (z. B. rohe Sockets über eine Variable, eigene Protokolle). Diese Restlücke schließt die OS-Firewall.</p>
+
+                <h3>3. Funktionsweise der Firewall</h3>
+                <p class="kb-hint">Umgesetzt in <code>backend/egress_guard.py</code>. Für Benutzer ohne Internet-Freigabe wird <code>shell_execute</code> via <code>runuser</code> als dedizierter OS-Benutzer <code>jarvis_sandbox_noinet</code> ausgeführt (Einstellung <code>sandbox_shell_user_noinet</code>). Für dessen UID gilt eine eigenständige <code>nftables</code>-Regel (<code>table inet jarvis_egress</code>, <code>meta skuid</code>-Match):</p>
+                <table>
+                    <tr><th>Ziel</th><th>Regel für den gesperrten Benutzer</th></tr>
+                    <tr><td>Loopback (<code>127.0.0.0/8</code>, <code>::1</code>)</td><td>erlaubt</td></tr>
+                    <tr><td>Internes LAN (<code>10/8</code>, <code>172.16/12</code>, <code>192.168/16</code>, <code>169.254/16</code>)</td><td>erlaubt – z. B. internes Jira/Confluence</td></tr>
+                    <tr><td>DNS (Port 53) zu den konfigurierten Resolvern</td><td>erlaubt (Namensauflösung)</td></tr>
+                    <tr><td><b>Alles Übrige (öffentliches Internet)</b></td><td><b>verworfen (DROP)</b></td></tr>
+                </table>
+                <p class="kb-hint">Die Tabelle ist eigenständig und beeinflusst bestehende Regeln (Docker/NAT) nicht. Ein <code>systemd</code>-Dienst (<code>jarvis-egress.service</code>) lädt sie nach jedem Reboot. UID und Resolver werden bei der Einrichtung <b>automatisch erkannt</b> – die Sperre funktioniert dadurch ohne manuelle Anpassung auf jedem Server.</p>
+
+                <h3>4. Wer ist betroffen?</h3>
+                <p class="kb-hint">Nur Benutzer <b>ohne</b> Internet-Freigabe (Steuerung unter <i>Sicherheit → Berechtigungen → Internet-Zugang</i> via <code>ad_internet_users</code>/<code>ad_internet_group</code>). Lokale Administratoren und freigeschaltete Benutzer laufen über den normalen Sandbox-Benutzer <b>mit</b> Internet. Die beiden Ebenen (OS-Sandbox und Egress-Sperre) sind unabhängig schaltbar.</p>
+
+                <h3>5. Einrichtung &amp; Verifikation (in dieser Oberfläche)</h3>
+                <ul>
+                    <li><b>Einrichten / Reparieren</b> (<code>POST /api/security/egress/setup</code>): legt den OS-Benutzer an, schreibt die nftables-Regel + den Autostart-Dienst und setzt die Einstellung. Idempotent.</li>
+                    <li><b>Status prüfen (Live-Test)</b> (<code>GET /api/security/egress?live=1</code>): führt als gesperrter Benutzer einen echten Verbindungsversuch aus und zeigt, ob öffentliches Internet blockiert ist.</li>
+                    <li><b>Deaktivieren</b> (<code>POST /api/security/egress/teardown</code>): entfernt Regel + Autostart und leert die Einstellung. Die Tool-Ebenen-Sperre bleibt aktiv.</li>
+                </ul>
+
+                <h3>6. Grenzen &amp; Restrisiko</h3>
+                <ul>
+                    <li>DNS zu den internen Resolvern ist erlaubt (nötig für Namensauflösung); ein theoretisches DNS-Tunneling bleibt damit möglich. Für maximale Strenge lässt sich DNS für den gesperrten Benutzer ganz sperren.</li>
+                    <li>Die Einstufung „intern" für Jira/Confluence gilt nur bei self-hostetem Betrieb. Zeigen sie auf eine Cloud (<code>*.atlassian.net</code>), wären sie „Internet" und müssten anders eingestuft werden.</li>
+                    <li>In-Prozess-Tools (Bildersuche, Browser, Google) werden nicht über die Firewall, sondern über die <b>Tool-Ebene</b> gesperrt (Punkt&nbsp;1) – die Firewall betrifft ausschließlich <code>shell_execute</code>.</li>
+                </ul>
 
             </div>
         </div>
@@ -2531,6 +2589,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
                                 <p class="kb-hint" style="margin-bottom:10px;">Leer lassen = alle angemeldeten Benutzer dürfen das Internet nutzen. Lokale Admins sind immer berechtigt. Eingeschränkte Benutzer können Web-Suche, Browser und Bildersuche nicht nutzen.</p>
 
+                                <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;cursor:pointer;font-size:0.86rem;">
+                                    <input type="checkbox" id="ad-internet-deny-all" style="margin-top:2px;flex-shrink:0;">
+                                    <span>Internet für <b>alle</b> Netzwerk-Benutzer sperren
+                                        <span style="color:var(--text-muted);font-weight:400;">– niemand außer lokalen Administratoren erhält Internet-Zugang; übersteuert die beiden Felder unten.</span>
+                                    </span>
+                                </label>
+
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
                                         <span>Erlaubte Benutzer</span>
@@ -2559,6 +2624,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <span style="font-weight:600;font-size:0.9rem;">Harte Egress-Sperre (Firewall)</span>
                                     </div>
                                     <p class="kb-hint" style="margin:0 0 10px;">Ergänzt die Berechtigung oben um eine <b>Betriebssystem-Firewall</b>: Shell-Befehle von Benutzern <b>ohne</b> Internet-Freigabe laufen als gesperrter OS-Benutzer, der nur internes Netz (LAN, Jira/Confluence), Loopback und DNS erreicht – öffentliches Internet wird verworfen. Das ist die harte Grenze und fängt auch ab, was die Muster-Erkennung verpasst (z.&nbsp;B. rohe Sockets). Einmalige Einrichtung pro Server.</p>
+                                    <button type="button" id="sec-fwdoc-btn" class="kb-btn-secondary"
+                                            style="margin:0 0 10px;padding:5px 12px;font-size:0.85rem;line-height:1.4;display:inline-flex;align-items:center;gap:6px;">❓ <span>Funktionsweise &amp; Sicherheitsfeatures</span></button>
                                     <div id="sec-egress-status" style="font-size:0.82rem;line-height:1.75;margin-bottom:10px;color:var(--text-secondary,#cbd5e1);">Status wird geladen…</div>
                                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
                                         <button type="button" id="sec-egress-setup" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(139,92,246,0.5);background:rgba(139,92,246,0.15);color:var(--text-primary,#e2e8f0);cursor:pointer;">Einrichten / Reparieren</button>
@@ -2627,6 +2694,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             document.getElementById('ad-knowledge-editors-group').value = d.knowledge_editors_group || '';
                                             document.getElementById('ad-internet-users').value = d.internet_users || '';
                                             document.getElementById('ad-internet-group').value = d.internet_group || '';
+                                            document.getElementById('ad-internet-deny-all').checked = !!d.internet_deny_all;
                                             document.getElementById('ad-admins').value = d.admins || '';
                                             document.getElementById('ad-admins-group').value = d.admins_group || '';
                                             _adUpdateStatus(d);
@@ -2760,6 +2828,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                     ad_knowledge_editors_group: document.getElementById('ad-knowledge-editors-group').value.trim(),
                                                     ad_internet_users:         document.getElementById('ad-internet-users').value.trim(),
                                                     ad_internet_group:         document.getElementById('ad-internet-group').value.trim(),
+                                                    ad_internet_deny_all:      document.getElementById('ad-internet-deny-all').checked,
                                                     ad_admins:                 document.getElementById('ad-admins').value.trim(),
                                                     ad_admins_group:           document.getElementById('ad-admins-group').value.trim(),
                                                 })
@@ -3099,7 +3168,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/issues.js?v=6"></script>
     <script src="/static/js/branding.js?v=16"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/security_incidents.js?v=7"></script>
+    <script src="/static/js/security_incidents.js?v=8"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/app.js?v=144"></script>
 </body>

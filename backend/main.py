@@ -808,6 +808,10 @@ def _user_has_internet_access(user: str) -> bool:
     u = (user or "").strip()
     if not u or u in ALLOWED_USERS or u in {"jarvis", "root"}:
         return True
+    # "Internet fuer alle sperren": kein Netzwerk-Benutzer darf ins Internet
+    # (lokale Administratoren oben sind ausgenommen).
+    if str(config.get_setting("ad_internet_deny_all", False)).strip().lower() in ("1", "true", "yes", "on"):
+        return False
     users_raw = config.get_setting("ad_internet_users", "").strip()
     grp = config.get_setting("ad_internet_group", "").strip()
     if not users_raw and not grp:
@@ -2535,6 +2539,8 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         _internet_access_cache.clear()
     if "ad_internet_group" in body:
         config.save_setting("ad_internet_group", body["ad_internet_group"])
+    if "ad_internet_deny_all" in body:
+        config.save_setting("ad_internet_deny_all", bool(body["ad_internet_deny_all"]))
         _internet_access_cache.clear()
     if "ad_admins" in body:
         config.save_setting("ad_admins", body["ad_admins"])
@@ -2595,7 +2601,9 @@ async def get_ad_status(user: str = Depends(require_auth)):
         ),
         "internet_users": config.get_setting("ad_internet_users", ""),
         "internet_group": config.get_setting("ad_internet_group", ""),
+        "internet_deny_all": str(config.get_setting("ad_internet_deny_all", False)).strip().lower() in ("1", "true", "yes", "on"),
         "internet_mode": (
+            "none"      if str(config.get_setting("ad_internet_deny_all", False)).strip().lower() in ("1", "true", "yes", "on") else
             "group"     if config.get_setting("ad_internet_group", "") else
             "users"     if config.get_setting("ad_internet_users", "") else
             "all"       # alle Benutzer haben Internet-Zugang

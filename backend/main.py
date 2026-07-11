@@ -2292,18 +2292,33 @@ async def security_violations(user: str = Depends(require_local_auth)):
 
 
 @app.get("/api/security/sandbox")
-async def security_sandbox_status(user: str = Depends(require_local_auth)):
-    """Status der OS-Sandbox: aktiv? welcher OS-Benutzer? existiert er? (Admin)"""
-    sbx = (config.get_setting("sandbox_shell_user", "") or "").strip()
-    exists = False
-    if sbx:
-        try:
-            import pwd
-            pwd.getpwnam(sbx)
-            exists = True
-        except Exception:
-            exists = False
-    return JSONResponse({"active": bool(sbx), "user": sbx, "user_exists": exists})
+async def security_sandbox_status(live: int = 0, user: str = Depends(require_local_auth)):
+    """Status der OS-Sandbox (Systemschutz Netzwerk-Benutzer): aktiv? OS-Benutzer
+    vorhanden? Secrets per Dateirechten gesperrt? (Admin) Mit ?live=1 zusaetzlich
+    ein Isolationstest (Sandbox-User: Secrets lesbar? /tmp schreibbar?)."""
+    from backend import sandbox_guard
+    return JSONResponse(sandbox_guard.status(live=bool(live)))
+
+
+@app.post("/api/security/sandbox/setup")
+async def security_sandbox_setup(user: str = Depends(require_local_auth)):
+    """Richtet die OS-Sandbox ein bzw. repariert sie (Admin, root): legt den
+    OS-Benutzer an, setzt die Secret-Dateirechte (600) und die Einstellung
+    sandbox_shell_user. Idempotent; gibt Schritte + Status (inkl. Live-Test)."""
+    from backend import sandbox_guard
+    res = sandbox_guard.setup()
+    return JSONResponse(res, status_code=200 if res.get("ok") else 500)
+
+
+@app.post("/api/security/sandbox/teardown")
+async def security_sandbox_teardown(user: str = Depends(require_local_auth)):
+    """Deaktiviert die OS-Sandbox (Admin): leert sandbox_shell_user – nicht-
+    privilegierte Shell laeuft dann wieder als Dienst-Benutzer (nur Code-
+    Haertung). Benutzer ohne Internet-Freigabe bleiben ueber die Egress-Sperre
+    gekapselt. Dateirechte + OS-Benutzer bleiben bestehen."""
+    from backend import sandbox_guard
+    res = sandbox_guard.teardown()
+    return JSONResponse(res, status_code=200 if res.get("ok") else 500)
 
 
 @app.get("/api/security/egress")

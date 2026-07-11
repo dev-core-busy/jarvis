@@ -62,6 +62,8 @@
             if (egSetup) egSetup.addEventListener('click', function () { Mgr.setupEgress(); });
             var egVerify = $('sec-egress-verify');
             if (egVerify) egVerify.addEventListener('click', function () { Mgr.loadEgress(true); });
+            var egDown = $('sec-egress-teardown');
+            if (egDown) egDown.addEventListener('click', function () { Mgr.teardownEgress(); });
         },
 
         _showDoc: function (show) {
@@ -157,6 +159,41 @@
                 })
                 .then(function () {
                     if (btn) { btn.disabled = false; btn.textContent = orig || 'Einrichten / Reparieren'; }
+                });
+        },
+
+        teardownEgress: function () {
+            if (!window.confirm('Harte Egress-Sperre wirklich deaktivieren?\n\n'
+                + 'Benutzer ohne Internet-Freigabe können danach per Shell (curl, rohe Sockets) '
+                + 'wieder ins öffentliche Internet. Die Tool-Sperre (Bildersuche, Browser, Google) '
+                + 'bleibt aktiv.')) return;
+            var btn = $('sec-egress-teardown');
+            var out = $('sec-egress-result');
+            var orig = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = 'Wird deaktiviert…'; }
+            fetch('/api/security/egress/teardown', { method: 'POST', headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    d = d || {};
+                    if (out) {
+                        out.style.display = 'block';
+                        var good = !!d.ok;
+                        out.style.borderColor = good ? 'rgba(148,163,184,0.5)' : 'rgba(239,68,68,0.5)';
+                        out.style.background = good ? 'rgba(148,163,184,0.1)' : 'rgba(239,68,68,0.1)';
+                        var lines = (d.steps || []).map(function (s) {
+                            return (s.ok ? '✅' : '❌') + ' ' + esc(s.name) + (s.detail && !s.ok ? ' – ' + esc(s.detail) : '');
+                        }).join('<br>');
+                        out.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">'
+                            + (good ? 'Egress-Sperre deaktiviert.' : 'Deaktivierung unvollständig – Details:')
+                            + '</div>' + lines;
+                    }
+                    Mgr.renderEgress(d.status);
+                })
+                .catch(function () {
+                    if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Deaktivierung.'; }
+                })
+                .then(function () {
+                    if (btn) { btn.disabled = false; btn.textContent = orig || 'Deaktivieren'; }
                 });
         },
 

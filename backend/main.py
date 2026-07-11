@@ -2306,6 +2306,35 @@ async def security_sandbox_status(user: str = Depends(require_local_auth)):
     return JSONResponse({"active": bool(sbx), "user": sbx, "user_exists": exists})
 
 
+@app.get("/api/security/egress")
+async def security_egress_status(live: int = 0, user: str = Depends(require_local_auth)):
+    """Status der Internet-Egress-Sperre fuer Benutzer ohne Internet-Freigabe (Admin).
+
+    Liefert: configured (Einstellung gesetzt?), user_exists (netzwerkgesperrter
+    OS-Benutzer vorhanden?), nft_active (Firewall-Regel geladen?),
+    service_enabled (Autostart?), resolvers, ok. Mit ?live=1 zusaetzlich ein
+    Live-Test (egress_blocked: kommt der gesperrte Benutzer wirklich nicht ins
+    Internet?) – etwas langsamer, daher nur auf Anforderung.
+    """
+    from backend import egress_guard
+    return JSONResponse(egress_guard.status(live=bool(live)))
+
+
+@app.post("/api/security/egress/setup")
+async def security_egress_setup(user: str = Depends(require_local_auth)):
+    """Richtet die Internet-Egress-Sperre ein bzw. repariert sie (Admin, root).
+
+    Idempotent: legt den netzwerkgesperrten OS-Benutzer an, schreibt die
+    nftables-Regel (uid + DNS-Resolver werden automatisch erkannt) und den
+    Autostart-Dienst, laedt/aktiviert beides und setzt die Einstellung
+    sandbox_shell_user_noinet. Gibt die durchgefuehrten Schritte + den neuen
+    Status (inkl. Live-Test) zurueck.
+    """
+    from backend import egress_guard
+    res = egress_guard.setup()
+    return JSONResponse(res, status_code=200 if res.get("ok") else 500)
+
+
 @app.get("/api/cert")
 async def download_cert():
     """Zertifikat zum Download anbieten (DER-Format .cer für Windows)."""

@@ -331,7 +331,7 @@ const _I18N = {
 
         // ── Security Form Labels ──────────────────────────────
         'security.section_pw':      'Kennwort ändern',
-        'security.section_ad':      'Active Directory / LDAP',
+        'security.section_ad':      'Berechtigungen (lokal und Active Directory / LDAP)',
         'security.section_2fa':     'Zwei-Faktor-Authentifizierung (2FA)',
         'security.section_status':  'Sicherheitsstatus',
         'security.section_incidents':   'Angriffsprävention und Sicherheitsvorfälle',
@@ -1318,7 +1318,7 @@ const _I18N = {
 
         // ── Security Form Labels ──────────────────────────────
         'security.section_pw':      'Change Password',
-        'security.section_ad':      'Active Directory / LDAP',
+        'security.section_ad':      'Permissions (local and Active Directory / LDAP)',
         'security.section_2fa':     'Two-Factor Authentication (2FA)',
         'security.section_status':  'Security Status',
         'security.section_incidents':   'Attack prevention & security incidents',

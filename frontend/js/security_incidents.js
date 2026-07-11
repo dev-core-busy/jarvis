@@ -64,6 +64,13 @@
             if (egVerify) egVerify.addEventListener('click', function () { Mgr.loadEgress(true); });
             var egDown = $('sec-egress-teardown');
             if (egDown) egDown.addEventListener('click', function () { Mgr.teardownEgress(); });
+            // OS-Sandbox: Aktivieren / Isolation testen / Deaktivieren
+            var sbSetup = $('sec-sandbox-setup');
+            if (sbSetup) sbSetup.addEventListener('click', function () { Mgr.setupSandbox(); });
+            var sbVerify = $('sec-sandbox-verify');
+            if (sbVerify) sbVerify.addEventListener('click', function () { Mgr.loadSandbox(true); });
+            var sbDown = $('sec-sandbox-teardown');
+            if (sbDown) sbDown.addEventListener('click', function () { Mgr.teardownSandbox(); });
         },
 
         _showDoc: function (show) {
@@ -83,10 +90,7 @@
                 })
                 .catch(function () {});
             // OS-Sandbox-Status
-            fetch('/api/security/sandbox', { headers: authHeaders() })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (d) { Mgr.renderSandbox(d); })
-                .catch(function () {});
+            Mgr.loadSandbox(false);
             // Letzte Zugriffs-Verstöße
             fetch('/api/security/violations', { headers: authHeaders() })
                 .then(function (r) { return r.ok ? r.json() : null; })
@@ -197,23 +201,96 @@
                 });
         },
 
+        loadSandbox: function (live) {
+            var box = $('sec-sandbox-status');
+            if (box && live) box.innerHTML = '⏳ Isolationstest läuft…';
+            fetch('/api/security/sandbox' + (live ? '?live=1' : ''), { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) { Mgr.renderSandbox(d); })
+                .catch(function () {});
+        },
+
         renderSandbox: function (d) {
             var box = $('sec-sandbox-status');
             if (!box) return;
             if (!d) { box.innerHTML = ''; return; }
-            var active = !!d.active, exists = !!d.user_exists;
-            var dot = (active && exists) ? '🟢' : (active ? '🟠' : '⚪');
-            var txt;
-            if (active && exists) {
-                txt = T('security.sandbox_on', 'OS-Sandbox aktiv') + ' — '
-                    + T('security.sandbox_user', 'Sandbox-Benutzer') + ': ' + esc(d.user);
-            } else if (active && !exists) {
-                txt = '⚠️ ' + T('security.sandbox_missing', 'Sandbox konfiguriert, aber OS-Benutzer fehlt')
-                    + ': ' + esc(d.user);
-            } else {
-                txt = T('security.sandbox_off', 'OS-Sandbox inaktiv – nur Code-Härtung aktiv');
+            function row(ok, label) {
+                var mark = ok === true ? '✅' : (ok === false ? '❌' : '❔');
+                return '<div>' + mark + ' ' + esc(label) + '</div>';
             }
-            box.innerHTML = '<span style="font-size:0.9rem;">' + dot + ' ' + txt + '</span>';
+            var iso = d.isolation || null;
+            var head;
+            if (d.ok) {
+                head = (iso && iso.secret_readable)
+                    ? '🟠 <b>Aktiv – aber Secrets für den Sandbox-Benutzer noch lesbar!</b>'
+                    : '🟢 <b>Aktiv' + (iso ? ' &amp; live verifiziert' : '') + '</b>';
+            } else if (d.active && !d.user_exists) {
+                head = '🟠 <b>Konfiguriert, aber OS-Benutzer fehlt</b>';
+            } else if (d.active && !d.secrets_locked) {
+                head = '🟠 <b>Aktiv, aber Secret-Dateirechte offen</b>';
+            } else if (!d.active) {
+                head = '⚪ <b>Inaktiv – nur Code-Härtung</b>';
+            } else {
+                head = '🔴 <b>Nicht vollständig eingerichtet</b>';
+            }
+            var rows = ''
+                + row(d.active, 'OS-Sandbox aktiviert (Einstellung sandbox_shell_user)')
+                + row(d.user_exists, 'Unprivilegierter OS-Benutzer: ' + (d.user || '') + (d.uid != null ? ' (uid ' + d.uid + ')' : ' — fehlt'))
+                + row(d.secrets_locked, 'Secret-Dateien gesperrt (nur root lesbar)');
+            if (iso) {
+                rows += row(iso.secret_readable === false, 'Live-Test: Secrets für Sandbox-Benutzer ' + (iso.secret_readable ? 'LESBAR ⚠' : 'nicht lesbar'));
+                rows += row(iso.tmp_writable === true, 'Live-Test: Arbeitsbereich /tmp schreibbar');
+            }
+            box.innerHTML = '<div style="margin-bottom:6px;">' + head + '</div>'
+                + '<div style="line-height:1.75;">' + rows + '</div>';
+        },
+
+        // Generischer POST-Aktions-Helfer (Einrichten/Deaktivieren) mit Schritt-Ausgabe
+        _runAction: function (o) {
+            if (o.confirm && !window.confirm(o.confirm)) return;
+            var btn = $(o.btn), out = $(o.result), orig = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = o.busy; }
+            fetch(o.url, { method: 'POST', headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    d = d || {};
+                    if (out) {
+                        out.style.display = 'block';
+                        var good = !!d.ok;
+                        out.style.borderColor = good ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)';
+                        out.style.background = good ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)';
+                        var lines = (d.steps || []).map(function (s) {
+                            return (s.ok ? '✅' : '❌') + ' ' + esc(s.name) + (s.detail && !s.ok ? ' – ' + esc(s.detail) : '');
+                        }).join('<br>');
+                        out.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">'
+                            + esc(good ? o.okMsg : o.failMsg) + '</div>' + lines;
+                    }
+                    if (o.render) o.render(d.status);
+                })
+                .catch(function () { if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Ausführung.'; } })
+                .then(function () { if (btn) { btn.disabled = false; btn.textContent = orig || o.busy; } });
+        },
+
+        setupSandbox: function () {
+            Mgr._runAction({
+                url: '/api/security/sandbox/setup', btn: 'sec-sandbox-setup', result: 'sec-sandbox-result',
+                busy: 'Wird eingerichtet…', okMsg: 'OS-Sandbox aktiv & verifiziert.',
+                failMsg: 'Einrichtung unvollständig – Details:',
+                render: function (s) { Mgr.renderSandbox(s); }
+            });
+        },
+
+        teardownSandbox: function () {
+            Mgr._runAction({
+                url: '/api/security/sandbox/teardown', btn: 'sec-sandbox-teardown', result: 'sec-sandbox-result',
+                busy: 'Wird deaktiviert…', okMsg: 'OS-Sandbox deaktiviert.',
+                failMsg: 'Deaktivierung unvollständig – Details:',
+                render: function (s) { Mgr.renderSandbox(s); },
+                confirm: 'OS-Sandbox wirklich deaktivieren?\n\n'
+                    + 'Shell-Befehle von Netzwerk-Benutzern MIT Internet-Freigabe laufen danach '
+                    + 'wieder als Dienst-Benutzer (nur Code-Härtung, keine harte OS-Grenze). '
+                    + 'Benutzer OHNE Internet-Freigabe bleiben über die Egress-Sperre gekapselt.'
+            });
         },
 
         renderViolations: function (list) {

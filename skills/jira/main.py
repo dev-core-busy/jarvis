@@ -314,7 +314,10 @@ class JiraOrgProfileTool(_Base):
                 "seitenweise (Paginierung, umgeht das 100er-Seitenlimit) und liefert "
                 "deterministische Kennzahlen ueber den GESAMTBESTAND: Gesamtzahl, Verteilung "
                 "nach Prioritaet/Status/Typ, Anzahl unterschiedlicher Bearbeiter und Melder, "
-                "Erstellzeitraum und Durchschnittsalter, plus die komplette Ticket-Liste. "
+                "Erstellzeitraum, Durchschnittsalter und Ø-Bearbeitungsdauer, plus die "
+                "komplette Ticket-Liste MIT Anlagedatum, Schliessdatum und Dauer[Tage] pro "
+                "Ticket. Genau diese Einzeldaten fuer Diagramme/Auswertungen ueber Ticket-"
+                "Zeitverlaeufe verwenden (z.B. Anlagedatum vs. Bearbeitungsdauer). "
                 "IMMER dieses Tool fuer vollstaendige Kunden-/Eskalationsprofile verwenden – "
                 "es deckt ALLE Tickets ab (keine Stichprobe). Kommentar-Inhalte/Tonalitaet "
                 "sind NICHT enthalten (dafuer einzelne Tickets per jira_get_issue nachladen).")
@@ -334,13 +337,17 @@ class JiraOrgProfileTool(_Base):
         org = crm_org_clause(term)
         jql = (org if org else 'text ~ "%s"' % term.replace('"', "'")) + " ORDER BY created ASC"
         cap = _max_results()
+        # resolutiondate zusaetzlich laden – fuer "Dauer bis zum Schliessen" pro Ticket
+        # (ermoeglicht z.B. ein Diagramm Anlagedatum vs. Bearbeitungsdauer).
+        fields = ("summary,status,project,issuetype,priority,assignee,reporter,"
+                  "updated,created,resolutiondate")
         issues = []
         total = None
         start = 0
         try:
             while len(issues) < cap:
                 want = min(100, cap - len(issues))
-                data = await _to_thread(c.search, jql, want, start)
+                data = await _to_thread(c.search, jql, want, start, fields)
                 if total is None:
                     total = data.get("total", 0)
                 batch = data.get("issues", [])
@@ -413,16 +420,36 @@ class JiraOrgProfileTool(_Base):
                 min(created).date(), max(created).date(), avg_age))
         if updated:
             L.append("Letzte Aktivitaet (spaetestes 'updated'): %s" % max(updated).date())
+        # Bearbeitungsdauer (created -> resolutiondate) ueber alle geschlossenen Tickets
+        durations = []
+        for it in issues:
+            f = it.get("fields", {}) or {}
+            cd = _parse(f.get("created"))
+            rd = _parse(f.get("resolutiondate"))
+            if cd and rd:
+                durations.append((rd - cd).days)
+        if durations:
+            L.append("Geschlossene Tickets: %d | Ø-Bearbeitungsdauer: %d Tage (min %d / max %d)" % (
+                len(durations), round(sum(durations) / len(durations)),
+                min(durations), max(durations)))
         L.append("")
         L.append("HINWEIS: Kommentar-Anzahl sowie oeffentliche/interne Kommentar-INHALTE und "
                  "Tonalitaet sind hier NICHT enthalten – dafuer einzelne Tickets per "
                  "jira_get_issue nachladen (qualitative Bewertung).")
         L.append("")
-        L.append("Alle %d Tickets (Key | Prioritaet | Status | Typ):" % len(issues))
+        L.append("Alle %d Tickets (Key | Prioritaet | Status | Typ | angelegt | geschlossen | "
+                 "Dauer[Tage]):" % len(issues))
         for it in issues:
             b = issue_brief(it, c.base)
-            L.append("- %s | %s | %s | %s" % (b.get("key"), b.get("priority") or "—",
-                                               b.get("status") or "—", b.get("type") or "—"))
+            f = it.get("fields", {}) or {}
+            cd = _parse(f.get("created"))
+            rd = _parse(f.get("resolutiondate"))
+            c_s = cd.date().isoformat() if cd else "—"
+            r_s = rd.date().isoformat() if rd else "offen"
+            dur = str((rd - cd).days) if (cd and rd) else "—"
+            L.append("- %s | %s | %s | %s | %s | %s | %s" % (
+                b.get("key"), b.get("priority") or "—", b.get("status") or "—",
+                b.get("type") or "—", c_s, r_s, dur))
         return "\n".join(L)
 
 

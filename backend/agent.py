@@ -705,7 +705,16 @@ KRITISCH – Autonomie-Regeln:
                 "ERLAUBT: Alle Lese-Operationen auf nicht-sensiblen Dateien, Wissensdatenbank, "
                 "Systeminformationen (date, ls, df, free, uname, ps, top, uptime, etc.), "
                 "Allgemeinwissen, Berechnungen, Textverarbeitung. "
-                "Bei Anfragen auf gesperrte Ressourcen: Höflich ablehnen und erklären was nicht erlaubt ist."
+                "Bei Anfragen auf gesperrte Ressourcen: Höflich ablehnen und erklären was nicht erlaubt ist. "
+                "DIAGRAMME/CHARTS/GRAFIKEN sind AUSDRÜCKLICH ERLAUBT und funktionieren OHNE Shell: "
+                "Wenn der Nutzer ein Diagramm/Chart/eine Grafik aus Daten will, gib IMMER SOFORT einen "
+                "```chartjs-Codeblock (reines JSON: type, data, options) aus – die Chat-UI rendert ihn "
+                "direkt inline als interaktives Diagramm. Hole die nötigen Daten mit den erlaubten Tools "
+                "(z.B. jira_org_profile liefert pro Ticket Anlagedatum/Dauer) und baue daraus den Block. "
+                "STRENG VERBOTEN bei Diagramm-Anfragen: matplotlib/Shell verlangen; Alternativen wie "
+                "ASCII/CSV/HTML-Datei anbieten; zurückfragen welche Variante gewünscht ist; behaupten, du "
+                "könntest kein Diagramm erstellen oder es sei eine 'HTML-Datei zum Öffnen'. Einfach den "
+                "chartjs-Block ausgeben."
             )
 
         # Benutzer-Instruktionen laden (data/instructions/*.md)

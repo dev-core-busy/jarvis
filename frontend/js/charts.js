@@ -28,22 +28,71 @@
         polarArea: 1, bubble: 1, scatter: 1
     };
 
-    // Findet zu einer '{'-Position die passende schliessende '}' – string-bewusst
-    // (Klammern in Strings zaehlen nicht). -1 bei fehlender Schliessung.
+    // Findet zu einer '{'-Position die passende schliessende '}'. String-bewusst
+    // fuer "…", '…' UND Template-Literals `…${ … }…` (inkl. Interpolation, deren
+    // Klammern korrekt mitgezaehlt werden). -1 bei fehlender Schliessung.
     function findMatchingBrace(s, start) {
-        var depth = 0, inStr = false, q = '';
-        for (var i = start; i < s.length; i++) {
+        var depth = 0, i = start, mode = 'code', interp = [];
+        while (i < s.length) {
             var c = s[i];
-            if (inStr) {
-                if (c === '\\') { i++; continue; }
-                if (c === q) inStr = false;
-                continue;
+            if (mode === '"' || mode === "'") {
+                if (c === '\\') { i += 2; continue; }
+                if (c === mode) mode = 'code';
+                i++; continue;
             }
-            if (c === '"' || c === "'") { inStr = true; q = c; continue; }
-            if (c === '{') depth++;
-            else if (c === '}') { depth--; if (depth === 0) return i; }
+            if (mode === '`') {
+                if (c === '\\') { i += 2; continue; }
+                if (c === '`') { mode = 'code'; i++; continue; }
+                if (c === '$' && s[i + 1] === '{') { interp.push(depth); depth++; mode = 'code'; i += 2; continue; }
+                i++; continue;
+            }
+            if (c === '"' || c === "'") { mode = c; i++; continue; }
+            if (c === '`') { mode = '`'; i++; continue; }
+            if (c === '{') { depth++; }
+            else if (c === '}') {
+                depth--;
+                if (depth === 0) return i;
+                if (interp.length && depth === interp[interp.length - 1]) { interp.pop(); mode = '`'; }
+            }
+            i++;
         }
         return -1;
+    }
+
+    // Haengt fehlende schliessende Klammern an (string-/template-bewusst). LLMs
+    // vergessen bei langen Configs gern die letzte '}' -> ohne diese Reparatur
+    // scheitert JSON.parse. Wird nur im Fallback benutzt; bei balanciertem Input
+    // ein No-Op.
+    function closeUnbalanced(src) {
+        var stack = [], i = 0, mode = 'code', interp = [];
+        while (i < src.length) {
+            var c = src[i];
+            if (mode === '"' || mode === "'") {
+                if (c === '\\') { i += 2; continue; }
+                if (c === mode) mode = 'code';
+                i++; continue;
+            }
+            if (mode === '`') {
+                if (c === '\\') { i += 2; continue; }
+                if (c === '`') { mode = 'code'; i++; continue; }
+                if (c === '$' && src[i + 1] === '{') { interp.push(stack.length); stack.push('{'); mode = 'code'; i += 2; continue; }
+                i++; continue;
+            }
+            if (c === '"' || c === "'") { mode = c; i++; continue; }
+            if (c === '`') { mode = '`'; i++; continue; }
+            if (c === '{') { stack.push('{'); }
+            else if (c === '[') { stack.push('['); }
+            else if (c === '}') {
+                if (stack.length) stack.pop();
+                if (interp.length && stack.length === interp[interp.length - 1]) { interp.pop(); mode = '`'; }
+            } else if (c === ']') {
+                if (stack.length) stack.pop();
+            }
+            i++;
+        }
+        var tail = '';
+        for (var k = stack.length - 1; k >= 0; k--) tail += (stack[k] === '{' ? '}' : ']');
+        return src + tail;
     }
 
     // Ersetzt Funktions-WERTE (nach einem ':') durch null, damit die Spec
@@ -111,11 +160,11 @@
         try {
             spec = JSON.parse(raw);
         } catch (e1) {
-            // Fallback: LLM-Config enthaelt vermutlich JS-Callbacks -> Funktionswerte
-            // entfernen (nie ausfuehren) und erneut parsen. Gueltiges JSON kommt hier
-            // nie an, bleibt also unveraendert.
+            // Fallback: LLM-Config ist kein sauberes JSON. Zwei typische Ursachen
+            // reparieren (nie ausfuehren): JS-Callbacks entfernen UND fehlende
+            // schliessende Klammern anhaengen. Gueltiges JSON kommt hier nie an.
             try {
-                spec = JSON.parse(stripJsFunctions(raw));
+                spec = JSON.parse(closeUnbalanced(stripJsFunctions(raw)));
             } catch (e2) {
                 fail(el, 'Chart-Daten ungültig: ' + (e2 && e2.message ? e2.message : e2));
                 return;

@@ -12,14 +12,14 @@
     'use strict';
 
     var FIELDS = {
-        'ad-allowed-users':           { kind: 'users',  multi: true,  sep: ',',  list: true },
-        'ad-allowed-group':           { kind: 'groups', multi: true,  sep: '\n', list: true },
-        'ad-internet-users':          { kind: 'users',  multi: true,  sep: ',',  list: false },
-        'ad-internet-group':          { kind: 'groups', multi: false, sep: '\n', list: false },
-        'ad-admins':                  { kind: 'users',  multi: true,  sep: ',',  list: false },
-        'ad-admins-group':            { kind: 'groups', multi: false, sep: '\n', list: false },
-        'ad-knowledge-editors':       { kind: 'users',  multi: true,  sep: ',',  list: false },
-        'ad-knowledge-editors-group': { kind: 'groups', multi: false, sep: '\n', list: false }
+        'ad-allowed-users':           { kind: 'users',  multi: true, sep: ',',  list: true },
+        'ad-allowed-group':           { kind: 'groups', multi: true, sep: '\n', list: true },
+        'ad-internet-users':          { kind: 'users',  multi: true, sep: ',',  list: true },
+        'ad-internet-group':          { kind: 'groups', multi: true, sep: '\n', list: true },
+        'ad-admins':                  { kind: 'users',  multi: true, sep: ',',  list: true },
+        'ad-admins-group':            { kind: 'groups', multi: true, sep: '\n', list: true },
+        'ad-knowledge-editors':       { kind: 'users',  multi: true, sep: ',',  list: true },
+        'ad-knowledge-editors-group': { kind: 'groups', multi: true, sep: '\n', list: true }
     };
 
     var _cred = { user: '', password: '' };

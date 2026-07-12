@@ -2592,7 +2592,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <span>Editor-Gruppe (AD-Gruppe)</span>
                                         <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
                                     </label>
-                                    <input type="text" id="ad-knowledge-editors-group" placeholder="z.B. CN=Knowledge-Editors,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
+                                    <textarea id="ad-knowledge-editors-group" rows="1" placeholder="z.B. CN=Knowledge-Editors,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
                                         ⚠ Gruppenprüfung wird beim Login gecacht – Änderungen erfordern Neuanmeldung der betroffenen Benutzer.
                                     </div>
@@ -2626,7 +2626,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <span>Internet-Gruppe (AD-Gruppe)</span>
                                         <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
                                     </label>
-                                    <input type="text" id="ad-internet-group" placeholder="z.B. CN=Internet-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
+                                    <textarea id="ad-internet-group" rows="1" placeholder="z.B. CN=Internet-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
                                         ⚠ Gruppenprüfung wird beim Login gecacht – Änderungen erfordern Neuanmeldung der betroffenen Benutzer.
                                     </div>
@@ -2674,7 +2674,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <span>Admin-Gruppe (AD-Gruppe)</span>
                                         <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
                                     </label>
-                                    <input type="text" id="ad-admins-group" placeholder="z.B. CN=Jarvis-Admins,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
+                                    <textarea id="ad-admins-group" rows="1" placeholder="z.B. CN=Jarvis-Admins,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
                                         ⚠ Gruppenprüfung wird beim Login gecacht – Änderungen erfordern Neuanmeldung der betroffenen Benutzer.
                                     </div>
@@ -2708,8 +2708,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             document.getElementById('ad-domain').value        = d.domain        || '';
                                             document.getElementById('ad-allowed-users').value = d.allowed_users || '';
                                             document.getElementById('ad-allowed-group').value = d.allowed_group || '';
-                                            // Token-Listen (Chips) neu aufbauen
-                                            ['ad-allowed-users','ad-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
                                             document.getElementById('ad-knowledge-editors').value = d.knowledge_editors || '';
                                             document.getElementById('ad-knowledge-editors-group').value = d.knowledge_editors_group || '';
                                             document.getElementById('ad-internet-users').value = d.internet_users || '';
@@ -2720,6 +2718,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             document.getElementById('ad-bind-pw-hint').textContent = d.bind_password_set ? '✓ Passwort gespeichert (leer lassen = unverändert)' : 'Kein Passwort gespeichert.';
                                             document.getElementById('ad-admins').value = d.admins || '';
                                             document.getElementById('ad-admins-group').value = d.admins_group || '';
+                                            // Token-Listen (Chips) aller AD-Felder neu aufbauen (nach dem Setzen aller Werte)
+                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
                                             _adUpdateStatus(d);
                                         } catch(e) {}
                                     }
@@ -3194,7 +3194,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/branding.js?v=16"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=8"></script>
-    <script src="/static/js/ldap_picker.js?v=2"></script>
+    <script src="/static/js/ldap_picker.js?v=3"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/app.js?v=144"></script>
 </body>

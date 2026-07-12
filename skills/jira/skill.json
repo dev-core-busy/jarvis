@@ -4,7 +4,7 @@
     "version": "1.0.0",
     "author": "Jarvis",
     "module": "main",
-    "tools": ["jira_test_connection", "jira_search", "jira_get_issue", "jira_org_profile", "jira_org_analysis", "jira_list_projects", "jira_add_comment", "jira_create_issue"],
+    "tools": ["jira_test_connection", "jira_search", "jira_get_issue", "jira_org_profile", "jira_org_analysis", "jira_ticket_chart", "jira_list_projects", "jira_add_comment", "jira_create_issue"],
     "category": "wissen",
     "icon": "ticket",
     "system": false,
@@ -60,6 +60,11 @@
                 "name": "jira_org_analysis",
                 "label": "Eskalationsprofil (Map-Reduce, alle Tickets)",
                 "desc": "Vollstaendige Kunden-Eskalationsprofil-Analyse ueber ALLE Tickets per serverseitigem Map-Reduce (Beschreibung+Kommentare batchweise); liefert das zusammenfassende JSON mit Scores 0-10."
+            },
+            {
+                "name": "jira_ticket_chart",
+                "label": "Ticket-Diagramm (fertiger chartjs-Block)",
+                "desc": "Aggregiert ALLE Tickets eines Kunden serverseitig (monatlich/quartalsweise/jaehrlich) und liefert ein FERTIGES Liniendiagramm als chartjs-Block (x=Zeit nach Anlagedatum, y=Ø-Bearbeitungsdauer + Anzahl). Fuer 'Diagramm der Tickets von crm-XXXX' – Block unveraendert ausgeben."
             }
         ],
         "use_cases": [

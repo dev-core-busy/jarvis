@@ -643,6 +643,132 @@ class JiraOrgAnalysisTool(_Base):
         return s
 
 
+class JiraTicketChartTool(_Base):
+    """Erzeugt ein FERTIGES Diagramm (chartjs-Block) ueber die Tickets eines Kunden.
+
+    Aggregiert serverseitig (vertraegt beliebig viele Tickets) und liefert den
+    fertigen chartjs-JSON-Block. So muss das LLM NICHT hunderte Rohpunkte selbst
+    konstruieren (woran kleinere lokale Modelle scheitern) – es gibt den Block
+    nur unveraendert aus.
+    """
+
+    @property
+    def name(self): return "jira_ticket_chart"
+
+    @property
+    def description(self):
+        return ("Erzeugt ein FERTIGES Liniendiagramm (chartjs-Block) ueber die Tickets einer "
+                "Kunden-/Organisations-ID (z.B. 'crm-10550'): x-Achse = Zeit nach Anlagedatum "
+                "(monatlich/quartalsweise/jaehrlich aggregiert), y-Achse = durchschnittliche "
+                "Bearbeitungsdauer in Tagen plus Ticket-Anzahl. Serverseitig aggregiert (vertraegt "
+                "beliebig viele Tickets) und liefert den FERTIGEN chartjs-JSON-Block. IMMER dieses "
+                "Tool fuer 'Diagramm/Chart der Tickets von crm-XXXX (Anlagedatum vs. Dauer)' "
+                "verwenden und den gelieferten chartjs-Block UNVERAENDERT an den Nutzer ausgeben – "
+                "NICHT die Rohdaten selbst zeichnen.")
+
+    def parameters_schema(self):
+        return {"type": "OBJECT", "properties": {
+            "query": {"type": "STRING", "description": "Kunden-/Organisations-ID, z.B. 'crm-10550'."},
+            "bucket": {"type": "STRING", "description": "Zeitraster: 'month' (Standard), 'quarter' oder 'year'."},
+        }, "required": ["query"]}
+
+    async def execute(self, **kwargs):
+        c = self._guard()
+        if not c:
+            return "Jira ist nicht konfiguriert."
+        term = (kwargs.get("query") or kwargs.get("key") or "").strip()
+        if not term:
+            return "Bitte eine Kunden-/Organisations-ID angeben (z.B. crm-10550)."
+        bucket = (kwargs.get("bucket") or "month").strip().lower()
+        if bucket not in ("month", "quarter", "year"):
+            bucket = "month"
+        org = crm_org_clause(term)
+        jql = (org if org else 'text ~ "%s"' % term.replace('"', "'")) + " ORDER BY created ASC"
+        cap = _max_results()
+        fields = "created,resolutiondate"
+        issues, total, start = [], None, 0
+        try:
+            while len(issues) < cap:
+                want = min(100, cap - len(issues))
+                data = await _to_thread(c.search, jql, want, start, fields)
+                if total is None:
+                    total = data.get("total", 0)
+                batch = data.get("issues", [])
+                if not batch:
+                    break
+                issues.extend(batch)
+                start += len(batch)
+                if start >= (total or 0):
+                    break
+        except JiraError as e:
+            return _fmt_err(e)
+        if not issues:
+            return "Keine Tickets gefunden.\nJQL: %s" % jql
+
+        import datetime as _dt
+        import json as _json
+        from collections import OrderedDict
+
+        def _parse(s):
+            if not s:
+                return None
+            try:
+                return _dt.datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                return None
+
+        def _key(d):
+            if bucket == "year":
+                return "%04d" % d.year
+            if bucket == "quarter":
+                return "%04d-Q%d" % (d.year, (d.month - 1) // 3 + 1)
+            return "%04d-%02d" % (d.year, d.month)
+
+        # key -> [sum_dauer, n_geschlossen, n_angelegt]
+        buckets = OrderedDict()
+        for it in issues:
+            f = it.get("fields", {}) or {}
+            cd = _parse(f.get("created"))
+            if not cd:
+                continue
+            b = buckets.setdefault(_key(cd), [0.0, 0, 0])
+            b[2] += 1
+            rd = _parse(f.get("resolutiondate"))
+            if rd:
+                b[0] += max(0, (rd - cd).days)
+                b[1] += 1
+        labels = list(buckets.keys())
+        avg_dur = [round(buckets[k][0] / buckets[k][1], 1) if buckets[k][1] else None for k in labels]
+        counts = [buckets[k][2] for k in labels]
+
+        spec = {
+            "type": "line",
+            "data": {"labels": labels, "datasets": [
+                {"label": "Ø Dauer bis Schließen [Tage]", "data": avg_dur,
+                 "borderColor": "#2563eb", "backgroundColor": "rgba(37,99,235,0.1)",
+                 "fill": False, "tension": 0.2, "spanGaps": True, "yAxisID": "y"},
+                {"label": "Tickets angelegt", "data": counts,
+                 "borderColor": "#f59e0b", "backgroundColor": "rgba(245,158,11,0.1)",
+                 "fill": False, "tension": 0.2, "yAxisID": "y1"},
+            ]},
+            "options": {
+                "plugins": {"title": {"display": True,
+                            "text": "Tickets %s – Ø Bearbeitungsdauer & Anzahl (%s)" % (term.upper(), bucket)}},
+                "scales": {
+                    "y": {"title": {"display": True, "text": "Ø Dauer [Tage]"}, "beginAtZero": True},
+                    "y1": {"position": "right", "title": {"display": True, "text": "Anzahl"},
+                           "beginAtZero": True, "grid": {"drawOnChartArea": False}},
+                },
+            },
+        }
+        block = "```chartjs\n" + _json.dumps(spec, ensure_ascii=False) + "\n```"
+        n_closed = sum(buckets[k][1] for k in labels)
+        return ("Diagramm für %s fertig aggregiert: %d Tickets über %d %s-Buckets "
+                "(%d geschlossen, mit Bearbeitungsdauer). Gib den folgenden chartjs-Block "
+                "UNVERÄNDERT und ohne weiteren Text an den Nutzer aus:\n\n%s"
+                % (term.upper(), len(issues), len(labels), bucket, n_closed, block))
+
+
 def get_tools():
     return [
         JiraTestConnectionTool(),
@@ -650,6 +776,7 @@ def get_tools():
         JiraGetIssueTool(),
         JiraOrgProfileTool(),
         JiraOrgAnalysisTool(),
+        JiraTicketChartTool(),
         JiraListProjectsTool(),
         JiraAddCommentTool(),
         JiraCreateIssueTool(),

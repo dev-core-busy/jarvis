@@ -2367,6 +2367,54 @@ async def security_egress_teardown(user: str = Depends(require_local_auth)):
     return JSONResponse(res, status_code=200 if res.get("ok") else 500)
 
 
+async def _ldap_dir_search(request: Request, kind: str, admin_user: str):
+    """Gemeinsame Logik für die AD-Verzeichnissuche (User/Gruppen). Nutzt das
+    Service-Konto, falls gesetzt; sonst On-Demand-Credentials aus dem Body."""
+    from backend import ldap_directory
+    import asyncio as _asyncio
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    q = (body.get("q") or "").strip()
+    svc = (config.get_setting("ad_bind_user", "") or "").strip()
+    bind_user = None
+    bind_pw = None
+    if not svc:
+        bind_pw = body.get("password") or ""
+        bind_user = (body.get("bind_user") or admin_user or "").strip()
+        if not bind_pw:
+            return JSONResponse({"error": "NO_CREDENTIALS"}, status_code=428)
+    fn = ldap_directory.search_users if kind == "users" else ldap_directory.search_groups
+    try:
+        rows = await _asyncio.to_thread(fn, q, bind_user, bind_pw)
+        return JSONResponse({kind: rows, "count": len(rows)})
+    except RuntimeError as e:
+        code = str(e)
+        if code == "NO_CREDENTIALS":
+            return JSONResponse({"error": "NO_CREDENTIALS"}, status_code=428)
+        if code.startswith("BIND_FAILED"):
+            return JSONResponse({"error": "BIND_FAILED", "detail": code}, status_code=401)
+        return JSONResponse({"error": code}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)[:200]}, status_code=500)
+
+
+@app.post("/api/ldap/users")
+async def ldap_search_users(request: Request, user: str = Depends(require_local_auth)):
+    """Sucht AD-Benutzer für den User-Picker (Admin). Body: {q, [password], [bind_user]}.
+    Nutzt das Service-Konto falls konfiguriert; sonst On-Demand-Bind. Read-only.
+    Antwort: {users:[{sam,display,mail}], count} oder 428 NO_CREDENTIALS / 401 BIND_FAILED."""
+    return await _ldap_dir_search(request, "users", user)
+
+
+@app.post("/api/ldap/groups")
+async def ldap_search_groups(request: Request, user: str = Depends(require_local_auth)):
+    """Sucht AD-Gruppen für den Gruppen-Picker (Admin). Body: {q, [password], [bind_user]}.
+    Antwort: {groups:[{cn,dn,desc}], count} oder 428 NO_CREDENTIALS / 401 BIND_FAILED."""
+    return await _ldap_dir_search(request, "groups", user)
+
+
 @app.get("/api/cert")
 async def download_cert():
     """Zertifikat zum Download anbieten (DER-Format .cer für Windows)."""
@@ -2541,6 +2589,13 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("ad_internet_group", body["ad_internet_group"])
     if "ad_internet_deny_all" in body:
         config.save_setting("ad_internet_deny_all", bool(body["ad_internet_deny_all"]))
+    if "ad_bind_user" in body:
+        _bu = (body["ad_bind_user"] or "").strip()
+        config.save_setting("ad_bind_user", _bu)
+        if not _bu:  # Service-Konto deaktiviert -> Passwort verwerfen
+            config.save_setting("ad_bind_password", "")
+    if body.get("ad_bind_password"):  # nur bei tatsächlicher Eingabe aktualisieren
+        config.save_setting("ad_bind_password", body["ad_bind_password"])
         _internet_access_cache.clear()
     if "ad_admins" in body:
         config.save_setting("ad_admins", body["ad_admins"])
@@ -2615,6 +2670,9 @@ async def get_ad_status(user: str = Depends(require_auth)):
             "users"     if config.get_setting("ad_admins", "") else
             "none"      # nur lokaler jarvis
         ),
+        # Service-Konto für das Verzeichnis-Durchsuchen (Passwort nie ausliefern)
+        "bind_user": config.get_setting("ad_bind_user", ""),
+        "bind_password_set": bool((config.get_setting("ad_bind_password", "") or "").strip()),
     })
 
 

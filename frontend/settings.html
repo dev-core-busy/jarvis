@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=5">
-    <link rel="stylesheet" href="/static/css/style.css?v=113">
+    <link rel="stylesheet" href="/static/css/style.css?v=114">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -2534,6 +2534,24 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </div>
 
+                                <!-- ── Verzeichnis-Suche (Service-Konto, optional) ── -->
+                                <div style="margin:6px 0 4px;padding:12px 14px;border:1px solid rgba(255,255,255,0.09);border-radius:10px;background:rgba(255,255,255,0.02);">
+                                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                                        <span style="font-size:1rem;">🔎</span>
+                                        <span style="font-weight:600;font-size:0.9rem;">Verzeichnis-Suche (Service-Konto, optional)</span>
+                                    </div>
+                                    <p class="kb-hint" style="margin:0 0 10px;">Für die <b>Durchsuchen</b>-Buttons an den Feldern unten. Ein nur-lesendes Service-Konto ermöglicht komfortables Blättern ohne Passwortabfrage. Leer lassen = beim Durchsuchen wird einmalig ein AD-Passwort abgefragt (wird nicht gespeichert).</p>
+                                    <div class="form-group" style="margin-bottom:8px;">
+                                        <label><span>Bind-Benutzer</span><span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– z.B. <code>svc-jarvis</code> oder <code>svc-jarvis@domain</code></span></label>
+                                        <input type="text" id="ad-bind-user" autocomplete="off" placeholder="Leer = Passwortabfrage beim Durchsuchen" style="width:60%;box-sizing:border-box;">
+                                    </div>
+                                    <div class="form-group" style="margin-bottom:0;">
+                                        <label><span>Bind-Passwort</span></label>
+                                        <input type="password" id="ad-bind-password" autocomplete="new-password" placeholder="•••••• (leer lassen = unverändert)" style="width:60%;box-sizing:border-box;">
+                                        <div id="ad-bind-pw-hint" style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;"></div>
+                                    </div>
+                                </div>
+
                                 <!-- Zugriffssteuerung -->
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
@@ -2695,6 +2713,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             document.getElementById('ad-internet-users').value = d.internet_users || '';
                                             document.getElementById('ad-internet-group').value = d.internet_group || '';
                                             document.getElementById('ad-internet-deny-all').checked = !!d.internet_deny_all;
+                                            document.getElementById('ad-bind-user').value = d.bind_user || '';
+                                            document.getElementById('ad-bind-password').value = '';
+                                            document.getElementById('ad-bind-pw-hint').textContent = d.bind_password_set ? '✓ Passwort gespeichert (leer lassen = unverändert)' : 'Kein Passwort gespeichert.';
                                             document.getElementById('ad-admins').value = d.admins || '';
                                             document.getElementById('ad-admins-group').value = d.admins_group || '';
                                             _adUpdateStatus(d);
@@ -2829,6 +2850,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                     ad_internet_users:         document.getElementById('ad-internet-users').value.trim(),
                                                     ad_internet_group:         document.getElementById('ad-internet-group').value.trim(),
                                                     ad_internet_deny_all:      document.getElementById('ad-internet-deny-all').checked,
+                                                    ad_bind_user:              document.getElementById('ad-bind-user').value.trim(),
+                                                    ad_bind_password:          document.getElementById('ad-bind-password').value,
                                                     ad_admins:                 document.getElementById('ad-admins').value.trim(),
                                                     ad_admins_group:           document.getElementById('ad-admins-group').value.trim(),
                                                 })
@@ -3169,6 +3192,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/branding.js?v=16"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=8"></script>
+    <script src="/static/js/ldap_picker.js?v=1"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/app.js?v=144"></script>
 </body>

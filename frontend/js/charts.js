@@ -12,6 +12,13 @@
  *  - Nur eine feste Whitelist an Diagrammtypen wird zugelassen.
  *  - Wir setzen niemals untrusted Inhalt via innerHTML (nur statische
  *    Fehlermeldungen via textContent).
+ *
+ * ROBUSTHEIT: LLMs liefern Chart.js-Configs oft MIT JS-Callbacks (z.B.
+ * "label": function(ctx){...} oder ticks.callback: v => v+'%'). Das ist kein
+ * gueltiges JSON und liess das Rendern frueher mit "Chart-Daten ungueltig"
+ * scheitern. stripJsFunctions() ENTFERNT solche Funktionswerte (ersetzt sie
+ * durch null) VOR dem JSON.parse – die Funktionen werden also nie ausgefuehrt
+ * (Sicherheit bleibt), Chart.js nutzt stattdessen seine Default-Formatierung.
  */
 (function () {
     'use strict';
@@ -20,6 +27,52 @@
         bar: 1, line: 1, pie: 1, doughnut: 1, radar: 1,
         polarArea: 1, bubble: 1, scatter: 1
     };
+
+    // Findet zu einer '{'-Position die passende schliessende '}' – string-bewusst
+    // (Klammern in Strings zaehlen nicht). -1 bei fehlender Schliessung.
+    function findMatchingBrace(s, start) {
+        var depth = 0, inStr = false, q = '';
+        for (var i = start; i < s.length; i++) {
+            var c = s[i];
+            if (inStr) {
+                if (c === '\\') { i++; continue; }
+                if (c === q) inStr = false;
+                continue;
+            }
+            if (c === '"' || c === "'") { inStr = true; q = c; continue; }
+            if (c === '{') depth++;
+            else if (c === '}') { depth--; if (depth === 0) return i; }
+        }
+        return -1;
+    }
+
+    // Ersetzt Funktions-WERTE (nach einem ':') durch null, damit die Spec
+    // gueltiges JSON wird. Wird nie ausgefuehrt – reine Textbereinigung.
+    function stripJsFunctions(src) {
+        // Formen mit Block-Body: function(...){...} bzw. (...) => {...} bzw. x => {...}
+        var blockForms = [
+            /:\s*function\b\s*[A-Za-z0-9_$]*\s*\([^)]*\)\s*\{/,
+            /:\s*\([^)]*\)\s*=>\s*\{/,
+            /:\s*[A-Za-z_$][\w$]*\s*=>\s*\{/
+        ];
+        for (var guard = 0; guard < 500; guard++) {
+            var best = -1, bestLen = 0;
+            for (var p = 0; p < blockForms.length; p++) {
+                blockForms[p].lastIndex = 0;
+                var m = blockForms[p].exec(src);
+                if (m && (best === -1 || m.index < best)) { best = m.index; bestLen = m[0].length; }
+            }
+            if (best === -1) break;
+            var braceStart = best + bestLen - 1;          // Index der oeffnenden '{'
+            var close = findMatchingBrace(src, braceStart);
+            if (close === -1) break;                       // defekt -> abbrechen
+            src = src.slice(0, best) + ': null' + src.slice(close + 1);
+        }
+        // Kurz-Arrows ohne Block:  : (a)=>expr  /  : x=>expr  (bis , } ])
+        src = src.replace(
+            /:\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*[^,}\]\n]+/g, ': null');
+        return src;
+    }
 
     // base64 -> UTF-8-String (ohne deprecated escape/unescape)
     function b64ToJson(b64) {
@@ -54,8 +107,22 @@
     function renderInto(el) {
         el.setAttribute('data-rendered', '1');
         var spec;
+        var raw = b64ToJson(el.getAttribute('data-spec') || '');
         try {
-            spec = sanitize(JSON.parse(b64ToJson(el.getAttribute('data-spec') || '')));
+            spec = JSON.parse(raw);
+        } catch (e1) {
+            // Fallback: LLM-Config enthaelt vermutlich JS-Callbacks -> Funktionswerte
+            // entfernen (nie ausfuehren) und erneut parsen. Gueltiges JSON kommt hier
+            // nie an, bleibt also unveraendert.
+            try {
+                spec = JSON.parse(stripJsFunctions(raw));
+            } catch (e2) {
+                fail(el, 'Chart-Daten ungültig: ' + (e2 && e2.message ? e2.message : e2));
+                return;
+            }
+        }
+        try {
+            spec = sanitize(spec);
         } catch (e) {
             fail(el, 'Chart-Daten ungültig: ' + (e && e.message ? e.message : e));
             return;

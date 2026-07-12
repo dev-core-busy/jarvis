@@ -2245,6 +2245,26 @@ body.light .modal-header h2 {
 #sec-secdoc-modal .modal-body h3 { margin-top: 1.8em; }
 #sec-fwdoc-modal .modal-body h3 { margin-top: 1.8em; }
 
+/* ── AD-Verzeichnis-Picker (Benutzer/Gruppen durchsuchen) ── */
+.ldap-pick-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 6px; padding: 5px 12px; font-size: 0.8rem;
+    border: 1px solid rgba(var(--fg-rgb), 0.18); border-radius: 8px;
+    background: rgba(var(--fg-rgb), 0.05); color: var(--text-secondary);
+    cursor: pointer; transition: background .12s;
+}
+.ldap-pick-btn:hover { background: rgba(var(--fg-rgb), 0.1); }
+.ldap-row {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+    padding: 8px 12px; cursor: pointer;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.06);
+}
+.ldap-row:last-child { border-bottom: none; }
+.ldap-row:hover { background: rgba(var(--fg-rgb), 0.07); }
+.ldap-row input[type="checkbox"] { margin-right: 4px; }
+.ldap-row-main { font-size: 0.88rem; color: var(--text-primary); font-weight: 500; }
+.ldap-row-sub { font-size: 0.74rem; color: var(--text-muted); }
+
 /* ── Wissensgruppen (logische Tags) ── */
 .kb-grp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .kb-grp-chip {

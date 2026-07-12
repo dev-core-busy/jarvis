@@ -469,6 +469,23 @@ def _group_cn_prefix(group_dn: str) -> str:
     return f"cn={g.split(',')[0]},"
 
 
+def _member_of_any_group(member_of, groups_raw: str) -> bool:
+    """True, wenn der Benutzer (member_of = Liste seiner Gruppen-DNs) Mitglied
+    EINER der konfigurierten Gruppen ist. Mehrere Gruppen sind zeilengetrennt
+    (DNs enthalten selbst Kommas). Einzelner Legacy-DN = genau eine Zeile."""
+    groups = [x.strip() for x in (groups_raw or "").splitlines() if x.strip()]
+    if not groups:
+        return False
+    member_lower = [g.lower() for g in (member_of or [])]
+    for want in groups:
+        want_lower = want.lower()
+        want_prefix = _group_cn_prefix(want)
+        for gl in member_lower:
+            if gl == want_lower or gl.startswith(want_prefix):
+                return True
+    return False
+
+
 def _norm_login(name: str) -> str:
     """Normalisiert einen Login ODER Listen-Eintrag auf den blossen sAMAccountName:
     entfernt Domain-Praefix (DOMAIN\\user), UPN-Suffix (user@domain) und Whitespace,
@@ -746,12 +763,10 @@ def _check_knowledge_edit_permission_with_conn(username: str, conn, base_dn: str
             )
             if conn.entries:
                 member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
-                group_lower = editors_group.lower()
-                for g in member_of:
-                    if g.lower() == group_lower or g.lower().startswith(_group_cn_prefix(editors_group)):
-                        print(f"[AUTH] Knowledge-Editor Gruppe: '{plain}' darf Wissen bearbeiten", flush=True)
-                        return True
-            print(f"[AUTH] Knowledge-Editor Gruppe: '{plain}' NICHT in Gruppe '{editors_group}'", flush=True)
+                if _member_of_any_group(member_of, editors_group):
+                    print(f"[AUTH] Knowledge-Editor Gruppe: '{plain}' darf Wissen bearbeiten", flush=True)
+                    return True
+            print(f"[AUTH] Knowledge-Editor Gruppe: '{plain}' NICHT in Gruppe(n) '{editors_group}'", flush=True)
         except Exception as e:
             print(f"[AUTH] Knowledge-Editor Gruppen-Check Fehler: {e}", flush=True)
 
@@ -793,12 +808,10 @@ def _check_internet_access_with_conn(username: str, conn, base_dn: str) -> bool:
             )
             if conn.entries:
                 member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
-                group_lower = grp.lower()
-                for g in member_of:
-                    if g.lower() == group_lower or g.lower().startswith(_group_cn_prefix(grp)):
-                        print(f"[AUTH] Internet-Zugang Gruppe: '{plain}' erlaubt", flush=True)
-                        return True
-            print(f"[AUTH] Internet-Zugang Gruppe: '{plain}' NICHT in Gruppe '{grp}'", flush=True)
+                if _member_of_any_group(member_of, grp):
+                    print(f"[AUTH] Internet-Zugang Gruppe: '{plain}' erlaubt", flush=True)
+                    return True
+            print(f"[AUTH] Internet-Zugang Gruppe: '{plain}' NICHT in Gruppe(n) '{grp}'", flush=True)
         except Exception as e:
             print(f"[AUTH] Internet-Zugang Gruppen-Check Fehler: {e}", flush=True)
 
@@ -863,12 +876,10 @@ def _check_admin_with_conn(username: str, conn, base_dn: str) -> bool:
             )
             if conn.entries:
                 member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
-                group_lower = grp.lower()
-                for g in member_of:
-                    if g.lower() == group_lower or g.lower().startswith(_group_cn_prefix(grp)):
-                        print(f"[AUTH] Admin-Recht Gruppe: '{plain}' erlaubt", flush=True)
-                        return True
-            print(f"[AUTH] Admin-Recht Gruppe: '{plain}' NICHT in Gruppe '{grp}'", flush=True)
+                if _member_of_any_group(member_of, grp):
+                    print(f"[AUTH] Admin-Recht Gruppe: '{plain}' erlaubt", flush=True)
+                    return True
+            print(f"[AUTH] Admin-Recht Gruppe: '{plain}' NICHT in Gruppe(n) '{grp}'", flush=True)
         except Exception as e:
             print(f"[AUTH] Admin-Recht Gruppen-Check Fehler: {e}", flush=True)
 

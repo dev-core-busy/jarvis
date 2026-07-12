@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=5">
-    <link rel="stylesheet" href="/static/css/style.css?v=114">
+    <link rel="stylesheet" href="/static/css/style.css?v=115">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -2565,7 +2565,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <span data-i18n="security.ad_group_label">Erlaubte Gruppe (AD-Gruppe)</span>
                                         <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
                                     </label>
-                                    <input type="text" id="ad-allowed-group" data-i18n-placeholder="security.ad_group_ph" placeholder="z.B. CN=Jarvis-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;">
+                                    <textarea id="ad-allowed-group" rows="1" placeholder="z.B. CN=Jarvis-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;" data-i18n="security.ad_group_warning">
                                         ⚠ Wenn eine Gruppe eingetragen ist, wird die Benutzerliste ignoriert.
                                     </div>
@@ -2708,6 +2708,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             document.getElementById('ad-domain').value        = d.domain        || '';
                                             document.getElementById('ad-allowed-users').value = d.allowed_users || '';
                                             document.getElementById('ad-allowed-group').value = d.allowed_group || '';
+                                            // Token-Listen (Chips) neu aufbauen
+                                            ['ad-allowed-users','ad-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
                                             document.getElementById('ad-knowledge-editors').value = d.knowledge_editors || '';
                                             document.getElementById('ad-knowledge-editors-group').value = d.knowledge_editors_group || '';
                                             document.getElementById('ad-internet-users').value = d.internet_users || '';
@@ -3192,7 +3194,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/branding.js?v=16"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=8"></script>
-    <script src="/static/js/ldap_picker.js?v=1"></script>
+    <script src="/static/js/ldap_picker.js?v=2"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/app.js?v=144"></script>
 </body>

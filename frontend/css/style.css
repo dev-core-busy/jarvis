@@ -2265,6 +2265,35 @@ body.light .modal-header h2 {
 .ldap-row-main { font-size: 0.88rem; color: var(--text-primary); font-weight: 500; }
 .ldap-row-sub { font-size: 0.74rem; color: var(--text-muted); }
 
+/* ── Token-Liste (Chips mit ✕) für AD-Felder ── */
+.token-list { margin: 2px 0 2px; }
+.token-items { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
+.token-empty { font-size: 0.8rem; color: var(--text-muted); font-style: italic; }
+.token {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 6px 8px 6px 12px; border-radius: 8px;
+    background: rgba(var(--fg-rgb), 0.06); border: 1px solid rgba(var(--fg-rgb), 0.1);
+    max-width: 520px;
+}
+.token-label {
+    font-size: 0.86rem; color: var(--text-primary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.token-x {
+    flex-shrink: 0; width: 20px; height: 20px; line-height: 1; border-radius: 6px;
+    border: none; background: rgba(239,68,68,0.15); color: #f0a0a0;
+    cursor: pointer; font-size: 1rem;
+}
+.token-x:hover { background: rgba(239,68,68,0.3); color: #fff; }
+.token-add { display: flex; gap: 6px; max-width: 520px; }
+.token-add-input { flex: 1; box-sizing: border-box; font-size: 0.83rem; }
+.token-add-btn {
+    flex-shrink: 0; padding: 5px 12px; font-size: 0.8rem; border-radius: 8px;
+    border: 1px solid rgba(var(--fg-rgb), 0.18); background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-secondary); cursor: pointer;
+}
+.token-add-btn:hover { background: rgba(var(--fg-rgb), 0.1); }
+
 /* ── Wissensgruppen (logische Tags) ── */
 .kb-grp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .kb-grp-chip {

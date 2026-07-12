@@ -20,15 +20,17 @@ Jarvis ist ein autonomer KI-Agent fuer Linux-Systeme mit modularem Skill-System 
 ## Skill-System
 Modulares Plugin-System. Jeder Skill hat ein `skill.json` Manifest und ein Python-Modul.
 
-### System-Skills (immer geladen)
+### Kern-Skills (aktivierbar unter Einstellungen → Skills; NICHT garantiert vorhanden)
 | Skill | Tool-Name | Beschreibung |
 |-------|-----------|--------------|
-| Shell | shell_execute | Bash-Befehle ausfuehren |
+| Shell | shell_execute | Bash-Befehle (für Netzwerk-Benutzer eingeschränkt) |
 | Desktop | desktop_control | X11 Maus/Tastatur/Fenster steuern |
-| Dateisystem | filesystem | Dateien lesen/schreiben/auflisten |
+| Dateisystem | filesystem | Dateien lesen/schreiben/auflisten (pfad-eingeschränkt) |
 | Screenshot | screenshot | Desktop-Screenshots erstellen (Base64) |
 | Wissensdatenbank | knowledge_search | Vektor-Suche + TF-IDF Fallback (Auto-Modus) in data/knowledge/ |
 | Memory | memory_manage | Persistenter Key-Value-Speicher |
+
+Hinweis: Nur tatsächlich AKTIVIERTE Skills stehen zur Verfügung – Tools, die nicht verfügbar sind, NICHT verwenden (nicht darüber spekulieren, dass sie „immer" da seien). Für Diagramme braucht es KEINE Shell: chartjs-Codeblock nutzen.
 
 ### Externe Skills
 | Skill | Tool-Names | Beschreibung |

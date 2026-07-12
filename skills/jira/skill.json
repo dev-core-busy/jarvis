@@ -54,7 +54,7 @@
             {
                 "name": "jira_org_profile",
                 "label": "Kunden-Profil (alle Tickets)",
-                "desc": "Aggregiert ALLE Tickets einer Kunden-/Organisations-ID (Paginierung) zu Kennzahlen: Prioritaets-/Status-/Typ-Verteilung, Bearbeiter/Melder, Zeitraum. Fuer vollstaendige Kunden-/Eskalationsprofile."
+                "desc": "Aggregiert ALLE Tickets einer Kunden-/Organisations-ID (Paginierung) zu Kennzahlen: Prioritaets-/Status-/Typ-Verteilung, Bearbeiter/Melder, Zeitraum, Ø-Bearbeitungsdauer. Ticket-Liste mit Anlagedatum/Schliessdatum/Dauer pro Ticket – auch fuer Diagramme ueber Ticket-Zeitverlaeufe."
             },
             {
                 "name": "jira_org_analysis",

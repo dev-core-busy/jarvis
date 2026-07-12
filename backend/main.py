@@ -668,9 +668,13 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
         print(f"[AUTH] AD-Whitelist: '{plain}' in Benutzerliste – Zugriff erlaubt", flush=True)
         return True
 
-    # ── Gruppen-Filter prüfen ─────────────────────────────────────────
-    allowed_group = config.get_setting("ad_allowed_group", "").strip()
-    if allowed_group:
+    # ── Gruppen-Filter prüfen (eine ODER mehrere Gruppen, zeilengetrennt) ──
+    allowed_group_raw = config.get_setting("ad_allowed_group", "").strip()
+    if allowed_group_raw:
+        # Mehrere Gruppen-DNs sind durch Zeilenumbruch getrennt (DNs enthalten
+        # selbst Kommas, daher NICHT komma-getrennt). Ein einzelner Legacy-DN
+        # ergibt genau eine Zeile.
+        groups = [g.strip() for g in allowed_group_raw.splitlines() if g.strip()]
         # LDAP-Sonderzeichen escapen (verhindert LDAP-Injection)
         safe_plain = plain.replace("\\", "\\5c").replace("*", "\\2a").replace(
             "(", "\\28").replace(")", "\\29").replace("\x00", "\\00")
@@ -684,13 +688,15 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
             print(f"[AUTH] AD-Gruppe: User '{plain}' nicht im Directory gefunden", flush=True)
             return False
         member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
-        # Vergleich case-insensitiv
-        group_lower = allowed_group.lower()
-        for g in member_of:
-            if g.lower() == group_lower or g.lower().startswith(_group_cn_prefix(allowed_group)):
-                print(f"[AUTH] AD-Gruppe: '{plain}' ist Mitglied von '{allowed_group}' – Zugriff erlaubt", flush=True)
-                return True
-        print(f"[AUTH] AD-Gruppe: '{plain}' NICHT Mitglied von '{allowed_group}' – Zugriff verweigert", flush=True)
+        member_lower = [g.lower() for g in member_of]
+        for want in groups:
+            want_lower = want.lower()
+            want_prefix = _group_cn_prefix(want)
+            for gl in member_lower:
+                if gl == want_lower or gl.startswith(want_prefix):
+                    print(f"[AUTH] AD-Gruppe: '{plain}' ist Mitglied von '{want}' – Zugriff erlaubt", flush=True)
+                    return True
+        print(f"[AUTH] AD-Gruppe: '{plain}' NICHT Mitglied der erlaubten Gruppen {groups} – Zugriff verweigert", flush=True)
         return False
 
     # ── Keine Einschränkung konfiguriert → alle AD-User erlaubt ──────

@@ -1,27 +1,29 @@
-/* Jarvis – mausbedienbarer AD-User-/Gruppen-Picker.
+/* Jarvis – mausbedienbarer AD-User-/Gruppen-Picker + Token-Listen.
  *
- * Hängt an alle AD-Eingabefelder (Benutzer-Listen, Gruppen-DNs) einen
- * "Durchsuchen"-Button und öffnet ein Such-Popup mit Live-Ergebnissen aus dem
- * Verzeichnis (POST /api/ldap/users|groups). Nutzt das Service-Konto; ist keines
- * gesetzt, fragt das Popup einmalig nach AD-Benutzer + Passwort (nur im Speicher
- * dieser Sitzung, nichts wird gespeichert).
- *
- * Benutzer-Felder: Mehrfachauswahl (Checkboxen) -> kommagetrennte sAMAccountNames.
- * Gruppen-Felder:  Einzelauswahl -> Distinguished Name (DN).
+ * - Hängt an alle AD-Felder einen "Durchsuchen"-Button mit Live-Verzeichnis-Suche
+ *   (POST /api/ldap/users|groups). Service-Konto oder On-Demand-Passwort (nur Sitzung).
+ * - Felder mit list:true (Erlaubte Benutzer / Erlaubte Gruppe) werden als
+ *   Chip-Liste dargestellt: Einträge untereinander, je ✕ zum Entfernen, plus
+ *   manuelles Hinzufügen. Das zugrunde liegende (versteckte) Feld bleibt die
+ *   Quelle der Wahrheit (Benutzer: kommagetrennt; Gruppen: zeilengetrennt, da
+ *   DNs Kommas enthalten).
  */
 (function () {
     'use strict';
 
-    // Feld-Zuordnung: Eingabe-ID -> Verzeichnistyp
     var FIELDS = {
-        'ad-allowed-users': 'users', 'ad-allowed-group': 'groups',
-        'ad-internet-users': 'users', 'ad-internet-group': 'groups',
-        'ad-admins': 'users', 'ad-admins-group': 'groups',
-        'ad-knowledge-editors': 'users', 'ad-knowledge-editors-group': 'groups'
+        'ad-allowed-users':           { kind: 'users',  multi: true,  sep: ',',  list: true },
+        'ad-allowed-group':           { kind: 'groups', multi: true,  sep: '\n', list: true },
+        'ad-internet-users':          { kind: 'users',  multi: true,  sep: ',',  list: false },
+        'ad-internet-group':          { kind: 'groups', multi: false, sep: '\n', list: false },
+        'ad-admins':                  { kind: 'users',  multi: true,  sep: ',',  list: false },
+        'ad-admins-group':            { kind: 'groups', multi: false, sep: '\n', list: false },
+        'ad-knowledge-editors':       { kind: 'users',  multi: true,  sep: ',',  list: false },
+        'ad-knowledge-editors-group': { kind: 'groups', multi: false, sep: '\n', list: false }
     };
 
-    var _cred = { user: '', password: '' };  // On-Demand-Credentials (nur Sitzung)
-    var _state = null;                        // aktueller Picker-Kontext
+    var _cred = { user: '', password: '' };
+    var _state = null;
     var _searchTimer = null;
 
     function token() { return localStorage.getItem('jarvis_token') || ''; }
@@ -31,8 +33,20 @@
         });
     }
     function el(id) { return document.getElementById(id); }
+    function joinSep(sep) { return sep === '\n' ? '\n' : ', '; }
+    function splitVals(val, sep) {
+        return (val || '').split(sep).map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+    function shortDn(dn) {
+        var m = /^CN=([^,]+)/i.exec(dn || '');
+        return m ? m[1] : dn;
+    }
+    function setTarget(inp, value) {
+        inp.value = value;
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+    }
 
-    // ── Modal einmalig aufbauen ───────────────────────────────────────────
+    // ── Such-Popup ────────────────────────────────────────────────────────
     function ensureModal() {
         if (el('ldap-picker-modal')) return;
         var m = document.createElement('div');
@@ -87,31 +101,24 @@
         if (m) m.classList.remove('open');
         _state = null;
     }
-
     function info(msg, isErr) {
         var i = el('ldap-picker-info');
         if (i) { i.textContent = msg || ''; i.style.color = isErr ? '#f0a0a0' : 'var(--text-muted)'; }
     }
 
-    function open(kind, targetInput) {
+    function open(cfg, targetInput) {
         ensureModal();
-        _state = {
-            kind: kind,
-            mode: kind === 'users' ? 'multi' : 'single',
-            target: targetInput,
-            selected: {}
-        };
-        // vorhandene Auswahl (nur User/Multi) vorbelegen
-        if (_state.mode === 'multi') {
-            (targetInput.value || '').split(',').forEach(function (v) {
-                v = v.trim(); if (v) _state.selected[v.toLowerCase()] = v;
+        _state = { kind: cfg.kind, multi: !!cfg.multi, sep: cfg.sep || ',', target: targetInput, selected: {} };
+        if (_state.multi) {
+            splitVals(targetInput.value, _state.sep).forEach(function (v) {
+                _state.selected[v.toLowerCase()] = v;
             });
         }
-        el('ldap-picker-title').textContent = kind === 'users' ? 'Benutzer auswählen' : 'Gruppe auswählen';
+        el('ldap-picker-title').textContent = cfg.kind === 'users' ? 'Benutzer auswählen' : 'Gruppe(n) auswählen';
         el('ldap-picker-search').value = '';
         el('ldap-picker-list').innerHTML = '';
         el('ldap-picker-cred').style.display = 'none';
-        el('ldap-picker-actions').style.display = _state.mode === 'multi' ? 'flex' : 'none';
+        el('ldap-picker-actions').style.display = _state.multi ? 'flex' : 'none';
         if (!el('ldap-picker-user').value) {
             el('ldap-picker-user').value = _cred.user || localStorage.getItem('jarvis_user') || '';
         }
@@ -152,66 +159,124 @@
     function renderList(rows) {
         var box = el('ldap-picker-list');
         if (!rows.length) { box.innerHTML = '<div style="padding:14px;color:var(--text-muted);font-size:0.85rem;">Keine Treffer.</div>'; info(''); return; }
-        info(rows.length + ' Treffer' + (rows.length >= 100 ? ' (ggf. eingegrenzt – bitte suchen)' : ''));
+        info(rows.length + ' Treffer' + (rows.length >= 100 ? ' (bitte weiter eingrenzen)' : ''));
+        var users = _state.kind === 'users';
         var html = '';
         rows.forEach(function (r) {
-            if (_state.kind === 'users') {
-                var checked = _state.selected[(r.sam || '').toLowerCase()] ? ' checked' : '';
-                html += '<label class="ldap-row" data-sam="' + esc(r.sam) + '">' +
+            var key = (users ? r.sam : r.dn) || '';
+            var main = users ? r.display : r.cn;
+            var sub = users ? (r.sam + (r.mail ? ' · ' + r.mail : '')) : (r.dn + (r.desc ? ' · ' + r.desc : ''));
+            if (_state.multi) {
+                var checked = _state.selected[key.toLowerCase()] ? ' checked' : '';
+                html += '<label class="ldap-row" data-key="' + esc(key) + '" title="' + esc(key) + '">' +
                     '<input type="checkbox"' + checked + ' style="flex-shrink:0;">' +
-                    '<span class="ldap-row-main">' + esc(r.display) + '</span>' +
-                    '<span class="ldap-row-sub">' + esc(r.sam) + (r.mail ? ' · ' + esc(r.mail) : '') + '</span>' +
-                    '</label>';
+                    '<span class="ldap-row-main">' + esc(main) + '</span>' +
+                    '<span class="ldap-row-sub">' + esc(sub) + '</span></label>';
             } else {
-                html += '<div class="ldap-row" data-dn="' + esc(r.dn) + '" role="button" tabindex="0">' +
-                    '<span class="ldap-row-main">' + esc(r.cn) + '</span>' +
-                    '<span class="ldap-row-sub">' + esc(r.dn) + (r.desc ? ' · ' + esc(r.desc) : '') + '</span>' +
-                    '</div>';
+                html += '<div class="ldap-row" data-key="' + esc(key) + '" role="button" tabindex="0" title="' + esc(key) + '">' +
+                    '<span class="ldap-row-main">' + esc(main) + '</span>' +
+                    '<span class="ldap-row-sub">' + esc(sub) + '</span></div>';
             }
         });
         box.innerHTML = html;
-        if (_state.kind === 'users') {
-            box.querySelectorAll('.ldap-row').forEach(function (row) {
+        box.querySelectorAll('.ldap-row').forEach(function (row) {
+            var key = row.getAttribute('data-key');
+            if (_state.multi) {
                 var cb = row.querySelector('input');
                 row.addEventListener('click', function (e) {
                     if (e.target !== cb) cb.checked = !cb.checked;
-                    var sam = row.getAttribute('data-sam');
-                    if (cb.checked) _state.selected[sam.toLowerCase()] = sam;
-                    else delete _state.selected[sam.toLowerCase()];
+                    if (cb.checked) _state.selected[key.toLowerCase()] = key;
+                    else delete _state.selected[key.toLowerCase()];
                 });
-            });
-        } else {
-            box.querySelectorAll('.ldap-row').forEach(function (row) {
-                row.addEventListener('click', function () {
-                    _state.target.value = row.getAttribute('data-dn');
-                    close();
-                });
-            });
-        }
+            } else {
+                row.addEventListener('click', function () { setTarget(_state.target, key); close(); });
+            }
+        });
     }
 
     function applyMulti() {
         if (!_state) return;
         var vals = Object.keys(_state.selected).map(function (k) { return _state.selected[k]; });
-        _state.target.value = vals.join(', ');
+        setTarget(_state.target, vals.join(joinSep(_state.sep)));
         close();
     }
 
-    // ── "Durchsuchen"-Buttons an die Felder hängen ────────────────────────
+    // ── Token-Liste (Chips mit ✕) für list:true-Felder ────────────────────
+    function initTokenList(inp, cfg) {
+        if (inp.dataset.tokenList) return;
+        inp.dataset.tokenList = '1';
+        inp.style.display = 'none';
+        var wrap = document.createElement('div');
+        wrap.className = 'token-list';
+        var items = document.createElement('div');
+        items.className = 'token-items';
+        var addRow = document.createElement('div');
+        addRow.className = 'token-add';
+        var addInp = document.createElement('input');
+        addInp.type = 'text';
+        addInp.className = 'token-add-input';
+        addInp.placeholder = cfg.kind === 'groups' ? 'Gruppen-DN einfügen…' : 'Login manuell hinzufügen…';
+        var addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'token-add-btn';
+        addBtn.textContent = '+ Hinzufügen';
+        addRow.appendChild(addInp);
+        addRow.appendChild(addBtn);
+        wrap.appendChild(items);
+        wrap.appendChild(addRow);
+        inp.parentNode.insertBefore(wrap, inp);
+
+        function render() {
+            var toks = splitVals(inp.value, cfg.sep);
+            if (!toks.length) {
+                items.innerHTML = '<span class="token-empty">– keine Einträge –</span>';
+            } else {
+                items.innerHTML = toks.map(function (t, i) {
+                    var label = cfg.kind === 'groups' ? shortDn(t) : t;
+                    return '<span class="token" title="' + esc(t) + '"><span class="token-label">' + esc(label) +
+                           '</span><button type="button" class="token-x" data-i="' + i + '" aria-label="Entfernen">×</button></span>';
+                }).join('');
+            }
+            items.querySelectorAll('.token-x').forEach(function (b) {
+                b.addEventListener('click', function () {
+                    var toks2 = splitVals(inp.value, cfg.sep);
+                    toks2.splice(parseInt(b.getAttribute('data-i'), 10), 1);
+                    inp.value = toks2.join(joinSep(cfg.sep));
+                    render();
+                });
+            });
+        }
+        function add() {
+            var v = addInp.value.trim();
+            if (!v) return;
+            var toks = splitVals(inp.value, cfg.sep);
+            if (toks.some(function (t) { return t.toLowerCase() === v.toLowerCase(); })) { addInp.value = ''; return; }
+            toks.push(v);
+            inp.value = toks.join(joinSep(cfg.sep));
+            addInp.value = '';
+            render();
+        }
+        addBtn.addEventListener('click', add);
+        addInp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+        inp.addEventListener('change', render);
+        render();
+    }
+
+    // ── Buttons + Token-Listen an die Felder hängen ───────────────────────
     function attachButtons() {
         Object.keys(FIELDS).forEach(function (id) {
             var inp = el(id);
             if (!inp || inp.dataset.ldapAttached) return;
             inp.dataset.ldapAttached = '1';
-            var kind = FIELDS[id];
+            var cfg = FIELDS[id];
             var btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'ldap-pick-btn';
-            btn.innerHTML = (kind === 'users' ? '👥' : '🗂️') + ' Durchsuchen';
-            btn.addEventListener('click', function () { open(kind, inp); });
-            // hinter das Eingabefeld setzen
+            btn.innerHTML = (cfg.kind === 'users' ? '👥' : '🗂️') + ' Durchsuchen';
+            btn.addEventListener('click', function () { open(cfg, inp); });
             if (inp.nextSibling) inp.parentNode.insertBefore(btn, inp.nextSibling);
             else inp.parentNode.appendChild(btn);
+            if (cfg.list) initTokenList(inp, cfg);
         });
     }
 

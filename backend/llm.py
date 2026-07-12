@@ -113,6 +113,21 @@ def _llm_timeout() -> "httpx.Timeout":
     return httpx.Timeout(float(total), connect=10.0, read=float(total), write=30.0)
 
 
+def _llm_max_tokens() -> int:
+    """Obergrenze fuer die Antwortlaenge (max_tokens) OpenAI-kompatibler Aufrufe.
+
+    Wichtig bei Reasoning-Modellen (z.B. Qwen3): ohne Cap kann der Server einen
+    sehr langen Gedankengang generieren und dabei den Read-Timeout reissen. Der
+    Wert ist ueber Einstellungen -> LLM (config.LLM_MAX_TOKENS) anpassbar; der
+    Default begrenzt die Generierung auf ein Mass, das i.d.R. unter dem Timeout
+    bleibt."""
+    try:
+        from backend.config import config
+        return max(256, min(int(getattr(config, "LLM_MAX_TOKENS", 8192) or 8192), 131072))
+    except Exception:
+        return 8192
+
+
 async def _get_shared_client() -> httpx.AsyncClient:
     """Gibt den shared AsyncClient zurueck (lazy init, thread-safe).
 
@@ -391,6 +406,8 @@ class OpenAICompatibleProvider(LLMProvider):
             "messages": messages,
             "temperature": 0.2,
             "stream": False,   # Kein Streaming – wir lesen die komplette JSON-Antwort
+            # Cap gegen endlose Reasoning-Laeufe (sonst Read-Timeout bei Qwen3 & Co.)
+            "max_tokens": _llm_max_tokens(),
         }
 
         if tools:
@@ -485,6 +502,26 @@ class OpenAICompatibleProvider(LLMProvider):
 
             if message.get("content"):
                 parts.append(LLMPart(text=message["content"]))
+            elif not message.get("tool_calls"):
+                # content=null OHNE Tool-Call → je nach finish_reason unterscheiden.
+                _finish = (choice.get("finish_reason") or "").lower()
+                _reasoning = message.get("reasoning") or message.get("reasoning_content")
+                if _finish == "length":
+                    # Generierung mitten im Reasoning abgeschnitten (max_tokens
+                    # erreicht – bei Reasoning-Modellen wie Qwen3 oft eine
+                    # Denk-Schleife). NIEMALS das rohe Reasoning an den Nutzer
+                    # dumpen; stattdessen klare Kurzmeldung.
+                    parts.append(LLMPart(text=(
+                        "⚠️ Das Modell konnte die Antwort nicht abschließen "
+                        "(max_tokens erreicht – vermutlich eine Reasoning-Schleife, "
+                        "weil die nötigen Daten/Tools nicht verfügbar waren). "
+                        "Bitte die Anfrage konkretisieren oder ein anderes Modell/Profil wählen."
+                    )))
+                elif _reasoning:
+                    # Sauber beendet (stop), aber Text nur im 'reasoning'-Feld –
+                    # dann ist das die eigentliche Antwort. Als Fallback nutzen,
+                    # damit der Agent nicht mit 0 Parts (leerer Antwort) endet.
+                    parts.append(LLMPart(text=_reasoning))
 
             if message.get("tool_calls"):
                 for tc in message["tool_calls"]:

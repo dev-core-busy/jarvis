@@ -1622,6 +1622,15 @@ KRITISCH – Autonomie-Regeln:
                         _sbx_user = _noinet
                 if _sbx_user:
                     exec_args['_sandbox_user'] = _sbx_user
+                    exec_args['_broker_user'] = _uname
+
+            # Privilegierte Benutzer (lokal/System): Root-Befehle laufen ueber
+            # den Root-Broker (shell_root) – unbekannte Befehle erzeugen dort
+            # einen auditierbaren Pending-Eintrag zur Admin-Freigabe.
+            if (name == "shell_execute" and not _ldap_blocked
+                    and (not _uname or _uname in _LOCAL_PRIVILEGED_USERS)):
+                exec_args['_root_broker'] = True
+                exec_args['_broker_user'] = _uname or "system"
 
             if not _ldap_blocked:
                 result = await tool.execute(**exec_args)

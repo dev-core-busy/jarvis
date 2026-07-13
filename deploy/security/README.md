@@ -1,3 +1,40 @@
+# Trennung UI-/Ausführungsebene (Root-Broker)
+
+Das Backend (Web-UI, Chat, Agent) läuft im getrennten Betrieb als
+unprivilegierter Benutzer (`jarvis.service`, User=jarvis, Port 443 via
+`CAP_NET_BIND_SERVICE`). Alles, was root braucht, läuft über den
+**Root-Broker** (`jarvis-broker.service`, root, Unix-Socket
+`/run/jarvis-broker.sock`, nur Gruppe `jarvis`):
+
+- **Benannte, validierte Operationen** (`backend/broker/ops.py`): systemctl
+  (Unit-Whitelist), VNC/Session/Unlock, chpasswd, Sandbox-/Egress-Setup,
+  Mounts (nur `/mnt/`), certbot, `sandbox_exec` (runuser, nur
+  `jarvis_sandbox*`-User) und generisches `shell_root`.
+- **Auditierbare Freigabeliste** (`/etc/jarvis/broker-policy.json`, nur root):
+  Jede Operation wird beim ersten Auftauchen als Eintrag registriert.
+  Systemoperationen: automatisch erlaubt (Admin kann widerrufen).
+  `shell_root:<befehl>` (Root-Shell des Agenten): startet als **pending** und
+  muss unter *Einstellungen → Sicherheit → Root-Freigaben* erlaubt werden.
+- **Audit-Log** `/var/log/jarvis-broker-audit.jsonl` (root-eigen, vom Backend
+  nicht manipulierbar). API: `/api/broker/status|ops|ops/decide|ops/remove|audit`.
+
+## Migration (pro Server)
+
+```bash
+# Code deployen (beide Pfade), dann:
+bash /opt/jarvis/deploy/security/setup_broker.sh   # [JARVIS_DIR] [SERVICE_USER]
+```
+
+Alt-Betrieb (nicht migriert, Backend als root) funktioniert weiter: der
+Broker-Client führt Operationen dann lokal aus – inklusive Policy + Audit,
+nur ohne Prozess-Trennung.
+
+**Vertrauensmodell / bekannte Grenze:** Die Admin-Entscheidungen kommen über
+das Backend (Web-UI) zum Broker. Ein vollständig kompromittiertes Backend
+könnte sich Freigaben selbst erteilen – die Trennung schützt primär davor,
+dass Agent-/Prompt-Injection-Code *direkt* mit root läuft, und macht jede
+Root-Aktion auditierbar. Policy/Audit-Dateien selbst sind root-only.
+
 # Internet-Egress-Sperre für Benutzer ohne Internet-Freigabe
 
 Benutzer ohne Internet-Freigabe (Einstellungen → Sicherheit → Internet-Zugang)

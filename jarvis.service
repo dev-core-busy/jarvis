@@ -1,3 +1,7 @@
+# ALT-BETRIEB (Backend als root) – nur fuer nicht migrierte Installationen.
+# Empfohlen ist der getrennte Betrieb (unprivilegiertes Backend + Root-Broker):
+#   deploy/security/jarvis.service + jarvis-broker.service
+#   Migration: bash deploy/security/setup_broker.sh
 [Unit]
 Description=Jarvis KI Linux Agent
 After=network-online.target lightdm.service

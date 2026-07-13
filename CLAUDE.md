@@ -102,6 +102,15 @@ data/
   vision/          – Gesichtserkennung (faces/, encodings.pkl, config.json, events.json)
 ```
 
+## Rechte-Trennung (Root-Broker)
+- **Getrennter Betrieb (empfohlen):** Backend laeuft unprivilegiert (`jarvis.service`, User=jarvis, Port 443 via `CAP_NET_BIND_SERVICE`); Root-Operationen laufen ueber den **Root-Broker** (`jarvis-broker.service`, root, Unix-Socket `/run/jarvis-broker.sock`, Gruppe jarvis 0660)
+- **Code:** `backend/broker/` (policy.py, ops.py, daemon.py) + `backend/broker_client.py` (Client mit root-Fallback fuer Alt-Installationen) + `backend/desktop_control.py` (aus main.py herausgeloeste Desktop-/Session-Root-Logik)
+- **Benannte Ops mit harter Validierung:** systemctl (Unit-Whitelist), unlock_screen, switch_session, vnc_restart, chpasswd, sandbox_exec (nur `jarvis_sandbox*`), sandbox/egress_setup|teardown|status, mount_share/umount_share (nur /mnt/), certbot_obtain, shell_root (generisch)
+- **Auditierbare Freigabeliste:** Jede Op wird beim ersten Auftauchen als Policy-Eintrag registriert (`/etc/jarvis/broker-policy.json`, root-only). System-Ops: auto-allow (widerrufbar). `shell_root:<befehl>`: startet **pending** → Admin entscheidet unter *Einstellungen → Sicherheit → Root-Freigaben* (`/api/broker/*`, security_incidents.js)
+- **Shell-Routing:** `shell.py::_needs_root()` erkennt Root-Befehle (sudo/systemctl/apt/mount/...); privilegierte Nutzer → Broker shell_root, Domain-Nutzer → Broker sandbox_exec (runuser). Audit: `/var/log/jarvis-broker-audit.jsonl`
+- **Migration pro Server:** `bash deploy/security/setup_broker.sh` (chown, Units installieren, Dienste starten, Verifikation). Alt-Betrieb (Backend als root, repo-root `jarvis.service`) funktioniert weiter: broker_client fuehrt Ops dann lokal aus (inkl. Policy/Audit)
+- **Achtung:** settings.json-Schreiben erhaelt Eigentuemer (`config._write_preserve_owner`) – der root-Broker darf die Datei dem jarvis-Backend nicht entziehen
+
 ## Multi-Agent System
 - **AgentManager** in `agent.py`: Verwaltet Haupt- und Sub-Agents
   - `get_or_create_main()`: Erstellt/gibt Hauptagent zurueck
@@ -193,6 +202,7 @@ data/
 # Services neustarten
 systemctl restart jarvis.service
 systemctl restart whatsapp-bridge.service
+systemctl restart jarvis-broker.service   # Root-Broker (getrennter Betrieb)
 
 # Logs pruefen
 journalctl -u jarvis.service -f

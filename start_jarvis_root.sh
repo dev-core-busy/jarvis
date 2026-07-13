@@ -1,21 +1,25 @@
 #!/bin/bash
-# Jarvis Start-Skript (VNC & Xvfb Recovery Fix)
+# Jarvis Root-Bootstrap + Root-Broker (jarvis-broker.service)
 #
-# Zwei Betriebsarten:
-# - GETRENNT (empfohlen): jarvis.service laeuft mit User=jarvis. Die root-
-#   pflichtigen Startaufgaben (iptables, dconf, Xvfb/x11vnc, websockify) macht
-#   start_jarvis_root.sh (jarvis-broker.service). Dieses Skript ueberspringt
-#   sie dann und startet nur das Backend.
-# - ALT (root): laeuft dieses Skript als root (nicht migrierte Installation),
-#   fuehrt es wie bisher ALLE Schritte selbst aus.
+# Laeuft als root und uebernimmt ALLE root-pflichtigen Startaufgaben, die
+# frueher in start_jarvis.sh (jarvis.service als root) lagen:
+#   - Display-Erkennung + Xvfb-Fallback
+#   - iptables-Freischaltung der Jarvis-Ports
+#   - Screensaver-/dconf-Haertung
+#   - x11vnc (+ Selbstheilungs-Watcher) und websockify
+# Danach startet er den Root-Broker (backend/broker/daemon.py), ueber den das
+# unprivilegierte Backend (jarvis.service, User=jarvis) Root-Operationen
+# anfordert. Siehe deploy/security/README.md.
 
 JARVIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$JARVIS_DIR"
 
-IS_ROOT=0
-[ "$(id -u)" = "0" ] && IS_ROOT=1
+if [ "$(id -u)" != "0" ]; then
+    echo "FEHLER: start_jarvis_root.sh muss als root laufen (jarvis-broker.service)." >&2
+    exit 1
+fi
 
-# 1. Display-Erkennung (Priorität: LightDM :1, dann :0, dann :10)
+# 1. Display-Erkennung (Prioritaet: LightDM :1, dann :0, dann :10)
 # Beim Boot startet lightdm PARALLEL zu diesem Dienst. Ohne Warten landet x11vnc
 # dauerhaft auf dem leeren Xvfb :10 (-> schwarzer VNC-Bildschirm), obwohl der
 # echte Desktop Sekunden spaeter da ist. Daher: bis zu 60s auf :0/:1 warten,
@@ -41,13 +45,10 @@ if [ -z "$DISPLAY" ] || [ "$DISPLAY" == ":10" ]; then
     fi
 fi
 
-# XAUTHORITY ermitteln (für :0, bei :1 bereits oben gesetzt)
+# XAUTHORITY ermitteln (fuer :0, bei :1 bereits oben gesetzt)
 if [ "$DISPLAY" == ":0" ] && [ -z "$XAUTHORITY" ]; then
-    if [ "$IS_ROOT" = "1" ] && [ -f "/var/run/lightdm/root/:0" ]; then
+    if [ -f "/var/run/lightdm/root/:0" ]; then
         export XAUTHORITY="/var/run/lightdm/root/:0"
-    elif [ -f "$HOME/.Xauthority" ]; then
-        # Unprivilegiert: eigene Xauthority des Dienst-Benutzers (Desktop-User jarvis)
-        export XAUTHORITY="$HOME/.Xauthority"
     else
         for home_dir in /home/*; do
             if [ -f "$home_dir/.Xauthority" ]; then
@@ -60,16 +61,13 @@ fi
 
 echo "Nutze DISPLAY=$DISPLAY mit XAUTHORITY=$XAUTHORITY"
 
-if [ "$IS_ROOT" = "1" ]; then
-# ── Root-Startaufgaben (nur Alt-Betrieb; getrennt: start_jarvis_root.sh) ──
-
-# Jarvis-Ports vor Tailscale ts-input-DROP freischalten (443, 80, 6080)
+# 2. Jarvis-Ports vor Tailscale ts-input-DROP freischalten (443, 80, 6080)
 for PORT in 443 80 6080; do
     iptables -C INPUT -p tcp --dport $PORT -j ACCEPT 2>/dev/null || \
         iptables -I INPUT 1 -p tcp --dport $PORT -j ACCEPT
 done
 
-# Screensaver und DPMS deaktivieren (verhindert schwarzen Bildschirm bei VNC)
+# 3. Screensaver und DPMS deaktivieren (verhindert schwarzen Bildschirm bei VNC)
 xset s off -dpms 2>/dev/null || true
 pkill -f cinnamon-screensaver 2>/dev/null || true
 # gsettings als root wirkt NICHT auf die jarvis-Session (falsches dconf-Profil).
@@ -88,25 +86,17 @@ DCONF
     dconf update 2>/dev/null || true
 fi
 
-fi  # IS_ROOT (Teil 1)
-
-# 0. Bereinigung alter Locks
-if [ "$IS_ROOT" = "1" ] && [ "$DISPLAY" == ":10" ]; then
+# 4. Bereinigung alter Locks + Xvfb-Fallback nur bei :10
+if [ "$DISPLAY" == ":10" ]; then
     rm -f /tmp/.X10-lock
     rm -rf /tmp/.X11-unix/X10
-fi
-
-# 1. Starte Xvfb nur falls :10 genutzt wird und nicht aktiv ist (nur Alt-Betrieb)
-if [ "$IS_ROOT" = "1" ] && [ "$DISPLAY" == ":10" ]; then
     if ! pgrep -x "Xvfb" > /dev/null; then
         echo "Starte Xvfb auf :10..."
         Xvfb :10 -screen 0 1280x800x24 &
         sleep 2
     fi
-
     if ! pgrep -f "cinnamon-session" > /dev/null; then
         echo "Starte Cinnamon Desktop..."
-        # dbus-Session fuer Cinnamon
         if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
             eval $(dbus-launch --sh-syntax)
             export DBUS_SESSION_BUS_ADDRESS
@@ -114,11 +104,6 @@ if [ "$IS_ROOT" = "1" ] && [ "$DISPLAY" == ":10" ]; then
         XDG_SESSION_TYPE=x11 cinnamon-session &
         sleep 3
     fi
-fi
-
-# 2. Zertifikate sicherstellen (optional)
-if [ -f "backend/security.py" ]; then
-    ./venv/bin/python -c "from backend.security import ensure_certificates; ensure_certificates()" 2>/dev/null || true
 fi
 
 # Selbstheilung: Laeuft x11vnc (nur) auf dem leeren Xvfb :10, obwohl lightdm
@@ -146,10 +131,9 @@ _vnc_upgrade_watcher() {
     disown 2>/dev/null || true
 }
 
-# 3. Starte x11vnc (nur Alt-Betrieb; getrennt uebernimmt start_jarvis_root.sh)
-if [ "$IS_ROOT" = "1" ] && ! pgrep -x "x11vnc" > /dev/null; then
+# 5. x11vnc starten
+if ! pgrep -x "x11vnc" > /dev/null; then
     echo "Starte x11vnc für $DISPLAY..."
-
     if [ "$DISPLAY" == ":0" ]; then
         x11vnc -display :0 -auth guess -shared -forever -nopw -bg -quiet -rfbport 5900
     elif [ -n "$XAUTHORITY" ]; then
@@ -157,9 +141,7 @@ if [ "$IS_ROOT" = "1" ] && ! pgrep -x "x11vnc" > /dev/null; then
     else
         x11vnc -display "$DISPLAY" -rfbport 5900 -shared -forever -nopw -bg -quiet
     fi
-
     sleep 3
-
     if ! pgrep -x "x11vnc" > /dev/null && [ "$DISPLAY" == ":0" ]; then
         echo "x11vnc konnte :0 nicht binden. Fallback auf :10..."
         export DISPLAY=:10
@@ -174,41 +156,25 @@ if [ "$IS_ROOT" = "1" ] && ! pgrep -x "x11vnc" > /dev/null; then
     fi
 fi
 
-# 4. Websockify ist nicht mehr nötig – VNC läuft über FastAPI WebSocket-Proxy (/ws/vnc)
-# noVNC-Dateien werden über FastAPI /novnc/ serviert (Same-Origin, kein separates SSL)
-echo "VNC-Proxy läuft über FastAPI (Port 443, /ws/vnc)"
-
-# Legacy-websockify als optionaler Fallback (ohne SSL, nur localhost; nur Alt-Betrieb)
-if [ "$IS_ROOT" = "1" ]; then
-pkill -f "websockify.*6080" 2>/dev/null || true
+# 6. websockify-Fallback (Port 6080, optional – VNC laeuft primaer ueber /ws/vnc)
 NOVNC_DIR=""
 for dir in /usr/share/novnc /usr/share/noVNC /snap/novnc/current/usr/share/novnc; do
     [ -d "$dir" ] && NOVNC_DIR="$dir" && break
 done
-
-if [ -n "$NOVNC_DIR" ]; then
+if [ -n "$NOVNC_DIR" ] && ! pgrep -f "websockify.*6080" > /dev/null; then
     WSOCK_CMD=""
     if command -v /usr/bin/websockify &>/dev/null; then
         WSOCK_CMD="/usr/bin/websockify"
     elif command -v websockify &>/dev/null; then
         WSOCK_CMD="$(command -v websockify)"
     fi
-
     if [ -n "$WSOCK_CMD" ]; then
         "$WSOCK_CMD" --web="$NOVNC_DIR" 6080 localhost:5900 > /var/log/jarvis-websockify.log 2>&1 &
-    else
-        ./venv/bin/python -m websockify --web="$NOVNC_DIR" 6080 localhost:5900 > /var/log/jarvis-websockify.log 2>&1 &
-    fi
-    WSOCK_PID=$!
-    sleep 1
-    if kill -0 "$WSOCK_PID" 2>/dev/null; then
-        echo "websockify Fallback gestartet (PID: $WSOCK_PID, Port 6080, kein SSL)"
-    else
-        echo "⚠ websockify konnte nicht gestartet werden – prüfe /var/log/jarvis-websockify.log"
+        echo "websockify Fallback gestartet (Port 6080, kein SSL)"
     fi
 fi
-fi  # IS_ROOT (Teil 2)
 
-# 5. Starte das Backend
-echo "Starte Backend (HTTPS)..."
-exec ./venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 443 --ssl-keyfile ./certs/server.key --ssl-certfile ./certs/server.crt
+# 7. Root-Broker starten (Vordergrund-Prozess dieses Dienstes)
+echo "Starte Root-Broker..."
+export JARVIS_BROKER_GROUP="${JARVIS_BROKER_GROUP:-jarvis}"
+exec ./venv/bin/python -m backend.broker.daemon

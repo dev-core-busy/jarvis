@@ -2581,6 +2581,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                 { hdr: 'sec-sect-ad-hdr',  body: 'sec-sect-ad-body',  tog: 'sec-sect-ad-tog'  },
                 { hdr: 'sec-sect-2fa-hdr', body: 'sec-sect-2fa-body', tog: 'sec-sect-2fa-tog' },
                 { hdr: 'sec-sect-incidents-hdr', body: 'sec-sect-incidents-body', tog: 'sec-sect-incidents-tog' },
+                { hdr: 'sec-sect-broker-hdr', body: 'sec-sect-broker-body', tog: 'sec-sect-broker-tog' },
             ]);
         }
 

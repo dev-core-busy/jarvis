@@ -116,6 +116,10 @@ def list_groups(all_rel_paths=None) -> dict:
         "color": g.get("color", "#64748b"),
         "order": g.get("order", 0),
         "count": _count(g["id"]),
+        # Pro-Gruppe zusaetzliche Wissens-Editoren (analog Sicherheit -> Berechtigungen):
+        # AD-Benutzer kommagetrennt, AD-Gruppen-DNs zeilengetrennt.
+        "editors_users": g.get("editors_users", ""),
+        "editors_group": g.get("editors_group", ""),
     } for g in groups]
 
     ungrouped_count = None
@@ -131,6 +135,19 @@ def list_groups(all_rel_paths=None) -> dict:
 
 def _valid_ids(data: dict) -> set:
     return {g["id"] for g in data.get("groups", [])}
+
+
+def get_group(gid: str) -> dict:
+    """Liefert die rohe Gruppen-Definition (inkl. Editoren) oder None.
+
+    Wird backend-seitig fuer die Berechtigungspruefung benoetigt (welche
+    AD-Benutzer/-Gruppen duerfen genau diese Gruppe bearbeiten)."""
+    with _lock:
+        data = _load_unlocked()
+    for g in data.get("groups", []):
+        if g["id"] == gid:
+            return dict(g)
+    return None
 
 
 def create_group(name: str, color: str = "#64748b") -> dict:
@@ -151,7 +168,10 @@ def create_group(name: str, color: str = "#64748b") -> dict:
         return group
 
 
-def update_group(gid: str, name=None, color=None, order=None) -> dict:
+def update_group(gid: str, name=None, color=None, order=None,
+                 editors_users=None, editors_group=None) -> dict:
+    """Aktualisiert eine Gruppe. ``None`` = Feld unveraendert lassen,
+    Leerstring bei den Editoren-Feldern loescht die jeweilige Zuordnung."""
     with _lock:
         data = _load_unlocked()
         for g in data["groups"]:
@@ -162,6 +182,10 @@ def update_group(gid: str, name=None, color=None, order=None) -> dict:
                     g["color"] = color
                 if order is not None:
                     g["order"] = int(order)
+                if editors_users is not None:
+                    g["editors_users"] = (editors_users or "").strip()
+                if editors_group is not None:
+                    g["editors_group"] = (editors_group or "").strip()
                 _save_unlocked(data)
                 return g
         raise KeyError(gid)

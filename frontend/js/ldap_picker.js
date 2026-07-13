@@ -262,25 +262,40 @@
         render();
     }
 
-    // ── Buttons + Token-Listen an die Felder hängen ───────────────────────
+    // ── Buttons + Token-Listen an EIN Feld hängen ─────────────────────────
+    function attachOne(inp, cfg) {
+        if (!inp || inp.dataset.ldapAttached) return;
+        inp.dataset.ldapAttached = '1';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ldap-pick-btn';
+        btn.innerHTML = (cfg.kind === 'users' ? '👥' : '🗂️') + ' Durchsuchen';
+        btn.addEventListener('click', function () { open(cfg, inp); });
+        if (inp.nextSibling) inp.parentNode.insertBefore(btn, inp.nextSibling);
+        else inp.parentNode.appendChild(btn);
+        if (cfg.list) initTokenList(inp, cfg);
+    }
+
+    // ── Buttons + Token-Listen an die statischen Felder hängen ────────────
     function attachButtons() {
         Object.keys(FIELDS).forEach(function (id) {
-            var inp = el(id);
-            if (!inp || inp.dataset.ldapAttached) return;
-            inp.dataset.ldapAttached = '1';
-            var cfg = FIELDS[id];
-            var btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'ldap-pick-btn';
-            btn.innerHTML = (cfg.kind === 'users' ? '👥' : '🗂️') + ' Durchsuchen';
-            btn.addEventListener('click', function () { open(cfg, inp); });
-            if (inp.nextSibling) inp.parentNode.insertBefore(btn, inp.nextSibling);
-            else inp.parentNode.appendChild(btn);
-            if (cfg.list) initTokenList(inp, cfg);
+            attachOne(el(id), FIELDS[id]);
         });
     }
 
-    window.LdapPicker = { open: open, attachButtons: attachButtons };
+    // attachField: für dynamisch erzeugte Felder (z.B. Wissensgruppen-Editoren).
+    // cfg optional – Default = mehrfach-Token-Liste, kind ableitbar oder 'users'.
+    function attachField(inp, cfg) {
+        cfg = cfg || {};
+        attachOne(inp, {
+            kind: cfg.kind === 'groups' ? 'groups' : 'users',
+            multi: cfg.multi !== false,
+            sep: cfg.sep || (cfg.kind === 'groups' ? '\n' : ','),
+            list: cfg.list !== false
+        });
+    }
+
+    window.LdapPicker = { open: open, attachButtons: attachButtons, attachField: attachField };
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', attachButtons);

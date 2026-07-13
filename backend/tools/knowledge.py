@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -202,6 +203,66 @@ def _get_folders() -> list[Path]:
             p = PROJECT_ROOT / p
         paths.append(p)
     return paths or [PROJECT_ROOT / DEFAULT_FOLDER]
+
+
+# ─── Nicht-blockierende Verfügbarkeitspruefung fuer (Netz-)Ordner ─────────────
+# Ein totes CIFS/NFS-Mount laesst exists()/os.walk() bis zum Kernel-Timeout
+# blockieren ("Lädt…" haengt ewig). Wir pruefen exists() daher in einem
+# Daemon-Thread mit kurzem Timeout und cachen ein negatives Ergebnis kurz.
+_avail_down_until: dict[str, float] = {}
+_AVAIL_DOWN_TTL = 30.0   # Sekunden, wie lange ein totes Mount als "weg" gilt
+
+
+def _safe_exists(path, timeout: float = 2.0) -> bool:
+    """exists()-Check, der bei toten Netzlaufwerken NICHT blockiert.
+
+    Laeuft in einem Daemon-Thread; Timeout oder OSError => False. Ein als
+    "blockierend/tot" erkanntes Verzeichnis wird kurz gecacht, damit nicht
+    jeder Aufruf (z.B. Stats-Polling) erneut ins Timeout laeuft."""
+    key = str(path)
+    now = time.time()
+    until = _avail_down_until.get(key)
+    if until and now < until:
+        return False
+
+    result = {"ok": False}
+
+    def _check():
+        try:
+            result["ok"] = os.path.exists(key)
+        except OSError:
+            result["ok"] = False
+
+    th = threading.Thread(target=_check, daemon=True)
+    th.start()
+    th.join(timeout)
+    if th.is_alive():
+        # Haengt am toten Mount -> kurz als "weg" merken und den Thread
+        # (Daemon) sich selbst beenden lassen, sobald der Kernel zurueckkehrt.
+        _avail_down_until[key] = now + _AVAIL_DOWN_TTL
+        _log.warning("Ordner reagiert nicht (Netzlaufwerk tot?), wird übersprungen: %s", key)
+        return False
+    _avail_down_until.pop(key, None)
+    return bool(result["ok"])
+
+
+def _bounded_call(fn, timeout: float, default):
+    """Führt ``fn`` in einem Daemon-Thread aus und bricht nach ``timeout`` ab.
+
+    Gibt bei Timeout ``default`` zurück (der haengende Thread laeuft als Daemon
+    im Hintergrund aus). Schützt Hot-Paths (z.B. Stats) vor toten Netzlaufwerken."""
+    box = {"val": default}
+
+    def _run():
+        try:
+            box["val"] = fn()
+        except Exception:
+            box["val"] = default
+
+    th = threading.Thread(target=_run, daemon=True)
+    th.start()
+    th.join(timeout)
+    return box["val"]
 
 
 def _get_max_bytes() -> int:
@@ -475,6 +536,33 @@ def _load_cache() -> dict:
     return {"version": 1, "files": {}}
 
 
+def _indexed_rel_paths() -> list:
+    """Alle Datei-Pfade, die im INDEX (lokale Wissensdatenbank) stehen.
+
+    Quelle: TF-IDF-Cache (``knowledge_index.json``) + FAISS-Meta
+    (``faiss_meta.json``) – BEIDES lokale Dateien. Es wird KEIN Datei-Share
+    durchlaufen; die Funktion ist damit immer schnell und unabhaengig davon,
+    ob ein Netzlaufwerk erreichbar ist. Genau das ist die richtige Quelle fuer
+    die Gruppen-Zaehler (die Gruppen sind logische Tags auf DB-Eintraegen)."""
+    paths = set()
+    try:
+        for p in _load_cache().get("files", {}).keys():
+            if p:
+                paths.add(p)
+    except Exception:
+        pass
+    try:
+        _meta = PROJECT_ROOT / "data" / "vector_store" / "faiss_meta.json"
+        if _meta.exists() and _meta.stat().st_size > 10:
+            for m in json.loads(_meta.read_text(encoding="utf-8")):
+                fp = m.get("file_path")
+                if fp:
+                    paths.add(fp)
+    except Exception:
+        pass
+    return list(paths)
+
+
 def _save_cache(cache: dict):
     try:
         INDEX_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -490,12 +578,17 @@ def _all_files(folders: list[Path]) -> list[Path]:
     all_exts = EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO
     files = []
     for folder in folders:
-        if not folder.exists():
+        # Totes Netzlaufwerk nicht anfassen -> sonst blockiert os.walk minutenlang.
+        if not _safe_exists(folder):
             continue
-        for root, dirs, fs in os.walk(folder):
-            for f in fs:
-                if Path(f).suffix.lower() in all_exts:
-                    files.append(Path(root) / f)
+        try:
+            for root, dirs, fs in os.walk(folder, onerror=lambda e: None):
+                for f in fs:
+                    if Path(f).suffix.lower() in all_exts:
+                        files.append(Path(root) / f)
+        except OSError as e:
+            _log.warning("Ordner konnte nicht durchsucht werden (übersprungen): %s (%s)", folder, e)
+            continue
     return files
 
 
@@ -708,7 +801,7 @@ def get_stats() -> dict:
             rel = str(f.relative_to(PROJECT_ROOT))
         except ValueError:
             rel = str(f)
-        folder_list.append({"path": rel, "exists": f.exists()})
+        folder_list.append({"path": rel, "exists": _safe_exists(f)})
 
     # Vektor-DB: FAISS verfuegbar? + Index-Inhalt lesen (meta.json)
     vector_db_available = False
@@ -744,11 +837,17 @@ def get_stats() -> dict:
         total_files = vector_files
         indexed_files = vector_files
         total_chunks = vector_chunks
-        # Dateigröße aus Filesystem (FAISS speichert keine Größe)
-        total_size = sum(
-            Path(p).stat().st_size for p in faiss_file_paths
-            if Path(p).exists()
-        )
+        # Dateigröße aus Filesystem (FAISS speichert keine Größe). Zeitlich
+        # begrenzt, damit ein totes Netzlaufwerk die Stats nicht einfriert.
+        def _sum_sizes():
+            total = 0
+            for p in faiss_file_paths:
+                try:
+                    total += Path(p).stat().st_size
+                except OSError:
+                    continue
+            return total
+        total_size = _bounded_call(_sum_sizes, timeout=3.0, default=0)
     else:
         cache = _load_cache()
         total_files = len(cache["files"])
@@ -991,7 +1090,7 @@ class KnowledgeManageTool(BaseTool):
                     rel = str(f.relative_to(PROJECT_ROOT))
                 except ValueError:
                     rel = str(f)
-                lines.append(f"  {'✅' if f.exists() else '❌'} {rel}")
+                lines.append(f"  {'✅' if _safe_exists(f) else '❌'} {rel}")
             return "📁 Knowledge-Ordner:\n" + "\n".join(lines)
 
         elif action == "add_folder":

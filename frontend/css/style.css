@@ -2389,6 +2389,12 @@ body.light .modal-header h2 {
 .kb-grp-manage-row:hover { background: rgba(var(--fg-rgb), 0.04); }
 .kb-grp-manage-name { cursor: pointer; font-size: 0.86rem; }
 .kb-grp-manage-name:hover { text-decoration: underline; }
+.kb-grp-editors {
+    font-size: 0.78rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    text-decoration: none;
+}
 .kb-grp-manage-spacer { flex: 1; }
 .kb-grp-color-input {
     width: 26px; height: 22px; padding: 0; border: none; background: none;

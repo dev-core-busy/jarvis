@@ -57,15 +57,19 @@ class JarvisKnowledgeManager {
         if (!el || !window.KbGroups) return;
         const KG = window.KbGroups;
         const T = (k, d) => (window.t && window.t(k)) || d;
-        const rows = KG.all().map(g => `
+        const rows = KG.all().map(g => {
+            const ed = this._editorsSummary(g);
+            return `
             <div class="kb-grp-manage-row" data-gid="${KG.esc(g.id)}">
                 <input type="color" class="kb-grp-color-input" value="${KG.esc(g.color)}" title="${T('kbgroups.color', 'Farbe ändern')}">
-                <span class="kb-grp-manage-name" title="${T('kbgroups.show_files', 'Dokumente anzeigen')}">${KG.esc(g.name)}</span>
+                <span class="kb-grp-manage-name" title="${T('kbgroups.show_files', 'Dokumente anzeigen')}">${KG.esc(g.name)}${ed}</span>
                 <span class="kb-grp-count">${g.count}</span>
                 <span class="kb-grp-manage-spacer"></span>
+                <button class="kb-grp-manage-btn kb-grp-perms" title="${T('kbgroups.perms', 'Berechtigungen verwalten')}">🔐</button>
                 <button class="kb-grp-manage-btn kb-grp-rename" title="${T('kbgroups.rename', 'Umbenennen')}">✏️</button>
                 <button class="kb-grp-manage-btn kb-grp-delete" title="${T('kbgroups.delete', 'Löschen')}">🗑️</button>
-            </div>`).join('');
+            </div>`;
+        }).join('');
         const ung = KG.ungroupedCount();
         const ungRow = (ung != null) ? `
             <div class="kb-grp-manage-row kb-grp-row-ung">
@@ -92,9 +96,93 @@ class JarvisKnowledgeManager {
             const gid = row.dataset.gid;
             row.querySelector('.kb-grp-manage-name').onclick = () => this._showGroupFiles(gid);
             row.querySelector('.kb-grp-color-input').onchange = (e) => this._setGroupColor(gid, e.target.value);
+            row.querySelector('.kb-grp-perms').onclick = () => this._editGroupPermissions(gid);
             row.querySelector('.kb-grp-rename').onclick = () => this._renameGroup(gid);
             row.querySelector('.kb-grp-delete').onclick = () => this._deleteGroup(gid);
         });
+    }
+
+    // Fasst die zusätzlichen Editoren einer Gruppe für die Anzeige in Klammern
+    // hinter dem Gruppennamen zusammen (AD-Benutzer + Kurz-CN der AD-Gruppen).
+    _editorsSummary(g) {
+        const KG = window.KbGroups;
+        const cn = (dn) => { const m = /^CN=([^,]+)/i.exec((dn || '').trim()); return m ? m[1] : (dn || '').trim(); };
+        const users = (g.editors_users || '').split(',').map(s => s.trim()).filter(Boolean);
+        const groups = (g.editors_group || '').split('\n').map(cn).filter(Boolean);
+        const all = users.concat(groups);
+        if (!all.length) return '';
+        return ` <span class="kb-grp-editors" title="${KG.esc(all.join(', '))}">(${KG.esc(all.join(', '))})</span>`;
+    }
+
+    // ── Pro-Gruppe Berechtigungen (zusaetzliche AD-Editoren) ──────────────
+    _editGroupPermissions(gid) {
+        const KG = window.KbGroups;
+        const g = KG && KG.byId(gid);
+        if (!g) return;
+        const T = (k, d) => (window.t && window.t(k)) || d;
+        const esc = KG.esc;
+
+        // Bestehendes Modal entfernen (frischer State pro Aufruf)
+        const old = document.getElementById('kbgrp-perm-modal');
+        if (old) old.remove();
+
+        const m = document.createElement('div');
+        m.id = 'kbgrp-perm-modal';
+        m.className = 'modal';
+        m.style.zIndex = '10001';
+        m.innerHTML = `
+            <div class="modal-content glass" style="max-width:620px;">
+                <div class="modal-header">
+                    <h2>${T('kbgroups.perms_title', 'Berechtigungen')} – ${esc(g.name)}</h2>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <button class="btn-icon" id="kbgrp-perm-close" aria-label="Schließen">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-body" style="overflow-y:auto;">
+                    <p class="kb-hint" style="margin-top:0;">${T('kbgroups.perms_hint',
+                        'Diese AD-Benutzer und -Gruppen dürfen – zusätzlich zu den unter Einstellungen → Sicherheit hinterlegten Wissens-Editoren – diese Gruppe bearbeiten und Dokumente zuordnen.')}</p>
+                    <label class="kb-form-label" style="display:block;margin:12px 0 4px;">${T('kbgroups.perms_users', 'Zusätzliche Editoren (AD-Benutzer)')}</label>
+                    <input type="text" id="kbgrp-perm-users" class="kb-input" style="width:100%;box-sizing:border-box;">
+                    <label class="kb-form-label" style="display:block;margin:16px 0 4px;">${T('kbgroups.perms_groups', 'Zusätzliche Editoren (AD-Gruppen)')}</label>
+                    <textarea id="kbgrp-perm-groups" class="kb-input" rows="2" style="width:100%;box-sizing:border-box;"></textarea>
+                    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+                        <button type="button" id="kbgrp-perm-cancel" class="kb-btn-action">${T('common.cancel', 'Abbrechen')}</button>
+                        <button type="button" id="kbgrp-perm-save" class="kb-btn-action kb-btn-primary">${T('common.save', 'Speichern')}</button>
+                    </div>
+                </div>
+            </div>`;
+        document.body.appendChild(m);
+
+        const usersInp = m.querySelector('#kbgrp-perm-users');
+        const groupsInp = m.querySelector('#kbgrp-perm-groups');
+        // Werte VOR dem Attach setzen, damit die Chip-Liste sie sofort rendert.
+        usersInp.value = g.editors_users || '';
+        groupsInp.value = g.editors_group || '';
+        if (window.LdapPicker) {
+            window.LdapPicker.attachField(usersInp, { kind: 'users', sep: ',' });
+            window.LdapPicker.attachField(groupsInp, { kind: 'groups', sep: '\n' });
+        }
+
+        const close = () => m.remove();
+        m.querySelector('#kbgrp-perm-close').onclick = close;
+        m.querySelector('#kbgrp-perm-cancel').onclick = close;
+        m.addEventListener('click', (e) => { if (e.target === m) close(); });
+        m.querySelector('#kbgrp-perm-save').onclick = async () => {
+            const res = await KG.updateGroup(gid, {
+                editors_users: (usersInp.value || '').trim(),
+                editors_group: (groupsInp.value || '').trim(),
+            });
+            if (res && res.ok) {
+                await this._refreshGroups();
+                this._showNotification(T('kbgroups.perms_saved', 'Berechtigungen gespeichert'), 'success');
+                close();
+            } else {
+                this._showNotification((res && res.error) || T('kbgroups.perms_err', 'Fehler beim Speichern'), 'error');
+            }
+        };
+        requestAnimationFrame(() => m.classList.add('open'));
     }
 
     async _refreshGroups() {

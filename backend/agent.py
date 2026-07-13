@@ -301,6 +301,11 @@ class AgentState(Enum):
     STOPPED = "stopped"
 
 
+# Sentinel: unterscheidet "kb_groups nicht uebergeben" (Sub-Agent erbt) von
+# "explizit None" (Benutzer hat alle Gruppen gewaehlt -> kein Filter).
+_KB_GROUPS_UNSET = object()
+
+
 class JarvisAgent:
     """Der Jarvis Agent – orchestriert LLM und Tools."""
 
@@ -560,7 +565,7 @@ KRITISCH – Autonomie-Regeln:
             )
         return declarations
 
-    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None):
+    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None, kb_groups=_KB_GROUPS_UNSET):
         """Führt eine Aufgabe aus – der Agent-Loop."""
         import sys
         from backend.telemetry import tracer
@@ -569,6 +574,15 @@ KRITISCH – Autonomie-Regeln:
         # Sub-Agents werden ohne username gestartet – dann den vom Eltern-Agent
         # geerbten Namen behalten (nicht mit "" ueberschreiben), damit LDAP-Gating greift.
         self._current_username = username or getattr(self, '_current_username', '')
+        # Vom Benutzer gewaehlter Wissensgruppen-Filter (fuer knowledge_search):
+        #   None    -> kein Filter (alle Gruppen)
+        #   []       -> keine Gruppe -> kein Wissen
+        #   [ids]    -> nur diese Gruppen
+        # Wichtig: NICHT uebergeben (Sentinel) = intern gespawnter Sub-Agent ->
+        # Auswahl des Eltern-Agenten erben. Explizit None = Benutzer hat "alle"
+        # gewaehlt -> Filter fuer diesen Task loeschen (kein Erben eines Altwerts).
+        if kb_groups is not _KB_GROUPS_UNSET:
+            self._current_kb_groups = kb_groups
         # Kontext für die Verstoß-Protokollierung (ausführliches Logging bei Deny)
         self._current_task = task_text or getattr(self, '_current_task', '')
         self._current_client_ip = client_ip or getattr(self, '_current_client_ip', '')
@@ -1500,6 +1514,9 @@ KRITISCH – Autonomie-Regeln:
             # Benutzer-spezifischer Memory-Namespace
             if name == "memory_manage":
                 exec_args.setdefault('_username', getattr(self, '_current_username', ''))
+            # Vom Benutzer gewaehlter Wissensgruppen-Filter fuer die Wissenssuche
+            if name == "knowledge_search":
+                exec_args.setdefault('_kb_groups', getattr(self, '_current_kb_groups', None))
             # Read-Only Skill: schreibende Tools blockieren
             _WRITE_TOOLS = {"shell_execute", "write_file", "desktop_action"}
             if name in _WRITE_TOOLS and self.skill_manager.is_tool_readonly(name):

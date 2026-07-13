@@ -975,6 +975,17 @@ class KnowledgeTool(BaseTool):
         query = kwargs.get("query", "")
         max_results = int(kwargs.get("max_results", 8))
 
+        # Vom Benutzer gewaehlter Wissensgruppen-Filter (Modell B):
+        #   None       -> kein Filter (alle Gruppen)
+        #   []          -> Benutzer hat ALLE Gruppen abgewaehlt -> kein Wissen
+        #   [ids...]    -> nur Treffer aus diesen Gruppen (ODER; "ungrouped" moeglich)
+        kb_groups = kwargs.get("_kb_groups")
+        if isinstance(kb_groups, list) and len(kb_groups) == 0:
+            return ("🔒 Keine Wissensgruppen ausgewählt – es wird kein Wissen aus der "
+                    "Knowledge Base verwendet. (Auswahl über den Wissensgruppen-Filter änderbar.)")
+        # Bei aktivem Filter ueber-abfragen, damit nach dem Filtern genug uebrig bleibt.
+        fetch_n = max(max_results * 5, 40) if kb_groups else max_results
+
         if not query.strip():
             return "❌ Fehler: query-Parameter fehlt. Bitte knowledge_search erneut aufrufen und einen konkreten Suchbegriff aus der Benutzeranfrage als 'query' übergeben (z.B. knowledge_search({'query': 'LDT Import Medistar'}))."
 
@@ -1020,21 +1031,33 @@ class KnowledgeTool(BaseTool):
             if has_vector:
                 # Vektor-Index vorhanden → ausschliesslich Vektor verwenden (kein TF-IDF-Fallback)
                 # Begruendung: TF-IDF skaliert O(n) mit Dateizahl, Vektor konstant ~35ms
-                results = await asyncio.to_thread(_vector_search, query, max_results)
+                results = await asyncio.to_thread(_vector_search, query, fetch_n)
                 search_mode = "Vektor"
             elif search_mode_cfg == "auto":
                 # Kein Vektor-Index → TF-IDF als Fallback
-                results = _search(query, cache, max_results)
+                results = _search(query, cache, fetch_n)
                 search_mode = "TF-IDF"
             # search_mode_cfg == "vector" ohne Index → keine Ergebnisse (hat_vector=False)
 
         elif search_mode_cfg == "tfidf":
-            results = _search(query, cache, max_results)
+            results = _search(query, cache, fetch_n)
             search_mode = "TF-IDF"
+
+        # Auf die gewaehlten Wissensgruppen einschraenken (ODER-Filter ueber Pfade)
+        if kb_groups and results:
+            try:
+                from backend import knowledge_groups as kg
+                kept = set(kg.filter_paths_by_groups([r[1] for r in results], kb_groups))
+                results = [r for r in results if r[1] in kept]
+            except Exception:
+                pass
+        if results:
+            results = results[:max_results]
 
         if not results:
             total = sum(len(d.get("chunks", [])) for d in cache["files"].values())
-            return f"🔍 Keine Treffer für '{query}' ({len(cache['files'])} Dateien, {total} Chunks)."
+            _grp = " in den gewählten Wissensgruppen" if kb_groups else ""
+            return f"🔍 Keine Treffer für '{query}'{_grp} ({len(cache['files'])} Dateien, {total} Chunks)."
 
         output = f"🔍 {len(results)} Treffer für '{query}' ({search_mode}):\n\n"
         for i, (score, filename, chunk) in enumerate(results, 1):

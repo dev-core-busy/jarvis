@@ -296,6 +296,7 @@
     function showChat() {
         loginScreen.classList.add('hidden');
         chatScreen.classList.remove('hidden');
+        ensureKbFilter();
         // Angemeldeter Benutzer: als Tooltip am Logout-Button ('<user> abmelden')
         const _logoutBtn = $('btn-logout');
         if (_logoutBtn && _currentUser) _logoutBtn.title = _currentUser + ' abmelden';
@@ -452,6 +453,15 @@
 
     // ─── Datei-Anhänge ──────────────────────────────────────────
     let _pendingAttachments = [];
+
+    // Wissensgruppen-Filter (aufklappbare Checkbox-Liste in der Eingabeleiste)
+    let _kbFilter = null;
+    function ensureKbFilter() {
+        if (_kbFilter || !window.KbGroupFilter) return;
+        const slot = document.getElementById('kb-filter-slot');
+        if (!slot) return;
+        _kbFilter = window.KbGroupFilter.mount({ anchor: slot, place: 'append', direction: 'up', key: 'chat' });
+    }
 
     const _SUPPORTED = new Set([
         'image/jpeg','image/jpg','image/png','image/gif','image/webp','image/bmp',
@@ -615,6 +625,11 @@
         if (_activeAgentId && _activeAgentId !== '_main') msg.agent_id = _activeAgentId;
         if (_pendingAttachments.length > 0) {
             msg.attachments = _pendingAttachments.map(a => ({ name: a.name, mime_type: a.mime_type, data: a.data }));
+        }
+        // Wissensgruppen-Filter: null = alle (Feld weglassen), [] = keine, [ids] = nur diese
+        if (_kbFilter) {
+            const _sel = _kbFilter.getSelection();
+            if (_sel !== null) msg.kb_groups = _sel;
         }
         wsSend(msg);
 

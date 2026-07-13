@@ -456,6 +456,8 @@
                 <!-- IBS-Tickets: nur klickbar, wenn Kundenverwaltungs-API (URL + Key) konfiguriert ist -->
                 <label id="sup-opt-ibs-wrap"><input type="checkbox" id="sup-opt-ibs" disabled> <span data-i18n="sup.opt_ibs">IBS Tickets</span></label>
                 <label><input type="checkbox" id="sup-opt-ai" checked> <span data-i18n="sup.opt_ai">KI-Gesamtzusammenfassung</span></label>
+                <!-- Wissensgruppen-Filter (wird per JS befüllt) – ans Zeilenende -->
+                <div id="kb-filter-slot" style="margin-left:auto;"></div>
             </div>
             <button type="button" id="sup-adv-toggle" class="sup-adv-toggle" aria-expanded="false">
                 <svg class="sup-adv-caret" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>
@@ -558,11 +560,14 @@
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=51"></script>
+<script src="/static/js/i18n.js?v=52"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=16"></script>
 <script src="/static/js/issues.js?v=5"></script>
 <script src="/static/js/chatlib.js?v=9"></script>
-<script src="/static/js/support.js?v=49"></script>
+<!-- Wissensgruppen-Filter (Checkbox-Auswahl der genutzten Gruppen) -->
+<script src="/static/js/kbgroups.js?v=4"></script>
+<script src="/static/js/kbgroupfilter.js?v=2"></script>
+<script src="/static/js/support.js?v=50"></script>
 </body>
 </html>

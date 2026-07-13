@@ -183,130 +183,15 @@ def _unlock_desktop_screen(target_user: str = "jarvis") -> None:
     """Bildschirmschoner/Sperre fuer den Desktop-Benutzer deaktivieren.
     Wird beim VNC-Connect und bei Session-Wechsel aufgerufen.
 
-    Strategie (von zuverlässig nach aufwändig):
-    1. loginctl unlock-sessions  → systemd/PAM-Standard für alle Sessions
-    2. pkill cinnamon-screensaver → prozessbasiert, funktioniert ohne D-Bus
-    3. Aktiven Session-User auf Display :0 dynamisch ermitteln
-    4. D-Bus screensaver-Befehl als dieser User
-    5. DPMS aufwecken mit korrekter XAUTHORITY
-    """
-    # Bekannte X-Auth-Datei fuer Display :0 (lightdm setzt diese)
-    _XAUTH = "/var/run/lightdm/root/:0"
-    _xenv  = {"DISPLAY": ":0", "XAUTHORITY": _XAUTH}
-
-    try:
-        # ── 1. systemd loginctl ────────────────────────────────────────────────
-        subprocess.run(["loginctl", "unlock-sessions"], capture_output=True, timeout=5)
-
-        # ── 2. Screensaver-Prozess direkt beenden (zuverlässigste Methode) ─────
-        subprocess.run(["pkill", "-f", "cinnamon-screensaver"], capture_output=True, timeout=5)
-        subprocess.run(["pkill", "-f", "xscreensaver"],         capture_output=True, timeout=5)
-        subprocess.run(["pkill", "-f", "gnome-screensaver"],    capture_output=True, timeout=5)
-
-        # ── 3. Aktiven Session-User auf :0 ermitteln ───────────────────────────
-        uid  = None
-        user = None
-        try:
-            # `who` liefert z.B.: "andreas seat0  2026-04-28 09:00 (:0)"
-            who = subprocess.run(["who"], capture_output=True, text=True, timeout=5)
-            for line in who.stdout.splitlines():
-                if "(:0)" in line or "(:0." in line:
-                    user = line.split()[0]
-                    break
-            # loginctl als Fallback: erste Seat0-Session die kein Greeter ist
-            if not user:
-                sess = subprocess.run(
-                    ["loginctl", "list-sessions", "--no-legend"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                for line in sess.stdout.splitlines():
-                    parts = line.split()
-                    # Format: SESSION UID USER SEAT CLASS ...
-                    if len(parts) >= 5 and parts[3] == "seat0" and parts[4] != "greeter" and parts[2] not in ("lightdm", "root", ""):
-                        user = parts[2]
-                        uid  = parts[1]
-                        break
-            if user and not uid:
-                uid_r = subprocess.run(["id", "-u", user], capture_output=True, text=True, timeout=5)
-                uid = uid_r.stdout.strip() or None
-        except Exception:
-            pass
-
-        # Fallback auf target_user wenn kein aktiver User gefunden
-        if not uid:
-            import pwd as _pwd
-            try:
-                uid  = str(_pwd.getpwnam(target_user).pw_uid)
-                user = target_user
-            except KeyError:
-                uid  = "1001"
-                user = target_user
-
-        # ── 4. D-Bus Screensaver-Kommando als Session-User ─────────────────────
-        dbus_sock = f"/run/user/{uid}/bus"
-        if Path(dbus_sock).exists():
-            dbus_env = {**_xenv, "DBUS_SESSION_BUS_ADDRESS": f"unix:path={dbus_sock}", "HOME": f"/home/{user}"}
-            subprocess.run(
-                ["sudo", "-u", f"#{uid}", "cinnamon-screensaver-command", "--deactivate"],
-                env=dbus_env, capture_output=True, timeout=5,
-            )
-            subprocess.run(
-                ["sudo", "-u", f"#{uid}", "xdg-screensaver", "reset"],
-                env=dbus_env, capture_output=True, timeout=3,
-            )
-
-        # ── 5. DPMS aufwecken UND Blanking dauerhaft deaktivieren ──────────────
-        #    "force on" weckt nur einmalig; bei ferngesteuertem Desktop zusaetzlich
-        #    Screensaver/DPMS komplett abschalten, damit nichts wieder blankt
-        #    (verhindert auch das DPMS-bedingte "Redscreen" bei VNC-Fullscreen).
-        subprocess.run(["xset", "-display", ":0", "dpms", "force", "on"], env=_xenv, capture_output=True, timeout=5)
-        subprocess.run(["xset", "-display", ":0", "s", "reset"],          env=_xenv, capture_output=True, timeout=5)
-        subprocess.run(["xset", "-display", ":0", "s", "off"],            env=_xenv, capture_output=True, timeout=5)
-        subprocess.run(["xset", "-display", ":0", "s", "noblank"],        env=_xenv, capture_output=True, timeout=5)
-        subprocess.run(["xset", "-display", ":0", "-dpms"],               env=_xenv, capture_output=True, timeout=5)
-
-        # ── 6. Greeter-Fall: kein aktiver User auf :0 → jarvis einloggen ──────
-        # Pruefen ob Greeter laeuft (kein normaler User auf :0)
-        who2 = subprocess.run(["who"], capture_output=True, text=True, timeout=5)
-        display_users = [
-            line.split()[0] for line in who2.stdout.splitlines()
-            if "(:0)" in line or "(:0." in line
-        ]
-        # Wenn niemand oder nur lightdm auf :0 → Greeter zeigt → jarvis einloggen.
-        # dm-tool ist hier NUTZLOS (braucht XDG_SEAT_PATH und loggt nicht passwortlos
-        # ein) – stattdessen lightdm neu starten: der Autologin (Conf unten) feuert
-        # dann sicher. Da nur der Greeter laeuft, geht dabei keine Session verloren.
-        if not display_users or all(u in ("lightdm", "root") for u in display_users):
-            print("[VNC] Greeter aktiv – stelle Autologin sicher und starte lightdm neu.", flush=True)
-            _AUTOLOGIN_CONF = "/etc/lightdm/lightdm.conf.d/50-jarvis-autologin.conf"
-            try:
-                import os as _os
-                _os.makedirs(_os.path.dirname(_AUTOLOGIN_CONF), exist_ok=True)
-                with open(_AUTOLOGIN_CONF, "w") as _f:
-                    _f.write("[Seat:*]\nautologin-user=%s\nautologin-user-timeout=0\n" % target_user)
-            except Exception as _e:
-                print(f"[VNC] Autologin-Datei schreiben fehlgeschlagen: {_e}", flush=True)
-            subprocess.run(["systemctl", "restart", "lightdm"], capture_output=True, timeout=20)
-            # Auf die neue Session warten (Autologin braucht ein paar Sekunden) …
-            import time as _time
-            for _i in range(15):
-                _time.sleep(2)
-                _w = subprocess.run(["who"], capture_output=True, text=True, timeout=5)
-                if any(l.split()[0] == target_user and ("(:0)" in l or "seat0" in l)
-                       for l in _w.stdout.splitlines()):
-                    break
-            # … und x11vnc an den NEUEN X-Server binden (der alte haengt am toten X).
-            subprocess.run(["pkill", "-x", "x11vnc"], capture_output=True, timeout=5)
-            _time.sleep(1)
-            subprocess.run(["x11vnc", "-display", ":0", "-auth", "guess", "-shared",
-                            "-forever", "-nopw", "-bg", "-quiet", "-rfbport", "5900"],
-                           capture_output=True, timeout=15)
-            print("[VNC] lightdm neu gestartet, Autologin ausgeloest, x11vnc neu gebunden.", flush=True)
-        else:
-            print(f"[VNC] Bildschirmsperre aufgehoben (user={user}, uid={uid})", flush=True)
-
-    except Exception as e:
-        print(f"[VNC] Screensaver-Unlock Fehler: {e}", flush=True)
+    Root-Operation → laeuft ueber den Root-Broker (backend/broker), die
+    eigentliche Logik liegt in backend/desktop_control.py. Auf nicht
+    migrierten Alt-Installationen (Backend als root) fuehrt der Broker-Client
+    sie lokal aus."""
+    from backend import broker_client
+    res = broker_client.call_sync("unlock_screen", {"target_user": target_user},
+                                  user="system", timeout=180)
+    if not res.get("ok"):
+        print(f"[VNC] unlock_screen via Broker fehlgeschlagen: {res.get('error') or res.get('stderr')}", flush=True)
 
 
 # ─── State ────────────────────────────────────────────────────────────
@@ -1137,127 +1022,25 @@ def _validate_password_strength(password: str, username: str) -> list[str]:
     return errors
 
 def _change_linux_password(username: str, new_password: str) -> bool:
-    """Setzt das Linux-Kennwort via chpasswd (läuft als root). Gibt True bei Erfolg zurück."""
-    try:
-        proc = subprocess.run(
-            ['chpasswd'],
-            input=f'{username}:{new_password}\n',
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return proc.returncode == 0
-    except Exception as e:
-        print(f"[AUTH] chpasswd Fehler: {e}", flush=True)
-        return False
+    """Setzt das Linux-Kennwort via chpasswd (Root-Broker). Gibt True bei Erfolg zurück."""
+    from backend import broker_client
+    res = broker_client.call_sync("chpasswd",
+                                  {"username": username, "password": new_password},
+                                  user="system", timeout=30)
+    if not res.get("ok"):
+        print(f"[AUTH] chpasswd via Broker fehlgeschlagen: {res.get('error') or res.get('stderr')}", flush=True)
+    return bool(res.get("ok"))
 
 
 def switch_desktop_session(username: str):
-    """Wechselt die aktive Desktop-Session zum angegebenen Benutzer via LightDM-Autologin."""
-    import os
-    import sys
+    """Wechselt die aktive Desktop-Session zum angegebenen Benutzer via LightDM-Autologin.
 
-    AUTOLOGIN_CONF = "/etc/lightdm/lightdm.conf.d/50-jarvis-autologin.conf"
-
-    def log(msg: str):
-        print(msg, flush=True)
-
-    def unlock_screen(target_user):
-        """Delegiert an die Modul-Level-Funktion."""
-        _unlock_desktop_screen(target_user)
-
-    def restart_vnc():
-        """x11vnc für Display :0 robust neu starten."""
-        # Alle x11vnc-Prozesse beenden
-        subprocess.run(["pkill", "-9", "x11vnc"], capture_output=True, timeout=5)
-        time.sleep(2)
-        # Neuen x11vnc starten und prüfen ob er läuft
-        result = subprocess.run(
-            ["x11vnc", "-display", ":0", "-auth", "guess",
-             "-shared", "-forever", "-nopw", "-bg", "-rfbport", "5900"],
-            capture_output=True, text=True, timeout=10
-        )
-        log(f"[Session-Wechsel] x11vnc gestartet: {result.stdout.strip()}")
-
-    try:
-        log(f"[Session-Wechsel] Starte Wechsel zu '{username}'...")
-
-        # 1. Prüfen ob der Benutzer bereits eine aktive grafische Session hat
-        result = subprocess.run(
-            ["loginctl", "list-sessions", "--no-legend"],
-            capture_output=True, text=True, timeout=5
-        )
-        for line in result.stdout.strip().splitlines():
-            parts = line.split()
-            if len(parts) >= 3 and parts[2] == username:
-                # Session-Details prüfen: Type=x11 UND Display gesetzt UND auf seat0
-                info = subprocess.run(
-                    ["loginctl", "show-session", parts[0],
-                     "-p", "Type", "-p", "Display", "-p", "Seat"],
-                    capture_output=True, text=True, timeout=5
-                )
-                props = dict(p.split("=", 1) for p in info.stdout.strip().splitlines() if "=" in p)
-                if props.get("Type") in ("x11", "wayland") and props.get("Display") and props.get("Seat") == "seat0":
-                    subprocess.run(["loginctl", "activate", parts[0]], timeout=5)
-                    log(f"[Session-Wechsel] Bestehende Session {parts[0]} für '{username}' aktiviert.")
-                    unlock_screen(username)
-                    restart_vnc()
-                    return
-
-        # 2. LightDM-Autologin per Drop-In-Datei setzen
-        os.makedirs(os.path.dirname(AUTOLOGIN_CONF), exist_ok=True)
-        with open(AUTOLOGIN_CONF, "w") as f:
-            f.write(f"[Seat:*]\nautologin-user={username}\nautologin-user-timeout=0\n")
-        log(f"[Session-Wechsel] LightDM-Autologin auf '{username}' gesetzt.")
-
-        # 3. x11vnc stoppen
-        subprocess.run(["pkill", "-9", "x11vnc"], capture_output=True, timeout=5)
-
-        # 4. LightDM neu starten (asynchron – blockiert nicht)
-        log("[Session-Wechsel] Starte LightDM neu...")
-        subprocess.Popen(
-            ["systemctl", "restart", "lightdm"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        time.sleep(5)  # LightDM Zeit zum Starten geben
-
-        # 5. Warten bis neue X11-Session gestartet ist
-        log(f"[Session-Wechsel] Warte auf Desktop-Session für '{username}'...")
-        for attempt in range(20):
-            time.sleep(2)
-            result2 = subprocess.run(
-                ["loginctl", "list-sessions", "--no-legend"],
-                capture_output=True, text=True, timeout=5
-            )
-            for line in result2.stdout.strip().splitlines():
-                parts = line.split()
-                if len(parts) >= 3 and parts[2] == username:
-                    info = subprocess.run(
-                        ["loginctl", "show-session", parts[0],
-                         "-p", "Type", "-p", "Display", "-p", "Seat"],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    props = dict(p.split("=", 1) for p in info.stdout.strip().splitlines() if "=" in p)
-                    if props.get("Type") in ("x11", "wayland") and props.get("Display") and props.get("Seat") == "seat0":
-                        log(f"[Session-Wechsel] Session für '{username}' erkannt (Display={props.get('Display')}), warte auf Stabilisierung...")
-                        time.sleep(8)  # Display vollständig stabilisieren
-                        unlock_screen(username)
-                        restart_vnc()
-                        log(f"[Session-Wechsel] ✅ '{username}' ist jetzt am Desktop angemeldet.")
-                        return
-
-        # Fallback
-        log("[Session-Wechsel] ⚠️ Timeout - starte x11vnc trotzdem...")
-        restart_vnc()
-
-    except Exception as e:
-        log(f"[Session-Wechsel] ❌ Fehler: {e}")
-        import traceback
-        traceback.print_exc()
-        try:
-            restart_vnc()
-        except Exception:
-            pass
+    Root-Operation → Root-Broker; Logik liegt in backend/desktop_control.py."""
+    from backend import broker_client
+    res = broker_client.call_sync("switch_session", {"username": username},
+                                  user="system", timeout=240)
+    if not res.get("ok"):
+        print(f"[Session-Wechsel] via Broker fehlgeschlagen: {res.get('error') or res.get('stderr')}", flush=True)
 
 
 # ─── HTTP Routes ──────────────────────────────────────────────────────
@@ -2198,11 +1981,12 @@ async def api_context_threshold(request: Request, user: str = Depends(require_au
 
 @app.post("/api/system/restart")
 async def system_restart(user: str = Depends(require_local_auth)):
-    """Startet den Jarvis-Dienst neu (via systemctl)."""
-    import subprocess, threading
+    """Startet den Jarvis-Dienst neu (via Root-Broker → systemctl)."""
+    import threading
     def _do_restart():
         import time; time.sleep(1)
-        subprocess.run(["systemctl", "restart", "jarvis.service"], check=False)
+        from backend import broker_client
+        broker_client.systemctl_sync("restart", "jarvis.service", user=user)
     threading.Thread(target=_do_restart, daemon=True).start()
     return JSONResponse({"ok": True, "message": "Neustart eingeleitet"})
 
@@ -2380,8 +2164,11 @@ async def security_sandbox_status(live: int = 0, user: str = Depends(require_loc
     """Status der OS-Sandbox (Systemschutz Netzwerk-Benutzer): aktiv? OS-Benutzer
     vorhanden? Secrets per Dateirechten gesperrt? (Admin) Mit ?live=1 zusaetzlich
     ein Isolationstest (Sandbox-User: Secrets lesbar? /tmp schreibbar?)."""
-    from backend import sandbox_guard
-    return JSONResponse(sandbox_guard.status(live=bool(live)))
+    from backend import broker_client
+    res = await broker_client.call("sandbox_status", {"live": bool(live)}, user=user, timeout=60)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "error": res.get("error") or res.get("stderr")}, status_code=502)
+    return JSONResponse(res.get("result") or {})
 
 
 @app.post("/api/security/sandbox/setup")
@@ -2389,8 +2176,11 @@ async def security_sandbox_setup(user: str = Depends(require_local_auth)):
     """Richtet die OS-Sandbox ein bzw. repariert sie (Admin, root): legt den
     OS-Benutzer an, setzt die Secret-Dateirechte (600) und die Einstellung
     sandbox_shell_user. Idempotent; gibt Schritte + Status (inkl. Live-Test)."""
-    from backend import sandbox_guard
-    res = sandbox_guard.setup()
+    from backend import broker_client
+    bres = await broker_client.call("sandbox_setup", {}, user=user, timeout=120)
+    if not bres.get("ok"):
+        return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")}, status_code=502)
+    res = bres.get("result") or {}
     return JSONResponse(res, status_code=200 if res.get("ok") else 500)
 
 
@@ -2400,8 +2190,11 @@ async def security_sandbox_teardown(user: str = Depends(require_local_auth)):
     privilegierte Shell laeuft dann wieder als Dienst-Benutzer (nur Code-
     Haertung). Benutzer ohne Internet-Freigabe bleiben ueber die Egress-Sperre
     gekapselt. Dateirechte + OS-Benutzer bleiben bestehen."""
-    from backend import sandbox_guard
-    res = sandbox_guard.teardown()
+    from backend import broker_client
+    bres = await broker_client.call("sandbox_teardown", {}, user=user, timeout=60)
+    if not bres.get("ok"):
+        return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")}, status_code=502)
+    res = bres.get("result") or {}
     return JSONResponse(res, status_code=200 if res.get("ok") else 500)
 
 
@@ -2415,8 +2208,11 @@ async def security_egress_status(live: int = 0, user: str = Depends(require_loca
     Live-Test (egress_blocked: kommt der gesperrte Benutzer wirklich nicht ins
     Internet?) – etwas langsamer, daher nur auf Anforderung.
     """
-    from backend import egress_guard
-    return JSONResponse(egress_guard.status(live=bool(live)))
+    from backend import broker_client
+    res = await broker_client.call("egress_status", {"live": bool(live)}, user=user, timeout=60)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "error": res.get("error") or res.get("stderr")}, status_code=502)
+    return JSONResponse(res.get("result") or {})
 
 
 @app.post("/api/security/egress/setup")
@@ -2429,8 +2225,11 @@ async def security_egress_setup(user: str = Depends(require_local_auth)):
     sandbox_shell_user_noinet. Gibt die durchgefuehrten Schritte + den neuen
     Status (inkl. Live-Test) zurueck.
     """
-    from backend import egress_guard
-    res = egress_guard.setup()
+    from backend import broker_client
+    bres = await broker_client.call("egress_setup", {}, user=user, timeout=120)
+    if not bres.get("ok"):
+        return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")}, status_code=502)
+    res = bres.get("result") or {}
     return JSONResponse(res, status_code=200 if res.get("ok") else 500)
 
 
@@ -2442,9 +2241,116 @@ async def security_egress_teardown(user: str = Depends(require_local_auth)):
     Autostart. Der gesperrte OS-Benutzer bleibt bestehen (Re-Aktivieren per
     Klick). Die Tool-Ebenen-Sperre (search_image/Browser/Google) bleibt aktiv.
     """
-    from backend import egress_guard
-    res = egress_guard.teardown()
+    from backend import broker_client
+    bres = await broker_client.call("egress_teardown", {}, user=user, timeout=60)
+    if not bres.get("ok"):
+        return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")}, status_code=502)
+    res = bres.get("result") or {}
     return JSONResponse(res, status_code=200 if res.get("ok") else 500)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Root-Broker – auditierbare Freigabeliste fuer Root-Operationen
+# ═══════════════════════════════════════════════════════════════════════════
+@app.get("/api/broker/status")
+async def broker_status(user: str = Depends(require_local_auth)):
+    """Status der Rechte-Trennung (Admin): Betriebsmodus des Root-Brokers.
+
+    mode: 'broker' (getrennter Betrieb: Backend unprivilegiert, Root-Ops via
+    jarvis-broker.service), 'local-root' (Alt-Betrieb: Backend laeuft noch als
+    root, Broker-Logik inkl. Policy/Audit laeuft im Prozess) oder 'none'
+    (unprivilegiert UND kein Broker erreichbar – Root-Ops schlagen fehl).
+    Zusaetzlich: euid/Benutzer des Backend-Prozesses und Pending-Anzahl."""
+    from backend import broker_client
+    import getpass
+    mode = broker_client.mode()
+    pending = 0
+    reachable = False
+    if mode != "none":
+        res = await broker_client.call("broker.policy_list", {}, user=user, timeout=15)
+        reachable = bool(res.get("ok"))
+        if reachable:
+            pending = sum(1 for e in (res.get("ops") or [])
+                          if e.get("decision") == "pending")
+    return JSONResponse({
+        "ok": True,
+        "mode": mode,
+        "reachable": reachable,
+        "backend_euid": os.geteuid(),
+        "backend_user": getpass.getuser(),
+        "separated": os.geteuid() != 0,
+        "pending": pending,
+    })
+
+
+@app.get("/api/broker/ops")
+async def broker_ops_list(user: str = Depends(require_local_auth)):
+    """Alle Root-Operations-Eintraege der Broker-Policy (Admin).
+
+    Jeder Eintrag: key, op, description, decision (allow/deny/pending),
+    auto (automatisch erlaubte Systemoperation), first_seen/last_used/count,
+    requested_by, decided_by/decided_at. Pending zuerst."""
+    from backend import broker_client
+    res = await broker_client.call("broker.policy_list", {}, user=user, timeout=15)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "error": res.get("error", "Broker nicht erreichbar")},
+                            status_code=502)
+    return JSONResponse({"ok": True, "ops": res.get("ops") or []})
+
+
+@app.post("/api/broker/ops/decide")
+async def broker_ops_decide(request: Request, user: str = Depends(require_local_auth)):
+    """Admin-Entscheidung fuer eine Root-Operation setzen (Admin).
+
+    Body: {key, decision} mit decision in allow|deny|pending.
+    'allow' schaltet die Operation frei (der Agent kann sie danach erneut
+    ausfuehren), 'deny' sperrt sie dauerhaft, 'pending' setzt sie zurueck auf
+    'wartet auf Freigabe'. Jede Entscheidung wird im Broker-Audit-Log
+    protokolliert."""
+    body = await request.json()
+    key = (body.get("key") or "").strip()
+    decision = (body.get("decision") or "").strip()
+    if not key or decision not in ("allow", "deny", "pending"):
+        return JSONResponse({"ok": False, "error": "key und decision (allow|deny|pending) erforderlich"},
+                            status_code=400)
+    from backend import broker_client
+    res = await broker_client.call("broker.policy_decide",
+                                   {"key": key, "decision": decision, "by": user},
+                                   user=user, timeout=15)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "error": res.get("error", "Unbekannter Eintrag")},
+                            status_code=404)
+    return JSONResponse({"ok": True, "entry": res.get("entry")})
+
+
+@app.post("/api/broker/ops/remove")
+async def broker_ops_remove(request: Request, user: str = Depends(require_local_auth)):
+    """Eintrag aus der Broker-Policy loeschen (Admin). Body: {key}.
+    Die Operation erscheint beim naechsten Auftauchen wieder (Systemoperationen
+    als 'allow', Root-Shell-Befehle als 'pending')."""
+    body = await request.json()
+    key = (body.get("key") or "").strip()
+    if not key:
+        return JSONResponse({"ok": False, "error": "key erforderlich"}, status_code=400)
+    from backend import broker_client
+    res = await broker_client.call("broker.policy_remove", {"key": key, "by": user},
+                                   user=user, timeout=15)
+    return JSONResponse({"ok": bool(res.get("ok"))})
+
+
+@app.get("/api/broker/audit")
+async def broker_audit(n: int = 100, user: str = Depends(require_local_auth)):
+    """Letzte n Eintraege des Broker-Audit-Logs (Admin, max 1000).
+
+    Jeder Eintrag: ts, user, op, key, decision (executed/pending/denied),
+    rc, duration_ms, detail. Die Log-Datei selbst gehoert root und ist vom
+    Backend nicht manipulierbar."""
+    from backend import broker_client
+    res = await broker_client.call("broker.audit_tail", {"n": n}, user=user, timeout=15)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "error": res.get("error", "Broker nicht erreichbar")},
+                            status_code=502)
+    return JSONResponse({"ok": True, "entries": res.get("entries") or []})
 
 
 async def _ldap_dir_search(request: Request, kind: str, admin_user: str):
@@ -2839,96 +2745,45 @@ async def request_letsencrypt(request: Request, user: str = Depends(require_loca
         return JSONResponse({"error": "Ungültige E-Mail-Adresse"}, status_code=400)
 
     async def _stream():
+        """Root-Operation → Root-Broker (certbot_obtain): certbot-Installation,
+        Standalone-Challenge, Kopieren der Zertifikate nach certs/ (Eigentuemer:
+        Dienst-Benutzer) und Renewal-Hook. Die Broker-Ausgabe wird live
+        durchgereicht."""
+        from backend import broker_client
+
         yield f"🔍 Starte Let's Encrypt Zertifikatsanfrage für {domain}...\n"
 
-        # 1. certbot installieren falls nicht vorhanden
-        certbot_path = None
-        for cp in ["/usr/bin/certbot", "/usr/local/bin/certbot"]:
-            if Path(cp).exists():
-                certbot_path = cp
+        queue: asyncio.Queue = asyncio.Queue()
+        _DONE = object()
+
+        async def _on_line(line: str):
+            await queue.put(line)
+
+        import getpass
+        service_user = getpass.getuser() if os.geteuid() != 0 else "jarvis"
+
+        async def _run():
+            res = await broker_client.call(
+                "certbot_obtain",
+                {"domain": domain, "email": email, "service_user": service_user},
+                user=user, timeout=600, stream_cb=_on_line)
+            await queue.put(_DONE)
+            return res
+
+        task = asyncio.create_task(_run())
+        while True:
+            item = await queue.get()
+            if item is _DONE:
                 break
+            yield str(item) + "\n"
+        res = await task
 
-        if not certbot_path:
-            yield "📦 certbot nicht gefunden – installiere...\n"
-            proc = await asyncio.create_subprocess_exec(
-                "apt-get", "install", "-y", "certbot",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            async for line in proc.stdout:
-                yield line.decode(errors="replace")
-            await proc.wait()
-            if Path("/usr/bin/certbot").exists():
-                certbot_path = "/usr/bin/certbot"
-                yield "✅ certbot installiert\n"
-            else:
-                yield "❌ certbot konnte nicht installiert werden\n"
-                return
-
-        # 2. Port-80-Redirect pausieren (damit certbot standalone Port 80 nutzen kann)
-        yield "⏸️  Pausiere HTTP-Redirect für certbot-Challenge...\n"
-
-        # 3. certbot standalone ausführen
-        yield f"🌐 Führe certbot aus: {certbot_path} certonly --standalone -d {domain}\n"
-        cmd = [
-            certbot_path, "certonly",
-            "--standalone",
-            "--non-interactive",
-            "--agree-tos",
-            "-m", email,
-            "-d", domain,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        async for line in proc.stdout:
-            yield line.decode(errors="replace")
-        rc = await proc.wait()
-
-        if rc != 0:
-            yield f"\n❌ certbot fehlgeschlagen (Exit-Code {rc})\n"
+        if not res.get("ok"):
+            yield f"\n❌ Fehlgeschlagen: {res.get('error') or res.get('stderr')}\n"
             return
-
-        yield "\n✅ Let's Encrypt Zertifikat erfolgreich erhalten!\n"
-
-        # 4. Symlinks in certs/ setzen
-        le_fullchain = Path(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
-        le_privkey = Path(f"/etc/letsencrypt/live/{domain}/privkey.pem")
-
-        if not le_fullchain.exists() or not le_privkey.exists():
-            yield f"❌ Zertifikatsdateien nicht gefunden unter /etc/letsencrypt/live/{domain}/\n"
-            return
-
-        for certs_dir in [Path("/opt/jarvis/certs"), Path(__file__).parent.parent / "certs"]:
-            certs_dir.mkdir(parents=True, exist_ok=True)
-            cert_dst = certs_dir / "server.crt"
-            key_dst = certs_dir / "server.key"
-            # Backup der alten Zertifikate
-            for f in [cert_dst, key_dst]:
-                if f.exists() and not f.is_symlink():
-                    f.rename(f.with_suffix(".bak"))
-            # Symlinks setzen
-            try:
-                if cert_dst.is_symlink():
-                    cert_dst.unlink()
-                if key_dst.is_symlink():
-                    key_dst.unlink()
-                cert_dst.symlink_to(le_fullchain)
-                key_dst.symlink_to(le_privkey)
-                yield f"🔗 Symlinks gesetzt: {certs_dir}/server.crt → {le_fullchain}\n"
-            except Exception as e:
-                yield f"⚠️  Symlink-Fehler in {certs_dir}: {e}\n"
-                # Fallback: Kopieren
-                import shutil
-                shutil.copy2(str(le_fullchain), str(cert_dst))
-                shutil.copy2(str(le_privkey), str(key_dst))
-                os.chmod(str(key_dst), 0o600)
-                yield f"📋 Zertifikat kopiert nach {certs_dir}/\n"
-
+        yield f"\n✅ {res.get('stdout') or 'Zertifikat erhalten und installiert.'}\n"
         yield "\n✅ Fertig! Bitte starten Sie den Jarvis-Service neu:\n"
-        yield "   systemctl restart jarvis.service\n"
+        yield "   (Einstellungen → System → Dienst neu starten)\n"
 
     return StreamingResponse(_stream(), media_type="text/plain")
 
@@ -6004,9 +5859,10 @@ async def remove_mount(idx: int, user: str = Depends(require_auth)):
         return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
 
     mp = _mount_path(idx)
-    # Unmounten falls aktiv
+    # Unmounten falls aktiv (Root-Broker)
     if mp.is_mount():
-        await asyncio.to_thread(subprocess.run, ["umount", str(mp)], capture_output=True, timeout=10)
+        from backend import broker_client
+        await broker_client.call("umount_share", {"mountpoint": str(mp)}, user=user, timeout=30)
 
     # Ordner aus Knowledge-Liste entfernen
     kb_state = config.get_skill_states().get("knowledge", {})
@@ -6033,10 +5889,11 @@ async def update_mount(idx: int, request: Request, user: str = Depends(require_a
     source = data.get("source", "").strip()
     if not source:
         return JSONResponse({"error": "Quelle fehlt"}, status_code=400)
-    # Unmounten falls aktiv (neue Credentials erfordern Neuverbindung)
+    # Unmounten falls aktiv (neue Credentials erfordern Neuverbindung; Root-Broker)
     mp = _mount_path(idx)
     if mp.is_mount():
-        await asyncio.to_thread(subprocess.run, ["umount", str(mp)], capture_output=True, timeout=10)
+        from backend import broker_client
+        await broker_client.call("umount_share", {"mountpoint": str(mp)}, user=user, timeout=30)
     mounts[idx] = {
         "type": data.get("type", "smb"),
         "source": source,
@@ -6056,41 +5913,23 @@ async def mount_share(idx: int, user: str = Depends(require_auth)):
 
     m = mounts[idx]
     mp = _mount_path(idx)
-    mp.mkdir(parents=True, exist_ok=True)
 
     mount_type = m.get("type", "smb")
-    source = m["source"]
-    username = m.get("username", "")
-    password = m.get("password", "")
-
-    if mount_type == "smb":
-        opts = "ro"
-        if username:
-            opts += f",username={username},password={password}"
-        else:
-            opts += ",guest"
-        cmd = ["mount", "-t", "cifs", source, str(mp), "-o", opts]
-    elif mount_type == "nfs":
-        cmd = ["mount", "-t", "nfs", "-o", "ro", source, str(mp)]
-    elif mount_type == "webdav":
-        # davfs2: Credentials in Datei schreiben
-        secrets = Path("/etc/davfs2/secrets")
-        secrets.parent.mkdir(parents=True, exist_ok=True)
-        line = f"{str(mp)} {username} {password}\n"
-        if secrets.exists():
-            content = secrets.read_text()
-            if str(mp) not in content:
-                secrets.write_text(content + line)
-        else:
-            secrets.write_text(line)
-        secrets.chmod(0o600)
-        cmd = ["mount", "-t", "davfs", "-o", "ro", source, str(mp)]
-    else:
+    if mount_type not in ("smb", "nfs", "webdav"):
         return JSONResponse({"error": f"Unbekannter Typ: {mount_type}"}, status_code=400)
 
-    result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=15)
-    if result.returncode != 0:
-        return JSONResponse({"error": f"Mount fehlgeschlagen: {result.stderr.strip()}"}, status_code=500)
+    # Root-Operation (mount, davfs2-Secrets) → Root-Broker
+    from backend import broker_client
+    result = await broker_client.call("mount_share", {
+        "type": mount_type,
+        "source": m["source"],
+        "mountpoint": str(mp),
+        "username": m.get("username", ""),
+        "password": m.get("password", ""),
+    }, user=user, timeout=60)
+    if not result.get("ok"):
+        err = result.get("stderr") or result.get("error") or ""
+        return JSONResponse({"error": f"Mount fehlgeschlagen: {err.strip()}"}, status_code=500)
 
     # auto_mount aktivieren – Benutzer will diese Freigabe verbunden haben
     mounts[idx]["auto_mount"] = True
@@ -6119,9 +5958,11 @@ async def unmount_share(idx: int, user: str = Depends(require_auth)):
             _save_mounts_config(mounts)
         return JSONResponse({"ok": True, "hint": "War nicht gemountet"})
 
-    result = await asyncio.to_thread(subprocess.run, ["umount", str(mp)], capture_output=True, text=True, timeout=10)
-    if result.returncode != 0:
-        return JSONResponse({"error": f"Unmount fehlgeschlagen: {result.stderr.strip()}"}, status_code=500)
+    from backend import broker_client
+    result = await broker_client.call("umount_share", {"mountpoint": str(mp)}, user=user, timeout=30)
+    if not result.get("ok"):
+        err = result.get("stderr") or result.get("error") or ""
+        return JSONResponse({"error": f"Unmount fehlgeschlagen: {err.strip()}"}, status_code=500)
 
     # auto_mount deaktivieren – manuelle Trennung respektieren
     mounts = _get_mounts_config()
@@ -8265,30 +8106,25 @@ async def startup():
                 mp = _mount_path(idx)
                 if mp.is_mount():
                     continue  # Bereits gemountet
-                mp.mkdir(parents=True, exist_ok=True)
                 source = m["source"]
                 mount_type = m.get("type", "smb")
-                username = m.get("username", "")
-                password = m.get("password", "")
-                if mount_type == "smb":
-                    opts = "ro"
-                    if username:
-                        opts += f",username={username},password={password}"
-                    else:
-                        opts += ",guest"
-                    cmd = ["mount", "-t", "cifs", source, str(mp), "-o", opts]
-                elif mount_type == "nfs":
-                    cmd = ["mount", "-t", "nfs", "-o", "ro", source, str(mp)]
-                else:
+                if mount_type not in ("smb", "nfs"):
                     continue
-                result = await _asyncio.to_thread(
-                    subprocess.run, cmd, capture_output=True, text=True, timeout=15
-                )
-                if result.returncode == 0:
+                # Root-Operation → Root-Broker
+                from backend import broker_client
+                result = await broker_client.call("mount_share", {
+                    "type": mount_type,
+                    "source": source,
+                    "mountpoint": str(mp),
+                    "username": m.get("username", ""),
+                    "password": m.get("password", ""),
+                }, user="system", timeout=60)
+                if result.get("ok"):
                     print(f"[knowledge] Auto-Mount: {source} → {mp}", flush=True)
                     needs_reindex = True
                 else:
-                    print(f"[knowledge] Auto-Mount fehlgeschlagen ({source}): {result.stderr.strip()}", flush=True)
+                    err = (result.get("stderr") or result.get("error") or "").strip()
+                    print(f"[knowledge] Auto-Mount fehlgeschlagen ({source}): {err}", flush=True)
             if needs_reindex:
                 from backend.tools.knowledge import force_reindex
                 await _asyncio.to_thread(force_reindex)

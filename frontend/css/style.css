@@ -6962,4 +6962,38 @@ select option:hover {
     body.printing-fwdoc #sec-fwdoc-close { display: none !important; }
     body.printing-fwdoc #sec-fwdoc-modal table { page-break-inside: auto; }
     body.printing-fwdoc #sec-fwdoc-modal tr { page-break-inside: avoid; }
+
+    /* ── Druck der Root-Broker-Funktionsbeschreibung (body.printing-brkdoc) ── */
+    body.printing-brkdoc > *:not(#sec-brkdoc-modal) { display: none !important; }
+    body.printing-brkdoc #sec-brkdoc-modal {
+        display: block !important; position: static !important; inset: auto !important;
+        background: #fff !important; backdrop-filter: none !important;
+        padding: 0 !important; opacity: 1 !important; overflow: visible !important; z-index: auto !important;
+    }
+    body.printing-brkdoc #sec-brkdoc-modal .modal-content {
+        background: #fff !important; box-shadow: none !important; border: none !important;
+        width: 100% !important; max-width: none !important; max-height: none !important;
+        overflow: visible !important; display: block !important; animation: none !important;
+    }
+    body.printing-brkdoc #sec-brkdoc-modal .modal-header {
+        background: none !important; border-bottom: 1px solid #ccc !important; padding: 0 0 8px !important;
+    }
+    body.printing-brkdoc #sec-brkdoc-modal .modal-body {
+        overflow: visible !important; max-height: none !important; padding: 12px 0 0 !important;
+    }
+    body.printing-brkdoc #sec-brkdoc-modal,
+    body.printing-brkdoc #sec-brkdoc-modal * { color: #000 !important; }
+    body.printing-brkdoc #sec-brkdoc-modal h2 { background: none !important; -webkit-text-fill-color: #000 !important; }
+    body.printing-brkdoc #sec-brkdoc-modal pre,
+    body.printing-brkdoc #sec-brkdoc-modal code {
+        background: #f5f5f5 !important; border-color: #ccc !important;
+        white-space: pre-wrap !important; word-break: break-word !important;
+    }
+    body.printing-brkdoc #sec-brkdoc-modal th,
+    body.printing-brkdoc #sec-brkdoc-modal td,
+    body.printing-brkdoc #sec-brkdoc-modal tr { border-color: #ccc !important; }
+    body.printing-brkdoc #sec-brkdoc-pdf,
+    body.printing-brkdoc #sec-brkdoc-close { display: none !important; }
+    body.printing-brkdoc #sec-brkdoc-modal table { page-break-inside: auto; }
+    body.printing-brkdoc #sec-brkdoc-modal tr { page-break-inside: avoid; }
 }

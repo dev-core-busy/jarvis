@@ -1,0 +1,18 @@
+[Unit]
+Description=Jarvis Root-Broker (privilegierte Operationen + Desktop/VNC-Bootstrap)
+After=network-online.target lightdm.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/jarvis
+Environment=DISPLAY=:0
+Environment=JARVIS_BROKER_GROUP=jarvis
+ExecStart=/opt/jarvis/start_jarvis_root.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

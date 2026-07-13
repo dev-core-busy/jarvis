@@ -2228,7 +2228,10 @@ body.light .modal-header h2 {
 }
 
 /* ── Generischer Vollbild-/Expand-Umschalter für alle Popups (modal_expand.js) ── */
-.modal-expand-btn { font-size: 1.05rem; line-height: 1; opacity: 0.7; }
+/* margin-left:auto verhindert, dass der Button im space-between-Header
+   (Titel | ? | Schliessen) mittig landet – er gruppiert sich rechts neben
+   den Schliessen-Button; margin-right sorgt fuer etwas Abstand zum X. */
+.modal-expand-btn { font-size: 1.05rem; line-height: 1; opacity: 0.7; margin-left: auto; margin-right: 0.5rem; }
 .modal-expand-btn:hover,
 .modal-expand-btn.active { opacity: 1; }
 .modal.modal-expanded > .modal-content {
@@ -2488,12 +2491,18 @@ body.light .modal-header h2 {
 body.kbm-resizing { cursor: col-resize; user-select: none; }
 .kbm-content { cursor: help; color: var(--text-muted); font-style: italic; }
 .kbm-tip {
-    position: fixed; z-index: 10080; max-width: 380px; max-height: 320px; overflow: auto;
+    position: fixed; z-index: 10080; width: 680px; max-width: calc(100vw - 24px);
+    max-height: min(70vh, 560px); overflow: auto;
     white-space: pre-wrap; word-break: break-word;
     background: var(--bg-secondary, #0f172a); border: 1px solid var(--border, rgba(255,255,255,.15));
-    border-radius: 8px; padding: 8px 10px; font-size: 0.76rem; line-height: 1.4;
+    border-radius: 8px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5;
     color: var(--text-primary); box-shadow: 0 12px 30px rgba(var(--shadow-rgb), 0.5);
-    pointer-events: none;
+    pointer-events: auto; resize: both;
+}
+/* Gültiges JSON wird eingerückt + in Monospace angezeigt (besser lesbar). */
+.kbm-tip.kbm-tip-json {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.78rem; tab-size: 2;
 }
 
 /* ── Profil-Liste ── */

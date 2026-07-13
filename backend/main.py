@@ -591,10 +591,10 @@ async def require_local_auth(request: Request) -> str:
     return username
 
 
-async def require_knowledge_editor(request: Request, user: str = Depends(require_auth)) -> str:
-    """FastAPI Dependency: Prüft ob der Benutzer Wissen bearbeiten darf.
+def _may_edit_knowledge(user: str) -> bool:
+    """Prädikat: Darf der Benutzer *generell* Wissen bearbeiten (globale Editoren)?
 
-    Erlaubt wenn:
+    True wenn:
     - Keine Editor-Einschränkung konfiguriert (bestehende Behavior beibehalten)
     - Lokaler Admin (ALLOWED_USERS)
     - AD-User in ad_knowledge_editors-Benutzerliste
@@ -605,32 +605,66 @@ async def require_knowledge_editor(request: Request, user: str = Depends(require
 
     # Keine Einschränkung konfiguriert → alle dürfen (bestehende Behavior bleibt erhalten)
     if not editors_raw and not editors_group:
-        return user
-
+        return True
     # Lokale Admins immer erlaubt
     if user in ALLOWED_USERS:
-        return user
+        return True
 
-    plain = user.split("@")[0].split("\\")[-1].lower()
-
-    # Benutzerliste (kein LDAP nötig, sofort wirksam)
+    plain = _norm_login(user)
     if editors_raw:
         allowed_list = {_norm_login(u) for u in editors_raw.split(",") if u.strip()}
         if plain in allowed_list:
-            return user
-        if not editors_group:
-            raise HTTPException(status_code=403,
-                detail="Keine Berechtigung zum Bearbeiten von Wissen – Benutzer nicht in Editoren-Liste")
+            return True
+    if editors_group and _knowledge_editor_cache.get(plain, False):
+        return True
+    return False
 
-    # Gruppen-Check via Login-Cache
+
+async def require_knowledge_editor(request: Request, user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Prüft ob der Benutzer *generell* Wissen bearbeiten darf.
+
+    Für gruppenbezogene Aktionen (eine bestimmte Wissensgruppe) siehe
+    ``_can_edit_kb_group`` – dort zählen zusätzlich die pro Gruppe hinterlegten
+    Editoren.
+    """
+    if _may_edit_knowledge(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Keine Berechtigung zum Bearbeiten von Wissen – nicht in Editoren-Liste/-Gruppe "
+               "(ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
+def _is_kb_group_editor(user: str, group: dict) -> bool:
+    """True, wenn der Benutzer als *gruppenspezifischer* Editor hinterlegt ist.
+
+    Pro Wissensgruppe koennen – zusaetzlich zu den globalen Wissens-Editoren –
+    weitere AD-Benutzer (kommagetrennt) und AD-Gruppen-DNs (zeilengetrennt)
+    freigeschaltet werden. Die Gruppen-Mitgliedschaft wird gegen die beim
+    Login gecachten memberOf-DNs geprüft.
+    """
+    if not group:
+        return False
+    plain = _norm_login(user)
+    editors_users = (group.get("editors_users") or "").strip()
+    if editors_users:
+        allowed = {_norm_login(u) for u in editors_users.split(",") if u.strip()}
+        if plain in allowed:
+            return True
+    editors_group = (group.get("editors_group") or "").strip()
     if editors_group:
-        if _knowledge_editor_cache.get(plain, False):
-            return user
-        raise HTTPException(status_code=403,
-            detail="Keine Berechtigung zum Bearbeiten von Wissen – "
-                   "nicht in Editor-Gruppe (ggf. neu einloggen für Gruppen-Aktualisierung)")
+        dns = _user_group_dns_cache.get(plain, [])
+        if _member_of_any_group(dns, editors_group):
+            return True
+    return False
 
-    raise HTTPException(status_code=403, detail="Keine Berechtigung zum Bearbeiten von Wissen")
+
+def _can_edit_kb_group(user: str, gid: str) -> bool:
+    """True, wenn der Benutzer diese konkrete Wissensgruppe bearbeiten darf:
+    globaler Wissens-Editor ODER gruppenspezifischer Editor."""
+    if _may_edit_knowledge(user):
+        return True
+    from backend import knowledge_groups as kg
+    return _is_kb_group_editor(user, kg.get_group(gid))
 
 
 async def require_auth_or_query(request: Request) -> str:
@@ -724,6 +758,31 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
 # Cache: sAMAccountName (lower) → bool (darf Wissen bearbeiten)
 # Wird beim AD-Login befüllt und beim Speichern neuer Editor-Einstellungen geleert.
 _knowledge_editor_cache: dict[str, bool] = {}
+
+# Cache: sAMAccountName (lower) → Liste der memberOf-Gruppen-DNs des Benutzers.
+# Wird beim AD-Login befüllt und dient der pro-Wissensgruppe-Berechtigung
+# (gruppenspezifische Editoren via AD-Gruppen). Enthält Fakten über den User
+# (nicht aus Settings abgeleitet) → muss beim Speichern NICHT geleert werden.
+_user_group_dns_cache: dict[str, list] = {}
+
+
+def _fetch_user_group_dns(conn, base_dn: str, username: str) -> list:
+    """Liest die memberOf-Gruppen-DNs eines Benutzers (nur beim Login – Bind aktiv)."""
+    plain = username.split("@")[0].split("\\")[-1].lower()
+    safe_plain = plain.replace("\\", "\\5c").replace("*", "\\2a").replace(
+        "(", "\\28").replace(")", "\\29").replace("\x00", "\\00")
+    try:
+        conn.search(
+            search_base=base_dn,
+            search_filter=f"(sAMAccountName={safe_plain})",
+            attributes=["memberOf"],
+        )
+        if conn.entries:
+            mo = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
+            return list(mo or [])
+    except Exception as e:
+        print(f"[AUTH] memberOf-Cache Fehler: {e}", flush=True)
+    return []
 
 
 def _check_knowledge_edit_permission_with_conn(username: str, conn, base_dn: str) -> bool:
@@ -977,6 +1036,10 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
                 )
                 _admin_access_cache[plain_key] = _check_admin_with_conn(
                     username, conn, base_dn
+                )
+                # memberOf-DNs cachen (für pro-Wissensgruppe-Editoren via AD-Gruppe)
+                _user_group_dns_cache[plain_key] = _fetch_user_group_dns(
+                    conn, base_dn, username
                 )
                 conn.unbind()
                 if allowed:
@@ -5526,10 +5589,18 @@ def _kb_all_rel_paths() -> list:
 
 @app.get("/api/knowledge/groups")
 async def knowledge_groups_list(user: str = Depends(require_auth)):
-    """Liefert alle Wissensgruppen samt zugehöriger Dateizuordnungen."""
+    """Liefert alle Wissensgruppen (Definition + Zähler).
+
+    WICHTIG: Die Gruppen-Definition ist UNABHÄNGIG von den Datei-Shares und
+    kommt allein aus der lokalen ``.groups.json``. Die Datei-Aufzählung dient
+    NUR den exakten Zählern und läuft best-effort mit hartem Timeout – ist ein
+    Share tot/langsam, fallen wir auf manifest-basierte Zähler zurück, statt zu
+    blockieren. Gruppenverwaltung funktioniert also auch bei toten Shares."""
     from backend import knowledge_groups as kg
+    from backend.tools.knowledge import _indexed_rel_paths
     try:
-        return JSONResponse({"ok": True, **kg.list_groups(_kb_all_rel_paths())})
+        # Zähler NUR aus dem Index (lokale DB) – kein Share-Zugriff, nie blockierend.
+        return JSONResponse({"ok": True, **kg.list_groups(_indexed_rel_paths())})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -5547,20 +5618,39 @@ async def knowledge_groups_create(request: Request, user: str = Depends(require_
 
 
 @app.patch("/api/knowledge/groups/{gid}")
-async def knowledge_groups_update(gid: str, request: Request, user: str = Depends(require_knowledge_editor)):
-    """Aktualisiert eine Wissensgruppe (Name, Farbe oder Reihenfolge)."""
+async def knowledge_groups_update(gid: str, request: Request, user: str = Depends(require_auth)):
+    """Aktualisiert eine Wissensgruppe (Name, Farbe, Reihenfolge oder ihre Editoren).
+
+    Erlaubt für globale Wissens-Editoren ODER die pro Gruppe hinterlegten Editoren.
+    Die Editoren-Felder (``editors_users`` kommagetrennt, ``editors_group``
+    zeilengetrennte AD-Gruppen-DNs) definieren *zusätzlich* zu den globalen
+    Wissens-Editoren, wer diese Gruppe bearbeiten darf.
+    """
+    if not _can_edit_kb_group(user, gid):
+        raise HTTPException(status_code=403,
+            detail="Keine Berechtigung, diese Wissensgruppe zu bearbeiten")
     from backend import knowledge_groups as kg
     body = await request.json()
     try:
-        g = kg.update_group(gid, name=body.get("name"), color=body.get("color"), order=body.get("order"))
+        g = kg.update_group(
+            gid,
+            name=body.get("name"),
+            color=body.get("color"),
+            order=body.get("order"),
+            editors_users=body.get("editors_users"),
+            editors_group=body.get("editors_group"),
+        )
         return JSONResponse({"ok": True, "group": g})
     except KeyError:
         return JSONResponse({"ok": False, "error": "Gruppe nicht gefunden"}, status_code=404)
 
 
 @app.delete("/api/knowledge/groups/{gid}")
-async def knowledge_groups_delete(gid: str, user: str = Depends(require_knowledge_editor)):
-    """Löscht eine Wissensgruppe."""
+async def knowledge_groups_delete(gid: str, user: str = Depends(require_auth)):
+    """Löscht eine Wissensgruppe (globale ODER gruppenspezifische Editoren)."""
+    if not _can_edit_kb_group(user, gid):
+        raise HTTPException(status_code=403,
+            detail="Keine Berechtigung, diese Wissensgruppe zu löschen")
     from backend import knowledge_groups as kg
     ok = kg.delete_group(gid)
     return JSONResponse({"ok": ok}, status_code=200 if ok else 404)
@@ -5576,8 +5666,12 @@ async def knowledge_assignments_get(path: str = "", user: str = Depends(require_
 
 
 @app.post("/api/knowledge/assignments")
-async def knowledge_assignments_set(request: Request, user: str = Depends(require_knowledge_editor)):
-    """Setzt die Gruppenzuordnungen für eine Datei."""
+async def knowledge_assignments_set(request: Request, user: str = Depends(require_auth)):
+    """Setzt die Gruppenzuordnungen für eine Datei.
+
+    Globale Wissens-Editoren dürfen jede Zuordnung ändern. Gruppenspezifische
+    Editoren dürfen eine Datei nur denjenigen Gruppen zuordnen/entziehen, für die
+    sie selbst als Editor hinterlegt sind."""
     from backend import knowledge_groups as kg
     body = await request.json()
     path = (body.get("path") or "").strip()
@@ -5586,6 +5680,17 @@ async def knowledge_assignments_set(request: Request, user: str = Depends(requir
     groups = body.get("groups")
     if not isinstance(groups, list):
         return JSONResponse({"ok": False, "error": "groups muss eine Liste sein"}, status_code=400)
+
+    if not _may_edit_knowledge(user):
+        # Nur geänderte Gruppen prüfen (hinzugefügt ODER entfernt).
+        current = set(kg.get_assignment(path))
+        wanted = set(g for g in groups if isinstance(g, str))
+        changed = current.symmetric_difference(wanted)
+        for gid in changed:
+            if not _is_kb_group_editor(user, kg.get_group(gid)):
+                raise HTTPException(status_code=403,
+                    detail=f"Keine Berechtigung für die Wissensgruppe '{gid}'")
+
     saved = kg.set_assignment(path, groups)
     return JSONResponse({"ok": True, "path": path, "groups": saved})
 

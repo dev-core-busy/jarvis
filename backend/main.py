@@ -4606,6 +4606,13 @@ async def _support_run_query(body: dict, user: str) -> dict:
     t0 = _t.time()
     query = (body.get("text") or body.get("query") or "").strip()
     use_rag = body.get("rag", True)
+    # Vom Benutzer gewaehlter Wissensgruppen-Filter (Checkbox-Auswahl):
+    # None/fehlt = alle Gruppen; [] = keine (RAG deaktiviert); [ids] = nur diese.
+    kb_groups = body.get("kb_groups")
+    if kb_groups is not None and not isinstance(kb_groups, list):
+        kb_groups = None
+    if isinstance(kb_groups, list) and len(kb_groups) == 0:
+        use_rag = False  # keine Gruppe gewaehlt -> kein Wissen aus der KB
     use_conf = body.get("confluence", True)
     use_ai = body.get("ai", True)
     # Jira-Modi ueber EINDEUTIGE Keys: ``jira_all`` = 'alle Jira Tickets'
@@ -4650,7 +4657,7 @@ async def _support_run_query(body: dict, user: str) -> dict:
     if use_rag:
         try:
             from backend.tools.knowledge import rag_search
-            results = await rag_search(query, _support_count(_sacfg, "rag_results", _SUPPORT_RAG_DEFAULT))
+            results = await rag_search(query, _support_count(_sacfg, "rag_results", _SUPPORT_RAG_DEFAULT), groups=kb_groups or None)
             rag_max = max((s for s, _, _ in results), default=1.0) or 1.0
             for score, rel, chunk in results:
                 pct = round(score * 100) if rag_max <= 1.0 else round(score / rag_max * 100)
@@ -7619,6 +7626,11 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
 
         target_agent_id = msg.get("agent_id", "")
         ui_lang = msg.get("lang", "de")  # UI-Sprache des Nutzers (de/en)
+        # Vom Benutzer gewaehlter Wissensgruppen-Filter (Checkbox-Auswahl im Chat):
+        # None/fehlt = kein Filter (alle Gruppen), [] = keine, [ids] = nur diese.
+        kb_groups = msg.get("kb_groups")
+        if kb_groups is not None and not isinstance(kb_groups, list):
+            kb_groups = None
 
         # ── Sicherheitsschicht: Eingabe auf Jailbreak/Injection pruefen ──
         # Bei Erkennung wird der Account sofort gesperrt; der Client wird
@@ -7647,7 +7659,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             target = agent_manager.get_agent(target_agent_id)
             if target.is_sub_agent:
                 target._current_user_internet = _ws_internet
-                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments))
+                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups))
                 return
 
         agent = agent_manager.get_or_create_main()
@@ -7687,7 +7699,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Aufgabe im Hintergrund starten – sendet 'finished' wenn fertig (für Windows-TTS)
         async def _run_main_agent_and_notify():
             try:
-                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang, attachments=image_attachments)
+                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups)
             except Exception:
                 pass
             finally:

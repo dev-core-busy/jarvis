@@ -151,11 +151,21 @@
         });
     }
 
+    // Wissensgruppen-Filter (aufklappbare Checkbox-Liste in der Options-Leiste)
+    var _kbFilter = null;
+    function ensureKbFilter() {
+        if (_kbFilter || !window.KbGroupFilter) return;
+        var slot = $('kb-filter-slot');
+        if (!slot) return;
+        _kbFilter = window.KbGroupFilter.mount({ anchor: slot, place: 'append', direction: 'down', key: 'support' });
+    }
+
     function showApp() {
         $('sup-login').classList.add('hidden');
         $('sup-app').classList.remove('hidden');
         loadStatus();
         bind();
+        ensureKbFilter();
         startLlmStatus();
         if (window.refreshBranding) try { window.refreshBranding(); } catch (e) {}
     }
@@ -609,6 +619,8 @@
         var useRag = $('sup-opt-rag').checked;
         var useIbs = $('sup-opt-ibs') ? $('sup-opt-ibs').checked : false;
         var useAi = $('sup-opt-ai').checked;
+        // Wissensgruppen-Filter: null = alle (Feld weglassen), [] = keine, [ids] = nur diese
+        var kbSel = _kbFilter ? _kbFilter.getSelection() : null;
 
         var btn = $('sup-search-btn'); btn.disabled = true;
         var cancelBtn = $('sup-cancel-btn'); if (cancelBtn) cancelBtn.classList.remove('hidden');
@@ -623,11 +635,12 @@
         fetch('/api/support/query', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ text: text, jira_all: allJira, jira_open: openJira,
+            body: JSON.stringify(Object.assign({ text: text, jira_all: allJira, jira_open: openJira,
                                    confluence: useConf, rag: useRag, ibs: useIbs, ai: useAi,
                                    lang: (localStorage.getItem('jarvis_lang') || 'de'),
                                    jira_limit: clampNum(getNumPref('tickets') === null ? _supDefault.tickets : getNumPref('tickets'), 1, _supMax.tickets),
-                                   summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) }),
+                                   summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) },
+                                   kbSel !== null ? { kb_groups: kbSel } : {})),
             signal: _searchAbort.signal
         })
             .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })

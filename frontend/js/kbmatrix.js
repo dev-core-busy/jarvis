@@ -187,7 +187,20 @@ window.KbMatrix = (function () {
         _bindContentTip(ov);
     }
 
-    // ── Hover-Tooltip mit Dateiinhalt für "Inhalt"-Zellen (lazy geladen) ──────
+    // JSON huebsch einrücken, wenn der Inhalt gültiges JSON ist – sonst Rohtext.
+    // Gibt { text, json } zurück (json=true -> Monospace-Darstellung im Tooltip).
+    function _prettyMaybeJson(txt) {
+        const s = (txt || '').trim();
+        if (s && (s[0] === '{' || s[0] === '[')) {
+            try { return { text: JSON.stringify(JSON.parse(s), null, 2), json: true }; }
+            catch (e) { /* abgeschnitten/kein JSON -> Rohtext */ }
+        }
+        return { text: txt, json: false };
+    }
+
+    // ── Info-Popup mit Dateiinhalt für "Inhalt"-Zellen (lazy geladen) ─────────
+    // Bleibt offen, solange die Maus in Zelle ODER Popup ist (Scrollbar erreichbar),
+    // und wird vertikal in den Viewport eingepasst.
     function _bindContentTip(ov) {
         const tbody = ov.querySelector('tbody');
         const tip = document.createElement('div');
@@ -195,29 +208,51 @@ window.KbMatrix = (function () {
         tip.style.display = 'none';
         ov.appendChild(tip);
 
+        let hideTimer = null;
+        const cancelHide = () => { clearTimeout(hideTimer); };
+        const scheduleHide = () => { clearTimeout(hideTimer); hideTimer = setTimeout(() => { tip.style.display = 'none'; }, 250); };
+
         function place(cell) {
             const r = cell.getBoundingClientRect();
-            tip.style.left = Math.max(8, Math.min(window.innerWidth - 380, r.left)) + 'px';
-            tip.style.top = (r.bottom + 4) + 'px';
+            const w = Math.min(680, window.innerWidth - 24);
+            tip.style.width = w + 'px';
+            tip.style.left = Math.max(12, Math.min(window.innerWidth - w - 12, r.left)) + 'px';
+            tip._anchorBottom = r.bottom + 6;
+            tip.style.top = tip._anchorBottom + 'px';
+        }
+        function reclamp() {
+            // Passt der Tooltip unterhalb nicht mehr, nach oben schieben.
+            const h = tip.offsetHeight;
+            let top = tip._anchorBottom || 12;
+            if (top + h > window.innerHeight - 12) top = Math.max(12, window.innerHeight - h - 12);
+            tip.style.top = top + 'px';
+        }
+        function setContent(entry) {
+            tip.textContent = entry.text;
+            tip.classList.toggle('kbm-tip-json', !!entry.json);
+            reclamp();
         }
         function show(cell) {
+            cancelHide();
             const path = cell.closest('tr').dataset.path;
             tip._path = path;
             place(cell);
             tip.style.display = 'block';
-            if (_contentCache[path] !== undefined) { tip.textContent = _contentCache[path]; return; }
+            if (_contentCache[path] !== undefined) { setContent(_contentCache[path]); return; }
+            tip.classList.remove('kbm-tip-json');
             tip.textContent = T('kbmatrix.loading', 'lädt…');
             fetch('/api/knowledge/file_read?path=' + encodeURIComponent(path), { headers: _auth() })
                 .then(r => r.json()).then(d => {
-                    let txt = (d && d.ok && d.content != null && d.content !== '')
+                    let raw = (d && d.ok && d.content != null && d.content !== '')
                         ? String(d.content) : T('kbmatrix.no_content', '(Inhalt nicht als Text lesbar)');
-                    txt = txt.replace(/\s+$/, '');
-                    if (txt.length > 2000) txt = txt.slice(0, 2000) + '\n…';
-                    _contentCache[path] = txt;
-                    if (tip.style.display !== 'none' && tip._path === path) tip.textContent = txt;
+                    raw = raw.replace(/\s+$/, '');
+                    const entry = _prettyMaybeJson(raw);
+                    if (entry.text.length > 8000) entry.text = entry.text.slice(0, 8000) + '\n…';
+                    _contentCache[path] = entry;
+                    if (tip.style.display !== 'none' && tip._path === path) setContent(entry);
                 }).catch(() => {
-                    _contentCache[path] = T('kbmatrix.no_content', '(Inhalt nicht lesbar)');
-                    if (tip._path === path) tip.textContent = _contentCache[path];
+                    _contentCache[path] = { text: T('kbmatrix.no_content', '(Inhalt nicht lesbar)'), json: false };
+                    if (tip._path === path) setContent(_contentCache[path]);
                 });
         }
         tbody.addEventListener('mouseover', e => {
@@ -226,8 +261,14 @@ window.KbMatrix = (function () {
         });
         tbody.addEventListener('mouseout', e => {
             const cell = e.target.closest('.kbm-content');
-            if (cell && (!e.relatedTarget || !cell.contains(e.relatedTarget))) tip.style.display = 'none';
+            if (!cell) return;
+            // Nicht schließen, wenn die Maus in den Tooltip wandert.
+            if (e.relatedTarget && (tip === e.relatedTarget || tip.contains(e.relatedTarget))) return;
+            scheduleHide();
         });
+        // Solange die Maus im Tooltip ist, offen halten (Scrollen/Markieren möglich).
+        tip.addEventListener('mouseenter', cancelHide);
+        tip.addEventListener('mouseleave', scheduleHide);
     }
 
     async function _toggle(cell, ov) {

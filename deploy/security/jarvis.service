@@ -1,0 +1,21 @@
+[Unit]
+Description=Jarvis KI Linux Agent (unprivilegiert, Root-Ops via jarvis-broker)
+After=network-online.target lightdm.service jarvis-broker.service
+Wants=network-online.target jarvis-broker.service
+
+[Service]
+Type=simple
+# Getrennter Betrieb: Backend laeuft als Desktop-/Dienst-Benutzer jarvis.
+# Alles, was root braucht, laeuft ueber den Root-Broker (jarvis-broker.service).
+User=jarvis
+Group=jarvis
+WorkingDirectory=/opt/jarvis
+Environment=DISPLAY=:0
+# Port 443/80 ohne root binden
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+ExecStart=/opt/jarvis/start_jarvis.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

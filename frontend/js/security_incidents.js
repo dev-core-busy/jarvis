@@ -92,6 +92,36 @@
             if (sbVerify) sbVerify.addEventListener('click', function () { Mgr.loadSandbox(true); });
             var sbDown = $('sec-sandbox-teardown');
             if (sbDown) sbDown.addEventListener('click', function () { Mgr.teardownSandbox(); });
+            // Root-Broker: Freigabeliste aktualisieren / Audit-Log
+            var brRefresh = $('sec-broker-refresh');
+            if (brRefresh) brRefresh.addEventListener('click', function () { Mgr.loadBroker(); });
+            var brAudit = $('sec-broker-audit-btn');
+            if (brAudit) brAudit.addEventListener('click', function () { Mgr.toggleBrokerAudit(); });
+            // Root-Broker-Funktionsanalyse-Popup (❓) + PDF-Druck
+            var brkBtn = $('sec-brkdoc-btn');
+            if (brkBtn) brkBtn.addEventListener('click', function () { Mgr._showBrkDoc(true); });
+            var brkClose = $('sec-brkdoc-close');
+            if (brkClose) brkClose.addEventListener('click', function () { Mgr._showBrkDoc(false); });
+            var brkModal = $('sec-brkdoc-modal');
+            if (brkModal) brkModal.addEventListener('click', function (e) { if (e.target === brkModal) Mgr._showBrkDoc(false); });
+            var brkPdf = $('sec-brkdoc-pdf');
+            if (brkPdf) brkPdf.addEventListener('click', function () {
+                document.body.classList.add('printing-brkdoc');
+                var cleanup = function () {
+                    document.body.classList.remove('printing-brkdoc');
+                    window.removeEventListener('afterprint', cleanup);
+                };
+                window.addEventListener('afterprint', cleanup);
+                try { window.print(); } catch (e) { cleanup(); }
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && brkModal && brkModal.classList.contains('open')) Mgr._showBrkDoc(false);
+            });
+        },
+
+        _showBrkDoc: function (show) {
+            var m = $('sec-brkdoc-modal');
+            if (m) m.classList.toggle('open', !!show);
         },
 
         _showDoc: function (show) {
@@ -124,6 +154,159 @@
                 .catch(function () {});
             // Internet-Egress-Sperre (Status ohne Live-Test = schnell)
             Mgr.loadEgress(false);
+            // Root-Broker (Rechte-Trennung + Freigabeliste)
+            Mgr.loadBroker();
+        },
+
+        // ── Root-Broker: Freigabeliste + Audit ──────────────────────────
+        loadBroker: function () {
+            fetch('/api/broker/status', { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) { Mgr.renderBrokerStatus(d); })
+                .catch(function () {});
+            fetch('/api/broker/ops', { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) { Mgr.renderBrokerOps(d && d.ops ? d.ops : null); })
+                .catch(function () { Mgr.renderBrokerOps(null); });
+        },
+
+        renderBrokerStatus: function (d) {
+            var box = $('sec-broker-status');
+            if (!box) return;
+            if (!d || !d.ok) { box.innerHTML = ''; return; }
+            var head;
+            if (d.mode === 'broker' && d.separated) {
+                head = '🟢 <b>' + esc(T('security.broker_separated', 'Getrennter Betrieb aktiv')) + '</b> – '
+                    + esc(T('security.broker_separated_hint', 'Oberfläche läuft unprivilegiert als')) + ' <code>' + esc(d.backend_user || '') + '</code>, '
+                    + esc(T('security.broker_via', 'Root-Operationen laufen über den Broker')) + '.';
+            } else if (d.mode === 'local-root') {
+                head = '🟠 <b>' + esc(T('security.broker_legacy', 'Alt-Betrieb (Backend läuft als root)')) + '</b> – '
+                    + esc(T('security.broker_legacy_hint', 'Freigabeliste + Audit sind aktiv, aber ohne Prozess-Trennung. Empfehlung: deploy/security/setup_broker.sh ausführen.'));
+            } else if (d.mode === 'broker') {
+                head = '🟠 <b>Broker erreichbar, Backend läuft aber noch als root.</b>';
+            } else {
+                head = '🔴 <b>' + esc(T('security.broker_none', 'Root-Broker nicht erreichbar')) + '</b> – '
+                    + esc(T('security.broker_none_hint', 'Root-Operationen schlagen fehl (jarvis-broker.service prüfen).'));
+            }
+            box.innerHTML = '<div style="margin-bottom:4px;">' + head + '</div>';
+            var badge = $('sec-broker-pending-badge');
+            if (badge) {
+                if (d.pending > 0) {
+                    badge.style.display = '';
+                    badge.textContent = d.pending + ' ' + T('security.broker_pending_badge', 'offen');
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+        },
+
+        renderBrokerOps: function (ops) {
+            var box = $('sec-broker-list');
+            if (!box) return;
+            if (ops === null) {
+                box.innerHTML = '<p class="kb-hint">' + esc(T('security.broker_unavailable', 'Freigabeliste nicht verfügbar (Broker nicht erreichbar).')) + '</p>';
+                return;
+            }
+            if (!ops.length) {
+                box.innerHTML = '<p class="kb-hint">' + esc(T('security.broker_empty', 'Noch keine Root-Operationen registriert – Einträge erscheinen hier automatisch beim ersten Auftauchen.')) + '</p>';
+                return;
+            }
+            function badge(dec) {
+                if (dec === 'pending') return '<span style="padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.5);">⏳ ' + esc(T('security.broker_st_pending', 'wartet auf Freigabe')) + '</span>';
+                if (dec === 'deny') return '<span style="padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.5);">🚫 ' + esc(T('security.broker_st_deny', 'abgelehnt')) + '</span>';
+                return '<span style="padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.5);">✅ ' + esc(T('security.broker_st_allow', 'erlaubt')) + '</span>';
+            }
+            box.innerHTML = ops.map(function (e) {
+                var meta = [];
+                if (e.auto) meta.push(T('security.broker_auto', 'Systemoperation (automatisch erlaubt)'));
+                if (e.requested_by) meta.push(T('security.broker_by', 'angefordert von') + ' ' + e.requested_by);
+                if (e.count) meta.push(e.count + '×');
+                if (e.last_used) meta.push(T('security.broker_last', 'zuletzt') + ' ' + fmtTs(e.last_used));
+                if (e.decided_by && !e.auto) meta.push(T('security.broker_decided', 'entschieden von') + ' ' + e.decided_by);
+                var isPending = e.decision === 'pending';
+                var html = '<div class="sec-broker-row" data-key="' + esc(e.key) + '" '
+                    + 'style="border:1px solid ' + (isPending ? 'rgba(245,158,11,0.5)' : 'var(--border)') + ';border-radius:8px;padding:8px 12px;margin-bottom:6px;'
+                    + (isPending ? 'background:rgba(245,158,11,0.06);' : '') + '">'
+                    + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+                    + badge(e.decision)
+                    + '<code style="font-size:0.78rem;word-break:break-all;flex:1;min-width:180px;">' + esc(e.description || e.key) + '</code>'
+                    + '</div>'
+                    + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px;">'
+                    + '<span style="font-size:0.72rem;color:var(--text-muted);flex:1;">' + esc(meta.join(' · ')) + '</span>';
+                if (e.decision !== 'allow') html += '<button type="button" class="kb-btn-action sec-brk-allow" style="font-size:0.74rem;padding:2px 10px;">' + esc(T('security.broker_allow', 'Erlauben')) + '</button>';
+                if (e.decision !== 'deny') html += '<button type="button" class="kb-btn-action sec-brk-deny" style="font-size:0.74rem;padding:2px 10px;">' + esc(T('security.broker_deny', 'Ablehnen')) + '</button>';
+                html += '<button type="button" class="kb-btn-action sec-brk-remove" title="' + esc(T('security.broker_remove_title', 'Eintrag löschen – erscheint beim nächsten Auftauchen erneut')) + '" style="font-size:0.74rem;padding:2px 10px;">🗑</button>'
+                    + '</div></div>';
+                return html;
+            }).join('');
+            box.querySelectorAll('.sec-brk-allow').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    Mgr.decideBroker(btn.closest('.sec-broker-row').getAttribute('data-key'), 'allow');
+                });
+            });
+            box.querySelectorAll('.sec-brk-deny').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    Mgr.decideBroker(btn.closest('.sec-broker-row').getAttribute('data-key'), 'deny');
+                });
+            });
+            box.querySelectorAll('.sec-brk-remove').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    Mgr.removeBrokerOp(btn.closest('.sec-broker-row').getAttribute('data-key'));
+                });
+            });
+        },
+
+        decideBroker: function (key, decision) {
+            if (!key) return;
+            if (decision === 'allow' && key.indexOf('shell_root:') === 0
+                && !window.confirm(T('security.broker_allow_confirm',
+                    'Diesen Befehl mit ROOT-Rechten erlauben?\n\n%s\n\nEr darf danach jederzeit erneut ausgeführt werden.')
+                    .replace('%s', key.substring(11)))) return;
+            fetch('/api/broker/ops/decide', {
+                method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ key: key, decision: decision })
+            }).then(function (r) { return r.json(); })
+              .then(function () { Mgr.loadBroker(); })
+              .catch(function () {});
+        },
+
+        removeBrokerOp: function (key) {
+            if (!key) return;
+            if (!window.confirm(T('security.broker_remove_confirm', 'Eintrag wirklich löschen?'))) return;
+            fetch('/api/broker/ops/remove', {
+                method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ key: key })
+            }).then(function (r) { return r.json(); })
+              .then(function () { Mgr.loadBroker(); })
+              .catch(function () {});
+        },
+
+        toggleBrokerAudit: function () {
+            var box = $('sec-broker-audit');
+            if (!box) return;
+            if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+            box.style.display = '';
+            box.innerHTML = '<p class="kb-hint">' + esc(T('common.loading', 'Lade…')) + '</p>';
+            fetch('/api/broker/audit?n=100', { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    var entries = (d && d.entries) || [];
+                    if (!entries.length) {
+                        box.innerHTML = '<p class="kb-hint">' + esc(T('security.broker_audit_empty', 'Noch keine Audit-Einträge.')) + '</p>';
+                        return;
+                    }
+                    box.innerHTML = '<div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px 10px;">'
+                        + entries.slice().reverse().map(function (a) {
+                            var mark = a.decision === 'executed' ? (a.rc === 0 || a.rc == null ? '✅' : '⚠️')
+                                : (a.decision === 'denied' ? '🚫' : '⏳');
+                            var line = mark + ' ' + esc(fmtTs(a.ts)) + ' · <b>' + esc(a.user || '–') + '</b> · '
+                                + '<code style="font-size:0.74rem;word-break:break-all;">' + esc(a.key || a.op) + '</code>'
+                                + ' · ' + esc(a.decision);
+                            if (a.rc != null && a.decision === 'executed') line += ' (rc=' + a.rc + (a.duration_ms != null ? ', ' + a.duration_ms + ' ms' : '') + ')';
+                            return '<div style="font-size:0.76rem;padding:3px 0;border-bottom:1px solid rgba(var(--fg-rgb),.06);">' + line + '</div>';
+                        }).join('') + '</div>';
+                })
+                .catch(function () { box.innerHTML = '<p class="kb-hint">✗</p>'; });
         },
 
         loadEgress: function (live) {

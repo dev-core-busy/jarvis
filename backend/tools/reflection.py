@@ -708,11 +708,8 @@ class ReflectionTool(BaseTool):
             async def _delayed_restart():
                 await asyncio.sleep(5)
                 try:
-                    subprocess.Popen(
-                        ["systemctl", "restart", "jarvis.service"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
+                    from backend import broker_client
+                    await broker_client.systemctl("restart", "jarvis.service", user="system")
                 except Exception:
                     pass
 

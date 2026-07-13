@@ -11,6 +11,27 @@ PROJECT_ROOT = Path(__file__).parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 
+def _write_preserve_owner(path: Path, text: str) -> None:
+    """Datei schreiben und dabei den bisherigen Eigentuemer erhalten.
+
+    Wichtig fuer den Root-Broker: laeuft er (als root) z.B. sandbox_setup und
+    speichert dabei eine Einstellung, darf settings.json nicht ploetzlich
+    root gehoeren – sonst kann das unprivilegierte Backend (jarvis.service,
+    User=jarvis) seine eigenen Einstellungen nicht mehr schreiben."""
+    st = None
+    try:
+        if path.exists():
+            st = path.stat()
+    except Exception:  # noqa: BLE001
+        st = None
+    path.write_text(text)
+    try:
+        if st is not None and os.geteuid() == 0 and (st.st_uid != 0 or st.st_gid != 0):
+            os.chown(path, st.st_uid, st.st_gid)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class Config:
     """Zentrale Konfiguration für Jarvis mit Profil-Verwaltung."""
 
@@ -268,7 +289,7 @@ class Config:
         }
         if existing_extra:
             data["extra"] = existing_extra
-        self.SETTINGS_FILE.write_text(json.dumps(data, indent=4))
+        _write_preserve_owner(self.SETTINGS_FILE, json.dumps(data, indent=4))
 
     def save_global_settings(self, settings: dict):
         """Speichert globale Einstellungen (TTS, Desktop, Agent-API-Key etc.)."""
@@ -308,7 +329,7 @@ class Config:
             if "extra" not in data:
                 data["extra"] = {}
             data["extra"][key] = value
-            self.SETTINGS_FILE.write_text(json.dumps(data, indent=4))
+            _write_preserve_owner(self.SETTINGS_FILE, json.dumps(data, indent=4))
         except Exception as e:
             print(f"[Config] save_setting Fehler: {e}", flush=True)
 

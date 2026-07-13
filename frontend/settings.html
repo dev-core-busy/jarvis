@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=5">
-    <link rel="stylesheet" href="/static/css/style.css?v=117">
+    <link rel="stylesheet" href="/static/css/style.css?v=118">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -1167,6 +1167,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <li>Anzeige: „Letzte Zugriffs-Verstöße" und „Gesperrte Konten" in diesem Bereich; API: <code>/api/security/violations</code>, <code>/api/security/incidents</code>, <code>/api/security/sandbox</code>.</li>
                     <li>Internet-Egress-Sperre (harte Firewall-Grenze für Benutzer ohne Internet-Freigabe): Status via <code>GET /api/security/egress</code> (mit <code>?live=1</code> Live-Test), Ein-Klick-Einrichtung via <code>POST /api/security/egress/setup</code>, Deaktivierung via <code>POST /api/security/egress/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Harte Egress-Sperre</i>.</li>
                     <li>OS-Sandbox (Systemschutz Netzwerk-Benutzer): Status via <code>GET /api/security/sandbox</code> (mit <code>?live=1</code> Isolationstest), Ein-/Ausschalten via <code>POST /api/security/sandbox/setup</code> bzw. <code>/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Systemschutz / Sandbox</i>.</li>
+                    <li>Root-Broker (Trennung UI-/Ausführungsebene): Betriebsmodus via <code>GET /api/broker/status</code>, Freigabeliste via <code>GET /api/broker/ops</code>, Admin-Entscheidung via <code>POST /api/broker/ops/decide</code> (Body <code>{key, decision: allow|deny|pending}</code>), Eintrag löschen via <code>POST /api/broker/ops/remove</code>, Audit-Log via <code>GET /api/broker/audit?n=100</code>. Bedienung unter <i>Sicherheit → Root-Freigaben (Root-Broker)</i>.</li>
                 </ul>
 
                 <h3>8. Schutz vor Kontext-Vergiftung</h3>
@@ -1183,8 +1184,11 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <li><code>security_autoblock_*</code> – Auto-Sperre-Schwelle/-Fenster.</li>
                 </ul>
 
-                <h3>10. Grenzen &amp; Restrisiko</h3>
-                <p class="kb-hint">Die Muster-Prüfungen (Regex, Guard-Heuristik) sind <b>Defense-in-Depth</b>. Die harte Garantie für Shell-Befehle liefert die <b>OS-Sandbox</b> (Punkt 4): Solange Befehle als <code>root</code> laufen (OS-Sandbox aus), bleibt ein prinzipielles Restrisiko, da als root ausgeführter Code Wege finden kann. Empfehlung: OS-Sandbox aktivieren und Secrets per Dateirechten absichern.</p>
+                <h3>10. Trennung UI-/Ausführungsebene (Root-Broker)</h3>
+                <p class="kb-hint">Im getrennten Betrieb läuft das Backend (Web-Oberfläche, Chat, Agent) als <b>unprivilegierter Dienst-Benutzer</b>; alles, was root braucht, läuft über den separaten <b>Root-Broker</b> (<code>jarvis-broker.service</code>, Unix-Socket). Der Broker kennt nur <b>benannte, validierte Operationen</b> (Dienst-Neustart, VNC, Sandbox, Mounts, Zertifikate …). Jede Operation wird beim ersten Auftauchen als <b>auditierbarer Eintrag</b> registriert: Systemoperationen automatisch erlaubt (vom Admin widerrufbar), <b>beliebige Root-Shell-Befehle des Agenten dagegen erst nach expliziter Admin-Freigabe</b> (Status „wartet auf Freigabe"). Policy und Audit-Log gehören root und sind vom Backend nicht manipulierbar. Verwaltung unter <i>Sicherheit → Root-Freigaben</i>.</p>
+
+                <h3>11. Grenzen &amp; Restrisiko</h3>
+                <p class="kb-hint">Die Muster-Prüfungen (Regex, Guard-Heuristik) sind <b>Defense-in-Depth</b>. Die harte Garantie für Shell-Befehle liefert die <b>OS-Sandbox</b> (Punkt 4) bzw. im getrennten Betrieb der <b>unprivilegierte Dienst-Benutzer + Root-Broker</b> (Punkt 10). Auf Alt-Installationen ohne Trennung (Backend als root) bleibt ein prinzipielles Restrisiko, da als root ausgeführter Code Wege finden kann. Empfehlung: Rechte-Trennung einrichten (<code>deploy/security/setup_broker.sh</code>), OS-Sandbox aktivieren und Secrets per Dateirechten absichern.</p>
 
             </div>
         </div>
@@ -1242,6 +1246,84 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <li>DNS zu den internen Resolvern ist erlaubt (nötig für Namensauflösung); ein theoretisches DNS-Tunneling bleibt damit möglich. Für maximale Strenge lässt sich DNS für den gesperrten Benutzer ganz sperren.</li>
                     <li>Die Einstufung „intern" für Jira/Confluence gilt nur bei self-hostetem Betrieb. Zeigen sie auf eine Cloud (<code>*.atlassian.net</code>), wären sie „Internet" und müssten anders eingestuft werden.</li>
                     <li>In-Prozess-Tools (Bildersuche, Browser, Google) werden nicht über die Firewall, sondern über die <b>Tool-Ebene</b> gesperrt (Punkt&nbsp;1) – die Firewall betrifft ausschließlich <code>shell_execute</code>.</li>
+                </ul>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Root-Freigaben / Root-Broker – technische Funktionsanalyse ═══ -->
+    <div id="sec-brkdoc-modal" class="modal" style="z-index:10001;">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h2>🔐 Root-Freigaben (Root-Broker) – technische Funktionsanalyse</h2>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button type="button" id="sec-brkdoc-pdf" title="Als PDF speichern (an PDF-Drucker drucken)" aria-label="Als PDF drucken"
+                            style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:600;font-size:0.82rem;cursor:pointer;line-height:1;">🖨️ PDF</button>
+                    <button class="btn-icon" id="sec-brkdoc-close" aria-label="Schließen">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body" style="overflow-y:auto;">
+
+                <p class="kb-hint"><b>Leitprinzip:</b> Die Benutzeroberfläche (Chat, Support, Agent) und die Ausführungsebene mit Root-Rechten sind <b>getrennte Prozesse</b>. Das Backend läuft als unprivilegierter Dienst-Benutzer – selbst wenn ein Angreifer den Agenten per Prompt-Injection zu einem Befehl verleitet, läuft dieser <b>nicht</b> automatisch als root. Jede Root-Aktion ist eine benannte, geprüfte und protokollierte Operation.</p>
+
+                <h3>1. Architektur</h3>
+                <ul>
+                    <li><b><code>jarvis.service</code></b> (User=<code>jarvis</code>): Web-UI, Chat, Agent, Skills. Bindet Port 443/80 über die Linux-Capability <code>CAP_NET_BIND_SERVICE</code> – ganz ohne root.</li>
+                    <li><b><code>jarvis-broker.service</code></b> (root): kleiner, separater Dienst (<code>backend/broker/daemon.py</code>). Übernimmt beim Start die root-pflichtigen Systemaufgaben (Firewall-Ports, VNC/x11vnc, Bildschirmsperre) und lauscht danach auf dem Unix-Socket <code>/run/jarvis-broker.sock</code>.</li>
+                    <li>Der Socket gehört <code>root:jarvis</code> mit Rechten <code>0660</code> – nur der Dienst-Benutzer kann Anfragen stellen; Netzwerkzugriff auf den Broker gibt es nicht.</li>
+                </ul>
+
+                <h3>2. Benannte Operationen statt „root darf alles"</h3>
+                <p class="kb-hint">Der Broker kennt ausschließlich <b>fest definierte Operationen</b> mit harter Argument-Validierung (<code>backend/broker/ops.py</code>):</p>
+                <ul>
+                    <li><code>systemctl</code> – nur Whitelist-Units (jarvis, whatsapp-bridge, lightdm, egress, broker) und erlaubte Aktionen.</li>
+                    <li><code>unlock_screen</code>, <code>switch_session</code>, <code>vnc_restart</code> – Desktop-/VNC-Steuerung.</li>
+                    <li><code>chpasswd</code> – Linux-Kennwort setzen (Erst-Login-Pflichtwechsel).</li>
+                    <li><code>sandbox_exec</code> – Shell-Befehle von Netzwerk-Benutzern als Sandbox-OS-User (<code>runuser</code>); nur Benutzer mit Prefix <code>jarvis_sandbox</code>, nie uid&nbsp;0.</li>
+                    <li><code>sandbox_*</code>/<code>egress_*</code> – Ein-Klick-Einrichtung von OS-Sandbox und Egress-Firewall.</li>
+                    <li><code>mount_share</code>/<code>umount_share</code> – Wissens-Freigaben (SMB/NFS/WebDAV), ausschließlich unterhalb <code>/mnt/</code>.</li>
+                    <li><code>certbot_obtain</code> – Let's-Encrypt-Zertifikat inkl. Renewal-Hook.</li>
+                    <li><code>shell_root</code> – <b>generischer Root-Shell-Befehl. Läuft niemals sofort</b>, siehe Punkt 3.</li>
+                </ul>
+
+                <h3>3. Auditierbare Freigabeliste („wenn sie auftauchen")</h3>
+                <p class="kb-hint">Jede Operation wird beim <b>ersten Auftauchen</b> automatisch als Eintrag in der Freigabeliste registriert (<code>/etc/jarvis/broker-policy.json</code>, nur für root beschreibbar):</p>
+                <ul>
+                    <li><b>Systemoperationen</b> (Punkt 2, außer shell_root): automatisch <b>erlaubt</b>, als „Systemoperation" markiert und jederzeit per Klick widerrufbar („Ablehnen").</li>
+                    <li><b><code>shell_root:&lt;befehl&gt;</code></b>: startet immer als <b>„wartet auf Freigabe"</b> (pending). Der Agent erhält eine klare Meldung, der Befehl wird <b>nicht</b> ausgeführt. Erst nach „Erlauben" durch einen lokalen Administrator ist genau dieser Befehl (exakte Signatur) ausführbar – „Ablehnen" sperrt ihn dauerhaft.</li>
+                    <li>Jeder Eintrag zeigt: Beschreibung, Status, wer ihn angefordert hat, Anzahl/Zeitpunkt der Nutzung, wer entschieden hat. Löschen (🗑) setzt den Eintrag zurück – er erscheint beim nächsten Auftauchen erneut.</li>
+                </ul>
+
+                <h3>4. Ablauf eines Root-Befehls des Agenten</h3>
+                <ul>
+                    <li>1. Agent ruft <code>shell_execute</code> mit z.&nbsp;B. <code>apt-get install …</code> auf.</li>
+                    <li>2. <code>shell.py::_needs_root()</code> erkennt den Root-Bedarf (sudo, systemctl, apt, mount, useradd, …; reine Lesebefehle wie <code>systemctl status</code> laufen weiter unprivilegiert).</li>
+                    <li>3. Der Befehl geht als <code>shell_root</code> an den Broker → Freigabeliste: <b>pending</b> (neuer Eintrag) / <b>erlaubt</b> (Ausführung mit Live-Streaming) / <b>abgelehnt</b> (Verweigerung).</li>
+                    <li>4. Bei „pending" informiert der Agent den Benutzer, dass ein Administrator die Anfrage unter <i>Sicherheit → Root-Freigaben</i> freigeben muss.</li>
+                </ul>
+
+                <h3>5. Audit &amp; Manipulationsschutz</h3>
+                <ul>
+                    <li>Jede Anfrage – auch verweigerte – landet im Audit-Log <code>/var/log/jarvis-broker-audit.jsonl</code> (Zeitpunkt, Benutzer, Operation, Entscheidung, Exit-Code, Dauer). Einsehbar über „Audit-Log anzeigen".</li>
+                    <li>Policy-Datei und Audit-Log gehören <b>root</b> (0600) – das unprivilegierte Backend kann sie nicht verändern oder löschen; Passwörter werden vor der Protokollierung maskiert.</li>
+                    <li>Die Statusanzeige oben im Bereich zeigt <b>immer</b> den Betriebsmodus: 🟢 getrennter Betrieb, 🟠 Alt-Betrieb (Backend noch als root, Liste+Audit aktiv, keine Prozess-Trennung), 🔴 Broker nicht erreichbar.</li>
+                </ul>
+
+                <h3>6. Betriebsarten &amp; Migration</h3>
+                <ul>
+                    <li><b>Getrennt (empfohlen):</b> Einrichtung einmalig pro Server mit <code>bash deploy/security/setup_broker.sh</code> (Eigentümerschaft, systemd-Units, Dienste, Verifikation).</li>
+                    <li><b>Alt-Betrieb:</b> Nicht migrierte Installationen funktionieren unverändert – der Broker-Client führt Operationen dann lokal aus, inklusive Freigabeliste und Audit.</li>
+                    <li>API (nur lokale Administratoren): <code>GET /api/broker/status</code>, <code>GET /api/broker/ops</code>, <code>POST /api/broker/ops/decide</code>, <code>POST /api/broker/ops/remove</code>, <code>GET /api/broker/audit</code>.</li>
+                </ul>
+
+                <h3>7. Grenzen &amp; Restrisiko</h3>
+                <ul>
+                    <li>Freigabe-Entscheidungen kommen über die Web-UI zum Broker: Ein <b>vollständig kompromittiertes Backend</b> könnte sich theoretisch selbst Freigaben erteilen. Die Trennung schützt primär davor, dass Agent-/Prompt-Injection-Code <b>direkt</b> mit root läuft – und macht jede Root-Aktion sichtbar und nachvollziehbar.</li>
+                    <li>Ein einmal erlaubter <code>shell_root</code>-Befehl darf erneut ausgeführt werden, bis er widerrufen wird. Empfehlung: eng gefasste Befehle freigeben, keine „Sammel-Freigaben" (z.&nbsp;B. kein <code>bash -c …</code> mit variablem Inhalt).</li>
+                    <li>Die Root-Erkennung in der Shell ist eine Heuristik: Nicht erkannte Befehle laufen unprivilegiert und scheitern dann schlicht an fehlenden Rechten („Permission denied") – es findet <b>keine</b> stille Rechteausweitung statt.</li>
                 </ul>
 
             </div>
@@ -3045,6 +3127,28 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- ── Root-Freigaben (Root-Broker) – eigene, immer sichtbare Sektion ── -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header" id="sec-sect-broker-hdr">
+                                <h3><span data-i18n="security.section_broker">Root-Freigaben (Root-Broker)</span> <span id="sec-broker-pending-badge" style="display:none;margin-left:6px;padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.5);color:var(--text-primary);"></span></h3>
+                                <span class="sk-openclaw-toggle" id="sec-sect-broker-tog">▼</span>
+                            </div>
+                            <div id="sec-sect-broker-body" class="kb-collapse-body">
+                                <button type="button" id="sec-brkdoc-btn" class="kb-btn-secondary"
+                                        title="Technische Funktionsbeschreibung der Rechte-Trennung (Root-Broker)"
+                                        data-i18n-title="security.brkdoc_btn_title"
+                                        style="margin:0 0 10px;padding:5px 12px;font-size:0.85rem;line-height:1.4;display:inline-flex;align-items:center;gap:6px;">❓ <span data-i18n="security.brkdoc_btn_label">Funktionsweise &amp; Sicherheitsfeatures</span></button>
+                                <div id="sec-broker-status" class="kb-hint" style="margin:0 0 4px;"></div>
+                                <p class="kb-hint" data-i18n="security.broker_desc">Im getrennten Betrieb läuft die Benutzeroberfläche unprivilegiert; alles, was root braucht, läuft über den Root-Broker. Jede Root-Operation erscheint hier als auditierbarer Eintrag: Systemoperationen werden automatisch erlaubt (widerrufbar), unbekannte Root-Shell-Befehle des Agenten warten auf deine Freigabe. Entscheidungen wirken sofort.</p>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                    <button type="button" id="sec-broker-refresh" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.05);color:var(--text-primary,#e2e8f0);cursor:pointer;" data-i18n="security.broker_refresh">Aktualisieren</button>
+                                    <button type="button" id="sec-broker-audit-btn" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.05);color:var(--text-primary,#e2e8f0);cursor:pointer;" data-i18n="security.broker_audit">Audit-Log anzeigen</button>
+                                </div>
+                                <div id="sec-broker-list" style="margin-top:8px;"></div>
+                                <div id="sec-broker-audit" style="display:none;margin-top:8px;"></div>
+                            </div>
+                        </div>
+
                     </div><!-- /kb-container -->
                 </div><!-- /settings-tab-security -->
 
@@ -3193,10 +3297,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/issues.js?v=6"></script>
     <script src="/static/js/branding.js?v=16"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/security_incidents.js?v=8"></script>
+    <script src="/static/js/security_incidents.js?v=10"></script>
     <script src="/static/js/ldap_picker.js?v=4"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=144"></script>
+    <script src="/static/js/app.js?v=145"></script>
 </body>
 
 </html>

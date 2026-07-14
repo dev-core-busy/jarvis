@@ -2598,7 +2598,10 @@ async def chat_sessions_get(sid: str, user: str = Depends(require_auth)):
     from backend import chat_sessions as cs
     if not cs._valid(user, sid):
         return JSONResponse({"ok": False, "error": "Nicht gefunden"}, status_code=404)
-    return JSONResponse({"ok": True, "transcript": cs.load_transcript(user, sid)})
+    meta = cs.get_meta(user, sid) or {}
+    return JSONResponse({"ok": True, "transcript": cs.load_transcript(user, sid),
+                         "kb_groups": meta.get("kb_groups"),
+                         "kb_groups_set": "kb_groups" in meta})
 
 
 @app.put("/api/chat/sessions/{sid}/transcript")
@@ -2609,6 +2612,8 @@ async def chat_sessions_save_transcript(sid: str, request: Request, user: str = 
         return JSONResponse({"ok": False, "error": "Nicht gefunden"}, status_code=404)
     body = await request.json()
     msgs = body.get("messages", []) if isinstance(body, dict) else []
+    if isinstance(body, dict) and "kb_groups" in body:
+        cs.save_kb_groups(user, sid, body.get("kb_groups"))
     return JSONResponse({"ok": True, "messages": cs.save_transcript(user, sid, msgs)})
 
 

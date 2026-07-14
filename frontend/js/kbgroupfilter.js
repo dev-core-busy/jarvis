@@ -86,6 +86,8 @@ window.KbGroupFilter = (function () {
 
         var _groups = [];
         var _off = loadOff();
+        var _desired;          // programmatisch gesetzte Auswahl (null/[]/[ids]) o. undefined
+        var _onChange = null;  // Callback bei Nutzer-Aenderung (fuer Sitzungs-Persistenz)
 
         function loadOff() {
             try { return new Set(JSON.parse(localStorage.getItem(storageKey) || '[]')); }
@@ -97,6 +99,16 @@ window.KbGroupFilter = (function () {
         function entries() {
             return _groups.concat([{ id: UNGROUPED, name: t('kbfilter.ungrouped', 'ungruppiert'), color: '#94a3b8' }]);
         }
+        // Programmatisch gesetzte Auswahl (aus einer Sitzung) auf _off anwenden.
+        function applyDesired() {
+            if (_desired === undefined) return;
+            var all = entries();
+            if (_desired === null) { _off = new Set(); }
+            else if (Array.isArray(_desired) && _desired.length === 0) { _off = new Set(all.map(function (e) { return e.id; })); }
+            else { var want = new Set(_desired); _off = new Set(all.filter(function (e) { return !want.has(e.id); }).map(function (e) { return e.id; })); }
+            saveOff(); renderBadge(); if (!panel.hidden) renderPanel();
+        }
+        function fireChange() { _desired = undefined; if (_onChange) { try { _onChange(pub.getSelection()); } catch (e) {} } }
 
         var wrap = document.createElement('div');
         wrap.className = 'kbgf-wrap';
@@ -141,14 +153,14 @@ window.KbGroupFilter = (function () {
             panel.querySelectorAll('input[type=checkbox]').forEach(function (cb) {
                 cb.addEventListener('change', function () {
                     if (cb.checked) _off.delete(cb.value); else _off.add(cb.value);
-                    saveOff(); renderBadge();
+                    saveOff(); renderBadge(); fireChange();
                 });
             });
             panel.querySelectorAll('.kbgf-a').forEach(function (b) {
                 b.addEventListener('click', function () {
                     if (b.dataset.a === 'all') _off = new Set();
                     else _off = new Set(all.map(function (e) { return e.id; }));
-                    saveOff(); renderPanel(); renderBadge();
+                    saveOff(); renderPanel(); renderBadge(); fireChange();
                 });
             });
         }
@@ -157,9 +169,9 @@ window.KbGroupFilter = (function () {
         btn.addEventListener('click', function (e) { e.stopPropagation(); if (panel.hidden) openP(); else closeP(); });
         document.addEventListener('click', function (e) { if (!wrap.contains(e.target)) closeP(); });
 
-        (async function () { _groups = await loadGroups(); renderBadge(); if (!panel.hidden) renderPanel(); })();
+        (async function () { _groups = await loadGroups(); applyDesired(); renderBadge(); if (!panel.hidden) renderPanel(); })();
 
-        return {
+        var pub = {
             el: wrap,
             getSelection: function () {
                 var all = entries();
@@ -168,10 +180,15 @@ window.KbGroupFilter = (function () {
                 if (on.length === 0) return [];              // keine -> kein Wissen
                 return on.map(function (e) { return e.id; });
             },
+            // Auswahl aus einer Sitzung setzen (null=alle, []=keine, [ids]=nur diese).
+            setSelection: function (sel) { _desired = sel; applyDesired(); },
+            // Callback bei Nutzer-Aenderung registrieren (fuer Sitzungs-Persistenz).
+            onChange: function (cb) { _onChange = cb; },
             refresh: async function () {
-                _groups = await loadGroups(); renderBadge(); if (!panel.hidden) renderPanel();
+                _groups = await loadGroups(); applyDesired(); renderBadge(); if (!panel.hidden) renderPanel();
             }
         };
+        return pub;
     }
 
     return { mount: mount };

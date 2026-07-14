@@ -118,6 +118,25 @@ def delete_session(user: str, sid: str) -> bool:
             return False
 
 
+def get_meta(user: str, sid: str) -> dict | None:
+    """Rohe Metadaten einer Sitzung (inkl. gespeicherter kb_groups) oder None."""
+    with _LOCK:
+        if not _valid(user, sid):
+            return None
+        return _read_meta(_sess_dir(user, sid))
+
+
+def save_kb_groups(user: str, sid: str, groups) -> None:
+    """Wissensgruppen-Auswahl der Sitzung merken (None=alle, []=keine, [ids]=nur diese)."""
+    with _LOCK:
+        sd = _sess_dir(user, sid)
+        meta = _read_meta(sd)
+        if not meta:
+            return
+        meta["kb_groups"] = groups
+        _write_meta(sd, meta)
+
+
 def touch(user: str, sid: str, auto_title: str = "") -> None:
     """Aktualisiert den updated-Zeitstempel; setzt bei noch unbenanntem Chat
     optional einen Titel aus dem ersten Nutzertext."""

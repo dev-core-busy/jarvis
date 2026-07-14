@@ -1864,14 +1864,22 @@ async def api_conv_log_clear(user: str = Depends(require_auth)):
 
 
 @app.get("/api/context/stats")
-async def api_context_stats(user: str = Depends(require_auth)):
-    """Aktuelle Kontext-Statistiken des Hauptagenten."""
+async def api_context_stats(session_id: str = "", user: str = Depends(require_auth)):
+    """Kontext-Statistiken. Mit session_id: fuer genau diese /chat-Sitzung
+    (auch wenn sie gerade nicht der zuletzt gelaufene Kontext ist)."""
     agent = agent_manager.main_agent
     if not agent:
         return JSONResponse({"history_entries": 0, "compress_threshold": 30,
                              "fills_pct": 0, "session_input_tokens": 0,
                              "session_output_tokens": 0, "session_total_tokens": 0,
                              "estimated_history_tokens": 0, "agent_state": "idle"})
+    if session_id:
+        from backend.agent import _hist_key as _hk, deserialize_history as _deser
+        hist = agent._user_histories.get(_hk(user, session_id))
+        if hist is None:
+            from backend import chat_sessions as _cs
+            hist = _deser(_cs.load_context(user, session_id))
+        return JSONResponse(agent.get_context_stats(hist))
     return JSONResponse(agent.get_context_stats())
 
 
@@ -1886,16 +1894,32 @@ async def api_context_compress(user: str = Depends(require_auth)):
 
 
 @app.post("/api/context/clear")
-async def api_context_clear(user: str = Depends(require_auth)):
-    """Löscht die Chat-History des aktuellen Benutzers (neues Gespräch)."""
+async def api_context_clear(request: Request, user: str = Depends(require_auth)):
+    """Löscht den Kontext (neues Gespräch). Mit session_id: nur diese /chat-Sitzung."""
+    session_id = ""
+    try:
+        b = await request.json()
+        if isinstance(b, dict):
+            session_id = (b.get("session_id") or "").strip()
+    except Exception:  # noqa: BLE001
+        pass
     agent = agent_manager.main_agent
     if not agent:
         return JSONResponse({"ok": True, "cleared": 0})
-    history = agent._user_histories.pop(user, [])
+    from backend.agent import _hist_key as _hk
+    key = _hk(user, session_id) if session_id else user
+    history = agent._user_histories.pop(key, [])
     # Falls gerade aktiv: auch live-Referenz leeren
     if agent._current_chat_history is history:
         history.clear()
         agent._current_chat_history = []
+    # Persistierten Sitzungs-Kontext ebenfalls leeren
+    if session_id:
+        try:
+            from backend import chat_sessions as _cs
+            _cs.save_context(user, session_id, [])
+        except Exception:  # noqa: BLE001
+            pass
     return JSONResponse({"ok": True, "cleared": len(history)})
 
 
@@ -2541,6 +2565,78 @@ async def chat_history_clear(user: str = Depends(require_auth)):
     import backend.chat_history as ch
     ch.clear(user)
     return JSONResponse({"ok": True})
+
+
+# ─── /chat: benutzereigene Chat-Sitzungen (Sidebar-Historie) ─────────────────
+# Jede Sitzung = eigener Unterordner mit Transkript + LLM-Kontext. Pro Benutzer
+# streng getrennt (require_auth liefert den angemeldeten Benutzer).
+
+@app.get("/api/chat/sessions")
+async def chat_sessions_list(user: str = Depends(require_auth)):
+    """Alle Chat-Sitzungen des Benutzers (neueste zuerst)."""
+    from backend import chat_sessions as cs
+    return JSONResponse({"ok": True, "sessions": cs.list_sessions(user)})
+
+
+@app.post("/api/chat/sessions")
+async def chat_sessions_create(request: Request, user: str = Depends(require_auth)):
+    """Neue Chat-Sitzung anlegen (optional Titel)."""
+    from backend import chat_sessions as cs
+    title = ""
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            title = (body.get("title") or "").strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return JSONResponse({"ok": True, "session": cs.create_session(user, title)})
+
+
+@app.get("/api/chat/sessions/{sid}")
+async def chat_sessions_get(sid: str, user: str = Depends(require_auth)):
+    """Metadaten + Transkript einer Sitzung (der LLM-Kontext bleibt serverseitig)."""
+    from backend import chat_sessions as cs
+    if not cs._valid(user, sid):
+        return JSONResponse({"ok": False, "error": "Nicht gefunden"}, status_code=404)
+    return JSONResponse({"ok": True, "transcript": cs.load_transcript(user, sid)})
+
+
+@app.put("/api/chat/sessions/{sid}/transcript")
+async def chat_sessions_save_transcript(sid: str, request: Request, user: str = Depends(require_auth)):
+    """Sichtbares Transkript einer Sitzung speichern (Frontend nach jedem Turn)."""
+    from backend import chat_sessions as cs
+    if not cs._valid(user, sid):
+        return JSONResponse({"ok": False, "error": "Nicht gefunden"}, status_code=404)
+    body = await request.json()
+    msgs = body.get("messages", []) if isinstance(body, dict) else []
+    return JSONResponse({"ok": True, "messages": cs.save_transcript(user, sid, msgs)})
+
+
+@app.patch("/api/chat/sessions/{sid}")
+async def chat_sessions_rename(sid: str, request: Request, user: str = Depends(require_auth)):
+    """Sitzung umbenennen."""
+    from backend import chat_sessions as cs
+    body = await request.json()
+    title = (body.get("title") or "").strip() if isinstance(body, dict) else ""
+    res = cs.rename_session(user, sid, title)
+    if res is None:
+        return JSONResponse({"ok": False, "error": "Nicht gefunden"}, status_code=404)
+    return JSONResponse({"ok": True, "session": res})
+
+
+@app.delete("/api/chat/sessions/{sid}")
+async def chat_sessions_delete(sid: str, user: str = Depends(require_auth)):
+    """Sitzung löschen (Ordner + Transkript + Kontext) und RAM-Kontext verwerfen."""
+    from backend import chat_sessions as cs
+    from backend.agent import _hist_key as _hk
+    ok = cs.delete_session(user, sid)
+    # RAM-Kontext dieser Sitzung verwerfen (falls geladen)
+    try:
+        if agent_instance is not None:
+            agent_instance._user_histories.pop(_hk(user, sid), None)
+    except Exception:  # noqa: BLE001
+        pass
+    return JSONResponse({"ok": ok})
 
 
 @app.get("/api/settings")
@@ -7612,6 +7708,8 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         if not task_text:
             await ws.send_json({"type": "error", "message": "Keine Aufgabe angegeben"})
             return
+        # /chat-Sitzung (eigener Kontext pro Chat); leer = klassischer Ein-Bucket-Modus
+        chat_sid = (msg.get("session_id") or "").strip()
 
         # Spracheingabe von Windows/Desktop-Client: [Voice]\n<audio>BASE64</audio>
         # → Whisper transkribiert das Audio, task_text wird durch das Transkript ersetzt
@@ -7824,7 +7922,14 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             try:
                 _keep = int(_trunc)
                 _user_key = _get_ws_username(ws) or "anonymous"
-                _hist = agent._user_histories.get(_user_key)
+                from backend.agent import _hist_key as _hk, deserialize_history as _deser
+                _skey = _hk(_user_key, chat_sid)
+                _hist = agent._user_histories.get(_skey)
+                if _hist is None and chat_sid:
+                    # Sitzungs-Kontext lazy laden, damit Edit-Modus auch nach Neustart greift
+                    from backend import chat_sessions as _cs
+                    _hist = _deser(_cs.load_context(_user_key, chat_sid))
+                    agent._user_histories[_skey] = _hist
                 if _hist is not None:
                     _removed = _truncate_history_to_user_index(_hist, _keep)
                     if _removed > 0:
@@ -7847,7 +7952,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Aufgabe im Hintergrund starten – sendet 'finished' wenn fertig (für Windows-TTS)
         async def _run_main_agent_and_notify():
             try:
-                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups)
+                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups, session_id=chat_sid)
             except Exception:
                 pass
             finally:
@@ -7905,7 +8010,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                                 "agent_id": target.agent_id})
         elif action == "stop":
             target.stop()
-            await ws.send_json({"type": "status", "message": "⏹️ Agent gestoppt",
+            await ws.send_json({"type": "status", "message": "⏹️ Anfrage gestoppt",
                                 "agent_id": target.agent_id})
         elif action == "stop_all":
             if agent_manager:

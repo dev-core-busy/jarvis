@@ -39,6 +39,10 @@
     const _HISTORY_KEY = 'jarvis_chat_history_v1';
     const _HISTORY_MAX = 120;
     let _chatHistory   = [];
+    // Benutzereigene Chat-Sitzungen (Sidebar-Historie)
+    let _sessions  = [];
+    let _activeSid = null;
+    const _CS_DEFAULT_TITLE = 'Neuer Chat';   // Backend-Standardtitel (chat_sessions._DEFAULT_TITLE)
 
     // ─── DOM ────────────────────────────────────────────────────
     const $ = id => document.getElementById(id);
@@ -329,7 +333,9 @@
         }
         connectWS();
         _startLlmStatusIndicator();
-        _restoreHistory();
+        _initSessions();
+        const _csNewBtn = $('cs-new');
+        if (_csNewBtn && !_csNewBtn._wired) { _csNewBtn._wired = true; _csNewBtn.addEventListener('click', _newSession); }
         // Auto-Focus nur auf Geraeten mit Maus/Tastatur: auf Touch-Geraeten oeffnet
         // focus() die Bildschirmtastatur und Chrome schiebt die Titelleiste aus dem Bild.
         if (!window.matchMedia('(pointer: coarse)').matches) msgInput.focus();
@@ -355,14 +361,15 @@
 
     // ─── Kontext-Indikator ────────────────────────────────────────────
     let _ctxTimer = null;
-    const _authHdr = () => ({ 'Authorization': 'Bearer ' + token });
+    const _authHdr = (extra) => Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {});
 
     async function _updateContextIndicator() {
         const el   = document.getElementById('ctx-indicator');
         const text = document.getElementById('ctx-indicator-text');
         if (!el) return;
         try {
-            const r = await fetch('/api/context/stats', { headers: _authHdr() });
+            const q = _activeSid ? ('?session_id=' + encodeURIComponent(_activeSid)) : '';
+            const r = await fetch('/api/context/stats' + q, { headers: _authHdr() });
             if (!r.ok) return;
             const d = await r.json();
             const n = d.history_entries || 0;
@@ -382,7 +389,10 @@
 
     window._clearUserContext = async function () {
         try {
-            const r = await fetch('/api/context/clear', { method: 'POST', headers: _authHdr() });
+            const r = await fetch('/api/context/clear', {
+                method: 'POST', headers: _authHdr({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ session_id: _activeSid || '' })
+            });
             const d = await r.json();
             if (d.ok) document.getElementById('ctx-indicator').style.display = 'none';
         } catch (e) { /* ignore */ }
@@ -621,6 +631,7 @@
         _saveHistory();
         _syncAppend(_chatHistory[_chatHistory.length - 1]);
         const msg = { type: 'task', text: finalText, lang: window._lang || 'de' };
+        if (_activeSid) msg.session_id = _activeSid;
         // Multi-Agent: an aktiven Sub-Agenten richten (sonst Hauptagent)
         if (_activeAgentId && _activeAgentId !== '_main') msg.agent_id = _activeAgentId;
         if (_pendingAttachments.length > 0) {
@@ -812,6 +823,7 @@
                 _chatHistory.push({ role: 'bot', text: _lastBotResp, time: timeStr(), date: _currentDateStr(), stats: _lastStats, ts: Date.now() });
                 _saveHistory();
                 _syncAppend(_chatHistory[_chatHistory.length - 1]);
+                _maybeRefreshTitle();   // Auto-Benennung nach der ersten Antwort in die Sidebar uebernehmen
             }
             if (_lastBotCol && _lastBotResp) {
                 _appendFeedbackRow(_lastBotCol, _lastUserMsg, _lastBotResp);
@@ -1198,6 +1210,7 @@
             text: newText,
             lang: window._lang || 'de',
             truncate_user_msg_index: userIndex,
+            session_id: _activeSid || undefined,
         });
     }
 
@@ -1557,18 +1570,123 @@
         }
     }
 
-    // Neue Nachricht in die geteilte Backend-History anhaengen (additiv, fensteruebergreifend)
-    function _syncAppend(msg) {
-        if (window.JarvisChatLib && window.JarvisChatLib.sharedAppend && token) {
-            window.JarvisChatLib.sharedAppend(token, msg, _clientId);
+    // ── Chat-Sitzungen: Persistenz je aktiver Sitzung (statt geteilter History) ──
+    function _csHeaders(extra) { return Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {}); }
+    function _sidKey() { return 'jarvis_chat_sid_' + (_currentUser || 'anon'); }
+    // Transkript der aktiven Sitzung serverseitig speichern (nach jedem Turn/Edit)
+    function _persistSession() {
+        if (!_activeSid || !token) return;
+        fetch('/api/chat/sessions/' + encodeURIComponent(_activeSid) + '/transcript', {
+            method: 'PUT', headers: _csHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ messages: _chatHistory })
+        }).catch(() => {});
+    }
+    // Kompatible Namen zu den bisherigen Aufrufstellen -> alle schreiben die Sitzung
+    function _syncAppend(_msg) { _persistSession(); }
+    function _syncReplace() { _persistSession(); }
+
+    async function _csList() {
+        try { const r = await fetch('/api/chat/sessions', { headers: _csHeaders() }); const d = await r.json(); return (d && d.sessions) || []; }
+        catch (e) { return []; }
+    }
+    async function _csCreate(title) {
+        try {
+            const r = await fetch('/api/chat/sessions', { method: 'POST', headers: _csHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ title: title || '' }) });
+            const d = await r.json(); return d && d.session;
+        } catch (e) { return null; }
+    }
+    async function _csTranscript(sid) {
+        try { const r = await fetch('/api/chat/sessions/' + encodeURIComponent(sid), { headers: _csHeaders() }); if (!r.ok) return []; const d = await r.json(); return (d && d.transcript) || []; }
+        catch (e) { return []; }
+    }
+
+    function _renderSidebar() {
+        const list = document.getElementById('cs-list');
+        if (!list) return;
+        if (!_sessions.length) { list.innerHTML = '<div class="cs-empty">' + escapeHtml(window.t('chat.no_sessions')) + '</div>'; return; }
+        list.innerHTML = '';
+        _sessions.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'cs-item' + (s.id === _activeSid ? ' active' : '');
+            const title = document.createElement('span');
+            title.className = 'cs-title'; title.textContent = s.title || window.t('chat.untitled');
+            const ren = document.createElement('button'); ren.type = 'button'; ren.className = 'cs-act cs-ren'; ren.textContent = '✎'; ren.title = window.t('chat.rename');
+            const del = document.createElement('button'); del.type = 'button'; del.className = 'cs-act cs-del'; del.textContent = '×'; del.title = window.t('chat.delete');
+            item.appendChild(title); item.appendChild(ren); item.appendChild(del);
+            item.addEventListener('click', (e) => { if (e.target === ren || e.target === del) return; _switchSession(s.id); });
+            ren.addEventListener('click', (e) => { e.stopPropagation(); _renameSession(s); });
+            del.addEventListener('click', (e) => { e.stopPropagation(); _deleteSession(s); });
+            list.appendChild(item);
+        });
+    }
+
+    async function _initSessions() {
+        _sessions = await _csList();
+        let want = null; try { want = localStorage.getItem(_sidKey()); } catch (e) {}
+        let active = _sessions.find(s => s.id === want) || _sessions[0] || null;
+        if (!active) { active = await _csCreate(''); if (active) _sessions.unshift(active); }
+        _activeSid = active ? active.id : null;
+        if (_activeSid) { try { localStorage.setItem(_sidKey(), _activeSid); } catch (e) {} }
+        _renderSidebar();
+        await _restoreHistory();        _updateContextIndicator();
+    }
+
+    async function _switchSession(sid) {
+        if (sid === _activeSid) return;
+        _persistSession();
+        _activeSid = sid;
+        try { localStorage.setItem(_sidKey(), sid); } catch (e) {}
+        _renderSidebar();
+        await _restoreHistory();        _updateContextIndicator();
+    }
+
+    async function _newSession() {
+        _persistSession();
+        const s = await _csCreate('');
+        if (!s) return;
+        _sessions.unshift(s);
+        _activeSid = s.id;
+        try { localStorage.setItem(_sidKey(), s.id); } catch (e) {}
+        _renderSidebar();
+        await _restoreHistory();        _updateContextIndicator();
+        if (typeof msgInput !== 'undefined' && msgInput) msgInput.focus();
+    }
+
+    async function _renameSession(s) {
+        const nn = window.prompt(window.t('chat.rename_prompt'), s.title || '');
+        if (nn == null) return;
+        const title = nn.trim(); if (!title) return;
+        try {
+            const r = await fetch('/api/chat/sessions/' + encodeURIComponent(s.id), { method: 'PATCH', headers: _csHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ title }) });
+            const d = await r.json();
+            if (d && d.ok && d.session) { s.title = d.session.title; _renderSidebar(); }
+        } catch (e) {}
+    }
+
+    async function _deleteSession(s) {
+        if (!window.confirm(window.t('chat.delete_confirm').replace('{name}', s.title || ''))) return;
+        try { await fetch('/api/chat/sessions/' + encodeURIComponent(s.id), { method: 'DELETE', headers: _csHeaders() }); } catch (e) {}
+        _sessions = _sessions.filter(x => x.id !== s.id);
+        if (_activeSid === s.id) {
+            _activeSid = _sessions[0] ? _sessions[0].id : null;
+            if (!_activeSid) { const ns = await _csCreate(''); if (ns) { _sessions.unshift(ns); _activeSid = ns.id; } }
+            try { localStorage.setItem(_sidKey(), _activeSid || ''); } catch (e) {}
+            _renderSidebar();
+            await _restoreHistory();            _updateContextIndicator();
+        } else {
+            _renderSidebar();
         }
     }
-    // Komplette Liste ins Backend schreiben (fuer Editieren/Loeschen)
-    function _syncReplace() {
-        if (window.JarvisChatLib && window.JarvisChatLib.sharedReplace && token) {
-            window.JarvisChatLib.sharedReplace(token, _chatHistory, _clientId);
-        }
+    // Nach der ersten Antwort den vom Backend automatisch gesetzten Titel
+    // (erster Nachrichtentext) in die Sidebar uebernehmen.
+    async function _maybeRefreshTitle() {
+        const s = _sessions.find(x => x.id === _activeSid);
+        if (!s || (s.title && s.title !== _CS_DEFAULT_TITLE)) return;
+        const list = await _csList();
+        const ns = list.find(x => x.id === _activeSid);
+        if (ns && ns.title && ns.title !== s.title) { s.title = ns.title; _renderSidebar(); }
     }
+    window._chatNewSession = _newSession;
 
     // Live-Sync: vom anderen Fenster (gleicher Benutzer) angehaengte Nachricht
     // sofort darstellen, ohne sie erneut ans Backend zu senden.
@@ -1583,18 +1701,18 @@
         scrollToBottom();
     }
     async function _restoreHistory() {
-        // Geteilte Anzeige-History pro Benutzer (Hauptfenster + jarvis/chat identisch).
-        const _CL = window.JarvisChatLib;
-        if (_CL && _CL.sharedMigrate && token) {
-            try {
-                await _CL.sharedMigrate(token, ['jarvis_main_history_v1', 'jarvis_chat_history_v1']);
-                const shared = await _CL.sharedLoad(token);
-                _chatHistory = (shared !== null) ? shared : _loadHistory();
-            } catch (_e) { _chatHistory = _loadHistory(); }
-        } else {
-            _chatHistory = _loadHistory();
+        // Sichtbares Transkript der AKTIVEN Sitzung laden und die Anzeige ersetzen.
+        messagesEl.innerHTML = '';
+        currentBotBubble = null;
+        _chatHistory = _activeSid ? await _csTranscript(_activeSid) : [];
+        if (_chatHistory.length === 0) {
+            // Willkommensnachricht (wie im Ausgangszustand)
+            messagesEl.innerHTML = '<div class="welcome-msg">'
+                + '<p data-i18n="chat.greeting">Hallo! Ich bin Jarvis.</p>'
+                + '<p class="welcome-sub" data-i18n="chat.greeting_sub">Wie kann ich dir helfen?</p></div>';
+            if (window.applyLang) window.applyLang();
+            return;
         }
-        if (_chatHistory.length === 0) return;
 
         removeWelcome();
         let restoredDate = '';

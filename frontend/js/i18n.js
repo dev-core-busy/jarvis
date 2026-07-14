@@ -187,9 +187,6 @@ const _I18N = {
         'select.confirm':        '{n} ausgewählte Nachricht(en) löschen?',
         'header.logged_in_as':   'Angemeldet als',
         'panel.stop':            'Stoppen',
-        'panel.debug.on':        'debug aktiv',
-        'panel.debug.off':       'debug aktivieren',
-        'panel.debug_toggle':    'Debug-Ausgaben ein/ausblenden',
         'panel.zoom.out':        'Verkleinern',
         'panel.zoom.reset':      'Zurücksetzen',
         'panel.zoom.in':         'Vergrößern',
@@ -1176,6 +1173,8 @@ const _I18N = {
         'chat.ctx_active':      'Kontext aktiv',
         'chat.ctx_reset':       'Kontext zurücksetzen',
         'chat.debug_toggle':    'Debug-Ansicht: Zwischenschritte anzeigen',
+        'chat.debug_on':        'Debug ist eingeschaltet',
+        'chat.debug_off':       'Debug ist ausgeschaltet',
         'chat.stop_agent':      'Anfrage stoppen',
         'chat.input_ph':        'Nachricht eingeben…',
         'chat.mic':             'Spracheingabe',
@@ -1571,9 +1570,6 @@ const _I18N = {
         'select.confirm':        'Delete {n} selected message(s)?',
         'header.logged_in_as':   'Logged in as',
         'panel.stop':            'Stop',
-        'panel.debug.on':        'debug on',
-        'panel.debug.off':       'debug off',
-        'panel.debug_toggle':    'Toggle debug output',
         'panel.zoom.out':        'Zoom Out',
         'panel.zoom.reset':      'Reset Zoom',
         'panel.zoom.in':         'Zoom In',
@@ -2560,6 +2556,8 @@ const _I18N = {
         'chat.ctx_active':      'Context active',
         'chat.ctx_reset':       'Reset Context',
         'chat.debug_toggle':    'Debug view: show intermediate steps',
+        'chat.debug_on':        'Debug is on',
+        'chat.debug_off':       'Debug is off',
         'chat.stop_agent':      'Stop request',
         'chat.input_ph':        'Type a message…',
         'chat.mic':             'Speech Input',
@@ -2830,15 +2828,6 @@ window.applyLang = function() {
         input.addEventListener('invalid', _onInvalid, { once: false });
         input.addEventListener('input',   _onInput,   { once: false });
     });
-
-    // Debug-Button Text (falls vorhanden und in localStorage gespeichert)
-    const btnDebug = document.getElementById('btn-debug');
-    if (btnDebug) {
-        const isActive = btnDebug.classList.contains('active');
-        btnDebug.textContent = isActive
-            ? window.t('panel.debug.on')
-            : window.t('panel.debug.off');
-    }
 
     // Sprachschalter-Buttons synchronisieren
     document.querySelectorAll('.lang-toggle-btn').forEach(btn => {

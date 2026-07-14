@@ -1221,24 +1221,9 @@
         }
     });
 
-    // ─── Debug-Toggle ──────────────────────────────────────────
-    const btnDebug = document.getElementById('btn-debug');
-    let _debugMode = localStorage.getItem('jarvis_debug') !== 'false'; // Default: an
-    // Initialzustand setzen
-    const _updateDebugBtn = () => {
-        btnDebug.textContent = window.t(_debugMode ? 'panel.debug.on' : 'panel.debug.off');
-        btnDebug.classList.toggle('active', _debugMode);
-        logContainer.classList.toggle('hide-debug', !_debugMode);
-    };
-    _updateDebugBtn();
-
-    btnDebug.addEventListener('click', () => {
-        _debugMode = !_debugMode;
-        localStorage.setItem('jarvis_debug', _debugMode);
-        _updateDebugBtn();
-        // Zum Ende scrollen
-        logContainer.scrollTop = logContainer.scrollHeight;
-    });
+    // Debug-Toggle entfernt: der /-Hauptbildschirm wird nach Login stets auf
+    // /portal umgeleitet und ist keine sichtbare Oberflaeche. Die Debug-Ansicht
+    // lebt jetzt in /chat (Umschalter neben der Kontext-Pille).
 
     function applyLogZoom() {
         const scale = logZoom / 100;

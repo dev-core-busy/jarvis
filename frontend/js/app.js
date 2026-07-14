@@ -34,13 +34,9 @@
     // laeuft auf /settings nicht mehr. Das Modal laedt seine Daten selbst (openModal).
     function _enterSettingsPage() {
         if (loginScreen) loginScreen.classList.remove('active');
-        // Nur die fuer die Einstellungen relevanten Teile initialisieren
-        try { loadVersion(); } catch (e) {}
-        try { updateWidget.init(); } catch (e) {}
-        try { _startBrokerBadge(); } catch (e) {}
         setTimeout(function () {
-            const b = document.getElementById('btn-settings');
-            if (b) b.click();   // openModal(): laedt Profile + oeffnet das Modal-Overlay
+            // Modal direkt oeffnen (ohne den entfernten Header-Zahnrad-Button)
+            if (window._openSettingsModal) window._openSettingsModal();
             const c = document.getElementById('btn-close-settings');
             if (c) c.addEventListener('click', function () { window.location.replace(_settingsReturn()); }, { once: true });
             if (window.applyLang) window.applyLang();
@@ -1265,7 +1261,7 @@
     });
     }  // Ende alte Chat-/Zoom-Steuerung (Guard: taskInput)
 
-    btnLogout.addEventListener('click', () => {
+    if (btnLogout) btnLogout.addEventListener('click', () => {
         showLoginScreen();
     });
 
@@ -2493,7 +2489,9 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         let defaults = {};
         let editingProfileId = null; // null = neues Profil
 
-        if (!modal || !btnOpen) return;
+        // btnOpen (Header-Zahnrad) ist optional – /settings oeffnet das Modal ueber
+        // window._openSettingsModal. Nur das Modal selbst ist Pflicht.
+        if (!modal) return;
 
         const PROVIDER_LABELS = {
             'google': 'Google Gemini',
@@ -2972,7 +2970,10 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             if (window.visionManager) window.visionManager.stop();
         };
 
-        btnOpen.addEventListener('click', openModal);
+        // Von _enterSettingsPage genutzt, damit /settings das Modal ohne den
+        // (entfernten) Header-Zahnrad-Button oeffnen kann.
+        window._openSettingsModal = openModal;
+        if (btnOpen) btnOpen.addEventListener('click', openModal);
         btnClose.addEventListener('click', closeModal);
         // Kein Schließen bei Klick außerhalb oder versehentlichem Drag – nur explizit via X-Button
 

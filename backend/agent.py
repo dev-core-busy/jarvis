@@ -556,14 +556,63 @@ KRITISCH – Autonomie-Regeln:
                 continue  # Confluence/Jira nur lesend im Chat
             self.tools_map[tool.name] = tool
 
+        # Effektives LLM-Profil dieses Agents (benutzerbezogen). Wird bei jedem
+        # Task-Start via _resolve_profile_for_user() anhand des Benutzers gesetzt;
+        # bis dahin gilt das globale aktive Profil.
+        self._active_profile: dict | None = None
+
         # Provider initialisieren
         self.provider = get_provider(
-            config.LLM_PROVIDER,
-            config.current_api_key,
-            auth_method=config.current_auth_method,
-            session_key=config.current_session_key,
-            prompt_tool_calling=config.current_prompt_tool_calling,
+            self.LLM_PROVIDER,
+            self.current_api_key,
+            auth_method=self.current_auth_method,
+            session_key=self.current_session_key,
+            prompt_tool_calling=self.current_prompt_tool_calling,
         )
+
+    # ─── Benutzerbezogenes LLM-Profil (Fassade, Fallback: global) ──────────
+    @property
+    def _eff_profile(self) -> dict | None:
+        return self._active_profile if getattr(self, "_active_profile", None) else config.active_profile
+
+    @property
+    def LLM_PROVIDER(self) -> str:
+        p = self._eff_profile
+        return p.get("provider", "google") if p else "google"
+
+    @property
+    def current_model(self) -> str:
+        p = self._eff_profile
+        return p.get("model", "") if p else ""
+
+    @property
+    def current_api_key(self) -> str:
+        p = self._eff_profile
+        return p.get("api_key", "") if p else ""
+
+    @property
+    def current_api_url(self) -> str:
+        p = self._eff_profile
+        return p.get("api_url", "") if p else ""
+
+    @property
+    def current_auth_method(self) -> str:
+        p = self._eff_profile
+        return p.get("auth_method", "api_key") if p else "api_key"
+
+    @property
+    def current_session_key(self) -> str:
+        p = self._eff_profile
+        return p.get("session_key", "") if p else ""
+
+    @property
+    def current_prompt_tool_calling(self) -> bool:
+        p = self._eff_profile
+        return bool(p.get("prompt_tool_calling", False)) if p else False
+
+    def _resolve_profile_for_user(self):
+        """Setzt das effektive Profil anhand des aktuellen Benutzers (_current_username)."""
+        self._active_profile = config.profile_for_user(getattr(self, "_current_username", ""))
 
     def reload_skills(self):
         """Hot-Reload: Lädt Skills neu und aktualisiert die Tool-Liste."""
@@ -605,6 +654,8 @@ KRITISCH – Autonomie-Regeln:
         # Sub-Agents werden ohne username gestartet – dann den vom Eltern-Agent
         # geerbten Namen behalten (nicht mit "" ueberschreiben), damit LDAP-Gating greift.
         self._current_username = username or getattr(self, '_current_username', '')
+        # Effektives LLM-Profil dieses Benutzers aufloesen (benutzerbezogene Wahl)
+        self._resolve_profile_for_user()
         # Vom Benutzer gewaehlter Wissensgruppen-Filter (fuer knowledge_search):
         #   None    -> kein Filter (alle Gruppen)
         #   []       -> keine Gruppe -> kein Wissen
@@ -638,12 +689,12 @@ KRITISCH – Autonomie-Regeln:
 
         # Provider bei jedem Start neu initialisieren (für geänderte Einstellungen)
         self.provider = get_provider(
-            config.LLM_PROVIDER,
-            config.current_api_key,
-            config.current_api_url,
-            auth_method=config.current_auth_method,
-            session_key=config.current_session_key,
-            prompt_tool_calling=config.current_prompt_tool_calling,
+            self.LLM_PROVIDER,
+            self.current_api_key,
+            self.current_api_url,
+            auth_method=self.current_auth_method,
+            session_key=self.current_session_key,
+            prompt_tool_calling=self.current_prompt_tool_calling,
         )
 
         await self._send_status(ws, f"🚀 Starte Aufgabe: {task_text}")
@@ -857,9 +908,9 @@ KRITISCH – Autonomie-Regeln:
                     _log(f"Anhang übersprungen ({_att.get('name','?')}): {_att_err}")
             _user_msg = types.Content(role="user", parts=_user_parts)
             llm_span = tracer.start_span("llm:initial", kind="llm", parent_id=self.agent_id)
-            llm_span.attributes["model"] = config.current_model
+            llm_span.attributes["model"] = self.current_model
             _stopped, response = await self._await_or_stop(self.provider.generate_response(
-                model=config.current_model,
+                model=self.current_model,
                 system_prompt=system_prompt,
                 contents=[*chat_history, _user_msg],
                 tools=self._tool_instances
@@ -901,7 +952,7 @@ KRITISCH – Autonomie-Regeln:
                     _log("Leere LLM-Antwort – retry mit Fallback-Prompt")
                     try:
                         retry_resp = await self.provider.generate_response(
-                            model=config.current_model,
+                            model=self.current_model,
                             system_prompt="Antworte kurz und hilfreich auf Deutsch.",
                             contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_text)])],
                             tools=[],
@@ -936,7 +987,7 @@ KRITISCH – Autonomie-Regeln:
                 # Wenn keine Function Calls → fertig; User+Antwort in History eintragen
                 if not function_calls:
                     chat_history.append(_user_msg)
-                    if config.LLM_PROVIDER == "google" and hasattr(response, 'raw') and response.raw and response.raw.candidates:
+                    if self.LLM_PROVIDER == "google" and hasattr(response, 'raw') and response.raw and response.raw.candidates:
                         chat_history.append(response.raw.candidates[0].content)
                     else:
                         _resp_parts = []
@@ -1059,7 +1110,7 @@ KRITISCH – Autonomie-Regeln:
                 # Beim ersten Tool-Step: User-Nachricht als Anker in History einbauen
                 if steps == 0 and (not chat_history or chat_history[-1] != _user_msg):
                     chat_history.append(_user_msg)
-                if config.LLM_PROVIDER == "google":
+                if self.LLM_PROVIDER == "google":
                     chat_history.append(response.raw.candidates[0].content)
                 else:
                     parts = []
@@ -1080,9 +1131,9 @@ KRITISCH – Autonomie-Regeln:
                 chat_history = await self._compress_history(chat_history, system_prompt)
 
                 llm_span = tracer.start_span(f"llm:step_{steps+1}", kind="llm", parent_id=self.agent_id)
-                llm_span.attributes["model"] = config.current_model
+                llm_span.attributes["model"] = self.current_model
                 _stopped, response = await self._await_or_stop(self.provider.generate_response(
-                    model=config.current_model,
+                    model=self.current_model,
                     system_prompt=system_prompt,
                     contents=chat_history,
                     tools=self._tool_instances
@@ -1115,7 +1166,7 @@ KRITISCH – Autonomie-Regeln:
                 async def _try_final(label: str, contents_, system_):
                     try:
                         _resp = await self.provider.generate_response(
-                            model=config.current_model,
+                            model=self.current_model,
                             system_prompt=system_,
                             contents=contents_,
                             tools=[],
@@ -1195,7 +1246,7 @@ KRITISCH – Autonomie-Regeln:
                 try:
                     conv_log.log_conversation(
                         task=task_text,
-                        model=config.current_model,
+                        model=self.current_model,
                         client_ip=client_ip,
                         client_type=client_type,
                         system_prompt=system_prompt,
@@ -1226,7 +1277,7 @@ KRITISCH – Autonomie-Regeln:
                                 task=task_text,
                                 conv_messages=_conv_messages,
                                 provider=self.provider,
-                                model=config.current_model,
+                                model=self.current_model,
                             )
                         )
                         _log("Background-Learning gestartet")
@@ -1253,7 +1304,7 @@ KRITISCH – Autonomie-Regeln:
                             types.Content(role="user", parts=[types.Part.from_text(text=learning_hint)])
                         )
                         learn_response = await self.provider.generate_response(
-                            model=config.current_model,
+                            model=self.current_model,
                             system_prompt=system_prompt,
                             contents=[
                                 types.Content(role="user", parts=[types.Part.from_text(text=task_text)]),
@@ -1293,7 +1344,7 @@ KRITISCH – Autonomie-Regeln:
                     _dur = int((time.time() - _task_start_time) * 1000)
                     conv_log.log_conversation(
                         task=task_text,
-                        model=config.current_model,
+                        model=self.current_model,
                         client_ip=client_ip,
                         client_type=client_type,
                         system_prompt=system_prompt if 'system_prompt' in locals() else "",
@@ -1316,6 +1367,8 @@ KRITISCH – Autonomie-Regeln:
 
         Wird von der WhatsApp-Pipeline genutzt.
         """
+        # Effektives LLM-Profil des (ggf. via _current_username gesetzten) Benutzers
+        self._resolve_profile_for_user()
         self.state = AgentState.RUNNING
         self._stop_flag = False
         self._stop_event.clear()
@@ -1328,12 +1381,12 @@ KRITISCH – Autonomie-Regeln:
 
         # Provider neu initialisieren
         self.provider = get_provider(
-            config.LLM_PROVIDER,
-            config.current_api_key,
-            config.current_api_url,
-            auth_method=config.current_auth_method,
-            session_key=config.current_session_key,
-            prompt_tool_calling=config.current_prompt_tool_calling,
+            self.LLM_PROVIDER,
+            self.current_api_key,
+            self.current_api_url,
+            auth_method=self.current_auth_method,
+            session_key=self.current_session_key,
+            prompt_tool_calling=self.current_prompt_tool_calling,
         )
 
         # System-Prompt zusammenbauen
@@ -1351,7 +1404,7 @@ KRITISCH – Autonomie-Regeln:
             chat_history = []
 
             response = await self.provider.generate_response(
-                model=config.current_model,
+                model=self.current_model,
                 system_prompt=system_prompt,
                 contents=[
                     types.Content(
@@ -1416,7 +1469,7 @@ KRITISCH – Autonomie-Regeln:
                     if image_part:
                         function_response_parts.append(image_part)
 
-                if config.LLM_PROVIDER == "google":
+                if self.LLM_PROVIDER == "google":
                     chat_history.append(response.raw.candidates[0].content)
                 else:
                     parts = []
@@ -1433,7 +1486,7 @@ KRITISCH – Autonomie-Regeln:
                 )
 
                 response = await self.provider.generate_response(
-                    model=config.current_model,
+                    model=self.current_model,
                     system_prompt=system_prompt,
                     contents=[
                         types.Content(
@@ -1454,7 +1507,7 @@ KRITISCH – Autonomie-Regeln:
                 async def _try_final_h(label: str, contents_, system_):
                     try:
                         _resp = await self.provider.generate_response(
-                            model=config.current_model,
+                            model=self.current_model,
                             system_prompt=system_,
                             contents=contents_,
                             tools=[],
@@ -1515,7 +1568,7 @@ KRITISCH – Autonomie-Regeln:
                             types.Content(role="user", parts=[types.Part.from_text(text=learning_hint)])
                         )
                         learn_response = await self.provider.generate_response(
-                            model=config.current_model, system_prompt=system_prompt,
+                            model=self.current_model, system_prompt=system_prompt,
                             contents=[
                                 types.Content(role="user", parts=[types.Part.from_text(text=task_text)]),
                                 *chat_history,
@@ -1801,7 +1854,7 @@ KRITISCH – Autonomie-Regeln:
 
         try:
             summary_response = await self.provider.generate_response(
-                model=config.current_model,
+                model=self.current_model,
                 system_prompt="Du fasst Gespräche zusammen. Antworte ausschließlich mit der Zusammenfassung.",
                 contents=[
                     types.Content(

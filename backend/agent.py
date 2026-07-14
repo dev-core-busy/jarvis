@@ -306,6 +306,37 @@ class AgentState(Enum):
 _KB_GROUPS_UNSET = object()
 
 
+def _hist_key(username: str, session_id: str = "") -> str:
+    """RAM-Schluessel fuer _user_histories. Mit session_id -> pro Chat-Sitzung
+    getrennter Kontext (fuer /chat); ohne -> ein Bucket pro Benutzer (Hauptfenster)."""
+    u = username or "anonymous"
+    return f"{u}\x00{session_id}" if session_id else u
+
+
+def serialize_history(history: list) -> list:
+    """types.Content-Liste -> JSON-taugliche Dicts (verlustfrei inkl. Anhaenge/
+    function_call), fuer die Persistenz des Sitzungs-Kontexts."""
+    out = []
+    for c in history or []:
+        try:
+            out.append(c.model_dump(mode="json", exclude_none=True))
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
+def deserialize_history(dicts: list) -> list:
+    """Umkehrung von serialize_history -> types.Content-Liste."""
+    from google.genai import types as _types
+    out = []
+    for d in dicts or []:
+        try:
+            out.append(_types.Content.model_validate(d))
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
 class JarvisAgent:
     """Der Jarvis Agent – orchestriert LLM und Tools."""
 
@@ -565,7 +596,7 @@ KRITISCH – Autonomie-Regeln:
             )
         return declarations
 
-    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None, kb_groups=_KB_GROUPS_UNSET):
+    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None, kb_groups=_KB_GROUPS_UNSET, session_id: str = ""):
         """Führt eine Aufgabe aus – der Agent-Loop."""
         import sys
         from backend.telemetry import tracer
@@ -754,11 +785,24 @@ KRITISCH – Autonomie-Regeln:
         _task_start_time = time.time()
         try:
             # Konversation starten – pro User persistente History weiterverwenden
-            _history_key = username or "anonymous"
+            self._current_session_id = session_id
+            _history_key = _hist_key(username, session_id)
             if self.is_sub_agent:
                 chat_history = []
             else:
-                chat_history = self._user_histories.get(_history_key, [])
+                chat_history = self._user_histories.get(_history_key)
+                if chat_history is None:
+                    # Kontext dieser Sitzung (falls vorhanden) aus dem Sitzungs-
+                    # speicher laden – so setzt ein Historieneintrag den zugehoerigen
+                    # Kontext fort, auch nach Neustart.
+                    chat_history = []
+                    if session_id:
+                        try:
+                            from backend import chat_sessions as _cs
+                            chat_history = deserialize_history(_cs.load_context(username, session_id))
+                        except Exception:  # noqa: BLE001
+                            chat_history = []
+                    self._user_histories[_history_key] = chat_history
             self._current_chat_history  = chat_history  # Live-Referenz für Context-Stats-API
             self._session_input_tokens  = 0             # Token-Zähler zurücksetzen
             self._session_output_tokens = 0
@@ -848,7 +892,7 @@ KRITISCH – Autonomie-Regeln:
                 # Pause/Stop prüfen
                 await self._check_controls(ws)
                 if self._stop_flag:
-                    await self._send_status(ws, "⏹️ Agent wurde gestoppt")
+                    await self._send_status(ws, "⏹️ Anfrage gestoppt")
                     break
 
                 # Antwort verarbeiten
@@ -1003,7 +1047,7 @@ KRITISCH – Autonomie-Regeln:
 
                 # Tool wurde per Stop-Button abgebrochen -> Loop sofort verlassen
                 if _tool_stopped:
-                    await self._send_status(ws, "⏹️ Agent wurde gestoppt")
+                    await self._send_status(ws, "⏹️ Anfrage gestoppt")
                     break
 
                 # Geschwindigkeits-Verzögerung
@@ -1045,7 +1089,7 @@ KRITISCH – Autonomie-Regeln:
                 ))
                 tracer.end_span(llm_span)
                 if _stopped:
-                    await self._send_status(ws, "⏹️ Agent wurde gestoppt")
+                    await self._send_status(ws, "⏹️ Anfrage gestoppt")
                     break
                 if response.usage:
                     _total_input_tokens  += response.usage.get("input_tokens", 0)
@@ -1164,6 +1208,14 @@ KRITISCH – Autonomie-Regeln:
                     _log(f"conv_log fehlgeschlagen: {cl_err}")
                 # Chat-History für nächste Anfrage dieses Users speichern
                 self._user_histories[_history_key] = chat_history
+                # Kontext dieser Sitzung persistieren (fortsetzbar, ueberlebt Neustart)
+                if session_id and not self.is_sub_agent:
+                    try:
+                        from backend import chat_sessions as _cs
+                        _cs.save_context(username, session_id, serialize_history(chat_history))
+                        _cs.touch(username, session_id, auto_title=self._current_task)
+                    except Exception as _cs_err:  # noqa: BLE001
+                        _log(f"Sitzungs-Kontext speichern fehlgeschlagen: {_cs_err}")
 
                 # Background-Learning: Fakten aus Konversation extrahieren + in FAISS indexieren
                 if _conv_messages and steps >= 1:
@@ -1230,6 +1282,12 @@ KRITISCH – Autonomie-Regeln:
             # History auch bei Fehler zurückspeichern
             if not self.is_sub_agent and chat_history:
                 self._user_histories[_history_key] = chat_history
+                if session_id:
+                    try:
+                        from backend import chat_sessions as _cs
+                        _cs.save_context(username, session_id, serialize_history(chat_history))
+                    except Exception:  # noqa: BLE001
+                        pass
             if not self.is_sub_agent:
                 try:
                     _dur = int((time.time() - _task_start_time) * 1000)
@@ -2074,17 +2132,23 @@ KRITISCH – Autonomie-Regeln:
         self._pause_event.set()
 
     def stop(self):
+        # Bricht NUR die aktuell laufende Anfrage ab – der Agent bleibt bereit
+        # (Zustand IDLE, nicht terminal STOPPED) und nimmt sofort neue Aufgaben an.
+        # Der Abbruch wird ueber _stop_flag/_stop_event erkannt, nicht ueber den Zustand.
         self._stop_flag = True
-        self.state = AgentState.STOPPED
+        self.state = AgentState.IDLE
         self._pause_event.set()  # Falls pausiert, aufwecken zum Beenden
         self._stop_event.set()   # Laufenden LLM-Call / Tool sofort abbrechen
 
     def set_speed(self, speed: float):
         self._speed = max(0.1, min(5.0, speed))
 
-    def get_context_stats(self) -> dict:
-        """Gibt aktuelle Kontext-Statistiken zurück (History-Länge, Tokens, Schwellwert)."""
-        history = self._current_chat_history
+    def get_context_stats(self, history=None) -> dict:
+        """Gibt Kontext-Statistiken zurück (History-Länge, Tokens, Schwellwert).
+        Ohne history: die aktuell live geladene; mit history: die einer bestimmten
+        Sitzung (fuer die Sidebar-Anzeige beim Chat-Wechsel)."""
+        if history is None:
+            history = self._current_chat_history
         n = len(history)
         # Groben Token-Schätzwert aus History-Text berechnen (~4 Zeichen pro Token)
         estimated_chars = 0

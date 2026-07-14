@@ -202,10 +202,10 @@ class JarvisVisionManager {
         const data = await this._api('/status');
         if (data.error) {
             if (this._lastLogState !== 'error') {
-                this._visLog('Engine nicht erreichbar: ' + data.error, 'error');
+                this._visLog(window.t('vision.engine_unreachable') + data.error, 'error');
                 this._lastLogState = 'error';
             }
-            this._setStatusBadge('offline', 'Nicht verfuegbar');
+            this._setStatusBadge('offline', window.t('vision.unavailable'));
             return;
         }
 
@@ -215,7 +215,7 @@ class JarvisVisionManager {
             this._setStatusBadge('live', `Live · ${fps} FPS${extra}`);
 
             if (this._lastLogState !== 'running') {
-                this._visLog(`Engine gestartet (${fps} FPS)`, 'success');
+                this._visLog(window.t('vision.engine_started').replace('{fps}', fps), 'success');
                 this._lastLogState = 'running';
             }
 
@@ -238,10 +238,10 @@ class JarvisVisionManager {
             }
         } else {
             if (this._lastLogState !== 'stopped') {
-                this._visLog('Engine gestoppt', 'info');
+                this._visLog(window.t('vision.engine_stopped'), 'info');
                 this._lastLogState = 'stopped';
             }
-            this._setStatusBadge('offline', 'Gestoppt');
+            this._setStatusBadge('offline', window.t('vision.stopped'));
             this._showFeedImage(false);
         }
 
@@ -253,9 +253,9 @@ class JarvisVisionManager {
                 const conf = f.confidence ? ` (${(f.confidence * 100).toFixed(0)}%)` : '';
                 return f.name + conf;
             }).join(', ');
-            this._visLog(`Erkannt: ${names}`, 'success');
+            this._visLog(window.t('vision.recognized') + names, 'success');
         } else if (!faceKey && this._lastFaceKey) {
-            this._visLog('Keine Gesichter mehr erkannt', 'info');
+            this._visLog(window.t('vision.no_more_faces'), 'info');
         }
         this._lastFaceKey = faceKey;
 
@@ -277,7 +277,7 @@ class JarvisVisionManager {
         }
         if (label) label.textContent = text;
         if (btn) {
-            btn.textContent = state === 'live' ? 'Stoppen' : 'Starten';
+            btn.textContent = state === 'live' ? window.t('vision.stop') : window.t('vision.start');
             btn.classList.toggle('vis-btn-active', state === 'live');
         }
     }
@@ -286,7 +286,7 @@ class JarvisVisionManager {
         const el = document.getElementById('vis-detected-faces');
         if (!el) return;
         if (!faces.length) {
-            el.innerHTML = '<span class="vis-no-faces">Keine Gesichter erkannt</span>';
+            el.innerHTML = '<span class="vis-no-faces">' + window.t('vision.no_faces_detected') + '</span>';
             return;
         }
         const token = encodeURIComponent(this._token());
@@ -319,7 +319,7 @@ class JarvisVisionManager {
                     // Dropdown deaktivieren wenn URL gesetzt (URL hat Vorrang)
                     if (camSelect) {
                         camSelect.disabled = true;
-                        camSelect.title = 'URL-Feld hat Vorrang';
+                        camSelect.title = window.t('vision.url_precedence');
                     }
                 } else {
                     if (camSelect) camSelect.value = cfg.camera_source;
@@ -331,7 +331,7 @@ class JarvisVisionManager {
                 urlInput.addEventListener('input', () => {
                     const hasUrl = urlInput.value.trim().length > 0;
                     camSelect.disabled = hasUrl;
-                    camSelect.title = hasUrl ? 'URL-Feld hat Vorrang' : '';
+                    camSelect.title = hasUrl ? window.t('vision.url_precedence') : '';
                 });
             }
 
@@ -367,13 +367,13 @@ class JarvisVisionManager {
 
     async _controlEngine(action) {
         const source = this._getActiveSource();
-        this._visLog(`${action === 'start' ? 'Starte' : 'Stoppe'} Engine...`, 'info');
+        this._visLog(action === 'start' ? window.t('vision.starting_engine') : window.t('vision.stopping_engine'), 'info');
         const data = await this._api('/control', {
             method: 'POST',
             body: JSON.stringify({ action, source }),
         });
         if (data.error) {
-            this._visLog(`Fehler: ${data.error}`, 'error');
+            this._visLog(window.t('vision.error') + data.error, 'error');
         } else {
             this._visLog(data.message || `Engine ${action}`, 'success');
         }
@@ -400,7 +400,7 @@ class JarvisVisionManager {
         // Engine starten wenn noetig
         const dot = document.getElementById('vis-status-dot');
         if (dot && dot.classList.contains('vis-dot-off')) {
-            this._notify('Starte Kamera...');
+            this._notify(window.t('vision.starting_camera'));
             await this._controlEngine('start');
             await new Promise(r => setTimeout(r, 2000));
         }
@@ -463,9 +463,9 @@ class JarvisVisionManager {
             const wrap = bar?.closest('.vis-progress-wrap');
 
             if (bar) { bar.style.width = '5%'; bar.classList.add('vis-progress-pulse'); }
-            if (text) text.textContent = 'Starte Training...';
+            if (text) text.textContent = window.t('vision.starting_training');
             if (wrap) wrap.style.display = '';
-            this._notify('Training gestartet – bitte in die Kamera schauen...');
+            this._notify(window.t('vision.training_started'));
 
             const data = await this._api('/training/start', {
                 method: 'POST',
@@ -482,7 +482,7 @@ class JarvisVisionManager {
             clearInterval(this._trainingPoll);
             this._trainingPoll = setInterval(() => this._pollTraining(), 500);
         } catch (e) {
-            alert('Training-Fehler: ' + e.message);
+            alert(window.t('vision.training_error') + e.message);
         }
     }
 
@@ -529,7 +529,7 @@ class JarvisVisionManager {
         } else {
             wrap.style.display = '';
             if (input) {
-                input.placeholder = type === 'url' ? 'https://example.com/webhook' : 'z.B. Hallo {name}!';
+                input.placeholder = type === 'url' ? 'https://example.com/webhook' : window.t('vision.prompt_ph');
             }
         }
     }
@@ -538,7 +538,7 @@ class JarvisVisionManager {
         const nameInput = document.getElementById('vis-wizard-name');
         const name = nameInput?.value?.trim();
         if (!name) {
-            this._notify('Bitte einen Namen eingeben.', 'error');
+            this._notify(window.t('vision.enter_name'), 'error');
             if (nameInput) nameInput.focus();
             return;
         }
@@ -569,7 +569,7 @@ class JarvisVisionManager {
             body: JSON.stringify({ name: newName, action, action_value: actionValue }),
         });
 
-        this._notify(`"${name}" gespeichert!`);
+        this._notify(window.t('vision.name_saved').replace('{name}', name));
         this._tempTrainingName = null;
         await this._fetchProfiles();
 
@@ -588,7 +588,7 @@ class JarvisVisionManager {
             this._trainingPoll = null;
 
             const title = document.getElementById('vis-wizard-done-title');
-            if (title) title.textContent = 'Training abgeschlossen!';
+            if (title) title.textContent = window.t('vision.training_done');
 
             this._setWizardStep('action');
 
@@ -622,17 +622,17 @@ class JarvisVisionManager {
             const pct = t.total > 0 ? Math.round((t.progress / t.total) * 100) : 0;
             bar.style.width = `${pct}%`;
             bar.classList.remove('vis-progress-pulse');
-            text.textContent = `${displayName}${t.progress}/${t.total} Aufnahmen (${pct}%)`;
+            text.textContent = `${displayName}${t.progress}/${t.total} ${window.t('vision.captures')} (${pct}%)`;
             wrap.style.display = '';
         } else if (phase === 'encoding') {
             bar.style.width = '100%';
             bar.classList.add('vis-progress-pulse');
-            text.textContent = `${displayName}Berechne Gesichtsdaten...`;
+            text.textContent = `${displayName}${window.t('vision.computing_face_data')}`;
             wrap.style.display = '';
         } else if (phase === 'done') {
             bar.style.width = '100%';
             bar.classList.remove('vis-progress-pulse');
-            text.textContent = `\u2705 Training abgeschlossen! ${t.result || ''}`;
+            text.textContent = `\u2705 ${window.t('vision.training_done')} ${t.result || ''}`;
             wrap.style.display = '';
         } else {
             bar.style.width = '0%';
@@ -656,7 +656,7 @@ class JarvisVisionManager {
         if (!el) return;
 
         if (!profiles.length) {
-            el.innerHTML = '<div class="vis-empty">Noch keine Gesichter trainiert.</div>';
+            el.innerHTML = '<div class="vis-empty">' + window.t('vision.no_faces_trained') + '</div>';
             return;
         }
 
@@ -693,8 +693,8 @@ class JarvisVisionManager {
 
             // Test-Button nur bei greet-Aktion
             const testBtn = p.action === 'greet'
-                ? `<button class="vis-btn-sm vis-btn-test" id="vis-test-${p.id}" onclick="visionManager._testGreetAudio('${p.id}')" title="Audio testen">🔊</button>`
-                : `<button class="vis-btn-sm vis-btn-test" id="vis-test-${p.id}" onclick="visionManager._testGreetAudio('${p.id}')" title="Audio testen" style="display:none">🔊</button>`;
+                ? `<button class="vis-btn-sm vis-btn-test" id="vis-test-${p.id}" onclick="visionManager._testGreetAudio('${p.id}')" title="${window.t('vision.test_audio')}">🔊</button>`
+                : `<button class="vis-btn-sm vis-btn-test" id="vis-test-${p.id}" onclick="visionManager._testGreetAudio('${p.id}')" title="${window.t('vision.test_audio')}" style="display:none">🔊</button>`;
 
             return `
                 <div class="vis-profile-item">
@@ -703,7 +703,7 @@ class JarvisVisionManager {
                              onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect fill=%22%23333%22 width=%2250%22 height=%2250%22/><text x=%2225%22 y=%2232%22 text-anchor=%22middle%22 fill=%22%23888%22 font-size=%2220%22>?</text></svg>'" />
                         <div class="vis-profile-info">
                             <strong>${this._esc(p.name)}</strong>
-                            <small>${p.num_images} Bilder · ${date}</small>
+                            <small>${p.num_images} ${window.t('vision.images_count')} · ${date}</small>
                         </div>
                         <div class="vis-profile-actions">
                             <button class="vis-btn-sm" onclick="visionManager._editProfile('${p.id}')" title="${window.t('common.edit')}">✏</button>
@@ -780,7 +780,7 @@ class JarvisVisionManager {
             method: 'POST',
             body: JSON.stringify(payload),
         });
-        this._notify(data.message || data.error || 'Gespeichert');
+        this._notify(data.message || data.error || window.t('vision.saved'));
     }
 
     async _testGreetAudio(profileId) {
@@ -796,12 +796,12 @@ class JarvisVisionManager {
             const audio = new Audio(url);
             audio.onended = resetBtn;
             audio.onerror = () => {
-                this._notify('Keine Audio-Datei – bitte erst speichern.', 'error');
+                this._notify(window.t('vision.no_audio_file'), 'error');
                 resetBtn();
             };
             await audio.play();
         } catch (e) {
-            this._notify('Keine Audio-Datei – bitte erst speichern.', 'error');
+            this._notify(window.t('vision.no_audio_file'), 'error');
             resetBtn();
         }
     }
@@ -861,7 +861,7 @@ class JarvisVisionManager {
 
         const newName = document.getElementById('vis-modal-name')?.value?.trim();
         if (!newName) {
-            this._notify('Name darf nicht leer sein.', 'error');
+            this._notify(window.t('vision.name_empty'), 'error');
             return;
         }
 
@@ -869,13 +869,13 @@ class JarvisVisionManager {
             method: 'POST',
             body: JSON.stringify({ name: pid, display_name: newName }),
         });
-        this._notify(data.message || data.error || 'Gespeichert');
+        this._notify(data.message || data.error || window.t('vision.saved'));
         this._closeModal();
         await this._fetchProfiles();
     }
 
     async _deleteProfile(profileId) {
-        if (!confirm(`Profil '${profileId}' wirklich löschen?`)) return;
+        if (!confirm(window.t('vision.confirm_delete_profile').replace('{name}', profileId))) return;
 
         const resp = await fetch(`/api/vision/profile/${encodeURIComponent(profileId)}`, {
             method: 'DELETE',
@@ -903,10 +903,10 @@ class JarvisVisionManager {
         ).join('');
 
         if (!data.cameras?.length) {
-            select.innerHTML = '<option value="0">Keine Kamera gefunden</option>';
+            select.innerHTML = '<option value="0">' + window.t('vision.no_camera') + '</option>';
         }
 
-        this._notify(`${(data.cameras || []).length} Kamera(s) gefunden.`);
+        this._notify((data.cameras || []).length + ' ' + window.t('vision.cameras_found'));
     }
 
     async _applyCamera() {
@@ -933,7 +933,7 @@ class JarvisVisionManager {
             body: JSON.stringify(cfg),
         });
         const data = await resp.json();
-        this._notify(data.success ? 'Einstellungen gespeichert.' : (data.error || 'Fehler'));
+        this._notify(data.success ? window.t('vision.settings_saved') : (data.error || window.t('vision.error_generic')));
     }
 
     /* ── Stream-Tools Download ─────────────────────────────────────── */
@@ -989,7 +989,7 @@ class JarvisVisionManager {
         } else {
             wrap.style.display = '';
             if (label) label.textContent = type === 'url' ? 'Webhook URL' : 'Text / Prompt';
-            if (input) input.placeholder = type === 'url' ? 'https://...' : 'z.B. Hallo {name}!';
+            if (input) input.placeholder = type === 'url' ? 'https://...' : window.t('vision.prompt_ph');
         }
     }
 }

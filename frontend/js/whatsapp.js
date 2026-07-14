@@ -73,7 +73,7 @@ class JarvisWhatsAppManager {
                 connected_number: null,
                 has_qr: false,
                 message_count: 0,
-                last_error: 'Bridge nicht erreichbar'
+                last_error: window.t('whatsapp.bridge_unreachable')
             });
         }
     }
@@ -89,11 +89,11 @@ class JarvisWhatsAppManager {
         if (badge) {
             badge.className = 'wa-status-badge ' + state;
             const labels = {
-                'connected': 'Verbunden',
-                'qr_pending': 'QR-Scan',
-                'connecting': 'Verbindet...',
-                'disconnected': 'Getrennt',
-                'error': 'Fehler'
+                'connected': window.t('whatsapp.state_connected'),
+                'qr_pending': window.t('whatsapp.state_qr'),
+                'connecting': window.t('whatsapp.state_connecting'),
+                'disconnected': window.t('whatsapp.state_disconnected'),
+                'error': window.t('common.error')
             };
             badge.textContent = labels[state] || state;
         }
@@ -110,13 +110,13 @@ class JarvisWhatsAppManager {
         const statusText = document.getElementById('wa-status-text');
         if (statusText) {
             const texts = {
-                'connected': 'WhatsApp verbunden',
-                'qr_pending': 'Warte auf QR-Scan',
-                'connecting': 'Verbinde...',
-                'disconnected': 'Nicht verbunden',
-                'error': 'Fehler'
+                'connected': window.t('whatsapp.status_connected'),
+                'qr_pending': window.t('whatsapp.status_qr'),
+                'connecting': window.t('common.connecting'),
+                'disconnected': window.t('whatsapp.status_disconnected'),
+                'error': window.t('common.error')
             };
-            statusText.textContent = texts[state] || 'Unbekannt';
+            statusText.textContent = texts[state] || window.t('whatsapp.status_unknown');
         }
 
         // Detail-Text
@@ -127,7 +127,7 @@ class JarvisWhatsAppManager {
             } else if (state === 'connected') {
                 detail.textContent = window.t('wa.ready');
             } else if (state === 'qr_pending') {
-                detail.textContent = 'Scanne den QR-Code mit deinem Handy';
+                detail.textContent = window.t('whatsapp.qr_scan_hint');
             } else {
                 detail.textContent = '';
             }
@@ -160,7 +160,7 @@ class JarvisWhatsAppManager {
                             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                             <polyline points="22 4 12 14.01 9 11.01"/>
                         </svg>
-                        Verbunden
+                        ${window.t('whatsapp.state_connected')}
                     </div>`;
             }
         }
@@ -191,7 +191,7 @@ class JarvisWhatsAppManager {
         }
 
         if (typeof QRCode === 'undefined') {
-            qrBox.innerHTML = '<div class="wa-qr-loading">QR-Library fehlt</div>';
+            qrBox.innerHTML = '<div class="wa-qr-loading">' + window.t('whatsapp.qr_lib_missing') + '</div>';
             return;
         }
 
@@ -208,7 +208,7 @@ class JarvisWhatsAppManager {
             });
         } catch (e) {
             // Fallback: Einfaches Canvas
-            qrBox.innerHTML = '<div class="wa-qr-loading">QR-Code wird generiert...</div>';
+            qrBox.innerHTML = '<div class="wa-qr-loading">' + window.t('whatsapp.qr_generating') + '</div>';
             console.error('[WA] QR-Render Fehler:', e);
         }
     }
@@ -317,12 +317,12 @@ class JarvisWhatsAppManager {
                 }
             }
         } catch (e) {
-            container.innerHTML = '<div class="wa-logs-empty">Logs konnten nicht geladen werden</div>';
+            container.innerHTML = '<div class="wa-logs-empty">' + window.t('whatsapp.logs_load_failed') + '</div>';
             return;
         }
 
         if (allLogs.length === 0) {
-            container.innerHTML = '<div class="wa-logs-empty">Keine Logs vorhanden</div>';
+            container.innerHTML = '<div class="wa-logs-empty">' + window.t('wa.no_logs') + '</div>';
             return;
         }
 

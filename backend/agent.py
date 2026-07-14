@@ -1486,6 +1486,16 @@ KRITISCH – Autonomie-Regeln:
     # Tools, deren Ergebnisse innerhalb eines Task-Runs gecacht werden können
     _CACHEABLE_TOOLS = {"read_file", "screenshot", "read_clipboard"}
 
+    def _broker_context(self) -> str:
+        """Kurzer, rein informativer Ausloeser-Kontext fuers Broker-Audit:
+        Agent-Label + Auszug des aktuellen Tasks. Nur fuers Protokoll."""
+        task = getattr(self, '_current_task', '')
+        if not isinstance(task, str):
+            task = ''
+        task = ' '.join(task.split())[:160]
+        label = getattr(self, 'label', '') or ''
+        return (f"[{label}] {task}" if label else task).strip()
+
     async def _execute_tool(self, name: str, args: dict, ws=None) -> str:
         """Fuehrt ein Tool aus. Bei Streaming-Tools wird Live-Output gesendet."""
         import json as _json
@@ -1623,6 +1633,7 @@ KRITISCH – Autonomie-Regeln:
                 if _sbx_user:
                     exec_args['_sandbox_user'] = _sbx_user
                     exec_args['_broker_user'] = _uname
+                    exec_args['_broker_context'] = self._broker_context()
 
             # Privilegierte Benutzer (lokal/System): Root-Befehle laufen ueber
             # den Root-Broker (shell_root) – unbekannte Befehle erzeugen dort
@@ -1631,6 +1642,7 @@ KRITISCH – Autonomie-Regeln:
                     and (not _uname or _uname in _LOCAL_PRIVILEGED_USERS)):
                 exec_args['_root_broker'] = True
                 exec_args['_broker_user'] = _uname or "system"
+                exec_args['_broker_context'] = self._broker_context()
 
             if not _ldap_blocked:
                 result = await tool.execute(**exec_args)

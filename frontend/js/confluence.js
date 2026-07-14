@@ -60,30 +60,30 @@
                 user: '',  // Server/DC: PAT als Bearer -> kein Benutzer noetig
                 api_token: ($('cf-token') ? $('cf-token').value : '').trim()
             };
-            status('Speichere…');
+            status(window.t('confluence.saving'));
             fetch('/api/skills/confluence/config', {
                 method: 'POST',
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(body)
             }).then(function (r) { return r.json(); })
-              .then(function () { status('✓ Gespeichert', 'ok'); })
-              .catch(function () { status('✗ Fehler beim Speichern', 'error'); });
+              .then(function () { status('✓ ' + window.t('confluence.saved'), 'ok'); })
+              .catch(function () { status('✗ ' + window.t('confluence.save_failed'), 'error'); });
         },
 
         test: function () {
-            status('Teste Verbindung…');
+            status(window.t('confluence.testing'));
             fetch('/api/confluence/test', { headers: authHeaders() })
                 .then(function (r) { return r.json(); })
                 .then(function (d) {
                     if (d && d.ok) {
-                        status('✅ Verbunden (' + d.count + ' Space(s))', 'ok');
+                        status('✅ ' + window.t('confluence.connected').replace('{n}', d.count), 'ok');
                     } else if (d && d.configured === false) {
-                        status('Nicht konfiguriert – bitte zuerst speichern.', 'error');
+                        status(window.t('confluence.not_configured'), 'error');
                     } else {
-                        status('❌ ' + ((d && d.error) || 'Verbindung fehlgeschlagen'), 'error');
+                        status('❌ ' + ((d && d.error) || window.t('confluence.connect_failed')), 'error');
                     }
                 })
-                .catch(function () { status('❌ Verbindungstest fehlgeschlagen', 'error'); });
+                .catch(function () { status('❌ ' + window.t('confluence.test_failed'), 'error'); });
         },
 
         search: function () {

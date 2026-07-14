@@ -56,23 +56,23 @@
         m.innerHTML =
             '<div class="modal-content glass" style="max-width:640px;">' +
               '<div class="modal-header">' +
-                '<h2 id="ldap-picker-title">Verzeichnis durchsuchen</h2>' +
-                '<button class="btn-icon" id="ldap-picker-close" aria-label="Schließen">' +
+                '<h2 id="ldap-picker-title">' + window.t('ldap.title_browse') + '</h2>' +
+                '<button class="btn-icon" id="ldap-picker-close" aria-label="' + window.t('common.close') + '">' +
                   '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>' +
                 '</button>' +
               '</div>' +
               '<div class="modal-body" style="overflow-y:auto;">' +
-                '<div id="ldap-picker-cred" style="display:none;margin-bottom:12px;padding:10px 12px;border:1px solid rgba(255,255,255,0.12);border-radius:10px;background:rgba(255,255,255,0.03);">' +
-                  '<div style="font-size:0.84rem;margin-bottom:8px;">Kein Service-Konto hinterlegt – bitte einmalig AD-Zugangsdaten eingeben (werden nicht gespeichert):</div>' +
-                  '<input type="text" id="ldap-picker-user" placeholder="AD-Benutzer (z.B. vorname.nachname)" style="width:100%;box-sizing:border-box;margin-bottom:6px;">' +
-                  '<input type="password" id="ldap-picker-pass" placeholder="AD-Passwort" style="width:100%;box-sizing:border-box;margin-bottom:8px;">' +
-                  '<button type="button" id="ldap-picker-connect" style="padding:6px 14px;border-radius:8px;border:1px solid rgba(139,92,246,0.5);background:rgba(139,92,246,0.15);color:var(--text-primary,#e2e8f0);cursor:pointer;font-size:0.84rem;">Verbinden &amp; suchen</button>' +
+                '<div id="ldap-picker-cred" style="display:none;margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:rgba(var(--fg-rgb),0.03);">' +
+                  '<div style="font-size:0.84rem;margin-bottom:8px;">' + window.t('ldap.cred_hint') + '</div>' +
+                  '<input type="text" id="ldap-picker-user" placeholder="' + window.t('ldap.ph_user') + '" style="width:100%;box-sizing:border-box;margin-bottom:6px;">' +
+                  '<input type="password" id="ldap-picker-pass" placeholder="' + window.t('ldap.ph_pass') + '" style="width:100%;box-sizing:border-box;margin-bottom:8px;">' +
+                  '<button type="button" id="ldap-picker-connect" style="padding:6px 14px;border-radius:8px;border:1px solid rgba(var(--accent-rgb),0.5);background:rgba(var(--accent-rgb),0.15);color:var(--text-primary,#e2e8f0);cursor:pointer;font-size:0.84rem;">' + window.t('ldap.connect_search') + '</button>' +
                 '</div>' +
-                '<input type="text" id="ldap-picker-search" placeholder="Suchen… (Name, Login, E-Mail)" autocomplete="off" style="width:100%;box-sizing:border-box;margin-bottom:6px;">' +
+                '<input type="text" id="ldap-picker-search" placeholder="' + window.t('ldap.ph_search') + '" autocomplete="off" style="width:100%;box-sizing:border-box;margin-bottom:6px;">' +
                 '<div id="ldap-picker-info" style="font-size:0.78rem;color:var(--text-muted);min-height:1.2em;margin-bottom:6px;"></div>' +
-                '<div id="ldap-picker-list" style="max-height:46vh;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:10px;"></div>' +
+                '<div id="ldap-picker-list" style="max-height:46vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px;"></div>' +
                 '<div id="ldap-picker-actions" style="display:none;justify-content:flex-end;gap:8px;margin-top:12px;">' +
-                  '<button type="button" id="ldap-picker-apply" style="padding:7px 16px;border-radius:8px;border:1px solid rgba(139,92,246,0.5);background:rgba(139,92,246,0.2);color:var(--text-primary,#e2e8f0);cursor:pointer;font-weight:600;font-size:0.85rem;">Übernehmen</button>' +
+                  '<button type="button" id="ldap-picker-apply" style="padding:7px 16px;border-radius:8px;border:1px solid rgba(var(--accent-rgb),0.5);background:rgba(var(--accent-rgb),0.2);color:var(--text-primary,#e2e8f0);cursor:pointer;font-weight:600;font-size:0.85rem;">' + window.t('ldap.apply') + '</button>' +
                 '</div>' +
               '</div>' +
             '</div>';
@@ -90,7 +90,7 @@
         el('ldap-picker-connect').addEventListener('click', function () {
             _cred.user = el('ldap-picker-user').value.trim();
             _cred.password = el('ldap-picker-pass').value;
-            if (!_cred.password) { info('Bitte Passwort eingeben.', true); return; }
+            if (!_cred.password) { info(window.t('ldap.enter_pass'), true); return; }
             runSearch();
         });
         el('ldap-picker-apply').addEventListener('click', applyMulti);
@@ -103,7 +103,7 @@
     }
     function info(msg, isErr) {
         var i = el('ldap-picker-info');
-        if (i) { i.textContent = msg || ''; i.style.color = isErr ? '#f0a0a0' : 'var(--text-muted)'; }
+        if (i) { i.textContent = msg || ''; i.style.color = isErr ? 'var(--danger)' : 'var(--text-muted)'; }
     }
 
     function open(cfg, targetInput) {
@@ -114,7 +114,7 @@
                 _state.selected[v.toLowerCase()] = v;
             });
         }
-        el('ldap-picker-title').textContent = cfg.kind === 'users' ? 'Benutzer auswählen' : 'Gruppe(n) auswählen';
+        el('ldap-picker-title').textContent = cfg.kind === 'users' ? window.t('ldap.pick_user') : window.t('ldap.pick_groups');
         el('ldap-picker-search').value = '';
         el('ldap-picker-list').innerHTML = '';
         el('ldap-picker-cred').style.display = 'none';
@@ -131,7 +131,7 @@
     function runSearch() {
         if (!_state) return;
         var q = el('ldap-picker-search').value.trim();
-        info('Suche läuft…');
+        info(window.t('ldap.searching'));
         var payload = { q: q };
         if (_cred.password) { payload.password = _cred.password; payload.bind_user = _cred.user; }
         fetch('/api/ldap/' + _state.kind, {
@@ -142,11 +142,11 @@
             return r.json().then(function (j) { return { status: r.status, j: j }; });
         }).then(function (res) {
             if (res.status === 428) { showCred(''); return; }
-            if (res.status === 401) { showCred('Anmeldung fehlgeschlagen – bitte Zugangsdaten prüfen.'); return; }
-            if (res.status !== 200) { info((res.j && res.j.error) || ('Fehler ' + res.status), true); return; }
+            if (res.status === 401) { showCred(window.t('ldap.auth_failed')); return; }
+            if (res.status !== 200) { info((res.j && res.j.error) || (window.t('common.error') + ' ' + res.status), true); return; }
             el('ldap-picker-cred').style.display = 'none';
             renderList(res.j[_state.kind] || []);
-        }).catch(function () { info('Netzwerkfehler.', true); });
+        }).catch(function () { info(window.t('ldap.network_error'), true); });
     }
 
     function showCred(errMsg) {
@@ -158,8 +158,8 @@
 
     function renderList(rows) {
         var box = el('ldap-picker-list');
-        if (!rows.length) { box.innerHTML = '<div style="padding:14px;color:var(--text-muted);font-size:0.85rem;">Keine Treffer.</div>'; info(''); return; }
-        info(rows.length + ' Treffer' + (rows.length >= 100 ? ' (bitte weiter eingrenzen)' : ''));
+        if (!rows.length) { box.innerHTML = '<div style="padding:14px;color:var(--text-muted);font-size:0.85rem;">' + window.t('ldap.no_hits') + '</div>'; info(''); return; }
+        info(rows.length + ' ' + window.t('ldap.hits') + (rows.length >= 100 ? ' (' + window.t('ldap.narrow') + ')' : ''));
         var users = _state.kind === 'users';
         var html = '';
         rows.forEach(function (r) {
@@ -215,11 +215,11 @@
         var addInp = document.createElement('input');
         addInp.type = 'text';
         addInp.className = 'token-add-input';
-        addInp.placeholder = cfg.kind === 'groups' ? 'Gruppen-DN einfügen…' : 'Login manuell hinzufügen…';
+        addInp.placeholder = cfg.kind === 'groups' ? window.t('ldap.ph_group_dn') : window.t('ldap.ph_login_manual');
         var addBtn = document.createElement('button');
         addBtn.type = 'button';
         addBtn.className = 'token-add-btn';
-        addBtn.textContent = '+ Hinzufügen';
+        addBtn.textContent = window.t('ldap.add_btn');
         addRow.appendChild(addInp);
         addRow.appendChild(addBtn);
         wrap.appendChild(items);
@@ -229,12 +229,12 @@
         function render() {
             var toks = splitVals(inp.value, cfg.sep);
             if (!toks.length) {
-                items.innerHTML = '<span class="token-empty">– keine Einträge –</span>';
+                items.innerHTML = '<span class="token-empty">' + window.t('ldap.no_entries') + '</span>';
             } else {
                 items.innerHTML = toks.map(function (t, i) {
                     var label = cfg.kind === 'groups' ? shortDn(t) : t;
                     return '<span class="token" title="' + esc(t) + '"><span class="token-label">' + esc(label) +
-                           '</span><button type="button" class="token-x" data-i="' + i + '" aria-label="Entfernen">×</button></span>';
+                           '</span><button type="button" class="token-x" data-i="' + i + '" aria-label="' + window.t('ldap.remove') + '">×</button></span>';
                 }).join('');
             }
             items.querySelectorAll('.token-x').forEach(function (b) {
@@ -269,7 +269,7 @@
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'ldap-pick-btn';
-        btn.innerHTML = (cfg.kind === 'users' ? '👥' : '🗂️') + ' Durchsuchen';
+        btn.innerHTML = (cfg.kind === 'users' ? '👥' : '🗂️') + ' ' + window.t('ldap.browse');
         btn.addEventListener('click', function () { open(cfg, inp); });
         if (inp.nextSibling) inp.parentNode.insertBefore(btn, inp.nextSibling);
         else inp.parentNode.appendChild(btn);

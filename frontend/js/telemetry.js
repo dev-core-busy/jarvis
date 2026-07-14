@@ -52,9 +52,9 @@ class JarvisTelemetryManager {
                     { label: window.t('telemetry.stat_errors'),   value: s.errors,      icon: '❌', danger: s.errors > 0 },
                     { label: window.t('telemetry.stat_duration'), value: _fmtDur(s.total_duration_ms), icon: '⏱' },
                 ].map(c => `
-                    <div style="background:var(--bg-glass);border:1px solid ${c.danger ? 'rgba(239,68,68,0.4)' : 'var(--border)'};border-radius:var(--radius-md);padding:12px 14px;text-align:center;">
+                    <div style="background:var(--bg-glass);border:1px solid ${c.danger ? 'rgba(var(--danger-rgb),0.4)' : 'var(--border)'};border-radius:var(--radius-md);padding:12px 14px;text-align:center;">
                         <div style="font-size:1.4rem;margin-bottom:4px;">${c.icon}</div>
-                        <div style="font-size:1.1rem;font-weight:700;color:${c.danger ? '#ef4444' : 'var(--text-primary)'};">${c.value}</div>
+                        <div style="font-size:1.1rem;font-weight:700;color:${c.danger ? 'var(--danger)' : 'var(--text-primary)'};">${c.value}</div>
                         <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px;">${c.label}</div>
                     </div>
                 `).join('');
@@ -126,7 +126,7 @@ class JarvisTelemetryManager {
     async _loadConvLog() {
         const body = document.getElementById('tele-convlog-body');
         if (!body) return;
-        body.innerHTML = '<div class="kb-loading">Lade…</div>';
+        body.innerHTML = '<div class="kb-loading">' + window.t('telemetry.loading') + '</div>';
 
         // IPs und Benutzer nachladen
         await Promise.all([this._loadConvLogIps(), this._loadConvLogUsers()]);
@@ -154,7 +154,7 @@ class JarvisTelemetryManager {
                 });
             });
         } catch (e) {
-            body.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
+            body.innerHTML = `<div class="kb-files-error">${window.t('telemetry.error_prefix')} ${e.message}</div>`;
         }
     }
 
@@ -198,12 +198,12 @@ class JarvisTelemetryManager {
         const ts  = new Date(e.ts * 1000).toLocaleString('de-DE');
         const dur = _fmtDur(e.duration_ms);
         const errBadge = e.error
-            ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:99px;background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.25);">${window.t('telemetry.error_badge')}</span>`
+            ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:99px;background:rgba(var(--danger-rgb),0.15);color:var(--danger);border:1px solid rgba(var(--danger-rgb),0.25);">${window.t('telemetry.error_badge')}</span>`
             : '';
         const msgsHtml = (e.messages || []).map(m => {
-            const col = m.role === 'assistant' ? 'rgba(129,140,248,0.5)'
-                      : m.role === 'tool'      ? 'rgba(251,191,36,0.4)'
-                      : 'rgba(74,222,128,0.4)';
+            const col = m.role === 'assistant' ? 'rgba(var(--accent-rgb),0.5)'
+                      : m.role === 'tool'      ? 'rgba(var(--warning-rgb),0.4)'
+                      : 'rgba(var(--success-rgb),0.4)';
             const lbl = m.role === 'tool' ? `🔧 ${m.tool || 'tool'}` : m.role === 'assistant' ? window.t('telemetry.role_assistant') : '👤 User';
             const prev = (m.preview || m.content || '').replace(/</g,'&lt;');
             return `<div style="display:flex;gap:8px;font-size:0.78rem;padding:4px 8px;border-radius:5px;background:rgba(var(--fg-rgb),0.03);border-left:2px solid ${col};">
@@ -212,14 +212,14 @@ class JarvisTelemetryManager {
             </div>`;
         }).join('');
 
-        return `<div style="border:1px solid ${e.error ? 'rgba(239,68,68,0.3)' : 'var(--border)'};border-radius:7px;margin-bottom:5px;overflow:hidden;background:var(--bg-glass);">
+        return `<div style="border:1px solid ${e.error ? 'rgba(var(--danger-rgb),0.3)' : 'var(--border)'};border-radius:7px;margin-bottom:5px;overflow:hidden;background:var(--bg-glass);">
   <div class="conv-log-header" style="display:flex;align-items:center;gap:7px;padding:7px 11px;cursor:pointer;user-select:none;">
     <span class="conv-log-chevron" style="color:var(--text-muted);font-size:0.68rem;flex-shrink:0;">▶</span>
     <span style="flex:1;font-size:0.83rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;">${(e.task||'').replace(/</g,'&lt;')}</span>
     <span style="display:flex;align-items:center;gap:5px;flex-shrink:0;flex-wrap:wrap;">
       ${errBadge}
-      ${e.username ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:99px;background:rgba(46,204,113,0.18);color:#2ecc71;border:1px solid rgba(46,204,113,0.25);">👤 ${e.username}</span>` : ''}
-      <span style="font-size:0.68rem;padding:1px 5px;border-radius:99px;background:rgba(79,70,229,0.18);color:var(--accent-hover);border:1px solid rgba(129,140,248,0.2);">${e.client_type||'browser'}</span>
+      ${e.username ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:99px;background:rgba(var(--success-rgb),0.18);color:var(--success);border:1px solid rgba(var(--success-rgb),0.25);">👤 ${e.username}</span>` : ''}
+      <span style="font-size:0.68rem;padding:1px 5px;border-radius:99px;background:rgba(var(--accent-rgb),0.18);color:var(--accent-hover);border:1px solid rgba(var(--accent-rgb),0.2);">${e.client_type||'browser'}</span>
       <span style="font-size:0.71rem;color:var(--text-muted);">${e.client_ip||''}</span>
       <span style="font-size:0.71rem;color:var(--text-muted);">${e.model||''}</span>
       <span style="font-size:0.71rem;color:var(--text-muted);">${e.steps} ${window.t('telemetry.steps_abbr')}</span>
@@ -228,7 +228,7 @@ class JarvisTelemetryManager {
     </span>
   </div>
   <div style="display:none;padding:8px 12px;border-top:1px solid var(--border);">
-    ${e.error ? `<div style="font-size:0.81rem;color:#f87171;margin-bottom:7px;">❌ ${e.error.replace(/</g,'&lt;')}</div>` : ''}
+    ${e.error ? `<div style="font-size:0.81rem;color:var(--danger);margin-bottom:7px;">❌ ${e.error.replace(/</g,'&lt;')}</div>` : ''}
     <div style="display:flex;flex-direction:column;gap:3px;">${msgsHtml || `<em style="font-size:0.78rem;color:var(--text-muted);">${window.t('telemetry.no_messages')}</em>`}</div>
   </div>
 </div>`;
@@ -269,14 +269,14 @@ class JarvisTelemetryManager {
                         ${[...errors].reverse().map(sp => `
                             <tr style="border-bottom:1px solid rgba(var(--fg-rgb),0.04);vertical-align:top;">
                                 <td style="padding:6px 10px;font-family:var(--font-mono);color:var(--text-primary);white-space:nowrap;">${sp.name}</td>
-                                <td style="padding:6px 10px;color:#f87171;word-break:break-word;">${(sp.error||'').replace(/</g,'&lt;')}</td>
+                                <td style="padding:6px 10px;color:var(--danger);word-break:break-word;">${(sp.error||'').replace(/</g,'&lt;')}</td>
                                 <td style="padding:6px 10px;text-align:right;color:var(--text-muted);">${sp.duration_ms}</td>
                             </tr>
                         `).join('')}
                     </tbody>
                 </table>`;
         } catch (e) {
-            if (body) body.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
+            if (body) body.innerHTML = `<div class="kb-files-error">${window.t('telemetry.error_prefix')} ${e.message}</div>`;
         }
     }
 
@@ -297,7 +297,7 @@ class JarvisTelemetryManager {
                 return;
             }
 
-            const kindColor = { agent: '#818cf8', tool: '#34d399', llm: '#f59e0b', internal: 'var(--text-secondary)' };
+            const kindColor = { agent: 'var(--accent)', tool: 'var(--success)', llm: 'var(--warning)', internal: 'var(--text-secondary)' };
             body.innerHTML = `
                 <div style="font-size:0.8rem;overflow-x:auto;">
                     <table style="width:100%;border-collapse:collapse;min-width:500px;">
@@ -314,15 +314,15 @@ class JarvisTelemetryManager {
                                 <tr style="border-bottom:1px solid rgba(var(--fg-rgb),0.04);" title="${(sp.error||'').replace(/"/g,"'")}">
                                     <td style="padding:5px 8px;font-family:var(--font-mono);color:var(--text-primary);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${sp.name}</td>
                                     <td style="padding:5px 8px;"><span style="font-size:0.7rem;padding:2px 6px;border-radius:99px;background:rgba(var(--fg-rgb),0.07);color:${kindColor[sp.kind]||'var(--text-secondary)'};">${sp.kind}</span></td>
-                                    <td style="padding:5px 8px;text-align:right;color:${sp.duration_ms>1000?'#f59e0b':'var(--text-primary)'};">${sp.duration_ms}</td>
-                                    <td style="padding:5px 8px;color:${sp.status==='error'?'#ef4444':'#34d399'};">${sp.status}${sp.error ? ' ⚠' : ''}</td>
+                                    <td style="padding:5px 8px;text-align:right;color:${sp.duration_ms>1000?'var(--warning)':'var(--text-primary)'};">${sp.duration_ms}</td>
+                                    <td style="padding:5px 8px;color:${sp.status==='error'?'var(--danger)':'var(--success)'};">${sp.status}${sp.error ? ' ⚠' : ''}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
                     </table>
                 </div>`;
         } catch (e) {
-            if (body) body.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
+            if (body) body.innerHTML = `<div class="kb-files-error">${window.t('telemetry.error_prefix')} ${e.message}</div>`;
         }
     }
 

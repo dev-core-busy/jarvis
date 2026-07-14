@@ -114,7 +114,7 @@
                 position: absolute;
                 width: ${2 + Math.random() * 4}px;
                 height: ${2 + Math.random() * 4}px;
-                background: rgba(99, 102, 241, ${0.1 + Math.random() * 0.3});
+                background: rgba(var(--accent-rgb), ${0.1 + Math.random() * 0.3});
                 border-radius: 50%;
                 left: ${Math.random() * 100}%;
                 top: ${Math.random() * 100}%;
@@ -251,18 +251,18 @@
         if (!connectionDot) return;
         try {
             const res = await fetch('/api/llm/active-status', { headers: { 'Authorization': 'Bearer ' + token } });
-            const H = ' · Doppelklick: LLM-Profile';
-            if (!res.ok) { connectionDot.classList.remove('connected'); connectionDot.title = 'LLM-Status nicht abrufbar' + H; return; }
+            const H = ' · ' + window.t('app.dblclick_llm_profiles');
+            if (!res.ok) { connectionDot.classList.remove('connected'); connectionDot.title = window.t('app.llm_status_unavailable') + H; return; }
             const d = await res.json();
             const reachable = (d.status === 'ok' || d.status === 'degraded');
             connectionDot.classList.toggle('connected', reachable);
             const name = d.profile_name ? ' – ' + d.profile_name : '';
-            if (d.status === 'ok')            connectionDot.title = 'LLM erreichbar' + name + H;
-            else if (d.status === 'degraded') connectionDot.title = 'LLM erreichbar (Modell fehlt)' + name + H;
-            else                              connectionDot.title = 'LLM nicht erreichbar' + name + H;
+            if (d.status === 'ok')            connectionDot.title = window.t('app.llm_reachable') + name + H;
+            else if (d.status === 'degraded') connectionDot.title = window.t('app.llm_reachable_no_model') + name + H;
+            else                              connectionDot.title = window.t('app.llm_unreachable') + name + H;
         } catch (e) {
             connectionDot.classList.remove('connected');
-            connectionDot.title = 'LLM nicht erreichbar · Doppelklick: LLM-Profile';
+            connectionDot.title = window.t('app.llm_unreachable') + ' · ' + window.t('app.dblclick_llm_profiles');
         }
     }
     function _startLlmStatusIndicator() {
@@ -309,6 +309,7 @@
         _startLlmStatusIndicator();
         _initHeaderTts();
         _startIssuesBadge();
+        _startBrokerBadge();
         // Sprachübersetzungen nach Screen-Wechsel anwenden
         if (window.applyLang) window.applyLang();
     }
@@ -643,19 +644,19 @@
             if (btn) { btn.disabled = true; btn.textContent = window.t('update.applying'); }
             const infoEl = document.createElement('p');
             infoEl.className = 'kb-hint';
-            infoEl.style.cssText = 'margin:0;color:#f39c12;';
+            infoEl.style.cssText = 'margin:0;color:var(--warning);';
             infoEl.textContent = window.t('update.in_progress');
             if (body) { body.prepend(infoEl); body.scrollTop = 0; }
             try {
                 const r = await fetch('/api/update/apply', { method: 'POST', headers: _auth() });
                 const d = await r.json();
                 if (d.ok) {
-                    if (body) body.innerHTML = `<p style="color:#2ecc71;font-size:.85rem;">${window.t('update.success')}</p>`;
+                    if (body) body.innerHTML = `<p style="color:var(--success);font-size:.85rem;">${window.t('update.success')}</p>`;
                     setTimeout(() => window.location.reload(), 5000);
                 } else {
                     const errEl = document.createElement('p');
                     errEl.className = 'kb-hint';
-                    errEl.style.cssText = 'color:#e74c3c;white-space:pre-wrap;word-break:break-word;';
+                    errEl.style.cssText = 'color:var(--danger);white-space:pre-wrap;word-break:break-word;';
                     // d.detail = FastAPI-Fehler (z.B. 403 "nur lokale Admins"), d.error = Git-Fehler
                     errEl.textContent = window.t('update.error').replace('{msg}', d.error || d.detail || window.t('update.unknown_error'));
                     if (body) { body.prepend(errEl); body.scrollTop = 0; }
@@ -705,7 +706,7 @@
                         </div>
                         <div style="display:flex;gap:6px;">
                             <button class="btn-instr-save" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;">${window.t('instructions.save')}</button>
-                            <button class="btn-instr-del" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:var(--radius-sm);cursor:pointer;">${window.t('instructions.delete')}</button>
+                            <button class="btn-instr-del" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:rgba(var(--danger-rgb),0.15);color:var(--danger);border:1px solid rgba(var(--danger-rgb),0.3);border-radius:var(--radius-sm);cursor:pointer;">${window.t('instructions.delete')}</button>
                         </div>
                     </div>
                     <div class="instr-card-body" style="display:none;padding:0 14px 14px;">
@@ -735,7 +736,7 @@
                         headers: {'Content-Type': 'application/json', ...authHeader},
                         body: JSON.stringify({content: textarea.value})
                     });
-                    if (res.ok) { btn.textContent = '✓'; btn.style.background = '#10b981'; setTimeout(() => { btn.textContent = window.t('instructions.save'); btn.style.background = ''; }, 1500); }
+                    if (res.ok) { btn.textContent = '✓'; btn.style.background = 'var(--success)'; setTimeout(() => { btn.textContent = window.t('instructions.save'); btn.style.background = ''; }, 1500); }
                 });
             });
             // Event-Handler Löschen
@@ -1106,7 +1107,7 @@
         if ((!text && _pendingAttachments.length === 0) || !ws) return;
         if (!text && _pendingAttachments.length > 0) {
             // Nur Datei, kein Text → Standardaufgabe
-            taskInput.value = 'Bitte analysiere/beschreibe die angehängten Dateien.';
+            taskInput.value = window.t('app.analyze_attachments');
         }
         const finalText = taskInput.value.trim();
 
@@ -1192,7 +1193,7 @@
     if (btnMic) {
         btnMic.addEventListener('click', () => {
             if (!recognition) {
-                alert('Spracherkennung wird von deinem Browser leider nicht unterstützt (nutze Chrome oder Edge).');
+                alert(window.t('app.speech_unsupported'));
                 return;
             }
             if (isRecording) {
@@ -1408,6 +1409,29 @@
         if (!_issuesBadgeTimer) _issuesBadgeTimer = setInterval(_refreshIssuesBadge, 60000);
     }
     window._refreshIssuesBadge = _refreshIssuesBadge;
+
+    // ── Zahnrad-Badge: offene Root-Freigaben (Root-Broker) ──
+    let _brokerBadgeTimer = null;
+    function _setBrokerBadge(n) {
+        const b = document.getElementById('gear-broker-badge');
+        if (!b) return;
+        if (n > 0) { b.textContent = n > 99 ? '99+' : String(n); b.style.display = ''; }
+        else { b.style.display = 'none'; }
+    }
+    async function _refreshBrokerBadge() {
+        try {
+            const r = await fetch('/api/broker/status', { headers: { 'Authorization': 'Bearer ' + token } });
+            if (!r.ok) { _setBrokerBadge(0); return; }
+            const d = await r.json();
+            _setBrokerBadge((d && d.pending) || 0);
+        } catch (e) { /* ignore */ }
+    }
+    function _startBrokerBadge() {
+        _refreshBrokerBadge();
+        if (!_brokerBadgeTimer) _brokerBadgeTimer = setInterval(_refreshBrokerBadge, 60000);
+    }
+    window._setBrokerBadge = _setBrokerBadge;
+    window._refreshBrokerBadge = _refreshBrokerBadge;
     // Beim Oeffnen des Issue-Trackers gelten die Status-Aenderungen als gesehen
     {
         const _bi = document.getElementById('btn-issues');
@@ -2131,7 +2155,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         if (_editingRow) return;            // schon ein Edit aktiv
         if (!row || !bubble) return;
         if (!(window.JarvisChatLib && window.JarvisChatLib.enterEditMode)) {
-            alert('Edit-Bibliothek (chatlib.js) nicht geladen.');
+            alert(window.t('app.edit_lib_missing'));
             return;
         }
         const ok = window.JarvisChatLib.enterEditMode(row, bubble, {
@@ -2197,7 +2221,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         _editingRow = null;
 
         // 5) WS-Task mit truncate-Hint senden (Backend kürzt seine History)
-        if (!ws) { alert('Keine WebSocket-Verbindung.'); return; }
+        if (!ws) { alert(window.t('app.no_ws_connection')); return; }
         const wsMsg = {
             type: 'task',
             text: newText,
@@ -2909,7 +2933,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         async function requestLetsEncrypt() {
             const domain = (document.getElementById('le-domain') || {}).value?.trim();
             const email = (document.getElementById('le-email') || {}).value?.trim();
-            if (!domain || !email) { alert('Domain und E-Mail erforderlich'); return; }
+            if (!domain || !email) { alert(window.t('app.domain_email_required')); return; }
 
             const btn = document.getElementById('btn-request-letsencrypt');
             const progress = document.getElementById('le-progress');
@@ -3273,7 +3297,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
 
             // API Key Hinweis
             if (apikeyHint) {
-                apikeyHint.textContent = isOpenAICompat ? 'Optional – für Ollama nicht erforderlich' : '';
+                apikeyHint.textContent = isOpenAICompat ? window.t('app.apikey_optional_ollama') : '';
             }
 
             // Prompt-Tool-Calling nur bei openai_compatible anzeigen
@@ -3406,27 +3430,27 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                     }
                     if (data.success) {
                         const ok = data.model_found !== false;
-                        profileTestResult.style.background = ok ? 'rgba(46,204,113,0.15)' : 'rgba(230,126,34,0.15)';
-                        profileTestResult.style.border = ok ? '1px solid rgba(46,204,113,0.4)' : '1px solid rgba(230,126,34,0.4)';
-                        profileTestResult.style.color = ok ? '#2ecc71' : '#e67e22';
+                        profileTestResult.style.background = ok ? 'rgba(var(--success-rgb),0.15)' : 'rgba(var(--warning-rgb),0.15)';
+                        profileTestResult.style.border = ok ? '1px solid rgba(var(--success-rgb),0.4)' : '1px solid rgba(var(--warning-rgb),0.4)';
+                        profileTestResult.style.color = ok ? 'var(--success)' : 'var(--warning)';
                         profileTestResult.textContent = `${ok ? '✓' : '⚠'} ${data.message}${data.latency_ms ? ` (${data.latency_ms} ms)` : ''}`;
                         if (availModels.length > 0 && !ok) {
-                            profileTestResult.textContent += ' → Modellname aus Vorschlagsliste wählen!';
+                            profileTestResult.textContent += ' → ' + window.t('app.pick_model_from_list');
                         }
                     } else {
-                        profileTestResult.style.background = 'rgba(231,76,60,0.15)';
-                        profileTestResult.style.border = '1px solid rgba(231,76,60,0.4)';
-                        profileTestResult.style.color = '#e74c3c';
+                        profileTestResult.style.background = 'rgba(var(--danger-rgb),0.15)';
+                        profileTestResult.style.border = '1px solid rgba(var(--danger-rgb),0.4)';
+                        profileTestResult.style.color = 'var(--danger)';
                         profileTestResult.textContent = `✗ ${data.error}${data.latency_ms ? ` (${data.latency_ms} ms)` : ''}`;
                     }
                 } catch (e) {
-                    profileTestResult.style.background = 'rgba(231,76,60,0.15)';
-                    profileTestResult.style.border = '1px solid rgba(231,76,60,0.4)';
-                    profileTestResult.style.color = '#e74c3c';
+                    profileTestResult.style.background = 'rgba(var(--danger-rgb),0.15)';
+                    profileTestResult.style.border = '1px solid rgba(var(--danger-rgb),0.4)';
+                    profileTestResult.style.color = 'var(--danger)';
                     profileTestResult.textContent = `✗ ${window.t('update.error').replace('{msg}', e.message)}`;
                 } finally {
                     btnTestProfile.disabled = false;
-                    btnTestProfile.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Verbindung testen';
+                    btnTestProfile.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' + window.t('app.test_connection');
                 }
             });
         }
@@ -3459,7 +3483,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                 const d = document.createElement('div');
                 d.textContent = txt;
                 d.style.cssText = 'padding:9px 12px;font-size:0.8rem;';
-                _mdSolid(d, c, isErr ? '#f87171' : c.fgm);
+                _mdSolid(d, c, isErr ? 'var(--danger)' : c.fgm);
                 modelDiscoverList.appendChild(d);
             };
             // Popup an document.body haengen + per position:fixed unter dem Eingabefeld
@@ -3492,7 +3516,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                 btnDiscoverModels.disabled = true;
                 btnDiscoverModels.innerHTML = '⏳';
                 _mdPlace();
-                _mdMsg('Lade Modelle…', false);
+                _mdMsg(window.t('app.loading_models'), false);
                 try {
                     const payload = {
                         provider: selectProvider.value,
@@ -3513,7 +3537,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                         models.forEach(m => { const o = document.createElement('option'); o.value = m; modelSuggestions.appendChild(o); });
                         modelDiscoverList.innerHTML = '';
                         const head = document.createElement('div');
-                        head.textContent = models.length + ' Modelle – zum Übernehmen anklicken';
+                        head.textContent = models.length + ' ' + window.t('app.models_click_to_apply');
                         head.style.cssText = 'position:sticky;top:0;padding:7px 12px;font-size:0.72rem;border-bottom:1px solid ' + c.brd + ';';
                         _mdSolid(head, c, c.fgm);
                         modelDiscoverList.appendChild(head);
@@ -3530,7 +3554,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                             modelDiscoverList.appendChild(item);
                         });
                     } else {
-                        _mdMsg('✗ ' + (data.error || 'Keine Modelle gefunden'), true);
+                        _mdMsg('✗ ' + (data.error || window.t('app.no_models_found')), true);
                     }
                 } catch (e) {
                     _mdMsg('✗ ' + e.message, true);
@@ -3650,7 +3674,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             const api = (path, opts) => fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token } }, opts || {}));
 
             function render(keys) {
-                if (!keys.length) { listEl.innerHTML = '<div style="opacity:.6;font-size:.8rem;">Noch keine Keys.</div>'; return; }
+                if (!keys.length) { listEl.innerHTML = `<div style="opacity:.6;font-size:.8rem;">${window.t('app.no_keys')}</div>`; return; }
                 listEl.innerHTML = '';
                 keys.forEach(k => {
                     const row = document.createElement('div');
@@ -3668,7 +3692,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             }
             function load() {
                 api('/api/agent/keys').then(r => r.json()).then(d => render((d && d.keys) || []))
-                    .catch(() => { listEl.innerHTML = '<div style="opacity:.6;font-size:.8rem;color:var(--danger);">Fehler beim Laden.</div>'; });
+                    .catch(() => { listEl.innerHTML = `<div style="opacity:.6;font-size:.8rem;color:var(--danger);">${window.t('app.load_error')}</div>`; });
             }
             let _loaded = false;
             function loadOnce() { if (_loaded) return; _loaded = true; load(); }
@@ -4196,7 +4220,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
 .log-fb-btn:disabled{cursor:default;opacity:.45;}
 .log-fb-btn.log-fb-active{border-color:rgba(var(--accent-rgb), .7);background:rgba(var(--accent-rgb), .18);}
 .log-fb-info{font-size:.72rem;color:rgba(var(--fg-rgb),.5);margin:2px 0 2px 8px;}
-.log-entry.log-task{color:rgba(167,139,250,.9);font-weight:500;
+.log-entry.log-task{color:rgba(var(--accent-rgb),.9);font-weight:500;
   background:rgba(var(--accent-rgb), .07);border-left:2px solid rgba(var(--accent-rgb), .45);
   padding-left:6px;margin:4px 0;}
 .log-container.hide-debug .log-entry.log-task{display:block!important;}

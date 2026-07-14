@@ -325,12 +325,12 @@ window.extractorManager = new (class JarvisExtractorManager {
         fetch('/api/confluence/spaces', { headers: this._authHeaders() })
             .then(r => r.json())
             .then(d => {
-                if (!d || !d.ok) { input.placeholder = (d && d.error) || 'Fehler beim Laden'; return; }
+                if (!d || !d.ok) { input.placeholder = (d && d.error) || window.t('extractor.load_error'); return; }
                 this._cfSpaces = d.spaces || [];
                 input.placeholder = 'Bereich suchen… (' + this._filteredSpaces().length + ')';
                 if (this._ddOpen) this._renderCfSpaceDropdown();
             })
-            .catch(() => { input.placeholder = 'Fehler beim Laden'; });
+            .catch(() => { input.placeholder = window.t('extractor.load_error'); });
     }
 
     /** Bereiche gemäß Suchtext + "persönliche"-Schalter gefiltert. */
@@ -378,7 +378,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         this._ddList = shown;
         if (this._ddIndex >= shown.length) this._ddIndex = -1;
         if (!shown.length) {
-            dd.innerHTML = '<div style="padding:8px 10px;color:var(--text-secondary);font-size:0.85rem;">Keine Treffer</div>';
+            dd.innerHTML = '<div style="padding:8px 10px;color:var(--text-secondary);font-size:0.85rem;">' + window.t('extractor.no_hits') + '</div>';
             dd.style.display = '';
             return;
         }
@@ -467,7 +467,7 @@ window.extractorManager = new (class JarvisExtractorManager {
             .then(r => r.json())
             .then(d => {
                 if (!d || !d.ok) {
-                    if (pageSel) pageSel.innerHTML = '<option value="">' + ((d && d.error) || 'Fehler') + '</option>';
+                    if (pageSel) pageSel.innerHTML = '<option value="">' + ((d && d.error) || window.t('common.error')) + '</option>';
                     return;
                 }
                 const pages = d.pages || [];
@@ -480,7 +480,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                 document.getElementById('ext-cf-bulk-hint').textContent =
                     pages.length + ' Seite(n) im Bereich';
             })
-            .catch(() => { if (pageSel) pageSel.innerHTML = '<option value="">Fehler</option>'; });
+            .catch(() => { if (pageSel) pageSel.innerHTML = '<option value="">' + window.t('common.error') + '</option>'; });
     }
 
     _setExtractStatus(msg, show) {
@@ -511,7 +511,7 @@ window.extractorManager = new (class JarvisExtractorManager {
             .then(({ ok, j }) => {
                 this._setExtractStatus('', false);
                 if (btn) btn.disabled = false;
-                if (!ok) { this._notify('Fehler: ' + (j.error || 'Import fehlgeschlagen'), 'error'); return; }
+                if (!ok) { this._notify(window.t('common.error') + ': ' + (j.error || 'Import fehlgeschlagen'), 'error'); return; }
                 this._loadPending();
                 if (audit) {
                     this._notify(`✅ Seite importiert: „${j.title}"`);
@@ -548,7 +548,7 @@ window.extractorManager = new (class JarvisExtractorManager {
             .then(({ ok, j }) => {
                 this._setExtractStatus('', false);
                 if (btn) btn.disabled = false;
-                if (!ok) { this._notify('Fehler: ' + (j.error || 'Import fehlgeschlagen'), 'error'); return; }
+                if (!ok) { this._notify(window.t('common.error') + ': ' + (j.error || 'Import fehlgeschlagen'), 'error'); return; }
                 if (audit) {
                     this._notify('⏳ Import von ' + j.total
                         + ' Seite(n) gestartet – sie erscheinen nach und nach unten in den Pending-Dokumenten.');
@@ -646,7 +646,7 @@ window.extractorManager = new (class JarvisExtractorManager {
             });
             const d = await r.json();
             if (!r.ok || d.error) {
-                this._notify('Fehler: ' + (d.error || r.status), 'error');
+                this._notify(window.t('common.error') + ': ' + (d.error || r.status), 'error');
             } else {
                 document.getElementById('ext-url-input').value = '';
                 this._notify(`✅ Extraktion abgeschlossen: „${d.title}"`);
@@ -694,7 +694,7 @@ window.extractorManager = new (class JarvisExtractorManager {
             });
             const d = await r.json();
             if (!r.ok || d.error) {
-                this._notify('Fehler: ' + (d.error || r.status), 'error');
+                this._notify(window.t('common.error') + ': ' + (d.error || r.status), 'error');
             } else {
                 this._hideDropBanner();
                 this._notify(`✅ Extraktion abgeschlossen: „${d.title}"`);
@@ -800,9 +800,9 @@ window.extractorManager = new (class JarvisExtractorManager {
             const fct    = doc.fact_count ?? doc.facts?.length ?? 0;
             const fileHint = doc.file ? `<div style="padding:2px 0 0 18px;font-family:monospace;font-size:.7rem;color:var(--text-secondary);">${this._esc(doc.file)}</div>` : '';
             return `
-            <div class="cron-item" data-id="${doc.id}" style="border-left:3px solid var(--green,#10b981);">
+            <div class="cron-item" data-id="${doc.id}" style="border-left:3px solid var(--success);">
                 <div class="cron-item-row">
-                    <span class="cron-item-dot" style="background:var(--green,#10b981);"></span>
+                    <span class="cron-item-dot" style="background:var(--success);"></span>
                     <span class="cron-item-label">${this._esc(doc.title)}</span>
                     <div class="cron-item-actions">
                         ${(window.KbGroups && doc.file) ? window.KbGroups.buttonHtml(doc.file, (this._grpMap || {})[doc.file]) : ''}
@@ -1036,7 +1036,7 @@ window.extractorManager = new (class JarvisExtractorManager {
             });
             const d = await r.json();
             if (!r.ok || !d.ok) {
-                this._notifyReview('Fehler: ' + (d.error || r.status), 'error');
+                this._notifyReview(window.t('common.error') + ': ' + (d.error || r.status), 'error');
             } else {
                 const msg = isApproved
                     ? `💾 Aktualisiert: ${d.fact_count} Fakten + ${d.qa_count} Q&A-Paare`

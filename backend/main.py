@@ -2343,7 +2343,8 @@ async def broker_audit(n: int = 100, user: str = Depends(require_local_auth)):
     """Letzte n Eintraege des Broker-Audit-Logs (Admin, max 1000).
 
     Jeder Eintrag: ts, user, op, key, decision (executed/pending/denied),
-    rc, duration_ms, detail. Die Log-Datei selbst gehoert root und ist vom
+    rc, duration_ms, detail (stderr-Auszug), context (informativer Ausloeser,
+    z.B. Agent-Task-Auszug). Die Log-Datei selbst gehoert root und ist vom
     Backend nicht manipulierbar."""
     from backend import broker_client
     res = await broker_client.call("broker.audit_tail", {"n": n}, user=user, timeout=15)

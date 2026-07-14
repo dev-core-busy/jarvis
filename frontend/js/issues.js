@@ -52,19 +52,19 @@
     }
 
     function _typeLabel(t) {
-        return { bug: 'Bug', feature: 'Feature', improvement: 'Verbesserung' }[t] || t || '–';
+        return { bug: window.t('issues.type_bug'), feature: window.t('issues.type_feature'), improvement: window.t('issues.type_improvement') }[t] || t || '–';
     }
 
     function _statusLabel(s) {
-        return { open: 'Offen', in_progress: 'In Arbeit', closed: 'Geschlossen' }[s] || s || '–';
+        return { open: window.t('issues.status_open'), in_progress: window.t('issues.status_in_progress'), closed: window.t('issues.status_closed') }[s] || s || '–';
     }
 
     function _statusColor(s) {
-        return { open: '#3b82f6', in_progress: '#f59e0b', closed: '#10b981' }[s] || '#6b7280';
+        return { open: '#3b82f6', in_progress: 'var(--warning)', closed: 'var(--success)' }[s] || '#6b7280';
     }
 
     function _prioLabel(p) {
-        return { low: 'Niedrig', medium: 'Mittel', high: 'Hoch' }[p] || p || '–';
+        return { low: window.t('issues.prio_low'), medium: window.t('issues.prio_medium'), high: window.t('issues.prio_high') }[p] || p || '–';
     }
 
     // ─── State ────────────────────────────────────────────────────────
@@ -100,8 +100,8 @@
 .jv-iss-btn:hover{background:rgba(var(--fg-rgb),.12);}
 .jv-iss-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
 .jv-iss-btn.primary:hover{background:var(--accent-hover);}
-.jv-iss-btn.danger{background:#dc2626;border-color:#dc2626;color:#fff;}
-.jv-iss-btn.danger:hover{background:#ef4444;}
+.jv-iss-btn.danger{background:var(--danger);border-color:var(--danger);color:#fff;}
+.jv-iss-btn.danger:hover{background:rgba(var(--danger-rgb),.85);}
 .jv-iss-btn:disabled{opacity:.4;cursor:not-allowed;}
 .jv-iss-toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;}
 .jv-iss-toolbar select,.jv-iss-toolbar input{background:rgba(var(--fg-rgb),.06);
@@ -116,16 +116,16 @@
 .jv-iss-item-title{font-weight:600;color:var(--text-primary);font-size:14px;flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .jv-iss-notif{position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:8px;
-  background:#ef4444;color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center;
+  background:var(--danger);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center;
   padding:0 4px;pointer-events:none;box-shadow:0 0 0 2px var(--bg-primary,#0a0e17);}
 .jv-iss-badge{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600;
   text-transform:uppercase;letter-spacing:.04em;color:#fff;background:#6b7280;}
-.jv-iss-badge.bug{background:#dc2626;}
+.jv-iss-badge.bug{background:var(--danger);}
 .jv-iss-badge.feature{background:#3b82f6;}
-.jv-iss-badge.improvement{background:#10b981;}
+.jv-iss-badge.improvement{background:var(--success);}
 .jv-iss-badge.prio-low{background:#6b7280;}
-.jv-iss-badge.prio-medium{background:#f59e0b;}
-.jv-iss-badge.prio-high{background:#dc2626;}
+.jv-iss-badge.prio-medium{background:var(--warning);}
+.jv-iss-badge.prio-high{background:var(--danger);}
 .jv-iss-item-meta{font-size:11px;color:var(--text-muted);margin-top:3px;display:flex;
   gap:10px;flex-wrap:wrap;}
 .jv-iss-item-author{color:var(--text-secondary);}
@@ -157,11 +157,11 @@
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .jv-iss-attach-item a:hover{text-decoration:underline;}
 .jv-iss-attach-thumb{max-width:120px;max-height:120px;border-radius:4px;cursor:pointer;}
-.jv-iss-attach-del{background:none;border:none;color:#dc2626;cursor:pointer;
+.jv-iss-attach-del{background:none;border:none;color:var(--danger);cursor:pointer;
   font-size:14px;padding:0 4px;}
-.jv-iss-attach-del:hover{color:#ef4444;}
-.jv-iss-err{color:#ef4444;font-size:12px;padding:6px 0;}
-.jv-iss-ok{color:#10b981;font-size:12px;padding:6px 0;}
+.jv-iss-attach-del:hover{color:rgba(var(--danger-rgb),.85);}
+.jv-iss-err{color:var(--danger);font-size:12px;padding:6px 0;}
+.jv-iss-ok{color:var(--success);font-size:12px;padding:6px 0;}
 @media(max-width:600px){
   .jv-iss-form-grid{grid-template-columns:1fr;}
   .jv-iss-modal{width:100vw;height:100vh;max-height:100vh;border-radius:0;}
@@ -181,7 +181,7 @@
             <div class="jv-iss-modal" role="dialog" aria-modal="true">
                 <div class="jv-iss-header">
                     <h2 class="jv-iss-title" id="jv-iss-title">Issues</h2>
-                    <button class="jv-iss-close" aria-label="Schliessen">&times;</button>
+                    <button class="jv-iss-close" aria-label="${window.t('common.close')}">&times;</button>
                 </div>
                 <div class="jv-iss-body" id="jv-iss-body"></div>
                 <div class="jv-iss-footer" id="jv-iss-footer"></div>
@@ -219,12 +219,12 @@
 
     // ─── Liste ────────────────────────────────────────────────────────
     async function _showList() {
-        document.getElementById('jv-iss-title').textContent = 'Issues – Feedback & Bugs';
+        document.getElementById('jv-iss-title').textContent = window.t('issues.title_list');
         const body = document.getElementById('jv-iss-body');
         const footer = document.getElementById('jv-iss-footer');
-        body.innerHTML = '<div class="jv-iss-empty">Lade …</div>';
+        body.innerHTML = `<div class="jv-iss-empty">${window.t('issues.loading')}</div>`;
         footer.innerHTML = `
-            <button class="jv-iss-btn primary" id="jv-iss-new-btn">Neues Issue</button>
+            <button class="jv-iss-btn primary" id="jv-iss-new-btn">${window.t('issues.new')}</button>
         `;
         document.getElementById('jv-iss-new-btn').onclick = () => _showForm(null);
 
@@ -236,7 +236,7 @@
             _isAdmin = !!data.is_admin;
             _renderList(data.issues || []);
         } catch (e) {
-            body.innerHTML = `<div class="jv-iss-err">Fehler beim Laden: ${_escape(e.message)}</div>`;
+            body.innerHTML = `<div class="jv-iss-err">${window.t('issues.load_error')}: ${_escape(e.message)}</div>`;
         }
     }
 
@@ -244,25 +244,25 @@
         const body = document.getElementById('jv-iss-body');
         body.innerHTML = `
             <div class="jv-iss-toolbar">
-                <label>Status
+                <label>${window.t('issues.f_status')}
                     <select id="jv-iss-flt-status">
-                        <option value="">alle</option>
-                        <option value="open">Offen</option>
-                        <option value="in_progress">In Arbeit</option>
-                        <option value="closed">Geschlossen</option>
+                        <option value="">${window.t('issues.f_all')}</option>
+                        <option value="open">${window.t('issues.status_open')}</option>
+                        <option value="in_progress">${window.t('issues.status_in_progress')}</option>
+                        <option value="closed">${window.t('issues.status_closed')}</option>
                     </select>
                 </label>
-                <label>Typ
+                <label>${window.t('issues.f_type')}
                     <select id="jv-iss-flt-type">
-                        <option value="">alle</option>
-                        <option value="bug">Bug</option>
-                        <option value="feature">Feature</option>
-                        <option value="improvement">Verbesserung</option>
+                        <option value="">${window.t('issues.f_all')}</option>
+                        <option value="bug">${window.t('issues.type_bug')}</option>
+                        <option value="feature">${window.t('issues.type_feature')}</option>
+                        <option value="improvement">${window.t('issues.type_improvement')}</option>
                     </select>
                 </label>
-                <label><input type="checkbox" id="jv-iss-flt-mine"> nur meine</label>
+                <label><input type="checkbox" id="jv-iss-flt-mine"> ${window.t('issues.f_mine')}</label>
                 <span style="flex:1"></span>
-                <span style="font-size:11px;color:var(--text-muted);">${issues.length} Issue(s)</span>
+                <span style="font-size:11px;color:var(--text-muted);">${issues.length} ${window.t('issues.count_label')}</span>
             </div>
             <div class="jv-iss-list" id="jv-iss-list"></div>
         `;
@@ -287,7 +287,7 @@
     function _renderItems(items) {
         const list = document.getElementById('jv-iss-list');
         if (!items.length) {
-            list.innerHTML = '<div class="jv-iss-empty">Keine Issues gefunden.</div>';
+            list.innerHTML = `<div class="jv-iss-empty">${window.t('issues.none_found')}</div>`;
             return;
         }
         list.innerHTML = items.map(i => `
@@ -299,7 +299,7 @@
                     <span class="jv-iss-badge" style="background:${_statusColor(i.status)}">${_statusLabel(i.status)}</span>
                 </div>
                 <div class="jv-iss-item-meta">
-                    <span class="jv-iss-item-author" title="Melder">👤 ${_escape(i.author || '—')}</span>
+                    <span class="jv-iss-item-author" title="${window.t('issues.reporter_title')}">👤 ${_escape(i.author || '—')}</span>
                     <span>${_fmtDate(i.created)}</span>
                     ${(i.attachments && i.attachments.length) ? `<span>📎 ${i.attachments.length}</span>` : ''}
                 </div>

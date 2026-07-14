@@ -65,7 +65,7 @@ class ConvLogManager {
     _render() {
         if (!this._container) return;
         if (!this._entries.length) {
-            this._container.innerHTML = '<div class="conv-log-empty">Noch keine Konversationen aufgezeichnet.</div>';
+            this._container.innerHTML = '<div class="conv-log-empty">' + window.t('conv_log.none_recorded') + '</div>';
             return;
         }
         this._container.innerHTML = this._entries.map(e => this._renderEntry(e)).join('');

@@ -24,8 +24,12 @@
             : ch === 'whatsapp' ? 'WhatsApp' : (ch || '–'));
     }
 
+    // Reine Lese-/Statusabfragen (UI-Polls) – nie freigabepflichtig, aus Liste/Audit ausblenden
+    var HIDE_OPS = { 'sandbox_status': 1, 'egress_status': 1 };
+
     var Mgr = {
         _bound: false,
+        _auditCache: null,   // zwischengespeicherte Audit-Einträge (pro loadBroker geleert)
 
         // ── Einstellungen ───────────────────────────────────────────────
         onShow: function () { this._bind(); this.load(); },
@@ -160,6 +164,7 @@
 
         // ── Root-Broker: Freigabeliste + Audit ──────────────────────────
         loadBroker: function () {
+            this._auditCache = null;   // Audit neu laden, sobald wieder benötigt
             fetch('/api/broker/status', { headers: authHeaders() })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) { Mgr.renderBrokerStatus(d); })
@@ -198,6 +203,8 @@
                     badge.style.display = 'none';
                 }
             }
+            // Zahnrad-Badge (Header) synchron mitziehen
+            if (window._setBrokerBadge) window._setBrokerBadge(d.pending || 0);
         },
 
         renderBrokerOps: function (ops) {
@@ -207,14 +214,15 @@
                 box.innerHTML = '<p class="kb-hint">' + esc(T('security.broker_unavailable', 'Freigabeliste nicht verfügbar (Broker nicht erreichbar).')) + '</p>';
                 return;
             }
+            ops = ops.filter(function (e) { return !HIDE_OPS[e.key]; });   // Status-Polls nicht listen
             if (!ops.length) {
                 box.innerHTML = '<p class="kb-hint">' + esc(T('security.broker_empty', 'Noch keine Root-Operationen registriert – Einträge erscheinen hier automatisch beim ersten Auftauchen.')) + '</p>';
                 return;
             }
             function badge(dec) {
-                if (dec === 'pending') return '<span style="padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.5);">⏳ ' + esc(T('security.broker_st_pending', 'wartet auf Freigabe')) + '</span>';
-                if (dec === 'deny') return '<span style="padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.5);">🚫 ' + esc(T('security.broker_st_deny', 'abgelehnt')) + '</span>';
-                return '<span style="padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.5);">✅ ' + esc(T('security.broker_st_allow', 'erlaubt')) + '</span>';
+                if (dec === 'pending') return '<span style="padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(var(--warning-rgb),0.18);border:1px solid rgba(var(--warning-rgb),0.5);">⏳ ' + esc(T('security.broker_st_pending', 'wartet auf Freigabe')) + '</span>';
+                if (dec === 'deny') return '<span style="padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(var(--danger-rgb),0.15);border:1px solid rgba(var(--danger-rgb),0.5);">🚫 ' + esc(T('security.broker_st_deny', 'abgelehnt')) + '</span>';
+                return '<span style="padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(var(--success-rgb),0.15);border:1px solid rgba(var(--success-rgb),0.5);">✅ ' + esc(T('security.broker_st_allow', 'erlaubt')) + '</span>';
             }
             box.innerHTML = ops.map(function (e) {
                 var meta = [];
@@ -225,20 +233,29 @@
                 if (e.decided_by && !e.auto) meta.push(T('security.broker_decided', 'entschieden von') + ' ' + e.decided_by);
                 var isPending = e.decision === 'pending';
                 var html = '<div class="sec-broker-row" data-key="' + esc(e.key) + '" '
-                    + 'style="border:1px solid ' + (isPending ? 'rgba(245,158,11,0.5)' : 'var(--border)') + ';border-radius:8px;padding:8px 12px;margin-bottom:6px;'
-                    + (isPending ? 'background:rgba(245,158,11,0.06);' : '') + '">'
+                    + 'style="border:1px solid ' + (isPending ? 'rgba(var(--warning-rgb),0.5)' : 'var(--border)') + ';border-radius:8px;padding:8px 12px;margin-bottom:6px;'
+                    + (isPending ? 'background:rgba(var(--warning-rgb),0.06);' : '') + '">'
                     + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
                     + badge(e.decision)
                     + '<code style="font-size:0.78rem;word-break:break-all;flex:1;min-width:180px;">' + esc(e.description || e.key) + '</code>'
                     + '</div>'
                     + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px;">'
                     + '<span style="font-size:0.72rem;color:var(--text-muted);flex:1;">' + esc(meta.join(' · ')) + '</span>';
-                if (e.decision !== 'allow') html += '<button type="button" class="kb-btn-action sec-brk-allow" style="font-size:0.74rem;padding:2px 10px;">' + esc(T('security.broker_allow', 'Erlauben')) + '</button>';
-                if (e.decision !== 'deny') html += '<button type="button" class="kb-btn-action sec-brk-deny" style="font-size:0.74rem;padding:2px 10px;">' + esc(T('security.broker_deny', 'Ablehnen')) + '</button>';
-                html += '<button type="button" class="kb-btn-action sec-brk-remove" title="' + esc(T('security.broker_remove_title', 'Eintrag löschen – erscheint beim nächsten Auftauchen erneut')) + '" style="font-size:0.74rem;padding:2px 10px;">🗑</button>'
-                    + '</div></div>';
+                html += '<button type="button" class="sec-btn small sec-brk-history" title="' + esc(T('security.broker_history_title', 'Letzte Ausführungen/Entscheidungen zu diesem Eintrag')) + '">📜 ' + esc(T('security.broker_history', 'Beispiele')) + '</button>';
+                if (e.decision !== 'allow') html += '<button type="button" class="sec-btn small primary sec-brk-allow">' + esc(T('security.broker_allow', 'Erlauben')) + '</button>';
+                if (e.decision !== 'deny') html += '<button type="button" class="sec-btn small sec-brk-deny">' + esc(T('security.broker_deny', 'Ablehnen')) + '</button>';
+                html += '<button type="button" class="sec-btn small danger sec-brk-remove" title="' + esc(T('security.broker_remove_title', 'Eintrag löschen – erscheint beim nächsten Auftauchen erneut')) + '">🗑</button>'
+                    + '</div>'
+                    + '<div class="sec-brk-history-box" style="display:none;margin-top:6px;"></div>'
+                    + '</div>';
                 return html;
             }).join('');
+            box.querySelectorAll('.sec-brk-history').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    var row = btn.closest('.sec-broker-row');
+                    Mgr.toggleOpHistory(row.getAttribute('data-key'), row.querySelector('.sec-brk-history-box'));
+                });
+            });
             box.querySelectorAll('.sec-brk-allow').forEach(function (btn) {
                 btn.addEventListener('click', function () {
                     Mgr.decideBroker(btn.closest('.sec-broker-row').getAttribute('data-key'), 'allow');
@@ -281,32 +298,78 @@
               .catch(function () {});
         },
 
+        // Rendert eine einzelne Audit-Zeile (wiederverwendet: Gesamt-Log + Pro-Eintrag-Beispiele).
+        // showKey=true zeigt zusätzlich den Befehl/Key (Gesamt-Log); pro Eintrag ist er redundant.
+        _auditLineHtml: function (a, showKey) {
+            var mark = a.decision === 'executed' ? (a.rc === 0 || a.rc == null ? '✅' : '⚠️')
+                : (a.decision === 'denied' ? '🚫' : (a.decision === 'pending' ? '⏳' : '•'));
+            var head = mark + ' ' + esc(fmtTs(a.ts)) + ' · <b>' + esc(a.user || '–') + '</b> · ' + esc(a.decision);
+            if (a.rc != null && a.decision === 'executed') head += ' (rc=' + a.rc + (a.duration_ms != null ? ', ' + a.duration_ms + ' ms' : '') + ')';
+            var parts = ['<div>' + head + '</div>'];
+            if (showKey && (a.key || a.op)) {
+                parts.push('<div style="margin-top:2px;"><code style="font-size:0.74rem;word-break:break-all;">' + esc(a.key || a.op) + '</code></div>');
+            }
+            if (a.context) {
+                parts.push('<div style="margin-top:2px;color:var(--text-secondary);font-size:0.74rem;">↳ '
+                    + esc(T('security.broker_trigger', 'Auslöser')) + ': ' + esc(a.context) + '</div>');
+            }
+            if (a.detail) {
+                parts.push('<div style="margin-top:2px;color:var(--text-muted);font-size:0.72rem;white-space:pre-wrap;word-break:break-word;font-family:monospace;">' + esc(a.detail) + '</div>');
+            }
+            return '<div style="padding:6px 0;border-bottom:1px solid rgba(var(--fg-rgb),.06);">' + parts.join('') + '</div>';
+        },
+
+        // Holt das Audit-Log (max. n) und legt es in _auditCache ab; force erzwingt Neuladen.
+        _fetchAuditOnce: function (force) {
+            if (this._auditCache && !force) return Promise.resolve(this._auditCache);
+            var self = this;
+            return fetch('/api/broker/audit?n=1000', { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    self._auditCache = ((d && d.entries) || []).filter(function (a) {
+                        return !HIDE_OPS[a.op] && !HIDE_OPS[a.key];   // reine Status-Polls ausblenden
+                    });
+                    return self._auditCache;
+                });
+        },
+
         toggleBrokerAudit: function () {
             var box = $('sec-broker-audit');
             if (!box) return;
             if (box.style.display !== 'none') { box.style.display = 'none'; return; }
             box.style.display = '';
             box.innerHTML = '<p class="kb-hint">' + esc(T('common.loading', 'Lade…')) + '</p>';
-            fetch('/api/broker/audit?n=100', { headers: authHeaders() })
-                .then(function (r) { return r.json(); })
-                .then(function (d) {
-                    var entries = (d && d.entries) || [];
+            this._fetchAuditOnce(true)
+                .then(function (entries) {
                     if (!entries.length) {
                         box.innerHTML = '<p class="kb-hint">' + esc(T('security.broker_audit_empty', 'Noch keine Audit-Einträge.')) + '</p>';
                         return;
                     }
                     box.innerHTML = '<div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px 10px;">'
-                        + entries.slice().reverse().map(function (a) {
-                            var mark = a.decision === 'executed' ? (a.rc === 0 || a.rc == null ? '✅' : '⚠️')
-                                : (a.decision === 'denied' ? '🚫' : '⏳');
-                            var line = mark + ' ' + esc(fmtTs(a.ts)) + ' · <b>' + esc(a.user || '–') + '</b> · '
-                                + '<code style="font-size:0.74rem;word-break:break-all;">' + esc(a.key || a.op) + '</code>'
-                                + ' · ' + esc(a.decision);
-                            if (a.rc != null && a.decision === 'executed') line += ' (rc=' + a.rc + (a.duration_ms != null ? ', ' + a.duration_ms + ' ms' : '') + ')';
-                            return '<div style="font-size:0.76rem;padding:3px 0;border-bottom:1px solid rgba(var(--fg-rgb),.06);">' + line + '</div>';
-                        }).join('') + '</div>';
+                        + entries.slice().reverse().map(function (a) { return Mgr._auditLineHtml(a, true); }).join('')
+                        + '</div>';
                 })
                 .catch(function () { box.innerHTML = '<p class="kb-hint">✗</p>'; });
+        },
+
+        // Zeigt die letzten Audit-Beispiele für genau einen Freigabe-Eintrag (nach key gefiltert)
+        toggleOpHistory: function (key, el) {
+            if (!el) return;
+            if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+            el.style.display = '';
+            el.innerHTML = '<p class="kb-hint">' + esc(T('common.loading', 'Lade…')) + '</p>';
+            this._fetchAuditOnce()
+                .then(function (entries) {
+                    var mine = entries.filter(function (a) { return (a.key || a.op) === key; });
+                    if (!mine.length) {
+                        el.innerHTML = '<p class="kb-hint">' + esc(T('security.broker_history_empty', 'Noch keine Beispiele zu diesem Eintrag.')) + '</p>';
+                        return;
+                    }
+                    el.innerHTML = '<div style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:rgba(var(--fg-rgb),.03);">'
+                        + mine.slice(-8).reverse().map(function (a) { return Mgr._auditLineHtml(a, false); }).join('')
+                        + '</div>';
+                })
+                .catch(function () { el.innerHTML = '<p class="kb-hint">✗</p>'; });
         },
 
         loadEgress: function (live) {
@@ -348,7 +411,7 @@
             var btn = $('sec-egress-setup');
             var out = $('sec-egress-result');
             var orig = btn ? btn.textContent : '';
-            if (btn) { btn.disabled = true; btn.textContent = 'Wird eingerichtet…'; }
+            if (btn) { btn.disabled = true; btn.textContent = T('security.busy_setup', 'Wird eingerichtet…'); }
             fetch('/api/security/egress/setup', { method: 'POST', headers: authHeaders() })
                 .then(function (r) { return r.json().then(function (j) { return j; }); })
                 .then(function (d) {
@@ -356,8 +419,8 @@
                     if (out) {
                         out.style.display = 'block';
                         var good = !!d.ok;
-                        out.style.borderColor = good ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)';
-                        out.style.background = good ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)';
+                        out.style.borderColor = good ? 'rgba(var(--success-rgb),0.5)' : 'rgba(var(--danger-rgb),0.5)';
+                        out.style.background = good ? 'rgba(var(--success-rgb),0.1)' : 'rgba(var(--danger-rgb),0.1)';
                         var lines = (d.steps || []).map(function (s) {
                             return (s.ok ? '✅' : '❌') + ' ' + esc(s.name) + (s.detail && !s.ok ? ' – ' + esc(s.detail) : '');
                         }).join('<br>');
@@ -371,7 +434,7 @@
                     if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Einrichtung.'; }
                 })
                 .then(function () {
-                    if (btn) { btn.disabled = false; btn.textContent = orig || 'Einrichten / Reparieren'; }
+                    if (btn) { btn.disabled = false; btn.textContent = orig || T('security.egress_setup', 'Einrichten / Reparieren'); }
                 });
         },
 
@@ -383,7 +446,7 @@
             var btn = $('sec-egress-teardown');
             var out = $('sec-egress-result');
             var orig = btn ? btn.textContent : '';
-            if (btn) { btn.disabled = true; btn.textContent = 'Wird deaktiviert…'; }
+            if (btn) { btn.disabled = true; btn.textContent = T('security.busy_teardown', 'Wird deaktiviert…'); }
             fetch('/api/security/egress/teardown', { method: 'POST', headers: authHeaders() })
                 .then(function (r) { return r.json(); })
                 .then(function (d) {
@@ -391,8 +454,8 @@
                     if (out) {
                         out.style.display = 'block';
                         var good = !!d.ok;
-                        out.style.borderColor = good ? 'rgba(148,163,184,0.5)' : 'rgba(239,68,68,0.5)';
-                        out.style.background = good ? 'rgba(148,163,184,0.1)' : 'rgba(239,68,68,0.1)';
+                        out.style.borderColor = good ? 'rgba(var(--fg-rgb),0.3)' : 'rgba(var(--danger-rgb),0.5)';
+                        out.style.background = good ? 'rgba(var(--fg-rgb),0.06)' : 'rgba(var(--danger-rgb),0.1)';
                         var lines = (d.steps || []).map(function (s) {
                             return (s.ok ? '✅' : '❌') + ' ' + esc(s.name) + (s.detail && !s.ok ? ' – ' + esc(s.detail) : '');
                         }).join('<br>');
@@ -406,7 +469,7 @@
                     if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Deaktivierung.'; }
                 })
                 .then(function () {
-                    if (btn) { btn.disabled = false; btn.textContent = orig || 'Deaktivieren'; }
+                    if (btn) { btn.disabled = false; btn.textContent = orig || T('security.egress_teardown', 'Deaktivieren'); }
                 });
         },
 
@@ -466,8 +529,8 @@
                     if (out) {
                         out.style.display = 'block';
                         var good = !!d.ok;
-                        out.style.borderColor = good ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)';
-                        out.style.background = good ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)';
+                        out.style.borderColor = good ? 'rgba(var(--success-rgb),0.5)' : 'rgba(var(--danger-rgb),0.5)';
+                        out.style.background = good ? 'rgba(var(--success-rgb),0.1)' : 'rgba(var(--danger-rgb),0.1)';
                         var lines = (d.steps || []).map(function (s) {
                             return (s.ok ? '✅' : '❌') + ' ' + esc(s.name) + (s.detail && !s.ok ? ' – ' + esc(s.detail) : '');
                         }).join('<br>');
@@ -483,7 +546,7 @@
         setupSandbox: function () {
             Mgr._runAction({
                 url: '/api/security/sandbox/setup', btn: 'sec-sandbox-setup', result: 'sec-sandbox-result',
-                busy: 'Wird eingerichtet…', okMsg: 'OS-Sandbox aktiv & verifiziert.',
+                busy: T('security.busy_setup', 'Wird eingerichtet…'), okMsg: 'OS-Sandbox aktiv & verifiziert.',
                 failMsg: 'Einrichtung unvollständig – Details:',
                 render: function (s) { Mgr.renderSandbox(s); }
             });
@@ -492,7 +555,7 @@
         teardownSandbox: function () {
             Mgr._runAction({
                 url: '/api/security/sandbox/teardown', btn: 'sec-sandbox-teardown', result: 'sec-sandbox-result',
-                busy: 'Wird deaktiviert…', okMsg: 'OS-Sandbox deaktiviert.',
+                busy: T('security.busy_teardown', 'Wird deaktiviert…'), okMsg: 'OS-Sandbox deaktiviert.',
                 failMsg: 'Deaktivierung unvollständig – Details:',
                 render: function (s) { Mgr.renderSandbox(s); },
                 confirm: 'OS-Sandbox wirklich deaktivieren?\n\n'
@@ -556,8 +619,8 @@
                     + '<span style="font-size:0.78rem;color:var(--danger);">' + esc(b.reason || '') + '</span>'
                     + '<span style="font-size:0.74rem;color:var(--text-muted);">[' + esc(chanLabel(b.channel)) + ' · ' + esc(b.method || '') + ' · ' + (b.incident_count || 0) + ']</span>'
                     + '<span style="flex:1;"></span>'
-                    + '<button type="button" class="kb-btn-action sec-blk-log" style="font-size:0.76rem;padding:3px 10px;">' + esc(T('security.view_log', 'Log ansehen')) + '</button>'
-                    + '<button type="button" class="kb-btn-action sec-blk-unblock" style="font-size:0.76rem;padding:3px 10px;">' + esc(T('security.unblock', 'Freischalten')) + '</button>'
+                    + '<button type="button" class="sec-btn small sec-blk-log">' + esc(T('security.view_log', 'Log ansehen')) + '</button>'
+                    + '<button type="button" class="sec-btn small primary sec-blk-unblock">' + esc(T('security.unblock', 'Freischalten')) + '</button>'
                     + '</div>'
                     + '<div class="sec-blk-detail" style="display:none;margin-top:10px;"></div>'
                     + '</div>';

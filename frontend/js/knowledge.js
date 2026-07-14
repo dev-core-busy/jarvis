@@ -73,7 +73,7 @@ class JarvisKnowledgeManager {
         const ung = KG.ungroupedCount();
         const ungRow = (ung != null) ? `
             <div class="kb-grp-manage-row kb-grp-row-ung">
-                <span class="kb-grp-dot" style="background:#94a3b8;"></span>
+                <span class="kb-grp-dot" style="background:var(--text-secondary);"></span>
                 <span class="kb-grp-manage-name" style="cursor:default;">${T('kbgroups.ungrouped', 'ungruppiert')}</span>
                 <span class="kb-grp-count">${ung}</span>
             </div>` : '';
@@ -201,7 +201,7 @@ class JarvisKnowledgeManager {
             await this._refreshGroups();
             this._showNotification(window.t('kbgroups.added') || 'Gruppe angelegt', 'success');
         } else {
-            this._showNotification((res && res.error) || 'Fehler beim Anlegen', 'error');
+            this._showNotification((res && res.error) || window.t('knowledge.err_create'), 'error');
         }
     }
 
@@ -214,7 +214,7 @@ class JarvisKnowledgeManager {
         if (!trimmed || trimmed === cur) return;
         const res = await window.KbGroups.updateGroup(gid, { name: trimmed });
         if (res && res.ok) await this._refreshGroups();
-        else this._showNotification((res && res.error) || 'Fehler', 'error');
+        else this._showNotification((res && res.error) || window.t('common.error'), 'error');
     }
 
     async _setGroupColor(gid, color) {
@@ -235,7 +235,7 @@ class JarvisKnowledgeManager {
             await this._refreshGroups();
             this._showNotification(window.t('kbgroups.deleted') || 'Gruppe gelöscht', 'success');
         } else {
-            this._showNotification('Fehler beim Löschen', 'error');
+            this._showNotification(window.t('knowledge.err_delete'), 'error');
         }
     }
 
@@ -361,7 +361,7 @@ class JarvisKnowledgeManager {
             }
             if (status) {
                 status.textContent = msg;
-                status.style.color = result.total_rejected > 0 ? '#f59e0b' : '#10b981';
+                status.style.color = result.total_rejected > 0 ? 'var(--warning)' : 'var(--success)';
                 setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 5000);
             }
             this._showNotification(msg, result.total_rejected > 0 ? 'warning' : 'success');
@@ -369,7 +369,7 @@ class JarvisKnowledgeManager {
         } catch (e) {
             if (status) {
                 status.textContent = window.t('knowledge.upload_failed').replace('{msg}', e.message);
-                status.style.color = '#ef4444';
+                status.style.color = 'var(--danger)';
             }
             this._showNotification(window.t('knowledge.upload_failed').replace('{msg}', e.message), 'error');
         }
@@ -410,14 +410,14 @@ class JarvisKnowledgeManager {
         const docxIcon = stats.docx_support ? '✅' : '⚠️';
         const xlsxIcon = stats.xlsx_support ? '✅' : '⚠️';
         const pptxIcon = stats.pptx_support ? '✅' : '⚠️';
-        const pdfTitle = stats.pdf_support ? 'PDF-Support aktiv' : 'pdfplumber nicht installiert';
-        const docxTitle = stats.docx_support ? 'Word-Support aktiv (.docx, .doc)' : 'python-docx nicht installiert';
-        const xlsxTitle = stats.xlsx_support ? 'Excel-Support aktiv' : 'openpyxl nicht installiert';
-        const pptxTitle = stats.pptx_support ? 'PowerPoint-Support aktiv' : 'python-pptx nicht installiert';
+        const pdfTitle = stats.pdf_support ? window.t('knowledge.support_pdf_ok') : window.t('knowledge.support_pdf_missing');
+        const docxTitle = stats.docx_support ? window.t('knowledge.support_word_ok') : window.t('knowledge.support_word_missing');
+        const xlsxTitle = stats.xlsx_support ? window.t('knowledge.support_excel_ok') : window.t('knowledge.support_excel_missing');
+        const pptxTitle = stats.pptx_support ? window.t('knowledge.support_ppt_ok') : window.t('knowledge.support_ppt_missing');
         const videoIcon = stats.video_support ? '✅' : '⚠️';
-        const videoTitle = stats.video_support ? 'Video/Audio-Support aktiv (ffmpeg + faster-whisper)' : 'ffmpeg oder faster-whisper fehlt';
+        const videoTitle = stats.video_support ? window.t('knowledge.support_video_ok') : window.t('knowledge.support_video_missing');
         const imageIcon = stats.image_support ? '✅' : '⚠️';
-        const imageTitle = stats.image_support ? 'Bild-OCR aktiv (Tesseract + pytesseract)' : 'tesseract-ocr oder pytesseract fehlt';
+        const imageTitle = stats.image_support ? window.t('knowledge.support_image_ok') : window.t('knowledge.support_image_missing');
         const vectorAvail = stats.vector_db_available;
         const vectorIcon = vectorAvail ? '✅' : (stats.indexing ? '🔄' : '⚠️');
         const vectorDbLabel = stats.vector_db_name
@@ -429,7 +429,7 @@ class JarvisKnowledgeManager {
                 : (stats.indexing
                     ? `${vectorDbLabel} · ${stats.vector_model || ''}\n${window.t('knowledge.indexing_building')}`
                     : `${vectorDbLabel} · ${stats.vector_model || ''}\n${window.t('knowledge.no_index')}`))
-            : 'faiss-cpu/sentence-transformers nicht installiert';
+            : window.t('knowledge.support_vector_missing');
 
         // Aktueller Suchmodus
         const mode = stats.search_mode || 'auto';
@@ -437,7 +437,7 @@ class JarvisKnowledgeManager {
         // Statuszeile: gelb während Indizierung, grün wenn fertig
         const phase = stats.index_phase || '';
         const isVectorPhase = phase.toLowerCase().includes('vektor');
-        const GREEN = '#34d399', YELLOW = '#f59e0b', GREY = '#94a3b8';
+        const GREEN = 'var(--success)', YELLOW = 'var(--warning)', GREY = 'var(--text-secondary)';
 
         function activeLabel(label, color) {
             return `<span style="color:${color};font-weight:600;">${label}</span>`;
@@ -468,7 +468,7 @@ class JarvisKnowledgeManager {
         const dbBtnDisabled = !stats.vector_db_available;
         const dbBtnTitle = stats.vector_db_available
             ? (stats.vector_search ? window.t('knowledge.search_auto_title') : window.t('knowledge.search_vector_no_index'))
-            : 'faiss-cpu nicht installiert';
+            : window.t('knowledge.support_faiss_missing');
 
         el.innerHTML = `
             <div class="kb-stat-grid">
@@ -569,7 +569,7 @@ class JarvisKnowledgeManager {
         const withLlm = document.getElementById('kb-export-llm')?.checked;
         if (btn) { btn.disabled = true; btn.textContent = window.t('knowledge.learned.exporting'); }
         setStatus(withLlm ? window.t('knowledge.learned.export_running_llm')
-                          : window.t('knowledge.learned.export_running'), '#f59e0b');
+                          : window.t('knowledge.learned.export_running'), 'var(--warning)');
         try {
             const params = [];
             if (withEmb) params.push('embeddings=1');
@@ -595,10 +595,10 @@ class JarvisKnowledgeManager {
             a.href = url; a.download = fname;
             document.body.appendChild(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(url), 2000);
-            setStatus(`✓ ${fname} (${sizeKb} KB)`, '#34d399');
+            setStatus(`✓ ${fname} (${sizeKb} KB)`, 'var(--success)');
             setTimeout(() => { if (st) st.style.display = 'none'; }, 6000);
         } catch (e) {
-            setStatus('✗ ' + (window.t('knowledge.learned.export_fail') || 'Export fehlgeschlagen') + ': ' + e.message, '#ef4444');
+            setStatus('✗ ' + (window.t('knowledge.learned.export_fail') || 'Export fehlgeschlagen') + ': ' + e.message, 'var(--danger)');
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = orig; }
         }
@@ -639,7 +639,7 @@ class JarvisKnowledgeManager {
                 </div>`;
             }).join('');
         } catch (e) {
-            el.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
+            el.innerHTML = `<div class="kb-files-error">${window.t('common.error')}: ${e.message}</div>`;
         }
     }
 
@@ -663,7 +663,7 @@ class JarvisKnowledgeManager {
                     <button class="kb-btn-sm" onclick="document.getElementById('${itemId}_editor').style.display='none'">${window.t('common.cancel')}</button>
                 </div>`;
         } catch (e) {
-            editorEl.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
+            editorEl.innerHTML = `<div class="kb-files-error">${window.t('common.error')}: ${e.message}</div>`;
         }
     }
 
@@ -683,7 +683,7 @@ class JarvisKnowledgeManager {
             this._showNotification(window.t('knowledge.learned.saved'), 'success');
             document.getElementById(itemId + '_editor').style.display = 'none';
         } catch (e) {
-            this._showNotification('Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 
@@ -706,7 +706,7 @@ class JarvisKnowledgeManager {
             await this.fetchStats();
             await this.toggleLearnedList();
         } catch (e) {
-            this._showNotification('Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 
@@ -813,7 +813,7 @@ class JarvisKnowledgeManager {
                 </div>`;
             }).join('');
         } catch (e) {
-            filesEl.innerHTML = `<div class="kb-files-error">Fehler: ${e.message}</div>`;
+            filesEl.innerHTML = `<div class="kb-files-error">${window.t('common.error')}: ${e.message}</div>`;
         }
     }
 
@@ -853,7 +853,7 @@ class JarvisKnowledgeManager {
             await this.toggleFolder(folderIdx, folderPath);
             await this.fetchStats();
         } catch (e) {
-            this._showNotification('Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 
@@ -873,7 +873,7 @@ class JarvisKnowledgeManager {
                     <button id="kb-file-view-close" style="background:none;border:none;color:var(--text-secondary);font-size:1.2rem;cursor:pointer;padding:2px 6px;border-radius:4px;" title="${window.t('common.close') || 'Schließen'}">✕</button>
                 </div>
                 <div id="kb-file-view-body" style="padding:16px;overflow:auto;flex:1;font-family:monospace;font-size:0.8rem;line-height:1.5;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">
-                    <div style="text-align:center;padding:20px;color:var(--text-muted);">Lade…</div>
+                    <div style="text-align:center;padding:20px;color:var(--text-muted);">${window.t('common.loading')}</div>
                 </div>
                 <div style="padding:10px 16px;border-top:1px solid var(--border-color);display:flex;justify-content:flex-end;">
                     <button id="kb-file-view-close2" style="padding:6px 16px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-glass);color:var(--text-primary);cursor:pointer;font-size:0.85rem;">${window.t('common.close') || 'Schließen'}</button>
@@ -899,12 +899,12 @@ class JarvisKnowledgeManager {
                 body.textContent = data.content;
             } else {
                 body.style.color = 'var(--error, #f87171)';
-                body.textContent = data.error || 'Fehler beim Laden';
+                body.textContent = data.error || window.t('knowledge.load_failed');
             }
         } catch (e) {
             const body = modal.querySelector('#kb-file-view-body');
             body.style.color = 'var(--error, #f87171)';
-            body.textContent = 'Fehler: ' + e.message;
+            body.textContent = window.t('common.error') + ': ' + e.message;
         }
     }
 
@@ -932,7 +932,7 @@ class JarvisKnowledgeManager {
             this._showNotification(window.t('knowledge.folder_added'), 'success');
             await this.fetchStats();
         } catch (e) {
-            this._showNotification('Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 
@@ -954,7 +954,7 @@ class JarvisKnowledgeManager {
             this._showNotification(window.t('knowledge.folder_removed'), 'success');
             await this.fetchStats();
         } catch (e) {
-            this._showNotification('Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 
@@ -993,7 +993,7 @@ class JarvisKnowledgeManager {
                 this._startProgressPolling();
             }
         } catch (e) {
-            this._showNotification('Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 
@@ -1094,7 +1094,7 @@ class JarvisKnowledgeManager {
     _updateActiveLabel(phase) {
         const el = document.getElementById('kb-active-label');
         if (!el) return;
-        const GREEN = '#34d399', YELLOW = '#f59e0b', GREY = '#94a3b8';
+        const GREEN = 'var(--success)', YELLOW = 'var(--warning)', GREY = 'var(--text-secondary)';
         const isVector = phase.toLowerCase().includes('vektor');
         const label = isVector ? window.t('knowledge.vektor_db') : window.t('knowledge.file_content');
         el.innerHTML = `<span style="color:${YELLOW};font-weight:600;">${label}</span>`
@@ -1155,7 +1155,7 @@ class JarvisKnowledgeManager {
             document.getElementById('kb-webdav-new-user').value = '';
             document.getElementById('kb-webdav-new-pass').value = '';
         } catch (e) {
-            this._showNotification('Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 
@@ -1279,7 +1279,7 @@ class JarvisKnowledgeManager {
             this._showNotification(window.t('knowledge.share_updated'), 'success');
             await this.fetchMounts();
         } catch (e) {
-            this._showNotification('Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 
@@ -1315,7 +1315,7 @@ class JarvisKnowledgeManager {
             await this.fetchMounts();
             await this.fetchStats();
         } catch (e) {
-            this._showNotification('Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 
@@ -1334,7 +1334,7 @@ class JarvisKnowledgeManager {
             await this.fetchMounts();
             await this.fetchStats();
         } catch (e) {
-            this._showNotification('Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 
@@ -1348,7 +1348,7 @@ class JarvisKnowledgeManager {
             this._showNotification(window.t('knowledge.share_removed'), 'success');
             await this.fetchMounts();
         } catch (e) {
-            this._showNotification('Fehler: ' + e.message, 'error');
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 

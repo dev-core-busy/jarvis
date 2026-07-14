@@ -20,7 +20,7 @@ class JarvisGoogleManager {
     async _renderAll() {
         const container = document.getElementById('google-status-container');
         if (!container) return;
-        container.innerHTML = '<div class="kb-loading">Lade…</div>';
+        container.innerHTML = '<div class="kb-loading">' + window.t('google.loading') + '</div>';
 
         // Beide Stati parallel laden
         const [jarvisStatus, gogStatus, gogEnabled] = await Promise.all([
@@ -47,7 +47,7 @@ class JarvisGoogleManager {
     // ─── Sektion 1: Jarvis Google Apps ────────────────────────────
 
     _renderJarvisSection(status) {
-        if (!status) return this._errorCard('Jarvis Google', 'Verbindungsfehler');
+        if (!status) return this._errorCard('Jarvis Google', window.t('google.conn_error'));
 
         let card = '';
 
@@ -56,18 +56,13 @@ class JarvisGoogleManager {
                 <div class="google-card google-card-warn">
                     <div class="google-card-icon">⚙️</div>
                     <div class="google-card-body">
-                        <div class="google-card-title">Jarvis Google Apps – nicht konfiguriert</div>
-                        <div class="google-card-desc">
-                            Füge in <code>.env</code> hinzu:<br>
-                            <code>GOOGLE_OAUTH_CLIENT_ID=…</code><br>
-                            <code>GOOGLE_OAUTH_CLIENT_SECRET=…</code><br>
-                            OAuth-App-Typ: <strong>TV und Geräte mit eingeschränkter Eingabe</strong>
-                        </div>
+                        <div class="google-card-title">${window.t('google.jarvis_not_configured')}</div>
+                        <div class="google-card-desc">${window.t('google.jarvis_env_hint')}</div>
                         <ol class="google-setup-steps">
-                            <li><a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> öffnen</li>
-                            <li>APIs aktivieren: Gmail, Drive, Calendar</li>
-                            <li>OAuth-Client → Typ: <strong>TV und eingeschränkte Eingabegeräte</strong></li>
-                            <li>Client-ID + Secret in <code>.env</code> eintragen → Jarvis neu starten</li>
+                            <li>${window.t('google.setup_step_console')}</li>
+                            <li>${window.t('google.setup_step_apis')}</li>
+                            <li>${window.t('google.setup_step_oauth')}</li>
+                            <li>${window.t('google.setup_step_env')}</li>
                         </ol>
                     </div>
                 </div>`;
@@ -85,7 +80,7 @@ class JarvisGoogleManager {
                         </div>
                     </div>
                     <button class="kb-btn-action google-btn-revoke"
-                        onclick="window.googleManager.revokeJarvis()">Trennen</button>
+                        onclick="window.googleManager.revokeJarvis()">${window.t('google.disconnect')}</button>
                 </div>`;
         } else {
             card = `
@@ -93,10 +88,10 @@ class JarvisGoogleManager {
                     <div class="google-card-icon">🔗</div>
                     <div class="google-card-body">
                         <div class="google-card-title">Jarvis Google Apps</div>
-                        <div class="google-card-desc">Gmail, Drive und Calendar via Device Flow verbinden.</div>
+                        <div class="google-card-desc">${window.t('google.jarvis_desc')}</div>
                     </div>
                     <button class="kb-btn-action google-btn-connect"
-                        onclick="window.googleManager.connectJarvis()">Mit Google verbinden</button>
+                        onclick="window.googleManager.connectJarvis()">${window.t('google.connect_google')}</button>
                 </div>`;
         }
 
@@ -125,7 +120,7 @@ class JarvisGoogleManager {
                 <div class="google-card google-card-ok">
                     <div class="google-card-icon">✅</div>
                     <div class="google-card-body">
-                        <div class="google-card-title">OpenClaw Gmail verbunden</div>
+                        <div class="google-card-title">${window.t('google.gog_connected')}</div>
                         <div class="google-card-email" id="gog-email-display">${email}</div>
                         <div class="google-card-services">
                             <span class="google-service-badge">Gmail</span>
@@ -133,43 +128,39 @@ class JarvisGoogleManager {
                             <span class="google-service-badge">Drive</span>
                         </div>
                     </div>
-                    <button class="kb-btn-action google-btn-revoke" id="gog-remove-btn">Trennen</button>
+                    <button class="kb-btn-action google-btn-revoke" id="gog-remove-btn">${window.t('google.disconnect')}</button>
                 </div>`;
         } else {
             // ── Setup-Formular ──
             card = `
                 <div class="google-card google-card-idle gog-setup-card">
                     <div class="google-card-body" style="width:100%">
-                        <div class="google-card-title">OpenClaw Gmail einrichten</div>
-                        <div class="google-card-desc">
-                            Einmalig: OAuth-Client aus der
-                            <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a>
-                            eintragen (Typ: <strong>Desktop-App</strong>).
-                        </div>
+                        <div class="google-card-title">${window.t('google.gog_setup_title')}</div>
+                        <div class="google-card-desc">${window.t('google.gog_setup_desc')}</div>
 
                         <div class="gog-form">
                             <div class="gog-form-row">
-                                <label class="gog-label">Client-ID</label>
+                                <label class="gog-label">${window.t('google.label_client_id')}</label>
                                 <input id="gog-client-id" class="gog-input" type="text"
                                     placeholder="1234….apps.googleusercontent.com" autocomplete="off">
                             </div>
                             <div class="gog-form-row">
-                                <label class="gog-label">Client-Secret</label>
+                                <label class="gog-label">${window.t('google.label_client_secret')}</label>
                                 <input id="gog-client-secret" class="gog-input" type="password"
                                     placeholder="GOCSPX-…" autocomplete="off">
                             </div>
                             <div class="gog-form-row">
-                                <label class="gog-label">Gmail-Konto</label>
+                                <label class="gog-label">${window.t('google.label_gmail_account')}</label>
                                 <input id="gog-email" class="gog-input" type="email"
                                     placeholder="deine@gmail.com" autocomplete="off">
                             </div>
 
                             <div class="gog-btn-row">
                                 <button id="gog-save-btn" class="gog-btn gog-btn-primary">
-                                    💾 Credentials speichern
+                                    ${window.t('google.save_credentials')}
                                 </button>
                                 <button id="gog-connect-btn" class="gog-btn gog-btn-connect" disabled>
-                                    🔗 Mit Gmail verbinden
+                                    ${window.t('google.connect_gmail')}
                                 </button>
                             </div>
 
@@ -205,10 +196,10 @@ class JarvisGoogleManager {
         const email        = document.getElementById('gog-email')?.value.trim();
 
         if (!clientId || !clientSecret || !email) {
-            this._gogMsg('⚠️ Bitte alle Felder ausfüllen.', 'warn'); return;
+            this._gogMsg(window.t('google.fill_all_fields'), 'warn'); return;
         }
 
-        this._gogMsg('💾 Speichere Credentials…', 'info');
+        this._gogMsg(window.t('google.saving_credentials'), 'info');
         const saveBtn = document.getElementById('gog-save-btn');
         if (saveBtn) saveBtn.disabled = true;
 
@@ -220,11 +211,11 @@ class JarvisGoogleManager {
         if (saveBtn) saveBtn.disabled = false;
 
         if (!result || result.error || !result.ok) {
-            this._gogMsg('❌ Fehler: ' + (result?.error || 'Unbekannt'), 'error'); return;
+            this._gogMsg('❌ ' + window.t('google.error_label') + ': ' + (result?.error || window.t('google.unknown')), 'error'); return;
         }
 
         this._gogEmail = email;
-        this._gogMsg('✅ Credentials gespeichert! Jetzt "Mit Gmail verbinden" klicken.', 'success');
+        this._gogMsg(window.t('google.credentials_saved'), 'success');
         const connectBtn = document.getElementById('gog-connect-btn');
         if (connectBtn) connectBtn.disabled = false;
     }
@@ -234,11 +225,11 @@ class JarvisGoogleManager {
             || document.getElementById('gog-email')?.value.trim();
 
         if (!email) {
-            this._gogMsg('⚠️ Bitte zuerst Credentials speichern.', 'warn'); return;
+            this._gogMsg(window.t('google.save_first'), 'warn'); return;
         }
 
         const connectBtn = document.getElementById('gog-connect-btn');
-        if (connectBtn) { connectBtn.disabled = true; connectBtn.textContent = '⏳ Lade URL…'; }
+        if (connectBtn) { connectBtn.disabled = true; connectBtn.textContent = window.t('google.loading_url'); }
 
         // Schritt 1: Auth-URL vom Server holen
         const result = await this._fetchJson('/api/google/gog-auth-url', {
@@ -246,10 +237,10 @@ class JarvisGoogleManager {
             body: JSON.stringify({ email }),
         });
 
-        if (connectBtn) { connectBtn.disabled = false; connectBtn.textContent = '🔗 Mit Gmail verbinden'; }
+        if (connectBtn) { connectBtn.disabled = false; connectBtn.textContent = window.t('google.connect_gmail'); }
 
         if (!result || !result.ok) {
-            this._gogMsg('❌ ' + (result?.error || 'Fehler beim Abrufen der Auth-URL'), 'error');
+            this._gogMsg('❌ ' + (result?.error || window.t('google.auth_url_error')), 'error');
             return;
         }
 
@@ -264,28 +255,26 @@ class JarvisGoogleManager {
 
         card.innerHTML = `
             <div class="google-card-body" style="width:100%">
-                <div class="google-card-title">Google-Konto verbinden – 3 Schritte</div>
+                <div class="google-card-title">${window.t('google.connect_account_3steps')}</div>
 
                 <div class="google-flow-steps" style="margin-top:0.85rem">
                     <div class="google-flow-step">
                         <span class="google-flow-num">1</span>
-                        <span>Öffne diesen Link in deinem Browser und melde dich an:</span>
+                        <span>${window.t('google.flow_step_open_link')}</span>
                     </div>
                 </div>
                 <a href="${authUrl}" target="_blank" class="gog-auth-link">
-                    🔗 Jetzt bei Google anmelden
+                    ${window.t('google.sign_in_google')}
                 </a>
 
                 <div class="google-flow-steps" style="margin-top:0.85rem">
                     <div class="google-flow-step">
                         <span class="google-flow-num">2</span>
-                        <span>Nach der Anmeldung versucht der Browser auf <code>localhost</code> weiterzuleiten
-                        — das schlägt fehl. Kopiere die komplette URL aus der Adressleiste (beginnt mit
-                        <code>http://localhost:…?code=…</code>).</span>
+                        <span>${window.t('google.flow_step_localhost')}</span>
                     </div>
                     <div class="google-flow-step">
                         <span class="google-flow-num">3</span>
-                        <span>Füge die URL hier ein:</span>
+                        <span>${window.t('google.flow_step_paste')}</span>
                     </div>
                 </div>
 
@@ -296,10 +285,10 @@ class JarvisGoogleManager {
 
                 <div class="gog-btn-row" style="margin-top:0.6rem">
                     <button id="gog-exchange-btn" class="gog-btn gog-btn-connect">
-                        ✅ Verbindung abschließen
+                        ${window.t('google.finish_connection')}
                     </button>
                     <button class="gog-btn"
-                        onclick="window.googleManager._renderAll()">Abbrechen</button>
+                        onclick="window.googleManager._renderAll()">${window.t('google.cancel')}</button>
                 </div>
                 <div id="gog-status-msg" class="gog-status-msg" style="display:none;"></div>
             </div>`;
@@ -314,12 +303,12 @@ class JarvisGoogleManager {
     async _gogExchange(email) {
         const redirectUrl = document.getElementById('gog-redirect-url')?.value.trim();
         if (!redirectUrl) {
-            this._gogMsg('⚠️ Bitte die Redirect-URL einfügen.', 'warn'); return;
+            this._gogMsg(window.t('google.paste_redirect_url'), 'warn'); return;
         }
 
         const btn = document.getElementById('gog-exchange-btn');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ Verbinde…'; }
-        this._gogMsg('🔄 Authentifizierung läuft…', 'info');
+        if (btn) { btn.disabled = true; btn.textContent = window.t('google.connecting'); }
+        this._gogMsg(window.t('google.authenticating'), 'info');
 
         const result = await this._fetchJson('/api/google/gog-auth-exchange', {
             method: 'POST',
@@ -327,12 +316,12 @@ class JarvisGoogleManager {
         });
 
         if (!result || !result.ok) {
-            this._gogMsg('❌ ' + (result?.error || 'Fehler'), 'error');
-            if (btn) { btn.disabled = false; btn.textContent = '✅ Verbindung abschließen'; }
+            this._gogMsg('❌ ' + (result?.error || window.t('google.error_label')), 'error');
+            if (btn) { btn.disabled = false; btn.textContent = window.t('google.finish_connection'); }
             return;
         }
 
-        this._gogMsg('✅ Erfolgreich verbunden!', 'success');
+        this._gogMsg(window.t('google.connected_success'), 'success');
         setTimeout(() => this._renderAll(), 900);
     }
 
@@ -340,7 +329,7 @@ class JarvisGoogleManager {
         const emailEl = document.getElementById('gog-email-display');
         const email   = emailEl?.textContent.trim() || '';
         if (!email) { await this._renderAll(); return; }
-        if (!confirm(`OpenClaw Gmail-Konto "${email}" trennen?`)) return;
+        if (!confirm(window.t('google.confirm_disconnect_gog').replace('{email}', email))) return;
 
         await this._fetchJson('/api/google/gog-account', {
             method: 'DELETE',
@@ -357,7 +346,7 @@ class JarvisGoogleManager {
 
         const result = await this._fetchJson('/api/google/device-start', { method: 'POST' });
         if (!result || result.error) {
-            alert('Fehler: ' + (result?.error || 'Unbekannt'));
+            alert(window.t('google.error_label') + ': ' + (result?.error || window.t('google.unknown')));
             await this._renderAll(); return;
         }
 
@@ -369,23 +358,23 @@ class JarvisGoogleManager {
             card.innerHTML = `
                 <div class="google-card-icon">📱</div>
                 <div class="google-card-body">
-                    <div class="google-card-title">Google verbinden – 2 Schritte</div>
+                    <div class="google-card-title">${window.t('google.connect_google_2steps')}</div>
                     <div class="google-flow-steps">
                         <div class="google-flow-step">
                             <span class="google-flow-num">1</span>
-                            <span>Öffne:</span>
+                            <span>${window.t('google.flow_step_open')}</span>
                             <a href="${verification_url}" target="_blank" class="google-flow-url">${verification_url}</a>
                         </div>
                         <div class="google-flow-step">
                             <span class="google-flow-num">2</span>
-                            <span>Gib diesen Code ein:</span>
+                            <span>${window.t('google.flow_step_enter_code')}</span>
                         </div>
                     </div>
                     <div class="google-flow-code">${user_code}</div>
-                    <div class="google-flow-hint" id="jarvis-device-status">⏳ Warte… (${min} Min)</div>
+                    <div class="google-flow-hint" id="jarvis-device-status">${window.t('google.waiting_min').replace('{min}', min)}</div>
                 </div>
                 <button class="kb-btn-action google-btn-revoke"
-                    onclick="window.googleManager._stopDevicePoll();window.googleManager._renderAll()">Abbrechen</button>`;
+                    onclick="window.googleManager._stopDevicePoll();window.googleManager._renderAll()">${window.t('google.cancel')}</button>`;
         }
         this._startDevicePoll();
     }
@@ -406,21 +395,21 @@ class JarvisGoogleManager {
 
         if (data.status === 'authorized') {
             this._stopDevicePoll();
-            if (el) el.textContent = '✅ ' + (data.message || 'Verbunden!');
+            if (el) el.textContent = '✅ ' + (data.message || window.t('google.device_connected'));
             setTimeout(() => this._renderAll(), 800);
         } else if (data.status === 'expired' || data.status === 'error') {
             this._stopDevicePoll();
-            if (el) el.textContent = (data.status === 'expired' ? '⚠️ Code abgelaufen' : '❌ Fehler') + ' – bitte erneut versuchen.';
+            if (el) el.textContent = (data.status === 'expired' ? window.t('google.code_expired') : '❌ ' + window.t('google.error_label')) + window.t('google.try_again_suffix');
             setTimeout(() => this._renderAll(), 2500);
         } else if (el && data.expires_in_sec > 0) {
             const m = Math.floor(data.expires_in_sec / 60);
             const s = data.expires_in_sec % 60;
-            el.textContent = `⏳ Warte… (noch ${m}:${String(s).padStart(2,'0')} Min)`;
+            el.textContent = window.t('google.waiting_countdown').replace('{t}', `${m}:${String(s).padStart(2,'0')}`);
         }
     }
 
     async revokeJarvis() {
-        if (!confirm('Jarvis Google-Verbindung trennen?')) return;
+        if (!confirm(window.t('google.confirm_disconnect_jarvis'))) return;
         await this._fetchJson('/api/google/revoke', { method: 'POST' });
         await this._renderAll();
     }
@@ -453,7 +442,7 @@ class JarvisGoogleManager {
 
     _errorCard(title, msg) {
         return `<div class="google-section">
-            <div class="kb-empty" style="color:#f87171;">${title}: ${msg}</div>
+            <div class="kb-empty" style="color:var(--danger);">${title}: ${msg}</div>
         </div>`;
     }
 }

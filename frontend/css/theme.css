@@ -46,6 +46,11 @@
     --warning: #f59e0b;
     --danger: #ef4444;
     --info: #3b82f6;
+    /* RGB-Tripel der Statusfarben fuer Toenungen rgba(var(--…-rgb), α). */
+    --success-rgb: 16, 185, 129;
+    --warning-rgb: 245, 158, 11;
+    --danger-rgb: 239, 68, 68;
+    --info-rgb: 59, 130, 246;
 
     --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', 'Fira Code', monospace;

@@ -17,7 +17,9 @@
             border-bottom: 1px solid var(--border); background: var(--bg-glass); backdrop-filter: blur(8px);
             position: sticky; top: 0; z-index: 10; }
         .wi-logo { width: 32px; height: 32px; border-radius: 50%; background: var(--gradient);
-            display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; }
+            display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .wi-logo img { width: 100%; height: 100%; object-fit: contain; }
         .wi-title { font-size: 1.15rem; font-weight: 600; }
         .wi-spacer { flex: 1; }
         .wi-wrap { max-width: 900px; margin: 0 auto; padding: 26px 18px 80px; }
@@ -76,7 +78,7 @@
 <script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
 
     <div class="wi-topbar">
-        <div class="wi-logo">J</div>
+        <div class="wi-logo topbar-avatar">J</div>
         <div class="wi-title"><span class="brand-app-name">Jarvis</span> · <span data-i18n="wissen.nav">Wissen</span></div>
         <div class="wi-spacer"></div>
         <button class="btn-theme-toggle sec-btn" id="btn-theme-toggle" type="button" data-i18n-title="chat.theme" title="Hell/Dunkel" aria-label="Hell/Dunkel">🌓</button>
@@ -166,5 +168,6 @@
     <script src="/static/js/i18n.js?v=65"></script>
     <script src="/static/js/theme.js?v=1"></script>
     <script src="/static/js/wissen.js?v=2"></script>
+    <script src="/static/js/branding.js?v=17"></script>
 </body>
 </html>

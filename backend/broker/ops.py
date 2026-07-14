@@ -25,8 +25,13 @@ SYSTEMCTL_ACTIONS = {"start", "stop", "restart", "reload", "enable", "disable",
                      "is-active", "is-enabled", "daemon-reload"}
 SANDBOX_USER_PREFIX = "jarvis_sandbox"      # harte Grenze: nur Sandbox-User
 MOUNT_PREFIX = "/mnt/"                      # Mounts nur unterhalb /mnt/
-# Reine Lese-/Statusabfragen: nicht freigabepflichtig, nicht auditiert (UI-Polls)
-READONLY_OPS = {"sandbox_status", "egress_status"}
+# Automatische/interne Wartungs- und Status-Ops OHNE forensischen Wert: werden
+# WEDER in der Freigabeliste registriert NOCH auditiert, sonst fluten sie beides
+# mit inhaltslosen "executed (rc=0)"-Eintraegen (UI-Status-Polls, die im Takt
+# feuernde Bildschirm-Entsperrung, VNC-Neustart). Aussagekraeftige Ops
+# (shell_root, systemctl, chpasswd, mount_share, certbot, switch_session) werden
+# weiterhin vollstaendig auditiert.
+READONLY_OPS = {"sandbox_status", "egress_status", "unlock_screen", "vnc_restart"}
 
 
 def _norm_cmd(cmd: str) -> str:

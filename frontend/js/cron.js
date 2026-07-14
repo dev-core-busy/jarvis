@@ -373,7 +373,7 @@ window.cronManager = new (class JarvisCronManager {
                     <div   class="cron-item-actions">
                         <button class="kb-btn-run  cron-run-btn"  data-id="${job.id}" title="Jetzt ausführen">▶</button>
                         <button class="kb-btn-icon cron-edit-btn" data-id="${job.id}" title="Bearbeiten">✏️</button>
-                        <button class="kb-btn-danger cron-del-btn" data-id="${job.id}" title="Löschen">🗑️</button>
+                        <button class="kb-btn-danger cron-del-btn" data-id="${job.id}" title="Löschen">×</button>
                         <label class="kb-form-checkbox-label" style="margin-left:4px;" title="${job.enabled ? 'Aktiv' : 'Inaktiv'}">
                             <input type="checkbox" class="cron-toggle" data-id="${job.id}" ${job.enabled ? 'checked' : ''}>
                         </label>
@@ -525,7 +525,7 @@ window.cronManager = new (class JarvisCronManager {
                     <span class="cron-event-badge">${actLabel}</span>
                     <div   class="cron-item-actions">
                         <button class="kb-btn-icon   watcher-edit-btn" data-id="${w.id}" title="Bearbeiten">✏️</button>
-                        <button class="kb-btn-danger watcher-del-btn"  data-id="${w.id}" title="Löschen">🗑️</button>
+                        <button class="kb-btn-danger watcher-del-btn"  data-id="${w.id}" title="Löschen">×</button>
                         <label class="kb-form-checkbox-label" style="margin-left:4px;" title="${w.enabled ? 'Aktiv' : 'Inaktiv'}">
                             <input type="checkbox" class="watcher-toggle" data-id="${w.id}" ${w.enabled ? 'checked' : ''}>
                         </label>

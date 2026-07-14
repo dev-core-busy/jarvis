@@ -133,7 +133,7 @@ window.KbMatrix = (function () {
                 <td class="kbm-c-text" title="${_attr(row.source)}">${_esc(row.source)}</td>
                 ${gcells}
                 <td class="kbm-c-act"><button class="kbm-edit" title="${T('kbgroups.rename', 'Bearbeiten')}">✏️</button></td>
-                <td class="kbm-c-act"><button class="kbm-del" title="${T('kbgroups.delete', 'Löschen')}">🗑️</button></td>
+                <td class="kbm-c-act"><button class="kbm-del" title="${T('kbgroups.delete', 'Löschen')}">×</button></td>
             </tr>`;
         }).join('') + '</tbody>';
 

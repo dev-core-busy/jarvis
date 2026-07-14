@@ -759,7 +759,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                         <div class="cron-item-actions">
                             <button class="kb-btn-action ext-review-btn" data-id="${doc.id}" style="padding:3px 10px;font-size:.75rem;">${window.t('ext.check_btn')}</button>
                             <button class="kb-btn-secondary ext-dl-btn"  data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="JSON herunterladen">⬇️</button>
-                            <button class="kb-btn-danger ext-del-btn"    data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;">🗑️</button>
+                            <button class="kb-btn-danger ext-del-btn"    data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;">×</button>
                         </div>
                     </div>
                     <div class="cron-item-meta">${this._esc(this._sourceLabel(doc))} · ${dt} · ${fct} Fakten · ${qa} Q&amp;A-Paare</div>
@@ -808,7 +808,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                         ${(window.KbGroups && doc.file) ? window.KbGroups.buttonHtml(doc.file, (this._grpMap || {})[doc.file]) : ''}
                         <button class="kb-btn-secondary ext-edit-btn" data-id="${doc.id}" style="padding:3px 10px;font-size:.75rem;">✏️ Bearbeiten</button>
                         <button class="kb-btn-secondary ext-dl-btn"   data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="JSON herunterladen">⬇️</button>
-                        <button class="kb-btn-danger ext-del-btn"     data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="Aus Verlauf und Wissens-DB entfernen">🗑️</button>
+                        <button class="kb-btn-danger ext-del-btn"     data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="Aus Verlauf und Wissens-DB entfernen">×</button>
                     </div>
                 </div>
                 <div class="cron-item-meta">${this._esc(this._sourceLabel(doc))} · Extrahiert: ${dtC} · Genehmigt: ${dtA} · ${fct} Fakten · ${qa} Q&amp;A-Paare</div>

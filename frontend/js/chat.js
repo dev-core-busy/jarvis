@@ -323,14 +323,9 @@
         // CPU-Auslastung fuer alle (Werte kommen via WS-Event 'cpu')
         const _cpuBar = $('cpu-bar');
         if (_cpuBar) _cpuBar.style.display = '';
-        // LLM-Status-Pill fuer Admins klickbar -> Einstellungen (LLM-Profile)
-        const _dot = $('status-dot');
-        if (_isAdmin && _dot && !_dot._adminWired) {
-            _dot._adminWired = true;
-            _dot.style.cursor = 'pointer';
-            _dot.title = (window.t ? window.t('chat.llm_settings') : 'LLM-Profile öffnen');
-            _dot.addEventListener('click', () => { try{sessionStorage.setItem('jarvis_settings_return','/chat');}catch(e){} window.location.href = '/settings'; });
-        }
+        // LLM-Status-Pill: Profilumschalter fuer alle mit LLM-Nutzungsrecht
+        // (ersetzt den frueheren Admin-only-Weg in die Einstellungen).
+        _setupProfileSwitcher();
         connectWS();
         _startLlmStatusIndicator();
         _initSessions();
@@ -401,6 +396,20 @@
             if (d.ok) document.getElementById('ctx-indicator').style.display = 'none';
         } catch (e) { /* ignore */ }
     };
+
+    // ── LLM-Profilumschalter (Klick auf die Status-Pill) ─────────────────
+    // Gemeinsames Modul (profile_switcher.js); zeigt rot/gruen-Erreichbarkeit.
+    function _setupProfileSwitcher() {
+        if (!window.ProfileSwitcher) return;
+        window.ProfileSwitcher.attach({
+            dotId: 'status-dot',
+            headers: function () { return _authHdr(); },
+            onSwitched: function (name) {
+                addStatusLine('🔄 ' + window.t('chat.profile_switched').replace('{name}', name || ''));
+                if (typeof _checkLlmStatus === 'function') _checkLlmStatus();
+            },
+        });
+    }
 
     function logout() {
         token = '';
@@ -1029,7 +1038,7 @@
             onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
         });
         items.push({
-            label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: '🗑', danger: true,
+            label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: '×', danger: true,
             onClick: () => _selCtl.startSelectionDelete(row),
         });
         return items;

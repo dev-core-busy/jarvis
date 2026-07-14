@@ -193,6 +193,14 @@
     function startLlmStatus() {
         checkLlmStatus();
         if (!_llmStatusTimer) _llmStatusTimer = setInterval(checkLlmStatus, 30000);
+        // Profil-Umschalter auf der Status-Pill (gemeinsames Modul)
+        if (window.ProfileSwitcher) {
+            window.ProfileSwitcher.attach({
+                dotId: 'sup-status-dot',
+                headers: function () { return authHeaders(); },
+                onSwitched: function () { checkLlmStatus(); },
+            });
+        }
     }
 
     // ── Checkbox-Vorbelegung pro Browser/Session merken ──

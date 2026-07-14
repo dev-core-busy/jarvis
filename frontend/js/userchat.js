@@ -253,17 +253,14 @@
                 dot.title = (d.status === 'ok' ? window.t('app.llm_reachable') : d.status === 'degraded' ? window.t('app.llm_reachable_no_model') : window.t('app.llm_unreachable')) + name;
             })
             .catch(function () { dot.className = 'topbar-dot disconnected'; dot.title = window.t('app.llm_unreachable'); });
-        // Admin: Pill klickbar -> Einstellungen (LLM-Profile)
+        // Admin: Setup-Button (direkt vor Logout) einblenden -> Einstellungen.
+        // Der Profilwechsel selbst laeuft ueber die Status-Pill (ProfileSwitcher).
         if (!dot._adminChecked) {
             dot._adminChecked = true;
             fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + token } })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {
                     if (d && d.is_admin) {
-                        dot.style.cursor = 'pointer';
-                        dot.title = (window.t ? window.t('chat.llm_settings') : 'LLM-Profile öffnen');
-                        dot.addEventListener('click', function () { try{sessionStorage.setItem('jarvis_settings_return','/userchat');}catch(e){} window.location.href = '/settings'; });
-                        // Setup-Button (direkt vor Logout) fuer Admins einblenden
                         var sb = $('btn-uc-settings');
                         if (sb) {
                             sb.style.display = '';
@@ -275,6 +272,13 @@
     }
     function _startLlmStatus() {
         _checkLlmStatus();
+        if (window.ProfileSwitcher) {
+            window.ProfileSwitcher.attach({
+                dotId: 'status-dot',
+                headers: function () { return { 'Authorization': 'Bearer ' + token }; },
+                onSwitched: function () { _checkLlmStatus(); },
+            });
+        }
         if (!_llmStatusTimer) _llmStatusTimer = setInterval(_checkLlmStatus, 30000);
     }
 
@@ -742,7 +746,7 @@
         }
         if (mine && msg.msg_id) {
             items.push({
-                label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: '🗑', danger: true,
+                label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: '×', danger: true,
                 onClick: () => _selCtl.startSelectionDelete(row),
             });
         }

@@ -797,6 +797,9 @@ const _I18N = {
         // ── Common ────────────────────────────────────────────
         'common.save':          'Speichern',
         'wissen.nav': 'Wissen',
+        'wissen.delete_file': 'Löschen',
+        'wissen.delete_confirm': 'Datei „{name}" wirklich löschen?',
+        'wissen.delete_failed': 'Löschen fehlgeschlagen.',
         'wissen.open_file':             'Datei öffnen',
         'wissen.back': '← Portal',
         'wissen.login_title': 'Anmelden',
@@ -2155,6 +2158,9 @@ const _I18N = {
         // ── Common ────────────────────────────────────────────
         'common.save':          'Save',
         'wissen.nav': 'Knowledge',
+        'wissen.delete_file': 'Delete',
+        'wissen.delete_confirm': 'Really delete file "{name}"?',
+        'wissen.delete_failed': 'Delete failed.',
         'wissen.open_file':             'Open file',
         'wissen.back': '← Portal',
         'wissen.login_title': 'Sign in',

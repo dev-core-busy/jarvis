@@ -801,117 +801,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- ═══ Hauptansicht ═══ -->
     <div id="main-screen" class="screen">
         <!-- Header -->
-        <header class="header">
-            <div class="header-left">
-                <div class="header-logo">
-                    <div class="logo-mini-ring">
-                        <div class="logo-mini-core">J</div>
-                    </div>
-                </div>
-                <div class="header-info">
-                    <h1 class="header-title">JARVIS</h1>
-                    <a href="https://jarvis-ai.info" target="_blank" rel="noopener noreferrer"
-                       style="font-size:0.62rem;color:var(--text-secondary,#94a3b8);text-decoration:none;opacity:0.55;letter-spacing:0.02em;"
-                       onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.55'">jarvis-ai.info</a>
-                    <!-- Version-Pill: klickbar, öffnet Update-Dropdown -->
-                    <div class="update-widget-wrap">
-                        <div id="version-pill" class="header-version-pill upd-pill-clickable" title="Updates &amp; Version">
-                            <span id="update-version" class="upd-pill-ver">v?</span>
-                            <span id="update-badge" class="update-badge" style="display:none;">●</span>
-                        </div>
-                        <div id="update-dropdown" class="update-dropdown hidden">
-                            <div class="update-dropdown-header">
-                                <span>Jarvis Updates</span>
-                                <button id="upd-close" class="update-close-btn">✕</button>
-                            </div>
-                            <div id="upd-body" class="update-dropdown-body">
-                                <p class="kb-hint" style="margin:0;">Prüfe…</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="security-indicator" class="security-badge" title="Sicherheitsstatus" data-i18n-title="security.status">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2.5">
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                        </svg>
-                    </div>
-                </div>
-            </div>
-            <div class="header-center" style="flex: 1; display: flex; justify-content: center; max-width: 50%;">
-                <div class="cpu-bar" id="cpu-bar" style="width: 100%; max-width: 400px; margin: 0 1rem;">
-                    <div class="cpu-bar-fill" id="cpu-bar-fill" style="width: 0%"></div>
-                    <span class="cpu-bar-label" id="cpu-bar-label">CPU: 0%</span>
-                </div>
-            </div>
-            <div class="header-right">
-                <div class="connection-indicator" id="connection-dot" title="LLM-Verbindungsstatus"></div>
-
-                <!-- Audio / Sprachausgabe (wie jarvis/chat): Stimme + Soundtest + Lautsprecher-Toggle -->
-                <div id="hdr-tts-voicewrap" style="display:none;align-items:center;gap:4px;">
-                    <select id="hdr-tts-voice" data-i18n-title="chat.tts_toggle" title="Stimme wählen"
-                            style="max-width:150px;padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.8rem;">
-                        <option value="">Standard</option>
-                    </select>
-                    <button class="btn-icon" id="btn-tts-preview-hdr" data-i18n-title="profile.voice_preview" title="Soundtest">▶</button>
-                </div>
-                <button class="btn-icon" id="btn-tts-hdr" data-i18n-title="input.tts" title="Sprachausgabe ein/aus">
-                    <svg id="hdr-tts-on" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-                    <svg id="hdr-tts-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
-                </button>
-
-                <!-- Sprach-Toggle im Header -->
-                <div class="lang-toggle header-lang" id="header-lang-toggle">
-                    <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang('de')" title="Deutsch">DE</button>
-                    <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang('en')" title="English">EN</button>
-                </div>
-
-                <!-- Hell/Dunkel-Umschalter -->
-                <button class="btn-icon" id="btn-theme-toggle" data-i18n-title="header.theme" title="Hell/Dunkel umschalten">
-                    <svg class="theme-icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                    <svg class="theme-icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                </button>
-
-                <!-- Desktop ein-/ausblenden (Standard: nur Chat) -->
-                <button class="btn-icon" id="btn-toggle-desktop" data-i18n-title="header.toggle_desktop" title="Desktop ein-/ausblenden">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-                        <line x1="8" y1="21" x2="16" y2="21"/>
-                        <line x1="12" y1="17" x2="12" y2="21"/>
-                    </svg>
-                </button>
-
-                <a href="/userchat?from=main" target="_blank" class="btn-icon" data-i18n-title="header.user_chat" title="Benutzer-Chat" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                    </svg>
-                </a>
-                <button class="btn-icon" id="btn-issues" title="Issues / Feedback" onclick="window.JarvisIssues && window.JarvisIssues.open()" style="position:relative;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="12" y1="8" x2="12" y2="12"/>
-                        <line x1="12" y1="16" x2="12.01" y2="16"/>
-                    </svg>
-                    <span class="issues-badge" id="issues-badge" style="display:none;"></span>
-                </button>
-                <button class="btn-icon" id="btn-settings" data-i18n-title="header.settings" title="KI-Einstellungen" style="position:relative;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="3"></circle>
-                        <path
-                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1 2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
-                        </path>
-                    </svg>
-                    <span class="broker-badge" id="gear-broker-badge" data-i18n-title="security.gear_badge_title" title="Offene Root-Freigaben" style="display:none;"></span>
-                </button>
-                <span id="header-user-badge" class="header-user-badge" data-i18n-title="header.logged_in_as" title="Angemeldet als"></span>
-                <button class="btn-icon" id="btn-logout" data-i18n-title="header.logout" title="Abmelden">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                        <polyline points="16 17 21 12 16 7" />
-                        <line x1="21" y1="12" x2="9" y2="12" />
-                    </svg>
-                </button>
-            </div>
-        </header>
+        <!-- Tote Kopfzeile entfernt (Update-Pille/Status/Logout etc. liegen in /portal; /settings nutzt nur das Modal). -->
 
         <!-- Hauptbereich -->
         <!-- Alter Haupt-Chat + Live-Desktop entfernt (tote Oberflaeche – /settings zeigt nur das Einstellungen-Modal). -->
@@ -3114,7 +3004,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/security_incidents.js?v=17"></script>
     <script src="/static/js/ldap_picker.js?v=6"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=159"></script>
+    <script src="/static/js/app.js?v=164"></script>
 </body>
 
 </html>

@@ -233,6 +233,23 @@ body {
 .cs-item .cs-act.cs-del:hover { color: var(--danger); }
 .cs-empty { color: var(--text-muted); font-size: 0.82rem; padding: 8px 4px; }
 
+/* Einklappen der Verlaufs-Sidebar (nach links) */
+.chat-sidebar { transition: flex-basis .18s ease, width .18s ease, padding .18s ease, opacity .15s ease; }
+.cs-head { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.cs-head .cs-new { flex: 1; }
+.cs-collapse {
+    flex: 0 0 auto; width: 32px; height: 34px; border: 1px solid var(--border);
+    background: transparent; color: var(--text-secondary); border-radius: 8px;
+    cursor: pointer; font-size: 1rem; line-height: 1;
+}
+.cs-collapse:hover { color: var(--text-primary); border-color: var(--border-hover); }
+.cs-expand { display: none; }
+.chat-screen.sidebar-collapsed .chat-sidebar {
+    flex-basis: 0; width: 0; padding-left: 0; padding-right: 0;
+    border-right: none; opacity: 0; overflow: hidden; pointer-events: none;
+}
+.chat-screen.sidebar-collapsed .cs-expand { display: inline-flex; }
+
 @media (max-width: 720px) {
     .chat-sidebar { flex-basis: 168px; width: 168px; }
 }

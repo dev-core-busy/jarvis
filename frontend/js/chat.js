@@ -336,6 +336,10 @@
         _initSessions();
         const _csNewBtn = $('cs-new');
         if (_csNewBtn && !_csNewBtn._wired) { _csNewBtn._wired = true; _csNewBtn.addEventListener('click', _newSession); }
+        const _csCol = $('cs-collapse'); if (_csCol && !_csCol._wired) { _csCol._wired = true; _csCol.addEventListener('click', () => _setSidebarCollapsed(true)); }
+        const _csExp = $('cs-expand');   if (_csExp && !_csExp._wired) { _csExp._wired = true; _csExp.addEventListener('click', () => _setSidebarCollapsed(false)); }
+        // Zuletzt gewählten Einklapp-Zustand wiederherstellen
+        try { _setSidebarCollapsed(localStorage.getItem('jarvis_chat_sidebar_collapsed') === '1'); } catch (e) {}
         // Auto-Focus nur auf Geraeten mit Maus/Tastatur: auf Touch-Geraeten oeffnet
         // focus() die Bildschirmtastatur und Chrome schiebt die Titelleiste aus dem Bild.
         if (!window.matchMedia('(pointer: coarse)').matches) msgInput.focus();
@@ -1685,6 +1689,12 @@
         const list = await _csList();
         const ns = list.find(x => x.id === _activeSid);
         if (ns && ns.title && ns.title !== s.title) { s.title = ns.title; _renderSidebar(); }
+    }
+    // Verlaufs-Sidebar ein-/ausklappen (nach links); Zustand pro Browser gemerkt.
+    function _setSidebarCollapsed(collapsed) {
+        const screen = document.getElementById('chat-screen');
+        if (screen) screen.classList.toggle('sidebar-collapsed', !!collapsed);
+        try { localStorage.setItem('jarvis_chat_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
     }
     window._chatNewSession = _newSession;
 

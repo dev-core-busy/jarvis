@@ -8,7 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>Jarvis Chat</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=6">
-    <link rel="stylesheet" href="/static/css/chat.css?v=36">
+    <link rel="stylesheet" href="/static/css/chat.css?v=37">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <!-- PWA -->
@@ -71,13 +71,17 @@
 <div id="chat-screen" class="chat-screen hidden">
     <!-- Verlaufs-Sidebar (benutzereigene Chat-Sitzungen) -->
     <aside id="chat-sidebar" class="chat-sidebar">
-        <button id="cs-new" class="cs-new" type="button" data-i18n="chat.new_chat">+ Neuer Chat</button>
+        <div class="cs-head">
+            <button id="cs-new" class="cs-new" type="button" data-i18n="chat.new_chat">+ Neuer Chat</button>
+            <button id="cs-collapse" class="cs-collapse" type="button" data-i18n-title="chat.collapse_history" title="Verlauf einklappen" aria-label="Verlauf einklappen">«</button>
+        </div>
         <div id="cs-list" class="cs-list"></div>
     </aside>
     <div id="chat-main" class="chat-main">
     <!-- Top Bar -->
     <header class="topbar">
         <div class="topbar-left">
+            <button id="cs-expand" class="btn-theme cs-expand" type="button" data-i18n-title="chat.expand_history" title="Verlauf anzeigen" aria-label="Verlauf anzeigen">☰</button>
             <div class="topbar-avatar">J</div>
             <span class="topbar-title"><span class="brand-app-name">Jarvis</span> <span data-i18n="chat.title">Chat</span></span>
             <span class="topbar-dot" id="status-dot" title="LLM-Status"></span>
@@ -297,7 +301,7 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=35"></script>
+<script src="/static/js/i18n.js?v=36"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=10"></script>
 <script src="/static/js/issues.js?v=6"></script>
@@ -306,7 +310,7 @@ sudo update-ca-certificates</code></pre>
 <!-- Wissensgruppen-Filter (Checkbox-Auswahl der genutzten Gruppen) -->
 <script src="/static/js/kbgroups.js?v=4"></script>
 <script src="/static/js/kbgroupfilter.js?v=5"></script>
-<script src="/static/js/chat.js?v=72"></script>
+<script src="/static/js/chat.js?v=73"></script>
 <!-- Interaktive Charts (```chartjs) – Chart.js lokal gevendort (CSP: kein CDN) -->
 <script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
 <script src="/static/js/charts.js?v=3"></script>

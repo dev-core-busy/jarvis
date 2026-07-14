@@ -183,6 +183,11 @@
             <div class="pt-card-title" data-i18n="portal.card_support">Support-Assistent</div>
             <div class="pt-card-desc" data-i18n="portal.card_support_desc">Antworten aus Wissen, Jira und Confluence.</div>
         </a>
+        <a class="pt-card hidden" id="pt-card-wissen" href="/wissen">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_wissen">Wissen</div>
+            <div class="pt-card-desc" data-i18n="portal.card_wissen_desc">Dateien hochladen und Wissen deines Bereichs pflegen.</div>
+        </a>
         <a class="pt-card" href="/supportagent">
             <div class="pt-card-icon" style="background:transparent;padding:0;overflow:hidden;">
                 <img src="/static/jira_agent_symbol.png" alt="" style="width:44px;height:44px;object-fit:contain;">
@@ -306,7 +311,7 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=25"></script>
+<script src="/static/js/i18n.js?v=27"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=17"></script>
 <script src="/static/js/security_incidents.js?v=5"></script>
@@ -359,6 +364,11 @@ sudo update-ca-certificates</code></pre>
 
     fetch('/api/support/status', { headers: H }).then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
         if (d && d.active) { var c = document.getElementById('pt-card-support'); if (c) c.classList.remove('hidden'); }
+    }).catch(function(){});
+
+    // Wissen-Kachel nur, wenn dem Nutzer ein Wissensbereich (Editor-Gruppe) zugewiesen ist.
+    fetch('/api/wissen/scope', { headers: H }).then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
+        if (d && d.ok && d.groups && d.groups.length) { var c = document.getElementById('pt-card-wissen'); if (c) c.classList.remove('hidden'); }
     }).catch(function(){});
 
     var lo = document.getElementById('pt-logout');

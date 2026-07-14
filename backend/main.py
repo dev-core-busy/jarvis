@@ -1098,6 +1098,21 @@ async def portal_page():
     )
 
 
+@app.get("/wissen", response_class=HTMLResponse)
+async def wissen_page():
+    """Eigenständige Wissens-Seite fuer Domänennutzer: Datei-Upload, Ordnerwahl
+    und Informationsextraktor – hart beschraenkt auf die Wissensgruppen, fuer die
+    der angemeldete Benutzer Editor-Rechte hat. Netzwerk-Freigaben (Root-Mount)
+    sind hier bewusst NICHT verfuegbar (bleiben Admin-only in den Einstellungen)."""
+    f = FRONTEND_DIR / "wissen.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
+    return HTMLResponse(
+        content=f.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
 @app.get("/supportagent", response_class=HTMLResponse)
 async def supportagent_page():
     """Info-/Download-Seite fuer den Support-Agent (Windows-Anwendung fuer
@@ -5328,7 +5343,7 @@ async def write_knowledge_file(request: Request, user: str = Depends(require_kno
 
 
 @app.post("/api/knowledge/open-folder")
-async def open_knowledge_folder(request: Request, user: str = Depends(require_auth)):
+async def open_knowledge_folder(request: Request, user: str = Depends(require_knowledge_editor)):
     """Öffnet einen Knowledge-Ordner im Dateimanager des Server-Desktops."""
     import subprocess, os
     from backend.tools.knowledge import _get_folders, PROJECT_ROOT
@@ -5434,6 +5449,226 @@ async def upload_knowledge_files(
         "total_saved": len(saved),
         "total_rejected": len(rejected),
     })
+
+
+# ─── Eigenständige Wissens-Seite /wissen (Domänennutzer, bereichs-beschränkt) ──
+# Domänennutzer duerfen NUR in "ihren" Wissensgruppen (Editor-Rechte) lesen und
+# schreiben. Alle folgenden Endpoints erzwingen das serverseitig – der Client kann
+# keine fremden Gruppen/Ordner unterschieben.
+
+def _editable_groups_for(user: str) -> list:
+    """Wissensgruppen, die dieser Benutzer lesen UND beschreiben darf ('sein Bereich').
+    Globaler Wissens-Editor -> alle Gruppen; sonst nur Gruppen mit gruppenspezifischem
+    Editor-Recht (editors_users/editors_group)."""
+    from backend import knowledge_groups as kg
+    from backend.tools.knowledge import _indexed_rel_paths
+    groups = kg.list_groups(_indexed_rel_paths()).get("groups", [])
+    if _may_edit_knowledge(user):
+        return groups
+    return [g for g in groups if _is_kb_group_editor(user, g)]
+
+
+def _wissen_check_groups(user: str, req_groups: list):
+    """Stellt sicher, dass ALLE angefragten Gruppen im Bereich des Nutzers liegen.
+    Rueckgabe: (ok: bool, fehlermeldung: str|None)."""
+    allowed = {g["id"] for g in _editable_groups_for(user)}
+    if not req_groups:
+        return False, "Bitte mindestens eine Wissensgruppe (deinen Bereich) auswaehlen."
+    bad = [g for g in req_groups if g not in allowed]
+    if bad:
+        return False, "Keine Berechtigung fuer Gruppe(n): " + ", ".join(bad)
+    return True, None
+
+
+@app.get("/api/wissen/scope")
+async def wissen_scope(user: str = Depends(require_auth)):
+    """Bereich des Nutzers: beschreibbare Wissensgruppen + verfuegbare Ordner."""
+    from backend.tools.knowledge import _get_folders, PROJECT_ROOT
+    groups = _editable_groups_for(user)
+    folders = []
+    for f in _get_folders():
+        try:
+            rel = str(f.relative_to(PROJECT_ROOT))
+        except ValueError:
+            rel = str(f)
+        folders.append({"path": rel, "name": f.name})
+    return JSONResponse({
+        "ok": True, "user": user, "is_editor": _may_edit_knowledge(user),
+        "groups": [{"id": g["id"], "name": g["name"], "color": g.get("color", "#64748b")}
+                   for g in groups],
+        "folders": folders,
+    })
+
+
+@app.post("/api/wissen/upload")
+async def wissen_upload(
+    files: list[UploadFile] = File(...),
+    folder: str = Form("data/knowledge"),
+    groups: str = Form(""),
+    user: str = Depends(require_auth),
+):
+    """Datei-Upload, hart auf die Wissensgruppen des Nutzers beschraenkt."""
+    from backend.tools.knowledge import (
+        _get_folders, PROJECT_ROOT,
+        EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,
+        EXTENSIONS_XLSX, EXTENSIONS_PPTX, EXTENSIONS_VIDEO, EXTENSIONS_AUDIO,
+        EXTENSIONS_IMAGE,
+    )
+    from backend import knowledge_groups as kg
+    req_groups = [g.strip() for g in (groups or "").split(",") if g.strip()]
+    ok, err = _wissen_check_groups(user, req_groups)
+    if not ok:
+        return JSONResponse({"error": err}, status_code=403)
+    all_exts = (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX |
+                EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO | EXTENSIONS_IMAGE)
+    target = None
+    for f in _get_folders():
+        try:
+            rel = str(f.relative_to(PROJECT_ROOT))
+        except ValueError:
+            rel = str(f)
+        if rel == folder or str(f) == folder:
+            target = f
+            break
+    if not target:
+        return JSONResponse({"error": f"Ordner '{folder}' nicht verfuegbar"}, status_code=400)
+    target.mkdir(parents=True, exist_ok=True)
+    saved, rejected = [], []
+    for file in files:
+        suffix = Path(file.filename).suffix.lower()
+        if suffix not in all_exts:
+            rejected.append({"name": file.filename, "reason": f"Format '{suffix}' nicht unterstuetzt"})
+            continue
+        dest = target / file.filename
+        counter = 1
+        while dest.exists():
+            dest = target / f"{Path(file.filename).stem}_{counter}{suffix}"
+            counter += 1
+        content = await file.read()
+        dest.write_bytes(content)
+        size_str = f"{len(content)/1024:.1f} KB" if len(content) >= 1024 else f"{len(content)} B"
+        saved.append({"name": dest.name, "size": size_str})
+        try:
+            kg.set_assignment(str(dest.relative_to(PROJECT_ROOT)), req_groups)
+        except Exception:  # noqa: BLE001
+            pass
+    return JSONResponse({"saved": saved, "rejected": rejected,
+                         "total_saved": len(saved), "total_rejected": len(rejected)})
+
+
+@app.get("/api/wissen/files")
+async def wissen_files(user: str = Depends(require_auth)):
+    """Wissensdateien, die den Gruppen des Nutzers zugeordnet sind (Lese-Scope)."""
+    from backend import knowledge_groups as kg
+    allowed = {g["id"]: g for g in _editable_groups_for(user)}
+    out = []
+    for path, gids in kg.get_assignments_map().items():
+        mine = [gid for gid in gids if gid in allowed]
+        if mine:
+            out.append({"path": path, "name": path.rsplit("/", 1)[-1],
+                        "groups": [{"id": gid, "name": allowed[gid]["name"],
+                                    "color": allowed[gid].get("color", "#64748b")} for gid in mine]})
+    out.sort(key=lambda x: x["name"].lower())
+    return JSONResponse({"ok": True, "files": out})
+
+
+@app.post("/api/wissen/extract")
+async def wissen_extract(request: Request, user: str = Depends(require_auth)):
+    """URL abrufen -> Extraktions-Entwurf (Pending), dem Nutzer zugeordnet."""
+    if not _editable_groups_for(user):
+        return JSONResponse({"error": "Dir ist kein Wissensbereich zugewiesen."}, status_code=403)
+    body = await request.json()
+    url = (body.get("url") or "").strip()
+    if not url:
+        return JSONResponse({"error": "Keine URL angegeben"}, status_code=400)
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        from backend.web_extractor import extract_from_url, update_pending
+        ok, doc = await _run_cancellable(request, extract_from_url(url))
+        if not ok:
+            return JSONResponse({"error": "Abgebrochen"}, status_code=499)
+        try:
+            update_pending(doc["id"], {"created_by": _norm_login(user)})
+        except Exception:  # noqa: BLE001
+            pass
+        return JSONResponse(doc)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/wissen/extract/upload")
+async def wissen_extract_upload(request: Request, file: UploadFile = File(...),
+                                user: str = Depends(require_auth)):
+    """Datei abrufen -> Extraktions-Entwurf (Pending), dem Nutzer zugeordnet."""
+    if not _editable_groups_for(user):
+        return JSONResponse({"error": "Dir ist kein Wissensbereich zugewiesen."}, status_code=403)
+    content = await file.read()
+    if len(content) > 50 * 1024 * 1024:
+        return JSONResponse({"error": "Datei zu groß (max. 50 MB)"}, status_code=413)
+    try:
+        from backend.web_extractor import extract_from_file, update_pending
+        ok, doc = await _run_cancellable(request, extract_from_file(file.filename, content))
+        if not ok:
+            return JSONResponse({"error": "Abgebrochen"}, status_code=499)
+        try:
+            update_pending(doc["id"], {"created_by": _norm_login(user)})
+        except Exception:  # noqa: BLE001
+            pass
+        return JSONResponse(doc, status_code=201)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/wissen/pending")
+async def wissen_pending(user: str = Depends(require_auth)):
+    """Eigene ausstehende Extraktions-Entwuerfe (nur die des Nutzers)."""
+    from backend.web_extractor import list_pending
+    me = _norm_login(user)
+    mine = [d for d in list_pending() if _norm_login(str(d.get("created_by", ""))) == me]
+    return JSONResponse({"ok": True, "pending": mine})
+
+
+@app.patch("/api/wissen/pending/{doc_id}")
+async def wissen_pending_update(doc_id: str, request: Request, user: str = Depends(require_auth)):
+    """Eigenen Entwurf bearbeiten (Titel/Inhalt)."""
+    from backend.web_extractor import get_pending, update_pending
+    doc = get_pending(doc_id)
+    if not doc or _norm_login(str(doc.get("created_by", ""))) != _norm_login(user):
+        return JSONResponse({"error": "Nicht gefunden"}, status_code=404)
+    data = await request.json()
+    if isinstance(data, dict):
+        data.pop("created_by", None)
+    return JSONResponse({"ok": update_pending(doc_id, data)})
+
+
+@app.post("/api/wissen/pending/{doc_id}/approve")
+async def wissen_pending_approve(doc_id: str, request: Request, user: str = Depends(require_auth)):
+    """Entwurf uebernehmen – Zielgruppen MUESSEN im Bereich des Nutzers liegen."""
+    from backend.web_extractor import get_pending, approve_pending
+    doc = get_pending(doc_id)
+    if not doc or _norm_login(str(doc.get("created_by", ""))) != _norm_login(user):
+        return JSONResponse({"error": "Nicht gefunden"}, status_code=404)
+    body = await request.json()
+    req_groups = [g for g in ((body.get("groups") if isinstance(body, dict) else None) or []) if g]
+    ok, err = _wissen_check_groups(user, req_groups)
+    if not ok:
+        return JSONResponse({"error": err}, status_code=403)
+    try:
+        result = approve_pending(doc_id, groups=req_groups)
+        return JSONResponse({"ok": True, **result})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.delete("/api/wissen/pending/{doc_id}")
+async def wissen_pending_delete(doc_id: str, user: str = Depends(require_auth)):
+    """Eigenen Entwurf verwerfen."""
+    from backend.web_extractor import get_pending, delete_pending
+    doc = get_pending(doc_id)
+    if not doc or _norm_login(str(doc.get("created_by", ""))) != _norm_login(user):
+        return JSONResponse({"error": "Nicht gefunden"}, status_code=404)
+    return JSONResponse({"ok": delete_pending(doc_id)})
 
 
 # ─── Wissensgruppen (logische Tags, Modell B) ────────────────────────
@@ -5800,7 +6035,7 @@ async def knowledge_extract_file_delete(request: Request, user: str = Depends(re
 
 
 @app.get("/api/knowledge/mounts")
-async def list_mounts(user: str = Depends(require_auth)):
+async def list_mounts(user: str = Depends(require_knowledge_editor)):
     """Liefert die konfigurierten Netzwerk-Freigaben inkl. Mount-Status."""
     mounts = _get_mounts_config()
     result = []
@@ -5817,7 +6052,7 @@ async def list_mounts(user: str = Depends(require_auth)):
 
 
 @app.post("/api/knowledge/mounts")
-async def add_mount(request: Request, user: str = Depends(require_auth)):
+async def add_mount(request: Request, user: str = Depends(require_knowledge_editor)):
     """Legt eine neue Netzwerk-Freigabe an und fügt deren Ordner der Wissensbasis hinzu."""
     data = await request.json()
     source = data.get("source", "").strip()
@@ -5853,7 +6088,7 @@ async def add_mount(request: Request, user: str = Depends(require_auth)):
 
 
 @app.delete("/api/knowledge/mounts/{idx}")
-async def remove_mount(idx: int, user: str = Depends(require_auth)):
+async def remove_mount(idx: int, user: str = Depends(require_knowledge_editor)):
     """Löscht eine Netzwerk-Freigabe, hängt sie ggf. aus und entfernt ihren Ordner aus der Wissensbasis."""
     mounts = _get_mounts_config()
     if idx < 0 or idx >= len(mounts):
@@ -5881,7 +6116,7 @@ async def remove_mount(idx: int, user: str = Depends(require_auth)):
 
 
 @app.put("/api/knowledge/mounts/{idx}")
-async def update_mount(idx: int, request: Request, user: str = Depends(require_auth)):
+async def update_mount(idx: int, request: Request, user: str = Depends(require_knowledge_editor)):
     """Aktualisiert Typ, Quelle und Credentials einer bestehenden Freigabe."""
     mounts = _get_mounts_config()
     if idx < 0 or idx >= len(mounts):
@@ -5906,7 +6141,7 @@ async def update_mount(idx: int, request: Request, user: str = Depends(require_a
 
 
 @app.post("/api/knowledge/mounts/{idx}/mount")
-async def mount_share(idx: int, user: str = Depends(require_auth)):
+async def mount_share(idx: int, user: str = Depends(require_knowledge_editor)):
     """Bindet eine Netzwerk-Freigabe (SMB/NFS/WebDAV) ein und startet anschließend den Reindex."""
     mounts = _get_mounts_config()
     if idx < 0 or idx >= len(mounts):
@@ -5948,7 +6183,7 @@ async def mount_share(idx: int, user: str = Depends(require_auth)):
 
 
 @app.post("/api/knowledge/mounts/{idx}/unmount")
-async def unmount_share(idx: int, user: str = Depends(require_auth)):
+async def unmount_share(idx: int, user: str = Depends(require_knowledge_editor)):
     """Hängt eine Netzwerk-Freigabe aus und deaktiviert deren automatisches Einbinden."""
     mp = _mount_path(idx)
     if not mp.is_mount():
@@ -5975,7 +6210,7 @@ async def unmount_share(idx: int, user: str = Depends(require_auth)):
 
 
 @app.get("/api/knowledge/webdav/status")
-async def webdav_status(user: str = Depends(require_auth)):
+async def webdav_status(user: str = Depends(require_knowledge_editor)):
     """WebDAV-Status und Verbindungsdetails."""
     from backend.webdav import _get_webdav_config, is_webdav_enabled
     from backend.tools.knowledge import PROJECT_ROOT
@@ -6019,7 +6254,7 @@ async def webdav_status(user: str = Depends(require_auth)):
 
 
 @app.post("/api/knowledge/webdav/config")
-async def webdav_config(request: Request, user: str = Depends(require_auth)):
+async def webdav_config(request: Request, user: str = Depends(require_knowledge_editor)):
     """WebDAV aktivieren/deaktivieren + Credentials setzen."""
     data = await request.json()
     states = config.get_skill_states()

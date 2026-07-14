@@ -161,7 +161,8 @@
                     var chips = f.groups.map(function (g) {
                         return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';color:' + esc(g.color) + ';font-size:0.7rem;">' + esc(g.name) + '</span>';
                     }).join(' ');
-                    return '<div class="wi-item"><span class="nm">' + esc(f.name) + '</span>' + chips + '</div>';
+                    var url = '/api/wissen/file?path=' + encodeURIComponent(f.path) + '&token=' + encodeURIComponent(token);
+                    return '<div class="wi-item"><a class="nm wi-flink" href="' + esc(url) + '" target="_blank" rel="noopener" title="' + esc(t('wissen.open_file')) + '">' + esc(f.name) + '</a>' + chips + '</div>';
                 }).join('');
             })
             .catch(function () {});

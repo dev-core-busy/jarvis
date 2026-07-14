@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import contextvars
 import json
 import re
 import time
@@ -297,8 +298,31 @@ def load_instructions() -> str:
 class AgentState(Enum):
     IDLE = "idle"
     RUNNING = "running"
-    PAUSED = "paused"
     STOPPED = "stopped"
+
+
+class _StopScope:
+    """Pro-Task Abbruch-Signal.
+
+    Der Hauptagent ist EINE geteilte Instanz fuer alle Benutzer. Wuerde man den
+    Stop ueber Instanz-Felder (self._stop_flag/_stop_event) abwickeln, bräche ein
+    Stop von Benutzer A auch die parallel laufende Anfrage von Benutzer B ab.
+    Jeder run_task-Aufruf bekommt daher einen eigenen _StopScope, der ueber eine
+    ContextVar (pro asyncio-Task kopiert) im Loop und in _await_or_stop sichtbar
+    ist. Der Stop trifft nur den Scope des jeweiligen Benutzers."""
+    __slots__ = ("event",)
+
+    def __init__(self):
+        self.event = asyncio.Event()
+
+    @property
+    def stopped(self) -> bool:
+        return self.event.is_set()
+
+
+# Pro asyncio-Task sichtbarer Stop-Scope des aktuell laufenden run_task.
+_run_stop_scope: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_run_stop_scope", default=None)
 
 
 # Sentinel: unterscheidet "kb_groups nicht uebergeben" (Sub-Agent erbt) von
@@ -455,12 +479,14 @@ KRITISCH – Autonomie-Regeln:
         self.is_sub_agent = is_sub_agent
         self.parent_id = parent_id
         self.state = AgentState.IDLE
-        self._pause_event = asyncio.Event()
-        self._pause_event.set()  # Nicht pausiert
         self._stop_flag = False
         # Wird von stop() gesetzt und weckt SOFORT einen laufenden LLM-Call / ein
         # Tool auf (nicht erst am naechsten Loop-Schritt) -> _await_or_stop().
+        # Legacy-Signal (Fallback fuer Kontexte ohne Scope, z.B. stop_all/headless).
         self._stop_event = asyncio.Event()
+        # Aktive Stop-Scopes des GETEILTEN Hauptagenten je Benutzer (run-key -> Scope).
+        # Ermoeglicht benutzerbezogenen Abbruch, ohne fremde Anfragen zu stoeren.
+        self._stop_scopes: dict[str, _StopScope] = {}
         self._speed = 1.0
         self._current_task: asyncio.Task | None = None
         self._created_at = time.time()
@@ -682,9 +708,12 @@ KRITISCH – Autonomie-Regeln:
         agent_span.attributes["task"] = task_text[:200]
 
         self.state = AgentState.RUNNING
-        self._stop_flag = False
-        self._stop_event.clear()
-        self._pause_event.set()
+        # Benutzerbezogener Stop-Scope: isoliert den Abbruch dieses Laufs von
+        # parallel laufenden Anfragen anderer Nutzer auf dem geteilten Hauptagenten.
+        stop_scope = _StopScope()
+        _rkey = self._run_key(self._current_username)
+        self._stop_scopes[_rkey] = stop_scope
+        _scope_token = _run_stop_scope.set(stop_scope)
         self._tool_cache.clear()  # Cache für diesen Task-Run leeren
 
         # Provider bei jedem Start neu initialisieren (für geänderte Einstellungen)
@@ -940,9 +969,8 @@ KRITISCH – Autonomie-Regeln:
             _recent_calls: list[str] = []
             _loop_break = False
             while steps < config.MAX_AGENT_STEPS:
-                # Pause/Stop prüfen
-                await self._check_controls(ws)
-                if self._stop_flag:
+                # Stop prüfen (benutzerbezogener Scope)
+                if stop_scope.stopped:
                     await self._send_status(ws, "⏹️ Anfrage gestoppt")
                     break
 
@@ -1150,7 +1178,7 @@ KRITISCH – Autonomie-Regeln:
 
                 steps += 1
 
-            if (steps >= config.MAX_AGENT_STEPS or _loop_break) and not self._stop_flag:
+            if (steps >= config.MAX_AGENT_STEPS or _loop_break) and not stop_scope.stopped:
                 # Max-Steps erreicht ODER Loop-Detector hat angeschlagen:
                 # einen finalen LLM-Call OHNE Tools erzwingen,
                 # damit der User mit dem bisherigen Kontext eine Antwort bekommt.
@@ -1361,6 +1389,13 @@ KRITISCH – Autonomie-Regeln:
             if agent_span:
                 tracer.end_span(agent_span)
             self.state = AgentState.IDLE
+            # Stop-Scope dieses Laufs freigeben (nur wenn noch unserer)
+            if self._stop_scopes.get(_rkey) is stop_scope:
+                self._stop_scopes.pop(_rkey, None)
+            try:
+                _run_stop_scope.reset(_scope_token)
+            except Exception:
+                pass
 
     async def run_task_headless(self, task_text: str) -> str:
         """Führt eine Aufgabe ohne WebSocket aus. Gibt das Ergebnis als String zurück.
@@ -1372,7 +1407,6 @@ KRITISCH – Autonomie-Regeln:
         self.state = AgentState.RUNNING
         self._stop_flag = False
         self._stop_event.clear()
-        self._pause_event.set()
 
         # Pro-Task Bild-Erfassung (Kanaele ohne Markdown senden das Bild als Medium)
         from backend.tools.image_gen import current_task_images
@@ -1884,12 +1918,6 @@ KRITISCH – Autonomie-Regeln:
         # Fallback: nur letzte Einträge behalten
         return keep
 
-    async def _check_controls(self, ws: WebSocket):
-        """Prüft Pause/Stop-Status."""
-        if not self._pause_event.is_set():
-            await self._send_status(ws, "⏸️ Pausiert – warte auf Fortsetzen...")
-            await self._pause_event.wait()
-
     async def _await_or_stop(self, coro):
         """Wartet auf ``coro``, bricht die Wartung aber SOFORT ab, sobald stop()
         gerufen wird (Stop-Button). So endet der Agent mitten im LLM-Call oder Tool,
@@ -1901,7 +1929,11 @@ KRITISCH – Autonomie-Regeln:
         laeuft im Thread zwar aus, blockiert den Agenten aber nicht mehr.
         Exceptions aus ``coro`` werden unveraendert durchgereicht."""
         task = asyncio.ensure_future(coro)
-        stop_waiter = asyncio.ensure_future(self._stop_event.wait())
+        # Bevorzugt der benutzerbezogene Stop-Scope dieses Laufs; Fallback auf das
+        # Legacy-Signal (headless/stop_all), falls kein Scope gesetzt ist.
+        _scope = _run_stop_scope.get()
+        _stop_evt = _scope.event if _scope is not None else self._stop_event
+        stop_waiter = asyncio.ensure_future(_stop_evt.wait())
         try:
             done, _pending = await asyncio.wait(
                 {task, stop_waiter}, return_when=asyncio.FIRST_COMPLETED)
@@ -2176,22 +2208,29 @@ KRITISCH – Autonomie-Regeln:
             pass
 
     # ─── Steuerung ────────────────────────────────────────────────────
-    def pause(self):
-        self.state = AgentState.PAUSED
-        self._pause_event.clear()
+    @staticmethod
+    def _run_key(username: str) -> str:
+        """Normalisierter Schluessel fuer den benutzerbezogenen Stop-Scope."""
+        return (username or "").split("@")[0].split("\\")[-1].strip().lower() or "_anon"
 
-    def resume(self):
-        self.state = AgentState.RUNNING
-        self._pause_event.set()
+    def stop(self, username: str | None = None):
+        """Bricht eine laufende Anfrage ab, ohne den Agenten terminal zu beenden.
 
-    def stop(self):
-        # Bricht NUR die aktuell laufende Anfrage ab – der Agent bleibt bereit
-        # (Zustand IDLE, nicht terminal STOPPED) und nimmt sofort neue Aufgaben an.
-        # Der Abbruch wird ueber _stop_flag/_stop_event erkannt, nicht ueber den Zustand.
+        ``username`` gesetzt (Regelfall am geteilten Hauptagenten): bricht NUR den
+        Lauf DIESES Benutzers ab – parallele Anfragen anderer Nutzer laufen
+        ungestoert weiter. Ohne ``username`` (eigene Sub-Agent-Instanz / stop_all):
+        alle Scopes + Legacy-Signal, der Agent bleibt bereit (IDLE, nicht STOPPED)."""
+        if username is not None:
+            scope = self._stop_scopes.get(self._run_key(username))
+            if scope is not None:
+                scope.event.set()   # nur den Lauf dieses Benutzers abbrechen
+            return
+        # Voll-Stop (isolierte Instanz / stop_all): alles abbrechen
         self._stop_flag = True
         self.state = AgentState.IDLE
-        self._pause_event.set()  # Falls pausiert, aufwecken zum Beenden
-        self._stop_event.set()   # Laufenden LLM-Call / Tool sofort abbrechen
+        self._stop_event.set()   # Legacy-Signal (headless/Fallback)
+        for scope in list(self._stop_scopes.values()):
+            scope.event.set()
 
     def set_speed(self, speed: float):
         self._speed = max(0.1, min(5.0, speed))
@@ -2326,23 +2365,13 @@ class AgentManager:
         try:
             await agent.run_task(task, ws)
         finally:
-            # Nur 'finished' melden wenn nicht pausiert (Pause = Agent lebt weiter)
-            if agent.state != AgentState.PAUSED:
-                agent.state = AgentState.IDLE
-                await ws.send_json({
-                    "type": "agent_event",
-                    "event": "finished",
-                    "agent": agent.get_info(),
-                    "agents": self.get_all_info(),
-                })
-            else:
-                # Pausiert: nur State-Update senden, kein finished
-                await ws.send_json({
-                    "type": "agent_event",
-                    "event": "paused",
-                    "agent": agent.get_info(),
-                    "agents": self.get_all_info(),
-                })
+            agent.state = AgentState.IDLE
+            await ws.send_json({
+                "type": "agent_event",
+                "event": "finished",
+                "agent": agent.get_info(),
+                "agents": self.get_all_info(),
+            })
 
     def stop_all(self):
         """Stoppt alle Agents."""

@@ -323,9 +323,6 @@
         // CPU-Auslastung fuer alle (Werte kommen via WS-Event 'cpu')
         const _cpuBar = $('cpu-bar');
         if (_cpuBar) _cpuBar.style.display = '';
-        // LLM-Status-Pill: Profilumschalter fuer alle mit LLM-Nutzungsrecht
-        // (ersetzt den frueheren Admin-only-Weg in die Einstellungen).
-        _setupProfileSwitcher();
         connectWS();
         _startLlmStatusIndicator();
         _initSessions();
@@ -397,20 +394,6 @@
         } catch (e) { /* ignore */ }
     };
 
-    // ── LLM-Profilumschalter (Klick auf die Status-Pill) ─────────────────
-    // Gemeinsames Modul (profile_switcher.js); zeigt rot/gruen-Erreichbarkeit.
-    function _setupProfileSwitcher() {
-        if (!window.ProfileSwitcher) return;
-        window.ProfileSwitcher.attach({
-            dotId: 'status-dot',
-            headers: function () { return _authHdr(); },
-            onSwitched: function (name) {
-                addStatusLine('🔄 ' + window.t('chat.profile_switched').replace('{name}', name || ''));
-                if (typeof _checkLlmStatus === 'function') _checkLlmStatus();
-            },
-        });
-    }
-
     function logout() {
         token = '';
         // Global abmelden (SSO): alle Seiten-Token entfernen
@@ -479,6 +462,7 @@
 
     // Wissensgruppen-Filter (aufklappbare Checkbox-Liste in der Eingabeleiste)
     let _kbFilter = null;
+    let _profSel = null;   // KI-Profil-Pulldown (hinter dem Wissensgruppen-Filter)
     function ensureKbFilter() {
         if (_kbFilter || !window.KbGroupFilter) return;
         const slot = document.getElementById('kb-filter-slot');
@@ -486,6 +470,14 @@
         _kbFilter = window.KbGroupFilter.mount({ anchor: slot, place: 'append', direction: 'up', key: 'chat' });
         // Auswahländerung sofort in der aktiven Sitzung merken
         if (_kbFilter.onChange) _kbFilter.onChange(function () { _persistSession(); });
+        // KI-Profil-Pulldown direkt HINTER den Wissensgruppen; Auswahl pro Sitzung merken
+        if (window.ProfileSwitcher && !_profSel) {
+            _profSel = window.ProfileSwitcher.mount({
+                anchor: slot, place: 'append',
+                headers: function () { return _authHdr(); },
+                onChange: function () { _persistSession(); if (typeof _checkLlmStatus === 'function') _checkLlmStatus(); }
+            });
+        }
     }
 
     const _SUPPORTED = new Set([
@@ -1594,6 +1586,8 @@
         const body = { messages: _chatHistory };
         // Wissensgruppen-Auswahl der Sitzung mitspeichern (null=alle, []=keine, [ids])
         if (_kbFilter) body.kb_groups = _kbFilter.getSelection();
+        // Gewaehltes KI-Profil der Sitzung mitspeichern (Pulldown-Zustand im Verlauf)
+        if (_profSel) body.profile_id = _profSel.getSelected() || '';
         fetch('/api/chat/sessions/' + encodeURIComponent(_activeSid) + '/transcript', {
             method: 'PUT', headers: _csHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(body)
@@ -1733,6 +1727,8 @@
         _chatHistory = (_sdata && _sdata.transcript) || [];
         // Wissensgruppen-Auswahl dieser Sitzung wiederherstellen (sonst: alle)
         if (_kbFilter) _kbFilter.setSelection((_sdata && _sdata.kb_groups_set) ? _sdata.kb_groups : null);
+        // Gewaehltes KI-Profil dieser Sitzung wiederherstellen + aktivieren
+        if (_profSel && _sdata && _sdata.profile_id) _profSel.setSelected(_sdata.profile_id, { activate: true });
         if (_chatHistory.length === 0) {
             // Willkommensnachricht (wie im Ausgangszustand)
             messagesEl.innerHTML = '<div class="welcome-msg">'

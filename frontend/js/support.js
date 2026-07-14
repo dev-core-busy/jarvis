@@ -166,6 +166,7 @@
         loadStatus();
         bind();
         ensureKbFilter();
+        ensureProfileSelect();
         startLlmStatus();
         if (window.refreshBranding) try { window.refreshBranding(); } catch (e) {}
     }
@@ -193,14 +194,18 @@
     function startLlmStatus() {
         checkLlmStatus();
         if (!_llmStatusTimer) _llmStatusTimer = setInterval(checkLlmStatus, 30000);
-        // Profil-Umschalter auf der Status-Pill (gemeinsames Modul)
-        if (window.ProfileSwitcher) {
-            window.ProfileSwitcher.attach({
-                dotId: 'sup-status-dot',
-                headers: function () { return authHeaders(); },
-                onSwitched: function () { checkLlmStatus(); },
-            });
-        }
+    }
+    // KI-Profil-Pulldown in den erweiterten Einstellungen (gemeinsames Modul)
+    var _profSel = null;
+    function ensureProfileSelect() {
+        if (_profSel || !window.ProfileSwitcher) return;
+        var slot = $('sup-profile-slot');
+        if (!slot) return;
+        _profSel = window.ProfileSwitcher.mount({
+            anchor: slot, place: 'append',
+            headers: function () { return authHeaders(); },
+            onChange: function () { checkLlmStatus(); }
+        });
     }
 
     // ── Checkbox-Vorbelegung pro Browser/Session merken ──

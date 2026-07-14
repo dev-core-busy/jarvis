@@ -2708,6 +2708,11 @@ body.kbm-resizing { cursor: col-resize; user-select: none; }
     overflow: hidden;
     text-overflow: ellipsis;
 }
+/* Einschraenkungs-Hinweis (erlaubte Benutzer/Gruppen) – dezent angehaengt */
+.profile-restriction {
+    opacity: 0.75;
+    font-style: italic;
+}
 
 .profile-actions {
     display: flex;

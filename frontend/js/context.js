@@ -67,7 +67,6 @@ window.contextManager = new (class JarvisContextManager {
             const stateMap = {
                 idle:    { label: window.t('agent.idle'),    color: 'var(--text-secondary)' },
                 running: { label: window.t('agent.running'), color: 'var(--success-color,#2ecc71)' },
-                paused:  { label: window.t('agent.paused'),  color: '#f39c12' },
                 stopped: { label: window.t('agent.stopped'), color: '#e74c3c' },
             };
             const s = stateMap[d.agent_state] || { label: d.agent_state || '—', color: 'var(--text-secondary)' };

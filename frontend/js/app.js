@@ -68,8 +68,6 @@
     const thinkingBar = document.getElementById('llm-thinking-bar');
     const taskInput = document.getElementById('task-input');
     const btnSend = document.getElementById('btn-send');
-    const btnPause = document.getElementById('btn-pause');
-    const btnResume = document.getElementById('btn-resume');
     const btnStop = document.getElementById('btn-stop');
     const btnSelectMsgs = document.getElementById('btn-select-msgs');
     const msgSelectBar = document.getElementById('msg-select-bar');
@@ -1122,7 +1120,6 @@
         _renderAttachPreviews();
 
         // Steuerung aktivieren
-        btnPause.disabled = false;
         btnStop.disabled = false;
     }
 
@@ -1211,26 +1208,9 @@
         return msg;
     }
 
-    btnPause.addEventListener('click', () => {
-        ws.send(_controlMsg('pause'));
-        btnPause.hidden = true;
-        btnResume.hidden = false;
-        btnResume.disabled = false;
-    });
-
-    btnResume.addEventListener('click', () => {
-        ws.send(_controlMsg('resume'));
-        btnResume.hidden = true;
-        btnPause.hidden = false;
-        btnPause.disabled = false;
-    });
-
     btnStop.addEventListener('click', () => {
         ws.send(_controlMsg('stop'));
-        btnPause.disabled = true;
         btnStop.disabled = true;
-        btnResume.hidden = true;
-        btnPause.hidden = false;
 
         // Bei Stop: zurueck zum Hauptagent wechseln
         const mainId = Object.keys(_agentInfos).find(id => !_agentInfos[id].is_sub_agent);
@@ -1645,7 +1625,7 @@
             const info = _agentInfos[id];
             const isActive = id === _activeAgentId;
             const typeClass = info.is_sub_agent ? 'sub-agent' : 'main-agent';
-            const stateLabel = { running: window.t('agent.running'), idle: window.t('agent.idle'), paused: window.t('agent.paused'), stopped: window.t('agent.stopped') };
+            const stateLabel = { running: window.t('agent.running'), idle: window.t('agent.idle'), stopped: window.t('agent.stopped') };
             const closeBtn = info.is_sub_agent
                 ? `<span class="agent-card-close" onclick="event.stopPropagation(); window._removeAgent('${id}')" title="${window.t('agent.remove')}">×</span>`
                 : '';
@@ -2218,7 +2198,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         _fb_lastHighlightText = '';
 
         ws.send(wsMsg);
-        btnPause.disabled = false;
         btnStop.disabled = false;
     }
 
@@ -2456,20 +2435,11 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         thinkingBar.hidden = !isRunning;
         switch (state) {
             case 'running':
-                btnPause.disabled = false;
                 btnStop.disabled = false;
                 break;
-            case 'paused':
-                break;
             case 'stopped':
-                btnPause.disabled = true;
-                btnStop.disabled = true;
-                break;
             case 'idle':
-                btnPause.disabled = true;
                 btnStop.disabled = true;
-                btnResume.hidden = true;
-                btnPause.hidden = false;
                 break;
         }
     }
@@ -3075,6 +3045,22 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             }
         }
 
+        // Dezente Zusammenfassung der Profil-Einschraenkung (erlaubte Benutzer/Gruppen)
+        // fuer die Listenanzeige – leer, wenn das Profil fuer alle offen ist.
+        function _profRestrictionSummary(p) {
+            const cn = (dn) => { const m = /^CN=([^,]+)/i.exec((dn || '').trim()); return m ? m[1] : (dn || '').trim(); };
+            const users = (p.allowed_users || '').split(',').map(s => s.trim()).filter(Boolean);
+            const groups = (p.allowed_group || '').split('\n').map(cn).filter(Boolean);
+            const all = users.concat(groups);
+            const lbl = escapeHtml(window.t('profile.perm_label'));
+            if (!all.length) {
+                const ev = escapeHtml(window.t('profile.perm_everyone'));
+                return ` <span class="profile-restriction" title="${lbl}: ${ev}">(${ev})</span>`;
+            }
+            const txt = all.join(', ');
+            return ` <span class="profile-restriction" title="${lbl}: ${escapeHtml(txt)}">(${escapeHtml(txt)})</span>`;
+        }
+
         // ── Profilliste rendern ──
         function renderProfileList() {
             profilesContainer.innerHTML = '';
@@ -3087,7 +3073,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                             <span class="llm-status-pill checking" data-id="${p.id}" title="${window.t('profile.status_checking')}"></span>
                             <span class="profile-name">${escapeHtml(p.name)}</span>
                         </span>
-                        <span class="profile-detail">${PROVIDER_LABELS[p.provider] || p.provider} · ${escapeHtml(p.model)}</span>
+                        <span class="profile-detail">${PROVIDER_LABELS[p.provider] || p.provider} · ${escapeHtml(p.model)}${_profRestrictionSummary(p)}</span>
                     </div>
                     <div class="profile-actions">
                         <button class="btn-icon btn-small btn-perms-profile" data-id="${p.id}" title="${window.t('profile.perm_label')}">
@@ -3186,7 +3172,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                 <div class="modal-content glass" style="max-width:620px;">
                     <div class="modal-header">
                         <h2>${T('profile.perm_label', 'Nutzung erlauben für')} – ${escapeHtml(p.name)}</h2>
-                        <button class="btn-icon" id="llm-perm-close" aria-label="Schließen">
+                        <button class="btn-icon" id="llm-perm-close" aria-label="${T('common.close', 'Schließen')}">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                         </button>
                     </div>

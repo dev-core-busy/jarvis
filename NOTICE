@@ -1,0 +1,10 @@
+Jarvis AI Desktop Agent
+Copyright 2026 Andreas Bender
+
+Licensed under the Apache License, Version 2.0 (see the LICENSE file).
+
+This product bundles and/or invokes third-party open-source components that
+remain under their own licenses (MIT, BSD, Apache-2.0, LGPL-3.0, MPL-2.0,
+GPL-2.0). See the "Third-Party Licenses" section of README.md for the list.
+GPL-2.0 system programs (e.g. x11vnc, Openbox) are invoked as separate
+processes and are not linked into this Work.

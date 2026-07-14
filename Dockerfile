@@ -8,7 +8,7 @@ FROM debian:bookworm-slim
 LABEL org.opencontainers.image.title="Jarvis AI Desktop Agent" \
       org.opencontainers.image.description="Autonomer KI-Agent mit Web-UI, VNC-Desktop und WhatsApp-Integration" \
       org.opencontainers.image.source="https://github.com/dev-core-busy/jarvis" \
-      org.opencontainers.image.licenses="AGPL-3.0" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.authors="Andreas Bender"
 
 # ── System-Pakete (Openbox statt Cinnamon fuer schnellen Build) ──────────────

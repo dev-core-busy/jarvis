@@ -5,7 +5,7 @@
 **A self-hosted, autonomous AI agent for Linux — it plans, executes, and gets real work done.**
 
 [![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-AGPL--3.0-green?logo=gnu)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue?logo=apache)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.9-orange)](https://github.com/dev-core-busy/jarvis/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey?logo=linux)](https://www.linux.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen)](https://github.com/dev-core-busy/jarvis/pulls)
@@ -915,15 +915,16 @@ Full license texts are included in the `LICENSES/` directory.
 
 ## License
 
-Jarvis AI Desktop Agent is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
+Jarvis AI Desktop Agent is licensed under the **Apache License 2.0 (Apache-2.0)**.
 
 This means:
-- ✅ Free to use, modify, and distribute
-- ✅ Can be used for personal and commercial purposes
-- ⚠️ Modified versions must be released under AGPL-3.0
-- ⚠️ If you run a modified version as a network service, you must provide the source code
+- ✅ Free to use, modify, and distribute — for personal and commercial purposes
+- ✅ May be embedded in proprietary/closed-source products; no obligation to publish your changes
+- ✅ Includes an explicit patent grant
+- ⚠️ Keep the copyright/`NOTICE` and license notices; mark files you changed
 
-See [LICENSE](LICENSE) for the full text.
+See [LICENSE](LICENSE) and [NOTICE](NOTICE) for the full text. Third-party
+components remain under their own licenses (see *Third-Party Licenses* above).
 
 ---
 
@@ -937,6 +938,6 @@ See [LICENSE](LICENSE) for the full text.
 
 Developed by Andreas Bender with [Claude](https://claude.ai) (Anthropic) – code, architecture & landing page.
 
-© 2026 Andreas Bender · Licensed under [AGPL-3.0](LICENSE)
+© 2026 Andreas Bender · Licensed under [Apache-2.0](LICENSE)
 
 </div>

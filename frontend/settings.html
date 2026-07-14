@@ -1561,14 +1561,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </small>
                     </div>
 
-                    <!-- Berechtigung: wer darf dieses Profil nutzen/wechseln (leer = alle) -->
-                    <div class="form-group">
-                        <label data-i18n="profile.perm_label">Nutzung erlauben für</label>
-                        <small class="tab-note" style="display:block;margin:2px 0 8px;opacity:0.7;" data-i18n="profile.perm_hint">Leer lassen = alle dürfen dieses Profil nutzen und darauf wechseln. Sonst nur die genannten Benutzer/Gruppen (plus Administratoren).</small>
-                        <input type="text" id="profile-allowed-users" data-i18n-placeholder="profile.perm_users_ph" placeholder="Benutzer (kommagetrennt)" style="width:100%;margin-bottom:8px;">
-                        <textarea id="profile-allowed-group" rows="2" data-i18n-placeholder="profile.perm_groups_ph" placeholder="AD-Gruppen (eine pro Zeile)" style="width:100%;"></textarea>
-                    </div>
-
                     <div class="modal-actions">
                         <button class="btn-primary" id="btn-save-profile" data-i18n="profile.save">Speichern</button>
                         <button class="btn-secondary" id="btn-cancel-profile" data-i18n="profile.cancel">Abbrechen</button>
@@ -3284,7 +3276,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=71"></script>
+    <script src="/static/js/i18n.js?v=72"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=16"></script>
     <script src="/static/js/context.js?v=4"></script>
@@ -3309,8 +3301,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/security_incidents.js?v=17"></script>
     <script src="/static/js/ldap_picker.js?v=6"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/profile_switcher.js?v=1"></script>
-    <script src="/static/js/app.js?v=151"></script>
+    <script src="/static/js/app.js?v=154"></script>
 </body>
 
 </html>

@@ -111,6 +111,10 @@ class Config:
     def __init__(self):
         self.profiles: list[dict] = []
         self.active_profile_id: str = ""
+        # Benutzerbezogene Profilwahl: {normalisierter_login: profile_id}. Leer =
+        # der Benutzer nutzt das globale aktive Profil. Ermoeglicht, dass jeder
+        # Benutzer ein eigenes LLM-Profil waehlt, ohne andere zu beeinflussen.
+        self.user_profiles: dict[str, str] = {}
         self._skill_states: dict[str, dict] = {}
         self._mcp_servers: list[dict] = []
 
@@ -204,6 +208,8 @@ class Config:
         """Lädt das v2-Format mit Profilen."""
         self.profiles = data.get("profiles", [])
         self.active_profile_id = data.get("active_profile_id", "")
+        up = data.get("user_profiles", {})
+        self.user_profiles = dict(up) if isinstance(up, dict) else {}
         self.TTS_ENABLED = data.get("tts_enabled", False)
         self.TTS_VOICE = data.get("tts_voice", "")
         self.USE_PHYSICAL_DESKTOP = data.get("use_physical_desktop", False)
@@ -220,6 +226,9 @@ class Config:
         # Sicherstellen, dass active_profile_id gültig ist
         if self.profiles and not any(p["id"] == self.active_profile_id for p in self.profiles):
             self.active_profile_id = self.profiles[0]["id"]
+        # Verwaiste Benutzer-Profilwahlen (geloeschte Profile) entfernen
+        valid_ids = {p["id"] for p in self.profiles}
+        self.user_profiles = {u: pid for u, pid in self.user_profiles.items() if pid in valid_ids}
 
     def _migrate_v1_to_v2(self, data: dict):
         """Migriert settings.json v1 (flach) nach v2 (Profile)."""
@@ -278,6 +287,7 @@ class Config:
         data = {
             "version": 2,
             "active_profile_id": self.active_profile_id,
+            "user_profiles": self.user_profiles,
             "tts_enabled": self.TTS_ENABLED,
             "tts_voice": self.TTS_VOICE,
             "use_physical_desktop": self.USE_PHYSICAL_DESKTOP,
@@ -449,16 +459,52 @@ class Config:
         self.profiles = [p for p in self.profiles if p["id"] != profile_id]
         if self.active_profile_id == profile_id:
             self.active_profile_id = self.profiles[0]["id"]
+        # Benutzer, die genau dieses Profil gewaehlt hatten, auf Default zuruecksetzen
+        self.user_profiles = {u: pid for u, pid in self.user_profiles.items() if pid != profile_id}
         self._save_to_file()
         return True
 
     def activate_profile(self, profile_id: str) -> bool:
-        """Setzt ein Profil als aktiv."""
+        """Setzt ein Profil global aktiv (Admin-Default / Fallback)."""
         if any(p["id"] == profile_id for p in self.profiles):
             self.active_profile_id = profile_id
             self._save_to_file()
             return True
         return False
+
+    # ─── Benutzerbezogene Profilwahl ───────────────────────────────
+    @staticmethod
+    def _norm_user(username: str) -> str:
+        """Login auf einen stabilen Schluessel normalisieren (Domain/Case egal)."""
+        u = (username or "").strip()
+        if "\\" in u:
+            u = u.split("\\")[-1]
+        if "@" in u:
+            u = u.split("@")[0]
+        return u.lower()
+
+    def active_profile_id_for_user(self, username: str) -> str:
+        """Profil-ID, die DIESER Benutzer nutzt (eigene Wahl, sonst global aktiv)."""
+        pid = self.user_profiles.get(self._norm_user(username))
+        if pid and any(p["id"] == pid for p in self.profiles):
+            return pid
+        return self.active_profile_id
+
+    def profile_for_user(self, username: str) -> dict | None:
+        """Effektives Profil-Dict fuer diesen Benutzer (Fallback: globales aktives)."""
+        pid = self.active_profile_id_for_user(username)
+        for p in self.profiles:
+            if p["id"] == pid:
+                return p
+        return self.active_profile
+
+    def set_user_profile(self, username: str, profile_id: str) -> bool:
+        """Merkt die Profilwahl eines Benutzers (beeinflusst nur ihn selbst)."""
+        if not any(p["id"] == profile_id for p in self.profiles):
+            return False
+        self.user_profiles[self._norm_user(username)] = profile_id
+        self._save_to_file()
+        return True
 
     # ─── Properties (Fassade für agent.py) ─────────────────────────
 

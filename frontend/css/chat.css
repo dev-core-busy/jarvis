@@ -651,6 +651,14 @@ body {
     border-radius: 3px;
 }
 
+/* Debug-Umschalter neben der Kontext-Pille */
+#ctx-debug-toggle:hover { color: var(--text-primary); border-color: rgba(var(--accent-rgb), 0.5); }
+#ctx-debug-toggle.active {
+    color: var(--accent);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    background: rgba(var(--accent-rgb), 0.12);
+}
+
 /* ─── Edit-Modus innerhalb der Bubble ─────────────────────────── */
 .msg-edit-area {
     width: 100%;

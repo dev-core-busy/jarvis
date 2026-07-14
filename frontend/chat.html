@@ -8,7 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>Jarvis Chat</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=6">
-    <link rel="stylesheet" href="/static/css/chat.css?v=38">
+    <link rel="stylesheet" href="/static/css/chat.css?v=39">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <!-- PWA -->
@@ -164,13 +164,18 @@
     <!-- Input Bar -->
     <div class="input-bar">
         <!-- Kontext-Indikator -->
-        <div id="ctx-indicator" style="display:none;align-items:center;padding:3px 10px 1px;">
+        <div id="ctx-indicator" style="display:flex;align-items:center;gap:6px;padding:3px 10px 1px;">
             <!-- Textfarbe: var(--accent) (Branding-Farbe, in Hell UND Dunkel lesbar).
                  var(--accent-light) ist nur eine 10%-Alpha-Toenung fuer Hintergruende! --><span id="ctx-indicator-pill" data-i18n-title="chat.ctx_info" title="Kurzzeitgedächtnis dieses Chats: Anzahl der gemerkten Gesprächseinträge und Füllstand in % bis zur automatischen Komprimierung. Die KI nutzt diese Einträge als Kontext für ihre Antworten." style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:rgba(var(--accent-rgb),0.12);border:1px solid rgba(var(--accent-rgb),0.3);font-size:0.73rem;color:var(--accent);cursor:help;user-select:none;">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                 <span id="ctx-indicator-text" data-i18n="chat.ctx_active">Kontext aktiv</span>
                 <button id="ctx-indicator-clear" data-i18n-title="chat.ctx_reset" title="Kontext zurücksetzen" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;color:var(--text-secondary);line-height:1;font-size:0.85rem;display:flex;align-items:center;" onclick="window._clearUserContext()">✕</button>
             </span>
+            <!-- Debug-Umschalter (nur Symbol): Zwischenschritte dauerhaft einblenden -->
+            <button id="ctx-debug-toggle" type="button" data-i18n-title="chat.debug_toggle" title="Debug-Ansicht: Zwischenschritte anzeigen"
+                    style="background:none;border:1px solid rgba(var(--fg-rgb),0.15);cursor:pointer;padding:3px 7px;border-radius:20px;color:var(--text-secondary);line-height:1;display:inline-flex;align-items:center;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l1.5 1.5M16 2l-1.5 1.5"/><path d="M9 7V6a3 3 0 0 1 6 0v1"/><rect x="8" y="7" width="8" height="12" rx="4"/><path d="M12 11v7M8 11H4M8 15H3M8 18l-3 2M16 11h4M16 15h5M16 18l3 2"/></svg>
+            </button>
         </div>
         <!-- Anhang-Vorschau (versteckt wenn leer) -->
         <div class="attach-preview-bar" id="attach-preview-bar" style="display:none;"></div>
@@ -301,7 +306,7 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=40"></script>
+<script src="/static/js/i18n.js?v=41"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=11"></script>
 <script src="/static/js/issues.js?v=6"></script>
@@ -311,7 +316,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/kbgroups.js?v=4"></script>
 <script src="/static/js/kbgroupfilter.js?v=6"></script>
 <script src="/static/js/profile_switcher.js?v=3"></script>
-<script src="/static/js/chat.js?v=78"></script>
+<script src="/static/js/chat.js?v=79"></script>
 <!-- Interaktive Charts (```chartjs) – Chart.js lokal gevendort (CSP: kein CDN) -->
 <script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
 <script src="/static/js/charts.js?v=3"></script>

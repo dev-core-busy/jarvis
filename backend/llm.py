@@ -231,8 +231,14 @@ class GeminiProvider(LLMProvider):
     async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
         gemini_tools = [types.Tool(function_declarations=tools)] if tools else None
 
+        # Harte Zeitgrenze: das Gemini-SDK laeuft in einem Thread OHNE eigenen
+        # Timeout – ein stehengebliebener Upstream-Call wuerde den Chat sonst
+        # unbegrenzt haengen lassen. wait_for wirft nach Ablauf TimeoutError
+        # (nicht retry-faehig -> wird als Fehler gemeldet, Nutzer kann wiederholen).
+        _to = max(10, min(int(getattr(config, "LLM_TIMEOUT", 180) or 180), 1800))
+
         async def _call():
-            resp = await asyncio.to_thread(
+            resp = await asyncio.wait_for(asyncio.to_thread(
                 self.client.models.generate_content,
                 model=model,
                 contents=contents,
@@ -241,7 +247,7 @@ class GeminiProvider(LLMProvider):
                     tools=gemini_tools,
                     temperature=0.2,
                 ),
-            )
+            ), timeout=_to)
             parts = []
             if resp.candidates and resp.candidates[0].content and resp.candidates[0].content.parts:
                 for p in resp.candidates[0].content.parts:

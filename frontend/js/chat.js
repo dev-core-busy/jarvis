@@ -475,6 +475,8 @@
         const slot = document.getElementById('kb-filter-slot');
         if (!slot) return;
         _kbFilter = window.KbGroupFilter.mount({ anchor: slot, place: 'append', direction: 'up', key: 'chat' });
+        // Auswahländerung sofort in der aktiven Sitzung merken
+        if (_kbFilter.onChange) _kbFilter.onChange(function () { _persistSession(); });
     }
 
     const _SUPPORTED = new Set([
@@ -1580,9 +1582,12 @@
     // Transkript der aktiven Sitzung serverseitig speichern (nach jedem Turn/Edit)
     function _persistSession() {
         if (!_activeSid || !token) return;
+        const body = { messages: _chatHistory };
+        // Wissensgruppen-Auswahl der Sitzung mitspeichern (null=alle, []=keine, [ids])
+        if (_kbFilter) body.kb_groups = _kbFilter.getSelection();
         fetch('/api/chat/sessions/' + encodeURIComponent(_activeSid) + '/transcript', {
             method: 'PUT', headers: _csHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ messages: _chatHistory })
+            body: JSON.stringify(body)
         }).catch(() => {});
     }
     // Kompatible Namen zu den bisherigen Aufrufstellen -> alle schreiben die Sitzung
@@ -1599,9 +1604,9 @@
             const d = await r.json(); return d && d.session;
         } catch (e) { return null; }
     }
-    async function _csTranscript(sid) {
-        try { const r = await fetch('/api/chat/sessions/' + encodeURIComponent(sid), { headers: _csHeaders() }); if (!r.ok) return []; const d = await r.json(); return (d && d.transcript) || []; }
-        catch (e) { return []; }
+    async function _csGet(sid) {
+        try { const r = await fetch('/api/chat/sessions/' + encodeURIComponent(sid), { headers: _csHeaders() }); if (!r.ok) return null; return await r.json(); }
+        catch (e) { return null; }
     }
 
     function _renderSidebar() {
@@ -1714,7 +1719,11 @@
         // Sichtbares Transkript der AKTIVEN Sitzung laden und die Anzeige ersetzen.
         messagesEl.innerHTML = '';
         currentBotBubble = null;
-        _chatHistory = _activeSid ? await _csTranscript(_activeSid) : [];
+        let _sdata = null;
+        if (_activeSid) _sdata = await _csGet(_activeSid);
+        _chatHistory = (_sdata && _sdata.transcript) || [];
+        // Wissensgruppen-Auswahl dieser Sitzung wiederherstellen (sonst: alle)
+        if (_kbFilter) _kbFilter.setSelection((_sdata && _sdata.kb_groups_set) ? _sdata.kb_groups : null);
         if (_chatHistory.length === 0) {
             // Willkommensnachricht (wie im Ausgangszustand)
             messagesEl.innerHTML = '<div class="welcome-msg">'

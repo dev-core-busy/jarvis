@@ -51,7 +51,7 @@ class JarvisVNC {
         this._removeOverlay();
 
         this.statusEl.textContent = window.t('panel.desktop.connecting');
-        this.statusEl.style.color = '#f59e0b';
+        this.statusEl.style.color = 'var(--warning)';
 
         // Desktop-Sperre beim VNC-Verbinden automatisch aufheben
         const _tok = window.authToken
@@ -79,7 +79,7 @@ class JarvisVNC {
             if (data.vnc_available) {
                 // x11vnc läuft – Verbindung als OK annehmen
                 this.statusEl.textContent = window.t('panel.desktop.connected');
-                this.statusEl.style.color = '#10b981';
+                this.statusEl.style.color = 'var(--success)';
             } else {
                 this._handleConnectFailure();
             }
@@ -94,7 +94,7 @@ class JarvisVNC {
         if (this._connectRetries <= 5) {
             console.log(`[VNC] Verbindung fehlgeschlagen, Retry ${this._connectRetries}/5...`);
             this.statusEl.textContent = `Retry ${this._connectRetries}/5…`;
-            this.statusEl.style.color = '#f59e0b';
+            this.statusEl.style.color = 'var(--warning)';
             this.connected = false;
             this.iframe.src = '';
             // Kurze Pause, dann erneut probieren
@@ -123,7 +123,7 @@ class JarvisVNC {
         this._clearTimers();
         this._showWaitingOverlay();
         this.statusEl.textContent = window.t('panel.desktop.loading');
-        this.statusEl.style.color = '#f59e0b';
+        this.statusEl.style.color = 'var(--warning)';
 
         let attempts = 0;
 
@@ -228,12 +228,12 @@ class JarvisVNC {
                 <line x1="8" y1="21" x2="16" y2="21"/>
                 <line x1="12" y1="17" x2="12" y2="21"/>
             </svg>
-            <p style="margin-top:1rem;color:#64748b;font-size:0.85rem;">
-                Desktop-Vorschau nicht verfügbar.<br>
-                <small>Prüfe: <code>x11vnc</code> auf Port 5900</small>
+            <p style="margin-top:1rem;color:var(--text-muted);font-size:0.85rem;">
+                ${window.t('vnc.preview_unavailable')}<br>
+                <small>${window.t('vnc.check_x11vnc')}</small>
             </p>`;
-        this.statusEl.textContent = 'Nicht verfügbar';
-        this.statusEl.style.color = '#f59e0b';
+        this.statusEl.textContent = window.t('vnc.unavailable');
+        this.statusEl.style.color = 'var(--warning)';
     }
 
     disconnect() {
@@ -243,7 +243,7 @@ class JarvisVNC {
         this.iframe.hidden = true;
         this.placeholder.hidden = false;
         this.connected = false;
-        this.statusEl.textContent = 'Nicht verbunden';
+        this.statusEl.textContent = window.t('vnc.disconnected');
         this.statusEl.style.color = '';
     }
 

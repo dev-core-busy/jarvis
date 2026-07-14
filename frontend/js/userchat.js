@@ -76,7 +76,7 @@
 
     function _updateTabTitle() {
         const total = Object.values(_unread).reduce((a, b) => a + b, 0);
-        document.title = total > 0 ? `(${total}) Benutzer-Chat – Jarvis` : 'Jarvis – Benutzer-Chat';
+        document.title = total > 0 ? window.t('userchat.tab_title_unread').replace('{n}', total) : window.t('userchat.tab_title');
     }
 
     // Tab erhält Fokus → aktiven Chat als gelesen markieren
@@ -127,10 +127,10 @@
     function formatDate(ts) {
         const d = new Date(ts);
         const today = new Date();
-        if (d.toDateString() === today.toDateString()) return 'Heute';
+        if (d.toDateString() === today.toDateString()) return window.t('userchat.today');
         const yest = new Date(today);
         yest.setDate(yest.getDate() - 1);
-        if (d.toDateString() === yest.toDateString()) return 'Gestern';
+        if (d.toDateString() === yest.toDateString()) return window.t('userchat.yesterday');
         return d.toLocaleDateString('de-DE');
     }
 
@@ -170,7 +170,7 @@
         e.preventDefault();
         loginError.textContent = '';
         loginBtn.disabled = true;
-        loginBtn.textContent = 'Anmelden…';
+        loginBtn.textContent = window.t('userchat.logging_in');
 
         try {
             const payload = {
@@ -197,13 +197,13 @@
                 totpRow.classList.remove('hidden');
                 loginTotp.focus();
             } else {
-                loginError.textContent = data.error || 'Anmeldung fehlgeschlagen';
+                loginError.textContent = data.error || window.t('userchat.login_failed');
             }
         } catch (err) {
-            loginError.textContent = 'Verbindungsfehler';
+            loginError.textContent = window.t('userchat.connection_error');
         } finally {
             loginBtn.disabled = false;
-            loginBtn.textContent = 'Anmelden';
+            loginBtn.textContent = window.t('userchat.login');
         }
     });
 
@@ -213,7 +213,7 @@
         chatScreen.style.display  = 'flex';
         chatScreen.classList.remove('hidden');
         var _ucLogout = $('btn-uc-logout');
-        if (_ucLogout && myUser) _ucLogout.title = myUser + ' abmelden';
+        if (_ucLogout && myUser) _ucLogout.title = window.t('userchat.logout_title').replace('{user}', myUser);
         _requestNotifyPermission();
         _startLlmStatus();
         _startCpu();
@@ -246,13 +246,13 @@
         fetch('/api/llm/active-status', { headers: { 'Authorization': 'Bearer ' + token } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
-                if (!d) { dot.className = 'topbar-dot disconnected'; dot.title = 'LLM-Status nicht abrufbar'; return; }
+                if (!d) { dot.className = 'topbar-dot disconnected'; dot.title = window.t('userchat.llm_status_unavailable'); return; }
                 var reachable = (d.status === 'ok' || d.status === 'degraded');
                 dot.className = 'topbar-dot ' + (reachable ? 'connected' : 'disconnected');
                 var name = d.profile_name ? ' – ' + d.profile_name : '';
-                dot.title = (d.status === 'ok' ? 'LLM erreichbar' : d.status === 'degraded' ? 'LLM erreichbar (Modell fehlt)' : 'LLM nicht erreichbar') + name;
+                dot.title = (d.status === 'ok' ? window.t('app.llm_reachable') : d.status === 'degraded' ? window.t('app.llm_reachable_no_model') : window.t('app.llm_unreachable')) + name;
             })
-            .catch(function () { dot.className = 'topbar-dot disconnected'; dot.title = 'LLM nicht erreichbar'; });
+            .catch(function () { dot.className = 'topbar-dot disconnected'; dot.title = window.t('app.llm_unreachable'); });
         // Admin: Pill klickbar -> Einstellungen (LLM-Profile)
         if (!dot._adminChecked) {
             dot._adminChecked = true;
@@ -319,7 +319,7 @@
             case 'connected':
                 myUser = msg.username || myUser;
                 var _ucLogout = $('btn-uc-logout');
-        if (_ucLogout && myUser) _ucLogout.title = myUser + ' abmelden';
+        if (_ucLogout && myUser) _ucLogout.title = window.t('userchat.logout_title').replace('{user}', myUser);
                 updatePresence(msg.users || []);
                 break;
 
@@ -460,8 +460,8 @@
                         if (footer && !footer.querySelector('.uc-edited')) {
                             const mark = document.createElement('span');
                             mark.className = 'uc-edited';
-                            mark.textContent = '(bearbeitet)';
-                            mark.title = 'Nachricht wurde bearbeitet';
+                            mark.textContent = window.t('userchat.edited');
+                            mark.title = window.t('userchat.edited_title');
                             footer.insertBefore(mark, footer.firstChild);
                         }
                     }
@@ -661,7 +661,7 @@
             const moreBtn = document.createElement('span');
             moreBtn.className = 'uc-reaction-more';
             moreBtn.textContent = '+';
-            moreBtn.title = 'Mehr Emojis';
+            moreBtn.title = window.t('userchat.more_emojis');
             moreBtn.addEventListener('click', (e) => { e.stopPropagation(); openRxnPicker(msg.msg_id, moreBtn); });
             rbar.appendChild(moreBtn);
             wrap.appendChild(rbar);
@@ -689,8 +689,8 @@
         if (msg.edited_at) {
             const mark = document.createElement('span');
             mark.className = 'uc-edited';
-            mark.textContent = '(bearbeitet)';
-            mark.title = 'Nachricht wurde bearbeitet';
+            mark.textContent = window.t('userchat.edited');
+            mark.title = window.t('userchat.edited_title');
             footer.appendChild(mark);
         }
         const ts = document.createElement('span');
@@ -777,7 +777,7 @@
     function _editDmBubble(row, bubble, msg) {
         if (_dmEditingMsgId) return;
         if (!window.JarvisChatLib || !window.JarvisChatLib.enterEditMode) {
-            alert('Edit-Bibliothek nicht geladen.');
+            alert(window.t('userchat.edit_lib_missing'));
             return;
         }
         row.dataset.rawText = msg.text || '';
@@ -787,8 +787,8 @@
             actionsClass: 'uc-edit-actions',
             saveClass:    'uc-edit-save',
             cancelClass:  'uc-edit-cancel',
-            saveLabel:    'Speichern',
-            cancelLabel:  'Abbrechen',
+            saveLabel:    window.t('common.save'),
+            cancelLabel:  window.t('common.cancel'),
             onCommit: (newText) => {
                 wsSend({ type: 'dm_edit', to: activePartner, msg_id: msg.msg_id, text: newText });
                 // Bubble visuell zuruecksetzen (Echo vom Server aktualisiert dann den Text)
@@ -805,7 +805,7 @@
 
     function _deleteDmBubble(row, msg) {
         if (!msg.msg_id || !activePartner) return;
-        if (!confirm('Diese Nachricht fuer beide Seiten loeschen?')) return;
+        if (!confirm(window.t('userchat.confirm_delete_both'))) return;
         wsSend({ type: 'dm_delete', to: activePartner, msg_id: msg.msg_id });
         // DOM nicht sofort entfernen – warten auf Server-Echo, damit Fehlerfälle
         // (z.B. fremde Nachricht / nicht gefunden) sichtbar bleiben.
@@ -913,7 +913,7 @@
     // ─── Typing-Indikator ────────────────────────────────────────
     let _typingClearTimer = null;
     function showTyping(username) {
-        typingEl.textContent = `${username} schreibt…`;
+        typingEl.textContent = window.t('userchat.typing').replace('{user}', username);
         clearTimeout(_typingClearTimer);
         _typingClearTimer = setTimeout(() => { typingEl.textContent = ''; }, 3000);
     }
@@ -1023,13 +1023,13 @@
                 unsupported.push(ext);
                 continue;
             }
-            if (_ucPending.length >= MAX) { showUcToast(`Max. ${MAX} Dateien erlaubt.`); break; }
+            if (_ucPending.length >= MAX) { showUcToast(window.t('userchat.max_files').replace('{n}', MAX)); break; }
             let type = 'video';
             if (mime.startsWith('image/')) type = 'image';
             else if (mime.startsWith('audio/')) type = 'audio';
             else if (mime === 'application/pdf') type = 'pdf';
             // Größenlimit: 5 MB
-            if (file.size > 5 * 1024 * 1024) { showUcToast(`"${file.name}" ist zu groß (max. 5 MB).`); continue; }
+            if (file.size > 5 * 1024 * 1024) { showUcToast(window.t('userchat.file_too_large').replace('{name}', file.name)); continue; }
             try {
                 const b64 = await new Promise((res, rej) => {
                     const r = new FileReader();
@@ -1038,11 +1038,11 @@
                     r.readAsDataURL(file);
                 });
                 _ucPending.push({ name: file.name, mime_type: mime, data: b64, type });
-            } catch (e) { showUcToast(`"${file.name}" konnte nicht gelesen werden.`); }
+            } catch (e) { showUcToast(window.t('userchat.file_read_error').replace('{name}', file.name)); }
         }
         if (unsupported.length > 0) {
             const fmts = [...new Set(unsupported)].join(', ');
-            showUcToast(`Format nicht unterstützt: ${fmts} – Erlaubt: Bilder, Audio, Video, PDF`);
+            showUcToast(window.t('userchat.format_unsupported').replace('{fmts}', fmts));
         }
         renderUcAttachPreview();
     }
@@ -1084,7 +1084,7 @@
 
     // ─── Emoji-Picker ────────────────────────────────────────────
     const EMOJI_CATS = [
-        { id: 'smileys', icon: '😀', label: 'Smileys', emojis: [
+        { id: 'smileys', icon: '😀', label: window.t('userchat.cat_smileys'), emojis: [
             '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','🫠','😉','😊','😇',
             '🥰','😍','🤩','😘','😗','😚','😙','🥲','😋','😛','😜','🤪','😝','🤑',
             '🤗','🫡','🤭','🫢','🫣','🤫','🤔','😐','😑','😶','😏','😒','🙄','😬',
@@ -1094,19 +1094,19 @@
             '😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️',
             '💩','🤡','👹','👺','👻','👽','👾','🤖',
         ]},
-        { id: 'people', icon: '👋', label: 'Gesten & Menschen', emojis: [
+        { id: 'people', icon: '👋', label: window.t('userchat.cat_people'), emojis: [
             '👋','🤚','🖐️','✋','🖖','🫱','🫲','👌','🤌','🤏','✌️','🤞','🫰','🤟',
             '🤘','🤙','👈','👉','👆','🖕','👇','☝️','🫵','👍','👎','✊','👊','🤛',
             '🤜','👏','🙌','🫶','🤲','🤝','🙏','💪','🦾','🫀','🦷','👀','👁️','👅',
             '👃','💋','💅','🤳','🧠','🦴','👶','🧒','👦','👧','🧑','👱','👨','🧔',
             '👩','🧓','👴','👵','🙍','🙎','🙅','🙆','💁','🙋','🧏','🙇','🤦','🤷',
         ]},
-        { id: 'hearts', icon: '❤️', label: 'Herzen & Liebe', emojis: [
+        { id: 'hearts', icon: '❤️', label: window.t('userchat.cat_hearts'), emojis: [
             '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹',
             '💕','💞','💓','💗','💖','💘','💝','💟','💌','💍','💎','🌹','🫦',
             '😻','💑','👫','👬','👭','💏','🥂','🍾','🎉','🎊','🎁','🎀','🎈',
         ]},
-        { id: 'nature', icon: '🌿', label: 'Natur & Tiere', emojis: [
+        { id: 'nature', icon: '🌿', label: window.t('userchat.cat_nature'), emojis: [
             '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷',
             '🐸','🐵','🙈','🙉','🙊','🐔','🐧','🐦','🦆','🦅','🦉','🦇','🐝',
             '🦋','🐛','🐌','🐠','🐟','🐡','🐬','🐳','🦈','🐊','🦎','🐍','🦕',
@@ -1114,7 +1114,7 @@
             '🌾','🌿','☘️','🍀','🍁','🍂','🍃','🌍','🌙','⭐','☀️','🌈','❄️',
             '🌊','🔥','💧','🌬️','⚡','🌀','🌪️','🌫️','🌦️','⛅','☁️','🌤️',
         ]},
-        { id: 'food', icon: '🍕', label: 'Essen & Trinken', emojis: [
+        { id: 'food', icon: '🍕', label: window.t('userchat.cat_food'), emojis: [
             '🍎','🍊','🍋','🍇','🍓','🫐','🍒','🍑','🥭','🍍','🥥','🥝','🍅',
             '🥑','🍆','🥦','🥕','🌽','🌶️','🧄','🧅','🍞','🥐','🥨','🧀','🥚',
             '🍳','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🌮','🌯','🥗','🥙',
@@ -1122,21 +1122,21 @@
             '🧁','🍫','🍬','🍭','☕','🍵','🧃','🥤','🧋','🍺','🍻','🥂','🍷',
             '🥃','🍸','🍹','🧉','🥛','🍼',
         ]},
-        { id: 'travel', icon: '✈️', label: 'Reise & Orte', emojis: [
+        { id: 'travel', icon: '✈️', label: window.t('userchat.cat_travel'), emojis: [
             '🚀','🛸','✈️','🚁','🛩️','🪂','🚂','🚄','🚇','🚌','🚎','🏎️','🚑',
             '🚒','🚓','🚕','🛻','🚗','🚙','🛵','🏍️','🚲','🛴','🛹','⛵','🚤',
             '🛥️','🚢','🏔️','⛰️','🌋','🏕️','🏖️','🏜️','🏝️','🏛️','🏗️','🏙️',
             '🗼','🗽','🏰','🏯','🎡','🎢','🎪','🎭','🎨','🗺️','🧭','🏠','🏡',
             '🏢','🏣','🏤','🏥','🏦','🏧','🏨','🏩','🏪','🏫','🏬','🏭','🗾',
         ]},
-        { id: 'objects', icon: '💡', label: 'Objekte', emojis: [
+        { id: 'objects', icon: '💡', label: window.t('userchat.cat_objects'), emojis: [
             '⌚','📱','💻','⌨️','🖥️','🖨️','🖱️','📷','📸','📹','🎥','📽️','📞',
             '☎️','📡','💡','🔦','🕯️','🔭','🔬','🧪','💊','💉','🩺','🩹','🩻',
             '🔑','🗝️','🔒','🔓','🔐','📚','📖','📝','✏️','🖊️','📌','📍','📎',
             '✂️','🗑️','🔧','🔨','⚙️','🔩','🪛','💰','💵','💳','💎','🎁','🎀',
             '🎊','🎉','🎈','🎆','🎇','🧨','🪔','🪄','🎭','🎨','🖼️','🎪','🎠',
         ]},
-        { id: 'symbols', icon: '💯', label: 'Symbole & Sport', emojis: [
+        { id: 'symbols', icon: '💯', label: window.t('userchat.cat_symbols'), emojis: [
             '💯','✅','❌','❓','❗','⬆️','⬇️','➡️','⬅️','↩️','↪️','🔄','🔃',
             '🔴','🟠','🟡','🟢','🔵','🟣','⚫','⚪','🟤','🔶','🔷','🔸','🔹',
             '🔺','🔻','💠','🔘','🔲','🔳','▪️','▫️','◾','◽','◼️','◻️','⭕','🅰️',
@@ -1179,7 +1179,7 @@
             if (list.length === 0) {
                 const empty = document.createElement('div');
                 empty.className = 'uc-ep-empty';
-                empty.textContent = 'Keine Emojis gefunden';
+                empty.textContent = window.t('userchat.no_emojis');
                 grid.appendChild(empty);
                 return;
             }
@@ -1373,7 +1373,7 @@
         list.innerHTML = '';
         const users = Object.keys(_online).filter(u => u !== myUser);
         if (users.length === 0) {
-            list.innerHTML = '<p style="color:#94a3b8;font-size:0.85rem;text-align:center;padding:8px 0;">Keine anderen Benutzer vorhanden</p>';
+            list.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;text-align:center;padding:8px 0;">' + window.t('userchat.no_other_users') + '</p>';
         } else {
             users.sort((a,b) => (_online[b]?1:0) - (_online[a]?1:0) || a.localeCompare(b));
             for (const u of users) {
@@ -1431,7 +1431,7 @@
                 cell.className = 'uc-ig-cell';
                 const img = document.createElement('img');
                 img.src = _dataUrl(att);
-                img.alt = att.name || 'Bild';
+                img.alt = att.name || window.t('userchat.image');
                 img.loading = 'lazy';
                 cell.appendChild(img);
 
@@ -1492,13 +1492,13 @@
             const isPdf = mime === 'application/pdf';
             wrap.classList.add(isPdf ? 'pdf' : 'other');
             const icon = isPdf ? '📄' : '📎';
-            const badge = isPdf ? 'PDF' : att.name?.split('.').pop()?.toUpperCase() || 'Datei';
+            const badge = isPdf ? 'PDF' : att.name?.split('.').pop()?.toUpperCase() || window.t('userchat.file');
             wrap.innerHTML = `<div class="uc-fc-icon">${icon}</div>
                 <div class="uc-fc-info" style="flex:1;min-width:0;">
-                    <span class="uc-fc-name" title="${escHtml(att.name||'')}">${escHtml(att.name||'Datei')}</span>
+                    <span class="uc-fc-name" title="${escHtml(att.name||'')}">${escHtml(att.name||window.t('userchat.file'))}</span>
                     <span class="uc-fc-badge">${escHtml(badge)}</span>
                 </div>
-                <a class="uc-fc-dl" href="${src}" download="${escHtml(att.name||'datei')}" title="Herunterladen" onclick="event.stopPropagation()">⬇</a>`;
+                <a class="uc-fc-dl" href="${src}" download="${escHtml(att.name||'datei')}" title="${escHtml(window.t('userchat.download'))}" onclick="event.stopPropagation()">⬇</a>`;
             wrap.addEventListener('contextmenu', e => showCtxMenu(e, att, msg));
             addLongPress(wrap, e => showCtxMenu(e, att, msg));
         }

@@ -25,6 +25,8 @@ SYSTEMCTL_ACTIONS = {"start", "stop", "restart", "reload", "enable", "disable",
                      "is-active", "is-enabled", "daemon-reload"}
 SANDBOX_USER_PREFIX = "jarvis_sandbox"      # harte Grenze: nur Sandbox-User
 MOUNT_PREFIX = "/mnt/"                      # Mounts nur unterhalb /mnt/
+# Reine Lese-/Statusabfragen: nicht freigabepflichtig, nicht auditiert (UI-Polls)
+READONLY_OPS = {"sandbox_status", "egress_status"}
 
 
 def _norm_cmd(cmd: str) -> str:
@@ -470,13 +472,31 @@ def dispatch(op: str, args: dict, user: str = "", stream=None) -> dict:
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "decision": "invalid", "error": f"Ungueltige Argumente: {e}"}
 
+    # Reine Lese-/Statusabfragen (vom Frontend beim Tab-Oeffnen automatisch
+    # ausgeloest) sind KEINE sicherheitsrelevanten Operationen: sie werden weder
+    # in der Freigabeliste registriert noch auditiert (sonst fluten sie beides
+    # mit inhaltslosen "executed (rc=0)"-Eintraegen).
+    if op in READONLY_OPS:
+        try:
+            result = run(args, stream)
+        except Exception as e:  # noqa: BLE001
+            result = {"ok": False, "rc": -1, "stdout": "", "stderr": f"Broker-Op-Fehler: {e}"}
+        result.setdefault("ok", False)
+        result["decision"] = "allowed"
+        result["key"] = key
+        return result
+
+    # Rein informativer Ausloeser-Kontext (z.B. Agent-Task-Auszug). Wird NUR
+    # ins Audit geschrieben und fliesst nie in key/desc/Policy/Befehl ein.
+    context = str(args.get("_context") or "")[:300]
+
     decision = policy.check(key, op, desc, user, default_allow)
     if decision == policy.DENY:
-        policy.audit(user, op, key, "denied")
+        policy.audit(user, op, key, "denied", context=context)
         return {"ok": False, "decision": "denied", "key": key,
                 "error": "Vom Administrator abgelehnt"}
     if decision == policy.PENDING:
-        policy.audit(user, op, key, "pending")
+        policy.audit(user, op, key, "pending", context=context)
         return {"ok": False, "decision": "pending", "key": key,
                 "error": "Wartet auf Admin-Freigabe"}
 
@@ -487,7 +507,7 @@ def dispatch(op: str, args: dict, user: str = "", stream=None) -> dict:
         result = {"ok": False, "rc": -1, "stdout": "", "stderr": f"Broker-Op-Fehler: {e}"}
     dur = int((time.monotonic() - t0) * 1000)
     policy.audit(user, op, key, "executed", rc=result.get("rc"),
-                 duration_ms=dur, detail=(result.get("stderr") or "")[:200])
+                 duration_ms=dur, detail=(result.get("stderr") or "")[:200], context=context)
     result.setdefault("ok", False)
     result["decision"] = "allowed"
     result["key"] = key

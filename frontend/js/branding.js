@@ -592,7 +592,7 @@
                   if (st) { st.textContent = '✓ Gespeichert'; setTimeout(function () { st.textContent = ''; }, 2500); }
               }).catch(function () {
                   var st = document.getElementById('br-status');
-                  if (st) st.textContent = '✗ Fehler beim Speichern';
+                  if (st) st.textContent = window.t('branding.save_error');
               });
         },
         uploadLogo: function (ev, variant, kind) {
@@ -638,7 +638,7 @@
             var f = ev.target.files && ev.target.files[0];
             if (!f) return;
             var st = document.getElementById('br-status');
-            if (st) st.textContent = '… Animation wird hochgeladen';
+            if (st) st.textContent = window.t('branding.uploading_animation');
             var fd = new FormData();
             fd.append('file', f);
             fetch('/api/branding/portal-video', {

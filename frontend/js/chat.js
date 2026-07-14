@@ -93,7 +93,7 @@
             const resp = await fetch('/api/tts/voices', { headers: { 'Authorization': `Bearer ${token}` } });
             if (!resp.ok) return;
             const voices = await resp.json();
-            chatTtsVoice.innerHTML = '<option value="">Standard</option>';
+            chatTtsVoice.innerHTML = '<option value="">' + window.t('chat.voice_default') + '</option>';
             voices.forEach(v => {
                 const opt = document.createElement('option');
                 opt.value = v.name;
@@ -234,7 +234,7 @@
                 if (window.SecurityIncidents) window.SecurityIncidents.showBlockedScreen(data.block_reason, data.block_incidents);
             } else if (data.success && data.token && data.must_change_password) {
                 // Lokaler Erst-Login: Kennwortaenderung ist nur im Hauptfenster moeglich.
-                loginError.textContent = 'Bitte zuerst im Hauptfenster (Startseite) das Kennwort aendern, dann hier anmelden.';
+                loginError.textContent = window.t('chat.change_pw_main_first');
             } else if (data.success && data.token) {
                 token = data.token;
                 localStorage.setItem('jarvis_chat_token', token);
@@ -273,19 +273,19 @@
             });
             if (!res.ok) {
                 statusDot.className = 'topbar-dot disconnected';
-                statusDot.title = 'LLM-Status nicht abrufbar';
+                statusDot.title = window.t('chat.llm_status_unavailable');
                 return;
             }
             const d = await res.json();
             const reachable = (d.status === 'ok' || d.status === 'degraded');
             statusDot.className = 'topbar-dot ' + (reachable ? 'connected' : 'disconnected');
             const name = d.profile_name ? ' – ' + d.profile_name : '';
-            if (d.status === 'ok')            statusDot.title = 'LLM erreichbar' + name;
-            else if (d.status === 'degraded') statusDot.title = 'LLM erreichbar (Modell fehlt)' + name;
-            else                              statusDot.title = 'LLM nicht erreichbar' + name;
+            if (d.status === 'ok')            statusDot.title = window.t('chat.llm_reachable') + name;
+            else if (d.status === 'degraded') statusDot.title = window.t('chat.llm_reachable_no_model') + name;
+            else                              statusDot.title = window.t('chat.llm_unreachable') + name;
         } catch (e) {
             statusDot.className = 'topbar-dot disconnected';
-            statusDot.title = 'LLM nicht erreichbar';
+            statusDot.title = window.t('chat.llm_unreachable');
         }
     }
     function _startLlmStatusIndicator() {
@@ -299,7 +299,7 @@
         ensureKbFilter();
         // Angemeldeter Benutzer: als Tooltip am Logout-Button ('<user> abmelden')
         const _logoutBtn = $('btn-logout');
-        if (_logoutBtn && _currentUser) _logoutBtn.title = _currentUser + ' abmelden';
+        if (_logoutBtn && _currentUser) _logoutBtn.title = window.t('chat.logout_user').replace('{u}', _currentUser);
         // Setup/Einstellungen-Button nur fuer Admins (direkt vor Logout)
         const _setupBtn = $('btn-settings');
         if (_setupBtn) {
@@ -556,7 +556,7 @@
             if (!okMime && !_SUPPORTED_EXT.has(ext)) {
                 unsupported.push(ext ? '.'+ext.toUpperCase() : (mime||'?')); continue;
             }
-            if (_pendingAttachments.length >= 5) { showToast('Max. 5 Dateien erlaubt.'); break; }
+            if (_pendingAttachments.length >= 5) { showToast(window.t('chat.max_files')); break; }
             let type = 'file';
             if (mime.startsWith('image/') || ['jpg','jpeg','png','gif','bmp','tif','tiff','webp'].includes(ext)) type = 'image';
             else if (mime.startsWith('audio/') || ['mp3','m4a','wav','ogg','aac','flac'].includes(ext)) type = 'audio';
@@ -571,11 +571,11 @@
                     r.readAsDataURL(file);
                 });
                 _pendingAttachments.push({ name: file.name, mime_type: mime, data: b64, type });
-            } catch(e) { showToast(`"${file.name}" konnte nicht gelesen werden.`); }
+            } catch(e) { showToast(window.t('chat.file_read_error').replace('{f}', file.name)); }
         }
         if (unsupported.length > 0) {
             const fmts = [...new Set(unsupported)].join(', ');
-            showToast(`Format nicht unterstützt: ${fmts} – Erlaubt: Bilder, Audio, Video, PDF, Office (xlsx/docx/pptx), Text, XML, ZIP`);
+            showToast(window.t('chat.format_unsupported').replace('{f}', fmts));
         }
         renderPreviews();
     }
@@ -598,7 +598,7 @@
     function sendMessage() {
         const text = msgInput.value.trim();
         if (!text && _pendingAttachments.length === 0) return;
-        const finalText = text || 'Bitte analysiere/beschreibe die angehängten Dateien.';
+        const finalText = text || window.t('chat.analyze_attachments');
 
         _lastUserMsg = finalText;
         _lastBotResp = '';
@@ -615,7 +615,7 @@
         // Benutzernachricht im Verlauf speichern (nur Text + Hinweis, kein base64)
         const _attIcon = m => { m = (m || '').toLowerCase(); return m.startsWith('image/') ? '🖼️' : m === 'application/pdf' ? '📄' : m.startsWith('audio/') ? '🎵' : m.startsWith('video/') ? '🎬' : '📎'; };
         const attNote = _pendingAttachments.length > 0
-            ? ' [' + _pendingAttachments.map(a => `${_attIcon(a.mime_type)} ${a.name || 'Datei'}`).join(', ') + ']'
+            ? ' [' + _pendingAttachments.map(a => `${_attIcon(a.mime_type)} ${a.name || window.t('chat.file')}`).join(', ') + ']'
             : '';
         _chatHistory.push({ role: 'user', text: finalText + attNote, time: timeStr(), date: _currentDateStr(), ts: Date.now() });
         _saveHistory();
@@ -864,7 +864,7 @@
                 ? { label: 'Jarvis', state: agentRunning ? 'running' : 'idle', is_sub_agent: false }
                 : _agentInfos[id];
             if (!info) return '';
-            const dot = info.state === 'running' ? '#f59e0b' : info.state === 'paused' ? '#a855f7' : '#22c55e';
+            const dot = info.state === 'running' ? 'var(--warning)' : info.state === 'paused' ? 'var(--accent)' : 'var(--success)';
             const act = id === _activeAgentId;
             return '<div class="agent-card" data-agent-id="' + esc(id) + '" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;cursor:pointer;margin-bottom:4px;'
                 + (act ? 'background:rgba(var(--accent-rgb,99,102,241),0.18);' : '') + '">'
@@ -1127,7 +1127,7 @@
         if (_editingRow) return;
         if (!row || !bubble) return;
         if (!(window.JarvisChatLib && window.JarvisChatLib.enterEditMode)) {
-            alert('Edit-Bibliothek (chatlib.js) nicht geladen.');
+            alert(window.t('chat.editlib_missing'));
             return;
         }
         const ok = window.JarvisChatLib.enterEditMode(row, bubble, {
@@ -1233,7 +1233,7 @@
             const tps = outTok / secNum;
             s += ` · ${tps >= 100 ? tps.toFixed(0) : tps.toFixed(1)} tok/s`;
         }
-        s += ` · ${steps} Schritte`;
+        s += ' · ' + window.t('chat.n_steps').replace('{n}', steps);
         _lastStats = s;
         stats.textContent = _lastStats;
         currentBotBubble.parentElement.appendChild(stats);
@@ -1269,8 +1269,8 @@
         const fmt = d => d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' });
         const todayStr = fmt(new Date());
         const yesterStr = fmt(new Date(Date.now() - 86400000));
-        if (str === todayStr)   return 'Heute';
-        if (str === yesterStr)  return 'Gestern';
+        if (str === todayStr)   return window.t('chat.today');
+        if (str === yesterStr)  return window.t('chat.yesterday');
         return str;
     }
 
@@ -1404,7 +1404,7 @@
                 cell.className = 'uc-ig-cell';
                 const img = document.createElement('img');
                 img.src = _dataUrl(att);
-                img.alt = att.name || 'Bild';
+                img.alt = att.name || window.t('chat.image');
                 img.loading = 'lazy';
                 cell.appendChild(img);
                 if (i === MAX - 1 && imgAtts.length > MAX) {
@@ -1459,10 +1459,10 @@
             const badge = isPdf ? 'PDF' : att.name?.split('.').pop()?.toUpperCase() || 'Datei';
             wrap.innerHTML = `<div class="uc-fc-icon">${icon}</div>
                 <div class="uc-fc-info" style="flex:1;min-width:0;">
-                    <span class="uc-fc-name" title="${escapeHtml(att.name||'')}">${escapeHtml(att.name||'Datei')}</span>
+                    <span class="uc-fc-name" title="${escapeHtml(att.name||'')}">${escapeHtml(att.name||window.t('chat.file'))}</span>
                     <span class="uc-fc-badge">${escapeHtml(badge)}</span>
                 </div>
-                <a class="uc-fc-dl" href="${src}" download="${escapeHtml(att.name||'datei')}" title="Herunterladen" onclick="event.stopPropagation()">⬇</a>`;
+                <a class="uc-fc-dl" href="${src}" download="${escapeHtml(att.name||'datei')}" title="${escapeHtml(window.t('chat.download'))}" onclick="event.stopPropagation()">⬇</a>`;
             wrap.addEventListener('contextmenu', e => showCtxMenu(e, att));
             addLongPress(wrap, e => showCtxMenu(e, att));
         }
@@ -1621,7 +1621,7 @@
         const divider = document.createElement('div');
         divider.className = 'date-sep';
         divider.style.opacity = '0.45';
-        divider.innerHTML = `<span>── Neue Sitzung ──</span>`;
+        divider.innerHTML = `<span>── ${escapeHtml(window.t('chat.new_session'))} ──</span>`;
         messagesEl.appendChild(divider);
 
         scrollToBottom();
@@ -1717,7 +1717,7 @@
                 totpSetupFlow.classList.remove('hidden');
             }
         } catch {
-            totpModalError.textContent = 'Verbindungsfehler';
+            totpModalError.textContent = window.t('chat.connection_error');
         }
 
         totpModal.classList.remove('hidden');
@@ -1749,12 +1749,12 @@
             const data = await resp.json();
             if (data.success) {
                 totpModal.classList.add('hidden');
-                addStatusLine('✅ 2FA wurde aktiviert');
+                addStatusLine('✅ ' + window.t('chat.totp_enabled'));
             } else {
-                totpModalError.textContent = data.error || 'Verifizierung fehlgeschlagen';
+                totpModalError.textContent = data.error || window.t('chat.verify_failed');
             }
         } catch {
-            totpModalError.textContent = 'Verbindungsfehler';
+            totpModalError.textContent = window.t('chat.connection_error');
         }
     });
 
@@ -1777,12 +1777,12 @@
             if (data.success) {
                 totpModal.classList.add('hidden');
                 $('totp-disable-pass').value = '';
-                addStatusLine('🔓 2FA wurde deaktiviert');
+                addStatusLine('🔓 ' + window.t('chat.totp_disabled'));
             } else {
-                totpModalError.textContent = data.error || 'Deaktivierung fehlgeschlagen';
+                totpModalError.textContent = data.error || window.t('chat.disable_failed');
             }
         } catch {
-            totpModalError.textContent = 'Verbindungsfehler';
+            totpModalError.textContent = window.t('chat.connection_error');
         }
     });
     }  // Ende 2FA-Guard

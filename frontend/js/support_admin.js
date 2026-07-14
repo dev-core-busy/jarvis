@@ -120,14 +120,14 @@
                 .then(function (d) {
                     if (!d || !d.ok) {
                         if (box) box.innerHTML = '<div class="kb-hint" style="color:var(--danger);">'
-                            + esc((d && d.error) || 'Bereiche nicht ladbar (Confluence aktiv?)') + '</div>';
+                            + esc((d && d.error) || window.t('support_admin.areas_unloadable_hint')) + '</div>';
                         return;
                     }
                     self._cfSpaces = d.spaces || [];
                     self._renderSpaces();
                 })
                 .catch(function () {
-                    if (box) box.innerHTML = '<div class="kb-hint" style="color:var(--danger);">Bereiche nicht ladbar.</div>';
+                    if (box) box.innerHTML = '<div class="kb-hint" style="color:var(--danger);">' + window.t('support_admin.areas_unloadable') + '</div>';
                 });
         },
 

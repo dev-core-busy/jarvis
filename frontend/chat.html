@@ -7,7 +7,7 @@
          bleibt dadurch immer sichtbar. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>Jarvis Chat</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=5">
+    <link rel="stylesheet" href="/static/css/theme.css?v=6">
     <link rel="stylesheet" href="/static/css/chat.css?v=35">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
@@ -92,7 +92,7 @@
                 <select id="chat-tts-voice" class="tts-voice-select" data-i18n-title="chat.tts_toggle" title="Stimme wählen">
                     <option value="" data-i18n="chat.voice_default">Standard</option>
                 </select>
-                <button id="btn-tts-preview-chat" data-i18n-title="profile.voice_preview" title="Stimme vorhören" style="flex-shrink:0;padding:0 7px;height:30px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font-size:0.85rem;line-height:1;">▶</button>
+                <button id="btn-tts-preview-chat" data-i18n-title="profile.voice_preview" title="Stimme vorhören" style="flex-shrink:0;padding:0 7px;height:30px;border:1px solid rgba(var(--fg-rgb),0.15);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font-size:0.85rem;line-height:1;">▶</button>
             </div>
             <button class="btn-theme" id="btn-tts-chat" data-i18n-title="chat.tts_toggle" title="Sprachausgabe ein/aus">
                 <svg id="chat-tts-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
@@ -199,13 +199,13 @@
     <button id="uc-lb-next" class="uc-lb-nav">›</button>
     <div id="uc-lb-counter" class="uc-lb-counter"></div>
     <div class="uc-lb-actions">
-        <button id="uc-lb-save" class="uc-lb-btn">💾 Speichern</button>
+        <button id="uc-lb-save" class="uc-lb-btn" data-i18n="chat.lightbox_save">💾 Speichern</button>
     </div>
 </div>
 
 <!-- Kontextmenü (Rechtsklick auf Anhang) -->
 <div id="uc-ctx-menu" class="uc-ctx-menu">
-    <button class="uc-ctx-item" id="uc-ctx-save-btn">💾 Speichern</button>
+    <button class="uc-ctx-item" id="uc-ctx-save-btn" data-i18n="chat.lightbox_save">💾 Speichern</button>
 </div>
 
 <!-- SSL-Zertifikat Modal -->
@@ -264,7 +264,7 @@ sudo update-ca-certificates</code></pre>
             </ol>
         </div>
 
-        <button class="btn-modal-close" id="btn-cert-close">Schließen</button>
+        <button class="btn-modal-close" id="btn-cert-close" data-i18n="common.close">Schließen</button>
     </div>
 </div>
 
@@ -290,16 +290,16 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=27"></script>
+<script src="/static/js/i18n.js?v=29"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=10"></script>
-<script src="/static/js/issues.js?v=5"></script>
-<script src="/static/js/branding.js?v=16"></script>
-<script src="/static/js/security_incidents.js?v=3"></script>
+<script src="/static/js/issues.js?v=6"></script>
+<script src="/static/js/branding.js?v=17"></script>
+<script src="/static/js/security_incidents.js?v=5"></script>
 <!-- Wissensgruppen-Filter (Checkbox-Auswahl der genutzten Gruppen) -->
 <script src="/static/js/kbgroups.js?v=4"></script>
-<script src="/static/js/kbgroupfilter.js?v=3"></script>
-<script src="/static/js/chat.js?v=67"></script>
+<script src="/static/js/kbgroupfilter.js?v=5"></script>
+<script src="/static/js/chat.js?v=69"></script>
 <!-- Interaktive Charts (```chartjs) – Chart.js lokal gevendort (CSP: kein CDN) -->
 <script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
 <script src="/static/js/charts.js?v=3"></script>

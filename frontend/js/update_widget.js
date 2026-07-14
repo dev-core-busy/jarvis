@@ -127,7 +127,7 @@
         if (body) {
             var info = document.createElement('p');
             info.className = 'kb-hint';
-            info.style.cssText = 'margin:0;color:#f39c12;';
+            info.style.cssText = 'margin:0;color:var(--warning);';
             info.textContent = T('update.in_progress');
             body.prepend(info); body.scrollTop = 0;
         }
@@ -135,13 +135,13 @@
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (d.ok) {
-                    if (body) body.innerHTML = '<p style="color:#2ecc71;font-size:.85rem;">' + T('update.success') + '</p>';
+                    if (body) body.innerHTML = '<p style="color:var(--success);font-size:.85rem;">' + T('update.success') + '</p>';
                     setTimeout(function () { window.location.reload(); }, 5000);
                 } else {
                     if (body) {
                         var err = document.createElement('p');
                         err.className = 'kb-hint';
-                        err.style.cssText = 'color:#e74c3c;white-space:pre-wrap;word-break:break-word;';
+                        err.style.cssText = 'color:var(--danger);white-space:pre-wrap;word-break:break-word;';
                         err.textContent = T('update.error', { msg: d.error || d.detail || T('update.unknown_error') });
                         body.prepend(err); body.scrollTop = 0;
                     }

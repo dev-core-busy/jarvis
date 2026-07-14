@@ -12,8 +12,8 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=5">
-    <link rel="stylesheet" href="/static/css/style.css?v=118">
+    <link rel="stylesheet" href="/static/css/theme.css?v=7">
+    <link rel="stylesheet" href="/static/css/style.css?v=121">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -45,7 +45,7 @@
                     <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;" data-i18n="login.username.label">BENUTZERNAME</label>
                     <input type="text" id="login-username" name="username" placeholder="Benutzername" data-i18n-placeholder="login.username.ph"
                         autocomplete="username" required
-                        style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
+                        style="width:100%;box-sizing:border-box;background:rgba(var(--fg-rgb),0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
                         onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(var(--accent-rgb),0.2)'"
                         onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
                 </div>
@@ -54,7 +54,7 @@
                     <div style="position:relative;">
                         <input type="password" id="login-password" name="password" placeholder="Kennwort" data-i18n-placeholder="login.password.ph"
                             autocomplete="current-password" required
-                            style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 42px 11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
+                            style="width:100%;box-sizing:border-box;background:rgba(var(--fg-rgb),0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 42px 11px 14px;color:var(--text-primary);font-size:0.95rem;font-family:var(--font-body);outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
                             onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(var(--accent-rgb),0.2)'"
                             onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
                         <button type="button" id="btn-toggle-login-pw"
@@ -68,7 +68,7 @@
                     <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;" data-i18n="login.totp.label">2FA-CODE</label>
                     <input type="text" id="login-totp" placeholder="6-stelliger Code" data-i18n-placeholder="login.totp.ph"
                         autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
-                        style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:1.2rem;font-family:var(--font-mono);text-align:center;letter-spacing:8px;font-weight:600;outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
+                        style="width:100%;box-sizing:border-box;background:rgba(var(--fg-rgb),0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:1.2rem;font-family:var(--font-mono);text-align:center;letter-spacing:8px;font-weight:600;outline:none;transition:border-color 0.2s,box-shadow 0.2s;"
                         onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 12px rgba(var(--accent-rgb),0.2)'"
                         onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'">
                 </div>
@@ -141,7 +141,7 @@
                     </div>
                 </div>
                 <div id="cpw-strength" style="margin-bottom:8px;font-size:0.8rem;min-height:18px;"></div>
-                <div id="cpw-error" style="display:none;color:#ff6b6b;font-size:0.85rem;margin-bottom:10px;"></div>
+                <div id="cpw-error" style="display:none;color:var(--danger);font-size:0.85rem;margin-bottom:10px;"></div>
                 <div style="display:flex;gap:10px;justify-content:flex-end;">
                     <button class="btn-secondary" id="cpw-cancel" data-i18n="common.cancel">Abbrechen</button>
                     <button class="kb-btn-action" id="cpw-submit" data-i18n="security.save_pw">Kennwort speichern</button>
@@ -893,13 +893,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     </svg>
                     <span class="issues-badge" id="issues-badge" style="display:none;"></span>
                 </button>
-                <button class="btn-icon" id="btn-settings" data-i18n-title="header.settings" title="KI-Einstellungen">
+                <button class="btn-icon" id="btn-settings" data-i18n-title="header.settings" title="KI-Einstellungen" style="position:relative;">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="3"></circle>
                         <path
                             d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1 2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
                         </path>
                     </svg>
+                    <span class="broker-badge" id="gear-broker-badge" data-i18n-title="security.gear_badge_title" title="Offene Root-Freigaben" style="display:none;"></span>
                 </button>
                 <span id="header-user-badge" class="header-user-badge" data-i18n-title="header.logged_in_as" title="Angemeldet als"></span>
                 <button class="btn-icon" id="btn-logout" data-i18n-title="header.logout" title="Abmelden">
@@ -1432,7 +1433,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div id="agent-keys-list"><div style="opacity:.6;font-size:.8rem;">Lädt…</div></div>
                                 <div class="input-group" style="display:flex;gap:8px;align-items:center;margin-top:10px;">
                                     <input type="text" id="agent-key-newname" placeholder="Name des neuen Keys" style="flex:1;">
-                                    <button class="btn-secondary btn-small" id="btn-agent-key-add" style="flex-shrink:0;padding:4px 10px;font-size:0.75rem;">🔑 Key erstellen</button>
+                                    <button class="btn-secondary btn-small" id="btn-agent-key-add" data-i18n="settings.agentkey_create" style="flex-shrink:0;padding:4px 10px;font-size:0.75rem;">🔑 Key erstellen</button>
                                 </div>
                             </div>
                         </div>
@@ -1455,7 +1456,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <input type="email" id="le-email" placeholder="email@example.com" style="width:100%">
                                     </div>
                                     <small style="color:var(--text-muted); display:block; margin-bottom:10px;">Port 80 muss vom Internet erreichbar sein. Die Domain muss auf diesen Server zeigen.</small>
-                                    <button class="btn-secondary btn-small" id="btn-request-letsencrypt">Zertifikat beantragen</button>
+                                    <button class="btn-secondary btn-small" id="btn-request-letsencrypt" data-i18n="settings.request_cert">Zertifikat beantragen</button>
                                     <div id="le-progress" style="display:none; margin-top:10px; padding:10px; background:var(--bg-glass-heavy); border-radius:8px; font-family:monospace; font-size:0.78rem; max-height:150px; overflow-y:auto; color:var(--text-secondary);"></div>
                                 </div>
                             </div>
@@ -1555,7 +1556,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
                         <small class="tab-note" style="margin-top: 5px; opacity: 0.7;">
                             Aus dem Browser-Cookie <code>sessionKey</code> auf
-                            <a href="https://claude.ai" target="_blank" style="color: #818cf8;">claude.ai</a> kopieren.
+                            <a href="https://claude.ai" target="_blank" style="color: var(--accent);">claude.ai</a> kopieren.
                             <br>Chrome: F12 &rarr; Application &rarr; Cookies &rarr; sessionKey
                         </small>
                     </div>
@@ -1754,7 +1755,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             <span id="kb-progress-label" style="font-size:12px;opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;" data-i18n="knowledge.indexing_running">Indizierung läuft...</span>
                                             <span id="kb-progress-pct" style="font-size:12px;opacity:0.7;white-space:nowrap;flex-shrink:0;margin-left:8px;">0%</span>
                                         </div>
-                                        <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:6px;overflow:hidden;">
+                                        <div style="background:rgba(var(--fg-rgb),0.08);border-radius:4px;height:6px;overflow:hidden;">
                                             <div id="kb-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent-hover));border-radius:4px;transition:width 0.4s ease;"></div>
                                         </div>
                                         <div style="display:flex;justify-content:space-between;margin-top:4px;overflow:hidden;">
@@ -2020,7 +2021,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                 </div>
                                             </div>
                                             <button class="vis-btn vis-btn-primary" id="vis-wizard-save" data-i18n="common.save"
-                                                    onclick="if(window.visionManager){window.visionManager._saveWizardAction().catch(e=>alert('Fehler: '+e.message))}else{alert('visionManager nicht geladen')}">Speichern</button>
+                                                    onclick="if(window.visionManager){window.visionManager._saveWizardAction().catch(e=>alert('Fehler: '+e.message))}else{alert('visionManager nicht geladen')}" data-i18n="common.save">Speichern</button>
                                         </div>
                                         <button class="vis-btn vis-btn-sm" id="vis-wizard-cancel" data-i18n="common.cancel">Abbrechen</button>
                                     </div>
@@ -2185,7 +2186,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                                 <input type="file" id="br-logo-file" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif">
                                 <img id="br-logo-preview" alt="Logo dunkel" style="display:none;width:48px;height:48px;border-radius:50%;object-fit:contain;background:#0a0e17;border:1px solid var(--border);">
-                                <button class="btn-secondary" id="br-logo-del" type="button">Entfernen</button>
+                                <button class="btn-secondary" id="br-logo-del" type="button" data-i18n="branding.remove">Entfernen</button>
                             </div>
                         </div>
                         <div class="form-group">
@@ -2193,7 +2194,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                                 <input type="file" id="br-logo-file-light" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif">
                                 <img id="br-logo-preview-light" alt="Logo hell" style="display:none;width:48px;height:48px;border-radius:50%;object-fit:contain;background:#ffffff;border:1px solid var(--border);">
-                                <button class="btn-secondary" id="br-logo-del-light" type="button">Entfernen</button>
+                                <button class="btn-secondary" id="br-logo-del-light" type="button" data-i18n="branding.remove">Entfernen</button>
                             </div>
                         </div>
 
@@ -2203,7 +2204,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                                 <input type="file" id="br-portal-video-file" accept="video/quicktime,video/mp4,video/webm,.mov,.mp4,.m4v,.webm,.ogv">
                                 <video id="br-portal-video-preview" muted loop playsinline style="display:none;width:48px;height:48px;border-radius:50%;object-fit:cover;background:#000;border:1px solid var(--border);"></video>
-                                <button class="btn-secondary" id="br-portal-video-del" type="button">Entfernen</button>
+                                <button class="btn-secondary" id="br-portal-video-del" type="button" data-i18n="branding.remove">Entfernen</button>
                             </div>
                             <p class="kb-hint" style="margin:4px 0 0;">Empfehlung: MP4 (H.264) oder WEBM für zuverlässige Wiedergabe in allen Browsern (.mov spielt nicht überall ab). Wird stummgeschaltet in Endlosschleife abgespielt.</p>
                         </div>
@@ -2226,7 +2227,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
 
                         <div style="display:flex;align-items:center;gap:14px;margin-top:18px;">
-                            <button class="btn-primary" id="br-save" type="button">Speichern & anwenden</button>
+                            <button class="btn-primary" id="br-save" type="button" data-i18n="branding.save_apply">Speichern & anwenden</button>
                             <span id="br-status" style="color:var(--success);font-size:0.9em;"></span>
                         </div>
                         <p class="tab-note" style="margin-top:10px;opacity:0.7;">Hinweis: Die Vorschau wirkt sofort im aktuellen Fenster. Chat &amp; User-Chat übernehmen das Branding beim nächsten Laden.</p>
@@ -2248,8 +2249,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <input type="password" id="cf-token" class="config-input" placeholder="••••••••" autocomplete="new-password" style="width:100%;box-sizing:border-box;">
                         </div>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
-                            <button class="btn-primary" id="cf-save" type="button" style="flex:0 0 auto;">Speichern</button>
-                            <button class="btn-secondary" id="cf-test" type="button" style="flex:0 0 auto;">Verbindung testen</button>
+                            <button class="btn-primary" id="cf-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
+                            <button class="btn-secondary" id="cf-test" type="button" data-i18n="profile.test" style="flex:0 0 auto;">Verbindung testen</button>
                             <span id="cf-status" style="font-size:0.9em;"></span>
                         </div>
 
@@ -2257,7 +2258,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                             <input type="text" id="cf-search-q" class="config-input" placeholder="Suchbegriff…" style="flex:1;min-width:180px;">
                             <input type="text" id="cf-search-space" class="config-input" placeholder="Space-Key (optional)" style="width:170px;">
-                            <button class="btn-secondary" id="cf-search-btn" type="button">Suchen</button>
+                            <button class="btn-secondary" id="cf-search-btn" type="button" data-i18n="common.search">Suchen</button>
                         </div>
                         <div id="cf-results" style="margin-top:12px;display:flex;flex-direction:column;gap:6px;"></div>
                         <div id="cf-page-view" style="margin-top:12px;display:none;border:1px solid var(--border);border-radius:8px;padding:14px;background:var(--bg-secondary);">
@@ -2300,8 +2301,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <p class="kb-hint" style="margin:4px 0 0;">Zentrale Obergrenze für die Ticketsuche des Agenten (z.&nbsp;B. „alle Tickets von crm-XXXX"). Standard 50, Maximum 1000.</p>
                         </div>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
-                            <button class="btn-primary" id="jira-save" type="button" style="flex:0 0 auto;">Speichern</button>
-                            <button class="btn-secondary" id="jira-test" type="button" style="flex:0 0 auto;">Verbindung testen</button>
+                            <button class="btn-primary" id="jira-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
+                            <button class="btn-secondary" id="jira-test" type="button" data-i18n="profile.test" style="flex:0 0 auto;">Verbindung testen</button>
                             <span id="jira-status" style="font-size:0.9em;"></span>
                         </div>
 
@@ -2309,7 +2310,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                             <input type="text" id="jira-search-q" class="config-input" placeholder="Suchbegriff (Volltext)…" style="flex:1;min-width:180px;">
                             <input type="text" id="jira-search-project" class="config-input" placeholder="Projekt-Key (optional)" style="width:170px;">
-                            <button class="btn-secondary" id="jira-search-btn" type="button">Suchen</button>
+                            <button class="btn-secondary" id="jira-search-btn" type="button" data-i18n="common.search">Suchen</button>
                         </div>
                         <div style="margin-top:8px;">
                             <input type="text" id="jira-search-jql" class="config-input" placeholder="Erweitert: vollständige JQL (überschreibt die Felder oben)" style="width:100%;box-sizing:border-box;font-family:var(--font-mono);font-size:0.82rem;">
@@ -2356,9 +2357,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <h4 style="margin:18px 0 8px;">Confluence-Eingrenzung</h4>
                         <p class="kb-hint">Nur wirksam bei aktivem Confluence-Skill. <strong>Whitelist</strong> = nur die gewählten Bereiche durchsuchen; <strong>Blacklist</strong> = alle Bereiche außer den gewählten.</p>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="off">Aus</button>
-                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="whitelist">Whitelist</button>
-                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="blacklist">Blacklist</button>
+                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="off" data-i18n="common.off">Aus</button>
+                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="whitelist" data-i18n="common.whitelist">Whitelist</button>
+                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="blacklist" data-i18n="common.blacklist">Blacklist</button>
                         </div>
                         <div id="sup-cf-spaces-wrap" style="display:none;">
                             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
@@ -2370,7 +2371,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
 
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;">
-                            <button class="btn-primary" id="support-save" type="button" style="flex:0 0 auto;">Speichern</button>
+                            <button class="btn-primary" id="support-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
                             <a class="btn-secondary" href="/support" target="_blank" rel="noopener" style="flex:0 0 auto;text-decoration:none;">Support-Oberfläche öffnen ↗</a>
                             <span id="support-status" style="font-size:0.9em;"></span>
                         </div>
@@ -2458,7 +2459,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <span class="kb-hint" style="margin:0;" data-i18n="telemetry.ctx_utilization">History-Auslastung</span>
                                         <span class="kb-hint" id="ctx-fills-label" style="margin:0;">0 / 30 Einträge</span>
                                     </div>
-                                    <div style="height:6px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden;">
+                                    <div style="height:6px;background:rgba(var(--fg-rgb),0.08);border-radius:4px;overflow:hidden;">
                                         <div id="ctx-fills-bar" style="height:100%;width:0%;background:var(--accent);border-radius:4px;transition:width 0.4s;"></div>
                                     </div>
                                 </div>
@@ -2535,7 +2536,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                         <div style="display:flex;gap:10px;margin-top:16px;">
                             <button class="vis-btn vis-btn-primary" id="btn-tele-refresh" data-i18n="telemetry.refresh">↻ Aktualisieren</button>
-                            <button class="vis-btn" id="btn-tele-clear" style="color:#ef4444;border-color:rgba(239,68,68,0.4);" data-i18n="telemetry.reset">Zurücksetzen</button>
+                            <button class="vis-btn" id="btn-tele-clear" style="color:var(--danger);border-color:rgba(var(--danger-rgb),0.4);" data-i18n="telemetry.reset">Zurücksetzen</button>
                         </div>
                     </div>
                 </div>
@@ -2583,8 +2584,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </div>
                                 <div id="sec-cpw-strength" style="font-size:0.8rem;min-height:18px;margin-bottom:8px;width:25%;"></div>
-                                <div id="sec-cpw-error" style="display:none;color:#ff6b6b;font-size:0.85rem;margin-bottom:10px;"></div>
-                                <div id="sec-cpw-success" style="display:none;color:#4ade80;font-size:0.85rem;margin-bottom:10px;"></div>
+                                <div id="sec-cpw-error" style="display:none;color:var(--danger);font-size:0.85rem;margin-bottom:10px;"></div>
+                                <div id="sec-cpw-success" style="display:none;color:var(--success);font-size:0.85rem;margin-bottom:10px;"></div>
                                 <button class="kb-btn-action" id="sec-cpw-submit" data-i18n="security.save_pw">Kennwort speichern</button>
                             </div>
                         </div>
@@ -2617,7 +2618,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
 
                                 <!-- ── Verzeichnis-Suche (Service-Konto, optional) ── -->
-                                <div style="margin:6px 0 4px;padding:12px 14px;border:1px solid rgba(255,255,255,0.09);border-radius:10px;background:rgba(255,255,255,0.02);">
+                                <div style="margin:6px 0 4px;padding:12px 14px;border:1px solid rgba(var(--fg-rgb),0.09);border-radius:10px;background:rgba(var(--fg-rgb),0.02);">
                                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
                                         <span style="font-size:1rem;">🔎</span>
                                         <span style="font-weight:600;font-size:0.9rem;">Verzeichnis-Suche (Service-Konto, optional)</span>
@@ -2654,7 +2655,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
 
                                 <!-- ── Wissens-Editoren ── -->
-                                <hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:14px 0 12px;">
+                                <hr style="border:none;border-top:1px solid rgba(var(--fg-rgb),0.07);margin:14px 0 12px;">
                                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
                                     <span style="font-size:1rem;">📚</span>
                                     <span style="font-weight:600;font-size:0.92rem;">Wissens-Editoren</span>
@@ -2681,7 +2682,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
 
                                 <!-- ── Internet-Zugang ── -->
-                                <hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:14px 0 12px;">
+                                <hr style="border:none;border-top:1px solid rgba(var(--fg-rgb),0.07);margin:14px 0 12px;">
                                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
                                     <span style="font-size:1rem;">🌐</span>
                                     <span style="font-weight:600;font-size:0.92rem;">Internet-Zugang</span>
@@ -2718,25 +2719,25 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div id="ad-internet-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:10px;border:1px solid;"></div>
 
                                 <!-- ── Internet-Egress-Sperre (harte OS-Grenze) ── -->
-                                <div style="margin:6px 0 4px;padding:12px 14px;border:1px solid rgba(255,255,255,0.09);border-radius:10px;background:rgba(255,255,255,0.02);">
+                                <div style="margin:6px 0 4px;padding:12px 14px;border:1px solid rgba(var(--fg-rgb),0.09);border-radius:10px;background:rgba(var(--fg-rgb),0.02);">
                                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
                                         <span style="font-size:1rem;">🧱</span>
                                         <span style="font-weight:600;font-size:0.9rem;">Harte Egress-Sperre (Firewall)</span>
                                     </div>
                                     <p class="kb-hint" style="margin:0 0 10px;">Ergänzt die Berechtigung oben um eine <b>Betriebssystem-Firewall</b>: Shell-Befehle von Benutzern <b>ohne</b> Internet-Freigabe laufen als gesperrter OS-Benutzer, der nur internes Netz (LAN, Jira/Confluence), Loopback und DNS erreicht – öffentliches Internet wird verworfen. Das ist die harte Grenze und fängt auch ab, was die Muster-Erkennung verpasst (z.&nbsp;B. rohe Sockets). Einmalige Einrichtung pro Server.</p>
-                                    <button type="button" id="sec-fwdoc-btn" class="kb-btn-secondary"
-                                            style="margin:0 0 10px;padding:5px 12px;font-size:0.85rem;line-height:1.4;display:inline-flex;align-items:center;gap:6px;">❓ <span>Funktionsweise &amp; Sicherheitsfeatures</span></button>
+                                    <button type="button" id="sec-fwdoc-btn" class="sec-btn"
+                                            style="margin:0 0 10px;">❓ <span>Funktionsweise &amp; Sicherheitsfeatures</span></button>
                                     <div id="sec-egress-status" style="font-size:0.82rem;line-height:1.75;margin-bottom:10px;color:var(--text-secondary,#cbd5e1);">Status wird geladen…</div>
                                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                                        <button type="button" id="sec-egress-setup" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(139,92,246,0.5);background:rgba(139,92,246,0.15);color:var(--text-primary,#e2e8f0);cursor:pointer;">Einrichten / Reparieren</button>
-                                        <button type="button" id="sec-egress-verify" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.05);color:var(--text-primary,#e2e8f0);cursor:pointer;">Status prüfen (Live-Test)</button>
-                                        <button type="button" id="sec-egress-teardown" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.12);color:var(--text-primary,#e2e8f0);cursor:pointer;">Deaktivieren</button>
+                                        <button type="button" id="sec-egress-setup" data-i18n="security.egress_setup" class="sec-btn primary">Einrichten / Reparieren</button>
+                                        <button type="button" id="sec-egress-verify" data-i18n="security.egress_verify" class="sec-btn">Status prüfen (Live-Test)</button>
+                                        <button type="button" id="sec-egress-teardown" data-i18n="security.egress_teardown" class="sec-btn danger">Deaktivieren</button>
                                     </div>
                                     <div id="sec-egress-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
                                 </div>
 
                                 <!-- ── Administratoren ── -->
-                                <hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:14px 0 12px;">
+                                <hr style="border:none;border-top:1px solid rgba(var(--fg-rgb),0.07);margin:14px 0 12px;">
                                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
                                     <span style="font-size:1rem;">🛡️</span>
                                     <span style="font-weight:600;font-size:0.92rem;">Administratoren</span>
@@ -2824,7 +2825,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         hint.style.display     = 'block';
                                         if (d.access_mode === 'open') {
                                             hint.style.borderColor = '#f59e0b';
-                                            hint.style.background  = 'rgba(245,158,11,0.08)';
+                                            hint.style.background  = 'rgba(var(--warning-rgb),0.08)';
                                             hint.style.color       = '#f59e0b';
                                             hint.textContent       = window.t('security.ad_warn_open');
                                         } else if (d.access_mode === 'users') {
@@ -2844,7 +2845,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             if (!d.knowledge_editors && !d.knowledge_editors_group) {
                                                 kst.style.display = 'block';
                                                 kst.style.borderColor = '#f59e0b';
-                                                kst.style.background  = 'rgba(245,158,11,0.06)';
+                                                kst.style.background  = 'rgba(var(--warning-rgb),0.06)';
                                                 kst.style.color       = '#f59e0b';
                                                 kst.textContent = '📚 Wissens-Editoren: Alle angemeldeten Benutzer dürfen Wissen bearbeiten';
                                             } else if (d.knowledge_edit_mode === 'users') {
@@ -2869,7 +2870,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             if (!d.internet_users && !d.internet_group) {
                                                 ist.style.display = 'block';
                                                 ist.style.borderColor = '#f59e0b';
-                                                ist.style.background  = 'rgba(245,158,11,0.06)';
+                                                ist.style.background  = 'rgba(var(--warning-rgb),0.06)';
                                                 ist.style.color       = '#f59e0b';
                                                 ist.textContent = '🌐 Internet-Zugang: Alle angemeldeten Benutzer dürfen Internet-Abfragen machen';
                                             } else if (d.internet_mode === 'users') {
@@ -2894,7 +2895,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             if (!d.admins && !d.admins_group) {
                                                 ast.style.display = 'block';
                                                 ast.style.borderColor = '#f59e0b';
-                                                ast.style.background  = 'rgba(245,158,11,0.06)';
+                                                ast.style.background  = 'rgba(var(--warning-rgb),0.06)';
                                                 ast.style.color       = '#f59e0b';
                                                 ast.textContent = '🛡️ Administratoren: nur lokaler Benutzer jarvis';
                                             } else if (d.admin_mode === 'users') {
@@ -2945,7 +2946,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             setTimeout(() => { st.textContent = ''; }, 3000);
                                             await _adLoad();
                                         } catch(e) {
-                                            st.textContent = '✗ Fehler: ' + e.message; st.style.color = '#ef4444';
+                                            st.textContent = '✗ Fehler: ' + e.message; st.style.color = 'var(--danger)';
                                         } finally { btn.disabled = false; }
                                     };
 
@@ -2965,9 +2966,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             if (d.reachable) {
                                                 res.style.color='#34d399'; res.textContent='✓ ' + srv + ' – ' + window.t('security.ad_reachable');
                                             } else {
-                                                res.style.color='#ef4444'; res.textContent='✗ ' + window.t('security.ad_unreachable') + ': ' + (d.error || 'Timeout');
+                                                res.style.color='var(--danger)'; res.textContent='✗ ' + window.t('security.ad_unreachable') + ': ' + (d.error || 'Timeout');
                                             }
-                                        } catch(e) { res.style.color='#ef4444'; res.textContent='✗ ' + e.message; }
+                                        } catch(e) { res.style.color='var(--danger)'; res.textContent='✗ ' + e.message; }
                                     };
 
                                     document.addEventListener('DOMContentLoaded', function() {
@@ -2997,14 +2998,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <div style="display:flex;gap:8px;">
                                         <input type="text" id="totp-settings-code" data-i18n-placeholder="chat.totp_ph" placeholder="6-stelliger Code"
                                             inputmode="numeric" maxlength="6" autocomplete="one-time-code"
-                                            style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:1.1rem;text-align:center;letter-spacing:6px;font-weight:600;font-family:var(--font-mono);outline:none;">
+                                            style="flex:1;background:rgba(var(--fg-rgb),0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:1.1rem;text-align:center;letter-spacing:6px;font-weight:600;font-family:var(--font-mono);outline:none;">
                                         <button id="btn-totp-settings-verify" class="settings-action-btn" style="white-space:nowrap;" data-i18n="security.totp_activate">Aktivieren</button>
                                     </div>
                                 </div>
                                 <div id="totp-settings-disable" style="display:none;">
                                     <div style="display:flex;gap:8px;">
                                         <input type="password" id="totp-settings-disable-pw" data-i18n-placeholder="security.pw_ph_current" placeholder="Kennwort zur Bestätigung"
-                                            style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:0.9rem;outline:none;">
+                                            style="flex:1;background:rgba(var(--fg-rgb),0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;color:var(--text-primary);font-size:0.9rem;outline:none;">
                                         <button id="btn-totp-settings-disable" class="settings-action-btn" style="background:var(--danger);white-space:nowrap;" data-i18n="security.totp_deactivate">Deaktivieren</button>
                                     </div>
                                 </div>
@@ -3082,10 +3083,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="sk-openclaw-toggle" id="sec-sect-incidents-tog">▶</span>
                             </div>
                             <div id="sec-sect-incidents-body" class="kb-collapse-body" style="display:none;">
-                                <button type="button" id="sec-secdoc-btn" class="kb-btn-secondary"
+                                <button type="button" id="sec-secdoc-btn" class="sec-btn"
                                         title="Technische Funktionsbeschreibung der Sicherheitsschicht"
                                         data-i18n-title="security.doc_btn_title"
-                                        style="margin:0 0 10px;padding:5px 12px;font-size:0.85rem;line-height:1.4;display:inline-flex;align-items:center;gap:6px;">❓ <span data-i18n="security.doc_btn_label">Funktionsweise &amp; Sicherheitsfeatures</span></button>
+                                        style="margin:0 0 10px;">❓ <span data-i18n="security.doc_btn_label">Funktionsweise &amp; Sicherheitsfeatures</span></button>
                                 <p class="kb-hint" data-i18n="security.incidents_desc">Erkennt Jailbreak- und Prompt-Injection-Versuche in Chat, Support und WhatsApp. Betroffene Konten werden sofort gesperrt – sie können sich noch anmelden und sehen dort nur den Sperr-Hinweis samt Protokoll. Nur ein lokaler Benutzer kann wieder freischalten.</p>
 
                                 <label class="sec-guard-opt" style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;font-weight:600;">
@@ -3112,9 +3113,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div id="sec-sandbox-status" class="kb-hint" style="margin:0 0 4px;"></div>
                                 <p class="kb-hint" data-i18n="security.sandbox_desc">Für Netzwerk-/Domain-Benutzer ist der Datei- und Shell-Zugriff im Code beschränkt (Schreiben nur im Arbeitsbereich, Lesen nur in Wissens-/Arbeitsverzeichnissen; Secrets, Root- und System-Bereiche gesperrt; verschleierte/base64-kodierte Ausführung blockiert). Ist die OS-Sandbox aktiv, laufen deren Shell-Befehle zusätzlich als unprivilegierter Betriebssystem-Benutzer – das Betriebssystem erzwingt die Grenze dann hart.</p>
                                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                                    <button type="button" id="sec-sandbox-setup" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(139,92,246,0.5);background:rgba(139,92,246,0.15);color:var(--text-primary,#e2e8f0);cursor:pointer;">Aktivieren / Reparieren</button>
-                                    <button type="button" id="sec-sandbox-verify" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.05);color:var(--text-primary,#e2e8f0);cursor:pointer;">Isolation testen</button>
-                                    <button type="button" id="sec-sandbox-teardown" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.12);color:var(--text-primary,#e2e8f0);cursor:pointer;">Deaktivieren</button>
+                                    <button type="button" id="sec-sandbox-setup" data-i18n="security.sandbox_setup" class="sec-btn primary">Aktivieren / Reparieren</button>
+                                    <button type="button" id="sec-sandbox-verify" data-i18n="security.sandbox_verify" class="sec-btn">Isolation testen</button>
+                                    <button type="button" id="sec-sandbox-teardown" data-i18n="security.sandbox_teardown" class="sec-btn danger">Deaktivieren</button>
                                 </div>
                                 <div id="sec-sandbox-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
 
@@ -3130,19 +3131,19 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <!-- ── Root-Freigaben (Root-Broker) – eigene, immer sichtbare Sektion ── -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header" id="sec-sect-broker-hdr">
-                                <h3><span data-i18n="security.section_broker">Root-Freigaben (Root-Broker)</span> <span id="sec-broker-pending-badge" style="display:none;margin-left:6px;padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.5);color:var(--text-primary);"></span></h3>
+                                <h3><span data-i18n="security.section_broker">Root-Freigaben (Root-Broker)</span> <span id="sec-broker-pending-badge" style="display:none;margin-left:6px;padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(var(--warning-rgb),0.18);border:1px solid rgba(var(--warning-rgb),0.5);color:var(--text-primary);"></span></h3>
                                 <span class="sk-openclaw-toggle" id="sec-sect-broker-tog">▼</span>
                             </div>
                             <div id="sec-sect-broker-body" class="kb-collapse-body">
-                                <button type="button" id="sec-brkdoc-btn" class="kb-btn-secondary"
+                                <button type="button" id="sec-brkdoc-btn" class="sec-btn"
                                         title="Technische Funktionsbeschreibung der Rechte-Trennung (Root-Broker)"
                                         data-i18n-title="security.brkdoc_btn_title"
-                                        style="margin:0 0 10px;padding:5px 12px;font-size:0.85rem;line-height:1.4;display:inline-flex;align-items:center;gap:6px;">❓ <span data-i18n="security.brkdoc_btn_label">Funktionsweise &amp; Sicherheitsfeatures</span></button>
+                                        style="margin:0 0 10px;">❓ <span data-i18n="security.brkdoc_btn_label">Funktionsweise &amp; Sicherheitsfeatures</span></button>
                                 <div id="sec-broker-status" class="kb-hint" style="margin:0 0 4px;"></div>
                                 <p class="kb-hint" data-i18n="security.broker_desc">Im getrennten Betrieb läuft die Benutzeroberfläche unprivilegiert; alles, was root braucht, läuft über den Root-Broker. Jede Root-Operation erscheint hier als auditierbarer Eintrag: Systemoperationen werden automatisch erlaubt (widerrufbar), unbekannte Root-Shell-Befehle des Agenten warten auf deine Freigabe. Entscheidungen wirken sofort.</p>
                                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                                    <button type="button" id="sec-broker-refresh" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.05);color:var(--text-primary,#e2e8f0);cursor:pointer;" data-i18n="security.broker_refresh">Aktualisieren</button>
-                                    <button type="button" id="sec-broker-audit-btn" style="font-size:0.82rem;padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.05);color:var(--text-primary,#e2e8f0);cursor:pointer;" data-i18n="security.broker_audit">Audit-Log anzeigen</button>
+                                    <button type="button" id="sec-broker-refresh" class="sec-btn" data-i18n="security.broker_refresh">Aktualisieren</button>
+                                    <button type="button" id="sec-broker-audit-btn" class="sec-btn" data-i18n="security.broker_audit">Audit-Log anzeigen</button>
                                 </div>
                                 <div id="sec-broker-list" style="margin-top:8px;"></div>
                                 <div id="sec-broker-audit" style="display:none;margin-top:8px;"></div>
@@ -3275,32 +3276,32 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=61"></script>
+    <script src="/static/js/i18n.js?v=64"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=15"></script>
     <script src="/static/js/context.js?v=4"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
     <script src="/static/js/kbmatrix.js?v=5"></script>
-    <script src="/static/js/extractor.js?v=21"></script>
-    <script src="/static/js/vnc.js?v=17"></script>
+    <script src="/static/js/extractor.js?v=22"></script>
+    <script src="/static/js/vnc.js?v=18"></script>
     <script src="/static/js/skills.js?v=30"></script>
-    <script src="/static/js/whatsapp.js?v=10"></script>
-    <script src="/static/js/knowledge.js?v=50"></script>
+    <script src="/static/js/whatsapp.js?v=12"></script>
+    <script src="/static/js/knowledge.js?v=51"></script>
     <script src="/static/js/mcp.js?v=3"></script>
-    <script src="/static/js/vision.js?v=28"></script>
-    <script src="/static/js/confluence.js?v=5"></script>
+    <script src="/static/js/vision.js?v=30"></script>
+    <script src="/static/js/confluence.js?v=6"></script>
     <script src="/static/js/jira.js?v=5"></script>
-    <script src="/static/js/support_admin.js?v=10"></script>
-    <script src="/static/js/telemetry.js?v=5"></script>
+    <script src="/static/js/support_admin.js?v=11"></script>
+    <script src="/static/js/telemetry.js?v=6"></script>
     <script src="/static/js/chatlib.js?v=12"></script>
-    <script src="/static/js/issues.js?v=6"></script>
-    <script src="/static/js/branding.js?v=16"></script>
+    <script src="/static/js/issues.js?v=7"></script>
+    <script src="/static/js/branding.js?v=17"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/security_incidents.js?v=10"></script>
-    <script src="/static/js/ldap_picker.js?v=4"></script>
+    <script src="/static/js/security_incidents.js?v=15"></script>
+    <script src="/static/js/ldap_picker.js?v=6"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=145"></script>
+    <script src="/static/js/app.js?v=147"></script>
 </body>
 
 </html>

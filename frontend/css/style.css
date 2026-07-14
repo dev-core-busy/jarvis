@@ -625,7 +625,7 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
 }
 
 .btn-tts.tts-active {
-    background: rgba(139, 92, 246, 0.15);
+    background: rgba(var(--accent-rgb), 0.15);
     color: var(--accent);
     border-color: var(--accent);
 }
@@ -944,6 +944,25 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     line-height: 16px;
     text-align: center;
     box-shadow: 0 0 0 2px var(--bg-base, #0b0f17);
+    pointer-events: none;
+}
+
+/* Badge am Zahnrad: offene Root-Freigaben (Root-Broker). Nutzt Theme-Variablen. */
+.broker-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--bg-primary);
     pointer-events: none;
 }
 
@@ -4499,6 +4518,48 @@ select option:hover {
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* Sekundaeraktions-Button in Settings (z.B. 2FA aktivieren/deaktivieren).
+   Akzentbasiert – folgt Branding; Gefahr-Variante via inline background:var(--danger). */
+.settings-action-btn {
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.82rem;
+    padding: 0.45rem 0.9rem;
+    font-weight: 500;
+    transition: opacity 0.2s;
+}
+.settings-action-btn:hover:not(:disabled) { opacity: 0.85; }
+.settings-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Einheitliche Button-Familie fuer den Sicherheits-Tab (gleiche Groesse/Form;
+   Farbe nur nach Rolle: primary=Akzent, danger=Gefahr, sonst neutral outline). */
+.sec-btn {
+    font-size: 0.82rem;
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-weight: 500;
+    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    transition: all var(--transition);
+}
+.sec-btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-hover); background: rgba(var(--fg-rgb), 0.05); }
+.sec-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.sec-btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+.sec-btn.primary:hover:not(:disabled) { opacity: 0.88; color: #fff; background: var(--accent); }
+.sec-btn.danger { border-color: rgba(var(--danger-rgb), 0.5); color: var(--danger); }
+.sec-btn.danger:hover:not(:disabled) { color: var(--danger); background: rgba(var(--danger-rgb), 0.12); border-color: var(--danger); }
+.sec-btn.small { font-size: 0.74rem; padding: 3px 10px; }
 
 /* Zustände */
 .kb-loading {

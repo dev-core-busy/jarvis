@@ -166,6 +166,8 @@ class ShellTool(BaseTool):
         command = "export MPLBACKEND=Agg MPLCONFIGDIR=/tmp/.mpl-$(id -u); " + command
 
         _broker_user = (kwargs.get("_broker_user") or "").strip()
+        # Rein informativer Ausloeser-Kontext (Agent-Task-Auszug) fuers Audit-Log.
+        _broker_context = (kwargs.get("_broker_context") or "").strip()[:200]
 
         # OS-Sandbox: Befehl als unprivilegierter OS-User ausfuehren (harte Grenze).
         # Wird vom Agent-Dispatch nur fuer nicht-privilegierte Benutzer gesetzt.
@@ -180,7 +182,8 @@ class ShellTool(BaseTool):
                 # Getrennter Betrieb: runuser braucht root → Root-Broker
                 return await self._exec_via_broker(
                     "sandbox_exec",
-                    {"user": _sandbox_user, "command": command, "timeout": timeout},
+                    {"user": _sandbox_user, "command": command, "timeout": timeout,
+                     "_context": _broker_context},
                     _broker_user, timeout, _status_callback)
 
         # Root-Befehle privilegierter Benutzer: ueber den Root-Broker (shell_root).
@@ -188,11 +191,11 @@ class ShellTool(BaseTool):
         elif _wants_root and os.geteuid() != 0 and kwargs.get("_root_broker"):
             return await self._exec_via_broker(
                 "shell_root",
-                {"command": command, "cwd": cwd, "timeout": timeout},
+                {"command": command, "cwd": cwd, "timeout": timeout,
+                 "_context": _broker_context},
                 _broker_user, timeout, _status_callback)
 
         # Python-Buffering deaktivieren fuer Live-Streaming
-        import os
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
 

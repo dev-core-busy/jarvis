@@ -24,8 +24,10 @@
             : ch === 'whatsapp' ? 'WhatsApp' : (ch || '–'));
     }
 
-    // Reine Lese-/Statusabfragen (UI-Polls) – nie freigabepflichtig, aus Liste/Audit ausblenden
-    var HIDE_OPS = { 'sandbox_status': 1, 'egress_status': 1 };
+    // Automatische/interne Wartungs- & Status-Ops (UI-Polls, Bildschirm-Entsperrung,
+    // VNC-Neustart) – ohne forensischen Wert, aus Liste UND Audit-Anzeige ausblenden
+    // (blendet auch bereits protokollierte Alt-Einträge aus).
+    var HIDE_OPS = { 'sandbox_status': 1, 'egress_status': 1, 'unlock_screen': 1, 'vnc_restart': 1 };
 
     var Mgr = {
         _bound: false,

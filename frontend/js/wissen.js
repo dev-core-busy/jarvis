@@ -162,10 +162,34 @@
                         return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';color:' + esc(g.color) + ';font-size:0.7rem;">' + esc(g.name) + '</span>';
                     }).join(' ');
                     var url = '/api/wissen/file?path=' + encodeURIComponent(f.path) + '&token=' + encodeURIComponent(token);
-                    return '<div class="wi-item"><a class="nm wi-flink" href="' + esc(url) + '" target="_blank" rel="noopener" title="' + esc(t('wissen.open_file')) + '">' + esc(f.name) + '</a>' + chips + '</div>';
+                    return '<div class="wi-item" data-path="' + esc(f.path) + '">'
+                        + '<a class="nm wi-flink" href="' + esc(url) + '" target="_blank" rel="noopener" title="' + esc(t('wissen.open_file')) + '">' + esc(f.name) + '</a>'
+                        + chips
+                        + '<button type="button" class="sec-btn small danger wi-file-del" title="' + esc(t('wissen.delete_file')) + '">×</button>'
+                        + '</div>';
                 }).join('');
+                box.querySelectorAll('.wi-file-del').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        var row = btn.closest('.wi-item');
+                        deleteFile(row.getAttribute('data-path'), (row.querySelector('.nm') || {}).textContent);
+                    });
+                });
             })
             .catch(function () {});
+    }
+
+    function deleteFile(path, name) {
+        if (!path) return;
+        if (!window.confirm(t('wissen.delete_confirm', { name: name || path }))) return;
+        fetch('/api/wissen/file', {
+            method: 'DELETE', headers: authH({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ path: path })
+        }).then(function (r) { return r.json(); })
+          .then(function (d) {
+              if (d && d.ok) { loadFiles(); }
+              else { window.alert((d && d.error) || t('wissen.delete_failed')); }
+          })
+          .catch(function () { window.alert(t('wissen.delete_failed')); });
     }
 
     // ── Extraktor ───────────────────────────────────────────────────────
@@ -265,7 +289,7 @@
                     row.innerHTML = '<span class="nm">' + esc(it.title || t('wissen.untitled')) + '</span>';
                     var rev = document.createElement('button'); rev.className = 'sec-btn small'; rev.textContent = t('wissen.review_btn');
                     rev.addEventListener('click', function () { showReview(it); window.scrollTo(0, document.body.scrollHeight); });
-                    var del = document.createElement('button'); del.className = 'sec-btn small danger'; del.textContent = '🗑';
+                    var del = document.createElement('button'); del.className = 'sec-btn small danger'; del.textContent = '×';
                     del.addEventListener('click', function () { deletePending(it.id, false); });
                     row.appendChild(rev); row.appendChild(del);
                     box.appendChild(row);

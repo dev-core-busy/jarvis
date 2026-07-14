@@ -5603,6 +5603,46 @@ async def wissen_file(path: str = "", user: str = Depends(require_auth_or_query)
                         content_disposition_type=disp)
 
 
+@app.delete("/api/wissen/file")
+async def wissen_file_delete(request: Request, user: str = Depends(require_auth)):
+    """Löscht eine Wissensdatei – NUR wenn sie einer Gruppe im Bereich des Nutzers
+    zugeordnet ist. Entfernt Datei, Gruppenzuordnung und Vektor-Index-Eintrag."""
+    from backend import knowledge_groups as kg
+    from backend.tools.knowledge import PROJECT_ROOT
+    body = await request.json()
+    rel = (body.get("path") or "").strip().lstrip("/")
+    if not rel:
+        return JSONResponse({"error": "Kein Pfad"}, status_code=400)
+    allowed = {g["id"] for g in _editable_groups_for(user)}
+    gids = kg.get_assignment(rel)
+    if not gids or not (allowed & set(gids)):
+        return JSONResponse({"error": "Kein Zugriff auf diese Datei"}, status_code=403)
+    root = Path(PROJECT_ROOT).resolve()
+    try:
+        target = (root / rel).resolve()
+        target.relative_to(root)   # Path-Traversal-Schutz
+    except ValueError:
+        return JSONResponse({"error": "Ungueltiger Pfad"}, status_code=400)
+    if not target.is_file():
+        return JSONResponse({"error": "Nicht gefunden"}, status_code=404)
+    try:
+        target.unlink()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": f"Löschen fehlgeschlagen: {e}"}, status_code=500)
+    try:
+        kg.set_assignment(rel, [])   # Gruppenzuordnung entfernen
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from backend.tools.knowledge import _get_vector_store
+        vs = _get_vector_store()
+        if vs:
+            vs.remove_file(str(target))
+    except Exception:  # noqa: BLE001
+        pass
+    return JSONResponse({"ok": True, "deleted": rel})
+
+
 @app.post("/api/wissen/extract")
 async def wissen_extract(request: Request, user: str = Depends(require_auth)):
     """URL abrufen -> Extraktions-Entwurf (Pending), dem Nutzer zugeordnet."""

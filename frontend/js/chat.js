@@ -323,6 +323,7 @@
         // CPU-Auslastung fuer alle (Werte kommen via WS-Event 'cpu')
         const _cpuBar = $('cpu-bar');
         if (_cpuBar) _cpuBar.style.display = '';
+        _setupDebugToggle();
         connectWS();
         _startLlmStatusIndicator();
         _initSessions();
@@ -360,9 +361,11 @@
     const _authHdr = (extra) => Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {});
 
     async function _updateContextIndicator() {
-        const el   = document.getElementById('ctx-indicator');
+        // Nur die Kontext-Pille wird ein-/ausgeblendet; der Debug-Umschalter rechts
+        // daneben bleibt immer sichtbar (auch wenn noch kein Kontext existiert).
+        const pill = document.getElementById('ctx-indicator-pill');
         const text = document.getElementById('ctx-indicator-text');
-        if (!el) return;
+        if (!pill) return;
         try {
             const q = _activeSid ? ('?session_id=' + encodeURIComponent(_activeSid)) : '';
             const r = await fetch('/api/context/stats' + q, { headers: _authHdr() });
@@ -370,12 +373,33 @@
             const d = await r.json();
             const n = d.history_entries || 0;
             if (n > 0) {
-                el.style.display = 'flex';
+                pill.style.display = 'inline-flex';
                 text.textContent = window.t('chat.ctx_label').replace('{n}', n).replace('{pct}', d.fills_pct ?? 0);
             } else {
-                el.style.display = 'none';
+                pill.style.display = 'none';
             }
         } catch (e) { /* offline */ }
+    }
+
+    // ─── Debug-Umschalter (rechts von der Kontext-Pille) ─────────────────
+    // AN: Zwischenschritte (Tool/LLM/Fortschritt) dauerhaft als Status-Zeilen.
+    // AUS (Default): nur die transiente Aktivitätszeile.
+    let _chatDebug = false;
+    try { _chatDebug = localStorage.getItem('jarvis_chat_debug') === '1'; } catch (e) {}
+    function _updateDebugBtn() {
+        const b = document.getElementById('ctx-debug-toggle');
+        if (b) b.classList.toggle('active', _chatDebug);
+    }
+    function _setupDebugToggle() {
+        const b = document.getElementById('ctx-debug-toggle');
+        if (!b || b._wired) return;
+        b._wired = true;
+        b.addEventListener('click', function () {
+            _chatDebug = !_chatDebug;
+            try { localStorage.setItem('jarvis_chat_debug', _chatDebug ? '1' : '0'); } catch (e) {}
+            _updateDebugBtn();
+        });
+        _updateDebugBtn();
     }
 
     function _startContextIndicator() {
@@ -390,7 +414,7 @@
                 body: JSON.stringify({ session_id: _activeSid || '' })
             });
             const d = await r.json();
-            if (d.ok) document.getElementById('ctx-indicator').style.display = 'none';
+            if (d.ok) { const _p = document.getElementById('ctx-indicator-pill'); if (_p) _p.style.display = 'none'; }
         } catch (e) { /* ignore */ }
     };
 
@@ -761,8 +785,11 @@
         } else if (isStatus) {
             if (text.startsWith('⏸') || text.startsWith('▶') || text.startsWith('⏹')) {
                 addStatusLine(text);
+            } else if (_chatDebug) {
+                // Debug-Ansicht: Zwischenschritte dauerhaft als Status-Zeilen anzeigen
+                addStatusLine(text);
             } else {
-                // Laufende Aktivität (Start / LLM-Warten / Tool / Fortschritt) live anzeigen
+                // Standard: laufende Aktivität nur als transiente Zeile (Spinner)
                 _setActivity(text);
             }
         }
@@ -918,8 +945,9 @@
         bubble.className = 'msg-bubble';
         bubble.innerHTML = role === 'user' ? escapeHtml(text) : renderMarkdown(text);
 
-        // Edit-Button für User-Bubbles
+        // Wiederholen- + Edit-Button für User-Bubbles (Wiederholen links vom Bearbeiten)
         if (role === 'user') {
+            timeEl.appendChild(_makeRetryBtn(row, bubble));
             const editBtn = document.createElement('button');
             editBtn.type = 'button';
             editBtn.className = 'msg-edit-btn';
@@ -1168,6 +1196,27 @@
             window.JarvisChatLib.exitEditMode(row, bubble, { editBtnSelector: '.msg-edit-btn' });
         }
         _editingRow = null;
+    }
+
+    // ─── Wiederholen: dieselbe Anfrage erneut senden (dezent, wie Bearbeiten) ───
+    function _makeRetryBtn(row, bubble) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'msg-edit-btn msg-retry-btn';
+        b.title = (window.t ? window.t('bubble.retry_msg') : 'Anfrage wiederholen');
+        b.setAttribute('aria-label', b.title);
+        b.textContent = '↻';
+        b.addEventListener('click', () => _retryUserBubble(row, bubble));
+        return b;
+    }
+    function _retryUserBubble(row, bubble) {
+        if (_editingRow) return;
+        if (agentRunning) { alert(window.t ? window.t('bubble.block_running') : 'Bitte stoppe zuerst die laufende Aufgabe.'); return; }
+        const txt = (row && row.dataset && row.dataset.rawText) || (bubble ? bubble.textContent : '');
+        if (!txt || !txt.trim()) return;
+        // Gleiche Logik wie Bearbeiten, nur mit unverändertem Text: History/DOM ab
+        // dieser Nachricht trimmen und die Anfrage neu stellen.
+        _submitEdit(row, bubble, txt);
     }
 
     function _submitEdit(row, bubble, newText) {
@@ -1529,8 +1578,9 @@
             ? escapeHtml(entry.text)
             : renderMarkdown(entry.text);
 
-        // Edit-Button für User-Bubbles (auch nach Reload nutzbar)
+        // Wiederholen- + Edit-Button für User-Bubbles (auch nach Reload nutzbar)
         if (entry.role === 'user') {
+            timeEl.appendChild(_makeRetryBtn(row, bubble));
             const editBtn = document.createElement('button');
             editBtn.type = 'button';
             editBtn.className = 'msg-edit-btn';

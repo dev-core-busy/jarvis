@@ -28,14 +28,22 @@
         try { r = sessionStorage.getItem('jarvis_settings_return') || ''; } catch (e) {}
         return allowed.indexOf(r) !== -1 ? r : '/portal';
     }
-    // Oeffnet die App-Shell und sofort das Settings-Modal; Schliessen -> Ursprungsbereich.
+    // Oeffnet NUR das Einstellungen-Modal (nicht den toten Haupt-Chat/-Desktop).
+    // Stufe 1 der Altlast-Bereinigung: der chat-/desktopspezifische Init-Chain aus
+    // showMainScreen() (WebSocket, VNC, Verlauf, Kontext-/LLM-Status, Header-TTS)
+    // laeuft auf /settings nicht mehr. Das Modal laedt seine Daten selbst (openModal).
     function _enterSettingsPage() {
-        showMainScreen();
+        if (loginScreen) loginScreen.classList.remove('active');
+        // Nur die fuer die Einstellungen relevanten Teile initialisieren
+        try { loadVersion(); } catch (e) {}
+        try { updateWidget.init(); } catch (e) {}
+        try { _startBrokerBadge(); } catch (e) {}
         setTimeout(function () {
             const b = document.getElementById('btn-settings');
-            if (b) b.click();
+            if (b) b.click();   // openModal(): laedt Profile + oeffnet das Modal-Overlay
             const c = document.getElementById('btn-close-settings');
             if (c) c.addEventListener('click', function () { window.location.replace(_settingsReturn()); }, { once: true });
+            if (window.applyLang) window.applyLang();
         }, 60);
     }
     let ws = null;

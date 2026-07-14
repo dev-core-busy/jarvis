@@ -797,6 +797,7 @@ const _I18N = {
         // ── Common ────────────────────────────────────────────
         'common.save':          'Speichern',
         'wissen.nav': 'Wissen',
+        'wissen.open_file':             'Datei öffnen',
         'wissen.back': '← Portal',
         'wissen.login_title': 'Anmelden',
         'wissen.login_sub': 'Melde dich mit deinem Domänen-Konto an, um Wissen deines Bereichs zu pflegen.',
@@ -2154,6 +2155,7 @@ const _I18N = {
         // ── Common ────────────────────────────────────────────
         'common.save':          'Save',
         'wissen.nav': 'Knowledge',
+        'wissen.open_file':             'Open file',
         'wissen.back': '← Portal',
         'wissen.login_title': 'Sign in',
         'wissen.login_sub': 'Sign in with your domain account to maintain the knowledge of your area.',

@@ -47,7 +47,7 @@ Updates: Re-run the same install script – it auto-detects existing installatio
 
 - Website: https://jarvis-ai.info
 - GitHub: https://github.com/dev-core-busy/jarvis
-- License: AGPL-3.0
+- License: Apache-2.0
 
 ## Credits
 

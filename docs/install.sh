@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 # Jarvis AI Desktop Agent – Installer & Updater
-# Copyright (C) 2026 Andreas Bender · AGPL-3.0
+# Copyright (C) 2026 Andreas Bender · Apache-2.0
 # https://jarvis-ai.info  |  https://github.com/dev-core-busy/jarvis
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -185,7 +185,7 @@ ${CYAN}${BOLD}
 ╚█████╔╝██║  ██║██║  ██║ ╚████╔╝ ██║███████║
  ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚══════╝
 ${RESET}
-  Autonomous AI Desktop Agent  |  v0.8  |  AGPL-3.0
+  Autonomous AI Desktop Agent  |  v0.8  |  Apache-2.0
   ${CYAN}https://jarvis-ai.info${RESET}
 "
 

@@ -8100,16 +8100,15 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             await ws.send_json({"type": "error", "message": "Kein Agent aktiv"})
             return
 
-        if action == "pause":
-            target.pause()
-            await ws.send_json({"type": "status", "message": "⏸️ Agent pausiert",
-                                "agent_id": target.agent_id})
-        elif action == "resume":
-            target.resume()
-            await ws.send_json({"type": "status", "message": "▶️ Agent fortgesetzt",
-                                "agent_id": target.agent_id})
-        elif action == "stop":
-            target.stop()
+        if action == "stop":
+            # Geteilter Hauptagent: nur den Lauf DIESES Benutzers abbrechen, damit
+            # parallele Anfragen anderer Nutzer ungestoert weiterlaufen. Eigene
+            # Sub-Agent-Instanzen sind isoliert -> voll stoppen.
+            _is_main = (agent_manager and target is agent_manager.main_agent) or target is agent_instance
+            if _is_main:
+                target.stop(username=_get_ws_username(ws))
+            else:
+                target.stop()
             await ws.send_json({"type": "status", "message": "⏹️ Anfrage gestoppt",
                                 "agent_id": target.agent_id})
         elif action == "stop_all":

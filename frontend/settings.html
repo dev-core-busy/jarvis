@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=7">
-    <link rel="stylesheet" href="/static/css/style.css?v=121">
+    <link rel="stylesheet" href="/static/css/style.css?v=122">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -975,17 +975,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                 <!-- Steuerung -->
                 <div class="control-bar" id="control-bar">
-                    <button class="btn-control" id="btn-pause" title="Pausieren" data-i18n-title="panel.pause" disabled>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                            <rect x="6" y="4" width="4" height="16" />
-                            <rect x="14" y="4" width="4" height="16" />
-                        </svg>
-                    </button>
-                    <button class="btn-control" id="btn-resume" title="Fortsetzen" data-i18n-title="panel.resume" disabled hidden>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                            <polygon points="5 3 19 12 5 21 5 3" />
-                        </svg>
-                    </button>
                     <button class="btn-control btn-danger" id="btn-stop" title="Stoppen" data-i18n-title="panel.stop" disabled>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                             <rect x="4" y="4" width="16" height="16" rx="2" />
@@ -3276,10 +3265,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=72"></script>
+    <script src="/static/js/i18n.js?v=73"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=16"></script>
-    <script src="/static/js/context.js?v=4"></script>
+    <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
     <script src="/static/js/kbmatrix.js?v=6"></script>
@@ -3301,7 +3290,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/security_incidents.js?v=17"></script>
     <script src="/static/js/ldap_picker.js?v=6"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=154"></script>
+    <script src="/static/js/app.js?v=156"></script>
 </body>
 
 </html>

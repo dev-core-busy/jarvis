@@ -268,6 +268,16 @@
     function _startLlmStatusIndicator() {
         _checkLlmStatus();
         if (!_llmStatusTimer) _llmStatusTimer = setInterval(_checkLlmStatus, 30000);
+        // Profil-Umschalter (Einfachklick auf die Pill) – gemeinsames Modul,
+        // zeigt rot/gruen-Erreichbarkeit je Profil. Der Doppelklick unten
+        // oeffnet weiterhin die Einstellungen (Admin-Komfort).
+        if (window.ProfileSwitcher) {
+            window.ProfileSwitcher.attach({
+                dotId: 'connection-dot',
+                headers: function () { return { 'Authorization': 'Bearer ' + token }; },
+                onSwitched: function () { _checkLlmStatus(); },
+            });
+        }
         // Doppelklick auf die Pill -> Einstellungen oeffnen + LLM-Profile-Tab aktivieren
         if (connectionDot && !connectionDot._dblBound) {
             connectionDot._dblBound = true;
@@ -706,7 +716,7 @@
                         </div>
                         <div style="display:flex;gap:6px;">
                             <button class="btn-instr-save" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;">${window.t('instructions.save')}</button>
-                            <button class="btn-instr-del" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:rgba(var(--danger-rgb),0.15);color:var(--danger);border:1px solid rgba(var(--danger-rgb),0.3);border-radius:var(--radius-sm);cursor:pointer;">${window.t('instructions.delete')}</button>
+                            <button class="btn-instr-del" data-name="${f.name}" title="${window.t('instructions.delete')}" aria-label="${window.t('instructions.delete')}" style="width:28px;height:28px;font-size:1rem;line-height:1;background:rgba(var(--danger-rgb),0.15);color:var(--danger);border:1px solid rgba(var(--danger-rgb),0.3);border-radius:var(--radius-sm);cursor:pointer;flex-shrink:0;">×</button>
                         </div>
                     </div>
                     <div class="instr-card-body" style="display:none;padding:0 14px 14px;">
@@ -1992,7 +2002,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         });
         items.push({
             label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'),
-            icon: '🗑',
+            icon: '×',
             danger: true,
             onClick: () => _selCtl.startSelectionDelete(row),
         });
@@ -2518,6 +2528,13 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         const checkPromptTool = document.getElementById('profile-prompt-tool-calling');
         const inputKey = document.getElementById('profile-api-key');
         const inputSessionKey = document.getElementById('profile-session-key');
+        const inputAllowedUsers = document.getElementById('profile-allowed-users');
+        const inputAllowedGroup = document.getElementById('profile-allowed-group');
+        // AD-Picker fuer die Profil-Berechtigung (analog Wissensgruppen-Editoren)
+        if (window.LdapPicker) {
+            if (inputAllowedUsers) window.LdapPicker.attachField(inputAllowedUsers, { kind: 'users', sep: ',' });
+            if (inputAllowedGroup) window.LdapPicker.attachField(inputAllowedGroup, { kind: 'groups', sep: '\n' });
+        }
         const apikeyHint = document.querySelector('.apikey-hint');
         const checkTts = document.getElementById('setting-tts');
         const selectTtsVoice = document.getElementById('setting-tts-voice');
@@ -3114,7 +3131,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                         </button>
                         <button class="btn-icon btn-small btn-delete-profile" data-id="${p.id}" title="${window.t('common.delete')}">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            <span style="font-size:1.15rem;line-height:1;">×</span>
                         </button>
                     </div>
                 `;
@@ -3219,6 +3236,8 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             inputUrl.value = profile ? profile.api_url : '';
             inputKey.value = '';
             if (inputSessionKey) inputSessionKey.value = '';
+            if (inputAllowedUsers) inputAllowedUsers.value = profile ? (profile.allowed_users || '') : '';
+            if (inputAllowedGroup) inputAllowedGroup.value = profile ? (profile.allowed_group || '') : '';
 
             // Eye-Icons zurücksetzen (Auge-auf = verborgen)
             inputKey.type = 'password';
@@ -3345,6 +3364,8 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                 auth_method: isSession ? 'session' : 'api_key',
                 session_key: isSession && inputSessionKey ? inputSessionKey.value : '',
                 prompt_tool_calling: provider === 'openai_compatible' && checkPromptTool ? checkPromptTool.checked : false,
+                allowed_users: inputAllowedUsers ? inputAllowedUsers.value.trim() : '',
+                allowed_group: inputAllowedGroup ? inputAllowedGroup.value.trim() : '',
             };
 
             btnSaveProfile.textContent = window.t('common.saving');
@@ -3686,7 +3707,7 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                         '<button class="btn-icon btn-small ak-show" title="Anzeigen/Verbergen">' + EYE + '</button>' +
                         '<button class="btn-icon btn-small ak-copy" title="Kopieren">' + COPY + '</button>' +
                         '<button class="btn-icon btn-small ak-regen" title="Neu generieren">🔄</button>' +
-                        '<button class="btn-icon btn-small ak-del" title="Löschen">🗑️</button>';
+                        '<button class="btn-icon btn-small ak-del" title="Löschen">×</button>';
                     listEl.appendChild(row);
                 });
             }

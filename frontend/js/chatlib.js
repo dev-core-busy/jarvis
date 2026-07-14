@@ -451,7 +451,7 @@
      *  opts = {
      *    items: [
      *      { label: 'Bearbeiten', icon: '✏', onClick: () => {...} },
-     *      { label: 'Loeschen',   icon: '🗑', danger: true, onClick: ... },
+     *      { label: 'Loeschen',   icon: '×', danger: true, onClick: ... },
      *      { label: 'Kopieren',   icon: '⧉', onClick: ... },
      *    ]
      *  }

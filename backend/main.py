@@ -505,6 +505,28 @@ def _may_edit_knowledge(user: str) -> bool:
     return False
 
 
+def _may_use_profile(user: str, profile: dict) -> bool:
+    """Darf der Benutzer dieses KI-Profil nutzen/aktivieren?
+
+    Default (keine Berechtigung am Profil hinterlegt) = ALLE. Sonst: lokale
+    Admins, Benutzer in ``allowed_users`` oder Mitglieder von ``allowed_group``
+    (memberOf-DNs werden beim Login gecacht) – analog den Wissensgruppen-Editoren."""
+    if not profile:
+        return False
+    au = (profile.get("allowed_users") or "").strip()
+    ag = (profile.get("allowed_group") or "").strip()
+    if not au and not ag:
+        return True
+    if user in ALLOWED_USERS or _user_is_admin(user):
+        return True
+    plain = _norm_login(user)
+    if au and plain in {_norm_login(u) for u in au.split(",") if u.strip()}:
+        return True
+    if ag and _member_of_any_group(_user_group_dns_cache.get(plain, []), ag):
+        return True
+    return False
+
+
 async def require_knowledge_editor(request: Request, user: str = Depends(require_auth)) -> str:
     """FastAPI Dependency: Prüft ob der Benutzer *generell* Wissen bearbeiten darf.
 
@@ -3317,10 +3339,81 @@ async def llm_active_status(user: str = Depends(require_auth)):
 
 @app.post("/api/profiles/{profile_id}/activate")
 async def activate_profile(profile_id: str, user: str = Depends(require_local_auth)):
-    """Setzt ein Profil als aktiv."""
+    """Setzt ein Profil als aktiv (Admin-Weg unter Einstellungen)."""
     if config.activate_profile(profile_id):
         return JSONResponse({"success": True})
     return JSONResponse({"success": False, "error": "Profil nicht gefunden"}, status_code=404)
+
+
+# ─── LLM-Profilumschalter fuer Nutzer (nicht admin-only) ─────────────────────
+# Pro-Profil-Berechtigung (_may_use_profile, Default alle) – der Nutzer sieht
+# nur nutzbare Profile. Angebunden an die LLM-Status-Pill in allen vier
+# Frontends (/, /chat, /support, /userchat). NICHT der Admin-Weg oben.
+
+@app.get("/api/llm/profiles")
+async def llm_profiles_list(user: str = Depends(require_auth)):
+    """Nur die Profile, die DIESER Benutzer nutzen darf, + aktives Profil.
+    (Pro-Profil-Berechtigung, Default alle.)"""
+    usable = [p for p in config.profiles if _may_use_profile(user, p)]
+    profs = [{"id": p["id"], "name": p.get("name", p["id"]),
+              "provider": p.get("provider", ""), "model": p.get("model", "")}
+             for p in usable]
+    return JSONResponse({"ok": True, "profiles": profs,
+                         "active_id": config.active_profile_id})
+
+
+@app.post("/api/llm/profiles/{profile_id}/activate")
+async def llm_activate_profile(profile_id: str, user: str = Depends(require_auth)):
+    """Aktives Profil wechseln – nur wenn der Benutzer dieses Profil nutzen darf."""
+    prof = next((p for p in config.profiles if p.get("id") == profile_id), None)
+    if not prof:
+        return JSONResponse({"ok": False, "error": "Profil nicht gefunden"}, status_code=404)
+    if not _may_use_profile(user, prof):
+        return JSONResponse({"ok": False, "error": "Keine Berechtigung fuer dieses Profil"},
+                            status_code=403)
+    if config.activate_profile(profile_id):
+        return JSONResponse({"ok": True, "active_id": config.active_profile_id})
+    return JSONResponse({"ok": False, "error": "Profil nicht gefunden"}, status_code=404)
+
+
+# Kurzer Cache fuer die Erreichbarkeits-Ampel im Umschalter-Menue: pro Profil
+# {reachable, status, ts}. Vermeidet, dass jedes Menue-Oeffnen alle Provider anpingt.
+_llm_reach_cache: dict = {}
+_LLM_REACH_TTL = 30.0  # Sekunden
+
+
+@app.get("/api/llm/profiles/reachability")
+async def llm_profiles_reachability(user: str = Depends(require_auth)):
+    """Erreichbarkeit (rot/gruen-Punkt) aller fuer DIESEN Benutzer nutzbaren Profile.
+    Probt konkurrent mit kurzem Cache; ``status``: ok|degraded|down."""
+    usable = [p for p in config.profiles if _may_use_profile(user, p)]
+    now = time.time()
+
+    async def _one(prof: dict) -> tuple:
+        pid = prof.get("id", "")
+        cached = _llm_reach_cache.get(pid)
+        if cached and (now - cached["ts"]) < _LLM_REACH_TTL:
+            return pid, {"reachable": cached["reachable"], "status": cached["status"]}
+        res = await _probe_llm_connection(
+            provider=prof.get("provider", ""), api_url=prof.get("api_url", ""),
+            api_key=prof.get("api_key", ""), model=prof.get("model", ""),
+            auth_method=prof.get("auth_method", "api_key"),
+            session_key=prof.get("session_key", ""),
+        )
+        if res.get("success"):
+            status = "ok" if res.get("model_found", True) else "degraded"
+        else:
+            status = "down"
+        reachable = status in ("ok", "degraded")
+        _llm_reach_cache[pid] = {"reachable": reachable, "status": status, "ts": now}
+        return pid, {"reachable": reachable, "status": status}
+
+    pairs = await asyncio.gather(*[_one(p) for p in usable], return_exceptions=True)
+    out = {}
+    for item in pairs:
+        if isinstance(item, tuple):
+            out[item[0]] = item[1]
+    return JSONResponse({"ok": True, "reachability": out})
 
 
 @app.post("/api/feedback")

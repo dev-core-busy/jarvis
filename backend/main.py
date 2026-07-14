@@ -2623,7 +2623,8 @@ async def chat_sessions_get(sid: str, user: str = Depends(require_auth)):
     meta = cs.get_meta(user, sid) or {}
     return JSONResponse({"ok": True, "transcript": cs.load_transcript(user, sid),
                          "kb_groups": meta.get("kb_groups"),
-                         "kb_groups_set": "kb_groups" in meta})
+                         "kb_groups_set": "kb_groups" in meta,
+                         "profile_id": meta.get("profile_id", "")})
 
 
 @app.put("/api/chat/sessions/{sid}/transcript")
@@ -2636,6 +2637,8 @@ async def chat_sessions_save_transcript(sid: str, request: Request, user: str = 
     msgs = body.get("messages", []) if isinstance(body, dict) else []
     if isinstance(body, dict) and "kb_groups" in body:
         cs.save_kb_groups(user, sid, body.get("kb_groups"))
+    if isinstance(body, dict) and "profile_id" in body:
+        cs.save_profile(user, sid, body.get("profile_id"))
     return JSONResponse({"ok": True, "messages": cs.save_transcript(user, sid, msgs)})
 
 
@@ -4431,7 +4434,7 @@ def _support_readable(stem: str, chunk: str) -> tuple[str, str]:
 
 
 async def _support_ai_summary(query: str, blocks: list, system_prompt: str, lines: int = 5,
-                              lang: str = "de", max_sources: int = 10) -> str:
+                              lang: str = "de", max_sources: int = 10, prof: dict = None) -> str:
     """LLM-Kurzzusammenfassung der Top-Quellen (best effort). Stellt das
     konfigurierte Prompt der Instruktion voran. ``lines`` begrenzt die Laenge."""
     if not blocks:
@@ -4466,12 +4469,13 @@ async def _support_ai_summary(query: str, blocks: list, system_prompt: str, line
                                             (b.get("full_text") or b.get("summary") or ""))
                         for b in blocks[:max(1, max_sources)])
         user_text = "Anfrage: %s\n\nGefundene Treffer (%d):\n%s" % (query, len(blocks), src[:120000])
+        _p = prof or config.active_profile or {}
         provider = get_provider(
-            config.LLM_PROVIDER, config.current_api_key, config.current_api_url,
-            auth_method=config.current_auth_method,
-            session_key=config.current_session_key, prompt_tool_calling=False)
+            _p.get("provider", "google"), _p.get("api_key", ""), _p.get("api_url", ""),
+            auth_method=_p.get("auth_method", "api_key"),
+            session_key=_p.get("session_key", ""), prompt_tool_calling=False)
         resp = await provider.generate_response(
-            model=config.current_model, system_prompt=sysp,
+            model=_p.get("model", ""), system_prompt=sysp,
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_text)])],
             tools=[])
         return "".join(p.text for p in (resp.parts or []) if getattr(p, "text", None)).strip()
@@ -4480,7 +4484,7 @@ async def _support_ai_summary(query: str, blocks: list, system_prompt: str, line
         return ""
 
 
-async def _support_summarize_block(b: dict, lines: int, lang: str, system_prompt: str):
+async def _support_summarize_block(b: dict, lines: int, lang: str, system_prompt: str, prof: dict = None):
     """Erzeugt eine mehrzeilige KI-Zusammenfassung EINES Treffers (Ticket /
     Confluence-Seite / Wissens-Chunk) und schreibt sie in ``b['summary']``.
     Bei Jira wird zusaetzlich die Beschreibung + die letzten Kommentare nachgeladen.
@@ -4524,12 +4528,13 @@ async def _support_summarize_block(b: dict, lines: int, lang: str, system_prompt
                     "mit der Zusammenfassung." % lines)
         sysp = ((system_prompt.strip() + "\n\n") if (system_prompt or "").strip() else "") + base
         user_text = "%s\n\n%s" % (b.get("title", ""), content[:6000])
+        _p = prof or config.active_profile or {}
         provider = get_provider(
-            config.LLM_PROVIDER, config.current_api_key, config.current_api_url,
-            auth_method=config.current_auth_method,
-            session_key=config.current_session_key, prompt_tool_calling=False)
+            _p.get("provider", "google"), _p.get("api_key", ""), _p.get("api_url", ""),
+            auth_method=_p.get("auth_method", "api_key"),
+            session_key=_p.get("session_key", ""), prompt_tool_calling=False)
         resp = await provider.generate_response(
-            model=config.current_model, system_prompt=sysp,
+            model=_p.get("model", ""), system_prompt=sysp,
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_text)])],
             tools=[])
         txt = "".join(p.text for p in (resp.parts or []) if getattr(p, "text", None)).strip()
@@ -4671,6 +4676,8 @@ async def _support_run_query(body: dict, user: str) -> dict:
     Rueckgabe = fertiges Antwort-Dict; ``_status`` (falls gesetzt) ist der HTTP-Code."""
     import time as _t
     t0 = _t.time()
+    # Benutzerbezogenes LLM-Profil (vom Profil-Pulldown gesetzt) fuer die KI-Summaries
+    prof = config.profile_for_user(user)
     query = (body.get("text") or body.get("query") or "").strip()
     use_rag = body.get("rag", True)
     # Vom Benutzer gewaehlter Wissensgruppen-Filter (Checkbox-Auswahl):
@@ -4837,7 +4844,7 @@ async def _support_run_query(body: dict, user: str) -> dict:
                 "Zusaetzliche Anweisung fuer diese Anfrage (immer beachten):\n" + _req_prompt
         ai_summary = await _support_ai_summary(
             query, blocks, _sys, eff_sum, lang,
-            _support_count(cfg, "summary_sources", _SUPPORT_SUMMARY_SOURCES_DEFAULT))
+            _support_count(cfg, "summary_sources", _SUPPORT_SUMMARY_SOURCES_DEFAULT), prof=prof)
 
     _record_support_history(user, query, len(blocks))
 
@@ -4906,7 +4913,8 @@ async def support_summarize(request: Request):
 
     b = {"source": "JIRA", "key": key, "_key": key, "title": key, "summary": ""}
     ok, _ = await _run_cancellable(
-        request, _support_summarize_block(b, lines, lang, cfg.get("system_prompt") or ""))
+        request, _support_summarize_block(b, lines, lang, cfg.get("system_prompt") or "",
+                                          prof=config.profile_for_user(user)))
     if not ok:
         return JSONResponse({"ok": False, "error": "Abgebrochen"}, status_code=499)
     summary = (b.get("summary") or "").strip()

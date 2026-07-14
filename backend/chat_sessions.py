@@ -137,6 +137,17 @@ def save_kb_groups(user: str, sid: str, groups) -> None:
         _write_meta(sd, meta)
 
 
+def save_profile(user: str, sid: str, profile_id) -> None:
+    """Gewaehltes KI-Profil der Sitzung merken (fuer den Profil-Pulldown in /chat)."""
+    with _LOCK:
+        sd = _sess_dir(user, sid)
+        meta = _read_meta(sd)
+        if not meta:
+            return
+        meta["profile_id"] = (profile_id or "")
+        _write_meta(sd, meta)
+
+
 def touch(user: str, sid: str, auto_title: str = "") -> None:
     """Aktualisiert den updated-Zeitstempel; setzt bei noch unbenanntem Chat
     optional einen Titel aus dem ersten Nutzertext."""

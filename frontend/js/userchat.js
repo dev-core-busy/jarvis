@@ -254,7 +254,6 @@
             })
             .catch(function () { dot.className = 'topbar-dot disconnected'; dot.title = window.t('app.llm_unreachable'); });
         // Admin: Setup-Button (direkt vor Logout) einblenden -> Einstellungen.
-        // Der Profilwechsel selbst laeuft ueber die Status-Pill (ProfileSwitcher).
         if (!dot._adminChecked) {
             dot._adminChecked = true;
             fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + token } })
@@ -272,13 +271,6 @@
     }
     function _startLlmStatus() {
         _checkLlmStatus();
-        if (window.ProfileSwitcher) {
-            window.ProfileSwitcher.attach({
-                dotId: 'status-dot',
-                headers: function () { return { 'Authorization': 'Bearer ' + token }; },
-                onSwitched: function () { _checkLlmStatus(); },
-            });
-        }
         if (!_llmStatusTimer) _llmStatusTimer = setInterval(_checkLlmStatus, 30000);
     }
 

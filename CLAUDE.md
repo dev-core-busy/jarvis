@@ -9,8 +9,9 @@ Autonomer KI-Agent auf einem Linux-Server (Debian 13) mit Web-Frontend, Desktop-
 - **Deploy:** Lokal schreiben + `scp` (keine Heredocs ueber SSH – Quoting-Probleme mit f-strings)
   - HINWEIS: Auf dem Server wird NICHT committet → der Git-HEAD dort bleibt alt und ist KEIN Versionsindikator. Massgeblich ist der Datei-Inhalt (md5-Vergleich), nicht `git rev-parse`.
 - **Landing-Page:** `jarvis-ai.info` ist ein SEPARATER Host (89.110.149.134, nginx) – NICHT der App-Server.
-  - Quelle der Wahrheit ist die per FTPS deployte Datei; Repo-Kopie `docs/landing-page/index.html` driftet und muss manuell nachgezogen werden.
-  - Deploy via `windows-app-go/build.sh` (FTPS). ⚠️ FTPS-Passwort steht dort im Klartext und ist ins oeffentliche Repo committet – sollte rotiert/ausgelagert werden.
+  - Quelle der Wahrheit ist die live deployte Datei; Repo-Kopie `docs/landing-page/index.html` driftet und muss manuell nachgezogen werden.
+  - Deploy via `windows-app-go/build.sh` – per **keyless SSH** (`jarvis@jarvis-ai.info`, Key `~/.ssh/id_rsa`, Docroot `/var/www/vhosts/jarvis-ai.info/www`), KEIN Secret im Repo (FTP/FTPS wurde abgelöst, da FTP-ALG in manchen Netzen das AUTH-Kommando kapert).
+  - Drift-sicher patchen: Live-Datei per `scp` laden, gezielt ändern, zurückspielen (statt Repo-Kopie zu überschreiben) – so wie build.sh es für den Versionsstring macht.
 - **Desktop-User:** `jarvis` (autologin via lightdm), Web-Login: `jarvis/jarvis`
 - **Services:** `systemctl restart jarvis.service` + `systemctl restart whatsapp-bridge.service`
 - **Git-Remote:** lokaler Clone nutzt SSH (`git@github.com:dev-core-busy/jarvis.git`) – kein Token mehr in `.git/config` (Stand 2026-06-16). Repo ist public; Server ziehen token-los per HTTPS.
@@ -91,7 +92,7 @@ skills/             – 18 Skills, u.a.:
   example_skill/   – Template fuer neue Skills
 android/           – Android-App (Kotlin/Jetpack Compose, signiert via .jks)
 windows-app-go/    – Nativer Windows-Client (Go, Tray, lokale STT, Avatar, WS-Client)
-docs/landing-page/ – Statische Landing-Page fuer jarvis-ai.info (FTP-Deploy via build.sh)
+docs/landing-page/ – Statische Landing-Page fuer jarvis-ai.info (SSH-Deploy via build.sh, keyless)
 services/
   whatsapp-bridge/index.js – Baileys Bridge mit Express API
 data/

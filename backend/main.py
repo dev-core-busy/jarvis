@@ -5572,6 +5572,37 @@ async def wissen_files(user: str = Depends(require_auth)):
     return JSONResponse({"ok": True, "files": out})
 
 
+@app.get("/api/wissen/file")
+async def wissen_file(path: str = "", user: str = Depends(require_auth_or_query)):
+    """Liefert eine Wissensdatei aus – NUR wenn sie einer Gruppe im Bereich des
+    Nutzers zugeordnet ist. Anzeigbare Formate (PDF/Bild/Text) inline (zum Öffnen
+    im Browser), alles andere als Download. Token via ?token= erlaubt (neuer Tab)."""
+    from backend import knowledge_groups as kg
+    from backend.tools.knowledge import PROJECT_ROOT
+    import mimetypes
+    rel = (path or "").strip().lstrip("/")
+    if not rel:
+        return JSONResponse({"error": "Kein Pfad"}, status_code=400)
+    allowed = {g["id"] for g in _editable_groups_for(user)}
+    gids = kg.get_assignment(rel)
+    if not gids or not (allowed & set(gids)):
+        return JSONResponse({"error": "Kein Zugriff auf diese Datei"}, status_code=403)
+    root = Path(PROJECT_ROOT).resolve()
+    try:
+        target = (root / rel).resolve()
+        target.relative_to(root)   # Path-Traversal-Schutz
+    except ValueError:
+        return JSONResponse({"error": "Ungueltiger Pfad"}, status_code=400)
+    if not target.is_file():
+        return JSONResponse({"error": "Nicht gefunden"}, status_code=404)
+    _VIEWABLE = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+                 ".txt", ".md", ".csv", ".log", ".json", ".html", ".htm"}
+    disp = "inline" if target.suffix.lower() in _VIEWABLE else "attachment"
+    mt = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return FileResponse(str(target), media_type=mt, filename=target.name,
+                        content_disposition_type=disp)
+
+
 @app.post("/api/wissen/extract")
 async def wissen_extract(request: Request, user: str = Depends(require_auth)):
     """URL abrufen -> Extraktions-Entwurf (Pending), dem Nutzer zugeordnet."""

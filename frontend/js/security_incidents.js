@@ -246,7 +246,7 @@
                 html += '<button type="button" class="sec-btn small sec-brk-history" title="' + esc(T('security.broker_history_title', 'Letzte Ausführungen/Entscheidungen zu diesem Eintrag')) + '">📜 ' + esc(T('security.broker_history', 'Beispiele')) + '</button>';
                 if (e.decision !== 'allow') html += '<button type="button" class="sec-btn small primary sec-brk-allow">' + esc(T('security.broker_allow', 'Erlauben')) + '</button>';
                 if (e.decision !== 'deny') html += '<button type="button" class="sec-btn small sec-brk-deny">' + esc(T('security.broker_deny', 'Ablehnen')) + '</button>';
-                html += '<button type="button" class="sec-btn small danger sec-brk-remove" title="' + esc(T('security.broker_remove_title', 'Eintrag löschen – erscheint beim nächsten Auftauchen erneut')) + '">🗑</button>'
+                html += '<button type="button" class="sec-btn small danger sec-brk-remove" title="' + esc(T('security.broker_remove_title', 'Eintrag löschen – erscheint beim nächsten Auftauchen erneut')) + '">×</button>'
                     + '</div>'
                     + '<div class="sec-brk-history-box" style="display:none;margin-top:6px;"></div>'
                     + '</div>';

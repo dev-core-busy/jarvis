@@ -417,6 +417,9 @@ class Config:
             "api_key": data.get("api_key", ""),
             "auth_method": data.get("auth_method", "api_key"),
             "session_key": data.get("session_key", ""),
+            # Pro-Profil-Berechtigung (leer = alle duerfen nutzen); analog Wissensgruppen.
+            "allowed_users": data.get("allowed_users", ""),
+            "allowed_group": data.get("allowed_group", ""),
         }
         self.profiles.append(profile)
         if not self.active_profile_id:
@@ -428,7 +431,7 @@ class Config:
         """Aktualisiert ein bestehendes Profil."""
         for p in self.profiles:
             if p["id"] == profile_id:
-                for key in ["name", "provider", "model", "api_url", "api_key", "auth_method", "session_key"]:
+                for key in ["name", "provider", "model", "api_url", "api_key", "auth_method", "session_key", "allowed_users", "allowed_group"]:
                     if key in data:
                         val = data[key]
                         # Maskierte Keys (***...) nicht überschreiben – Wert unverändert lassen

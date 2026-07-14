@@ -67,7 +67,7 @@ class JarvisKnowledgeManager {
                 <span class="kb-grp-manage-spacer"></span>
                 <button class="kb-grp-manage-btn kb-grp-perms" title="${T('kbgroups.perms', 'Berechtigungen verwalten')}">🔐</button>
                 <button class="kb-grp-manage-btn kb-grp-rename" title="${T('kbgroups.rename', 'Umbenennen')}">✏️</button>
-                <button class="kb-grp-manage-btn kb-grp-delete" title="${T('kbgroups.delete', 'Löschen')}">🗑️</button>
+                <button class="kb-grp-manage-btn kb-grp-delete" title="${T('kbgroups.delete', 'Löschen')}">×</button>
             </div>`;
         }).join('');
         const ung = KG.ungroupedCount();
@@ -632,7 +632,7 @@ class JarvisKnowledgeManager {
                         <span class="kb-learned-item-date">${dateStr} · ${f.size_kb} KB</span>
                         <div class="kb-learned-item-actions">
                             <button class="kb-btn-sm" onclick="window.knowledgeManager.toggleLearnedEdit('${safeId}', '${f.path.replace(/'/g,"\\'")}')">✏️</button>
-                            <button class="kb-btn-sm kb-btn-del" onclick="window.knowledgeManager.deleteLearnedFile('${f.path.replace(/'/g,"\\'")}')">🗑</button>
+                            <button class="kb-btn-sm kb-btn-del" onclick="window.knowledgeManager.deleteLearnedFile('${f.path.replace(/'/g,"\\'")}')">×</button>
                         </div>
                     </div>
                     <div class="kb-learned-item-editor" id="${safeId}_editor" style="display:none;"></div>

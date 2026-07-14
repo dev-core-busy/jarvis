@@ -250,6 +250,23 @@ body {
 }
 .chat-screen.sidebar-collapsed .cs-expand { display: inline-flex; }
 
+/* LLM-Profilumschalter (Popup an der Status-Pill) */
+.llm-pop {
+    position: fixed; z-index: 10050; min-width: 200px; max-width: 300px;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 12px; padding: 6px; box-shadow: 0 12px 40px rgba(var(--shadow-rgb), .45);
+}
+.llm-pop-head { font-size: .72rem; color: var(--text-secondary); padding: 4px 8px 6px; }
+.llm-pop-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 7px 8px; border: none; background: none; color: var(--text-primary);
+    border-radius: 8px; cursor: pointer; font-size: .85rem; font-family: inherit;
+}
+.llm-pop-item:hover { background: rgba(var(--fg-rgb), .06); }
+.llm-pop-item.active { color: var(--accent); }
+.llm-pop-check { width: 14px; flex-shrink: 0; color: var(--accent); }
+.llm-pop-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 720px) {
     .chat-sidebar { flex-basis: 168px; width: 168px; }
 }

@@ -1191,6 +1191,9 @@
         });
     }
 
+    // Alte Chat-/Zoom-Steuerung: nur aktiv, wenn der (entfernte) Haupt-Chat
+    // vorhanden ist. Auf /settings existiert er nicht -> Block wird uebersprungen.
+    if (taskInput) {
     btnSend.addEventListener('click', sendTask);
     taskInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -1260,6 +1263,7 @@
     btnZoomReset.addEventListener('click', () => {
         logZoom = 100; applyLogZoom();
     });
+    }  // Ende alte Chat-/Zoom-Steuerung (Guard: taskInput)
 
     btnLogout.addEventListener('click', () => {
         showLoginScreen();

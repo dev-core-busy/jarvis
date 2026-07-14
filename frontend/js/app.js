@@ -251,7 +251,7 @@
         if (!connectionDot) return;
         try {
             const res = await fetch('/api/llm/active-status', { headers: { 'Authorization': 'Bearer ' + token } });
-            const H = ' · ' + window.t('app.dblclick_llm_profiles');
+            const H = '';  // kein Profil-Umschalter auf dieser (nie sichtbaren) Pill
             if (!res.ok) { connectionDot.classList.remove('connected'); connectionDot.title = window.t('app.llm_status_unavailable') + H; return; }
             const d = await res.json();
             const reachable = (d.status === 'ok' || d.status === 'degraded');
@@ -262,46 +262,16 @@
             else                              connectionDot.title = window.t('app.llm_unreachable') + name + H;
         } catch (e) {
             connectionDot.classList.remove('connected');
-            connectionDot.title = window.t('app.llm_unreachable') + ' · ' + window.t('app.dblclick_llm_profiles');
+            connectionDot.title = window.t('app.llm_unreachable');
         }
     }
     function _startLlmStatusIndicator() {
         _checkLlmStatus();
         if (!_llmStatusTimer) _llmStatusTimer = setInterval(_checkLlmStatus, 30000);
-        // Profil-Umschalter (Einfachklick auf die Pill) – gemeinsames Modul,
-        // zeigt rot/gruen-Erreichbarkeit je Profil. Der Doppelklick unten
-        // oeffnet weiterhin die Einstellungen (Admin-Komfort).
-        if (window.ProfileSwitcher) {
-            window.ProfileSwitcher.attach({
-                dotId: 'connection-dot',
-                headers: function () { return { 'Authorization': 'Bearer ' + token }; },
-                onSwitched: function () { _checkLlmStatus(); },
-            });
-        }
-        // Doppelklick auf die Pill -> Einstellungen oeffnen + LLM-Profile-Tab aktivieren
-        if (connectionDot && !connectionDot._dblBound) {
-            connectionDot._dblBound = true;
-            connectionDot.style.cursor = 'pointer';
-            connectionDot.addEventListener('dblclick', () => {
-                // openModal (btn-settings) oeffnet bereits den LLM-Profile-Tab UND
-                // rendert die Profile (await loadProfiles). Ein zusaetzlicher Tab-Klick
-                // wuerde waehrend des Ladens dazwischenfunken und die Liste leeren.
-                const openBtn = document.getElementById('btn-settings');
-                if (openBtn) openBtn.click();
-                // Zusaetzlich den eingeklappten "LLM Profile"-Listenabschnitt aufklappen,
-                // damit die Profile direkt sichtbar sind (zweifach wg. async loadProfiles).
-                const _expandProfileList = () => {
-                    const body = document.getElementById('prof-sect-list-body');
-                    const hdr  = document.getElementById('prof-sect-list-hdr');
-                    const tog  = document.getElementById('prof-sect-list-tog');
-                    if (body) body.style.display = '';
-                    if (hdr)  hdr.classList.remove('is-collapsed');
-                    if (tog)  tog.textContent = '▼';
-                };
-                _expandProfileList();
-                setTimeout(_expandProfileList, 250);
-            });
-        }
+        // Hinweis: KEIN Profil-Umschalter auf dieser Pill. Der `/`-Hauptbildschirm
+        // wird nach Login stets auf /portal umgeleitet (siehe Login-Flow) und ist
+        // daher keine sichtbare Oberflaeche. Der Umschalter sitzt auf den echten
+        // Stellen: /portal, /chat, /userchat, /support.
     }
     // Nach Profilwechsel sofort neu pruefen
     window._refreshLlmStatusPill = _checkLlmStatus;
@@ -2528,13 +2498,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         const checkPromptTool = document.getElementById('profile-prompt-tool-calling');
         const inputKey = document.getElementById('profile-api-key');
         const inputSessionKey = document.getElementById('profile-session-key');
-        const inputAllowedUsers = document.getElementById('profile-allowed-users');
-        const inputAllowedGroup = document.getElementById('profile-allowed-group');
-        // AD-Picker fuer die Profil-Berechtigung (analog Wissensgruppen-Editoren)
-        if (window.LdapPicker) {
-            if (inputAllowedUsers) window.LdapPicker.attachField(inputAllowedUsers, { kind: 'users', sep: ',' });
-            if (inputAllowedGroup) window.LdapPicker.attachField(inputAllowedGroup, { kind: 'groups', sep: '\n' });
-        }
         const apikeyHint = document.querySelector('.apikey-hint');
         const checkTts = document.getElementById('setting-tts');
         const selectTtsVoice = document.getElementById('setting-tts-voice');
@@ -3127,6 +3090,9 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                         <span class="profile-detail">${PROVIDER_LABELS[p.provider] || p.provider} · ${escapeHtml(p.model)}</span>
                     </div>
                     <div class="profile-actions">
+                        <button class="btn-icon btn-small btn-perms-profile" data-id="${p.id}" title="${window.t('profile.perm_label')}">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        </button>
                         <button class="btn-icon btn-small btn-edit-profile" data-id="${p.id}" title="Bearbeiten">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                         </button>
@@ -3137,6 +3103,10 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                 `;
                 // Klick auf Info-Bereich = Profil aktivieren
                 card.querySelector('.profile-info').addEventListener('click', () => activateProfile(p.id));
+                card.querySelector('.btn-perms-profile').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    editProfilePermissions(p.id);
+                });
                 card.querySelector('.btn-edit-profile').addEventListener('click', (e) => {
                     e.stopPropagation();
                     openEditView(p.id);
@@ -3199,6 +3169,81 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             }
         }
 
+        // ── Pro-Profil Berechtigungen (eigenes Fenster, analog Wissensgruppen) ──
+        function editProfilePermissions(id) {
+            const p = profiles.find(x => x.id === id);
+            if (!p) return;
+            const T = (k, d) => (window.t && window.t(k) !== k ? window.t(k) : d);
+
+            const old = document.getElementById('llm-perm-modal');
+            if (old) old.remove();
+
+            const m = document.createElement('div');
+            m.id = 'llm-perm-modal';
+            m.className = 'modal';
+            m.style.zIndex = '10001';
+            m.innerHTML = `
+                <div class="modal-content glass" style="max-width:620px;">
+                    <div class="modal-header">
+                        <h2>${T('profile.perm_label', 'Nutzung erlauben für')} – ${escapeHtml(p.name)}</h2>
+                        <button class="btn-icon" id="llm-perm-close" aria-label="Schließen">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                    </div>
+                    <div class="modal-body" style="overflow-y:auto;">
+                        <p class="kb-hint" style="margin-top:0;" data-i18n="profile.perm_hint">${T('profile.perm_hint', 'Leer lassen = alle dürfen dieses Profil nutzen und darauf wechseln. Sonst nur die genannten Benutzer/Gruppen (plus Administratoren).')}</p>
+                        <label class="kb-form-label" style="display:block;margin:12px 0 4px;" data-i18n="profile.perm_users">${T('profile.perm_users', 'Erlaubte AD-Benutzer')}</label>
+                        <input type="text" id="llm-perm-users" class="kb-input" style="width:100%;box-sizing:border-box;" data-i18n-placeholder="profile.perm_users_ph" placeholder="${T('profile.perm_users_ph', 'Benutzer (kommagetrennt)')}">
+                        <label class="kb-form-label" style="display:block;margin:16px 0 4px;" data-i18n="profile.perm_groups">${T('profile.perm_groups', 'Erlaubte AD-Gruppen')}</label>
+                        <textarea id="llm-perm-groups" class="kb-input" rows="2" style="width:100%;box-sizing:border-box;" data-i18n-placeholder="profile.perm_groups_ph" placeholder="${T('profile.perm_groups_ph', 'AD-Gruppen (eine pro Zeile)')}"></textarea>
+                        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+                            <button type="button" id="llm-perm-cancel" class="btn-secondary" data-i18n="profile.cancel">${T('profile.cancel', 'Abbrechen')}</button>
+                            <button type="button" id="llm-perm-save" class="btn-primary" data-i18n="profile.save">${T('profile.save', 'Speichern')}</button>
+                        </div>
+                    </div>
+                </div>`;
+            document.body.appendChild(m);
+
+            const usersInp = m.querySelector('#llm-perm-users');
+            const groupsInp = m.querySelector('#llm-perm-groups');
+            // Werte VOR dem Attach setzen, damit die Chip-Liste sie sofort rendert
+            // (behebt: hinterlegter Benutzer wurde nicht angezeigt).
+            usersInp.value = p.allowed_users || '';
+            groupsInp.value = p.allowed_group || '';
+            if (window.LdapPicker) {
+                window.LdapPicker.attachField(usersInp, { kind: 'users', sep: ',' });
+                window.LdapPicker.attachField(groupsInp, { kind: 'groups', sep: '\n' });
+            }
+            if (window.applyLang) window.applyLang();
+
+            const close = () => m.remove();
+            m.querySelector('#llm-perm-close').onclick = close;
+            m.querySelector('#llm-perm-cancel').onclick = close;
+            m.addEventListener('click', (e) => { if (e.target === m) close(); });
+            m.querySelector('#llm-perm-save').onclick = async () => {
+                try {
+                    const res = await fetch(`/api/profiles/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({
+                            allowed_users: (usersInp.value || '').trim(),
+                            allowed_group: (groupsInp.value || '').trim(),
+                        }),
+                    });
+                    const data = await res.json();
+                    if (data && (data.success || data.id)) {
+                        await loadProfiles();
+                        close();
+                    } else {
+                        alert(window.t('common.error_unknown').replace('{msg}', (data && data.error) || '?'));
+                    }
+                } catch (e) {
+                    alert(window.t('common.connection_failed'));
+                }
+            };
+            requestAnimationFrame(() => m.classList.add('open'));
+        }
+
         // ── Profil löschen ──
         async function deleteProfile(id) {
             if (profiles.length <= 1) {
@@ -3236,8 +3281,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             inputUrl.value = profile ? profile.api_url : '';
             inputKey.value = '';
             if (inputSessionKey) inputSessionKey.value = '';
-            if (inputAllowedUsers) inputAllowedUsers.value = profile ? (profile.allowed_users || '') : '';
-            if (inputAllowedGroup) inputAllowedGroup.value = profile ? (profile.allowed_group || '') : '';
 
             // Eye-Icons zurücksetzen (Auge-auf = verborgen)
             inputKey.type = 'password';
@@ -3364,8 +3407,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
                 auth_method: isSession ? 'session' : 'api_key',
                 session_key: isSession && inputSessionKey ? inputSessionKey.value : '',
                 prompt_tool_calling: provider === 'openai_compatible' && checkPromptTool ? checkPromptTool.checked : false,
-                allowed_users: inputAllowedUsers ? inputAllowedUsers.value.trim() : '',
-                allowed_group: inputAllowedGroup ? inputAllowedGroup.value.trim() : '',
             };
 
             btnSaveProfile.textContent = window.t('common.saving');

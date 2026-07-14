@@ -312,6 +312,7 @@ sudo update-ca-certificates</code></pre>
 </div>
 
 <script src="/static/js/i18n.js?v=31"></script>
+<script src="/static/js/profile_switcher.js?v=1"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=17"></script>
 <script src="/static/js/security_incidents.js?v=7"></script>
@@ -411,6 +412,14 @@ sudo update-ca-certificates</code></pre>
         }).catch(function(){ dot.className='pt-status-dot disconnected'; dot.title=(window.t?window.t('sup.llm_down'):'LLM nicht erreichbar'); });
     }
     pollLlm(); setInterval(pollLlm, 30000);
+    // LLM-Profil-Umschalter (Klick auf die Status-Pill) – gemeinsames Modul
+    if (window.ProfileSwitcher) {
+        window.ProfileSwitcher.attach({
+            dotId: 'pt-status-dot',
+            headers: function(){ return H; },
+            onSwitched: function(){ pollLlm(); },
+        });
+    }
 
     // ── SSL-/Verbindungs-Sicherheit: Badge + Warnbanner + Zertifikat-Modal ──
     var certModal = document.getElementById('cert-modal');

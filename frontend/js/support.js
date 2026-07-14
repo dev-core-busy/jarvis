@@ -319,12 +319,8 @@
                 var lo = $('sup-logout-btn');
                 if (lo && d.username) lo.title = d.username + ' abmelden';
                 if (d.is_admin) {
-                    var dot = $('sup-status-dot');
-                    if (dot) {
-                        dot.style.cursor = 'pointer';
-                        dot.title = T('chat.llm_settings', 'LLM-Profile öffnen');
-                        dot.addEventListener('click', function () { try{sessionStorage.setItem('jarvis_settings_return','/support');}catch(e){} window.location.href = '/settings'; });
-                    }
+                    // Profilwechsel laeuft ueber das Status-Pill-Menue (ProfileSwitcher);
+                    // die fruehere Pill-Navigation zu /settings wurde entfernt.
                     // Setup-Button (direkt vor Logout) fuer Admins einblenden
                     var sb = $('sup-settings-btn');
                     if (sb) {

@@ -506,18 +506,18 @@ def _may_edit_knowledge(user: str) -> bool:
 
 
 def _may_use_profile(user: str, profile: dict) -> bool:
-    """Darf der Benutzer dieses KI-Profil nutzen/aktivieren?
+    """Darf der Benutzer dieses KI-Profil im Umschalter nutzen/aktivieren?
 
-    Default (keine Berechtigung am Profil hinterlegt) = ALLE. Sonst: lokale
-    Admins, Benutzer in ``allowed_users`` oder Mitglieder von ``allowed_group``
-    (memberOf-DNs werden beim Login gecacht) – analog den Wissensgruppen-Editoren."""
+    Default (keine Berechtigung am Profil hinterlegt) = ALLE. Sonst NUR Benutzer
+    in ``allowed_users`` oder Mitglieder von ``allowed_group`` (memberOf-DNs werden
+    beim Login gecacht). KEIN Admin-Bypass: ist ein Profil eingeschraenkt und der
+    Admin steht nicht auf der Liste, erscheint es fuer ihn NICHT im Umschalter-Menue.
+    (Admins verwalten/aktivieren dennoch alle Profile unter Einstellungen -> LLM-Profile.)"""
     if not profile:
         return False
     au = (profile.get("allowed_users") or "").strip()
     ag = (profile.get("allowed_group") or "").strip()
     if not au and not ag:
-        return True
-    if user in ALLOWED_USERS or _user_is_admin(user):
         return True
     plain = _norm_login(user)
     if au and plain in {_norm_login(u) for u in au.split(",") if u.strip()}:
@@ -3313,8 +3313,9 @@ def _track_llm_reach(reachable: bool) -> int:
 async def llm_active_status(user: str = Depends(require_auth)):
     """Erreichbarkeit des AKTIVEN LLM-Profils – fuer die Verbindungsstatus-Pill.
     status: ok (erreichbar) | degraded (erreichbar, Modell fehlt) | down (nicht erreichbar).
-    ``reachable``/``since`` (Epoch-ms): seit wann der aktuelle Zustand besteht."""
-    prof = config.active_profile
+    ``reachable``/``since`` (Epoch-ms): seit wann der aktuelle Zustand besteht.
+    Benutzerbezogen: zeigt das vom Benutzer gewaehlte Profil (Fallback global)."""
+    prof = config.profile_for_user(user)
     if not prof:
         return JSONResponse({"success": False, "status": "down", "error": "Kein aktives Profil",
                              "reachable": False, "since": _track_llm_reach(False)})
@@ -3359,20 +3360,21 @@ async def llm_profiles_list(user: str = Depends(require_auth)):
               "provider": p.get("provider", ""), "model": p.get("model", "")}
              for p in usable]
     return JSONResponse({"ok": True, "profiles": profs,
-                         "active_id": config.active_profile_id})
+                         "active_id": config.active_profile_id_for_user(user)})
 
 
 @app.post("/api/llm/profiles/{profile_id}/activate")
 async def llm_activate_profile(profile_id: str, user: str = Depends(require_auth)):
-    """Aktives Profil wechseln – nur wenn der Benutzer dieses Profil nutzen darf."""
+    """Profilwahl DIESES Benutzers setzen – beeinflusst nur ihn, nicht andere.
+    Nur erlaubt, wenn der Benutzer das Profil nutzen darf."""
     prof = next((p for p in config.profiles if p.get("id") == profile_id), None)
     if not prof:
         return JSONResponse({"ok": False, "error": "Profil nicht gefunden"}, status_code=404)
     if not _may_use_profile(user, prof):
         return JSONResponse({"ok": False, "error": "Keine Berechtigung fuer dieses Profil"},
                             status_code=403)
-    if config.activate_profile(profile_id):
-        return JSONResponse({"ok": True, "active_id": config.active_profile_id})
+    if config.set_user_profile(user, profile_id):
+        return JSONResponse({"ok": True, "active_id": config.active_profile_id_for_user(user)})
     return JSONResponse({"ok": False, "error": "Profil nicht gefunden"}, status_code=404)
 
 

@@ -388,7 +388,15 @@
     try { _chatDebug = localStorage.getItem('jarvis_chat_debug') === '1'; } catch (e) {}
     function _updateDebugBtn() {
         const b = document.getElementById('ctx-debug-toggle');
-        if (b) b.classList.toggle('active', _chatDebug);
+        if (!b) return;
+        b.classList.toggle('active', _chatDebug);
+        // Zustand dem Tooltip voranstellen ("Debug ist ein-/ausgeschaltet · …")
+        const state = _chatDebug
+            ? (window.t ? window.t('chat.debug_on') : 'Debug ist eingeschaltet')
+            : (window.t ? window.t('chat.debug_off') : 'Debug ist ausgeschaltet');
+        const base = (window.t ? window.t('chat.debug_toggle') : 'Debug-Ansicht: Zwischenschritte anzeigen');
+        b.title = state + ' · ' + base;
+        b.setAttribute('aria-label', b.title);
     }
     function _setupDebugToggle() {
         const b = document.getElementById('ctx-debug-toggle');
@@ -399,6 +407,13 @@
             try { localStorage.setItem('jarvis_chat_debug', _chatDebug ? '1' : '0'); } catch (e) {}
             _updateDebugBtn();
         });
+        // Bei Sprachwechsel den zusammengesetzten Titel neu setzen (applyLang wuerde
+        // ihn sonst nicht kennen – wir tragen kein data-i18n-title mehr am Button).
+        if (window.setLang && !window._chatDbgLangWrapped) {
+            window._chatDbgLangWrapped = true;
+            const _orig = window.setLang;
+            window.setLang = function () { const r = _orig.apply(this, arguments); try { _updateDebugBtn(); } catch (e) {} return r; };
+        }
         _updateDebugBtn();
     }
 

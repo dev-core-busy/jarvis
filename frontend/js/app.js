@@ -239,105 +239,6 @@
     _wireEyeBtn('btn-toggle-login-pw', document.getElementById('login-password'));
 
     // ─── Screen-Wechsel ─────────────────────────────────────────
-    function _updateUserBadge() {
-        const badge = document.getElementById('header-user-badge');
-        if (!badge) return;
-        badge.textContent = currentUser || '';
-        badge.style.display = currentUser ? '' : 'none';
-    }
-
-    // ── Verbindungsstatus-Pill = Erreichbarkeit des AKTIVEN LLM-Profils ──
-    //    LLM erreichbar -> gruen (.connected), nicht erreichbar -> rot (Default).
-    let _llmStatusTimer = null;
-    async function _checkLlmStatus() {
-        if (!connectionDot) return;
-        try {
-            const res = await fetch('/api/llm/active-status', { headers: { 'Authorization': 'Bearer ' + token } });
-            const H = '';  // kein Profil-Umschalter auf dieser (nie sichtbaren) Pill
-            if (!res.ok) { connectionDot.classList.remove('connected'); connectionDot.title = window.t('app.llm_status_unavailable') + H; return; }
-            const d = await res.json();
-            const reachable = (d.status === 'ok' || d.status === 'degraded');
-            connectionDot.classList.toggle('connected', reachable);
-            const name = d.profile_name ? ' – ' + d.profile_name : '';
-            if (d.status === 'ok')            connectionDot.title = window.t('app.llm_reachable') + name + H;
-            else if (d.status === 'degraded') connectionDot.title = window.t('app.llm_reachable_no_model') + name + H;
-            else                              connectionDot.title = window.t('app.llm_unreachable') + name + H;
-        } catch (e) {
-            connectionDot.classList.remove('connected');
-            connectionDot.title = window.t('app.llm_unreachable');
-        }
-    }
-    function _startLlmStatusIndicator() {
-        _checkLlmStatus();
-        if (!_llmStatusTimer) _llmStatusTimer = setInterval(_checkLlmStatus, 30000);
-        // Hinweis: KEIN Profil-Umschalter auf dieser Pill. Der `/`-Hauptbildschirm
-        // wird nach Login stets auf /portal umgeleitet (siehe Login-Flow) und ist
-        // daher keine sichtbare Oberflaeche. Der Umschalter sitzt auf den echten
-        // Stellen: /portal, /chat, /userchat, /support.
-    }
-    // Nach Profilwechsel sofort neu pruefen
-    window._refreshLlmStatusPill = _checkLlmStatus;
-
-    function showMainScreen() {
-        loginScreen.classList.remove('active');
-        mainScreen.classList.add('active');
-        _updateUserBadge();
-        _restoreHistory();
-        connectWebSocket();
-        initVNC();
-        loadVersion();
-        updateWidget.init();
-        _startContextIndicator();
-        _startLlmStatusIndicator();
-        _initHeaderTts();
-        _startIssuesBadge();
-        _startBrokerBadge();
-        // Sprachübersetzungen nach Screen-Wechsel anwenden
-        if (window.applyLang) window.applyLang();
-    }
-
-    // ─── Kontext-Indikator ───────────────────────────────────────────
-    let _ctxIndicatorTimer = null;
-
-    async function _updateContextIndicator() {
-        const indicator = document.getElementById('ctx-indicator');
-        const text      = document.getElementById('ctx-indicator-text');
-        if (!indicator) return;
-        try {
-            const r = await fetch('/api/context/stats', {
-                headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') }
-            });
-            if (!r.ok) return;
-            const d = await r.json();
-            const n = d.history_entries || 0;
-            if (n > 0) {
-                indicator.style.display = 'flex';
-                text.textContent = window.t('context.label').replace('{n}', n).replace('{pct}', d.fills_pct ?? 0);
-            } else {
-                indicator.style.display = 'none';
-            }
-        } catch (e) { /* offline */ }
-    }
-
-    function _startContextIndicator() {
-        _updateContextIndicator();
-        _ctxIndicatorTimer = setInterval(_updateContextIndicator, 8000);
-    }
-
-    window._clearUserContext = async function() {
-        try {
-            const r = await fetch('/api/context/clear', {
-                method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') }
-            });
-            const d = await r.json();
-            if (d.ok) {
-                document.getElementById('ctx-indicator').style.display = 'none';
-            }
-        } catch (e) { /* ignore */ }
-    };
-
-    // ─── Kennwort-Änderungs-Modal ────────────────────────────────
     const changePwModal = document.getElementById('change-password-modal');
     const cpwOld     = document.getElementById('cpw-old');
     const cpwNew     = document.getElementById('cpw-new');
@@ -481,21 +382,6 @@
     }
 
     // ─── Version laden und anzeigen ─────────────────────────────
-    async function loadVersion() {
-        try {
-            const res = await fetch('/api/version');
-            const data = await res.json();
-            const v = data.version || '?';
-            // Version in Pill (via update-version span, nicht textContent der Pill selbst)
-            const verSpan = document.getElementById('update-version');
-            if (verSpan) verSpan.textContent = 'v' + v;
-            // Footer im Settings-Modal
-            const footer = document.getElementById('version-modal-footer');
-            if (footer) footer.innerHTML = 'Jarvis v' + v + ' · Developed by Andreas Bender with <a href="https://claude.ai" target="_blank" style="color:var(--accent-hover);text-decoration:none;">Claude</a> (Anthropic)';
-        } catch (e) { /* Version nicht verfuegbar */ }
-    }
-
-    // ─── Update-Widget (an Version-Pill im Header) ────────────────
     const updateWidget = (() => {
         const widget   = document.getElementById('version-pill');
         const dropdown = document.getElementById('update-dropdown');
@@ -761,180 +647,6 @@
     }
 
     // ─── WebSocket ──────────────────────────────────────────────
-    function connectWebSocket() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-        ws = new JarvisWebSocket(wsUrl);
-
-        ws.on('connected', () => {
-            // Beim Server registrieren (setzt Benutzer der WS) → Live-Sync-Events empfangen
-            if (token) ws.send({ type: 'hello', token });
-            // Pill zeigt jetzt den LLM-Status (s. _checkLlmStatus), nicht den WS-Status.
-            addLogEntry('🔗 ' + (window.t ? window.t('notif.connected') : 'Verbindung hergestellt'), 'system');
-            // Nach Reconnect VNC neu verbinden, falls nicht schon verbunden/probiert
-            if (vnc && !vnc.connected && !vnc._probingActive) {
-                vnc.startProbing(2000, 30);
-            }
-        });
-
-        ws.on('disconnected', () => {
-            // VNC-Probing starten — verbindet automatisch sobald Server zurück
-            if (vnc && !vnc._probingActive) {
-                vnc.startProbing(3000, 40);
-            }
-        });
-
-        ws.on('reconnecting', (attempt) => {
-            addLogEntry('🔄 ' + (window.t ? window.t('notif.reconnect').replace('{n}', attempt) : `Verbindung wird wiederhergestellt... (Versuch ${attempt})`), 'system');
-        });
-
-        ws.on('cpu', (data) => {
-            updateCPU(data.value);
-        });
-
-        ws.on('status', (data) => {
-            const agentId = data.agent_id || '_main';
-            // Fehlermeldungen (❌/🔴/⚠️) immer als highlight anzeigen, unabhängig vom Debug-Modus
-            const isError = data.message && (data.message.startsWith('❌') || data.message.startsWith('🔴') || data.message.startsWith('⚠️'));
-            // ⏳ Fortschritts-Meldungen (Warte auf LLM, Tool-Ausführung etc.) nur im Debug sichtbar
-            const isProgress = data.message && (
-                data.message.trimStart().startsWith('⏳') ||
-                data.message.trimStart().startsWith('🔧') ||
-                data.message.trimStart().startsWith('🚀')
-            );
-            addLogEntry(data.message, 'info', (data.highlight && !isProgress) || isError, agentId);
-            // Agent-State in Sidebar aktualisieren
-            if (data.agent_id) {
-                _updateAgentCard(data.agent_id, data.agent_label, data.state, data.is_sub_agent);
-            }
-            // Hauptagent-State im Header nur wenn aktiver Agent
-            if (agentId === _activeAgentId && data.state) {
-                updateAgentState(data.state);
-            }
-        });
-
-        ws.on('llm_stats', (data) => {
-            const agentId = data.agent_id || '_main';
-            const secNum = (data.duration_ms || 0) / 1000;
-            const sec = secNum.toFixed(1);
-            const inTok = data.input_tokens || 0;
-            const outTok = data.output_tokens || 0;
-            const total = data.total_tokens || (inTok + outTok);
-            let info = `⏱ ${sec}s`;
-            if (total > 0) info += ` · ${inTok.toLocaleString('de-DE')} → ${outTok.toLocaleString('de-DE')} Tokens`;
-            // Output-Token/s: nur die Antwort-Geschwindigkeit (was der User spürt)
-            if (outTok > 0 && secNum > 0) {
-                const tps = outTok / secNum;
-                const tpsStr = tps >= 100 ? tps.toFixed(0) : tps.toFixed(1);
-                info += ` · ${tpsStr} tok/s`;
-            }
-            if (data.steps > 0) info += ` · ${data.steps} Schritt${data.steps !== 1 ? 'e' : ''}`;
-            addStatsEntry(info, agentId);
-        });
-
-        ws.on('agent_event', (data) => {
-            _handleAgentEvent(data);
-        });
-
-        // Sicherheitsschicht: Konto wurde (gerade) gesperrt → Sperr-Bildschirm
-        ws.on('security_blocked', () => {
-            if (window.SecurityIncidents) window.SecurityIncidents.fetchAndShowBlocked();
-        });
-
-        // Live-Sync der geteilten Anzeige-History (vom /chat-Fenster)
-        ws.on('shared_history_append', (data) => {
-            _applyRemoteAppend(data.message, data.origin);
-        });
-
-        ws.on('agent_list', (data) => {
-            for (const a of (data.agents || [])) {
-                _agentInfos[a.agent_id] = {
-                    label: a.label,
-                    state: a.state,
-                    is_sub_agent: a.is_sub_agent,
-                };
-                _ensureAgentLog(a.agent_id);
-            }
-            _renderAgentCards();
-            _updateSidebarVisibility();
-        });
-
-        ws.on('error', (data) => {
-            const msg = data.message || data.error || data.detail || JSON.stringify(data);
-            addLogEntry(`❌ Fehler: ${msg}`, 'error');
-        });
-
-        // TTS-Event: Browser Speech Synthesis fuer Vision-Begruessungen
-        ws.on('tts', (data) => {
-            const text = data.text || '';
-            const name = data.name || '';
-            if (text && window.speechSynthesis) {
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'de-DE';
-                utterance.rate = 1.0;
-                utterance.pitch = 1.0;
-                window.speechSynthesis.speak(utterance);
-                addLogEntry(`🔊 TTS: "${text}"`);
-            } else {
-                addLogEntry(`🔊 Begrüßung (kein TTS verfügbar): ${text}`);
-            }
-        });
-
-        // Vorgerenderte Audio-Begruessungen abspielen
-        ws.on('greet_audio', (data) => {
-            const url = data.url || '';
-            const name = data.name || '';
-            if (url) {
-                const t = localStorage.getItem('jarvis_token') || '';
-                const audio = new Audio(`${url}?token=${t}`);
-                audio.play().catch(e => console.warn('Audio playback failed:', e));
-                addLogEntry(`🔊 Begrüßung: ${name}`);
-            }
-        });
-
-        // Cron- und Watcher-Events an cronManager weiterleiten
-        ws.on('cron_event', (data) => {
-            if (window.cronManager) window.cronManager.handleWsEvent(data);
-        });
-        ws.on('watcher_event', (data) => {
-            if (window.cronManager) window.cronManager.handleWsEvent(data);
-        });
-
-        // Alle Nachrichten als DOM-Event weitersenden (für OpenClaw Import-Modal etc.)
-        ws.on('message', (data) => {
-            window.dispatchEvent(new CustomEvent('jarvis-ws-message', { detail: data }));
-        });
-
-        ws.connect();
-    }
-
-    // ─── Globale Helfer für Skills / OpenClaw Import ─────────────
-    /** Sendet einen Task an den Jarvis-Agenten via WebSocket. */
-    window.sendJarvisTask = function (text) {
-        if (!ws) return false;
-        ws.send({ type: 'task', text, token, lang: window._lang || 'de' });
-        addLogEntry(`📝 Aufgabe: ${text.substring(0, 80)}…`, 'task', false);
-        return true;
-    };
-
-    // ─── VNC ────────────────────────────────────────────────────
-    async function initVNC() {
-        vnc = new JarvisVNC();
-        try {
-            const res = await fetch('/api/config');
-            const data = await res.json();
-            if (data.vnc_available) {
-                vnc.connect(data.websockify_port);
-            }
-        } catch {
-            vnc.showError();
-        }
-    }
-
-    // ─── Datei-Anhänge ──────────────────────────────────────────
-    let _pendingAttachments = [];  // [{name, mime_type, data (base64), type}]
-
     function _renderAttachPreviews() {
         if (!attachPreviewBar) return;
         attachPreviewBar.innerHTML = '';
@@ -1345,128 +1057,6 @@
 
     // ── Issue-Benachrichtigungs-Badge (roter Kreis mit Anzahl ueber dem Issue-Icon) ──
     let _issuesBadgeTimer = null;
-    async function _refreshIssuesBadge() {
-        const badge = document.getElementById('issues-badge');
-        if (!badge) return;
-        try {
-            const r = await fetch('/api/issues/notifications', { headers: { 'Authorization': 'Bearer ' + token } });
-            if (!r.ok) { badge.style.display = 'none'; return; }
-            const d = await r.json();
-            const n = d.count || 0;
-            if (n > 0) { badge.textContent = n > 99 ? '99+' : String(n); badge.style.display = ''; }
-            else { badge.style.display = 'none'; }
-        } catch (e) { /* ignore */ }
-    }
-    function _startIssuesBadge() {
-        _refreshIssuesBadge();
-        if (!_issuesBadgeTimer) _issuesBadgeTimer = setInterval(_refreshIssuesBadge, 60000);
-    }
-    window._refreshIssuesBadge = _refreshIssuesBadge;
-
-    // ── Zahnrad-Badge: offene Root-Freigaben (Root-Broker) ──
-    let _brokerBadgeTimer = null;
-    function _setBrokerBadge(n) {
-        const b = document.getElementById('gear-broker-badge');
-        if (!b) return;
-        if (n > 0) { b.textContent = n > 99 ? '99+' : String(n); b.style.display = ''; }
-        else { b.style.display = 'none'; }
-    }
-    async function _refreshBrokerBadge() {
-        try {
-            const r = await fetch('/api/broker/status', { headers: { 'Authorization': 'Bearer ' + token } });
-            if (!r.ok) { _setBrokerBadge(0); return; }
-            const d = await r.json();
-            _setBrokerBadge((d && d.pending) || 0);
-        } catch (e) { /* ignore */ }
-    }
-    function _startBrokerBadge() {
-        _refreshBrokerBadge();
-        if (!_brokerBadgeTimer) _brokerBadgeTimer = setInterval(_refreshBrokerBadge, 60000);
-    }
-    window._setBrokerBadge = _setBrokerBadge;
-    window._refreshBrokerBadge = _refreshBrokerBadge;
-    // Beim Oeffnen des Issue-Trackers gelten die Status-Aenderungen als gesehen
-    {
-        const _bi = document.getElementById('btn-issues');
-        if (_bi) _bi.addEventListener('click', () => {
-            const badge = document.getElementById('issues-badge');
-            if (badge) badge.style.display = 'none';
-            fetch('/api/issues/notifications/seen', {
-                method: 'POST', headers: { 'Authorization': 'Bearer ' + token }
-            }).catch(() => {});
-        });
-    }
-
-    // Header-Audio-Cluster eigenstaendig initialisieren (unabhaengig vom Settings-Modal)
-    let _hdrTtsInit = false;
-    async function _initHeaderTts() {
-        const hv   = document.getElementById('hdr-tts-voice');
-        const prev = document.getElementById('btn-tts-preview-hdr');
-        let savedVoice = '';
-        try {
-            const r = await fetch('/api/settings', { headers: { 'Authorization': `Bearer ${token}` } });
-            if (r.ok) {
-                const d = await r.json();
-                _ttsEnabled = d.tts_enabled || false;
-                savedVoice  = d.tts_voice || '';
-            }
-        } catch (e) { /* ignore */ }
-        _updateTtsBtn();
-        if (hv) {
-            try {
-                const rv = await fetch('/api/tts/voices', { headers: { 'Authorization': `Bearer ${token}` } });
-                if (rv.ok) {
-                    const voices = await rv.json();
-                    hv.innerHTML = '<option value="">Standard</option>';
-                    voices.forEach(v => {
-                        const o = document.createElement('option');
-                        o.value = v.name; o.textContent = v.display || v.name;
-                        hv.appendChild(o);
-                    });
-                    if (savedVoice) hv.value = savedVoice;
-                }
-            } catch (e) { /* ignore */ }
-        }
-        if (_hdrTtsInit) return;   // Event-Handler nur einmal binden
-        _hdrTtsInit = true;
-        if (hv) {
-            hv.addEventListener('change', async () => {
-                const sv = document.getElementById('setting-tts-voice');
-                if (sv) sv.value = hv.value;
-                try {
-                    await fetch('/api/settings', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ tts_voice: hv.value })
-                    });
-                } catch (e) { /* ignore */ }
-            });
-        }
-        if (prev && hv) {
-            prev.addEventListener('click', async () => {
-                const previewText = window._lang === 'en'
-                    ? 'Hello, I am Jarvis, your autonomous AI assistant.'
-                    : 'Hallo, ich bin Jarvis, dein autonomer KI-Assistent.';
-                const orig = prev.innerHTML;
-                prev.disabled = true; prev.innerHTML = '⏳';
-                try {
-                    const resp = await fetch('/api/tts', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ text: previewText, voice: hv.value || '' })
-                    });
-                    if (!resp.ok) throw new Error('tts');
-                    const url = URL.createObjectURL(await resp.blob());
-                    const a = new Audio(url); prev.innerHTML = '🔊';
-                    a.onended = () => { URL.revokeObjectURL(url); prev.innerHTML = orig; prev.disabled = false; };
-                    a.onerror = () => { URL.revokeObjectURL(url); prev.innerHTML = orig; prev.disabled = false; };
-                    await a.play();
-                } catch (e) { prev.innerHTML = orig; prev.disabled = false; }
-            });
-        }
-    }
-
-    // ─── Multi-Agent State ──────────────────────────────────────
     const _agentLogs = {};        // agent_id → [DOM-Elemente]
     let _activeAgentId = '_main'; // Aktuell angezeigter Agent
     const _agentInfos = {};       // agent_id → {label, state, is_sub_agent}
@@ -1502,103 +1092,6 @@
 
         // Zum Ende scrollen
         logContainer.scrollTop = logContainer.scrollHeight;
-    }
-
-    function _updateAgentCard(agentId, label, state, isSubAgent) {
-        _agentInfos[agentId] = { label: label || agentId, state: state || 'idle', is_sub_agent: isSubAgent };
-        _renderAgentCards();
-    }
-
-    function _handleAgentEvent(data) {
-        const event = data.event;
-        const agent = data.agent || {};
-        const agents = data.agents || [];
-
-        if (event === 'started' && !agent.is_sub_agent) {
-            // Neuer Hauptagent gestartet – alte Agent-Infos zuruecksetzen
-            // (z.B. nach Service-Restart oder neuem Task)
-            const oldIds = Object.keys(_agentInfos);
-            for (const oldId of oldIds) {
-                delete _agentInfos[oldId];
-            }
-            _activeAgentId = agent.agent_id;
-            // Eventuell offene Bot-Bubble aus vorherigem Task verwerfen
-            _currentBotBubble = null;
-            _currentBotRaw = '';
-        }
-
-        if (event === 'started' || event === 'spawned') {
-            _agentInfos[agent.agent_id] = {
-                label: agent.label,
-                state: agent.state,
-                is_sub_agent: agent.is_sub_agent,
-            };
-            _ensureAgentLog(agent.agent_id);
-        }
-
-        if (event === 'finished' && agent.is_sub_agent) {
-            // Sub-Agent fertig – State aktualisieren
-            if (_agentInfos[agent.agent_id]) {
-                _agentInfos[agent.agent_id].state = 'idle';
-            }
-            // Wenn der beendete Sub-Agent aktiv war: zurueck zum Hauptagent
-            if (_activeAgentId === agent.agent_id) {
-                const mainId = Object.keys(_agentInfos).find(id => !_agentInfos[id].is_sub_agent);
-                if (mainId) _switchToAgent(mainId);
-            }
-            // Auto-Cleanup: Sub-Agent nach 8 Sekunden entfernen (nur wenn nicht pausiert)
-            const removeId = agent.agent_id;
-            setTimeout(() => {
-                const info = _agentInfos[removeId];
-                if (info && info.state !== 'paused') {
-                    window._removeAgent(removeId);
-                }
-            }, 8000);
-        }
-
-        if (event === 'paused' && agent.is_sub_agent) {
-            // Sub-Agent pausiert – State aktualisieren, NICHT entfernen
-            if (_agentInfos[agent.agent_id]) {
-                _agentInfos[agent.agent_id].state = 'paused';
-            }
-        }
-
-        // Alle Agent-Infos aktualisieren
-        for (const a of agents) {
-            _agentInfos[a.agent_id] = {
-                label: a.label,
-                state: a.state,
-                is_sub_agent: a.is_sub_agent,
-            };
-        }
-
-        // Thinking Bar: ausblenden wenn Hauptagent fertig oder idle
-        if ((event === 'finished' || event === 'paused') && !agent.is_sub_agent) {
-            if (event === 'finished') {
-                // Bot-Bubble abschließen und in History speichern
-                _finalizeBotBubble();
-                if (_currentBotRaw.trim()) {
-                    _mainHistory.push({ role: 'bot', text: _currentBotRaw.trim(), time: _timeStr(), date: _currentDateStr(), ts: Date.now() });
-                    _saveHistory();
-                    _syncAppend(_mainHistory[_mainHistory.length - 1]);
-                    _currentBotRaw = '';
-                }
-            }
-            updateAgentState('idle');
-            _updateContextIndicator();
-            // Feedback-Buttons an letzten Log-Eintrag hängen (immer, solange Task vorhanden)
-            if (event === 'finished' && _fb_lastHighlightEl && _fb_lastUserTask) {
-                _appendFeedbackToLog(_fb_lastHighlightEl, _fb_lastUserTask, _fb_lastHighlightText.trim());
-                _fb_lastHighlightEl   = null;
-                _fb_lastHighlightText = '';
-            }
-        }
-        if (event === 'started' && !agent.is_sub_agent) {
-            updateAgentState('running');
-        }
-
-        _renderAgentCards();
-        _updateSidebarVisibility();
     }
 
     function _renderAgentCards() {
@@ -1958,70 +1451,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
     // Tool-Call-Verkettung muessen erhalten bleiben. Nachfolgende Dialoge
     // werden NICHT mitgeloescht. (Edit-Workflow truncated weiterhin bewusst,
     // da eine geaenderte Frage neue Antworten erfordert.)
-    function _deleteBubble(row, role) {
-        if (!row || !row.parentNode) return;
-
-        // Edit-Modus auf einer anderen Row beenden
-        if (_editingRow && _editingRow !== row) {
-            try { _restoreBubble(_editingRow.querySelector('.jv-bubble'), _editingRow); } catch(_) {}
-        }
-
-        const isUser = (role === 'user');
-        const promptTxt = window.t
-            ? (isUser ? window.t('bubble.del_user_q') : window.t('bubble.del_bot_a'))
-            : (isUser ? 'Diese Frage löschen?' : 'Diese Antwort löschen?');
-        if (!confirm(promptTxt)) return;
-
-        // Position dieser Row unter allen Rows der gleichen Rolle ermitteln,
-        // damit wir den passenden _mainHistory-Eintrag finden.
-        const rowSel = isUser ? '.jv-bubble-row.user' : '.jv-bubble-row.bot';
-        const sameRoleRows = logContainer.querySelectorAll(rowSel);
-        const roleIndex    = Array.from(sameRoleRows).indexOf(row);
-
-        // Falls die aktuell streamende Bot-Bubble geloescht wird, Stream-State leeren
-        if (!isUser && (row.contains(_currentBotBubble) || _currentBotBubbleCol === row.querySelector('.jv-bubble-col'))) {
-            _currentBotBubble    = null;
-            _currentBotBubbleCol = null;
-            _currentBotRaw       = '';
-        }
-        if (_editingRow === row) _editingRow = null;
-
-        // Nur diese Row entfernen
-        row.parentNode.removeChild(row);
-
-        // _mainHistory: nur den passenden Eintrag entfernen (kein Truncate!)
-        if (Array.isArray(_mainHistory) && roleIndex >= 0) {
-            const wantRoles = isUser ? ['user'] : ['bot', 'assistant'];
-            let seen = 0;
-            for (let i = 0; i < _mainHistory.length; i++) {
-                const e = _mainHistory[i];
-                if (e && wantRoles.includes(e.role)) {
-                    if (seen === roleIndex) { _mainHistory.splice(i, 1); break; }
-                    seen++;
-                }
-            }
-            _saveHistory();
-            _syncReplace();
-        }
-
-        // Falls Container leer → Welcome wieder einblenden
-        if (!logContainer.querySelector('.jv-bubble-row')) {
-            const w = logContainer.querySelector('.log-welcome');
-            if (!w) {
-                const welcome = document.createElement('div');
-                welcome.className = 'log-welcome';
-                welcome.innerHTML = '<p>👋 Willkommen bei Jarvis!</p>' +
-                                    '<p class="log-hint">Gib unten eine Aufgabe ein, um loszulegen.</p>';
-                logContainer.appendChild(welcome);
-            }
-        }
-    }
-
-    // ─── Mehrfachauswahl: Nachrichten per Checkbox loeschen ──────
-    //  Lebenszyklus in chatlib.js (createSelectionController). Hier nur
-    //  die seitenspezifische Loeschlogik: lokale History je Rolle filtern,
-    //  DOM-Rows + verwaiste Datums-Separatoren entfernen, Welcome wieder
-    //  einblenden, Streaming-State der aktiven Bot-Bubble leeren.
     const _selCtl = window.JarvisChatLib.createSelectionController({
         container: logContainer,
         rowSelector: '.jv-bubble-row',
@@ -2213,19 +1642,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         logContainer.scrollTop = logContainer.scrollHeight;
     }
 
-    function _finalizeBotBubble() {
-        if (_currentBotBubbleCol) {
-            const dots = _currentBotBubbleCol.querySelector('.jv-streaming-dots');
-            if (dots) dots.remove();
-        }
-        _currentBotBubble = null;
-        _currentBotBubbleCol = null;
-    }
-
-    // Referenz auf die Col des aktuellen Bot-Bubbles (für Stats + Feedback)
-    let _currentBotBubbleCol = null;
-
-    // ─── History Persistenz (delegieren an chatlib.js) ──────────
     function _saveHistory() {
         if (_mainHistory.length > _HISTORY_MAX) _mainHistory = _mainHistory.slice(-_HISTORY_MAX);
         if (window.JarvisChatLib && window.JarvisChatLib.saveHistory) {
@@ -2235,16 +1651,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             catch(e) { /* QuotaExceeded */ }
         }
     }
-    function _loadHistory() {
-        if (window.JarvisChatLib && window.JarvisChatLib.loadHistory) {
-            return window.JarvisChatLib.loadHistory(_HISTORY_KEY);
-        }
-        try {
-            const raw = localStorage.getItem(_HISTORY_KEY);
-            return raw ? (JSON.parse(raw) || []) : [];
-        } catch(e) { return []; }
-    }
-    // Neue Nachricht in die geteilte Backend-History anhaengen (additiv, fensteruebergreifend)
     function _syncAppend(msg) {
         if (window.JarvisChatLib && window.JarvisChatLib.sharedAppend && token) {
             window.JarvisChatLib.sharedAppend(token, msg, _clientId);
@@ -2259,73 +1665,11 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
 
     // Live-Sync: vom anderen Fenster (gleicher Benutzer) angehaengte Nachricht
     // sofort darstellen, ohne sie erneut ans Backend zu senden.
-    function _applyRemoteAppend(entry, origin) {
-        if (origin && origin === _clientId) return;       // eigenes Echo ignorieren
-        if (!entry || (entry.role !== 'user' && entry.role !== 'bot')) return;
-        if (entry.ts && _mainHistory.some(m => m && m.ts === entry.ts)) return;  // Dedup
-        if (entry.role === 'user') {
-            _addBubble(entry.text, 'user', entry.time || '', false);
-        } else {
-            const { col } = _addBubble(entry.text, 'bot', entry.time || '', true);
-            if (entry.stats) {
-                const s = document.createElement('div');
-                s.className = 'jv-bubble-stats';
-                s.textContent = entry.stats;
-                col.appendChild(s);
-            }
-        }
-        _mainHistory.push(entry);
-        logContainer.scrollTop = logContainer.scrollHeight;
-    }
-    async function _restoreHistory() {
-        // Geteilte Anzeige-History pro Benutzer (Hauptfenster + jarvis/chat identisch).
-        const _CL = window.JarvisChatLib;
-        if (_CL && _CL.sharedMigrate && token) {
-            try {
-                await _CL.sharedMigrate(token, ['jarvis_main_history_v1', 'jarvis_chat_history_v1']);
-                const shared = await _CL.sharedLoad(token);
-                _mainHistory = (shared !== null) ? shared : _loadHistory();
-            } catch (_e) { _mainHistory = _loadHistory(); }
-        } else {
-            _mainHistory = _loadHistory();
-        }
-        if (_mainHistory.length === 0) return;
-        const welcome = logContainer.querySelector('.log-welcome');
-        if (welcome) welcome.remove();
-        let lastDate = '';
-        for (const entry of _mainHistory) {
-            if (entry.date && entry.date !== lastDate) {
-                lastDate = entry.date;
-                _lastBubbleDate = lastDate;  // Sync damit _maybeAddDateSep nicht doppelt zeichnet
-                const sep = document.createElement('div');
-                sep.className = 'jv-date-sep';
-                sep.innerHTML = `<span>${_dateLabel(entry.date)}</span>`;
-                logContainer.appendChild(sep);
-            }
-            if (entry.role === 'user') {
-                _addBubble(entry.text, 'user', entry.time || '', false);
-            } else if (entry.role === 'bot') {
-                const { col, bubble } = _addBubble(entry.text, 'bot', entry.time || '', true);
-                if (entry.stats) {
-                    const statsEl = document.createElement('div');
-                    statsEl.className = 'jv-bubble-stats';
-                    statsEl.textContent = entry.stats;
-                    col.appendChild(statsEl);
-                }
-            }
-        }
-        // Neue-Sitzung Trennlinie
-        const div = document.createElement('div');
-        div.className = 'jv-date-sep';
-        div.style.opacity = '0.4';
-        div.innerHTML = '<span>── Neue Sitzung ──</span>';
-        logContainer.appendChild(div);
-        // lastBubbleDate für neue Nachrichten auf heutiges Datum setzen
-        _lastBubbleDate = lastDate;
-        logContainer.scrollTop = logContainer.scrollHeight;
-    }
-
     function addLogEntry(message, type = 'info', highlight = false, agentId = null) {
+        // Der Log-/Chat-Container des alten Hauptbildschirms wurde entfernt. Live-
+        // Aufrufer (z.B. Profil speichern/loeschen) nutzen dies nur fuer kosmetische
+        // Log-Zeilen -> ohne Container geraeuschlos aussteigen (sonst Null-Fehler).
+        if (!logContainer) return;
         // TTS nur für die eigentliche LLM-Antwort (highlight=true), nicht für Status-Meldungen
         if (highlight && (type === 'system' || type === 'info')) {
             const cleanMessage = message.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
@@ -2389,19 +1733,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
         }
     }
 
-    function addStatsEntry(info, agentId) {
-        const effectiveAgentId = agentId || '_main';
-        const entry = document.createElement('div');
-        entry.className = 'log-entry log-stats';
-        entry.dataset.agentId = effectiveAgentId;
-        if (effectiveAgentId !== _activeAgentId) entry.style.display = 'none';
-        entry.innerHTML = `<span class="log-stats-text">${escapeHtml(info)}</span>`;
-        _ensureAgentLog(effectiveAgentId);
-        _agentLogs[effectiveAgentId].push(entry);
-        logContainer.appendChild(entry);
-        if (effectiveAgentId === _activeAgentId) logContainer.scrollTop = logContainer.scrollHeight;
-    }
-
     function escapeHtml(text) {
         if (window.JarvisChatLib && window.JarvisChatLib.escapeHtml) {
             return window.JarvisChatLib.escapeHtml(text);
@@ -2412,31 +1743,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
     }
 
     // ─── CPU Bar ────────────────────────────────────────────────
-    function updateCPU(percent) {
-        const pct = Math.max(0, Math.min(100, percent));
-        cpuBarFill.style.width = pct + '%';
-        cpuBarLabel.textContent = `CPU: ${Math.round(pct)}%`;
-
-        // Gradient-Position basierend auf Last
-        const gradientPos = pct + '%';
-        cpuBarFill.style.backgroundPosition = `${pct}% 0`;
-    }
-
-    // ─── Agent State ────────────────────────────────────────────
-    function updateAgentState(state) {
-        const isRunning = state === 'running';
-        thinkingBar.hidden = !isRunning;
-        switch (state) {
-            case 'running':
-                btnStop.disabled = false;
-                break;
-            case 'stopped':
-            case 'idle':
-                btnStop.disabled = true;
-                break;
-        }
-    }
-
     function setupSettings() {
         const SVG_EYE_OPEN   = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
         const SVG_EYE_CLOSED = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
@@ -3967,17 +3273,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
             showLoginScreen();
         });
     }
-    function _showTokenExpiryWarning(remainingSec) {
-        if (remainingSec <= 0) { showLoginScreen(); return; }
-        const mins = Math.max(0, Math.round(remainingSec / 60));
-        const bar = document.createElement('div');
-        bar.className = 'token-expiry-bar';
-        bar.innerHTML = `⏱ Sitzung laeuft in ${mins} Min. ab. <button onclick="this.parentElement.remove();showLoginScreen()">Neu anmelden</button>`;
-        bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:var(--accent-warning,#f0ad4e);color:#000;text-align:center;padding:8px;font-size:14px;';
-        document.body.appendChild(bar);
-        // Auto-Logout bei Ablauf
-        setTimeout(() => { showLoginScreen(); }, remainingSec * 1000);
-    }
     function setupModal() {
         const modal = document.getElementById('cert-modal');
         const btnOpen = document.getElementById('btn-cert-help');
@@ -4207,49 +3502,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
     checkSecurity();
 
     // ─── Feedback ───────────────────────────────────────────────
-    function _appendFeedbackToLog(targetEl, userTask, botText) {
-        const row = document.createElement('div');
-        row.className = 'log-feedback-row';
-        // SVG-Icons statt Emoji (System-Emoji-Font kann fehlen / inkonsistent sein,
-        // SVG rendert ueberall identisch). Gelb fuer Thumbs (Emoji-Optik), Rot fuer X.
-        const SVG_UP   = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>`;
-        const SVG_DOWN = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#FFCA28"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>`;
-        const SVG_X    = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#E74C3C"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`;
-        const _tGood  = window.t ? window.t('feedback.good')  : 'Gute Antwort';
-        const _tBad   = window.t ? window.t('feedback.bad')   : 'Schlechte Antwort';
-        const _tWrong = window.t ? window.t('feedback.wrong') : 'Falsche Antwort';
-        row.innerHTML =
-            `<button class="log-fb-btn" data-r="positive" title="${_tGood}">${SVG_UP}</button>` +
-            `<button class="log-fb-btn" data-r="negative" title="${_tBad}">${SVG_DOWN}</button>` +
-            `<button class="log-fb-btn" data-r="wrong"    title="${_tWrong}">${SVG_X}</button>`;
-        targetEl.after(row);
-
-        row.querySelectorAll('.log-fb-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const rating = btn.dataset.r;
-                row.querySelectorAll('.log-fb-btn').forEach(b => b.disabled = true);
-                btn.classList.add('log-fb-active');
-                try {
-                    const res = await fetch('/api/feedback', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ token, rating, user_message: userTask, bot_response: botText }),
-                    });
-                    const data = await res.json();
-                    const info = document.createElement('div');
-                    info.className = 'log-fb-info';
-                    info.textContent = data.message || (window.t ? window.t('feedback.thanks') : 'Danke!');
-                    row.replaceWith(info);
-                    // LLM-Analyse mit Alternativen als highlight-Eintrag einblenden
-                    if (data.analysis) {
-                        addLogEntry(data.analysis, 'info', true, '_main');
-                    }
-                } catch {
-                    btn.disabled = false;
-                }
-            });
-        });
-    }
 
     // Feedback-CSS einmalig injizieren
     (function () {

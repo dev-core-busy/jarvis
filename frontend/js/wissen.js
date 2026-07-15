@@ -101,7 +101,7 @@
         banner.innerHTML = t('wissen.scope_as') + ' <b>' + esc(SCOPE.user) + '</b>'
             + (SCOPE.is_editor ? ' ' + t('wissen.global_editor') : '')
             + ' · ' + t('wissen.scope_area') + ' ' + SCOPE.groups.map(function (g) {
-                return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';color:' + esc(g.color) + ';">' + esc(g.name) + '</span>';
+                return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';">' + esc(g.name) + '</span>';
             }).join(' ');
 
         var sel = $('wi-folder');
@@ -115,10 +115,10 @@
 
     function groupBoxes(prefix) {
         return SCOPE.groups.map(function (g) {
-            return '<label class="wi-grpbox" style="border-color:' + esc(g.color) + '55;">'
+            return '<label class="wi-grpbox" style="border-color:' + esc(g.color) + ';">'
                 + '<input type="checkbox" class="wi-grp-' + prefix + '" value="' + esc(g.id) + '"'
                 + (SCOPE.groups.length === 1 ? ' checked' : '') + '>'
-                + '<span style="color:' + esc(g.color) + ';font-weight:600;">' + esc(g.name) + '</span></label>';
+                + '<span style="font-weight:600;">' + esc(g.name) + '</span></label>';
         }).join('');
     }
     function checkedGroups(prefix) {
@@ -208,7 +208,7 @@
                 if (!files.length) { box.innerHTML = '<div class="wi-empty">' + t('wissen.no_files') + '</div>'; return; }
                 box.innerHTML = files.map(function (f) {
                     var chips = f.groups.map(function (g) {
-                        return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';color:' + esc(g.color) + ';font-size:0.7rem;">' + esc(g.name) + '</span>';
+                        return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';font-size:0.7rem;">' + esc(g.name) + '</span>';
                     }).join(' ');
                     var url = '/api/wissen/file?path=' + encodeURIComponent(f.path) + '&token=' + encodeURIComponent(token);
                     return '<div class="wi-item" data-path="' + esc(f.path) + '">'

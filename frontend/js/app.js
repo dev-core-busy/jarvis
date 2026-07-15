@@ -69,7 +69,6 @@
     const loginBtn = document.getElementById('login-btn');
 
     const logContainer = document.getElementById('log-container');
-    const thinkingBar = document.getElementById('llm-thinking-bar');
     const taskInput = document.getElementById('task-input');
     const btnSend = document.getElementById('btn-send');
     const btnStop = document.getElementById('btn-stop');
@@ -101,9 +100,6 @@
     const btnZoomReset = document.getElementById('btn-zoom-reset');
     let logZoom = 100; // Zoom-Stufe in Prozent
 
-    const cpuBarFill = document.getElementById('cpu-bar-fill');
-    const cpuBarLabel = document.getElementById('cpu-bar-label');
-    const connectionDot = document.getElementById('connection-dot');
 
     // ─── Partikel-Hintergrund (Login) ───────────────────────────
     function initParticles() {
@@ -382,175 +378,6 @@
     }
 
     // ─── Version laden und anzeigen ─────────────────────────────
-    const updateWidget = (() => {
-        const widget   = document.getElementById('version-pill');
-        const dropdown = document.getElementById('update-dropdown');
-        const badge    = document.getElementById('update-badge');
-        const verEl    = document.getElementById('update-version');
-        const body     = document.getElementById('upd-body');
-        const _auth    = () => ({ 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') });
-        let _open = false;
-        let _checkTimer = null;
-
-        function init() {
-            if (!widget) return;
-            widget.addEventListener('click', toggle);
-            document.getElementById('upd-close')?.addEventListener('click', close);
-            // Klick außerhalb schließt Dropdown
-            document.addEventListener('click', e => {
-                if (_open && !widget.contains(e.target) && !dropdown?.contains(e.target)) close();
-            });
-            // Sofort prüfen, danach alle 30 Min
-            _check();
-            _checkTimer = setInterval(_check, 30 * 60 * 1000);
-        }
-
-        function toggle() { _open ? close() : open(); }
-
-        function open() {
-            _open = true;
-            dropdown?.classList.remove('hidden');
-            _check();
-        }
-
-        function close() {
-            _open = false;
-            dropdown?.classList.add('hidden');
-        }
-
-        async function _check() {
-            try {
-                const r = await fetch('/api/update/status', { headers: _auth() });
-                if (!r.ok) return;
-                const d = await r.json();
-                _render(d);
-            } catch (e) { /* offline */ }
-        }
-
-        function _render(d) {
-            // Version in Pill
-            if (verEl) verEl.textContent = 'v' + (d.jarvis_version || '?');
-
-            // Badge + Pill-Farbe
-            if (badge) {
-                badge.style.display = d.has_update ? 'inline' : 'none';
-                badge.className = 'update-badge' + (d.has_update ? ' has-update' : '');
-                badge.title = d.has_update ? window.t('update.badge_title').replace('{n}', d.commits_behind) : '';
-            }
-            if (widget) {
-                widget.classList.toggle('has-update', !!d.has_update);
-                widget.title = d.has_update
-                    ? window.t('update.widget_title_avail').replace('{n}', d.commits_behind)
-                    : window.t('update.widget_title_ok');
-            }
-
-            if (!body) return;
-
-            // Auto-Update-Einstellung laden
-            fetch('/api/update/settings', { headers: _auth() })
-                .then(r => r.json())
-                .then(s => _buildBody(d, s.auto_update_schedule || 'never'))
-                .catch(() => _buildBody(d, 'never'));
-        }
-
-        function _buildBody(d, schedule) {
-            if (!body) return;
-            const statusDot  = d.has_update ? 'pending' : (d.ok ? 'ok' : 'error');
-            const statusText = d.has_update
-                ? (d.commits_behind === 1
-                    ? window.t('update.commits_singular').replace('{n}', d.commits_behind)
-                    : window.t('update.commits_plural').replace('{n}', d.commits_behind))
-                : (d.ok ? window.t('update.status_ok') : window.t('update.status_error').replace('{msg}', d.error || '?'));
-
-            let commitsHtml = '';
-            if (d.recent_commits?.length) {
-                commitsHtml = `
-                <div class="upd-commit-list">
-                    ${d.recent_commits.map(c => `
-                    <div class="upd-commit">
-                        <span class="upd-commit-hash">${c.hash}</span>
-                        <span class="upd-commit-msg">${_esc(c.message)}</span>
-                        <span class="upd-commit-date">${c.date}</span>
-                    </div>`).join('')}
-                </div>`;
-            }
-
-            let updateBtn = '';
-            if (d.has_update) {
-                updateBtn = `<button id="upd-apply-btn" class="kb-btn-action" style="width:100%;">${window.t('update.apply_btn')}</button>`;
-            } else {
-                updateBtn = `<button id="upd-check-btn" class="kb-btn-secondary" style="width:100%;font-size:.78rem;">${window.t('update.check_btn')}</button>`;
-            }
-
-            body.innerHTML = `
-                <div class="upd-status-row">
-                    <span class="upd-dot ${statusDot}"></span>
-                    <span style="font-size:.82rem;color:var(--text-primary);">${statusText}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;font-size:.75rem;color:var(--text-secondary);">
-                    <span>${window.t('update.current')} <code style="color:var(--accent);">${d.current_hash || '?'}</code></span>
-                    <span>${window.t('update.branch')} <code style="color:var(--text-secondary);">${d.branch || 'master'}</code></span>
-                </div>
-                ${commitsHtml}
-                ${updateBtn}
-                <div class="upd-auto-row">
-                    <span class="upd-auto-label">${window.t('update.auto_label')}</span>
-                    <select id="upd-schedule" class="upd-schedule-select">
-                        <option value="never"  ${schedule==='never'  ?'selected':''}>${window.t('update.sched_never')}</option>
-                        <option value="daily"  ${schedule==='daily'  ?'selected':''}>${window.t('update.sched_daily')}</option>
-                        <option value="weekly" ${schedule==='weekly' ?'selected':''}>${window.t('update.sched_weekly')}</option>
-                    </select>
-                </div>`;
-
-            document.getElementById('upd-apply-btn')?.addEventListener('click', _applyUpdate);
-            document.getElementById('upd-check-btn')?.addEventListener('click', _check);
-            document.getElementById('upd-schedule')?.addEventListener('change', e => _saveSchedule(e.target.value));
-        }
-
-        async function _applyUpdate() {
-            const btn = document.getElementById('upd-apply-btn');
-            if (btn) { btn.disabled = true; btn.textContent = window.t('update.applying'); }
-            const infoEl = document.createElement('p');
-            infoEl.className = 'kb-hint';
-            infoEl.style.cssText = 'margin:0;color:var(--warning);';
-            infoEl.textContent = window.t('update.in_progress');
-            if (body) { body.prepend(infoEl); body.scrollTop = 0; }
-            try {
-                const r = await fetch('/api/update/apply', { method: 'POST', headers: _auth() });
-                const d = await r.json();
-                if (d.ok) {
-                    if (body) body.innerHTML = `<p style="color:var(--success);font-size:.85rem;">${window.t('update.success')}</p>`;
-                    setTimeout(() => window.location.reload(), 5000);
-                } else {
-                    const errEl = document.createElement('p');
-                    errEl.className = 'kb-hint';
-                    errEl.style.cssText = 'color:var(--danger);white-space:pre-wrap;word-break:break-word;';
-                    // d.detail = FastAPI-Fehler (z.B. 403 "nur lokale Admins"), d.error = Git-Fehler
-                    errEl.textContent = window.t('update.error').replace('{msg}', d.error || d.detail || window.t('update.unknown_error'));
-                    if (body) { body.prepend(errEl); body.scrollTop = 0; }
-                    if (btn) { btn.disabled = false; btn.textContent = window.t('update.apply_btn'); }
-                }
-            } catch (e) {
-                if (btn) { btn.disabled = false; btn.textContent = window.t('update.apply_btn'); }
-            }
-        }
-
-        async function _saveSchedule(val) {
-            await fetch('/api/update/settings', {
-                method: 'POST',
-                headers: { ..._auth(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ auto_update_schedule: val })
-            });
-        }
-
-        function _esc(s) {
-            return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        }
-
-        return { init };
-    })();
-
-    // ─── Instructions Editor ─────────────────────────────────────
     async function _loadInstructions() {
         const list = document.getElementById('instr-list');
         if (!list) return;
@@ -3500,31 +3327,6 @@ body.light .jv-bubble tr:nth-child(even) td{background:rgba(0,0,0,.03);}
     setupModal();
     setupSettings();
     checkSecurity();
-
-    // ─── Feedback ───────────────────────────────────────────────
-
-    // Feedback-CSS einmalig injizieren
-    (function () {
-        if (document.getElementById('jarvis-app-fb-css')) return;
-        const s = document.createElement('style');
-        s.id = 'jarvis-app-fb-css';
-        s.textContent = `
-.log-feedback-row{display:flex;gap:4px;margin:2px 0 2px 8px;align-items:center;}
-.log-fb-btn{background:none;border:1px solid rgba(var(--fg-rgb),.12);border-radius:50%;
-  width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;
-  padding:0;cursor:pointer;transition:all .15s;line-height:0;}
-.log-fb-btn svg{display:block;}
-.log-fb-btn:hover:not(:disabled){border-color:var(--accent);background:rgba(var(--fg-rgb),.06);transform:scale(1.12);}
-.log-fb-btn:disabled{cursor:default;opacity:.45;}
-.log-fb-btn.log-fb-active{border-color:rgba(var(--accent-rgb), .7);background:rgba(var(--accent-rgb), .18);}
-.log-fb-info{font-size:.72rem;color:rgba(var(--fg-rgb),.5);margin:2px 0 2px 8px;}
-.log-entry.log-task{color:rgba(var(--accent-rgb),.9);font-weight:500;
-  background:rgba(var(--accent-rgb), .07);border-left:2px solid rgba(var(--accent-rgb), .45);
-  padding-left:6px;margin:4px 0;}
-.log-container.hide-debug .log-entry.log-task{display:block!important;}
-        `;
-        document.head.appendChild(s);
-    })();
 
 })();
 

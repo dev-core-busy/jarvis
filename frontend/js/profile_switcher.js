@@ -28,7 +28,6 @@
         if (_styled) return; _styled = true;
         var css = ''
             + '.llmps-wrap{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;}'
-            + '.llmps-label{font-size:.82rem;color:var(--text-secondary,#94a3b8);white-space:nowrap;}'
             + '.llmps-select{max-width:220px;padding:6px 10px;border-radius:10px;font:inherit;font-size:.82rem;'
             + 'cursor:pointer;line-height:1;color:var(--text-primary,#e2e8f0);'
             + 'border:1px solid var(--border,rgba(255,255,255,.14));background:var(--bg-glass,rgba(255,255,255,.05));}'
@@ -47,14 +46,10 @@
 
         var wrap = document.createElement('div');
         wrap.className = 'llmps-wrap';
-        var label = document.createElement('span');
-        label.className = 'llmps-label';
-        label.textContent = tt('profile.pulldown_label', 'KI-Profil');
-        label.setAttribute('data-i18n', 'profile.pulldown_label');
+        // Kein sichtbares "KI-Profil"-Label mehr; der Zweck bleibt als Tooltip am Select.
         var sel = document.createElement('select');
         sel.className = 'llmps-select';
         sel.title = tt('profile.pulldown_label', 'KI-Profil');
-        wrap.appendChild(label);
         wrap.appendChild(sel);
 
         var anchor = opts.anchor;

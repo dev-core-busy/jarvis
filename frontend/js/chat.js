@@ -34,6 +34,10 @@
     let _lastBotResp  = '';        // letzte vollständige Bot-Antwort
     let _lastBotCol   = null;      // .msg-col des letzten Bot-Bubbles
     let _lastStats    = '';        // Statistik-Text des letzten Bot-Bubbles
+    // Sitzung, in der die AKTUELL laufende Anfrage gestellt wurde. Antworten werden
+    // immer DORTHIN geroutet – auch wenn der Benutzer waehrenddessen den Verlauf
+    // wechselt (dann: Chunks puffern statt anzeigen, am Ende remote persistieren).
+    let _runSid = null;
 
     // Verlauf-Persistenz
     const _HISTORY_KEY = 'jarvis_chat_history_v1';
@@ -366,19 +370,17 @@
         const pill = document.getElementById('ctx-indicator-pill');
         const text = document.getElementById('ctx-indicator-text');
         if (!pill) return;
+        // Pille IMMER anzeigen – auch bei leerem Kontext (0 Einträge) und direkt
+        // beim ersten Oeffnen/Verlaufswechsel (nicht erst nach erfolgreichem Fetch).
+        pill.style.display = 'inline-flex';
         try {
             const q = _activeSid ? ('?session_id=' + encodeURIComponent(_activeSid)) : '';
             const r = await fetch('/api/context/stats' + q, { headers: _authHdr() });
             if (!r.ok) return;
             const d = await r.json();
             const n = d.history_entries || 0;
-            if (n > 0) {
-                pill.style.display = 'inline-flex';
-                text.textContent = window.t('chat.ctx_label').replace('{n}', n).replace('{pct}', d.fills_pct ?? 0);
-            } else {
-                pill.style.display = 'none';
-            }
-        } catch (e) { /* offline */ }
+            text.textContent = window.t('chat.ctx_label').replace('{n}', n).replace('{pct}', d.fills_pct ?? 0);
+        } catch (e) { /* offline – Pille bleibt mit letztem Stand sichtbar */ }
     }
 
     // ─── Debug-Umschalter (rechts von der Kontext-Pille) ─────────────────
@@ -429,7 +431,7 @@
                 body: JSON.stringify({ session_id: _activeSid || '' })
             });
             const d = await r.json();
-            if (d.ok) { const _p = document.getElementById('ctx-indicator-pill'); if (_p) _p.style.display = 'none'; }
+            if (d.ok) _updateContextIndicator();   // Pille bleibt sichtbar, zeigt 0-Stand
         } catch (e) { /* ignore */ }
     };
 
@@ -654,6 +656,13 @@
     function sendMessage() {
         const text = msgInput.value.trim();
         if (!text && _pendingAttachments.length === 0) return;
+        // Nur EINE laufende Anfrage pro Fenster: das Frontend fuehrt Streaming-,
+        // Verlauf- und Statistik-State fuer genau einen Lauf. Ein zweiter Start
+        // (z.B. nach Verlaufs-Wechsel) wuerde beide Antworten vermischen.
+        if (agentRunning) {
+            alert(window.t ? window.t('bubble.block_running') : 'Bitte stoppe zuerst die laufende Aufgabe.');
+            return;
+        }
         const finalText = text || window.t('chat.analyze_attachments');
 
         _lastUserMsg = finalText;
@@ -678,6 +687,7 @@
         _syncAppend(_chatHistory[_chatHistory.length - 1]);
         const msg = { type: 'task', text: finalText, lang: window._lang || 'de' };
         if (_activeSid) msg.session_id = _activeSid;
+        _runSid = _activeSid;   // Ursprungs-Sitzung dieser Anfrage merken (Antwort-Routing)
         // Multi-Agent: an aktiven Sub-Agenten richten (sonst Hauptagent)
         if (_activeAgentId && _activeAgentId !== '_main') msg.agent_id = _activeAgentId;
         if (_pendingAttachments.length > 0) {
@@ -789,15 +799,25 @@
         const _aid = msg.agent_id || '_main';
         const _isSub = _aid !== '_main' && _agentInfos[_aid] && _agentInfos[_aid].is_sub_agent;
 
+        // Antwort-Routing: gehoert der laufende Lauf zu einer ANDEREN Sitzung als der
+        // gerade geoeffneten, nichts in die aktuelle Ansicht zeichnen. Antwort-Text
+        // wird in _lastBotResp gepuffert und bei 'finished' in die Ursprungs-Sitzung
+        // persistiert (bzw. beim Rueckwechsel als Streaming-Bubble fortgesetzt).
+        const _detached = !_isSub && _runSid && _activeSid !== _runSid;
+
         if (msg.highlight && !isStatus) {
             if (_isSub) {
                 _appendSubBubble(_aid, text);   // Sub-Agent: getaggt, kein TTS
+            } else if (_detached) {
+                _ttsBuf += (text + ' ');
+                _lastBotResp = (_lastBotResp ? _lastBotResp + '\n' : '') + text;
             } else {
                 // Echter LLM-Antwort-Text (highlight=true, kein Status-Emoji) → Bot-Bubble + TTS
                 _ttsBuf += (text + ' ');
                 appendToBotBubble(text);
             }
         } else if (isStatus) {
+            if (_detached) return;   // Status/Aktivitaet einer fremden Sitzung nicht anzeigen
             if (text.startsWith('⏸') || text.startsWith('▶') || text.startsWith('⏹')) {
                 addStatusLine(text);
             } else if (_chatDebug) {
@@ -868,13 +888,23 @@
             const toSpeak = _ttsBuf.trim();
             _ttsBuf = '';
             if (toSpeak) speak(toSpeak);
+            // Antwort-Routing: IMMER in die Sitzung schreiben, in der die Frage
+            // gestellt wurde – nicht in den gerade geoeffneten Verlauf.
+            const _origin = _runSid;
+            _runSid = null;
+            const _isRemote = _origin && _origin !== _activeSid;
             if (_lastBotResp) {
-                _chatHistory.push({ role: 'bot', text: _lastBotResp, time: timeStr(), date: _currentDateStr(), stats: _lastStats, ts: Date.now() });
-                _saveHistory();
-                _syncAppend(_chatHistory[_chatHistory.length - 1]);
-                _maybeRefreshTitle();   // Auto-Benennung nach der ersten Antwort in die Sidebar uebernehmen
+                const entry = { role: 'bot', text: _lastBotResp, time: timeStr(), date: _currentDateStr(), stats: _lastStats, ts: Date.now() };
+                if (_isRemote) {
+                    _appendToSessionTranscript(_origin, entry);
+                } else {
+                    _chatHistory.push(entry);
+                    _saveHistory();
+                    _syncAppend(entry);
+                    _maybeRefreshTitle();   // Auto-Benennung nach der ersten Antwort in die Sidebar uebernehmen
+                }
             }
-            if (_lastBotCol && _lastBotResp) {
+            if (_lastBotCol && _lastBotResp && !_isRemote) {
                 _appendFeedbackRow(_lastBotCol, _lastUserMsg, _lastBotResp);
                 _lastBotCol = null;
             }
@@ -1276,6 +1306,7 @@
         _lastBotResp = '';
         _lastBotCol  = null;
         _lastStats   = '';
+        _runSid = _activeSid;   // Ursprungs-Sitzung dieser Anfrage merken (Antwort-Routing)
         wsSend({
             type: 'task',
             text: newText,
@@ -1302,11 +1333,6 @@
     }
 
     function appendStats(msg) {
-        if (!currentBotBubble) return;
-        removeStreamingDots();
-
-        const stats = document.createElement('div');
-        stats.className = 'msg-stats';
         const secNum = (msg.duration_ms || 0) / 1000;
         const dur = secNum.toFixed(1);
         const tokens = msg.total_tokens || 0;
@@ -1318,7 +1344,13 @@
             s += ` · ${tps >= 100 ? tps.toFixed(0) : tps.toFixed(1)} tok/s`;
         }
         s += ' · ' + window.t('chat.n_steps').replace('{n}', steps);
+        // Statistik IMMER merken (wird mit der Antwort persistiert) – auch wenn der
+        // Benutzer gerade eine andere Sitzung geoeffnet hat (keine Bubble sichtbar).
         _lastStats = s;
+        if (!currentBotBubble) return;
+        removeStreamingDots();
+        const stats = document.createElement('div');
+        stats.className = 'msg-stats';
         stats.textContent = _lastStats;
         currentBotBubble.parentElement.appendChild(stats);
         scrollToBottom();
@@ -1662,6 +1694,26 @@
     function _syncAppend(_msg) { _persistSession(); }
     function _syncReplace() { _persistSession(); }
 
+    // Bot-Antwort in das Transkript einer NICHT geoeffneten Sitzung anhaengen
+    // (Antwort-Routing: die Frage wurde dort gestellt, der Benutzer hat inzwischen
+    // den Verlauf gewechselt). Nur `messages` senden – kb_groups/profile_id der
+    // Ziel-Sitzung bleiben unangetastet.
+    async function _appendToSessionTranscript(sid, entry) {
+        try {
+            const d = await _csGet(sid);
+            if (!d) return;   // Sitzung inzwischen geloescht
+            const msgs = (d.transcript || []);
+            msgs.push(entry);
+            await fetch('/api/chat/sessions/' + encodeURIComponent(sid) + '/transcript', {
+                method: 'PUT', headers: _csHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ messages: msgs })
+            });
+            // Sidebar aktualisieren (Auto-Benennung/updated der Ursprungs-Sitzung)
+            const list = await _csList();
+            if (list.length) { _sessions = list; _renderSidebar(); }
+        } catch (e) { /* best effort */ }
+    }
+
     async function _csList() {
         try { const r = await fetch('/api/chat/sessions', { headers: _csHeaders() }); const d = await r.json(); return (d && d.sessions) || []; }
         catch (e) { return []; }
@@ -1715,6 +1767,15 @@
         try { localStorage.setItem(_sidKey(), sid); } catch (e) {}
         _renderSidebar();
         await _restoreHistory();        _updateContextIndicator();
+        // Laeuft gerade eine Anfrage DIESER Sitzung (Rueckwechsel waehrend Streaming):
+        // bisher gepufferten Antwort-Text als Streaming-Bubble fortsetzen.
+        if (agentRunning && _runSid === sid && _lastBotResp) {
+            currentBotBubble = addBubble(_lastBotResp, 'bot');
+            currentBotBubble._rawText = _lastBotResp;
+            _lastBotCol = currentBotBubble.parentElement;
+            addStreamingDots();
+            scrollToBottom();
+        }
     }
 
     async function _newSession() {

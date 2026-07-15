@@ -41,7 +41,11 @@
         /* Sektionen */
         .wi-section { background: var(--bg-secondary); border: 1px solid var(--border);
             border-radius: var(--radius-lg); padding: 20px 22px; margin-bottom: 18px; box-shadow: var(--shadow-sm); }
-        .wi-section h2 { font-size: 1.1rem; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+        .wi-section h2 { font-size: 1.1rem; margin: 0 0 4px; display: flex; align-items: center; gap: 8px;
+            cursor: pointer; user-select: none; }
+        .wi-section h2 .wi-sec-tog { margin-left: auto; font-size: 0.8rem; color: var(--text-secondary); }
+        .wi-section.collapsed > *:not(h2) { display: none !important; }
+        .wi-section.collapsed h2 { margin-bottom: 0; }
         .wi-section .desc { color: var(--text-secondary); font-size: 0.86rem; margin: 0 0 16px; }
         .wi-scope { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
         .wi-chip { font-size: 0.78rem; padding: 3px 10px; border-radius: 999px; font-weight: 600;
@@ -53,6 +57,19 @@
         .wi-drop { border: 2px dashed rgba(var(--fg-rgb), 0.25); border-radius: 12px; padding: 26px; text-align: center;
             color: var(--text-secondary); cursor: pointer; transition: all var(--transition); }
         .wi-drop:hover, .wi-drop.drag { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.06); color: var(--text-primary); }
+        /* Ablage gesperrt (keine Gruppe gewaehlt / KI-Analyse laeuft) */
+        .wi-drop.disabled { opacity: .45; cursor: not-allowed; }
+        .wi-drop.disabled:hover { border-color: rgba(var(--fg-rgb), 0.25); background: transparent; color: var(--text-secondary); }
+        .wi-drop-hint { margin-top: 8px; font-size: 0.85rem; color: var(--warning); }
+        /* Prominente Warten-Anzeige waehrend Upload/KI-Analyse */
+        .wi-busy { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 14px 18px;
+            border: 1px solid rgba(var(--accent-rgb), 0.5); border-radius: 12px;
+            background: rgba(var(--accent-rgb), 0.10); color: var(--text-primary);
+            font-size: 1rem; font-weight: 600; }
+        .wi-busy-spin { width: 22px; height: 22px; flex: 0 0 22px; border-radius: 50%;
+            border: 3px solid rgba(var(--accent-rgb), 0.25); border-top-color: var(--accent);
+            animation: wiSpin 0.9s linear infinite; }
+        @keyframes wiSpin { to { transform: rotate(360deg); } }
         .wi-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-top: 14px; }
         .wi-row > div { display: flex; flex-direction: column; gap: 4px; }
         .wi-row label { font-size: 0.78rem; color: var(--text-secondary); }
@@ -114,9 +131,11 @@
 
         <!-- Dateien hochladen -->
         <div class="wi-section" id="wi-sec-upload">
-            <h2 data-i18n="wissen.sec_upload">Dateien hochladen</h2>
+            <h2><span data-i18n="wissen.sec_upload">Dateien hochladen</span><span class="wi-sec-tog">▼</span></h2>
             <p class="desc" data-i18n="wissen.sec_upload_desc">Dateien in einen Wissens-Ordner hochladen und deinen Wissensgruppen zuordnen. Nur deine Bereiche stehen zur Auswahl.</p>
             <div class="wi-drop" id="wi-drop" data-i18n="wissen.drop">Dateien hierher ziehen oder klicken zum Auswählen</div>
+            <div class="wi-drop-hint" id="wi-drop-hint" style="display:none;"></div>
+            <div class="wi-busy hidden" id="wi-busy"><span class="wi-busy-spin"></span><span id="wi-busy-text"></span></div>
             <input type="file" id="wi-file-input" multiple class="hidden">
             <div class="wi-row">
                 <div>
@@ -128,19 +147,31 @@
                 <label style="font-size:0.78rem;color:var(--text-secondary);" data-i18n="wissen.groups_label">Wissensgruppen (dein Bereich) *</label>
                 <div class="wi-groups" id="wi-upload-groups" style="margin-top:6px;"></div>
             </div>
+            <!-- Optional: Fragen & Antworten per KI generieren (Audit vor Uebernahme) -->
+            <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--text-primary);cursor:pointer;">
+                    <input type="checkbox" id="wi-genq">
+                    <span data-i18n="wissen.genq">Fragen &amp; Antworten generieren (KI)</span>
+                </label>
+                <label id="wi-genq-count-wrap" style="display:none;align-items:center;gap:6px;font-size:0.8rem;color:var(--text-secondary);">
+                    <span data-i18n="wissen.genq_count">Anzahl Fragen</span>
+                    <input type="number" id="wi-genq-count" class="wi-input" min="1" max="30" value="5" style="width:70px;padding:5px 8px;">
+                </label>
+            </div>
+            <p class="desc" id="wi-genq-hint" style="display:none;margin-top:6px;" data-i18n="wissen.genq_hint">Die generierten Fragen und Antworten erscheinen unten im Informationsextraktor als Entwurf – dort kannst du sie löschen, korrigieren und freigeben.</p>
             <div class="wi-status" id="wi-upload-status"></div>
         </div>
 
         <!-- Mein Wissen -->
         <div class="wi-section" id="wi-sec-files">
-            <h2 data-i18n="wissen.sec_files">Mein Wissen</h2>
+            <h2><span data-i18n="wissen.sec_files">Mein Wissen</span><span class="wi-sec-tog">▼</span></h2>
             <p class="desc" data-i18n="wissen.sec_files_desc">Dateien, die deinen Wissensgruppen zugeordnet sind.</p>
             <div class="wi-list" id="wi-files-list"><div class="wi-empty" data-i18n="common.loading">Lade…</div></div>
         </div>
 
         <!-- Informationsextraktor -->
         <div class="wi-section" id="wi-sec-ext">
-            <h2 data-i18n="wissen.sec_ext">Informationsextraktor</h2>
+            <h2><span data-i18n="wissen.sec_ext">Informationsextraktor</span><span class="wi-sec-tog">▼</span></h2>
             <p class="desc" data-i18n="wissen.sec_ext_desc">Aus einer Webseite oder Datei automatisch Wissen extrahieren, prüfen und deinem Bereich hinzufügen.</p>
             <div class="wi-tabs">
                 <button class="sec-btn" id="wi-ext-tab-url" type="button" data-i18n="wissen.tab_url">🔗 Webseite</button>
@@ -167,9 +198,9 @@
         </div>
     </div>
 
-    <script src="/static/js/i18n.js?v=69"></script>
+    <script src="/static/js/i18n.js?v=71"></script>
     <script src="/static/js/theme.js?v=1"></script>
-    <script src="/static/js/wissen.js?v=5"></script>
+    <script src="/static/js/wissen.js?v=8"></script>
     <script src="/static/js/branding.js?v=17"></script>
 </body>
 </html>

@@ -110,6 +110,7 @@
         }).join('');
 
         $('wi-upload-groups').innerHTML = groupBoxes('up');
+        updateDropState();   // Ablage-Sperre initial setzen (keine Gruppe = gesperrt + Hinweis)
     }
 
     function groupBoxes(prefix) {
@@ -126,27 +127,75 @@
     }
 
     // ── Upload ──────────────────────────────────────────────────────────
+    // Ablage-Sperre: solange keine Wissensgruppe gewaehlt ist ODER eine
+    // KI-Analyse/ein Upload laeuft, duerfen keine Dateien abgelegt werden.
+    var _busy = false;
+    function canUpload() { return !_busy && checkedGroups('up').length > 0; }
+    function updateDropState() {
+        var drop = $('wi-drop'), hint = $('wi-drop-hint');
+        if (!drop) return;
+        var ok = canUpload();
+        drop.classList.toggle('disabled', !ok);
+        if (hint) {
+            if (_busy) { hint.style.display = 'none'; }                       // Busy-Banner uebernimmt
+            else if (!checkedGroups('up').length) { hint.style.display = 'block'; hint.textContent = t('wissen.drop_need_group'); }
+            else { hint.style.display = 'none'; }
+        }
+    }
+    function setBusy(on, genQ) {
+        _busy = !!on;
+        var b = $('wi-busy'), bt = $('wi-busy-text');
+        if (b) b.classList.toggle('hidden', !_busy);
+        if (_busy && bt) bt.textContent = genQ ? t('wissen.busy_genq') : t('wissen.busy_upload');
+        updateDropState();
+    }
     function uploadFiles(fileList) {
         var st = $('wi-upload-status');
         var groups = checkedGroups('up');
-        if (!groups.length) { st.style.color = 'var(--danger)'; st.textContent = t('wissen.pick_group'); return; }
+        if (_busy) return;   // laufende Analyse: keine weitere Ablage
+        if (!groups.length) { st.style.color = 'var(--danger)'; st.textContent = t('wissen.pick_group'); updateDropState(); return; }
         if (!fileList || !fileList.length) return;
         var fd = new FormData();
         for (var i = 0; i < fileList.length; i++) fd.append('files', fileList[i]);
         fd.append('folder', $('wi-folder').value);
         fd.append('groups', groups.join(','));
-        st.style.color = 'var(--text-secondary)'; st.textContent = t('wissen.uploading', { n: fileList.length });
+        // Optional: Frage-Antwort-Paare generieren (Checkbox + gewuenschte Anzahl)
+        var genQ = $('wi-genq') && $('wi-genq').checked;
+        if (genQ) {
+            var n = parseInt(($('wi-genq-count') || {}).value, 10);
+            if (isNaN(n) || n < 1) n = 5; if (n > 30) n = 30;
+            fd.append('gen_questions', String(n));
+        }
+        st.textContent = '';
+        setBusy(true, genQ);   // prominentes Warten-Banner + Ablage-Sperre
         fetch('/api/wissen/upload', { method: 'POST', headers: authH(), body: fd })
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 d = d || {};
                 if (d.error) { st.style.color = 'var(--danger)'; st.textContent = '✗ ' + d.error; return; }
                 st.style.color = 'var(--success)';
-                st.textContent = t('wissen.saved_n', { n: d.total_saved || 0 })
+                var msg = t('wissen.saved_n', { n: d.total_saved || 0 })
                     + (d.total_rejected ? t('wissen.rejected_n', { n: d.total_rejected }) : '') + '.';
+                if (d.qa_pending && d.qa_pending.length) msg += ' ' + t('wissen.genq_done', { n: d.qa_pending.length });
+                if (d.qa_errors && d.qa_errors.length) {
+                    st.style.color = 'var(--warning)';
+                    msg += ' ⚠ ' + d.qa_errors.map(function (e) { return e.name + ': ' + e.error; }).join(' · ');
+                }
+                st.textContent = msg;
                 loadFiles();
+                // Generierte Entwuerfe: Liste aktualisieren + ersten direkt zum Audit oeffnen
+                if (d.qa_pending && d.qa_pending.length) {
+                    loadPending();
+                    fetch('/api/wissen/pending', { headers: authH() })
+                        .then(function (r) { return r.json(); })
+                        .then(function (p) {
+                            var doc = ((p && p.pending) || []).find(function (x) { return x.id === d.qa_pending[0].id; });
+                            if (doc) { showReview(doc); $('wi-ext-review').scrollIntoView({ behavior: 'smooth' }); }
+                        }).catch(function () {});
+                }
             })
-            .catch(function () { st.style.color = 'var(--danger)'; st.textContent = t('wissen.upload_failed'); });
+            .catch(function () { st.style.color = 'var(--danger)'; st.textContent = t('wissen.upload_failed'); })
+            .then(function () { setBusy(false); });
     }
 
     // ── Mein Wissen ─────────────────────────────────────────────────────
@@ -225,24 +274,65 @@
         var parts = [];
         if (d.summary) parts.push(d.summary);
         if (d.facts && d.facts.length) parts.push('\n' + t('wissen.facts_label') + '\n- ' + d.facts.join('\n- '));
-        if (d.qa_pairs && d.qa_pairs.length) parts.push('\n' + t('wissen.qa_label') + '\n' + d.qa_pairs.map(function (p) { return 'F: ' + p.q + '\nA: ' + p.a; }).join('\n'));
         return parts.join('\n');
+    }
+
+    // Q&A-Audit: eine editierbare Zeile pro Frage-Antwort-Paar
+    // (Checkbox = freigeben, Textfelder = korrigieren, × = loeschen).
+    function qaRowHtml(p, i) {
+        return '<div class="wi-qa-row" data-qid="' + esc(p.id || String(i)) + '" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;">'
+            + '<input type="checkbox" class="wi-qa-keep" ' + (p.approved !== false ? 'checked' : '') + ' title="' + esc(t('wissen.qa_keep')) + '" style="margin-top:8px;">'
+            + '<div style="flex:1;min-width:0;">'
+            + '<input class="wi-input wi-qa-q" value="' + esc(p.q || '') + '" placeholder="' + esc(t('wissen.qa_q_ph')) + '" style="margin-bottom:4px;font-weight:600;">'
+            + '<textarea class="wi-input wi-qa-a" rows="2" placeholder="' + esc(t('wissen.qa_a_ph')) + '" style="resize:vertical;">' + esc(p.a || '') + '</textarea>'
+            + '</div>'
+            + '<button type="button" class="sec-btn small danger wi-qa-del" title="' + esc(t('wissen.qa_del')) + '" style="margin-top:6px;">×</button>'
+            + '</div>';
     }
 
     function showReview(d) {
         var box = $('wi-ext-review');
+        var qa = (d.qa_pairs || []);
+        var qaHtml = qa.length
+            ? '<label style="font-size:0.78rem;color:var(--text-secondary);display:block;margin-top:10px;">' + t('wissen.qa_audit_label', { n: qa.length }) + '</label>'
+              + '<div id="wi-rev-qa" style="margin:6px 0 10px;">' + qa.map(qaRowHtml).join('') + '</div>'
+            : '';
         box.innerHTML = '<div class="wi-review">'
             + '<div style="font-weight:600;margin-bottom:6px;">' + t('wissen.review_title') + '</div>'
             + '<label style="font-size:0.78rem;color:var(--text-secondary);">' + t('wissen.title_label') + '</label>'
             + '<input class="wi-input" id="wi-rev-title" value="' + esc(d.title || '') + '">'
             + '<pre>' + esc(docPreview(d)) + '</pre>'
+            + qaHtml
             + '<label style="font-size:0.78rem;color:var(--text-secondary);">' + t('wissen.target_groups') + '</label>'
             + '<div class="wi-groups" id="wi-rev-groups" style="margin:6px 0 10px;">' + groupBoxes('rev') + '</div>'
             + '<button class="sec-btn primary" id="wi-rev-approve" type="button">' + t('wissen.approve') + '</button> '
             + '<button class="sec-btn danger" id="wi-rev-discard" type="button">' + t('wissen.discard') + '</button>'
             + '</div>';
+        // Zeilen-Loeschen (Paar komplett entfernen)
+        box.querySelectorAll('.wi-qa-del').forEach(function (btn) {
+            btn.addEventListener('click', function () { btn.closest('.wi-qa-row').remove(); });
+        });
         $('wi-rev-approve').addEventListener('click', function () { approvePending(d.id); });
         $('wi-rev-discard').addEventListener('click', function () { deletePending(d.id, true); });
+    }
+
+    // Auditierte Q&A-Paare aus dem Review-Formular einsammeln
+    // (geloeschte Zeilen fehlen; Checkbox ab = nicht freigeben).
+    function collectQa() {
+        var rows = document.querySelectorAll('#wi-rev-qa .wi-qa-row');
+        if (!rows.length) return null;   // kein Q&A-Audit im Formular
+        var out = [];
+        rows.forEach(function (row) {
+            var q = (row.querySelector('.wi-qa-q') || {}).value || '';
+            var a = (row.querySelector('.wi-qa-a') || {}).value || '';
+            if (!q.trim()) return;
+            out.push({
+                id: row.getAttribute('data-qid') || '',
+                q: q.trim(), a: a.trim(),
+                approved: !!(row.querySelector('.wi-qa-keep') || {}).checked,
+            });
+        });
+        return out;
     }
 
     function approvePending(id) {
@@ -250,10 +340,14 @@
         var st = $('wi-ext-status');
         if (!groups.length) { st.style.color = 'var(--danger)'; st.textContent = t('wissen.pick_target'); return; }
         var title = ($('wi-rev-title') || {}).value;
+        var patch = {};
+        if (title != null) patch.title = title;
+        var qa = collectQa();
+        if (qa !== null) patch.qa_pairs = qa;
         var chain = Promise.resolve();
-        if (title != null) {
+        if (Object.keys(patch).length) {
             chain = fetch('/api/wissen/pending/' + encodeURIComponent(id), {
-                method: 'PATCH', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify({ title: title })
+                method: 'PATCH', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify(patch)
             }).catch(function () {});
         }
         chain.then(function () {
@@ -306,15 +400,48 @@
         });
         $('wi-logout').addEventListener('click', logout);
 
+        // Fragen-Generierung: Anzahl-Feld + Hinweis nur bei aktivierter Checkbox
+        var genq = $('wi-genq');
+        if (genq) genq.addEventListener('change', function () {
+            var on = genq.checked;
+            $('wi-genq-count-wrap').style.display = on ? 'inline-flex' : 'none';
+            $('wi-genq-hint').style.display = on ? 'block' : 'none';
+        });
+
         var drop = $('wi-drop'), fin = $('wi-file-input');
-        drop.addEventListener('click', function () { fin.click(); });
+        drop.addEventListener('click', function () {
+            if (!canUpload()) { updateDropState(); return; }   // gesperrt: Hinweis statt Dateidialog
+            fin.click();
+        });
         fin.addEventListener('change', function () { uploadFiles(fin.files); fin.value = ''; });
         ['dragover', 'dragleave', 'drop'].forEach(function (ev) {
             drop.addEventListener(ev, function (e) {
                 e.preventDefault();
-                drop.classList.toggle('drag', ev === 'dragover');
-                if (ev === 'drop' && e.dataTransfer) uploadFiles(e.dataTransfer.files);
+                drop.classList.toggle('drag', ev === 'dragover' && canUpload());
+                if (ev === 'drop' && e.dataTransfer) {
+                    if (!canUpload()) { updateDropState(); return; }
+                    uploadFiles(e.dataTransfer.files);
+                }
             });
+        });
+        // Gruppen-Auswahl schaltet die Ablage frei/gesperrt (Checkboxen kommen per JS)
+        $('wi-upload-groups').addEventListener('change', updateDropState);
+
+        // Einklappbare Container (Zustand pro Browser gemerkt, analog Einstellungen).
+        // Der Pfeil steht fest im Markup (eigener Span, damit applyLang ihn nicht wegwischt).
+        ['wi-sec-upload', 'wi-sec-files', 'wi-sec-ext'].forEach(function (id) {
+            var sec = $(id); if (!sec) return;
+            var h = sec.querySelector('h2'); if (!h) return;
+            var tog = h.querySelector('.wi-sec-tog'); if (!tog) return;
+            var key = 'jarvis_wissen_sec_' + id;
+            function apply(collapsed, silent) {
+                sec.classList.toggle('collapsed', collapsed);
+                tog.textContent = collapsed ? '▶' : '▼';
+                if (!silent) { try { localStorage.setItem(key, collapsed ? '1' : '0'); } catch (e) {} }
+            }
+            var saved = null; try { saved = localStorage.getItem(key); } catch (e) {}
+            apply(saved === '1', true);
+            h.addEventListener('click', function () { apply(!sec.classList.contains('collapsed')); });
         });
 
         $('wi-ext-url-btn').addEventListener('click', extractUrl);

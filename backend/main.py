@@ -5709,9 +5709,15 @@ async def wissen_upload(
     files: list[UploadFile] = File(...),
     folder: str = Form("data/knowledge"),
     groups: str = Form(""),
+    gen_questions: str = Form(""),
     user: str = Depends(require_auth),
 ):
-    """Datei-Upload, hart auf die Wissensgruppen des Nutzers beschraenkt."""
+    """Datei-Upload, hart auf die Wissensgruppen des Nutzers beschraenkt.
+
+    ``gen_questions`` (optional, Anzahl > 0): zusaetzlich pro hochgeladener Datei
+    per LLM die gewuenschte Anzahl Frage-Antwort-Paare generieren (analog
+    Informationsextraktor) – als Pending-Entwurf, den der Benutzer auditieren
+    (loeschen/korrigieren/freigeben) kann."""
     from backend.tools.knowledge import (
         _get_folders, PROJECT_ROOT,
         EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,
@@ -5736,8 +5742,18 @@ async def wissen_upload(
             break
     if not target:
         return JSONResponse({"error": f"Ordner '{folder}' nicht verfuegbar"}, status_code=400)
+    # Gewuenschte Fragenanzahl (Checkbox "Fragen generieren" im /wissen-Upload)
+    try:
+        qa_n = max(0, min(int(gen_questions or 0), 50))
+    except (TypeError, ValueError):
+        qa_n = 0
+    # Formate, die der Extraktor lesen kann (Teilmenge der Upload-Formate)
+    _QA_EXTS = {".pdf", ".txt", ".md", ".rst", ".csv", ".docx", ".doc", ".xlsx", ".ods",
+                ".pptx", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp",
+                ".mp3", ".m4a", ".wav", ".ogg", ".mp4", ".mov", ".mkv", ".avi"}
+
     target.mkdir(parents=True, exist_ok=True)
-    saved, rejected = [], []
+    saved, rejected, qa_pending, qa_errors = [], [], [], []
     for file in files:
         suffix = Path(file.filename).suffix.lower()
         if suffix not in all_exts:
@@ -5756,8 +5772,21 @@ async def wissen_upload(
             kg.set_assignment(str(dest.relative_to(PROJECT_ROOT)), req_groups)
         except Exception:  # noqa: BLE001
             pass
+        # Optional: Frage-Antwort-Paare zur Datei generieren (Audit via Pending-Review)
+        if qa_n > 0:
+            if suffix not in _QA_EXTS:
+                qa_errors.append({"name": dest.name, "error": f"Fragen-Generierung fuer '{suffix}' nicht unterstuetzt"})
+                continue
+            try:
+                from backend.web_extractor import extract_from_file, update_pending
+                doc = await extract_from_file(dest.name, content, qa_count=qa_n)
+                update_pending(doc["id"], {"created_by": _norm_login(user)})
+                qa_pending.append({"id": doc["id"], "title": doc.get("title", dest.name)})
+            except Exception as e:  # noqa: BLE001 – Upload bleibt erfolgreich
+                qa_errors.append({"name": dest.name, "error": str(e)[:300]})
     return JSONResponse({"saved": saved, "rejected": rejected,
-                         "total_saved": len(saved), "total_rejected": len(rejected)})
+                         "total_saved": len(saved), "total_rejected": len(rejected),
+                         "qa_pending": qa_pending, "qa_errors": qa_errors})
 
 
 @app.get("/api/wissen/files")

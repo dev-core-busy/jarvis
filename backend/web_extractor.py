@@ -31,7 +31,7 @@ Ausgabe AUSSCHLIESSLICH als valides JSON-Objekt mit diesen Feldern:
 Regeln:
 - Sprache: Deutsch (auch wenn der Quelltext Englisch ist)
 - 3–10 Kernfakten
-- 5–15 Frage-Antwort-Paare – präzise, eigenständig verständlich, direkt aus dem Inhalt
+- {qa_rule}
 - Keine Quellenangaben, keine URLs in den Antworten
 - Kein Markdown, keine Code-Blöcke um das JSON
 
@@ -41,10 +41,29 @@ Inhalt:
 ---
 """
 
-async def extract_structured_from_text(text: str, fallback_title: str = "") -> dict:
+_QA_RULE_DEFAULT = "5–15 Frage-Antwort-Paare – präzise, eigenständig verständlich, direkt aus dem Inhalt"
+
+
+def _clamp_qa_count(qa_count) -> int | None:
+    """Gewuenschte Fragenanzahl validieren (1..50); None/ungueltig = Default-Regel."""
+    try:
+        n = int(qa_count)
+    except (TypeError, ValueError):
+        return None
+    return max(1, min(n, 50)) if n > 0 else None
+
+
+def _build_prompt(content: str, qa_count=None) -> str:
+    """Extraktions-Prompt bauen; qa_count = vom Benutzer gewuenschte Fragenanzahl."""
+    n = _clamp_qa_count(qa_count)
+    rule = (f"genau {n} Frage-Antwort-Paare – präzise, eigenständig verständlich, "
+            f"direkt aus dem Inhalt") if n else _QA_RULE_DEFAULT
+    return _EXTRACT_PROMPT.replace("{qa_rule}", rule).replace("{content}", content)
+
+async def extract_structured_from_text(text: str, fallback_title: str = "", qa_count=None) -> dict:
     """Schickt beliebigen Text durch den Wissensextraktor-LLM und liefert
     {title, summary, facts, qa_pairs}. Wiederverwendbar – u.a. fuer die
-    LLM-Anreicherung beim Wissens-Export."""
+    LLM-Anreicherung beim Wissens-Export. qa_count: gewuenschte Fragenanzahl."""
     from backend.config import config
     from backend.llm import get_provider
     from google.genai import types
@@ -57,7 +76,7 @@ async def extract_structured_from_text(text: str, fallback_title: str = "") -> d
         auth_method=config.current_auth_method,
         session_key=config.current_session_key, prompt_tool_calling=False,
     )
-    prompt = _EXTRACT_PROMPT.replace("{content}", content)
+    prompt = _build_prompt(content, qa_count)
     response = await provider.generate_response(
         model=config.current_model,
         system_prompt="Du bist ein Wissensextraktor. Antworte ausschließlich mit dem angeforderten JSON.",
@@ -243,7 +262,7 @@ async def extract_from_url(url: str) -> dict:
         prompt_tool_calling=False,
     )
 
-    prompt = _EXTRACT_PROMPT.replace("{content}", content)
+    prompt = _build_prompt(content)
     response = await provider.generate_response(
         model=config.current_model,
         system_prompt="Du bist ein Wissensextraktor. Antworte ausschließlich mit dem angeforderten JSON.",
@@ -329,8 +348,10 @@ def update_pending(doc_id: str, data: dict) -> bool:
     doc = get_pending(doc_id)
     if not doc:
         return False
-    # Erlaubte Felder aktualisieren
-    for field in ("title", "summary", "facts", "qa_pairs"):
+    # Erlaubte Felder aktualisieren. created_by: Ersteller-Zuordnung fuer /wissen
+    # (dortige Pending-Liste zeigt nur EIGENE Entwuerfe – ohne dieses Feld wuerde
+    # jeder Entwurf herausgefiltert und "unten" bliebe leer).
+    for field in ("title", "summary", "facts", "qa_pairs", "created_by"):
         if field in data:
             doc[field] = data[field]
     save_pending(doc)
@@ -428,10 +449,12 @@ def delete_pending(doc_id: str) -> bool:
 
 # ─── Datei-Extraktion ────────────────────────────────────────────────────────
 
-async def extract_from_file(filename: str, content: bytes, source_url: str | None = None) -> dict:
+async def extract_from_file(filename: str, content: bytes, source_url: str | None = None,
+                            qa_count=None) -> dict:
     """Datei → Text-Extraktion → LLM → Pending-Dokument.
     Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV und Audio/Video via Whisper.
-    source_url: wird gesetzt wenn die Datei über eine URL heruntergeladen wurde."""
+    source_url: wird gesetzt wenn die Datei über eine URL heruntergeladen wurde.
+    qa_count: vom Benutzer gewuenschte Anzahl Frage-Antwort-Paare (1..50)."""
     import asyncio as _asyncio
     import os as _os
     import tempfile as _tempfile
@@ -492,7 +515,7 @@ async def extract_from_file(filename: str, content: bytes, source_url: str | Non
         prompt_tool_calling=False,
     )
 
-    prompt = _EXTRACT_PROMPT.replace("{content}", content_for_llm)
+    prompt = _build_prompt(content_for_llm, qa_count)
 
     # Bild nur anhaengen, wenn nicht zu gross (Provider-Limits); sonst nur OCR-Text
     _vision = is_image and len(content) <= 8 * 1024 * 1024

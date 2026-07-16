@@ -25,6 +25,7 @@
     function showLogin() {
         $('wi-app').classList.add('hidden');
         $('wi-logout').classList.add('hidden');
+        var ps = $('wi-prof-slot'); if (ps) ps.classList.add('hidden');
         $('wi-login').classList.remove('hidden');
         var u = $('wi-user'); if (u) u.focus();
     }
@@ -32,6 +33,20 @@
         $('wi-login').classList.add('hidden');
         $('wi-app').classList.remove('hidden');
         $('wi-logout').classList.remove('hidden');
+        mountProfile();
+    }
+
+    // KI-Profil-Pulldown in der Topbar (per-User-Auswahl, wirkt auf die KI-Analyse)
+    var _prof = null;
+    function mountProfile() {
+        var slot = $('wi-prof-slot');
+        if (!slot || !window.ProfileSwitcher) return;
+        slot.classList.remove('hidden');
+        if (_prof) { _prof.refresh(); return; }
+        _prof = window.ProfileSwitcher.mount({
+            anchor: slot,
+            headers: function () { return authH(); }
+        });
     }
 
     // ── Login ───────────────────────────────────────────────────────────
@@ -94,15 +109,16 @@
             banner.className = 'wi-banner warn';
             banner.innerHTML = t('wissen.no_area');
             $('wi-sec-upload').classList.add('hidden');
-            $('wi-sec-ext').classList.add('hidden');
             return;
         }
         banner.className = 'wi-banner';
-        banner.innerHTML = t('wissen.scope_as') + ' <b>' + esc(SCOPE.user) + '</b>'
-            + (SCOPE.is_editor ? ' ' + t('wissen.global_editor') : '')
-            + ' · ' + t('wissen.scope_area') + ' ' + SCOPE.groups.map(function (g) {
+        // "Dein Bereich" + Wissensgruppen in eigener Zeile (bricht sonst unschoen um)
+        banner.innerHTML = '<div>' + t('wissen.scope_as') + ' <b>' + esc(SCOPE.user) + '</b>'
+            + (SCOPE.is_editor ? ' ' + t('wissen.global_editor') : '') + '</div>'
+            + '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">'
+            + t('wissen.scope_area') + ' ' + SCOPE.groups.map(function (g) {
                 return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';">' + esc(g.name) + '</span>';
-            }).join(' ');
+            }).join(' ') + '</div>';
 
         var sel = $('wi-folder');
         sel.innerHTML = SCOPE.folders.map(function (f) {
@@ -147,7 +163,15 @@
         var b = $('wi-busy'), bt = $('wi-busy-text');
         if (b) b.classList.toggle('hidden', !_busy);
         if (_busy && bt) bt.textContent = genQ ? t('wissen.busy_genq') : t('wissen.busy_upload');
+        var ub = $('wi-ext-url-btn'); if (ub) ub.disabled = _busy;   // URL-Analyse mitsperren
         updateDropState();
+    }
+
+    // Gewuenschte Fragenanzahl aus dem Zahlenfeld (1..30, Fallback 20)
+    function qaCount() {
+        var n = parseInt(($('wi-genq-count') || {}).value, 10);
+        if (isNaN(n) || n < 1) n = 20; if (n > 30) n = 30;
+        return n;
     }
     function uploadFiles(fileList) {
         var st = $('wi-upload-status');
@@ -161,11 +185,7 @@
         fd.append('groups', groups.join(','));
         // Optional: Frage-Antwort-Paare generieren (Checkbox + gewuenschte Anzahl)
         var genQ = $('wi-genq') && $('wi-genq').checked;
-        if (genQ) {
-            var n = parseInt(($('wi-genq-count') || {}).value, 10);
-            if (isNaN(n) || n < 1) n = 5; if (n > 30) n = 30;
-            fd.append('gen_questions', String(n));
-        }
+        if (genQ) fd.append('gen_questions', String(qaCount()));
         st.textContent = '';
         setBusy(true, genQ);   // prominentes Warten-Banner + Ablage-Sperre
         fetch('/api/wissen/upload', { method: 'POST', headers: authH(), body: fd })
@@ -241,33 +261,24 @@
           .catch(function () { window.alert(t('wissen.delete_failed')); });
     }
 
-    // ── Extraktor ───────────────────────────────────────────────────────
+    // ── Extraktor (Webseite) ────────────────────────────────────────────
+    // Fragen & Antworten werden bei der URL-Analyse IMMER generiert
+    // (Anzahl aus dem Zahlenfeld); waehrend der Analyse ist die Ablage gesperrt.
     function extractUrl() {
         var url = $('wi-ext-url').value.trim();
-        if (!url) return;
+        if (!url || _busy) return;
         var st = $('wi-ext-status');
         st.style.color = 'var(--text-secondary)'; st.textContent = t('wissen.extracting');
-        fetch('/api/wissen/extract', { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify({ url: url }) })
+        setBusy(true, true);
+        fetch('/api/wissen/extract', { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify({ url: url, qa_count: qaCount() }) })
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (d.error) { st.style.color = 'var(--danger)'; st.textContent = '✗ ' + d.error; return; }
                 st.textContent = ''; $('wi-ext-url').value = '';
                 showReview(d); loadPending();
             })
-            .catch(function () { st.style.color = 'var(--danger)'; st.textContent = t('wissen.extract_failed'); });
-    }
-    function extractFile(file) {
-        if (!file) return;
-        var st = $('wi-ext-status');
-        st.style.color = 'var(--text-secondary)'; st.textContent = t('wissen.extracting_file', { f: file.name });
-        var fd = new FormData(); fd.append('file', file);
-        fetch('/api/wissen/extract/upload', { method: 'POST', headers: authH(), body: fd })
-            .then(function (r) { return r.json(); })
-            .then(function (d) {
-                if (d.error) { st.style.color = 'var(--danger)'; st.textContent = '✗ ' + d.error; return; }
-                st.textContent = ''; showReview(d); loadPending();
-            })
-            .catch(function () { st.style.color = 'var(--danger)'; st.textContent = t('wissen.extract_failed'); });
+            .catch(function () { st.style.color = 'var(--danger)'; st.textContent = t('wissen.extract_failed'); })
+            .then(function () { setBusy(false); });
     }
 
     function docPreview(d) {
@@ -400,14 +411,6 @@
         });
         $('wi-logout').addEventListener('click', logout);
 
-        // Fragen-Generierung: Anzahl-Feld + Hinweis nur bei aktivierter Checkbox
-        var genq = $('wi-genq');
-        if (genq) genq.addEventListener('change', function () {
-            var on = genq.checked;
-            $('wi-genq-count-wrap').style.display = on ? 'inline-flex' : 'none';
-            $('wi-genq-hint').style.display = on ? 'block' : 'none';
-        });
-
         var drop = $('wi-drop'), fin = $('wi-file-input');
         drop.addEventListener('click', function () {
             if (!canUpload()) { updateDropState(); return; }   // gesperrt: Hinweis statt Dateidialog
@@ -429,7 +432,7 @@
 
         // Einklappbare Container (Zustand pro Browser gemerkt, analog Einstellungen).
         // Der Pfeil steht fest im Markup (eigener Span, damit applyLang ihn nicht wegwischt).
-        ['wi-sec-upload', 'wi-sec-files', 'wi-sec-ext'].forEach(function (id) {
+        ['wi-sec-upload', 'wi-sec-files'].forEach(function (id) {
             var sec = $(id); if (!sec) return;
             var h = sec.querySelector('h2'); if (!h) return;
             var tog = h.querySelector('.wi-sec-tog'); if (!tog) return;
@@ -446,22 +449,6 @@
 
         $('wi-ext-url-btn').addEventListener('click', extractUrl);
         $('wi-ext-url').addEventListener('keydown', function (e) { if (e.key === 'Enter') extractUrl(); });
-        $('wi-ext-tab-url').addEventListener('click', function () {
-            $('wi-ext-url-panel').classList.remove('hidden'); $('wi-ext-file-panel').classList.add('hidden');
-        });
-        $('wi-ext-tab-file').addEventListener('click', function () {
-            $('wi-ext-file-panel').classList.remove('hidden'); $('wi-ext-url-panel').classList.add('hidden');
-        });
-        var edrop = $('wi-ext-drop'), efin = $('wi-ext-file-input');
-        edrop.addEventListener('click', function () { efin.click(); });
-        efin.addEventListener('change', function () { if (efin.files[0]) extractFile(efin.files[0]); efin.value = ''; });
-        ['dragover', 'dragleave', 'drop'].forEach(function (ev) {
-            edrop.addEventListener(ev, function (e) {
-                e.preventDefault();
-                edrop.classList.toggle('drag', ev === 'dragover');
-                if (ev === 'drop' && e.dataTransfer && e.dataTransfer.files[0]) extractFile(e.dataTransfer.files[0]);
-            });
-        });
 
         if (window.applyLang) window.applyLang();
         loadScope();

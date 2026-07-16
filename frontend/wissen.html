@@ -27,6 +27,22 @@
         .wi-top-icons { display: flex; align-items: center; gap: 8px; }
         .wi-icon-btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
         .wi-icon-btn svg { width: 18px; height: 18px; }
+        /* LLM-Status-Punkt + CPU-Auslastung in der Topbar (wie /chat und /support) */
+        .wi-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+            background: var(--text-muted); transition: background .3s ease; }
+        .wi-status-dot.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
+        .wi-status-dot.disconnected { background: var(--danger); }
+        .cpu-bar.wi-cpu-bar { width: 130px; height: 18px; border-radius: 999px;
+            background: rgba(148, 163, 184, .14); position: relative; overflow: hidden;
+            border: 1px solid rgba(148, 163, 184, .55); flex-shrink: 0; }
+        .cpu-bar.wi-cpu-bar .cpu-bar-fill { height: 100%; border-radius: 999px;
+            background: linear-gradient(90deg, #10b981, #22c55e, #84cc16, #eab308, #f97316, #ef4444);
+            background-size: 300% 100%;
+            transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
+        .cpu-bar.wi-cpu-bar .cpu-bar-label { position: absolute; left: 50%; top: 50%;
+            transform: translate(-50%, -50%); font-size: 0.62rem; font-weight: 600;
+            font-family: var(--font-mono, monospace); color: var(--text-primary);
+            white-space: nowrap; z-index: 1; }
         .wi-wrap { max-width: 900px; margin: 0 auto; padding: 26px 18px 80px; }
 
         /* Login */
@@ -104,11 +120,18 @@
     <div class="wi-topbar">
         <div class="wi-logo topbar-avatar">J</div>
         <div class="wi-title"><span class="brand-app-name">Jarvis</span> · <span data-i18n="wissen.nav">Wissen</span></div>
+        <!-- LLM-Status + CPU-Auslastung (nur angemeldet; gleiche Position wie /chat, /support) -->
+        <span class="wi-status-dot hidden" id="wi-status-dot" title="LLM-Status" data-i18n-title="portal.llm_status"></span>
+        <div class="cpu-bar wi-cpu-bar hidden" id="cpu-bar" title="CPU-Auslastung">
+            <div class="cpu-bar-fill" id="cpu-bar-fill" style="width:0%"></div>
+            <span class="cpu-bar-label" id="cpu-bar-label">CPU: 0%</span>
+        </div>
         <div class="wi-spacer"></div>
         <div class="wi-top-icons">
-            <!-- KI-Profil-Pulldown (nur angemeldet; wissen.js mountet ProfileSwitcher) -->
-            <span id="wi-prof-slot" class="hidden"></span>
-            <button class="btn-theme-toggle sec-btn" id="btn-theme-toggle" type="button" data-i18n-title="chat.theme" title="Hell/Dunkel" aria-label="Hell/Dunkel">🌓</button>
+            <button class="btn-theme-toggle sec-btn wi-icon-btn" id="btn-theme-toggle" type="button" data-i18n-title="chat.theme" title="Hell/Dunkel" aria-label="Hell/Dunkel">
+                <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
             <a class="sec-btn wi-icon-btn" href="/portal" data-i18n-title="nav.home" title="Startseite" aria-label="Startseite">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             </a>
@@ -175,6 +198,8 @@
                     <input type="checkbox" id="wi-genq" checked>
                     <span data-i18n="wissen.genq">Fragen &amp; Antworten generieren (KI)</span>
                 </label>
+                <!-- KI-Profil-Pulldown (wissen.js mountet ProfileSwitcher) -->
+                <span id="wi-prof-slot"></span>
                 <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;color:var(--text-secondary);">
                     <span data-i18n="wissen.genq_count">Anzahl Fragen</span>
                     <input type="number" id="wi-genq-count" class="wi-input" min="1" max="30" value="20" style="width:70px;padding:5px 8px;">
@@ -200,7 +225,7 @@
     <script src="/static/js/i18n.js?v=75"></script>
     <script src="/static/js/theme.js?v=1"></script>
     <script src="/static/js/profile_switcher.js?v=4"></script>
-    <script src="/static/js/wissen.js?v=11"></script>
+    <script src="/static/js/wissen.js?v=12"></script>
     <script src="/static/js/branding.js?v=18"></script>
 </body>
 </html>

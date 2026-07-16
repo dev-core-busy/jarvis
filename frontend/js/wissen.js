@@ -25,7 +25,8 @@
     function showLogin() {
         $('wi-app').classList.add('hidden');
         $('wi-logout').classList.add('hidden');
-        var ps = $('wi-prof-slot'); if (ps) ps.classList.add('hidden');
+        var d = $('wi-status-dot'); if (d) d.classList.add('hidden');
+        var c = $('cpu-bar'); if (c) c.classList.add('hidden');
         $('wi-login').classList.remove('hidden');
         var u = $('wi-user'); if (u) u.focus();
     }
@@ -33,20 +34,72 @@
         $('wi-login').classList.add('hidden');
         $('wi-app').classList.remove('hidden');
         $('wi-logout').classList.remove('hidden');
+        var d = $('wi-status-dot'); if (d) d.classList.remove('hidden');
+        var c = $('cpu-bar'); if (c) c.classList.remove('hidden');
         mountProfile();
+        startLlmStatus();
+        startCpu();
     }
 
-    // KI-Profil-Pulldown in der Topbar (per-User-Auswahl, wirkt auf die KI-Analyse)
+    // KI-Profil-Pulldown neben "Fragen & Antworten generieren"
+    // (per-User-Auswahl, wirkt auf die KI-Analyse)
     var _prof = null;
     function mountProfile() {
         var slot = $('wi-prof-slot');
         if (!slot || !window.ProfileSwitcher) return;
-        slot.classList.remove('hidden');
         if (_prof) { _prof.refresh(); return; }
         _prof = window.ProfileSwitcher.mount({
             anchor: slot,
-            headers: function () { return authH(); }
+            headers: function () { return authH(); },
+            onChange: function () { checkLlmStatus(); }
         });
+    }
+
+    // ── LLM-Status-Punkt + CPU-Auslastung (wie /chat und /support) ─────
+    var _llmStatusTimer = null, _cpuTimer = null;
+    function checkLlmStatus() {
+        var dot = $('wi-status-dot');
+        if (!dot) return;
+        fetch('/api/llm/active-status', { headers: authH() })
+            .then(function (r) { if (!r.ok) throw new Error('http'); return r.json(); })
+            .then(function (d) {
+                var reachable = (d.status === 'ok' || d.status === 'degraded');
+                // classList statt className: 'hidden' (Login-Screen) muss erhalten bleiben
+                dot.classList.toggle('connected', reachable);
+                dot.classList.toggle('disconnected', !reachable);
+                var name = d.profile_name ? ' – ' + d.profile_name : '';
+                dot.title = (d.status === 'ok' ? t('sup.llm_ok')
+                    : d.status === 'degraded' ? t('sup.llm_degraded')
+                    : t('sup.llm_down')) + name;
+            })
+            .catch(function () {
+                dot.classList.remove('connected');
+                dot.classList.add('disconnected');
+                dot.title = t('sup.llm_down');
+            });
+    }
+    function startLlmStatus() {
+        checkLlmStatus();
+        if (!_llmStatusTimer) _llmStatusTimer = setInterval(checkLlmStatus, 30000);
+    }
+    function startCpu() {
+        function poll() {
+            fetch('/api/cpu', { headers: authH() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    if (!d) return;
+                    var fill = $('cpu-bar-fill'), label = $('cpu-bar-label');
+                    if (!fill || !label) return;
+                    var p = Math.max(0, Math.min(100, Number(d.cpu) || 0));
+                    fill.style.width = p + '%';
+                    fill.style.backgroundPosition = p + '% 0';
+                    label.textContent = 'CPU: ' + Math.round(p) + '%';
+                })
+                .catch(function () {});
+        }
+        if (_cpuTimer) return;
+        poll();
+        _cpuTimer = setInterval(poll, 3000);
     }
 
     // ── Login ───────────────────────────────────────────────────────────

@@ -198,12 +198,13 @@
                     <input type="checkbox" id="wi-genq" checked>
                     <span data-i18n="wissen.genq">Fragen &amp; Antworten generieren (KI)</span>
                 </label>
-                <!-- KI-Profil-Pulldown (wissen.js mountet ProfileSwitcher) -->
-                <span id="wi-prof-slot"></span>
                 <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;color:var(--text-secondary);">
                     <span data-i18n="wissen.genq_count">Anzahl Fragen</span>
                     <input type="number" id="wi-genq-count" class="wi-input" min="1" max="30" value="20" style="width:70px;padding:5px 8px;">
                 </label>
+                <!-- KI-Profil-Pulldown (wissen.js mountet ProfileSwitcher);
+                     Zeilen-gap 10px + margin 10px = 20px Abstand zum Anzahl-Feld -->
+                <span id="wi-prof-slot" style="margin-left:10px;"></span>
             </div>
             <p class="desc" style="margin-top:6px;" data-i18n="wissen.genq_hint">Bei Datei-Uploads optional (Standard: aktiv), bei der URL-Analyse immer aktiv. Die generierten Fragen &amp; Antworten erscheinen unten unter „Deine Entwürfe" – dort kannst du sie löschen, korrigieren und freigeben.</p>
             <div class="wi-status" id="wi-upload-status"></div>

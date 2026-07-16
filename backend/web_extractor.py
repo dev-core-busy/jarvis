@@ -60,25 +60,43 @@ def _build_prompt(content: str, qa_count=None) -> str:
             f"direkt aus dem Inhalt") if n else _QA_RULE_DEFAULT
     return _EXTRACT_PROMPT.replace("{qa_rule}", rule).replace("{content}", content)
 
-async def extract_structured_from_text(text: str, fallback_title: str = "", qa_count=None) -> dict:
-    """Schickt beliebigen Text durch den Wissensextraktor-LLM und liefert
-    {title, summary, facts, qa_pairs}. Wiederverwendbar – u.a. fuer die
-    LLM-Anreicherung beim Wissens-Export. qa_count: gewuenschte Fragenanzahl."""
+
+def _profile_provider(prof=None):
+    """(provider, model) fuer die Extraktion – aus dem uebergebenen LLM-Profil
+    (per-User, z.B. Pulldown auf /wissen) oder dem globalen Aktiv-Profil."""
     from backend.config import config
     from backend.llm import get_provider
+    p = prof or config.active_profile or {}
+    if p:
+        provider = get_provider(
+            p.get("provider", "google"), p.get("api_key", ""), p.get("api_url", ""),
+            auth_method=p.get("auth_method", "api_key"),
+            session_key=p.get("session_key", ""), prompt_tool_calling=False,
+        )
+        return provider, p.get("model", "")
+    # Alt-Konfiguration ohne Profile
+    provider = get_provider(
+        config.LLM_PROVIDER, config.current_api_key, config.current_api_url,
+        auth_method=config.current_auth_method,
+        session_key=config.current_session_key, prompt_tool_calling=False,
+    )
+    return provider, config.current_model
+
+
+async def extract_structured_from_text(text: str, fallback_title: str = "", qa_count=None,
+                                        prof: dict = None) -> dict:
+    """Schickt beliebigen Text durch den Wissensextraktor-LLM und liefert
+    {title, summary, facts, qa_pairs}. Wiederverwendbar – u.a. fuer die
+    LLM-Anreicherung beim Wissens-Export. qa_count: gewuenschte Fragenanzahl.
+    prof: LLM-Profil des Benutzers (None = globales Aktiv-Profil)."""
     from google.genai import types
     content = (text or "")[:8000]
     if not content.strip():
         return {"title": fallback_title, "summary": "", "facts": [], "qa_pairs": []}
-    provider = get_provider(
-        config.LLM_PROVIDER, config.current_api_key,
-        config.current_api_url,
-        auth_method=config.current_auth_method,
-        session_key=config.current_session_key, prompt_tool_calling=False,
-    )
+    provider, _model = _profile_provider(prof)
     prompt = _build_prompt(content, qa_count)
     response = await provider.generate_response(
-        model=config.current_model,
+        model=_model,
         system_prompt="Du bist ein Wissensextraktor. Antworte ausschließlich mit dem angeforderten JSON.",
         contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
         tools=[],
@@ -219,10 +237,11 @@ def _strip_tags(html: str) -> str:
 
 # ─── LLM-Extraktion ──────────────────────────────────────────────────────────
 
-async def extract_from_url(url: str) -> dict:
+async def extract_from_url(url: str, qa_count=None, prof: dict = None) -> dict:
     """URL → strukturiertes Pending-Dokument.
     Erkennt automatisch ob die URL auf eine HTML-Seite oder eine Datei zeigt
-    (PDF, DOCX, XLSX, PPTX, Audio/Video …) und wählt die passende Pipeline."""
+    (PDF, DOCX, XLSX, PPTX, Audio/Video …) und wählt die passende Pipeline.
+    qa_count: gewuenschte Anzahl Frage-Antwort-Paare; prof: LLM-Profil des Benutzers."""
     from pathlib import Path as _Path
 
     resp = await _http_get(url)
@@ -239,11 +258,10 @@ async def extract_from_url(url: str) -> dict:
         raw_name = _Path(url.split("?")[0]).name
         filename = raw_name if raw_name.endswith(detected_suffix) else (raw_name or "dokument") + detected_suffix
         # Datei-Pipeline mit Original-URL als Quelle
-        return await extract_from_file(filename, resp.content, source_url=url)
+        return await extract_from_file(filename, resp.content, source_url=url,
+                                       qa_count=qa_count, prof=prof)
 
     # ── HTML-Pipeline ──────────────────────────────────────────────────────────
-    from backend.config import config
-    from backend.llm import get_provider
     from google.genai import types
 
     page_title, content = _html_to_text(resp.text)
@@ -253,18 +271,11 @@ async def extract_from_url(url: str) -> dict:
         raise ValueError("Seite enthält keinen lesbaren Text")
 
     # 2. LLM-Extraktion
-    provider = get_provider(
-        config.LLM_PROVIDER,
-        config.current_api_key,
-        config.current_api_url,
-        auth_method=config.current_auth_method,
-        session_key=config.current_session_key,
-        prompt_tool_calling=False,
-    )
+    provider, _model = _profile_provider(prof)
 
-    prompt = _build_prompt(content)
+    prompt = _build_prompt(content, qa_count)
     response = await provider.generate_response(
-        model=config.current_model,
+        model=_model,
         system_prompt="Du bist ein Wissensextraktor. Antworte ausschließlich mit dem angeforderten JSON.",
         contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
         tools=[],
@@ -450,11 +461,12 @@ def delete_pending(doc_id: str) -> bool:
 # ─── Datei-Extraktion ────────────────────────────────────────────────────────
 
 async def extract_from_file(filename: str, content: bytes, source_url: str | None = None,
-                            qa_count=None) -> dict:
+                            qa_count=None, prof: dict = None) -> dict:
     """Datei → Text-Extraktion → LLM → Pending-Dokument.
     Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV und Audio/Video via Whisper.
     source_url: wird gesetzt wenn die Datei über eine URL heruntergeladen wurde.
-    qa_count: vom Benutzer gewuenschte Anzahl Frage-Antwort-Paare (1..50)."""
+    qa_count: vom Benutzer gewuenschte Anzahl Frage-Antwort-Paare (1..50).
+    prof: LLM-Profil des Benutzers (None = globales Aktiv-Profil)."""
     import asyncio as _asyncio
     import os as _os
     import tempfile as _tempfile
@@ -502,18 +514,9 @@ async def extract_from_file(filename: str, content: bytes, source_url: str | Non
         content_for_llm = f"[Datei: {filename}]\n\n{ocr_text[:8000]}"
 
     # LLM-Extraktion – gleiche Pipeline wie URL-Extraktion
-    from backend.config import config
-    from backend.llm import get_provider
     from google.genai import types
 
-    provider = get_provider(
-        config.LLM_PROVIDER,
-        config.current_api_key,
-        config.current_api_url,
-        auth_method=config.current_auth_method,
-        session_key=config.current_session_key,
-        prompt_tool_calling=False,
-    )
+    provider, _model = _profile_provider(prof)
 
     prompt = _build_prompt(content_for_llm, qa_count)
 
@@ -526,7 +529,7 @@ async def extract_from_file(filename: str, content: bytes, source_url: str | Non
             parts.append(types.Part.from_bytes(data=content, mime_type=_IMAGE_MIME[suffix]))
         parts.append(types.Part.from_text(text=prompt))
         return await provider.generate_response(
-            model=config.current_model,
+            model=_model,
             system_prompt="Du bist ein Wissensextraktor. Antworte ausschließlich mit dem angeforderten JSON.",
             contents=[types.Content(role="user", parts=parts)],
             tools=[],

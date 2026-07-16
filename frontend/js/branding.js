@@ -299,23 +299,33 @@
         if (b.logo_mode === 'image' && logoUrl) {
             if (core._brandedUrl === logoUrl) return; // schon gesetzt
             core._brandedUrl = logoUrl;
-            core.innerHTML = '';
-            core.classList.add('branding-logo-img');
             // Neutraler (weisser) Hintergrund statt Akzent-Gradient – sonst
             // verschwindet ein Logo in Markenfarbe (z.B. rotes Logo auf rotem
             // Avatar). Markenlogos sind auf Weiss ausgelegt. NUR fuer die flachen
             // Avatar-Kreise – die Header-Ring-Kerne haben ihr eigenes Design.
             var isRingCore = core.classList.contains('logo-core') ||
                              core.classList.contains('logo-mini-core');
-            if (!isRingCore) core.style.background = '#fff';
             var img = document.createElement('img');
-            img.src = logoUrl;
             img.alt = b.company_name || 'Logo';
             img.style.width = '100%';
             img.style.height = '100%';
             img.style.objectFit = 'contain';
             img.style.borderRadius = '50%';
-            core.appendChild(img);
+            // Bild erst NACH erfolgreichem Laden einwechseln – sonst ist der
+            // Kreis fuer die Ladedauer leer (z.B. wenn der Server gerade eine
+            // laengere Anfrage abarbeitet) bzw. bleibt bei veraltetem
+            // localStorage-Cache/404 dauerhaft ohne Logo.
+            img.onload = function () {
+                if (core._brandedUrl !== logoUrl) return; // inzwischen gewechselt/zurueckgesetzt
+                core.innerHTML = '';
+                core.classList.add('branding-logo-img');
+                if (!isRingCore) core.style.background = '#fff';
+                core.appendChild(img);
+            };
+            img.onerror = function () {
+                if (core._brandedUrl === logoUrl) core._brandedUrl = ''; // Retry beim naechsten apply
+            };
+            img.src = logoUrl;
         } else if (b.core_letter) {
             core.classList.remove('branding-logo-img');
             core._brandedUrl = '';

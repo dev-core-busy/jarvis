@@ -5779,7 +5779,8 @@ async def wissen_upload(
                 continue
             try:
                 from backend.web_extractor import extract_from_file, update_pending
-                doc = await extract_from_file(dest.name, content, qa_count=qa_n)
+                doc = await extract_from_file(dest.name, content, qa_count=qa_n,
+                                              prof=config.profile_for_user(user))
                 update_pending(doc["id"], {"created_by": _norm_login(user)})
                 qa_pending.append({"id": doc["id"], "title": doc.get("title", dest.name)})
             except Exception as e:  # noqa: BLE001 – Upload bleibt erfolgreich
@@ -5887,9 +5888,12 @@ async def wissen_extract(request: Request, user: str = Depends(require_auth)):
         return JSONResponse({"error": "Keine URL angegeben"}, status_code=400)
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
+    # Gewuenschte Fragenanzahl (Zahlenfeld auf /wissen; bei URL-Analyse immer aktiv)
+    qa_n = body.get("qa_count")
     try:
         from backend.web_extractor import extract_from_url, update_pending
-        ok, doc = await _run_cancellable(request, extract_from_url(url))
+        ok, doc = await _run_cancellable(
+            request, extract_from_url(url, qa_count=qa_n, prof=config.profile_for_user(user)))
         if not ok:
             return JSONResponse({"error": "Abgebrochen"}, status_code=499)
         try:
@@ -5912,7 +5916,8 @@ async def wissen_extract_upload(request: Request, file: UploadFile = File(...),
         return JSONResponse({"error": "Datei zu groß (max. 50 MB)"}, status_code=413)
     try:
         from backend.web_extractor import extract_from_file, update_pending
-        ok, doc = await _run_cancellable(request, extract_from_file(file.filename, content))
+        ok, doc = await _run_cancellable(
+            request, extract_from_file(file.filename, content, prof=config.profile_for_user(user)))
         if not ok:
             return JSONResponse({"error": "Abgebrochen"}, status_code=499)
         try:

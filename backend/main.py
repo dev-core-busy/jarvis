@@ -337,6 +337,12 @@ def verify_token(token: str) -> str | None:
             hashlib.sha256,
         ).hexdigest()
         if hmac.compare_digest(sig, expected):
+            # Widerrufene Sitzungen (AD-Gruppen-Revalidierung): Tokens, die VOR
+            # dem Widerrufszeitpunkt ausgestellt wurden, sind ungueltig. Ein
+            # neuer Login (frischer Timestamp) hebt den Widerruf faktisch auf.
+            rev = _revoked_logins.get(_norm_login(username))
+            if rev and int(ts) <= rev:
+                return None
             return username
         return None
     except Exception:
@@ -395,6 +401,9 @@ def _login_still_allowed(username: str) -> bool:
     dagegen sofort durchgesetzt."""
     if username in ALLOWED_USERS:
         return True
+    # AD-Benutzer als 'aktiv' vormerken – Grundlage fuer die periodische
+    # Gruppen-Revalidierung (_ad_revalidation_loop prueft nur aktive Benutzer).
+    _ad_seen_users[_norm_login(username)] = time.time()
     ad_srv = config.get_setting("ad_server", "")
     ad_dom = config.get_setting("ad_domain", "")
     if not (ad_srv and ad_dom):
@@ -852,6 +861,134 @@ def _check_admin_with_conn(username: str, conn, base_dn: str) -> bool:
     return False
 
 
+# ─── Periodische AD-Gruppen-Revalidierung (Service-Konto) ────────────────────
+# Rein GRUPPEN-basierte Freigaben sind nach dem Login ohne Benutzer-Passwort
+# nicht live pruefbar (Grenze von _login_still_allowed). Mit hinterlegtem
+# Service-Konto (ad_bind_user/-password, siehe Verzeichnis-Suche) schlaegt ein
+# Hintergrund-Task die Mitgliedschaften aktiver AD-Benutzer periodisch nach:
+# - Login-Gruppe (ad_allowed_group) entzogen / Konto geloescht -> Sitzung wird
+#   widerrufen (Token-Epoche in data/auth_revocations.json; verify_token lehnt
+#   aeltere Tokens ab -> wirkt beim naechsten Request, F5-sicher)
+# - Rollen-Caches (Admin/Internet/Wissens-Editor/memberOf) werden aktualisiert,
+#   damit Gruppen-Aenderungen auch OHNE Neuanmeldung greifen
+# Fail-open: bei DC-/Bind-Fehlern wird NIE widerrufen (kein Aussperren bei
+# Netz-Flackern). Intervall: Setting ad_revalidate_minutes (Default 10, 0=aus).
+_REVOKED_FILE = Path(__file__).parent.parent / "data" / "auth_revocations.json"
+_revoked_logins: dict[str, int] = {}     # plain login -> Widerrufs-Epoche (ts)
+_ad_seen_users: dict[str, float] = {}    # plain login -> zuletzt aktiv (ts)
+
+
+def _load_revocations():
+    global _revoked_logins
+    try:
+        if _REVOKED_FILE.exists():
+            data = json.loads(_REVOKED_FILE.read_text())
+            if isinstance(data, dict):
+                _revoked_logins = {str(k): int(v) for k, v in data.items()}
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Revocations laden fehlgeschlagen: {e}", flush=True)
+
+
+def _save_revocations():
+    try:
+        _REVOKED_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _REVOKED_FILE.write_text(json.dumps(_revoked_logins))
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Revocations speichern fehlgeschlagen: {e}", flush=True)
+
+
+_load_revocations()
+
+
+def _revalidate_ad_groups_once() -> dict:
+    """Ein Revalidierungs-Durchlauf (blocking – via asyncio.to_thread aufrufen).
+
+    Prueft alle in den letzten 24h aktiven AD-Benutzer per Service-Konto-Bind.
+    Widerrufen wird NUR im reinen Gruppen-Modus (ad_allowed_group gesetzt und
+    KEINE ad_allowed_users-Liste – die Liste wird bereits pro Request in
+    _login_still_allowed durchgesetzt)."""
+    res = {"checked": 0, "revoked": [], "skipped": ""}
+    now = time.time()
+    users = sorted({u for u, ts in list(_ad_seen_users.items())
+                    if now - ts < 86400
+                    and u not in ALLOWED_USERS and u not in ("jarvis", "root")
+                    and u not in _revoked_logins})
+    if not users:
+        return res
+
+    from backend import ldap_directory
+    try:
+        conn, base_dn = ldap_directory._bind()
+    except Exception as e:  # noqa: BLE001
+        res["skipped"] = f"Service-Bind fehlgeschlagen: {e}"
+        return res
+
+    allowed_users_raw = config.get_setting("ad_allowed_users", "").strip()
+    allowed_group = config.get_setting("ad_allowed_group", "").strip()
+    enforce_login = bool(allowed_group) and not allowed_users_raw
+    try:
+        for plain in users:
+            safe = plain.replace("\\", "\\5c").replace("*", "\\2a").replace(
+                "(", "\\28").replace(")", "\\29").replace("\x00", "\\00")
+            try:
+                conn.search(search_base=base_dn,
+                            search_filter=f"(sAMAccountName={safe})",
+                            attributes=["memberOf"])
+            except Exception as e:  # noqa: BLE001
+                print(f"[AUTH] Revalidierung: Suche fuer '{plain}' fehlgeschlagen: {e}", flush=True)
+                continue  # fail-open pro Benutzer
+            res["checked"] += 1
+            found = bool(conn.entries)
+            member_of = []
+            if found:
+                member_of = list(conn.entries[0]["memberOf"].values
+                                 if "memberOf" in conn.entries[0] else [])
+                # Rollen-Caches auffrischen (Gruppen-Aenderungen ohne Neuanmeldung)
+                _user_group_dns_cache[plain] = member_of
+                _knowledge_editor_cache[plain] = _check_knowledge_edit_permission_with_conn(plain, conn, base_dn)
+                _internet_access_cache[plain] = _check_internet_access_with_conn(plain, conn, base_dn)
+                _admin_access_cache[plain] = _check_admin_with_conn(plain, conn, base_dn)
+            if enforce_login and (not found or not _member_of_any_group(member_of, allowed_group)):
+                _revoked_logins[plain] = int(now)
+                res["revoked"].append(plain)
+                print(f"[AUTH] Revalidierung: Login-Gruppe entzogen -> Sitzung widerrufen: '{plain}'", flush=True)
+    finally:
+        try:
+            conn.unbind()
+        except Exception:  # noqa: BLE001
+            pass
+    if res["revoked"]:
+        _save_revocations()
+    return res
+
+
+async def _ad_revalidation_loop():
+    """Hintergrund-Task: periodische Nachpruefung der AD-Gruppen-Mitgliedschaft."""
+    while True:
+        try:
+            minutes = int(float(config.get_setting("ad_revalidate_minutes", 10) or 0))
+        except Exception:  # noqa: BLE001
+            minutes = 10
+        await asyncio.sleep(minutes * 60 if minutes > 0 else 300)
+        if minutes <= 0:
+            continue  # deaktiviert – Intervall-Setting weiter beobachten
+        if not (config.get_setting("ad_server", "") and config.get_setting("ad_domain", "")):
+            continue
+        if not (config.get_setting("ad_bind_user", "") or "").strip():
+            continue  # kein Service-Konto -> Nachpruefung nicht moeglich
+        try:
+            r = await asyncio.to_thread(_revalidate_ad_groups_once)
+            if r.get("skipped"):
+                print(f"[AUTH] Revalidierung uebersprungen: {r['skipped']}", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AUTH] Revalidierung Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
+async def startup_ad_revalidation():
+    asyncio.create_task(_ad_revalidation_loop())
+
+
 def _user_is_admin(user: str) -> bool:
     """Darf dieser Benutzer Admin-Aktionen (Update, Profile, Skills, MCP, …) ausfuehren?
 
@@ -950,6 +1087,10 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
                 )
                 conn.unbind()
                 if allowed:
+                    # Erfolgreicher Login beweist die Berechtigung neu ->
+                    # frueheren Widerruf aufheben (Registry sauber halten)
+                    if _revoked_logins.pop(plain_key, None) is not None:
+                        _save_revocations()
                     print(f"[AUTH] AD-Login erfolgreich: {bind_user}", flush=True)
                     return True
                 else:
@@ -2797,7 +2938,14 @@ async def get_ad_status(user: str = Depends(require_auth)):
 
     ``reachable`` ist das Ergebnis eines echten Verbindungstests zum
     Domain-Controller (TCP/LDAP-Connect ohne Bind, Timeout ~3s; null wenn
-    nicht konfiguriert) – 'konfiguriert' allein heisst NICHT erreichbar."""
+    nicht konfiguriert) – 'konfiguriert' allein heisst NICHT erreichbar.
+
+    ``revalidation``: Zustand der periodischen AD-Gruppen-Revalidierung
+    (active: laeuft mit Service-Konto; minutes: Intervall, Setting
+    ``ad_revalidate_minutes``, 0 = aus; revoked: Anzahl aktuell widerrufener
+    Sitzungen). Entzieht die Login-Gruppe einem aktiven Benutzer, wird seine
+    Sitzung ohne Neuanmeldung widerrufen; Rollen-Gruppen (Admin/Internet/
+    Wissen) werden automatisch nachgezogen."""
     ad_server = config.get_setting("ad_server", "")
     ad_domain = config.get_setting("ad_domain", "")
     allowed_users = config.get_setting("ad_allowed_users", "")
@@ -2825,9 +2973,18 @@ async def get_ad_status(user: str = Depends(require_auth)):
         except Exception:  # noqa: BLE001
             reachable = False
 
+    try:
+        _reval_min = int(float(config.get_setting("ad_revalidate_minutes", 10) or 0))
+    except Exception:  # noqa: BLE001
+        _reval_min = 10
     return JSONResponse({
         "configured": bool(ad_server and ad_domain),
         "reachable": reachable,
+        "revalidation": {
+            "active": bool((config.get_setting("ad_bind_user", "") or "").strip()) and _reval_min > 0,
+            "minutes": _reval_min,
+            "revoked": len(_revoked_logins),
+        },
         "server": ad_server,
         "domain": ad_domain,
         "allowed_users": allowed_users,

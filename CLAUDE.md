@@ -5,7 +5,7 @@ Autonomer KI-Agent auf einem Linux-Server (Debian 13) mit Web-Frontend, Desktop-
 
 ## Server & Deployment
 - **App-Server:** root@191.100.144.1 (Debian 13), SSH: `ssh -i /c/users/bender/.ssh/id_rsa root@191.100.144.1`
-- **Zwei Pfade:** `/opt/jarvis/` (systemd Service, WorkingDirectory) + `/home/jarvis/jarvis/` (Entwicklung) – Dateien an BEIDE deployen!
+- **Ein Pfad:** `/opt/jarvis/` (systemd Service, WorkingDirectory) – der frühere Zweitpfad `/home/jarvis/jarvis/` wurde 2026-07-17 abgeschafft (war totes Kopier-Ziel).
 - **Deploy:** Lokal schreiben + `scp` (keine Heredocs ueber SSH – Quoting-Probleme mit f-strings)
   - HINWEIS: Auf dem Server wird NICHT committet → der Git-HEAD dort bleibt alt und ist KEIN Versionsindikator. Massgeblich ist der Datei-Inhalt (md5-Vergleich), nicht `git rev-parse`.
 - **Landing-Page:** `jarvis-ai.info` ist ein SEPARATER Host (89.110.149.134, nginx) – NICHT der App-Server.
@@ -209,7 +209,6 @@ systemctl restart jarvis-broker.service   # Root-Broker (getrennter Betrieb)
 journalctl -u jarvis.service -f
 journalctl -u whatsapp-bridge.service -f
 
-# Deployen (von Windows aus)
-scp -i /c/users/bender/.ssh/id_rsa <datei> root@191.100.144.1:/opt/jarvis/<pfad>
-scp -i /c/users/bender/.ssh/id_rsa <datei> root@191.100.144.1:/home/jarvis/jarvis/<pfad>
+# Deployen
+scp -i ~/.ssh/id_rsa <datei> root@191.100.144.1:/opt/jarvis/<pfad>
 ```

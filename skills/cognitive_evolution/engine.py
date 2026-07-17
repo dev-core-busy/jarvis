@@ -30,9 +30,9 @@ SELF_DIR      = Path(__file__).parent                          # skills/cognitiv
 PROPOSALS_DIR = PROJECT_ROOT / "data" / "learnings" / "proposals"
 EVOLUTION_LOG = PROJECT_ROOT / "data" / "learnings" / "evolution_log.json"
 
-# Deploy-Pfade (spiegeln Produktions-Server)
+# Service-Pfad – einziges Deploy-Ziel (der fruehere Zweitpfad
+# /home/jarvis/jarvis wurde 2026-07-17 abgeschafft)
 _SERVICE_ROOT = Path("/opt/jarvis")
-_DEV_ROOT     = Path("/home/jarvis/jarvis")
 
 # Skill-Vorlage für den Proposal-Prompt
 _SKILL_TEMPLATE = """
@@ -587,15 +587,14 @@ async def _apply_new_skill(proposal: dict) -> str:
         target.write_text(content, encoding="utf-8")
         written.append(rel_path)
 
-        # Deploy zu Service- und Dev-Pfad
-        for base in (_SERVICE_ROOT, _DEV_ROOT):
-            deploy_target = base / rel_path
-            if deploy_target.parent.exists():
-                try:
-                    deploy_target.parent.mkdir(parents=True, exist_ok=True)
-                    deploy_target.write_text(content, encoding="utf-8")
-                except Exception as e:
-                    pass  # Deploy-Fehler sind nicht kritisch
+        # Deploy in den Service-Pfad (falls nicht schon die Quelle)
+        deploy_target = _SERVICE_ROOT / rel_path
+        if _SERVICE_ROOT.exists() and deploy_target.resolve() != target.resolve():
+            try:
+                deploy_target.parent.mkdir(parents=True, exist_ok=True)
+                deploy_target.write_text(content, encoding="utf-8")
+            except Exception:
+                pass  # Deploy-Fehler sind nicht kritisch
 
     # Skill-Code verifizieren (temporärer SkillLoader – registriert nicht beim laufenden Agent)
     load_result = ""
@@ -636,14 +635,13 @@ async def _apply_self_patch(proposal: dict) -> str:
     # Schreiben
     engine_path.write_text(new_engine, encoding="utf-8")
 
-    # Deploy
-    for base in (_SERVICE_ROOT, _DEV_ROOT):
-        deploy = base / "skills" / "cognitive_evolution" / "engine.py"
-        if deploy.parent.exists():
-            try:
-                deploy.write_text(new_engine, encoding="utf-8")
-            except Exception:
-                pass
+    # Deploy in den Service-Pfad (falls nicht schon die Quelle)
+    deploy = _SERVICE_ROOT / "skills" / "cognitive_evolution" / "engine.py"
+    if deploy.parent.exists() and deploy.resolve() != engine_path.resolve():
+        try:
+            deploy.write_text(new_engine, encoding="utf-8")
+        except Exception:
+            pass
 
     # Reload
     module_key = "skills.cognitive_evolution.engine"

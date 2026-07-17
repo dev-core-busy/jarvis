@@ -67,7 +67,7 @@ Smartphone → WhatsApp Server → Baileys Bridge (:3001) → Jarvis Backend (:4
 - `whisper_model`: tiny/base/small/medium/large (Standard: small)
 
 ## Wichtige Pfade
-- Projekt: /opt/jarvis (Service/Prod) + /home/jarvis/jarvis (Entwicklung)
+- Projekt: /opt/jarvis (Service/Prod)
 - Instruktionen: /opt/jarvis/data/instructions/
 - Skills: /opt/jarvis/skills/
 - WhatsApp Bridge: /opt/jarvis/services/whatsapp-bridge/
@@ -77,7 +77,7 @@ Smartphone → WhatsApp Server → Baileys Bridge (:3001) → Jarvis Backend (:4
 - Settings: /opt/jarvis/data/settings.json
 
 ## Deployment-Regeln
-- Dateien immer an BEIDE Pfade deployen: `/opt/jarvis/` UND `/home/jarvis/jarvis/`
+- Deploy-Ziel ist ausschließlich `/opt/jarvis/`
 - Nach Backend-Änderungen (Python-Dateien): `systemctl restart jarvis.service`
 - Nach WhatsApp-Bridge-Änderungen: `systemctl restart whatsapp-bridge.service`
 - Frontend-Änderungen: Cache-Buster in index.html hochzählen (`?v=N`)

@@ -61,12 +61,12 @@ Bei technischem Fehler der Validierung wird die Änderung trotzdem erlaubt (fail
 **Für Code-Fixes (`apply_code_fix`):**
 - Backup wird automatisch angelegt (`.reflection_bak`)
 - Python-Syntax wird vor dem Anwenden geprüft
-- Deployment in beide Pfade: `/opt/jarvis/` + `/home/jarvis/jarvis/`
+- Deployment nach `/opt/jarvis/`
 - `restart_service: true` nur für Backend-Dateien, die den Service betreffen
 
 **Für Instruktionen (`apply_instruction`):**
 - Backup wird automatisch angelegt (`.md.bak`)
-- Änderung wird in beide Deploy-Pfade kopiert
+- Änderung wird nach `/opt/jarvis/` deployt
 - `old_text` für präzise Ersetzungen verwenden (exakter Match erforderlich)
 - `new_text` ohne `old_text` = Anhang ans Ende der Datei
 

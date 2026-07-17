@@ -306,7 +306,7 @@ def _op_certbot_obtain(args, stream):
     except KeyError:
         uid = gid = 0
     copied = []
-    for certs_dir in [Path("/opt/jarvis/certs"), Path("/home/jarvis/jarvis/certs")]:
+    for certs_dir in [Path("/opt/jarvis/certs")]:
         if not certs_dir.parent.exists():
             continue
         certs_dir.mkdir(parents=True, exist_ok=True)
@@ -338,7 +338,7 @@ def _op_certbot_obtain(args, stream):
             "#!/bin/bash\n"
             "# Auto-generiert von Jarvis (backend/broker/ops.py): kopiert erneuerte\n"
             "# Let's-Encrypt-Zertifikate ins Jarvis-certs/-Verzeichnis.\n"
-            f"for D in /opt/jarvis/certs /home/jarvis/jarvis/certs; do\n"
+            f"for D in /opt/jarvis/certs; do\n"
             f"  [ -d \"$D\" ] || continue\n"
             f"  cp -L /etc/letsencrypt/live/{domain}/fullchain.pem \"$D/server.crt\"\n"
             f"  cp -L /etc/letsencrypt/live/{domain}/privkey.pem \"$D/server.key\"\n"

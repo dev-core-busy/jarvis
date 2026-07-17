@@ -169,7 +169,7 @@ _LDAP_SHELL_WRITE_REDIRECT = re.compile(r'(?<![<|&])>\s*\S')
 # Ziel-Pfade von >/>>-Redirects (ohne fd-Praefix wie 2>, ohne <|&)
 _REDIRECT_TARGETS = re.compile(r'(?<![<|&\d])>>?\s*([^\s"\'|&;<>]+)')
 _LDAP_SHELL_SECRET_PATHS = re.compile(
-    r'(?:/opt/jarvis/\.env\b|/home/jarvis/jarvis/\.env\b|auth_state\.json\b)',
+    r'(?:/opt/jarvis/\.env\b|auth_state\.json\b)',
     re.IGNORECASE,
 )
 

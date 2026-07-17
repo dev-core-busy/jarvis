@@ -146,6 +146,75 @@ class JiraSearchTool(_Base):
         return header + "\n".join(lines)
 
 
+class JiraCustomerTicketsTool(_Base):
+    @property
+    def name(self): return "jira_customer_tickets"
+
+    @property
+    def description(self):
+        return ("Findet die zu SCHLAGWORTEN passenden Tickets EINES CRM-Kunden "
+                "(z.B. 'crm-10550') – OFFENE UND ABGESCHLOSSENE. GENAU DIESES Tool bei "
+                "Fragen wie 'Tickets von crm-XXXX, die A und B enthalten' oder "
+                "'Tickets von Kunde X zum Thema Y'. Verbindet die exakte Kunden-"
+                "Organisationssuche mit 2-5 Schlagworten im Volltext und liefert eine "
+                "kompakte, begrenzte Trefferliste (Key, Titel, Status, offen/abgeschlossen, "
+                "Link). NICHT jira_org_profile dafuer verwenden – das zieht ALLE Tickets "
+                "des Kunden und ist fuer Schlagwort-Filter ungeeignet.")
+
+    def parameters_schema(self):
+        return {"type": "OBJECT", "properties": {
+            "crm": {"type": "STRING", "description": "CRM-Kundennummer, z.B. 'crm-10550'."},
+            "keywords": {"type": "ARRAY", "items": {"type": "STRING"},
+                         "description": "2 bis 5 Schlagworte (z.B. ['LDT','Anbindung']). Auch als komma-/leerzeichengetrennter String moeglich."},
+            "match": {"type": "STRING", "description": "'all' (Default) = Ticket muss ALLE Schlagworte enthalten (bei 'A und B'); 'any' = irgendeines (bei 'A oder B')."},
+            "limit": {"type": "INTEGER", "description": "Max. Trefferzahl. Standard 25 (Admin-Obergrenze wird durchgesetzt)."},
+        }, "required": ["crm", "keywords"]}
+
+    async def execute(self, **kwargs):
+        from backend.jira_client import crm_keyword_jql, normalize_keywords
+        c = self._guard()
+        if not c:
+            return "Jira ist nicht konfiguriert."
+        crm = (kwargs.get("crm") or kwargs.get("query") or kwargs.get("kunde") or "").strip()
+        if not crm:
+            return "Bitte eine CRM-Kundennummer angeben (z.B. crm-10550)."
+        terms = normalize_keywords(kwargs.get("keywords"))
+        if len(terms) < 2:
+            return "Bitte mindestens 2 Schlagworte angeben (z.B. keywords=['LDT','Anbindung'])."
+        if len(terms) > 5:
+            return "Bitte hoechstens 5 Schlagworte angeben."
+        match = (kwargs.get("match") or "all").strip().lower()
+        jql = crm_keyword_jql(crm, terms, match)
+        if not jql:
+            return "Keine gueltige CRM-Nummer (erwartet z.B. 'crm-10550')."
+        try:
+            limit = max(1, min(int(kwargs.get("limit") or 25), _max_results()))
+        except (TypeError, ValueError):
+            limit = min(25, _max_results())
+        try:
+            data = await _to_thread(c.search, jql, limit, 0, c._SEARCH_FIELDS + ",resolution")
+        except JiraError as e:
+            return _fmt_err(e)
+        issues = data.get("issues", [])
+        total = data.get("total", len(issues))
+        mode = "any" if match in ("any", "or", "oder") else "all"
+        verb = "irgendeines der" if mode == "any" else "ALLE"
+        if not issues:
+            return ("Keine Tickets fuer %s mit %s Schlagworte(n) %s gefunden.\nJQL: %s"
+                    % (crm.upper(), verb, terms, jql))
+        n_open = sum(1 for it in issues if not (it.get("fields", {}) or {}).get("resolution"))
+        lines = []
+        for it in issues:
+            b = issue_brief(it, c.base)
+            resolved = bool((it.get("fields", {}) or {}).get("resolution"))
+            b["status"] = (b.get("status") or "?") + (" – abgeschlossen" if resolved else " – offen")
+            lines.append(_fmt_issue_line(b))
+        header = ("%s: %d Treffer (%s Schlagworte: %s), davon %d offen / %d abgeschlossen. "
+                  "Anzeige %d, neueste zuerst:\n"
+                  % (crm.upper(), total, verb, ", ".join(terms), n_open, len(issues) - n_open, len(issues)))
+        return header + "\n".join(lines)
+
+
 class JiraGetIssueTool(_Base):
     @property
     def name(self): return "jira_get_issue"
@@ -320,7 +389,11 @@ class JiraOrgProfileTool(_Base):
                 "Zeitverlaeufe verwenden (z.B. Anlagedatum vs. Bearbeitungsdauer). "
                 "IMMER dieses Tool fuer vollstaendige Kunden-/Eskalationsprofile verwenden – "
                 "es deckt ALLE Tickets ab (keine Stichprobe). Kommentar-Inhalte/Tonalitaet "
-                "sind NICHT enthalten (dafuer einzelne Tickets per jira_get_issue nachladen).")
+                "sind NICHT enthalten (dafuer einzelne Tickets per jira_get_issue nachladen). "
+                "NICHT verwenden, wenn nur die zu bestimmten SCHLAGWORTEN passenden Tickets "
+                "eines Kunden gefragt sind (z.B. 'Tickets von crm-X, die A und B enthalten') – "
+                "dafuer jira_customer_tickets nutzen (klein, gefiltert; dieses Tool wuerde "
+                "unnoetig ALLE Tickets laden).")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
@@ -773,6 +846,7 @@ def get_tools():
     return [
         JiraTestConnectionTool(),
         JiraSearchTool(),
+        JiraCustomerTicketsTool(),
         JiraGetIssueTool(),
         JiraOrgProfileTool(),
         JiraOrgAnalysisTool(),

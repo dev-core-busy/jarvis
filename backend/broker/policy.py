@@ -122,11 +122,14 @@ def list_ops() -> list[dict]:
 
 
 def audit(user: str, op: str, key: str, decision: str, rc=None,
-          duration_ms=None, detail: str = "", context: str = "") -> None:
+          duration_ms=None, detail: str = "", context: str = "",
+          info: str = "") -> None:
     """Audit-Eintrag anhaengen (JSON-Lines, root-eigene Datei).
 
     context: kurzer, rein informativer Ausloeser-Kontext (z.B. Agent-Task-Auszug),
-    NUR fuers Protokoll – fliesst nie in Policy-Entscheidungen oder Befehle ein."""
+    NUR fuers Protokoll – fliesst nie in Policy-Entscheidungen oder Befehle ein.
+    info: konkrete (maskierte) Argumente der Ausfuehrung in Klartext – macht
+    die 'Beispiele' in der Admin-UI aussagekraeftig."""
     rec = {
         "ts": int(time.time()),
         "user": user or "",
@@ -137,6 +140,7 @@ def audit(user: str, op: str, key: str, decision: str, rc=None,
         "duration_ms": duration_ms,
         "detail": (detail or "")[:300],
         "context": (context or "")[:300],
+        "info": (info or "")[:300],
     }
     try:
         AUDIT_FILE.parent.mkdir(parents=True, exist_ok=True)

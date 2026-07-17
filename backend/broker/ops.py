@@ -462,6 +462,24 @@ def redact_args(op: str, args: dict) -> dict:
     return out
 
 
+def _args_info(op: str, args: dict) -> str:
+    """Kompakte Klartext-Darstellung der konkreten (maskierten) Argumente
+    fuers Audit-Log ('welcher Befehl/welche Unit/welcher User genau?') –
+    macht die 'Beispiele' in der Admin-UI aussagekraeftig. Interne Felder
+    (_context) und Leerwerte werden ausgelassen."""
+    red = redact_args(op, args)
+    red.pop("_context", None)
+    parts = []
+    for k, v in red.items():
+        if v is None or v == "" or v == [] or v == {}:
+            continue
+        s = _norm_cmd(str(v)) if isinstance(v, str) else str(v)
+        if len(s) > 140:
+            s = s[:139] + "…"
+        parts.append(f"{k}={s}")
+    return " ".join(parts)[:300]
+
+
 def dispatch(op: str, args: dict, user: str = "", stream=None) -> dict:
     """Operation ausfuehren: Policy pruefen (Eintrag beim ersten Auftauchen
     anlegen), bei 'allow' ausfuehren, sonst pending/denied zurueckgeben."""
@@ -494,14 +512,16 @@ def dispatch(op: str, args: dict, user: str = "", stream=None) -> dict:
     # Rein informativer Ausloeser-Kontext (z.B. Agent-Task-Auszug). Wird NUR
     # ins Audit geschrieben und fliesst nie in key/desc/Policy/Befehl ein.
     context = str(args.get("_context") or "")[:300]
+    # Konkrete (maskierte) Argumente dieser Ausfuehrung fuers Audit-Log
+    info = _args_info(op, args)
 
     decision = policy.check(key, op, desc, user, default_allow)
     if decision == policy.DENY:
-        policy.audit(user, op, key, "denied", context=context)
+        policy.audit(user, op, key, "denied", context=context, info=info)
         return {"ok": False, "decision": "denied", "key": key,
                 "error": "Vom Administrator abgelehnt"}
     if decision == policy.PENDING:
-        policy.audit(user, op, key, "pending", context=context)
+        policy.audit(user, op, key, "pending", context=context, info=info)
         return {"ok": False, "decision": "pending", "key": key,
                 "error": "Wartet auf Admin-Freigabe"}
 
@@ -511,8 +531,11 @@ def dispatch(op: str, args: dict, user: str = "", stream=None) -> dict:
     except Exception as e:  # noqa: BLE001
         result = {"ok": False, "rc": -1, "stdout": "", "stderr": f"Broker-Op-Fehler: {e}"}
     dur = int((time.monotonic() - t0) * 1000)
+    # Detail: stderr hat Vorrang (Fehlerursache); bei Erfolg ein stdout-Auszug,
+    # damit auch rc=0-Eintraege aussagen, WAS passiert ist.
+    detail = (result.get("stderr") or result.get("stdout") or "")[:200]
     policy.audit(user, op, key, "executed", rc=result.get("rc"),
-                 duration_ms=dur, detail=(result.get("stderr") or "")[:200], context=context)
+                 duration_ms=dur, detail=detail, context=context, info=info)
     result.setdefault("ok", False)
     result["decision"] = "allowed"
     result["key"] = key

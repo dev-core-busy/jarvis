@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=7">
-    <link rel="stylesheet" href="/static/css/style.css?v=122">
+    <link rel="stylesheet" href="/static/css/style.css?v=123">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -2956,142 +2956,29 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub > .sec-sub-body { padding: 2px 14px 12px; }
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    /* ── Datei-Anhang Button ──────────────────────────────────────── */
-    .btn-attach {
-        width: 44px;
-        height: 44px;
-        border-radius: var(--radius-md);
-        border: 1px solid var(--border);
-        background: var(--bg-glass);
-        color: var(--text-muted);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        transition: all var(--transition);
-        flex-shrink: 0;
-        align-self: flex-end;
-        padding: 0;
-    }
-    .btn-attach:hover {
-        color: var(--accent);
-        border-color: var(--accent);
-        background: rgba(var(--accent-rgb),0.08);
-    }
-    .btn-attach.has-files {
-        color: var(--accent);
-        border-color: var(--accent);
-        background: rgba(var(--accent-rgb),0.12);
-    }
-    /* ── Anhang-Vorschau-Leiste ──────────────────────────────────── */
-    #attach-preview-bar {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        padding: 6px 1rem 0;
-    }
-    .attach-chip {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        padding: 3px 6px 3px 4px;
-        border-radius: 6px;
-        border: 1px solid var(--border);
-        background: var(--bg-glass);
-        font-size: 0.78rem;
-        color: var(--text-secondary);
-        max-width: 160px;
-        position: relative;
-    }
-    .attach-chip img {
-        width: 28px;
-        height: 28px;
-        object-fit: cover;
-        border-radius: 3px;
-        flex-shrink: 0;
-    }
-    .attach-chip-icon {
-        font-size: 1.2rem;
-        line-height: 1;
-        flex-shrink: 0;
-    }
-    .attach-chip-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        flex: 1;
-        min-width: 0;
-    }
-    .attach-chip-remove {
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: var(--text-muted);
-        font-size: 1rem;
-        line-height: 1;
-        padding: 0 2px;
-        flex-shrink: 0;
-        transition: color 0.15s;
-    }
-    .attach-chip-remove:hover { color: #f87171; }
-    /* ── Drag-Over-Highlight ─────────────────────────────────────── */
-    .panel-left.drag-over {
-        outline: 2px dashed var(--accent);
-        outline-offset: -4px;
-        background: rgba(var(--accent-rgb),0.04);
-    }
-    /* ── Attach-Toast ────────────────────────────────────────────── */
-    #attach-toast {
-        position: fixed;
-        bottom: 80px;
-        left: 50%;
-        transform: translateX(-50%) translateY(12px);
-        background: rgba(30, 32, 48, 0.97);
-        border: 1px solid var(--border);
-        border-left: 3px solid #f87171;
-        color: var(--text-primary);
-        padding: 10px 16px;
-        border-radius: var(--radius-sm);
-        font-size: 0.85rem;
-        white-space: nowrap;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.2s, transform 0.2s;
-        z-index: 9999;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-    }
-    #attach-toast.show {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0);
-    }
     </style>
-    <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=83"></script>
-    <script src="/static/js/websocket.js?v=6"></script>
+    <script src="/static/js/i18n.js?v=84"></script>
     <script src="/static/js/cron.js?v=16"></script>
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
     <script src="/static/js/kbmatrix.js?v=6"></script>
     <script src="/static/js/extractor.js?v=23"></script>
-    <script src="/static/js/vnc.js?v=18"></script>
     <script src="/static/js/skills.js?v=30"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
-    <script src="/static/js/knowledge.js?v=56"></script>
+    <script src="/static/js/knowledge.js?v=57"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=6"></script>
     <script src="/static/js/jira.js?v=5"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
     <script src="/static/js/telemetry.js?v=6"></script>
-    <script src="/static/js/chatlib.js?v=13"></script>
-    <script src="/static/js/issues.js?v=7"></script>
     <script src="/static/js/branding.js?v=19"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=19"></script>
     <script src="/static/js/ldap_picker.js?v=6"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=167"></script>
+    <script src="/static/js/app.js?v=168"></script>
 </body>
 
 </html>

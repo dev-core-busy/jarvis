@@ -2409,6 +2409,13 @@ body.light .modal-header h2 {
     padding: 5px 8px; border-radius: 8px;
 }
 .kb-grp-manage-row:hover { background: rgba(var(--fg-rgb), 0.04); }
+/* Drag & Drop Sortierung der Gruppen */
+.kb-grp-drag {
+    cursor: grab; color: var(--text-muted); font-size: 0.85rem;
+    letter-spacing: -2px; user-select: none; flex-shrink: 0;
+}
+.kb-grp-manage-row.kb-grp-dragging { opacity: 0.4; }
+.kb-grp-manage-row.kb-grp-dropover { outline: 1px dashed rgba(var(--accent-rgb), 0.6); }
 .kb-grp-manage-name { cursor: pointer; font-size: 0.86rem; }
 .kb-grp-manage-name:hover { text-decoration: underline; }
 .kb-grp-editors {

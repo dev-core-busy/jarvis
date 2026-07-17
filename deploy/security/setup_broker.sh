@@ -30,6 +30,15 @@ step() { echo ""; echo "── $*"; }
 [ -f "$JARVIS_DIR/backend/broker/daemon.py" ] || fail "Broker-Code fehlt in $JARVIS_DIR – erst Code deployen."
 id "$SVC_USER" >/dev/null 2>&1 || fail "Benutzer $SVC_USER existiert nicht."
 
+# Preflight: der Dienst-Benutzer muss das Elternverzeichnis BETRETEN koennen
+# (Traversal). Liegt Jarvis z.B. unter /root/jarvis (0700), wuerde die
+# Migration das Backend unstartbar machen (status=200/CHDIR) – deshalb hier
+# HART abbrechen, BEVOR irgendetwas veraendert wird.
+PARENT_DIR="$(dirname "$JARVIS_DIR")"
+if ! runuser -u "$SVC_USER" -- test -x "$PARENT_DIR" 2>/dev/null; then
+    fail "Preflight: Benutzer '$SVC_USER' kann $PARENT_DIR nicht betreten (z.B. Installation unter /root). Getrennter Betrieb ist mit diesem Layout nicht moeglich – es wurde NICHTS veraendert. Jarvis zuerst nach /opt/jarvis umziehen."
+fi
+
 step "1/5 Eigentuemerschaft: $JARVIS_DIR (und /home/jarvis/jarvis, falls vorhanden) → $SVC_USER"
 chown -R "$SVC_USER:$SVC_USER" "$JARVIS_DIR"
 if [ -d "/home/jarvis/jarvis" ] && [ "/home/jarvis/jarvis" != "$JARVIS_DIR" ]; then

@@ -25,9 +25,7 @@ for f in "$SRC"/*.md "$SRC"/*.md.disabled; do
         -e "s|{{SERVER_IP}}|$SERVER_IP|g" \
         -e "s|{{SSH_KEY_PATH}}|$SSH_KEY_PATH|g" \
         "$f" > "$tmp"
-    # Beide Pfade
     $SCP "$tmp" "root@$SERVER_IP:/opt/jarvis/data/instructions/$fname"
-    $SCP "$tmp" "root@$SERVER_IP:/home/jarvis/jarvis/data/instructions/$fname"
     echo "  ✓ $fname"
 done
 

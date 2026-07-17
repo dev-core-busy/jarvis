@@ -30,9 +30,9 @@ PROPOSALS_DIR   = LEARNINGS_DIR / "proposals"
 INDEX_FILE      = LEARNINGS_DIR / "index.json"
 INSTRUCTIONS_DIR = PROJECT_ROOT / "data" / "instructions"
 
-# Zweiter Deploy-Pfad (Dev-Tree parallel zum Service-Tree)
+# Service-Pfad – einziges Deploy-Ziel (der fruehere Zweitpfad
+# /home/jarvis/jarvis wurde 2026-07-17 abgeschafft)
 _SERVICE_ROOT = Path("/opt/jarvis")
-_DEV_ROOT     = Path("/home/jarvis/jarvis")
 
 # Locking fuer parallele Sub-Agent-Zugriffe
 _lock = threading.Lock()
@@ -78,14 +78,16 @@ def _report_filename(title: str) -> str:
 
 
 def _deploy_file(local_path: Path, relative: str):
-    """Schreibt eine Datei in beide Server-Pfade falls sie existieren."""
-    for base in [_SERVICE_ROOT, _DEV_ROOT]:
-        target = base / relative
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(local_path), str(target))
-        except Exception:
-            pass  # Zweiter Pfad optional
+    """Schreibt eine Datei in den Service-Pfad – ausser der laufende Prozess
+    arbeitet ohnehin schon daraus (dann ist die Quelle bereits das Ziel)."""
+    target = _SERVICE_ROOT / relative
+    try:
+        if target.resolve() == local_path.resolve():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(local_path), str(target))
+    except Exception:
+        pass  # Deploy optional (z.B. lokale Entwicklungsumgebung)
 
 
 def _try_notify_whatsapp(message: str):
@@ -670,17 +672,16 @@ class ReflectionTool(BaseTool):
         # ── Datei schreiben ───────────────────────────────────────────────────
         filepath.write_text(content, encoding="utf-8")
 
-        # ── Deploy in beide Server-Pfade ──────────────────────────────────────
+        # ── Deploy in den Service-Pfad (falls nicht schon die Quelle) ────────
         deployed = []
-        for base in [_SERVICE_ROOT, _DEV_ROOT]:
-            target = base / file
-            if base.exists():
-                try:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(str(filepath), str(target))
-                    deployed.append(str(base))
-                except Exception as e:
-                    deployed.append(f"⚠️ {base}: {e}")
+        target = _SERVICE_ROOT / file
+        if _SERVICE_ROOT.exists() and target.resolve() != filepath.resolve():
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(filepath), str(target))
+                deployed.append(str(_SERVICE_ROOT))
+            except Exception as e:
+                deployed.append(f"⚠️ {_SERVICE_ROOT}: {e}")
 
         # ── Aenderung loggen ──────────────────────────────────────────────────
         log_entry = (
@@ -814,11 +815,12 @@ class ReflectionTool(BaseTool):
 # ─── Instruktions-Deploy Hilfsfunktion ───────────────────────────────────────
 
 def _deploy_instruction(filename: str, local_path: Path):
-    """Deployt eine Instruktionsdatei in beide Server-Pfade."""
-    for base in [_SERVICE_ROOT, _DEV_ROOT]:
-        target = base / "data" / "instructions" / filename
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(local_path), str(target))
-        except Exception:
-            pass
+    """Deployt eine Instruktionsdatei in den Service-Pfad (falls nicht schon die Quelle)."""
+    target = _SERVICE_ROOT / "data" / "instructions" / filename
+    try:
+        if target.resolve() == local_path.resolve():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(local_path), str(target))
+    except Exception:
+        pass

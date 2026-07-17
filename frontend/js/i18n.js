@@ -37,6 +37,8 @@ const _I18N = {
         'portal.llm_since_down':     'nicht erreichbar seit ',
         'portal.logout_suffix':      'abmelden',
         'portal.conn_error':         'Verbindungsfehler',
+        'portal.contact_info_default': 'universelles, modulares KI Portal',
+        'portal.contact_phone_prefix': 'Tel.',
 
         // ── 2FA-Modal (Portal) ─────────────────────────────────
         'totp.title':          'Zwei-Faktor-Authentifizierung',
@@ -329,6 +331,11 @@ const _I18N = {
         'branding.namelogo_dark':   'Logo – Dunkelmodus (PNG/JPG/SVG/WEBP)',
         'branding.namelogo_light':  'Logo – Hellmodus (optional, sonst wird das dunkle verwendet)',
         'branding.remove':          'Entfernen',
+        'branding.contact_heading': 'Kontakt & Info (Portalseite)',
+        'branding.contact_hint':    'Dezente Info-Zeile unterhalb der Bereichsauswahl auf /portal. Leere Felder werden ausgeblendet; ohne aktives Branding erscheinen die Standard-Angaben.',
+        'branding.contact_info':    'Info-Text',
+        'branding.contact_phone':   'Telefon',
+        'branding.contact_email':   'E-Mail-Adresse',
         'profile.section_tts':      'Sprachausgabe (TTS)',
         'profile.section_timeout':  'Antwort-Timeout',
         'profile.timeout_label':    'Timeout für LLM-Anfragen (Sekunden)',
@@ -1423,6 +1430,8 @@ const _I18N = {
         'portal.llm_since_down':     'unreachable since ',
         'portal.logout_suffix':      'sign out',
         'portal.conn_error':         'Connection error',
+        'portal.contact_info_default': 'universal, modular AI portal',
+        'portal.contact_phone_prefix': 'Phone',
 
         // ── 2FA modal (portal) ─────────────────────────────────
         'totp.title':          'Two-Factor Authentication',
@@ -1715,6 +1724,11 @@ const _I18N = {
         'branding.namelogo_dark':   'Logo – dark mode (PNG/JPG/SVG/WEBP)',
         'branding.namelogo_light':  'Logo – light mode (optional, falls back to the dark one)',
         'branding.remove':          'Remove',
+        'branding.contact_heading': 'Contact & info (portal page)',
+        'branding.contact_hint':    'Subtle info line below the area selection on /portal. Empty fields are hidden; without active branding the built-in defaults are shown.',
+        'branding.contact_info':    'Info text',
+        'branding.contact_phone':   'Phone',
+        'branding.contact_email':   'Email address',
         'profile.section_tts':      'Text-to-Speech (TTS)',
         'profile.section_timeout':  'Response Timeout',
         'profile.timeout_label':    'Timeout for LLM requests (seconds)',

@@ -651,12 +651,22 @@ body {
     border-radius: 3px;
 }
 
-/* Debug-Umschalter neben der Kontext-Pille */
+/* Debug-Umschalter neben der Kontext-Pille.
+   Basis-Optik hier (NICHT inline im HTML) – sonst schlagen Inline-Styles die
+   .active-Regel und der Ein/Aus-Zustand ist optisch nicht unterscheidbar. */
+#ctx-debug-toggle {
+    background: transparent;
+    border: 1px solid rgba(var(--fg-rgb), 0.15);
+    color: var(--text-secondary);
+    transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
+}
 #ctx-debug-toggle:hover { color: var(--text-primary); border-color: rgba(var(--accent-rgb), 0.5); }
+/* AN: deutlich abgesetzt – Akzent-Rahmen + Tönung + Ring + Akzent-Icon */
 #ctx-debug-toggle.active {
     color: var(--accent);
-    border-color: rgba(var(--accent-rgb), 0.5);
-    background: rgba(var(--accent-rgb), 0.12);
+    border-color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.20);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22);
 }
 
 /* ─── Edit-Modus innerhalb der Bubble ─────────────────────────── */

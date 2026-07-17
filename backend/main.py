@@ -2344,6 +2344,41 @@ async def broker_status(user: str = Depends(require_local_auth)):
     })
 
 
+@app.post("/api/broker/setup")
+async def broker_mode_setup(user: str = Depends(require_local_auth)):
+    """Getrennten Betrieb per Klick aktivieren/reparieren (Admin).
+
+    Startet deploy/security/setup_broker.sh als transiente systemd-Unit
+    (jarvis-broker-migrate) – idempotent. jarvis.service und
+    jarvis-broker.service werden dabei NEU GESTARTET, die Oberfläche ist
+    kurz nicht erreichbar. Antwort kommt sofort (Umstellung gestartet);
+    den Fortschritt liefert Polling von GET /api/broker/status
+    (mode='broker' + separated=true = fertig)."""
+    from backend import broker_client
+    res = await broker_client.call("broker_setup", {}, user=user, timeout=60)
+    ok = bool(res.get("ok"))
+    return JSONResponse({"ok": ok, "message": res.get("stdout", ""),
+                         "error": res.get("stderr") or res.get("error", "")},
+                        status_code=200 if ok else 502)
+
+
+@app.post("/api/broker/teardown")
+async def broker_mode_teardown(user: str = Depends(require_local_auth)):
+    """Alt-Betrieb per Klick wiederherstellen (Admin): Backend wieder als
+    root, jarvis-broker.service wird deaktiviert.
+
+    Startet deploy/security/teardown_broker.sh als transiente systemd-Unit
+    (jarvis-broker-restore). Freigabeliste + Audit bleiben aktiv (root-
+    Fallback), nur die Prozess-Trennung entfällt. Antwort kommt sofort;
+    Fortschritt via Polling von GET /api/broker/status (mode='local-root')."""
+    from backend import broker_client
+    res = await broker_client.call("broker_teardown", {}, user=user, timeout=60)
+    ok = bool(res.get("ok"))
+    return JSONResponse({"ok": ok, "message": res.get("stdout", ""),
+                         "error": res.get("stderr") or res.get("error", "")},
+                        status_code=200 if ok else 502)
+
+
 @app.get("/api/broker/ops")
 async def broker_ops_list(user: str = Depends(require_local_auth)):
     """Alle Root-Operations-Eintraege der Broker-Policy (Admin).
@@ -2404,8 +2439,9 @@ async def broker_audit(n: int = 100, user: str = Depends(require_local_auth)):
     """Letzte n Eintraege des Broker-Audit-Logs (Admin, max 1000).
 
     Jeder Eintrag: ts, user, op, key, decision (executed/pending/denied),
-    rc, duration_ms, detail (stderr-Auszug), context (informativer Ausloeser,
-    z.B. Agent-Task-Auszug). Die Log-Datei selbst gehoert root und ist vom
+    rc, duration_ms, detail (stderr-/stdout-Auszug), info (konkrete, maskierte
+    Argumente der Ausfuehrung), context (informativer Ausloeser, z.B.
+    Agent-Task-Auszug). Die Log-Datei selbst gehoert root und ist vom
     Backend nicht manipulierbar."""
     from backend import broker_client
     res = await broker_client.call("broker.audit_tail", {"n": n}, user=user, timeout=15)

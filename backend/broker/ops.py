@@ -370,6 +370,20 @@ def _op_broker_mode(script_name: str, unit: str, args):
     svc_user = str(args.get("service_user") or "jarvis").strip() or "jarvis"
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,31}", svc_user):
         return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Dienst-Benutzer"}
+    # Preflight SYNCHRON (Fehler sofort in der UI statt Polling-Timeout):
+    # Der Dienst-Benutzer muss das Elternverzeichnis betreten koennen – bei
+    # Installationen unter /root (0700) wuerde die Migration das Backend
+    # unstartbar machen. Das Skript prueft dasselbe nochmal (Defense-in-Depth).
+    if script_name == "setup_broker.sh":
+        chk = _run(["runuser", "-u", svc_user, "--", "test", "-x", str(jdir.parent)],
+                   timeout=10)
+        if not chk.get("ok"):
+            return {"ok": False, "rc": -1, "stdout": "", "stderr": (
+                f"Preflight fehlgeschlagen: Benutzer '{svc_user}' kann "
+                f"{jdir.parent} nicht betreten (z.B. Installation unter /root)"
+                f"{(' – ' + chk['stderr'].strip()) if chk.get('stderr') else ''}. "
+                "Getrennter Betrieb ist mit diesem Layout nicht moeglich – "
+                "es wurde nichts veraendert. Jarvis zuerst nach /opt/jarvis umziehen.")}
     cmd = ["systemd-run", "--collect", f"--unit={unit}",
            "bash", str(script), str(jdir)]
     if script_name == "setup_broker.sh":

@@ -355,8 +355,56 @@ def _op_certbot_obtain(args, stream):
             "stderr": ""}
 
 
+def _op_broker_mode(script_name: str, unit: str, args):
+    """Betriebsart-Wechsel (getrennt <-> Alt-Betrieb) ueber das jeweilige
+    Deploy-Skript. Laeuft ALS TRANSIENTE systemd-Unit (systemd-run), weil das
+    Skript jarvis.service/jarvis-broker.service neu startet – ein Kind-Prozess
+    in deren cgroup wuerde beim Restart mitgekillt. Rueckgabe sofort
+    ('gestartet'); Fortschritt via journalctl -u <unit> bzw. Status-Polling."""
+    from pathlib import Path as _P
+    jdir = _P(__file__).resolve().parent.parent.parent
+    script = jdir / "deploy" / "security" / script_name
+    if not script.exists():
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": f"Skript fehlt: {script}"}
+    svc_user = str(args.get("service_user") or "jarvis").strip() or "jarvis"
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,31}", svc_user):
+        return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Dienst-Benutzer"}
+    cmd = ["systemd-run", "--collect", f"--unit={unit}",
+           "bash", str(script), str(jdir)]
+    if script_name == "setup_broker.sh":
+        cmd.append(svc_user)
+    r = _run(cmd, timeout=20)
+    if not r.get("ok"):
+        return r
+    return {"ok": True, "rc": 0, "stderr": "",
+            "stdout": (f"Umstellung gestartet (transiente Unit '{unit}'). "
+                       f"Die Dienste starten gleich neu – Fortschritt: "
+                       f"journalctl -u {unit}")}
+
+
+def _op_broker_setup(args, stream):
+    return _op_broker_mode("setup_broker.sh", "jarvis-broker-migrate", args)
+
+
+def _op_broker_teardown(args, stream):
+    return _op_broker_mode("teardown_broker.sh", "jarvis-broker-restore", args)
+
+
 # name -> (run, key_fn, desc_fn, default_allow, redact_fields)
 _REGISTRY = {
+    "broker_setup": (
+        _op_broker_setup,
+        lambda a: "broker_setup",
+        lambda a: "Getrennten Betrieb einrichten/reparieren (unprivilegiertes Backend + Root-Broker)",
+        True, (),
+    ),
+    "broker_teardown": (
+        _op_broker_teardown,
+        lambda a: "broker_teardown",
+        lambda a: "Alt-Betrieb wiederherstellen (Backend als root, Broker-Dienst deaktivieren)",
+        True, (),
+    ),
     "systemctl": (
         _op_systemctl,
         lambda a: f"systemctl:{a.get('action')}:{a.get('unit') or '-'}",

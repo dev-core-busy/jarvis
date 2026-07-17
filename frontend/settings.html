@@ -871,7 +871,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <li>Anzeige: „Letzte Zugriffs-Verstöße" und „Gesperrte Konten" in diesem Bereich; API: <code>/api/security/violations</code>, <code>/api/security/incidents</code>, <code>/api/security/sandbox</code>.</li>
                     <li>Internet-Egress-Sperre (harte Firewall-Grenze für Benutzer ohne Internet-Freigabe): Status via <code>GET /api/security/egress</code> (mit <code>?live=1</code> Live-Test), Ein-Klick-Einrichtung via <code>POST /api/security/egress/setup</code>, Deaktivierung via <code>POST /api/security/egress/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Harte Egress-Sperre</i>.</li>
                     <li>OS-Sandbox (Systemschutz Netzwerk-Benutzer): Status via <code>GET /api/security/sandbox</code> (mit <code>?live=1</code> Isolationstest), Ein-/Ausschalten via <code>POST /api/security/sandbox/setup</code> bzw. <code>/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Systemschutz / Sandbox</i>.</li>
-                    <li>Root-Broker (Trennung UI-/Ausführungsebene): Betriebsmodus via <code>GET /api/broker/status</code>, Freigabeliste via <code>GET /api/broker/ops</code>, Admin-Entscheidung via <code>POST /api/broker/ops/decide</code> (Body <code>{key, decision: allow|deny|pending}</code>), Eintrag löschen via <code>POST /api/broker/ops/remove</code>, Audit-Log via <code>GET /api/broker/audit?n=100</code>. Bedienung unter <i>Sicherheit → Root-Freigaben (Root-Broker)</i>.</li>
+                    <li>Root-Broker (Trennung UI-/Ausführungsebene): Betriebsmodus via <code>GET /api/broker/status</code>, Ein-Klick-Umschaltung via <code>POST /api/broker/setup</code> (getrennter Betrieb) bzw. <code>POST /api/broker/teardown</code> (Alt-Betrieb), Freigabeliste via <code>GET /api/broker/ops</code>, Admin-Entscheidung via <code>POST /api/broker/ops/decide</code> (Body <code>{key, decision: allow|deny|pending}</code>), Eintrag löschen via <code>POST /api/broker/ops/remove</code>, Audit-Log via <code>GET /api/broker/audit?n=100</code>. Bedienung unter <i>Sicherheit → Root-Freigaben (Root-Broker)</i>.</li>
                 </ul>
 
                 <h3>8. Schutz vor Kontext-Vergiftung</h3>
@@ -1018,9 +1018,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                 <h3>6. Betriebsarten &amp; Migration</h3>
                 <ul>
-                    <li><b>Getrennt (empfohlen):</b> Einrichtung einmalig pro Server mit <code>bash deploy/security/setup_broker.sh</code> (Eigentümerschaft, systemd-Units, Dienste, Verifikation).</li>
-                    <li><b>Alt-Betrieb:</b> Nicht migrierte Installationen funktionieren unverändert – der Broker-Client führt Operationen dann lokal aus, inklusive Freigabeliste und Audit.</li>
-                    <li>API (nur lokale Administratoren): <code>GET /api/broker/status</code>, <code>GET /api/broker/ops</code>, <code>POST /api/broker/ops/decide</code>, <code>POST /api/broker/ops/remove</code>, <code>GET /api/broker/audit</code>.</li>
+                    <li><b>Getrennt (empfohlen):</b> Ein-Klick-Aktivierung unter <i>Sicherheit → Root-Freigaben</i> („Getrennten Betrieb aktivieren / reparieren") oder manuell mit <code>bash deploy/security/setup_broker.sh</code> (Eigentümerschaft, systemd-Units, Dienste, Verifikation). Beide Wege sind idempotent; die Dienste starten dabei neu.</li>
+                    <li><b>Alt-Betrieb:</b> Nicht migrierte Installationen funktionieren unverändert – der Broker-Client führt Operationen dann lokal aus, inklusive Freigabeliste und Audit. Rückweg per Klick („Deaktivieren (Alt-Betrieb)") oder <code>bash deploy/security/teardown_broker.sh</code>.</li>
+                    <li>API (nur lokale Administratoren): <code>GET /api/broker/status</code>, <code>POST /api/broker/setup</code>, <code>POST /api/broker/teardown</code>, <code>GET /api/broker/ops</code>, <code>POST /api/broker/ops/decide</code>, <code>POST /api/broker/ops/remove</code>, <code>GET /api/broker/audit</code>.</li>
                 </ul>
 
                 <h3>7. Grenzen &amp; Restrisiko</h3>
@@ -2862,9 +2862,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div id="sec-broker-status" class="kb-hint" style="margin:0 0 4px;"></div>
                                 <p class="kb-hint" data-i18n="security.broker_desc">Im getrennten Betrieb läuft die Benutzeroberfläche unprivilegiert; alles, was root braucht, läuft über den Root-Broker. Jede Root-Operation erscheint hier als auditierbarer Eintrag: Systemoperationen werden automatisch erlaubt (widerrufbar), unbekannte Root-Shell-Befehle des Agenten warten auf deine Freigabe. Entscheidungen wirken sofort.</p>
                                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                    <button type="button" id="sec-broker-setup" class="sec-btn primary" data-i18n="security.broker_setup">Getrennten Betrieb aktivieren / reparieren</button>
+                                    <button type="button" id="sec-broker-teardown" class="sec-btn danger" style="display:none;" data-i18n="security.broker_teardown">Deaktivieren (Alt-Betrieb)</button>
                                     <button type="button" id="sec-broker-refresh" class="sec-btn" data-i18n="security.broker_refresh">Aktualisieren</button>
                                     <button type="button" id="sec-broker-audit-btn" class="sec-btn" data-i18n="security.broker_audit">Audit-Log anzeigen</button>
                                 </div>
+                                <div id="sec-broker-mode-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
                                 <div id="sec-broker-list" style="margin-top:8px;"></div>
                                 <div id="sec-broker-audit" style="display:none;margin-top:8px;"></div>
                             </div>
@@ -3009,7 +3012,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=75"></script>
+    <script src="/static/js/i18n.js?v=76"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=16"></script>
     <script src="/static/js/context.js?v=5"></script>
@@ -3031,7 +3034,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/issues.js?v=7"></script>
     <script src="/static/js/branding.js?v=19"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/security_incidents.js?v=18"></script>
+    <script src="/static/js/security_incidents.js?v=19"></script>
     <script src="/static/js/ldap_picker.js?v=6"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/app.js?v=167"></script>

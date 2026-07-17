@@ -101,6 +101,11 @@
             // Root-Broker: Freigabeliste aktualisieren / Audit-Log
             var brRefresh = $('sec-broker-refresh');
             if (brRefresh) brRefresh.addEventListener('click', function () { Mgr.loadBroker(); });
+            // Root-Broker: Betriebsart per Klick umschalten (getrennt <-> Alt-Betrieb)
+            var brSetup = $('sec-broker-setup');
+            if (brSetup) brSetup.addEventListener('click', function () { Mgr.setupBrokerMode(); });
+            var brDown = $('sec-broker-teardown');
+            if (brDown) brDown.addEventListener('click', function () { Mgr.teardownBrokerMode(); });
             var brAudit = $('sec-broker-audit-btn');
             if (brAudit) brAudit.addEventListener('click', function () { Mgr.toggleBrokerAudit(); });
             // Root-Broker-Funktionsanalyse-Popup (❓) + PDF-Druck
@@ -188,7 +193,7 @@
                     + esc(T('security.broker_via', 'Root-Operationen laufen über den Broker')) + '.';
             } else if (d.mode === 'local-root') {
                 head = '🟠 <b>' + esc(T('security.broker_legacy', 'Alt-Betrieb (Backend läuft als root)')) + '</b> – '
-                    + esc(T('security.broker_legacy_hint', 'Freigabeliste + Audit sind aktiv, aber ohne Prozess-Trennung. Empfehlung: deploy/security/setup_broker.sh ausführen.'));
+                    + esc(T('security.broker_legacy_hint', 'Freigabeliste + Audit sind aktiv, aber ohne Prozess-Trennung. Empfehlung: getrennten Betrieb aktivieren (Button unten).'));
             } else if (d.mode === 'broker') {
                 head = '🟠 <b>Broker erreichbar, Backend läuft aber noch als root.</b>';
             } else {
@@ -207,6 +212,87 @@
             }
             // Zahnrad-Badge (Header) synchron mitziehen
             if (window._setBrokerBadge) window._setBrokerBadge(d.pending || 0);
+            // Umschalt-Buttons je Betriebsart: im getrennten Betrieb nur den
+            // Rueckweg anbieten, sonst die Aktivierung/Reparatur.
+            var isSep = (d.mode === 'broker' && d.separated);
+            var bSetup = $('sec-broker-setup');
+            if (bSetup) bSetup.style.display = isSep ? 'none' : '';
+            var bDown = $('sec-broker-teardown');
+            if (bDown) bDown.style.display = isSep ? '' : 'none';
+        },
+
+        // ── Betriebsart umschalten (Ein-Klick, analog Sandbox/Egress-Panel) ──
+        setupBrokerMode: function () {
+            if (!window.confirm(T('security.broker_setup_confirm',
+                'Getrennten Betrieb jetzt aktivieren/reparieren?\n\n'
+                + 'Das Backend wird auf einen unprivilegierten Dienst-Benutzer umgestellt, '
+                + 'Root-Operationen laufen danach über den Root-Broker. '
+                + 'jarvis.service und jarvis-broker.service starten dabei NEU – die '
+                + 'Oberfläche ist für einige Sekunden nicht erreichbar.'))) return;
+            Mgr._brokerModeAction('/api/broker/setup', 'sec-broker-setup', 'broker',
+                T('security.broker_mode_ok_sep', 'Getrennter Betrieb aktiv – Oberfläche läuft unprivilegiert.'));
+        },
+
+        teardownBrokerMode: function () {
+            if (!window.confirm(T('security.broker_teardown_confirm',
+                'Wirklich in den Alt-Betrieb zurückschalten?\n\n'
+                + 'Das Backend läuft danach wieder MIT root-Rechten (keine Prozess-Trennung); '
+                + 'der Broker-Dienst wird deaktiviert. Freigabeliste + Audit bleiben aktiv. '
+                + 'jarvis.service startet dabei NEU – die Oberfläche ist kurz nicht erreichbar.'))) return;
+            Mgr._brokerModeAction('/api/broker/teardown', 'sec-broker-teardown', 'local-root',
+                T('security.broker_mode_ok_legacy', 'Alt-Betrieb wiederhergestellt (Backend läuft als root).'));
+        },
+
+        // Startet die Umstellung und pollt den Status, bis der Ziel-Modus
+        // erreicht ist (die Dienste starten waehrenddessen neu).
+        _brokerModeAction: function (url, btnId, expectMode, okMsg) {
+            var btn = $(btnId), out = $('sec-broker-mode-result');
+            var orig = btn ? btn.textContent : '';
+            var finish = function () { if (btn) { btn.disabled = false; btn.textContent = orig; } };
+            var show = function (html, good) {
+                if (!out) return;
+                out.style.display = 'block';
+                out.style.borderColor = good === false ? 'rgba(var(--danger-rgb),0.5)'
+                    : (good ? 'rgba(var(--success-rgb),0.5)' : 'rgba(var(--fg-rgb),0.3)');
+                out.style.background = good === false ? 'rgba(var(--danger-rgb),0.1)'
+                    : (good ? 'rgba(var(--success-rgb),0.1)' : 'rgba(var(--fg-rgb),0.06)');
+                out.innerHTML = html;
+            };
+            if (btn) { btn.disabled = true; btn.textContent = T('security.busy_setup', 'Wird eingerichtet…'); }
+            fetch(url, { method: 'POST', headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    d = d || {};
+                    if (!d.ok) {
+                        show('❌ ' + esc(d.error || 'Start fehlgeschlagen'), false);
+                        finish();
+                        return;
+                    }
+                    show('⏳ ' + esc(T('security.broker_mode_started',
+                        'Umstellung gestartet – Dienste starten neu, Status wird überwacht…'))
+                        + (d.message ? '<br><span style="color:var(--text-muted);">' + esc(d.message) + '</span>' : ''), null);
+                    var tries = 0;
+                    var iv = setInterval(function () {
+                        tries++;
+                        fetch('/api/broker/status', { headers: authHeaders() })
+                            .then(function (r) { return r.ok ? r.json() : null; })
+                            .then(function (s) {
+                                if (s && s.ok && s.mode === expectMode
+                                    && (expectMode !== 'broker' || s.separated)) {
+                                    clearInterval(iv); finish();
+                                    show('✅ ' + esc(okMsg), true);
+                                    Mgr.loadBroker();
+                                } else if (tries >= 30) {   // ~2 Minuten
+                                    clearInterval(iv); finish();
+                                    show('⚠️ ' + esc(T('security.broker_mode_timeout',
+                                        'Zeitüberschreitung – Status bitte über „Aktualisieren“ prüfen; Details: journalctl -u jarvis-broker-migrate bzw. -u jarvis-broker-restore.')), false);
+                                    Mgr.loadBroker();
+                                }
+                            })
+                            .catch(function () { /* Dienst startet gerade neu – weiter pollen */ });
+                    }, 4000);
+                })
+                .catch(function () { show('❌ ' + esc(T('portal.conn_error', 'Verbindungsfehler')), false); finish(); });
         },
 
         renderBrokerOps: function (ops) {

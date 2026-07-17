@@ -392,6 +392,7 @@
         const b = document.getElementById('ctx-debug-toggle');
         if (!b) return;
         b.classList.toggle('active', _chatDebug);
+        b.setAttribute('aria-pressed', _chatDebug ? 'true' : 'false');
         // Zustand dem Tooltip voranstellen ("Debug ist ein-/ausgeschaltet · …")
         const state = _chatDebug
             ? (window.t ? window.t('chat.debug_on') : 'Debug ist eingeschaltet')

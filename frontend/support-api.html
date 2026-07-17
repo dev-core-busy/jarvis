@@ -148,7 +148,7 @@
                     <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET/POST</code></td><td style="padding:6px 8px;"><code>/api/support/instructions</code></td><td style="padding:6px 8px;">Persönliche Anweisungen lesen/speichern (Markdown)</td><td style="padding:6px 8px;">Token</td></tr>
                     <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET/DELETE</code></td><td style="padding:6px 8px;"><code>/api/support/history</code></td><td style="padding:6px 8px;">Suchverlauf des Benutzers lesen/löschen</td><td style="padding:6px 8px;">Token</td></tr>
                     <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/phonenumber</code></td><td style="padding:6px 8px;">CRM-Kundennummer (<code>CRM-xxxxxx</code>) zu einer Telefonnummer ermitteln</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
-                    <tr><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/crm-number</code></td><td style="padding:6px 8px;">Alle Tickets zu einer dedizierten CRM-Kundennummer finden</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/crm-number</code></td><td style="padding:6px 8px;">Alle Tickets zu einer dedizierten CRM-Kundennummer finden</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr><tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/passende-tickets</code></td><td style="padding:6px 8px;">Passende Tickets eines CRM-Kunden zu 2-5 Schlagworten (offen + abgeschlossen)</td><td style="padding:6px 8px;">Token <em>oder</em> API-Key</td></tr>
                 </tbody>
             </table>
             </div>
@@ -379,6 +379,45 @@
                 (Jira-Gesamttreffer), <code>results[]</code> (Tickets mit <code>key</code>, <code>summary</code>,
                 <code>status</code>, <code>type</code>, <code>priority</code>, <code>assignee</code>, <code>created</code>, <code>updated</code>, <code>link</code>),
                 <code>jql</code>. Das Organisationsfeld ist über die Jira-Skill-Konfiguration (<code>org_field</code>) anpassbar.</p>
+
+            <h4 style="margin:20px 0 6px;">Beispiel 5 – Passende Tickets eines CRM-Kunden zu Schlagworten</h4>
+            <p class="kb-hint" style="margin:0 0 6px;">Kombiniert die exakte CRM-Kundensuche mit 2&nbsp;bis&nbsp;5 Schlagworten (Volltext, OR-verknüpft)
+                und liefert <b>offene und abgeschlossene</b> Tickets des Kunden, neueste zuerst.</p>
+            <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>curl -sk "https://DEIN-JARVIS-HOST/api/jira/passende-tickets?crm=CRM-10550&keywords=drucker,fehler,vpn&limit=25" \
+  -H "X-API-Key: DEIN_API_KEY"</code></pre>
+            <p class="kb-hint" style="margin:6px 0 4px;">Antwort (gekürzt):</p>
+            <pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>{
+  "ok": true,
+  "crm": "CRM-10550",
+  "keywords": ["drucker", "fehler", "vpn"], "match": "all",
+  "total": 5, "returned": 5, "open": 2, "closed": 3,
+  "jql": "Organisation = \"CRM-10550\" AND (text ~ \"drucker\" AND text ~ \"fehler\" AND text ~ \"vpn\") ORDER BY updated DESC",
+  "results": [
+    { "key": "NXCIS-42", "summary": "Störung Drucker", "status": "Erledigt",
+      "type": "Bug", "priority": "Hoch", "resolved": true, "link": "https://…/browse/NXCIS-42" }
+  ]
+}</code></pre>
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+                        <th style="padding:6px 8px;">Parameter</th><th style="padding:6px 8px;">Typ</th>
+                        <th style="padding:6px 8px;">Default</th><th style="padding:6px 8px;">Beschreibung</th>
+                    </tr>
+                </thead>
+                <tbody style="color:var(--text-primary);">
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>crm</code> <span style="color:var(--text-secondary);">(Aliase <code>crm_number</code>, <code>number</code>, <code>kunde</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">CRM-Kundennummer im Muster <code>CRM-xxxxxx</code>. Anderes Format → <code>400</code>.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>keywords</code> <span style="color:var(--text-secondary);">(Alias <code>q</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">2&nbsp;bis&nbsp;5 Schlagworte, komma- oder leerzeichengetrennt (z.&nbsp;B. <code>drucker,fehler,vpn</code>). Weniger als 2 oder mehr als 5 → <code>400</code>.</td></tr>
+                    <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>match</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>all</code></td><td style="padding:6px 8px;"><code>all</code> = Ticket muss ALLE Schlagworte enthalten (UND); <code>any</code> = irgendeines (ODER).</td></tr>
+                    <tr><td style="padding:6px 8px;"><code>limit</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>25</code></td><td style="padding:6px 8px;">Max. Anzahl zurückgegebener Tickets (1 … 50).</td></tr>
+                </tbody>
+            </table>
+            </div>
+            <p class="kb-hint" style="margin:8px 0 0;">Antwort-Felder: <code>crm</code>, <code>keywords[]</code>, <code>total</code>
+                (Jira-Gesamttreffer), <code>returned</code> (Anzahl gelieferter Tickets), <code>open</code>/<code>closed</code>
+                (offen/abgeschlossen, bezogen auf die gelieferte Seite), <code>results[]</code> (Tickets zusätzlich mit
+                <code>resolved</code> = abgeschlossen ja/nein), <code>jql</code>. Es wird KEIN Status-/Resolution-Filter gesetzt
+                → offene wie abgeschlossene Vorgänge kommen zurück.</p>
         </div>
 
         <div class="doc-footer">
@@ -434,7 +473,7 @@
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET/POST</code></td><td style="padding:6px 8px;"><code>/api/support/instructions</code></td><td style="padding:6px 8px;">Read/save personal instructions (Markdown)</td><td style="padding:6px 8px;">Token</td></tr>
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET/DELETE</code></td><td style="padding:6px 8px;"><code>/api/support/history</code></td><td style="padding:6px 8px;">Read/delete the user's search history</td><td style="padding:6px 8px;">Token</td></tr>
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/phonenumber</code></td><td style="padding:6px 8px;">Determine the CRM customer number (<code>CRM-xxxxxx</code>) for a phone number</td><td style="padding:6px 8px;">Token <em>or</em> API key</td></tr>
-        <tr><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/crm-number</code></td><td style="padding:6px 8px;">Find all tickets for a dedicated CRM customer number</td><td style="padding:6px 8px;">Token <em>or</em> API key</td></tr>
+        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/crm-number</code></td><td style="padding:6px 8px;">Find all tickets for a dedicated CRM customer number</td><td style="padding:6px 8px;">Token <em>or</em> API key</td></tr><tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>GET</code></td><td style="padding:6px 8px;"><code>/api/jira/passende-tickets</code></td><td style="padding:6px 8px;">Matching tickets of a CRM customer for 2-5 keywords (open + closed)</td><td style="padding:6px 8px;">Token <em>or</em> API key</td></tr>
     </tbody>
 </table>
 </div>
@@ -665,6 +704,45 @@
     (Jira total hits), <code>results[]</code> (tickets with <code>key</code>, <code>summary</code>,
     <code>status</code>, <code>type</code>, <code>priority</code>, <code>assignee</code>, <code>created</code>, <code>updated</code>, <code>link</code>),
     <code>jql</code>. The organization field can be adjusted via the Jira skill configuration (<code>org_field</code>).</p>
+
+<h4 style="margin:20px 0 6px;">Example 5 – Matching tickets of a CRM customer for keywords</h4>
+<p class="kb-hint" style="margin:0 0 6px;">Combines the exact CRM customer search with 2&nbsp;to&nbsp;5 keywords (full text, OR-linked)
+    and returns the customer's <b>open and closed</b> tickets, newest first.</p>
+<pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>curl -sk "https://YOUR-JARVIS-HOST/api/jira/passende-tickets?crm=CRM-10550&keywords=printer,error,vpn&limit=25" \
+  -H "X-API-Key: YOUR_API_KEY"</code></pre>
+<p class="kb-hint" style="margin:6px 0 4px;">Response (shortened):</p>
+<pre style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:0.8rem;line-height:1.5;"><code>{
+  "ok": true,
+  "crm": "CRM-10550",
+  "keywords": ["printer", "error", "vpn"], "match": "all",
+  "total": 5, "returned": 5, "open": 2, "closed": 3,
+  "jql": "Organisation = \"CRM-10550\" AND (text ~ \"printer\" AND text ~ \"error\" AND text ~ \"vpn\") ORDER BY updated DESC",
+  "results": [
+    { "key": "NXCIS-42", "summary": "Printer failure", "status": "Done",
+      "type": "Bug", "priority": "High", "resolved": true, "link": "https://…/browse/NXCIS-42" }
+  ]
+}</code></pre>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+    <thead>
+        <tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);">
+            <th style="padding:6px 8px;">Parameter</th><th style="padding:6px 8px;">Type</th>
+            <th style="padding:6px 8px;">Default</th><th style="padding:6px 8px;">Description</th>
+        </tr>
+    </thead>
+    <tbody style="color:var(--text-primary);">
+        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>crm</code> <span style="color:var(--text-secondary);">(aliases <code>crm_number</code>, <code>number</code>, <code>kunde</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>required</em></td><td style="padding:6px 8px;">CRM customer number in the pattern <code>CRM-xxxxxx</code>. Any other format → <code>400</code>.</td></tr>
+        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>keywords</code> <span style="color:var(--text-secondary);">(alias <code>q</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>required</em></td><td style="padding:6px 8px;">2&nbsp;to&nbsp;5 keywords, comma- or space-separated (e.g. <code>printer,error,vpn</code>). Fewer than 2 or more than 5 → <code>400</code>.</td></tr>
+        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>match</code></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><code>all</code></td><td style="padding:6px 8px;"><code>all</code> = ticket must contain ALL keywords (AND); <code>any</code> = any of them (OR).</td></tr>
+        <tr><td style="padding:6px 8px;"><code>limit</code></td><td style="padding:6px 8px;">int</td><td style="padding:6px 8px;"><code>25</code></td><td style="padding:6px 8px;">Max. number of returned tickets (1 … 50).</td></tr>
+    </tbody>
+</table>
+</div>
+<p class="kb-hint" style="margin:8px 0 0;">Response fields: <code>crm</code>, <code>keywords[]</code>, <code>total</code>
+    (Jira total hits), <code>returned</code> (number of returned tickets), <code>open</code>/<code>closed</code>
+    (open/closed, relative to the returned page), <code>results[]</code> (tickets additionally with
+    <code>resolved</code> = closed yes/no), <code>jql</code>. No status/resolution filter is applied
+    → both open and closed issues are returned.</p>
         </div>
 
         <div class="doc-footer">

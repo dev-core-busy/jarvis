@@ -72,6 +72,39 @@ def crm_org_clause(term: str) -> str | None:
     return ('%s = "%s"' % (_org_field(), t.upper())) if _CRM_RE.match(t) else None
 
 
+def normalize_keywords(keywords) -> list[str]:
+    """Zerlegt Schlagworte aus einer Liste ODER einem komma-/leerzeichengetrennten
+    String, trimmt und dedupliziert (case-insensitiv, Reihenfolge stabil)."""
+    if isinstance(keywords, (list, tuple)):
+        raw = [str(x) for x in keywords]
+    else:
+        s = str(keywords or "")
+        raw = s.split(",") if "," in s else s.split()
+    seen, out = set(), []
+    for p in raw:
+        p = p.strip()
+        if p and p.lower() not in seen:
+            seen.add(p.lower())
+            out.append(p)
+    return out
+
+
+def crm_keyword_jql(crm_term: str, terms: list[str], match: str = "all") -> str | None:
+    """JQL fuer 'Tickets eines CRM-Kunden, die zu Schlagworten passen'. Verbindet die
+    exakte Organisationsfeld-Klausel des Kunden (alle zugeordneten Tickets, OFFEN wie
+    ABGESCHLOSSEN – KEIN Resolution-Filter) per AND mit den Schlagworten im Volltext.
+    ``match='all'`` -> alle Begriffe (AND), ``match='any'`` -> irgendein Begriff (OR).
+    Gibt None zurueck, wenn ``crm_term`` keine gueltige CRM-ID ist."""
+    org = crm_org_clause(crm_term)
+    if not org:
+        return None
+    op = " OR " if str(match).lower() in ("any", "or", "oder") else " AND "
+    clause = ""
+    if terms:
+        clause = " AND (" + op.join('text ~ "%s"' % t.replace('"', "'") for t in terms) + ")"
+    return org + clause + " ORDER BY updated DESC"
+
+
 def phone_search_variants(phone: str) -> list[str]:
     """Erzeugt aus einer Telefonnummer Such-Varianten fuer die CRM-Objektsuche.
     Nummern koennen je nach Eingabe mit/ohne Laendervorwahl bzw. fuehrender 0 kommen –

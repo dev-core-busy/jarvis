@@ -4396,6 +4396,65 @@ async def jira_crm_number_api(crm: str = "", crm_number: str = "", number: str =
                          "jql": jql, "results": items})
 
 
+@app.get("/api/jira/passende-tickets")
+async def jira_matching_tickets_api(crm: str = "", crm_number: str = "", number: str = "",
+                                    kunde: str = "", keywords: str = "", q: str = "",
+                                    match: str = "all", limit: int = 25,
+                                    user: str = Depends(require_auth_or_agent)):
+    """Findet die zu 2-5 Schlagworten passenden Jira-Tickets eines bestimmten
+    CRM-Kunden – OFFENE UND ABGESCHLOSSENE. Die CRM-Kundennummer (CRM-xxxxxx)
+    wird exakt im Insight-Organisationsfeld gesucht (findet ALLE Tickets des
+    Kunden), die Schlagworte werden per Volltext darueber gelegt und mit dem
+    Kunden UND-verknuepft. Es wird KEIN Status-/Resolution-Filter gesetzt, damit
+    offene wie geschlossene Vorgaenge zurueckkommen.
+
+    Parameter: ``crm`` (Aliase ``crm_number``/``number``/``kunde``), z.B.
+    ``CRM-10550`` (Pflicht); ``keywords`` (Alias ``q``) – 2 bis 5 Schlagworte,
+    komma- oder leerzeichengetrennt (Pflicht); ``match`` – ``all`` (Default, alle
+    Begriffe müssen vorkommen = AND) oder ``any`` (irgendein Begriff = OR);
+    ``limit`` (1-50, Default 25). Rueckgabe: ``results`` (Tickets mit Feld
+    ``resolved`` = abgeschlossen ja/nein) plus ``total`` (Gesamttreffer) und die
+    Zaehler ``open``/``closed`` bezogen auf die zurueckgelieferte Seite.
+    Auth: Benutzer-Token ODER externer API-Key."""
+    from backend.jira_client import JiraError, crm_keyword_jql, normalize_keywords, issue_brief
+    c = _jira_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
+    raw = (crm or crm_number or number or kunde or "").strip()
+    if not raw:
+        return JSONResponse({"ok": False, "error": "crm fehlt (erwartet z.B. 'CRM-10550')."}, status_code=400)
+    terms = normalize_keywords(keywords or q)
+    if len(terms) < 2:
+        return JSONResponse({"ok": False, "error": "Bitte mindestens 2 Schlagworte angeben."}, status_code=400)
+    if len(terms) > 5:
+        return JSONResponse({"ok": False, "error": "Bitte hoechstens 5 Schlagworte angeben."}, status_code=400)
+    jql = crm_keyword_jql(raw, terms, match)
+    if not jql:
+        return JSONResponse({"ok": False, "error": "Keine gueltige CRM-Nummer (erwartet z.B. 'CRM-10550')."},
+                            status_code=400)
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 25
+    fields = c._SEARCH_FIELDS + ",resolution"
+    try:
+        data = await asyncio.to_thread(c.search, jql, limit, 0, fields)
+    except JiraError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e), "jql": jql})
+    results, n_open, n_closed = [], 0, 0
+    for it in data.get("issues", []):
+        b = issue_brief(it, c.base)
+        resolved = bool((it.get("fields", {}) or {}).get("resolution"))
+        b["resolved"] = resolved
+        n_closed += resolved
+        n_open += (not resolved)
+        results.append(b)
+    mode = "any" if str(match).lower() in ("any", "or", "oder") else "all"
+    return JSONResponse({"ok": True, "crm": raw.upper(), "keywords": terms, "match": mode,
+                         "total": data.get("total", len(results)), "returned": len(results),
+                         "open": n_open, "closed": n_closed, "jql": jql, "results": results})
+
+
 # ─── Support-Assistent (/support) ────────────────────────────────────
 
 def _skill_active(name: str) -> bool:

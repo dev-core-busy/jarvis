@@ -173,13 +173,38 @@
                 return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';">' + esc(g.name) + '</span>';
             }).join(' ') + '</div>';
 
+        $('wi-upload-groups').innerHTML = groupBoxes('up');
+        updateFolderOptions();
+        updateDropState();   // Ablage-Sperre initial setzen (keine Gruppe = gesperrt + Hinweis)
+    }
+
+    // Speicherordner-Auswahl auf die gewaehlten Gruppen eingrenzen: angeboten
+    // wird die Union der Speicherordner der angehakten Gruppen (Server liefert
+    // pro Gruppe g.folders; data/knowledge wird unter /wissen nie angeboten).
+    // Gruppen ohne Zuordnung haben KEIN Speicherziel -> Ablage bleibt gesperrt.
+    // Globale Editoren sehen immer alle Ordner ihres Scopes.
+    function updateFolderOptions() {
         var sel = $('wi-folder');
-        sel.innerHTML = SCOPE.folders.map(function (f) {
+        if (!sel) return;
+        var offer = SCOPE.folders || [];
+        var checked = checkedGroups('up');
+        if (!SCOPE.is_editor && checked.length) {
+            var want = {};
+            checked.forEach(function (gid) {
+                var g = null;
+                SCOPE.groups.forEach(function (x) { if (x.id === gid) g = x; });
+                ((g && g.folders) || []).forEach(function (p) { want[p] = true; });
+            });
+            offer = offer.filter(function (f) { return want[f.path]; });
+        }
+        var cur = sel.value;
+        sel.innerHTML = offer.map(function (f) {
             return '<option value="' + esc(f.path) + '">' + esc(f.name) + ' (' + esc(f.path) + ')</option>';
         }).join('');
-
-        $('wi-upload-groups').innerHTML = groupBoxes('up');
-        updateDropState();   // Ablage-Sperre initial setzen (keine Gruppe = gesperrt + Hinweis)
+        // Bisherige Auswahl erhalten, wenn sie weiterhin angeboten wird
+        for (var i = 0; i < offer.length; i++) {
+            if (offer[i].path === cur) { sel.value = cur; break; }
+        }
     }
 
     function groupBoxes(prefix) {
@@ -199,7 +224,8 @@
     // Ablage-Sperre: solange keine Wissensgruppe gewaehlt ist ODER eine
     // KI-Analyse/ein Upload laeuft, duerfen keine Dateien abgelegt werden.
     var _busy = false;
-    function canUpload() { return !_busy && checkedGroups('up').length > 0; }
+    function hasFolder() { var s = $('wi-folder'); return !!(s && s.value); }
+    function canUpload() { return !_busy && checkedGroups('up').length > 0 && hasFolder(); }
     function updateDropState() {
         var drop = $('wi-drop'), hint = $('wi-drop-hint');
         if (!drop) return;
@@ -208,6 +234,7 @@
         if (hint) {
             if (_busy) { hint.style.display = 'none'; }                       // Busy-Banner uebernimmt
             else if (!checkedGroups('up').length) { hint.style.display = 'block'; hint.textContent = t('wissen.drop_need_group'); }
+            else if (!hasFolder()) { hint.style.display = 'block'; hint.textContent = t('wissen.no_folder'); }
             else { hint.style.display = 'none'; }
         }
     }
@@ -231,6 +258,7 @@
         var groups = checkedGroups('up');
         if (_busy) return;   // laufende Analyse: keine weitere Ablage
         if (!groups.length) { st.style.color = 'var(--danger)'; st.textContent = t('wissen.pick_group'); updateDropState(); return; }
+        if (!hasFolder()) { st.style.color = 'var(--danger)'; st.textContent = t('wissen.no_folder'); updateDropState(); return; }
         if (!fileList || !fileList.length) return;
         var fd = new FormData();
         for (var i = 0; i < fileList.length; i++) fd.append('files', fileList[i]);
@@ -481,7 +509,10 @@
             });
         });
         // Gruppen-Auswahl schaltet die Ablage frei/gesperrt (Checkboxen kommen per JS)
-        $('wi-upload-groups').addEventListener('change', updateDropState);
+        $('wi-upload-groups').addEventListener('change', function () {
+            updateFolderOptions();   // Ordner-Angebot an die gewaehlten Gruppen anpassen
+            updateDropState();
+        });
 
         // Einklappbare Container (Zustand pro Browser gemerkt, analog Einstellungen).
         // Der Pfeil steht fest im Markup (eigener Span, damit applyLang ihn nicht wegwischt).

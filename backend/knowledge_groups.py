@@ -120,6 +120,9 @@ def list_groups(all_rel_paths=None) -> dict:
         # AD-Benutzer kommagetrennt, AD-Gruppen-DNs zeilengetrennt.
         "editors_users": g.get("editors_users", ""),
         "editors_group": g.get("editors_group", ""),
+        # Speicherordner der Gruppe (relative Pfade, z.B. "data/ibs"): werden
+        # /wissen-Nutzern dieser Gruppe als Upload-Ziel angeboten.
+        "folders": list(g.get("folders", [])),
     } for g in groups]
 
     ungrouped_count = None
@@ -169,9 +172,10 @@ def create_group(name: str, color: str = "#64748b") -> dict:
 
 
 def update_group(gid: str, name=None, color=None, order=None,
-                 editors_users=None, editors_group=None) -> dict:
+                 editors_users=None, editors_group=None, folders=None) -> dict:
     """Aktualisiert eine Gruppe. ``None`` = Feld unveraendert lassen,
-    Leerstring bei den Editoren-Feldern loescht die jeweilige Zuordnung."""
+    Leerstring bei den Editoren-Feldern loescht die jeweilige Zuordnung.
+    ``folders``: Liste relativer Speicherordner-Pfade (leere Liste = keine)."""
     with _lock:
         data = _load_unlocked()
         for g in data["groups"]:
@@ -186,6 +190,8 @@ def update_group(gid: str, name=None, color=None, order=None,
                     g["editors_users"] = (editors_users or "").strip()
                 if editors_group is not None:
                     g["editors_group"] = (editors_group or "").strip()
+                if folders is not None:
+                    g["folders"] = [_rel(f) for f in folders if str(f).strip()]
                 _save_unlocked(data)
                 return g
         raise KeyError(gid)
@@ -245,6 +251,121 @@ def get_assignments_map() -> dict:
     with _lock:
         data = _load_unlocked()
     return dict(data.get("assignments", {}))
+
+
+def add_folder_to_groups(rel_folder, group_ids) -> int:
+    """Traegt einen Speicherordner bei den angegebenen Gruppen ein (dedupliziert).
+    Gibt die Anzahl der Gruppen zurueck, bei denen der Ordner NEU eingetragen wurde."""
+    rel = _rel(rel_folder)
+    wanted = set(group_ids or [])
+    if not wanted:
+        return 0
+    with _lock:
+        data = _load_unlocked()
+        added = 0
+        for g in data.get("groups", []):
+            if g["id"] not in wanted:
+                continue
+            fl = list(g.get("folders", []))
+            if rel not in fl:
+                fl.append(rel)
+                g["folders"] = fl
+                added += 1
+        if added:
+            _save_unlocked(data)
+        return added
+
+
+def set_folder_groups(rel_folder, group_ids) -> dict:
+    """Setzt, welche Gruppen einen Ordner als Speicherordner fuehren: bei den
+    angegebenen Gruppen wird er eingetragen, bei allen anderen entfernt.
+    Rueckgabe: {"added": n, "removed": m}."""
+    rel = _rel(rel_folder)
+    wanted = set(group_ids or [])
+    with _lock:
+        data = _load_unlocked()
+        added = removed = 0
+        for g in data.get("groups", []):
+            fl = list(g.get("folders", []))
+            has = rel in fl
+            if g["id"] in wanted and not has:
+                fl.append(rel)
+                added += 1
+            elif g["id"] not in wanted and has:
+                fl = [f for f in fl if f != rel]
+                removed += 1
+            g["folders"] = fl
+        if added or removed:
+            _save_unlocked(data)
+        return {"added": added, "removed": removed}
+
+
+def relocate_prefix(old_rel_prefix, new_rel_prefix) -> int:
+    """Verschiebt bei einer Ordner-Umbenennung alle Datei-Zuordnungen unterhalb
+    des Ordners auf den neuen Pfad UND zieht die Speicherordner-Eintraege der
+    Gruppen (``folders``) mit. Gibt die Anzahl verschobener Zuordnungen zurueck."""
+    old_dir = _rel(old_rel_prefix).rstrip("/")
+    new_dir = _rel(new_rel_prefix).rstrip("/")
+    old = old_dir + "/"
+    new = new_dir + "/"
+    with _lock:
+        data = _load_unlocked()
+        moved = 0
+        new_assign = {}
+        for path, gids in data["assignments"].items():
+            key = _rel(path)
+            if key.startswith(old):
+                new_assign[new + key[len(old):]] = gids
+                moved += 1
+            else:
+                new_assign[path] = gids
+        # Speicherordner der Gruppen mit umbenennen (exakter Ordner oder Unterpfad)
+        folders_changed = 0
+        for g in data.get("groups", []):
+            fl = g.get("folders")
+            if not fl:
+                continue
+            updated = []
+            for f in fl:
+                key = _rel(f)
+                if key == old_dir or key.startswith(old):
+                    updated.append(new_dir + key[len(old_dir):])
+                    folders_changed += 1
+                else:
+                    updated.append(f)
+            g["folders"] = updated
+        if moved or folders_changed:
+            data["assignments"] = new_assign
+            _save_unlocked(data)
+        return moved
+
+
+def remove_prefix(rel_prefix) -> int:
+    """Entfernt bei einer Ordner-Loeschung alle Datei-Zuordnungen unterhalb des
+    Ordners UND die Speicherordner-Eintraege der Gruppen (``folders``).
+    Gibt die Anzahl entfernter Zuordnungen zurueck."""
+    pref_dir = _rel(rel_prefix).rstrip("/")
+    pref = pref_dir + "/"
+    with _lock:
+        data = _load_unlocked()
+        before = len(data["assignments"])
+        data["assignments"] = {
+            p: g for p, g in data["assignments"].items()
+            if not _rel(p).startswith(pref)
+        }
+        removed = before - len(data["assignments"])
+        folders_changed = 0
+        for g in data.get("groups", []):
+            fl = g.get("folders")
+            if not fl:
+                continue
+            kept = [f for f in fl
+                    if not (_rel(f) == pref_dir or _rel(f).startswith(pref))]
+            folders_changed += len(fl) - len(kept)
+            g["folders"] = kept
+        if removed or folders_changed:
+            _save_unlocked(data)
+        return removed
 
 
 # ─── Retrieval-Filter ────────────────────────────────────────────────────────

@@ -2886,6 +2886,19 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     </div>
 
     <style>
+    /* ── Buttons in den Einstellungs-Reitern: nicht per flex:1 auf die
+       volle Bildschirmbreite strecken (style.css-Regel ist fuer schmale
+       Modal-Zeilen gedacht), sondern alle in einheitlicher, symmetrischer
+       Breite. .btn-small (Inline-Mini-Buttons) bleibt unberuehrt. ── */
+    .settings-tab-content .btn-primary:not(.btn-small),
+    .settings-tab-content .btn-secondary:not(.btn-small) {
+        flex: 0 0 auto;
+        width: auto;
+        min-width: 170px;
+        padding: 12px 18px;
+        text-align: center;
+        box-sizing: border-box;
+    }
     /* ── Datei-Anhang Button ──────────────────────────────────────── */
     .btn-attach {
         width: 44px;

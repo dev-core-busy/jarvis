@@ -3788,6 +3788,10 @@ async def get_branding():
     Farben und Logo gibt es getrennt für Dunkel- (``colors``/``logo_url``) und
     Hell-Modus (``colors_light``/``logo_url_light``). Fehlt eine Hell-Variante,
     faellt das Frontend auf die Dunkel-Variante zurueck.
+
+    ``contact_info``/``contact_phone``/``contact_email`` füllen die dezente
+    Info-Zeile unterhalb der Karten auf /portal. Leere Felder blendet das
+    Frontend aus; ohne aktives Branding zeigt es die eingebauten Defaults.
     """
     enabled, cfg = _branding_state()
     if not enabled:
@@ -3804,6 +3808,10 @@ async def get_branding():
         "company_name": cfg.get("company_name", ""),
         "core_letter": cfg.get("core_letter", ""),
         "logo_mode": cfg.get("logo_mode", "letter"),
+        # Kontakt-/Infozeile der Portalseite (leer = im Frontend ausgeblendet)
+        "contact_info": cfg.get("contact_info", ""),
+        "contact_phone": cfg.get("contact_phone", ""),
+        "contact_email": cfg.get("contact_email", ""),
         "colors": cfg.get("colors", {}) or {},
         "colors_light": cfg.get("colors_light", {}) or {},
         "logo_url": ("/api/branding/logo?t=%d" % ts) if logo else "",

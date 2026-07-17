@@ -55,6 +55,12 @@
         .pt-card-icon svg { width: 24px; height: 24px; }
         .pt-card-title { font-size: 1.1rem; font-weight: 600; color: var(--text-primary); }
         .pt-card-desc { font-size: 0.86rem; color: var(--text-secondary); line-height: 1.45; }
+        /* Dezente Info-/Kontaktzeile unterhalb der Karten (Branding-Skill befuellbar) */
+        .pt-contact { margin-top: 26px; display: flex; justify-content: center; align-items: center;
+            gap: 8px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-secondary); opacity: .75; }
+        .pt-contact a { color: inherit; text-decoration: none; }
+        .pt-contact a:hover { color: var(--accent-hover); text-decoration: underline; }
+        .pt-contact-sep { opacity: .6; }
 
         /* ── Sicherheitsstatus-Badge + Banner (von /chat verschoben) ── */
         .security-badge { width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(239,68,68,.12);color:#ef4444;border:1px solid rgba(239,68,68,.25);cursor:pointer;transition:all .2s;flex-shrink:0; }
@@ -210,6 +216,16 @@
                    style="width:100%;height:auto;object-fit:contain;border-radius:10px;display:block;"></video>
         </div>
     </div>
+    <!-- Dezente Info-/Kontaktzeile: Standardwerte stehen hier im Markup,
+         der Branding-Skill überschreibt sie zur Laufzeit (branding.js).
+         Telefon ist ohne Branding leer und daher ausgeblendet. -->
+    <div class="pt-contact" id="pt-contact">
+        <span id="pt-contact-info" data-i18n="portal.contact_info_default">universelles, modulares KI Portal</span>
+        <span class="pt-contact-sep hidden" id="pt-contact-phone-sep">·</span>
+        <span id="pt-contact-phone" class="hidden"><span data-i18n="portal.contact_phone_prefix">Tel.</span> <a id="pt-contact-phone-link" href=""></a></span>
+        <span class="pt-contact-sep" id="pt-contact-email-sep">·</span>
+        <span id="pt-contact-email"><a id="pt-contact-email-link" href="mailto:dev-core@web.de">dev-core@web.de</a></span>
+    </div>
 </div>
 
 <!-- ═══ Desktop/VNC-Overlay (nur Admin, von /chat hierher verschoben) ═══ -->
@@ -311,9 +327,9 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=31"></script>
+<script src="/static/js/i18n.js?v=32"></script>
 <script src="/static/js/theme.js?v=2"></script>
-<script src="/static/js/branding.js?v=18"></script>
+<script src="/static/js/branding.js?v=19"></script>
 <script src="/static/js/security_incidents.js?v=7"></script>
 <script src="/static/js/update_widget.js?v=3"></script>
 <script src="/static/js/issues.js?v=6"></script>

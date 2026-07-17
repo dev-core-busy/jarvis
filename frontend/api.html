@@ -92,42 +92,60 @@
         .ad-resp-status { font-size: .8rem; font-weight: 700; margin-bottom: 6px; }
         .ok { color: #10b981; } .bad { color: #ef4444; } .warn2 { color: #f59e0b; }
         .ad-loading, .ad-error { padding: 40px 18px; text-align: center; color: var(--text-secondary); }
+
+        /* de/en-Umschalter wie in /portal */
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), 0.05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), 0.1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: inherit;
+            transition: background .15s, color .15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), 0.35); color: var(--text-primary); }
     </style>
 </head>
 <body>
     <div class="ad-top">
         <div class="ad-avatar topbar-avatar">J</div>
-        <span class="ad-title"><span class="brand-app-name">Jarvis</span> · API-Dokumentation<small id="ad-count"></small></span>
+        <span class="ad-title"><span class="brand-app-name">Jarvis</span> · <span data-i18n="api.title">API-Dokumentation</span><small id="ad-count"></small></span>
         <span class="ad-spacer"></span>
-        <button class="ad-btn" id="btn-theme-toggle" title="Hell/Dunkel umschalten">
+        <div class="lang-toggle">
+            <button class="lang-toggle-btn" data-lang="de" title="Deutsch">DE</button>
+            <button class="lang-toggle-btn" data-lang="en" title="English">EN</button>
+        </div>
+        <button class="ad-btn" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
             <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
         </button>
-        <a class="ad-btn" href="/portal" title="Startseite" aria-label="Startseite">
+        <a class="ad-btn" href="/portal" title="Startseite" aria-label="Startseite" data-i18n-title="nav.home" data-i18n-aria="nav.home">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         </a>
     </div>
 
     <div class="ad-controls">
-        <input type="text" class="ad-search" id="ad-search" placeholder="Endpunkt suchen (Pfad, Beschreibung)…">
+        <input type="text" class="ad-search" id="ad-search" placeholder="Endpunkt suchen (Pfad, Beschreibung)…" data-i18n-placeholder="api.search_ph">
         <div class="ad-mfilter" id="ad-mfilter"></div>
     </div>
-    <div class="ad-intro">Vollständige Übersicht aller REST-Endpunkte dieser Jarvis-Instanz – automatisch aus dem live erzeugten OpenAPI-Schema.
+    <div class="ad-intro" data-i18n="api.intro">Vollständige Übersicht aller REST-Endpunkte dieser Jarvis-Instanz – automatisch aus dem live erzeugten OpenAPI-Schema.
         Jeden Eintrag aufklappen für Beschreibung, Parameter, ein Beispiel (cURL) und einen direkten Testaufruf.</div>
-    <div class="ad-warn">⚠️ Testaufrufe werden <b>echt</b> ausgeführt (inkl. POST/PUT/DELETE) und nutzen dein Admin-Token. Mit Bedacht verwenden.</div>
+    <div class="ad-warn" data-i18n-html="api.warn_html">⚠️ Testaufrufe werden <b>echt</b> ausgeführt (inkl. POST/PUT/DELETE) und nutzen dein Admin-Token. Mit Bedacht verwenden.</div>
 
     <div class="ad-wrap" id="ad-wrap">
-        <div class="ad-loading" id="ad-loading">Lade API-Schema…</div>
+        <div class="ad-loading" id="ad-loading" data-i18n="api.loading">Lade API-Schema…</div>
     </div>
 
+    <script src="/static/js/i18n.js?v=78"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/branding.js?v=18"></script>
+    <script src="/static/js/branding.js?v=19"></script>
     <script>
     (function () {
         'use strict';
         var TOKEN = localStorage.getItem('jarvis_token') || '';
         var H = { 'Authorization': 'Bearer ' + TOKEN };
         if (!TOKEN) { window.location.replace('/'); return; }
+
+        // Übersetzungs-Helfer (i18n.js ist eingebunden; Fallback = Key)
+        function T(k) { return window.t ? window.t(k) : k; }
 
         var METHOD_ORDER = ['get', 'post', 'put', 'patch', 'delete'];
         var spec = null, endpoints = [], activeMethods = {};
@@ -145,7 +163,7 @@
         function groupOf(path) {
             var parts = path.split('/').filter(Boolean);
             if (parts[0] === 'api') return parts[1] || 'api';
-            if (!parts.length) return '(Seiten)';
+            if (!parts.length) return T('api.group_pages');
             return parts[0];
         }
 
@@ -236,12 +254,13 @@
 
             var params = (op.parameters || []);
             if (params.length) {
-                var ph = document.createElement('div'); ph.className = 'ep-h'; ph.textContent = 'Parameter'; body.appendChild(ph);
+                var ph = document.createElement('div'); ph.className = 'ep-h'; ph.textContent = T('api.params'); body.appendChild(ph);
                 var tbl = document.createElement('table'); tbl.className = 'ad-params';
-                tbl.innerHTML = '<tr><th>Name</th><th>In</th><th>Typ</th><th>Pflicht</th></tr>' + params.map(function (p) {
+                tbl.innerHTML = '<tr><th>' + esc(T('api.th_name')) + '</th><th>' + esc(T('api.th_in')) + '</th><th>'
+                    + esc(T('api.th_type')) + '</th><th>' + esc(T('api.th_required')) + '</th></tr>' + params.map(function (p) {
                     var t = (resolveRef(p.schema).type) || '';
                     return '<tr><td><code>' + esc(p.name) + '</code></td><td>' + esc(p.in) + '</td><td>' + esc(t)
-                        + '</td><td>' + (p.required ? '<span class="ad-req">ja</span>' : 'nein') + '</td></tr>';
+                        + '</td><td>' + (p.required ? '<span class="ad-req">' + esc(T('api.yes')) + '</span>' : esc(T('api.no'))) + '</td></tr>';
                 }).join('');
                 body.appendChild(tbl);
             }
@@ -249,17 +268,17 @@
             var bs = bodySchema(op);
             var exampleBody = bs ? example(bs) : null;
             if (bs) {
-                var bh = document.createElement('div'); bh.className = 'ep-h'; bh.textContent = 'Request-Body (Beispiel)'; body.appendChild(bh);
+                var bh = document.createElement('div'); bh.className = 'ep-h'; bh.textContent = T('api.body_example'); body.appendChild(bh);
                 var pre = document.createElement('pre'); pre.className = 'ad-code';
                 pre.textContent = JSON.stringify(exampleBody, null, 2);
                 body.appendChild(pre);
             }
 
             // cURL-Beispiel
-            var ch = document.createElement('div'); ch.className = 'ep-h'; ch.textContent = 'Beispiel (cURL)'; body.appendChild(ch);
+            var ch = document.createElement('div'); ch.className = 'ep-h'; ch.textContent = T('api.curl_example'); body.appendChild(ch);
             var curl = document.createElement('pre'); curl.className = 'ad-code';
             var cl = "curl -sk -X " + ep.method.toUpperCase() + " '" + location.origin + ep.path + "' \\\n"
-                + "  -H 'Authorization: Bearer <DEIN_TOKEN>'";
+                + "  -H 'Authorization: Bearer <" + T('api.token_ph') + ">'";
             if (bs) cl += " \\\n  -H 'Content-Type: application/json' \\\n  -d '" + JSON.stringify(exampleBody) + "'";
             curl.textContent = cl;
             body.appendChild(curl);
@@ -272,13 +291,13 @@
         function testForm(ep, params, bs, exampleBody) {
             var box = document.createElement('div');
             box.className = 'ad-test';
-            var th = document.createElement('div'); th.className = 'ep-h'; th.textContent = 'Testaufruf'; box.appendChild(th);
+            var th = document.createElement('div'); th.className = 'ep-h'; th.textContent = T('api.test_call'); box.appendChild(th);
 
             var inputs = {};
             params.forEach(function (p) {
                 var f = document.createElement('div'); f.className = 'ad-field';
                 var lab = document.createElement('label');
-                lab.innerHTML = esc(p.name) + ' <span class="ad-in">(' + esc(p.in) + (p.required ? ', pflicht' : '') + ')</span>';
+                lab.innerHTML = esc(p.name) + ' <span class="ad-in">(' + esc(p.in) + (p.required ? esc(T('api.required_suffix')) : '') + ')</span>';
                 var inp = document.createElement('input'); inp.className = 'ad-input';
                 inp.placeholder = (resolveRef(p.schema).type) || '';
                 f.appendChild(lab); f.appendChild(inp); box.appendChild(f);
@@ -290,14 +309,14 @@
             if (allowBody) {
                 var bf = document.createElement('div'); bf.className = 'ad-field';
                 var bl = document.createElement('label');
-                bl.innerHTML = 'Request-Body (JSON) ' + (bs ? '' : '<span class="ad-in">(kein Schema hinterlegt – freies JSON, leer lassen wenn ohne Body)</span>');
+                bl.innerHTML = esc(T('api.body_label')) + (bs ? '' : '<span class="ad-in">' + esc(T('api.body_free')) + '</span>');
                 bodyEl = document.createElement('textarea'); bodyEl.className = 'ad-textarea';
                 bodyEl.value = bs ? JSON.stringify(exampleBody, null, 2) : '';
                 if (!bs) bodyEl.placeholder = '{ }';
                 bf.appendChild(bl); bf.appendChild(bodyEl); box.appendChild(bf);
             }
 
-            var btn = document.createElement('button'); btn.className = 'ad-send'; btn.textContent = '▶ Senden';
+            var btn = document.createElement('button'); btn.className = 'ad-send'; btn.textContent = T('api.send');
             box.appendChild(btn);
 
             var resp = document.createElement('div'); resp.className = 'ad-resp';
@@ -320,16 +339,16 @@
                     opts.headers['Content-Type'] = 'application/json';
                     if (bodyEl.value.trim()) {
                         try { opts.body = JSON.stringify(JSON.parse(bodyEl.value)); }
-                        catch (e) { resp.style.display = 'block'; rstat.className = 'ad-resp-status bad'; rstat.textContent = 'Ungültiges JSON im Body: ' + e.message; rpre.textContent = ''; return; }
+                        catch (e) { resp.style.display = 'block'; rstat.className = 'ad-resp-status bad'; rstat.textContent = T('api.bad_json') + e.message; rpre.textContent = ''; return; }
                     }
                 }
-                btn.disabled = true; btn.textContent = '… lädt';
-                resp.style.display = 'block'; rstat.className = 'ad-resp-status'; rstat.textContent = 'Sende…'; rpre.textContent = '';
+                btn.disabled = true; btn.textContent = T('api.sending_btn');
+                resp.style.display = 'block'; rstat.className = 'ad-resp-status'; rstat.textContent = T('api.sending'); rpre.textContent = '';
                 var t0 = performance.now();
                 fetch(url, opts).then(function (r) {
                     var ct = r.headers.get('content-type') || '';
                     var pr = ct.indexOf('application/json') >= 0 ? r.json().then(function (j) { return JSON.stringify(j, null, 2); })
-                        : r.text().then(function (t) { return t.length > 20000 ? t.slice(0, 20000) + '\n… (gekürzt)' : t; });
+                        : r.text().then(function (t) { return t.length > 20000 ? t.slice(0, 20000) + '\n' + T('api.truncated') : t; });
                     return pr.then(function (txt) { return { status: r.status, ok: r.ok, txt: txt }; });
                 }).then(function (res) {
                     var ms = Math.round(performance.now() - t0);
@@ -337,8 +356,8 @@
                     rstat.textContent = 'HTTP ' + res.status + ' · ' + ms + ' ms';
                     rpre.textContent = res.txt;
                 }).catch(function (e) {
-                    rstat.className = 'ad-resp-status bad'; rstat.textContent = 'Netzwerkfehler'; rpre.textContent = String(e);
-                }).finally(function () { btn.disabled = false; btn.textContent = '▶ Senden'; });
+                    rstat.className = 'ad-resp-status bad'; rstat.textContent = T('api.network_error'); rpre.textContent = String(e);
+                }).finally(function () { btn.disabled = false; btn.textContent = T('api.send'); });
             });
 
             return box;
@@ -393,14 +412,28 @@
                     endpoints.push({ path: path, method: m, op: paths[path][m], group: groupOf(path) });
                 });
             });
-            document.getElementById('ad-count').textContent = endpoints.length + ' Endpunkte · Basis ' + location.origin;
+            setCount();
             buildMethodFilter();
             render();
             document.getElementById('ad-search').addEventListener('input', applyFilter);
         }).catch(function (e) {
             if (e === 'noauth' || e === 'noadmin') return;
             var l = document.getElementById('ad-loading');
-            if (l) { l.className = 'ad-error'; l.textContent = 'Fehler beim Laden des API-Schemas.'; }
+            if (l) { l.className = 'ad-error'; l.textContent = T('api.load_error'); }
+        });
+
+        function setCount() {
+            document.getElementById('ad-count').textContent = endpoints.length + ' ' + T('api.endpoints') + ' ' + location.origin;
+        }
+
+        // Sprachwechsel: statische Texte macht applyLang (data-i18n), die dynamisch
+        // gerenderten Endpunkt-Bloecke werden komplett neu aufgebaut. Die Endpunkt-
+        // Beschreibungen selbst stammen aus den Backend-Docstrings (nur Deutsch).
+        document.querySelectorAll('.lang-toggle-btn').forEach(function (b) {
+            b.addEventListener('click', function () {
+                if (window.setLang) window.setLang(b.getAttribute('data-lang'));
+                if (spec) { setCount(); render(); }
+            });
         });
     })();
     </script>

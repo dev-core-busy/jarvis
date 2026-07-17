@@ -2319,12 +2319,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div id="sec-sect-ad-body" class="kb-collapse-body" style="display:none;">
                                 <p class="kb-hint" data-i18n="security.ad_hint">Domain-Login für Windows- und Android-App. Jarvis-Server muss nur im gleichen Netzwerk wie der Domain-Controller sein – kein Domain-Beitritt erforderlich.</p>
 
-                                <!-- Status-Badge -->
-                                <div id="ad-status-badge" style="display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:8px;background:var(--bg-glass);border:1px solid var(--border);font-size:0.82rem;margin-bottom:16px;">
+                                <!-- ── Unter-Container: Verbindung ── -->
+                                <details class="sec-sub" data-sub="connection">
+                                    <summary><span data-i18n="security.sub_connection">Verbindung (Domain-Controller)</span><span class="sec-sub-hint" data-i18n="security.sub_connection_hint">– Server, Domain &amp; Verzeichnis-Suche</span></summary>
+                                    <div class="sec-sub-body">
+                                <!-- Status-Badge (echter Erreichbarkeitstest via ad_status.reachable) -->
+                                <div id="ad-status-badge" style="display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:8px;background:var(--bg-glass);border:1px solid var(--border);font-size:0.82rem;margin-bottom:14px;">
                                     <span id="ad-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0;"></span>
                                     <span id="ad-status-text" style="color:var(--text-muted);" data-i18n="common.loading">Lädt…</span>
                                 </div>
-
                                 <!-- Server + Domain -->
                                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
                                     <div class="form-group" style="margin:0;">
@@ -2355,7 +2358,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </div>
 
-                                <!-- Zugriffssteuerung -->
+                                    </div>
+                                </details>
+
+                                <!-- ── Unter-Container: Anmeldung (Login-Zugriff) ── -->
+                                <details class="sec-sub" data-sub="login">
+                                    <summary><span data-i18n="security.sub_login">Anmeldung (Login-Zugriff)</span><span class="sec-sub-hint" data-i18n="security.sub_login_hint">– Wer darf sich überhaupt anmelden?</span></summary>
+                                    <div class="sec-sub-body">
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
                                         <span data-i18n="security.ad_users_label">Erlaubte Benutzer</span>
@@ -2374,13 +2383,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </div>
 
-                                <!-- ── Wissens-Editoren ── -->
-                                <hr style="border:none;border-top:1px solid rgba(var(--fg-rgb),0.07);margin:14px 0 12px;">
-                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-                                    <span style="font-size:1rem;">📚</span>
-                                    <span style="font-weight:600;font-size:0.92rem;">Wissens-Editoren</span>
-                                    <span style="color:var(--text-muted);font-size:0.78rem;">– Wer darf Wissen hinzufügen, bearbeiten und löschen?</span>
-                                </div>
+                                <!-- Modus-Anzeige (Login-Zugriff) -->
+                                <div id="ad-mode-hint" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:12px;border:1px solid;"></div>
+                                    </div>
+                                </details>
+
+                                <!-- ── Unter-Container: Wissens-Editoren ── -->
+                                <details class="sec-sub" data-sub="knowledge">
+                                    <summary><span data-i18n="security.sub_knowledge">Wissens-Editoren</span><span class="sec-sub-hint" data-i18n="security.sub_knowledge_hint">– Wer darf Wissen hinzufügen, bearbeiten und löschen?</span></summary>
+                                    <div class="sec-sub-body">
                                 <p class="kb-hint" style="margin-bottom:10px;">Leer lassen = alle angemeldeten Benutzer dürfen Wissen bearbeiten. Lokale Admins sind immer berechtigt.</p>
 
                                 <div class="form-group" style="margin-bottom:8px;">
@@ -2401,13 +2412,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </div>
 
-                                <!-- ── Internet-Zugang ── -->
-                                <hr style="border:none;border-top:1px solid rgba(var(--fg-rgb),0.07);margin:14px 0 12px;">
-                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-                                    <span style="font-size:1rem;">🌐</span>
-                                    <span style="font-weight:600;font-size:0.92rem;">Internet-Zugang</span>
-                                    <span style="color:var(--text-muted);font-size:0.78rem;">– Wer darf Abfragen mit Internet-Ergebnissen machen?</span>
-                                </div>
+                                <!-- Wissens-Editor Status -->
+                                <div id="ad-knowledge-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:4px;border:1px solid;"></div>
+                                    </div>
+                                </details>
+
+                                <!-- ── Unter-Container: Internet-Zugang ── -->
+                                <details class="sec-sub" data-sub="internet">
+                                    <summary><span data-i18n="security.sub_internet">Internet-Zugang</span><span class="sec-sub-hint" data-i18n="security.sub_internet_hint">– Wer darf Abfragen mit Internet-Ergebnissen machen?</span></summary>
+                                    <div class="sec-sub-body">
                                 <p class="kb-hint" style="margin-bottom:10px;">Leer lassen = alle angemeldeten Benutzer dürfen das Internet nutzen. Lokale Admins sind immer berechtigt. Eingeschränkte Benutzer können Web-Suche, Browser und Bildersuche nicht nutzen.</p>
 
                                 <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;cursor:pointer;font-size:0.86rem;">
@@ -2456,13 +2469,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <div id="sec-egress-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
                                 </div>
 
-                                <!-- ── Administratoren ── -->
-                                <hr style="border:none;border-top:1px solid rgba(var(--fg-rgb),0.07);margin:14px 0 12px;">
-                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-                                    <span style="font-size:1rem;">🛡️</span>
-                                    <span style="font-weight:600;font-size:0.92rem;">Administratoren</span>
-                                    <span style="color:var(--text-muted);font-size:0.78rem;">– Wer darf Admin-Aktionen (Update, Profile, Skills, MCP) ausführen?</span>
-                                </div>
+                                    </div>
+                                </details>
+
+                                <!-- ── Unter-Container: Administratoren ── -->
+                                <details class="sec-sub" data-sub="admins">
+                                    <summary><span data-i18n="security.sub_admins">Administratoren</span><span class="sec-sub-hint" data-i18n="security.sub_admins_hint">– Wer darf Admin-Aktionen (Update, Profile, Skills, MCP) ausführen?</span></summary>
+                                    <div class="sec-sub-body">
                                 <p class="kb-hint" style="margin-bottom:10px;">Leer lassen = nur der lokale Benutzer <code>jarvis</code> ist Administrator. Hier eingetragene AD-Benutzer/Gruppen dürfen zusätzlich Updates auslösen und Einstellungen ändern.</p>
 
                                 <div class="form-group" style="margin-bottom:8px;">
@@ -2485,12 +2498,26 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                                 <!-- Administratoren Status -->
                                 <div id="ad-admins-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:10px;border:1px solid;"></div>
+                                    </div>
+                                </details>
 
-                                <!-- Wissens-Editor Status -->
-                                <div id="ad-knowledge-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:4px;border:1px solid;"></div>
-
-                                <!-- Modus-Anzeige (Login-Zugriff) -->
-                                <div id="ad-mode-hint" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:12px;border:1px solid;"></div>
+                                <script>
+                                // Auf-/Zuklapp-Zustand der Unter-Container merken (localStorage).
+                                // Default: alle geschlossen; gespeicherter Zustand gewinnt.
+                                (function () {
+                                    var KEY = 'jarvis_sec_sub_open';
+                                    var saved = {};
+                                    try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+                                    document.querySelectorAll('details.sec-sub[data-sub]').forEach(function (d) {
+                                        var k = d.getAttribute('data-sub');
+                                        if (saved[k]) d.open = true;
+                                        d.addEventListener('toggle', function () {
+                                            saved[k] = d.open;
+                                            try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+                                        });
+                                    });
+                                })();
+                                </script>
 
                                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
                                     <button class="kb-btn-action" id="ad-save-btn" onclick="window._adSave()" data-i18n="common.save">Speichern</button>
@@ -2538,10 +2565,17 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             hint.style.display   = 'none';
                                             return;
                                         }
-                                        dot.style.background = '#34d399';
-                                        txt.style.color      = '#34d399';
                                         const modeLabels = { open: window.t('security.ad_mode_open'), users: window.t('security.ad_mode_users'), group: window.t('security.ad_mode_group') };
-                                        txt.textContent = window.t('security.ad_active_label') + ' · ' + d.server + ' · ' + d.domain + ' · ' + (modeLabels[d.access_mode] || d.access_mode);
+                                        if (d.reachable === false) {
+                                            // Konfiguriert heisst NICHT erreichbar: rot statt gruen
+                                            dot.style.background = '#ef4444';
+                                            txt.style.color      = '#ef4444';
+                                            txt.textContent = window.t('security.ad_unreachable_label') + ' · ' + d.server + ' · ' + d.domain;
+                                        } else {
+                                            dot.style.background = '#34d399';
+                                            txt.style.color      = '#34d399';
+                                            txt.textContent = window.t('security.ad_active_label') + ' · ' + d.server + ' · ' + d.domain + ' · ' + (modeLabels[d.access_mode] || d.access_mode);
+                                        }
                                         hint.style.display     = 'block';
                                         if (d.access_mode === 'open') {
                                             hint.style.borderColor = '#f59e0b';
@@ -2902,6 +2936,18 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         text-align: center;
         box-sizing: border-box;
     }
+    /* ── Zusammenklappbare Unter-Container (z.B. Sicherheit → Berechtigungen) ── */
+    details.sec-sub { border: 1px solid rgba(var(--fg-rgb), 0.12); border-radius: 10px;
+        background: rgba(var(--fg-rgb), 0.02); margin: 0 0 10px; }
+    details.sec-sub > summary { list-style: none; cursor: pointer; display: flex; align-items: center;
+        gap: 8px; padding: 10px 14px; font-weight: 600; font-size: 0.92rem; user-select: none;
+        color: var(--text-primary); }
+    details.sec-sub > summary::-webkit-details-marker { display: none; }
+    details.sec-sub > summary::after { content: '▶'; margin-left: auto; font-size: 0.7rem; opacity: .6; }
+    details.sec-sub[open] > summary::after { content: '▼'; }
+    details.sec-sub > .sec-sub-body { padding: 2px 14px 12px; }
+    details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
+        font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* ── Datei-Anhang Button ──────────────────────────────────────── */
     .btn-attach {
         width: 44px;
@@ -3012,7 +3058,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=76"></script>
+    <script src="/static/js/i18n.js?v=78"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=16"></script>
     <script src="/static/js/context.js?v=5"></script>

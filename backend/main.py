@@ -2793,15 +2793,41 @@ async def test_ad_connection(request: Request, _username: str = Depends(require_
 
 @app.get("/api/auth/ad_status")
 async def get_ad_status(user: str = Depends(require_auth)):
-    """Gibt den aktuellen AD/LDAP-Konfigurationsstatus zurueck."""
+    """Gibt den aktuellen AD/LDAP-Konfigurationsstatus zurueck.
+
+    ``reachable`` ist das Ergebnis eines echten Verbindungstests zum
+    Domain-Controller (TCP/LDAP-Connect ohne Bind, Timeout ~3s; null wenn
+    nicht konfiguriert) – 'konfiguriert' allein heisst NICHT erreichbar."""
     ad_server = config.get_setting("ad_server", "")
     ad_domain = config.get_setting("ad_domain", "")
     allowed_users = config.get_setting("ad_allowed_users", "")
     allowed_group = config.get_setting("ad_allowed_group", "")
     knowledge_editors = config.get_setting("ad_knowledge_editors", "")
     knowledge_editors_group = config.get_setting("ad_knowledge_editors_group", "")
+
+    reachable = None
+    if ad_server and ad_domain:
+        def _probe() -> bool:
+            try:
+                import ldap3
+                srv = ldap3.Server(ad_server, get_info=ldap3.NONE, connect_timeout=3)
+                conn = ldap3.Connection(srv, auto_bind=False)
+                conn.open()
+                try:
+                    conn.unbind()
+                except Exception:  # noqa: BLE001
+                    pass
+                return True
+            except Exception:  # noqa: BLE001
+                return False
+        try:
+            reachable = await asyncio.wait_for(asyncio.to_thread(_probe), timeout=4)
+        except Exception:  # noqa: BLE001
+            reachable = False
+
     return JSONResponse({
         "configured": bool(ad_server and ad_domain),
+        "reachable": reachable,
         "server": ad_server,
         "domain": ad_domain,
         "allowed_users": allowed_users,

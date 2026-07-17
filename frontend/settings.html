@@ -1912,6 +1912,23 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <p class="kb-hint" style="margin:4px 0 0;">Empfehlung: MP4 (H.264) oder WEBM für zuverlässige Wiedergabe in allen Browsern (.mov spielt nicht überall ab). Wird stummgeschaltet in Endlosschleife abgespielt.</p>
                         </div>
 
+                        <h4 style="margin:18px 0 8px;" data-i18n="branding.contact_heading">Kontakt &amp; Info (Portalseite)</h4>
+                        <p class="kb-hint" data-i18n="branding.contact_hint">Dezente Info-Zeile unterhalb der Bereichsauswahl auf /portal. Leere Felder werden ausgeblendet; ohne aktives Branding erscheinen die Standard-Angaben.</p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;">
+                            <div class="form-group">
+                                <label data-i18n="branding.contact_info">Info-Text</label>
+                                <input type="text" id="br-contact-info" class="config-input" placeholder="z.B. universelles, modulares KI Portal" style="width:100%;box-sizing:border-box;">
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="branding.contact_phone">Telefon</label>
+                                <input type="text" id="br-contact-phone" class="config-input" placeholder="z.B. +49 123 456789" style="width:100%;box-sizing:border-box;">
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="branding.contact_email">E-Mail-Adresse</label>
+                                <input type="email" id="br-contact-email" class="config-input" placeholder="z.B. support@firma.de" style="width:100%;box-sizing:border-box;">
+                            </div>
+                        </div>
+
                         <h4 style="margin:18px 0 8px;">Farben – Dunkelmodus</h4>
                         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;">
                             <div class="form-group"><label>Text</label><input type="color" id="br-text-primary" value="#f8fafc" style="width:100%;height:38px;"></div>
@@ -2979,7 +2996,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=74"></script>
+    <script src="/static/js/i18n.js?v=75"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=16"></script>
     <script src="/static/js/context.js?v=5"></script>
@@ -2999,7 +3016,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=6"></script>
     <script src="/static/js/chatlib.js?v=13"></script>
     <script src="/static/js/issues.js?v=7"></script>
-    <script src="/static/js/branding.js?v=18"></script>
+    <script src="/static/js/branding.js?v=19"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=17"></script>
     <script src="/static/js/ldap_picker.js?v=6"></script>

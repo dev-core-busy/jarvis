@@ -284,6 +284,8 @@
             if (av) { av.removeAttribute('src'); av._brandedSrc = ''; try { av.load(); } catch (e) {} }
             animWrap.style.display = 'none';
         }
+        // 6) Kontakt-/Infozeile auf die eingebauten Defaults zuruecksetzen
+        applyPortalContact(null);
     }
 
     // Alle runden „J"-Logo-/Avatar-Elemente, die gebrandet werden sollen
@@ -369,6 +371,63 @@
         }
     }
 
+    // ── Kontakt-/Infozeile der Portalseite (#pt-contact, nur /portal) ──
+    // Ohne aktives Branding gelten die eingebauten Defaults (Info-Text via
+    // i18n, Telefon leer, E-Mail dev-core@web.de). Bei aktivem Branding
+    // zaehlen ausschliesslich die gepflegten Werte – leere Felder werden
+    // ausgeblendet (White-Label ohne Kontaktangabe).
+    var CONTACT_DEFAULT_EMAIL = 'dev-core@web.de';
+
+    // Info-Text setzen: Ein eigener Branding-Text verliert sein data-i18n
+    // (sonst wuerde der naechste Sprachwechsel ihn mit dem Default-Text
+    // ueberschreiben); beim Zuruecksetzen wird das Attribut wiederhergestellt
+    // und der uebersetzte Default erneut angewendet.
+    function setContactInfo(el, text) {
+        if (text) {
+            if (el.dataset.i18n) { el.dataset.brandI18n = el.dataset.i18n; el.removeAttribute('data-i18n'); }
+            el.textContent = text;
+        } else {
+            if (el.dataset.brandI18n) { el.setAttribute('data-i18n', el.dataset.brandI18n); delete el.dataset.brandI18n; }
+            if (el.dataset.i18n && window.t) el.textContent = window.t(el.dataset.i18n);
+        }
+    }
+
+    function applyPortalContact(b) {
+        var wrap = document.getElementById('pt-contact');
+        if (!wrap) return; // Seite ohne Kontaktzeile
+        var active = !!(b && b.active);
+        var info = active ? (b.contact_info || '') : '';   // '' = i18n-Default
+        var phone = active ? (b.contact_phone || '') : '';
+        var email = active ? (b.contact_email || '') : CONTACT_DEFAULT_EMAIL;
+
+        var infoEl = document.getElementById('pt-contact-info');
+        var infoShown = false;
+        if (infoEl) {
+            setContactInfo(infoEl, info);
+            // Bei aktivem Branding ohne Info-Text die Zeile nicht mit dem
+            // Jarvis-Default fuellen, sondern den Info-Teil ausblenden.
+            infoShown = !active || !!info;
+            infoEl.classList.toggle('hidden', !infoShown);
+        }
+        var pEl = document.getElementById('pt-contact-phone');
+        var pLink = document.getElementById('pt-contact-phone-link');
+        if (pEl && pLink) {
+            if (phone) { pLink.textContent = phone; pLink.href = 'tel:' + phone.replace(/[^+\d]/g, ''); }
+            pEl.classList.toggle('hidden', !phone);
+        }
+        var eEl = document.getElementById('pt-contact-email');
+        var eLink = document.getElementById('pt-contact-email-link');
+        if (eEl && eLink) {
+            if (email) { eLink.textContent = email; eLink.href = 'mailto:' + email; }
+            eEl.classList.toggle('hidden', !email);
+        }
+        // Trennpunkte nur zwischen sichtbaren Teilen anzeigen
+        var pSep = document.getElementById('pt-contact-phone-sep');
+        if (pSep) pSep.classList.toggle('hidden', !(phone && infoShown));
+        var eSep = document.getElementById('pt-contact-email-sep');
+        if (eSep) eSep.classList.toggle('hidden', !(email && (infoShown || phone)));
+    }
+
     function applyBranding(b) {
         if (!b || !b.active) return;
         _current = b;
@@ -381,6 +440,7 @@
         applyNameLogo(b, nlu);
         applyFavicon(b, lu);
         applyPortalVideo(b);
+        applyPortalContact(b);
     }
 
     // ── Laufzeit: Branding laden & anwenden ─────────────────────────
@@ -479,7 +539,8 @@
             // Live-Vorschau bei Farb-/Text-/Logo-Änderung
             ['br-accent', 'br-accent-hover', 'br-bg-primary', 'br-bg-secondary', 'br-text-primary',
              'br-bg-primary-light', 'br-bg-secondary-light', 'br-text-primary-light',
-             'br-name', 'br-letter']
+             'br-name', 'br-letter',
+             'br-contact-info', 'br-contact-phone', 'br-contact-email']
                 .forEach(function (id) {
                     var el = document.getElementById(id);
                     if (el) el.addEventListener('input', function () { BrandingAdmin.preview(); });
@@ -503,6 +564,9 @@
                     var colL = c.colors_light || {};
                     BrandingAdmin._set('br-name', c.company_name || '');
                     BrandingAdmin._set('br-letter', c.core_letter || '');
+                    BrandingAdmin._set('br-contact-info', c.contact_info || '');
+                    BrandingAdmin._set('br-contact-phone', c.contact_phone || '');
+                    BrandingAdmin._set('br-contact-email', c.contact_email || '');
                     BrandingAdmin._set('br-accent', col.accent || DEFAULTS.accent);
                     BrandingAdmin._set('br-accent-hover', col.accent_hover || DEFAULTS.accent_hover);
                     BrandingAdmin._set('br-bg-primary', col.bg_primary || DEFAULTS.bg_primary);
@@ -560,6 +624,9 @@
                 active: true,
                 company_name: this._val('br-name', ''),
                 core_letter: this._val('br-letter', ''),
+                contact_info: this._val('br-contact-info', ''),
+                contact_phone: this._val('br-contact-phone', ''),
+                contact_email: this._val('br-contact-email', ''),
                 logo_mode: this._mode(),
                 logo_url: this._logoUrl,
                 logo_url_light: this._logoUrlLight,
@@ -586,6 +653,9 @@
             var body = {
                 company_name: b.company_name,
                 core_letter: b.core_letter,
+                contact_info: b.contact_info,
+                contact_phone: b.contact_phone,
+                contact_email: b.contact_email,
                 logo_mode: b.logo_mode,
                 colors: b.colors,
                 colors_light: b.colors_light

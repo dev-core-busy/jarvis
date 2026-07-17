@@ -311,6 +311,12 @@
             if (showKey && (a.key || a.op)) {
                 parts.push('<div style="margin-top:2px;"><code style="font-size:0.74rem;word-break:break-all;">' + esc(a.key || a.op) + '</code></div>');
             }
+            // Konkrete (maskierte) Argumente dieser Ausfuehrung (Audit-Feld 'info',
+            // z.B. "action=restart unit=jarvis.service" oder "command=…") – erst
+            // damit sagt eine 'executed'-Zeile aus, WAS genau ausgefuehrt wurde.
+            if (a.info) {
+                parts.push('<div style="margin-top:2px;"><code style="font-size:0.74rem;word-break:break-all;color:var(--text-secondary);">' + esc(a.info) + '</code></div>');
+            }
             if (a.context) {
                 parts.push('<div style="margin-top:2px;color:var(--text-secondary);font-size:0.74rem;">↳ '
                     + esc(T('security.broker_trigger', 'Auslöser')) + ': ' + esc(a.context) + '</div>');

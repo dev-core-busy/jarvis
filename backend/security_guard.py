@@ -352,7 +352,13 @@ def list_recent_violations(limit: int = 100) -> list:
 # ── Verschleierte (base64-kodierte) Payloads erkennen ────────────────────────
 import base64 as _b64
 
-_B64_RUN = re.compile(r'[A-Za-z0-9+/]{24,}={0,2}')
+# Mindestlaenge 11 Zeichen (= 8 Byte Klartext): faengt auch kurze Secret-/
+# Shell-Befehle wie 'cat .env' / 'rm -rf /' (je 11 Zeichen Base64) oder
+# 'cat /etc/shadow' (20). Fehlalarme sind unwahrscheinlich, weil ein Treffer
+# zusaetzlich verlangt, dass der DEKODIERTE Text ein Gefahr-/Jailbreak-Muster
+# trifft (heuristic_match / _DECODED_DANGER) – zufaellige Tokens dekodieren zu
+# Binaermuell und passen dort nicht.
+_B64_RUN = re.compile(r'[A-Za-z0-9+/]{11,}={0,2}')
 _DECODED_DANGER = re.compile(
     r'\b(?:rm|chmod|chown|curl|wget|bash|sh|zsh|python\d?|perl|eval|exec|base64|xxd|'
     r'systemctl|useradd|passwd|nc|ncat)\b'

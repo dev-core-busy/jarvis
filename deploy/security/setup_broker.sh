@@ -39,11 +39,8 @@ if ! runuser -u "$SVC_USER" -- test -x "$PARENT_DIR" 2>/dev/null; then
     fail "Preflight: Benutzer '$SVC_USER' kann $PARENT_DIR nicht betreten (z.B. Installation unter /root). Getrennter Betrieb ist mit diesem Layout nicht moeglich – es wurde NICHTS veraendert. Jarvis zuerst nach /opt/jarvis umziehen."
 fi
 
-step "1/5 Eigentuemerschaft: $JARVIS_DIR (und /home/jarvis/jarvis, falls vorhanden) → $SVC_USER"
+step "1/5 Eigentuemerschaft: $JARVIS_DIR → $SVC_USER"
 chown -R "$SVC_USER:$SVC_USER" "$JARVIS_DIR"
-if [ -d "/home/jarvis/jarvis" ] && [ "/home/jarvis/jarvis" != "$JARVIS_DIR" ]; then
-    chown -R "$SVC_USER:$SVC_USER" /home/jarvis/jarvis
-fi
 # Secrets bleiben eng (Eigentuemer darf, Gruppe/Andere nicht)
 for f in "$JARVIS_DIR/.env" "$JARVIS_DIR/data/settings.json" "$JARVIS_DIR/certs/server.key"; do
     [ -f "$f" ] && chmod 600 "$f"

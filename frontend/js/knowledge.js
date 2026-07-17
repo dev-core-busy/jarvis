@@ -9,9 +9,11 @@ class JarvisKnowledgeManager {
         // Buttons verbinden
         const btnReindex = document.getElementById('btn-kb-reindex');
         const btnAddFolder = document.getElementById('btn-kb-add-folder');
+        const btnCreateFolder = document.getElementById('btn-kb-create-folder');
 
         if (btnReindex) btnReindex.addEventListener('click', () => this.reindex());
         if (btnAddFolder) btnAddFolder.addEventListener('click', () => this.addFolder());
+        if (btnCreateFolder) btnCreateFolder.addEventListener('click', () => this.createFolder());
 
         // Enter-Taste im Eingabefeld
         const folderInput = document.getElementById('kb-folder-input');
@@ -44,6 +46,8 @@ class JarvisKnowledgeManager {
         this._renderGroupsOverview();
         // Upload-Ziel-Gruppen (Mehrfachauswahl) rendern
         window.KbGroups.renderCheckboxes(document.getElementById('kb-upload-groups'), []);
+        // Gruppen-Auswahl fuer "Ordner neu anlegen" (Speicherordner-Zuordnung)
+        window.KbGroups.renderCheckboxes(document.getElementById('kb-folder-groups'), []);
         // Tabellen-Symbol öffnet die Massenzuordnungs-Tabelle
         const mbtn = document.getElementById('kb-grp-matrix-btn');
         if (mbtn && !mbtn._bound) {
@@ -58,7 +62,7 @@ class JarvisKnowledgeManager {
         const KG = window.KbGroups;
         const T = (k, d) => (window.t && window.t(k)) || d;
         const rows = KG.all().map(g => {
-            const ed = this._editorsSummary(g);
+            const ed = this._editorsSummary(g) + this._foldersSummary(g);
             return `
             <div class="kb-grp-manage-row" data-gid="${KG.esc(g.id)}">
                 <input type="color" class="kb-grp-color-input" value="${KG.esc(g.color)}" title="${T('kbgroups.color', 'Farbe ändern')}">
@@ -114,13 +118,38 @@ class JarvisKnowledgeManager {
         return ` <span class="kb-grp-editors" title="${KG.esc(all.join(', '))}">(${KG.esc(all.join(', '))})</span>`;
     }
 
-    // ── Pro-Gruppe Berechtigungen (zusaetzliche AD-Editoren) ──────────────
-    _editGroupPermissions(gid) {
+    // Zeigt die der Gruppe zugeordneten Speicherordner (/wissen) hinter dem Namen.
+    _foldersSummary(g) {
+        const KG = window.KbGroups;
+        const fl = g.folders || [];
+        if (!fl.length) return '';
+        return ` <span class="kb-grp-editors" title="${KG.esc(fl.join(', '))}">📁 ${KG.esc(fl.map(p => p.replace(/^data\//, '')).join(', '))}</span>`;
+    }
+
+    // ── Pro-Gruppe Berechtigungen (zusaetzliche AD-Editoren + Speicherordner) ──
+    async _editGroupPermissions(gid) {
         const KG = window.KbGroups;
         const g = KG && KG.byId(gid);
         if (!g) return;
         const T = (k, d) => (window.t && window.t(k)) || d;
         const esc = KG.esc;
+
+        // Konfigurierte Knowledge-Ordner fuer die Speicherordner-Auswahl laden
+        let kbFolders = [];
+        try {
+            const resp = await fetch('/api/knowledge/stats', {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            kbFolders = ((await resp.json()).folders || []).map(f => f.path);
+        } catch (e) { /* Sektion zeigt dann nur den Hinweis */ }
+        const assigned = new Set(g.folders || []);
+        const folderRows = kbFolders.length
+            ? kbFolders.map(p => `
+                <label class="kb-grp-check" style="--grp:${esc(g.color)};">
+                    <input type="checkbox" class="kbgrp-perm-folder" value="${esc(p)}"${assigned.has(p) ? ' checked' : ''}>
+                    <span>📁 ${esc(p)}</span>
+                </label>`).join('')
+            : `<span class="kb-hint" style="margin:0;">${T('knowledge.no_folders', 'Keine Ordner konfiguriert')}</span>`;
 
         // Bestehendes Modal entfernen (frischer State pro Aufruf)
         const old = document.getElementById('kbgrp-perm-modal');
@@ -147,6 +176,10 @@ class JarvisKnowledgeManager {
                     <input type="text" id="kbgrp-perm-users" class="kb-input" style="width:100%;box-sizing:border-box;">
                     <label class="kb-form-label" style="display:block;margin:16px 0 4px;">${T('kbgroups.perms_groups', 'Zusätzliche Editoren (AD-Gruppen)')}</label>
                     <textarea id="kbgrp-perm-groups" class="kb-input" rows="2" style="width:100%;box-sizing:border-box;"></textarea>
+                    <label class="kb-form-label" style="display:block;margin:16px 0 4px;">${T('kbgroups.folders_label', 'Speicherordner (/wissen)')}</label>
+                    <p class="kb-hint" style="margin:0 0 6px;">${T('kbgroups.folders_hint',
+                        'Nutzern dieser Gruppe werden auf der /wissen-Seite nur diese Ordner als Speicherziel angeboten. Ohne Auswahl gilt der Standardordner data/knowledge.')}</p>
+                    <div id="kbgrp-perm-folders" class="kb-grp-checks">${folderRows}</div>
                     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
                         <button type="button" id="kbgrp-perm-cancel" class="kb-btn-action">${T('common.cancel', 'Abbrechen')}</button>
                         <button type="button" id="kbgrp-perm-save" class="kb-btn-action kb-btn-primary">${T('common.save', 'Speichern')}</button>
@@ -170,10 +203,16 @@ class JarvisKnowledgeManager {
         m.querySelector('#kbgrp-perm-cancel').onclick = close;
         m.addEventListener('click', (e) => { if (e.target === m) close(); });
         m.querySelector('#kbgrp-perm-save').onclick = async () => {
-            const res = await KG.updateGroup(gid, {
+            const patch = {
                 editors_users: (usersInp.value || '').trim(),
                 editors_group: (groupsInp.value || '').trim(),
-            });
+            };
+            // Speicherordner nur mitsenden, wenn geaendert (das Feld duerfen nur
+            // globale Wissens-Editoren aendern – sonst lehnt der Server ab)
+            const pickedFolders = [...m.querySelectorAll('.kbgrp-perm-folder:checked')].map(c => c.value);
+            const before = (g.folders || []).slice().sort().join(',');
+            if (pickedFolders.slice().sort().join(',') !== before) patch.folders = pickedFolders;
+            const res = await KG.updateGroup(gid, patch);
             if (res && res.ok) {
                 await this._refreshGroups();
                 this._showNotification(T('kbgroups.perms_saved', 'Berechtigungen gespeichert'), 'success');
@@ -189,6 +228,7 @@ class JarvisKnowledgeManager {
         await window.KbGroups.load();
         this._renderGroupsOverview();
         window.KbGroups.renderCheckboxes(document.getElementById('kb-upload-groups'), []);
+        window.KbGroups.renderCheckboxes(document.getElementById('kb-folder-groups'), []);
     }
 
     async _addGroup() {
@@ -740,21 +780,27 @@ class JarvisKnowledgeManager {
             return;
         }
 
-        el.innerHTML = folders.map((f, idx) => `
+        el.innerHTML = folders.map((f, idx) => {
+            const safePath = f.path.replace(/'/g, "\\'");
+            // Bearbeiten (Gruppen-Zuordnung, ggf. Umbenennen) fuer alle Ordner
+            const renameBtn = `<button class="kb-btn-remove kb-btn-rename" title="${window.t('knowledge.folder_edit_title')}"
+                        onclick="window.knowledgeManager.editFolder('${safePath}')">✏️</button>`;
+            return `
             <div class="kb-folder-item" id="kb-folder-item-${idx}">
                 <div class="kb-folder-header">
                     <button class="kb-folder-toggle" title="${window.t('knowledge.folder_files_title')}"
-                        onclick="window.knowledgeManager.toggleFolder(${idx}, '${f.path}')">
+                        onclick="window.knowledgeManager.toggleFolder(${idx}, '${safePath}')">
                         <span class="kb-folder-icon">${f.exists ? '📁' : '⚠️'}</span>
                         <span class="kb-folder-path" title="${f.path}">${f.path}</span>
                         <span class="kb-folder-arrow" id="kb-arrow-${idx}">▶</span>
                     </button>
+                    ${renameBtn}
                     <button class="kb-btn-remove" data-folder="${f.path}" title="${window.t('knowledge.folder_remove_title')}"
-                        onclick="window.knowledgeManager.removeFolder('${f.path}')">✕</button>
+                        onclick="window.knowledgeManager.removeFolder('${safePath}')">✕</button>
                 </div>
                 <div class="kb-folder-files" id="kb-files-${idx}" style="display:none;"></div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
     }
 
     async toggleFolder(idx, folderPath) {
@@ -936,21 +982,171 @@ class JarvisKnowledgeManager {
         }
     }
 
-    async removeFolder(folder) {
-        if (!confirm(window.t('knowledge.folder_remove_confirm').replace('{folder}', folder))) return;
+    // ─── Ordner neu anlegen (data/<name>, physisch + in der Liste) ────
+
+    async createFolder() {
+        const input = document.getElementById('kb-folder-input');
+        if (!input) return;
+
+        const name = input.value.trim();
+        if (!name) return;
+
+        // Gewaehlte Wissensgruppen: der neue Ordner wird dort direkt als
+        // Speicherordner (/wissen-Upload-Ziel) eingetragen
+        const groupsEl = document.getElementById('kb-folder-groups');
+        const groups = window.KbGroups ? window.KbGroups.readChecked(groupsEl) : [];
 
         try {
-            const newFolders = await this._buildNewFolderList(folder, 'remove');
-            const resp = await fetch('/api/skills/knowledge/config', {
+            const resp = await fetch('/api/knowledge/folders', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
                 },
-                body: JSON.stringify({ folders: newFolders })
+                body: JSON.stringify({ name, groups })
             });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const result = await resp.json();
+            if (!resp.ok) throw new Error(result.error || 'HTTP ' + resp.status);
 
+            input.value = '';
+            const msg = result.groups_assigned
+                ? window.t('knowledge.folder_created_assigned').replace('{n}', result.groups_assigned)
+                : window.t('knowledge.folder_created');
+            this._showNotification(result.warning ? result.warning : msg,
+                result.warning ? 'error' : 'success');
+            await this.fetchStats();
+            // Gruppen-Uebersicht + Checkboxen aktualisieren (Zuordnung sichtbar, Auswahl leeren)
+            if (window.KbGroups) await this._refreshGroups();
+        } catch (e) {
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+        }
+    }
+
+    // ─── Ordner bearbeiten: Wissensgruppen-Zuordnung + Umbenennen ─────
+    // Umbenennen nur fuer direkte data/-Unterordner (nicht der Default-Ordner);
+    // die Gruppen-Zuordnung (Speicherordner fuer /wissen) geht fuer JEDEN Ordner.
+
+    async editFolder(folder) {
+        const KG = window.KbGroups;
+        if (KG) await KG.load();
+        const T = (k, d) => (window.t && window.t(k)) || d;
+        const esc = KG ? KG.esc : (s => String(s == null ? '' : s).replace(/[&<>"]/g, c =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
+
+        const renameable = folder.startsWith('data/') && !folder.slice(5).includes('/')
+            && folder !== 'data/knowledge';
+        const curName = folder.replace(/^data\//, '');
+
+        // Aktuelle Zuordnung: Gruppen, die diesen Ordner als Speicherordner fuehren
+        const assigned = new Set();
+        const groups = KG ? KG.all() : [];
+        groups.forEach(g => { if ((g.folders || []).includes(folder)) assigned.add(g.id); });
+        const groupRows = groups.length
+            ? groups.map(g => `
+                <label class="kb-grp-check" style="--grp:${esc(g.color)};">
+                    <input type="checkbox" class="kbfld-grp" value="${esc(g.id)}"${assigned.has(g.id) ? ' checked' : ''}>
+                    <span>${esc(g.name)}</span>
+                </label>`).join('')
+            : `<span class="kb-hint" style="margin:0;">${T('kbgroups.none', 'Keine Gruppen angelegt.')}</span>`;
+
+        const nameRow = renameable ? `
+            <label class="kb-form-label" style="display:block;margin:12px 0 4px;">${T('knowledge.folder_name_label', 'Ordnername (umbenennen – das indizierte Wissen zieht mit)')}</label>
+            <input type="text" id="kbfld-name" class="kb-input" style="width:100%;box-sizing:border-box;" value="${esc(curName)}">` : '';
+
+        document.getElementById('kbfld-edit-modal')?.remove();
+        const m = document.createElement('div');
+        m.id = 'kbfld-edit-modal';
+        m.className = 'modal';
+        m.style.zIndex = '10001';
+        m.innerHTML = `
+            <div class="modal-content glass" style="max-width:560px;">
+                <div class="modal-header">
+                    <h2>${T('knowledge.folder_edit_title', 'Ordner bearbeiten')} – ${esc(folder)}</h2>
+                    <button class="btn-icon" id="kbfld-close" aria-label="Schließen">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+                <div class="modal-body" style="overflow-y:auto;">
+                    ${nameRow}
+                    <label class="kb-form-label" style="display:block;margin:16px 0 4px;">${T('kbgroups.folders_label', 'Speicherordner (/wissen)')}</label>
+                    <p class="kb-hint" style="margin:0 0 6px;">${T('knowledge.folder_groups_hint',
+                        'Wissensgruppen, denen dieser Ordner als Speicherziel angeboten wird. Abwählen entfernt die Zuordnung.')}</p>
+                    <div class="kb-grp-checks">${groupRows}</div>
+                    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+                        <button type="button" id="kbfld-cancel" class="kb-btn-action">${T('common.cancel', 'Abbrechen')}</button>
+                        <button type="button" id="kbfld-save" class="kb-btn-action kb-btn-primary">${T('common.save', 'Speichern')}</button>
+                    </div>
+                </div>
+            </div>`;
+        document.body.appendChild(m);
+
+        const close = () => m.remove();
+        m.querySelector('#kbfld-close').onclick = close;
+        m.querySelector('#kbfld-cancel').onclick = close;
+        m.addEventListener('click', (e) => { if (e.target === m) close(); });
+
+        m.querySelector('#kbfld-save').onclick = async () => {
+            const auth = {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
+            };
+            try {
+                // 1) Umbenennen (falls geaendert) – Server relokalisiert Index + Zuordnungen
+                let path = folder;
+                const nameInp = m.querySelector('#kbfld-name');
+                const newName = nameInp ? nameInp.value.trim() : '';
+                if (renameable && newName && newName !== curName) {
+                    const resp = await fetch('/api/knowledge/folders', {
+                        method: 'PUT', headers: auth,
+                        body: JSON.stringify({ path: folder, new_name: newName })
+                    });
+                    const r = await resp.json();
+                    if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
+                    path = r.path;
+                }
+                // 2) Gruppen-Zuordnung setzen (zuordnen UND entfernen)
+                if (KG) {
+                    const ids = [...m.querySelectorAll('.kbfld-grp:checked')].map(c => c.value);
+                    const resp = await fetch('/api/knowledge/folders/groups', {
+                        method: 'POST', headers: auth,
+                        body: JSON.stringify({ path, groups: ids })
+                    });
+                    const r = await resp.json();
+                    if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
+                }
+                this._showNotification(T('knowledge.folder_saved', 'Ordner gespeichert'), 'success');
+                close();
+                await this.fetchStats();
+                if (KG) await this._refreshGroups();
+            } catch (e) {
+                this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+            }
+        };
+        requestAnimationFrame(() => m.classList.add('open'));
+    }
+
+    async removeFolder(folder) {
+        if (!confirm(window.t('knowledge.folder_remove_confirm').replace('{folder}', folder))) return;
+
+        // data/-Unterordner: nachfragen, ob Dateien + Wissen von der Platte sollen
+        let deleteFiles = false;
+        if (folder.startsWith('data/') && !folder.slice(5).includes('/') && folder !== 'data/knowledge') {
+            deleteFiles = confirm(window.t('knowledge.folder_delete_files_confirm').replace('{folder}', folder));
+        }
+
+        try {
+            const resp = await fetch('/api/knowledge/folders', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
+                },
+                body: JSON.stringify({ path: folder, delete_files: deleteFiles })
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.error || 'HTTP ' + resp.status);
+            }
             this._showNotification(window.t('knowledge.folder_removed'), 'success');
             await this.fetchStats();
         } catch (e) {

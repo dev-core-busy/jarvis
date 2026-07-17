@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import re
 import hmac
 import json
 import subprocess
@@ -5805,6 +5806,240 @@ async def open_knowledge_folder(request: Request, user: str = Depends(require_kn
     return JSONResponse({"ok": True})
 
 
+# ─── Knowledge-Ordner verwalten (anlegen/umbenennen/loeschen) ─────────────────
+# Wissensgruppen-spezifische Quellen liegen als Unterordner von data/. Beim
+# Umbenennen/Loeschen wird das indizierte Wissen (TF-IDF + FAISS) und die
+# Gruppen-Zuordnungen mit relokalisiert bzw. geloescht.
+
+# Nur einfacher Ordnername (kein Pfad, kein fuehrender Punkt, kein Komma –
+# die Ordner-Liste wird kommagetrennt persistiert)
+_KB_FOLDER_NAME_RE = re.compile(r"^[A-Za-z0-9äöüÄÖÜß][A-Za-z0-9äöüÄÖÜß_. \-]{0,63}$")
+# data/-Unterordner mit Systemdaten – nie als Wissens-Ordner anlegen/umbenennen/loeschen
+_KB_RESERVED_DATA_DIRS = {"knowledge", "vector_store", "chroma_db", "logs", "vision",
+                          "instructions", "learned", "backups", "wa_media"}
+
+
+def _kb_validate_folder_name(name: str) -> str | None:
+    """Prueft einen neuen data/-Ordnernamen. Gibt Fehlermeldung oder None zurueck."""
+    if not name:
+        return "Kein Ordnername angegeben"
+    if not _KB_FOLDER_NAME_RE.match(name) or ".." in name or name.endswith("."):
+        return "Ungültiger Ordnername (erlaubt: Buchstaben, Zahlen, _ . - und Leerzeichen)"
+    if name.lower() in _KB_RESERVED_DATA_DIRS:
+        return f"'{name}' ist ein reservierter Systemordner"
+    return None
+
+
+def _kb_find_config_folder(path_arg: str):
+    """Sucht einen Ordner der Knowledge-Config anhand rel/abs Pfad-Angabe."""
+    from backend.tools.knowledge import _get_folders, PROJECT_ROOT
+    for f in _get_folders():
+        try:
+            rel = str(f.relative_to(PROJECT_ROOT))
+        except ValueError:
+            rel = str(f)
+        if rel == path_arg or str(f) == path_arg:
+            return f, rel
+    return None, None
+
+
+def _kb_save_folder_list(folders: list[str]) -> bool:
+    """Persistiert die Ordner-Liste in der Knowledge-Skill-Config."""
+    if not folders:
+        folders = ["data/knowledge"]
+    sm = _get_skill_manager()
+    return sm.update_skill_config("knowledge", {"folders": ",".join(folders)})
+
+
+def _kb_current_folder_list() -> list[str]:
+    from backend.tools.knowledge import _get_folders, PROJECT_ROOT
+    out = []
+    for f in _get_folders():
+        try:
+            out.append(str(f.relative_to(PROJECT_ROOT)))
+        except ValueError:
+            out.append(str(f))
+    return out
+
+
+@app.post("/api/knowledge/folders")
+async def create_knowledge_folder(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Legt einen neuen Wissens-Ordner unter data/ an und nimmt ihn in die Ordner-Liste auf.
+
+    Body: ``{"name": "<ordnername>", "groups": ["<gid>", ...]}`` – nur einfacher
+    Name (kein Pfad), ein fuehrendes ``data/`` wird toleriert. Der Ordner wird
+    physisch erstellt. ``groups`` (optional): der neue Ordner wird direkt als
+    Speicherordner bei diesen Wissensgruppen eingetragen (siehe /wissen)."""
+    from backend.tools.knowledge import PROJECT_ROOT
+    from backend import knowledge_groups as kg
+    data = await request.json()
+    name = (data.get("name") or "").strip()
+    if name.startswith("data/"):
+        name = name[len("data/"):].strip()
+    err = _kb_validate_folder_name(name)
+    if err:
+        return JSONResponse({"error": err}, status_code=400)
+
+    # Gewuenschte Wissensgruppen VOR dem Anlegen validieren
+    group_ids = [g.strip() for g in (data.get("groups") or []) if str(g).strip()]
+    if group_ids:
+        known_gids = {g["id"] for g in kg.list_groups().get("groups", [])}
+        bad = [g for g in group_ids if g not in known_gids]
+        if bad:
+            return JSONResponse({"error": "Unbekannte Wissensgruppe(n): " + ", ".join(bad)},
+                                status_code=400)
+
+    target = PROJECT_ROOT / "data" / name
+    rel = f"data/{name}"
+    if target.exists():
+        # Existiert schon physisch: nur in die Liste aufnehmen (kein Fehler)
+        folders = _kb_current_folder_list()
+        if rel in folders:
+            return JSONResponse({"error": f"Ordner '{rel}' existiert bereits"}, status_code=409)
+    else:
+        target.mkdir(parents=True)
+
+    folders = _kb_current_folder_list()
+    if rel not in folders:
+        folders.append(rel)
+        _kb_save_folder_list(folders)
+
+    # Direkt als Speicherordner bei den gewaehlten Wissensgruppen eintragen
+    assigned = 0
+    if group_ids:
+        try:
+            assigned = kg.add_folder_to_groups(rel, group_ids)
+        except Exception as e:
+            return JSONResponse({"ok": True, "path": rel, "groups_assigned": 0,
+                                 "warning": f"Gruppen-Zuordnung fehlgeschlagen: {e}"})
+    return JSONResponse({"ok": True, "path": rel, "groups_assigned": assigned})
+
+
+@app.put("/api/knowledge/folders")
+async def rename_knowledge_folder(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Benennt einen Wissens-Ordner unter data/ um – das indizierte Wissen zieht mit.
+
+    Body: ``{"path": "data/<alt>", "new_name": "<neu>"}``. TF-IDF-Cache,
+    FAISS-Metadaten (ohne Neu-Embedding) und Wissensgruppen-Zuordnungen werden
+    auf den neuen Pfad umgeschrieben. ``data/knowledge`` und Systemordner sind
+    geschuetzt; waehrend einer laufenden Indizierung nicht moeglich."""
+    from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
+                                         relocate_folder_index)
+    data = await request.json()
+    path_arg = (data.get("path") or "").strip()
+    new_name = (data.get("new_name") or "").strip()
+
+    if get_index_progress().get("running"):
+        return JSONResponse({"error": "Indizierung läuft – bitte warten"}, status_code=409)
+
+    folder, rel = _kb_find_config_folder(path_arg)
+    if folder is None:
+        return JSONResponse({"error": f"Ordner '{path_arg}' nicht konfiguriert"}, status_code=404)
+
+    data_root = (PROJECT_ROOT / "data").resolve()
+    if folder.resolve().parent != data_root:
+        return JSONResponse({"error": "Nur direkte Unterordner von data/ können umbenannt werden"},
+                            status_code=400)
+    if folder.name.lower() in _KB_RESERVED_DATA_DIRS:
+        return JSONResponse({"error": f"'{rel}' ist ein geschützter Systemordner"}, status_code=400)
+
+    err = _kb_validate_folder_name(new_name)
+    if err:
+        return JSONResponse({"error": err}, status_code=400)
+    new_folder = PROJECT_ROOT / "data" / new_name
+    if new_folder.exists():
+        return JSONResponse({"error": f"Zielordner 'data/{new_name}' existiert bereits"}, status_code=409)
+
+    # 1) Physisch umbenennen (falls vorhanden)
+    if folder.exists():
+        try:
+            folder.rename(new_folder)
+        except OSError as e:
+            return JSONResponse({"error": f"Umbenennen fehlgeschlagen: {e}"}, status_code=500)
+
+    # 2) Ordner-Liste aktualisieren
+    new_rel = f"data/{new_name}"
+    folders = [new_rel if f == rel else f for f in _kb_current_folder_list()]
+    _kb_save_folder_list(folders)
+
+    # 3) Indiziertes Wissen relokalisieren (TF-IDF + FAISS + Gruppen)
+    moved = relocate_folder_index(folder, new_folder)
+    return JSONResponse({"ok": True, "path": new_rel, "moved": moved})
+
+
+@app.delete("/api/knowledge/folders")
+async def delete_knowledge_folder(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Entfernt einen Wissens-Ordner aus der Liste inkl. seines indizierten Wissens.
+
+    Body: ``{"path": "...", "delete_files": bool}``. Index-Eintraege (TF-IDF +
+    FAISS) und Gruppen-Zuordnungen des Ordners werden immer entfernt;
+    ``delete_files=true`` loescht zusaetzlich das Verzeichnis auf der Platte
+    (nur direkte data/-Unterordner, nie ``data/knowledge``/Systemordner)."""
+    import shutil
+    from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
+                                         purge_folder_index)
+    data = await request.json()
+    path_arg = (data.get("path") or "").strip()
+    delete_files = bool(data.get("delete_files"))
+
+    if get_index_progress().get("running"):
+        return JSONResponse({"error": "Indizierung läuft – bitte warten"}, status_code=409)
+
+    folder, rel = _kb_find_config_folder(path_arg)
+    if folder is None:
+        return JSONResponse({"error": f"Ordner '{path_arg}' nicht konfiguriert"}, status_code=404)
+
+    # 1) Indiziertes Wissen entfernen (TF-IDF + FAISS + Gruppen-Zuordnungen)
+    removed = purge_folder_index(folder)
+
+    # 2) Optional: Verzeichnis physisch loeschen (nur data/-Unterordner)
+    deleted_dir = False
+    if delete_files:
+        data_root = (PROJECT_ROOT / "data").resolve()
+        resolved = folder.resolve()
+        if resolved.parent != data_root or folder.name.lower() in _KB_RESERVED_DATA_DIRS:
+            return JSONResponse({"error": "Nur direkte Unterordner von data/ können gelöscht werden"},
+                                status_code=400)
+        if resolved.exists():
+            try:
+                shutil.rmtree(resolved)
+                deleted_dir = True
+            except OSError as e:
+                return JSONResponse({"error": f"Löschen fehlgeschlagen: {e}"}, status_code=500)
+
+    # 3) Ordner-Liste aktualisieren
+    folders = [f for f in _kb_current_folder_list() if f != rel]
+    _kb_save_folder_list(folders)
+    return JSONResponse({"ok": True, "removed": removed, "deleted_dir": deleted_dir})
+
+
+@app.post("/api/knowledge/folders/groups")
+async def assign_knowledge_folder_groups(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Setzt die Wissensgruppen-Zuordnung eines bestehenden Knowledge-Ordners.
+
+    Body: ``{"path": "data/<ordner>", "groups": ["<gid>", ...]}`` – der Ordner
+    wird bei den angegebenen Gruppen als Speicherordner (/wissen-Upload-Ziel)
+    eingetragen und bei allen anderen Gruppen entfernt. Leere Liste = Ordner
+    aus allen Gruppen austragen."""
+    from backend import knowledge_groups as kg
+    data = await request.json()
+    path_arg = (data.get("path") or "").strip()
+
+    folder, rel = _kb_find_config_folder(path_arg)
+    if folder is None:
+        return JSONResponse({"error": f"Ordner '{path_arg}' nicht konfiguriert"}, status_code=404)
+
+    group_ids = [g.strip() for g in (data.get("groups") or []) if str(g).strip()]
+    known_gids = {g["id"] for g in kg.list_groups().get("groups", [])}
+    bad = [g for g in group_ids if g not in known_gids]
+    if bad:
+        return JSONResponse({"error": "Unbekannte Wissensgruppe(n): " + ", ".join(bad)},
+                            status_code=400)
+
+    result = kg.set_folder_groups(rel, group_ids)
+    return JSONResponse({"ok": True, "path": rel, **result})
+
+
 @app.post("/api/knowledge/upload")
 async def upload_knowledge_files(
     files: list[UploadFile] = File(...),
@@ -5911,21 +6146,50 @@ def _wissen_check_groups(user: str, req_groups: list):
     return True, None
 
 
+# Der Default-Ordner wird unter /wissen NICHT als Speicherziel angeboten –
+# dort zaehlt nur die explizite Speicherordner-Zuordnung der Gruppen.
+_WISSEN_HIDDEN_FOLDERS = {"data/knowledge"}
+
+
+def _wissen_group_folders(group: dict, configured: list) -> list:
+    """Gueltige Speicherordner einer Gruppe fuer /wissen (nur konfigurierte
+    Knowledge-Ordner, ohne den Default-Ordner). Keine Zuordnung = kein Ziel."""
+    return [f for f in group.get("folders", [])
+            if f in configured and f not in _WISSEN_HIDDEN_FOLDERS]
+
+
+def _wissen_allowed_folders(user: str, groups: list) -> list:
+    """Speicherordner, die ein /wissen-Nutzer fuer die gegebenen Gruppen nutzen
+    darf: globale Wissens-Editoren alle konfigurierten Ordner, sonst die Union
+    der Speicherordner der Gruppen (Reihenfolge wie konfiguriert). Der
+    Default-Ordner data/knowledge ist unter /wissen generell ausgenommen."""
+    configured = _kb_current_folder_list()
+    if _may_edit_knowledge(user):
+        return [f for f in configured if f not in _WISSEN_HIDDEN_FOLDERS]
+    allowed = set()
+    for g in groups:
+        allowed.update(_wissen_group_folders(g, configured))
+    return [f for f in configured if f in allowed]
+
+
 @app.get("/api/wissen/scope")
 async def wissen_scope(user: str = Depends(require_auth)):
-    """Bereich des Nutzers: beschreibbare Wissensgruppen + verfuegbare Ordner."""
-    from backend.tools.knowledge import _get_folders, PROJECT_ROOT
+    """Bereich des Nutzers: beschreibbare Wissensgruppen + verfuegbare Speicherordner.
+
+    ``folders`` enthaelt nur die Ordner, die dem Nutzer als Upload-Ziel zustehen
+    (globale Editoren: alle; sonst die Speicherordner seiner Gruppen). Der
+    Default-Ordner ``data/knowledge`` wird unter /wissen nie angeboten; Gruppen
+    ohne Zuordnung haben dort kein Speicherziel. Zusaetzlich traegt jede Gruppe
+    ihre eigenen Speicherordner (``folders``), damit die Auswahl clientseitig
+    auf die gewaehlten Gruppen eingegrenzt werden kann."""
     groups = _editable_groups_for(user)
-    folders = []
-    for f in _get_folders():
-        try:
-            rel = str(f.relative_to(PROJECT_ROOT))
-        except ValueError:
-            rel = str(f)
-        folders.append({"path": rel, "name": f.name})
+    configured = _kb_current_folder_list()
+    allowed = _wissen_allowed_folders(user, groups)
+    folders = [{"path": p, "name": Path(p).name} for p in allowed]
     return JSONResponse({
         "ok": True, "user": user, "is_editor": _may_edit_knowledge(user),
-        "groups": [{"id": g["id"], "name": g["name"], "color": g.get("color", "#64748b")}
+        "groups": [{"id": g["id"], "name": g["name"], "color": g.get("color", "#64748b"),
+                    "folders": _wissen_group_folders(g, configured)}
                    for g in groups],
         "folders": folders,
     })
@@ -5959,6 +6223,7 @@ async def wissen_upload(
     all_exts = (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX |
                 EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO | EXTENSIONS_IMAGE)
     target = None
+    target_rel = None
     for f in _get_folders():
         try:
             rel = str(f.relative_to(PROJECT_ROOT))
@@ -5966,9 +6231,17 @@ async def wissen_upload(
             rel = str(f)
         if rel == folder or str(f) == folder:
             target = f
+            target_rel = rel
             break
     if not target:
         return JSONResponse({"error": f"Ordner '{folder}' nicht verfuegbar"}, status_code=400)
+    # Speicherordner-Bindung der Gruppen serverseitig erzwingen: Nicht-Editoren
+    # duerfen nur in die Speicherordner der gewaehlten Gruppen schreiben.
+    sel_groups = [g for g in _editable_groups_for(user) if g["id"] in req_groups]
+    if target_rel not in _wissen_allowed_folders(user, sel_groups):
+        return JSONResponse(
+            {"error": f"Ordner '{folder}' ist den gewählten Wissensgruppen nicht zugeordnet"},
+            status_code=403)
     # Gewuenschte Fragenanzahl (Checkbox "Fragen generieren" im /wissen-Upload)
     try:
         qa_n = max(0, min(int(gen_questions or 0), 50))
@@ -6253,18 +6526,35 @@ async def knowledge_groups_create(request: Request, user: str = Depends(require_
 
 @app.patch("/api/knowledge/groups/{gid}")
 async def knowledge_groups_update(gid: str, request: Request, user: str = Depends(require_auth)):
-    """Aktualisiert eine Wissensgruppe (Name, Farbe, Reihenfolge oder ihre Editoren).
+    """Aktualisiert eine Wissensgruppe (Name, Farbe, Reihenfolge, Editoren oder
+    ihre Speicherordner).
 
     Erlaubt für globale Wissens-Editoren ODER die pro Gruppe hinterlegten Editoren.
     Die Editoren-Felder (``editors_users`` kommagetrennt, ``editors_group``
     zeilengetrennte AD-Gruppen-DNs) definieren *zusätzlich* zu den globalen
     Wissens-Editoren, wer diese Gruppe bearbeiten darf.
+    ``folders`` (Liste relativer Pfade, z.B. ``["data/ibs"]``): Speicherordner
+    der Gruppe – /wissen-Nutzern dieser Gruppe werden nur diese Ordner als
+    Upload-Ziel angeboten. Nur globale Wissens-Editoren dürfen das Feld ändern;
+    jeder Eintrag muss ein konfigurierter Knowledge-Ordner sein.
     """
     if not _can_edit_kb_group(user, gid):
         raise HTTPException(status_code=403,
             detail="Keine Berechtigung, diese Wissensgruppe zu bearbeiten")
     from backend import knowledge_groups as kg
     body = await request.json()
+    folders = body.get("folders")
+    if folders is not None:
+        if not _may_edit_knowledge(user):
+            raise HTTPException(status_code=403,
+                detail="Nur globale Wissens-Editoren dürfen Speicherordner zuordnen")
+        if not isinstance(folders, list):
+            return JSONResponse({"ok": False, "error": "folders muss eine Liste sein"}, status_code=400)
+        known = set(_kb_current_folder_list())
+        bad = [f for f in folders if f not in known]
+        if bad:
+            return JSONResponse({"ok": False,
+                "error": "Kein konfigurierter Knowledge-Ordner: " + ", ".join(bad)}, status_code=400)
     try:
         g = kg.update_group(
             gid,
@@ -6273,6 +6563,7 @@ async def knowledge_groups_update(gid: str, request: Request, user: str = Depend
             order=body.get("order"),
             editors_users=body.get("editors_users"),
             editors_group=body.get("editors_group"),
+            folders=folders,
         )
         return JSONResponse({"ok": True, "group": g})
     except KeyError:

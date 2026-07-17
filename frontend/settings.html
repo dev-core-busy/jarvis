@@ -1535,6 +1535,11 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         data-i18n-placeholder="knowledge.folder_ph"
                                         placeholder="Pfad zum Ordner (z.B. data/knowledge)" />
                                     <button class="kb-btn-action" id="btn-kb-add-folder" data-i18n="knowledge.add_btn">Hinzufügen</button>
+                                    <button class="kb-btn-action" id="btn-kb-create-folder" data-i18n="knowledge.create_btn" data-i18n-title="knowledge.create_title" title="Neuen Ordner unter data/ anlegen">Neu anlegen</button>
+                                </div>
+                                <div class="kb-upload-groups-row">
+                                    <span class="kb-hint" style="margin:0;" data-i18n="knowledge.create_groups_label">Beim Anlegen als Speicherordner zuordnen:</span>
+                                    <div id="kb-folder-groups" class="kb-grp-checks"></div>
                                 </div>
                             </div>
                         </div>
@@ -3061,7 +3066,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=79"></script>
+    <script src="/static/js/i18n.js?v=83"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=16"></script>
     <script src="/static/js/context.js?v=5"></script>
@@ -3072,7 +3077,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vnc.js?v=18"></script>
     <script src="/static/js/skills.js?v=30"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
-    <script src="/static/js/knowledge.js?v=52"></script>
+    <script src="/static/js/knowledge.js?v=56"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=6"></script>

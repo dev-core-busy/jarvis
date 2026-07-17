@@ -26,6 +26,7 @@ data/memory.json
 data/knowledge_index.json
 data/.secret_key
 data/auth_state.json
+data/auth_revocations.json
 data/support_history.json
 data/vision/encodings.json
 data/vision/encodings.pkl

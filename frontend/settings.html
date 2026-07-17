@@ -2381,6 +2381,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;" data-i18n="security.ad_group_warning">
                                         ⚠ Wenn eine Gruppe eingetragen ist, wird die Benutzerliste ignoriert.
                                     </div>
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;" data-i18n="security.ad_reval_hint">
+                                        Mit hinterlegtem Service-Konto (Verzeichnis-Suche) wird die Gruppen-Mitgliedschaft aktiver Benutzer automatisch nachgeprüft (Standard: alle 10 Min.) – ein Entzug meldet die Sitzung ohne Neuanmeldung ab.
+                                    </div>
                                 </div>
 
                                 <!-- Modus-Anzeige (Login-Zugriff) -->
@@ -2408,7 +2411,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </label>
                                     <textarea id="ad-knowledge-editors-group" rows="1" placeholder="z.B. CN=Knowledge-Editors,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        ⚠ Gruppenprüfung wird beim Login gecacht – Änderungen erfordern Neuanmeldung der betroffenen Benutzer.
+                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
                                     </div>
                                 </div>
 
@@ -2444,7 +2447,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </label>
                                     <textarea id="ad-internet-group" rows="1" placeholder="z.B. CN=Internet-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        ⚠ Gruppenprüfung wird beim Login gecacht – Änderungen erfordern Neuanmeldung der betroffenen Benutzer.
+                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
                                     </div>
                                 </div>
 
@@ -2492,7 +2495,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </label>
                                     <textarea id="ad-admins-group" rows="1" placeholder="z.B. CN=Jarvis-Admins,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        ⚠ Gruppenprüfung wird beim Login gecacht – Änderungen erfordern Neuanmeldung der betroffenen Benutzer.
+                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
                                     </div>
                                 </div>
 
@@ -3058,7 +3061,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     }
     </style>
     <div id="attach-toast"></div>
-    <script src="/static/js/i18n.js?v=78"></script>
+    <script src="/static/js/i18n.js?v=79"></script>
     <script src="/static/js/websocket.js?v=6"></script>
     <script src="/static/js/cron.js?v=16"></script>
     <script src="/static/js/context.js?v=5"></script>

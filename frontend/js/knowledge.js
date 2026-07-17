@@ -64,7 +64,8 @@ class JarvisKnowledgeManager {
         const rows = KG.all().map(g => {
             const ed = this._editorsSummary(g) + this._foldersSummary(g);
             return `
-            <div class="kb-grp-manage-row" data-gid="${KG.esc(g.id)}">
+            <div class="kb-grp-manage-row" data-gid="${KG.esc(g.id)}" draggable="true">
+                <span class="kb-grp-drag" title="${T('kbgroups.drag_title', 'Ziehen zum Sortieren')}">⋮⋮</span>
                 <input type="color" class="kb-grp-color-input" value="${KG.esc(g.color)}" title="${T('kbgroups.color', 'Farbe ändern')}">
                 <span class="kb-grp-manage-name" title="${T('kbgroups.show_files', 'Dokumente anzeigen')}">${KG.esc(g.name)}${ed}</span>
                 <span class="kb-grp-count">${g.count}</span>
@@ -104,6 +105,66 @@ class JarvisKnowledgeManager {
             row.querySelector('.kb-grp-rename').onclick = () => this._renameGroup(gid);
             row.querySelector('.kb-grp-delete').onclick = () => this._deleteGroup(gid);
         });
+
+        this._initGroupReorder(el.querySelector('.kb-grp-manage-list'));
+    }
+
+    // ── Drag & Drop Sortierung der Wissensgruppen ─────────────────────────
+    // Zeile am ⋮⋮-Griff (oder frei) ziehen; beim Ablegen wird die neue
+    // Reihenfolge als order-Feld (0..n) via PATCH persistiert.
+    _initGroupReorder(list) {
+        if (!list) return;
+        let dragRow = null;
+
+        list.querySelectorAll('.kb-grp-manage-row[data-gid]').forEach(row => {
+            row.addEventListener('dragstart', (e) => {
+                // Nicht aus Eingabefeldern/Buttons heraus ziehen (Farbwähler etc.)
+                if (e.target.closest && e.target.closest('input, button')) { e.preventDefault(); return; }
+                dragRow = row;
+                row.classList.add('kb-grp-dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                try { e.dataTransfer.setData('text/plain', row.dataset.gid); } catch (_) { /* IE */ }
+            });
+            row.addEventListener('dragend', () => {
+                row.classList.remove('kb-grp-dragging');
+                list.querySelectorAll('.kb-grp-dropover').forEach(r => r.classList.remove('kb-grp-dropover'));
+                if (dragRow) { dragRow = null; this._saveGroupOrder(list); }
+            });
+            row.addEventListener('dragover', (e) => {
+                if (!dragRow || dragRow === row) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                row.classList.add('kb-grp-dropover');
+                // Ober-/Unterhalb der Zeilenmitte einsortieren
+                const rect = row.getBoundingClientRect();
+                const before = (e.clientY - rect.top) < rect.height / 2;
+                row.parentNode.insertBefore(dragRow, before ? row : row.nextSibling);
+            });
+            row.addEventListener('dragleave', () => row.classList.remove('kb-grp-dropover'));
+            row.addEventListener('drop', (e) => e.preventDefault());
+        });
+    }
+
+    async _saveGroupOrder(list) {
+        const KG = window.KbGroups;
+        const ids = [...list.querySelectorAll('.kb-grp-manage-row[data-gid]')].map(r => r.dataset.gid);
+        // Nur Gruppen patchen, deren Position sich geaendert hat
+        const changed = ids.filter((gid, i) => {
+            const g = KG.byId(gid);
+            return g && g.order !== i;
+        });
+        if (!changed.length) return;
+        try {
+            await Promise.all(ids.map((gid, i) => {
+                const g = KG.byId(gid);
+                return (g && g.order !== i) ? KG.updateGroup(gid, { order: i }) : null;
+            }));
+            await this._refreshGroups();
+            this._showNotification(window.t('kbgroups.order_saved') || 'Reihenfolge gespeichert', 'success');
+        } catch (e) {
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+            await this._refreshGroups();
+        }
     }
 
     // Fasst die zusätzlichen Editoren einer Gruppe für die Anzeige in Klammern

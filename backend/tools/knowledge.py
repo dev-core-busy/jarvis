@@ -573,6 +573,97 @@ def _save_cache(cache: dict):
         pass
 
 
+# ─── Ordner-Verwaltung: Index-Relokation / -Bereinigung ──────────────────────
+# Indizierte Dokumente sind nur ueber ihren absoluten Dateipfad mit dem
+# Quellordner verknuepft (TF-IDF-Cache-Schluessel + FAISS file_path). Beim
+# Umbenennen/Loeschen eines Wissens-Ordners muessen daher beide Indizes und
+# die Gruppen-Zuordnungen (relative Pfade in .groups.json) mitgezogen werden.
+
+def _folder_rel(folder: Path) -> str:
+    try:
+        return str(folder.relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(folder)
+
+
+def relocate_folder_index(old_folder: Path, new_folder: Path) -> dict:
+    """Schreibt nach einer Ordner-Umbenennung alle Index-Eintraege um:
+    TF-IDF-Cache, FAISS-Metadaten (ohne Neu-Embedding) und Gruppen-Zuordnungen.
+    Gibt Zaehler der verschobenen Eintraege zurueck."""
+    old_s, new_s = str(old_folder), str(new_folder)
+
+    moved_tfidf = 0
+    with _cache_lock:
+        cache = _load_cache()
+        files = cache.get("files", {})
+        renamed = {}
+        for p, entry in files.items():
+            if p.startswith(old_s + os.sep):
+                renamed[new_s + p[len(old_s):]] = entry
+                moved_tfidf += 1
+            else:
+                renamed[p] = entry
+        if moved_tfidf:
+            cache["files"] = renamed
+            _save_cache(cache)
+
+    moved_vec = 0
+    vs = _get_vector_store()
+    if vs is not None:
+        try:
+            moved_vec = vs.rename_path_prefix(old_s, new_s)
+        except Exception as e:
+            _log.warning(f"FAISS-Relokation fehlgeschlagen: {e}")
+
+    moved_groups = 0
+    try:
+        from backend import knowledge_groups as kg
+        moved_groups = kg.relocate_prefix(_folder_rel(old_folder), _folder_rel(new_folder))
+    except Exception as e:
+        _log.warning(f"Gruppen-Relokation fehlgeschlagen: {e}")
+
+    _log.info(f"Ordner-Index relokalisiert {old_s} -> {new_s}: "
+              f"{moved_tfidf} TF-IDF-Dateien, {moved_vec} Vektor-Chunks, {moved_groups} Gruppen-Zuordnungen")
+    return {"tfidf_files": moved_tfidf, "vector_chunks": moved_vec,
+            "group_assignments": moved_groups}
+
+
+def purge_folder_index(folder: Path) -> dict:
+    """Entfernt alle Index-Eintraege (TF-IDF + FAISS) und Gruppen-Zuordnungen
+    unterhalb eines Ordners. Gibt Zaehler der entfernten Eintraege zurueck."""
+    folder_s = str(folder)
+
+    removed_tfidf = 0
+    with _cache_lock:
+        cache = _load_cache()
+        files = cache.get("files", {})
+        keep = {p: e for p, e in files.items() if not p.startswith(folder_s + os.sep)}
+        removed_tfidf = len(files) - len(keep)
+        if removed_tfidf:
+            cache["files"] = keep
+            _save_cache(cache)
+
+    removed_vec = 0
+    vs = _get_vector_store()
+    if vs is not None:
+        try:
+            removed_vec = vs.remove_path_prefix(folder_s)
+        except Exception as e:
+            _log.warning(f"FAISS-Bereinigung fehlgeschlagen: {e}")
+
+    removed_groups = 0
+    try:
+        from backend import knowledge_groups as kg
+        removed_groups = kg.remove_prefix(_folder_rel(folder))
+    except Exception as e:
+        _log.warning(f"Gruppen-Bereinigung fehlgeschlagen: {e}")
+
+    _log.info(f"Ordner-Index bereinigt {folder_s}: "
+              f"{removed_tfidf} TF-IDF-Dateien, {removed_vec} Vektor-Chunks, {removed_groups} Gruppen-Zuordnungen")
+    return {"tfidf_files": removed_tfidf, "vector_chunks": removed_vec,
+            "group_assignments": removed_groups}
+
+
 def _all_files(folders: list[Path]) -> list[Path]:
     """Gibt alle unterstützten Dateien in den konfigurierten Ordnern zurück."""
     all_exts = EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO

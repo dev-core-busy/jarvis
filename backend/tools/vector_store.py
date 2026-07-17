@@ -184,6 +184,37 @@ class VectorStore:
             new_vecs = self._vectors_at(keep)
             self._rebuild(new_meta, new_vecs)
 
+    def rename_path_prefix(self, old_prefix: str, new_prefix: str) -> int:
+        """Schreibt file_path-Metadaten aller Chunks unterhalb eines Ordners auf
+        einen neuen Pfad um (Ordner-Umbenennung) – ohne Neu-Embedding.
+        Gibt die Anzahl umgeschriebener Chunks zurueck."""
+        old_dir = old_prefix.rstrip("/") + "/"
+        new_dir = new_prefix.rstrip("/") + "/"
+        with self._lock:
+            changed = 0
+            for m in self._meta:
+                fp = m["file_path"]
+                if fp.startswith(old_dir):
+                    m["file_path"] = new_dir + fp[len(old_dir):]
+                    changed += 1
+            if changed:
+                self._save()
+            return changed
+
+    def remove_path_prefix(self, prefix: str) -> int:
+        """Entfernt alle Chunks von Dateien unterhalb eines Ordner-Pfads
+        (Ordner-Loeschung). Gibt die Anzahl entfernter Chunks zurueck."""
+        pref = prefix.rstrip("/") + "/"
+        with self._lock:
+            keep = [i for i, m in enumerate(self._meta)
+                    if not m["file_path"].startswith(pref)]
+            removed = len(self._meta) - len(keep)
+            if removed:
+                new_meta = [self._meta[i] for i in keep]
+                new_vecs = self._vectors_at(keep)
+                self._rebuild(new_meta, new_vecs)
+            return removed
+
     def clear(self):
         """Loescht den gesamten Index."""
         with self._lock:

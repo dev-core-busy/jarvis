@@ -6618,6 +6618,20 @@ async def knowledge_groups_list(user: str = Depends(require_auth)):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.get("/api/knowledge/groups/ungrouped")
+async def knowledge_groups_ungrouped(user: str = Depends(require_auth)):
+    """Listet alle indizierten Dateien ohne Wissensgruppen-Zuordnung
+    (relative Pfade) – die Datei-Liste zur "ungruppiert"-Zeile der
+    Gruppen-Uebersicht. Zaehler-Basis ist wie bei GET /api/knowledge/groups
+    der lokale Index (kein Share-Zugriff, nie blockierend)."""
+    from backend import knowledge_groups as kg
+    from backend.tools.knowledge import _indexed_rel_paths
+    try:
+        return JSONResponse({"ok": True, "files": kg.ungrouped_files(_indexed_rel_paths())})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/api/knowledge/groups")
 async def knowledge_groups_create(request: Request, user: str = Depends(require_knowledge_editor)):
     """Legt eine neue Wissensgruppe (Name + Farbe) an."""

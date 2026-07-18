@@ -482,19 +482,23 @@ class JarvisKnowledgeManager {
         const container = document.getElementById('kb-stats-container');
 
         try {
-            const [statsResp, learnedResp] = await Promise.all([
+            const [statsResp, learnedResp, compactResp] = await Promise.all([
                 fetch('/api/knowledge/stats', {
                     headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
                 }),
                 fetch('/api/knowledge/learned_stats', {
                     headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
                 }).catch(() => null),
+                fetch('/api/knowledge/compact_status', {
+                    headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+                }).catch(() => null),
             ]);
             if (!statsResp.ok) throw new Error('HTTP ' + statsResp.status);
             const stats = await statsResp.json();
             const learnedStats = learnedResp && learnedResp.ok ? await learnedResp.json() : null;
+            const compactStatus = compactResp && compactResp.ok ? await compactResp.json() : null;
 
-            this._renderStats(stats, learnedStats);
+            this._renderStats(stats, learnedStats, compactStatus);
             this._renderFolders(stats.folders);
             this._populateUploadTargets(stats.folders);
         } catch (e) {
@@ -502,7 +506,7 @@ class JarvisKnowledgeManager {
         }
     }
 
-    _renderStats(stats, learnedStats) {
+    _renderStats(stats, learnedStats, compactStatus) {
         const el = document.getElementById('kb-stats-container');
         if (!el) return;
 
@@ -651,10 +655,96 @@ class JarvisKnowledgeManager {
                     <input type="checkbox" id="kb-export-embeddings" style="margin:0;cursor:pointer;">
                     ${window.t('knowledge.learned.embeddings_label')}
                 </label>
+            </div>`;
+            // Wissens-Verdichtung: Verdichten-Button + ❓-Erklärung + Auto-Schalter
+            const cs = compactStatus || {};
+            const pending = cs.pending_files || 0;
+            const lastRun = cs.last_run ? `${window.t('knowledge.compact.last_run')} ${cs.last_run}` : '';
+            el.innerHTML += `
+            <div class="kb-learned-panel" title="${window.t('knowledge.compact.title')}">
+                <span class="kb-learned-icon">🗜️</span>
+                <span class="kb-learned-title">${window.t('knowledge.compact.title')}</span>
+                <button class="kb-learned-open-btn" id="kb-compact-btn" onclick="window.knowledgeManager.compactLearned(this)"
+                        title="${window.t('knowledge.compact.btn_title')}" ${cs.running ? 'disabled' : ''}>
+                    ${cs.running ? window.t('knowledge.compact.running') : window.t('knowledge.compact.btn')}
+                </button>
+                <button class="kb-learned-open-btn" onclick="window.knowledgeManager.showCompactInfo(true)"
+                        title="${window.t('knowledge.compact.info_title')}" style="font-weight:700;">❓</button>
+                <label class="kb-learned-embed-opt" title="${window.t('knowledge.compact.auto_title')}" style="display:inline-flex;align-items:center;gap:5px;font-size:0.78rem;color:var(--text-muted);margin-left:8px;cursor:pointer;">
+                    <input type="checkbox" id="kb-compact-auto" style="margin:0;cursor:pointer;" ${cs.auto ? 'checked' : ''}
+                           onchange="window.knowledgeManager.setCompactAuto(this)">
+                    ${window.t('knowledge.compact.auto_label')}
+                </label>
+                <span class="kb-learned-sep">·</span>
+                <span class="kb-learned-stat">${pending} ${window.t('knowledge.compact.pending')}</span>
+                ${lastRun ? `<span class="kb-learned-sep">·</span><span class="kb-learned-months">${lastRun}</span>` : ''}
             </div>
+            <div id="kb-compact-status" style="display:none;font-size:0.8rem;margin-top:8px;"></div>
             <div id="kb-export-status" style="display:none;font-size:0.8rem;margin-top:8px;"></div>
             <div id="kb-learned-list" style="display:none;"></div>`;
         }
+    }
+
+    // ─── Wissens-Verdichtung ──────────────────────────────────────────
+
+    _compactStatusLine(msg, color) {
+        const st = document.getElementById('kb-compact-status');
+        if (!st) return;
+        st.style.display = 'block';
+        st.style.color = color || 'var(--text-muted)';
+        st.textContent = msg;
+    }
+
+    async compactLearned(btn) {
+        if (btn) { btn.disabled = true; btn.textContent = window.t('knowledge.compact.running'); }
+        this._compactStatusLine(window.t('knowledge.compact.status_running'), 'var(--warning)');
+        try {
+            const resp = await fetch('/api/knowledge/compact', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || data.error) throw new Error(data.error || ('HTTP ' + resp.status));
+            if (data.skipped) {
+                this._compactStatusLine(window.t('knowledge.compact.nothing'), 'var(--text-muted)');
+            } else {
+                this._compactStatusLine(
+                    window.t('knowledge.compact.done')
+                        .replace('{in}', data.files_in)
+                        .replace('{out}', data.files_out)
+                        .replace('{topics}', (data.topics || []).join(', ')),
+                    'var(--success)');
+            }
+            setTimeout(() => this.fetchStats(), 2500);
+        } catch (e) {
+            this._compactStatusLine(window.t('knowledge.compact.fail').replace('{msg}', e.message), 'var(--danger)');
+            if (btn) { btn.disabled = false; btn.textContent = window.t('knowledge.compact.btn'); }
+        }
+    }
+
+    async setCompactAuto(cb) {
+        try {
+            const resp = await fetch('/api/knowledge/compact_config', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || ''),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ auto: !!cb.checked })
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            this._compactStatusLine(cb.checked
+                ? window.t('knowledge.compact.auto_on')
+                : window.t('knowledge.compact.auto_off'), 'var(--success)');
+        } catch (e) {
+            cb.checked = !cb.checked;
+            this._compactStatusLine(window.t('knowledge.compact.fail').replace('{msg}', e.message), 'var(--danger)');
+        }
+    }
+
+    showCompactInfo(show) {
+        const m = document.getElementById('kb-compact-modal');
+        if (m) m.classList.toggle('open', !!show);
     }
 
     async downloadLearnedJson(btn, split) {

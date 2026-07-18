@@ -136,6 +136,17 @@ def list_groups(all_rel_paths=None) -> dict:
     return {"groups": out_groups, "ungrouped_count": ungrouped_count}
 
 
+def ungrouped_files(all_rel_paths) -> list:
+    """Relative Pfade aller indizierten Dateien OHNE Gruppen-Zuordnung
+    (Gegenstueck zur ungrouped_count-Zahl aus list_groups)."""
+    with _lock:
+        data = _load_unlocked()
+    assignments = data.get("assignments", {})
+    known = {_rel(p) for p in (all_rel_paths or [])}
+    assigned = {_rel(p) for p, gids in assignments.items() if gids}
+    return sorted(known - assigned)
+
+
 def _valid_ids(data: dict) -> set:
     return {g["id"] for g in data.get("groups", [])}
 

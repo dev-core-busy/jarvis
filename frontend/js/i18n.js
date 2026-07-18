@@ -39,6 +39,7 @@ const _I18N = {
         'portal.conn_error':         'Verbindungsfehler',
         'portal.contact_info_default': 'universelles, modulares KI Portal',
         'portal.contact_phone_prefix': 'Tel.',
+        'portal.contact_manual':     'Benutzerhandbuch',
 
         // ── API-Dokumentation (/api) ───────────────────────────
         'api.title':        'API-Dokumentation',
@@ -366,6 +367,7 @@ const _I18N = {
         'branding.contact_info':    'Info-Text',
         'branding.contact_phone':   'Telefon',
         'branding.contact_email':   'E-Mail-Adresse',
+        'branding.manual_url':      'Benutzerhandbuch (Link)',
         'profile.section_tts':      'Sprachausgabe (TTS)',
         'profile.section_timeout':  'Antwort-Timeout',
         'profile.timeout_label':    'Timeout für LLM-Anfragen (Sekunden)',
@@ -1519,6 +1521,7 @@ const _I18N = {
         'portal.conn_error':         'Connection error',
         'portal.contact_info_default': 'universal, modular AI portal',
         'portal.contact_phone_prefix': 'Phone',
+        'portal.contact_manual':     'User guide',
 
         // ── API documentation (/api) ───────────────────────────
         'api.title':        'API Documentation',
@@ -1846,6 +1849,7 @@ const _I18N = {
         'branding.contact_info':    'Info text',
         'branding.contact_phone':   'Phone',
         'branding.contact_email':   'Email address',
+        'branding.manual_url':      'User guide (link)',
         'profile.section_tts':      'Text-to-Speech (TTS)',
         'profile.section_timeout':  'Response Timeout',
         'profile.timeout_label':    'Timeout for LLM requests (seconds)',

@@ -6618,6 +6618,21 @@ async def knowledge_groups_list(user: str = Depends(require_auth)):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.get("/api/knowledge/content_search")
+async def knowledge_content_search(q: str = "", user: str = Depends(require_auth)):
+    """Volltext-Suche (Substring, case-insensitive) ueber den INHALT aller
+    indizierten Wissensdateien – z.B. fuer die Filter-Box der
+    Wissensgruppen-Tabelle. Durchsucht die bereits extrahierten Text-Chunks
+    aus TF-IDF-Cache und Vektor-Index (nur lokale Dateien, kein
+    Share-Zugriff). Antwort: {ok, files: [relative Pfade]}."""
+    from backend.tools.knowledge import content_search_paths
+    try:
+        files = await asyncio.to_thread(content_search_paths, q)
+        return JSONResponse({"ok": True, "files": files})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.get("/api/knowledge/groups/ungrouped")
 async def knowledge_groups_ungrouped(user: str = Depends(require_auth)):
     """Listet alle indizierten Dateien ohne Wissensgruppen-Zuordnung

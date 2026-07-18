@@ -563,6 +563,23 @@ def _indexed_rel_paths() -> list:
     return list(paths)
 
 
+def known_paths_with_disk() -> list:
+    """Index-Pfade PLUS aktuell auf der Platte liegende Wissensdateien.
+
+    Gemeinsame Zaehl-/Listen-Basis fuer die Wissensgruppen: Der Index allein
+    hinkt der Platte hinterher (z.B. Pending-Extraktor-JSONs), wodurch
+    Gruppen-Zaehler kleiner ausfielen als die tatsaechliche Dokumentliste.
+    Der Disk-Teil laeuft best-effort – tote Netz-Shares faengt
+    _all_files/_safe_exists ab, bei Fehlern bleibt es beim Index."""
+    paths = set(_indexed_rel_paths())
+    try:
+        for f in _all_files(_get_folders()):
+            paths.add(str(f))
+    except Exception:
+        pass
+    return list(paths)
+
+
 # Kleiner mtime-Cache fuer den Disk-Scan der Inhalts-Suche
 _scan_cache: dict = {}          # path_str -> (mtime, text_lower)
 _SCAN_MAX_BYTES = 2_000_000     # groessere Dateien werden beim Disk-Scan uebersprungen

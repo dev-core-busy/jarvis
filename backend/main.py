@@ -1906,6 +1906,16 @@ async def update_settings_set(request: Request, user: str = Depends(require_loca
 from backend.mcp_client import mcp_manager
 
 @app.on_event("startup")
+async def startup_knowledge_compactor():
+    """Hintergrund-Task fuer die automatische Wissens-Verdichtung starten."""
+    try:
+        from backend.knowledge_compactor import auto_compact_loop
+        asyncio.create_task(auto_compact_loop())
+    except Exception as e:
+        print(f"[Compactor] Startup-Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_mcp():
     """MCP-Server beim Start verbinden."""
     try:
@@ -5438,6 +5448,43 @@ async def get_learned_stats(user: str = Depends(require_auth)):
     """Liefert Statistiken ueber automatisch gelernte Konversations-Fakten."""
     from backend.learning import get_learned_stats
     return JSONResponse(get_learned_stats())
+
+
+@app.post("/api/knowledge/compact")
+async def compact_learned_knowledge(user: str = Depends(require_knowledge_editor)):
+    """Verdichtet gelerntes Wissen per LLM (Duplikate zusammenfuehren, Widersprueche
+    aufloesen – neueres Datum gewinnt). Verarbeitet alle abgeschlossenen Monate,
+    schreibt Themen-Dateien nach learned/konsolidiert/ und archiviert die Originale
+    reversibel nach data/backups/learned_archiv/. Der FAISS-Index wird direkt
+    mitgepflegt. Antwort: {ok, files_in, topics, files_out, archived, chunks}
+    oder {error}."""
+    from backend.knowledge_compactor import compact_learned
+    result = await compact_learned(trigger=f"manuell ({user})")
+    status = 409 if result.get("error") == "Verdichtung läuft bereits" else (500 if result.get("error") else 200)
+    return JSONResponse(result, status_code=status)
+
+
+@app.get("/api/knowledge/compact_status")
+async def get_compact_status(user: str = Depends(require_auth)):
+    """Zustand der Wissens-Verdichtung: {running, auto, last_run, last_result,
+    last_error, pending_files} (pending_files = Dateien aus abgeschlossenen
+    Monaten, die beim naechsten Lauf verdichtet wuerden)."""
+    from backend.knowledge_compactor import get_status
+    return JSONResponse(get_status())
+
+
+@app.post("/api/knowledge/compact_config")
+async def set_compact_config(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Schaltet die automatische monatliche Wissens-Verdichtung um.
+    Body: {"auto": true|false} – persistiert als auto_compact in der
+    Knowledge-Skill-Konfiguration."""
+    body = await request.json()
+    auto = bool(body.get("auto"))
+    states = config.get_skill_states()
+    cfg = dict(states.get("knowledge", {}).get("config", {}))
+    cfg["auto_compact"] = auto
+    config.save_skill_state("knowledge", {"config": cfg})
+    return JSONResponse({"ok": True, "auto": auto})
 
 
 @app.get("/api/knowledge/files")

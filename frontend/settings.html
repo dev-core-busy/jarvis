@@ -1034,6 +1034,52 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         </div>
     </div>
 
+    <!-- ═══ Wissens-Verdichtung – Funktionsbeschreibung (❓ im Knowledge-Tab) ═══ -->
+    <div id="kb-compact-modal" class="modal" style="z-index:10001;" onclick="if(event.target===this)window.knowledgeManager.showCompactInfo(false)">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h2>🗜️ Wissens-Verdichtung – Funktionsweise</h2>
+                <button class="btn-icon" onclick="window.knowledgeManager.showCompactInfo(false)" aria-label="Schließen">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body" style="overflow-y:auto;">
+
+                <p class="kb-hint"><b>Problem:</b> Das Lernsystem schreibt pro Konversation eine eigene Wissensdatei (<code>data/knowledge/learned/JJJJ-MM/conv_&lt;zeit&gt;.md</code>). Mit der Zeit sammeln sich viele Dateien mit <b>doppelten oder widersprüchlichen Fakten</b> an – jede Konversation lernt isoliert, niemand gleicht gegen den Bestand ab.</p>
+
+                <h3>1. Was die Verdichtung macht</h3>
+                <ul>
+                    <li>Sammelt alle Wissensdateien aus <b>abgeschlossenen Monaten</b> – der laufende Monat bleibt unangetastet.</li>
+                    <li>Ein LLM-Lauf führt sie mit dem bisherigen konsolidierten Bestand zusammen: <b>Duplikate</b> werden zu einem Eintrag verschmolzen, bei <b>Widersprüchen gewinnt der Fakt mit dem neueren Datum</b> (das Datum steht im Kopf jeder Datei). Bei echter Unsicherheit bleiben beide Varianten mit Datum erhalten.</li>
+                    <li>Das Ergebnis wird <b>thematisch gruppiert</b> in wenige Dateien geschrieben (<code>learned/konsolidiert/</code>), z.&nbsp;B. Server &amp; Infrastruktur, Kunden, Vorgehensweisen.</li>
+                    <li>Bei jedem weiteren Lauf werden neue Fakten <b>gegen den Bestand abgeglichen</b> – das Wissen konvergiert, statt jedes Mal neu geschrieben zu werden.</li>
+                </ul>
+
+                <h3>2. Sicherheit</h3>
+                <ul>
+                    <li>Die LLM-Ausgabe läuft nochmal durch denselben <b>Sicherheits-Filter wie das Lernen selbst</b> (rechte-, passwort- und secret-bezogene Zeilen werden verworfen) – die Verdichtung kann den Prompt-Injection-Schutz nicht aushebeln.</li>
+                    <li>Anweisungen, die innerhalb gelernter Fakten stehen, behandelt der Verdichter als <b>Daten</b>, nicht als Befehle.</li>
+                </ul>
+
+                <h3>3. Reversibel statt destruktiv</h3>
+                <ul>
+                    <li>Originaldateien werden <b>nicht gelöscht</b>, sondern nach <code>data/backups/learned_archiv/JJJJ-MM/</code> verschoben – von dort können sie jederzeit zurückgeholt werden.</li>
+                    <li>Das Archiv liegt bewusst <b>außerhalb</b> des Wissensordners, damit die Suche es nicht erneut indexiert.</li>
+                    <li>Der Vektor-Index (FAISS) wird direkt mitgepflegt: Originale raus, konsolidierte Themen-Dateien sofort rein – kein kompletter Neuaufbau nötig.</li>
+                    <li><b>Alles-oder-nichts:</b> Schlägt der LLM-Aufruf fehl, wird keine einzige Datei angefasst.</li>
+                </ul>
+
+                <h3>4. Auslösung</h3>
+                <ul>
+                    <li><b>Manuell:</b> Button „Verdichten" in diesem Panel. Die Anzeige daneben zeigt, wie viele Dateien beim nächsten Lauf verarbeitet würden.</li>
+                    <li><b>Automatisch:</b> Haken „monatlich automatisch" – ein Hintergrund-Dienst prüft dann regelmäßig, ob abgeschlossene Monate vorliegen, und verdichtet sie selbstständig (typisch: einmal pro Monatswechsel).</li>
+                    <li>Die <code>feedback_*.md</code>-Dateien sind ausgenommen – Feedback ist Verhaltensregel, kein Faktenwissen, und wird nicht „wegverdichtet".</li>
+                </ul>
+
+            </div>
+        </div>
+    </div>
+
     <!-- ═══ Root-Freigaben / Root-Broker – technische Funktionsanalyse ═══ -->
     <div id="sec-brkdoc-modal" class="modal" style="z-index:10001;">
         <div class="modal-content glass">
@@ -2049,7 +2095,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
                         <div class="form-group">
                             <label>Personal Access Token (PAT)</label>
-                            <input type="password" id="cf-token" class="config-input" placeholder="••••••••" autocomplete="new-password" style="width:100%;box-sizing:border-box;">
+                            <div style="display:flex;align-items:center;gap:4px;">
+                                <input type="password" id="cf-token" class="config-input" placeholder="••••••••" autocomplete="new-password" style="flex:1;min-width:0;box-sizing:border-box;">
+                                <button type="button" id="cf-token-toggle" title="Key anzeigen/verbergen" data-i18n-title="profile.show_hide" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                </button>
+                            </div>
                         </div>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
                             <button class="btn-primary" id="cf-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
@@ -3035,7 +3086,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=84"></script>
+    <script src="/static/js/i18n.js?v=85"></script>
     <script src="/static/js/cron.js?v=16"></script>
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
@@ -3044,10 +3095,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/extractor.js?v=23"></script>
     <script src="/static/js/skills.js?v=30"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
-    <script src="/static/js/knowledge.js?v=57"></script>
+    <script src="/static/js/knowledge.js?v=58"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
-    <script src="/static/js/confluence.js?v=6"></script>
+    <script src="/static/js/confluence.js?v=7"></script>
     <script src="/static/js/jira.js?v=5"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
     <script src="/static/js/telemetry.js?v=6"></script>

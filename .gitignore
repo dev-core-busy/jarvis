@@ -93,3 +93,6 @@ windows-app-go/.ftps_credentials
 
 # Generierte Bilder (Bildgenerierung)
 data/generated_images/
+
+# Benutzerhandbuch: enthaelt Screenshots vom Echt-System mit potenziell privaten Daten – NIE committen (Repo ist public); Quelle der Wahrheit ist Confluence-Seite 315077818
+Benutzerhandbuch/

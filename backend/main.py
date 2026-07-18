@@ -4022,6 +4022,8 @@ async def get_branding():
     ``contact_info``/``contact_phone``/``contact_email`` füllen die dezente
     Info-Zeile unterhalb der Karten auf /portal. Leere Felder blendet das
     Frontend aus; ohne aktives Branding zeigt es die eingebauten Defaults.
+    ``manual_url`` ergänzt die Zeile um einen "Benutzerhandbuch"-Link
+    hinter der E-Mail-Adresse (leer = ausgeblendet).
     """
     enabled, cfg = _branding_state()
     if not enabled:
@@ -4042,6 +4044,7 @@ async def get_branding():
         "contact_info": cfg.get("contact_info", ""),
         "contact_phone": cfg.get("contact_phone", ""),
         "contact_email": cfg.get("contact_email", ""),
+        "manual_url": cfg.get("manual_url", ""),
         "colors": cfg.get("colors", {}) or {},
         "colors_light": cfg.get("colors_light", {}) or {},
         "logo_url": ("/api/branding/logo?t=%d" % ts) if logo else "",

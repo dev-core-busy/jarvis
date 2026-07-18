@@ -14,7 +14,7 @@
     "dependencies": [],
     "permissions": [],
     "help": {
-        "details": "White-Label-Skill: Überschreibt Firmenname (statt 'JARVIS'), Akzent-/Hintergrund-/Textfarben sowie das runde Logo-Element (Buchstabe oder hochgeladenes Bild) in Hauptseite, Chat und User-Chat. Zusätzlich befüllt er die dezente Kontakt-/Infozeile unterhalb der Bereichsauswahl auf der Portalseite (Info-Text, Telefon, E-Mail; leere Felder werden ausgeblendet). Die HTML/CSS-Dateien bleiben unverändert – das Branding wird beim Laden zur Laufzeit angewendet. Beim Deaktivieren des Skills wird automatisch wieder das Standard-Jarvis-Design (inkl. Standard-Kontaktzeile) angezeigt. Konfiguration erfolgt über den 'Branding'-Tab in den Einstellungen (erscheint nur bei aktiviertem Skill).",
+        "details": "White-Label-Skill: Überschreibt Firmenname (statt 'JARVIS'), Akzent-/Hintergrund-/Textfarben sowie das runde Logo-Element (Buchstabe oder hochgeladenes Bild) in Hauptseite, Chat und User-Chat. Zusätzlich befüllt er die dezente Kontakt-/Infozeile unterhalb der Bereichsauswahl auf der Portalseite (Info-Text, Telefon, E-Mail, Benutzerhandbuch-Link; leere Felder werden ausgeblendet). Ist ein Benutzerhandbuch-Link hinterlegt, erscheint er hinter der E-Mail-Adresse. Die HTML/CSS-Dateien bleiben unverändert – das Branding wird beim Laden zur Laufzeit angewendet. Beim Deaktivieren des Skills wird automatisch wieder das Standard-Jarvis-Design (inkl. Standard-Kontaktzeile) angezeigt. Konfiguration erfolgt über den 'Branding'-Tab in den Einstellungen (erscheint nur bei aktiviertem Skill).",
         "tools": [
             {
                 "name": "branding_info",

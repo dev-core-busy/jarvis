@@ -421,11 +421,22 @@
             if (email) { eLink.textContent = email; eLink.href = 'mailto:' + email; }
             eEl.classList.toggle('hidden', !email);
         }
+        // Benutzerhandbuch-Link hinter der E-Mail (nur bei aktivem Branding
+        // mit gepflegter URL; Link-Text kommt aus i18n)
+        var manual = active ? (b.manual_url || '') : '';
+        var mEl = document.getElementById('pt-contact-manual');
+        var mLink = document.getElementById('pt-contact-manual-link');
+        if (mEl && mLink) {
+            if (manual) mLink.href = manual;
+            mEl.classList.toggle('hidden', !manual);
+        }
         // Trennpunkte nur zwischen sichtbaren Teilen anzeigen
         var pSep = document.getElementById('pt-contact-phone-sep');
         if (pSep) pSep.classList.toggle('hidden', !(phone && infoShown));
         var eSep = document.getElementById('pt-contact-email-sep');
         if (eSep) eSep.classList.toggle('hidden', !(email && (infoShown || phone)));
+        var mSep = document.getElementById('pt-contact-manual-sep');
+        if (mSep) mSep.classList.toggle('hidden', !(manual && (infoShown || phone || email)));
     }
 
     function applyBranding(b) {
@@ -540,7 +551,7 @@
             ['br-accent', 'br-accent-hover', 'br-bg-primary', 'br-bg-secondary', 'br-text-primary',
              'br-bg-primary-light', 'br-bg-secondary-light', 'br-text-primary-light',
              'br-name', 'br-letter',
-             'br-contact-info', 'br-contact-phone', 'br-contact-email']
+             'br-contact-info', 'br-contact-phone', 'br-contact-email', 'br-manual-url']
                 .forEach(function (id) {
                     var el = document.getElementById(id);
                     if (el) el.addEventListener('input', function () { BrandingAdmin.preview(); });
@@ -567,6 +578,7 @@
                     BrandingAdmin._set('br-contact-info', c.contact_info || '');
                     BrandingAdmin._set('br-contact-phone', c.contact_phone || '');
                     BrandingAdmin._set('br-contact-email', c.contact_email || '');
+                    BrandingAdmin._set('br-manual-url', c.manual_url || '');
                     BrandingAdmin._set('br-accent', col.accent || DEFAULTS.accent);
                     BrandingAdmin._set('br-accent-hover', col.accent_hover || DEFAULTS.accent_hover);
                     BrandingAdmin._set('br-bg-primary', col.bg_primary || DEFAULTS.bg_primary);
@@ -627,6 +639,7 @@
                 contact_info: this._val('br-contact-info', ''),
                 contact_phone: this._val('br-contact-phone', ''),
                 contact_email: this._val('br-contact-email', ''),
+                manual_url: this._val('br-manual-url', ''),
                 logo_mode: this._mode(),
                 logo_url: this._logoUrl,
                 logo_url_light: this._logoUrlLight,
@@ -656,6 +669,7 @@
                 contact_info: b.contact_info,
                 contact_phone: b.contact_phone,
                 contact_email: b.contact_email,
+                manual_url: b.manual_url,
                 logo_mode: b.logo_mode,
                 colors: b.colors,
                 colors_light: b.colors_light

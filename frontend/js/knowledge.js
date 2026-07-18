@@ -79,7 +79,7 @@ class JarvisKnowledgeManager {
         const ungRow = (ung != null) ? `
             <div class="kb-grp-manage-row kb-grp-row-ung">
                 <span class="kb-grp-dot" style="background:var(--text-secondary);"></span>
-                <span class="kb-grp-manage-name" style="cursor:default;">${T('kbgroups.ungrouped', 'ungruppiert')}</span>
+                <span class="kb-grp-manage-name" title="${T('kbgroups.show_files', 'Dokumente anzeigen')}">${T('kbgroups.ungrouped', 'ungruppiert')}</span>
                 <span class="kb-grp-count">${ung}</span>
             </div>` : '';
         el.innerHTML = `
@@ -105,6 +105,10 @@ class JarvisKnowledgeManager {
             row.querySelector('.kb-grp-rename').onclick = () => this._renameGroup(gid);
             row.querySelector('.kb-grp-delete').onclick = () => this._deleteGroup(gid);
         });
+
+        // "ungruppiert"-Zeile: Klick zeigt die Dateien ohne Gruppen-Zuordnung
+        const ungName = el.querySelector('.kb-grp-row-ung .kb-grp-manage-name');
+        if (ungName) ungName.onclick = () => this._showUngroupedFiles();
 
         this._initGroupReorder(el.querySelector('.kb-grp-manage-list'));
     }
@@ -370,6 +374,40 @@ class JarvisKnowledgeManager {
                 this._showGroupFiles(gid);
             };
         });
+    }
+
+    async _showUngroupedFiles() {
+        const box = document.getElementById('kb-groups-files');
+        if (!box || !window.KbGroups) return;
+        const KG = window.KbGroups;
+        const T = (k, d) => (window.t && window.t(k)) || d;
+        box.style.display = 'block';
+        box.innerHTML = `<div class="kb-files-loading">${window.t('knowledge.loading') || 'Lädt…'}</div>`;
+        let files = [];
+        try {
+            const resp = await fetch('/api/knowledge/groups/ungrouped', {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            const d = await resp.json();
+            if (!resp.ok || !d.ok) throw new Error(d.error || ('HTTP ' + resp.status));
+            files = d.files || [];
+        } catch (e) {
+            box.innerHTML = `<div class="kb-files-empty">${KG.esc(e.message)}</div>`;
+            return;
+        }
+        const title = `<div class="kb-grp-files-head">
+            <span class="kb-grp-dot" style="background:var(--text-secondary);"></span>
+            <b>${T('kbgroups.ungrouped', 'ungruppiert')}</b>
+            <span class="kb-hint" style="margin:0;">${files.length} ${window.t('kbgroups.docs') || 'Dokument(e)'}</span></div>`;
+        if (!files.length) {
+            box.innerHTML = title + `<div class="kb-files-empty">${T('kbgroups.no_ungrouped', 'Keine ungruppierten Dokumente – alles ist zugeordnet.')}</div>`;
+            return;
+        }
+        box.innerHTML = title + files.map(p => `
+            <div class="kb-grp-file-row">
+                <span class="kb-file-icon">📄</span>
+                <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
+            </div>`).join('');
     }
 
     async _checkRunningIndex() {

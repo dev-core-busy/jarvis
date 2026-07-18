@@ -6606,14 +6606,15 @@ async def knowledge_groups_list(user: str = Depends(require_auth)):
 
     WICHTIG: Die Gruppen-Definition ist UNABHÄNGIG von den Datei-Shares und
     kommt allein aus der lokalen ``.groups.json``. Die Datei-Aufzählung dient
-    NUR den exakten Zählern und läuft best-effort mit hartem Timeout – ist ein
-    Share tot/langsam, fallen wir auf manifest-basierte Zähler zurück, statt zu
-    blockieren. Gruppenverwaltung funktioniert also auch bei toten Shares."""
+    NUR den exakten Zählern und läuft best-effort – ist ein Share tot/langsam,
+    fällt die Aufzählung auf den lokalen Index zurück, statt zu blockieren.
+    Gruppenverwaltung funktioniert also auch bei toten Shares."""
     from backend import knowledge_groups as kg
-    from backend.tools.knowledge import _indexed_rel_paths
+    from backend.tools.knowledge import known_paths_with_disk
     try:
-        # Zähler NUR aus dem Index (lokale DB) – kein Share-Zugriff, nie blockierend.
-        return JSONResponse({"ok": True, **kg.list_groups(_indexed_rel_paths())})
+        # Zähl-Basis: Index + Platte (gleiche Basis wie die Dokumentlisten,
+        # sonst zeigt der Badge weniger als die Liste; tote Shares abgefangen)
+        return JSONResponse({"ok": True, **kg.list_groups(known_paths_with_disk())})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -6636,14 +6637,14 @@ async def knowledge_content_search(q: str = "", user: str = Depends(require_auth
 
 @app.get("/api/knowledge/groups/ungrouped")
 async def knowledge_groups_ungrouped(user: str = Depends(require_auth)):
-    """Listet alle indizierten Dateien ohne Wissensgruppen-Zuordnung
-    (relative Pfade) – die Datei-Liste zur "ungruppiert"-Zeile der
-    Gruppen-Uebersicht. Zaehler-Basis ist wie bei GET /api/knowledge/groups
-    der lokale Index (kein Share-Zugriff, nie blockierend)."""
+    """Listet alle Wissensdateien ohne Gruppen-Zuordnung (relative Pfade) –
+    die Datei-Liste zur "ungruppiert"-Zeile der Gruppen-Uebersicht.
+    Basis ist wie bei GET /api/knowledge/groups Index + Platte, damit
+    Zaehler und Liste identisch sind."""
     from backend import knowledge_groups as kg
-    from backend.tools.knowledge import _indexed_rel_paths
+    from backend.tools.knowledge import known_paths_with_disk
     try:
-        return JSONResponse({"ok": True, "files": kg.ungrouped_files(_indexed_rel_paths())})
+        return JSONResponse({"ok": True, "files": kg.ungrouped_files(known_paths_with_disk())})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 

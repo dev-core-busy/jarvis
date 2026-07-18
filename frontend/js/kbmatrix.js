@@ -162,14 +162,32 @@ window.KbMatrix = (function () {
         ov.querySelector('.kbm-close').onclick = () => close();
         ov.addEventListener('mousedown', e => { if (e.target === ov) close(); });
 
-        // Filter
+        // Filter: sofort ueber den sichtbaren Zeilentext, zusaetzlich (debounced)
+        // ueber den DATEI-INHALT via Server (extrahierte Text-Chunks, z.B. JSON).
         const filter = ov.querySelector('.kbm-filter');
-        filter.addEventListener('input', () => {
-            const q = filter.value.trim().toLowerCase();
+        let fSeq = 0, fTimer = null;
+        const applyFilter = (q, contentHits) => {
             ov.querySelectorAll('tbody tr').forEach(tr => {
-                const hit = !q || tr.textContent.toLowerCase().indexOf(q) !== -1;
+                const hit = !q || tr.textContent.toLowerCase().indexOf(q) !== -1
+                    || (contentHits && contentHits.has(tr.dataset.path));
                 tr.style.display = hit ? '' : 'none';
             });
+        };
+        filter.addEventListener('input', () => {
+            const q = filter.value.trim().toLowerCase();
+            clearTimeout(fTimer);
+            applyFilter(q, null);
+            if (q.length < 2) return;
+            fTimer = setTimeout(async () => {
+                const mySeq = ++fSeq;
+                try {
+                    const r = await fetch('/api/knowledge/content_search?q=' + encodeURIComponent(q), { headers: _auth() });
+                    const d = await r.json();
+                    // Antwort verwerfen, wenn inzwischen weitergetippt wurde
+                    if (mySeq !== fSeq || filter.value.trim().toLowerCase() !== q) return;
+                    if (d && d.ok) applyFilter(q, new Set(d.files || []));
+                } catch (e) { /* dann eben nur Text-Treffer */ }
+            }, 300);
         });
 
         // Klicks in der Tabelle (Delegation)

@@ -563,6 +563,41 @@ def _indexed_rel_paths() -> list:
     return list(paths)
 
 
+def content_search_paths(needle: str) -> list:
+    """Substring-Suche (case-insensitive) ueber den INHALT aller indizierten
+    Dateien. Quelle sind die bereits extrahierten Text-Chunks aus TF-IDF-Cache
+    und FAISS-Meta – wie bei ``_indexed_rel_paths`` also NUR lokale Dateien,
+    kein Share-Zugriff, nie blockierend. Gibt relative Pfade zurueck."""
+    needle = (needle or "").strip().lower()
+    if len(needle) < 2:
+        return []
+    hits = set()
+    try:
+        for path_str, entry in _load_cache().get("files", {}).items():
+            for ch in entry.get("chunks") or []:
+                if needle in ch.lower():
+                    hits.add(path_str)
+                    break
+    except Exception:
+        pass
+    try:
+        _meta = PROJECT_ROOT / "data" / "vector_store" / "faiss_meta.json"
+        if _meta.exists() and _meta.stat().st_size > 10:
+            for m in json.loads(_meta.read_text(encoding="utf-8")):
+                fp = m.get("file_path")
+                if fp and fp not in hits and needle in (m.get("text") or "").lower():
+                    hits.add(fp)
+    except Exception:
+        pass
+    out = set()
+    for p in hits:
+        try:
+            out.add(str(Path(p).resolve().relative_to(PROJECT_ROOT)))
+        except Exception:
+            out.add(str(p))
+    return sorted(out)
+
+
 def _save_cache(cache: dict):
     try:
         INDEX_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)

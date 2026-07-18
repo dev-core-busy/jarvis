@@ -563,11 +563,23 @@ def _indexed_rel_paths() -> list:
     return list(paths)
 
 
+# Kleiner mtime-Cache fuer den Disk-Scan der Inhalts-Suche
+_scan_cache: dict = {}          # path_str -> (mtime, text_lower)
+_SCAN_MAX_BYTES = 2_000_000     # groessere Dateien werden beim Disk-Scan uebersprungen
+_SCAN_CACHE_BYTES = 262_144     # nur Dateien bis 256 KB im RAM cachen
+
+
 def content_search_paths(needle: str) -> list:
-    """Substring-Suche (case-insensitive) ueber den INHALT aller indizierten
-    Dateien. Quelle sind die bereits extrahierten Text-Chunks aus TF-IDF-Cache
-    und FAISS-Meta – wie bei ``_indexed_rel_paths`` also NUR lokale Dateien,
-    kein Share-Zugriff, nie blockierend. Gibt relative Pfade zurueck."""
+    """Substring-Suche (case-insensitive) ueber den INHALT der Wissensdateien.
+
+    Quellen (in dieser Reihenfolge):
+    1. TF-IDF-Cache-Chunks und FAISS-Meta (bereits extrahierte Texte – deckt
+       auch PDF/DOCX/OCR-Inhalte ab, sofern indexiert)
+    2. Textformate (.json/.md/.txt/...) zusaetzlich direkt von der Platte –
+       deckt neue/noch nicht indexierte Dateien ab, z.B. Pending-Extraktor-
+       JSONs. Tote Netz-Shares faengt _all_files/_safe_exists ab.
+
+    Gibt relative Pfade zurueck."""
     needle = (needle or "").strip().lower()
     if len(needle) < 2:
         return []
@@ -587,6 +599,31 @@ def content_search_paths(needle: str) -> list:
                 fp = m.get("file_path")
                 if fp and fp not in hits and needle in (m.get("text") or "").lower():
                     hits.add(fp)
+    except Exception:
+        pass
+    # Disk-Scan fuer Textformate (Index kann hinter der Platte herhinken)
+    try:
+        for f in _all_files(_get_folders()):
+            path_str = str(f)
+            if path_str in hits or f.suffix.lower() not in EXTENSIONS_TEXT:
+                continue
+            try:
+                st = f.stat()
+                if st.st_size > _SCAN_MAX_BYTES:
+                    continue
+                cached = _scan_cache.get(path_str)
+                if cached and cached[0] == st.st_mtime:
+                    text = cached[1]
+                else:
+                    text = f.read_text(encoding="utf-8", errors="ignore").lower()
+                    if st.st_size <= _SCAN_CACHE_BYTES:
+                        if len(_scan_cache) > 2000:
+                            _scan_cache.clear()
+                        _scan_cache[path_str] = (st.st_mtime, text)
+            except Exception:
+                continue
+            if needle in text:
+                hits.add(path_str)
     except Exception:
         pass
     out = set()

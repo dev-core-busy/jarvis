@@ -1425,6 +1425,15 @@ const _I18N = {
         'skills.purge_report_none':    'Nichts zu entfernen – alles wird noch benötigt.',
         'skills.purge_hint':           'Beim vollständigen Deinstallieren werden zugehörige Python-Pakete nur entfernt, wenn weder der Systemkern noch ein anderer installierter Skill sie braucht (Beispiel: die Sprach-Transkription bleibt erhalten, solange die Wissensbasis sie mitnutzt). Was behalten wird, zeigt der Abschlussbericht mit Begründung. Der Skill-Code selbst bleibt liegen und der Skill kann jederzeit neu installiert werden.',
 
+        // ── Kundenverwaltung ──────────────────────────────────
+        'settings.tab.kundenverwaltung': 'Kundenverwaltung',
+        'kv.hint':          'Anbindung an die Kundenverwaltungs-API (IBS). Die Zugangsdaten schalten die Checkbox „IBS Tickets" in der Support-Suche frei und versorgen die Ticketsuche des Agenten über die Kundenverwaltung (Funktion „tickets-by-buzzwords", derzeit als Dummy).',
+        'kv.section_ibs':   'Kundenverwaltung (IBS) API',
+        'kv.url_label':     'URL Kundenverwaltung API',
+        'kv.key_label':     'API-Key Kundenverwaltung',
+        'kv.key_hint':      'Beide Felder zusammen aktivieren die Checkbox „IBS Tickets" in der Support-Suche.',
+        'kv.dummy_note':    'Hinweis: Die API-Funktion „tickets-by-buzzwords" ist serverseitig noch nicht verfügbar – das Agent-Werkzeug „kv_tickets_by_buzzwords" liefert bis dahin gekennzeichnete Beispieldaten.',
+
         // ── WhatsApp ──────────────────────────────────────────
         'wa.ready':                    'Bereit für Nachrichten',
 
@@ -2920,6 +2929,15 @@ const _I18N = {
         'skills.purge_report_errors':  'Errors',
         'skills.purge_report_none':    'Nothing to remove – everything is still required.',
         'skills.purge_hint':           'A full uninstall only removes Python packages that neither the system core nor another installed skill still needs (example: speech transcription is kept as long as the knowledge base uses it). The final report lists everything that was kept, with the reason. The skill code itself stays on disk and the skill can be reinstalled at any time.',
+
+        // ── Customer management ───────────────────────────────
+        'settings.tab.kundenverwaltung': 'Customer Mgmt',
+        'kv.hint':          'Connection to the customer management API (IBS). The credentials enable the "IBS tickets" checkbox in the support search and power the agent\'s ticket search via customer management (function "tickets-by-buzzwords", currently a dummy).',
+        'kv.section_ibs':   'Customer management (IBS) API',
+        'kv.url_label':     'Customer management API URL',
+        'kv.key_label':     'Customer management API key',
+        'kv.key_hint':      'Both fields together enable the "IBS tickets" checkbox in the support search.',
+        'kv.dummy_note':    'Note: the API function "tickets-by-buzzwords" is not yet available server-side – until then the agent tool "kv_tickets_by_buzzwords" returns clearly marked sample data.',
 
         // ── WhatsApp ──────────────────────────────────────────
         'wa.ready':                    'Ready for messages',

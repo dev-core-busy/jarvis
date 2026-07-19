@@ -1179,6 +1179,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="branding" id="settings-tab-btn-branding" style="display:none;">Branding</button>
                 <button class="settings-tab-btn" data-settings-tab="confluence" id="settings-tab-btn-confluence" style="display:none;">Confluence</button>
                 <button class="settings-tab-btn" data-settings-tab="jira" id="settings-tab-btn-jira" style="display:none;">Jira</button>
+                <button class="settings-tab-btn" data-settings-tab="kundenverwaltung" id="settings-tab-btn-kundenverwaltung" style="display:none;" data-i18n="settings.tab.kundenverwaltung">Kundenverwaltung</button>
                 <button class="settings-tab-btn" data-settings-tab="support" id="settings-tab-btn-support" style="display:none;">Support</button>
                 <button class="settings-tab-btn" data-settings-tab="telemetry" data-i18n="settings.tab.telemetry">Telemetry</button>
                 <button class="settings-tab-btn" data-settings-tab="security" data-i18n="settings.tab.security">Sicherheit</button>
@@ -2143,16 +2144,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <label>Personal Access Token (PAT)</label>
                             <input type="password" id="jira-token" class="config-input" placeholder="••••••••" autocomplete="new-password" style="width:100%;box-sizing:border-box;">
                         </div>
-                        <!-- IBS/Kundenverwaltung: schaltet die Checkbox 'IBS Tickets' unter /support frei -->
-                        <div class="form-group">
-                            <label>URL Kundenverwaltung API</label>
-                            <input type="text" id="ibs-api-url" class="config-input" placeholder="https://kundenverwaltung.firma.de/api" style="width:100%;box-sizing:border-box;">
-                        </div>
-                        <div class="form-group">
-                            <label>API-Key Kundenverwaltung</label>
-                            <input type="password" id="ibs-api-key" class="config-input" placeholder="••••••••" autocomplete="new-password" style="width:100%;box-sizing:border-box;">
-                            <p class="kb-hint" style="margin:4px 0 0;">Beide Felder zusammen aktivieren die Checkbox „IBS Tickets" in der Support-Suche.</p>
-                        </div>
                         <div class="form-group">
                             <label>Max. Trefferzahl pro Suche</label>
                             <input type="number" id="jira-max-results" class="config-input" min="1" max="1000" step="1" placeholder="50" style="width:140px;box-sizing:border-box;">
@@ -2183,6 +2174,31 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <pre id="jira-issue-text" style="white-space:pre-wrap;word-break:break-word;margin:0;font-family:var(--font-body);font-size:0.88rem;max-height:300px;overflow:auto;"></pre>
                             <div id="jira-issue-comments"></div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- ═══ Tab: Kundenverwaltung ═══ -->
+                <div id="settings-tab-kundenverwaltung" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint" data-i18n="kv.hint">Anbindung an die Kundenverwaltungs-API (IBS). Die Zugangsdaten schalten die Checkbox „IBS Tickets" in der Support-Suche frei und versorgen die Ticketsuche des Agenten über die Kundenverwaltung (Funktion „tickets-by-buzzwords", derzeit als Dummy).</p>
+
+                        <h4 style="margin:16px 0 8px;" data-i18n="kv.section_ibs">Kundenverwaltung (IBS) API</h4>
+                        <!-- IBS/Kundenverwaltung: schaltet die Checkbox 'IBS Tickets' unter /support frei -->
+                        <div class="form-group">
+                            <label data-i18n="kv.url_label">URL Kundenverwaltung API</label>
+                            <input type="text" id="ibs-api-url" class="config-input" placeholder="https://kundenverwaltung.firma.de/api" style="width:100%;box-sizing:border-box;">
+                        </div>
+                        <div class="form-group">
+                            <label data-i18n="kv.key_label">API-Key Kundenverwaltung</label>
+                            <input type="password" id="ibs-api-key" class="config-input" placeholder="••••••••" autocomplete="new-password" style="width:100%;box-sizing:border-box;">
+                            <p class="kb-hint" style="margin:4px 0 0;" data-i18n="kv.key_hint">Beide Felder zusammen aktivieren die Checkbox „IBS Tickets" in der Support-Suche.</p>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
+                            <button class="btn-primary" id="kv-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
+                            <span id="kv-status" style="font-size:0.9em;"></span>
+                        </div>
+
+                        <p class="kb-hint" style="margin-top:18px;" data-i18n="kv.dummy_note">Hinweis: Die API-Funktion „tickets-by-buzzwords" ist serverseitig noch nicht verfügbar – das Agent-Werkzeug „kv_tickets_by_buzzwords" liefert bis dahin gekennzeichnete Beispieldaten.</p>
                     </div>
                 </div>
 
@@ -3090,20 +3106,21 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=88"></script>
+    <script src="/static/js/i18n.js?v=90"></script>
     <script src="/static/js/cron.js?v=16"></script>
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
     <script src="/static/js/kbmatrix.js?v=7"></script>
     <script src="/static/js/extractor.js?v=23"></script>
-    <script src="/static/js/skills.js?v=32"></script>
+    <script src="/static/js/skills.js?v=33"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
     <script src="/static/js/knowledge.js?v=59"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>
-    <script src="/static/js/jira.js?v=5"></script>
+    <script src="/static/js/jira.js?v=6"></script>
+    <script src="/static/js/kundenverwaltung.js?v=1"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
     <script src="/static/js/telemetry.js?v=6"></script>
     <script src="/static/js/branding.js?v=20"></script>
@@ -3111,7 +3128,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/security_incidents.js?v=19"></script>
     <script src="/static/js/ldap_picker.js?v=6"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=168"></script>
+    <script src="/static/js/app.js?v=169"></script>
 </body>
 
 </html>

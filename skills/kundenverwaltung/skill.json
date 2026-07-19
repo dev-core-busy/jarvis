@@ -1,10 +1,10 @@
 {
     "name": "Kundenverwaltung",
-    "description": "Kundenzentrierte Auswertungen auf Jira-Basis (CRM-Organisationen): Ticketlisten pro Kunde, Kennzahlen-Profile, Eskalations-Analyse und fertige Diagramme.",
-    "version": "1.0.0",
+    "description": "Anbindung an die Kundenverwaltung (IBS-API): Ticketsuche nach Schlagworten. Erste Ausbaustufe – Funktion 'tickets-by-buzzwords' derzeit als Dummy.",
+    "version": "1.1.0",
     "author": "Jarvis",
     "module": "main",
-    "tools": ["jira_customer_tickets", "jira_org_profile", "jira_org_analysis", "jira_ticket_chart"],
+    "tools": ["kv_tickets_by_buzzwords"],
     "category": "wissen",
     "icon": "lifebuoy",
     "system": false,
@@ -14,36 +14,19 @@
     "dependencies": [],
     "permissions": [],
     "help": {
-        "details": "Kundenzentrierte CRM-Auswertungen ueber die Jira-Tickets einer Organisation (z.B. 'crm-10550'): gefilterte Ticketlisten nach Schlagworten, deterministische Kennzahlen-Profile ueber ALLE Tickets (Paginierung), LLM-gestuetzte Eskalations-Analyse (Map-Reduce ueber Beschreibungen und Kommentare) und fertige Ticket-Diagramme. 2026-07 aus dem Jira-Skill herausgeloest. Nutzt die Jira-Verbindung des Jira-Skills (dort URL, Token und die zentrale max_results-Obergrenze konfigurieren).",
+        "details": "Anbindung an die Kundenverwaltungs-API (IBS), unabhaengig von Jira. Erste Ausbaustufe: Ticketsuche nach Schlagworten ueber die API-Funktion 'tickets-by-buzzwords'. Die Funktion ist serverseitig noch nicht verfuegbar und derzeit als DUMMY umgesetzt – das Tool validiert Eingaben, zeigt den geplanten API-Aufruf und liefert gekennzeichnete Beispieldaten. Die Zugangsdaten (URL + API-Key) schalten zusaetzlich die Checkbox 'IBS Tickets' in der Support-Suche frei.",
         "tools": [
             {
-                "name": "jira_customer_tickets",
-                "label": "Kunden-Tickets nach Schlagworten",
-                "desc": "Findet die zu 2-5 Schlagworten passenden Tickets EINES CRM-Kunden (offene und abgeschlossene) als kompakte Trefferliste."
-            },
-            {
-                "name": "jira_org_profile",
-                "label": "Kunden-Profil (alle Tickets)",
-                "desc": "Aggregiert ALLE Tickets einer Kunden-/Organisations-ID (Paginierung) zu Kennzahlen: Prioritaets-/Status-/Typ-Verteilung, Bearbeiter/Melder, Zeitraum, Ø-Bearbeitungsdauer. Ticket-Liste mit Anlagedatum/Schliessdatum/Dauer pro Ticket – auch fuer Diagramme ueber Ticket-Zeitverlaeufe."
-            },
-            {
-                "name": "jira_org_analysis",
-                "label": "Eskalationsprofil (Map-Reduce, alle Tickets)",
-                "desc": "Vollstaendige Kunden-Eskalationsprofil-Analyse ueber ALLE Tickets per serverseitigem Map-Reduce (Beschreibung+Kommentare batchweise); liefert das zusammenfassende JSON mit Scores 0-10."
-            },
-            {
-                "name": "jira_ticket_chart",
-                "label": "Ticket-Diagramm (fertiger chartjs-Block)",
-                "desc": "Aggregiert ALLE Tickets eines Kunden serverseitig (monatlich/quartalsweise/jaehrlich) und liefert ein FERTIGES Liniendiagramm als chartjs-Block (x=Zeit nach Anlagedatum, y=Ø-Bearbeitungsdauer + Anzahl). Fuer 'Diagramm der Tickets von crm-XXXX' – Block unveraendert ausgeben."
+                "name": "kv_tickets_by_buzzwords",
+                "label": "Tickets suchen (Kundenverwaltung)",
+                "desc": "Sucht Tickets ueber die Kundenverwaltungs-API anhand von 1-5 Schlagworten. Derzeit Dummy mit Beispieldaten."
             }
         ],
         "use_cases": [
-            "Tickets von crm-10550 zum Thema LDT und Anbindung",
-            "Erstelle ein Kundenprofil ueber alle Tickets von crm-10408",
-            "Analysiere alle Tickets von crm-10408 (Eskalationsprofil)",
-            "Diagramm der Tickets von crm-10550: Anlagedatum vs. Bearbeitungsdauer"
+            "Suche in der Kundenverwaltung Tickets zu 'LDT Anbindung'",
+            "Kundenverwaltung: Tickets zu 'Drucker' und 'Fehler'"
         ],
-        "setup": "Setzt einen konfigurierten Jira-Zugang voraus: im Jira-Skill (Zahnrad) URL und Personal Access Token eintragen. Der Jira-Skill muss dafuer nicht aktiviert sein – die Verbindung wird geteilt.",
-        "notes": "Die zentrale Obergrenze 'Max. Trefferzahl' aus der Jira-Skill-Konfiguration gilt auch hier. Fuer vollstaendige Kundenprofile grosser Kunden ggf. erhoehen."
+        "setup": "Im Einstellungs-Reiter 'Kundenverwaltung' die URL der Kundenverwaltungs-API und den API-Key eintragen.",
+        "notes": "Die API-Funktion 'tickets-by-buzzwords' ist noch nicht angebunden (Dummy). Kundenauswertungen auf Jira-Basis (Profile, Eskalations-Analyse, Diagramme) liegen im Jira-Skill."
     }
 }

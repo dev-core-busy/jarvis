@@ -596,8 +596,9 @@
         const tabCron    = document.getElementById('settings-tab-cron');
         const tabConfluence = document.getElementById('settings-tab-confluence');
         const tabJira    = document.getElementById('settings-tab-jira');
+        const tabKundenverwaltung = document.getElementById('settings-tab-kundenverwaltung');
         const tabSupport = document.getElementById('settings-tab-support');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron];
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -657,6 +658,10 @@
                     tabJira.style.display = '';
                     tabJira.classList.add('active');
                     if (window.JiraManager) window.JiraManager.onShow();
+                } else if (target === 'kundenverwaltung' && tabKundenverwaltung) {
+                    tabKundenverwaltung.style.display = '';
+                    tabKundenverwaltung.classList.add('active');
+                    if (window.KundenverwaltungManager) window.KundenverwaltungManager.onShow();
                 } else if (target === 'support' && tabSupport) {
                     tabSupport.style.display = '';
                     tabSupport.classList.add('active');
@@ -827,6 +832,32 @@
             }
         }
 
+        // ── Kundenverwaltungs-Tab: nur sichtbar wenn 'kundenverwaltung'-Skill aktiviert ──
+        const kvTabBtn = document.getElementById('settings-tab-btn-kundenverwaltung');
+        window.updateKundenverwaltungTabVisibility = async function updateKundenverwaltungTabVisibility() {
+            if (!kvTabBtn) return;
+            try {
+                const resp = await fetch('/api/skills', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json();
+                const skills = data.skills || data || [];
+                const kv = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'kundenverwaltung')
+                    : null;
+                const isEnabled = kv && kv.enabled;
+                kvTabBtn.style.display = isEnabled ? '' : 'none';
+                if (!isEnabled && tabKundenverwaltung && tabKundenverwaltung.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
         const supportTabBtn = document.getElementById('settings-tab-btn-support');
         window.updateSupportTabVisibility = async function updateSupportTabVisibility() {
             if (!supportTabBtn) return;
@@ -923,6 +954,7 @@
             await updateBrandingTabVisibility();
             await updateConfluenceTabVisibility();
             await updateJiraTabVisibility();
+            await updateKundenverwaltungTabVisibility();
             await updateSupportTabVisibility();
             loadSslStatus();
             showListView();

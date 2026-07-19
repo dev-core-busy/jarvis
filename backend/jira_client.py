@@ -403,3 +403,45 @@ def issue_brief(it: dict, base: str = "") -> dict:
         "updated": f.get("updated"),
         "link": ("%s/browse/%s" % (base.rstrip("/"), it.get("key"))) if base and it.get("key") else "",
     }
+
+
+# ─── Geteilte Skill-Helfer (Jira-Skill + Kundenverwaltungs-Skill) ────────────
+
+def max_results_cap() -> int:
+    """Vom Administrator zentral konfigurierte Obergrenze fuer Trefferzahlen
+    (Jira-Skill-Config 'max_results'). Standard 50, Untergrenze 1,
+    Sicherheits-Deckel 1000 (Schutz vor versehentlich riesigen Abfragen)."""
+    try:
+        v = int(get_jira_config().get("max_results") or 50)
+    except Exception:
+        v = 50
+    return max(1, min(v, 1000))
+
+
+def fmt_err(e: "JiraError") -> str:
+    """Einheitliche, nutzerfreundliche Fehlermeldung fuer Tool-Ausgaben."""
+    if e.status in (401, 403):
+        return "❌ Authentifizierung fehlgeschlagen (HTTP %s). API-Token pruefen." % e.status
+    if e.status == 404:
+        return "❌ Nicht gefunden (HTTP 404). Issue-Key/Projekt pruefen."
+    if e.status == 400:
+        return "❌ Ungueltige Anfrage (HTTP 400) – evtl. fehlerhafte JQL: %s" % e
+    if e.status == 0:
+        return "❌ %s" % e
+    return "❌ Jira-Fehler (HTTP %s): %s" % (e.status, e)
+
+
+def fmt_issue_line(b: dict) -> str:
+    """Eine Ticket-Zeile fuer Trefferlisten (Key, Titel, Meta, Link)."""
+    parts = ["%s — %s" % (b.get("key", "?"), b.get("summary", ""))]
+    meta = []
+    if b.get("status"):   meta.append(b["status"])
+    if b.get("type"):     meta.append(b["type"])
+    if b.get("priority"): meta.append("Prio %s" % b["priority"])
+    if b.get("assignee"): meta.append("→ %s" % b["assignee"])
+    line = "- " + parts[0]
+    if meta:
+        line += "  [%s]" % ", ".join(meta)
+    if b.get("link"):
+        line += "\n  " + b["link"]
+    return line

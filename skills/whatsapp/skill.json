@@ -52,6 +52,21 @@
     },
     "knowledge_docs": [],
     "dependencies": ["faster-whisper", "httpx"],
+    "purge_packages": ["faster-whisper", "ctranslate2", "av", "httpx"],
+    "data_dirs": [
+        "data/logs/whatsapp.log",
+        "data/logs/whatsapp-bridge.log",
+        "services/whatsapp-bridge/auth",
+        "services/whatsapp-bridge/node_modules"
+    ],
+    "caches": ["~/.cache/huggingface/hub/models--Systran--faster-whisper-*"],
+    "install_commands": [
+        {
+            "cmd": ["npm", "install", "--omit=dev"],
+            "cwd": "services/whatsapp-bridge",
+            "creates": "services/whatsapp-bridge/node_modules"
+        }
+    ],
     "permissions": ["network"],
     "systemd_service": "whatsapp-bridge",
     "help": {

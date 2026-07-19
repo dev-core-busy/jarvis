@@ -143,7 +143,19 @@ data/
 - Skills liegen unter `skills/<name>/` mit `skill.json` (Manifest) + `main.py` (get_tools())
 - Tools erben von `backend/tools/base.py:BaseTool`
 - States persistiert in `settings.json` unter `skills`-Key
-- API: `/api/skills`, `/api/skills/{name}/enable|disable|config`
+- API: `/api/skills`, `/api/skills/{name}/enable|disable|config|install-status|purge`
+- **Lifecycle (seit 2026-07-19):** Aktivieren installiert fehlende Abhaengigkeiten im
+  Hintergrund-Thread (pip + apt via Root-Broker + `install_commands` wie npm install);
+  Fortschritt via `GET install-status`, Frontend pollt und zeigt Log.
+  `POST purge` deinstalliert vollstaendig: Dienst stoppen, pip-Pakete entfernen
+  (Geteilt-Pruefung: requirements.txt + dependencies/optional_dependencies anderer
+  installierter Skills + pip-Reverse-Deps), optional `remove_data` fuer data_dirs/caches.
+  Skill-Code (git-getrackt) bleibt immer liegen.
+- Manifest-Lifecycle-Felder: `dependencies` (pip), `optional_dependencies` (schuetzt
+  fremde Pakete vor Purge, z.B. knowledge→faster-whisper), `system_packages` (apt),
+  `purge_packages` (explizite Entfern-Liste inkl. transitiver Pakete), `data_dirs`,
+  `caches` (Globs, z.B. Whisper-Modell), `install_commands` ({cmd,cwd,creates}),
+  `systemd_service`
 
 ## WhatsApp-Integration
 - **Bridge:** Node.js + Baileys v7, systemd `whatsapp-bridge.service`, Port 3001 (localhost)

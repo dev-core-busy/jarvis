@@ -19,6 +19,13 @@ MANIFEST_DEFAULTS = {
     "config_schema": {},
     "knowledge_docs": [],
     "dependencies": [],
+    # Lifecycle-Felder: Installation bei Aktivierung, Aufraeumen bei Deinstallation
+    "optional_dependencies": [],   # pip-Pakete, die der Skill nutzt, aber nicht erzwingt (schuetzt vor Purge anderer Skills)
+    "system_packages": [],         # apt-Pakete (Installation via Root-Broker)
+    "purge_packages": [],          # pip-Pakete, die beim Deinstallieren entfernt werden duerfen (leer = dependencies)
+    "data_dirs": [],               # Daten/Verzeichnisse (repo-relativ), die beim Deinstallieren geloescht werden koennen
+    "caches": [],                  # Cache-Globs (z.B. ~/.cache/huggingface/...), die beim Deinstallieren geloescht werden koennen
+    "install_commands": [],        # Zusatzbefehle bei Installation, z.B. npm install ({cmd, cwd, creates})
     "permissions": [],
 }
 

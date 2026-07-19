@@ -730,9 +730,15 @@
         async _activate(name) {
             const token = localStorage.getItem('jarvis_token') || '';
             try {
-                await fetch(`/api/skills/${name}/enable`, {
+                const resp = await fetch(`/api/skills/${name}/enable`, {
                     method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
                 });
+                const data = await resp.json().catch(() => ({}));
+                if (data.installing) {
+                    // Abhaengigkeiten werden im Hintergrund installiert → Fortschritt zeigen
+                    this._showInstallProgress(name);
+                    return;
+                }
                 this._notify(`"${name}" ${window.t('skills.activated')}`, 'success');
                 await this.loadSkills();
                 if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
@@ -746,14 +752,76 @@
             } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
         }
 
-        async _deactivate(name) {
-            if (!confirm(`"${name}" ${window.t('skills.deinstall_confirm')}`)) return;
+        _deactivate(name) {
+            // 'x' = Dialog: nur aus Liste entfernen ODER vollstaendig deinstallieren
+            const overlay = document.createElement('div');
+            overlay.className = 'skill-config-overlay';
+            overlay.innerHTML = `
+                <div class="skill-config-dialog">
+                    <h3>${window.t('skills.purge_title')}: ${name}</h3>
+                    <form id="sk-purge-form">
+                        <div class="form-group">
+                            <label class="checkbox-group">
+                                <input type="radio" name="sk-purge-mode" value="remove" checked>
+                                <span>${window.t('skills.purge_opt_remove')}</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-group">
+                                <input type="radio" name="sk-purge-mode" value="purge">
+                                <span>${window.t('skills.purge_opt_full')}</span>
+                            </label>
+                        </div>
+                        <div class="form-group" style="margin-left:1.5em;">
+                            <label class="checkbox-group">
+                                <input type="checkbox" name="sk-purge-data" disabled>
+                                <span>${window.t('skills.purge_data')}</span>
+                            </label>
+                        </div>
+                    </form>
+                    <p style="font-size:0.8em;color:var(--text-secondary);line-height:1.5;margin-top:6px;">
+                        ${window.t('skills.purge_hint')}
+                    </p>
+                    <div class="modal-actions">
+                        <button class="btn-primary" id="sk-purge-ok">${window.t('skills.purge_btn')}</button>
+                        <button class="btn-secondary" id="sk-purge-cancel">${window.t('common.cancel')}</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+
+            const dataCb = overlay.querySelector('[name="sk-purge-data"]');
+            overlay.querySelectorAll('[name="sk-purge-mode"]').forEach(r => {
+                r.addEventListener('change', () => {
+                    const purge = overlay.querySelector('[name="sk-purge-mode"]:checked').value === 'purge';
+                    dataCb.disabled = !purge;
+                    if (!purge) dataCb.checked = false;
+                });
+            });
+            overlay.querySelector('#sk-purge-cancel').addEventListener('click', () => overlay.remove());
+            overlay.querySelector('#sk-purge-ok').addEventListener('click', async () => {
+                const purge      = overlay.querySelector('[name="sk-purge-mode"]:checked').value === 'purge';
+                const removeData = dataCb.checked;
+                overlay.remove();
+                await this._doRemove(name, purge, removeData);
+            });
+        }
+
+        async _doRemove(name, purge, removeData) {
             const token = localStorage.getItem('jarvis_token') || '';
             try {
-                // 'x' = aus 'Installierte' entfernen (→ 'Moegliche'), nicht nur deaktivieren
-                await fetch(`/api/skills/${name}/remove`, {
-                    method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
-                });
+                if (purge) {
+                    const resp = await fetch(`/api/skills/${name}/purge`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ remove_data: removeData })
+                    });
+                    const report = await resp.json().catch(() => ({}));
+                    this._showPurgeReport(name, report);
+                } else {
+                    await fetch(`/api/skills/${name}/remove`, {
+                        method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                }
                 this._notify(`"${name}" ${window.t('skills.uninstalled')}`, 'success');
                 await this.loadSkills();
                 if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
@@ -767,6 +835,84 @@
             } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
         }
 
+        // Ergebnis der vollstaendigen Deinstallation anzeigen
+        _showPurgeReport(name, report) {
+            const rows = [];
+            const section = (title, items) => {
+                if (!items || !items.length) return;
+                rows.push(`<div class="sk-info-section-title">${title}</div>`);
+                rows.push(`<ul class="sk-info-use-cases">${items.map(i => `<li>${i}</li>`).join('')}</ul>`);
+            };
+            section(window.t('skills.purge_report_removed'), report.removed_packages);
+            section(window.t('skills.purge_report_kept'),
+                Object.entries(report.kept_packages || {}).map(([p, why]) => `${p} – ${why}`));
+            section(window.t('skills.purge_report_paths'), report.removed_paths);
+            section(window.t('skills.purge_report_errors'), report.errors);
+            if (!rows.length) rows.push(`<p>${window.t('skills.purge_report_none')}</p>`);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'skill-config-overlay';
+            overlay.innerHTML = `
+                <div class="skill-config-dialog">
+                    <h3>${window.t('skills.purge_title')}: ${name}</h3>
+                    <div class="sk-info-section">${rows.join('')}</div>
+                    <div class="modal-actions">
+                        <button class="btn-primary" id="sk-purge-report-close">${window.t('common.close')}</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            overlay.querySelector('#sk-purge-report-close').addEventListener('click', () => overlay.remove());
+        }
+
+        // Fortschritt der Hintergrund-Installation (Polling auf install-status)
+        _showInstallProgress(name) {
+            const token = localStorage.getItem('jarvis_token') || '';
+            const overlay = document.createElement('div');
+            overlay.className = 'skill-config-overlay';
+            overlay.innerHTML = `
+                <div class="skill-config-dialog">
+                    <h3>⏳ ${window.t('skills.installing').replace('{name}', name)}</h3>
+                    <pre id="sk-install-log" style="max-height:260px;overflow:auto;
+                        background:var(--bg-glass);color:var(--text-secondary);
+                        border-radius:8px;padding:10px;font-size:0.78em;
+                        white-space:pre-wrap;word-break:break-word;"></pre>
+                    <div class="modal-actions">
+                        <button class="btn-secondary" id="sk-install-hide">${window.t('common.close')}</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+
+            const logEl = overlay.querySelector('#sk-install-log');
+            let closed  = false;
+            const stop  = () => { closed = true; overlay.remove(); };
+            overlay.querySelector('#sk-install-hide').addEventListener('click', stop);
+
+            const poll = async () => {
+                if (closed) return;
+                try {
+                    const resp = await fetch(`/api/skills/${name}/install-status`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const st = await resp.json();
+                    logEl.textContent = (st.log || []).join('\n');
+                    logEl.scrollTop = logEl.scrollHeight;
+                    if (st.running) { setTimeout(poll, 1500); return; }
+                    // Fertig → Ergebnis melden und Liste aktualisieren
+                    this._notify(st.ok
+                        ? `"${name}" ${window.t('skills.install_ok')}`
+                        : `"${name}" ${window.t('skills.install_fail')}`,
+                        st.ok ? 'success' : 'error');
+                    await this.loadSkills();
+                    if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
+                    if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
+                    if (st.ok) setTimeout(stop, 1200);
+                } catch (e) {
+                    if (!closed) setTimeout(poll, 3000);
+                }
+            };
+            poll();
+        }
+
         async _toggle(e, name, enabled, isSystem) {
             if (isSystem && !enabled) {
                 if (!confirm(`"${name}" ${window.t('skills.confirm_disable_system')}`)) {
@@ -776,9 +922,14 @@
             const token    = localStorage.getItem('jarvis_token') || '';
             const endpoint = enabled ? 'enable' : 'disable';
             try {
-                await fetch(`/api/skills/${name}/${endpoint}`, {
+                const resp = await fetch(`/api/skills/${name}/${endpoint}`, {
                     method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
                 });
+                const data = await resp.json().catch(() => ({}));
+                if (enabled && data.installing) {
+                    this._showInstallProgress(name);
+                    return;
+                }
                 await this.loadSkills();
                 // Tab-Sichtbarkeit nach Skill-Änderung aktualisieren
                 if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();

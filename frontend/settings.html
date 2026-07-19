@@ -2198,7 +2198,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <span id="kv-status" style="font-size:0.9em;"></span>
                         </div>
 
-                        <p class="kb-hint" style="margin-top:18px;" data-i18n="kv.dummy_note">Hinweis: Die API-Funktion „tickets-by-buzzwords" ist serverseitig noch nicht verfügbar – das Agent-Werkzeug „kv_tickets_by_buzzwords" liefert bis dahin gekennzeichnete Beispieldaten.</p>
+                        <h4 style="margin:22px 0 8px;" data-i18n="kv.search_title">Tickets suchen (Dummy)</h4>
+                        <p class="kb-hint" data-i18n="kv.dummy_note">Hinweis: Die API-Funktion „tickets-by-buzzwords" ist serverseitig noch nicht verfügbar – die Suche liefert bis dahin gekennzeichnete Beispieldaten.</p>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                            <input type="text" id="kv-search-buzzwords" class="config-input" data-i18n-placeholder="kv.search_ph" placeholder="Schlagworte, kommagetrennt (1–5)…" style="flex:1;min-width:180px;">
+                            <input type="number" id="kv-search-limit" class="config-input" min="1" max="100" step="1" value="25" title="Max. Trefferzahl" style="width:90px;">
+                            <button class="btn-secondary" id="kv-search-btn" type="button" data-i18n="common.search">Suchen</button>
+                        </div>
+                        <div id="kv-search-results" style="margin-top:12px;display:flex;flex-direction:column;gap:6px;"></div>
                     </div>
                 </div>
 
@@ -3106,7 +3113,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=90"></script>
+    <script src="/static/js/i18n.js?v=91"></script>
     <script src="/static/js/cron.js?v=16"></script>
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
@@ -3120,7 +3127,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>
     <script src="/static/js/jira.js?v=6"></script>
-    <script src="/static/js/kundenverwaltung.js?v=1"></script>
+    <script src="/static/js/kundenverwaltung.js?v=2"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
     <script src="/static/js/telemetry.js?v=6"></script>
     <script src="/static/js/branding.js?v=20"></script>

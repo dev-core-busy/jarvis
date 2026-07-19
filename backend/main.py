@@ -3847,11 +3847,21 @@ async def verify_token_endpoint(request: Request):
 # ─── Skills-Verwaltung ────────────────────────────────────────────
 _standalone_skill_manager = None
 
+def _skill_post_install():
+    """Nach Hintergrund-Installation eines Skills: Agent-Tools neu laden."""
+    if agent_instance:
+        try:
+            agent_instance.reload_skills()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _get_skill_manager():
     """Gibt den SkillManager zurueck – nutzt Agent-Instanz falls vorhanden,
     sonst eigenstaendigen SkillManager (z.B. wenn kein API-Key gesetzt)."""
     global agent_instance, _standalone_skill_manager
     if agent_instance is not None:
+        agent_instance.skill_manager.post_install_hook = _skill_post_install
         return agent_instance.skill_manager
     # Versuche Agent zu erstellen (braucht API-Key)
     try:
@@ -3863,6 +3873,7 @@ def _get_skill_manager():
         if _standalone_skill_manager is None:
             from backend.skills.manager import SkillManager
             _standalone_skill_manager = SkillManager()
+        _standalone_skill_manager.post_install_hook = _skill_post_install
         return _standalone_skill_manager
 
 
@@ -3875,12 +3886,14 @@ async def get_skills(user: str = Depends(require_auth)):
 
 @app.post("/api/skills/{name}/enable")
 async def enable_skill(name: str, user: str = Depends(require_local_auth)):
-    """Aktiviert einen Skill."""
+    """Aktiviert einen Skill. Fehlen deklarierte Abhaengigkeiten, startet die
+    Installation im Hintergrund (Fortschritt: GET /api/skills/{name}/install-status);
+    Antwort enthaelt dann installing=true."""
     sm = _get_skill_manager()
-    success = sm.enable_skill(name)
+    result = await asyncio.to_thread(sm.enable_skill, name)
     if agent_instance:
         agent_instance.reload_skills()
-    return JSONResponse({"success": success})
+    return JSONResponse(result)
 
 
 @app.post("/api/skills/{name}/disable")
@@ -3941,6 +3954,32 @@ async def install_skill_deps(name: str, user: str = Depends(require_local_auth))
     sm = _get_skill_manager()
     result = sm.install_dependencies(name)
     return JSONResponse({"result": result})
+
+
+@app.get("/api/skills/{name}/install-status")
+async def skill_install_status(name: str, user: str = Depends(require_auth)):
+    """Fortschritt der Hintergrund-Installation eines Skills:
+    {running: bool, ok: bool|null, log: [zeilen]}."""
+    sm = _get_skill_manager()
+    return JSONResponse(sm.get_install_status(name))
+
+
+@app.post("/api/skills/{name}/purge")
+async def purge_skill(name: str, request: Request, user: str = Depends(require_local_auth)):
+    """Deinstalliert einen Skill vollstaendig: stoppt den gekoppelten Dienst,
+    entfernt pip-Pakete (nur wenn weder Kern noch andere Skills sie brauchen)
+    und loescht auf Wunsch (remove_data=true) Daten/Caches des Skills.
+    Antwort: {removed_packages, kept_packages, removed_paths, errors}."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    remove_data = bool(body.get("remove_data", False))
+    sm = _get_skill_manager()
+    report = await asyncio.to_thread(sm.purge_skill, name, remove_data)
+    if agent_instance:
+        agent_instance.reload_skills()
+    return JSONResponse(report)
 
 
 @app.delete("/api/skills/{name}")
@@ -8053,7 +8092,14 @@ def _get_whisper_model():
 
         try:
             from faster_whisper import WhisperModel
+        except ImportError:
+            # Optionales Feature: ohne faster-whisper (z.B. WhatsApp-Skill purged)
+            # keine Transkription – Hinweis statt Fehler
+            wa_log("INFO", "transcription",
+                   "faster-whisper nicht installiert – Sprach-Transkription deaktiviert")
+            return None
 
+        try:
             # Modell aus WhatsApp-Skill-Config lesen
             sm = _get_skill_manager()
             wa_config = sm.get_skill_config("whatsapp")
@@ -9220,6 +9266,10 @@ async def startup():
     # Whisper-Modell im Hintergrund vorladen (für Wake-Word-Erkennung)
     import threading
     def _preload_whisper():
+        import importlib.util
+        if importlib.util.find_spec("faster_whisper") is None:
+            print("[whisper] faster-whisper nicht installiert – Vorladen übersprungen", flush=True)
+            return
         try:
             _get_whisper_model()
         except Exception as e:

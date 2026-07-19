@@ -1432,7 +1432,9 @@ const _I18N = {
         'kv.url_label':     'URL Kundenverwaltung API',
         'kv.key_label':     'API-Key Kundenverwaltung',
         'kv.key_hint':      'Beide Felder zusammen aktivieren die Checkbox „IBS Tickets" in der Support-Suche.',
-        'kv.dummy_note':    'Hinweis: Die API-Funktion „tickets-by-buzzwords" ist serverseitig noch nicht verfügbar – das Agent-Werkzeug „kv_tickets_by_buzzwords" liefert bis dahin gekennzeichnete Beispieldaten.',
+        'kv.dummy_note':    'Hinweis: Die API-Funktion „tickets-by-buzzwords" ist serverseitig noch nicht verfügbar – die Suche liefert bis dahin gekennzeichnete Beispieldaten.',
+        'kv.search_title':  'Tickets suchen (Dummy)',
+        'kv.search_ph':     'Schlagworte, kommagetrennt (1–5)…',
 
         // ── WhatsApp ──────────────────────────────────────────
         'wa.ready':                    'Bereit für Nachrichten',
@@ -2937,7 +2939,9 @@ const _I18N = {
         'kv.url_label':     'Customer management API URL',
         'kv.key_label':     'Customer management API key',
         'kv.key_hint':      'Both fields together enable the "IBS tickets" checkbox in the support search.',
-        'kv.dummy_note':    'Note: the API function "tickets-by-buzzwords" is not yet available server-side – until then the agent tool "kv_tickets_by_buzzwords" returns clearly marked sample data.',
+        'kv.dummy_note':    'Note: the API function "tickets-by-buzzwords" is not yet available server-side – until then the search returns clearly marked sample data.',
+        'kv.search_title':  'Search tickets (dummy)',
+        'kv.search_ph':     'Buzzwords, comma-separated (1–5)…',
 
         // ── WhatsApp ──────────────────────────────────────────
         'wa.ready':                    'Ready for messages',

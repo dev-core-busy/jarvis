@@ -4582,6 +4582,19 @@ def _support_jira_jql(query: str, open_only: bool = True) -> str:
     return (jql + " ORDER BY updated DESC") if jql else "ORDER BY updated DESC"
 
 
+# ─── Kundenverwaltung (IBS-API) ──────────────────────────────────────
+@app.get("/api/kundenverwaltung/tickets-by-buzzwords")
+async def kv_tickets_by_buzzwords_api(buzzwords: str = "", limit: int = 25,
+                                      user: str = Depends(require_auth)):
+    """Ticketsuche ueber die Kundenverwaltungs-API (IBS) nach 1-5 Schlagworten
+    (kommagetrennt). DERZEIT DUMMY: die API-Funktion 'tickets-by-buzzwords' ist
+    serverseitig noch nicht verfuegbar – es kommen gekennzeichnete Beispieldaten
+    plus die geplante Request-URL zurueck (dummy=true). Zugangsdaten werden im
+    Einstellungs-Reiter 'Kundenverwaltung' gepflegt."""
+    from backend.kundenverwaltung_client import tickets_by_buzzwords
+    return JSONResponse(tickets_by_buzzwords(buzzwords, limit))
+
+
 @app.get("/support", response_class=HTMLResponse)
 async def support_page():
     """Support-Oberflaeche ausliefern – nur wenn der Skill aktiv ist."""

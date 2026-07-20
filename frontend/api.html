@@ -69,6 +69,12 @@
             font-size: .82rem; color: var(--text-secondary); user-select: none; }
         .ad-localonly input { accent-color: var(--danger, #ef4444); width: 15px; height: 15px; cursor: pointer; }
         .ad-localonly:hover { color: var(--text-primary); }
+        /* Schloss-Marker: nur sichtbar, wenn Endpunkt/Gruppe eingeschraenkt ist */
+        .ep-lock { display: none; margin-left: 8px; flex-shrink: 0; }
+        .ep.is-local-only > summary .ep-lock,
+        .ad-group.has-local-only > summary .ad-glock { display: inline; }
+        .ep.is-local-only > summary { border-left: 3px solid var(--danger, #ef4444);
+            background: rgba(239,68,68,.07); }
         .ep-desc { color: var(--text-secondary); font-size: .86rem; line-height: 1.5; margin: 10px 0; white-space: pre-wrap; }
         .ep-h { font-size: .72rem; text-transform: uppercase; letter-spacing: .6px; color: var(--text-secondary);
                 margin: 14px 0 6px; font-weight: 700; }
@@ -239,32 +245,36 @@
                 det.className = 'ad-group';
                 det.setAttribute('data-group', gname);
                 var sum = document.createElement('summary');
-                sum.innerHTML = esc(gname) + ' <span class="ad-gcount">' + list.length + '</span>';
+                sum.innerHTML = esc(gname) + ' <span class="ad-gcount">' + list.length + '</span>'
+                    + '<span class="ep-lock ad-glock" title="Enthält auf lokal beschränkte Endpunkte">🔒</span>';
                 det.appendChild(sum);
                 list.forEach(function (ep) { det.appendChild(epNode(ep)); });
                 wrap.appendChild(det);
             });
             applyFilter();
+            updateGroupMarkers();
         }
 
         function epNode(ep) {
             var op = ep.op;
+            var key = epKey(ep);
             var d = document.createElement('details');
-            d.className = 'ep';
+            d.className = 'ep' + (localOnly[key] ? ' is-local-only' : '');
             d.setAttribute('data-search', (ep.method + ' ' + ep.path + ' ' + (op.summary || '') + ' ' + (op.description || '')).toLowerCase());
             d.setAttribute('data-method', ep.method);
+            d.setAttribute('data-key', key);
 
             var s = document.createElement('summary');
             s.innerHTML = '<span class="ep-method ' + mCls(ep.method) + '">' + ep.method.toUpperCase() + '</span>'
                 + '<span class="ep-path">' + esc(ep.path) + '</span>'
-                + '<span class="ep-sum">' + esc(op.summary || '') + '</span>';
+                + '<span class="ep-sum">' + esc(op.summary || '') + '</span>'
+                + '<span class="ep-lock" title="Auf lokalen Zugriff (Loopback) beschränkt">🔒</span>';
             d.appendChild(s);
 
             var body = document.createElement('div');
             body.className = 'ep-body';
 
             // "nur lokal"-Schalter (Admin): beschraenkt den Endpunkt auf Loopback
-            var key = epKey(ep);
             var loRow = document.createElement('label'); loRow.className = 'ad-localonly';
             var loCb = document.createElement('input'); loCb.type = 'checkbox'; loCb.checked = !!localOnly[key];
             var loTxt = document.createElement('span');
@@ -346,7 +356,21 @@
                 }
                 localOnly = {}; (d.restricted || []).forEach(function (k) { localOnly[k] = true; });
                 cb.checked = !!localOnly[key];
+                // Marker an Endpunkt-Zeile UND Gruppe live aktualisieren
+                var det = cb.closest('.ep');
+                if (det) {
+                    det.classList.toggle('is-local-only', !!localOnly[key]);
+                    updateGroupMarkers();
+                }
             }
+        }
+
+        // Markiert jede Gruppe, in der mindestens ein Endpunkt beschraenkt ist.
+        function updateGroupMarkers() {
+            document.querySelectorAll('.ad-group').forEach(function (grp) {
+                var any = grp.querySelector('.ep.is-local-only') !== null;
+                grp.classList.toggle('has-local-only', any);
+            });
         }
 
         function testForm(ep, params, bs, exampleBody) {

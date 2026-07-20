@@ -577,7 +577,9 @@ def known_paths_with_disk() -> list:
             paths.add(str(f))
     except Exception:
         pass
-    return list(paths)
+    # Versteckte/interne Dateien ausschliessen – faengt auch evtl. frueher
+    # indizierte Alt-Eintraege ab (z.B. das Manifest .groups.json).
+    return [p for p in paths if not os.path.basename(p).startswith(".")]
 
 
 # Kleiner mtime-Cache fuer den Disk-Scan der Inhalts-Suche
@@ -763,7 +765,14 @@ def _all_files(folders: list[Path]) -> list[Path]:
             continue
         try:
             for root, dirs, fs in os.walk(folder, onerror=lambda e: None):
+                # Versteckte Verzeichnisse nicht betreten (z.B. .git, .cache)
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
                 for f in fs:
+                    # Versteckte/interne Dateien ueberspringen – z.B. das
+                    # Gruppen-Manifest data/knowledge/.groups.json ist KEIN
+                    # Wissensdokument und darf weder indiziert noch gelistet werden.
+                    if f.startswith("."):
+                        continue
                     if Path(f).suffix.lower() in all_exts:
                         files.append(Path(root) / f)
         except OSError as e:

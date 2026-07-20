@@ -37,6 +37,7 @@
             if (this._bound) return;
             this._bound = true;
             var save = $('kv-save'); if (save) save.addEventListener('click', this.save.bind(this));
+            var test = $('kv-test'); if (test) test.addEventListener('click', this.test.bind(this));
             var sb = $('kv-search-btn'); if (sb) sb.addEventListener('click', this.search.bind(this));
             var inp = $('kv-search-buzzwords');
             if (inp) inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') Manager.search(); });
@@ -76,7 +77,28 @@
               .catch(function () { status('✗ Fehler beim Speichern', 'error'); });
         },
 
-        // Dummy-Ticketsuche ueber /api/kundenverwaltung/tickets-by-buzzwords
+        // Erreichbarkeits-Test der IBS-API (jede HTTP-Antwort = erreichbar)
+        test: function () {
+            status('Teste Verbindung…');
+            fetch('/api/kundenverwaltung/test', { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d || (!d.ok && d.configured === false)) {
+                        status('Nicht konfiguriert – bitte zuerst URL speichern.', 'error');
+                    } else if (!d.ok) {
+                        status('❌ ' + (d.error || 'Nicht erreichbar'), 'error');
+                    } else {
+                        var msg = '✅ Erreichbar (HTTP ' + d.status + ')';
+                        if (!d.key_set) msg += ' – API-Key fehlt noch';
+                        else if (d.status === 401 || d.status === 403) msg = '⚠️ Erreichbar, aber HTTP ' + d.status + ' – API-Key prüfen';
+                        status(msg, (d.status === 401 || d.status === 403 || !d.key_set) ? '' : 'ok');
+                    }
+                })
+                .catch(function () { status('❌ Verbindungstest fehlgeschlagen', 'error'); });
+        },
+
+        // Ticketsuche ueber /api/kundenverwaltung/tickets-by-buzzwords
+        // (serverseitig API-Funktion 'getMatchingEvents')
         search: function () {
             var box = $('kv-search-results');
             if (!box) return;
@@ -93,9 +115,12 @@
             var limit = parseInt(($('kv-search-limit') ? $('kv-search-limit').value : '') || '25', 10);
             if (isNaN(limit) || limit < 1) limit = 25;
             if (limit > 100) limit = 100;
+            var addr = ($('kv-search-address') ? $('kv-search-address').value : '').trim();
             box.innerHTML = '<span class="kb-hint">Suche…</span>';
             fetch('/api/kundenverwaltung/tickets-by-buzzwords?buzzwords=' + encodeURIComponent(buzz)
-                    + '&limit=' + limit, { headers: authHeaders() })
+                    + '&limit=' + limit
+                    + (addr ? '&address_id=' + encodeURIComponent(addr) : ''),
+                    { headers: authHeaders() })
                 .then(function (r) { return r.json(); })
                 .then(function (d) {
                     if (!d || !d.ok) {
@@ -103,26 +128,30 @@
                             + esc((d && d.error) || 'Suche fehlgeschlagen') + '</span>';
                         return;
                     }
-                    var head = '';
-                    if (d.dummy) {
-                        head += '<div class="kb-hint" style="border:1px solid var(--border);'
-                            + 'border-radius:8px;padding:8px 10px;background:var(--bg-glass);">'
-                            + '⚠️ <strong>Dummy-Antwort</strong> – die API-Funktion „tickets-by-buzzwords" '
-                            + 'ist noch nicht verfügbar. Geplanter Aufruf:<br>'
-                            + '<code style="word-break:break-all;">GET ' + esc(d.planned || '') + '</code></div>';
-                    }
                     var res = d.tickets || [];
-                    head += '<div class="kb-hint" style="margin:8px 0 4px;">' + res.length
-                        + ' Beispieldaten für Schlagworte: ' + esc((d.terms || []).join(', ')) + '</div>';
-                    box.innerHTML = head;
+                    box.innerHTML = '<div class="kb-hint" style="margin:8px 0 4px;">' + res.length
+                        + ' Treffer für Schlagworte: ' + esc((d.terms || []).join(', '))
+                        + (d.address_id ? ' · Adress-ID: ' + esc(d.address_id) : '') + '</div>';
                     res.forEach(function (t) {
                         var row = document.createElement('div');
-                        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;'
-                            + 'gap:10px;padding:8px 10px;border:1px solid var(--border);'
+                        row.style.cssText = 'display:flex;flex-direction:column;gap:4px;'
+                            + 'padding:10px 12px;border:1px solid var(--border);'
                             + 'border-radius:8px;background:var(--bg-glass);';
-                        row.innerHTML = '<span style="min-width:0;"><span style="font-weight:600;">'
-                            + esc(t.key) + '</span> ' + esc(t.title || '')
-                            + '</span><span class="kb-hint" style="white-space:nowrap;">' + esc(t.status || '') + '</span>';
+                        // Kopfzeile: ID · Status · geaendert am
+                        var meta = [];
+                        if (t.status) meta.push(esc(t.status));
+                        if (t.updated) meta.push(esc(t.updated));
+                        if (t.dispatch_user) meta.push(esc(t.dispatch_user));
+                        var head = '<div style="display:flex;justify-content:space-between;'
+                            + 'gap:10px;align-items:baseline;">'
+                            + '<span style="font-weight:600;">#' + esc(t.key || '—') + '</span>'
+                            + '<span class="kb-hint" style="white-space:nowrap;">' + meta.join(' · ') + '</span>'
+                            + '</div>';
+                        // Volltext (mehrzeilige Verlaufshistorie) lesbar mit Umbruechen
+                        var full = (t.text || t.title || '');
+                        var bodyHtml = '<div style="white-space:pre-wrap;word-break:break-word;'
+                            + 'font-size:0.88rem;line-height:1.45;">' + esc(full) + '</div>';
+                        row.innerHTML = head + bodyHtml;
                         box.appendChild(row);
                     });
                 })

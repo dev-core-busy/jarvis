@@ -403,11 +403,37 @@ class JarvisKnowledgeManager {
             box.innerHTML = title + `<div class="kb-files-empty">${T('kbgroups.no_ungrouped', 'Keine ungruppierten Dokumente – alles ist zugeordnet.')}</div>`;
             return;
         }
+        // Ungruppierte Dateien sind keiner Gruppe zugeordnet -> das "✕" LÖSCHT die
+        // Datei ganz (in der Gruppen-Ansicht entfernt es dagegen nur die Zuordnung).
         box.innerHTML = title + files.map(p => `
             <div class="kb-grp-file-row">
                 <span class="kb-file-icon">📄</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
+                <button class="kb-btn-remove kb-ung-del" data-path="${KG.esc(p)}" title="${T('knowledge.file_delete_title', 'Datei löschen')}">✕</button>
             </div>`).join('');
+        box.querySelectorAll('.kb-ung-del').forEach(btn => {
+            btn.onclick = async () => {
+                const path = btn.dataset.path;
+                if (!confirm((window.t('knowledge.file_delete_confirm') || 'Datei „{name}" wirklich löschen?')
+                        .replace('{name}', KG.baseName(path)))) return;
+                try {
+                    const r = await fetch('/api/knowledge/files', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json',
+                                   'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                        body: JSON.stringify({ path })
+                    });
+                    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || ('HTTP ' + r.status)); }
+                    this._showNotification(window.t('knowledge.file_deleted') || 'Datei gelöscht', 'success');
+                    await KG.load();
+                    this._renderGroupsOverview();
+                    this._showUngroupedFiles();
+                    this.fetchStats && this.fetchStats();
+                } catch (e) {
+                    this._showNotification((window.t('common.error') || 'Fehler') + ': ' + e.message, 'error');
+                }
+            };
+        });
     }
 
     async _checkRunningIndex() {
@@ -1152,20 +1178,36 @@ class JarvisKnowledgeManager {
         const folder = input.value.trim();
         if (!folder) return;
 
+        // Einfacher Name (optional mit fuehrendem data/) -> Ordner ANLEGEN, falls
+        // er fehlt, und in die Liste aufnehmen (Create-Endpoint legt data/<name>
+        // physisch an; 409 = schon vorhanden = ok). Verhindert das Warndreieck
+        // "Ordner existiert nicht" beim Hinzufuegen eines neuen Namens.
+        // Echte Pfade (mit / oder absolut) werden wie bisher nur registriert.
+        const bareName = folder.replace(/^data\//, '');
+        const isSimpleName = !folder.startsWith('/') && !bareName.includes('/') && !bareName.includes('..');
+        const token = localStorage.getItem('jarvis_token') || '';
         try {
-            const resp = await fetch('/api/skills/knowledge/config', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
-                },
-                body: JSON.stringify({ folders: await this._buildNewFolderList(folder, 'add') })
-            });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-
+            if (isSimpleName) {
+                const resp = await fetch('/api/knowledge/folders', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ name: bareName })
+                });
+                const result = await resp.json().catch(() => ({}));
+                // 409 = Ordner ist bereits in der Liste -> kein Fehler
+                if (!resp.ok && resp.status !== 409) throw new Error(result.error || ('HTTP ' + resp.status));
+            } else {
+                const resp = await fetch('/api/skills/knowledge/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ folders: await this._buildNewFolderList(folder, 'add') })
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            }
             input.value = '';
             this._showNotification(window.t('knowledge.folder_added'), 'success');
             await this.fetchStats();
+            if (window.KbGroups) await this._refreshGroups();
         } catch (e) {
             this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }

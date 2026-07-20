@@ -514,6 +514,11 @@
     }
 
     window.refreshBranding = refreshBranding;
+    // Branding auf DYNAMISCH neu gerenderte Inhalte erneut anwenden (z.B. neue
+    // Chat-Begruessung bei "Neuer Chat"), ohne erneuten Netz-Abruf.
+    window.applyBrandingNow = function () {
+        if (_current && _current.active) applyBranding(_current);
+    };
     window.resetBranding = resetBranding;
     window.brandAvatar = brandAvatar;
 

@@ -1864,6 +1864,8 @@
                 + '<p data-i18n="chat.greeting">Hallo! Ich bin Jarvis.</p>'
                 + '<p class="welcome-sub" data-i18n="chat.greeting_sub">Wie kann ich dir helfen?</p></div>';
             if (window.applyLang) window.applyLang();
+            // Branding auf die frisch gerenderte Begruessung anwenden (Assistenten-Name)
+            if (window.applyBrandingNow) window.applyBrandingNow();
             return;
         }
 

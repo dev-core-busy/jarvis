@@ -127,6 +127,13 @@
         return String(name || '').split('@')[0].split('\\').pop().trim().toLowerCase();
     }
 
+    // Anzeigename: Domain-Praefix (DOMAIN\user) und UPN-Suffix (user@domain)
+    // entfernen, Original-Schreibweise aber behalten. Fuer die SICHTBARE Anzeige
+    // (Liste, Chat-Kopf) – intern bleibt der volle Login fuer Zustellung/Historie.
+    function _displayName(name) {
+        return String(name || '').split('@')[0].split('\\').pop().trim();
+    }
+
     function formatTime(ts) {
         const d = new Date(ts);
         return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
@@ -612,18 +619,19 @@
         userList.innerHTML = '';
         for (const e of entries) {
             const username = e.username, online = e.online, unread = e.unread;
+            const disp = _displayName(username);   // ohne Domain-Praefix anzeigen
             const isActive = e.norm === activeNorm;
 
             const item = document.createElement('div');
             item.className = 'uc-user-item' + (isActive ? ' active' : '');
-            item.dataset.username = username;
+            item.dataset.username = username;       // voller Login fuer Routing
 
             item.innerHTML = `
                 <div class="uc-avatar">
-                    ${initial(username)}
+                    ${initial(disp)}
                     <span class="uc-online-dot ${online ? 'online' : 'offline'}"></span>
                 </div>
-                <span class="uc-user-name ${online ? '' : 'offline'}">${escHtml(username)}</span>
+                <span class="uc-user-name ${online ? '' : 'offline'}">${escHtml(disp)}</span>
                 ${unread > 0 ? `<span class="uc-unread">${unread}</span>` : ''}
             `;
 
@@ -692,9 +700,10 @@
     function openChat(username) {
         activePartner = username;
 
-        // Header
-        partnerAvatar.textContent = initial(username);
-        partnerName.textContent   = username;
+        // Header – Anzeige ohne Domain-Praefix (Routing/Historie nutzt weiter den vollen Login)
+        const disp = _displayName(username);
+        partnerAvatar.textContent = initial(disp);
+        partnerName.textContent   = disp;
         updatePartnerStatus();
 
         // UI umschalten

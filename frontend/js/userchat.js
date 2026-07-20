@@ -147,24 +147,32 @@
         eyeBtn.innerHTML = show ? eyeSvgClosed : eyeSvgOpen;
     });
 
-    // ─── Login ──────────────────────────────────────────────────
-    if (token && myUser) {
-        localStorage.setItem('jarvis_uc_user', myUser);
-        showChat();
-    } else if (token) {
-        // SSO: Token von anderer Seite vorhanden, Benutzername lokal noch unbekannt
-        // -> per /api/me holen (validiert zugleich den Token). Ungueltig -> Login bleibt.
-        fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + token } })
-            .then(r => r.ok ? r.json() : null)
-            .then(d => {
-                if (d && d.username) {
-                    myUser = d.username;
-                    localStorage.setItem('jarvis_uc_user', myUser);
-                    showChat();
-                }
-            })
-            .catch(() => {});
+    // ─── Login (Auto-Login bei vorhandenem Token) ────────────────
+    // WICHTIG: erst NACHDEM das gesamte Modul initialisiert ist ausführen.
+    // showChat() ruft _startLlmStatus()/_startCpu()/initUserSearch(), die auf
+    // weiter unten per `let` deklarierte Timer-Variablen zugreifen – ein direkter
+    // Aufruf hier würde in die Temporal Dead Zone laufen (ReferenceError, bricht
+    // die komplette Initialisierung ab). Daher deferred bis zum Ende des Ticks.
+    function _autoLogin() {
+        if (token && myUser) {
+            localStorage.setItem('jarvis_uc_user', myUser);
+            showChat();
+        } else if (token) {
+            // SSO: Token von anderer Seite vorhanden, Benutzername lokal noch unbekannt
+            // -> per /api/me holen (validiert zugleich den Token). Ungueltig -> Login bleibt.
+            fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + token } })
+                .then(r => r.ok ? r.json() : null)
+                .then(d => {
+                    if (d && d.username) {
+                        myUser = d.username;
+                        localStorage.setItem('jarvis_uc_user', myUser);
+                        showChat();
+                    }
+                })
+                .catch(() => {});
+        }
     }
+    setTimeout(_autoLogin, 0);
 
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();

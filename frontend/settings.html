@@ -2142,7 +2142,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
                         <div class="form-group">
                             <label>Personal Access Token (PAT)</label>
-                            <input type="password" id="jira-token" class="config-input" placeholder="••••••••" autocomplete="new-password" style="width:100%;box-sizing:border-box;">
+                            <div style="display:flex;align-items:center;gap:4px;">
+                                <input type="password" id="jira-token" class="config-input" placeholder="••••••••" autocomplete="new-password" style="flex:1;min-width:0;box-sizing:border-box;">
+                                <button type="button" id="jira-token-toggle" title="Key anzeigen/verbergen" data-i18n-title="profile.show_hide" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>Max. Trefferzahl pro Suche</label>
@@ -2190,7 +2195,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
                         <div class="form-group">
                             <label data-i18n="kv.key_label">API-Key Kundenverwaltung</label>
-                            <input type="password" id="ibs-api-key" class="config-input" placeholder="••••••••" autocomplete="new-password" style="width:100%;box-sizing:border-box;">
+                            <div style="display:flex;align-items:center;gap:4px;">
+                                <input type="password" id="ibs-api-key" class="config-input" placeholder="••••••••" autocomplete="new-password" style="flex:1;min-width:0;box-sizing:border-box;">
+                                <button type="button" id="kv-key-toggle" title="Key anzeigen/verbergen" data-i18n-title="profile.show_hide" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                </button>
+                            </div>
                             <p class="kb-hint" style="margin:4px 0 0;" data-i18n="kv.key_hint">Beide Felder zusammen aktivieren die Checkbox „IBS Tickets" in der Support-Suche.</p>
                         </div>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
@@ -3126,8 +3136,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>
-    <script src="/static/js/jira.js?v=6"></script>
-    <script src="/static/js/kundenverwaltung.js?v=2"></script>
+    <script src="/static/js/jira.js?v=7"></script>
+    <script src="/static/js/kundenverwaltung.js?v=3"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
     <script src="/static/js/telemetry.js?v=6"></script>
     <script src="/static/js/branding.js?v=20"></script>

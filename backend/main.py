@@ -4583,16 +4583,31 @@ def _support_jira_jql(query: str, open_only: bool = True) -> str:
 
 
 # ─── Kundenverwaltung (IBS-API) ──────────────────────────────────────
+@app.get("/api/kundenverwaltung/test")
+async def kv_test_api(user: str = Depends(require_auth)):
+    """Testet die Verbindung zur Kundenverwaltungs-API (IBS): prueft die
+    Erreichbarkeit der konfigurierten Basis-URL (X-API-Key wird mitgesendet,
+    self-signed TLS erlaubt). Jede HTTP-Antwort gilt als erreichbar;
+    Rueckgabe: {ok, configured, reachable, status, key_set, url, error}."""
+    from backend.kundenverwaltung_client import test_connection
+    return JSONResponse(await asyncio.to_thread(test_connection))
+
+
 @app.get("/api/kundenverwaltung/tickets-by-buzzwords")
 async def kv_tickets_by_buzzwords_api(buzzwords: str = "", limit: int = 25,
+                                      address_id: str = "",
                                       user: str = Depends(require_auth)):
-    """Ticketsuche ueber die Kundenverwaltungs-API (IBS) nach 1-5 Schlagworten
-    (kommagetrennt). DERZEIT DUMMY: die API-Funktion 'tickets-by-buzzwords' ist
-    serverseitig noch nicht verfuegbar – es kommen gekennzeichnete Beispieldaten
-    plus die geplante Request-URL zurueck (dummy=true). Zugangsdaten werden im
+    """Ticket-/Ereignissuche ueber die Kundenverwaltungs-API (IBS) nach 1-5
+    Schlagworten (kommagetrennt), optional eingeschraenkt auf eine
+    Kunden-Adress-ID. Ruft serverseitig die API-Funktion 'getMatchingEvents'
+    auf (POST, X-API-Key, Payload {"request": {address_id, limit, buzzwords}}).
+    Rueckgabe: {ok, configured, url, terms, limit, address_id, count,
+    tickets[] (Anzeige-Zeilen), events[] (Rohdaten)}. Zugangsdaten werden im
     Einstellungs-Reiter 'Kundenverwaltung' gepflegt."""
     from backend.kundenverwaltung_client import tickets_by_buzzwords
-    return JSONResponse(tickets_by_buzzwords(buzzwords, limit))
+    # Blockierender HTTP-Aufruf -> Thread (Event-Loop nicht anhalten)
+    res = await asyncio.to_thread(tickets_by_buzzwords, buzzwords, limit, address_id)
+    return JSONResponse(res)
 
 
 @app.get("/support", response_class=HTMLResponse)
@@ -4987,8 +5002,13 @@ async def _run_cancellable(request: Request, coro):
 
 @app.post("/api/support/query")
 async def support_query(request: Request):
-    """Support-Anfrage: RAG-, Jira- und/oder Confluence-Treffer, nach Relevanz (%)
-    sortiert, plus optionale LLM-Kurzzusammenfassung (mit vorangestelltem Prompt).
+    """Support-Anfrage: RAG-, Jira-, Confluence- und/oder Kundenverwaltungs-Treffer
+    (IBS), nach Relevanz (%) sortiert, plus optionale LLM-Kurzzusammenfassung
+    (mit vorangestelltem Prompt).
+
+    - ``ibs`` (bool, Default false): Kundenverwaltung (IBS) durchsuchen –
+      Ticket-/Ereignissuche ueber die API-Funktion 'getMatchingEvents'
+      (nur wirksam, wenn URL + API-Key der Kundenverwaltung hinterlegt sind).
 
     Jira-Quellen ueber eindeutige Keys steuern:
     - ``jira_all``  (bool): 'alle Jira Tickets' (offen + geschlossen)
@@ -5169,6 +5189,46 @@ async def _support_run_query(body: dict, user: str) -> dict:
             print("[Support] Confluence-Suche fehlgeschlagen: %s" % e, flush=True)
         except Exception as e:
             print("[Support] Confluence-Suche Fehler: %s" % e, flush=True)
+
+    # ── Kundenverwaltung (IBS, API-Funktion 'getMatchingEvents') ────
+    # Checkbox 'IBS Tickets' unter /support; Schlagworte = Suchbegriffe der
+    # Anfrage (max. 5, wie die Suche im Einstellungs-Reiter Kundenverwaltung).
+    if bool(body.get("ibs")):
+        try:
+            from backend.kundenverwaltung_client import tickets_by_buzzwords
+            # Der Reiter hat ZWEI Felder (Schlagworte + Adress-ID); Support hat nur
+            # das Anfrage-Textfeld. Daher hier beides aus der Anfrage herauslesen:
+            # eine Kundennummer/Adress-ID ("#28530", "Kunde 28530") -> address_id;
+            # die uebrigen bedeutungstragenden Woerter -> Schlagworte (_support_terms).
+            import re as _re_ibs
+            _ibs_q = query
+            _ibs_addr = ""
+            _m = _re_ibs.search(r'(?:#|\bKunden?(?:nummer)?\s*#?\s*)(\d{3,})', _ibs_q, _re_ibs.I)
+            if _m:
+                _ibs_addr = _m.group(1)
+                _ibs_q = (_ibs_q[:_m.start()] + " " + _ibs_q[_m.end():])  # aus Schlagwortsuche entfernen
+            _ibs_bw = [w for w in _support_terms(_ibs_q)
+                       if w.lower() not in ("kunde", "kunden", "kundennummer")]
+            res = await asyncio.to_thread(tickets_by_buzzwords, _ibs_bw, 25, _ibs_addr)
+            if res.get("ok"):
+                for i, t in enumerate(res.get("tickets", [])):
+                    _txt = t.get("text") or t.get("title") or ""
+                    overlap = len(qtokens & _support_tokens(
+                        "%s %s" % (_txt, t.get("key") or ""))) / (len(qtokens) or 1)
+                    # relevanz-sortiert → Rang-Komponente, durch Overlap angehoben
+                    pct = max(20, min(round(max(overlap * 100, 85 - i * 8)), 96))
+                    _meta = " · ".join(x for x in [t.get("status"), t.get("updated")] if x)
+                    summary = _txt + ((" — " + _meta) if _meta else "")
+                    _key = t.get("key")
+                    blocks.append({"source": "IBS",
+                                   "title": ("#" + _key) if _key else "Ereignis",
+                                   "summary": _flatten(summary), "score": pct,
+                                   "full_text": _txt, "link": "",
+                                   "source_label": ("#" + _key) if _key else "Ereignis"})
+            else:
+                print("[Support] IBS-Suche fehlgeschlagen: %s" % res.get("error"), flush=True)
+        except Exception as e:
+            print("[Support] IBS-Suche Fehler: %s" % e, flush=True)
 
     blocks.sort(key=lambda b: b["score"], reverse=True)
 

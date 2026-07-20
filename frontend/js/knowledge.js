@@ -1186,12 +1186,16 @@ class JarvisKnowledgeManager {
         const bareName = folder.replace(/^data\//, '');
         const isSimpleName = !folder.startsWith('/') && !bareName.includes('/') && !bareName.includes('..');
         const token = localStorage.getItem('jarvis_token') || '';
+        // Ausgewaehlte Wissensgruppen ("Beim Anlegen als Speicherordner zuordnen")
+        // – gilt fuer BEIDE Buttons; das Zuordnen erfolgt nur beim Create-Weg.
+        const groupsEl = document.getElementById('kb-folder-groups');
+        const groups = window.KbGroups ? window.KbGroups.readChecked(groupsEl) : [];
         try {
             if (isSimpleName) {
                 const resp = await fetch('/api/knowledge/folders', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                    body: JSON.stringify({ name: bareName })
+                    body: JSON.stringify({ name: bareName, groups })
                 });
                 const result = await resp.json().catch(() => ({}));
                 // 409 = Ordner ist bereits in der Liste -> kein Fehler

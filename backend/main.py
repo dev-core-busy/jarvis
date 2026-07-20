@@ -1363,6 +1363,82 @@ async def get_online_users(user: str = Depends(require_auth)):
     return JSONResponse({"users": users})
 
 
+# System-/Pseudo-Konten, die nie als Chat-Partner auftauchen sollen
+_UC_NON_USERS = {"api", "jarvis", "root", "unknown", "anonymous", "system", "ki_read", ""}
+
+
+@app.get("/api/userchat/users")
+async def userchat_known_users(user: str = Depends(require_auth)):
+    """Bekannte Chat-Partner für den Benutzerchat: alle Benutzer, die Jarvis schon
+    genutzt haben (Konversations-Log), plus Userchat-Historie-Partner und aktuell
+    Verbundene – mit Online-Status. So kann man auch offline Kollegen anschreiben.
+    Pro Person nur EIN Eintrag (verschiedene Schreibweisen via _norm_login vereint;
+    bevorzugt die aktuell online verbundene Schreibweise)."""
+    from backend.conv_log import get_known_users
+    me = _norm_login(user)
+    online_exact = {u for u, conns in _uc_clients.items() if conns}
+    norm_online = {_norm_login(u) for u in online_exact}
+
+    cands: list[str] = list(get_known_users())
+    for key in _uc_history:                      # Historie-Partner (Key = "a__b")
+        cands.extend(key.split("__"))
+    cands.extend(online_exact)
+
+    by_norm: dict[str, str] = {}                 # norm -> beste Schreibweise
+    for u in cands:
+        n = _norm_login(u)
+        if not n or n == me or n in _UC_NON_USERS or u in _UC_NON_USERS:
+            continue
+        cur = by_norm.get(n)
+        # bevorzuge eine aktuell online verbundene Schreibweise, sonst die erste
+        if cur is None or (u in online_exact and cur not in online_exact):
+            by_norm[n] = u
+
+    out = [{"username": u, "online": _norm_login(u) in norm_online}
+           for u in by_norm.values()]
+    out.sort(key=lambda x: (not x["online"], x["username"].lower()))
+    return JSONResponse({"users": out})
+
+
+@app.post("/api/userchat/search")
+async def userchat_search(request: Request, user: str = Depends(require_auth)):
+    """AD-Verzeichnissuche für den Benutzerchat (jeder angemeldete Nutzer darf
+    suchen). Nutzt NUR das Service-Konto (verlangt kein Passwort vom Domain-User);
+    ohne Service-Konto leer + Hinweis. Bildet den gefundenen sAMAccountName auf das
+    tatsaechliche Login-Format ab, falls die Person Jarvis schon genutzt hat –
+    sonst best effort (klein geschriebener sAMAccountName)."""
+    svc = (config.get_setting("ad_bind_user", "") or "").strip()
+    if not svc:
+        return JSONResponse({"users": [], "error": "NO_SERVICE_ACCOUNT"})
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    q = (body.get("q") or "").strip()
+    if len(q) < 2:
+        return JSONResponse({"users": []})
+    from backend import ldap_directory
+    from backend.conv_log import get_known_users
+    me = _norm_login(user)
+    known = {}
+    for u in get_known_users():
+        known.setdefault(_norm_login(u), u)      # norm -> echtes Login-Format
+    try:
+        rows = await asyncio.to_thread(ldap_directory.search_users, q, None, None)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"users": [], "error": str(e)[:200]})
+    out, seen = [], set()
+    for r in rows[:50]:
+        sam = (r.get("sam") or "").strip()
+        n = _norm_login(sam)
+        if not n or n == me or n in seen:
+            continue
+        seen.add(n)
+        out.append({"username": known.get(n, sam.lower()),
+                    "display": r.get("display") or sam, "mail": r.get("mail") or ""})
+    return JSONResponse({"users": out})
+
+
 @app.websocket("/ws/users")
 async def userchat_ws(ws: WebSocket):
     """WebSocket-Endpoint für den User-zu-User-Chat."""

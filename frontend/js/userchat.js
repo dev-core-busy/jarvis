@@ -217,6 +217,7 @@
         _requestNotifyPermission();
         _startLlmStatus();
         _startCpu();
+        initUserSearch();
         connectWS();
     }
 
@@ -317,6 +318,7 @@
                 var _ucLogout = $('btn-uc-logout');
         if (_ucLogout && myUser) _ucLogout.title = window.t('userchat.logout_title').replace('{user}', myUser);
                 updatePresence(msg.users || []);
+                loadKnownUsers();   // bekannte Kollegen (auch offline) nachladen
                 break;
 
             case 'history': {
@@ -528,6 +530,24 @@
         if (activePartner) updatePartnerStatus();
     }
 
+    // Bekannte Chat-Partner (auch offline) laden, damit man Kollegen anschreiben
+    // kann, ohne dass sie gerade im Benutzerchat verbunden sind. Online-Status
+    // aus /ws/users hat Vorrang (nicht ueberschreiben, wenn schon online bekannt).
+    function loadKnownUsers() {
+        fetch('/api/userchat/users', { headers: { 'Authorization': 'Bearer ' + token } })
+            .then(r => r.ok ? r.json() : null)
+            .then(d => {
+                if (!d || !Array.isArray(d.users)) return;
+                for (const u of d.users) {
+                    if (!u || !u.username) continue;
+                    if (!_online.hasOwnProperty(u.username)) _online[u.username] = !!u.online;
+                    else if (u.online) _online[u.username] = true;
+                }
+                renderUserList();
+            })
+            .catch(() => {});
+    }
+
     function renderUserList() {
         if (!userList) return;
         const allUsers = Object.keys(_online).sort((a, b) => {
@@ -561,6 +581,62 @@
             item.addEventListener('click', () => openChat(username));
             userList.appendChild(item);
         }
+    }
+
+    // ─── Benutzer-Suche (AD-Verzeichnis) ─────────────────────────
+    let _searchTimer = null, _searchInit = false;
+    function initUserSearch() {
+        if (_searchInit) return;
+        const inp = $('uc-search'), box = $('uc-search-results');
+        if (!inp || !box) return;
+        _searchInit = true;
+        function close() { box.innerHTML = ''; }
+        inp.addEventListener('input', () => {
+            const q = inp.value.trim();
+            clearTimeout(_searchTimer);
+            if (q.length < 2) { close(); return; }
+            _searchTimer = setTimeout(() => {
+                fetch('/api/userchat/search', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ q })
+                }).then(r => r.ok ? r.json() : null)
+                  .then(d => {
+                      box.innerHTML = '';
+                      if (!d) return;
+                      if (d.error === 'NO_SERVICE_ACCOUNT') {
+                          box.innerHTML = `<div class="uc-sr-hint">${escHtml(window.t('uc.search_no_ad'))}</div>`;
+                          return;
+                      }
+                      const users = d.users || [];
+                      if (!users.length) {
+                          box.innerHTML = `<div class="uc-sr-hint">${escHtml(window.t('uc.search_none'))}</div>`;
+                          return;
+                      }
+                      for (const u of users) {
+                          const it = document.createElement('div');
+                          it.className = 'uc-sr-item';
+                          it.innerHTML = `
+                              <div class="uc-avatar" style="width:30px;height:30px;">${initial(u.display || u.username)}</div>
+                              <div style="min-width:0;">
+                                  <div class="uc-sr-name">${escHtml(u.display || u.username)}</div>
+                                  ${u.mail ? `<div class="uc-sr-sub">${escHtml(u.mail)}</div>` : ''}
+                              </div>`;
+                          it.addEventListener('click', () => {
+                              if (!_online.hasOwnProperty(u.username)) _online[u.username] = false;
+                              renderUserList();
+                              openChat(u.username);
+                              inp.value = ''; close();
+                          });
+                          box.appendChild(it);
+                      }
+                  }).catch(() => { close(); });
+            }, 300);
+        });
+        // Klick ausserhalb schliesst die Trefferliste
+        document.addEventListener('click', (e) => {
+            if (!box.contains(e.target) && e.target !== inp) close();
+        });
     }
 
     // ─── Chat öffnen ─────────────────────────────────────────────

@@ -37,7 +37,7 @@ from backend.security import get_certificate_path
 from backend import security_guard
 
 # ─── App erstellen ────────────────────────────────────────────────────
-JARVIS_VERSION = "0.9.0"
+JARVIS_VERSION = "0.9.1"
 # Die eingebauten Doku-Endpunkte (/docs, /redoc, /openapi.json) werden deaktiviert
 # und weiter unten durch admin-geschuetzte Varianten ersetzt – so ist die komplette
 # API-Oberflaeche nicht mehr oeffentlich einsehbar.

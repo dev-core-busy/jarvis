@@ -200,15 +200,8 @@
                 el.placeholder = el.placeholder.replace(/jarvis/ig, name);
             }
         });
-        // Begrüßungszeilen (best-effort; werden bei Sprachwechsel ggf. neu gesetzt)
-        ['.log-welcome p', '[data-i18n="chat.greeting"]'].forEach(function (sel) {
-            document.querySelectorAll(sel).forEach(function (el) {
-                if (/jarvis/i.test(el.textContent)) {
-                    if (el.dataset.brandOrig === undefined) el.dataset.brandOrig = el.textContent;
-                    el.textContent = el.textContent.replace(/jarvis/ig, name);
-                }
-            });
-        });
+        // Begrüßungszeilen werden NICHT hier (Firmenname) gebrandet, sondern in
+        // applyAssistantName() mit dem separaten Assistenten-Namen.
         // Produkt-/Seitenname (z.B. /support, /portal): 'Jarvis' → Firmenname
         if (!skipVisualName) {
             document.querySelectorAll('.brand-app-name').forEach(function (el) {
@@ -250,6 +243,7 @@
     // Wird bei /api/branding active:false und beim Deaktivieren des Skills gerufen.
     function resetBranding() {
         _current = null;
+        window.brandAssistantName = '';   // TTS-Vorschau nutzt wieder 'Jarvis'
         // 1) Inline-CSS-Variablen entfernen (Themes/Defaults greifen wieder)
         var root = (document.body || document.documentElement).style;
         ['--accent', '--accent-glow', '--accent-light', '--accent-rgb',
@@ -439,6 +433,28 @@
         if (mSep) mSep.classList.toggle('hidden', !(manual && (infoShown || phone || email)));
     }
 
+    // Assistenten-Name fuer die Begruessungen: eigenes Feld, sonst Firmenname.
+    function assistantNameOf(b) {
+        return ((b && b.assistant_name) || '').trim() || (b && b.company_name) || '';
+    }
+
+    // Ersetzt 'Jarvis' in den sichtbaren Begruessungszeilen durch den
+    // Assistenten-Namen (nicht den Firmennamen). Best-effort: applyLang setzt
+    // die data-i18n-Zeile bei Sprachwechsel ggf. neu -> applyBranding laeuft
+    // erneut (setTimeout/load/themechange).
+    function applyAssistantName(b) {
+        var name = assistantNameOf(b);
+        if (!name) return;
+        ['.log-welcome p', '[data-i18n="chat.greeting"]'].forEach(function (sel) {
+            document.querySelectorAll(sel).forEach(function (el) {
+                if (/jarvis/i.test(el.textContent)) {
+                    if (el.dataset.brandOrig === undefined) el.dataset.brandOrig = el.textContent;
+                    el.textContent = el.textContent.replace(/jarvis/ig, name);
+                }
+            });
+        });
+    }
+
     function applyBranding(b) {
         if (!b || !b.active) return;
         _current = b;
@@ -446,6 +462,9 @@
         applyColors(effectiveColors(b, isLight));
         var nlu = effectiveNameLogoUrl(b, isLight);
         setBrandLabels(b.company_name, !!nlu);
+        applyAssistantName(b);
+        // Fuer nicht-DOM-Texte (z.B. TTS-Vorschau in chat.js/app.js) bereitstellen
+        window.brandAssistantName = assistantNameOf(b);
         var lu = effectiveLogoUrl(b, isLight);
         applyLogo(b, lu);
         applyNameLogo(b, nlu);
@@ -550,7 +569,7 @@
             // Live-Vorschau bei Farb-/Text-/Logo-Änderung
             ['br-accent', 'br-accent-hover', 'br-bg-primary', 'br-bg-secondary', 'br-text-primary',
              'br-bg-primary-light', 'br-bg-secondary-light', 'br-text-primary-light',
-             'br-name', 'br-letter',
+             'br-name', 'br-assistant-name', 'br-letter',
              'br-contact-info', 'br-contact-phone', 'br-contact-email', 'br-manual-url']
                 .forEach(function (id) {
                     var el = document.getElementById(id);
@@ -574,6 +593,7 @@
                     var col = c.colors || {};
                     var colL = c.colors_light || {};
                     BrandingAdmin._set('br-name', c.company_name || '');
+                    BrandingAdmin._set('br-assistant-name', c.assistant_name || '');
                     BrandingAdmin._set('br-letter', c.core_letter || '');
                     BrandingAdmin._set('br-contact-info', c.contact_info || '');
                     BrandingAdmin._set('br-contact-phone', c.contact_phone || '');
@@ -635,6 +655,7 @@
             return {
                 active: true,
                 company_name: this._val('br-name', ''),
+                assistant_name: this._val('br-assistant-name', ''),
                 core_letter: this._val('br-letter', ''),
                 contact_info: this._val('br-contact-info', ''),
                 contact_phone: this._val('br-contact-phone', ''),
@@ -665,6 +686,7 @@
             var b = this._buildBranding();
             var body = {
                 company_name: b.company_name,
+                assistant_name: b.assistant_name,
                 core_letter: b.core_letter,
                 contact_info: b.contact_info,
                 contact_phone: b.contact_phone,

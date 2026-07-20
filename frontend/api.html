@@ -65,6 +65,10 @@
         .ep-sum { color: var(--text-secondary); font-size: .8rem; margin-left: auto; text-align: right;
                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
         .ep-body { padding: 4px 14px 14px; border-top: 1px solid var(--border, rgba(255,255,255,.08)); }
+        .ad-localonly { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; cursor: pointer;
+            font-size: .82rem; color: var(--text-secondary); user-select: none; }
+        .ad-localonly input { accent-color: var(--danger, #ef4444); width: 15px; height: 15px; cursor: pointer; }
+        .ad-localonly:hover { color: var(--text-primary); }
         .ep-desc { color: var(--text-secondary); font-size: .86rem; line-height: 1.5; margin: 10px 0; white-space: pre-wrap; }
         .ep-h { font-size: .72rem; text-transform: uppercase; letter-spacing: .6px; color: var(--text-secondary);
                 margin: 14px 0 6px; font-weight: 700; }
@@ -151,6 +155,19 @@
         var spec = null, endpoints = [], activeMethods = {};
         METHOD_ORDER.forEach(function (m) { activeMethods[m] = true; });
         activeMethods['other'] = true;
+
+        // "nur lokal"-Beschraenkung: Menge beschraenkter Endpunkte + Fremdzugriffs-Statistik
+        var localOnly = {};   // "METHOD /pfad" -> true
+        var loStats = {};     // "METHOD /pfad" -> {count,last,ips}
+        function epKey(ep) { return ep.method.toUpperCase() + ' ' + ep.path; }
+        function loadLocalOnly() {
+            return fetch('/api/admin/api-local-only', { headers: H })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    localOnly = {}; loStats = (d && d.stats) || {};
+                    ((d && d.restricted) || []).forEach(function (k) { localOnly[k] = true; });
+                }).catch(function () {});
+        }
 
         function esc(s) {
             return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
@@ -246,6 +263,16 @@
             var body = document.createElement('div');
             body.className = 'ep-body';
 
+            // "nur lokal"-Schalter (Admin): beschraenkt den Endpunkt auf Loopback
+            var key = epKey(ep);
+            var loRow = document.createElement('label'); loRow.className = 'ad-localonly';
+            var loCb = document.createElement('input'); loCb.type = 'checkbox'; loCb.checked = !!localOnly[key];
+            var loTxt = document.createElement('span');
+            loTxt.textContent = ' 🔒 nur lokal (Loopback) – externe Aufrufe werden mit 403 abgewiesen';
+            loRow.appendChild(loCb); loRow.appendChild(loTxt);
+            body.appendChild(loRow);
+            loCb.addEventListener('change', function () { toggleLocalOnly(ep, loCb); });
+
             var descText = op.description || op.summary || '';
             if (descText) {
                 var ds = document.createElement('div'); ds.className = 'ep-desc'; ds.textContent = descText;
@@ -286,6 +313,40 @@
             body.appendChild(testForm(ep, params, bs, exampleBody));
             d.appendChild(body);
             return d;
+        }
+
+        // "nur lokal" umschalten. Beim Einschraenken prueft der Server auf reale
+        // Fremdzugriffe und liefert ggf. eine Warnung mit Begruendung -> confirm.
+        function toggleLocalOnly(ep, cb) {
+            var key = epKey(ep);
+            var want = cb.checked;
+            function apply(confirm) {
+                return fetch('/api/admin/api-local-only', {
+                    method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, H),
+                    body: JSON.stringify({ key: key, local_only: want, confirm: !!confirm })
+                }).then(function (r) { return r.json().then(function (d) { return { status: r.status, d: d }; }); });
+            }
+            apply(false).then(function (res) {
+                var d = res.d || {};
+                if (d.needs_confirm) {
+                    if (window.confirm(d.warning || 'Diesen Endpunkt wirklich auf nur lokal beschraenken?')) {
+                        return apply(true).then(function (res2) { finish(res2); });
+                    }
+                    cb.checked = false;   // abgebrochen -> Zustand zuruecksetzen
+                    return;
+                }
+                finish(res);
+            }).catch(function () { cb.checked = !want; window.alert('Fehler beim Speichern.'); });
+
+            function finish(res) {
+                var d = res.d || {};
+                if (res.status >= 400 || d.error) {
+                    cb.checked = !want; window.alert(d.error || ('Fehler (HTTP ' + res.status + ')'));
+                    return;
+                }
+                localOnly = {}; (d.restricted || []).forEach(function (k) { localOnly[k] = true; });
+                cb.checked = !!localOnly[key];
+            }
         }
 
         function testForm(ep, params, bs, exampleBody) {
@@ -412,6 +473,8 @@
                     endpoints.push({ path: path, method: m, op: paths[path][m], group: groupOf(path) });
                 });
             });
+            return loadLocalOnly();
+        }).then(function () {
             setCount();
             buildMethodFilter();
             render();

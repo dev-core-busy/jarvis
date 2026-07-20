@@ -76,6 +76,73 @@ async def no_cache_static(request: Request, call_next):
     return response
 
 
+# ─── API-Endpunkt-Zugriffsschutz: einzelne Endpunkte auf Loopback beschraenken ──
+# Admin-konfigurierbar ueber /api (Checkbox pro Endpunkt). Schluessel = Route-Template
+# "METHOD /pfad/{param}". Zusaetzlich zaehlt eine In-Memory-Statistik NICHT-lokale
+# Zugriffe pro Endpunkt (seit Dienststart) – Grundlage fuer die Warnung beim
+# Einschraenken (reale Fremdzugriffe).
+from starlette.routing import Match as _RouteMatch
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", ""}
+_api_foreign_access: dict = {}          # key -> {"count": int, "ips": {ip: ts}, "last": ts}
+_API_FOREIGN_IP_CAP = 20
+# Der Konfigurations-Endpunkt selbst darf NIE gesperrt werden (kein Aussperren des Admins)
+_API_LOCAL_ONLY_EXEMPT = {"GET /api/admin/api-local-only", "POST /api/admin/api-local-only"}
+
+
+def _api_local_only_set() -> set:
+    try:
+        return set(config.get_setting("api_local_only", []) or [])
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _client_is_local(request) -> bool:
+    return (request.client.host if request.client else "") in _LOOPBACK_HOSTS
+
+
+def _resolve_route_key(request) -> str | None:
+    """'METHOD /template' der zur Anfrage passenden Route (Statistik + Enforcement)."""
+    for route in request.app.router.routes:
+        tmpl = getattr(route, "path", None)
+        if not tmpl:
+            continue
+        try:
+            m, _ = route.matches(request.scope)
+        except Exception:  # noqa: BLE001
+            continue
+        if m != _RouteMatch.NONE:
+            return "%s %s" % (request.method.upper(), tmpl)
+    return None
+
+
+def _record_foreign_access(key: str, ip: str):
+    ent = _api_foreign_access.get(key)
+    if ent is None:
+        ent = {"count": 0, "ips": {}, "last": 0.0}
+        _api_foreign_access[key] = ent
+    ent["count"] += 1
+    ent["last"] = time.time()
+    if ip and (ip in ent["ips"] or len(ent["ips"]) < _API_FOREIGN_IP_CAP):
+        ent["ips"][ip] = ent["last"]
+
+
+@app.middleware("http")
+async def _api_local_only_mw(request: Request, call_next):
+    """Beschraenkt als 'nur lokal' markierte API-Endpunkte auf Loopback-Zugriffe
+    und protokolliert Fremdzugriffe (fuer die Warn-Statistik)."""
+    path = request.url.path
+    if path.startswith("/api/") and not _client_is_local(request):
+        key = _resolve_route_key(request)
+        if key and key not in _API_LOCAL_ONLY_EXEMPT:
+            _record_foreign_access(key, request.client.host if request.client else "")
+            if key in _api_local_only_set():
+                return JSONResponse(
+                    {"error": "Dieser Endpunkt ist auf lokalen Zugriff (Loopback) beschraenkt."},
+                    status_code=403)
+    return await call_next(request)
+
+
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 
@@ -1342,6 +1409,63 @@ async def require_admin_or_query(request: Request) -> str:
 async def gated_openapi(user: str = Depends(require_admin_or_query)):
     """OpenAPI-Schema – nur fuer Admins (Bearer-Token oder ?token=)."""
     return JSONResponse(app.openapi())
+
+
+@app.get("/api/admin/api-local-only")
+async def api_local_only_list(user: str = Depends(require_local_auth)):
+    """Liste der auf Loopback beschraenkten API-Endpunkte + Fremdzugriffs-Statistik
+    (seit Dienststart) fuer die Warnung beim Einschraenken. Nur Admins."""
+    restricted = sorted(_api_local_only_set())
+    stats = {}
+    for key, ent in _api_foreign_access.items():
+        stats[key] = {"count": ent["count"], "last": int(ent["last"] * 1000),
+                      "ips": list(ent["ips"].keys())[:_API_FOREIGN_IP_CAP]}
+    return JSONResponse({"ok": True, "restricted": restricted, "stats": stats})
+
+
+@app.post("/api/admin/api-local-only")
+async def api_local_only_update(request: Request, user: str = Depends(require_local_auth)):
+    """Markiert einen API-Endpunkt als 'nur lokal' (Loopback) oder hebt das auf.
+    Body: ``{key: "METHOD /pfad", local_only: bool, confirm: bool}``.
+
+    Beim Einschraenken (local_only=true) wird ZUERST geprueft, ob der Endpunkt
+    seit Dienststart von nicht-lokalen IPs aufgerufen wurde. Falls ja UND confirm
+    ist nicht gesetzt, wird NICHT angewandt, sondern ``{needs_confirm, warning}``
+    mit ausfuehrlicher Begruendung zurueckgegeben. Nur Admins."""
+    body = await request.json()
+    key = (body.get("key") or "").strip()
+    local_only = bool(body.get("local_only"))
+    confirm = bool(body.get("confirm"))
+    if not key or " " not in key or not key.split(" ", 1)[1].startswith("/"):
+        return JSONResponse({"error": "Ungueltiger Endpunkt-Schluessel"}, status_code=400)
+    if key in _API_LOCAL_ONLY_EXEMPT:
+        return JSONResponse({"error": "Dieser Endpunkt kann nicht beschraenkt werden "
+                             "(Konfigurations-Endpunkt – sonst waere die Einstellung "
+                             "nicht mehr aenderbar)."}, status_code=400)
+    cur = _api_local_only_set()
+    if local_only:
+        ent = _api_foreign_access.get(key)
+        if ent and ent.get("count", 0) > 0 and not confirm:
+            import datetime as _dt
+            ips = list(ent["ips"].keys())
+            when = _dt.datetime.fromtimestamp(ent["last"]).strftime("%d.%m.%Y %H:%M")
+            warn = (
+                "Achtung: '%s' wurde seit dem letzten Dienststart %d-mal von %d nicht-lokalen "
+                "IP-Adresse(n) aufgerufen (zuletzt %s%s).\n\n"
+                "Wenn du diesen Endpunkt auf 'nur lokal' (Loopback) beschraenkst, erhalten ALLE "
+                "externen Clients kuenftig HTTP 403 - das betrifft auch deinen eigenen Browser, "
+                "sofern du NICHT direkt auf dem Server arbeitest, sowie Windows-/Android-Client "
+                "und andere Integrationen. Danach funktionieren nur noch Aufrufe vom Server selbst "
+                "(127.0.0.1).\n\nWirklich beschraenken?"
+            ) % (key, ent["count"], len(ent["ips"]), when,
+                 (", z.B. " + ", ".join(ips[:5])) if ips else "")
+            return JSONResponse({"needs_confirm": True, "warning": warn,
+                                 "foreign_count": ent["count"], "foreign_ips": ips[:10]})
+        cur.add(key)
+    else:
+        cur.discard(key)
+    config.save_setting("api_local_only", sorted(cur))
+    return JSONResponse({"ok": True, "restricted": sorted(cur)})
 
 
 @app.get("/docs", include_in_schema=False)

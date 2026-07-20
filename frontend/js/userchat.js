@@ -119,6 +119,14 @@
         return (name || '?').charAt(0).toUpperCase();
     }
 
+    // Normalisiert einen Login auf den blossen sAMAccountName (analog Backend
+    // _norm_login): Domain-Praefix (DOMAIN\user) und UPN-Suffix (user@domain)
+    // entfernen, lowercase. Dient dazu, dieselbe Person – die im System mal MIT
+    // und mal OHNE Domain-Praefix vorkommt – in der Liste nur EINMAL anzuzeigen.
+    function _normLogin(name) {
+        return String(name || '').split('@')[0].split('\\').pop().trim().toLowerCase();
+    }
+
     function formatTime(ts) {
         const d = new Date(ts);
         return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
@@ -558,20 +566,53 @@
 
     function renderUserList() {
         if (!userList) return;
-        const allUsers = Object.keys(_online).sort((a, b) => {
-            const ao = _online[a] ? 1 : 0;
-            const bo = _online[b] ? 1 : 0;
+
+        // Dieselbe Person kann in verschiedenen Schreibweisen vorliegen (mit/ohne
+        // Domain-Praefix – z.B. "nexus\christine.seebach" aus der Presence und
+        // "christine.seebach" aus den bekannten Benutzern). Pro Person (normalisiert)
+        // nur EIN Eintrag. Bevorzugte Anzeige-/Chat-Schreibweise: aktuell online,
+        // sonst eine mit vorhandener Historie, sonst die erste.
+        const meNorm = _normLogin(myUser);
+        const byNorm = {};   // norm -> {username, online}
+        for (const uname of Object.keys(_online)) {
+            const n = _normLogin(uname);
+            if (!n || n === meNorm) continue;
+            const online = !!_online[uname];
+            const cur = byNorm[n];
+            if (!cur) {
+                byNorm[n] = { username: uname, online };
+            } else {
+                // bessere Schreibweise waehlen: online > Historie > bisherige
+                const better = online && !cur.online
+                    ? true
+                    : (!cur.online && (_msgs[uname] && _msgs[uname].length)
+                        && !(_msgs[cur.username] && _msgs[cur.username].length));
+                if (better) cur.username = uname;
+                cur.online = cur.online || online;
+            }
+        }
+        // Ungelesene pro Person (ueber alle Schreibweisen) aufsummieren
+        const unreadByNorm = {};
+        for (const p in _unread) {
+            const n = _normLogin(p);
+            if (n) unreadByNorm[n] = (unreadByNorm[n] || 0) + (_unread[p] || 0);
+        }
+
+        const entries = Object.keys(byNorm).map(n => ({
+            norm: n, username: byNorm[n].username, online: byNorm[n].online,
+            unread: unreadByNorm[n] || 0,
+        }));
+        entries.sort((a, b) => {
+            const ao = a.online ? 1 : 0, bo = b.online ? 1 : 0;
             if (ao !== bo) return bo - ao;
-            return a.localeCompare(b);
+            return a.username.localeCompare(b.username);
         });
 
+        const activeNorm = _normLogin(activePartner);
         userList.innerHTML = '';
-        for (const username of allUsers) {
-            if (username === myUser) continue;   // eigener User wird nicht angezeigt
-
-            const online   = _online[username];
-            const unread   = _unread[username] || 0;
-            const isActive = username === activePartner;
+        for (const e of entries) {
+            const username = e.username, online = e.online, unread = e.unread;
+            const isActive = e.norm === activeNorm;
 
             const item = document.createElement('div');
             item.className = 'uc-user-item' + (isActive ? ' active' : '');

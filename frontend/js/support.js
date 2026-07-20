@@ -745,6 +745,12 @@
             aiBtn = '<button type="button" class="sup-ai-btn" data-key="' + esc(b.key || b.title) + '">'
                 + esc(T('sup.ai_btn', 'KI-Zusammenfassung')) + '</button>';
         }
+        // IBS-Ereignisse sind roher Verlaufstext (u.a. SQL mit Unterstrichen) –
+        // NICHT als Markdown rendern (sonst werden '_' als Kursiv gedeutet),
+        // sondern escapt mit erhaltenen Zeilenumbruechen (wie im Einstellungs-Reiter).
+        var bodyHtml = (b.source === 'IBS')
+            ? '<div class="sup-block-body" style="white-space:pre-wrap;word-break:break-word;">' + esc(b.summary) + '</div>'
+            : '<div class="sup-block-body sup-ai-md">' + renderBlockBody(b.summary) + '</div>';
         return '<div class="sup-block">'
             + '<div class="sup-block-head">'
             + '<span class="sup-block-num">' + (i + 1) + '.</span>'
@@ -753,7 +759,7 @@
             + '<span class="sup-badge-score" title="' + esc(scoreTitle(b)) + '">' + b.score + '%</span>'
             + aiBtn
             + '</div>'
-            + '<div class="sup-block-body sup-ai-md">' + renderBlockBody(b.summary) + '</div>'
+            + bodyHtml
             + srcHtml
             + datesHtml
             + '</div>';

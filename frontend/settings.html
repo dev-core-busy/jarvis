@@ -351,6 +351,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>text</code> <span style="color:var(--text-secondary);">(Alias <code>query</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>Pflicht</em></td><td style="padding:6px 8px;">Die Suchanfrage / der Freitext. Leer → <code>400</code>. Enthält der Text einen Vorgangs-/CRM-Key (Muster <code>ABC-123</code>, z.&nbsp;B. <code>CRM-10550</code>), wird Jira unabhängig von den Jira-Flags <b>immer</b> durchsucht.</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>rag</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Wissensdatenbank einbeziehen (RAG – TF-IDF/Vektor-Suche).</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>confluence</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Confluence-Seiten durchsuchen (nur wirksam, wenn der Confluence-Skill aktiv ist).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>ibs</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>false</code></td><td style="padding:6px 8px;">Kundenverwaltung (IBS) durchsuchen – Ticket-/Ereignissuche über die API-Funktion „getMatchingEvents" (nur wirksam, wenn URL und API-Key der Kundenverwaltung hinterlegt sind).</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>ai</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">KI-Gesamtzusammenfassung (<code>ai_summary</code>) über alle Treffer erzeugen.</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_all</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>false</code></td><td style="padding:6px 8px;">„Alle Jira-Tickets" (offen&nbsp;+&nbsp;geschlossen) durchsuchen.</td></tr>
                         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_open</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>false</code></td><td style="padding:6px 8px;">„Nur offene Jira-Tickets" durchsuchen. Sind <code>jira_all</code> und <code>jira_open</code> beide <code>true</code>, gewinnt <code>jira_all</code>.</td></tr>
@@ -652,6 +653,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>text</code> <span style="color:var(--text-secondary);">(alias <code>query</code>)</span></td><td style="padding:6px 8px;">string</td><td style="padding:6px 8px;"><em>required</em></td><td style="padding:6px 8px;">The search query / free text. Empty → <code>400</code>. If the text contains an issue/CRM key (pattern <code>ABC-123</code>, e.g. <code>CRM-10550</code>), Jira is <b>always</b> searched regardless of the Jira flags.</td></tr>
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>rag</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Include the knowledge base (RAG – TF-IDF/vector search).</td></tr>
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>confluence</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Search Confluence pages (only effective if the Confluence skill is active).</td></tr>
+                        <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>ibs</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>false</code></td><td style="padding:6px 8px;">Search customer management (IBS) – ticket/event search via the "getMatchingEvents" API function (only effective if the customer management URL and API key are configured).</td></tr>
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>ai</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>true</code></td><td style="padding:6px 8px;">Generate an overall AI summary (<code>ai_summary</code>) across all hits.</td></tr>
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_all</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>false</code></td><td style="padding:6px 8px;">Search "all Jira tickets" (open&nbsp;+&nbsp;closed).</td></tr>
         <tr style="border-bottom:1px solid rgba(var(--fg-rgb),.06);"><td style="padding:6px 8px;"><code>jira_open</code></td><td style="padding:6px 8px;">bool</td><td style="padding:6px 8px;"><code>false</code></td><td style="padding:6px 8px;">Search "open Jira tickets only". If <code>jira_all</code> and <code>jira_open</code> are both <code>true</code>, <code>jira_all</code> wins.</td></tr>
@@ -2185,7 +2187,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <!-- ═══ Tab: Kundenverwaltung ═══ -->
                 <div id="settings-tab-kundenverwaltung" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
-                        <p class="kb-hint" data-i18n="kv.hint">Anbindung an die Kundenverwaltungs-API (IBS). Die Zugangsdaten schalten die Checkbox „IBS Tickets" in der Support-Suche frei und versorgen die Ticketsuche des Agenten über die Kundenverwaltung (Funktion „tickets-by-buzzwords", derzeit als Dummy).</p>
+                        <p class="kb-hint" data-i18n="kv.hint">Anbindung an die Kundenverwaltungs-API (IBS). Die Zugangsdaten schalten die Checkbox „IBS Tickets" in der Support-Suche frei und versorgen die Ticketsuche des Agenten über die Kundenverwaltung (API-Funktion „getMatchingEvents").</p>
 
                         <h4 style="margin:16px 0 8px;" data-i18n="kv.section_ibs">Kundenverwaltung (IBS) API</h4>
                         <!-- IBS/Kundenverwaltung: schaltet die Checkbox 'IBS Tickets' unter /support frei -->
@@ -2205,13 +2207,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
                             <button class="btn-primary" id="kv-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
+                            <button class="btn-secondary" id="kv-test" type="button" data-i18n="profile.test" style="flex:0 0 auto;">Verbindung testen</button>
                             <span id="kv-status" style="font-size:0.9em;"></span>
                         </div>
 
-                        <h4 style="margin:22px 0 8px;" data-i18n="kv.search_title">Tickets suchen (Dummy)</h4>
-                        <p class="kb-hint" data-i18n="kv.dummy_note">Hinweis: Die API-Funktion „tickets-by-buzzwords" ist serverseitig noch nicht verfügbar – die Suche liefert bis dahin gekennzeichnete Beispieldaten.</p>
+                        <h4 style="margin:22px 0 8px;" data-i18n="kv.search_title">Tickets suchen</h4>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                             <input type="text" id="kv-search-buzzwords" class="config-input" data-i18n-placeholder="kv.search_ph" placeholder="Schlagworte, kommagetrennt (1–5)…" style="flex:1;min-width:180px;">
+                            <input type="text" id="kv-search-address" class="config-input" data-i18n-placeholder="kv.search_addr_ph" placeholder="Adress-ID (optional)" style="width:150px;">
                             <input type="number" id="kv-search-limit" class="config-input" min="1" max="100" step="1" value="25" title="Max. Trefferzahl" style="width:90px;">
                             <button class="btn-secondary" id="kv-search-btn" type="button" data-i18n="common.search">Suchen</button>
                         </div>
@@ -3123,7 +3126,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=91"></script>
+    <script src="/static/js/i18n.js?v=92"></script>
     <script src="/static/js/cron.js?v=16"></script>
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
@@ -3137,7 +3140,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>
     <script src="/static/js/jira.js?v=7"></script>
-    <script src="/static/js/kundenverwaltung.js?v=3"></script>
+    <script src="/static/js/kundenverwaltung.js?v=6"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
     <script src="/static/js/telemetry.js?v=6"></script>
     <script src="/static/js/branding.js?v=20"></script>

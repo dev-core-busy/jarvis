@@ -1427,14 +1427,14 @@ const _I18N = {
 
         // ── Kundenverwaltung ──────────────────────────────────
         'settings.tab.kundenverwaltung': 'Kundenverwaltung',
-        'kv.hint':          'Anbindung an die Kundenverwaltungs-API (IBS). Die Zugangsdaten schalten die Checkbox „IBS Tickets" in der Support-Suche frei und versorgen die Ticketsuche des Agenten über die Kundenverwaltung (Funktion „tickets-by-buzzwords", derzeit als Dummy).',
+        'kv.hint':          'Anbindung an die Kundenverwaltungs-API (IBS). Die Zugangsdaten schalten die Checkbox „IBS Tickets" in der Support-Suche frei und versorgen die Ticketsuche des Agenten über die Kundenverwaltung (API-Funktion „getMatchingEvents").',
         'kv.section_ibs':   'Kundenverwaltung (IBS) API',
         'kv.url_label':     'URL Kundenverwaltung API',
         'kv.key_label':     'API-Key Kundenverwaltung',
         'kv.key_hint':      'Beide Felder zusammen aktivieren die Checkbox „IBS Tickets" in der Support-Suche.',
-        'kv.dummy_note':    'Hinweis: Die API-Funktion „tickets-by-buzzwords" ist serverseitig noch nicht verfügbar – die Suche liefert bis dahin gekennzeichnete Beispieldaten.',
-        'kv.search_title':  'Tickets suchen (Dummy)',
+        'kv.search_title':  'Tickets suchen',
         'kv.search_ph':     'Schlagworte, kommagetrennt (1–5)…',
+        'kv.search_addr_ph': 'Adress-ID (optional)',
 
         // ── WhatsApp ──────────────────────────────────────────
         'wa.ready':                    'Bereit für Nachrichten',
@@ -2934,14 +2934,14 @@ const _I18N = {
 
         // ── Customer management ───────────────────────────────
         'settings.tab.kundenverwaltung': 'Customer Mgmt',
-        'kv.hint':          'Connection to the customer management API (IBS). The credentials enable the "IBS tickets" checkbox in the support search and power the agent\'s ticket search via customer management (function "tickets-by-buzzwords", currently a dummy).',
+        'kv.hint':          'Connection to the customer management API (IBS). The credentials enable the "IBS tickets" checkbox in the support search and power the agent\'s ticket search via customer management (API function "getMatchingEvents").',
         'kv.section_ibs':   'Customer management (IBS) API',
         'kv.url_label':     'Customer management API URL',
         'kv.key_label':     'Customer management API key',
         'kv.key_hint':      'Both fields together enable the "IBS tickets" checkbox in the support search.',
-        'kv.dummy_note':    'Note: the API function "tickets-by-buzzwords" is not yet available server-side – until then the search returns clearly marked sample data.',
-        'kv.search_title':  'Search tickets (dummy)',
+        'kv.search_title':  'Search tickets',
         'kv.search_ph':     'Buzzwords, comma-separated (1–5)…',
+        'kv.search_addr_ph': 'Address ID (optional)',
 
         // ── WhatsApp ──────────────────────────────────────────
         'wa.ready':                    'Ready for messages',

@@ -255,10 +255,14 @@ async def _uc_send_to_user(username: str, msg: dict):
         await _uc_send(ws, msg)
 
 async def _uc_broadcast_presence():
-    """Sendet die aktuelle Online-User-Liste an alle verbundenen User-Chat-Clients."""
-    users = [{"username": u, "online": True} for u in _uc_clients if _uc_clients[u]]
-    msg = {"type": "presence", "users": users}
+    """Sendet die aktuelle Online-User-Liste an alle verbundenen User-Chat-Clients.
+    Jeder Client erhaelt die Liste OHNE sich selbst (auch andere Schreibweisen des
+    eigenen Logins) – so kann der eigene Benutzer nie in der Benutzerliste landen."""
+    online = [u for u in _uc_clients if _uc_clients[u]]
     for username, conns in list(_uc_clients.items()):
+        me = _norm_login(username)
+        users = [{"username": u, "online": True} for u in online if _norm_login(u) != me]
+        msg = {"type": "presence", "users": users}
         for ws in list(conns):
             await _uc_send(ws, msg)
 
@@ -1488,19 +1492,34 @@ async def userchat_ws(ws: WebSocket):
             _uc_clients[username] = []
         _uc_clients[username].append(ws)
 
-        # Willkommens-Nachricht + aktuelle User-Liste senden
-        online_users = [{"username": u, "online": True} for u in _uc_clients if _uc_clients[u]]
+        # Willkommens-Nachricht + aktuelle User-Liste senden (ohne sich selbst)
+        _me = _norm_login(username)
+        online_users = [{"username": u, "online": True}
+                        for u in _uc_clients if _uc_clients[u] and _norm_login(u) != _me]
         await _uc_send(ws, {"type": "connected", "username": username, "users": online_users})
         # Presence-Update an alle senden
         await _uc_broadcast_presence()
 
-        # Chat-Historie senden: alle Konversationen dieses Users
-        user_history: dict[str, list] = {}
+        # Chat-Historie senden: alle Konversationen dieses Users. Abgleich per
+        # _norm_login, damit die Historie unabhaengig von der Login-Schreibweise
+        # (mit/ohne Domain) in JEDEM Browser sichtbar ist; Konversationen mit
+        # demselben Partner in verschiedenen Schreibweisen werden zusammengefuehrt.
+        merged: dict[str, dict] = {}   # partner_norm -> {"name": <Anzeige-Login>, "msgs": [...]}
         for key, msgs in _uc_history.items():
             parts = key.split("__")
-            if username in parts:
-                partner = parts[0] if parts[1] == username else parts[1]
-                user_history[partner] = msgs
+            if len(parts) != 2:
+                continue
+            n0, n1 = _norm_login(parts[0]), _norm_login(parts[1])
+            if _me not in (n0, n1):
+                continue
+            partner = parts[0] if n1 == _me else parts[1]
+            pn = _norm_login(partner)
+            ent = merged.setdefault(pn, {"name": partner, "msgs": []})
+            ent["msgs"].extend(msgs)
+        user_history: dict[str, list] = {}
+        for ent in merged.values():
+            ent["msgs"].sort(key=lambda m: m.get("ts", 0))
+            user_history[ent["name"]] = ent["msgs"]
         if user_history:
             await _uc_send(ws, {"type": "history", "conversations": user_history})
 

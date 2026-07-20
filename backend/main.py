@@ -1367,6 +1367,21 @@ async def get_online_users(user: str = Depends(require_auth)):
 _UC_NON_USERS = {"api", "jarvis", "root", "unknown", "anonymous", "system", "ki_read", ""}
 
 
+@app.get("/api/userchat/unread")
+async def userchat_unread(user: str = Depends(require_auth)):
+    """Anzahl ungelesener Benutzerchat-Nachrichten fuer den aktuellen Nutzer –
+    fuer die Badge auf der /portal-Karte. Zaehlt Nachrichten, die AN den Nutzer
+    gehen (to == user, ueber alle Schreibweisen via _norm_login) und noch nicht
+    als 'read' markiert sind."""
+    me = _norm_login(user)
+    count = 0
+    for msgs in _uc_history.values():
+        for m in msgs:
+            if _norm_login(str(m.get("to", ""))) == me and m.get("status") != "read":
+                count += 1
+    return JSONResponse({"unread": count})
+
+
 @app.get("/api/userchat/users")
 async def userchat_known_users(user: str = Depends(require_auth)):
     """Bekannte Chat-Partner für den Benutzerchat: alle Benutzer, die Jarvis schon

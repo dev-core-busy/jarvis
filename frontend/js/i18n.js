@@ -796,6 +796,9 @@ const _I18N = {
         // ── User-Chat ────────────────────────────────────────
         'uc.title':             'Benutzerchat',
         'uc.select_user':       'Wähle einen Benutzer links aus',
+        'uc.search_ph':         'Benutzer suchen…',
+        'uc.search_none':       'Keine Benutzer gefunden.',
+        'uc.search_no_ad':      'Verzeichnissuche nicht verfügbar (kein AD-Service-Konto konfiguriert).',
         'uc.back':              'Zurück zu Jarvis',
         'nav.home':             'Startseite',
         'nav.settings':         'Einstellungen',
@@ -2303,6 +2306,9 @@ const _I18N = {
         // ── User-Chat ────────────────────────────────────────
         'uc.title':             'User-Chat',
         'uc.select_user':       'Select a user on the left',
+        'uc.search_ph':         'Search users…',
+        'uc.search_none':       'No users found.',
+        'uc.search_no_ad':      'Directory search unavailable (no AD service account configured).',
         'uc.back':              'Back to Jarvis',
         'nav.home':             'Home',
         'nav.settings':         'Settings',

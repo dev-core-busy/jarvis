@@ -56,6 +56,28 @@
         .uc-sidebar-header .back-btn:hover { background: rgba(var(--accent-rgb), 0.15); }
         .uc-sidebar-header .back-btn svg { width: 18px; height: 18px; }
 
+        /* Benutzer-Suche (AD-Verzeichnis) im Sidebar-Kopf */
+        .uc-search-wrap { padding: 8px 12px; border-bottom: 1px solid var(--border); position: relative; }
+        .uc-search-input {
+            width: 100%; box-sizing: border-box; padding: 7px 12px; border-radius: 8px;
+            border: 1px solid var(--border); background: rgba(var(--fg-rgb), 0.05);
+            color: var(--text-primary); font-size: 0.88rem; outline: none;
+        }
+        .uc-search-input:focus { border-color: var(--accent); }
+        .uc-search-results {
+            position: absolute; left: 12px; right: 12px; top: calc(100% - 2px); z-index: 20;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 8px; box-shadow: var(--shadow-md); max-height: 260px; overflow-y: auto;
+        }
+        .uc-search-results:empty { display: none; }
+        .uc-sr-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; }
+        .uc-sr-item:hover { background: rgba(var(--accent-rgb), 0.12); }
+        .uc-sr-name { font-size: 0.88rem; color: var(--text-primary); }
+        .uc-sr-sub { font-size: 0.74rem; color: var(--text-muted); }
+        .uc-sr-hint { padding: 10px 12px; font-size: 0.8rem; color: var(--text-muted); }
+        .uc-list-section { padding: 6px 16px 2px; font-size: 0.7rem; letter-spacing: .04em;
+            text-transform: uppercase; color: var(--text-muted); }
+
         .uc-user-list {
             flex: 1;
             overflow-y: auto;
@@ -768,6 +790,11 @@
             <div class="uc-sidebar-header">
                 <span data-i18n="uc.title">Benutzer-Chat</span>
             </div>
+            <div class="uc-search-wrap">
+                <input type="text" id="uc-search" class="uc-search-input" autocomplete="off"
+                       data-i18n-placeholder="uc.search_ph" placeholder="Benutzer suchen…">
+                <div class="uc-search-results" id="uc-search-results"></div>
+            </div>
             <div class="uc-user-list" id="uc-user-list">
                 <!-- wird per JS befüllt -->
             </div>
@@ -878,12 +905,12 @@
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=33"></script>
+<script src="/static/js/i18n.js?v=76"></script>
 <script src="/static/js/issues.js?v=6"></script>
 <script src="/static/js/chatlib.js?v=9"></script>
 <script src="/static/js/branding.js?v=19"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/security_incidents.js?v=7"></script>
-<script src="/static/js/userchat.js?v=31"></script>
+<script src="/static/js/userchat.js?v=32"></script>
 </body>
 </html>

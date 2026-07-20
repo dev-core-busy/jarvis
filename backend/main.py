@@ -4311,6 +4311,9 @@ async def get_branding():
     return JSONResponse({
         "active": True,
         "company_name": cfg.get("company_name", ""),
+        # Separater Assistenten-Name fuer die Begruessungen (Chat-Willkommen +
+        # TTS-Vorschau); unabhaengig vom Firmennamen. Leer = Firmenname gilt.
+        "assistant_name": cfg.get("assistant_name", ""),
         "core_letter": cfg.get("core_letter", ""),
         "logo_mode": cfg.get("logo_mode", "letter"),
         # Kontakt-/Infozeile der Portalseite (leer = im Frontend ausgeblendet)

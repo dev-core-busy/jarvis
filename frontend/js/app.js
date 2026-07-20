@@ -510,19 +510,27 @@
                 const hdrEl = document.getElementById(hdr);
                 if (!hdrEl || hdrEl._kbBound) return;
                 hdrEl._kbBound = true;
-                // Initiale is-collapsed Klasse setzen
-                const bodyEl0 = document.getElementById(body);
-                if (bodyEl0 && bodyEl0.style.display === 'none') {
-                    hdrEl.classList.add('is-collapsed');
+                const bodyEl = document.getElementById(body);
+                const togEl  = document.getElementById(tog);
+                // Gemerkten Auf-/Zu-Zustand (pro Container) anwenden; ohne
+                // gespeicherten Wert gilt der HTML-Default (display:none = zu).
+                const key = 'jarvis_sect_collapse_' + hdr;
+                let saved = null;
+                try { saved = localStorage.getItem(key); } catch (e) {}
+                let collapsed = (saved === '1') ? true
+                    : (saved === '0') ? false
+                    : (bodyEl && bodyEl.style.display === 'none');
+                function apply(c) {
+                    if (bodyEl) bodyEl.style.display = c ? 'none' : '';
+                    if (togEl) togEl.textContent = c ? '▶' : '▼';
+                    hdrEl.classList.toggle('is-collapsed', c);
                 }
+                apply(collapsed);
                 hdrEl.addEventListener('click', (e) => {
                     if (e.target.closest('button, input, label, .toggle-switch, a')) return;
-                    const bodyEl = document.getElementById(body);
-                    const togEl  = document.getElementById(tog);
-                    const collapsed = bodyEl.style.display !== 'none';
-                    bodyEl.style.display = collapsed ? 'none' : '';
-                    if (togEl) togEl.textContent = collapsed ? '▶' : '▼';
-                    hdrEl.classList.toggle('is-collapsed', collapsed);
+                    const nowCollapsed = bodyEl.style.display !== 'none';
+                    apply(nowCollapsed);
+                    try { localStorage.setItem(key, nowCollapsed ? '1' : '0'); } catch (e) {}
                 });
             });
         }

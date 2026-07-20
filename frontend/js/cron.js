@@ -286,14 +286,26 @@ window.cronManager = new (class JarvisCronManager {
         const hdr = document.getElementById(hdrId);
         if (!hdr || hdr._crBound) return;
         hdr._crBound = true;
+        const body = document.getElementById(bodyId);
+        const tog  = document.getElementById(togId);
+        // Gemerkten Auf-/Zu-Zustand (pro Container) anwenden; ohne gespeicherten
+        // Wert gilt der HTML-Default. Key-Schema identisch zu app.js.
+        const key = 'jarvis_sect_collapse_' + hdrId;
+        let saved = null;
+        try { saved = localStorage.getItem(key); } catch (e) {}
+        const collapsed0 = (saved === '1') ? true
+            : (saved === '0') ? false
+            : (body && body.style.display === 'none');
+        if (body) body.style.display = collapsed0 ? 'none' : '';
+        if (tog) tog.textContent = collapsed0 ? '▶' : '▼';
+        hdr.classList.toggle('is-collapsed', collapsed0);
         hdr.addEventListener('click', e => {
             if (e.target.closest('button, input, label')) return;
-            const body = document.getElementById(bodyId);
-            const tog  = document.getElementById(togId);
-            const collapsed = body.style.display !== 'none';
-            body.style.display = collapsed ? 'none' : '';
-            if (tog) tog.textContent = collapsed ? '▶' : '▼';
-            hdr.classList.toggle('is-collapsed', collapsed);
+            const nowCollapsed = body.style.display !== 'none';
+            body.style.display = nowCollapsed ? 'none' : '';
+            if (tog) tog.textContent = nowCollapsed ? '▶' : '▼';
+            hdr.classList.toggle('is-collapsed', nowCollapsed);
+            try { localStorage.setItem(key, nowCollapsed ? '1' : '0'); } catch (e) {}
         });
     }
 
@@ -306,6 +318,7 @@ window.cronManager = new (class JarvisCronManager {
             body.style.display = '';
             if (tog) tog.textContent = '▼';
             if (hdr) hdr.classList.remove('is-collapsed');
+            try { localStorage.setItem('jarvis_sect_collapse_' + hdrId, '0'); } catch (e) {}
         }
     }
 

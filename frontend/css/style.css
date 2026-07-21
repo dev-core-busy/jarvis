@@ -2531,6 +2531,26 @@ body.kbm-resizing { cursor: col-resize; user-select: none; }
     font-size: 0.78rem; tab-size: 2;
 }
 
+/* Maus-über-Vorschau fuer Datei-Zeilen in der Gruppen-Ansicht (Wissen).
+   Text/JSON wie .kbm-tip; Medien (Bild/GIF/PDF) ohne Zeilenumbruch-Zwang. */
+.kb-file-tip {
+    position: fixed; z-index: 10080; width: 560px; max-width: calc(100vw - 24px);
+    max-height: min(72vh, 620px); overflow: auto;
+    white-space: pre-wrap; word-break: break-word;
+    background: var(--bg-secondary, #0f172a); border: 1px solid var(--border, rgba(255,255,255,.15));
+    border-radius: 8px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5;
+    color: var(--text-primary); box-shadow: 0 12px 30px rgba(var(--shadow-rgb), 0.5);
+    pointer-events: auto; resize: both;
+}
+.kb-file-tip.kb-file-tip-json {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.78rem; tab-size: 2;
+}
+/* Medien fuellen den Popup-Rand; kein Textumbruch/Padding-Overhead. */
+.kb-file-tip.kb-file-tip-media {
+    white-space: normal; padding: 8px; resize: none;
+}
+
 /* ── Profil-Liste ── */
 .profiles-list {
     display: flex;

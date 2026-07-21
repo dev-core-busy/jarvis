@@ -630,18 +630,23 @@ def _may_edit_knowledge(user: str) -> bool:
     """Prädikat: Darf der Benutzer *generell* Wissen bearbeiten (globale Editoren)?
 
     True wenn:
-    - Keine Editor-Einschränkung konfiguriert (bestehende Behavior beibehalten)
     - Lokaler Admin (ALLOWED_USERS)
     - AD-User in ad_knowledge_editors-Benutzerliste
     - AD-User in ad_knowledge_editors_group (wird beim Login gecacht)
+
+    Globale Wissens-Editoren müssen EXPLIZIT eingetragen werden. Ist weder eine
+    Benutzerliste noch eine Gruppe konfiguriert, ist NIEMAND globaler Editor –
+    ausdrücklich auch KEINE lokalen Admins. Soll jemand bearbeiten dürfen, muss
+    er eingetragen sein; für "alle" die AD-Gruppe "Jeder"/Domänen-Benutzer unter
+    ad_knowledge_editors_group setzen.
     """
     editors_raw = config.get_setting("ad_knowledge_editors", "").strip()
     editors_group = config.get_setting("ad_knowledge_editors_group", "").strip()
 
-    # Keine Einschränkung konfiguriert → alle dürfen (bestehende Behavior bleibt erhalten)
+    # Nichts konfiguriert → niemand ist globaler Wissens-Editor (auch keine Admins)
     if not editors_raw and not editors_group:
-        return True
-    # Lokale Admins immer erlaubt
+        return False
+    # Lokale Admins immer erlaubt, sobald überhaupt eine Einschränkung existiert
     if user in ALLOWED_USERS:
         return True
 
@@ -846,16 +851,19 @@ def _check_knowledge_edit_permission_with_conn(username: str, conn, base_dn: str
     """Prüft ob ein AD-User Wissen bearbeiten darf (nur beim Login aufrufbar – LDAP-Bind aktiv).
 
     Gibt True zurück wenn:
-    - Weder Editoren-Liste noch Editoren-Gruppe konfiguriert (alle dürfen)
     - Benutzername in ad_knowledge_editors-Liste
     - User ist Mitglied der ad_knowledge_editors_group
+
+    Globale Wissens-Editoren müssen EXPLIZIT eingetragen werden – ist nichts
+    konfiguriert, darf hier kein AD-User global Wissen bearbeiten (für "alle"
+    die AD-Gruppe "Jeder"/Domänen-Benutzer als ad_knowledge_editors_group setzen).
     """
     editors_raw = config.get_setting("ad_knowledge_editors", "").strip()
     editors_group = config.get_setting("ad_knowledge_editors_group", "").strip()
 
-    # Keine Einschränkung → alle AD-User dürfen Wissen bearbeiten
+    # Nichts konfiguriert → kein AD-User ist globaler Wissens-Editor (explizites Opt-in)
     if not editors_raw and not editors_group:
-        return True
+        return False
 
     plain = username.split("@")[0].split("\\")[-1].lower()
 
@@ -3333,7 +3341,7 @@ async def get_ad_status(user: str = Depends(require_auth)):
         "knowledge_edit_mode": (
             "group"     if knowledge_editors_group else
             "users"     if knowledge_editors else
-            "all"       # alle authentifizierten Benutzer dürfen
+            "none"      # nichts konfiguriert → nur lokale Admins (kein globaler Editor)
         ),
         "internet_users": config.get_setting("ad_internet_users", ""),
         "internet_group": config.get_setting("ad_internet_group", ""),
@@ -6316,8 +6324,10 @@ async def read_knowledge_file_raw(path: str, user: str = Depends(require_auth_or
     if not resolved.is_file():
         return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
     media, _ = mimetypes.guess_type(str(resolved))
+    # inline statt attachment: sonst zwingt Content-Disposition den Browser zum
+    # Download (auch im <iframe> der Hover-Vorschau) statt die Datei anzuzeigen.
     return FileResponse(str(resolved), media_type=media or "application/octet-stream",
-                        filename=resolved.name)
+                        filename=resolved.name, content_disposition_type="inline")
 
 
 @app.put("/api/knowledge/file_write")

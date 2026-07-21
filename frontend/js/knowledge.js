@@ -48,12 +48,8 @@ class JarvisKnowledgeManager {
         window.KbGroups.renderCheckboxes(document.getElementById('kb-upload-groups'), []);
         // Gruppen-Auswahl fuer "Ordner neu anlegen" (Speicherordner-Zuordnung)
         window.KbGroups.renderCheckboxes(document.getElementById('kb-folder-groups'), []);
-        // Tabellen-Symbol öffnet die Massenzuordnungs-Tabelle
-        const mbtn = document.getElementById('kb-grp-matrix-btn');
-        if (mbtn && !mbtn._bound) {
-            mbtn._bound = true;
-            mbtn.onclick = () => { if (window.KbMatrix) window.KbMatrix.open(); };
-        }
+        // Die Massenzuordnungs-Tabelle (▦) wurde nach /wissen -> "Massenzuordnung"
+        // verschoben (nur fuer globale Wissens-Editoren).
     }
 
     _renderGroupsOverview() {

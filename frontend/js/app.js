@@ -539,12 +539,9 @@
         function _initKbCollapse() {
             _collapseInit([
                 { hdr: 'kb-sect-stats-hdr',  body: 'kb-sect-stats-body',  tog: 'kb-sect-stats-tog'  },
-                { hdr: 'kb-sect-groups-hdr', body: 'kb-sect-groups-body', tog: 'kb-sect-groups-tog' },
-                { hdr: 'kb-sect-upload-hdr', body: 'kb-sect-upload-body', tog: 'kb-sect-upload-tog' },
                 { hdr: 'kb-sect-folder-hdr', body: 'kb-sect-folder-body', tog: 'kb-sect-folder-tog' },
                 { hdr: 'kb-sect-webdav-hdr', body: 'kb-sect-webdav-body', tog: 'kb-sect-webdav-tog' },
                 { hdr: 'kb-sect-net-hdr',    body: 'kb-sect-net-body',    tog: 'kb-sect-net-tog'    },
-                { hdr: 'kb-sect-ext-hdr',    body: 'kb-sect-ext-body',    tog: 'kb-sect-ext-tog'    },
             ]);
         }
 

@@ -152,6 +152,7 @@
                 renderScope();
                 loadFiles();
                 loadPending();
+                loadCfSpaces();
             })
             .catch(function () { showLogin(); });
     }
@@ -165,17 +166,26 @@
             return;
         }
         banner.className = 'wi-banner';
-        // "Dein Bereich" + Wissensgruppen in eigener Zeile (bricht sonst unschoen um)
+        // Nur "Angemeldet als <user>" – die Wissensgruppen-Chips entfallen hier,
+        // da die Gruppen weiter unten in der Auswahl ohnehin gezeigt werden.
         banner.innerHTML = '<div>' + t('wissen.scope_as') + ' <b>' + esc(SCOPE.user) + '</b>'
-            + (SCOPE.is_editor ? ' ' + t('wissen.global_editor') : '') + '</div>'
-            + '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">'
-            + t('wissen.scope_area') + ' ' + SCOPE.groups.map(function (g) {
-                return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';">' + esc(g.name) + '</span>';
-            }).join(' ') + '</div>';
+            + (SCOPE.is_editor ? ' ' + t('wissen.global_editor') : '') + '</div>';
 
         $('wi-upload-groups').innerHTML = groupBoxes('up');
         updateFolderOptions();
         updateDropState();   // Ablage-Sperre initial setzen (keine Gruppe = gesperrt + Hinweis)
+
+        // Massenzuordnung + Wissensgruppen-Verwaltung nur fuer globale Wissens-Editoren
+        var mSec = $('wi-sec-matrix');
+        if (mSec) mSec.style.display = SCOPE.is_editor ? '' : 'none';
+        var gSec = $('wi-sec-groups');
+        if (gSec) {
+            gSec.style.display = SCOPE.is_editor ? '' : 'none';
+            // Gruppen-Verwaltung (aus Einstellungen verschoben) via knowledge.js rendern
+            if (SCOPE.is_editor && window.knowledgeManager && window.knowledgeManager.initGroups) {
+                window.knowledgeManager.initGroups();
+            }
+        }
     }
 
     // Speicherordner-Auswahl auf die gewaehlten Gruppen eingrenzen: angeboten
@@ -243,7 +253,7 @@
         var b = $('wi-busy'), bt = $('wi-busy-text');
         if (b) b.classList.toggle('hidden', !_busy);
         if (_busy && bt) bt.textContent = genQ ? t('wissen.busy_genq') : t('wissen.busy_upload');
-        var ub = $('wi-ext-url-btn'); if (ub) ub.disabled = _busy;   // URL-Analyse mitsperren
+        var ub = $('wi-extract-btn'); if (ub) ub.disabled = _busy;   // Aktion mitsperren
         updateDropState();
     }
 
@@ -467,20 +477,322 @@
             .then(function (d) {
                 var box = $('wi-pending-list');
                 var items = (d && d.pending) || [];
+                var bulk = $('wi-drafts-bulk');
+                if (bulk) bulk.style.display = items.length ? 'flex' : 'none';
                 if (!items.length) { box.innerHTML = '<div class="wi-empty">' + t('wissen.no_drafts') + '</div>'; return; }
                 box.innerHTML = '';
                 items.forEach(function (it) {
                     var row = document.createElement('div');
                     row.className = 'wi-item';
-                    row.innerHTML = '<span class="nm">' + esc(it.title || t('wissen.untitled')) + '</span>';
+                    var cb = document.createElement('input');
+                    cb.type = 'checkbox'; cb.className = 'wi-draft-cb'; cb.value = it.id;
+                    cb.title = t('wissen.mark_delete');
+                    cb.style.cssText = 'flex-shrink:0;width:16px;height:16px;margin:0 2px 0 0;cursor:pointer;';
+                    var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = it.title || t('wissen.untitled');
                     var rev = document.createElement('button'); rev.className = 'sec-btn small'; rev.textContent = t('wissen.review_btn');
                     rev.addEventListener('click', function () { showReview(it); window.scrollTo(0, document.body.scrollHeight); });
                     var del = document.createElement('button'); del.className = 'sec-btn small danger'; del.textContent = '×';
                     del.addEventListener('click', function () { deletePending(it.id, false); });
-                    row.appendChild(rev); row.appendChild(del);
+                    row.appendChild(cb); row.appendChild(nm); row.appendChild(rev); row.appendChild(del);
                     box.appendChild(row);
                 });
+                bindDraftsBulk(box);
             })
+            .catch(function () {});
+    }
+
+    // Mehrfachauswahl zum Verwerfen mehrerer Entwuerfe (analog Einstellungen-Extraktor).
+    function bindDraftsBulk(box) {
+        var boxes = Array.prototype.slice.call(box.querySelectorAll('.wi-draft-cb'));
+        var selAll = $('wi-drafts-selall'), delSel = $('wi-drafts-delsel');
+        function sync() {
+            var checked = boxes.filter(function (b) { return b.checked; }).length;
+            if (delSel) {
+                delSel.disabled = checked === 0;
+                delSel.textContent = checked ? t('wissen.delete_selected') + ' (' + checked + ')' : t('wissen.delete_selected');
+            }
+            if (selAll) selAll.textContent = (checked && checked === boxes.length) ? t('wissen.unselect_all') : t('wissen.select_all');
+        }
+        boxes.forEach(function (b) { b.onchange = sync; });
+        if (selAll) selAll.onclick = function () {
+            var all = boxes.length && boxes.every(function (b) { return b.checked; });
+            boxes.forEach(function (b) { b.checked = !all; });
+            sync();
+        };
+        if (delSel) delSel.onclick = function () {
+            var ids = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+            if (ids.length) bulkDeleteDrafts(ids);
+        };
+        sync();
+    }
+
+    function bulkDeleteDrafts(ids) {
+        if (!window.confirm(t('wissen.delete_selected_confirm', { n: ids.length }))) return;
+        var chain = Promise.resolve();
+        ids.forEach(function (id) {
+            chain = chain.then(function () {
+                return fetch('/api/wissen/pending/' + encodeURIComponent(id), { method: 'DELETE', headers: authH() }).catch(function () {});
+            });
+        });
+        chain.then(function () { $('wi-ext-review').innerHTML = ''; loadPending(); });
+    }
+
+    // ── Eingabe-Tabs: URL / Datei / Confluence ──────────────────────────
+    var _extTab = 'url';
+    function switchExtTab(tab) {
+        _extTab = tab;
+        [['url', 'wi-tab-url', 'wi-panel-url'], ['file', 'wi-tab-file', 'wi-panel-file'],
+         ['cf', 'wi-tab-cf', 'wi-panel-cf']].forEach(function (x) {
+            var btn = $(x[1]), pan = $(x[2]);
+            if (btn) btn.classList.toggle('active', tab === x[0]);
+            if (pan) pan.style.display = (tab === x[0]) ? '' : 'none';
+        });
+        // Der Abbrechen-Button gehoert zum Confluence-Bulk – bei Tab-Wechsel weg,
+        // sofern kein Job laeuft.
+        if (!_cfJobId) { var xc = $('wi-extract-cancel'); if (xc) xc.style.display = 'none'; }
+        if (tab === 'file') updateDropState();
+    }
+
+    // Universeller "Extrahieren"-Button: löst je nach aktivem Tab die passende Aktion aus.
+    function doExtract() {
+        if (_extTab === 'cf') { importCf(); return; }
+        if (_extTab === 'file') {
+            if (canUpload()) $('wi-file-input').click(); else updateDropState();
+            return;
+        }
+        extractUrl();
+    }
+
+    // ── Confluence-Import (nur persönliche Bereiche) ────────────────────
+    // Suchbare Bereichsauswahl (analog Einstellungen → Wissen → Confluence):
+    // Freitext-Suche mit Dropdown, danach Seiten-Mehrfachauswahl.
+    var _cfJobId = null, _cfPoll = null;
+    var _cfSpaces = null, _selectedSpaceKey = '', _ddOpen = false, _ddIndex = -1, _ddList = [];
+
+    function loadCfSpaces(force) {
+        var tabBtn = $('wi-tab-cf'), input = $('wi-cf-space-search');
+        if (_cfSpaces && !force) { if (_ddOpen) renderCfSpaceDropdown(); return; }
+        if (input) input.placeholder = t('common.loading');
+        fetch('/api/wissen/confluence/spaces', { headers: authH() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                var spaces = (d && d.ok && d.configured) ? (d.spaces || []) : [];
+                if (!spaces.length) {
+                    _cfSpaces = [];
+                    if (tabBtn) tabBtn.style.display = 'none';
+                    if (_extTab === 'cf') switchExtTab('url');   // Tab entfaellt -> zurueck auf URL
+                    return;
+                }
+                _cfSpaces = spaces;
+                if (tabBtn) tabBtn.style.display = '';
+                if (input) input.placeholder = t('wissen.cf_space_search') + ' (' + spaces.length + ')';
+                if (_ddOpen) renderCfSpaceDropdown();
+            })
+            .catch(function () {
+                if (tabBtn) tabBtn.style.display = 'none';
+                if (_extTab === 'cf') switchExtTab('url');
+            });
+    }
+
+    function filteredSpaces() {
+        if (!_cfSpaces) return [];
+        var q = (($('wi-cf-space-search') || {}).value || '').trim().toLowerCase();
+        if (!q) return _cfSpaces;
+        return _cfSpaces.filter(function (s) {
+            return (((s.name || '') + ' ' + (s.key || '')).toLowerCase().indexOf(q) !== -1);
+        });
+    }
+
+    function onSpaceSearchInput() {
+        _selectedSpaceKey = '';
+        var wrap = $('wi-cf-page-wrap'), hint = $('wi-cf-hint');
+        if (wrap) wrap.style.display = 'none';
+        if (hint) hint.style.display = 'none';
+        _ddIndex = -1;
+        openSpaceDropdown();
+    }
+
+    function openSpaceDropdown() {
+        _ddOpen = true;
+        if (!_cfSpaces) { loadCfSpaces(false); return; }
+        renderCfSpaceDropdown();
+    }
+    function closeSpaceDropdown() {
+        _ddOpen = false;
+        var dd = $('wi-cf-space-dd');
+        if (dd) dd.style.display = 'none';
+    }
+
+    function renderCfSpaceDropdown() {
+        var dd = $('wi-cf-space-dd');
+        if (!dd) return;
+        var list = filteredSpaces();
+        var CAP = 200;
+        var shown = list.slice(0, CAP);
+        _ddList = shown;
+        if (_ddIndex >= shown.length) _ddIndex = -1;
+        if (!shown.length) {
+            dd.innerHTML = '<div style="padding:8px 10px;color:var(--text-secondary);font-size:0.85rem;">' + esc(t('wissen.cf_no_hits')) + '</div>';
+            dd.style.display = '';
+            return;
+        }
+        dd.innerHTML = shown.map(function (s, i) {
+            return '<div class="wi-cf-opt" data-key="' + esc(s.key) + '" data-i="' + i + '" '
+                + 'style="padding:7px 10px;cursor:pointer;font-size:0.86rem;'
+                + (i === _ddIndex ? 'background:rgba(var(--accent-rgb),0.18);' : '') + '">'
+                + esc(s.name) + ' <span style="color:var(--text-secondary);">(' + esc(s.key) + ')</span></div>';
+        }).join('')
+        + (list.length > CAP ? '<div style="padding:6px 10px;color:var(--text-secondary);font-size:0.78rem;">… '
+            + (list.length - CAP) + '</div>' : '');
+        dd.style.display = '';
+        dd.querySelectorAll('.wi-cf-opt').forEach(function (el) {
+            el.addEventListener('mousedown', function (ev) {
+                ev.preventDefault();   // verhindert blur vor der Auswahl
+                selectSpace(el.getAttribute('data-key'));
+            });
+            el.addEventListener('mouseover', function () {
+                _ddIndex = parseInt(el.getAttribute('data-i'), 10);
+                highlightDd();
+            });
+        });
+    }
+
+    function highlightDd() {
+        var dd = $('wi-cf-space-dd');
+        if (!dd) return;
+        dd.querySelectorAll('.wi-cf-opt').forEach(function (el) {
+            var i = parseInt(el.getAttribute('data-i'), 10);
+            el.style.background = (i === _ddIndex) ? 'rgba(var(--accent-rgb),0.18)' : '';
+        });
+    }
+
+    function spaceSearchKey(e) {
+        if (!_ddOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { openSpaceDropdown(); return; }
+        var n = (_ddList || []).length;
+        if (e.key === 'ArrowDown') { e.preventDefault(); _ddIndex = Math.min(_ddIndex + 1, n - 1); highlightDd(); scrollDdIntoView(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); _ddIndex = Math.max(_ddIndex - 1, 0); highlightDd(); scrollDdIntoView(); }
+        else if (e.key === 'Enter') { e.preventDefault(); var pick = (_ddList || [])[_ddIndex] || (_ddList || [])[0]; if (pick) selectSpace(pick.key); }
+        else if (e.key === 'Escape') { closeSpaceDropdown(); }
+    }
+    function scrollDdIntoView() {
+        var dd = $('wi-cf-space-dd');
+        var el = dd && dd.querySelector('.wi-cf-opt[data-i="' + _ddIndex + '"]');
+        if (el) el.scrollIntoView({ block: 'nearest' });
+    }
+
+    function selectSpace(key) {
+        var sp = (_cfSpaces || []).filter(function (s) { return s.key === key; })[0];
+        if (!sp) return;
+        _selectedSpaceKey = key;
+        var input = $('wi-cf-space-search');
+        if (input) input.value = sp.name + ' (' + sp.key + ')';
+        closeSpaceDropdown();
+        loadCfPages(key);
+    }
+
+    function loadCfPages(space) {
+        var wrap = $('wi-cf-page-wrap'), hint = $('wi-cf-hint'), pageSel = $('wi-cf-page'), st = $('wi-cf-status');
+        if (st) st.textContent = '';
+        if (wrap) wrap.style.display = 'flex';
+        if (hint) hint.style.display = 'none';
+        if (pageSel) { pageSel.disabled = true; pageSel.innerHTML = '<option>' + esc(t('common.loading')) + '</option>'; }
+        fetch('/api/wissen/confluence/pages?space=' + encodeURIComponent(space), { headers: authH() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!pageSel) return;
+                if (!d || !d.ok) { pageSel.innerHTML = '<option value="">' + esc((d && d.error) || t('common.error')) + '</option>'; return; }
+                var pages = d.pages || [];
+                pageSel.disabled = false;
+                pageSel.innerHTML = '<option value="__ALL__">' + esc(t('wissen.cf_all', { n: pages.length })) + '</option>'
+                    + pages.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.title) + '</option>'; }).join('');
+                if (hint) hint.style.display = pages.length ? 'block' : 'none';
+            })
+            .catch(function () { if (pageSel) pageSel.innerHTML = '<option value="">' + esc(t('common.error')) + '</option>'; });
+    }
+
+    function importCf() {
+        var sel = $('wi-cf-page');
+        var picked = sel ? Array.prototype.slice.call(sel.selectedOptions).map(function (o) { return o.value; }).filter(Boolean) : [];
+        var st = $('wi-cf-status');
+        if (!picked.length) { if (st) { st.style.color = 'var(--danger)'; st.textContent = t('wissen.cf_pick'); } return; }
+        var space = _selectedSpaceKey || '';
+        var body, bulk;
+        if (picked.indexOf('__ALL__') !== -1) { body = { space: space }; bulk = true; }
+        else if (picked.length > 1) { body = { page_ids: picked }; bulk = true; }
+        else { body = { page_id: picked[0] }; bulk = false; }
+        var jobId = _cfJobId = 'wcf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        body.job_id = jobId;
+        var btn = $('wi-extract-btn'), cancel = $('wi-extract-cancel');
+        if (btn) btn.disabled = true;
+        if (st) { st.style.color = 'var(--text-secondary)'; st.textContent = t('wissen.cf_starting'); }
+        fetch('/api/wissen/extract/confluence', { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) })
+            .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
+            .then(function (res) {
+                var j = res.j || {};
+                if (res.status === 499) { if (st) st.textContent = t('wissen.cf_cancelled'); if (btn) btn.disabled = false; _cfJobId = null; return; }
+                if (res.status >= 400) {
+                    if (st) { st.style.color = 'var(--danger)'; st.textContent = '✗ ' + (j.error || t('common.error')); }
+                    if (btn) btn.disabled = false; _cfJobId = null; return;
+                }
+                if (bulk) {
+                    if (cancel) cancel.style.display = '';
+                    watchCf(jobId, j.total || 0);
+                } else {
+                    if (btn) btn.disabled = false;
+                    _cfJobId = null;
+                    if (st) st.textContent = '';
+                    showReview(j); loadPending();
+                    $('wi-ext-review').scrollIntoView({ behavior: 'smooth' });
+                }
+            })
+            .catch(function () { if (st) { st.style.color = 'var(--danger)'; st.textContent = t('wissen.cf_failed'); } if (btn) btn.disabled = false; _cfJobId = null; });
+    }
+
+    // Bulk-Fortschritt pollen und Statuszeile mit Countdown stehen lassen.
+    function watchCf(jobId, total) {
+        if (!jobId) return;
+        clearInterval(_cfPoll);
+        var started = Date.now();
+        var st = $('wi-cf-status'), btn = $('wi-extract-btn'), cancel = $('wi-extract-cancel');
+        function tick() {
+            fetch('/api/wissen/extract/progress?job_id=' + encodeURIComponent(jobId), { headers: authH() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    d = d || {};
+                    var done = d.done || 0, running = !!d.running;
+                    if (d.total) total = d.total;
+                    if (_cfJobId !== jobId) { clearInterval(_cfPoll); _cfPoll = null; return; }
+                    if (running) {
+                        var remaining = Math.max(0, total - done);
+                        var secs = Math.round((Date.now() - started) / 1000);
+                        if (st) { st.style.color = 'var(--text-secondary)'; st.textContent = t('wissen.cf_progress', { r: remaining, n: total, s: secs }); }
+                        loadPending();
+                        return;
+                    }
+                    clearInterval(_cfPoll); _cfPoll = null; _cfJobId = null;
+                    if (btn) btn.disabled = false;
+                    if (cancel) cancel.style.display = 'none';
+                    loadPending();
+                    if (st) {
+                        if (done < total) { st.style.color = 'var(--warning)'; st.textContent = t('wissen.cf_stopped', { done: done, n: total }); }
+                        else { st.style.color = 'var(--success)'; st.textContent = t('wissen.cf_done', { n: total }); }
+                    }
+                })
+                .catch(function () { /* Netzfehler -> naechster Tick */ });
+        }
+        tick();
+        _cfPoll = setInterval(tick, 2000);
+    }
+
+    function abortCf() {
+        var jid = _cfJobId; _cfJobId = null;
+        clearInterval(_cfPoll); _cfPoll = null;
+        var cancel = $('wi-extract-cancel'), btn = $('wi-extract-btn');
+        if (cancel) cancel.style.display = 'none';
+        if (btn) btn.disabled = false;
+        if (!jid) return;
+        fetch('/api/wissen/extract/cancel', { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify({ job_id: jid }) })
+            .then(function () { var st = $('wi-cf-status'); if (st) st.textContent = t('wissen.cf_cancelled'); })
             .catch(function () {});
     }
 
@@ -516,7 +828,7 @@
 
         // Einklappbare Container (Zustand pro Browser gemerkt, analog Einstellungen).
         // Der Pfeil steht fest im Markup (eigener Span, damit applyLang ihn nicht wegwischt).
-        ['wi-sec-upload', 'wi-sec-files'].forEach(function (id) {
+        ['wi-sec-matrix', 'wi-sec-groups', 'wi-sec-upload', 'wi-sec-files'].forEach(function (id) {
             var sec = $(id); if (!sec) return;
             var h = sec.querySelector('h2'); if (!h) return;
             var tog = h.querySelector('.wi-sec-tog'); if (!tog) return;
@@ -531,8 +843,28 @@
             h.addEventListener('click', function () { apply(!sec.classList.contains('collapsed')); });
         });
 
-        $('wi-ext-url-btn').addEventListener('click', extractUrl);
-        $('wi-ext-url').addEventListener('keydown', function (e) { if (e.key === 'Enter') extractUrl(); });
+        var exBtn = $('wi-extract-btn'); if (exBtn) exBtn.addEventListener('click', doExtract);
+        var exCancel = $('wi-extract-cancel'); if (exCancel) exCancel.addEventListener('click', abortCf);
+        $('wi-ext-url').addEventListener('keydown', function (e) { if (e.key === 'Enter') doExtract(); });
+
+        // Eingabe-Tabs (URL / Datei / Confluence)
+        var tU = $('wi-tab-url'); if (tU) tU.addEventListener('click', function () { switchExtTab('url'); });
+        var tF = $('wi-tab-file'); if (tF) tF.addEventListener('click', function () { switchExtTab('file'); });
+        var tC = $('wi-tab-cf'); if (tC) tC.addEventListener('click', function () { switchExtTab('cf'); });
+
+        // Confluence-Import (nur persönliche Bereiche) – suchbare Bereichsauswahl
+        var cfSearch = $('wi-cf-space-search');
+        if (cfSearch) {
+            cfSearch.addEventListener('input', onSpaceSearchInput);
+            cfSearch.addEventListener('focus', openSpaceDropdown);
+            cfSearch.addEventListener('keydown', spaceSearchKey);
+            cfSearch.addEventListener('blur', function () { setTimeout(closeSpaceDropdown, 150); });
+        }
+        var cfRefresh = $('wi-cf-refresh'); if (cfRefresh) cfRefresh.addEventListener('click', function () { loadCfSpaces(true); });
+
+        // Massenzuordnung: Tabellen-Overlay öffnen (nur für globale Wissens-Editoren sichtbar)
+        var mBtn = $('wi-matrix-btn');
+        if (mBtn) mBtn.addEventListener('click', function () { if (window.KbMatrix) window.KbMatrix.open(); });
 
         if (window.applyLang) window.applyLang();
         loadScope();

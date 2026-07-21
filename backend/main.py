@@ -7054,6 +7054,196 @@ async def wissen_pending_delete(doc_id: str, user: str = Depends(require_auth)):
     return JSONResponse({"ok": delete_pending(doc_id)})
 
 
+# ─── Confluence-Import fuer /wissen (NUR persoenliche Bereiche) ──────
+# Domaenennutzer duerfen ueber /wissen ausschliesslich aus PERSOENLICHEN
+# Confluence-Bereichen (space.type == 'personal') importieren. Es entstehen
+# immer Entwuerfe (Pending), dem Nutzer zugeordnet (created_by) – kein
+# auditloser Direkt-Import. Progress/Cancel teilen sich die Job-Dicts mit
+# dem Einstellungs-Extraktor (job_id ist clientseitig eindeutig).
+
+async def _wissen_personal_spaces(c) -> list:
+    """Nur persoenliche Confluence-Bereiche (type == 'personal')."""
+    spaces = await asyncio.to_thread(c.spaces_detailed, 500)
+    return [s for s in spaces if (s.get("type") == "personal")]
+
+
+@app.get("/api/wissen/confluence/spaces")
+async def wissen_confluence_spaces(user: str = Depends(require_auth)):
+    """Persoenliche Confluence-Bereiche fuer den /wissen-Extraktor."""
+    if not _editable_groups_for(user):
+        return JSONResponse({"ok": False, "error": "Dir ist kein Wissensbereich zugewiesen."}, status_code=403)
+    from backend.confluence_client import ConfluenceError
+    c = _confluence_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "configured": False,
+                             "error": "Confluence ist nicht konfiguriert."})
+    try:
+        spaces = await _wissen_personal_spaces(c)
+        spaces.sort(key=lambda s: (s.get("name") or "").lower())
+        return JSONResponse({"ok": True, "configured": True, "base": c.base,
+                             "count": len(spaces), "spaces": spaces})
+    except ConfluenceError as e:
+        return JSONResponse({"ok": False, "configured": True, "status": e.status, "error": str(e)})
+
+
+@app.get("/api/wissen/confluence/pages")
+async def wissen_confluence_pages(space: str = "", user: str = Depends(require_auth)):
+    """Seiten eines PERSOENLICHEN Bereichs fuer den /wissen-Extraktor."""
+    if not _editable_groups_for(user):
+        return JSONResponse({"ok": False, "error": "Dir ist kein Wissensbereich zugewiesen."}, status_code=403)
+    from backend.confluence_client import ConfluenceError
+    c = _confluence_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
+    space = space.strip()
+    if not space:
+        return JSONResponse({"ok": False, "error": "Space-Key fehlt."}, status_code=400)
+    try:
+        personal_keys = {s.get("key") for s in await _wissen_personal_spaces(c)}
+        if space not in personal_keys:
+            return JSONResponse({"ok": False, "error": "Nur persönliche Bereiche erlaubt."}, status_code=403)
+        pages = await asyncio.to_thread(c.pages_in_space, space, 500)
+        pages.sort(key=lambda p: (p.get("title") or "").lower())
+        return JSONResponse({"ok": True, "count": len(pages), "pages": pages})
+    except ConfluenceError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+
+
+@app.post("/api/wissen/extract/confluence")
+async def wissen_extract_confluence(request: Request, user: str = Depends(require_auth)):
+    """Confluence-Import fuer /wissen -> Entwuerfe (Pending), dem Nutzer zugeordnet.
+
+    Body: ``{"page_id": "123"}`` (synchron) | ``{"page_ids": [...]}`` |
+    ``{"space": "KEY"}`` (Hintergrund-Job). NUR persoenliche Bereiche."""
+    if not _editable_groups_for(user):
+        return JSONResponse({"error": "Dir ist kein Wissensbereich zugewiesen."}, status_code=403)
+    from backend.confluence_client import ConfluenceError, html_to_text
+    from backend.web_extractor import extract_to_pending, update_pending
+    body = await request.json()
+    page_id = (body.get("page_id") or "").strip()
+    space = (body.get("space") or "").strip()
+    page_ids = [str(p).strip() for p in (body.get("page_ids") or []) if str(p).strip()]
+    job_id = (body.get("job_id") or "").strip()
+    me = _norm_login(user)
+    c = _confluence_client()
+    if not c.configured:
+        return JSONResponse({"error": "Confluence ist nicht konfiguriert."}, status_code=400)
+
+    def _page_text(page: dict) -> str:
+        raw = (((page.get("body") or {}).get("storage") or {}).get("value")) or ""
+        return html_to_text(raw, 8000)
+
+    def _is_personal(page: dict) -> bool:
+        return ((page.get("space") or {}).get("type")) == "personal"
+
+    # ── Einzelseite (synchron, abbrechbar) ──
+    if page_id:
+        async def _do_page():
+            page = await asyncio.to_thread(c.get_page, page_id, None, None)
+            if not _is_personal(page):
+                return (403, {"error": "Nur persönliche Bereiche erlaubt."})
+            text = _page_text(page)
+            if not text.strip():
+                return (422, {"error": "Seite enthält keinen lesbaren Text."})
+            doc = await extract_to_pending(text, page.get("title", ""), c.link_for(page, page))
+            try:
+                update_pending(doc["id"], {"created_by": me})
+            except Exception:  # noqa: BLE001
+                pass
+            return (201, doc)
+        try:
+            ok, result = await _run_cancellable(request, _do_page(), job_id=job_id)
+            if not ok:
+                return JSONResponse({"error": "Abgebrochen"}, status_code=499)
+            code, payload = result
+            return JSONResponse(payload, status_code=code)
+        except ConfluenceError as e:
+            return JSONResponse({"error": str(e)}, status_code=502)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    # ── Ganzer (persoenlicher) Bereich -> alle Seiten-IDs sammeln ──
+    if space and not page_ids:
+        try:
+            personal_keys = {s.get("key") for s in await _wissen_personal_spaces(c)}
+            if space not in personal_keys:
+                return JSONResponse({"error": "Nur persönliche Bereiche erlaubt."}, status_code=403)
+            pages = await asyncio.to_thread(c.pages_in_space, space, 500)
+        except ConfluenceError as e:
+            return JSONResponse({"error": str(e)}, status_code=502)
+        if not pages:
+            return JSONResponse({"error": "Bereich enthält keine Seiten."}, status_code=404)
+        page_ids = [p["id"] for p in pages]
+
+    # ── Bulk (Hintergrund-Job, Fortschritt via job_id) ──
+    if page_ids:
+        async def _bulk(ids: list):
+            for pid in ids:
+                try:
+                    full = await asyncio.to_thread(c.get_page, pid, None, None)
+                    if _is_personal(full):
+                        text = _page_text(full)
+                        if text.strip():
+                            doc = await extract_to_pending(text, full.get("title", ""),
+                                                           c.link_for(full, full))
+                            try:
+                                update_pending(doc["id"], {"created_by": me})
+                            except Exception:  # noqa: BLE001
+                                pass
+                except Exception as ex:  # noqa: BLE001
+                    print(f"[Wissen-Confluence-Bulk] Seite {pid} übersprungen: {ex}", flush=True)
+                finally:
+                    if job_id and job_id in _extract_progress:
+                        _extract_progress[job_id]["done"] += 1
+            if job_id and job_id in _extract_progress:
+                _extract_progress[job_id]["running"] = False
+
+        if job_id:
+            _extract_progress[job_id] = {"done": 0, "total": len(page_ids), "running": True}
+        task = asyncio.create_task(_bulk(page_ids))
+        _bg_confluence_tasks.add(task)
+        task.add_done_callback(_bg_confluence_tasks.discard)
+        if job_id:
+            _extract_jobs[job_id] = task
+            def _cleanup(t, _j=job_id):
+                _extract_jobs.pop(_j, None)
+                prog = _extract_progress.get(_j)
+                if prog:
+                    prog["running"] = False
+            task.add_done_callback(_cleanup)
+        return JSONResponse({"ok": True, "started": True, "total": len(page_ids),
+                             "job_id": job_id}, status_code=202)
+
+    return JSONResponse({"error": "page_id, page_ids oder space erforderlich."}, status_code=400)
+
+
+@app.get("/api/wissen/extract/progress")
+async def wissen_extract_progress(job_id: str = "", user: str = Depends(require_auth)):
+    """Fortschritt eines /wissen-Bulk-Confluence-Imports: ``{done, total, running}``."""
+    prog = _extract_progress.get(job_id)
+    if not prog:
+        return JSONResponse({"ok": True, "running": False, "done": 0, "total": 0})
+    resp = {"ok": True, **prog}
+    if not prog.get("running"):
+        _extract_progress.pop(job_id, None)
+    return JSONResponse(resp)
+
+
+@app.post("/api/wissen/extract/cancel")
+async def wissen_extract_cancel(request: Request, user: str = Depends(require_auth)):
+    """Bricht einen laufenden /wissen-Bulk-Confluence-Import ab."""
+    body = await request.json()
+    job_id = (body.get("job_id") or "").strip()
+    task = _extract_jobs.get(job_id)
+    if not task:
+        return JSONResponse({"ok": False, "error": "Kein laufender Job"}, status_code=404)
+    task.cancel()
+    prog = _extract_progress.get(job_id)
+    if prog:
+        prog["running"] = False
+    return JSONResponse({"ok": True})
+
+
 # ─── Wissensgruppen (logische Tags, Modell B) ────────────────────────
 
 def _kb_all_rel_paths() -> list:

@@ -7325,9 +7325,10 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
     """Importiert Confluence-Inhalte in den Extraktor.
 
     Body:
-    - ``{"page_id": "123"}`` – Einzelseite (synchron)
-    - ``{"space": "KEY"}``  – ganzer Bereich (Hintergrund-Job)
-    - ``{"audit": false}``  – auditlos: direkt in die Wissens-DB schreiben
+    - ``{"page_id": "123"}``            – Einzelseite (synchron)
+    - ``{"page_ids": ["1","2"]}``      – gezielte Auswahl (Hintergrund-Job)
+    - ``{"space": "KEY"}``             – ganzer Bereich (Hintergrund-Job)
+    - ``{"audit": false}``             – auditlos: direkt in die Wissens-DB schreiben
       (ohne Pending/Review). Standard ist ``audit: true`` (mit Review).
     """
     from backend.confluence_client import ConfluenceError, html_to_text
@@ -7335,6 +7336,7 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
     body = await request.json()
     page_id = (body.get("page_id") or "").strip()
     space = (body.get("space") or "").strip()
+    page_ids = [str(p).strip() for p in (body.get("page_ids") or []) if str(p).strip()]
     job_id = (body.get("job_id") or "").strip()
     audit = body.get("audit", True)  # False = auditloser Direkt-Import
     c = _confluence_client()
@@ -7344,6 +7346,41 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
     def _page_text(page: dict) -> str:
         raw = (((page.get("body") or {}).get("storage") or {}).get("value")) or ""
         return html_to_text(raw, 8000)
+
+    async def _bulk(page_list: list, do_audit: bool):
+        for p in page_list:
+            try:
+                full = await asyncio.to_thread(c.get_page, p["id"], None, None)
+                text = _page_text(full)
+                if text.strip():
+                    doc = await extract_to_pending(text, full.get("title", ""),
+                                                   c.link_for(full, full))
+                    if not do_audit:
+                        # auditlos: schreiben, aber NICHT pro Seite reindizieren
+                        await asyncio.to_thread(approve_pending, doc["id"], False)
+            except Exception as ex:
+                print(f"[Confluence-Bulk] Seite {p.get('id')} übersprungen: {ex}", flush=True)
+        if not do_audit:
+            # nach allen Seiten EINMAL reindizieren
+            try:
+                from backend.tools.knowledge import force_reindex
+                await asyncio.to_thread(force_reindex)
+            except Exception as ex:
+                print(f"[Confluence-Bulk] Reindex fehlgeschlagen: {ex}", flush=True)
+
+    def _launch_bulk(page_list: list, extra: dict):
+        task = asyncio.create_task(_bulk(page_list, audit))
+        _bg_confluence_tasks.add(task)
+        task.add_done_callback(_bg_confluence_tasks.discard)
+        # Unter job_id registrieren, damit der Bulk-Lauf gezielt abgebrochen
+        # werden kann (CancelledError bricht die _bulk-Schleife am naechsten await).
+        if job_id:
+            _extract_jobs[job_id] = task
+            task.add_done_callback(lambda t, _j=job_id: _extract_jobs.pop(_j, None))
+        payload = {"ok": True, "started": True, "total": len(page_list),
+                   "audited": bool(audit), "job_id": job_id}
+        payload.update(extra)
+        return JSONResponse(payload, status_code=202)
 
     # ── Einzelseite (synchron, abbrechbar via job_id) ───────────────────
     if page_id:
@@ -7370,6 +7407,10 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
 
+    # ── Gezielte Mehrfachauswahl (Hintergrund-Job) ──────────────────────
+    if page_ids:
+        return _launch_bulk([{"id": pid} for pid in page_ids], {"selected": len(page_ids)})
+
     # ── Ganzer Bereich (Hintergrund-Job) ────────────────────────────────
     if space:
         try:
@@ -7378,41 +7419,9 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
             return JSONResponse({"error": str(e)}, status_code=502)
         if not pages:
             return JSONResponse({"error": "Bereich enthält keine Seiten."}, status_code=404)
+        return _launch_bulk(pages, {"space": space})
 
-        async def _bulk(space_key: str, page_list: list, do_audit: bool):
-            for p in page_list:
-                try:
-                    full = await asyncio.to_thread(c.get_page, p["id"], None, None)
-                    text = _page_text(full)
-                    if text.strip():
-                        doc = await extract_to_pending(text, full.get("title", ""),
-                                                       c.link_for(full, full))
-                        if not do_audit:
-                            # auditlos: schreiben, aber NICHT pro Seite reindizieren
-                            await asyncio.to_thread(approve_pending, doc["id"], False)
-                except Exception as ex:
-                    print(f"[Confluence-Bulk] Seite {p.get('id')} übersprungen: {ex}", flush=True)
-            if not do_audit:
-                # nach allen Seiten EINMAL reindizieren
-                try:
-                    from backend.tools.knowledge import force_reindex
-                    await asyncio.to_thread(force_reindex)
-                except Exception as ex:
-                    print(f"[Confluence-Bulk] Reindex fehlgeschlagen: {ex}", flush=True)
-
-        task = asyncio.create_task(_bulk(space, pages, audit))
-        _bg_confluence_tasks.add(task)
-        task.add_done_callback(_bg_confluence_tasks.discard)
-        # Unter job_id registrieren, damit der Bulk-Lauf gezielt abgebrochen
-        # werden kann (CancelledError bricht die _bulk-Schleife am naechsten await).
-        if job_id:
-            _extract_jobs[job_id] = task
-            task.add_done_callback(lambda t, _j=job_id: _extract_jobs.pop(_j, None))
-        return JSONResponse({"ok": True, "started": True, "total": len(pages),
-                             "audited": bool(audit), "space": space, "job_id": job_id},
-                            status_code=202)
-
-    return JSONResponse({"error": "page_id oder space erforderlich."}, status_code=400)
+    return JSONResponse({"error": "page_id, page_ids oder space erforderlich."}, status_code=400)
 
 
 @app.get("/api/knowledge/pending")

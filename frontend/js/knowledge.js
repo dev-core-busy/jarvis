@@ -471,11 +471,21 @@ class JarvisKnowledgeManager {
             tip._scheduleHide = () => { clearTimeout(ht); ht = setTimeout(() => { tip.style.display = 'none'; tip._path = null; }, 250); };
             tip.addEventListener('mouseenter', () => tip._cancelHide());
             tip.addEventListener('mouseleave', () => tip._scheduleHide());
+            // ESC schliesst die Vorschau sofort (unabhaengig von der Maus-Position).
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && tip.style.display !== 'none') {
+                    tip._cancelHide();
+                    tip.style.display = 'none';
+                    tip._path = null;
+                }
+            });
         }
 
         const IMG = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'];
+        // disp=inline: neue URL, damit alte im Browser gecachte attachment-Antwort
+        // (die den PDF-Download ausloeste) nicht wiederverwendet wird.
         const rawUrl = (p) => '/api/knowledge/file_raw?path=' + encodeURIComponent(p)
-            + '&token=' + encodeURIComponent(token());
+            + '&token=' + encodeURIComponent(token()) + '&disp=inline';
 
         const place = (anchor) => {
             const r = anchor.getBoundingClientRect();

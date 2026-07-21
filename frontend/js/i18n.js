@@ -45,7 +45,7 @@ const _I18N = {
         // ── API-Dokumentation (/api) ───────────────────────────
         'api.title':        'API-Dokumentation',
         'api.search_ph':    'Endpunkt suchen (Pfad, Beschreibung)…',
-        'api.intro':        'Vollständige Übersicht aller REST-Endpunkte dieser Jarvis-Instanz – automatisch aus dem live erzeugten OpenAPI-Schema. Jeden Eintrag aufklappen für Beschreibung, Parameter, ein Beispiel (cURL) und einen direkten Testaufruf.',
+        'api.intro':        'Vollständige Übersicht aller REST-Endpunkte dieser Jarvis-Instanz – automatisch aus dem live erzeugten OpenAPI-Schema. Jeden Eintrag aufklappen für Beschreibung, Parameter, ein Beispiel (cURL) und einen direkten Testaufruf. Hinter jeder Gruppe steht die Anzahl der Endpunkte; eine Klammer dahinter zeigt die nicht-lokalen (externen) Zugriffe seit dem letzten Neustart.',
         'api.warn_html':    '⚠️ Testaufrufe werden <b>echt</b> ausgeführt (inkl. POST/PUT/DELETE) und nutzen dein Admin-Token. Mit Bedacht verwenden.',
         'api.loading':      'Lade API-Schema…',
         'api.load_error':   'Fehler beim Laden des API-Schemas.',
@@ -71,6 +71,8 @@ const _I18N = {
         'api.truncated':    '… (gekürzt)',
         'api.network_error':'Netzwerkfehler',
         'api.endpoints':    'Endpunkte · Basis',
+        'api.foreign_hint': 'Nicht-lokale (externe) Zugriffe auf diese Gruppe seit dem letzten Neustart',
+        'api.foreign_hint_ep': 'Nicht-lokale (externe) Zugriffe auf diesen Endpunkt seit dem letzten Neustart',
 
         // ── 2FA-Modal (Portal) ─────────────────────────────────
         'totp.title':          'Zwei-Faktor-Authentifizierung',
@@ -1565,7 +1567,7 @@ const _I18N = {
         // ── API documentation (/api) ───────────────────────────
         'api.title':        'API Documentation',
         'api.search_ph':    'Search endpoints (path, description)…',
-        'api.intro':        'Complete overview of all REST endpoints of this Jarvis instance – generated automatically from the live OpenAPI schema. Expand any entry for its description, parameters, a cURL example and a direct test call.',
+        'api.intro':        'Complete overview of all REST endpoints of this Jarvis instance – generated automatically from the live OpenAPI schema. Expand any entry for its description, parameters, a cURL example and a direct test call. Each group shows its endpoint count; a number in parentheses after it shows non-local (external) requests since the last restart.',
         'api.warn_html':    '⚠️ Test calls are executed <b>for real</b> (incl. POST/PUT/DELETE) and use your admin token. Use with care.',
         'api.loading':      'Loading API schema…',
         'api.load_error':   'Failed to load the API schema.',
@@ -1591,6 +1593,8 @@ const _I18N = {
         'api.truncated':    '… (truncated)',
         'api.network_error':'Network error',
         'api.endpoints':    'endpoints · base',
+        'api.foreign_hint': 'Non-local (external) requests to this group since the last restart',
+        'api.foreign_hint_ep': 'Non-local (external) requests to this endpoint since the last restart',
 
         // ── 2FA modal (portal) ─────────────────────────────────
         'totp.title':          'Two-Factor Authentication',

@@ -7065,22 +7065,26 @@ async def wissen_pending_delete(doc_id: str, user: str = Depends(require_auth)):
     return JSONResponse({"ok": delete_pending(doc_id)})
 
 
-# ─── Confluence-Import fuer /wissen (NUR persoenliche Bereiche) ──────
-# Domaenennutzer duerfen ueber /wissen ausschliesslich aus PERSOENLICHEN
-# Confluence-Bereichen (space.type == 'personal') importieren. Es entstehen
-# immer Entwuerfe (Pending), dem Nutzer zugeordnet (created_by) – kein
-# auditloser Direkt-Import. Progress/Cancel teilen sich die Job-Dicts mit
-# dem Einstellungs-Extraktor (job_id ist clientseitig eindeutig).
+# ─── Confluence-Import fuer /wissen (ALLE sichtbaren Bereiche) ──────
+# Domaenennutzer duerfen ueber /wissen aus ALLEN Bereichen importieren, die der
+# konfigurierte Confluence-Token sehen kann (frueher auf PERSOENLICHE Bereiche
+# beschraenkt – auf Wunsch aufgehoben). Es entstehen immer Entwuerfe (Pending),
+# dem Nutzer zugeordnet (created_by) – kein auditloser Direkt-Import.
+# Progress/Cancel teilen sich die Job-Dicts mit dem Einstellungs-Extraktor
+# (job_id ist clientseitig eindeutig).
 
-async def _wissen_personal_spaces(c) -> list:
-    """Nur persoenliche Confluence-Bereiche (type == 'personal')."""
-    spaces = await asyncio.to_thread(c.spaces_detailed, 500)
-    return [s for s in spaces if (s.get("type") == "personal")]
+async def _wissen_visible_spaces(c) -> list:
+    """Alle fuer den konfigurierten Token sichtbaren Confluence-Bereiche.
+
+    Frueher auf persoenliche Bereiche (type == 'personal') beschraenkt – auf
+    Wunsch aufgehoben: der /wissen-Extraktor zeigt jetzt ALLES, was sichtbar ist
+    (analog Einstellungen -> Wissen -> Confluence)."""
+    return await asyncio.to_thread(c.spaces_detailed, 500)
 
 
 @app.get("/api/wissen/confluence/spaces")
 async def wissen_confluence_spaces(user: str = Depends(require_auth)):
-    """Persoenliche Confluence-Bereiche fuer den /wissen-Extraktor."""
+    """Alle sichtbaren Confluence-Bereiche fuer den /wissen-Extraktor."""
     if not _editable_groups_for(user):
         return JSONResponse({"ok": False, "error": "Dir ist kein Wissensbereich zugewiesen."}, status_code=403)
     from backend.confluence_client import ConfluenceError
@@ -7089,7 +7093,7 @@ async def wissen_confluence_spaces(user: str = Depends(require_auth)):
         return JSONResponse({"ok": False, "configured": False,
                              "error": "Confluence ist nicht konfiguriert."})
     try:
-        spaces = await _wissen_personal_spaces(c)
+        spaces = await _wissen_visible_spaces(c)
         spaces.sort(key=lambda s: (s.get("name") or "").lower())
         return JSONResponse({"ok": True, "configured": True, "base": c.base,
                              "count": len(spaces), "spaces": spaces})
@@ -7099,7 +7103,7 @@ async def wissen_confluence_spaces(user: str = Depends(require_auth)):
 
 @app.get("/api/wissen/confluence/pages")
 async def wissen_confluence_pages(space: str = "", user: str = Depends(require_auth)):
-    """Seiten eines PERSOENLICHEN Bereichs fuer den /wissen-Extraktor."""
+    """Seiten eines sichtbaren Bereichs fuer den /wissen-Extraktor."""
     if not _editable_groups_for(user):
         return JSONResponse({"ok": False, "error": "Dir ist kein Wissensbereich zugewiesen."}, status_code=403)
     from backend.confluence_client import ConfluenceError
@@ -7110,9 +7114,9 @@ async def wissen_confluence_pages(space: str = "", user: str = Depends(require_a
     if not space:
         return JSONResponse({"ok": False, "error": "Space-Key fehlt."}, status_code=400)
     try:
-        personal_keys = {s.get("key") for s in await _wissen_personal_spaces(c)}
-        if space not in personal_keys:
-            return JSONResponse({"ok": False, "error": "Nur persönliche Bereiche erlaubt."}, status_code=403)
+        visible_keys = {s.get("key") for s in await _wissen_visible_spaces(c)}
+        if space not in visible_keys:
+            return JSONResponse({"ok": False, "error": "Bereich nicht sichtbar/erlaubt."}, status_code=403)
         pages = await asyncio.to_thread(c.pages_in_space, space, 500)
         pages.sort(key=lambda p: (p.get("title") or "").lower())
         return JSONResponse({"ok": True, "count": len(pages), "pages": pages})
@@ -7125,7 +7129,7 @@ async def wissen_extract_confluence(request: Request, user: str = Depends(requir
     """Confluence-Import fuer /wissen -> Entwuerfe (Pending), dem Nutzer zugeordnet.
 
     Body: ``{"page_id": "123"}`` (synchron) | ``{"page_ids": [...]}`` |
-    ``{"space": "KEY"}`` (Hintergrund-Job). NUR persoenliche Bereiche."""
+    ``{"space": "KEY"}`` (Hintergrund-Job). ALLE sichtbaren Bereiche."""
     if not _editable_groups_for(user):
         return JSONResponse({"error": "Dir ist kein Wissensbereich zugewiesen."}, status_code=403)
     from backend.confluence_client import ConfluenceError, html_to_text
@@ -7144,15 +7148,10 @@ async def wissen_extract_confluence(request: Request, user: str = Depends(requir
         raw = (((page.get("body") or {}).get("storage") or {}).get("value")) or ""
         return html_to_text(raw, 8000)
 
-    def _is_personal(page: dict) -> bool:
-        return ((page.get("space") or {}).get("type")) == "personal"
-
     # ── Einzelseite (synchron, abbrechbar) ──
     if page_id:
         async def _do_page():
             page = await asyncio.to_thread(c.get_page, page_id, None, None)
-            if not _is_personal(page):
-                return (403, {"error": "Nur persönliche Bereiche erlaubt."})
             text = _page_text(page)
             if not text.strip():
                 return (422, {"error": "Seite enthält keinen lesbaren Text."})
@@ -7173,12 +7172,12 @@ async def wissen_extract_confluence(request: Request, user: str = Depends(requir
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": str(e)}, status_code=500)
 
-    # ── Ganzer (persoenlicher) Bereich -> alle Seiten-IDs sammeln ──
+    # ── Ganzer (sichtbarer) Bereich -> alle Seiten-IDs sammeln ──
     if space and not page_ids:
         try:
-            personal_keys = {s.get("key") for s in await _wissen_personal_spaces(c)}
-            if space not in personal_keys:
-                return JSONResponse({"error": "Nur persönliche Bereiche erlaubt."}, status_code=403)
+            visible_keys = {s.get("key") for s in await _wissen_visible_spaces(c)}
+            if space not in visible_keys:
+                return JSONResponse({"error": "Bereich nicht sichtbar/erlaubt."}, status_code=403)
             pages = await asyncio.to_thread(c.pages_in_space, space, 500)
         except ConfluenceError as e:
             return JSONResponse({"error": str(e)}, status_code=502)
@@ -7192,15 +7191,14 @@ async def wissen_extract_confluence(request: Request, user: str = Depends(requir
             for pid in ids:
                 try:
                     full = await asyncio.to_thread(c.get_page, pid, None, None)
-                    if _is_personal(full):
-                        text = _page_text(full)
-                        if text.strip():
-                            doc = await extract_to_pending(text, full.get("title", ""),
-                                                           c.link_for(full, full))
-                            try:
-                                update_pending(doc["id"], {"created_by": me})
-                            except Exception:  # noqa: BLE001
-                                pass
+                    text = _page_text(full)
+                    if text.strip():
+                        doc = await extract_to_pending(text, full.get("title", ""),
+                                                       c.link_for(full, full))
+                        try:
+                            update_pending(doc["id"], {"created_by": me})
+                        except Exception:  # noqa: BLE001
+                            pass
                 except Exception as ex:  # noqa: BLE001
                     print(f"[Wissen-Confluence-Bulk] Seite {pid} übersprungen: {ex}", flush=True)
                 finally:

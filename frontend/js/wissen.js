@@ -575,7 +575,7 @@
         extractUrl();
     }
 
-    // ── Confluence-Import (nur persönliche Bereiche) ────────────────────
+    // ── Confluence-Import (alle sichtbaren Bereiche) ────────────────────
     // Suchbare Bereichsauswahl (analog Einstellungen → Wissen → Confluence):
     // Freitext-Suche mit Dropdown, danach Seiten-Mehrfachauswahl.
     var _cfJobId = null, _cfPoll = null;
@@ -864,7 +864,7 @@
         var tF = $('wi-tab-file'); if (tF) tF.addEventListener('click', function () { switchExtTab('file'); });
         var tC = $('wi-tab-cf'); if (tC) tC.addEventListener('click', function () { switchExtTab('cf'); });
 
-        // Confluence-Import (nur persönliche Bereiche) – suchbare Bereichsauswahl
+        // Confluence-Import (alle sichtbaren Bereiche) – suchbare Bereichsauswahl
         var cfSearch = $('wi-cf-space-search');
         if (cfSearch) {
             cfSearch.addEventListener('input', onSpaceSearchInput);

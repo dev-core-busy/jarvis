@@ -179,13 +179,18 @@ window.extractorManager = new (class JarvisExtractorManager {
                     <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;margin-bottom:10px;cursor:pointer;">
                         <input type="checkbox" id="ext-cf-no-audit"> ohne Audit – direkt in die Wissens-DB (kein Review)
                     </label>
-                    <div id="ext-cf-page-wrap" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-                        <select id="ext-cf-page" class="kb-input" style="flex:1;min-width:180px;">
+                    <div id="ext-cf-page-wrap" style="display:none;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px;">
+                        <select id="ext-cf-page" class="kb-input" multiple size="8" style="flex:1;min-width:180px;">
                             <option value="">– Seite wählen –</option>
                         </select>
-                        <button id="ext-cf-import-page" class="kb-btn-action" style="flex-shrink:0;">Seite importieren</button>
-                        <button id="ext-cf-page-cancel" class="kb-btn-danger" style="flex-shrink:0;display:none;">${window.t('common.cancel')}</button>
+                        <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
+                            <button id="ext-cf-import-page" class="kb-btn-action">Seite importieren</button>
+                            <button id="ext-cf-page-cancel" class="kb-btn-danger" style="display:none;">${window.t('common.cancel')}</button>
+                        </div>
                     </div>
+                    <p class="kb-hint" id="ext-cf-page-hint" style="display:none;margin:-4px 0 10px;">
+                        Mehrfachauswahl mit gedrückter <kbd>Strg</kbd>-Taste; „Alles" wählt den ganzen Bereich.
+                    </p>
                     <div id="ext-cf-bulk-wrap" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;">
                         <button id="ext-cf-import-space" class="kb-btn-secondary">Ganzen Bereich importieren</button>
                         <button id="ext-cf-space-cancel" class="kb-btn-danger" style="display:none;">${window.t('common.cancel')}</button>
@@ -201,7 +206,13 @@ window.extractorManager = new (class JarvisExtractorManager {
             <div class="kb-section">
                 <div class="kb-section-header">
                     <h3>${window.t('ext.pending')} <span id="ext-pending-count" class="ext-badge" style="display:none;">0</span></h3>
-                    <button id="ext-refresh-btn" class="kb-btn-secondary" title="${window.t('ext.refresh_title')}">🔄</button>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <div id="ext-pending-bulk" style="display:none;align-items:center;gap:8px;">
+                            <button id="ext-pending-selall" class="kb-btn-secondary" style="padding:3px 10px;font-size:.75rem;">Alle markieren</button>
+                            <button id="ext-pending-delsel" class="kb-btn-danger" style="padding:3px 10px;font-size:.75rem;" disabled>Auswahl löschen</button>
+                        </div>
+                        <button id="ext-refresh-btn" class="kb-btn-secondary" title="${window.t('ext.refresh_title')}">🔄</button>
+                    </div>
                 </div>
                 <div id="ext-pending-list"><p class="kb-empty">${window.t('ext.no_pending')}</p></div>
             </div>
@@ -210,6 +221,10 @@ window.extractorManager = new (class JarvisExtractorManager {
             <div class="kb-section" id="ext-approved-section" style="display:none;">
                 <div class="kb-section-header">
                     <h3>${window.t('ext.approved_section')} <span id="ext-approved-count" class="ext-badge ext-badge-approved" style="display:none;">0</span></h3>
+                    <div id="ext-approved-bulk" style="display:none;align-items:center;gap:8px;">
+                        <button id="ext-approved-selall" class="kb-btn-secondary" style="padding:3px 10px;font-size:.75rem;">Alle markieren</button>
+                        <button id="ext-approved-delsel" class="kb-btn-danger" style="padding:3px 10px;font-size:.75rem;" disabled>Auswahl löschen</button>
+                    </div>
                 </div>
                 <div id="ext-approved-list"></div>
             </div>
@@ -471,8 +486,10 @@ window.extractorManager = new (class JarvisExtractorManager {
             if (bulkWrap) bulkWrap.style.display = 'none';
             return;
         }
+        const pageHint = document.getElementById('ext-cf-page-hint');
         if (pageWrap) pageWrap.style.display = 'flex';
         if (bulkWrap) bulkWrap.style.display = 'flex';
+        if (pageHint) pageHint.style.display = 'none';
         if (pageSel) { pageSel.disabled = true; pageSel.innerHTML = '<option value="">Lädt…</option>'; }
         document.getElementById('ext-cf-bulk-hint').textContent = '';
         fetch('/api/confluence/pages?space=' + encodeURIComponent(space), { headers: this._authHeaders() })
@@ -485,10 +502,12 @@ window.extractorManager = new (class JarvisExtractorManager {
                 const pages = d.pages || [];
                 if (pageSel) {
                     pageSel.disabled = false;
-                    pageSel.innerHTML = '<option value="">– Seite wählen –</option>'
+                    pageSel.innerHTML =
+                        '<option value="__ALL__">★ Alles – alle ' + pages.length + ' Seite(n)</option>'
                         + pages.map(p => '<option value="' + this._attr(p.id) + '">'
                             + this._esc(p.title) + '</option>').join('');
                 }
+                if (pageHint) pageHint.style.display = pages.length ? 'block' : 'none';
                 document.getElementById('ext-cf-bulk-hint').textContent =
                     pages.length + ' Seite(n) im Bereich';
             })
@@ -508,8 +527,13 @@ window.extractorManager = new (class JarvisExtractorManager {
     }
 
     _importCfPage() {
-        const pageId = document.getElementById('ext-cf-page')?.value || '';
-        if (!pageId) { this._notify('Bitte zuerst eine Seite wählen.', 'error'); return; }
+        const sel = document.getElementById('ext-cf-page');
+        const picked = sel ? Array.from(sel.selectedOptions).map(o => o.value).filter(Boolean) : [];
+        if (!picked.length) { this._notify('Bitte zuerst eine oder mehrere Seiten wählen.', 'error'); return; }
+        // „Alles" (oder eine Mehrfachauswahl) → Bulk-Import im Hintergrund.
+        if (picked.includes('__ALL__')) { this._importCfSpace(); return; }
+        if (picked.length > 1) { this._importCfPages(picked); return; }
+        const pageId = picked[0];
         const audit = this._cfAudit();
         const btn = document.getElementById('ext-cf-import-page');
         const cancel = document.getElementById('ext-cf-page-cancel');
@@ -543,6 +567,51 @@ window.extractorManager = new (class JarvisExtractorManager {
             })
             .catch(() => {
                 done();
+                this._notify('Netzwerkfehler beim Import', 'error');
+            });
+    }
+
+    // Mehrere gezielt ausgewaehlte Seiten (STRG-Mehrfachauswahl) als Hintergrund-Job importieren.
+    _importCfPages(pageIds) {
+        const audit = this._cfAudit();
+        const warn = audit
+            ? pageIds.length + ' ausgewählte Seite(n) importieren?'
+            : pageIds.length + ' ausgewählte Seite(n) OHNE Audit direkt in die Wissens-DB schreiben? '
+              + 'Das überspringt die Prüfung.';
+        if (!confirm(warn)) return;
+        const btn = document.getElementById('ext-cf-import-page');
+        const cancel = document.getElementById('ext-cf-page-cancel');
+        const jobId = this._cfJobId = this._jobId();
+        if (btn) btn.disabled = true;
+        this._setExtractStatus('⏳ Starte Import ausgewählter Seiten…', true);
+        fetch('/api/knowledge/extract/confluence', {
+            method: 'POST',
+            headers: this._authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ page_ids: pageIds, audit, job_id: jobId }),
+        })
+            .then(r => r.json().then(j => ({ ok: r.ok, j })))
+            .then(({ ok, j }) => {
+                this._setExtractStatus('', false);
+                if (btn) btn.disabled = false;
+                if (!ok) {
+                    this._cfJobId = null;
+                    this._notify(window.t('common.error') + ': ' + (j.error || 'Import fehlgeschlagen'), 'error');
+                    return;
+                }
+                if (cancel) cancel.style.display = '';
+                if (audit) {
+                    this._notify('⏳ Import von ' + j.total
+                        + ' Seite(n) gestartet – sie erscheinen nach und nach unten in den Pending-Dokumenten.');
+                } else {
+                    this._notify('⏳ Auditloser Import von ' + j.total
+                        + ' Seite(n) gestartet – sie werden direkt in die Wissens-DB geschrieben (Reindex am Ende).');
+                }
+                setTimeout(() => this._loadPending(), 3000);
+            })
+            .catch(() => {
+                this._setExtractStatus('', false);
+                this._cfJobId = null;
+                if (btn) btn.disabled = false;
                 this._notify('Netzwerkfehler beim Import', 'error');
             });
     }
@@ -808,6 +877,9 @@ window.extractorManager = new (class JarvisExtractorManager {
         badge.textContent = pending.length;
         badge.style.display = pending.length ? 'inline-block' : 'none';
 
+        const pBulk = document.getElementById('ext-pending-bulk');
+        if (pBulk) pBulk.style.display = pending.length ? 'flex' : 'none';
+
         if (!pending.length) {
             el.innerHTML = `<p class="kb-empty">${window.t('ext.no_pending')}</p>`;
         } else {
@@ -818,6 +890,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                 return `
                 <div class="cron-item" data-id="${doc.id}">
                     <div class="cron-item-row">
+                        <input type="checkbox" class="ext-pending-cb" data-id="${doc.id}" title="Zum Löschen markieren" style="flex-shrink:0;width:16px;height:16px;margin:0 4px 0 0;cursor:pointer;">
                         <span class="cron-item-dot active"></span>
                         <span class="cron-item-label">${this._esc(doc.title)}</span>
                         <div class="cron-item-actions">
@@ -844,16 +917,23 @@ window.extractorManager = new (class JarvisExtractorManager {
             el.querySelectorAll('.ext-del-btn').forEach(btn => {
                 btn.onclick = () => this._deletePending(btn.dataset.id);
             });
+            this._bindBulk('pending', el);
         }
 
         // Genehmigter Verlauf
         const secEl   = document.getElementById('ext-approved-section');
         const apprEl  = document.getElementById('ext-approved-list');
         const apprBdg = document.getElementById('ext-approved-count');
+        const aBulk = document.getElementById('ext-approved-bulk');
         if (!secEl || !apprEl) return;
-        if (!approved.length) { secEl.style.display = 'none'; return; }
+        if (!approved.length) {
+            secEl.style.display = 'none';
+            if (aBulk) aBulk.style.display = 'none';
+            return;
+        }
 
         secEl.style.display = '';
+        if (aBulk) aBulk.style.display = 'flex';
         apprBdg.textContent = approved.length;
         apprBdg.style.display = 'inline-block';
 
@@ -866,6 +946,7 @@ window.extractorManager = new (class JarvisExtractorManager {
             return `
             <div class="cron-item" data-id="${doc.id}" style="border-left:3px solid var(--success);">
                 <div class="cron-item-row">
+                    <input type="checkbox" class="ext-approved-cb" data-id="${doc.id}" title="Zum Löschen markieren" style="flex-shrink:0;width:16px;height:16px;margin:0 4px 0 0;cursor:pointer;">
                     <span class="cron-item-dot" style="background:var(--success);"></span>
                     <span class="cron-item-label">${this._esc(doc.title)}</span>
                     <div class="cron-item-actions">
@@ -895,6 +976,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         apprEl.querySelectorAll('.ext-del-btn').forEach(btn => {
             btn.onclick = () => this._deleteApproved(btn.dataset.id);
         });
+        this._bindBulk('approved', apprEl);
 
         // Gruppen-Button (öffnet Checkbox-Liste) links neben „Bearbeiten"
         if (window.KbGroups) {
@@ -932,6 +1014,64 @@ window.extractorManager = new (class JarvisExtractorManager {
         if (this._reviewing?.id === id) this._closeReview();
         this._loadPending();
         this._notify('Extraktion verworfen', 'info');
+    }
+
+    // ─── Mehrfachauswahl / Bulk-Löschen ────────────────────────────────────────
+
+    // Verdrahtet Checkboxen, "Alle markieren" und "Auswahl löschen" fuer eine Liste.
+    _bindBulk(kind, container) {
+        const boxes  = Array.from(container.querySelectorAll('.ext-' + kind + '-cb'));
+        const selAll = document.getElementById('ext-' + kind + '-selall');
+        const delSel = document.getElementById('ext-' + kind + '-delsel');
+        const sync = () => {
+            const checked = boxes.filter(b => b.checked).length;
+            if (delSel) {
+                delSel.disabled = checked === 0;
+                delSel.textContent = checked ? `Auswahl löschen (${checked})` : 'Auswahl löschen';
+            }
+            if (selAll) selAll.textContent =
+                (checked && checked === boxes.length) ? 'Auswahl aufheben' : 'Alle markieren';
+        };
+        boxes.forEach(b => { b.onchange = sync; });
+        if (selAll) selAll.onclick = () => {
+            const allChecked = boxes.length && boxes.every(b => b.checked);
+            boxes.forEach(b => { b.checked = !allChecked; });
+            sync();
+        };
+        if (delSel) delSel.onclick = () => {
+            const ids = boxes.filter(b => b.checked).map(b => b.dataset.id);
+            if (ids.length) this._bulkDelete(kind, ids);
+        };
+        sync();
+    }
+
+    async _bulkDelete(kind, ids) {
+        const isApproved = kind === 'approved';
+        const msg = isApproved
+            ? `${ids.length} genehmigte(n) Eintrag/Einträge aus Verlauf und Wissens-DB entfernen?`
+            : `${ids.length} Extraktion(en) wirklich verwerfen?`;
+        if (!confirm(msg)) return;
+        for (const id of ids) {
+            if (isApproved) {
+                const doc = this._pending.find(d => d.id === id);
+                if (doc?.file) {
+                    try {
+                        await fetch('/api/knowledge/extract/file', {
+                            method: 'DELETE',
+                            headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ file: doc.file }),
+                        });
+                    } catch (e) {}
+                }
+            } else if (this._reviewing?.id === id) {
+                this._closeReview();
+            }
+            try {
+                await fetch(`/api/knowledge/pending/${id}`, { method: 'DELETE', headers: _authHeaders() });
+            } catch (e) {}
+        }
+        this._loadPending();
+        this._notify(`${ids.length} Eintrag/Einträge entfernt`, 'info');
     }
 
     // ─── Review ──────────────────────────────────────────────────────────────

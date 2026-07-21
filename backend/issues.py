@@ -28,6 +28,9 @@ from backend.config import config, PROJECT_ROOT
 # config._data_dir respektiert DATA_DIR-Env (Docker), Fallback PROJECT_ROOT/data
 _DATA_DIR = getattr(config, "_data_dir", None) or (PROJECT_ROOT / "data")
 ISSUES_FILE = _DATA_DIR / "issues.json"
+# Pro Admin: zuletzt gesehener Issue-Erstellzeitpunkt (fuer die Badge bei NEUEN
+# Issues anderer). {norm_login: created_iso}
+ADMIN_SEEN_FILE = _DATA_DIR / "issues_admin_seen.json"
 ATTACH_DIR = _DATA_DIR / "issue_attachments"
 ATTACH_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -71,6 +74,25 @@ def _save_all(issues: list[dict]) -> None:
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(issues, f, ensure_ascii=False, indent=2)
     tmp.replace(ISSUES_FILE)
+
+
+def _load_admin_seen() -> dict:
+    if not ADMIN_SEEN_FILE.exists():
+        return {}
+    try:
+        with ADMIN_SEEN_FILE.open("r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_admin_seen(d: dict) -> None:
+    ADMIN_SEEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = ADMIN_SEEN_FILE.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
+    tmp.replace(ADMIN_SEEN_FILE)
 
 
 # ═══ Permissions ════════════════════════════════════════════════════════
@@ -275,11 +297,12 @@ def update_issue(user: str, issue_id: str, patch: dict,
         return current, ""
 
 
-def unseen_count(user: str) -> int:
-    """Anzahl eigener Issues mit ungesehener Bearbeitung (Statuswechsel ODER
-    Admin-Aenderung am Loesungsbereich, z.B. neuer Kommentar).
+def unseen_count(user: str, is_admin: bool = False) -> int:
+    """Anzahl der Badge-Benachrichtigungen fuer diesen Benutzer:
+    - EIGENE Issues mit ungesehener Bearbeitung (Statuswechsel/Admin-Kommentar).
+    - Fuer ADMINS zusaetzlich: NEUE Issues ANDERER seit dem letzten "gesehen".
 
-    Grundlage fuer die Badge-Benachrichtigung beim meldenden Benutzer.
+    So erhalten alle Admins eine Badge, sobald ein neues Issue erzeugt wird.
     """
     u = (user or "").strip().lower()
     if not u:
@@ -296,17 +319,31 @@ def unseen_count(user: str) -> int:
         seen = i.get("status_seen")
         # Alt-Issues ohne status_seen (vor dem Feature angelegt) NICHT als
         # Benachrichtigung zaehlen – sonst Pseudo-Badge fuer laengst bekannte Status.
-        # Neue Issues erhalten status_seen="open" und werden korrekt verfolgt.
         if not seen:
             continue
         if i.get("status") != seen:
             n += 1
+    if is_admin:
+        with _lock:
+            seen_map = _load_admin_seen()
+            marker = seen_map.get(u)
+            latest = max((i.get("created", "") for i in issues), default="")
+            if marker is None:
+                # Lazy-Init: bestehende Issues nicht nachtraeglich als "neu" melden.
+                seen_map[u] = latest
+                _save_admin_seen(seen_map)
+            else:
+                n += sum(1 for i in issues
+                         if i.get("author", "").strip().lower() != u
+                         and i.get("created", "") > marker)
     return n
 
 
-def mark_seen(user: str) -> int:
-    """Markiert alle eigenen Issues als 'Status gesehen' (loescht die Badge-Benachrichtigung).
-    Gibt die Anzahl aktualisierter Issues zurueck."""
+def mark_seen(user: str, is_admin: bool = False) -> int:
+    """Markiert alle eigenen Issues als 'Status gesehen' (loescht die Badge-
+    Benachrichtigung). Fuer Admins zusaetzlich: NEUE Issues anderer als gesehen
+    markieren (Admin-Badge zuruecksetzen). Gibt die Anzahl aktualisierter
+    eigener Issues zurueck."""
     u = (user or "").strip().lower()
     if not u:
         return 0
@@ -327,6 +364,12 @@ def mark_seen(user: str) -> int:
                 changed += 1
         if changed:
             _save_all(issues)
+        if is_admin:
+            seen_map = _load_admin_seen()
+            latest = max((i.get("created", "") for i in issues), default="")
+            if seen_map.get(u) != latest:
+                seen_map[u] = latest
+                _save_admin_seen(seen_map)
     return changed
 
 

@@ -9508,14 +9508,17 @@ async def api_issues_list(request: Request, user: str = Depends(require_auth_or_
 
 @app.get("/api/issues/notifications")
 async def api_issues_notifications(user: str = Depends(require_auth_or_agent)):
-    """Anzahl eigener Issues mit ungesehener Status-Aenderung (fuer Badge)."""
-    return JSONResponse({"ok": True, "count": _issues_mod.unseen_count(user)})
+    """Badge-Anzahl: eigene Issues mit ungesehener Status-Aenderung PLUS – fuer
+    Admins – neue Issues anderer seit dem letzten 'gesehen'."""
+    return JSONResponse({"ok": True,
+                         "count": _issues_mod.unseen_count(user, is_admin=_is_admin_user(user))})
 
 
 @app.post("/api/issues/notifications/seen")
 async def api_issues_notifications_seen(user: str = Depends(require_auth_or_agent)):
-    """Markiert die Status-Aenderungen der eigenen Issues als gesehen (Badge zuruecksetzen)."""
-    _issues_mod.mark_seen(user)
+    """Markiert Status-Aenderungen der eigenen Issues (und fuer Admins die neuen
+    Issues anderer) als gesehen (Badge zuruecksetzen)."""
+    _issues_mod.mark_seen(user, is_admin=_is_admin_user(user))
     return JSONResponse({"ok": True, "count": 0})
 
 

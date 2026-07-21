@@ -130,13 +130,18 @@ def _record_foreign_access(key: str, ip: str):
 @app.middleware("http")
 async def _api_local_only_mw(request: Request, call_next):
     """Beschraenkt als 'nur lokal' markierte API-Endpunkte auf Loopback-Zugriffe
-    und protokolliert Fremdzugriffe (fuer die Warn-Statistik)."""
+    und protokolliert Fremdzugriffe (fuer die Warn-Statistik UND die Zugriffs-
+    zaehler pro Gruppe in der API-Doku). Gezaehlt werden nicht-lokale Zugriffe auf
+    ALLE gerouteten Endpunkte (jede Doku-Gruppe), statische Assets ausgenommen; die
+    403-Sperre gilt weiterhin nur fuer als 'nur lokal' markierte /api/-Endpunkte."""
     path = request.url.path
-    if path.startswith("/api/") and not _client_is_local(request):
+    if not _client_is_local(request) and not path.startswith("/static/"):
         key = _resolve_route_key(request)
+        # Exempt-Endpunkte (Konfig/Doku-Polling) werden NICHT gezaehlt, sonst
+        # blaeht der 15s-Auto-Refresh der API-Doku die Gruppe selbst auf.
         if key and key not in _API_LOCAL_ONLY_EXEMPT:
             _record_foreign_access(key, request.client.host if request.client else "")
-            if key in _api_local_only_set():
+            if path.startswith("/api/") and key in _api_local_only_set():
                 return JSONResponse(
                     {"error": "Dieser Endpunkt ist auf lokalen Zugriff (Loopback) beschraenkt."},
                     status_code=403)
@@ -1478,7 +1483,9 @@ async def gated_openapi(user: str = Depends(require_admin_or_query)):
 @app.get("/api/admin/api-local-only")
 async def api_local_only_list(user: str = Depends(require_local_auth)):
     """Liste der auf Loopback beschraenkten API-Endpunkte + Fremdzugriffs-Statistik
-    (seit Dienststart) fuer die Warnung beim Einschraenken. Nur Admins."""
+    (seit Dienststart) pro Endpunkt (nicht-lokale Aufrufe). Grundlage sowohl fuer die
+    Warnung beim Einschraenken als auch fuer die Zugriffszaehler pro Gruppe in der
+    API-Doku (/api). Nur Admins."""
     restricted = sorted(_api_local_only_set())
     stats = {}
     for key, ent in _api_foreign_access.items():

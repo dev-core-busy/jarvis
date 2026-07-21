@@ -36,6 +36,18 @@
         $('wi-logout').classList.remove('hidden');
         var d = $('wi-status-dot'); if (d) d.classList.remove('hidden');
         var c = $('cpu-bar'); if (c) c.classList.remove('hidden');
+        // Einstellungen-Zahnrad nur fuer Admins (zweites von rechts, vor Logout)
+        var setBtn = $('wi-settings');
+        if (setBtn) {
+            setBtn.classList.toggle('hidden', !SCOPE.is_admin);
+            if (SCOPE.is_admin && !setBtn._wired) {
+                setBtn._wired = true;
+                setBtn.addEventListener('click', function () {
+                    try { sessionStorage.setItem('jarvis_settings_return', '/wissen'); } catch (e) {}
+                    window.location.href = '/settings';
+                });
+            }
+        }
         mountProfile();
         startLlmStatus();
         startCpu();

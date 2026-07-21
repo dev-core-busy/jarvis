@@ -6762,6 +6762,7 @@ async def wissen_scope(user: str = Depends(require_auth)):
     folders = [{"path": p, "name": Path(p).name} for p in allowed]
     return JSONResponse({
         "ok": True, "user": user, "is_editor": _may_edit_knowledge(user),
+        "is_admin": _user_is_admin(user),
         "groups": [{"id": g["id"], "name": g["name"], "color": g.get("color", "#64748b"),
                     "folders": _wissen_group_folders(g, configured)}
                    for g in groups],

@@ -10,8 +10,11 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: var(--font-body); background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
+        /* position+z-index: Topbar (mit backdrop-filter = eigener Stacking-Kontext)
+           MUSS über den Karten liegen, sonst rutscht das Update-Dropdown dahinter. */
         .pt-topbar { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
-            border-bottom: 1px solid var(--border); background: var(--bg-glass); backdrop-filter: blur(8px); }
+            border-bottom: 1px solid var(--border); background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: relative; z-index: 30; }
         .pt-logo { width: 32px; height: 32px; border-radius: 50%; background: var(--gradient);
             display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #fff;
             flex-shrink: 0; overflow: hidden; }

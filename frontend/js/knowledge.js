@@ -381,6 +381,7 @@ class JarvisKnowledgeManager {
         });
         // Mehrfachauswahl (Drag/Klick) -> ausgewaehlte Dokumente gesammelt aus der Gruppe entfernen
         this._setupRowSelection(box, '.kb-grp-file-row', (paths) => this._bulkRemoveFromGroup(paths, gid));
+        this._bindFilePreview(box);
     }
 
     async _showUngroupedFiles() {
@@ -447,6 +448,126 @@ class JarvisKnowledgeManager {
                     this._showNotification((window.t('common.error') || 'Fehler') + ': ' + e.message, 'error');
                 }
             };
+        });
+        this._bindFilePreview(box);
+    }
+
+    // Maus-über-Vorschau fuer Datei-Zeilen in der Gruppen-/Ungruppiert-Ansicht:
+    // Bilder/GIF/SVG -> <img>, PDF -> <iframe>, Text/JSON/MD/… -> Textvorschau
+    // (wie in der Wissenstabelle). Inhalte werden lazy geladen und gecacht.
+    _bindFilePreview(box) {
+        if (!box) return;
+        const token = () => localStorage.getItem('jarvis_token') || '';
+        const T = (k, d) => (window.t && window.t(k)) || d;
+        if (!this._filePreviewCache) this._filePreviewCache = {};
+        const cache = this._filePreviewCache;
+
+        // Wiederverwendbaren Tooltip nur einmal erzeugen.
+        let tip = this._filePreviewTip;
+        if (!tip) {
+            tip = document.createElement('div');
+            tip.className = 'kb-file-tip';
+            tip.style.display = 'none';
+            document.body.appendChild(tip);
+            this._filePreviewTip = tip;
+            let ht = null;
+            tip._cancelHide   = () => clearTimeout(ht);
+            tip._scheduleHide = () => { clearTimeout(ht); ht = setTimeout(() => { tip.style.display = 'none'; tip._path = null; }, 250); };
+            tip.addEventListener('mouseenter', () => tip._cancelHide());
+            tip.addEventListener('mouseleave', () => tip._scheduleHide());
+        }
+
+        const IMG = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'];
+        const rawUrl = (p) => '/api/knowledge/file_raw?path=' + encodeURIComponent(p)
+            + '&token=' + encodeURIComponent(token());
+
+        const place = (anchor) => {
+            const r = anchor.getBoundingClientRect();
+            const w = Math.min(560, window.innerWidth - 24);
+            tip.style.width = w + 'px';
+            tip.style.left = Math.max(12, Math.min(window.innerWidth - w - 12, r.left)) + 'px';
+            tip._anchorBottom = r.bottom + 6;
+            tip.style.top = tip._anchorBottom + 'px';
+        };
+        const reclamp = () => {
+            const h = tip.offsetHeight;
+            let top = tip._anchorBottom || 12;
+            if (top + h > window.innerHeight - 12) top = Math.max(12, window.innerHeight - h - 12);
+            tip.style.top = top + 'px';
+        };
+        const setText = (entry) => {
+            tip.classList.remove('kb-file-tip-media');
+            tip.classList.toggle('kb-file-tip-json', !!entry.json);
+            tip.textContent = entry.text;
+            reclamp();
+        };
+        const setMedia = (html) => {
+            tip.classList.remove('kb-file-tip-json');
+            tip.classList.add('kb-file-tip-media');
+            tip.innerHTML = html;
+            reclamp();
+        };
+        const prettyMaybeJson = (txt) => {
+            const s = (txt || '').trim();
+            if (s && (s[0] === '{' || s[0] === '[')) {
+                try { return { text: JSON.stringify(JSON.parse(s), null, 2), json: true }; } catch (e) {}
+            }
+            return { text: txt, json: false };
+        };
+
+        const show = (anchor) => {
+            tip._cancelHide();
+            const row = anchor.closest('[data-path]');
+            if (!row) return;
+            const path = row.dataset.path;
+            tip._path = path;
+            const ext = (path.split('.').pop() || '').toLowerCase();
+            place(anchor);
+            tip.style.display = 'block';
+
+            if (IMG.includes(ext)) {
+                setMedia('<img src="' + rawUrl(path) + '" alt="" '
+                    + 'style="max-width:100%;max-height:60vh;display:block;border-radius:6px;">');
+                const img = tip.querySelector('img');
+                if (img) { img.onload = reclamp; img.onerror = () => setText({ text: T('kbmatrix.no_content', '(Vorschau nicht verfügbar)'), json: false }); }
+                return;
+            }
+            if (ext === 'pdf') {
+                setMedia('<iframe src="' + rawUrl(path) + '#toolbar=0" '
+                    + 'style="width:100%;height:60vh;border:0;border-radius:6px;background:#fff;"></iframe>');
+                return;
+            }
+            // Text/JSON/MD/… -> file_read (mit JSON-Verschönerung wie in der Wissenstabelle)
+            if (cache[path] !== undefined) { setText(cache[path]); return; }
+            setText({ text: T('kbmatrix.loading', 'lädt…'), json: false });
+            fetch('/api/knowledge/file_read?path=' + encodeURIComponent(path),
+                  { headers: { 'Authorization': 'Bearer ' + token() } })
+                .then(r => r.json()).then(d => {
+                    let raw = (d && d.ok && d.content != null && d.content !== '')
+                        ? String(d.content) : T('kbmatrix.no_content', '(Inhalt nicht als Text lesbar)');
+                    raw = raw.replace(/\s+$/, '');
+                    const entry = prettyMaybeJson(raw);
+                    if (entry.text.length > 8000) entry.text = entry.text.slice(0, 8000) + '\n…';
+                    cache[path] = entry;
+                    if (tip.style.display !== 'none' && tip._path === path) setText(entry);
+                }).catch(() => {
+                    cache[path] = { text: T('kbmatrix.no_content', '(Inhalt nicht lesbar)'), json: false };
+                    if (tip._path === path) setText(cache[path]);
+                });
+        };
+
+        // Listener nur einmal pro Box-Element anhaengen (innerHTML-Neuaufbau entfernt sie nicht).
+        if (box._filePreviewBound) return;
+        box._filePreviewBound = true;
+        box.addEventListener('mouseover', e => {
+            const anchor = e.target.closest('.kb-file-name');
+            if (anchor && box.contains(anchor)) show(anchor);
+        });
+        box.addEventListener('mouseout', e => {
+            const anchor = e.target.closest('.kb-file-name');
+            if (!anchor) return;
+            if (e.relatedTarget && (tip === e.relatedTarget || tip.contains(e.relatedTarget))) return;
+            tip._scheduleHide();
         });
     }
 

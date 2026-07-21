@@ -36,7 +36,7 @@
 
     function _showNotification(from, text) {
         const tabFocused  = document.hasFocus();
-        const chatVisible = from === activePartner && tabFocused;
+        const chatVisible = _pkey(from) === _pkey(activePartner) && tabFocused;
         if (chatVisible) return;
 
         _playPing();
@@ -81,7 +81,7 @@
 
     // Tab erhält Fokus → aktiven Chat als gelesen markieren
     window.addEventListener('focus', () => {
-        if (activePartner && _unread[activePartner]) {
+        if (activePartner && _unread[_pkey(activePartner)]) {
             _markRead(activePartner);
         }
     });
@@ -133,6 +133,13 @@
     function _displayName(name) {
         return String(name || '').split('@')[0].split('\\').pop().trim();
     }
+
+    // Ist der Login (in beliebiger Schreibweise) der eigene Benutzer?
+    function _isMe(name) { return _normLogin(name) === _normLogin(myUser); }
+    // Konversations-Schluessel: IMMER normalisiert, damit dieselbe Person –
+    // die mit/ohne Domain-Praefix vorkommen kann – EINE Konversation teilt
+    // (sonst erscheinen zusammengehoerige Nachrichten getrennt oder "verschwunden").
+    function _pkey(name) { return _normLogin(name); }
 
     function formatTime(ts) {
         const d = new Date(ts);
@@ -348,16 +355,19 @@
                 // Empfangene Chat-Histoire vom Server (alle Konversationen dieses Users)
                 const convs = msg.conversations || {};
                 for (const [partner, msgs] of Object.entries(convs)) {
-                    _msgs[partner] = msgs;
-                    // Ungelesene Nachrichten zählen
-                    const unread = msgs.filter(m => m.from === partner && m.status !== 'read').length;
-                    if (unread > 0) {
-                        _unread[partner] = (_unread[partner] || 0) + unread;
+                    const pk = _pkey(partner);
+                    // Zusammenfuehren statt ueberschreiben (dieselbe Person kann in
+                    // mehreren Schreibweisen ankommen), Duplikate per msg_id vermeiden
+                    const cur = _msgs[pk] || [];
+                    for (const m of msgs) {
+                        if (!m.msg_id || !cur.some(x => x.msg_id === m.msg_id)) cur.push(m);
                     }
-                    // Partner in Userliste eintragen (offline) falls noch nicht bekannt
-                    if (!_online.hasOwnProperty(partner)) {
-                        _online[partner] = false;
-                    }
+                    cur.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+                    _msgs[pk] = cur;
+                    // Ungelesene: eingehende (nicht von mir) und noch nicht gelesen
+                    const unread = msgs.filter(m => !_isMe(m.from) && m.status !== 'read').length;
+                    if (unread > 0) _unread[pk] = (_unread[pk] || 0) + unread;
+                    if (!_online.hasOwnProperty(pk)) _online[pk] = false;
                 }
                 renderUserList();
                 _updateTabTitle();
@@ -369,26 +379,23 @@
                 break;
 
             case 'dm': {
-                const partner = msg.from === myUser ? msg.to : msg.from;
+                const mine = _isMe(msg.from);
+                const partner = _pkey(mine ? msg.to : msg.from);
                 if (!_msgs[partner]) _msgs[partner] = [];
-                // Neuen Partner in Userliste aufnehmen falls noch nicht bekannt
                 if (!_online.hasOwnProperty(partner)) _online[partner] = false;
                 // Duplikat vermeiden (Echo der eigenen Nachricht + evtl. Reconnect)
                 if (!_msgs[partner].some(m => m.msg_id && m.msg_id === msg.msg_id)) {
                     _msgs[partner].push(msg);
                 }
-                if (partner === activePartner) {
+                if (partner === _pkey(activePartner)) {
                     appendMessage(msg);
                     scrollToBottom();
-                    // Sofort als gelesen markieren, wenn Chat offen ist
-                    if (msg.from !== myUser) {
-                        _markRead(partner);
-                    }
-                } else if (msg.from !== myUser) {
+                    if (!mine) _markRead(activePartner);   // als gelesen markieren
+                } else if (!mine) {
                     _unread[partner] = (_unread[partner] || 0) + 1;
                     renderUserList();
                 }
-                if (msg.from !== myUser) {
+                if (!mine) {
                     _showNotification(msg.from, msg.text);
                     _updateTabTitle();
                 }
@@ -398,7 +405,7 @@
             case 'msg_status': {
                 // Gelesene Bestätigung für eigene Nachrichten
                 const ids = msg.msg_ids || [];
-                const partner = msg.conv_with;
+                const partner = _pkey(msg.conv_with);
                 for (const id of ids) {
                     // Cache aktualisieren
                     if (partner && _msgs[partner]) {
@@ -419,7 +426,7 @@
             case 'reaction': {
                 const { msg_id, emoji, from, removed } = msg;
                 // Partner ableiten (eigene Echo oder fremde Reaktion)
-                const partner = from === myUser ? activePartner : from;
+                const partner = _pkey(_isMe(from) ? activePartner : from);
                 if (partner && _msgs[partner]) {
                     for (const m of _msgs[partner]) {
                         if (m.msg_id === msg_id) {
@@ -449,13 +456,13 @@
             }
 
             case 'typing':
-                if (msg.from === activePartner) {
+                if (_pkey(msg.from) === _pkey(activePartner)) {
                     showTyping(msg.from);
                 }
                 break;
 
             case 'dm_edit': {
-                const partner = msg.from === myUser ? msg.to : msg.from;
+                const partner = _pkey(_isMe(msg.from) ? msg.to : msg.from);
                 if (_msgs[partner]) {
                     for (const m of _msgs[partner]) {
                         if (m.msg_id === msg.msg_id) {
@@ -465,7 +472,7 @@
                         }
                     }
                 }
-                if (partner === activePartner) {
+                if (partner === _pkey(activePartner)) {
                     const row = messages.querySelector(`[data-msgid="${msg.msg_id}"]`);
                     if (row) {
                         const bub = row.querySelector('.uc-bubble');
@@ -491,11 +498,11 @@
             }
 
             case 'dm_delete': {
-                const partner = msg.from === myUser ? msg.to : msg.from;
+                const partner = _pkey(_isMe(msg.from) ? msg.to : msg.from);
                 if (_msgs[partner]) {
                     _msgs[partner] = _msgs[partner].filter(m => m.msg_id !== msg.msg_id);
                 }
-                if (partner === activePartner) {
+                if (partner === _pkey(activePartner)) {
                     const row = messages.querySelector(`[data-msgid="${msg.msg_id}"]`);
                     if (row && row.parentNode) row.parentNode.removeChild(row);
                 }
@@ -534,7 +541,7 @@
 
     // ─── Lesestatus melden ───────────────────────────────────────
     function _markRead(partner) {
-        _unread[partner] = 0;
+        _unread[_pkey(partner)] = 0;
         renderUserList();
         _updateTabTitle();
         wsSend({ type: 'read', from: partner });
@@ -589,12 +596,9 @@
             if (!cur) {
                 byNorm[n] = { username: uname, online };
             } else {
-                // bessere Schreibweise waehlen: online > Historie > bisherige
-                const better = online && !cur.online
-                    ? true
-                    : (!cur.online && (_msgs[uname] && _msgs[uname].length)
-                        && !(_msgs[cur.username] && _msgs[cur.username].length));
-                if (better) cur.username = uname;
+                // Bevorzugt die aktuell online verbundene Schreibweise als Anzeige-/
+                // Routing-Form (Historie teilen ohnehin alle Formen via _pkey).
+                if (online && !cur.online) cur.username = uname;
                 cur.online = cur.online || online;
             }
         }
@@ -715,7 +719,7 @@
         // _tickEls für diesen Chat zurücksetzen
         for (const id of Object.keys(_tickEls)) delete _tickEls[id];
 
-        const history = _msgs[username] || [];
+        const history = _msgs[_pkey(username)] || [];
         let lastDate = '';
         for (const m of history) {
             const d = formatDate(m.ts);
@@ -768,7 +772,7 @@
     const QUICK_REACTIONS = ['👍', '👎', '❤️', '😂', '😮'];
 
     function appendMessage(msg) {
-        const mine = msg.from === myUser;
+        const mine = _isMe(msg.from);
         const row  = document.createElement('div');
         row.className = 'uc-msg-row ' + (mine ? 'mine' : 'theirs');
         if (msg.msg_id) row.dataset.msgid = msg.msg_id;
@@ -853,7 +857,7 @@
     // ─── Kontextmenue: Bearbeiten/Loeschen/Kopieren/Antworten ─────
     function _buildDmCtxItems(row, bubble, msg) {
         const items = [];
-        const mine = msg.from === myUser;
+        const mine = _isMe(msg.from);
         const txt  = (msg.text || '').trim();
         if (mine) {
             // Edit nur fuer reine Text-Nachrichten (Anhaenge bleiben unangetastet)

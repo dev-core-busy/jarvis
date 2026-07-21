@@ -284,17 +284,58 @@ _UC_HISTORY_FILE = Path("data/userchat_history.json")
 _UC_HISTORY_MAX  = 200   # max. Nachrichten pro Konversation
 
 def _uc_conv_key(u1: str, u2: str) -> str:
-    """Eindeutiger Konversations-Schlüssel (alphabetisch sortiert)."""
-    return "__".join(sorted([u1, u2]))
+    """Kanonischer Konversations-Schlüssel: NORMALISIERTE Logins (ohne Domain-
+    Präfix/UPN, kleingeschrieben), alphabetisch sortiert. So gibt es pro
+    Personen-Paar exakt EINEN Schlüssel – egal in welcher Schreibweise sich
+    jemand anmeldet (verhindert gesplittete Konversationen)."""
+    return "__".join(sorted([_norm_login(u1), _norm_login(u2)]))
+
+
+def _uc_migrate_history() -> bool:
+    """Führt Alt-Konversationen desselben Personen-Paars (verschiedene
+    Schreibweisen) auf den kanonischen Schlüssel zusammen und normalisiert
+    from/to in den Nachrichten. Idempotent; speichert nur bei Änderung."""
+    changed = False
+    merged: dict[str, list] = {}
+    for k, msgs in _uc_history.items():
+        parts = k.split("__")
+        ck = _uc_conv_key(parts[0], parts[1]) if len(parts) == 2 else k
+        if ck != k:
+            changed = True
+        bucket = merged.setdefault(ck, [])
+        seen = {m.get("msg_id") for m in bucket if m.get("msg_id")}
+        for m in msgs:
+            nf, nt = _norm_login(str(m.get("from", ""))), _norm_login(str(m.get("to", "")))
+            if m.get("from") != nf or m.get("to") != nt:
+                m = dict(m); m["from"] = nf; m["to"] = nt; changed = True
+            mid = m.get("msg_id")
+            if mid and mid in seen:
+                changed = True
+                continue
+            if mid:
+                seen.add(mid)
+            bucket.append(m)
+    for ck in merged:
+        merged[ck].sort(key=lambda m: m.get("ts", 0))
+    if changed or set(merged) != set(_uc_history):
+        _uc_history.clear()
+        _uc_history.update(merged)
+        _uc_save_history()
+        return True
+    return False
+
 
 def _uc_load_history():
-    """Lädt die Nachrichten-Historie aus der JSON-Datei."""
+    """Lädt die Nachrichten-Historie aus der JSON-Datei (+ Einmal-Migration
+    auf kanonische Schlüssel)."""
     if _UC_HISTORY_FILE.exists():
         try:
             raw = json.loads(_UC_HISTORY_FILE.read_text(encoding="utf-8"))
             _uc_history.clear()
             for k, v in raw.items():
                 _uc_history[k] = v
+            if _uc_migrate_history():
+                print("ℹ️  userchat_history auf kanonische Schlüssel migriert", flush=True)
         except Exception as e:
             print(f"⚠️  userchat_history laden fehlgeschlagen: {e}")
 
@@ -317,9 +358,15 @@ async def _uc_send(ws: WebSocket, msg: dict):
         pass
 
 async def _uc_send_to_user(username: str, msg: dict):
-    """Leitet eine Nachricht an alle WebSocket-Verbindungen eines Users weiter."""
-    for ws in list(_uc_clients.get(username, [])):
-        await _uc_send(ws, msg)
+    """Leitet eine Nachricht an alle WebSocket-Verbindungen eines Users weiter –
+    Abgleich per _norm_login, damit die Zustellung unabhaengig von der
+    Login-Schreibweise (mit/ohne Domain-Praefix) den richtigen Empfaenger trifft."""
+    target = _norm_login(username)
+    for u, conns in list(_uc_clients.items()):
+        if _norm_login(u) != target:
+            continue
+        for ws in list(conns):
+            await _uc_send(ws, msg)
 
 async def _uc_broadcast_presence():
     """Sendet die aktuelle Online-User-Liste an alle verbundenen User-Chat-Clients.
@@ -1678,10 +1725,11 @@ async def userchat_ws(ws: WebSocket):
                     if _am in _UC_OK_MIME and _ad and len(_ad) <= 7_000_000:  # ~5 MB binary
                         clean_atts.append({"name": _an, "mime_type": _am, "data": _ad})
                 msg_id = str(uuid.uuid4())[:8]
+                # from/to KANONISCH (normalisiert) speichern -> keine Doppel-Schluessel
                 msg = {
                     "type": "dm",
-                    "from": username,
-                    "to": to_user,
+                    "from": _norm_login(username),
+                    "to": _norm_login(to_user),
                     "text": text or "",
                     "ts": int(time.time() * 1000),
                     "msg_id": msg_id,
@@ -1708,10 +1756,11 @@ async def userchat_ws(ws: WebSocket):
                 if not partner:
                     continue
                 key = _uc_conv_key(username, partner)
+                _pn, _men = _norm_login(partner), _norm_login(username)
                 updated_ids = []
                 for m in _uc_history.get(key, []):
-                    if (m.get("from") == partner
-                            and m.get("to") == username
+                    if (_norm_login(str(m.get("from", ""))) == _pn
+                            and _norm_login(str(m.get("to", ""))) == _men
                             and m.get("status") != "read"):
                         m["status"] = "read"
                         updated_ids.append(m.get("msg_id"))
@@ -1738,13 +1787,22 @@ async def userchat_ws(ws: WebSocket):
                 new_text = (data.get("text", "") or "").strip()
                 if not to_user or not msg_id or not new_text:
                     continue
-                key = _uc_conv_key(username, to_user)
+                # Konversation + eigene Nachricht per _norm_login finden (s. dm_delete)
+                _me_n = _norm_login(username)
+                _pair = {_me_n, _norm_login(to_user)}
                 edited = None
-                for m in _uc_history.get(key, []):
-                    if m.get("msg_id") == msg_id and m.get("from") == username:
-                        m["text"] = new_text[:5000]
-                        m["edited_at"] = int(time.time() * 1000)
-                        edited = m
+                for _k, _msgs in _uc_history.items():
+                    _parts = _k.split("__")
+                    if len(_parts) != 2 or {_norm_login(_parts[0]), _norm_login(_parts[1])} != _pair:
+                        continue
+                    for m in _msgs:
+                        if (m.get("msg_id") == msg_id
+                                and _norm_login(str(m.get("from", ""))) == _me_n):
+                            m["text"] = new_text[:5000]
+                            m["edited_at"] = int(time.time() * 1000)
+                            edited = m
+                            break
+                    if edited:
                         break
                 if not edited:
                     continue
@@ -1767,18 +1825,26 @@ async def userchat_ws(ws: WebSocket):
                 msg_id  = data.get("msg_id", "")
                 if not to_user or not msg_id:
                     continue
-                key = _uc_conv_key(username, to_user)
+                # Konversation + eigene Nachricht per _norm_login finden (Login-
+                # Schreibweise beim Senden kann von der aktuellen abweichen).
+                _me_n = _norm_login(username)
+                _pair = {_me_n, _norm_login(to_user)}
                 removed_msg = None
-                if key in _uc_history:
+                for _k, _msgs in list(_uc_history.items()):
+                    _parts = _k.split("__")
+                    if len(_parts) != 2 or {_norm_login(_parts[0]), _norm_login(_parts[1])} != _pair:
+                        continue
                     new_list = []
-                    for m in _uc_history[key]:
-                        if m.get("msg_id") == msg_id and m.get("from") == username:
+                    for m in _msgs:
+                        if (m.get("msg_id") == msg_id
+                                and _norm_login(str(m.get("from", ""))) == _me_n):
                             removed_msg = m
                             continue
                         new_list.append(m)
                     if removed_msg:
-                        _uc_history[key] = new_list
+                        _uc_history[_k] = new_list
                         _uc_save_history()
+                        break
                 if not removed_msg:
                     continue
                 evt = {

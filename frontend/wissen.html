@@ -165,34 +165,86 @@
     <div id="wi-app" class="wi-wrap hidden">
         <div id="wi-scope-banner" class="wi-banner" style="margin-bottom:18px;" data-i18n="common.loading">Lade…</div>
 
+        <!-- Massenzuordnung (1. Stelle) – NUR fuer globale Wissens-Editoren sichtbar -->
+        <div class="wi-section" id="wi-sec-matrix" style="display:none;">
+            <h2><span data-i18n="wissen.sec_matrix">Massenzuordnung</span><span class="wi-sec-tog">▼</span></h2>
+            <p class="desc" data-i18n="kbmatrix.launch_desc">Alle Dokumente in einer Tabelle auf einen Blick zuordnen (schnelle Massenbearbeitung):</p>
+            <button id="wi-matrix-btn" class="kb-grp-matrix-icon" type="button" title="Wissensgruppen-Tabelle öffnen" data-i18n-title="kbmatrix.open_title">▦</button>
+        </div>
+
+        <!-- Wissensgruppen (2. Stelle) – aus Einstellungen verschoben; nur für globale Wissens-Editoren -->
+        <div class="wi-section" id="wi-sec-groups" style="display:none;">
+            <h2><span data-i18n="kbgroups.section">Wissensgruppen</span><span class="wi-sec-tog">▼</span></h2>
+            <p class="desc" data-i18n="kbgroups.hint">Ordne Dokumente logischen Gruppen zu (Mehrfachzuordnung möglich). Eine Datei ohne Gruppe gilt als „ungruppiert".</p>
+            <div id="kb-groups-overview" class="kb-groups-overview"><div class="wi-empty" data-i18n="common.loading">Lade…</div></div>
+            <div id="kb-groups-files" class="kb-groups-files" style="display:none;"></div>
+            <div id="kb-notification" class="kb-notification" style="display:none;margin-top:8px;"></div>
+        </div>
+
         <!-- Informationsextraktor (Dateien hochladen + Webseite analysieren) -->
         <div class="wi-section" id="wi-sec-upload">
             <h2><span data-i18n="wissen.sec_ext">Informationsextraktor</span><span class="wi-sec-tog">▼</span></h2>
             <p class="desc" data-i18n="wissen.sec_ext_desc">Dateien hochladen und deinen Wissensgruppen zuordnen oder eine Webseite analysieren – die KI extrahiert daraus Wissen, das du prüfen und freigeben kannst.</p>
-            <!-- Webseite analysieren (immer mit Fragen-Generierung) -->
-            <div class="wi-row" style="margin: 0 0 14px;">
-                <div style="flex:1;">
-                    <label data-i18n="wissen.url">Webseite (URL)</label>
-                    <input class="wi-input" id="wi-ext-url" type="text" placeholder="https://…">
-                </div>
-                <button class="sec-btn primary" id="wi-ext-url-btn" type="button" data-i18n="wissen.extract">Extrahieren</button>
+            <!-- Eingabe-Tabs: URL / Datei / Confluence (analog Einstellungen → Wissen) -->
+            <div class="ext-input-tabs" id="wi-ext-tabs">
+                <button class="ext-input-tab active" id="wi-tab-url" type="button">🌐 <span data-i18n="wissen.tab_url">URL</span></button>
+                <button class="ext-input-tab" id="wi-tab-file" type="button">📄 <span data-i18n="wissen.tab_file">Datei</span></button>
+                <button class="ext-input-tab" id="wi-tab-cf" type="button" style="display:none;">📘 <span data-i18n="wissen.tab_cf">Confluence</span></button>
             </div>
-            <div class="wi-drop" id="wi-drop" data-i18n="wissen.drop">Dateien hierher ziehen oder klicken zum Auswählen</div>
-            <div class="wi-drop-hint" id="wi-drop-hint" style="display:none;"></div>
-            <div class="wi-busy hidden" id="wi-busy"><span class="wi-busy-spin"></span><span id="wi-busy-text"></span></div>
-            <input type="file" id="wi-file-input" multiple class="hidden">
-            <div class="wi-row">
-                <div>
-                    <label data-i18n="wissen.folder">Zielordner</label>
-                    <select class="wi-input" id="wi-folder"></select>
+
+            <!-- Panel: URL analysieren -->
+            <div id="wi-panel-url">
+                <div class="wi-row" style="margin-top:0;">
+                    <div style="flex:1;">
+                        <label data-i18n="wissen.url">Webseite (URL)</label>
+                        <input class="wi-input" id="wi-ext-url" type="text" placeholder="https://…">
+                    </div>
                 </div>
             </div>
+
+            <!-- Panel: Datei hochladen -->
+            <div id="wi-panel-file" style="display:none;">
+                <div class="wi-drop" id="wi-drop" data-i18n="wissen.drop">Dateien hierher ziehen oder klicken zum Auswählen</div>
+                <div class="wi-drop-hint" id="wi-drop-hint" style="display:none;"></div>
+                <div class="wi-busy hidden" id="wi-busy"><span class="wi-busy-spin"></span><span id="wi-busy-text"></span></div>
+                <input type="file" id="wi-file-input" multiple class="hidden">
+                <div class="wi-row">
+                    <div>
+                        <label data-i18n="wissen.folder">Zielordner</label>
+                        <select class="wi-input" id="wi-folder"></select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel: Confluence (NUR persönliche Bereiche) -->
+            <div id="wi-panel-cf" style="display:none;">
+                <div id="wi-cf-block">
+                    <div style="margin-bottom:6px;">
+                        <label style="margin:0;" data-i18n="wissen.cf_label">Aus Confluence importieren</label>
+                    </div>
+                    <div class="wi-row" style="margin-top:0;">
+                        <div style="position:relative;flex:1;min-width:200px;">
+                            <input type="text" id="wi-cf-space-search" class="wi-input" placeholder="Bereich suchen…" autocomplete="off" style="width:100%;">
+                            <div id="wi-cf-space-dd" style="display:none;position:absolute;z-index:50;left:0;right:0;top:calc(100% + 2px);max-height:260px;overflow-y:auto;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(var(--shadow-rgb),0.4);"></div>
+                        </div>
+                        <button class="sec-btn" id="wi-cf-refresh" type="button" title="Bereiche neu laden">🔄</button>
+                    </div>
+                    <div class="wi-row" id="wi-cf-page-wrap" style="display:none;margin-top:8px;">
+                        <div style="flex:1;">
+                            <select class="wi-input" id="wi-cf-page" multiple size="8" style="width:100%;"></select>
+                        </div>
+                    </div>
+                    <p class="desc" id="wi-cf-hint" style="display:none;margin-top:4px;" data-i18n="wissen.cf_hint">Mehrfachauswahl mit gedrückter Strg-Taste; „Alles" wählt den ganzen Bereich.</p>
+                    <div class="wi-status" id="wi-cf-status"></div>
+                </div>
+            </div>
+
+            <!-- Immer sichtbar für alle drei Eingabearten: Wissensgruppen, KI-Optionen,
+                 Profil und der Extrahieren-Button (die wechselnden Eingabefelder stehen darüber). -->
             <div style="margin-top:14px;">
                 <label style="font-size:0.78rem;color:var(--text-secondary);" data-i18n="wissen.groups_label">Wissensgruppen (dein Bereich) *</label>
                 <div class="wi-groups" id="wi-upload-groups" style="margin-top:6px;"></div>
             </div>
-            <!-- Fragen & Antworten per KI generieren: bei Datei-Upload optional
-                 (Standard: aktiv), bei URL-Analyse immer aktiv (Audit vor Uebernahme) -->
             <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--text-primary);cursor:pointer;">
                     <input type="checkbox" id="wi-genq" checked>
@@ -202,16 +254,24 @@
                     <span data-i18n="wissen.genq_count">Anzahl Fragen</span>
                     <input type="number" id="wi-genq-count" class="wi-input" min="1" max="30" value="20" style="width:70px;padding:5px 8px;">
                 </label>
-                <!-- KI-Profil-Pulldown (wissen.js mountet ProfileSwitcher);
-                     Zeilen-gap 10px + margin 10px = 20px Abstand zum Anzahl-Feld -->
+                <!-- KI-Profil-Pulldown (wissen.js mountet ProfileSwitcher) -->
                 <span id="wi-prof-slot" style="margin-left:10px;"></span>
+                <span style="flex:1;"></span>
+                <button class="sec-btn primary" id="wi-extract-btn" type="button" data-i18n="wissen.extract">Extrahieren</button>
+                <button class="sec-btn danger" id="wi-extract-cancel" type="button" style="display:none;" data-i18n="common.cancel">Abbrechen</button>
             </div>
-            <p class="desc" style="margin-top:6px;" data-i18n="wissen.genq_hint">Bei Datei-Uploads optional (Standard: aktiv), bei der URL-Analyse immer aktiv. Die generierten Fragen &amp; Antworten erscheinen unten unter „Deine Entwürfe" – dort kannst du sie löschen, korrigieren und freigeben.</p>
+            <p class="desc" style="margin-top:6px;" data-i18n="wissen.genq_hint">Die generierten Fragen &amp; Antworten erscheinen unten unter „Deine Entwürfe" – dort kannst du sie löschen, korrigieren und freigeben.</p>
             <div class="wi-status" id="wi-upload-status"></div>
             <div class="wi-status" id="wi-ext-status"></div>
             <div id="wi-ext-review"></div>
 
-            <h3 style="font-size:0.95rem;margin:18px 0 4px;" data-i18n="wissen.drafts">Deine Entwürfe</h3>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:18px 0 4px;">
+                <h3 style="font-size:0.95rem;margin:0;" data-i18n="wissen.drafts">Deine Entwürfe</h3>
+                <div id="wi-drafts-bulk" style="display:none;align-items:center;gap:8px;">
+                    <button class="sec-btn small" id="wi-drafts-selall" type="button" data-i18n="wissen.select_all">Alle markieren</button>
+                    <button class="sec-btn small danger" id="wi-drafts-delsel" type="button" disabled data-i18n="wissen.delete_selected">Auswahl löschen</button>
+                </div>
+            </div>
             <div class="wi-list" id="wi-pending-list"><div class="wi-empty">—</div></div>
         </div>
 
@@ -223,10 +283,13 @@
         </div>
     </div>
 
-    <script src="/static/js/i18n.js?v=83"></script>
+    <script src="/static/js/i18n.js?v=88"></script>
     <script src="/static/js/theme.js?v=1"></script>
     <script src="/static/js/profile_switcher.js?v=4"></script>
-    <script src="/static/js/wissen.js?v=14"></script>
+    <script src="/static/js/kbgroups.js?v=4"></script>
+    <script src="/static/js/kbmatrix.js?v=8"></script>
+    <script src="/static/js/knowledge.js?v=67"></script>
+    <script src="/static/js/wissen.js?v=21"></script>
     <script src="/static/js/branding.js?v=22"></script>
 </body>
 </html>

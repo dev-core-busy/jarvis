@@ -1600,52 +1600,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <!-- Wissensgruppen (logische Tags) -->
-                        <div class="kb-section">
-                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-groups-hdr">
-                                <h3 data-i18n="kbgroups.section">Wissensgruppen</h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-groups-tog">▶</span>
-                            </div>
-                            <div id="kb-sect-groups-body" class="kb-collapse-body" style="display:none;">
-                                <p class="kb-hint" data-i18n="kbgroups.hint">Ordne Dokumente logischen Gruppen zu (Mehrfachzuordnung möglich). Eine Datei ohne Gruppe gilt als „ungruppiert".</p>
-                                <div class="kb-grp-matrix-launch">
-                                    <span data-i18n="kbmatrix.launch_desc">Alle Dokumente in einer Tabelle auf einen Blick zuordnen (schnelle Massenbearbeitung):</span>
-                                    <button id="kb-grp-matrix-btn" class="kb-grp-matrix-icon" title="Wissensgruppen-Tabelle öffnen" data-i18n-title="kbmatrix.open_title">▦</button>
-                                </div>
-                                <div id="kb-groups-overview" class="kb-groups-overview">
-                                    <div class="kb-loading" data-i18n="knowledge.loading">Lädt…</div>
-                                </div>
-                                <div id="kb-groups-files" class="kb-groups-files" style="display:none;"></div>
-                            </div>
-                        </div>
-
-                        <!-- Datei-Upload -->
-                        <div class="kb-section">
-                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-upload-hdr">
-                                <h3 data-i18n="knowledge.section_upload">Dateien hochladen</h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-upload-tog">▶</span>
-                            </div>
-                            <div id="kb-sect-upload-body" class="kb-collapse-body" style="display:none;">
-                                <div id="kb-drop-zone" class="kb-drop-zone">
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
-                                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                                        <polyline points="17 8 12 3 7 8"/>
-                                        <line x1="12" y1="3" x2="12" y2="15"/>
-                                    </svg>
-                                    <p><span data-i18n="knowledge.drop_hint">Dateien hierher ziehen oder</span> <label for="kb-file-input" class="kb-upload-link" data-i18n="knowledge.browse">durchsuchen</label></p>
-                                    <input type="file" id="kb-file-input" multiple style="display:none" />
-                                </div>
-                                <div class="kb-upload-row">
-                                    <select id="kb-upload-target" class="kb-input kb-upload-select"></select>
-                                    <div id="kb-upload-status" class="kb-upload-status"></div>
-                                </div>
-                                <div class="kb-upload-groups-row">
-                                    <span class="kb-hint" style="margin:0;" data-i18n="kbgroups.upload_label">In Gruppen ablegen:</span>
-                                    <div id="kb-upload-groups" class="kb-grp-checks"></div>
-                                </div>
-                            </div>
-                        </div>
-
                         <!-- Ordner-Verwaltung -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-folder-hdr">
@@ -1727,17 +1681,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <button class="kb-btn-secondary" onclick="document.getElementById('kb-mount-form').style.display='none'" data-i18n="common.cancel">Abbrechen</button>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-
-                        <!-- ─── Extractor ──────────────────────────────── -->
-                        <div class="kb-section">
-                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-ext-hdr">
-                                <h3 data-i18n="knowledge.section_extractor">Informationsextraktor</h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-ext-tog">▶</span>
-                            </div>
-                            <div id="kb-sect-ext-body" class="kb-collapse-body" style="display:none;">
-                                <div id="extractor-tab-content"></div>
                             </div>
                         </div>
 
@@ -3137,11 +3080,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
-    <script src="/static/js/kbmatrix.js?v=7"></script>
-    <script src="/static/js/extractor.js?v=27"></script>
     <script src="/static/js/skills.js?v=33"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
-    <script src="/static/js/knowledge.js?v=66"></script>
+    <script src="/static/js/knowledge.js?v=67"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>
@@ -3154,7 +3095,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/security_incidents.js?v=19"></script>
     <script src="/static/js/ldap_picker.js?v=6"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=171"></script>
+    <script src="/static/js/app.js?v=173"></script>
 </body>
 
 </html>

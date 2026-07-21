@@ -5290,25 +5290,43 @@ async def support_instructions_set(request: Request, user: str = Depends(require
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-async def _run_cancellable(request: Request, coro):
+# Laufende, abbrechbare Extraktions-Jobs (job_id -> Task). Erlaubt gezieltes
+# Abbrechen ueber /api/knowledge/extract/cancel – robuster als die reine
+# Disconnect-Erkennung (die hinter HTTPS/Proxy nicht immer zuverlaessig feuert).
+_extract_jobs: dict[str, "asyncio.Task"] = {}
+
+
+async def _run_cancellable(request: Request, coro, job_id: str = ""):
     """Fuehrt ``coro`` als Task aus und bricht sie ab, sobald der Client die
-    HTTP-Verbindung trennt (Nutzer klickt 'Abbrechen' -> fetch().abort()).
+    HTTP-Verbindung trennt (Nutzer klickt 'Abbrechen' -> fetch().abort()) ODER
+    ein expliziter Cancel-Aufruf via ``job_id`` eintrifft.
 
     Dadurch rechnet der Server bei einem Abbruch nicht unnoetig weiter: Bei
     httpx-basierten LLM-Providern wird der laufende Request mit abgebrochen; ein
-    Gemini-SDK-Call laeuft im Hintergrund-Thread zwar aus, der Endpoint blockiert
-    aber nicht mehr darauf und gibt sofort frei.
+    Gemini-SDK-Call laeuft im Hintergrund-Thread zwar aus (Threads sind in Python
+    nicht killbar), der Endpoint blockiert aber nicht mehr darauf, gibt sofort
+    frei und verwirft das Ergebnis (kein Pending-Dokument wird gespeichert).
+
+    ``job_id`` (optional): registriert die Task, sodass sie zusaetzlich gezielt
+    ueber /api/knowledge/extract/cancel abgebrochen werden kann – noetig, weil
+    ``is_disconnected()`` hinter TLS/Reverse-Proxy nicht immer zieht.
 
     Rueckgabe: ``(True, ergebnis)`` bei normalem Abschluss, ``(False, None)`` bei
-    Client-Abbruch. Exceptions aus ``coro`` werden unveraendert durchgereicht.
-    Voraussetzung: der Request-Body wurde bereits gelesen (sonst meldet
-    ``is_disconnected()`` nichts)."""
+    Client- oder explizitem Abbruch. Exceptions aus ``coro`` werden unveraendert
+    durchgereicht. Voraussetzung: der Request-Body wurde bereits gelesen (sonst
+    meldet ``is_disconnected()`` nichts)."""
     task = asyncio.ensure_future(coro)
+    if job_id:
+        _extract_jobs[job_id] = task
     try:
         while True:
             done, _ = await asyncio.wait({task}, timeout=0.4)
             if task in done:
-                return True, task.result()   # reicht evtl. Exception durch
+                try:
+                    return True, task.result()   # reicht evtl. Exception durch
+                except asyncio.CancelledError:
+                    # extern abgebrochen (Cancel-Endpoint) -> als Abbruch melden
+                    return False, None
             try:
                 gone = await request.is_disconnected()
             except Exception:
@@ -5324,6 +5342,9 @@ async def _run_cancellable(request: Request, coro):
         # Der Request-Handler selbst wurde abgebrochen -> laufende Arbeit mitnehmen
         task.cancel()
         raise
+    finally:
+        if job_id:
+            _extract_jobs.pop(job_id, None)
 
 
 @app.post("/api/support/query")
@@ -7231,13 +7252,14 @@ async def knowledge_extract(request: Request, user: str = Depends(require_knowle
     """Ruft eine URL ab, extrahiert per LLM Wissen und speichert als Pending-Dokument."""
     body = await request.json()
     url = (body.get("url") or "").strip()
+    job_id = (body.get("job_id") or "").strip()
     if not url:
         return JSONResponse({"error": "Keine URL angegeben"}, status_code=400)
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     try:
         from backend.web_extractor import extract_from_url
-        ok, doc = await _run_cancellable(request, extract_from_url(url))
+        ok, doc = await _run_cancellable(request, extract_from_url(url), job_id=job_id)
         if not ok:
             return JSONResponse({"error": "Abgebrochen"}, status_code=499)
         return JSONResponse(doc)
@@ -7245,10 +7267,29 @@ async def knowledge_extract(request: Request, user: str = Depends(require_knowle
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.post("/api/knowledge/extract/cancel")
+async def knowledge_extract_cancel(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Bricht einen laufenden Extraktions-Job (URL/Datei/Confluence) gezielt ab.
+
+    Body: ``{"job_id": "<vom Client erzeugte ID>"}``. Der zugehoerige Task wird
+    abgebrochen; der Server gibt den Endpoint frei und speichert kein Ergebnis.
+    Zuverlaessiger als sich allein auf den TCP-Disconnect zu verlassen (der hinter
+    HTTPS/Reverse-Proxy nicht immer erkannt wird)."""
+    body = await request.json()
+    job_id = (body.get("job_id") or "").strip()
+    task = _extract_jobs.get(job_id)
+    if not task:
+        return JSONResponse({"ok": False, "error": "Kein laufender Job zu dieser ID"},
+                            status_code=404)
+    task.cancel()
+    return JSONResponse({"ok": True})
+
+
 @app.post("/api/knowledge/extract/upload")
 async def knowledge_extract_upload(
     request: Request,
     file: UploadFile = File(...),
+    job_id: str = Form(""),
     user: str = Depends(require_knowledge_editor),
 ):
     """Datei hochladen → Text extrahieren → LLM → Pending-Dokument."""
@@ -7270,7 +7311,8 @@ async def knowledge_extract_upload(
         return JSONResponse({"error": "Datei zu groß (max. 50 MB)"}, status_code=413)
     try:
         from backend.web_extractor import extract_from_file
-        ok, doc = await _run_cancellable(request, extract_from_file(file.filename, content))
+        ok, doc = await _run_cancellable(request, extract_from_file(file.filename, content),
+                                         job_id=(job_id or "").strip())
         if not ok:
             return JSONResponse({"error": "Abgebrochen"}, status_code=499)
         return JSONResponse(doc, status_code=201)
@@ -7293,6 +7335,7 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
     body = await request.json()
     page_id = (body.get("page_id") or "").strip()
     space = (body.get("space") or "").strip()
+    job_id = (body.get("job_id") or "").strip()
     audit = body.get("audit", True)  # False = auditloser Direkt-Import
     c = _confluence_client()
     if not c.configured:
@@ -7302,21 +7345,26 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
         raw = (((page.get("body") or {}).get("storage") or {}).get("value")) or ""
         return html_to_text(raw, 8000)
 
-    # ── Einzelseite (synchron) ──────────────────────────────────────────
+    # ── Einzelseite (synchron, abbrechbar via job_id) ───────────────────
     if page_id:
-        try:
+        async def _do_page():
             page = await asyncio.to_thread(c.get_page, page_id, None, None)
             text = _page_text(page)
             if not text.strip():
-                return JSONResponse({"error": "Seite enthält keinen lesbaren Text."}, status_code=422)
+                return (422, {"error": "Seite enthält keinen lesbaren Text."})
             doc = await extract_to_pending(text, page.get("title", ""), c.link_for(page, page))
             if not audit:
                 # auditlos: sofort in die Wissens-DB schreiben
                 res = await asyncio.to_thread(approve_pending, doc["id"], True)
-                return JSONResponse({"ok": True, "audited": False, "id": doc["id"],
-                                     "title": doc["title"], "file": res.get("file")},
-                                    status_code=201)
-            return JSONResponse(doc, status_code=201)
+                return (201, {"ok": True, "audited": False, "id": doc["id"],
+                              "title": doc["title"], "file": res.get("file")})
+            return (201, doc)
+        try:
+            ok, result = await _run_cancellable(request, _do_page(), job_id=job_id)
+            if not ok:
+                return JSONResponse({"error": "Abgebrochen"}, status_code=499)
+            code, payload = result
+            return JSONResponse(payload, status_code=code)
         except ConfluenceError as e:
             return JSONResponse({"error": str(e)}, status_code=502)
         except Exception as e:
@@ -7355,8 +7403,14 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
         task = asyncio.create_task(_bulk(space, pages, audit))
         _bg_confluence_tasks.add(task)
         task.add_done_callback(_bg_confluence_tasks.discard)
+        # Unter job_id registrieren, damit der Bulk-Lauf gezielt abgebrochen
+        # werden kann (CancelledError bricht die _bulk-Schleife am naechsten await).
+        if job_id:
+            _extract_jobs[job_id] = task
+            task.add_done_callback(lambda t, _j=job_id: _extract_jobs.pop(_j, None))
         return JSONResponse({"ok": True, "started": True, "total": len(pages),
-                             "audited": bool(audit), "space": space}, status_code=202)
+                             "audited": bool(audit), "space": space, "job_id": job_id},
+                            status_code=202)
 
     return JSONResponse({"error": "page_id oder space erforderlich."}, status_code=400)
 

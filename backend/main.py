@@ -368,6 +368,20 @@ async def _uc_send_to_user(username: str, msg: dict):
         for ws in list(conns):
             await _uc_send(ws, msg)
 
+# "Online" im Benutzerchat = der Benutzer hat eine AKTIVE Portal-Session
+# (kuerzlich authentifizierter Request) ODER ist gerade im Benutzerchat verbunden.
+# Fenster grosszuegiger als das Portal-Poll-Intervall (30s), damit es nicht flackert.
+_UC_ACTIVE_WINDOW = 150.0
+
+
+def _uc_user_active(login: str) -> bool:
+    n = _norm_login(login)
+    if any(_norm_login(u) == n and conns for u, conns in _uc_clients.items()):
+        return True
+    ts = _ad_seen_users.get(n, 0.0)
+    return (time.time() - ts) < _UC_ACTIVE_WINDOW
+
+
 async def _uc_broadcast_presence():
     """Sendet die aktuelle Online-User-Liste an alle verbundenen User-Chat-Clients.
     Jeder Client erhaelt die Liste OHNE sich selbst (auch andere Schreibweisen des
@@ -518,6 +532,9 @@ def _login_still_allowed(username: str) -> bool:
     (= ohne das Benutzerpasswort) nicht live pruefen und bleiben bis zum Abmelden
     bestehen. Die AD-Benutzer-Whitelist (ad_allowed_users) und ALLOWED_USERS werden
     dagegen sofort durchgesetzt."""
+    # Letzte Aktivitaet fuer ALLE angemeldeten Benutzer festhalten (Grundlage fuer
+    # die Online-Anzeige im Benutzerchat = "hat eine aktive Portal-Session").
+    _ad_seen_users[_norm_login(username)] = time.time()
     if username in ALLOWED_USERS:
         return True
     # AD-Benutzer als 'aktiv' vormerken – Grundlage fuer die periodische
@@ -1567,7 +1584,6 @@ async def userchat_known_users(user: str = Depends(require_auth)):
     from backend.conv_log import get_known_users
     me = _norm_login(user)
     online_exact = {u for u, conns in _uc_clients.items() if conns}
-    norm_online = {_norm_login(u) for u in online_exact}
 
     cands: list[str] = list(get_known_users())
     for key in _uc_history:                      # Historie-Partner (Key = "a__b")
@@ -1580,12 +1596,12 @@ async def userchat_known_users(user: str = Depends(require_auth)):
         if not n or n == me or n in _UC_NON_USERS or u in _UC_NON_USERS:
             continue
         cur = by_norm.get(n)
-        # bevorzuge eine aktuell online verbundene Schreibweise, sonst die erste
         if cur is None or (u in online_exact and cur not in online_exact):
             by_norm[n] = u
 
-    out = [{"username": u, "online": _norm_login(u) in norm_online}
-           for u in by_norm.values()]
+    # Online = AKTIVE Portal-Session (kuerzlicher authentifizierter Request) ODER
+    # gerade im Benutzerchat verbunden – NICHT nur "im Benutzerchat".
+    out = [{"username": u, "online": _uc_user_active(u)} for u in by_norm.values()]
     out.sort(key=lambda x: (not x["online"], x["username"].lower()))
     return JSONResponse({"users": out})
 

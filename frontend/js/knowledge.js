@@ -358,12 +358,17 @@ class JarvisKnowledgeManager {
             box.innerHTML = title + `<div class="kb-files-empty">${window.t('kbgroups.no_docs') || 'Keine Dokumente in dieser Gruppe.'}</div>`;
             return;
         }
-        box.innerHTML = title + files.map(p => `
-            <div class="kb-grp-file-row">
+        const barBulk = `<div class="kb-bulk-bar hidden">
+                <button class="btn-secondary kb-bulk-del" type="button">${window.t('knowledge.bulk_remove') || 'Aus Gruppe entfernen'} (<span class="kb-bulk-count">0</span>)</button>
+                <button class="btn-secondary kb-bulk-clear" type="button">${window.t('knowledge.bulk_clear') || 'Auswahl aufheben'}</button>
+                <span class="kb-bulk-hint">${window.t('knowledge.bulk_hint') || 'Mehrfachauswahl: Klick oder mit der Maus aufziehen'}</span>
+            </div>`;
+        box.innerHTML = title + barBulk + `<div class="kb-grp-file-list">` + files.map(p => `
+            <div class="kb-grp-file-row" data-path="${KG.esc(p)}">
                 <span class="kb-file-icon">📄</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
                 <button class="kb-btn-remove kb-grp-untag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.remove') || 'Aus Gruppe entfernen'}">✕</button>
-            </div>`).join('');
+            </div>`).join('') + `</div>`;
         box.querySelectorAll('.kb-grp-untag').forEach(btn => {
             btn.onclick = async () => {
                 const path = btn.dataset.path;
@@ -374,6 +379,8 @@ class JarvisKnowledgeManager {
                 this._showGroupFiles(gid);
             };
         });
+        // Mehrfachauswahl (Drag/Klick) -> ausgewaehlte Dokumente gesammelt aus der Gruppe entfernen
+        this._setupRowSelection(box, '.kb-grp-file-row', (paths) => this._bulkRemoveFromGroup(paths, gid));
     }
 
     async _showUngroupedFiles() {
@@ -405,12 +412,19 @@ class JarvisKnowledgeManager {
         }
         // Ungruppierte Dateien sind keiner Gruppe zugeordnet -> das "✕" LÖSCHT die
         // Datei ganz (in der Gruppen-Ansicht entfernt es dagegen nur die Zuordnung).
-        box.innerHTML = title + files.map(p => `
-            <div class="kb-grp-file-row">
+        const barBulk = `<div class="kb-bulk-bar hidden">
+                <button class="btn-secondary kb-bulk-del" type="button">${window.t('knowledge.bulk_delete') || 'Auswahl löschen'} (<span class="kb-bulk-count">0</span>)</button>
+                <button class="btn-secondary kb-bulk-clear" type="button">${window.t('knowledge.bulk_clear') || 'Auswahl aufheben'}</button>
+                <span class="kb-bulk-hint">${window.t('knowledge.bulk_hint') || 'Mehrfachauswahl: Klick oder mit der Maus aufziehen'}</span>
+            </div>`;
+        box.innerHTML = title + barBulk + files.map(p => `
+            <div class="kb-grp-file-row" data-path="${KG.esc(p)}">
                 <span class="kb-file-icon">📄</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
                 <button class="kb-btn-remove kb-ung-del" data-path="${KG.esc(p)}" title="${T('knowledge.file_delete_title', 'Datei löschen')}">✕</button>
             </div>`).join('');
+        this._setupRowSelection(box, '.kb-grp-file-row', (paths) =>
+            this._bulkDeleteFiles(paths, () => { this._renderGroupsOverview(); return this._showUngroupedFiles(); }));
         box.querySelectorAll('.kb-ung-del').forEach(btn => {
             btn.onclick = async () => {
                 const path = btn.dataset.path;
@@ -1051,7 +1065,15 @@ class JarvisKnowledgeManager {
                 return;
             }
 
-            filesEl.innerHTML = folderData.files.map(f => {
+            const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g,
+                c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            // Sammel-Lösch-Leiste (erscheint bei Auswahl) + Datei-Zeilen
+            const bar = `<div class="kb-bulk-bar hidden" id="kb-bulk-${idx}">
+                    <button class="btn-secondary kb-bulk-del" type="button">${window.t('knowledge.bulk_delete') || 'Auswahl löschen'} (<span class="kb-bulk-count">0</span>)</button>
+                    <button class="btn-secondary kb-bulk-clear" type="button">${window.t('knowledge.bulk_clear') || 'Auswahl aufheben'}</button>
+                    <span class="kb-bulk-hint">${window.t('knowledge.bulk_hint') || 'Mehrfachauswahl: Klick oder mit der Maus aufziehen'}</span>
+                </div>`;
+            const rows = folderData.files.map(f => {
                 const safePath = f.path.replace(/'/g, "\\'");
                 const isText = /\.(txt|md|json|yaml|yml|csv|log|xml|html|htm|py|js|ts|sh|cfg|ini|toml|rst|tex)$/i.test(f.name);
                 const viewBtn = isText
@@ -1063,19 +1085,158 @@ class JarvisKnowledgeManager {
                             onclick="window.knowledgeManager.tagFile(this, '${safePath}')">🏷</button>`
                     : '';
                 return `
-                <div class="kb-file-item" id="kb-file-${btoa(unescape(encodeURIComponent(f.path))).replace(/[^a-zA-Z0-9]/g, '')}">
+                <div class="kb-file-item" data-path="${esc(f.path)}" id="kb-file-${btoa(unescape(encodeURIComponent(f.path))).replace(/[^a-zA-Z0-9]/g, '')}">
                     <span class="kb-file-icon">📄</span>
-                    <span class="kb-file-name" title="${f.path}">${f.name}</span>
-                    <span class="kb-file-size">${f.size}</span>
+                    <span class="kb-file-name" title="${esc(f.path)}">${esc(f.name)}</span>
+                    <span class="kb-file-size">${esc(f.size)}</span>
                     ${tagBtn}
                     ${viewBtn}
                     <button class="kb-btn-delete-file" title="${window.t('knowledge.file_delete_title')}"
                         onclick="window.knowledgeManager.deleteFile('${safePath}', ${idx}, '${folderPath}')">✕</button>
                 </div>`;
             }).join('');
+            filesEl.innerHTML = bar + rows;
+            this._setupRowSelection(filesEl, '.kb-file-item', (paths) =>
+                this._bulkDeleteFiles(paths, () => {
+                    const el = document.getElementById(`kb-files-${idx}`);
+                    if (el) el.style.display = 'none';
+                    return this.toggleFolder(idx, folderPath);
+                }));
         } catch (e) {
             filesEl.innerHTML = `<div class="kb-files-error">${window.t('common.error')}: ${e.message}</div>`;
         }
+    }
+
+    // ─── Mehrfachauswahl (Klick + Maus-Drag/Rubber-Band) – generisch ────
+    // container: Listen-Element (position:relative); rowSel: Zeilen-Selektor;
+    // onBulk(paths): Aktion fuer die ausgewaehlten data-path-Werte.
+    _setupRowSelection(container, rowSel, onBulk) {
+        if (!container) return;
+        // Bezugspunkt fuer das absolut positionierte Auswahl-Rechteck
+        try { if (getComputedStyle(container).position === 'static') container.style.position = 'relative'; } catch (e) {}
+        const self = this;
+        const items = () => Array.prototype.slice.call(container.querySelectorAll(rowSel));
+        const selected = () => Array.prototype.slice.call(container.querySelectorAll(rowSel + '.selected'));
+        const bar = container.querySelector('.kb-bulk-bar');
+        const updateBar = () => {
+            if (!bar) return;
+            const n = selected().length;
+            bar.classList.toggle('hidden', n === 0);
+            const c = bar.querySelector('.kb-bulk-count'); if (c) c.textContent = String(n);
+        };
+        // Einzelklick schaltet Auswahl um (nicht auf Buttons/Links)
+        container.addEventListener('click', (e) => {
+            if (e.target.closest('button, a, input')) return;
+            const row = e.target.closest(rowSel);
+            if (!row || !container.contains(row)) return;
+            if (self._dragMoved) return;
+            row.classList.toggle('selected');
+            updateBar();
+        });
+        if (bar) {
+            const del = bar.querySelector('.kb-bulk-del');
+            const clr = bar.querySelector('.kb-bulk-clear');
+            if (del) del.addEventListener('click', () => {
+                const paths = selected().map(it => it.getAttribute('data-path')).filter(Boolean);
+                if (paths.length) onBulk(paths);
+            });
+            if (clr) clr.addEventListener('click', () => {
+                items().forEach(it => it.classList.remove('selected')); updateBar();
+            });
+        }
+        // Maus-Drag: Auswahl-Rechteck. Start nur auf leerer Flaeche (nicht Buttons).
+        let sx = 0, sy = 0, rubber = null, additive = false;
+        const onDown = (e) => {
+            if (e.button !== 0 || e.target.closest('button, a, input')) return;
+            self._dragMoved = false;
+            additive = e.ctrlKey || e.metaKey || e.shiftKey;
+            const r = container.getBoundingClientRect();
+            sx = e.clientX - r.left + container.scrollLeft;
+            sy = e.clientY - r.top + container.scrollTop;
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        };
+        const onMove = (e) => {
+            const r = container.getBoundingClientRect();
+            const cx = e.clientX - r.left + container.scrollLeft;
+            const cy = e.clientY - r.top + container.scrollTop;
+            if (!rubber) {
+                if (Math.abs(cx - sx) < 4 && Math.abs(cy - sy) < 4) return;
+                self._dragMoved = true;
+                container.classList.add('kb-selecting');
+                rubber = document.createElement('div'); rubber.className = 'kb-rubber';
+                container.appendChild(rubber);
+                if (!additive) items().forEach(it => it.classList.remove('selected'));
+            }
+            const x = Math.min(sx, cx), y = Math.min(sy, cy), w = Math.abs(cx - sx), h = Math.abs(cy - sy);
+            rubber.style.left = x + 'px'; rubber.style.top = y + 'px';
+            rubber.style.width = w + 'px'; rubber.style.height = h + 'px';
+            const cr = container.getBoundingClientRect();
+            items().forEach(it => {
+                const b = it.getBoundingClientRect();
+                const iy1 = b.top - cr.top + container.scrollTop, iy2 = iy1 + b.height;
+                const ix1 = b.left - cr.left + container.scrollLeft, ix2 = ix1 + b.width;
+                const hit = !(iy2 < y || iy1 > y + h || ix2 < x || ix1 > x + w);
+                if (hit) it.classList.add('selected');
+                else if (!additive) it.classList.remove('selected');
+            });
+            updateBar();
+        };
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            if (rubber) { rubber.remove(); rubber = null; }
+            container.classList.remove('kb-selecting');
+            updateBar();
+            setTimeout(() => { self._dragMoved = false; }, 0);
+        };
+        container.addEventListener('mousedown', onDown);
+        updateBar();
+    }
+
+    // Sammel-Löschen von Dateien (per Pfad); refresh() lädt die Liste neu.
+    async _bulkDeleteFiles(paths, refresh) {
+        if (!paths || !paths.length) return;
+        const msg = (window.t('knowledge.bulk_delete_confirm') || '{n} Dateien wirklich löschen?').replace('{n}', paths.length);
+        if (!confirm(msg)) return;
+        const token = localStorage.getItem('jarvis_token') || '';
+        let ok = 0, fail = 0;
+        for (const p of paths) {
+            try {
+                const r = await fetch('/api/knowledge/files', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ path: p })
+                });
+                if (r.ok) ok++; else fail++;
+            } catch (e) { fail++; }
+        }
+        this._showNotification(
+            (window.t('knowledge.bulk_deleted') || '{n} gelöscht').replace('{n}', ok)
+            + (fail ? ' · ' + fail + ' ' + (window.t('knowledge.bulk_failed') || 'fehlgeschlagen') : ''),
+            fail ? 'error' : 'success');
+        if (refresh) await refresh();
+        await this.fetchStats();
+    }
+
+    // Sammel-Entfernen aus einer Gruppe (Zuordnung lösen, Datei bleibt bestehen).
+    async _bulkRemoveFromGroup(paths, gid) {
+        if (!paths || !paths.length || !window.KbGroups) return;
+        const msg = (window.t('knowledge.bulk_remove_confirm') || '{n} Dokumente aus der Gruppe entfernen?').replace('{n}', paths.length);
+        if (!confirm(msg)) return;
+        const KG = window.KbGroups;
+        let ok = 0;
+        for (const p of paths) {
+            try {
+                const cur = await KG.getAssignment(p);
+                await KG.setAssignment(p, cur.filter(x => x !== gid));
+                ok++;
+            } catch (e) { /* weiter */ }
+        }
+        this._showNotification((window.t('knowledge.bulk_removed') || '{n} aus Gruppe entfernt').replace('{n}', ok), 'success');
+        await KG.load();
+        this._renderGroupsOverview();
+        this._showGroupFiles(gid);
     }
 
     // ─── Datei einer Gruppe zuordnen ─────────────────────────────────

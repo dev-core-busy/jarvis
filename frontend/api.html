@@ -51,6 +51,12 @@
         .ad-group > summary::before { content: '▸'; opacity: .6; font-size: .9rem; }
         .ad-group[open] > summary::before { content: '▾'; }
         .ad-gcount { font-weight: 400; color: var(--text-secondary); font-size: .8rem; }
+        /* Nicht-lokale (externe) Zugriffe auf die Gruppe seit letztem Neustart */
+        .ad-gforeign { font-weight: 700; color: rgb(var(--accent-rgb, 124,58,237)); font-size: .78rem;
+                       margin-left: 2px; cursor: help; }
+        /* dito pro einzelnem Endpunkt (in der Endpunkt-Kopfzeile) */
+        .ep-foreign { font-weight: 700; color: rgb(var(--accent-rgb, 124,58,237)); font-size: .74rem;
+                      cursor: help; flex-shrink: 0; }
 
         .ep { border: 1px solid var(--border, rgba(255,255,255,.1)); border-radius: 10px; margin: 8px 0;
               overflow: hidden; background: var(--bg-glass, rgba(255,255,255,.03)); }
@@ -144,7 +150,7 @@
         <div class="ad-loading" id="ad-loading" data-i18n="api.loading">Lade API-Schema…</div>
     </div>
 
-    <script src="/static/js/i18n.js?v=78"></script>
+    <script src="/static/js/i18n.js?v=80"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/branding.js?v=22"></script>
     <script>
@@ -229,6 +235,14 @@
             } catch (e) { return null; }
         }
 
+        // Summe der nicht-lokalen (externen) Zugriffe auf alle Endpunkte einer Gruppe
+        // seit dem letzten Dienststart (aus loStats, wird live vom Backend gezaehlt).
+        function groupForeign(list) {
+            var n = 0;
+            list.forEach(function (ep) { var st = loStats[epKey(ep)]; if (st) n += (st.count || 0); });
+            return n;
+        }
+
         // ── Rendern ──
         function render() {
             var wrap = document.getElementById('ad-wrap');
@@ -245,7 +259,11 @@
                 det.className = 'ad-group';
                 det.setAttribute('data-group', gname);
                 var sum = document.createElement('summary');
-                sum.innerHTML = esc(gname) + ' <span class="ad-gcount">' + list.length + '</span>'
+                var foreign = groupForeign(list);
+                var fHtml = foreign > 0
+                    ? ' <span class="ad-gforeign" title="' + esc(T('api.foreign_hint')) + '">(' + foreign + ')</span>'
+                    : '';
+                sum.innerHTML = esc(gname) + ' <span class="ad-gcount">' + list.length + '</span>' + fHtml
                     + '<span class="ep-lock ad-glock" title="Enthält auf lokal beschränkte Endpunkte">🔒</span>';
                 det.appendChild(sum);
                 list.forEach(function (ep) { det.appendChild(epNode(ep)); });
@@ -253,6 +271,57 @@
             });
             applyFilter();
             updateGroupMarkers();
+        }
+
+        // Zaehler live aktualisieren, ohne die Gruppen neu aufzubauen (erhaelt den
+        // Aufklapp-Zustand und laufende Testformulare). Holt nur die Statistik neu.
+        function refreshForeignCounts() {
+            fetch('/api/admin/api-local-only', { headers: H })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    if (!d) return;
+                    loStats = d.stats || {};
+                    // pro einzelnem Endpunkt
+                    document.querySelectorAll('.ep[data-key]').forEach(function (ep) {
+                        var st = loStats[ep.getAttribute('data-key')];
+                        var n = st ? (st.count || 0) : 0;
+                        var sum = ep.querySelector('summary');
+                        if (!sum) return;
+                        var badge = sum.querySelector('.ep-foreign');
+                        if (n > 0) {
+                            if (!badge) {
+                                badge = document.createElement('span');
+                                badge.className = 'ep-foreign';
+                                badge.title = T('api.foreign_hint_ep');
+                                var path = sum.querySelector('.ep-path');
+                                if (path) path.insertAdjacentElement('afterend', badge);
+                            }
+                            badge.textContent = '(' + n + ')';
+                        } else if (badge) {
+                            badge.remove();
+                        }
+                    });
+                    // pro Gruppe (Summe)
+                    document.querySelectorAll('.ad-group').forEach(function (grp) {
+                        var gname = grp.getAttribute('data-group');
+                        var list = endpoints.filter(function (ep) { return ep.group === gname; });
+                        var foreign = groupForeign(list);
+                        var sum = grp.querySelector('summary');
+                        var badge = sum ? sum.querySelector('.ad-gforeign') : null;
+                        if (foreign > 0) {
+                            if (!badge) {
+                                badge = document.createElement('span');
+                                badge.className = 'ad-gforeign';
+                                badge.title = T('api.foreign_hint');
+                                var cnt = sum.querySelector('.ad-gcount');
+                                if (cnt) cnt.insertAdjacentElement('afterend', badge);
+                            }
+                            badge.textContent = '(' + foreign + ')';
+                        } else if (badge) {
+                            badge.remove();
+                        }
+                    });
+                }).catch(function () {});
         }
 
         function epNode(ep) {
@@ -265,8 +334,14 @@
             d.setAttribute('data-key', key);
 
             var s = document.createElement('summary');
+            var st = loStats[key];
+            var epForeign = st ? (st.count || 0) : 0;
+            var epFHtml = epForeign > 0
+                ? '<span class="ep-foreign" title="' + esc(T('api.foreign_hint_ep')) + '">(' + epForeign + ')</span>'
+                : '';
             s.innerHTML = '<span class="ep-method ' + mCls(ep.method) + '">' + ep.method.toUpperCase() + '</span>'
                 + '<span class="ep-path">' + esc(ep.path) + '</span>'
+                + epFHtml
                 + '<span class="ep-sum">' + esc(op.summary || '') + '</span>'
                 + '<span class="ep-lock" title="Auf lokalen Zugriff (Loopback) beschränkt">🔒</span>';
             d.appendChild(s);
@@ -503,6 +578,8 @@
             buildMethodFilter();
             render();
             document.getElementById('ad-search').addEventListener('input', applyFilter);
+            // Zugriffszaehler pro Gruppe regelmaessig auffrischen (seit-Neustart-Werte)
+            setInterval(refreshForeignCounts, 15000);
         }).catch(function (e) {
             if (e === 'noauth' || e === 'noadmin') return;
             var l = document.getElementById('ad-loading');

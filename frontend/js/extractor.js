@@ -20,6 +20,14 @@ window.extractorManager = new (class JarvisExtractorManager {
         this._ddOpen           = false;  // Bereichs-Dropdown offen?
         this._ddIndex          = -1;     // Tastatur-Markierung im Dropdown
         this._ddList           = [];     // aktuell angezeigte Treffer
+        this._extractJobId     = null;   // laufender URL-/Datei-Job (fuer server-seitigen Abbruch)
+        this._cfJobId          = null;   // laufender Confluence-Job (fuer server-seitigen Abbruch)
+    }
+
+    // Eindeutige Job-ID fuer den server-seitigen Abbruch (siehe _abortExtract/_abortCf).
+    _jobId() {
+        try { return crypto.randomUUID(); }
+        catch (e) { return 'job-' + Date.now() + '-' + Math.random().toString(36).slice(2); }
     }
 
     init() {
@@ -176,9 +184,11 @@ window.extractorManager = new (class JarvisExtractorManager {
                             <option value="">– Seite wählen –</option>
                         </select>
                         <button id="ext-cf-import-page" class="kb-btn-action" style="flex-shrink:0;">Seite importieren</button>
+                        <button id="ext-cf-page-cancel" class="kb-btn-danger" style="flex-shrink:0;display:none;">${window.t('common.cancel')}</button>
                     </div>
                     <div id="ext-cf-bulk-wrap" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;">
                         <button id="ext-cf-import-space" class="kb-btn-secondary">Ganzen Bereich importieren</button>
+                        <button id="ext-cf-space-cancel" class="kb-btn-danger" style="display:none;">${window.t('common.cancel')}</button>
                         <span class="kb-hint" id="ext-cf-bulk-hint" style="margin:0;"></span>
                     </div>
                 </div>
@@ -260,6 +270,8 @@ window.extractorManager = new (class JarvisExtractorManager {
         cfSearch.addEventListener('blur', () => setTimeout(() => this._closeSpaceDropdown(), 150));
         document.getElementById('ext-cf-import-page').onclick  = () => this._importCfPage();
         document.getElementById('ext-cf-import-space').onclick = () => this._importCfSpace();
+        document.getElementById('ext-cf-page-cancel').onclick  = () => this._abortCf();
+        document.getElementById('ext-cf-space-cancel').onclick = () => this._abortCf();
 
         // URL-Tab
         document.getElementById('ext-info-btn').onclick    = () => this._showInfo();
@@ -500,17 +512,26 @@ window.extractorManager = new (class JarvisExtractorManager {
         if (!pageId) { this._notify('Bitte zuerst eine Seite wählen.', 'error'); return; }
         const audit = this._cfAudit();
         const btn = document.getElementById('ext-cf-import-page');
+        const cancel = document.getElementById('ext-cf-page-cancel');
+        const jobId = this._cfJobId = this._jobId();
         if (btn) btn.disabled = true;
+        if (cancel) cancel.style.display = '';
         this._setExtractStatus(audit ? '⏳ Importiere Seite…' : '⏳ Importiere direkt…', true);
+        const done = () => {
+            this._setExtractStatus('', false);
+            this._cfJobId = null;
+            if (btn) btn.disabled = false;
+            if (cancel) cancel.style.display = 'none';
+        };
         fetch('/api/knowledge/extract/confluence', {
             method: 'POST',
             headers: this._authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ page_id: pageId, audit }),
+            body: JSON.stringify({ page_id: pageId, audit, job_id: jobId }),
         })
-            .then(r => r.json().then(j => ({ ok: r.ok, j })))
-            .then(({ ok, j }) => {
-                this._setExtractStatus('', false);
-                if (btn) btn.disabled = false;
+            .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, j })))
+            .then(({ ok, status, j }) => {
+                done();
+                if (status === 499) { this._notify(window.t('ext.cancelled'), 'error'); return; }
                 if (!ok) { this._notify(window.t('common.error') + ': ' + (j.error || 'Import fehlgeschlagen'), 'error'); return; }
                 this._loadPending();
                 if (audit) {
@@ -521,8 +542,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                 }
             })
             .catch(() => {
-                this._setExtractStatus('', false);
-                if (btn) btn.disabled = false;
+                done();
                 this._notify('Netzwerkfehler beim Import', 'error');
             });
     }
@@ -537,18 +557,27 @@ window.extractorManager = new (class JarvisExtractorManager {
               + 'Das kann je nach Größe dauern und überspringt die Prüfung.';
         if (!confirm(warn)) return;
         const btn = document.getElementById('ext-cf-import-space');
+        const cancel = document.getElementById('ext-cf-space-cancel');
+        const jobId = this._cfJobId = this._jobId();
         if (btn) btn.disabled = true;
         this._setExtractStatus('⏳ Starte Bereichs-Import…', true);
         fetch('/api/knowledge/extract/confluence', {
             method: 'POST',
             headers: this._authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ space: space, audit }),
+            body: JSON.stringify({ space: space, audit, job_id: jobId }),
         })
             .then(r => r.json().then(j => ({ ok: r.ok, j })))
             .then(({ ok, j }) => {
                 this._setExtractStatus('', false);
                 if (btn) btn.disabled = false;
-                if (!ok) { this._notify(window.t('common.error') + ': ' + (j.error || 'Import fehlgeschlagen'), 'error'); return; }
+                if (!ok) {
+                    this._cfJobId = null;
+                    this._notify(window.t('common.error') + ': ' + (j.error || 'Import fehlgeschlagen'), 'error');
+                    return;
+                }
+                // Bulk laeuft im Hintergrund weiter -> Abbrechen-Button sichtbar lassen,
+                // bis der Nutzer abbricht (kein Fertig-Signal vom Server verfuegbar).
+                if (cancel) cancel.style.display = '';
                 if (audit) {
                     this._notify('⏳ Import von ' + j.total
                         + ' Seite(n) gestartet – sie erscheinen nach und nach unten in den Pending-Dokumenten.');
@@ -560,9 +589,28 @@ window.extractorManager = new (class JarvisExtractorManager {
             })
             .catch(() => {
                 this._setExtractStatus('', false);
+                this._cfJobId = null;
                 if (btn) btn.disabled = false;
                 this._notify('Netzwerkfehler beim Import', 'error');
             });
+    }
+
+    // Laufenden Confluence-Job (Einzelseite oder Bereichs-Bulk) serverseitig abbrechen.
+    _abortCf() {
+        const jid = this._cfJobId;
+        this._cfJobId = null;
+        const pc = document.getElementById('ext-cf-page-cancel');
+        const sc = document.getElementById('ext-cf-space-cancel');
+        if (pc) pc.style.display = 'none';
+        if (sc) sc.style.display = 'none';
+        if (!jid) return;
+        fetch('/api/knowledge/extract/cancel', {
+            method: 'POST',
+            headers: this._authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ job_id: jid }),
+        })
+            .then(r => { if (r.ok) this._notify(window.t('ext.cancelled'), 'error'); })
+            .catch(() => {});
     }
 
     _authHeaders(extra) {
@@ -636,14 +684,16 @@ window.extractorManager = new (class JarvisExtractorManager {
         status.textContent = window.t('ext.extracting');
         status.style.display = 'block';
         this._extractAbort = new AbortController();
+        const jobId = this._extractJobId = this._jobId();
 
         try {
             const r = await fetch('/api/knowledge/extract', {
                 method: 'POST',
                 headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url }),
+                body: JSON.stringify({ url, job_id: jobId }),
                 signal: this._extractAbort.signal,
             });
+            if (r.status === 499) { this._notify(window.t('ext.cancelled'), 'error'); return; }
             const d = await r.json();
             if (!r.ok || d.error) {
                 this._notify(window.t('common.error') + ': ' + (d.error || r.status), 'error');
@@ -658,14 +708,24 @@ window.extractorManager = new (class JarvisExtractorManager {
             else this._notify('Netzwerkfehler: ' + e.message, 'error');
         } finally {
             this._extractAbort = null;
+            this._extractJobId = null;
             btn.disabled = false; btn.textContent = window.t('ext.extract_btn');
             if (cancel) cancel.style.display = 'none';
             status.style.display = 'none';
         }
     }
 
-    // Laufende Extraktion (URL oder Datei) abbrechen
+    // Laufende Extraktion (URL oder Datei) abbrechen – BEIDES: den Client-Fetch
+    // UND den serverseitigen Job (sonst rechnet der Server einfach weiter).
     _abortExtract() {
+        const jid = this._extractJobId;
+        if (jid) {
+            fetch('/api/knowledge/extract/cancel', {
+                method: 'POST',
+                headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_id: jid }),
+            }).catch(() => {});
+        }
         if (this._extractAbort) { try { this._extractAbort.abort(); } catch (e) {} }
     }
 
@@ -682,16 +742,19 @@ window.extractorManager = new (class JarvisExtractorManager {
         status.textContent = `„${file.name}" ${window.t('ext.running').replace('⏳ ', '')} (${file.type || '?'})…`;
         status.style.display = 'block';
         this._extractAbort = new AbortController();
+        const jobId = this._extractJobId = this._jobId();
 
         try {
             const form = new FormData();
             form.append('file', file);
+            form.append('job_id', jobId);
             const r = await fetch('/api/knowledge/extract/upload', {
                 method: 'POST',
                 headers: _authHeaders(),   // kein Content-Type – FormData setzt es selbst
                 body: form,
                 signal: this._extractAbort.signal,
             });
+            if (r.status === 499) { this._notify(window.t('ext.cancelled'), 'error'); return; }
             const d = await r.json();
             if (!r.ok || d.error) {
                 this._notify(window.t('common.error') + ': ' + (d.error || r.status), 'error');
@@ -706,6 +769,7 @@ window.extractorManager = new (class JarvisExtractorManager {
             else this._notify('Netzwerkfehler: ' + e.message, 'error');
         } finally {
             this._extractAbort = null;
+            this._extractJobId = null;
             btn.disabled = false; btn.textContent = window.t('ext.analyse_btn');
             if (cancel) cancel.style.display = 'none';
             status.style.display = 'none';

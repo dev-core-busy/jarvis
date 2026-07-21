@@ -17,6 +17,7 @@
     let reconnectTimer = null;
     let _sessionInvalid = false;   // Berechtigung entzogen -> kein Auto-Reconnect mehr
     let typingCooldown = false;
+    let _presenceTimer = null;     // periodischer Online-Status-Poll (aktive Sessions)
 
     // Lokaler Nachrichten-Cache: username → [{from,to,text,ts,mine,msg_id,status}]
     const _msgs = {};
@@ -249,6 +250,8 @@
         _startCpu();
         initUserSearch();
         connectWS();
+        // Online-Status (aktive Portal-Sessions) regelmaessig auffrischen
+        if (!_presenceTimer) _presenceTimer = setInterval(loadKnownUsers, 30000);
     }
 
     // ── CPU-Auslastung (fuer alle): /api/cpu pollen ──
@@ -548,21 +551,20 @@
     }
 
     // ─── Presence / Userliste ────────────────────────────────────
+    // WS-Presence markiert im Benutzerchat verbundene Nutzer sofort als online.
+    // NICHT-destruktiv: setzt niemand auf offline (das macht der Aktivitaets-Poll
+    // loadKnownUsers), damit portal-angemeldete Nutzer nicht faelschlich ausgehen.
     function updatePresence(users) {
-        for (const k in _online) _online[k] = false;
         for (const u of users) {
-            _online[u.username] = u.online;
-        }
-        if (myUser && !_online.hasOwnProperty(myUser)) {
-            _online[myUser] = true;
+            _online[_pkey(u.username)] = !!u.online;
         }
         renderUserList();
         if (activePartner) updatePartnerStatus();
     }
 
-    // Bekannte Chat-Partner (auch offline) laden, damit man Kollegen anschreiben
-    // kann, ohne dass sie gerade im Benutzerchat verbunden sind. Online-Status
-    // aus /ws/users hat Vorrang (nicht ueberschreiben, wenn schon online bekannt).
+    // Bekannte Chat-Partner laden + AUTORITATIVER Online-Status: online = aktive
+    // Portal-Session (server _uc_user_active). Wird periodisch gepollt, damit die
+    // Punkte "angemeldet am Portal" widerspiegeln (nicht nur "im Benutzerchat").
     function loadKnownUsers() {
         fetch('/api/userchat/users', { headers: { 'Authorization': 'Bearer ' + token } })
             .then(r => r.ok ? r.json() : null)
@@ -570,8 +572,7 @@
                 if (!d || !Array.isArray(d.users)) return;
                 for (const u of d.users) {
                     if (!u || !u.username) continue;
-                    if (!_online.hasOwnProperty(u.username)) _online[u.username] = !!u.online;
-                    else if (u.online) _online[u.username] = true;
+                    _online[_pkey(u.username)] = !!u.online;   // true UND false setzen
                 }
                 renderUserList();
             })
@@ -684,7 +685,7 @@
                                   ${u.mail ? `<div class="uc-sr-sub">${escHtml(u.mail)}</div>` : ''}
                               </div>`;
                           it.addEventListener('click', () => {
-                              if (!_online.hasOwnProperty(u.username)) _online[u.username] = false;
+                              if (!_online.hasOwnProperty(_pkey(u.username))) _online[_pkey(u.username)] = false;
                               renderUserList();
                               openChat(u.username);
                               inp.value = ''; close();
@@ -740,7 +741,7 @@
 
     function updatePartnerStatus() {
         if (!activePartner) return;
-        const online = _online[activePartner] || false;
+        const online = _online[_pkey(activePartner)] || false;
         partnerStatus.textContent = online ? 'online' : 'offline';
         partnerStatus.className = 'uc-chat-status ' + (online ? 'online' : '');
     }
@@ -1505,7 +1506,8 @@
         const overlay = document.getElementById('uc-fwd-overlay');
         if (!list || !overlay) return;
         list.innerHTML = '';
-        const users = Object.keys(_online).filter(u => u !== myUser);
+        const meNorm = _pkey(myUser);
+        const users = Object.keys(_online).filter(u => u && u !== meNorm);
         if (users.length === 0) {
             list.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;text-align:center;padding:8px 0;">' + window.t('userchat.no_other_users') + '</p>';
         } else {
@@ -1513,9 +1515,10 @@
             for (const u of users) {
                 const row = document.createElement('div');
                 row.className = 'uc-fwd-user';
+                const disp = _displayName(u);
                 row.innerHTML = `
-                    <div class="uc-fwd-avatar">${initial(u)}</div>
-                    <span style="flex:1;font-size:0.9rem;">${escHtml(u)}</span>
+                    <div class="uc-fwd-avatar">${initial(disp)}</div>
+                    <span style="flex:1;font-size:0.9rem;">${escHtml(disp)}</span>
                     <span class="uc-online-dot ${_online[u]?'online':'offline'}" style="width:8px;height:8px;border-radius:50%;flex-shrink:0;"></span>`;
                 row.addEventListener('click', () => { forwardTo(u, att); closeFwdModal(); });
                 list.appendChild(row);

@@ -2518,14 +2518,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <details class="sec-sub" data-sub="knowledge">
                                     <summary><span data-i18n="security.sub_knowledge">Wissens-Editoren</span><span class="sec-sub-hint" data-i18n="security.sub_knowledge_hint">– Wer darf Wissen hinzufügen, bearbeiten und löschen?</span></summary>
                                     <div class="sec-sub-body">
-                                <p class="kb-hint" data-i18n="security.knowledge_editors_intro" style="margin-bottom:10px;">Diese Liste steuert den GLOBALEN Zugriff auf die gesamte Wissens-Verwaltung (diese Seite, Ordner, Extraktor, Import/Export, Gruppen anlegen/löschen). Leer = alle angemeldeten Benutzer dürfen alles bearbeiten; lokale Admins sind immer berechtigt. Gezielten Schreibzugriff auf einzelne Gruppen (für Domänennutzer) vergibst du separat unter „Wissen → jeweilige Gruppe → 🔐". Wichtig: Diese Gruppen-Rechte greifen erst, sobald du den Zugriff hier einschränkst – solange dieses Feld leer ist, darf ohnehin jeder alles.</p>
+                                <p class="kb-hint" data-i18n="security.knowledge_editors_intro" style="margin-bottom:10px;">Diese Liste steuert den GLOBALEN Zugriff auf die gesamte Wissens-Verwaltung (diese Seite, Ordner, Extraktor, Import/Export, Gruppen anlegen/löschen). Globale Editoren müssen EXPLIZIT eingetragen werden: leer = niemand ist globaler Editor – ausdrücklich auch keine lokalen Admins. Soll jemand bearbeiten dürfen, muss er hier stehen; für „alle" trägst du die AD-Gruppe „Jeder"/Domänen-Benutzer als Editor-Gruppe ein. Gezielten Schreibzugriff auf einzelne Gruppen (für Domänennutzer) vergibst du separat unter „Wissen → jeweilige Gruppe → 🔐".</p>
 
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
                                         <span>Erlaubte Editoren</span>
                                         <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
                                     </label>
-                                    <input type="text" id="ad-knowledge-editors" placeholder="Leer = alle Benutzer dürfen bearbeiten" style="width:60%;box-sizing:border-box;">
+                                    <input type="text" id="ad-knowledge-editors" placeholder="Leer = niemand (auch keine Admins)" style="width:60%;box-sizing:border-box;">
                                 </div>
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
@@ -2727,7 +2727,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                 kst.style.borderColor = '#f59e0b';
                                                 kst.style.background  = 'rgba(var(--warning-rgb),0.06)';
                                                 kst.style.color       = '#f59e0b';
-                                                kst.textContent = '📚 Wissens-Editoren: Alle angemeldeten Benutzer dürfen Wissen bearbeiten';
+                                                kst.textContent = '📚 Wissens-Editoren: Niemand ist globaler Editor (auch keine lokalen Admins) – niemand darf die globale Wissens-Verwaltung nutzen. Für „alle" die AD-Gruppe „Jeder"/Domänen-Benutzer als Editor-Gruppe eintragen.';
                                             } else if (d.knowledge_edit_mode === 'users') {
                                                 kst.style.display = 'block';
                                                 kst.style.borderColor = '#34d399';
@@ -3075,14 +3075,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=95"></script>
+    <script src="/static/js/i18n.js?v=97"></script>
     <script src="/static/js/cron.js?v=17"></script>
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
     <script src="/static/js/skills.js?v=33"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
-    <script src="/static/js/knowledge.js?v=67"></script>
+    <script src="/static/js/knowledge.js?v=69"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>

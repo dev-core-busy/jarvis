@@ -599,14 +599,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                     return;
                 }
                 if (cancel) cancel.style.display = '';
-                if (audit) {
-                    this._notify('⏳ Import von ' + j.total
-                        + ' Seite(n) gestartet – sie erscheinen nach und nach unten in den Pending-Dokumenten.');
-                } else {
-                    this._notify('⏳ Auditloser Import von ' + j.total
-                        + ' Seite(n) gestartet – sie werden direkt in die Wissens-DB geschrieben (Reindex am Ende).');
-                }
-                setTimeout(() => this._loadPending(), 3000);
+                this._watchBulk(jobId, j.total);
             })
             .catch(() => {
                 this._setExtractStatus('', false);
@@ -644,17 +637,11 @@ window.extractorManager = new (class JarvisExtractorManager {
                     this._notify(window.t('common.error') + ': ' + (j.error || 'Import fehlgeschlagen'), 'error');
                     return;
                 }
-                // Bulk laeuft im Hintergrund weiter -> Abbrechen-Button sichtbar lassen,
-                // bis der Nutzer abbricht (kein Fertig-Signal vom Server verfuegbar).
+                // Bulk laeuft im Hintergrund weiter -> Abbrechen-Button sichtbar lassen.
+                // _watchBulk pollt den Fortschritt und haelt den Info-Balken mit
+                // Countdown stehen, bis der Job fertig ist oder abgebrochen wurde.
                 if (cancel) cancel.style.display = '';
-                if (audit) {
-                    this._notify('⏳ Import von ' + j.total
-                        + ' Seite(n) gestartet – sie erscheinen nach und nach unten in den Pending-Dokumenten.');
-                } else {
-                    this._notify('⏳ Auditloser Import von ' + j.total
-                        + ' Seite(n) gestartet – sie werden direkt in die Wissens-DB geschrieben (Reindex am Ende).');
-                }
-                setTimeout(() => this._loadPending(), 3000);
+                this._watchBulk(jobId, j.total);
             })
             .catch(() => {
                 this._setExtractStatus('', false);
@@ -664,10 +651,58 @@ window.extractorManager = new (class JarvisExtractorManager {
             });
     }
 
+    // Verfolgt einen laufenden Bulk-Import per Polling und haelt den Info-Balken
+    // mit Countdown ("noch X von N Seiten · Ns") stehen, bis der Job fertig ist
+    // oder abgebrochen wurde. Aktualisiert dabei die Pending-Liste.
+    _watchBulk(jobId, total) {
+        if (!jobId) return;
+        clearInterval(this._bulkPoll);
+        const started = Date.now();
+        const tick = async () => {
+            let done = 0, running = true;
+            try {
+                const r = await fetch('/api/knowledge/extract/progress?job_id=' + encodeURIComponent(jobId),
+                    { headers: this._authHeaders() });
+                const d = await r.json();
+                if (d && d.ok) { done = d.done || 0; running = !!d.running; total = d.total || total; }
+            } catch (e) { /* Netzfehler -> beim naechsten Tick erneut versuchen */ }
+
+            // Nutzer hat lokal abgebrochen (oder anderer Job) -> Polling beenden.
+            if (this._cfJobId !== jobId) { clearInterval(this._bulkPoll); this._bulkPoll = null; return; }
+
+            if (running) {
+                const remaining = Math.max(0, total - done);
+                const secs = Math.round((Date.now() - started) / 1000);
+                this._notify(`⏳ Importiere… noch ${remaining} von ${total} Seite(n) · ${secs}s`, 'info', 0);
+                this._loadPending();
+                return;
+            }
+
+            // Fertig (oder serverseitig gestoppt).
+            clearInterval(this._bulkPoll);
+            this._bulkPoll = null;
+            this._cfJobId = null;
+            const pc = document.getElementById('ext-cf-page-cancel');
+            const sc = document.getElementById('ext-cf-space-cancel');
+            if (pc) pc.style.display = 'none';
+            if (sc) sc.style.display = 'none';
+            this._loadPending();
+            if (done < total) {
+                this._notify(`⏹️ Import gestoppt – ${done} von ${total} Seite(n) verarbeitet.`, 'info');
+            } else {
+                this._notify(`✅ ${total} Seite(n) importiert.`, 'success');
+            }
+        };
+        tick();
+        this._bulkPoll = setInterval(tick, 2000);
+    }
+
     // Laufenden Confluence-Job (Einzelseite oder Bereichs-Bulk) serverseitig abbrechen.
     _abortCf() {
         const jid = this._cfJobId;
         this._cfJobId = null;
+        clearInterval(this._bulkPoll);
+        this._bulkPoll = null;
         const pc = document.getElementById('ext-cf-page-cancel');
         const sc = document.getElementById('ext-cf-space-cancel');
         if (pc) pc.style.display = 'none';
@@ -1281,13 +1316,15 @@ window.extractorManager = new (class JarvisExtractorManager {
 
     // ─── Hilfsmethoden ───────────────────────────────────────────────────────
 
-    _notify(msg, type = 'success') {
+    // duration=0 -> Balken bleibt stehen (z.B. waehrend eines laufenden Bulk-Imports).
+    _notify(msg, type = 'success', duration = 5000) {
         const el = document.getElementById('ext-notification');
         if (!el) return;
+        clearTimeout(this._notifyTimer);
         el.textContent = msg;
         el.className = `kb-notification kb-notification-${type}`;
         el.style.display = 'block';
-        setTimeout(() => { el.style.display = 'none'; }, 5000);
+        if (duration > 0) this._notifyTimer = setTimeout(() => { el.style.display = 'none'; }, duration);
     }
 
     _notifyReview(msg, type = 'error') {

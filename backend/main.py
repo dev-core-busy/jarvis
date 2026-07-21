@@ -5295,6 +5295,12 @@ async def support_instructions_set(request: Request, user: str = Depends(require
 # Disconnect-Erkennung (die hinter HTTPS/Proxy nicht immer zuverlaessig feuert).
 _extract_jobs: dict[str, "asyncio.Task"] = {}
 
+# Fortschritt von Bulk-Importen (Confluence-Bereich / Mehrfachauswahl) pro job_id:
+# {"done": int, "total": int, "running": bool}. Erlaubt dem Frontend einen
+# echten Countdown ("noch X von N Seiten") – auch beim auditlosen Direkt-Import,
+# der keine Pending-Dokumente erzeugt.
+_extract_progress: dict[str, dict] = {}
+
 
 async def _run_cancellable(request: Request, coro, job_id: str = ""):
     """Fuehrt ``coro`` als Task aus und bricht sie ab, sobald der Client die
@@ -7282,7 +7288,26 @@ async def knowledge_extract_cancel(request: Request, user: str = Depends(require
         return JSONResponse({"ok": False, "error": "Kein laufender Job zu dieser ID"},
                             status_code=404)
     task.cancel()
+    prog = _extract_progress.get(job_id)
+    if prog:
+        prog["running"] = False
     return JSONResponse({"ok": True})
+
+
+@app.get("/api/knowledge/extract/progress")
+async def knowledge_extract_progress(job_id: str = "", user: str = Depends(require_knowledge_editor)):
+    """Liefert den Fortschritt eines Bulk-Imports (Confluence-Bereich/Mehrfachauswahl).
+
+    Query: ``job_id``. Antwort: ``{done, total, running}``. ``running=false`` +
+    ``done>=total`` bedeutet fertig; unbekannte job_id -> ``{running: false}``."""
+    prog = _extract_progress.get(job_id)
+    if not prog:
+        return JSONResponse({"ok": True, "running": False, "done": 0, "total": 0})
+    resp = {"ok": True, **prog}
+    # Fertigen Job nach dem Abholen des Endzustands entfernen (kein Speicherleck).
+    if not prog.get("running"):
+        _extract_progress.pop(job_id, None)
+    return JSONResponse(resp)
 
 
 @app.post("/api/knowledge/extract/upload")
@@ -7360,6 +7385,11 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
                         await asyncio.to_thread(approve_pending, doc["id"], False)
             except Exception as ex:
                 print(f"[Confluence-Bulk] Seite {p.get('id')} übersprungen: {ex}", flush=True)
+            finally:
+                # Fortschritt hochzaehlen (auch bei uebersprungenen Seiten), damit
+                # der Countdown im Frontend die tatsaechlich abgearbeiteten Seiten zeigt.
+                if job_id and job_id in _extract_progress:
+                    _extract_progress[job_id]["done"] += 1
         if not do_audit:
             # nach allen Seiten EINMAL reindizieren
             try:
@@ -7367,8 +7397,12 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
                 await asyncio.to_thread(force_reindex)
             except Exception as ex:
                 print(f"[Confluence-Bulk] Reindex fehlgeschlagen: {ex}", flush=True)
+        if job_id and job_id in _extract_progress:
+            _extract_progress[job_id]["running"] = False
 
     def _launch_bulk(page_list: list, extra: dict):
+        if job_id:
+            _extract_progress[job_id] = {"done": 0, "total": len(page_list), "running": True}
         task = asyncio.create_task(_bulk(page_list, audit))
         _bg_confluence_tasks.add(task)
         task.add_done_callback(_bg_confluence_tasks.discard)
@@ -7376,7 +7410,14 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
         # werden kann (CancelledError bricht die _bulk-Schleife am naechsten await).
         if job_id:
             _extract_jobs[job_id] = task
-            task.add_done_callback(lambda t, _j=job_id: _extract_jobs.pop(_j, None))
+            def _cleanup(t, _j=job_id):
+                _extract_jobs.pop(_j, None)
+                # Bei Abbruch (CancelledError) läuft der finally-Block nicht mehr
+                # bis zum Ende -> running hier sicher auf False setzen.
+                prog = _extract_progress.get(_j)
+                if prog:
+                    prog["running"] = False
+            task.add_done_callback(_cleanup)
         payload = {"ok": True, "started": True, "total": len(page_list),
                    "audited": bool(audit), "job_id": job_id}
         payload.update(extra)

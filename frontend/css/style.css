@@ -4380,6 +4380,28 @@ select option:hover {
     gap: 0.5rem;
     padding: 0.15rem 0;
 }
+/* Mehrfachauswahl (Klick / Maus-Drag) zum Sammel-Löschen */
+.kb-file-item.selected,
+.kb-grp-file-row.selected {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.5);
+}
+.kb-folder-files { position: relative; }              /* Bezug fuer das Auswahl-Rechteck */
+.kb-folder-files.kb-selecting { user-select: none; }  /* kein Text markieren beim Ziehen */
+.kb-rubber {                                           /* Auswahl-Rechteck (Rubber-Band) */
+    position: absolute; z-index: 5; pointer-events: none;
+    border: 1px solid var(--accent, #6366f1);
+    background: rgba(var(--accent-rgb), 0.12); border-radius: 3px;
+}
+.kb-bulk-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 4px 0 8px; padding: 6px 10px; border-radius: 8px;
+    background: rgba(var(--accent-rgb), 0.10); border: 1px solid rgba(var(--accent-rgb), 0.35);
+    font-size: 0.8rem; color: var(--text-primary);
+}
+.kb-bulk-bar.hidden { display: none; }
+.kb-bulk-hint { color: var(--text-secondary); font-size: 0.75rem; margin-left: auto; }
 
 .kb-file-icon {
     font-size: 0.85rem;

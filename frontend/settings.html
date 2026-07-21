@@ -2575,7 +2575,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <details class="sec-sub" data-sub="knowledge">
                                     <summary><span data-i18n="security.sub_knowledge">Wissens-Editoren</span><span class="sec-sub-hint" data-i18n="security.sub_knowledge_hint">– Wer darf Wissen hinzufügen, bearbeiten und löschen?</span></summary>
                                     <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Leer lassen = alle angemeldeten Benutzer dürfen Wissen bearbeiten. Lokale Admins sind immer berechtigt.</p>
+                                <p class="kb-hint" data-i18n="security.knowledge_editors_intro" style="margin-bottom:10px;">Diese Liste steuert den GLOBALEN Zugriff auf die gesamte Wissens-Verwaltung (diese Seite, Ordner, Extraktor, Import/Export, Gruppen anlegen/löschen). Leer = alle angemeldeten Benutzer dürfen alles bearbeiten; lokale Admins sind immer berechtigt. Gezielten Schreibzugriff auf einzelne Gruppen (für Domänennutzer) vergibst du separat unter „Wissen → jeweilige Gruppe → 🔐". Wichtig: Diese Gruppen-Rechte greifen erst, sobald du den Zugriff hier einschränkst – solange dieses Feld leer ist, darf ohnehin jeder alles.</p>
 
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
@@ -3132,7 +3132,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=94"></script>
+    <script src="/static/js/i18n.js?v=95"></script>
     <script src="/static/js/cron.js?v=17"></script>
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
@@ -3141,7 +3141,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/extractor.js?v=27"></script>
     <script src="/static/js/skills.js?v=33"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
-    <script src="/static/js/knowledge.js?v=65"></script>
+    <script src="/static/js/knowledge.js?v=66"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>

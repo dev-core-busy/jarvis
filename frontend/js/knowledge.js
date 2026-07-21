@@ -236,7 +236,7 @@ class JarvisKnowledgeManager {
                 </div>
                 <div class="modal-body" style="overflow-y:auto;">
                     <p class="kb-hint" style="margin-top:0;">${T('kbgroups.perms_hint',
-                        'Diese AD-Benutzer und -Gruppen dürfen – zusätzlich zu den unter Einstellungen → Sicherheit hinterlegten Wissens-Editoren – diese Gruppe bearbeiten und Dokumente zuordnen.')}</p>
+                        'Diese AD-Benutzer und -Gruppen dürfen – zusätzlich zu den globalen Wissens-Editoren (Einstellungen → Sicherheit) – NUR diese Gruppe über die /wissen-Seite bearbeiten und Dokumente zuordnen. Hinweis: greift erst, wenn die globalen Editoren dort eingeschränkt sind – sonst darf ohnehin jeder alle Gruppen bearbeiten. Lokale Admins sind immer berechtigt.')}</p>
                     <label class="kb-form-label" style="display:block;margin:12px 0 4px;">${T('kbgroups.perms_users', 'Zusätzliche Editoren (AD-Benutzer)')}</label>
                     <input type="text" id="kbgrp-perm-users" class="kb-input" style="width:100%;box-sizing:border-box;">
                     <label class="kb-form-label" style="display:block;margin:16px 0 4px;">${T('kbgroups.perms_groups', 'Zusätzliche Editoren (AD-Gruppen)')}</label>

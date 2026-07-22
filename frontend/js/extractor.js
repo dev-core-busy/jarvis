@@ -30,6 +30,35 @@ window.extractorManager = new (class JarvisExtractorManager {
         catch (e) { return 'job-' + Date.now() + '-' + Math.random().toString(36).slice(2); }
     }
 
+    // Laufenden Confluence-Bulk-Job im Browser merken, damit der Fortschritt einen
+    // Seitenrefresh ueberlebt (Server-Job laeuft weiter, nur die job_id ginge sonst verloren).
+    _CF_LS() { return 'jarvis_ext_cf_job'; }
+    _saveCfJob(jobId, total, cancelId) {
+        try { localStorage.setItem(this._CF_LS(), JSON.stringify({ jobId, total: total || 0, cancelId: cancelId || '' })); } catch (e) {}
+    }
+    _clearCfJob() { try { localStorage.removeItem(this._CF_LS()); } catch (e) {} }
+    _loadCfJob() {
+        try { const s = localStorage.getItem(this._CF_LS()); return s ? JSON.parse(s) : null; } catch (e) { return null; }
+    }
+
+    // Nach Seitenrefresh (Modal erneut geoeffnet): gemerkten Bulk-Job wiederfinden
+    // und Polling erneut starten, sofern er serverseitig noch laeuft.
+    _resumeCf() {
+        const saved = this._loadCfJob();
+        if (!saved || !saved.jobId) return;
+        fetch('/api/knowledge/extract/progress?job_id=' + encodeURIComponent(saved.jobId),
+            { headers: this._authHeaders() })
+            .then(r => r.json())
+            .then(d => {
+                if (!d || !d.ok || !d.running) { this._clearCfJob(); return; }
+                this._cfJobId = saved.jobId;
+                const cancel = saved.cancelId ? document.getElementById(saved.cancelId) : null;
+                if (cancel) cancel.style.display = '';
+                this._watchBulk(saved.jobId, d.total || saved.total || 0, saved.cancelId);
+            })
+            .catch(() => { /* Netzfehler -> Job bleibt gemerkt */ });
+    }
+
     init() {
         this._container = document.getElementById('extractor-tab-content');
         if (!this._container) return;
@@ -42,6 +71,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         // Confluence-Sichtbarkeit erneut anwenden (Button existiert erst nach Render)
         this.setConfluenceEnabled(this._cfEnabled);
         this._loadPending();
+        this._resumeCf();   // laufenden Confluence-Bulk nach Refresh wiederaufnehmen
     }
 
     // ─── Info-Modal ──────────────────────────────────────────────────────────
@@ -599,7 +629,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                     return;
                 }
                 if (cancel) cancel.style.display = '';
-                this._watchBulk(jobId, j.total);
+                this._watchBulk(jobId, j.total, 'ext-cf-page-cancel');
             })
             .catch(() => {
                 this._setExtractStatus('', false);
@@ -641,7 +671,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                 // _watchBulk pollt den Fortschritt und haelt den Info-Balken mit
                 // Countdown stehen, bis der Job fertig ist oder abgebrochen wurde.
                 if (cancel) cancel.style.display = '';
-                this._watchBulk(jobId, j.total);
+                this._watchBulk(jobId, j.total, 'ext-cf-space-cancel');
             })
             .catch(() => {
                 this._setExtractStatus('', false);
@@ -654,10 +684,11 @@ window.extractorManager = new (class JarvisExtractorManager {
     // Verfolgt einen laufenden Bulk-Import per Polling und haelt den Info-Balken
     // mit Countdown ("noch X von N Seiten · Ns") stehen, bis der Job fertig ist
     // oder abgebrochen wurde. Aktualisiert dabei die Pending-Liste.
-    _watchBulk(jobId, total) {
+    _watchBulk(jobId, total, cancelId) {
         if (!jobId) return;
         clearInterval(this._bulkPoll);
         const started = Date.now();
+        this._saveCfJob(jobId, total, cancelId);   // fuer Wiederaufnahme nach Refresh
         const tick = async () => {
             let done = 0, running = true;
             try {
@@ -673,6 +704,7 @@ window.extractorManager = new (class JarvisExtractorManager {
             if (running) {
                 const remaining = Math.max(0, total - done);
                 const secs = Math.round((Date.now() - started) / 1000);
+                this._saveCfJob(jobId, total, cancelId);
                 this._notify(`⏳ Importiere… noch ${remaining} von ${total} Seite(n) · ${secs}s`, 'info', 0);
                 this._loadPending();
                 return;
@@ -682,6 +714,7 @@ window.extractorManager = new (class JarvisExtractorManager {
             clearInterval(this._bulkPoll);
             this._bulkPoll = null;
             this._cfJobId = null;
+            this._clearCfJob();
             const pc = document.getElementById('ext-cf-page-cancel');
             const sc = document.getElementById('ext-cf-space-cancel');
             if (pc) pc.style.display = 'none';
@@ -701,6 +734,7 @@ window.extractorManager = new (class JarvisExtractorManager {
     _abortCf() {
         const jid = this._cfJobId;
         this._cfJobId = null;
+        this._clearCfJob();
         clearInterval(this._bulkPoll);
         this._bulkPoll = null;
         const pc = document.getElementById('ext-cf-page-cancel');

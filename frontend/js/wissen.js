@@ -630,6 +630,17 @@
     var _cfJobId = null, _cfPoll = null;
     var _cfSpaces = null, _selectedSpaceKey = '', _ddOpen = false, _ddIndex = -1, _ddList = [];
 
+    // Laufenden Confluence-Job im Browser merken, damit der Fortschritt einen
+    // Seitenrefresh ueberlebt (Server-Job laeuft weiter, nur die job_id ginge sonst verloren).
+    var _CF_LS = 'jarvis_wissen_cf_job';
+    function saveCfJob(jobId, total) {
+        try { localStorage.setItem(_CF_LS, JSON.stringify({ jobId: jobId, total: total || 0 })); } catch (e) {}
+    }
+    function clearCfJob() { try { localStorage.removeItem(_CF_LS); } catch (e) {} }
+    function loadCfJob() {
+        try { var s = localStorage.getItem(_CF_LS); return s ? JSON.parse(s) : null; } catch (e) { return null; }
+    }
+
     function loadCfSpaces(force) {
         var tabBtn = $('wi-tab-cf'), input = $('wi-cf-space-search');
         if (_cfSpaces && !force) { if (_ddOpen) renderCfSpaceDropdown(); return; }
@@ -811,10 +822,11 @@
     }
 
     // Bulk-Fortschritt pollen und Statuszeile mit Countdown stehen lassen.
-    function watchCf(jobId, total) {
+    function watchCf(jobId, total, started) {
         if (!jobId) return;
         clearInterval(_cfPoll);
-        var started = Date.now();
+        started = started || Date.now();
+        saveCfJob(jobId, total);   // fuer Wiederaufnahme nach Refresh
         var cancel = $('wi-extract-cancel');
         function tick() {
             fetch('/api/wissen/extract/progress?job_id=' + encodeURIComponent(jobId), { headers: authH() })
@@ -822,7 +834,7 @@
                 .then(function (d) {
                     d = d || {};
                     var done = d.done || 0, running = !!d.running;
-                    if (d.total) total = d.total;
+                    if (d.total) { total = d.total; saveCfJob(jobId, total); }
                     if (_cfJobId !== jobId) { clearInterval(_cfPoll); _cfPoll = null; return; }
                     if (running) {
                         var remaining = Math.max(0, total - done);
@@ -831,7 +843,7 @@
                         loadPending();
                         return;
                     }
-                    clearInterval(_cfPoll); _cfPoll = null; _cfJobId = null;
+                    clearInterval(_cfPoll); _cfPoll = null; _cfJobId = null; clearCfJob();
                     if (cancel) cancel.style.display = 'none';
                     updateActionState();
                     loadPending();
@@ -844,8 +856,26 @@
         _cfPoll = setInterval(tick, 2000);
     }
 
+    // Nach Seitenrefresh: gemerkten Confluence-Job wiederfinden und Polling erneut starten.
+    function resumeCf() {
+        var saved = loadCfJob();
+        if (!saved || !saved.jobId) return;
+        // Serverseitig pruefen, ob der Job noch laeuft (sonst Altlast entfernen).
+        fetch('/api/wissen/extract/progress?job_id=' + encodeURIComponent(saved.jobId), { headers: authH() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                d = d || {};
+                if (!d.running) { clearCfJob(); return; }   // fertig/unbekannt -> nichts wiederherstellen
+                _cfJobId = saved.jobId;
+                var cancel = $('wi-extract-cancel'); if (cancel) cancel.style.display = '';
+                updateActionState();
+                watchCf(saved.jobId, d.total || saved.total || 0);
+            })
+            .catch(function () { /* Netzfehler -> nichts tun, Job bleibt gemerkt */ });
+    }
+
     function abortCf() {
-        var jid = _cfJobId; _cfJobId = null;
+        var jid = _cfJobId; _cfJobId = null; clearCfJob();
         clearInterval(_cfPoll); _cfPoll = null;
         var cancel = $('wi-extract-cancel');
         if (cancel) cancel.style.display = 'none';
@@ -943,5 +973,6 @@
 
         if (window.applyLang) window.applyLang();
         loadScope();
+        resumeCf();   // laufenden Confluence-Import nach Refresh wiederaufnehmen
     });
 })();

@@ -218,11 +218,17 @@
                 SCOPE.groups.forEach(function (x) { if (x.id === gid) g = x; });
                 ((g && g.folders) || []).forEach(function (p) { want[p] = true; });
             });
-            offer = offer.filter(function (f) { return want[f.path]; });
+            // Unterordner erben die Berechtigung ihrer Wurzel -> ueber f.root filtern.
+            offer = offer.filter(function (f) { return want[f.root || f.path]; });
         }
         var cur = sel.value;
         sel.innerHTML = offer.map(function (f) {
-            return '<option value="' + esc(f.path) + '">' + esc(f.name) + ' (' + esc(f.path) + ')</option>';
+            // Unterordner eingerueckt darstellen (em-space je Ebene + ↳).
+            var d = f.depth || 0;
+            var label = d
+                ? (new Array(d + 1).join(' ') + '↳ ' + f.name)
+                : (f.name + ' (' + f.path + ')');
+            return '<option value="' + esc(f.path) + '">' + esc(label) + '</option>';
         }).join('');
         // Bisherige Auswahl erhalten, wenn sie weiterhin angeboten wird
         for (var i = 0; i < offer.length; i++) {

@@ -4422,6 +4422,12 @@ select option:hover {
 }
 .kb-folder-files { position: relative; }              /* Bezug fuer das Auswahl-Rechteck */
 .kb-folder-files.kb-selecting { user-select: none; }  /* kein Text markieren beim Ziehen */
+/* Unterordner (Modell A): verschachtelte Ebenen schlanker einruecken als die Wurzel */
+.kb-folder-files .kb-folder-files { padding-left: 1.25rem; }
+.kb-subfolders { display: flex; flex-direction: column; gap: 0.2rem; }
+.kb-node-files { display: flex; flex-direction: column; gap: 0.2rem; position: relative; }
+.kb-btn-addsub { color: var(--text-secondary); }     /* "Unterordner erstellen" dezent */
+.kb-subfolder-item > .kb-folder-header { opacity: 0.95; }
 .kb-rubber {                                           /* Auswahl-Rechteck (Rubber-Band) */
     position: absolute; z-index: 5; pointer-events: none;
     border: 1px solid var(--accent, #6366f1);

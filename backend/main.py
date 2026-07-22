@@ -7016,10 +7016,16 @@ async def wissen_extract_upload(request: Request, file: UploadFile = File(...),
 
 @app.get("/api/wissen/pending")
 async def wissen_pending(user: str = Depends(require_auth)):
-    """Eigene ausstehende Extraktions-Entwuerfe (nur die des Nutzers)."""
+    """Eigene ausstehende Extraktions-Entwuerfe (nur die des Nutzers).
+
+    Nur wirklich OFFENE Entwuerfe – bereits uebernommene (status='approved')
+    liegen in 'Mein Wissen' und werden hier NICHT mehr gelistet (sonst wirkt es,
+    als sei der Entwurf nicht uebernommen worden)."""
     from backend.web_extractor import list_pending
     me = _norm_login(user)
-    mine = [d for d in list_pending() if _norm_login(str(d.get("created_by", ""))) == me]
+    mine = [d for d in list_pending()
+            if _norm_login(str(d.get("created_by", ""))) == me
+            and str(d.get("status") or "") != "approved"]
     return JSONResponse({"ok": True, "pending": mine})
 
 

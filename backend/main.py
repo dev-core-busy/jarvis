@@ -6782,10 +6782,12 @@ async def wissen_scope(user: str = Depends(require_auth)):
 
 @app.post("/api/wissen/upload")
 async def wissen_upload(
+    request: Request,
     files: list[UploadFile] = File(...),
     folder: str = Form("data/knowledge"),
     groups: str = Form(""),
     gen_questions: str = Form(""),
+    job_id: str = Form(""),
     user: str = Depends(require_auth),
 ):
     """Datei-Upload, hart auf die Wissensgruppen des Nutzers beschraenkt.
@@ -6839,6 +6841,7 @@ async def wissen_upload(
 
     target.mkdir(parents=True, exist_ok=True)
     saved, rejected, qa_pending, qa_errors = [], [], [], []
+    cancelled = False
     for file in files:
         suffix = Path(file.filename).suffix.lower()
         if suffix not in all_exts:
@@ -6864,15 +6867,25 @@ async def wissen_upload(
                 continue
             try:
                 from backend.web_extractor import extract_from_file, update_pending
-                doc = await extract_from_file(dest.name, content, qa_count=qa_n,
-                                              prof=config.profile_for_user(user))
+                # Abbrechbar: Client-Abbruch (Disconnect) ODER expliziter job_id-Cancel
+                # stoppt die LLM-Fragen-Generierung; bereits gespeicherte Dateien
+                # bleiben erhalten.
+                ok_c, doc = await _run_cancellable(
+                    request,
+                    extract_from_file(dest.name, content, qa_count=qa_n,
+                                      prof=config.profile_for_user(user)),
+                    job_id)
+                if not ok_c:
+                    cancelled = True
+                    break
                 update_pending(doc["id"], {"created_by": _norm_login(user)})
                 qa_pending.append({"id": doc["id"], "title": doc.get("title", dest.name)})
             except Exception as e:  # noqa: BLE001 – Upload bleibt erfolgreich
                 qa_errors.append({"name": dest.name, "error": str(e)[:300]})
     return JSONResponse({"saved": saved, "rejected": rejected,
                          "total_saved": len(saved), "total_rejected": len(rejected),
-                         "qa_pending": qa_pending, "qa_errors": qa_errors})
+                         "qa_pending": qa_pending, "qa_errors": qa_errors,
+                         "cancelled": cancelled})
 
 
 @app.get("/api/wissen/files")

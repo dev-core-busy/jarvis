@@ -251,6 +251,7 @@
     // Ablage-Sperre: solange keine Wissensgruppe gewaehlt ist ODER eine
     // KI-Analyse/ein Upload laeuft, duerfen keine Dateien abgelegt werden.
     var _busy = false;
+    var _uploadAbort = null, _uploadJobId = null;   // laufender Upload/URL-Job (abbrechbar)
     function hasFolder() { var s = $('wi-folder'); return !!(s && s.value); }
     function canUpload() { return !_busy && checkedGroups('up').length > 0 && hasFolder(); }
     function updateDropState() {
@@ -312,9 +313,14 @@
         // Optional: Frage-Antwort-Paare generieren (Checkbox + gewuenschte Anzahl)
         var genQ = $('wi-genq') && $('wi-genq').checked;
         if (genQ) fd.append('gen_questions', String(qaCount()));
+        // Abbrechbar machen (wie bei Confluence): Client-Abort + server-seitiger job_id
+        _uploadJobId = 'wup_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        _uploadAbort = new AbortController();
+        fd.append('job_id', _uploadJobId);
         st.textContent = '';
         setBusy(true, genQ);   // prominentes Warten-Banner + Ablage-Sperre
-        fetch('/api/wissen/upload', { method: 'POST', headers: authH(), body: fd })
+        var cancel = $('wi-extract-cancel'); if (cancel) cancel.style.display = '';
+        fetch('/api/wissen/upload', { method: 'POST', headers: authH(), body: fd, signal: _uploadAbort.signal })
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 d = d || {};
@@ -323,6 +329,7 @@
                 var msg = t('wissen.saved_n', { n: d.total_saved || 0 })
                     + (d.total_rejected ? t('wissen.rejected_n', { n: d.total_rejected }) : '') + '.';
                 if (d.qa_pending && d.qa_pending.length) msg += ' ' + t('wissen.genq_done', { n: d.qa_pending.length });
+                if (d.cancelled) { st.style.color = 'var(--warning)'; msg += ' ' + t('wissen.cancelled', 'Abgebrochen.'); }
                 if (d.qa_errors && d.qa_errors.length) {
                     st.style.color = 'var(--warning)';
                     msg += ' ⚠ ' + d.qa_errors.map(function (e) { return e.name + ': ' + e.error; }).join(' · ');
@@ -340,8 +347,15 @@
                         }).catch(function () {});
                 }
             })
-            .catch(function () { st.style.color = 'var(--danger)'; st.textContent = t('wissen.upload_failed'); })
-            .then(function () { setBusy(false); });
+            .catch(function (e) {
+                if (e && e.name === 'AbortError') { st.style.color = 'var(--warning)'; st.textContent = t('wissen.cancelled', 'Abgebrochen.'); loadFiles(); loadPending(); }
+                else { st.style.color = 'var(--danger)'; st.textContent = t('wissen.upload_failed'); }
+            })
+            .then(function () {
+                _uploadAbort = null; _uploadJobId = null;
+                if (cancel) cancel.style.display = 'none';
+                setBusy(false);
+            });
     }
 
     // ── Mein Wissen ─────────────────────────────────────────────────────
@@ -395,16 +409,26 @@
         if (!url || _busy) return;
         var st = $('wi-ext-status');
         st.style.color = 'var(--text-secondary)'; st.textContent = t('wissen.extracting');
+        // Abbrechbar: Client-Abort trennt die Verbindung -> Server bricht ab.
+        _uploadAbort = new AbortController(); _uploadJobId = null;
         setBusy(true, true);
-        fetch('/api/wissen/extract', { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify({ url: url, qa_count: qaCount() }) })
+        var cancel = $('wi-extract-cancel'); if (cancel) cancel.style.display = '';
+        fetch('/api/wissen/extract', { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify({ url: url, qa_count: qaCount() }), signal: _uploadAbort.signal })
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (d.error) { st.style.color = 'var(--danger)'; st.textContent = '✗ ' + d.error; return; }
                 st.textContent = ''; $('wi-ext-url').value = '';
                 showReview(d); loadPending();
             })
-            .catch(function () { st.style.color = 'var(--danger)'; st.textContent = t('wissen.extract_failed'); })
-            .then(function () { setBusy(false); });
+            .catch(function (e) {
+                if (e && e.name === 'AbortError') { st.style.color = 'var(--warning)'; st.textContent = t('wissen.cancelled', 'Abgebrochen.'); }
+                else { st.style.color = 'var(--danger)'; st.textContent = t('wissen.extract_failed'); }
+            })
+            .then(function () {
+                _uploadAbort = null; _uploadJobId = null;
+                if (cancel) cancel.style.display = 'none';
+                setBusy(false);
+            });
     }
 
     function docPreview(d) {
@@ -832,6 +856,20 @@
             .catch(function () {});
     }
 
+    // Zentraler Abbruch: je nach laufender Aktion Confluence-Job ODER Datei-/URL-Analyse.
+    function doCancel() {
+        if (_cfJobId) { abortCf(); return; }
+        if (_uploadAbort) {
+            try { _uploadAbort.abort(); } catch (e) {}
+            if (_uploadJobId) {   // server-seitigen Upload-Job zusaetzlich gezielt stoppen
+                fetch('/api/wissen/extract/cancel', {
+                    method: 'POST', headers: authH({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ job_id: _uploadJobId })
+                }).catch(function () {});
+            }
+        }
+    }
+
     // ── Verdrahtung ─────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', function () {
         $('wi-login-btn').addEventListener('click', doLogin);
@@ -881,7 +919,7 @@
         });
 
         var exBtn = $('wi-extract-btn'); if (exBtn) exBtn.addEventListener('click', doExtract);
-        var exCancel = $('wi-extract-cancel'); if (exCancel) exCancel.addEventListener('click', abortCf);
+        var exCancel = $('wi-extract-cancel'); if (exCancel) exCancel.addEventListener('click', doCancel);
         $('wi-ext-url').addEventListener('keydown', function (e) { if (e.key === 'Enter') doExtract(); });
 
         // Eingabe-Tabs (URL / Datei / Confluence)

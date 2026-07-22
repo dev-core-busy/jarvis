@@ -23,6 +23,8 @@ window.KbMatrix = (function () {
     let _assign = {};    // path -> [group-ids]
     let _groups = [];
     let _contentCache = {};  // path -> Inhalts-Vorschau (lazy)
+    let _sortKey = null;     // aktuelle Sortierspalte (null = Name aufsteigend)
+    let _sortDir = 1;        // 1 = aufsteigend, -1 = absteigend
 
     async function open() {
         const KG = window.KbGroups;
@@ -66,15 +68,34 @@ window.KbMatrix = (function () {
 
     function _cols() {
         const cols = [
-            { key: 'name',   label: T('kbmatrix.col_name', 'Name'),          tip: T('kbmatrix.t_name', 'Name bzw. Titel des Dokuments'),          cls: 'kbm-c-text' },
-            { key: 'desc',   label: T('kbmatrix.col_desc', 'Beschreibung'),  tip: T('kbmatrix.t_desc', 'Kurzbeschreibung / Zusammenfassung'),      cls: 'kbm-c-text' },
-            { key: 'source', label: T('kbmatrix.col_source', 'Quelle'),      tip: T('kbmatrix.t_source', 'Quelle (URL/Datei) bzw. Ordner'),        cls: 'kbm-c-text' },
+            { key: 'icon',   label: T('kbmatrix.col_icon', 'Symbol'),        tip: T('kbmatrix.t_icon', 'Maus über das Symbol zeigt die Vorschau'), cls: 'kbm-c-icon' },
+            { key: 'name',   label: T('kbmatrix.col_name', 'Name'),          tip: T('kbmatrix.t_name', 'Name bzw. Titel des Dokuments'),          cls: 'kbm-c-text', sort: true },
+            { key: 'desc',   label: T('kbmatrix.col_desc', 'Beschreibung'),  tip: T('kbmatrix.t_desc', 'Kurzbeschreibung / Zusammenfassung'),      cls: 'kbm-c-text', sort: true },
+            { key: 'source', label: T('kbmatrix.col_source', 'Quelle'),      tip: T('kbmatrix.t_source', 'Quelle (URL/Datei) bzw. Ordner'),        cls: 'kbm-c-text', sort: true },
         ];
         const gTip = T('kbmatrix.t_group', 'Klick in eine Zelle setzt/entfernt die Zugehörigkeit zu dieser Gruppe');
-        _groups.forEach(g => cols.push({ key: 'g:' + g.id, group: g, tip: g.name + ' – ' + gTip, cls: 'kbm-c-grp' }));
+        _groups.forEach(g => cols.push({ key: 'g:' + g.id, group: g, tip: g.name + ' – ' + gTip, cls: 'kbm-c-grp', sort: true }));
         cols.push({ key: 'edit', label: T('kbmatrix.col_edit', 'Bearb.'),   tip: T('kbmatrix.t_edit', 'Dokument bearbeiten'),   cls: 'kbm-c-act' });
         cols.push({ key: 'del',  label: T('kbmatrix.col_delete', 'Lösch.'), tip: T('kbmatrix.t_delete', 'Dokument löschen'),    cls: 'kbm-c-act' });
         return cols;
+    }
+
+    // Sortiert _rows nach der aktuellen Sortierspalte (_sortKey/_sortDir).
+    function _sortRows() {
+        const byName = (a, b) => a.name.localeCompare(b.name, 'de');
+        if (!_sortKey) { _rows.sort(byName); return; }
+        if (_sortKey.slice(0, 2) === 'g:') {
+            const gid = _sortKey.slice(2);
+            _rows.sort((a, b) => {
+                const av = (_assign[a.path] || []).includes(gid) ? 1 : 0;
+                const bv = (_assign[b.path] || []).includes(gid) ? 1 : 0;
+                return (bv - av) * _sortDir || byName(a, b);
+            });
+        } else {
+            _rows.sort((a, b) =>
+                String(a[_sortKey] || '').localeCompare(String(b[_sortKey] || ''), 'de') * _sortDir
+                || byName(a, b));
+        }
     }
 
     // Spaltenbreiten so setzen, dass die Tabelle exakt auf den Schirm passt;
@@ -85,12 +106,12 @@ window.KbMatrix = (function () {
         const cols  = ov.querySelectorAll('.kbm-table col');
         const G = _groups.length;
         const avail = Math.max(360, (wrap.clientWidth || 900) - 2);
-        const groupW = 46, actW = 48;
-        const textAvail = Math.max(240, avail - (G * groupW + 2 * actW));
+        const groupW = 46, actW = 48, iconW = 34;   // Symbol-Spalte bewusst schmal
+        const textAvail = Math.max(240, avail - (iconW + G * groupW + 2 * actW));
         const nameW = Math.round(textAvail * 0.30);
         const descW = Math.round(textAvail * 0.45);
         const srcW  = textAvail - nameW - descW;
-        const widths = [nameW, descW, srcW];
+        const widths = [iconW, nameW, descW, srcW];
         for (let i = 0; i < G; i++) widths.push(groupW);
         widths.push(actW, actW);
         let total = 0;
@@ -100,6 +121,7 @@ window.KbMatrix = (function () {
 
     function _render() {
         document.getElementById('kbm-overlay')?.remove();
+        _sortRows();
         const cols = _cols();
 
         const colgroup = '<colgroup>' + cols.map(() => '<col>').join('') + '</colgroup>';
@@ -112,8 +134,13 @@ window.KbMatrix = (function () {
             } else {
                 inner = _esc(c.label);
             }
+            // Sortier-Indikator + klickbarer Kopf fuer sortierbare Spalten
+            const arrow = (c.sort && _sortKey === c.key)
+                ? `<span class="kbm-sort-ind">${_sortDir === 1 ? '▲' : '▼'}</span>` : '';
+            const sortAttr = c.sort ? ` data-sortkey="${_attr(c.key)}"` : '';
+            const sortCls  = c.sort ? ' kbm-sortable' : '';
             const rez = (i < cols.length - 1) ? `<span class="kbm-resizer" data-ci="${i}"></span>` : '';
-            return `<th class="${c.cls}" title="${_attr(c.tip || '')}">${inner}${rez}</th>`;
+            return `<th class="${c.cls}${sortCls}"${sortAttr} title="${_attr(c.tip || '')}">${inner}${arrow}${rez}</th>`;
         }).join('') + '</tr></thead>';
 
         const tbody = '<tbody>' + _rows.map(row => {
@@ -122,12 +149,12 @@ window.KbMatrix = (function () {
                 return `<td class="kbm-gcell${on ? ' on' : ''}" data-gid="${_attr(g.id)}" style="--grp:${_attr(g.color)}">`
                     + `<span class="kbm-check">${on ? '✓' : ''}</span></td>`;
             }).join('');
-            // Beschreibung: liegt keine vor, "Inhalt" anzeigen und den Dateiinhalt
-            // per Hover-Tooltip (lazy geladen) daran hängen.
             const descTd = row.desc
                 ? `<td class="kbm-c-text" title="${_attr(row.desc)}">${_esc(row.desc)}</td>`
-                : `<td class="kbm-c-text kbm-content">${_esc(T('kbmatrix.content', 'Inhalt'))}</td>`;
+                : `<td class="kbm-c-text"></td>`;
+            // Symbol-Spalte (schmal): loest die Hover-Vorschau aus (Bild/PDF/Text).
             return `<tr data-path="${_attr(row.path)}">
+                <td class="kbm-c-icon"><span class="kb-file-icon">📄</span></td>
                 <td class="kbm-c-text" title="${_attr(row.path)}">${_esc(row.name)}</td>
                 ${descTd}
                 <td class="kbm-c-text" title="${_attr(row.source)}">${_esc(row.source)}</td>
@@ -190,6 +217,18 @@ window.KbMatrix = (function () {
             }, 300);
         });
 
+        // Klick auf sortierbaren Spaltenkopf -> sortieren (Resizer ausklammern).
+        const thead = ov.querySelector('thead');
+        if (thead) thead.addEventListener('click', e => {
+            if (e.target.closest('.kbm-resizer')) return;
+            const th = e.target.closest('th.kbm-sortable');
+            if (!th || !th.dataset.sortkey) return;
+            const key = th.dataset.sortkey;
+            if (_sortKey === key) _sortDir = -_sortDir;
+            else { _sortKey = key; _sortDir = 1; }
+            _render();
+        });
+
         // Klicks in der Tabelle (Delegation)
         const tbody = ov.querySelector('tbody');
         tbody.addEventListener('click', e => {
@@ -246,18 +285,43 @@ window.KbMatrix = (function () {
             tip.style.top = top + 'px';
         }
         function setContent(entry) {
+            tip.classList.remove('kbm-tip-media');
             tip.textContent = entry.text;
             tip.classList.toggle('kbm-tip-json', !!entry.json);
             reclamp();
         }
+        function setMedia(html) {
+            tip.classList.remove('kbm-tip-json');
+            tip.classList.add('kbm-tip-media');
+            tip.innerHTML = html;
+            reclamp();
+        }
+        const IMG = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'];
+        const _tok = () => localStorage.getItem('jarvis_token') || '';
+        const rawUrl = (p) => '/api/knowledge/file_raw?path=' + encodeURIComponent(p)
+            + '&token=' + encodeURIComponent(_tok()) + '&disp=inline';
         function show(cell) {
             cancelHide();
             const path = cell.closest('tr').dataset.path;
             tip._path = path;
             place(cell);
             tip.style.display = 'block';
+            const ext = (path.split('.').pop() || '').toLowerCase();
+            // Bilder inline, PDF im iframe (vorhandene Vorschau) – NICHT als Text lesen.
+            if (IMG.includes(ext)) {
+                setMedia('<img src="' + rawUrl(path) + '" alt="" '
+                    + 'style="max-width:100%;max-height:60vh;display:block;border-radius:6px;">');
+                const img = tip.querySelector('img');
+                if (img) { img.onload = reclamp; img.onerror = () => setContent({ text: T('kbmatrix.no_content', '(Vorschau nicht verfügbar)'), json: false }); }
+                return;
+            }
+            if (ext === 'pdf') {
+                setMedia('<iframe src="' + rawUrl(path) + '#toolbar=0" '
+                    + 'style="width:100%;height:60vh;border:0;border-radius:6px;background:#fff;"></iframe>');
+                return;
+            }
             if (_contentCache[path] !== undefined) { setContent(_contentCache[path]); return; }
-            tip.classList.remove('kbm-tip-json');
+            tip.classList.remove('kbm-tip-json', 'kbm-tip-media');
             tip.textContent = T('kbmatrix.loading', 'lädt…');
             fetch('/api/knowledge/file_read?path=' + encodeURIComponent(path), { headers: _auth() })
                 .then(r => r.json()).then(d => {
@@ -273,12 +337,13 @@ window.KbMatrix = (function () {
                     if (tip._path === path) setContent(_contentCache[path]);
                 });
         }
+        // Vorschau NUR ueber die Symbol-Spalte (nicht ueber Name/Beschreibung).
         tbody.addEventListener('mouseover', e => {
-            const cell = e.target.closest('.kbm-content');
+            const cell = e.target.closest('.kbm-c-icon');
             if (cell) show(cell);
         });
         tbody.addEventListener('mouseout', e => {
-            const cell = e.target.closest('.kbm-content');
+            const cell = e.target.closest('.kbm-c-icon');
             if (!cell) return;
             // Nicht schließen, wenn die Maus in den Tooltip wandert.
             if (e.relatedTarget && (tip === e.relatedTarget || tip.contains(e.relatedTarget))) return;

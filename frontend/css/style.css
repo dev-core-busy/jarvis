@@ -2530,6 +2530,15 @@ body.kbm-resizing { cursor: col-resize; user-select: none; }
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     font-size: 0.78rem; tab-size: 2;
 }
+/* Medien (Bild/PDF) im Matrix-Tooltip: kein Textumbruch-Zwang. */
+.kbm-tip.kbm-tip-media { white-space: normal; padding: 8px; resize: none; }
+/* Schmale Symbol-Spalte; das Symbol loest die Vorschau aus. */
+.kbm-c-icon { text-align: center; }
+.kbm-c-icon .kb-file-icon { cursor: help; }
+/* Sortierbare Spaltenkoepfe */
+.kbm-table thead th.kbm-sortable { cursor: pointer; }
+.kbm-table thead th.kbm-sortable:hover { color: var(--text-primary); }
+.kbm-sort-ind { margin-left: 4px; font-size: 0.7rem; opacity: 0.85; }
 
 /* Maus-über-Vorschau fuer Datei-Zeilen in der Gruppen-Ansicht (Wissen).
    Text/JSON wie .kbm-tip; Medien (Bild/GIF/PDF) ohne Zeilenumbruch-Zwang. */
@@ -4427,6 +4436,8 @@ select option:hover {
     font-size: 0.85rem;
     flex-shrink: 0;
 }
+/* In der Gruppen-Dateiliste loest das Symbol (nicht der Name) die Vorschau aus */
+.kb-grp-file-row .kb-file-icon { cursor: help; }
 
 .kb-file-name {
     flex: 1;

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wissen – Jarvis</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=6">
-    <link rel="stylesheet" href="/static/css/style.css?v=122">
+    <link rel="stylesheet" href="/static/css/style.css?v=124">
     <link rel="icon" href="/static/favicon.png" type="image/png">
     <style>
         * { box-sizing: border-box; }
@@ -267,6 +267,7 @@
                 <label style="font-size:0.78rem;color:var(--text-secondary);" data-i18n="wissen.groups_label">Wissensgruppen (dein Bereich) *</label>
                 <div class="wi-groups" id="wi-upload-groups" style="margin-top:6px;"></div>
             </div>
+            <!-- Reihe: KI-Optionen (Fragen & Antworten) -->
             <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--text-primary);cursor:pointer;">
                     <input type="checkbox" id="wi-genq" checked>
@@ -278,13 +279,16 @@
                 </label>
                 <!-- KI-Profil-Pulldown (wissen.js mountet ProfileSwitcher) -->
                 <span id="wi-prof-slot" style="margin-left:10px;"></span>
-                <!-- Import-/Extraktions-Fortschritt: sitzt zwischen den KI-Optionen
-                     und den Aktions-Buttons (Extrahieren/Abbrechen). -->
-                <span id="wi-extract-progress" class="wi-status" style="flex:1;min-width:140px;margin:0;text-align:right;"></span>
+            </div>
+            <p class="desc" style="margin-top:6px;" data-i18n="wissen.genq_hint">Die generierten Fragen &amp; Antworten erscheinen unten unter „Deine Entwürfe" – dort kannst du sie löschen, korrigieren und freigeben.</p>
+            <!-- Eigene Zeile: Import-/Extraktions-Fortschritt (zwischen KI-Optionen
+                 und den Aktions-Buttons). Nur sichtbar, wenn Text vorhanden ist. -->
+            <div id="wi-extract-progress" class="wi-status" style="margin-top:10px;"></div>
+            <!-- Reihe: Aktions-Buttons -->
+            <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 <button class="sec-btn primary" id="wi-extract-btn" type="button" data-i18n="wissen.extract">Extrahieren</button>
                 <button class="sec-btn danger" id="wi-extract-cancel" type="button" style="display:none;" data-i18n="common.cancel">Abbrechen</button>
             </div>
-            <p class="desc" style="margin-top:6px;" data-i18n="wissen.genq_hint">Die generierten Fragen &amp; Antworten erscheinen unten unter „Deine Entwürfe" – dort kannst du sie löschen, korrigieren und freigeben.</p>
             <div class="wi-status" id="wi-upload-status"></div>
             <div class="wi-status" id="wi-ext-status"></div>
             <div id="wi-ext-review"></div>
@@ -307,14 +311,14 @@
         </div>
     </div>
 
-    <script src="/static/js/i18n.js?v=98"></script>
+    <script src="/static/js/i18n.js?v=99"></script>
     <script src="/static/js/theme.js?v=1"></script>
     <script src="/static/js/profile_switcher.js?v=4"></script>
     <script src="/static/js/issues.js?v=6"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
-    <script src="/static/js/kbmatrix.js?v=8"></script>
+    <script src="/static/js/kbmatrix.js?v=9"></script>
     <script src="/static/js/ldap_picker.js?v=6"></script>
-    <script src="/static/js/knowledge.js?v=69"></script>
+    <script src="/static/js/knowledge.js?v=71"></script>
     <script src="/static/js/wissen.js?v=24"></script>
     <script src="/static/js/branding.js?v=22"></script>
 </body>

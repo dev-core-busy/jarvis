@@ -5889,6 +5889,10 @@ async def get_knowledge_stats(user: str = Depends(require_auth)):
     mount_prefix = str(_MOUNT_BASE)
     data["folders"] = [f for f in data.get("folders", [])
                        if not f["path"].startswith(mount_prefix)]
+    # has_children: hat der Ordner (mind.) einen echten Unterordner? -> abweichendes
+    # Symbol in der Baum-Darstellung (Einstellungen -> Wissen).
+    for f in data["folders"]:
+        f["has_children"] = _kb_has_subfolders(f["path"])
     return JSONResponse(data)
 
 
@@ -6491,6 +6495,22 @@ def _kb_supported_exts() -> set:
         EXTENSIONS_PPTX, EXTENSIONS_VIDEO, EXTENSIONS_AUDIO, EXTENSIONS_IMAGE)
     return (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX |
             EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO | EXTENSIONS_IMAGE)
+
+
+def _kb_has_subfolders(rel_path: str) -> bool:
+    """True, wenn der Ordner mindestens einen echten Unterordner enthaelt
+    (fuer Baum-Darstellung / abweichendes Symbol). Netzlaufwerk-geschuetzt."""
+    from backend.tools.knowledge import PROJECT_ROOT, _is_pending_path, _safe_exists
+    base = PROJECT_ROOT / _kb_norm_rel(rel_path)
+    if not _safe_exists(base) or not base.is_dir():
+        return False
+    try:
+        for e in base.iterdir():
+            if e.is_dir() and not e.name.startswith(".") and not _is_pending_path(str(e) + "/"):
+                return True
+    except OSError:
+        return False
+    return False
 
 
 def _kb_list_subfolders(root_rel: str) -> list:

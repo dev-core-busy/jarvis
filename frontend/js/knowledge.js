@@ -363,7 +363,7 @@ class JarvisKnowledgeManager {
             <div class="kb-grp-file-row" data-path="${KG.esc(p)}">
                 <span class="kb-file-icon">📄</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
-                <button class="kb-btn-view-file kb-grp-tag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.assign_title') || 'Wissensgruppen bearbeiten'}">🏷</button>
+                <button class="kb-btn-view-file kb-grp-tag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.perms') || 'Berechtigungen verwalten'}">🔐</button>
                 <button class="kb-btn-remove kb-grp-untag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.remove') || 'Aus Gruppe entfernen'}">✕</button>
             </div>`).join('') + `</div>`;
         // Wissensgruppen des Eintrags bearbeiten (Popover) – danach Liste auffrischen
@@ -430,7 +430,7 @@ class JarvisKnowledgeManager {
             <div class="kb-grp-file-row" data-path="${KG.esc(p)}">
                 <span class="kb-file-icon">📄</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
-                <button class="kb-btn-view-file kb-grp-tag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.assign_title') || 'Wissensgruppen bearbeiten'}">🏷</button>
+                <button class="kb-btn-view-file kb-grp-tag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.perms') || 'Berechtigungen verwalten'}">🔐</button>
                 <button class="kb-btn-remove kb-ung-del" data-path="${KG.esc(p)}" title="${T('knowledge.file_delete_title', 'Datei löschen')}">✕</button>
             </div>`).join('');
         this._setupRowSelection(box, '.kb-grp-file-row', (paths) =>
@@ -1228,14 +1228,11 @@ class JarvisKnowledgeManager {
                 </div>`;
             const rows = folderData.files.map(f => {
                 const safePath = f.path.replace(/'/g, "\\'");
-                const isText = /\.(txt|md|json|yaml|yml|csv|log|xml|html|htm|py|js|ts|sh|cfg|ini|toml|rst|tex)$/i.test(f.name);
-                const viewBtn = isText
-                    ? `<button class="kb-btn-view-file" title="${window.t('knowledge.file_view_title') || 'Inhalt anzeigen'}"
-                            onclick="window.knowledgeManager.viewFile('${safePath}', '${f.name}')">👁</button>`
-                    : '';
+                // "Inhalt anzeigen" (👁) entfaellt – der Inhalt erscheint jetzt als
+                // Hover-Vorschau ueber das 📄-Symbol (inkl. PDF/Bild).
                 const tagBtn = window.KbGroups
-                    ? `<button class="kb-btn-view-file kb-btn-tag-file" title="${window.t('kbgroups.assign_title') || 'Gruppen'}"
-                            onclick="window.knowledgeManager.tagFile(this, '${safePath}')">🏷</button>`
+                    ? `<button class="kb-btn-view-file kb-btn-tag-file" title="${window.t('kbgroups.assign_title') || 'Wissensgruppe bearbeiten'}"
+                            onclick="window.knowledgeManager.tagFile(this, '${safePath}')">🔐</button>`
                     : '';
                 return `
                 <div class="kb-file-item" data-path="${esc(f.path)}" id="kb-file-${btoa(unescape(encodeURIComponent(f.path))).replace(/[^a-zA-Z0-9]/g, '')}">
@@ -1243,7 +1240,6 @@ class JarvisKnowledgeManager {
                     <span class="kb-file-name" title="${esc(f.path)}">${esc(f.name)}</span>
                     <span class="kb-file-size">${esc(f.size)}</span>
                     ${tagBtn}
-                    ${viewBtn}
                     <button class="kb-btn-delete-file" title="${window.t('knowledge.file_delete_title')}"
                         onclick="window.knowledgeManager.deleteFile('${safePath}', ${idx}, '${folderPath}')">✕</button>
                 </div>`;
@@ -1255,6 +1251,7 @@ class JarvisKnowledgeManager {
                     if (el) el.style.display = 'none';
                     return this.toggleFolder(idx, folderPath);
                 }));
+            this._bindFilePreview(filesEl);   // Hover-Vorschau ueber das 📄-Symbol
         } catch (e) {
             filesEl.innerHTML = `<div class="kb-files-error">${window.t('common.error')}: ${e.message}</div>`;
         }

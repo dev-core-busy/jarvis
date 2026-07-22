@@ -1167,107 +1167,174 @@ class JarvisKnowledgeManager {
         }
     }
 
+    // Eindeutige, DOM-taugliche ID aus einem (beliebig tiefen) Ordnerpfad.
+    _pathId(path) {
+        return 'kbn-' + btoa(unescape(encodeURIComponent(path))).replace(/[^a-zA-Z0-9]/g, '');
+    }
+
+    _escHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g,
+            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+
+    // HTML eines Ordner-Knotens. Wurzeln behalten Bearbeiten/Entfernen; Unterordner
+    // bekommen Löschen. Beide erhalten "Unterordner erstellen" (➕).
+    _folderNodeHtml(path, exists, isRoot) {
+        const id = this._pathId(path);
+        const sp = path.replace(/'/g, "\\'");
+        const name = isRoot ? path : path.split('/').pop();
+        const T = (k, d) => (window.t && window.t(k)) || d;
+        const addSub = `<button class="kb-btn-remove kb-btn-addsub" title="${T('knowledge.subfolder_create_title', 'Unterordner erstellen')}"
+                onclick="event.stopPropagation();window.knowledgeManager.createSubfolder('${sp}')">➕</button>`;
+        const actions = isRoot
+            ? `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.folder_edit_title', 'Bearbeiten')}"
+                    onclick="event.stopPropagation();window.knowledgeManager.editFolder('${sp}')">✏️</button>${addSub}<button class="kb-btn-remove" title="${T('knowledge.folder_remove_title', 'Ordner entfernen')}"
+                    onclick="event.stopPropagation();window.knowledgeManager.removeFolder('${sp}')">✕</button>`
+            : `${addSub}<button class="kb-btn-remove" title="${T('knowledge.subfolder_remove_title', 'Unterordner löschen')}"
+                    onclick="event.stopPropagation();window.knowledgeManager.deleteSubfolder('${sp}')">✕</button>`;
+        return `
+            <div class="kb-folder-item${isRoot ? '' : ' kb-subfolder-item'}" data-path="${this._escHtml(path)}">
+                <div class="kb-folder-header">
+                    <button class="kb-folder-toggle" title="${T('knowledge.folder_files_title', 'Dateien anzeigen')}"
+                        onclick="window.knowledgeManager.toggleDir('${sp}', '${id}')">
+                        <span class="kb-folder-icon">${exists === false ? '⚠️' : (isRoot ? '📁' : '📂')}</span>
+                        <span class="kb-folder-path" title="${this._escHtml(path)}">${this._escHtml(name)}</span>
+                        <span class="kb-folder-arrow" id="${id}-arr">▶</span>
+                    </button>
+                    ${actions}
+                </div>
+                <div class="kb-folder-files" id="${id}-body" style="display:none;"></div>
+            </div>`;
+    }
+
     _renderFolders(folders) {
         const el = document.getElementById('kb-folder-list');
         if (!el) return;
-
         if (!folders || folders.length === 0) {
             el.innerHTML = `<div class="kb-empty">${window.t('knowledge.no_folders')}</div>`;
             return;
         }
-
-        el.innerHTML = folders.map((f, idx) => {
-            const safePath = f.path.replace(/'/g, "\\'");
-            // Bearbeiten (Gruppen-Zuordnung, ggf. Umbenennen) fuer alle Ordner
-            const renameBtn = `<button class="kb-btn-remove kb-btn-rename" title="${window.t('knowledge.folder_edit_title')}"
-                        onclick="window.knowledgeManager.editFolder('${safePath}')">✏️</button>`;
-            return `
-            <div class="kb-folder-item" id="kb-folder-item-${idx}">
-                <div class="kb-folder-header">
-                    <button class="kb-folder-toggle" title="${window.t('knowledge.folder_files_title')}"
-                        onclick="window.knowledgeManager.toggleFolder(${idx}, '${safePath}')">
-                        <span class="kb-folder-icon">${f.exists ? '📁' : '⚠️'}</span>
-                        <span class="kb-folder-path" title="${f.path}">${f.path}</span>
-                        <span class="kb-folder-arrow" id="kb-arrow-${idx}">▶</span>
-                    </button>
-                    ${renameBtn}
-                    <button class="kb-btn-remove" data-folder="${f.path}" title="${window.t('knowledge.folder_remove_title')}"
-                        onclick="window.knowledgeManager.removeFolder('${safePath}')">✕</button>
-                </div>
-                <div class="kb-folder-files" id="kb-files-${idx}" style="display:none;"></div>
-            </div>`;
-        }).join('');
+        el.innerHTML = folders.map(f => this._folderNodeHtml(f.path, f.exists, true)).join('');
     }
 
-    async toggleFolder(idx, folderPath) {
-        const filesEl = document.getElementById(`kb-files-${idx}`);
-        const arrowEl = document.getElementById(`kb-arrow-${idx}`);
-        if (!filesEl) return;
-
-        const isOpen = filesEl.style.display !== 'none';
-        if (isOpen) {
-            filesEl.style.display = 'none';
-            if (arrowEl) arrowEl.textContent = '▶';
+    // Ordner auf-/zuklappen; lädt Unterordner + Dateien per /api/knowledge/browse.
+    async toggleDir(path, id) {
+        const body = document.getElementById(`${id}-body`);
+        const arrow = document.getElementById(`${id}-arr`);
+        if (!body) return;
+        if (body.style.display !== 'none') {
+            body.style.display = 'none';
+            if (arrow) arrow.textContent = '▶';
             return;
         }
+        body.style.display = 'block';
+        if (arrow) arrow.textContent = '▼';
+        body.innerHTML = `<div class="kb-files-loading">${window.t('knowledge.loading')}</div>`;
+        await this._loadDir(path, id, body);
+    }
 
-        filesEl.innerHTML = `<div class="kb-files-loading">${window.t('knowledge.loading')}</div>`;
-        filesEl.style.display = 'block';
-        if (arrowEl) arrowEl.textContent = '▼';
-
+    // Inhalt eines Ordner-Knotens laden/rendern (Unterordner-Knoten + eigene Dateien).
+    async _loadDir(path, id, body) {
         try {
-            const resp = await fetch('/api/knowledge/files', {
+            const resp = await fetch('/api/knowledge/browse?path=' + encodeURIComponent(path), {
                 headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
             });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            if (!resp.ok) {
+                const e = await resp.json().catch(() => ({}));
+                throw new Error(e.error || 'HTTP ' + resp.status);
+            }
             const data = await resp.json();
-
-            const folderData = data.find(d => d.folder === folderPath);
-            if (!folderData || !folderData.exists) {
-                filesEl.innerHTML = `<div class="kb-files-empty">${window.t('knowledge.folder_not_exists')}</div>`;
-                return;
-            }
-            if (!folderData.files || folderData.files.length === 0) {
-                filesEl.innerHTML = `<div class="kb-files-empty">${window.t('knowledge.no_files')}</div>`;
-                return;
-            }
-
-            const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g,
-                c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-            // Sammel-Lösch-Leiste (erscheint bei Auswahl) + Datei-Zeilen
-            const bar = `<div class="kb-bulk-bar hidden" id="kb-bulk-${idx}">
+            const subs = (data.subfolders || []).map(sf =>
+                this._folderNodeHtml(sf.path, true, false)).join('');
+            const files = data.files || [];
+            const bar = files.length ? `<div class="kb-bulk-bar hidden" id="${id}-bulk">
                     <button class="btn-secondary kb-bulk-del" type="button">${window.t('knowledge.bulk_delete') || 'Auswahl löschen'} (<span class="kb-bulk-count">0</span>)</button>
                     <button class="btn-secondary kb-bulk-clear" type="button">${window.t('knowledge.bulk_clear') || 'Auswahl aufheben'}</button>
                     <span class="kb-bulk-hint">${window.t('knowledge.bulk_hint') || 'Mehrfachauswahl: Klick oder mit der Maus aufziehen'}</span>
-                </div>`;
-            const rows = folderData.files.map(f => {
-                const safePath = f.path.replace(/'/g, "\\'");
-                // "Inhalt anzeigen" (👁) entfaellt – der Inhalt erscheint jetzt als
-                // Hover-Vorschau ueber das 📄-Symbol (inkl. PDF/Bild).
-                const tagBtn = window.KbGroups
-                    ? `<button class="kb-btn-view-file kb-btn-tag-file" title="${window.t('kbgroups.assign_title') || 'Wissensgruppe bearbeiten'}"
-                            onclick="window.knowledgeManager.tagFile(this, '${safePath}')">🔐</button>`
-                    : '';
-                return `
+                </div>` : '';
+            const rows = files.map(f => this._fileRowHtml(f, path)).join('');
+            let inner = '';
+            if (subs) inner += `<div class="kb-subfolders">${subs}</div>`;
+            if (files.length) inner += `<div class="kb-node-files">${bar}${rows}</div>`;
+            if (!inner) inner = `<div class="kb-files-empty">${window.t('knowledge.no_files')}</div>`;
+            body.innerHTML = inner;
+            // Auswahl/Vorschau NUR auf die direkten Dateien dieses Knotens binden
+            // (verschachtelte Unterordner-Dateien haben eigene Container).
+            const nodeFiles = body.querySelector(':scope > .kb-node-files');
+            if (nodeFiles) {
+                this._setupRowSelection(nodeFiles, '.kb-file-item', (paths) =>
+                    this._bulkDeleteFiles(paths, () => this._loadDir(path, id, body)));
+                this._bindFilePreview(nodeFiles);
+            }
+        } catch (e) {
+            body.innerHTML = `<div class="kb-files-error">${window.t('common.error')}: ${e.message}</div>`;
+        }
+    }
+
+    // HTML einer Datei-Zeile innerhalb eines Ordner-Knotens.
+    _fileRowHtml(f, dirPath) {
+        const esc = (s) => this._escHtml(s);
+        const safePath = f.path.replace(/'/g, "\\'");
+        const dp = dirPath.replace(/'/g, "\\'");
+        const tagBtn = window.KbGroups
+            ? `<button class="kb-btn-view-file kb-btn-tag-file" title="${window.t('kbgroups.assign_title') || 'Wissensgruppe bearbeiten'}"
+                    onclick="window.knowledgeManager.tagFile(this, '${safePath}')">🔐</button>`
+            : '';
+        return `
                 <div class="kb-file-item" data-path="${esc(f.path)}" id="kb-file-${btoa(unescape(encodeURIComponent(f.path))).replace(/[^a-zA-Z0-9]/g, '')}">
                     <span class="kb-file-icon">${this._fileIcon(f.path)}</span>
                     <span class="kb-file-name" title="${esc(f.path)}">${esc(f.name)}</span>
                     <span class="kb-file-size">${esc(f.size)}</span>
                     ${tagBtn}
                     <button class="kb-btn-delete-file" title="${window.t('knowledge.file_delete_title')}"
-                        onclick="window.knowledgeManager.deleteFile('${safePath}', ${idx}, '${folderPath}')">✕</button>
+                        onclick="window.knowledgeManager.deleteFile('${safePath}', '${dp}')">✕</button>
                 </div>`;
-            }).join('');
-            filesEl.innerHTML = bar + rows;
-            this._setupRowSelection(filesEl, '.kb-file-item', (paths) =>
-                this._bulkDeleteFiles(paths, () => {
-                    const el = document.getElementById(`kb-files-${idx}`);
-                    if (el) el.style.display = 'none';
-                    return this.toggleFolder(idx, folderPath);
-                }));
-            this._bindFilePreview(filesEl);   // Hover-Vorschau ueber das 📄-Symbol
+    }
+
+    // Unterordner anlegen (physisch, erbt Gruppen der Wurzel – Modell A).
+    async createSubfolder(parentPath) {
+        const name = (window.prompt(window.t('knowledge.subfolder_prompt') || 'Name des neuen Unterordners:') || '').trim();
+        if (!name) return;
+        try {
+            const resp = await fetch('/api/knowledge/subfolders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                body: JSON.stringify({ parent: parentPath, name })
+            });
+            const r = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
+            this._showNotification(window.t('knowledge.subfolder_created') || 'Unterordner erstellt', 'success');
+            const id = this._pathId(parentPath);
+            const bodyEl = document.getElementById(`${id}-body`);
+            if (bodyEl && bodyEl.style.display !== 'none') await this._loadDir(parentPath, id, bodyEl);
+            else await this.toggleDir(parentPath, id);   // aufklappen + laden
         } catch (e) {
-            filesEl.innerHTML = `<div class="kb-files-error">${window.t('common.error')}: ${e.message}</div>`;
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+        }
+    }
+
+    // Unterordner löschen (Index/Gruppen immer, Dateien optional).
+    async deleteSubfolder(path) {
+        const name = path.split('/').pop();
+        if (!confirm((window.t('knowledge.subfolder_delete_confirm') || 'Unterordner „{name}" entfernen? Das darin indizierte Wissen wird entfernt.').replace('{name}', name))) return;
+        const withFiles = confirm(window.t('knowledge.subfolder_delete_files') || 'Auch die Dateien auf der Platte löschen?\n\nOK = Ordner + Dateien löschen · Abbrechen = nur aus dem Index entfernen');
+        try {
+            const resp = await fetch('/api/knowledge/subfolders', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                body: JSON.stringify({ path, delete_files: withFiles })
+            });
+            const r = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
+            this._showNotification(window.t('knowledge.subfolder_removed') || 'Unterordner entfernt', 'success');
+            const parent = path.split('/').slice(0, -1).join('/');
+            const pid = this._pathId(parent);
+            const bodyEl = document.getElementById(`${pid}-body`);
+            if (bodyEl && bodyEl.style.display !== 'none') await this._loadDir(parent, pid, bodyEl);
+            await this.fetchStats();
+            if (window.KbGroups) await this._refreshGroups();
+        } catch (e) {
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
     }
 
@@ -1416,7 +1483,7 @@ class JarvisKnowledgeManager {
 
     // ─── Datei löschen ──────────────────────────────────────────────
 
-    async deleteFile(filePath, folderIdx, folderPath) {
+    async deleteFile(filePath, dirPath) {
         if (!confirm(window.t('knowledge.file_delete_confirm').replace('{name}', filePath.split('/').pop()))) return;
 
         try {
@@ -1433,10 +1500,10 @@ class JarvisKnowledgeManager {
                 throw new Error(err.error || 'HTTP ' + resp.status);
             }
             this._showNotification(window.t('knowledge.file_deleted'), 'success');
-            // Ordner-Inhalt neu laden
-            const filesEl = document.getElementById(`kb-files-${folderIdx}`);
-            if (filesEl) filesEl.style.display = 'none';
-            await this.toggleFolder(folderIdx, folderPath);
+            // Knoten-Inhalt neu laden (dirPath = Ordner, in dem die Datei lag)
+            const id = this._pathId(dirPath);
+            const bodyEl = document.getElementById(`${id}-body`);
+            if (bodyEl && bodyEl.style.display !== 'none') await this._loadDir(dirPath, id, bodyEl);
             await this.fetchStats();
         } catch (e) {
             this._showNotification(window.t('common.error') + ': ' + e.message, 'error');

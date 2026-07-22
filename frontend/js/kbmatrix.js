@@ -68,7 +68,7 @@ window.KbMatrix = (function () {
 
     function _cols() {
         const cols = [
-            { key: 'icon',   label: T('kbmatrix.col_icon', 'Symbol'),        tip: T('kbmatrix.t_icon', 'Maus über das Symbol zeigt die Vorschau'), cls: 'kbm-c-icon' },
+            { key: 'icon',   label: '',                                      tip: T('kbmatrix.t_icon', 'Maus über das Symbol zeigt die Vorschau'), cls: 'kbm-c-icon' },
             { key: 'name',   label: T('kbmatrix.col_name', 'Name'),          tip: T('kbmatrix.t_name', 'Name bzw. Titel des Dokuments'),          cls: 'kbm-c-text', sort: true },
             { key: 'desc',   label: T('kbmatrix.col_desc', 'Beschreibung'),  tip: T('kbmatrix.t_desc', 'Kurzbeschreibung / Zusammenfassung'),      cls: 'kbm-c-text', sort: true },
             { key: 'source', label: T('kbmatrix.col_source', 'Quelle'),      tip: T('kbmatrix.t_source', 'Quelle (URL/Datei) bzw. Ordner'),        cls: 'kbm-c-text', sort: true },

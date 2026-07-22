@@ -13,7 +13,7 @@
         rel="stylesheet">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=7">
-    <link rel="stylesheet" href="/static/css/style.css?v=130">
+    <link rel="stylesheet" href="/static/css/style.css?v=131">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -1615,8 +1615,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <input type="text" id="kb-folder-input" class="kb-input"
                                         data-i18n-placeholder="knowledge.folder_ph"
                                         placeholder="Pfad zum Ordner (z.B. data/knowledge)" />
-                                    <button class="kb-btn-action" id="btn-kb-add-folder" data-i18n="knowledge.add_btn">Hinzufügen</button>
-                                    <button class="kb-btn-action" id="btn-kb-create-folder" data-i18n="knowledge.create_btn" data-i18n-title="knowledge.create_title" title="Neuen Ordner unter data/ anlegen">Neu anlegen</button>
+                                    <button class="kb-btn-action" id="btn-kb-add-folder" data-i18n="knowledge.add_btn" data-i18n-title="knowledge.add_title" title="Vorhandenen Ordner/Pfad zum Indizieren einbinden – z.B. „/mnt/share/doku" oder absoluter Pfad. Einfacher Name (z.B. „handbuecher") wird unter data/ angelegt, falls er fehlt.">Hinzufügen</button>
+                                    <button class="kb-btn-action" id="btn-kb-create-folder" data-i18n="knowledge.create_btn" data-i18n-title="knowledge.create_title" title="Neuen Ordner physisch unter data/NAME anlegen und gewählten Wissensgruppen als Speicherordner zuordnen (nur einfacher Name, z.B. „handbuecher").">Neu anlegen</button>
                                 </div>
                                 <div class="kb-upload-groups-row">
                                     <span class="kb-hint" style="margin:0;" data-i18n="knowledge.create_groups_label">Beim Anlegen als Speicherordner zuordnen:</span>
@@ -3075,14 +3075,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=99"></script>
+    <script src="/static/js/i18n.js?v=101"></script>
     <script src="/static/js/cron.js?v=17"></script>
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
     <script src="/static/js/skills.js?v=33"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
-    <script src="/static/js/knowledge.js?v=71"></script>
+    <script src="/static/js/knowledge.js?v=73"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>

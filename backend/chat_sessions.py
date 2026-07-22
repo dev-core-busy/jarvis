@@ -49,6 +49,42 @@ def new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+# ─── Benutzer-Preprompt (persoenliche Vorab-Anweisung fuer /chat) ─────────────
+# Gilt pro Benutzer (nicht pro Sitzung) und wird dem System-Prompt des
+# Hauptagenten vorangestellt. Liegt in data/chats/<user>/preprompt.txt.
+
+_PREPROMPT_MAX = 8000
+
+
+def get_preprompt(user: str) -> str:
+    """Liefert den persoenlichen Preprompt des Benutzers (leerer String, wenn keiner)."""
+    p = _user_dir(user) / "preprompt.txt"
+    try:
+        if p.exists():
+            return p.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    return ""
+
+
+def save_preprompt(user: str, text: str) -> str:
+    """Speichert den persoenlichen Preprompt des Benutzers (auf _PREPROMPT_MAX
+    Zeichen begrenzt). Leerer Text loescht die Datei. Rueckgabe: gespeicherter Text."""
+    text = (text or "")[:_PREPROMPT_MAX]
+    ud = _user_dir(user)
+    p = ud / "preprompt.txt"
+    with _LOCK:
+        try:
+            if text.strip():
+                ud.mkdir(parents=True, exist_ok=True)
+                p.write_text(text, encoding="utf-8")
+            elif p.exists():
+                p.unlink()
+        except Exception:
+            pass
+    return text if text.strip() else ""
+
+
 # ─── Metadaten / Sitzungsverwaltung ──────────────────────────────────────────
 
 def _read_meta(sd: Path) -> dict | None:

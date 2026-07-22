@@ -73,6 +73,9 @@
     <aside id="chat-sidebar" class="chat-sidebar">
         <div class="cs-head">
             <button id="cs-new" class="cs-new" type="button" data-i18n="chat.new_chat">+ Neuer Chat</button>
+            <button id="cs-preprompt" class="cs-collapse" type="button" data-i18n-title="chat.preprompt_title" title="Persönlicher Preprompt" aria-label="Persönlicher Preprompt">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
             <button id="cs-collapse" class="cs-collapse" type="button" data-i18n-title="chat.collapse_history" title="Verlauf einklappen" aria-label="Verlauf einklappen">«</button>
         </div>
         <div id="cs-list" class="cs-list"></div>
@@ -284,6 +287,20 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
+<!-- ═══ Persönlicher Preprompt (Zahnrad neben "+ Neuer Chat") ═══ -->
+<div id="preprompt-modal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width:560px;text-align:left;">
+        <h2 class="modal-title" style="text-align:center;" data-i18n="chat.preprompt_heading">Persönlicher Preprompt</h2>
+        <p style="font-size:13px;color:var(--muted);line-height:1.55;margin-bottom:12px;" data-i18n="chat.preprompt_desc">Diese Anweisung wird jedem Deiner Chats automatisch vorangestellt – z.B. bevorzugte Sprache, Tonfall, Rolle oder Kontext. Sie hebt keine Sicherheits- oder Rechtebeschränkungen auf. Leer lassen, um sie zu entfernen.</p>
+        <textarea id="preprompt-text" rows="9" data-i18n-placeholder="chat.preprompt_ph" placeholder="z.B. Antworte immer knapp und auf Deutsch. Ich bin Entwickler und bevorzuge Code-Beispiele." style="width:100%;box-sizing:border-box;padding:10px 12px;font-size:13px;font-family:inherit;line-height:1.5;background:var(--bg);color:var(--on-surface);border:1px solid var(--border);border-radius:10px;resize:vertical;"></textarea>
+        <div id="preprompt-status" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></div>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+            <button class="btn-login" id="btn-preprompt-save" style="flex:1;" data-i18n="common.save">Speichern</button>
+            <button class="btn-modal-close" id="btn-preprompt-close" style="margin-top:0;flex:0 0 auto;" data-i18n="common.close">Schließen</button>
+        </div>
+    </div>
+</div>
+
 <!-- ═══ Multi-Agent-Panel (nur Admin; erscheint, wenn Sub-Agenten laufen) ═══ -->
 <div id="agent-panel" style="display:none;position:fixed;top:58px;right:12px;z-index:8000;width:220px;max-width:70vw;background:var(--bg-secondary,#111827);border:1px solid var(--border,rgba(255,255,255,.12));border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.5);overflow:hidden;">
     <div style="padding:8px 12px;border-bottom:1px solid var(--border,rgba(255,255,255,.12));font-size:0.8rem;font-weight:600;color:var(--text-primary,#f8fafc);">Agenten</div>
@@ -306,7 +323,7 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=43"></script>
+<script src="/static/js/i18n.js?v=44"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=11"></script>
 <script src="/static/js/issues.js?v=6"></script>
@@ -316,7 +333,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/kbgroups.js?v=4"></script>
 <script src="/static/js/kbgroupfilter.js?v=6"></script>
 <script src="/static/js/profile_switcher.js?v=4"></script>
-<script src="/static/js/chat.js?v=85"></script>
+<script src="/static/js/chat.js?v=86"></script>
 <!-- Interaktive Charts (```chartjs) – Chart.js lokal gevendort (CSP: kein CDN) -->
 <script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
 <script src="/static/js/charts.js?v=3"></script>

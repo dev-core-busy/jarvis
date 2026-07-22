@@ -6446,6 +6446,192 @@ def _kb_current_folder_list() -> list[str]:
     return out
 
 
+# ─── Unterordner (Modell A) ──────────────────────────────────────────────────
+# Unterordner sind ECHTE Verzeichnisse unterhalb eines konfigurierten
+# Wurzelordners. Sie werden NICHT als eigene Wurzel registriert (sonst
+# Doppel-Indizierung), sondern von der rekursiven Indizierung der Wurzel erfasst
+# und erben deren Wissensgruppen-Berechtigung LIVE (ein Pfad unterhalb eines
+# Gruppen-Ordners "gehoert" zu dessen Gruppen – prefix-basiert).
+
+def _kb_norm_rel(rel_path: str) -> str:
+    return (rel_path or "").strip().replace("\\", "/").strip("/")
+
+
+def _kb_configured_root_for(rel_path: str):
+    """Konfigurierter Wurzelordner, unter dem ``rel_path`` (Datei oder Unterordner)
+    liegt – der TIEFSTE passende Ordner – oder None. Grundlage der Vererbung."""
+    rel = _kb_norm_rel(rel_path)
+    if not rel:
+        return None
+    best = None
+    for f in _kb_current_folder_list():
+        fn = _kb_norm_rel(f)
+        if rel == fn or rel.startswith(fn + "/"):
+            if best is None or len(fn) > len(best):
+                best = fn
+    return best
+
+
+def _kb_safe_within_data(rel_path: str):
+    """Aufgeloester absoluter Path, sofern ``rel_path`` innerhalb von data/ liegt
+    (Path-Traversal-Schutz); sonst None."""
+    from backend.tools.knowledge import PROJECT_ROOT
+    data_root = (PROJECT_ROOT / "data").resolve()
+    try:
+        p = (PROJECT_ROOT / _kb_norm_rel(rel_path)).resolve()
+        p.relative_to(data_root)
+        return p
+    except (ValueError, OSError):
+        return None
+
+
+def _kb_supported_exts() -> set:
+    from backend.tools.knowledge import (
+        EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX, EXTENSIONS_XLSX,
+        EXTENSIONS_PPTX, EXTENSIONS_VIDEO, EXTENSIONS_AUDIO, EXTENSIONS_IMAGE)
+    return (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX |
+            EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO | EXTENSIONS_IMAGE)
+
+
+def _kb_list_subfolders(root_rel: str) -> list:
+    """Alle physischen Unterordner (rekursiv) unterhalb eines Ordners:
+    ``[{path, name, depth}]`` relativ zu PROJECT_ROOT (Forward-Slashes).
+    Versteckte Ordner und der interne pending-Speicher werden ausgelassen."""
+    from backend.tools.knowledge import PROJECT_ROOT, _is_pending_path, _safe_exists
+    base = PROJECT_ROOT / _kb_norm_rel(root_rel)
+    # Totes Netzlaufwerk nicht anfassen -> sonst blockiert os.walk minutenlang.
+    if not _safe_exists(base) or not base.is_dir():
+        return []
+    root_depth = len(Path(_kb_norm_rel(root_rel)).parts)
+    out = []
+    for dirpath, dirnames, _files in os.walk(base):
+        keep = []
+        for d in sorted(dirnames):
+            if d.startswith("."):
+                continue
+            if _is_pending_path(os.path.join(dirpath, d) + "/"):
+                continue
+            keep.append(d)
+        dirnames[:] = keep
+        for d in keep:
+            rel = Path(os.path.join(dirpath, d)).relative_to(PROJECT_ROOT).as_posix()
+            out.append({"path": rel, "name": d,
+                        "depth": len(Path(rel).parts) - root_depth})
+    return out
+
+
+@app.get("/api/knowledge/browse")
+async def browse_knowledge_dir(path: str = "", user: str = Depends(require_knowledge_editor)):
+    """Direkte Kinder (Unterordner + Dateien) eines Wissens-Ordners fuer die
+    verschachtelte Ordner-Ansicht (Einstellungen -> Wissen). ``path`` muss ein
+    konfigurierter Wurzelordner oder ein Unterordner darunter sein."""
+    from backend.tools.knowledge import PROJECT_ROOT, _is_pending_path
+    rel = _kb_norm_rel(path)
+    if _kb_configured_root_for(rel) is None:
+        return JSONResponse({"error": f"Ordner '{path}' nicht konfiguriert"}, status_code=404)
+    if _kb_safe_within_data(rel) is None:   # Path-Traversal-Schutz
+        return JSONResponse({"error": "Ungültiger Pfad"}, status_code=400)
+    # Pfadform wie im Rest der Indizierung (unaufgeloest, PROJECT_ROOT-relativ),
+    # damit relative_to() nicht an Symlinks scheitert.
+    base = PROJECT_ROOT / rel
+    if not base.is_dir():
+        return JSONResponse({"error": "Ordner nicht gefunden"}, status_code=404)
+    exts = _kb_supported_exts()
+    subfolders, files = [], []
+    try:
+        entries = sorted(base.iterdir(), key=lambda e: e.name.lower())
+    except OSError as e:
+        return JSONResponse({"error": f"Ordner nicht lesbar: {e}"}, status_code=500)
+    for entry in entries:
+        if entry.name.startswith("."):
+            continue
+        entry_rel = entry.relative_to(PROJECT_ROOT).as_posix()
+        if entry.is_dir():
+            if _is_pending_path(str(entry) + "/"):
+                continue
+            try:
+                has_children = any(c.is_dir() and not c.name.startswith(".")
+                                   and not _is_pending_path(str(c) + "/")
+                                   for c in entry.iterdir())
+            except OSError:
+                has_children = False
+            subfolders.append({"path": entry_rel, "name": entry.name,
+                               "has_children": has_children})
+        elif entry.is_file() and entry.suffix.lower() in exts:
+            size = entry.stat().st_size
+            size_str = f"{size/1024:.1f} KB" if size >= 1024 else f"{size} B"
+            files.append({"path": entry_rel, "name": entry.name, "size": size_str})
+    return JSONResponse({"ok": True, "path": rel, "subfolders": subfolders, "files": files})
+
+
+@app.post("/api/knowledge/subfolders")
+async def create_knowledge_subfolder(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Legt physisch einen Unterordner in einem bestehenden Wissens-Ordner an.
+
+    Body: ``{"parent": "data/<...>", "name": "<ordnername>"}`` – nur einfacher
+    Name (kein Pfad). Der Unterordner wird NICHT als eigener Wurzelordner
+    registriert: er wird von der rekursiven Indizierung der Wurzel erfasst und
+    erbt deren Wissensgruppen-Berechtigung (Modell A)."""
+    data = await request.json()
+    parent = _kb_norm_rel(data.get("parent") or "")
+    name = (data.get("name") or "").strip()
+    if _kb_configured_root_for(parent) is None:
+        return JSONResponse({"error": f"Übergeordneter Ordner '{parent}' nicht konfiguriert"},
+                            status_code=404)
+    err = _kb_validate_folder_name(name)
+    if err:
+        return JSONResponse({"error": err}, status_code=400)
+    if _kb_safe_within_data(parent) is None:
+        return JSONResponse({"error": "Ungültiger übergeordneter Ordner"}, status_code=400)
+    new_rel = f"{parent}/{name}"
+    target = _kb_safe_within_data(new_rel)
+    if target is None:
+        return JSONResponse({"error": "Ungültiger Ordnername"}, status_code=400)
+    if target.exists():
+        return JSONResponse({"error": f"Ordner '{new_rel}' existiert bereits"}, status_code=409)
+    try:
+        target.mkdir(parents=True)
+    except OSError as e:
+        return JSONResponse({"error": f"Anlegen fehlgeschlagen: {e}"}, status_code=500)
+    return JSONResponse({"ok": True, "path": new_rel})
+
+
+@app.delete("/api/knowledge/subfolders")
+async def delete_knowledge_subfolder(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Loescht einen Unterordner samt indiziertem Wissen (TF-IDF + FAISS) und
+    Wissensgruppen-Zuordnungen. Body: ``{"path": "data/<...>/<sub>",
+    "delete_files": bool}``. Nur echte Unterordner – ein konfigurierter
+    Wurzelordner wird ueber die Ordner-Verwaltung entfernt."""
+    import shutil
+    from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
+                                         purge_folder_index)
+    data = await request.json()
+    rel = _kb_norm_rel(data.get("path") or "")
+    delete_files = bool(data.get("delete_files"))
+    if get_index_progress().get("running"):
+        return JSONResponse({"error": "Indizierung läuft – bitte warten"}, status_code=409)
+    root = _kb_configured_root_for(rel)
+    if root is None:
+        return JSONResponse({"error": f"Ordner '{rel}' nicht konfiguriert"}, status_code=404)
+    if rel == root:
+        return JSONResponse({"error": "Das ist ein Wurzelordner – bitte über die Ordner-Verwaltung entfernen"},
+                            status_code=400)
+    if _kb_safe_within_data(rel) is None:
+        return JSONResponse({"error": "Ungültiger Pfad"}, status_code=400)
+    # Index/Gruppen prefix-sauber bereinigen (gleiche Pfadform wie bei Indizierung)
+    removed = purge_folder_index(PROJECT_ROOT / rel)
+    deleted_dir = False
+    if delete_files:
+        resolved = _kb_safe_within_data(rel)
+        if resolved and resolved.exists():
+            try:
+                shutil.rmtree(resolved)
+                deleted_dir = True
+            except OSError as e:
+                return JSONResponse({"error": f"Löschen fehlgeschlagen: {e}"}, status_code=500)
+    return JSONResponse({"ok": True, "removed": removed, "deleted_dir": deleted_dir})
+
+
 @app.post("/api/knowledge/folders")
 async def create_knowledge_folder(request: Request, user: str = Depends(require_knowledge_editor)):
     """Legt einen neuen Wissens-Ordner unter data/ an und nimmt ihn in die Ordner-Liste auf.
@@ -6646,7 +6832,8 @@ async def upload_knowledge_files(
                 EXTENSIONS_XLSX | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO |
                 EXTENSIONS_IMAGE)
 
-    # Zielordner validieren
+    # Zielordner validieren – konfigurierter Wurzelordner ODER ein Unterordner
+    # darunter (Modell A: Unterordner erben die Wurzel).
     target = None
     for f in _get_folders():
         try:
@@ -6656,6 +6843,10 @@ async def upload_knowledge_files(
         if rel == folder or str(f) == folder:
             target = f
             break
+    if not target and _kb_configured_root_for(folder) is not None:
+        sub = _kb_safe_within_data(folder)
+        if sub is not None:
+            target = PROJECT_ROOT / _kb_norm_rel(folder)
 
     if not target:
         return JSONResponse({"error": f"Ordner '{folder}' nicht konfiguriert"}, status_code=400)
@@ -6769,7 +6960,15 @@ async def wissen_scope(user: str = Depends(require_auth)):
     groups = _editable_groups_for(user)
     configured = _kb_current_folder_list()
     allowed = _wissen_allowed_folders(user, groups)
-    folders = [{"path": p, "name": Path(p).name} for p in allowed]
+    # Jeder erlaubte Wurzelordner PLUS seine physischen Unterordner (Modell A:
+    # Unterordner erben die Gruppe der Wurzel). ``root`` bindet den Unterordner
+    # an seine Wurzel, damit der Client nach gewaehlten Gruppen filtern kann.
+    folders = []
+    for p in allowed:
+        folders.append({"path": p, "name": Path(p).name, "root": p, "depth": 0})
+        for sub in _kb_list_subfolders(p):
+            folders.append({"path": sub["path"], "name": sub["name"],
+                            "root": p, "depth": sub["depth"]})
     return JSONResponse({
         "ok": True, "user": user, "is_editor": _may_edit_knowledge(user),
         "is_admin": _user_is_admin(user),
@@ -6809,23 +7008,20 @@ async def wissen_upload(
         return JSONResponse({"error": err}, status_code=403)
     all_exts = (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX |
                 EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO | EXTENSIONS_IMAGE)
+    # Ziel: konfigurierter Wurzelordner ODER ein Unterordner darunter (Modell A).
+    root_rel = _kb_configured_root_for(folder)
     target = None
     target_rel = None
-    for f in _get_folders():
-        try:
-            rel = str(f.relative_to(PROJECT_ROOT))
-        except ValueError:
-            rel = str(f)
-        if rel == folder or str(f) == folder:
-            target = f
-            target_rel = rel
-            break
+    if root_rel is not None and _kb_safe_within_data(folder) is not None:
+        target_rel = _kb_norm_rel(folder)
+        target = PROJECT_ROOT / target_rel
     if not target:
         return JSONResponse({"error": f"Ordner '{folder}' nicht verfuegbar"}, status_code=400)
     # Speicherordner-Bindung der Gruppen serverseitig erzwingen: Nicht-Editoren
-    # duerfen nur in die Speicherordner der gewaehlten Gruppen schreiben.
+    # duerfen nur in die Speicherordner der gewaehlten Gruppen schreiben. Ein
+    # Unterordner erbt die Berechtigung seiner Wurzel -> ueber root_rel pruefen.
     sel_groups = [g for g in _editable_groups_for(user) if g["id"] in req_groups]
-    if target_rel not in _wissen_allowed_folders(user, sel_groups):
+    if root_rel not in _wissen_allowed_folders(user, sel_groups):
         return JSONResponse(
             {"error": f"Ordner '{folder}' ist den gewählten Wissensgruppen nicht zugeordnet"},
             status_code=403)

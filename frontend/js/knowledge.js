@@ -363,8 +363,20 @@ class JarvisKnowledgeManager {
             <div class="kb-grp-file-row" data-path="${KG.esc(p)}">
                 <span class="kb-file-icon">📄</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
+                <button class="kb-btn-view-file kb-grp-tag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.assign_title') || 'Wissensgruppen bearbeiten'}">🏷</button>
                 <button class="kb-btn-remove kb-grp-untag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.remove') || 'Aus Gruppe entfernen'}">✕</button>
             </div>`).join('') + `</div>`;
+        // Wissensgruppen des Eintrags bearbeiten (Popover) – danach Liste auffrischen
+        box.querySelectorAll('.kb-grp-tag').forEach(btn => {
+            btn.onclick = () => {
+                if (!window.KbGroups) return;
+                window.KbGroups.openTagPopover(btn, btn.dataset.path, async () => {
+                    await KG.load();
+                    this._renderGroupsOverview();
+                    this._showGroupFiles(gid);
+                });
+            };
+        });
         box.querySelectorAll('.kb-grp-untag').forEach(btn => {
             btn.onclick = async () => {
                 const path = btn.dataset.path;
@@ -418,10 +430,22 @@ class JarvisKnowledgeManager {
             <div class="kb-grp-file-row" data-path="${KG.esc(p)}">
                 <span class="kb-file-icon">📄</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
+                <button class="kb-btn-view-file kb-grp-tag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.assign_title') || 'Wissensgruppen bearbeiten'}">🏷</button>
                 <button class="kb-btn-remove kb-ung-del" data-path="${KG.esc(p)}" title="${T('knowledge.file_delete_title', 'Datei löschen')}">✕</button>
             </div>`).join('');
         this._setupRowSelection(box, '.kb-grp-file-row', (paths) =>
             this._bulkDeleteFiles(paths, () => { this._renderGroupsOverview(); return this._showUngroupedFiles(); }));
+        // Wissensgruppen zuweisen (Popover) – danach Ansicht auffrischen
+        box.querySelectorAll('.kb-grp-tag').forEach(btn => {
+            btn.onclick = () => {
+                if (!window.KbGroups) return;
+                window.KbGroups.openTagPopover(btn, btn.dataset.path, async () => {
+                    await KG.load();
+                    this._renderGroupsOverview();
+                    this._showUngroupedFiles();
+                });
+            };
+        });
         box.querySelectorAll('.kb-ung-del').forEach(btn => {
             btn.onclick = async () => {
                 const path = btn.dataset.path;
@@ -565,12 +589,14 @@ class JarvisKnowledgeManager {
         // Listener nur einmal pro Box-Element anhaengen (innerHTML-Neuaufbau entfernt sie nicht).
         if (box._filePreviewBound) return;
         box._filePreviewBound = true;
+        // Vorschau wird ueber das Datei-SYMBOL ausgeloest (nicht ueber den
+        // Dateinamen) – so bleibt der Name frei fuer Auswahl/Klick.
         box.addEventListener('mouseover', e => {
-            const anchor = e.target.closest('.kb-file-name');
+            const anchor = e.target.closest('.kb-file-icon');
             if (anchor && box.contains(anchor)) show(anchor);
         });
         box.addEventListener('mouseout', e => {
-            const anchor = e.target.closest('.kb-file-name');
+            const anchor = e.target.closest('.kb-file-icon');
             if (!anchor) return;
             if (e.relatedTarget && (tip === e.relatedTarget || tip.contains(e.relatedTarget))) return;
             tip._scheduleHide();

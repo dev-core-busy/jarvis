@@ -186,6 +186,7 @@
         $('wi-upload-groups').innerHTML = groupBoxes('up');
         updateFolderOptions();
         updateDropState();   // Ablage-Sperre initial setzen (keine Gruppe = gesperrt + Hinweis)
+        updateActionState(); // "Extrahieren" nur bei gewaehlter Gruppe aktiv
 
         // Massenzuordnung + Wissensgruppen-Verwaltung nur fuer globale Wissens-Editoren
         var mSec = $('wi-sec-matrix');
@@ -229,11 +230,15 @@
         }
     }
 
-    function groupBoxes(prefix) {
+    function groupBoxes(prefix, preselect) {
+        // Im Review ('rev') werden standardmaessig die im Extraktor ('up') gewaehlten
+        // Wissensgruppen vorbelegt, damit die Auswahl nach „Prüfen" erhalten bleibt.
+        var pre = preselect || (prefix === 'rev' ? checkedGroups('up') : []);
         return SCOPE.groups.map(function (g) {
+            var checked = (SCOPE.groups.length === 1) || (pre.indexOf(g.id) !== -1);
             return '<label class="wi-grpbox" style="border-color:' + esc(g.color) + ';">'
                 + '<input type="checkbox" class="wi-grp-' + prefix + '" value="' + esc(g.id) + '"'
-                + (SCOPE.groups.length === 1 ? ' checked' : '') + '>'
+                + (checked ? ' checked' : '') + '>'
                 + '<span style="font-weight:600;">' + esc(g.name) + '</span></label>';
         }).join('');
     }
@@ -260,12 +265,30 @@
             else { hint.style.display = 'none'; }
         }
     }
+    // "Extrahieren" ist nur startbar, wenn mindestens eine Wissensgruppe gewaehlt
+    // ist (und keine Analyse laeuft) – gilt fuer alle Eingabearten (URL/Datei/CF).
+    function actionEnabled() { return !_busy && !_cfJobId && checkedGroups('up').length > 0; }
+    function updateActionState() {
+        var b = $('wi-extract-btn'); if (b) b.disabled = !actionEnabled();
+    }
+    // Fortschritts-/Statuszeile in der Aktionsreihe setzen; fuehrendes ⏳ wird
+    // als animiertes Sanduhr-Symbol dargestellt.
+    function setProgress(msg, color) {
+        var el = $('wi-extract-progress'); if (!el) return;
+        el.style.color = color || 'var(--text-secondary)';
+        var m = msg || '';
+        if (m.charAt(0) === '⏳') {
+            el.innerHTML = '<span class="wi-hourglass">⏳</span>' + esc(m.slice(1));
+        } else {
+            el.textContent = m;
+        }
+    }
     function setBusy(on, genQ) {
         _busy = !!on;
         var b = $('wi-busy'), bt = $('wi-busy-text');
         if (b) b.classList.toggle('hidden', !_busy);
         if (_busy && bt) bt.textContent = genQ ? t('wissen.busy_genq') : t('wissen.busy_upload');
-        var ub = $('wi-extract-btn'); if (ub) ub.disabled = _busy;   // Aktion mitsperren
+        updateActionState();   // Aktion mitsperren (Busy ODER keine Gruppe)
         updateDropState();
     }
 
@@ -567,6 +590,8 @@
 
     // Universeller "Extrahieren"-Button: löst je nach aktivem Tab die passende Aktion aus.
     function doExtract() {
+        // Ohne gewaehlte Wissensgruppe kein Start (Button ist ohnehin gesperrt).
+        if (checkedGroups('up').length === 0) { setProgress(t('wissen.pick_group'), 'var(--danger)'); return; }
         if (_extTab === 'cf') { importCf(); return; }
         if (_extTab === 'file') {
             if (canUpload()) $('wi-file-input').click(); else updateDropState();
@@ -736,28 +761,29 @@
         body.job_id = jobId;
         var btn = $('wi-extract-btn'), cancel = $('wi-extract-cancel');
         if (btn) btn.disabled = true;
-        if (st) { st.style.color = 'var(--text-secondary)'; st.textContent = t('wissen.cf_starting'); }
+        if (st) st.textContent = '';                 // Auswahl-Hinweis loeschen
+        setProgress(t('wissen.cf_starting'));         // Fortschritt in der Aktionsreihe
         fetch('/api/wissen/extract/confluence', { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) })
             .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
             .then(function (res) {
                 var j = res.j || {};
-                if (res.status === 499) { if (st) st.textContent = t('wissen.cf_cancelled'); if (btn) btn.disabled = false; _cfJobId = null; return; }
+                if (res.status === 499) { setProgress(t('wissen.cf_cancelled')); if (btn) btn.disabled = false; _cfJobId = null; updateActionState(); return; }
                 if (res.status >= 400) {
-                    if (st) { st.style.color = 'var(--danger)'; st.textContent = '✗ ' + (j.error || t('common.error')); }
-                    if (btn) btn.disabled = false; _cfJobId = null; return;
+                    setProgress('✗ ' + (j.error || t('common.error')), 'var(--danger)');
+                    if (btn) btn.disabled = false; _cfJobId = null; updateActionState(); return;
                 }
                 if (bulk) {
                     if (cancel) cancel.style.display = '';
                     watchCf(jobId, j.total || 0);
                 } else {
-                    if (btn) btn.disabled = false;
                     _cfJobId = null;
-                    if (st) st.textContent = '';
+                    setProgress('');
+                    updateActionState();
                     showReview(j); loadPending();
                     $('wi-ext-review').scrollIntoView({ behavior: 'smooth' });
                 }
             })
-            .catch(function () { if (st) { st.style.color = 'var(--danger)'; st.textContent = t('wissen.cf_failed'); } if (btn) btn.disabled = false; _cfJobId = null; });
+            .catch(function () { setProgress(t('wissen.cf_failed'), 'var(--danger)'); if (btn) btn.disabled = false; _cfJobId = null; updateActionState(); });
     }
 
     // Bulk-Fortschritt pollen und Statuszeile mit Countdown stehen lassen.
@@ -765,7 +791,7 @@
         if (!jobId) return;
         clearInterval(_cfPoll);
         var started = Date.now();
-        var st = $('wi-cf-status'), btn = $('wi-extract-btn'), cancel = $('wi-extract-cancel');
+        var cancel = $('wi-extract-cancel');
         function tick() {
             fetch('/api/wissen/extract/progress?job_id=' + encodeURIComponent(jobId), { headers: authH() })
                 .then(function (r) { return r.json(); })
@@ -777,18 +803,16 @@
                     if (running) {
                         var remaining = Math.max(0, total - done);
                         var secs = Math.round((Date.now() - started) / 1000);
-                        if (st) { st.style.color = 'var(--text-secondary)'; st.textContent = t('wissen.cf_progress', { r: remaining, n: total, s: secs }); }
+                        setProgress(t('wissen.cf_progress', { r: remaining, n: total, s: secs }));
                         loadPending();
                         return;
                     }
                     clearInterval(_cfPoll); _cfPoll = null; _cfJobId = null;
-                    if (btn) btn.disabled = false;
                     if (cancel) cancel.style.display = 'none';
+                    updateActionState();
                     loadPending();
-                    if (st) {
-                        if (done < total) { st.style.color = 'var(--warning)'; st.textContent = t('wissen.cf_stopped', { done: done, n: total }); }
-                        else { st.style.color = 'var(--success)'; st.textContent = t('wissen.cf_done', { n: total }); }
-                    }
+                    if (done < total) setProgress(t('wissen.cf_stopped', { done: done, n: total }), 'var(--warning)');
+                    else setProgress(t('wissen.cf_done', { n: total }), 'var(--success)');
                 })
                 .catch(function () { /* Netzfehler -> naechster Tick */ });
         }
@@ -799,12 +823,12 @@
     function abortCf() {
         var jid = _cfJobId; _cfJobId = null;
         clearInterval(_cfPoll); _cfPoll = null;
-        var cancel = $('wi-extract-cancel'), btn = $('wi-extract-btn');
+        var cancel = $('wi-extract-cancel');
         if (cancel) cancel.style.display = 'none';
-        if (btn) btn.disabled = false;
+        updateActionState();
         if (!jid) return;
         fetch('/api/wissen/extract/cancel', { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify({ job_id: jid }) })
-            .then(function () { var st = $('wi-cf-status'); if (st) st.textContent = t('wissen.cf_cancelled'); })
+            .then(function () { setProgress(t('wissen.cf_cancelled')); })
             .catch(function () {});
     }
 
@@ -836,6 +860,7 @@
         $('wi-upload-groups').addEventListener('change', function () {
             updateFolderOptions();   // Ordner-Angebot an die gewaehlten Gruppen anpassen
             updateDropState();
+            updateActionState();     // "Extrahieren" frei/gesperrt je nach Gruppenwahl
         });
 
         // Einklappbare Container (Zustand pro Browser gemerkt, analog Einstellungen).

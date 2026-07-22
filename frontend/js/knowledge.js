@@ -1193,7 +1193,8 @@ class JarvisKnowledgeManager {
             ? `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.folder_edit_title', 'Bearbeiten')}"
                     onclick="event.stopPropagation();window.knowledgeManager.editFolder('${sp}')">✏️</button>${addSub}<button class="kb-btn-remove" title="${T('knowledge.folder_remove_title', 'Ordner entfernen')}"
                     onclick="event.stopPropagation();window.knowledgeManager.removeFolder('${sp}')">✕</button>`
-            : `${addSub}<button class="kb-btn-remove" title="${T('knowledge.subfolder_remove_title', 'Unterordner löschen')}"
+            : `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.subfolder_rename_title', 'Unterordner umbenennen')}"
+                    onclick="event.stopPropagation();window.knowledgeManager.renameSubfolder('${sp}')">✏️</button>${addSub}<button class="kb-btn-remove" title="${T('knowledge.subfolder_remove_title', 'Unterordner löschen')}"
                     onclick="event.stopPropagation();window.knowledgeManager.deleteSubfolder('${sp}')">✕</button>`;
         return `
             <div class="kb-folder-item${isRoot ? '' : ' kb-subfolder-item'}" data-path="${this._escHtml(path)}">
@@ -1337,6 +1338,31 @@ class JarvisKnowledgeManager {
             const r = await resp.json().catch(() => ({}));
             if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
             this._showNotification(window.t('knowledge.subfolder_removed') || 'Unterordner entfernt', 'success');
+            const parent = path.split('/').slice(0, -1).join('/');
+            const pid = this._pathId(parent);
+            const bodyEl = document.getElementById(`${pid}-body`);
+            if (bodyEl && bodyEl.style.display !== 'none') await this._loadDir(parent, pid, bodyEl);
+            if (window.KbGroups) await this._refreshGroups();
+        } catch (e) {
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+        }
+    }
+
+    // Unterordner umbenennen. Gruppen werden weiter von der Wurzel geerbt (Modell A),
+    // daher nur Umbenennen – kein Gruppen-Dialog wie bei Wurzelordnern.
+    async renameSubfolder(path) {
+        const cur = path.split('/').pop();
+        const name = (window.prompt(window.t('knowledge.subfolder_rename_prompt') || 'Neuer Name des Unterordners:', cur) || '').trim();
+        if (!name || name === cur) return;
+        try {
+            const resp = await fetch('/api/knowledge/subfolders', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                body: JSON.stringify({ path, new_name: name })
+            });
+            const r = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
+            this._showNotification(window.t('knowledge.subfolder_renamed') || 'Unterordner umbenannt', 'success');
             const parent = path.split('/').slice(0, -1).join('/');
             const pid = this._pathId(parent);
             const bodyEl = document.getElementById(`${pid}-body`);

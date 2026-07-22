@@ -4436,8 +4436,9 @@ select option:hover {
     font-size: 0.85rem;
     flex-shrink: 0;
 }
-/* In der Gruppen-Dateiliste loest das Symbol (nicht der Name) die Vorschau aus */
-.kb-grp-file-row .kb-file-icon { cursor: help; }
+/* In Gruppen- UND Ordner-Dateiliste loest das Symbol (nicht der Name) die Vorschau aus */
+.kb-grp-file-row .kb-file-icon,
+.kb-file-item .kb-file-icon { cursor: help; }
 
 .kb-file-name {
     flex: 1;

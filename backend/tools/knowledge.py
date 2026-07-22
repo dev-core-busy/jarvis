@@ -536,6 +536,13 @@ def _load_cache() -> dict:
     return {"version": 1, "files": {}}
 
 
+def _is_pending_path(p) -> bool:
+    """True fuer den internen Entwurfs-Speicher (data/knowledge/pending/*.json).
+    Diese Extraktor-Entwuerfe sind KEIN Wissen und duerfen weder indiziert noch
+    in der Dokument-/Gruppenliste auftauchen."""
+    return "data/knowledge/pending/" in str(p or "").replace("\\", "/")
+
+
 def _indexed_rel_paths() -> list:
     """Alle Datei-Pfade, die im INDEX (lokale Wissensdatenbank) stehen.
 
@@ -547,7 +554,7 @@ def _indexed_rel_paths() -> list:
     paths = set()
     try:
         for p in _load_cache().get("files", {}).keys():
-            if p:
+            if p and not _is_pending_path(p):
                 paths.add(p)
     except Exception:
         pass
@@ -556,7 +563,7 @@ def _indexed_rel_paths() -> list:
         if _meta.exists() and _meta.stat().st_size > 10:
             for m in json.loads(_meta.read_text(encoding="utf-8")):
                 fp = m.get("file_path")
-                if fp:
+                if fp and not _is_pending_path(fp):
                     paths.add(fp)
     except Exception:
         pass
@@ -578,8 +585,10 @@ def known_paths_with_disk() -> list:
     except Exception:
         pass
     # Versteckte/interne Dateien ausschliessen – faengt auch evtl. frueher
-    # indizierte Alt-Eintraege ab (z.B. das Manifest .groups.json).
-    return [p for p in paths if not os.path.basename(p).startswith(".")]
+    # indizierte Alt-Eintraege ab (z.B. das Manifest .groups.json oder die
+    # Entwurfs-JSONs unter data/knowledge/pending/).
+    return [p for p in paths
+            if not os.path.basename(p).startswith(".") and not _is_pending_path(p)]
 
 
 # Kleiner mtime-Cache fuer den Disk-Scan der Inhalts-Suche
@@ -765,8 +774,11 @@ def _all_files(folders: list[Path]) -> list[Path]:
             continue
         try:
             for root, dirs, fs in os.walk(folder, onerror=lambda e: None):
-                # Versteckte Verzeichnisse nicht betreten (z.B. .git, .cache)
-                dirs[:] = [d for d in dirs if not d.startswith(".")]
+                # Versteckte Verzeichnisse nicht betreten (z.B. .git, .cache) und
+                # den internen Entwurfs-Speicher (data/knowledge/pending) auslassen –
+                # Extraktor-Entwuerfe sind KEIN Wissensdokument.
+                dirs[:] = [d for d in dirs if not d.startswith(".")
+                           and not _is_pending_path(os.path.join(root, d) + "/")]
                 for f in fs:
                     # Versteckte/interne Dateien ueberspringen – z.B. das
                     # Gruppen-Manifest data/knowledge/.groups.json ist KEIN

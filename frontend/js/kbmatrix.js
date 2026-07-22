@@ -17,6 +17,19 @@ window.KbMatrix = (function () {
             ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     }
     function _attr(s) { return _esc(s); }
+    // Dateisymbol nach Endung (PDF eigenes Symbol; Bild/Office/Medien passend).
+    function _fileIcon(path) {
+        const ext = String(path || '').split('.').pop().toLowerCase();
+        if (ext === 'pdf') return '📕';
+        if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tif', 'tiff'].includes(ext)) return '🖼️';
+        if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) return '📝';
+        if (['xls', 'xlsx', 'ods', 'csv'].includes(ext)) return '📊';
+        if (['ppt', 'pptx', 'odp'].includes(ext)) return '📽️';
+        if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext)) return '🎵';
+        if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) return '🎬';
+        if (['zip', 'tar', 'gz', '7z', 'rar'].includes(ext)) return '🗜️';
+        return '📄';
+    }
     function T(k, d) { return (window.t && window.t(k)) || d; }
 
     let _rows = [];      // [{path,name,desc,source,docId,doc}]
@@ -106,7 +119,7 @@ window.KbMatrix = (function () {
         const cols  = ov.querySelectorAll('.kbm-table col');
         const G = _groups.length;
         const avail = Math.max(360, (wrap.clientWidth || 900) - 2);
-        const groupW = 46, actW = 48, iconW = 34;   // Symbol-Spalte bewusst schmal
+        const groupW = 46, actW = 48, iconW = 40;   // Symbol-Spalte schmal, aber ohne Abschneiden
         const textAvail = Math.max(240, avail - (iconW + G * groupW + 2 * actW));
         const nameW = Math.round(textAvail * 0.30);
         const descW = Math.round(textAvail * 0.45);
@@ -154,7 +167,7 @@ window.KbMatrix = (function () {
                 : `<td class="kbm-c-text"></td>`;
             // Symbol-Spalte (schmal): loest die Hover-Vorschau aus (Bild/PDF/Text).
             return `<tr data-path="${_attr(row.path)}">
-                <td class="kbm-c-icon"><span class="kb-file-icon">📄</span></td>
+                <td class="kbm-c-icon"><span class="kb-file-icon">${_fileIcon(row.path)}</span></td>
                 <td class="kbm-c-text" title="${_attr(row.path)}">${_esc(row.name)}</td>
                 ${descTd}
                 <td class="kbm-c-text" title="${_attr(row.source)}">${_esc(row.source)}</td>

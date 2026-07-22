@@ -2532,8 +2532,12 @@ body.kbm-resizing { cursor: col-resize; user-select: none; }
 }
 /* Medien (Bild/PDF) im Matrix-Tooltip: kein Textumbruch-Zwang. */
 .kbm-tip.kbm-tip-media { white-space: normal; padding: 8px; resize: none; }
-/* Schmale Symbol-Spalte; das Symbol loest die Vorschau aus. */
-.kbm-c-icon { text-align: center; }
+/* Schmale Symbol-Spalte; das Symbol loest die Vorschau aus. Kein Ellipsis/
+   Padding-Overhead, sonst wird das Emoji als "📄…" abgeschnitten. */
+.kbm-c-icon {
+    text-align: center; padding-left: 2px; padding-right: 2px;
+    overflow: visible; text-overflow: clip;
+}
 .kbm-c-icon .kb-file-icon { cursor: help; }
 /* Sortierbare Spaltenkoepfe */
 .kbm-table thead th.kbm-sortable { cursor: pointer; }

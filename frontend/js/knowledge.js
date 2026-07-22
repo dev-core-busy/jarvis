@@ -1179,10 +1179,13 @@ class JarvisKnowledgeManager {
 
     // HTML eines Ordner-Knotens. Wurzeln behalten Bearbeiten/Entfernen; Unterordner
     // bekommen Löschen. Beide erhalten "Unterordner erstellen" (➕).
-    _folderNodeHtml(path, exists, isRoot) {
+    _folderNodeHtml(path, exists, isRoot, hasChildren) {
         const id = this._pathId(path);
         const sp = path.replace(/'/g, "\\'");
         const name = isRoot ? path : path.split('/').pop();
+        // Symbol richtet sich danach, ob der Ordner Unterordner enthält:
+        // 🗂️ = mit Unterordnern, 📁 = ohne, ⚠️ = existiert nicht.
+        const icon = exists === false ? '⚠️' : (hasChildren ? '🗂️' : '📁');
         const T = (k, d) => (window.t && window.t(k)) || d;
         const addSub = `<button class="kb-btn-remove kb-btn-addsub" title="${T('knowledge.subfolder_create_title', 'Unterordner erstellen')}"
                 onclick="event.stopPropagation();window.knowledgeManager.createSubfolder('${sp}')">➕</button>`;
@@ -1197,7 +1200,7 @@ class JarvisKnowledgeManager {
                 <div class="kb-folder-header">
                     <button class="kb-folder-toggle" title="${T('knowledge.folder_files_title', 'Dateien anzeigen')}"
                         onclick="window.knowledgeManager.toggleDir('${sp}', '${id}')">
-                        <span class="kb-folder-icon">${exists === false ? '⚠️' : (isRoot ? '📁' : '📂')}</span>
+                        <span class="kb-folder-icon">${icon}</span>
                         <span class="kb-folder-path" title="${this._escHtml(path)}">${this._escHtml(name)}</span>
                         <span class="kb-folder-arrow" id="${id}-arr">▶</span>
                     </button>
@@ -1214,7 +1217,7 @@ class JarvisKnowledgeManager {
             el.innerHTML = `<div class="kb-empty">${window.t('knowledge.no_folders')}</div>`;
             return;
         }
-        el.innerHTML = folders.map(f => this._folderNodeHtml(f.path, f.exists, true)).join('');
+        el.innerHTML = folders.map(f => this._folderNodeHtml(f.path, f.exists, true, f.has_children)).join('');
     }
 
     // Ordner auf-/zuklappen; lädt Unterordner + Dateien per /api/knowledge/browse.
@@ -1245,7 +1248,7 @@ class JarvisKnowledgeManager {
             }
             const data = await resp.json();
             const subs = (data.subfolders || []).map(sf =>
-                this._folderNodeHtml(sf.path, true, false)).join('');
+                this._folderNodeHtml(sf.path, true, false, sf.has_children)).join('');
             const files = data.files || [];
             const bar = files.length ? `<div class="kb-bulk-bar hidden" id="${id}-bulk">
                     <button class="btn-secondary kb-bulk-del" type="button">${window.t('knowledge.bulk_delete') || 'Auswahl löschen'} (<span class="kb-bulk-count">0</span>)</button>
@@ -1258,6 +1261,13 @@ class JarvisKnowledgeManager {
             if (files.length) inner += `<div class="kb-node-files">${bar}${rows}</div>`;
             if (!inner) inner = `<div class="kb-files-empty">${window.t('knowledge.no_files')}</div>`;
             body.innerHTML = inner;
+            // Kopf-Symbol dieses Knotens an die tatsächlichen Unterordner angleichen
+            // (deckt Anlegen/Löschen von Unterordnern ab, ohne Voll-Refresh).
+            const hdrIcon = body.previousElementSibling
+                && body.previousElementSibling.querySelector('.kb-folder-icon');
+            if (hdrIcon && hdrIcon.textContent !== '⚠️') {
+                hdrIcon.textContent = (data.subfolders && data.subfolders.length) ? '🗂️' : '📁';
+            }
             // Auswahl/Vorschau NUR auf die direkten Dateien dieses Knotens binden
             // (verschachtelte Unterordner-Dateien haben eigene Container).
             const nodeFiles = body.querySelector(':scope > .kb-node-files');
@@ -1331,7 +1341,6 @@ class JarvisKnowledgeManager {
             const pid = this._pathId(parent);
             const bodyEl = document.getElementById(`${pid}-body`);
             if (bodyEl && bodyEl.style.display !== 'none') await this._loadDir(parent, pid, bodyEl);
-            await this.fetchStats();
             if (window.KbGroups) await this._refreshGroups();
         } catch (e) {
             this._showNotification(window.t('common.error') + ': ' + e.message, 'error');

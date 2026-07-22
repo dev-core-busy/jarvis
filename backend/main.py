@@ -6652,6 +6652,47 @@ async def delete_knowledge_subfolder(request: Request, user: str = Depends(requi
     return JSONResponse({"ok": True, "removed": removed, "deleted_dir": deleted_dir})
 
 
+@app.put("/api/knowledge/subfolders")
+async def rename_knowledge_subfolder(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Benennt einen Unterordner um – das indizierte Wissen (TF-IDF + FAISS ohne
+    Neu-Embedding) und die Wissensgruppen-Zuordnungen ziehen prefix-sauber mit.
+    Body: ``{"path": "data/<...>/<sub>", "new_name": "<neu>"}``. Nur echte
+    Unterordner; die Gruppen-Berechtigung wird weiter von der Wurzel geerbt."""
+    from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
+                                         relocate_folder_index)
+    data = await request.json()
+    rel = _kb_norm_rel(data.get("path") or "")
+    new_name = (data.get("new_name") or "").strip()
+    if get_index_progress().get("running"):
+        return JSONResponse({"error": "Indizierung läuft – bitte warten"}, status_code=409)
+    root = _kb_configured_root_for(rel)
+    if root is None:
+        return JSONResponse({"error": f"Ordner '{rel}' nicht konfiguriert"}, status_code=404)
+    if rel == root:
+        return JSONResponse({"error": "Das ist ein Wurzelordner – bitte über die Ordner-Verwaltung umbenennen"},
+                            status_code=400)
+    err = _kb_validate_folder_name(new_name)
+    if err:
+        return JSONResponse({"error": err}, status_code=400)
+    if _kb_safe_within_data(rel) is None:
+        return JSONResponse({"error": "Ungültiger Pfad"}, status_code=400)
+    parent = rel.rsplit("/", 1)[0]
+    new_rel = f"{parent}/{new_name}"
+    if _kb_safe_within_data(new_rel) is None:
+        return JSONResponse({"error": "Ungültiger Ordnername"}, status_code=400)
+    old_abs = PROJECT_ROOT / rel
+    new_abs = PROJECT_ROOT / new_rel
+    if new_abs.exists():
+        return JSONResponse({"error": f"Ordner '{new_rel}' existiert bereits"}, status_code=409)
+    if old_abs.exists():
+        try:
+            old_abs.rename(new_abs)
+        except OSError as e:
+            return JSONResponse({"error": f"Umbenennen fehlgeschlagen: {e}"}, status_code=500)
+    moved = relocate_folder_index(old_abs, new_abs)
+    return JSONResponse({"ok": True, "path": new_rel, "moved": moved})
+
+
 @app.post("/api/knowledge/folders")
 async def create_knowledge_folder(request: Request, user: str = Depends(require_knowledge_editor)):
     """Legt einen neuen Wissens-Ordner unter data/ an und nimmt ihn in die Ordner-Liste auf.

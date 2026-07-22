@@ -4457,8 +4457,8 @@ select option:hover {
     display: flex;
     align-items: center;
     justify-content: center;
-    opacity: 0.55;   /* dauerhaft sichtbar (vorher 0 -> erst bei Mouseover) */
-    transition: opacity 0.15s, color 0.15s, background 0.15s;
+    opacity: 1;   /* immer voll sichtbar (kein Mouseover mehr noetig) */
+    transition: color 0.15s, background 0.15s;
 }
 
 .kb-file-item:hover .kb-btn-delete-file {
@@ -4483,8 +4483,8 @@ select option:hover {
     display: flex;
     align-items: center;
     justify-content: center;
-    opacity: 0;
-    transition: opacity 0.15s, color 0.15s, background 0.15s;
+    opacity: 1;   /* immer voll sichtbar (kein Mouseover mehr noetig) */
+    transition: color 0.15s, background 0.15s;
 }
 
 .kb-file-item:hover .kb-btn-view-file {

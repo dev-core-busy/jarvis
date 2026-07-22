@@ -335,6 +335,14 @@
         _initSessions();
         const _csNewBtn = $('cs-new');
         if (_csNewBtn && !_csNewBtn._wired) { _csNewBtn._wired = true; _csNewBtn.addEventListener('click', _newSession); }
+        const _csPreBtn = $('cs-preprompt');
+        if (_csPreBtn && !_csPreBtn._wired) { _csPreBtn._wired = true; _csPreBtn.addEventListener('click', _openPreprompt); }
+        const _ppSave = $('btn-preprompt-save');
+        if (_ppSave && !_ppSave._wired) { _ppSave._wired = true; _ppSave.addEventListener('click', _savePreprompt); }
+        const _ppClose = $('btn-preprompt-close');
+        if (_ppClose && !_ppClose._wired) { _ppClose._wired = true; _ppClose.addEventListener('click', _closePreprompt); }
+        const _ppModal = $('preprompt-modal');
+        if (_ppModal && !_ppModal._wired) { _ppModal._wired = true; _ppModal.addEventListener('click', (e) => { if (e.target === _ppModal) _closePreprompt(); }); }
         const _csCol = $('cs-collapse'); if (_csCol && !_csCol._wired) { _csCol._wired = true; _csCol.addEventListener('click', () => _setSidebarCollapsed(true)); }
         const _csExp = $('cs-expand');   if (_csExp && !_csExp._wired) { _csExp._wired = true; _csExp.addEventListener('click', () => _setSidebarCollapsed(false)); }
         // Zuletzt gewählten Einklapp-Zustand wiederherstellen
@@ -1791,6 +1799,54 @@
         _renderSidebar();
         await _restoreHistory();        _updateContextIndicator();
         if (typeof msgInput !== 'undefined' && msgInput) msgInput.focus();
+    }
+
+    // ── Persönlicher Preprompt (Zahnrad neben "+ Neuer Chat") ────────────────
+    async function _openPreprompt() {
+        const modal = $('preprompt-modal');
+        const ta = $('preprompt-text');
+        const st = $('preprompt-status');
+        if (!modal || !ta) return;
+        if (st) st.textContent = '';
+        ta.value = '';
+        modal.classList.remove('hidden');
+        ta.focus();
+        try {
+            const r = await fetch('/api/chat/preprompt', { headers: _csHeaders() });
+            const d = await r.json();
+            if (d && d.ok) ta.value = d.preprompt || '';
+        } catch (e) {}
+    }
+
+    function _closePreprompt() {
+        const modal = $('preprompt-modal');
+        if (modal) modal.classList.add('hidden');
+    }
+
+    async function _savePreprompt() {
+        const ta = $('preprompt-text');
+        const st = $('preprompt-status');
+        const btn = $('btn-preprompt-save');
+        if (!ta) return;
+        if (btn) btn.disabled = true;
+        try {
+            const r = await fetch('/api/chat/preprompt', {
+                method: 'PUT',
+                headers: _csHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ preprompt: ta.value })
+            });
+            const d = await r.json();
+            if (d && d.ok) {
+                if (st) st.textContent = window.t('chat.preprompt_saved');
+                setTimeout(_closePreprompt, 700);
+            } else if (st) {
+                st.textContent = window.t('common.error');
+            }
+        } catch (e) {
+            if (st) st.textContent = window.t('common.error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
     }
 
     async function _renameSession(s) {

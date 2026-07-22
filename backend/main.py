@@ -3112,6 +3112,30 @@ async def chat_history_clear(user: str = Depends(require_auth)):
 # Jede Sitzung = eigener Unterordner mit Transkript + LLM-Kontext. Pro Benutzer
 # streng getrennt (require_auth liefert den angemeldeten Benutzer).
 
+@app.get("/api/chat/preprompt")
+async def chat_preprompt_get(user: str = Depends(require_auth)):
+    """Persoenlicher Preprompt des Benutzers (im /chat unter dem Zahnrad neben
+    "+ Neuer Chat" pflegbar). Wird dem System-Prompt des Hauptagenten
+    vorangestellt und gilt fuer alle Chats dieses Benutzers."""
+    from backend import chat_sessions as cs
+    return JSONResponse({"ok": True, "preprompt": cs.get_preprompt(user)})
+
+
+@app.put("/api/chat/preprompt")
+async def chat_preprompt_save(request: Request, user: str = Depends(require_auth)):
+    """Persoenlichen Preprompt des Benutzers speichern (leerer Text loescht ihn)."""
+    from backend import chat_sessions as cs
+    text = ""
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            text = body.get("preprompt") or ""
+    except Exception:  # noqa: BLE001
+        pass
+    saved = cs.save_preprompt(user, text)
+    return JSONResponse({"ok": True, "preprompt": saved})
+
+
 @app.get("/api/chat/sessions")
 async def chat_sessions_list(user: str = Depends(require_auth)):
     """Alle Chat-Sitzungen des Benutzers (neueste zuerst)."""

@@ -256,25 +256,56 @@ class JarvisTelemetryManager {
                 body.innerHTML = '<div class="kb-files-empty">' + window.t('telemetry.no_errors') + '</div>';
                 return;
             }
-            body.innerHTML = `
-                <table style="width:100%;border-collapse:collapse;font-size:0.81rem;">
-                    <thead>
-                        <tr style="color:var(--text-secondary);text-align:left;border-bottom:1px solid var(--border);">
-                            <th style="padding:6px 10px;">Span</th>
-                            <th style="padding:6px 10px;">${window.t('telemetry.error_col')}</th>
-                            <th style="padding:6px 10px;text-align:right;">ms</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${[...errors].reverse().map(sp => `
-                            <tr style="border-bottom:1px solid rgba(var(--fg-rgb),0.04);vertical-align:top;">
-                                <td style="padding:6px 10px;font-family:var(--font-mono);color:var(--text-primary);white-space:nowrap;">${sp.name}</td>
-                                <td style="padding:6px 10px;color:var(--danger);word-break:break-word;">${(sp.error||'').replace(/</g,'&lt;')}</td>
-                                <td style="padding:6px 10px;text-align:right;color:var(--text-muted);">${sp.duration_ms}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>`;
+            const esc = s => String(s == null ? '' : s).replace(/</g, '&lt;');
+            // Aufklappbare Fehler-Karten: Kopfzeile mit Span/Aufgabe/Meldung/Zeit,
+            // Detailbereich mit Fehlertyp, Kontext (Modell, Agent-ID, Schritte)
+            // und – falls vorhanden – dem vollstaendigen Traceback.
+            body.innerHTML = [...errors].reverse().map(sp => {
+                const a = sp.attributes || {};
+                const ts = sp.ts ? new Date(sp.ts * 1000).toLocaleString('de-DE') : '';
+                const errType = a['error.type'] ? esc(a['error.type']) : '';
+                // str(e) ist bei manchen Exceptions leer -> Fallback-Text zeigen
+                const errShown = esc(sp.error) || `<span style="opacity:0.55;">${window.t('telemetry.no_error_msg')}</span>`;
+                const task = a.task ? esc(a.task) : '';
+                const tb = a['error.traceback'] ? esc(a['error.traceback']) : '';
+                const rows = [];
+                if (task)          rows.push([window.t('telemetry.err_task'),  task]);
+                if (a.model)       rows.push([window.t('telemetry.err_model'), esc(a.model)]);
+                if (a['agent.id']) rows.push(['Agent-ID', esc(a['agent.id'])]);
+                if (a.steps != null) rows.push([window.t('telemetry.steps_abbr'), esc(a.steps)]);
+                const detailRows = rows.map(([k, v]) =>
+                    `<div style="display:flex;gap:8px;margin-bottom:3px;">
+                        <span style="flex-shrink:0;color:var(--text-muted);min-width:88px;">${k}</span>
+                        <span style="color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${v}</span>
+                    </div>`).join('');
+                const tbHtml = tb
+                    ? `<div style="color:var(--text-muted);margin:8px 0 3px;">${window.t('telemetry.err_trace')}</div>
+                       <pre style="margin:0;padding:8px;background:rgba(var(--fg-rgb),0.05);border-radius:6px;font-size:0.72rem;color:var(--text-secondary);overflow-x:auto;white-space:pre;">${tb}</pre>`
+                    : '';
+                return `<div style="border:1px solid rgba(var(--danger-rgb),0.3);border-radius:7px;margin-bottom:5px;overflow:hidden;background:var(--bg-glass);">
+  <div class="conv-log-header" style="display:flex;align-items:center;gap:7px;padding:7px 11px;cursor:pointer;user-select:none;">
+    <span class="conv-log-chevron" style="color:var(--text-muted);font-size:0.68rem;flex-shrink:0;">▶</span>
+    <span style="font-family:var(--font-mono);font-size:0.78rem;color:var(--text-primary);flex-shrink:0;">${esc(sp.name)}</span>
+    <span style="flex:1;font-size:0.8rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${task}</span>
+    <span style="flex-shrink:0;font-size:0.8rem;color:var(--danger);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;">${errShown}</span>
+    <span style="flex-shrink:0;font-size:0.71rem;color:var(--text-muted);">${sp.duration_ms} ms</span>
+    <span style="flex-shrink:0;font-size:0.71rem;color:var(--text-muted);">${ts}</span>
+  </div>
+  <div style="display:none;padding:9px 12px;border-top:1px solid rgba(var(--fg-rgb),0.06);font-size:0.8rem;">
+    <div style="color:var(--danger);margin-bottom:7px;word-break:break-word;">❌ ${errType ? `<strong>${errType}:</strong> ` : ''}${errShown}</div>
+    ${detailRows}
+    ${tbHtml}
+  </div>
+</div>`;
+            }).join('');
+            body.querySelectorAll('.conv-log-header').forEach(hdr => {
+                hdr.addEventListener('click', () => {
+                    const b = hdr.nextElementSibling;
+                    const open = b.style.display === 'block';
+                    b.style.display = open ? 'none' : 'block';
+                    hdr.querySelector('.conv-log-chevron').textContent = open ? '▶' : '▼';
+                });
+            });
         } catch (e) {
             if (body) body.innerHTML = `<div class="kb-files-error">${window.t('telemetry.error_prefix')} ${e.message}</div>`;
         }

@@ -1350,13 +1350,23 @@ KRITISCH – Autonomie-Regeln:
                         _log(f"Auto-Learning fehlgeschlagen: {le}")
 
         except Exception as e:
-            import traceback; _log(f"EXCEPTION: {e}\n{traceback.format_exc()}")
+            import traceback; _tb = traceback.format_exc(); _log(f"EXCEPTION: {e}\n{_tb}")
             err_msg = _friendly_api_error(e)
             # WICHTIG: als highlight senden -> sichtbare Antwort-Bubble. Ohne highlight
             # wird die Fehlermeldung nur als dezente Status-Zeile gezeigt (und vom
             # Debug-Toggle ausgeblendet) -> der Nutzer sieht "keine Antwort".
             await self._send_status(ws, err_msg, highlight=True)
-            tracer.end_span(agent_span, status="error", error=str(e))
+            # Fehler-Span fuer die Telemetrie anreichern: str(e) ist bei manchen
+            # Exceptions leer (z.B. TimeoutError) -> dann den Exception-Typ als
+            # Meldung nehmen, damit das Fehler-Log nicht nur "agent:Hauptagent"
+            # ohne Text zeigt. Traceback + Modell/Step fuer die Diagnose ablegen.
+            agent_span.attributes["error.type"] = type(e).__name__
+            agent_span.attributes["error.traceback"] = _tb[-4000:]
+            agent_span.attributes["model"] = self.current_model
+            if 'steps' in locals():
+                agent_span.attributes["steps"] = steps
+            _err_detail = str(e).strip() or type(e).__name__
+            tracer.end_span(agent_span, status="error", error=_err_detail)
             agent_span = None  # Verhindern, dass finally nochmal beendet
             # History auch bei Fehler zurückspeichern
             if not self.is_sub_agent and chat_history:
@@ -1811,7 +1821,10 @@ KRITISCH – Autonomie-Regeln:
                 pass
             return result
         except Exception as e:
-            tracer.end_span(span, status="error", error=str(e))
+            import traceback as _tbmod
+            span.attributes["error.type"] = type(e).__name__
+            span.attributes["error.traceback"] = _tbmod.format_exc()[-4000:]
+            tracer.end_span(span, status="error", error=str(e).strip() or type(e).__name__)
             return f"Fehler bei {name}: {str(e)}"
 
     async def _handle_spawn(self, ws: WebSocket, label: str, task: str) -> str:

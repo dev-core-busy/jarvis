@@ -98,6 +98,10 @@
             border: 3px solid rgba(var(--accent-rgb), 0.25); border-top-color: var(--accent);
             animation: wiSpin 0.9s linear infinite; }
         @keyframes wiSpin { to { transform: rotate(360deg); } }
+        /* Animiertes Sanduhr-Symbol in der Import-Fortschrittszeile */
+        @keyframes wiHourglass { 0% { transform: rotate(0deg); } 70% { transform: rotate(0deg); } 100% { transform: rotate(180deg); } }
+        .wi-hourglass { display: inline-block; animation: wiHourglass 1.2s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .wi-hourglass { animation: none; } }
         .wi-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-top: 14px; }
         .wi-row > div { display: flex; flex-direction: column; gap: 4px; }
         .wi-row label { font-size: 0.78rem; color: var(--text-secondary); }
@@ -274,7 +278,9 @@
                 </label>
                 <!-- KI-Profil-Pulldown (wissen.js mountet ProfileSwitcher) -->
                 <span id="wi-prof-slot" style="margin-left:10px;"></span>
-                <span style="flex:1;"></span>
+                <!-- Import-/Extraktions-Fortschritt: sitzt zwischen den KI-Optionen
+                     und den Aktions-Buttons (Extrahieren/Abbrechen). -->
+                <span id="wi-extract-progress" class="wi-status" style="flex:1;min-width:140px;margin:0;text-align:right;"></span>
                 <button class="sec-btn primary" id="wi-extract-btn" type="button" data-i18n="wissen.extract">Extrahieren</button>
                 <button class="sec-btn danger" id="wi-extract-cancel" type="button" style="display:none;" data-i18n="common.cancel">Abbrechen</button>
             </div>
@@ -309,7 +315,7 @@
     <script src="/static/js/kbmatrix.js?v=8"></script>
     <script src="/static/js/ldap_picker.js?v=6"></script>
     <script src="/static/js/knowledge.js?v=69"></script>
-    <script src="/static/js/wissen.js?v=23"></script>
+    <script src="/static/js/wissen.js?v=24"></script>
     <script src="/static/js/branding.js?v=22"></script>
 </body>
 </html>

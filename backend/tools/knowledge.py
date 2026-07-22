@@ -921,7 +921,9 @@ async def rag_search(query: str, max_results: int = 8, groups=None) -> list[tupl
     folders = _get_folders()
     max_bytes = _get_max_bytes()
     cfg = _get_skill_config()
-    search_mode_cfg = cfg.get("search_mode", "auto")
+    # Wissenssuche laeuft ausschliesslich ueber die Vektor-/Datenbank-Suche.
+    # Der frueher waehlbare Suchmodus (Auto/TF-IDF/Vektor) wurde entfernt.
+    search_mode_cfg = "vector"
 
     # Bei aktivem Gruppenfilter ueber-abfragen, damit nach dem Filtern noch
     # genug Treffer uebrig bleiben.
@@ -1070,7 +1072,7 @@ def get_stats() -> dict:
         "vector_db_name": vector_db_name,
         "vector_db_version": vector_db_version,
         "vector_model": vector_model,
-        "search_mode": _get_skill_config().get("search_mode", "auto"),
+        "search_mode": "vector",
         "indexing": get_index_progress()["running"],
         "index_phase": get_index_progress()["phase"],
     }
@@ -1196,9 +1198,10 @@ class KnowledgeTool(BaseTool):
         folders = _get_folders()
         max_bytes = _get_max_bytes()
 
-        # Suchmodus aus Config: "auto" (default), "tfidf", "vector"
+        # Wissenssuche laeuft ausschliesslich ueber die Vektor-/Datenbank-Suche.
+        # Der frueher waehlbare Suchmodus (Auto/TF-IDF/Vektor) wurde entfernt.
         cfg = _get_skill_config()
-        search_mode_cfg = cfg.get("search_mode", "auto")
+        search_mode_cfg = "vector"
 
         # TF-IDF Cache nur laden wenn benoetigt (nicht bei reinem Vektor-Modus)
         # Spart bei 600+ Dateien das Laden aller Chunks in den RAM

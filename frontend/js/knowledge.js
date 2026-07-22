@@ -840,19 +840,7 @@ class JarvisKnowledgeManager {
                 </div>
             </div>
             <div class="kb-search-mode" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
-                <span class="kb-search-mode-label">${window.t('knowledge.search_mode_label')}</span>
-                <div class="kb-toggle-group">
-                    <button class="kb-toggle-btn ${mode === 'auto' ? 'active' : ''}"
-                        data-mode="auto" onclick="window.knowledgeManager.setSearchMode('auto')"
-                        title="${window.t('knowledge.search_auto_title')}">${window.t('knowledge.search_auto')}</button>
-                    <button class="kb-toggle-btn ${mode === 'tfidf' ? 'active' : ''}"
-                        data-mode="tfidf" onclick="window.knowledgeManager.setSearchMode('tfidf')"
-                        title="TF-IDF">${window.t('knowledge.search_tfidf')}</button>
-                    <button class="kb-toggle-btn ${mode === 'vector' ? 'active' : ''} ${dbBtnDisabled ? 'disabled' : ''}"
-                        data-mode="vector" onclick="window.knowledgeManager.setSearchMode('vector')"
-                        title="${dbBtnTitle}" ${dbBtnDisabled ? 'disabled' : ''}>${window.t('knowledge.search_vector')}</button>
-                </div>
-                <span class="kb-search-mode-label" style="margin-left:8px;">${window.t('knowledge.search_active_label')}</span>
+                <span class="kb-search-mode-label">${window.t('knowledge.search_active_label')}</span>
                 <span id="kb-active-label" style="font-size:0.75rem;">${activeText}</span>
             </div>
             <div class="kb-formats">

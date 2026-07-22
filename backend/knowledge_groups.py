@@ -20,6 +20,15 @@ MANIFEST_PATH = PROJECT_ROOT / "data" / "knowledge" / ".groups.json"
 # Virtuelle Gruppe fuer Dateien ohne Tag – NICHT im Manifest gespeichert.
 UNGROUPED_ID = "ungrouped"
 
+# System-Gruppe fuer automatisch erlerntes Wissen. Alle systemgenerierten
+# Wissensdateien (learning.py: conv_*.md, main.py-Feedback: feedback_*.md,
+# knowledge_compactor.py: konsolidiert/conv_konsolidiert_*.md) liegen unter
+# data/knowledge/learned/ und werden dieser Gruppe automatisch zugeordnet,
+# damit sie nicht als "ungruppiert" erscheinen.
+LEARNED_GROUP_NAME = "Erlernt"
+LEARNED_GROUP_COLOR = "#10b981"
+LEARNED_PATH_PREFIX = "data/knowledge/learned/"
+
 # Beim ersten Anlegen vorbelegte, feste Startgruppen.
 _SEED_GROUPS = [
     {"id": "ibs", "name": "IBS", "color": "#3b82f6", "order": 0},
@@ -403,6 +412,51 @@ def filter_paths_by_groups(rel_paths, group_ids) -> list:
         elif not gids and want_ungrouped:
             kept.append(p)
     return kept
+
+
+# ─── System-Wissen automatisch gruppieren ────────────────────────────────────
+
+def _ensure_group_unlocked(data: dict, name: str, color: str) -> str:
+    """Liefert die gid einer Gruppe mit diesem Namen (Slug-Vergleich); legt sie
+    an, falls keine existiert. Erwartet, dass ``_lock`` bereits gehalten wird
+    und dass der Aufrufer danach ``_save_unlocked`` ausfuehrt."""
+    target = _slugify(name)
+    for g in data.get("groups", []):
+        if g["id"] == target or _slugify(g.get("name", "")) == target:
+            return g["id"]
+    existing = _valid_ids(data)
+    gid = target
+    i = 2
+    while gid in existing:
+        gid = f"{target}-{i}"
+        i += 1
+    order = max((g.get("order", 0) for g in data.get("groups", [])), default=-1) + 1
+    data["groups"].append({"id": gid, "name": (name or gid).strip(),
+                           "color": color, "order": order})
+    return gid
+
+
+def auto_assign_system_files(all_rel_paths) -> int:
+    """Ordnet alle indizierten, noch NICHT zugeordneten systemgenerierten
+    Wissensdateien (unter data/knowledge/learned/) der Gruppe "Erlernt" zu und
+    legt diese Gruppe bei Bedarf an. Idempotent – schreibt nur, wenn es etwas
+    Neues zuzuordnen gibt. Deckt Bestand (Backfill) und neue Dateien ab.
+    Gibt die Anzahl neu zugeordneter Dateien zurueck."""
+    learned = [_rel(p) for p in (all_rel_paths or [])
+               if _rel(p).startswith(LEARNED_PATH_PREFIX)]
+    if not learned:
+        return 0
+    with _lock:
+        data = _load_unlocked()
+        assignments = data.setdefault("assignments", {})
+        todo = [p for p in learned if not assignments.get(p)]
+        if not todo:
+            return 0
+        gid = _ensure_group_unlocked(data, LEARNED_GROUP_NAME, LEARNED_GROUP_COLOR)
+        for p in todo:
+            assignments[p] = [gid]
+        _save_unlocked(data)
+        return len(todo)
 
 
 # ─── Wartung ─────────────────────────────────────────────────────────────────

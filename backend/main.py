@@ -7557,7 +7557,11 @@ async def knowledge_groups_list(user: str = Depends(require_auth)):
     try:
         # Zähl-Basis: Index + Platte (gleiche Basis wie die Dokumentlisten,
         # sonst zeigt der Badge weniger als die Liste; tote Shares abgefangen)
-        return JSONResponse({"ok": True, **kg.list_groups(known_paths_with_disk())})
+        paths = known_paths_with_disk()
+        # Systemgenerierte Dateien (data/knowledge/learned/*) automatisch der
+        # Gruppe "Erlernt" zuordnen, statt sie als "ungruppiert" zu zeigen.
+        kg.auto_assign_system_files(paths)
+        return JSONResponse({"ok": True, **kg.list_groups(paths)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -7587,7 +7591,11 @@ async def knowledge_groups_ungrouped(user: str = Depends(require_auth)):
     from backend import knowledge_groups as kg
     from backend.tools.knowledge import known_paths_with_disk
     try:
-        return JSONResponse({"ok": True, "files": kg.ungrouped_files(known_paths_with_disk())})
+        paths = known_paths_with_disk()
+        # Systemgenerierte Dateien (data/knowledge/learned/*) vorab der Gruppe
+        # "Erlernt" zuordnen – so bleiben sie konsistent aus "ungruppiert" raus.
+        kg.auto_assign_system_files(paths)
+        return JSONResponse({"ok": True, "files": kg.ungrouped_files(paths)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 

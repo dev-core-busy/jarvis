@@ -361,7 +361,7 @@ class JarvisKnowledgeManager {
             </div>`;
         box.innerHTML = title + barBulk + `<div class="kb-grp-file-list">` + files.map(p => `
             <div class="kb-grp-file-row" data-path="${KG.esc(p)}">
-                <span class="kb-file-icon">📄</span>
+                <span class="kb-file-icon">${this._fileIcon(p)}</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
                 <button class="kb-btn-view-file kb-grp-tag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.perms') || 'Berechtigungen verwalten'}">🔐</button>
                 <button class="kb-btn-remove kb-grp-untag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.remove') || 'Aus Gruppe entfernen'}">✕</button>
@@ -428,7 +428,7 @@ class JarvisKnowledgeManager {
             </div>`;
         box.innerHTML = title + barBulk + files.map(p => `
             <div class="kb-grp-file-row" data-path="${KG.esc(p)}">
-                <span class="kb-file-icon">📄</span>
+                <span class="kb-file-icon">${this._fileIcon(p)}</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
                 <button class="kb-btn-view-file kb-grp-tag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.perms') || 'Berechtigungen verwalten'}">🔐</button>
                 <button class="kb-btn-remove kb-ung-del" data-path="${KG.esc(p)}" title="${T('knowledge.file_delete_title', 'Datei löschen')}">✕</button>
@@ -475,6 +475,20 @@ class JarvisKnowledgeManager {
     // Maus-über-Vorschau fuer Datei-Zeilen in der Gruppen-/Ungruppiert-Ansicht:
     // Bilder/GIF/SVG -> <img>, PDF -> <iframe>, Text/JSON/MD/… -> Textvorschau
     // (wie in der Wissenstabelle). Inhalte werden lazy geladen und gecacht.
+    // Dateisymbol nach Endung (PDF eigenes Symbol; Bild/Office/Medien passend).
+    _fileIcon(path) {
+        const ext = String(path || '').split('.').pop().toLowerCase();
+        if (ext === 'pdf') return '📕';
+        if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tif', 'tiff'].includes(ext)) return '🖼️';
+        if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) return '📝';
+        if (['xls', 'xlsx', 'ods', 'csv'].includes(ext)) return '📊';
+        if (['ppt', 'pptx', 'odp'].includes(ext)) return '📽️';
+        if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext)) return '🎵';
+        if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) return '🎬';
+        if (['zip', 'tar', 'gz', '7z', 'rar'].includes(ext)) return '🗜️';
+        return '📄';
+    }
+
     _bindFilePreview(box) {
         if (!box) return;
         const token = () => localStorage.getItem('jarvis_token') || '';
@@ -1236,7 +1250,7 @@ class JarvisKnowledgeManager {
                     : '';
                 return `
                 <div class="kb-file-item" data-path="${esc(f.path)}" id="kb-file-${btoa(unescape(encodeURIComponent(f.path))).replace(/[^a-zA-Z0-9]/g, '')}">
-                    <span class="kb-file-icon">📄</span>
+                    <span class="kb-file-icon">${this._fileIcon(f.path)}</span>
                     <span class="kb-file-name" title="${esc(f.path)}">${esc(f.name)}</span>
                     <span class="kb-file-size">${esc(f.size)}</span>
                     ${tagBtn}

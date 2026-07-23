@@ -234,6 +234,87 @@
         for (var i = 0; i < offer.length; i++) {
             if (offer[i].path === cur) { sel.value = cur; break; }
         }
+        updateFolderBtnState();
+    }
+
+    // ── Unterordner anlegen/umbenennen (im eigenen Berechtigungsbereich) ──
+    // Der Server prueft die Berechtigung erneut gegen die Wissensgruppen des
+    // Nutzers – die Buttons hier steuern nur die Bedienbarkeit.
+
+    // Metadaten des aktuell gewaehlten Ordner-Eintrags aus dem Scope.
+    function currentFolderEntry() {
+        var sel = $('wi-folder');
+        if (!sel || !sel.value) return null;
+        var found = null;
+        (SCOPE.folders || []).forEach(function (f) { if (f.path === sel.value) found = f; });
+        return found;
+    }
+
+    function updateFolderBtnState() {
+        var entry = currentFolderEntry();
+        var bNew = $('wi-folder-new'), bRen = $('wi-folder-rename');
+        if (bNew) bNew.disabled = !entry;
+        // Wurzelordner (depth 0) bleiben der Admin-Flaeche vorbehalten
+        if (bRen) bRen.disabled = !entry || !(entry.depth > 0);
+    }
+
+    // Ordnerliste neu holen und danach denselben (oder einen neuen) Pfad waehlen.
+    function reloadFolders(selectPath) {
+        return fetch('/api/wissen/scope', { headers: authH() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.ok) return;
+                SCOPE = d;
+                updateFolderOptions();
+                var sel = $('wi-folder');
+                if (sel && selectPath) {
+                    sel.value = selectPath;
+                    updateFolderBtnState();
+                }
+            });
+    }
+
+    function folderStatus(msgText, isError) {
+        var st = $('wi-upload-status');
+        if (!st) return;
+        st.style.color = isError ? 'var(--danger)' : 'var(--success)';
+        st.textContent = (isError ? '✗ ' : '') + msgText;
+    }
+
+    function createSubfolder() {
+        var entry = currentFolderEntry();
+        if (!entry) return;
+        var name = (window.prompt(t('wissen.subfolder_prompt'), '') || '').trim();
+        if (!name) return;
+        fetch('/api/wissen/subfolders', {
+            method: 'POST', headers: authH({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ parent: entry.path, name: name })
+        })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d || {} }; }); })
+            .then(function (res) {
+                if (!res.ok || res.d.error) { folderStatus(res.d.error || t('common.error'), true); return; }
+                folderStatus(t('wissen.subfolder_created'));
+                return reloadFolders(res.d.path);
+            })
+            .catch(function () { folderStatus(t('wissen.conn_error'), true); });
+    }
+
+    function renameSubfolder() {
+        var entry = currentFolderEntry();
+        if (!entry || !(entry.depth > 0)) return;
+        var name = (window.prompt(t('wissen.subfolder_rename_prompt'), entry.name) || '').trim();
+        if (!name || name === entry.name) return;
+        fetch('/api/wissen/subfolders', {
+            method: 'PUT', headers: authH({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ path: entry.path, new_name: name })
+        })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d || {} }; }); })
+            .then(function (res) {
+                if (!res.ok || res.d.error) { folderStatus(res.d.error || t('common.error'), true); return; }
+                folderStatus(t('wissen.subfolder_renamed'));
+                return reloadFolders(res.d.path).then(function () { loadFiles(); });
+            })
+            .catch(function () { folderStatus(t('wissen.conn_error'), true); });
     }
 
     function groupBoxes(prefix, preselect) {
@@ -305,6 +386,21 @@
         if (isNaN(n) || n < 1) n = 20; if (n > 30) n = 30;
         return n;
     }
+    // Klartext zu einem HTTP-Status, wenn der Server keinen eigenen Fehlertext
+    // liefert (Proxy-Fehlerseiten, leere Bodies).
+    function httpHint(status) {
+        var map = {
+            401: t('wissen.http_401', 'Nicht angemeldet – bitte neu einloggen.'),
+            403: t('wissen.http_403', 'Keine Berechtigung für diesen Ordner bzw. diese Wissensgruppe.'),
+            404: t('wissen.http_404', 'Zielordner nicht gefunden.'),
+            409: t('wissen.http_409', 'Indizierung läuft gerade – bitte kurz warten.'),
+            413: t('wissen.http_413', 'Datei zu groß für den Server.'),
+            502: t('wissen.http_502', 'Server nicht erreichbar (502).'),
+            504: t('wissen.http_504', 'Zeitüberschreitung beim Hochladen (504).')
+        };
+        return map[status] || t('wissen.http_other', 'Unerwarteter Serverfehler.');
+    }
+
     function uploadFiles(fileList) {
         var st = $('wi-upload-status');
         var groups = checkedGroups('up');
@@ -327,13 +423,43 @@
         setBusy(true, genQ);   // prominentes Warten-Banner + Ablage-Sperre
         var cancel = $('wi-extract-cancel'); if (cancel) cancel.style.display = '';
         fetch('/api/wissen/upload', { method: 'POST', headers: authH(), body: fd, signal: _uploadAbort.signal })
-            .then(function (r) { return r.json(); })
+            // Antwort IMMER als Text lesen und selbst parsen: bei 413/502/504 oder einer
+            // Proxy-Fehlerseite kommt kein JSON – ein blosses r.json() wuerde werfen und
+            // die eigentliche Ursache im catch verschlucken.
+            .then(function (r) {
+                return r.text().then(function (body) {
+                    var d = null;
+                    try { d = JSON.parse(body); } catch (_) { /* kein JSON */ }
+                    if (!r.ok) {
+                        var detail = (d && (d.error || d.detail))
+                            || (body || '').replace(/<[^>]*>/g, ' ').trim().slice(0, 300)
+                            || httpHint(r.status);
+                        throw new Error('HTTP ' + r.status + ' – ' + detail);
+                    }
+                    return d || {};
+                });
+            })
             .then(function (d) {
                 d = d || {};
                 if (d.error) { st.style.color = 'var(--danger)'; st.textContent = '✗ ' + d.error; return; }
                 st.style.color = 'var(--success)';
                 var msg = t('wissen.saved_n', { n: d.total_saved || 0 })
                     + (d.total_rejected ? t('wissen.rejected_n', { n: d.total_rejected }) : '') + '.';
+                // ZIP-Upload: neu angelegte Unterordner melden und Ordnerauswahl nachziehen
+                if (d.created_dirs) {
+                    msg += ' ' + t('wissen.zip_dirs_n', { n: d.created_dirs });
+                    reloadFolders($('wi-folder') && $('wi-folder').value);
+                }
+                // Abgelehntes NIE nur zaehlen – der Grund je Datei muss sichtbar sein
+                // (z.B. "tool.exe: Format '.exe' nicht unterstuetzt" aus einem Archiv).
+                if (d.rejected && d.rejected.length) {
+                    st.style.color = 'var(--warning)';
+                    var shown = d.rejected.slice(0, 8).map(function (e) {
+                        return (e.name || '?') + ': ' + (e.reason || '?');
+                    }).join(' · ');
+                    if (d.rejected.length > 8) shown += ' … (+' + (d.rejected.length - 8) + ')';
+                    msg += ' ⚠ ' + shown;
+                }
                 if (d.qa_pending && d.qa_pending.length) msg += ' ' + t('wissen.genq_done', { n: d.qa_pending.length });
                 if (d.cancelled) { st.style.color = 'var(--warning)'; msg += ' ' + t('wissen.cancelled', 'Abgebrochen.'); }
                 if (d.qa_errors && d.qa_errors.length) {
@@ -354,8 +480,21 @@
                 }
             })
             .catch(function (e) {
-                if (e && e.name === 'AbortError') { st.style.color = 'var(--warning)'; st.textContent = t('wissen.cancelled', 'Abgebrochen.'); loadFiles(); loadPending(); }
-                else { st.style.color = 'var(--danger)'; st.textContent = t('wissen.upload_failed'); }
+                if (e && e.name === 'AbortError') {
+                    st.style.color = 'var(--warning)';
+                    st.textContent = t('wissen.cancelled', 'Abgebrochen.');
+                    loadFiles(); loadPending();
+                    return;
+                }
+                st.style.color = 'var(--danger)';
+                // Ursache IMMER mit ausgeben – ohne sie ist die Meldung wertlos.
+                // TypeError = fetch selbst gescheitert (Netz weg, Server nicht erreichbar,
+                // Verbindung waehrend eines grossen Uploads abgebrochen).
+                var why = (e && e.name === 'TypeError')
+                    ? t('wissen.upload_neterr', 'Verbindung zum Server abgebrochen (Netzwerk, Zeitüberschreitung oder Datei zu groß).')
+                    : (e && e.message ? e.message : String(e || '?'));
+                st.textContent = t('wissen.upload_failed') + ' ' + why;
+                console.error('[wissen] Upload fehlgeschlagen:', e);
             })
             .then(function () {
                 _uploadAbort = null; _uploadJobId = null;
@@ -930,6 +1069,12 @@
                 }
             });
         });
+        // Unterordner im eigenen Bereich anlegen/umbenennen
+        var fNew = $('wi-folder-new'), fRen = $('wi-folder-rename'), fSel = $('wi-folder');
+        if (fNew) fNew.addEventListener('click', createSubfolder);
+        if (fRen) fRen.addEventListener('click', renameSubfolder);
+        if (fSel) fSel.addEventListener('change', updateFolderBtnState);
+
         // Gruppen-Auswahl schaltet die Ablage frei/gesperrt (Checkboxen kommen per JS)
         $('wi-upload-groups').addEventListener('change', function () {
             updateFolderOptions();   // Ordner-Angebot an die gewaehlten Gruppen anpassen

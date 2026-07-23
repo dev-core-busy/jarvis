@@ -158,7 +158,39 @@ data/
   diese Frage der Top-Treffer – unabhaengig vom Inhalt (selbstverstaerkende Schleife).
 - TF-IDF (`_search()` + `knowledge_index.json`) existiert noch als Fallback, wenn FAISS
   fehlt; der frueher waehlbare Suchmodus (Auto/TF-IDF/Vektor) wurde entfernt.
+- **Verschieben ohne Neu-Embedding:** Beim Verschieben aendert sich nur die Adresse eines
+  Dokuments, nicht sein Inhalt – es werden ausschliesslich Metadaten umgeschrieben.
+  Ordner: `relocate_folder_index()` / `rename_path_prefix()`. Einzeldateien:
+  `relocate_file_index()` / `rename_file_path()`, API `POST /api/knowledge/files/move`
+  (`{paths[], target}`), Zielordner-Liste ueber `GET /api/knowledge/folder_tree`.
+  UI: 📂-Knopf je Datei + "Auswahl verschieben" in der Bulk-Leiste (Einstellungen → Wissen).
+  WICHTIG: Die Datei per `Path.rename()` verschieben – das laesst die mtime unveraendert,
+  und genau die vergleicht der inkrementelle Reindex. Wird sie angefasst, bettet der
+  naechste Lauf die Datei unnoetig neu ein. Verifiziert: 3 Chunks in 37 ms umgezogen,
+  Folge-Reindex 0.00 s ohne Neu-Embedding.
 - **numpy**: Muss < 2.1 bleiben (VM hat kein SSE4.2)
+
+## Wissens-Upload (/wissen → Informationsextraktor → Datei)
+- Einziger UI-Weg, um Dateien in einen Wissensordner zu legen: `POST /api/wissen/upload`.
+  Der frühere Upload in *Einstellungen → Wissen* wurde entfernt (die UI war schon weg,
+  der tote JS-/CSS-Code am 2026-07-23 aufgeräumt). `POST /api/knowledge/upload` existiert
+  weiter für API-Nutzung, hat aber KEINE Oberfläche mehr.
+- **ZIP-Archive** werden serverseitig entpackt (`_kb_unpack_zip` in main.py); die
+  Ordnerstruktur wird unter dem Zielordner nachgebildet, fehlende Unterordner angelegt,
+  jede Datei erbt die gewählte Wissensgruppe. Nicht unterstützte Formate im Archiv
+  werden einzeln abgelehnt, nicht das ganze Archiv.
+- Schutz: Zip-Slip (`..`, absolute Pfade), Symlinks, `__MACOSX`/versteckte Dateien,
+  Tiefenlimit 8. Umlaut-Fix für Windows-ZIPs, die UTF-8 OHNE Flag 0x800 schreiben
+  (`_zip_entry_name` – sonst wird "Handbücher" zu "Handb├╝cher").
+- **Grenzen:** 500 MB entpackt / 2000 Dateien / 2 GB freie Plattenreserve –
+  **globale Wissens-Editoren (`_may_edit_knowledge`) sind von ALLEN dreien
+  ausgenommen** (`max_total_bytes`/`max_entries`/`min_free_bytes` = `None`),
+  laden also voellig unbegrenzt hoch (bewusste Vorgabe 2026-07-23).
+- Das Archiv wird über `UploadFile.file` gelesen, NICHT über `await file.read()` –
+  sonst läge ein mehrere GB großes Archiv komplett im RAM.
+- **Unterordner anlegen/umbenennen** darf im Portal jeder Editor einer Gruppe, der der
+  Wurzelordner zugeordnet ist: `POST`/`PUT /api/wissen/subfolders`, Prüfung über
+  `_wissen_may_write_path()`. Wurzelordner bleiben der Admin-Fläche vorbehalten.
 
 ## Skill-System
 - Skills liegen unter `skills/<name>/` mit `skill.json` (Manifest) + `main.py` (get_tools())

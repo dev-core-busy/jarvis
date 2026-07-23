@@ -22,9 +22,6 @@ class JarvisKnowledgeManager {
                 if (e.key === 'Enter') this.addFolder();
             });
         }
-
-        // Drag & Drop Upload
-        this._initDropZone();
     }
 
     // ─── Init (wird beim Tab-Wechsel aufgerufen) ──────────────────────
@@ -44,8 +41,6 @@ class JarvisKnowledgeManager {
         if (!window.KbGroups) return;
         await window.KbGroups.load();
         this._renderGroupsOverview();
-        // Upload-Ziel-Gruppen (Mehrfachauswahl) rendern
-        window.KbGroups.renderCheckboxes(document.getElementById('kb-upload-groups'), []);
         // Gruppen-Auswahl fuer "Ordner neu anlegen" (Speicherordner-Zuordnung)
         window.KbGroups.renderCheckboxes(document.getElementById('kb-folder-groups'), []);
         // Die Massenzuordnungs-Tabelle (▦) wurde nach /wissen -> "Massenzuordnung"
@@ -288,7 +283,6 @@ class JarvisKnowledgeManager {
     async _refreshGroups() {
         await window.KbGroups.load();
         this._renderGroupsOverview();
-        window.KbGroups.renderCheckboxes(document.getElementById('kb-upload-groups'), []);
         window.KbGroups.renderCheckboxes(document.getElementById('kb-folder-groups'), []);
     }
 
@@ -649,94 +643,6 @@ class JarvisKnowledgeManager {
         } catch (_) {}
     }
 
-    // ─── Drag & Drop Upload ──────────────────────────────────────────
-
-    _initDropZone() {
-        const zone = document.getElementById('kb-drop-zone');
-        const input = document.getElementById('kb-file-input');
-        if (!zone || !input) return;
-
-        // Drag Events
-        zone.addEventListener('dragenter', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
-        zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
-        zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-        zone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            zone.classList.remove('dragover');
-            if (e.dataTransfer.files.length) this._uploadFiles(e.dataTransfer.files);
-        });
-
-        // Klick auf Zone oeffnet Datei-Dialog
-        zone.addEventListener('click', (e) => {
-            if (e.target.tagName !== 'LABEL') input.click();
-        });
-
-        // Datei-Input
-        input.addEventListener('change', () => {
-            if (input.files.length) this._uploadFiles(input.files);
-            input.value = '';
-        });
-    }
-
-    _getUploadTarget() {
-        const sel = document.getElementById('kb-upload-target');
-        return sel ? sel.value : 'data/knowledge';
-    }
-
-    _populateUploadTargets(folders) {
-        const sel = document.getElementById('kb-upload-target');
-        if (!sel || !folders) return;
-        sel.innerHTML = folders.map(f =>
-            `<option value="${f.path}" ${f.path === 'data/knowledge' ? 'selected' : ''}>${f.path}</option>`
-        ).join('');
-    }
-
-    async _uploadFiles(fileList) {
-        const status = document.getElementById('kb-upload-status');
-        const folder = this._getUploadTarget();
-
-        if (status) status.textContent = window.t('knowledge.uploading').replace('{n}', fileList.length);
-
-        const formData = new FormData();
-        formData.append('folder', folder);
-        // Gewählte Zielgruppen (logische Tags) mitschicken
-        if (window.KbGroups) {
-            const gids = window.KbGroups.readChecked(document.getElementById('kb-upload-groups'));
-            if (gids.length) formData.append('groups', gids.join(','));
-        }
-        for (const f of fileList) {
-            formData.append('files', f);
-        }
-
-        try {
-            const resp = await fetch('/api/knowledge/upload', {
-                method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
-                body: formData,
-            });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            const result = await resp.json();
-
-            let msg = window.t('knowledge.uploaded').replace('{saved}', result.total_saved);
-            if (result.total_rejected > 0) {
-                const names = result.rejected.map(r => r.name).join(', ');
-                msg += ` | ` + window.t('knowledge.rejected').replace('{n}', result.total_rejected).replace('{names}', names);
-            }
-            if (status) {
-                status.textContent = msg;
-                status.style.color = result.total_rejected > 0 ? 'var(--warning)' : 'var(--success)';
-                setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 5000);
-            }
-            this._showNotification(msg, result.total_rejected > 0 ? 'warning' : 'success');
-            await this.fetchStats();
-        } catch (e) {
-            if (status) {
-                status.textContent = window.t('knowledge.upload_failed').replace('{msg}', e.message);
-                status.style.color = 'var(--danger)';
-            }
-            this._showNotification(window.t('knowledge.upload_failed').replace('{msg}', e.message), 'error');
-        }
-    }
 
     // ─── Stats laden ──────────────────────────────────────────────────
 
@@ -762,7 +668,6 @@ class JarvisKnowledgeManager {
 
             this._renderStats(stats, learnedStats, compactStatus);
             this._renderFolders(stats.folders);
-            this._populateUploadTargets(stats.folders);
         } catch (e) {
             if (container) container.innerHTML = `<div class="kb-error">${window.t('knowledge.load_error').replace('{msg}', e.message)}</div>`;
         }
@@ -1257,6 +1162,7 @@ class JarvisKnowledgeManager {
                 this._folderNodeHtml(sf.path, true, false, sf.has_children)).join('');
             const files = data.files || [];
             const bar = files.length ? `<div class="kb-bulk-bar hidden" id="${id}-bulk">
+                    <button class="btn-secondary kb-bulk-move" type="button">${window.t('knowledge.bulk_move') || 'Auswahl verschieben'} (<span class="kb-bulk-count">0</span>)</button>
                     <button class="btn-secondary kb-bulk-del" type="button">${window.t('knowledge.bulk_delete') || 'Auswahl löschen'} (<span class="kb-bulk-count">0</span>)</button>
                     <button class="btn-secondary kb-bulk-clear" type="button">${window.t('knowledge.bulk_clear') || 'Auswahl aufheben'}</button>
                     <span class="kb-bulk-hint">${window.t('knowledge.bulk_hint') || 'Mehrfachauswahl: Klick oder mit der Maus aufziehen'}</span>
@@ -1279,7 +1185,8 @@ class JarvisKnowledgeManager {
             const nodeFiles = body.querySelector(':scope > .kb-node-files');
             if (nodeFiles) {
                 this._setupRowSelection(nodeFiles, '.kb-file-item', (paths) =>
-                    this._bulkDeleteFiles(paths, () => this._loadDir(path, id, body)));
+                    this._bulkDeleteFiles(paths, () => this._loadDir(path, id, body)),
+                    (paths) => this.moveFiles(paths, path));
                 this._bindFilePreview(nodeFiles);
             }
         } catch (e) {
@@ -1302,9 +1209,120 @@ class JarvisKnowledgeManager {
                     <span class="kb-file-name" title="${esc(f.path)}">${esc(f.name)}</span>
                     <span class="kb-file-size">${esc(f.size)}</span>
                     ${tagBtn}
+                    <button class="kb-btn-view-file kb-btn-move-file" title="${window.t('knowledge.file_move_title') || 'In anderen Ordner verschieben'}"
+                        onclick="window.knowledgeManager.moveFiles(['${safePath}'], '${dp}')">📂</button>
                     <button class="kb-btn-delete-file" title="${window.t('knowledge.file_delete_title')}"
                         onclick="window.knowledgeManager.deleteFile('${safePath}', '${dp}')">✕</button>
                 </div>`;
+    }
+
+    // ─── Dateien verschieben (ohne Neu-Embedding) ────────────────────
+    // Beim Verschieben aendert sich nur die Adresse eines Dokuments, nicht sein
+    // Inhalt. Das Backend schreibt daher lediglich die Index-Metadaten um – die
+    // Vektoren bleiben, ein Neu-Indizieren ist nicht noetig.
+    async moveFiles(paths, srcDirPath) {
+        if (!paths || !paths.length) return;
+        const T = (k, d) => window.t(k) || d;
+
+        let folders = [];
+        try {
+            const resp = await fetch('/api/knowledge/folder_tree', {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+            folders = data.folders || [];
+        } catch (e) {
+            this._showNotification(T('common.error', 'Fehler') + ': ' + e.message, 'error');
+            return;
+        }
+        // Quellordner ist kein sinnvolles Ziel
+        const options = folders.filter(f => f.path !== srcDirPath);
+        if (!options.length) {
+            this._showNotification(T('knowledge.move_no_target', 'Kein anderer Wissens-Ordner vorhanden'), 'error');
+            return;
+        }
+
+        const target = await this._pickFolder(options, paths.length);
+        if (!target) return;
+
+        try {
+            const resp = await fetch('/api/knowledge/files/move', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '')
+                },
+                body: JSON.stringify({ paths, target })
+            });
+            const r = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
+
+            const moved = (r.moved || []).length;
+            const errs = r.errors || [];
+            if (moved) {
+                const chunks = (r.moved || []).reduce((a, m) => a + (m.chunks || 0), 0);
+                this._showNotification(
+                    T('knowledge.move_done', '{n} Datei(en) verschoben, {c} Chunks übernommen')
+                        .replace('{n}', moved).replace('{c}', chunks), 'success');
+            }
+            if (errs.length) {
+                this._showNotification(errs.map(e => `${e.path.split('/').pop()}: ${e.error}`).join(' · '), 'error');
+            }
+            // Quell- und Zielordner neu laden, damit beide Seiten stimmen
+            await this._refreshDir(srcDirPath);
+            await this._refreshDir(target);
+            await this.fetchStats();
+        } catch (e) {
+            this._showNotification(T('common.error', 'Fehler') + ': ' + e.message, 'error');
+        }
+    }
+
+    // Laedt einen bereits aufgeklappten Ordner-Knoten neu (no-op wenn zugeklappt).
+    async _refreshDir(dirPath) {
+        const id = this._pathId(dirPath);
+        const bodyEl = document.getElementById(`${id}-body`);
+        if (bodyEl && bodyEl.style.display !== 'none') await this._loadDir(dirPath, id, bodyEl);
+    }
+
+    // Modal zur Zielordner-Auswahl. Loest mit dem Pfad auf oder mit null (Abbruch).
+    _pickFolder(options, fileCount) {
+        const T = (k, d) => window.t(k) || d;
+        const esc = (s) => this._escHtml(s);
+        return new Promise((resolve) => {
+            document.getElementById('kb-move-modal')?.remove();
+            const modal = document.createElement('div');
+            modal.id = 'kb-move-modal';
+            modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+            const rows = options.map(f => `
+                <button class="kb-move-opt" data-path="${esc(f.path)}" type="button"
+                    style="display:block;width:100%;text-align:left;background:none;border:none;border-radius:6px;cursor:pointer;padding:7px 10px;color:var(--text-primary);font-size:0.85rem;padding-left:${10 + f.depth * 16}px;">
+                    ${f.is_root ? '📁' : '↳'} ${esc(f.name)}
+                    <span style="color:var(--text-muted);font-size:0.75rem;">${esc(f.path)}</span>
+                </button>`).join('');
+            modal.innerHTML = `
+                <div style="background:var(--bg-glass);border:1px solid var(--border-color);border-radius:12px;max-width:560px;width:90vw;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border-color);">
+                        <span style="font-weight:600;font-size:0.9rem;color:var(--text-primary);">
+                            ${T('knowledge.move_title', 'Zielordner wählen')} (${fileCount})
+                        </span>
+                        <button id="kb-move-close" style="background:none;border:none;color:var(--text-secondary);font-size:1.2rem;cursor:pointer;padding:2px 6px;border-radius:4px;" title="${T('common.close', 'Schließen')}">✕</button>
+                    </div>
+                    <div style="padding:8px;overflow:auto;flex:1;">${rows}</div>
+                    <div style="padding:10px 16px;border-top:1px solid var(--border-color);color:var(--text-muted);font-size:0.75rem;">
+                        ${T('knowledge.move_hint', 'Die Vektor-Einträge ziehen mit um – kein Neu-Indizieren nötig.')}
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+            const done = (val) => { modal.remove(); resolve(val); };
+            modal.querySelector('#kb-move-close').addEventListener('click', () => done(null));
+            modal.addEventListener('click', (e) => { if (e.target === modal) done(null); });
+            modal.querySelectorAll('.kb-move-opt').forEach(btn => {
+                btn.addEventListener('mouseenter', () => { btn.style.background = 'var(--bg-hover, rgba(255,255,255,0.06))'; });
+                btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+                btn.addEventListener('click', () => done(btn.getAttribute('data-path')));
+            });
+        });
     }
 
     // Unterordner anlegen (physisch, erbt Gruppen der Wurzel – Modell A).
@@ -1381,7 +1399,7 @@ class JarvisKnowledgeManager {
     // ─── Mehrfachauswahl (Klick + Maus-Drag/Rubber-Band) – generisch ────
     // container: Listen-Element (position:relative); rowSel: Zeilen-Selektor;
     // onBulk(paths): Aktion fuer die ausgewaehlten data-path-Werte.
-    _setupRowSelection(container, rowSel, onBulk) {
+    _setupRowSelection(container, rowSel, onBulk, onBulkMove) {
         if (!container) return;
         // Bezugspunkt fuer das absolut positionierte Auswahl-Rechteck
         try { if (getComputedStyle(container).position === 'static') container.style.position = 'relative'; } catch (e) {}
@@ -1412,6 +1430,11 @@ class JarvisKnowledgeManager {
             if (del) del.addEventListener('click', () => {
                 const paths = selected().map(it => it.getAttribute('data-path')).filter(Boolean);
                 if (paths.length) onBulk(paths);
+            });
+            const mv = bar.querySelector('.kb-bulk-move');
+            if (mv && onBulkMove) mv.addEventListener('click', () => {
+                const paths = selected().map(it => it.getAttribute('data-path')).filter(Boolean);
+                if (paths.length) onBulkMove(paths);
             });
             if (clr) clr.addEventListener('click', () => {
                 items().forEach(it => it.classList.remove('selected')); updateBar();

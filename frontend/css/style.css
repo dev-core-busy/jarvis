@@ -2354,7 +2354,6 @@ body.light .modal-header h2 {
 
 /* Checkbox-Auswahl (Upload + Extraktor) */
 .kb-grp-checks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-.kb-upload-groups-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 .kb-grp-check {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 10px; border-radius: 8px; cursor: pointer; font-size: 0.82rem;
@@ -4186,22 +4185,6 @@ select option:hover {
 }
 
 /* Upload Drop-Zone */
-.kb-drop-zone {
-    border: 2px dashed var(--border-color);
-    border-radius: 10px;
-    padding: 1.5rem;
-    text-align: center;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: border-color 0.2s, background 0.2s;
-}
-.kb-drop-zone:hover,
-.kb-drop-zone.dragover {
-    border-color: var(--accent);
-    background: rgba(var(--accent-rgb), 0.08);
-}
-.kb-drop-zone p { margin: 0.5rem 0 0; font-size: 0.85rem; }
-
 /* ── Extraktor: Input-Tabs ───────────────────────────────────────────────── */
 .ext-input-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
 .ext-input-tab {
@@ -4523,6 +4506,31 @@ select option:hover {
     font-style: italic;
     color: var(--text-secondary);
     padding: 0.25rem 0;
+}
+/* "Lädt…" beim Aufklappen eines Ordners: rotierender Ring + pulsierender Text,
+   damit sichtbar ist, dass noch gearbeitet wird (Netzlaufwerke brauchen). */
+.kb-files-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    animation: kb-loading-pulse 1.4s ease-in-out infinite;
+}
+.kb-files-loading::before {
+    content: '';
+    width: 13px;
+    height: 13px;
+    flex: 0 0 13px;
+    border: 2px solid rgba(var(--accent-rgb), 0.25);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+}
+@keyframes kb-loading-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .kb-files-loading, .kb-files-loading::before { animation: none; }
 }
 
 .kb-files-error {

@@ -6053,6 +6053,91 @@ async def delete_knowledge_file(request: Request, user: str = Depends(require_kn
     return JSONResponse({"ok": True, "deleted": file_path})
 
 
+@app.post("/api/knowledge/files/move")
+async def move_knowledge_files(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Verschiebt Dateien in einen anderen Wissens-Ordner – OHNE Neu-Embedding.
+
+    Body: ``{"paths": ["data/<...>/a.pdf", ...], "target": "data/<zielordner>"}``
+    (``path`` als Einzelwert wird ebenfalls akzeptiert).
+
+    Die Vektoren bleiben unveraendert: beim Verschieben aendert sich nur die
+    Adresse eines Dokuments, nicht sein Inhalt. Es werden lediglich die
+    Index-Metadaten umgeschrieben (FAISS + TF-IDF-Cache) und eine explizite
+    Wissensgruppen-Zuordnung mitgezogen. ``Path.rename()`` laesst die mtime
+    unangetastet, daher bettet auch der naechste inkrementelle Reindex die
+    Datei nicht erneut ein.
+
+    Antwort: ``{ok, moved: [{from, to, chunks}], errors: [{path, error}]}``.
+    """
+    from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
+                                         relocate_file_index)
+    data = await request.json()
+
+    raw_paths = data.get("paths")
+    if raw_paths is None:
+        single = data.get("path")
+        raw_paths = [single] if single else []
+    if not isinstance(raw_paths, list) or not raw_paths:
+        return JSONResponse({"error": "Keine Dateien angegeben"}, status_code=400)
+
+    target_rel = _kb_norm_rel(data.get("target") or "")
+    if not target_rel:
+        return JSONResponse({"error": "Kein Zielordner angegeben"}, status_code=400)
+
+    # Ein laufender Reindex wuerde gleichzeitig ueber dieselben Metadaten laufen.
+    if get_index_progress().get("running"):
+        return JSONResponse({"error": "Indizierung läuft – bitte warten"}, status_code=409)
+
+    # Ziel muss unter einem konfigurierten Wurzelordner liegen (Wurzel selbst
+    # oder ein Unterordner davon) – sonst waere die Datei nach dem Verschieben
+    # gar nicht mehr indiziert.
+    if _kb_configured_root_for(target_rel) is None:
+        return JSONResponse({"error": f"Zielordner '{target_rel}' ist kein Wissens-Ordner"},
+                            status_code=404)
+    target_abs = _kb_safe_within_data(target_rel)
+    if target_abs is None:
+        return JSONResponse({"error": "Ungültiger Zielordner"}, status_code=400)
+    if not target_abs.is_dir():
+        return JSONResponse({"error": f"Zielordner '{target_rel}' existiert nicht"},
+                            status_code=404)
+
+    moved, errors = [], []
+    for raw in raw_paths:
+        src_rel = _kb_norm_rel(raw or "")
+        if not src_rel:
+            continue
+        try:
+            if _kb_configured_root_for(src_rel) is None:
+                errors.append({"path": src_rel, "error": "Datei liegt nicht in einem Wissens-Ordner"})
+                continue
+            src_abs = _kb_safe_within_data(src_rel)
+            if src_abs is None or not src_abs.is_file():
+                errors.append({"path": src_rel, "error": "Datei nicht gefunden"})
+                continue
+
+            dst_abs = target_abs / src_abs.name
+            if dst_abs == src_abs:
+                errors.append({"path": src_rel, "error": "Datei liegt bereits in diesem Ordner"})
+                continue
+            if dst_abs.exists():
+                errors.append({"path": src_rel,
+                               "error": f"'{src_abs.name}' existiert im Zielordner bereits"})
+                continue
+
+            src_abs.rename(dst_abs)
+            res = relocate_file_index(src_abs, dst_abs)
+            moved.append({
+                "from": src_rel,
+                "to": str(dst_abs.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                "chunks": res.get("vector_chunks", 0),
+            })
+        except OSError as e:
+            # z.B. Verschieben ueber Dateisystemgrenzen bei fehlenden Rechten
+            errors.append({"path": src_rel, "error": f"Verschieben fehlgeschlagen: {e}"})
+
+    return JSONResponse({"ok": not errors, "moved": moved, "errors": errors})
+
+
 @app.get("/api/knowledge/learned")
 async def list_learned_files(user: str = Depends(require_auth)):
     """Listet alle automatisch gelernten Konversations-Dateien."""
@@ -6513,6 +6598,157 @@ def _kb_safe_within_data(rel_path: str):
         return None
 
 
+# ─── ZIP-Upload: Archiv unter Beibehaltung der Ordnerstruktur entpacken ───────
+# Grenzen gegen entartete Archive ("Zip-Bombe"): ein 50-KB-Archiv kann sich zu
+# vielen GB entpacken, daher wird die entpackte Gesamtgroesse und die Anzahl der
+# Eintraege hart begrenzt – unabhaengig von der Groesse der Upload-Datei.
+# Globale Wissens-Editoren duerfen diese beiden Grenzen ueberschreiten
+# (max_total_bytes/max_entries = None) – siehe wissen_upload.
+_ZIP_MAX_TOTAL_BYTES = 500 * 1024 * 1024   # 500 MB entpackt insgesamt
+_ZIP_MAX_ENTRIES = 2000                    # max. Dateien pro Archiv
+_ZIP_MAX_DEPTH = 8                         # max. Unterordner-Tiefe im Archiv
+# Freie Reserve, unterhalb derer fuer NICHT-Editoren abgebrochen wird.
+# Globale Wissens-Editoren sind auch hiervon ausgenommen (min_free_bytes=None).
+_ZIP_MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024   # 2 GB
+# Metadaten-Beiwerk gaengiger Packer – nie als Wissen uebernehmen
+_ZIP_SKIP_DIRS = {"__MACOSX", ".git", ".svn", "node_modules"}
+
+
+def _zip_entry_name(info) -> str:
+    """Dateiname eines ZIP-Eintrags mit korrekten Umlauten.
+
+    Ohne gesetztes UTF-8-Flag dekodiert ``zipfile`` nach CP437. Viele Windows-
+    Packer schreiben aber UTF-8 *ohne* das Flag zu setzen – dann kaeme "Handbücher"
+    als "HandbÃ¼cher" an. Wir machen die CP437-Dekodierung daher rueckgaengig und
+    versuchen es als UTF-8; schlaegt das fehl, war CP437 tatsaechlich richtig.
+    """
+    if info.flag_bits & 0x800:
+        return info.filename
+    try:
+        return info.filename.encode("cp437").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return info.filename
+
+
+def _kb_unpack_zip(zip_source, target, all_exts: set,
+                   max_total_bytes=_ZIP_MAX_TOTAL_BYTES,
+                   max_entries=_ZIP_MAX_ENTRIES,
+                   min_free_bytes=_ZIP_MIN_FREE_BYTES):
+    """Entpackt ein ZIP nach ``target`` und legt dabei die enthaltenen
+    Unterordner an. Gibt ``(geschrieben, abgelehnt, anzahl_ordner)`` zurueck.
+
+    ``zip_source`` ist ein ``bytes``-Objekt ODER ein seekbares Datei-Objekt
+    (z.B. ``UploadFile.file``) – letzteres vermeidet, ein grosses Archiv
+    vollstaendig in den Arbeitsspeicher zu laden.
+
+    ``max_total_bytes``, ``max_entries`` und ``min_free_bytes`` duerfen ``None``
+    sein (= unbegrenzt). Globale Wissens-Editoren laden damit beliebig grosse
+    Archive hoch – ohne Groessen-, Anzahl- und Plattenplatz-Grenze.
+
+    ``geschrieben`` ist eine Liste von ``Path``-Objekten, ``abgelehnt`` eine
+    Liste von ``{"name", "reason"}``. Nicht unterstuetzte Formate werden
+    uebersprungen, nicht das ganze Archiv verworfen.
+
+    Sicherheit: Eintraege mit absoluten Pfaden, ``..``-Anteilen oder Symlinks
+    werden verworfen (Zip-Slip); zusaetzlich greifen Groessen-, Anzahl- und
+    Tiefenlimits.
+    """
+    import io
+    import shutil as _shutil
+    import zipfile
+
+    written, rejected = [], []
+    created_dirs = set()
+    total_bytes = 0
+    target_res = target.resolve()
+
+    if isinstance(zip_source, (bytes, bytearray)):
+        src = io.BytesIO(zip_source)
+    else:
+        src = zip_source
+        try:
+            src.seek(0)
+        except (AttributeError, OSError):
+            pass
+
+    try:
+        zf = zipfile.ZipFile(src)
+    except zipfile.BadZipFile:
+        return [], [{"name": "(Archiv)", "reason": "Kein gueltiges ZIP-Archiv"}], 0
+
+    with zf:
+        infos = [i for i in zf.infolist() if not i.is_dir()]
+        if max_entries is not None and len(infos) > max_entries:
+            return [], [{"name": "(Archiv)",
+                         "reason": f"Zu viele Dateien im Archiv (>{max_entries})"}], 0
+
+        for info in infos:
+            raw = _zip_entry_name(info).replace("\\", "/")
+
+            # Symlinks (Unix-Modus 0o120000) nie folgen
+            if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                rejected.append({"name": raw, "reason": "Symlink uebersprungen"})
+                continue
+
+            parts = [p for p in raw.split("/") if p not in ("", ".")]
+            if not parts:
+                continue
+            # Zip-Slip: absolute Pfade, Laufwerksbuchstaben, Aufwaertsverweise
+            if raw.startswith("/") or ".." in parts or (len(raw) > 1 and raw[1] == ":"):
+                rejected.append({"name": raw, "reason": "Unzulaessiger Pfad im Archiv"})
+                continue
+            if any(p in _ZIP_SKIP_DIRS or p.startswith(".") for p in parts[:-1]):
+                continue          # Metadaten-/Versteckte Ordner still uebergehen
+            if parts[-1].startswith("."):
+                continue          # versteckte Dateien (.DS_Store)
+            if len(parts) - 1 > _ZIP_MAX_DEPTH:
+                rejected.append({"name": raw, "reason": "Ordnerstruktur zu tief"})
+                continue
+
+            suffix = Path(parts[-1]).suffix.lower()
+            if suffix not in all_exts:
+                rejected.append({"name": raw, "reason": f"Format '{suffix}' nicht unterstuetzt"})
+                continue
+
+            if max_total_bytes is not None and total_bytes + info.file_size > max_total_bytes:
+                rejected.append({"name": raw,
+                                 "reason": f"Groessenlimit erreicht ({max_total_bytes // (1024*1024)} MB entpackt)"})
+                continue
+            if min_free_bytes is not None:
+                try:
+                    if _shutil.disk_usage(target).free - info.file_size < min_free_bytes:
+                        rejected.append({"name": raw, "reason": "Zu wenig freier Speicherplatz"})
+                        continue
+                except OSError:
+                    pass
+
+            dest = target.joinpath(*parts)
+            # Zweite Absicherung gegen Zip-Slip: aufgeloester Pfad MUSS unter target liegen
+            try:
+                dest.resolve().relative_to(target_res)
+            except ValueError:
+                rejected.append({"name": raw, "reason": "Pfad ausserhalb des Zielordners"})
+                continue
+
+            try:
+                if not dest.parent.exists():
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    created_dirs.add(dest.parent)
+                # Namenskollision wie beim Einzel-Upload aufloesen
+                counter, stem = 1, dest.stem
+                while dest.exists():
+                    dest = dest.parent / f"{stem}_{counter}{suffix}"
+                    counter += 1
+                data = zf.read(info)
+                dest.write_bytes(data)
+                total_bytes += len(data)
+                written.append(dest)
+            except (OSError, zipfile.BadZipFile) as e:
+                rejected.append({"name": raw, "reason": f"Entpacken fehlgeschlagen: {e}"})
+
+    return written, rejected, len(created_dirs)
+
+
 def _kb_supported_exts() -> set:
     from backend.tools.knowledge import (
         EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX, EXTENSIONS_XLSX,
@@ -6606,6 +6842,51 @@ async def browse_knowledge_dir(path: str = "", user: str = Depends(require_knowl
             size_str = f"{size/1024:.1f} KB" if size >= 1024 else f"{size} B"
             files.append({"path": entry_rel, "name": entry.name, "size": size_str})
     return JSONResponse({"ok": True, "path": rel, "subfolders": subfolders, "files": files})
+
+
+@app.get("/api/knowledge/folder_tree")
+async def knowledge_folder_tree(user: str = Depends(require_knowledge_editor)):
+    """Alle Wissens-Ordner flach als Liste – Grundlage der Zielordner-Auswahl
+    beim Verschieben von Dateien.
+
+    Antwort: ``{ok, folders: [{path, name, depth, is_root}]}``, alphabetisch je
+    Ebene, Unterordner direkt unter ihrer Wurzel. ``depth`` ist die
+    Verschachtelungstiefe (0 = Wurzelordner) und dient nur der Einrueckung.
+    """
+    from backend.tools.knowledge import PROJECT_ROOT, _is_pending_path, _safe_exists
+    out = []
+
+    def _walk(rel: str, depth: int):
+        # Tiefe begrenzen: schuetzt vor Symlink-Schleifen und haelt die Auswahl bedienbar
+        if depth > 6:
+            return
+        base = PROJECT_ROOT / rel
+        try:
+            entries = sorted(base.iterdir(), key=lambda e: e.name.lower())
+        except OSError:
+            return
+        for entry in entries:
+            if not entry.is_dir() or entry.name.startswith("."):
+                continue
+            if _is_pending_path(str(entry) + "/"):
+                continue
+            entry_rel = entry.relative_to(PROJECT_ROOT).as_posix()
+            out.append({"path": entry_rel, "name": entry.name,
+                        "depth": depth + 1, "is_root": False})
+            _walk(entry_rel, depth + 1)
+
+    for folder in _kb_current_folder_list():
+        rel = _kb_norm_rel(folder)
+        if not rel:
+            continue
+        # Totes Netzlaufwerk nicht anfassen – sonst blockiert iterdir() minutenlang
+        if not _safe_exists(PROJECT_ROOT / rel):
+            continue
+        out.append({"path": rel, "name": rel.rsplit("/", 1)[-1],
+                    "depth": 0, "is_root": True})
+        _walk(rel, 0)
+
+    return JSONResponse({"ok": True, "folders": out})
 
 
 @app.post("/api/knowledge/subfolders")
@@ -7079,7 +7360,20 @@ async def wissen_upload(
     ``gen_questions`` (optional, Anzahl > 0): zusaetzlich pro hochgeladener Datei
     per LLM die gewuenschte Anzahl Frage-Antwort-Paare generieren (analog
     Informationsextraktor) – als Pending-Entwurf, den der Benutzer auditieren
-    (loeschen/korrigieren/freigeben) kann."""
+    (loeschen/korrigieren/freigeben) kann.
+
+    **ZIP-Archive** werden serverseitig entpackt statt abgelegt: die enthaltene
+    Ordnerstruktur wird unter dem Zielordner nachgebildet (fehlende Unterordner
+    werden angelegt), jede enthaltene Datei landet am passenden Platz und erhaelt
+    dieselbe Wissensgruppen-Zuordnung. Nicht unterstuetzte Formate im Archiv
+    werden einzeln abgelehnt, nicht das ganze Archiv. Antwortfeld ``created_dirs``
+    nennt die Anzahl neu angelegter Ordner. Siehe ``_kb_unpack_zip`` fuer die
+    Schutzmassnahmen (Zip-Slip, Groessen-/Anzahl-/Tiefenlimits, Symlinks).
+
+    **Globale Wissens-Editoren** (``_may_edit_knowledge``) laden Archive voellig
+    unbegrenzt hoch – keine Groessen-, Anzahl- oder Plattenplatz-Grenze. Fuer alle
+    anderen gelten ``_ZIP_MAX_TOTAL_BYTES``, ``_ZIP_MAX_ENTRIES`` und
+    ``_ZIP_MIN_FREE_BYTES``."""
     from backend.tools.knowledge import (
         _get_folders, PROJECT_ROOT,
         EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,
@@ -7123,8 +7417,68 @@ async def wissen_upload(
     target.mkdir(parents=True, exist_ok=True)
     saved, rejected, qa_pending, qa_errors = [], [], [], []
     cancelled = False
+    created_dirs = 0
+
+    # Ablagen sammeln: (Zieldatei, Anzeigename). Ein ZIP liefert mehrere Eintraege,
+    # deren Ordnerstruktur unter dem Zielordner nachgebildet wird.
     for file in files:
         suffix = Path(file.filename).suffix.lower()
+
+        if suffix == ".zip":
+            # Globale Wissens-Editoren duerfen die Archiv-Grenzen ueberschreiten.
+            # file.file (SpooledTemporaryFile) statt file.read(): ein mehrere GB
+            # grosses Archiv wuerde sonst komplett im Arbeitsspeicher landen.
+            unlimited = _may_edit_knowledge(user)
+            try:
+                written, zip_rejected, n_dirs = _kb_unpack_zip(
+                    file.file, target, all_exts,
+                    max_total_bytes=None if unlimited else _ZIP_MAX_TOTAL_BYTES,
+                    max_entries=None if unlimited else _ZIP_MAX_ENTRIES,
+                    min_free_bytes=None if unlimited else _ZIP_MIN_FREE_BYTES)
+            except Exception as e:  # noqa: BLE001
+                # Nie stumm scheitern: der Grund muss im Journal UND beim Nutzer landen.
+                import traceback
+                print(f"[wissen/upload] ZIP '{file.filename}' fehlgeschlagen: {e}", flush=True)
+                traceback.print_exc()
+                rejected.append({"name": file.filename,
+                                 "reason": f"Archiv konnte nicht entpackt werden: {e}"})
+                continue
+            created_dirs += n_dirs
+            rejected.extend(zip_rejected)
+            for dest in written:
+                rel_disp = str(dest.relative_to(target)).replace("\\", "/")
+                size = dest.stat().st_size
+                saved.append({"name": rel_disp,
+                              "size": f"{size/1024:.1f} KB" if size >= 1024 else f"{size} B"})
+                try:
+                    kg.set_assignment(str(dest.relative_to(PROJECT_ROOT)), req_groups)
+                except Exception:  # noqa: BLE001
+                    pass
+            # Fragen-Generierung fuer die entpackten Dateien (gleiche Regeln wie unten)
+            if qa_n > 0 and not cancelled:
+                for dest in written:
+                    if dest.suffix.lower() not in _QA_EXTS:
+                        qa_errors.append({"name": dest.name,
+                                          "error": f"Fragen-Generierung fuer '{dest.suffix.lower()}' nicht unterstuetzt"})
+                        continue
+                    try:
+                        from backend.web_extractor import extract_from_file, update_pending
+                        ok_c, doc = await _run_cancellable(
+                            request,
+                            extract_from_file(dest.name, dest.read_bytes(), qa_count=qa_n,
+                                              prof=config.profile_for_user(user)),
+                            job_id)
+                        if not ok_c:
+                            cancelled = True
+                            break
+                        update_pending(doc["id"], {"created_by": _norm_login(user)})
+                        qa_pending.append({"id": doc["id"], "title": doc.get("title", dest.name)})
+                    except Exception as e:  # noqa: BLE001 – Upload bleibt erfolgreich
+                        qa_errors.append({"name": dest.name, "error": str(e)[:300]})
+            if cancelled:
+                break
+            continue
+
         if suffix not in all_exts:
             rejected.append({"name": file.filename, "reason": f"Format '{suffix}' nicht unterstuetzt"})
             continue
@@ -7165,6 +7519,7 @@ async def wissen_upload(
                 qa_errors.append({"name": dest.name, "error": str(e)[:300]})
     return JSONResponse({"saved": saved, "rejected": rejected,
                          "total_saved": len(saved), "total_rejected": len(rejected),
+                         "created_dirs": created_dirs,
                          "qa_pending": qa_pending, "qa_errors": qa_errors,
                          "cancelled": cancelled})
 
@@ -7254,6 +7609,109 @@ async def wissen_file_delete(request: Request, user: str = Depends(require_auth)
     except Exception:  # noqa: BLE001
         pass
     return JSONResponse({"ok": True, "deleted": rel})
+
+
+def _wissen_may_write_path(user: str, rel_path: str):
+    """Darf dieser /wissen-Nutzer unterhalb von ``rel_path`` schreiben?
+
+    Grundlage ist dieselbe Bindung wie beim Upload: der Pfad muss unter einem
+    konfigurierten Wurzelordner liegen, der einer Wissensgruppe im Bereich des
+    Nutzers zugeordnet ist (Modell A – Unterordner erben die Wurzel-Rechte).
+    Rueckgabe: ``(ok: bool, fehlermeldung: str|None)``.
+    """
+    rel = _kb_norm_rel(rel_path)
+    if not rel:
+        return False, "Kein Pfad angegeben"
+    root_rel = _kb_configured_root_for(rel)
+    if root_rel is None:
+        return False, f"'{rel}' ist kein Wissens-Ordner"
+    if _kb_safe_within_data(rel) is None:      # Path-Traversal-Schutz
+        return False, "Ungültiger Pfad"
+    if root_rel not in _wissen_allowed_folders(user, _editable_groups_for(user)):
+        return False, f"Keine Berechtigung für '{rel}'"
+    return True, None
+
+
+@app.post("/api/wissen/subfolders")
+async def wissen_create_subfolder(request: Request, user: str = Depends(require_auth)):
+    """Legt einen Unterordner unter einem Ordner im Bereich des Nutzers an.
+
+    Body: ``{"parent": "data/<...>", "name": "<ordnername>"}`` – nur ein
+    einfacher Name, kein Pfad. Anders als das Admin-Pendant
+    (``/api/knowledge/subfolders``, globale Wissens-Editoren) genuegt hier das
+    Editor-Recht auf einer Wissensgruppe, der der Wurzelordner zugeordnet ist.
+    Der neue Unterordner erbt diese Gruppe (Modell A).
+    """
+    from backend.tools.knowledge import PROJECT_ROOT
+    data = await request.json()
+    parent = _kb_norm_rel(data.get("parent") or "")
+    name = (data.get("name") or "").strip()
+
+    ok, err = _wissen_may_write_path(user, parent)
+    if not ok:
+        return JSONResponse({"error": err}, status_code=403)
+    err = _kb_validate_folder_name(name)
+    if err:
+        return JSONResponse({"error": err}, status_code=400)
+
+    new_rel = f"{parent}/{name}"
+    target = _kb_safe_within_data(new_rel)
+    if target is None:
+        return JSONResponse({"error": "Ungültiger Ordnername"}, status_code=400)
+    if target.exists():
+        return JSONResponse({"error": f"Ordner '{name}' existiert bereits"}, status_code=409)
+    try:
+        target.mkdir(parents=True)
+    except OSError as e:
+        return JSONResponse({"error": f"Anlegen fehlgeschlagen: {e}"}, status_code=500)
+    return JSONResponse({"ok": True, "path": new_rel,
+                         "name": name, "parent": parent})
+
+
+@app.put("/api/wissen/subfolders")
+async def wissen_rename_subfolder(request: Request, user: str = Depends(require_auth)):
+    """Benennt einen Unterordner im Bereich des Nutzers um.
+
+    Body: ``{"path": "data/<...>/<sub>", "new_name": "<neu>"}``. Nur echte
+    Unterordner – ein konfigurierter Wurzelordner bleibt der Admin-Fläche
+    vorbehalten. Das indizierte Wissen (FAISS ohne Neu-Embedding, TF-IDF) und
+    die Wissensgruppen-Zuordnungen ziehen prefix-sauber mit.
+    """
+    from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
+                                         relocate_folder_index)
+    data = await request.json()
+    rel = _kb_norm_rel(data.get("path") or "")
+    new_name = (data.get("new_name") or "").strip()
+
+    ok, err = _wissen_may_write_path(user, rel)
+    if not ok:
+        return JSONResponse({"error": err}, status_code=403)
+    if rel == _kb_configured_root_for(rel):
+        return JSONResponse({"error": "Wurzelordner können hier nicht umbenannt werden"},
+                            status_code=400)
+    err = _kb_validate_folder_name(new_name)
+    if err:
+        return JSONResponse({"error": err}, status_code=400)
+    # Ein laufender Reindex wuerde gleichzeitig ueber dieselben Metadaten laufen.
+    if get_index_progress().get("running"):
+        return JSONResponse({"error": "Indizierung läuft – bitte warten"}, status_code=409)
+
+    parent = rel.rsplit("/", 1)[0]
+    new_rel = f"{parent}/{new_name}"
+    if _kb_safe_within_data(new_rel) is None:
+        return JSONResponse({"error": "Ungültiger Ordnername"}, status_code=400)
+    old_abs = PROJECT_ROOT / rel
+    new_abs = PROJECT_ROOT / new_rel
+    if not old_abs.is_dir():
+        return JSONResponse({"error": "Ordner nicht gefunden"}, status_code=404)
+    if new_abs.exists():
+        return JSONResponse({"error": f"Ordner '{new_name}' existiert bereits"}, status_code=409)
+    try:
+        old_abs.rename(new_abs)
+    except OSError as e:
+        return JSONResponse({"error": f"Umbenennen fehlgeschlagen: {e}"}, status_code=500)
+    moved = relocate_folder_index(old_abs, new_abs)
+    return JSONResponse({"ok": True, "path": new_rel, "moved": moved})
 
 
 @app.post("/api/wissen/extract")

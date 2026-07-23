@@ -168,6 +168,24 @@ data/
   und genau die vergleicht der inkrementelle Reindex. Wird sie angefasst, bettet der
   naechste Lauf die Datei unnoetig neu ein. Verifiziert: 3 Chunks in 37 ms umgezogen,
   Folge-Reindex 0.00 s ohne Neu-Embedding.
+- **Indizierungs-Lauf (Einstellungen → Wissen):** `POST /api/knowledge/reindex` startet,
+  `POST /api/knowledge/reindex/cancel` bricht ab (Flag `_reindex_cancel`, geprueft ZWISCHEN
+  zwei Dateien – bereits geschriebene Chunks bleiben, der Index ist danach unvollstaendig,
+  weil ein Neuaufbau mit `vs.clear()` beginnt). Der Knopf "Index neu aufbauen" wird waehrend
+  des Laufs zu "Indizierung abbrechen". `get_index_progress()` liefert zusaetzlich
+  `started_at`/`finished_at`/`cancelled`; der letzte Lauf steht in
+  `data/vector_store/last_index.json` (`get_last_run()`, ueberlebt Neustart).
+- **Automatischer Neuversuch nach FEHLERN** (nicht nach manuellem Abbruch): scheitert ein
+  Lauf mit einer Ausnahme, wiederholt `_run_with_retries()` ihn bis `MAX_INDEX_ATTEMPTS=3`
+  (Pause `RETRY_DELAY_SEC`, unterbrechbar). `running` bleibt dabei True, `attempt` zaehlt
+  hoch – der Fehler-Endzustand wird erst nach dem letzten Versuch geschrieben.
+  Stirbt der PROZESS mitten im Lauf, bleibt `status: running` in last_index.json stehen;
+  `resume_interrupted_reindex()` (Start-Hook in main.py, +30 s) setzt den Neuaufbau dann
+  automatisch fort – max. `MAX_RESUMES=2`, danach `status: interrupted` (Schleifenschutz).
+- **"Dateien" vs. "Indiziert":** `total_files` ist die Anzahl indizierbarer Dateien in den
+  Wissensordnern (`get_disk_file_count()`, 60 s gecacht, Hintergrund-Refresh),
+  `indexed_files` die Anzahl im FAISS-Index. Frueher stand in beiden die Index-Zahl –
+  ein unvollstaendiger Index sah dann wie "nur 10 Dokumente vorhanden" aus.
 - **numpy**: Muss < 2.1 bleiben (VM hat kein SSE4.2)
 
 ## Wissens-Upload (/wissen → Informationsextraktor → Datei)

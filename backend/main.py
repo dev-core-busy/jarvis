@@ -5928,9 +5928,21 @@ async def reindex_knowledge(user: str = Depends(require_knowledge_editor)):
     progress = get_index_progress()
     if progress.get("running"):
         return JSONResponse({"started": False, "message": "Indizierung läuft bereits"})
+    # Sofort als "laeuft" markieren – der Hintergrund-Thread braucht einen Moment,
+    # bis er das selbst tut. Ohne das koennte ein zweiter Klick durchrutschen und
+    # die Oberflaeche zeigt bis dahin keinen Fortschritt.
+    _set_progress(running=True, phase="Starte...", done=0, total=0, vector_done=0,
+                  vector_total=0, error="", started_at=time.time(), finished_at=0.0,
+                  cancelled=False)
     # Im Hintergrund starten, danach Speicher freigeben
     async def _run_reindex():
-        await _asyncio.to_thread(force_reindex)
+        try:
+            await _asyncio.to_thread(force_reindex)
+        except Exception as e:
+            # Fortschritt darf nie auf "laeuft" haengen bleiben – sonst blockiert
+            # der Knopf dauerhaft.
+            _set_progress(running=False, phase="Fehler", error=str(e))
+            print(f"[knowledge] Reindex fehlgeschlagen: {e}", flush=True)
         try:
             from backend.tools.vector_store import release_memory_to_os
             await _asyncio.to_thread(release_memory_to_os)
@@ -5940,9 +5952,26 @@ async def reindex_knowledge(user: str = Depends(require_knowledge_editor)):
     return JSONResponse({"started": True})
 
 
+@app.post("/api/knowledge/reindex/cancel")
+async def cancel_reindex_knowledge(user: str = Depends(require_knowledge_editor)):
+    """Bricht einen laufenden Index-Neuaufbau ab (nach der aktuell laufenden Datei).
+
+    Antwort: ``{"cancelled": true}`` oder ``{"cancelled": false, "reason": ...}``,
+    wenn gerade keine Indizierung läuft. Der Index bleibt nach einem Abbruch
+    unvollständig – erst ein neuer Lauf stellt ihn wieder her."""
+    from backend.tools.knowledge import cancel_reindex
+    return JSONResponse(cancel_reindex())
+
+
 @app.get("/api/knowledge/index_progress")
 async def get_knowledge_index_progress(user: str = Depends(require_auth)):
-    """Liefert aktuellen Fortschritt der Indizierung."""
+    """Liefert aktuellen Fortschritt der Indizierung.
+
+    Felder: ``running``, ``phase``, ``done``/``total`` (TF-IDF),
+    ``vector_done``/``vector_total`` (FAISS), ``error``, ``cancelled``,
+    ``started_at``/``finished_at`` (Unix-Zeitstempel des laufenden bzw. letzten
+    Laufs) sowie ``attempt``/``max_attempts`` – scheitert ein Lauf mit einem
+    Fehler, wird er automatisch wiederholt (``attempt`` > 1)."""
     from backend.tools.knowledge import get_index_progress
     return JSONResponse(get_index_progress())
 
@@ -10922,11 +10951,34 @@ async def startup():
         import time
         time.sleep(3)  # Warten bis Hauptprozess stabil
         try:
+            # Dateizaehler vorwaermen: der erste Walk ueber die Wissensordner
+            # kostet ~2s, danach liefert der Cache sofort. Sonst zahlt der erste
+            # Aufruf von /api/knowledge/stats nach jedem Neustart diese Wartezeit.
+            from backend.tools.knowledge import get_disk_file_count
+            get_disk_file_count()
+        except Exception as e:
+            print(f"[knowledge] Dateizaehler-Vorwaermen fehlgeschlagen: {e}", flush=True)
+        try:
             from backend.tools.knowledge import preload_embedding_model
             preload_embedding_model()
         except Exception as e:
             print(f"[knowledge] Embedding-Preload fehlgeschlagen: {e}", flush=True)
     threading.Thread(target=_preload_embeddings, daemon=True).start()
+
+    # Wurde der Prozess mitten in einem Index-Neuaufbau beendet (Neustart,
+    # Absturz, OOM), ist der Index unvollstaendig – ohne Fehlermeldung. Der
+    # Lauf wird deshalb automatisch fortgesetzt. Erst nach den Mounts (s.u.),
+    # damit Netzlaufwerke wieder da sind.
+    def _resume_reindex():
+        import time
+        time.sleep(30)
+        try:
+            from backend.tools.knowledge import resume_interrupted_reindex
+            if resume_interrupted_reindex():
+                print("[knowledge] Unterbrochene Indizierung wird fortgesetzt", flush=True)
+        except Exception as e:
+            print(f"[knowledge] Wiederaufnahme der Indizierung fehlgeschlagen: {e}", flush=True)
+    threading.Thread(target=_resume_reindex, daemon=True).start()
 
     # SMB/NFS-Mounts beim Start automatisch wiederherstellen
     async def _auto_remount_shares():

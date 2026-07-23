@@ -11,7 +11,11 @@ class JarvisKnowledgeManager {
         const btnAddFolder = document.getElementById('btn-kb-add-folder');
         const btnCreateFolder = document.getElementById('btn-kb-create-folder');
 
-        if (btnReindex) btnReindex.addEventListener('click', () => this.reindex());
+        // Ein Knopf, zwei Funktionen: solange die Indizierung laeuft, bricht er ab.
+        if (btnReindex) btnReindex.addEventListener('click', () => {
+            if (this._indexRunning) this.cancelReindex();
+            else this.reindex();
+        });
         if (btnAddFolder) btnAddFolder.addEventListener('click', () => this.addFolder());
         if (btnCreateFolder) btnCreateFolder.addEventListener('click', () => this.createFolder());
 
@@ -27,12 +31,18 @@ class JarvisKnowledgeManager {
     // ─── Init (wird beim Tab-Wechsel aufgerufen) ──────────────────────
 
     async init() {
-        await this.fetchStats();
-        await this.initGroups();
-        await this.initWebDAV();
-        await this.initMounts();
-        // Prüfen ob Indizierung gerade läuft (z.B. nach Seiten-Reload)
-        await this._checkRunningIndex();
+        // ZUERST: laeuft gerade eine Indizierung? Der Endpunkt antwortet in
+        // Millisekunden, waehrend Stats/Mounts (Netzfreigaben!) Sekunden brauchen
+        // koennen – stand die Pruefung am Ende, sah der Tab sekundenlang so aus,
+        // als passiere nichts. Nicht awaiten: die Anzeige kommt, sobald sie da ist.
+        this._checkRunningIndex();
+        // Der Rest ist voneinander unabhaengig und laeuft parallel.
+        await Promise.all([
+            this.fetchStats(),
+            this.initGroups(),
+            this.initWebDAV(),
+            this.initMounts(),
+        ]);
     }
 
     // ─── Wissensgruppen (logische Tags) ───────────────────────────────
@@ -636,8 +646,10 @@ class JarvisKnowledgeManager {
             if (!resp.ok) return;
             const p = await resp.json();
             if (p.running) {
+                this._ensureStatsSectionOpen();
                 this._showProgressBar();
                 this._updateProgressBar(p);
+                this._setIndexRunning(true);
                 this._startProgressPolling();
             }
         } catch (_) {}
@@ -761,6 +773,7 @@ class JarvisKnowledgeManager {
                     <span class="kb-stat-label">${window.t('knowledge.stat.size')}</span>
                 </div>
             </div>
+            ${this._lastRunLine(stats.last_index_run)}
             <div class="kb-search-mode" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
                 <span class="kb-search-mode-label">${window.t('knowledge.search_active_label')}</span>
                 <span id="kb-active-label" style="font-size:0.75rem;">${activeText}</span>
@@ -1909,13 +1922,61 @@ class JarvisKnowledgeManager {
             const result = await resp.json();
             if (result.started === false) {
                 this._showNotification(result.message || window.t('knowledge.already_running'), 'info');
+                this._startProgressPolling();
             } else {
                 this._showNotification(window.t('knowledge.indexing_started'), 'success');
+                this._setIndexRunning(true);
                 this._startProgressPolling();
             }
         } catch (e) {
             this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
         }
+    }
+
+    async cancelReindex() {
+        if (!confirm(window.t('knowledge.cancel_confirm'))) return;
+        const btn = document.getElementById('btn-kb-reindex');
+        if (btn) btn.disabled = true;   // Doppelklick waehrend des Abbruchs verhindern
+        try {
+            const resp = await fetch('/api/knowledge/reindex/cancel', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const result = await resp.json();
+            this._showNotification(
+                result.cancelled ? window.t('knowledge.cancel_requested') : window.t('knowledge.cancel_not_running'),
+                result.cancelled ? 'info' : 'info');
+            if (btn) btn.textContent = window.t('knowledge.reindex_cancelling');
+        } catch (e) {
+            if (btn) btn.disabled = false;
+            this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+        }
+    }
+
+    /** Schaltet den Knopf zwischen "Index neu aufbauen" und "Abbrechen" um. */
+    _setIndexRunning(running) {
+        this._indexRunning = running;
+        const btn = document.getElementById('btn-kb-reindex');
+        if (!btn) return;
+        btn.disabled = false;
+        btn.classList.toggle('kb-btn-cancel', !!running);
+        btn.textContent = running ? window.t('knowledge.reindex_cancel_btn')
+                                  : window.t('knowledge.reindex_btn');
+        btn.title = running ? window.t('knowledge.reindex_cancel_title') : '';
+        // data-i18n wuerde beim Sprachwechsel den Abbrechen-Text ueberschreiben
+        if (running) btn.removeAttribute('data-i18n');
+        else btn.setAttribute('data-i18n', 'knowledge.reindex_btn');
+    }
+
+    /** Abbruch angefordert: Knopf gesperrt, bis der Lauf tatsaechlich endet. */
+    _setIndexCancelling() {
+        this._indexRunning = true;
+        const btn = document.getElementById('btn-kb-reindex');
+        if (!btn) return;
+        btn.disabled = true;
+        btn.removeAttribute('data-i18n');
+        btn.textContent = window.t('knowledge.reindex_cancelling');
     }
 
     // ─── Fortschritts-Polling ─────────────────────────────────────────
@@ -1941,16 +2002,21 @@ class JarvisKnowledgeManager {
             if (!resp.ok) return;
             const p = await resp.json();
             this._updateProgressBar(p);
+            if (p.running && p.phase === 'Wird abgebrochen…') this._setIndexCancelling();
+            else this._setIndexRunning(!!p.running);
 
             // "Aktiv:"-Label direkt aktualisieren (kein fetchStats → kein Flackern)
             if (p.running) this._updateActiveLabel(p.phase || '');
 
-            if (!p.running && (p.phase === 'Fertig' || p.phase === 'Fehler' || p.phase === '')) {
+            if (!p.running) {
                 this._stopProgressPolling();
-                if (p.phase === 'Fertig') {
-                    setTimeout(() => this._hideProgressBar(), 2000);
-                    await this.fetchStats();
+                this._setIndexRunning(false);
+                // Bei "Fehler" bleibt der Balken stehen – sonst verschwindet die
+                // einzige Stelle, an der die Fehlermeldung steht.
+                if (p.phase === 'Fertig' || p.phase === 'Abgebrochen') {
+                    setTimeout(() => this._hideProgressBar(), 4000);
                 }
+                await this.fetchStats();
             }
         } catch (_) {}
     }
@@ -1958,6 +2024,34 @@ class JarvisKnowledgeManager {
     _showProgressBar() {
         const bar = document.getElementById('kb-index-progress-wrap');
         if (bar) bar.style.display = 'flex';
+    }
+
+    /** Klappt "Statistiken" auf, damit der Fortschritt ueberhaupt sichtbar ist.
+     *  Bewusst OHNE localStorage – der gemerkte Zustand des Benutzers bleibt. */
+    _ensureStatsSectionOpen() {
+        const body = document.getElementById('kb-sect-stats-body');
+        if (!body || body.style.display !== 'none') return;
+        body.style.display = '';
+        const tog = document.getElementById('kb-sect-stats-tog');
+        const hdr = document.getElementById('kb-sect-stats-hdr');
+        if (tog) tog.textContent = '▼';
+        if (hdr) hdr.classList.remove('is-collapsed');
+    }
+
+    /** Kurzanzeige im Abschnitts-Kopf – sichtbar auch bei zugeklapptem Abschnitt. */
+    _setStatsBadge(text) {
+        const hdr = document.getElementById('kb-sect-stats-hdr');
+        if (!hdr) return;
+        let badge = hdr.querySelector('.kb-sect-badge');
+        if (!text) { if (badge) badge.remove(); return; }
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'kb-sect-badge';
+            const h3 = hdr.querySelector('h3');
+            if (h3) h3.insertAdjacentElement('afterend', badge);
+            else hdr.prepend(badge);
+        }
+        badge.textContent = text;
     }
 
     _hideProgressBar() {
@@ -1971,7 +2065,19 @@ class JarvisKnowledgeManager {
         const bar     = document.getElementById('kb-progress-bar');
         const phase   = document.getElementById('kb-progress-phase');
         const count   = document.getElementById('kb-progress-count');
+        const started = document.getElementById('kb-progress-started');
         if (!bar) return;
+
+        // Start-Zeitpunkt + Laufdauer (Serverzeit als Unix-Zeitstempel)
+        if (started) {
+            if (p.started_at) {
+                const end = p.finished_at || (Date.now() / 1000);
+                started.textContent = `${window.t('knowledge.index_started')}: ${this._fmtDateTime(p.started_at)}`
+                                    + ` · ${window.t('knowledge.index_duration')}: ${this._fmtDuration(end - p.started_at)}`;
+            } else {
+                started.textContent = '';
+            }
+        }
 
         // Gesamt-Fortschritt: TF-IDF + Vektor zusammen
         const tTotal = p.total || 0;
@@ -1988,28 +2094,64 @@ class JarvisKnowledgeManager {
 
         bar.style.width = pctVal + '%';
         if (pct)   pct.textContent   = pctVal + '%';
+        this._setStatsBadge(p.running ? `⏳ ${pctVal}%` : '');
         if (phase) phase.textContent = p.phase || '';
         if (p.error && count) count.textContent = '⚠ ' + p.error.slice(0, 60);
         else if (count) count.textContent = grand > 0 ? `${doneClamped} / ${grand}` : '';
 
         if (label) {
-            if (p.phase === 'Fertig')      label.textContent = window.t('knowledge.indexing_done');
-            else if (p.phase === 'Fehler') label.textContent = window.t('knowledge.indexing_error_label');
-            else if (p.running)            label.textContent = window.t('knowledge.indexing_running');
-            else                           label.textContent = window.t('knowledge.indexing_ready');
+            if (p.phase === 'Fertig')           label.textContent = window.t('knowledge.indexing_done');
+            else if (p.phase === 'Abgebrochen') label.textContent = window.t('knowledge.indexing_cancelled');
+            else if (p.phase === 'Fehler')      label.textContent = window.t('knowledge.indexing_error_label');
+            else if (p.phase === 'Wird abgebrochen…') label.textContent = window.t('knowledge.reindex_cancelling');
+            else if (p.running && p.attempt > 1) label.textContent = window.t('knowledge.indexing_retry')
+                                                     .replace('{n}', p.attempt).replace('{m}', p.max_attempts);
+            else if (p.running)                 label.textContent = window.t('knowledge.indexing_running');
+            else                                label.textContent = window.t('knowledge.indexing_ready');
         }
 
-        // Dateien + Indiziert-Zähler live aktualisieren während Indizierung läuft
-        // Vektor-Zähler bevorzugen (FAISS-Only-Modus), Fallback auf TF-IDF-Zähler
+        // "Indiziert"-Kachel live mitzaehlen. Die Kachel "Dateien" bleibt
+        // unangetastet – sie zeigt den Bestand in den Ordnern, nicht den
+        // Fortschritt (frueher stand dort waehrend eines Laufs die Anzahl der
+        // noch zu verarbeitenden Dateien, z.B. "10" bei 700 Dokumenten).
         if (p.running) {
             const statEls = document.querySelectorAll('#kb-stats-container .kb-stat-value');
-            const liveFiles = p.vector_total || p.total || 0;
-            const liveDone  = p.vector_done  || p.done  || 0;
-            if (statEls.length >= 2 && liveFiles > 0) {
-                statEls[0].textContent = liveFiles;
-                statEls[1].textContent = liveDone;
-            }
+            const liveDone = p.vector_done || p.done || 0;
+            if (statEls.length >= 2) statEls[1].textContent = liveDone;
         }
+    }
+
+    /** Zeile "Letzter Indexlauf: <Datum/Uhrzeit> · Dauer · Ergebnis" (leer wenn nie gelaufen). */
+    _lastRunLine(run) {
+        if (!run || !run.started_at) return '';
+        const parts = [`${window.t('knowledge.last_index_run')}: ${this._fmtDateTime(run.started_at)}`];
+        if (run.finished_at) {
+            parts.push(`${window.t('knowledge.index_duration')}: ${this._fmtDuration(run.finished_at - run.started_at)}`);
+        }
+        if (run.status === 'cancelled')        parts.push(window.t('knowledge.index_status_cancelled'));
+        else if (run.status === 'error')       parts.push(window.t('knowledge.index_status_error'));
+        else if (run.status === 'interrupted') parts.push(window.t('knowledge.index_status_interrupted'));
+        else if (run.status === 'running')     parts.push(window.t('knowledge.index_status_running'));
+        else parts.push(`${run.indexed_files || 0} ${window.t('knowledge.stat.files')}, ${run.total_chunks || 0} Chunks`);
+        const color = run.status === 'ok' ? 'var(--text-secondary)' : 'var(--warning)';
+        return `<div class="kb-last-run" style="font-size:0.75rem;color:${color};margin:6px 0 2px;">${parts.join(' · ')}</div>`;
+    }
+
+    /** Unix-Zeitstempel → lokale Datums-/Uhrzeit-Anzeige. */
+    _fmtDateTime(ts) {
+        try {
+            return new Date(ts * 1000).toLocaleString(window._lang === 'en' ? 'en-GB' : 'de-DE',
+                { day: '2-digit', month: '2-digit', year: 'numeric',
+                  hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } catch (_) { return ''; }
+    }
+
+    /** Sekunden → "1:23" bzw. "1:02:03". */
+    _fmtDuration(sec) {
+        sec = Math.max(0, Math.round(sec));
+        const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+        const pad = (n) => String(n).padStart(2, '0');
+        return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
     }
 
     _updateActiveLabel(phase) {

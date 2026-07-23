@@ -44,7 +44,11 @@ _cache_lock = threading.Lock()
 _log = logging.getLogger("jarvis.knowledge")
 
 # ─── Indizierungs-Fortschritt (thread-sicher) ────────────────────────────────
-_index_progress: dict = {"running": False, "phase": "", "done": 0, "total": 0, "vector_done": 0, "vector_total": 0, "error": ""}
+# started_at/finished_at sind Unix-Zeitstempel (float) – die Oberflaeche zeigt
+# damit Startzeit und Laufdauer an.
+_index_progress: dict = {"running": False, "phase": "", "done": 0, "total": 0,
+                         "vector_done": 0, "vector_total": 0, "error": "",
+                         "started_at": 0.0, "finished_at": 0.0, "cancelled": False}
 _progress_lock = threading.Lock()
 # Verhindert PARALLELE Reindex-Laeufe – sonst teilen sie sich _index_progress und
 # die Zaehler ueberschreiben sich (z.B. vector_done=48 / vector_total=10 -> 480%).
@@ -52,6 +56,9 @@ _reindex_lock = threading.Lock()
 # Kam waehrend eines laufenden Reindex eine weitere Anfrage, wird GENAU EINMAL
 # nachgeholt (coalesced) – so gehen frisch hinzugefuegte Dateien nicht verloren.
 _reindex_rerun = threading.Event()
+# Abbruchwunsch des Benutzers. Wird nur zwischen zwei Dateien geprueft – eine
+# laufende Einbettung wird nicht mitten drin abgeschossen.
+_reindex_cancel = threading.Event()
 
 def get_index_progress() -> dict:
     with _progress_lock:
@@ -149,7 +156,14 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
     _set_progress(phase="Vektor", vector_done=0, vector_total=len(to_index))
 
     changed = 0
+    cancelled = False
     for i, filepath in enumerate(to_index):
+        # Abbruch nur ZWISCHEN zwei Dateien – die bereits geschriebenen Chunks
+        # bleiben gueltig, der Index ist danach lediglich unvollstaendig.
+        if _reindex_cancel.is_set():
+            cancelled = True
+            _log.info(f"Vektor-Index: Abbruch nach {i}/{len(to_index)} Dateien")
+            break
         path_str = str(filepath)
         _set_progress(vector_done=i + 1, phase=f"Vektor: {filepath.name[:40]}")
         try:
@@ -164,7 +178,8 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
         except Exception:
             pass
 
-    _set_progress(vector_done=len(to_index), vector_total=len(to_index))
+    if not cancelled:
+        _set_progress(vector_done=len(to_index), vector_total=len(to_index))
     if changed:
         _log.info(f"Vektor-Index aktualisiert: {changed} Datei(en)")
     return vs.chunk_count() > 0
@@ -925,7 +940,45 @@ def _all_files(folders: list[Path]) -> list[Path]:
         except OSError as e:
             _log.warning("Ordner konnte nicht durchsucht werden (übersprungen): %s (%s)", folder, e)
             continue
+    _disk_count_cache.update(value=len(files), ts=time.time())
     return files
+
+
+# ─── Anzahl indizierbarer Dateien auf der Platte ─────────────────────────────
+# Die Statistik-Kachel "Dateien" zeigt, was VORHANDEN ist – nicht, was im Index
+# steht (das ist die Kachel "Indiziert"). Der Walk ueber mehrere hundert Dateien
+# inkl. Netzlaufwerk darf den Stats-Aufruf aber nicht blockieren, deshalb:
+# gecacht, Aktualisierung im Hintergrund, erster Aufruf mit hartem Timeout.
+_disk_count_cache: dict = {"value": None, "ts": 0.0}
+_DISK_COUNT_TTL = 60.0
+_disk_count_refreshing = threading.Event()
+
+
+def _refresh_disk_count() -> None:
+    try:
+        _all_files(_get_folders())   # aktualisiert _disk_count_cache selbst
+    except Exception as e:
+        _log.debug(f"Datei-Zaehlung fehlgeschlagen: {e}")
+    finally:
+        _disk_count_refreshing.clear()
+
+
+def get_disk_file_count() -> int | None:
+    """Anzahl indizierbarer Dateien in den Wissensordnern (None = noch unbekannt)."""
+    cached = _disk_count_cache["value"]
+    fresh = cached is not None and (time.time() - _disk_count_cache["ts"]) < _DISK_COUNT_TTL
+    if fresh:
+        return cached
+    if cached is not None:
+        # Alten Wert sofort ausliefern, im Hintergrund neu zaehlen.
+        if not _disk_count_refreshing.is_set():
+            _disk_count_refreshing.set()
+            threading.Thread(target=_refresh_disk_count, daemon=True).start()
+        return cached
+    # Erster Aufruf: kurz warten, danach greift der Cache. Laeuft der Walk in den
+    # Timeout, fuellt der (weiterlaufende) Daemon-Thread den Cache trotzdem –
+    # der naechste Aufruf hat den Wert dann sofort.
+    return _bounded_call(lambda: len(_all_files(_get_folders())), timeout=5.0, default=None)
 
 
 INLINE_LIMIT = 10  # Maximale Dateien die inline (im Suchpfad) indiziert werden
@@ -972,6 +1025,9 @@ def _rebuild_cache(folders: list[Path], max_bytes: int, force: bool = False) -> 
 
         changed = False
         for i, filepath in enumerate(to_index):
+            if _reindex_cancel.is_set():
+                _log.info(f"TF-IDF Index: Abbruch nach {i}/{len(to_index)} Dateien")
+                break
             path_str = str(filepath)
             _set_progress(done=i + 1, phase=f"TF-IDF: {filepath.name[:40]}")
             try:
@@ -992,7 +1048,8 @@ def _rebuild_cache(folders: list[Path], max_bytes: int, force: bool = False) -> 
         if changed:
             _save_cache(cache)
 
-        _set_progress(done=len(to_index), total=len(to_index))
+        if not _reindex_cancel.is_set():
+            _set_progress(done=len(to_index), total=len(to_index))
         return cache
 
 
@@ -1193,9 +1250,17 @@ def get_stats() -> dict:
         total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
         total_size = sum(d.get("size", 0) for d in cache["files"].values())
 
+    # "Dateien" = was in den Wissensordnern LIEGT. Frueher stand hier die Anzahl
+    # der Dateien im Index – bei einem unvollstaendigen Index sah es dann so aus,
+    # als gaebe es nur 10 statt 700+ Dokumente.
+    disk_files = get_disk_file_count()
+    if disk_files is not None:
+        total_files = disk_files
+
     return {
         "folders": folder_list,
         "total_files": total_files,
+        "disk_files": disk_files,
         "indexed_files": indexed_files,
         "total_chunks": total_chunks,
         "total_size_bytes": total_size,
@@ -1210,13 +1275,26 @@ def get_stats() -> dict:
         "search_mode": "vector",
         "indexing": get_index_progress()["running"],
         "index_phase": get_index_progress()["phase"],
+        "last_index_run": get_last_run(),
     }
 
 
-def force_reindex() -> dict:
+# Ein Lauf, der an einem Fehler scheitert (Embedding-Modell nicht ladbar,
+# Netzlaufwerk weg, Speicher voll), hinterlaesst einen LEEREN Index – der
+# Neuaufbau beginnt mit vs.clear(). Deshalb automatisch neu ansetzen. Der
+# manuelle Abbruch ist davon ausgenommen (siehe _reindex_cancel).
+MAX_INDEX_ATTEMPTS = 3      # 1 regulaerer Lauf + 2 automatische Neuversuche
+RETRY_DELAY_SEC = 15        # Pause dazwischen (z.B. bis ein Mount zurueck ist)
+
+
+def force_reindex(resume_count: int = 0) -> dict:
     """Vollstaendiger Neuaufbau:
     - FAISS verfuegbar → nur Vektor-Index (schneller, besser bei 600+ Dateien)
     - FAISS nicht verfuegbar → TF-IDF-Index
+
+    Scheitert ein Lauf mit einer Ausnahme, wird er bis zu ``MAX_INDEX_ATTEMPTS``
+    mal automatisch wiederholt. ``resume_count`` zaehlt Wiederaufnahmen nach
+    einem Prozess-Neustart (siehe ``resume_interrupted_reindex``).
     """
     # Re-Entrancy-Schutz: laeuft bereits ein Reindex, NICHT parallel starten
     # (sonst ueberschreiben sich die Fortschritts-Zaehler -> >100%). Stattdessen
@@ -1226,53 +1304,185 @@ def force_reindex() -> dict:
         _log.info("force_reindex: laeuft bereits – Rerun vorgemerkt")
         return {"skipped": True, "reason": "reindex already running, rerun scheduled"}
     try:
-        result = _do_force_reindex()
+        _reindex_cancel.clear()
+        result = _run_with_retries(resume_count)
         # Waehrenddessen weitere Anfragen? -> genau einmal nachholen (coalesced).
-        while _reindex_rerun.is_set():
+        # Nach einem Abbruch NICHT nachholen – sonst startet der Lauf, den der
+        # Benutzer gerade gestoppt hat, sofort wieder von vorn.
+        while _reindex_rerun.is_set() and not _reindex_cancel.is_set():
             _reindex_rerun.clear()
-            result = _do_force_reindex()
+            result = _run_with_retries(resume_count)
         return result
     finally:
+        _reindex_rerun.clear()
+        # Flag zuruecksetzen, sonst wuerde die naechste inline-Indizierung
+        # (Suchpfad) den alten Abbruchwunsch erben und sofort abbrechen.
+        _reindex_cancel.clear()
         _reindex_lock.release()
 
 
-def _do_force_reindex() -> dict:
-    _set_progress(running=True, phase="Starte...", done=0, total=0, vector_done=0, vector_total=0, error="")
-    try:
-        folders = _get_folders()
-        max_bytes = _get_max_bytes()
-        vs = _get_vector_store()
-
-        # Verwaiste Gruppen-Zuordnungen (Modell B) entfernen: Dateien, die es
-        # nicht mehr gibt, verlieren ihre logischen Tags.
+def _run_with_retries(resume_count: int = 0) -> dict:
+    """Fuehrt den Neuaufbau aus und wiederholt ihn nach einem Fehler automatisch."""
+    last_exc: Exception | None = None
+    first_started = time.time()
+    for attempt in range(1, MAX_INDEX_ATTEMPTS + 1):
         try:
-            from backend import knowledge_groups as _kg
-            _kg.prune(_all_files(folders))
-        except Exception:
-            pass
+            return _do_force_reindex(attempt=attempt, resume_count=resume_count)
+        except Exception as e:
+            last_exc = e
+            _log.warning(f"Indizierung Versuch {attempt}/{MAX_INDEX_ATTEMPTS} fehlgeschlagen: {e}")
+            if _reindex_cancel.is_set() or attempt >= MAX_INDEX_ATTEMPTS:
+                break
+            # "laeuft" bleibt gesetzt – die Oberflaeche zeigt den Neuversuch an
+            # statt den Knopf freizugeben und den Fehler zu verschweigen.
+            _set_progress(running=True, phase="Neuversuch", error=str(e),
+                          attempt=attempt + 1, max_attempts=MAX_INDEX_ATTEMPTS)
+            # Unterbrechbare Pause: ein Abbruch waehrend der Wartezeit greift sofort.
+            if _reindex_cancel.wait(RETRY_DELAY_SEC):
+                break
 
-        if vs is not None:
-            # ── Nur FAISS aufbauen ──────────────────────────────────────────
-            vs.clear()
-            _rebuild_vector_index(folders, max_bytes, force=True)
-            chunk_count = vs.chunk_count()
-            file_count  = vs.file_count()
-            _set_progress(running=False, phase="Fertig")
-            return {"indexed_files": file_count, "total_chunks": chunk_count,
-                    "vector_info": f"Vektor: {chunk_count} Chunks"}
-        else:
-            # ── Nur TF-IDF aufbauen (FAISS nicht installiert) ───────────────
-            with _cache_lock:
-                INDEX_CACHE_PATH.unlink(missing_ok=True)
-            cache = _rebuild_cache(folders, max_bytes, force=True)
-            total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
-            _set_progress(running=False, phase="Fertig")
-            return {"indexed_files": len(cache["files"]), "total_chunks": total_chunks,
-                    "vector_info": ""}
+    finished = time.time()
+    cancelled = _reindex_cancel.is_set()
+    _set_progress(running=False, phase="Abgebrochen" if cancelled else "Fehler",
+                  error=str(last_exc or ""), finished_at=finished, cancelled=cancelled)
+    _save_last_run({"started_at": first_started, "finished_at": finished,
+                    "status": "cancelled" if cancelled else "error",
+                    "error": str(last_exc or "")[:300], "attempts": MAX_INDEX_ATTEMPTS,
+                    "resumed": resume_count, "indexed_files": 0, "total_chunks": 0})
+    raise last_exc if last_exc else RuntimeError("Indizierung fehlgeschlagen")
 
+
+def cancel_reindex() -> dict:
+    """Bricht einen laufenden Neuaufbau ab (nach der aktuellen Datei).
+
+    Der Index bleibt danach unvollstaendig – ein Neuaufbau leert ihn zuerst.
+    """
+    if not get_index_progress().get("running"):
+        return {"cancelled": False, "reason": "keine Indizierung aktiv"}
+    _reindex_cancel.set()
+    _reindex_rerun.clear()
+    _set_progress(phase="Wird abgebrochen…")
+    _log.info("Indizierung: Abbruch angefordert")
+    return {"cancelled": True}
+
+
+# Kurzprotokoll des letzten Laufs – ueberlebt einen Neustart, damit die
+# Oberflaeche "Letzter Indexlauf: <Datum/Uhrzeit>" auch nach einem Restart zeigt.
+LAST_INDEX_RUN_PATH = PROJECT_ROOT / "data" / "vector_store" / "last_index.json"
+
+
+def _save_last_run(run: dict) -> None:
+    try:
+        LAST_INDEX_RUN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        LAST_INDEX_RUN_PATH.write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
-        _set_progress(running=False, phase="Fehler", error=str(e))
-        raise
+        _log.warning(f"Lauf-Protokoll konnte nicht geschrieben werden: {e}")
+
+
+def get_last_run() -> dict:
+    """Metadaten des letzten Indexlaufs ({} wenn noch nie gelaufen)."""
+    try:
+        if LAST_INDEX_RUN_PATH.exists():
+            return json.loads(LAST_INDEX_RUN_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+MAX_RESUMES = 2   # Schutz vor einer Neustart-Schleife bei dauerhaftem Fehler
+
+
+def resume_interrupted_reindex() -> bool:
+    """Setzt einen Lauf fort, der durch einen Prozess-Abbruch geendet hat.
+
+    Beim Start aufrufen: steht im Lauf-Protokoll noch ``status: running``, ist
+    der Prozess mittendrin gestorben (Neustart, Absturz, OOM). Der Index ist
+    dann unvollstaendig, ohne dass es irgendwo als Fehler auftaucht. Gibt True
+    zurueck, wenn ein Neuaufbau gestartet wurde.
+    """
+    run = get_last_run()
+    if run.get("status") != "running":
+        return False
+    if get_index_progress().get("running"):
+        return False   # laeuft bereits (z.B. durch Auto-Mount angestossen)
+
+    resumed = int(run.get("resumed") or 0) + 1
+    if resumed > MAX_RESUMES:
+        run["status"] = "interrupted"
+        run["finished_at"] = run.get("finished_at") or time.time()
+        _save_last_run(run)
+        _log.warning(f"Indizierung wurde {MAX_RESUMES}x nach Abbruch fortgesetzt – "
+                     f"kein weiterer automatischer Versuch")
+        return False
+
+    _log.warning(f"Unterbrochene Indizierung gefunden (Start "
+                 f"{time.strftime('%d.%m.%Y %H:%M:%S', time.localtime(run.get('started_at') or 0))}) "
+                 f"– Neuaufbau wird automatisch fortgesetzt ({resumed}/{MAX_RESUMES})")
+
+    def _run():
+        try:
+            force_reindex(resume_count=resumed)
+        except Exception as e:
+            _log.error(f"Automatisch fortgesetzte Indizierung fehlgeschlagen: {e}")
+
+    threading.Thread(target=_run, daemon=True, name="reindex-resume").start()
+    return True
+
+
+def _do_force_reindex(attempt: int = 1, resume_count: int = 0) -> dict:
+    started = time.time()
+    _set_progress(running=True, phase="Starte...", done=0, total=0, vector_done=0,
+                  vector_total=0, error="", started_at=started, finished_at=0.0,
+                  cancelled=False, attempt=attempt, max_attempts=MAX_INDEX_ATTEMPTS)
+    # Marker "laeuft" auf die Platte: stirbt der Prozess mittendrin (Neustart,
+    # OOM-Killer), erkennt resume_interrupted_reindex() das beim naechsten Start
+    # und setzt den Lauf fort. Ein sauberes Ende ueberschreibt den Marker.
+    _save_last_run({"started_at": started, "finished_at": 0,
+                    "status": "running", "attempt": attempt,
+                    "resumed": resume_count, "indexed_files": 0, "total_chunks": 0})
+    # Ausnahmen werden bewusst NICHT hier abgefangen: Endzustand und Protokoll
+    # schreibt _run_with_retries – erst wenn alle Versuche verbraucht sind.
+    # Sonst zeigte die Oberflaeche zwischen zwei Neuversuchen "Fehler/fertig".
+    folders = _get_folders()
+    max_bytes = _get_max_bytes()
+    vs = _get_vector_store()
+
+    # Verwaiste Gruppen-Zuordnungen (Modell B) entfernen: Dateien, die es
+    # nicht mehr gibt, verlieren ihre logischen Tags.
+    try:
+        from backend import knowledge_groups as _kg
+        _kg.prune(_all_files(folders))
+    except Exception:
+        pass
+
+    if vs is not None:
+        # ── Nur FAISS aufbauen ──────────────────────────────────────────────
+        vs.clear()
+        _rebuild_vector_index(folders, max_bytes, force=True)
+        chunk_count = vs.chunk_count()
+        file_count  = vs.file_count()
+        result = {"indexed_files": file_count, "total_chunks": chunk_count,
+                  "vector_info": f"Vektor: {chunk_count} Chunks"}
+    else:
+        # ── Nur TF-IDF aufbauen (FAISS nicht installiert) ───────────────────
+        with _cache_lock:
+            INDEX_CACHE_PATH.unlink(missing_ok=True)
+        cache = _rebuild_cache(folders, max_bytes, force=True)
+        total_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
+        result = {"indexed_files": len(cache["files"]), "total_chunks": total_chunks,
+                  "vector_info": ""}
+
+    cancelled = _reindex_cancel.is_set()
+    finished = time.time()
+    _set_progress(running=False, phase="Abgebrochen" if cancelled else "Fertig",
+                  finished_at=finished, cancelled=cancelled)
+    _save_last_run({"started_at": started, "finished_at": finished,
+                    "status": "cancelled" if cancelled else "ok",
+                    "attempt": attempt, "resumed": resume_count,
+                    "indexed_files": result["indexed_files"],
+                    "total_chunks": result["total_chunks"]})
+    result["cancelled"] = cancelled
+    return result
 
 
 class KnowledgeTool(BaseTool):

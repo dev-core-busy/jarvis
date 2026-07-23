@@ -581,30 +581,97 @@
     }
 
     // ── Mein Wissen ─────────────────────────────────────────────────────
+    // ── Wissensgruppen-Filter fuer "Mein Wissen" ────────────────────────
+    // Gespeichert werden die ABGEWAEHLTEN Gruppen. So sind neu hinzukommende
+    // Gruppen automatisch sichtbar (Vorgabe: alles gewaehlt).
+    var FILTER_COOKIE = 'jarvis_wissen_gfilter_off';
+    var _files = [];   // zuletzt geladene Dateiliste (ungefiltert)
+
+    function readCookie(name) {
+        var m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+        return m ? decodeURIComponent(m[1]) : '';
+    }
+
+    function writeCookie(name, value) {
+        // 1 Jahr haltbar; Lax reicht, der Wert ist reine Anzeige-Praeferenz.
+        document.cookie = name + '=' + encodeURIComponent(value)
+            + ';path=/;max-age=31536000;SameSite=Lax';
+    }
+
+    function hiddenGroups() {
+        var raw = readCookie(FILTER_COOKIE);
+        return raw ? raw.split(',').filter(Boolean) : [];
+    }
+
+    function renderFileFilter() {
+        var wrap = $('wi-files-filter'), boxes = $('wi-files-filter-boxes');
+        if (!wrap || !boxes) return;
+        var groups = (SCOPE && SCOPE.groups) || [];
+        if (!groups.length) { wrap.style.display = 'none'; return; }
+        wrap.style.display = '';
+        var off = hiddenGroups();
+        boxes.innerHTML = groups.map(function (g) {
+            var on = off.indexOf(g.id) === -1;   // Vorgabe: gewaehlt
+            return '<label class="wi-grpbox" style="border-color:' + esc(g.color) + ';">'
+                + '<input type="checkbox" class="wi-grp-flt" value="' + esc(g.id) + '"'
+                + (on ? ' checked' : '') + '>'
+                + '<span style="font-weight:600;">' + esc(g.name) + '</span></label>';
+        }).join('');
+        boxes.querySelectorAll('.wi-grp-flt').forEach(function (cb) {
+            cb.addEventListener('change', function () {
+                var hidden = groups.map(function (g) { return g.id; })
+                    .filter(function (id) { return checkedGroups('flt').indexOf(id) === -1; });
+                writeCookie(FILTER_COOKIE, hidden.join(','));
+                renderFileList();
+            });
+        });
+    }
+
+    // Zeichnet die Dateiliste aus _files, eingeschraenkt auf die aktiven Gruppen.
+    function renderFileList() {
+        var box = $('wi-files-list');
+        if (!box) return;
+        var off = hiddenGroups();
+        var shown = _files.filter(function (f) {
+            // Datei bleibt sichtbar, solange mindestens eine ihrer Gruppen aktiv ist
+            return (f.groups || []).some(function (g) { return off.indexOf(g.id) === -1; });
+        });
+
+        var cnt = $('wi-files-count');
+        if (cnt) {
+            cnt.textContent = shown.length === _files.length
+                ? t('wissen.count_all', { n: _files.length })
+                : t('wissen.count_filtered', { n: shown.length, total: _files.length });
+        }
+
+        if (!_files.length) { box.innerHTML = '<div class="wi-empty">' + t('wissen.no_files') + '</div>'; return; }
+        if (!shown.length) { box.innerHTML = '<div class="wi-empty">' + t('wissen.no_files_filtered') + '</div>'; return; }
+        box.innerHTML = shown.map(function (f) {
+            var chips = f.groups.map(function (g) {
+                return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';font-size:0.7rem;">' + esc(g.name) + '</span>';
+            }).join(' ');
+            var url = '/api/wissen/file?path=' + encodeURIComponent(f.path) + '&token=' + encodeURIComponent(token);
+            return '<div class="wi-item" data-path="' + esc(f.path) + '">'
+                + '<a class="nm wi-flink" href="' + esc(url) + '" target="_blank" rel="noopener" title="' + esc(t('wissen.open_file')) + '">' + esc(f.name) + '</a>'
+                + chips
+                + '<button type="button" class="sec-btn small danger wi-file-del" title="' + esc(t('wissen.delete_file')) + '">×</button>'
+                + '</div>';
+        }).join('');
+        box.querySelectorAll('.wi-file-del').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var row = btn.closest('.wi-item');
+                deleteFile(row.getAttribute('data-path'), (row.querySelector('.nm') || {}).textContent);
+            });
+        });
+    }
+
     function loadFiles() {
         fetch('/api/wissen/files', { headers: authH() })
             .then(function (r) { return r.json(); })
             .then(function (d) {
-                var box = $('wi-files-list');
-                var files = (d && d.files) || [];
-                if (!files.length) { box.innerHTML = '<div class="wi-empty">' + t('wissen.no_files') + '</div>'; return; }
-                box.innerHTML = files.map(function (f) {
-                    var chips = f.groups.map(function (g) {
-                        return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';font-size:0.7rem;">' + esc(g.name) + '</span>';
-                    }).join(' ');
-                    var url = '/api/wissen/file?path=' + encodeURIComponent(f.path) + '&token=' + encodeURIComponent(token);
-                    return '<div class="wi-item" data-path="' + esc(f.path) + '">'
-                        + '<a class="nm wi-flink" href="' + esc(url) + '" target="_blank" rel="noopener" title="' + esc(t('wissen.open_file')) + '">' + esc(f.name) + '</a>'
-                        + chips
-                        + '<button type="button" class="sec-btn small danger wi-file-del" title="' + esc(t('wissen.delete_file')) + '">×</button>'
-                        + '</div>';
-                }).join('');
-                box.querySelectorAll('.wi-file-del').forEach(function (btn) {
-                    btn.addEventListener('click', function () {
-                        var row = btn.closest('.wi-item');
-                        deleteFile(row.getAttribute('data-path'), (row.querySelector('.nm') || {}).textContent);
-                    });
-                });
+                _files = (d && d.files) || [];
+                renderFileFilter();
+                renderFileList();
             })
             .catch(function () {});
     }

@@ -1104,7 +1104,8 @@ class JarvisKnowledgeManager {
                     onclick="event.stopPropagation();window.knowledgeManager.editFolder('${sp}')">✏️</button>${addSub}<button class="kb-btn-remove" title="${T('knowledge.folder_remove_title', 'Ordner entfernen')}"
                     onclick="event.stopPropagation();window.knowledgeManager.removeFolder('${sp}')">✕</button>`
             : `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.subfolder_rename_title', 'Unterordner umbenennen')}"
-                    onclick="event.stopPropagation();window.knowledgeManager.renameSubfolder('${sp}')">✏️</button>${addSub}<button class="kb-btn-remove" title="${T('knowledge.subfolder_remove_title', 'Unterordner löschen')}"
+                    onclick="event.stopPropagation();window.knowledgeManager.renameSubfolder('${sp}')">✏️</button>${addSub}<button class="kb-btn-remove kb-btn-movesub" title="${T('knowledge.subfolder_move_title', 'Unterordner verschieben')}"
+                    onclick="event.stopPropagation();window.knowledgeManager.moveSubfolder('${sp}')">📂</button><button class="kb-btn-remove" title="${T('knowledge.subfolder_remove_title', 'Unterordner löschen')}"
                     onclick="event.stopPropagation();window.knowledgeManager.deleteSubfolder('${sp}')">✕</button>`;
         return `
             <div class="kb-folder-item${isRoot ? '' : ' kb-subfolder-item'}" data-path="${this._escHtml(path)}">
@@ -1286,7 +1287,8 @@ class JarvisKnowledgeManager {
     }
 
     // Modal zur Zielordner-Auswahl. Loest mit dem Pfad auf oder mit null (Abbruch).
-    _pickFolder(options, fileCount) {
+    // ``label`` steht in der Kopfzeile (Anzahl Dateien bzw. Ordnername).
+    _pickFolder(options, label) {
         const T = (k, d) => window.t(k) || d;
         const esc = (s) => this._escHtml(s);
         return new Promise((resolve) => {
@@ -1304,7 +1306,7 @@ class JarvisKnowledgeManager {
                 <div style="background:var(--bg-glass);border:1px solid var(--border-color);border-radius:12px;max-width:560px;width:90vw;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
                     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border-color);">
                         <span style="font-weight:600;font-size:0.9rem;color:var(--text-primary);">
-                            ${T('knowledge.move_title', 'Zielordner wählen')} (${fileCount})
+                            ${T('knowledge.move_title', 'Zielordner wählen')} (${esc(String(label))})
                         </span>
                         <button id="kb-move-close" style="background:none;border:none;color:var(--text-secondary);font-size:1.2rem;cursor:pointer;padding:2px 6px;border-radius:4px;" title="${T('common.close', 'Schließen')}">✕</button>
                     </div>
@@ -1393,6 +1395,54 @@ class JarvisKnowledgeManager {
             if (window.KbGroups) await this._refreshGroups();
         } catch (e) {
             this._showNotification(window.t('common.error') + ': ' + e.message, 'error');
+        }
+    }
+
+    // Unterordner unter einen anderen Ordner haengen (ohne Neu-Embedding).
+    async moveSubfolder(path) {
+        const T = (k, d) => window.t(k) || d;
+        let folders = [];
+        try {
+            const resp = await fetch('/api/knowledge/folder_tree', {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+            folders = data.folders || [];
+        } catch (e) {
+            this._showNotification(T('common.error', 'Fehler') + ': ' + e.message, 'error');
+            return;
+        }
+        const parent = path.split('/').slice(0, -1).join('/');
+        // Weder der Ordner selbst, noch seine eigenen Unterordner (Schleife),
+        // noch der aktuelle Elternordner sind sinnvolle Ziele.
+        const options = folders.filter(f =>
+            f.path !== path && !f.path.startsWith(path + '/') && f.path !== parent);
+        if (!options.length) {
+            this._showNotification(T('knowledge.move_no_target', 'Kein anderer Zielordner vorhanden'), 'error');
+            return;
+        }
+        const target = await this._pickFolder(options, path.split('/').pop());
+        if (!target) return;
+
+        try {
+            const resp = await fetch('/api/knowledge/subfolders/move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                body: JSON.stringify({ path, target })
+            });
+            const r = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(r.error || 'HTTP ' + resp.status);
+            const chunks = (r.moved && r.moved.vector_chunks) || 0;
+            this._showNotification(
+                T('knowledge.subfolder_moved', 'Unterordner verschoben, {c} Chunks übernommen')
+                    .replace('{c}', chunks), 'success');
+            await this._refreshDir(parent);
+            await this._refreshDir(target);
+            await this.fetchStats();
+            if (window.KbGroups) await this._refreshGroups();
+        } catch (e) {
+            this._showNotification(T('common.error', 'Fehler') + ': ' + e.message, 'error');
         }
     }
 

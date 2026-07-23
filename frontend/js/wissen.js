@@ -252,10 +252,11 @@
 
     function updateFolderBtnState() {
         var entry = currentFolderEntry();
-        var bNew = $('wi-folder-new'), bRen = $('wi-folder-rename');
+        var bNew = $('wi-folder-new'), bRen = $('wi-folder-rename'), bMov = $('wi-folder-move');
         if (bNew) bNew.disabled = !entry;
         // Wurzelordner (depth 0) bleiben der Admin-Flaeche vorbehalten
         if (bRen) bRen.disabled = !entry || !(entry.depth > 0);
+        if (bMov) bMov.disabled = !entry || !(entry.depth > 0);
     }
 
     // Ordnerliste neu holen und danach denselben (oder einen neuen) Pfad waehlen.
@@ -386,6 +387,82 @@
         if (isNaN(n) || n < 1) n = 20; if (n > 30) n = 30;
         return n;
     }
+    // Unterordner an eine andere Stelle im eigenen Bereich haengen. Die Vektor-
+    // Eintraege ziehen mit um – kein Neu-Indizieren noetig.
+    function moveSubfolder() {
+        var entry = currentFolderEntry();
+        if (!entry || !(entry.depth > 0)) return;
+        var parent = entry.path.split('/').slice(0, -1).join('/');
+        // Weder der Ordner selbst, noch seine Unterordner (Schleife), noch der
+        // aktuelle Elternordner sind sinnvolle Ziele.
+        var options = (SCOPE.folders || []).filter(function (f) {
+            return f.path !== entry.path
+                && f.path.indexOf(entry.path + '/') !== 0
+                && f.path !== parent;
+        });
+        if (!options.length) {
+            folderStatus(t('wissen.move_no_target', 'Kein anderer Zielordner vorhanden'), true);
+            return;
+        }
+        pickFolder(options, entry.name).then(function (target) {
+            if (!target) return;
+            fetch('/api/wissen/subfolders/move', {
+                method: 'POST', headers: authH({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ path: entry.path, target: target })
+            })
+                .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d || {} }; }); })
+                .then(function (res) {
+                    if (!res.ok || res.d.error) { folderStatus(res.d.error || t('common.error'), true); return; }
+                    var chunks = (res.d.moved && res.d.moved.vector_chunks) || 0;
+                    folderStatus(t('wissen.subfolder_moved', 'Unterordner verschoben, {c} Chunks übernommen')
+                        .replace('{c}', chunks));
+                    return reloadFolders(res.d.path).then(function () { loadFiles(); });
+                })
+                .catch(function () { folderStatus(t('wissen.conn_error'), true); });
+        });
+    }
+
+    // Zielordner-Auswahl als Modal. Loest mit dem Pfad auf oder mit null (Abbruch).
+    function pickFolder(options, label) {
+        return new Promise(function (resolve) {
+            var old = $('wi-move-modal'); if (old) old.remove();
+            var modal = document.createElement('div');
+            modal.id = 'wi-move-modal';
+            modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;'
+                + 'justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+            var rows = options.map(function (f) {
+                var pad = 10 + (f.depth || 0) * 16;
+                return '<button class="wi-move-opt" data-path="' + esc(f.path) + '" type="button" '
+                    + 'style="display:block;width:100%;text-align:left;background:none;border:none;'
+                    + 'border-radius:6px;cursor:pointer;padding:7px 10px;padding-left:' + pad + 'px;'
+                    + 'color:var(--text-primary);font-size:0.85rem;">'
+                    + ((f.depth || 0) ? '↳' : '📁') + ' ' + esc(f.name)
+                    + ' <span style="color:var(--text-secondary);font-size:0.75rem;">' + esc(f.path) + '</span>'
+                    + '</button>';
+            }).join('');
+            modal.innerHTML = '<div style="background:var(--bg-secondary);border:1px solid var(--border);'
+                + 'border-radius:12px;max-width:560px;width:90vw;max-height:75vh;display:flex;'
+                + 'flex-direction:column;box-shadow:var(--shadow-md);">'
+                + '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;'
+                + 'border-bottom:1px solid var(--border);">'
+                + '<span style="font-weight:600;font-size:0.9rem;">'
+                + esc(t('wissen.move_title', 'Zielordner wählen')) + ' (' + esc(String(label)) + ')</span>'
+                + '<button id="wi-move-close" style="background:none;border:none;color:var(--text-secondary);'
+                + 'font-size:1.2rem;cursor:pointer;padding:2px 6px;">✕</button></div>'
+                + '<div style="padding:8px;overflow:auto;flex:1;">' + rows + '</div>'
+                + '<div style="padding:10px 16px;border-top:1px solid var(--border);color:var(--text-secondary);'
+                + 'font-size:0.75rem;">' + esc(t('wissen.move_hint', 'Die Vektor-Einträge ziehen mit um – kein Neu-Indizieren nötig.'))
+                + '</div></div>';
+            document.body.appendChild(modal);
+            function done(v) { modal.remove(); resolve(v); }
+            $('wi-move-close').addEventListener('click', function () { done(null); });
+            modal.addEventListener('click', function (e) { if (e.target === modal) done(null); });
+            Array.prototype.forEach.call(modal.querySelectorAll('.wi-move-opt'), function (b) {
+                b.addEventListener('click', function () { done(b.getAttribute('data-path')); });
+            });
+        });
+    }
+
     // Klartext zu einem HTTP-Status, wenn der Server keinen eigenen Fehlertext
     // liefert (Proxy-Fehlerseiten, leere Bodies).
     function httpHint(status) {
@@ -1071,8 +1148,10 @@
         });
         // Unterordner im eigenen Bereich anlegen/umbenennen
         var fNew = $('wi-folder-new'), fRen = $('wi-folder-rename'), fSel = $('wi-folder');
+        var fMov = $('wi-folder-move');
         if (fNew) fNew.addEventListener('click', createSubfolder);
         if (fRen) fRen.addEventListener('click', renameSubfolder);
+        if (fMov) fMov.addEventListener('click', moveSubfolder);
         if (fSel) fSel.addEventListener('change', updateFolderBtnState);
 
         // Gruppen-Auswahl schaltet die Ablage frei/gesperrt (Checkboxen kommen per JS)

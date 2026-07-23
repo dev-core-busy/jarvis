@@ -6749,6 +6749,70 @@ def _kb_unpack_zip(zip_source, target, all_exts: set,
     return written, rejected, len(created_dirs)
 
 
+def _kb_move_folder(src_rel: str, dst_parent_rel: str):
+    """Verschiebt einen Unterordner unter einen anderen Wissens-Ordner.
+
+    Gemeinsame Pruef- und Ausfuehrungslogik fuer die Admin-Flaeche
+    (``/api/knowledge/subfolders/move``) und das /wissen-Portal
+    (``/api/wissen/subfolders/move``). Die BERECHTIGUNG pruefen die Aufrufer
+    vorher – hier geht es nur um Gueltigkeit und Ausfuehrung.
+
+    Wie beim Verschieben einzelner Dateien werden die Vektoren NICHT neu
+    berechnet: ``relocate_folder_index()`` schreibt lediglich die Pfad-Praefixe
+    in FAISS-Metadaten, TF-IDF-Cache und Gruppen-Zuordnungen um.
+
+    Rueckgabe: ``(ergebnis_dict, fehlermeldung, status_code)`` – bei Erfolg ist
+    ``fehlermeldung`` None.
+    """
+    from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
+                                         relocate_folder_index)
+    src = _kb_norm_rel(src_rel)
+    dst_parent = _kb_norm_rel(dst_parent_rel)
+    if not src or not dst_parent:
+        return None, "Quelle oder Ziel fehlt", 400
+
+    src_root = _kb_configured_root_for(src)
+    if src_root is None:
+        return None, f"'{src}' ist kein Wissens-Ordner", 404
+    if src == src_root:
+        return None, "Wurzelordner können nicht verschoben werden – nur Unterordner", 400
+    if _kb_configured_root_for(dst_parent) is None:
+        return None, f"Zielordner '{dst_parent}' ist kein Wissens-Ordner", 404
+    if _kb_safe_within_data(src) is None or _kb_safe_within_data(dst_parent) is None:
+        return None, "Ungültiger Pfad", 400
+
+    # Ordner nicht in sich selbst oder einen eigenen Unterordner schieben
+    if dst_parent == src or dst_parent.startswith(src + "/"):
+        return None, "Ein Ordner kann nicht in sich selbst verschoben werden", 400
+    if dst_parent == src.rsplit("/", 1)[0]:
+        return None, "Der Ordner liegt bereits an dieser Stelle", 400
+
+    old_abs = PROJECT_ROOT / src
+    if not old_abs.is_dir():
+        return None, "Ordner nicht gefunden", 404
+    dst_parent_abs = PROJECT_ROOT / dst_parent
+    if not dst_parent_abs.is_dir():
+        return None, f"Zielordner '{dst_parent}' existiert nicht", 404
+
+    name = src.rsplit("/", 1)[-1]
+    new_rel = f"{dst_parent}/{name}"
+    new_abs = PROJECT_ROOT / new_rel
+    if new_abs.exists():
+        return None, f"Im Zielordner existiert bereits ein Ordner '{name}'", 409
+
+    # Ein laufender Reindex wuerde gleichzeitig ueber dieselben Metadaten laufen
+    if get_index_progress().get("running"):
+        return None, "Indizierung läuft – bitte warten", 409
+
+    try:
+        old_abs.rename(new_abs)
+    except OSError as e:
+        return None, f"Verschieben fehlgeschlagen: {e}", 500
+
+    moved = relocate_folder_index(old_abs, new_abs)
+    return {"ok": True, "path": new_rel, "from": src, "moved": moved}, None, 200
+
+
 def _kb_supported_exts() -> set:
     from backend.tools.knowledge import (
         EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX, EXTENSIONS_XLSX,
@@ -6996,6 +7060,22 @@ async def rename_knowledge_subfolder(request: Request, user: str = Depends(requi
             return JSONResponse({"error": f"Umbenennen fehlgeschlagen: {e}"}, status_code=500)
     moved = relocate_folder_index(old_abs, new_abs)
     return JSONResponse({"ok": True, "path": new_rel, "moved": moved})
+
+
+@app.post("/api/knowledge/subfolders/move")
+async def move_knowledge_subfolder(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Verschiebt einen Unterordner unter einen anderen Wissens-Ordner – OHNE
+    Neu-Embedding. Body: ``{"path": "data/<...>/<sub>", "target": "data/<...>"}``.
+
+    Nur echte Unterordner; ein konfigurierter Wurzelordner wird über die
+    Ordner-Verwaltung bearbeitet. Das indizierte Wissen (FAISS + TF-IDF) und die
+    Wissensgruppen-Zuordnungen ziehen prefix-sauber mit (``_kb_move_folder``).
+    """
+    data = await request.json()
+    res, err, code = _kb_move_folder(data.get("path") or "", data.get("target") or "")
+    if err:
+        return JSONResponse({"error": err}, status_code=code)
+    return JSONResponse(res)
 
 
 @app.post("/api/knowledge/folders")
@@ -7712,6 +7792,33 @@ async def wissen_rename_subfolder(request: Request, user: str = Depends(require_
         return JSONResponse({"error": f"Umbenennen fehlgeschlagen: {e}"}, status_code=500)
     moved = relocate_folder_index(old_abs, new_abs)
     return JSONResponse({"ok": True, "path": new_rel, "moved": moved})
+
+
+@app.post("/api/wissen/subfolders/move")
+async def wissen_move_subfolder(request: Request, user: str = Depends(require_auth)):
+    """Verschiebt einen Unterordner innerhalb des eigenen Bereichs – OHNE
+    Neu-Embedding. Body: ``{"path": "data/<...>/<sub>", "target": "data/<...>"}``.
+
+    QUELLE UND ZIEL muessen beide unter einem Ordner liegen, den der Nutzer ueber
+    eine seiner Wissensgruppen beschreiben darf – sonst koennte man Wissen aus
+    dem eigenen Bereich in einen fremden (oder umgekehrt) schieben. Wurzelordner
+    bleiben der Admin-Flaeche vorbehalten.
+    """
+    data = await request.json()
+    src = _kb_norm_rel(data.get("path") or "")
+    dst = _kb_norm_rel(data.get("target") or "")
+
+    ok, err = _wissen_may_write_path(user, src)
+    if not ok:
+        return JSONResponse({"error": err}, status_code=403)
+    ok, err = _wissen_may_write_path(user, dst)
+    if not ok:
+        return JSONResponse({"error": err}, status_code=403)
+
+    res, err, code = _kb_move_folder(src, dst)
+    if err:
+        return JSONResponse({"error": err}, status_code=code)
+    return JSONResponse(res)
 
 
 @app.post("/api/wissen/extract")

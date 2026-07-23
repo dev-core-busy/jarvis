@@ -22,6 +22,12 @@ INDEX_CACHE_PATH = PROJECT_ROOT / "data" / "knowledge_index.json"
 DEFAULT_FOLDER = "data/knowledge"
 DEFAULT_MAX_SIZE_MB = 50
 
+# Maximale Zeichen pro Treffer-Chunk in der Tool-Ausgabe.
+# MUSS groesser sein als ein vollstaendiger Chunk (_chunk_text: 200 Woerter,
+# ~1600 Zeichen) – sonst wird der gefundene Treffer mitten im Text abgeschnitten
+# und das LLM antwortet auf einem Ausschnitt, der die Antwort gar nicht enthaelt.
+CHUNK_OUTPUT_LIMIT = 3000
+
 EXTENSIONS_TEXT = {
     ".txt", ".md", ".json", ".csv", ".log", ".py", ".sh",
     ".yaml", ".yml", ".cfg", ".conf", ".ini",
@@ -164,23 +170,45 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
     return vs.chunk_count() > 0
 
 
+# Gelernte Konversationen (learned/conv_*.md) tragen die urspruengliche
+# Benutzerfrage als Ueberschrift. Dadurch sind sie fuer genau diese Frage der
+# perfekte semantische Treffer – unabhaengig davon, ob ihr Inhalt zur Frage
+# passt – und verdraengen die Primaerdokumentation vom ersten Platz. Das ist
+# eine selbstverstaerkende Schleife: eine falsche Antwort wird gelernt und beim
+# naechsten Mal bevorzugt wieder ausgeliefert. Deshalb im Ranking abwerten.
+LEARNED_PENALTY = 0.6
+
+
+def _is_learned_note(path_str: str) -> bool:
+    p = path_str.replace("\\", "/")
+    return "/knowledge/learned/" in p or "/knowledge/pending/" in p
+
+
 def _vector_search(query: str, max_results: int) -> list[tuple[float, str, str]] | None:
-    """Semantische Suche via VectorStore. Gibt None zurueck wenn nicht verfuegbar."""
+    """Hybride Suche (semantisch + BM25) via VectorStore.
+
+    Gibt None zurueck wenn kein VectorStore verfuegbar ist.
+    """
     vs = _get_vector_store()
     if vs is None:
         return None
-    results = vs.search(query, max_results)
+    # Ueber-abfragen: die Abwertung gelernter Notizen sortiert danach um.
+    results = vs.search_hybrid(query, max(max_results * 2, 20))
     if not results:
         return None
-    # Relative Pfade berechnen
+
     converted = []
     for score, file_path, chunk in results:
         try:
             rel = str(Path(file_path).relative_to(PROJECT_ROOT))
         except ValueError:
             rel = file_path
+        if _is_learned_note(file_path):
+            score *= LEARNED_PENALTY
         converted.append((score, rel, chunk))
-    return converted
+
+    converted.sort(key=lambda x: x[0], reverse=True)
+    return converted[:max_results]
 
 
 def _get_skill_config() -> dict:
@@ -512,7 +540,17 @@ def _tokenize(text: str) -> list[str]:
     return re.findall(r'\b\w{2,}\b', text.lower())
 
 
-def _chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str]:
+def _chunk_text(text: str, chunk_size: int = 200, overlap: int = 40) -> list[str]:
+    """Zerlegt Text in ueberlappende Wort-Chunks.
+
+    chunk_size MUSS zum Embedding-Modell passen: multilingual-e5-small hat ein
+    Limit von 512 Tokens und schneidet laengere Chunks stillschweigend ab. Ein
+    800-Wort-Chunk deutscher Fachtexte sind ~2000 Tokens – davon waren 75%
+    unsichtbar (gemessen: die Beschreibung von @STR_UCASE lag hinter dem
+    Cut-off und war ueber die Vektorsuche nicht auffindbar). 200 Woerter bleiben
+    mit Reserve unter dem Limit und schaerfen zugleich das Ranking, weil ein
+    Chunk dann ein Thema behandelt statt eines halben Kapitels.
+    """
     words = text.split()
     if len(words) <= chunk_size:
         return [text]
@@ -1279,7 +1317,7 @@ class KnowledgeTool(BaseTool):
                 # Vektor-Index vorhanden → ausschliesslich Vektor verwenden (kein TF-IDF-Fallback)
                 # Begruendung: TF-IDF skaliert O(n) mit Dateizahl, Vektor konstant ~35ms
                 results = await asyncio.to_thread(_vector_search, query, fetch_n)
-                search_mode = "Vektor"
+                search_mode = "Hybrid: Vektor+BM25"
             elif search_mode_cfg == "auto":
                 # Kein Vektor-Index → TF-IDF als Fallback
                 results = _search(query, cache, fetch_n)
@@ -1309,7 +1347,7 @@ class KnowledgeTool(BaseTool):
         output = f"🔍 {len(results)} Treffer für '{query}' ({search_mode}):\n\n"
         for i, (score, filename, chunk) in enumerate(results, 1):
             output += f"--- [{i}] {filename} (Relevanz: {score:.2f}) ---\n"
-            output += chunk.strip()[:1500] + "\n\n"
+            output += chunk.strip()[:CHUNK_OUTPUT_LIMIT] + "\n\n"
 
         return output
 

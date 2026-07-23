@@ -2375,7 +2375,6 @@ body.light .modal-header h2 {
     margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(var(--fg-rgb), 0.08);
     font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.kb-btn-tag-file { font-size: 0.85rem; }
 
 /* Gruppen-Button (öffnet die Checkbox-Liste) */
 .kb-grp-btn {

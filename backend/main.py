@@ -6042,12 +6042,12 @@ async def delete_knowledge_file(request: Request, user: str = Depends(require_kn
         return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
 
     resolved.unlink()
-    # Aus FAISS-Index entfernen
+    # Restlos aus dem Index entfernen: TF-IDF-Cache, FAISS UND Gruppen-Zuordnung.
+    # (Sonst bliebe die geloeschte Datei als Karteileiche in der Zaehl-Basis und
+    # die Wissensgruppen-Zaehler wuerden nicht sinken.)
     try:
-        from backend.tools.knowledge import _get_vector_store
-        vs = _get_vector_store()
-        if vs:
-            vs.remove_file(str(resolved))
+        from backend.tools.knowledge import purge_file_index
+        purge_file_index(resolved)
     except Exception:
         pass
     return JSONResponse({"ok": True, "deleted": file_path})

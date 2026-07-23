@@ -1200,16 +1200,11 @@ class JarvisKnowledgeManager {
         const esc = (s) => this._escHtml(s);
         const safePath = f.path.replace(/'/g, "\\'");
         const dp = dirPath.replace(/'/g, "\\'");
-        const tagBtn = window.KbGroups
-            ? `<button class="kb-btn-view-file kb-btn-tag-file" title="${window.t('kbgroups.assign_title') || 'Wissensgruppe bearbeiten'}"
-                    onclick="window.knowledgeManager.tagFile(this, '${safePath}')">🔐</button>`
-            : '';
         return `
                 <div class="kb-file-item" data-path="${esc(f.path)}" id="kb-file-${btoa(unescape(encodeURIComponent(f.path))).replace(/[^a-zA-Z0-9]/g, '')}">
                     <span class="kb-file-icon">${this._fileIcon(f.path)}</span>
                     <span class="kb-file-name" title="${esc(f.path)}">${esc(f.name)}</span>
                     <span class="kb-file-size">${esc(f.size)}</span>
-                    ${tagBtn}
                     <button class="kb-btn-view-file kb-btn-move-file" title="${window.t('knowledge.file_move_title') || 'In anderen Ordner verschieben'}"
                         onclick="window.knowledgeManager.moveFiles(['${safePath}'], '${dp}')">📂</button>
                     <button class="kb-btn-delete-file" title="${window.t('knowledge.file_delete_title')}"
@@ -1582,17 +1577,6 @@ class JarvisKnowledgeManager {
         this._showNotification((window.t('knowledge.bulk_removed') || '{n} aus Gruppe entfernt').replace('{n}', ok), 'success');
         await this._refreshGroups();
         this._showGroupFiles(gid);
-    }
-
-    // ─── Datei einer Gruppe zuordnen ─────────────────────────────────
-
-    tagFile(anchorEl, path) {
-        if (!window.KbGroups) return;
-        window.KbGroups.openTagPopover(anchorEl, path, async () => {
-            // Zähler in der Übersicht nach dem Speichern aktualisieren
-            await window.KbGroups.load();
-            this._renderGroupsOverview();
-        });
     }
 
     // ─── Datei löschen ──────────────────────────────────────────────

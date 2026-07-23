@@ -109,6 +109,11 @@
             const _ph = [];
             const _hold = (htmlStr) => { _ph.push(htmlStr); return `\x02PH${_ph.length - 1}\x02`; };
 
+            // Inline-Code SOFORT sichern – vor jeder Formatierung. Sonst frisst die
+            // Kursiv-Regex weiter unten die Unterstriche im Code-Inhalt, z.B. wuerde
+            // `LOCAL_RECEIVE_PATH` als LOCAL<em>RECEIVE</em>PATH gerendert.
+            t = t.replace(/<code>[\s\S]*?<\/code>/g, (m) => _hold(m));
+
             // Bilder ![alt](url)
             t = t.replace(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g, (_, alt, url) => {
                 const raw = url.replace(/&amp;/g, '&');
@@ -133,7 +138,10 @@
             t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
             t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
             t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-            t = t.replace(/_([^_\n]+)_/g, '<em>$1</em>');
+            // '_' kursiviert NUR ausserhalb von Woertern (wie CommonMark). Sonst
+            // zerreisst jeder Bezeichner mit zwei Unterstrichen – LOCAL_RECEIVE_PATH,
+            // LOCAL_SEND_PATH, snake_case – zu "LOCALRECEIVEPATH".
+            t = t.replace(/(^|[^A-Za-z0-9_])_([^_\n]+)_(?![A-Za-z0-9_])/g, '$1<em>$2</em>');
             t = t.replace(/~~(.+?)~~/g, '<del>$1</del>');
             t = t.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_, tit, url) => {
                 const raw = url.replace(/&amp;/g, '&');
@@ -142,13 +150,13 @@
             });
 
             // Nackte URLs (http/https/www) klickbar machen. Bestehende Markdown-<a>-
-            // und <code>-Bereiche zuerst schuetzen, damit URLs in href-Attributen nicht
-            // ein zweites Mal (und kaputt) verlinkt werden bzw. Code nicht verlinkt wird.
-            // Bilder/Chips sind hier bereits Platzhalter und daher automatisch geschuetzt.
+            // Bereiche zuerst schuetzen, damit URLs in href-Attributen nicht ein
+            // zweites Mal (und kaputt) verlinkt werden.
+            // Bilder/Chips/Inline-Code sind hier bereits Platzhalter und daher
+            // automatisch geschuetzt.
             const _prot = [];
             const _protect = (re) => { t = t.replace(re, (m) => { _prot.push(m); return `\x03P${_prot.length - 1}\x03`; }); };
             _protect(/<a\b[^>]*>[\s\S]*?<\/a>/g);
-            _protect(/<code>[\s\S]*?<\/code>/g);
             t = t.replace(/(https?:\/\/[^\s<>"{}|\\^`[\]]+|www\.[a-zA-Z0-9][^\s<>"{}|\\^`[\]]*)/gi, (url) => {
                 const raw = url.replace(/&amp;/g, '&');
                 const href = /^www\./i.test(raw) ? 'https://' + raw : raw;

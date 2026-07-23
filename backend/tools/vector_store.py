@@ -272,6 +272,31 @@ class VectorStore:
             new_vecs = self._vectors_at(keep)
             self._rebuild(new_meta, new_vecs)
 
+    def rename_file_path(self, old_path: str, new_path: str) -> int:
+        """Schreibt die Metadaten EINER Datei auf einen neuen Pfad um – ohne
+        Neu-Embedding. Einzeldatei-Pendant zu ``rename_path_prefix``.
+
+        Die Vektoren bleiben unberuehrt: der Inhalt aendert sich beim
+        Verschieben nicht, nur seine Adresse. ``mtime`` wird bewusst NICHT
+        angefasst – ``Path.rename()`` laesst sie ebenfalls unveraendert, und der
+        inkrementelle Reindex vergleicht genau diesen Wert. Bliebe sie hier
+        stehen bzw. wuerde sie hier geaendert, wuerde die Datei beim naechsten
+        Lauf unnoetig neu eingebettet.
+
+        Gibt die Anzahl umgeschriebener Chunks zurueck.
+        """
+        if old_path == new_path:
+            return 0
+        with self._lock:
+            changed = 0
+            for m in self._meta:
+                if m["file_path"] == old_path:
+                    m["file_path"] = new_path
+                    changed += 1
+            if changed:
+                self._save()
+            return changed
+
     def rename_path_prefix(self, old_prefix: str, new_prefix: str) -> int:
         """Schreibt file_path-Metadaten aller Chunks unterhalb eines Ordners auf
         einen neuen Pfad um (Ordner-Umbenennung) – ohne Neu-Embedding.

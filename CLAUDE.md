@@ -59,7 +59,7 @@ backend/
     base.py        – BaseTool Klasse
     shell.py       – Shell-Ausfuehrung mit Live-Streaming (stdout zeilenweise via WebSocket)
     subagent.py    – spawn_agent Tool (Hauptagent startet Sub-Agents)
-    vector_store.py – ChromaDB Vektor-Datenbank fuer Wissenssuche
+    vector_store.py – FAISS Vektor-DB + BM25 fuer hybride Wissenssuche
     desktop.py, filesystem.py, screenshot.py, knowledge.py, memory.py
     android_desktop.py, windows_desktop.py – Remote-Desktop-Steuerung
     google_calendar.py, google_drive.py, google_gmail.py, google_auth.py
@@ -132,11 +132,32 @@ data/
 - **WebSocket-Protokoll**: `agent_event` (started/spawned/finished/paused), `agent_list`, `status` mit `agent_id`
 
 ## Vektor-Datenbank (Wissenssuche)
-- **ChromaDB** + **sentence-transformers** (`paraphrase-multilingual-MiniLM-L12-v2`)
-- **vector_store.py**: PersistentClient, lazy-loaded Embedding-Singleton
-- **Suchmodi** (konfigurierbar in Knowledge-Skill): Auto, TF-IDF, Vektor
-  - Auto: versucht Vektor zuerst, Fallback auf TF-IDF
-- **Frontend**: Toggle-Buttons (Auto/TF-IDF/Vektor) im Knowledge-Settings-Tab
+- **FAISS** (`IndexFlatIP`, normierte Vektoren = Cosine) + **sentence-transformers**
+  (`intfloat/multilingual-e5-small`, 384d) – Persistenz: `data/vector_store/faiss_index.bin`
+  + `faiss_meta.json` (enthaelt auch die Chunk-Texte)
+- **Hybride Suche** (seit 2026-07-23): `search_hybrid()` fusioniert drei Kanaele per
+  Reciprocal Rank Fusion (RRF_K=20):
+  1. semantisch mit der Original-Query (FAISS/e5, e5-Prefixe `query:` / `passage:`)
+  2. semantisch mit der auf Inhaltswoerter reduzierten Query (`_content_terms()`,
+     Stoppwortliste DE/EN) – Frage-Floskeln ziehen den Query-Vektor messbar weg;
+     der Kanal entfaellt, wenn die Reduktion nichts aendert (spart ein Encoding)
+  3. lexikalisch (BM25 ueber dieselben Chunks aus `_meta` – kein zweiter Index;
+     invertierter Index lazy gebaut, invalidiert ueber Generations-Zaehler `_gen`)
+  Grund fuer BM25: reine Embeddings sind bei exakten Bezeichnern (`@STR_UCASE`,
+  Fehlercodes, Parameternamen) strukturell schwach – `STR_UCASE` und `STR_LCASE`
+  landen fast auf demselben Punkt. Latenz gemessen: 19–58 ms bei 1155 Chunks.
+- **Der zurueckgegebene Score ist ein normierter RRF-Rang** (Top = 1.00), KEIN Cosine-Wert.
+- **Chunking:** 200 Woerter / 40 Overlap. MUSS unter dem 512-Token-Limit von e5 bleiben –
+  laengere Chunks werden vom Modell still abgeschnitten und der Inhalt dahinter ist
+  im Vektor unauffindbar.
+- **Score-Filter:** `MIN_SCORE=0.72` absolut + `RELATIVE_CUT=0.5` relativ zum Top-Treffer
+  (mind. `MIN_KEEP=3`). e5 komprimiert Cosine auf ~0.75–0.95, absolute Schwellen allein
+  filtern daher praktisch nichts.
+- **Lern-Notizen** (`knowledge/learned|pending/`) werden im Ranking mit `LEARNED_PENALTY=0.6`
+  abgewertet: sie tragen die Benutzerfrage als Ueberschrift und waeren sonst fuer genau
+  diese Frage der Top-Treffer – unabhaengig vom Inhalt (selbstverstaerkende Schleife).
+- TF-IDF (`_search()` + `knowledge_index.json`) existiert noch als Fallback, wenn FAISS
+  fehlt; der frueher waehlbare Suchmodus (Auto/TF-IDF/Vektor) wurde entfernt.
 - **numpy**: Muss < 2.1 bleiben (VM hat kein SSE4.2)
 
 ## Skill-System
@@ -200,6 +221,17 @@ data/
 - **Shell-Streaming:** `PYTHONUNBUFFERED=1` muss gesetzt sein, sonst kein Live-Output
 - **Sub-Agent 0 Parts:** Wenn LLM leere Antwort liefert, pruefen ob Task-Text korrekt uebergeben wird
 - **Doppelter Hauptagent:** Frontend resettet `_agentInfos` bei `started`-Event des Hauptagents
+- **Embedding-Modell-Cache liegt beim jarvis-User:** Skripte, die `sentence-transformers`
+  nutzen (z.B. manueller Reindex), brauchen `HOME=/home/jarvis`. Sonst sucht HF in
+  `/root/.cache` → `OSError: PermissionError ... when downloading` → jedes Encoding
+  scheitert und ein Reindex baut still einen LEEREN Index auf:
+  `env HOME=/home/jarvis setpriv --reuid=jarvis --regid=jarvis --init-groups venv/bin/python ...`
+- **`_rebuild_vector_index()` verschluckt Fehler** (`except Exception: pass` pro Datei) –
+  ein fehlgeschlagener Reindex meldet keinen Fehler, sondern `0 Chunks`. Ergebniszahl
+  immer pruefen; vor einem Reindex `data/vector_store/` sichern (`vs.clear()` laeuft zuerst).
+- **Chunk-Ausgabe im Tool ist gedeckelt** (`CHUNK_OUTPUT_LIMIT`): Ist das Limit kleiner als
+  ein Chunk, sieht das LLM nur den Anfang des Treffers und antwortet auf einem Ausschnitt,
+  der die Antwort nicht enthaelt. Limit und `_chunk_text`-Groesse zusammen aendern.
 
 ## Ports
 | Port | Service | Zugriff |

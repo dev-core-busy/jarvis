@@ -845,6 +845,60 @@ def purge_file_index(file: Path) -> dict:
             "group_assignment": removed_group}
 
 
+def relocate_file_index(old_file: Path, new_file: Path) -> dict:
+    """Zieht die Index-Eintraege EINER verschobenen Datei auf den neuen Pfad um –
+    ohne Neu-Embedding. Einzeldatei-Pendant zu ``relocate_folder_index``.
+
+    Betrifft TF-IDF-Cache-Schluessel, FAISS-Metadaten und die Wissensgruppen-
+    Zuordnung. Die Datei selbst muss vom Aufrufer bereits verschoben worden sein
+    (``Path.rename()``), damit mtime und Inhalt unveraendert bleiben und der
+    naechste inkrementelle Reindex sie nicht erneut einbettet.
+
+    Gibt Zaehler der umgezogenen Eintraege zurueck.
+    """
+    old_s, new_s = str(old_file), str(new_file)
+    if old_s == new_s:
+        return {"tfidf_files": 0, "vector_chunks": 0, "group_assignment": False}
+
+    moved_tfidf = 0
+    with _cache_lock:
+        cache = _load_cache()
+        files = cache.get("files", {})
+        if old_s in files:
+            files[new_s] = files.pop(old_s)
+            moved_tfidf = 1
+            _save_cache(cache)
+
+    moved_vec = 0
+    vs = _get_vector_store()
+    if vs is not None:
+        try:
+            moved_vec = vs.rename_file_path(old_s, new_s)
+        except Exception as e:
+            _log.warning(f"FAISS-Relokation fehlgeschlagen: {e}")
+
+    # Gruppen-Zuordnung mitnehmen. Modell A: Dateien in einem Ordner erben
+    # dessen Gruppen; eine EXPLIZITE Zuordnung (Modell B) haengt dagegen am
+    # relativen Dateipfad und muss aktiv umgehaengt werden.
+    moved_group = False
+    try:
+        from backend import knowledge_groups as kg
+        old_rel, new_rel = _folder_rel(old_file), _folder_rel(new_file)
+        groups = kg.get_assignment(old_rel)
+        if groups:
+            kg.set_assignment(new_rel, groups)
+            kg.set_assignment(old_rel, [])
+            moved_group = True
+    except Exception as e:
+        _log.warning(f"Gruppen-Relokation fehlgeschlagen: {e}")
+
+    _log.info(f"Datei-Index verschoben {old_s} -> {new_s}: "
+              f"{moved_tfidf} TF-IDF, {moved_vec} Vektor-Chunks, "
+              f"Gruppen-Zuordnung={'ja' if moved_group else 'nein'}")
+    return {"tfidf_files": moved_tfidf, "vector_chunks": moved_vec,
+            "group_assignment": moved_group}
+
+
 def _all_files(folders: list[Path]) -> list[Path]:
     """Gibt alle unterstützten Dateien in den konfigurierten Ordnern zurück."""
     all_exts = EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO

@@ -764,6 +764,49 @@ def purge_folder_index(folder: Path) -> dict:
             "group_assignments": removed_groups}
 
 
+def purge_file_index(file: Path) -> dict:
+    """Entfernt eine EINZELNE Datei restlos aus dem Index: TF-IDF-Cache, FAISS
+    und ihre Gruppen-Zuordnung. Einzeldatei-Pendant zu ``purge_folder_index`` –
+    wird beim Loeschen einer Wissensdatei aufgerufen, damit die Datei nicht als
+    Karteileiche in der Zaehl-Basis (``known_paths_with_disk``) bzw. den
+    Wissensgruppen zurueckbleibt. Gibt Zaehler der entfernten Eintraege zurueck."""
+    file_s = str(file)
+
+    removed_tfidf = 0
+    with _cache_lock:
+        cache = _load_cache()
+        files = cache.get("files", {})
+        if file_s in files:
+            del files[file_s]
+            removed_tfidf = 1
+            _save_cache(cache)
+
+    removed_vec = 0
+    vs = _get_vector_store()
+    if vs is not None:
+        try:
+            before = len(vs._meta)
+            vs.remove_file(file_s)
+            removed_vec = before - len(vs._meta)
+        except Exception as e:
+            _log.warning(f"FAISS-Bereinigung fehlgeschlagen: {e}")
+
+    removed_group = False
+    try:
+        from backend import knowledge_groups as kg
+        if kg.get_assignment(file_s):
+            kg.set_assignment(file_s, [])  # leere Liste = Zuordnung entfernen
+            removed_group = True
+    except Exception as e:
+        _log.warning(f"Gruppen-Bereinigung fehlgeschlagen: {e}")
+
+    _log.info(f"Datei-Index bereinigt {file_s}: "
+              f"{removed_tfidf} TF-IDF, {removed_vec} Vektor-Chunks, "
+              f"Gruppen-Zuordnung={'ja' if removed_group else 'nein'}")
+    return {"tfidf_files": removed_tfidf, "vector_chunks": removed_vec,
+            "group_assignment": removed_group}
+
+
 def _all_files(folders: list[Path]) -> list[Path]:
     """Gibt alle unterstützten Dateien in den konfigurierten Ordnern zurück."""
     all_exts = EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO

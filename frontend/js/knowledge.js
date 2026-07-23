@@ -340,6 +340,32 @@ class JarvisKnowledgeManager {
         }
     }
 
+    // Loescht EINE Wissensdatei physisch (nicht nur die Gruppenzuordnung) – mit
+    // demselben Bestaetigungsdialog wie in der Ungruppiert-/Ordner-Ansicht. Das
+    // Backend raeumt dabei TF-IDF-Index, FAISS UND Gruppen-Zuordnung mit auf,
+    // damit die Zaehler danach stimmen. onDone() frischt die jeweilige Ansicht auf.
+    async _confirmDeleteKbFile(path, onDone) {
+        const KG = window.KbGroups;
+        if (!confirm((window.t('knowledge.file_delete_confirm') || 'Datei „{name}" wirklich löschen?')
+                .replace('{name}', KG.baseName(path)))) return false;
+        try {
+            const r = await fetch('/api/knowledge/files', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json',
+                           'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
+                body: JSON.stringify({ path })
+            });
+            if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || ('HTTP ' + r.status)); }
+            this._showNotification(window.t('knowledge.file_deleted') || 'Datei gelöscht', 'success');
+            if (onDone) await onDone();
+            this.fetchStats && this.fetchStats();
+            return true;
+        } catch (e) {
+            this._showNotification((window.t('common.error') || 'Fehler') + ': ' + e.message, 'error');
+            return false;
+        }
+    }
+
     async _showGroupFiles(gid) {
         const box = document.getElementById('kb-groups-files');
         if (!box || !window.KbGroups) return;
@@ -354,8 +380,11 @@ class JarvisKnowledgeManager {
             box.innerHTML = title + `<div class="kb-files-empty">${window.t('kbgroups.no_docs') || 'Keine Dokumente in dieser Gruppe.'}</div>`;
             return;
         }
+        // Mehrfachauswahl bietet BEIDE Aktionen an: Dateien loeschen ODER nur die
+        // Gruppenzuordnung loesen (Datei bleibt).
         const barBulk = `<div class="kb-bulk-bar hidden">
-                <button class="btn-secondary kb-bulk-del" type="button">${window.t('knowledge.bulk_remove') || 'Aus Gruppe entfernen'} (<span class="kb-bulk-count">0</span>)</button>
+                <button class="btn-secondary kb-bulk-del" type="button">${window.t('knowledge.bulk_delete') || 'Auswahl löschen'} (<span class="kb-bulk-count">0</span>)</button>
+                <button class="btn-secondary kb-bulk-remove" type="button">${window.t('knowledge.bulk_remove') || 'Aus Gruppe entfernen'} (<span class="kb-bulk-count">0</span>)</button>
                 <button class="btn-secondary kb-bulk-clear" type="button">${window.t('knowledge.bulk_clear') || 'Auswahl aufheben'}</button>
                 <span class="kb-bulk-hint">${window.t('knowledge.bulk_hint') || 'Mehrfachauswahl: Klick oder mit der Maus aufziehen'}</span>
             </div>`;
@@ -364,7 +393,7 @@ class JarvisKnowledgeManager {
                 <span class="kb-file-icon">${this._fileIcon(p)}</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
                 <button class="kb-btn-view-file kb-grp-tag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.perms') || 'Berechtigungen verwalten'}">🔐</button>
-                <button class="kb-btn-remove kb-grp-untag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.remove') || 'Aus Gruppe entfernen'}">✕</button>
+                <button class="kb-btn-remove kb-grp-del" data-path="${KG.esc(p)}" title="${window.t('knowledge.file_delete_title') || 'Datei löschen'}">✕</button>
             </div>`).join('') + `</div>`;
         // Wissensgruppen des Eintrags bearbeiten (Popover) – danach Liste auffrischen
         box.querySelectorAll('.kb-grp-tag').forEach(btn => {
@@ -377,18 +406,23 @@ class JarvisKnowledgeManager {
                 });
             };
         });
-        box.querySelectorAll('.kb-grp-untag').forEach(btn => {
-            btn.onclick = async () => {
-                const path = btn.dataset.path;
-                const cur = await KG.getAssignment(path);
-                await KG.setAssignment(path, cur.filter(x => x !== gid));
-                await KG.load();
-                this._renderGroupsOverview();
+        // Einzel-✕ LOESCHT die Datei physisch (mit Bestaetigungsdialog). Die reine
+        // Gruppenzuordnung loest man weiterhin pro Datei ueber das 🔐-Popover.
+        box.querySelectorAll('.kb-grp-del').forEach(btn => {
+            btn.onclick = () => this._confirmDeleteKbFile(btn.dataset.path, async () => {
+                await this._refreshGroups();
                 this._showGroupFiles(gid);
-            };
+            });
         });
-        // Mehrfachauswahl (Drag/Klick) -> ausgewaehlte Dokumente gesammelt aus der Gruppe entfernen
-        this._setupRowSelection(box, '.kb-grp-file-row', (paths) => this._bulkRemoveFromGroup(paths, gid));
+        // Mehrfachauswahl (Drag/Klick): Sammel-Loeschen ODER Sammel-Entfernen aus der Gruppe.
+        this._setupRowSelection(box, '.kb-grp-file-row', (paths) =>
+            this._bulkDeleteFiles(paths, () => { this._refreshGroups(); return this._showGroupFiles(gid); }));
+        const rmBtn = box.querySelector('.kb-bulk-remove');
+        if (rmBtn) rmBtn.onclick = () => {
+            const paths = [...box.querySelectorAll('.kb-grp-file-row.selected')]
+                .map(r => r.getAttribute('data-path')).filter(Boolean);
+            if (paths.length) this._bulkRemoveFromGroup(paths, gid);
+        };
         this._bindFilePreview(box);
     }
 
@@ -447,27 +481,10 @@ class JarvisKnowledgeManager {
             };
         });
         box.querySelectorAll('.kb-ung-del').forEach(btn => {
-            btn.onclick = async () => {
-                const path = btn.dataset.path;
-                if (!confirm((window.t('knowledge.file_delete_confirm') || 'Datei „{name}" wirklich löschen?')
-                        .replace('{name}', KG.baseName(path)))) return;
-                try {
-                    const r = await fetch('/api/knowledge/files', {
-                        method: 'DELETE',
-                        headers: { 'Content-Type': 'application/json',
-                                   'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') },
-                        body: JSON.stringify({ path })
-                    });
-                    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || ('HTTP ' + r.status)); }
-                    this._showNotification(window.t('knowledge.file_deleted') || 'Datei gelöscht', 'success');
-                    await KG.load();
-                    this._renderGroupsOverview();
-                    this._showUngroupedFiles();
-                    this.fetchStats && this.fetchStats();
-                } catch (e) {
-                    this._showNotification((window.t('common.error') || 'Fehler') + ': ' + e.message, 'error');
-                }
-            };
+            btn.onclick = () => this._confirmDeleteKbFile(btn.dataset.path, async () => {
+                await this._refreshGroups();
+                this._showUngroupedFiles();
+            });
         });
         this._bindFilePreview(box);
     }
@@ -1376,7 +1393,9 @@ class JarvisKnowledgeManager {
             if (!bar) return;
             const n = selected().length;
             bar.classList.toggle('hidden', n === 0);
-            const c = bar.querySelector('.kb-bulk-count'); if (c) c.textContent = String(n);
+            // Es kann mehrere Aktions-Buttons mit eigenem Zaehler geben (z.B. in der
+            // Gruppen-Ansicht "Löschen" + "Aus Gruppe entfernen").
+            bar.querySelectorAll('.kb-bulk-count').forEach(c => { c.textContent = String(n); });
         };
         // Einzelklick schaltet Auswahl um (nicht auf Buttons/Links)
         container.addEventListener('click', (e) => {
@@ -1488,8 +1507,7 @@ class JarvisKnowledgeManager {
             } catch (e) { /* weiter */ }
         }
         this._showNotification((window.t('knowledge.bulk_removed') || '{n} aus Gruppe entfernt').replace('{n}', ok), 'success');
-        await KG.load();
-        this._renderGroupsOverview();
+        await this._refreshGroups();
         this._showGroupFiles(gid);
     }
 

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wissen – Jarvis</title>
     <link rel="stylesheet" href="/static/css/theme.css?v=6">
-    <link rel="stylesheet" href="/static/css/style.css?v=130">
+    <link rel="stylesheet" href="/static/css/style.css?v=131">
     <link rel="icon" href="/static/favicon.png" type="image/png">
     <style>
         * { box-sizing: border-box; }
@@ -116,6 +116,11 @@
         .wi-grpbox { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 8px;
             border: 1px solid var(--border); cursor: pointer; font-size: 0.85rem; user-select: none; }
         .wi-grpbox input { accent-color: var(--accent); }
+        /* Wissensgruppen-Filter ueber der Dateiliste ("Mein Wissen") */
+        .wi-files-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+            margin-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+        .wi-files-filter-lbl { font-size: 0.8rem; color: var(--text-secondary); }
+        .wi-files-filter-count { font-size: 0.78rem; color: var(--text-secondary); margin-left: auto; }
         .wi-status { margin-top: 12px; font-size: 0.86rem; }
         .wi-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
         .wi-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px;
@@ -321,11 +326,17 @@
         <div class="wi-section" id="wi-sec-files">
             <h2><span data-i18n="wissen.sec_files">Mein Wissen</span><span class="wi-sec-tog">▼</span></h2>
             <p class="desc" data-i18n="wissen.sec_files_desc">Dateien, die deinen Wissensgruppen zugeordnet sind.</p>
+            <!-- Wissensgruppen-Filter: schraenkt die Liste darunter ein (Zustand im Cookie) -->
+            <div class="wi-files-filter" id="wi-files-filter" style="display:none;">
+                <span class="wi-files-filter-lbl" data-i18n="wissen.filter_label">Anzeigen:</span>
+                <span id="wi-files-filter-boxes"></span>
+                <span class="wi-files-filter-count" id="wi-files-count"></span>
+            </div>
             <div class="wi-list" id="wi-files-list"><div class="wi-empty" data-i18n="common.loading">Lade…</div></div>
         </div>
     </div>
 
-    <script src="/static/js/i18n.js?v=111"></script>
+    <script src="/static/js/i18n.js?v=112"></script>
     <script src="/static/js/theme.js?v=1"></script>
     <script src="/static/js/profile_switcher.js?v=4"></script>
     <script src="/static/js/issues.js?v=6"></script>
@@ -333,7 +344,7 @@
     <script src="/static/js/kbmatrix.js?v=12"></script>
     <script src="/static/js/ldap_picker.js?v=6"></script>
     <script src="/static/js/knowledge.js?v=83"></script>
-    <script src="/static/js/wissen.js?v=31"></script>
+    <script src="/static/js/wissen.js?v=32"></script>
     <script src="/static/js/branding.js?v=22"></script>
 </body>
 </html>

@@ -4602,6 +4602,23 @@ select option:hover {
     cursor: not-allowed;
 }
 
+/* Abbruch-Zustand: derselbe Knopf, der die Indizierung gestartet hat, stoppt sie
+   auch wieder – die Warnfarbe macht den Funktionswechsel sichtbar. */
+.kb-btn-action.kb-btn-cancel {
+    background: var(--warning);
+}
+
+/* Laufende Indizierung im Abschnitts-Kopf – bleibt sichtbar, auch wenn
+   "Statistiken" zugeklappt ist. margin-right:auto haelt es links am Titel. */
+.kb-sect-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--warning);
+    margin-left: 0.6rem;
+    margin-right: auto;
+    white-space: nowrap;
+}
+
 /* Sekundaeraktions-Button in Settings (z.B. 2FA aktivieren/deaktivieren).
    Akzentbasiert – folgt Branding; Gefahr-Variante via inline background:var(--danger). */
 .settings-action-btn {

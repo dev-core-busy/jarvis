@@ -4608,6 +4608,12 @@ select option:hover {
     background: var(--warning);
 }
 
+/* Kachel mit Erklaerungs-Tooltip (z.B. "Chunks"): der Hilfe-Cursor signalisiert,
+   dass beim Ueberfahren eine Erlaeuterung erscheint. */
+.kb-stat-help {
+    cursor: help;
+}
+
 /* Laufende Indizierung im Abschnitts-Kopf – bleibt sichtbar, auch wenn
    "Statistiken" zugeklappt ist. margin-right:auto haelt es links am Titel. */
 .kb-sect-badge {

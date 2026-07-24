@@ -672,6 +672,17 @@ const _I18N = {
         // Stat labels
         'knowledge.stat.files':          'Dateien',
         'knowledge.stat.indexed':        'Indiziert',
+        'knowledge.stat.indexed_help':
+            'Indiziert zählt die Dateien, aus denen tatsächlich durchsuchbarer Text gewonnen '
+            + 'wurde – die Differenz zu „Dateien“ sind Dokumente, die zwar gefunden, aber nicht '
+            + 'verwertet werden konnten. Der häufigste Grund ist eine fehlende Textebene, etwa bei '
+            + 'eingescannten PDFs oder Bildern, bei denen auch die Texterkennung nichts Brauchbares '
+            + 'liefert. Übersprungen werden außerdem Dateien oberhalb der eingestellten '
+            + 'Maximalgröße (Standard 50 MB) sowie Formate, für die das passende Lesemodul nicht '
+            + 'installiert ist – etwa Word, Excel oder die Video-/Audio-Transkription. '
+            + 'Beschädigte oder kennwortgeschützte Dokumente scheitern beim Öffnen und werden '
+            + 'ebenfalls stillschweigend ausgelassen, damit eine einzelne Datei nicht den '
+            + 'gesamten Indexlauf stoppt.',
         'knowledge.stat.chunks':         'Chunks',
         'knowledge.stat.chunks_help':
             'Chunks sind die Textabschnitte, in die jedes Dokument beim Indizieren zerlegt wird – '
@@ -2299,6 +2310,15 @@ const _I18N = {
         // Stat labels
         'knowledge.stat.files':          'Files',
         'knowledge.stat.indexed':        'Indexed',
+        'knowledge.stat.indexed_help':
+            'Indexed counts the files from which searchable text was actually extracted – the gap '
+            + 'to “Files” are documents that were found but could not be used. The most common '
+            + 'reason is a missing text layer, for example scanned PDFs or images where optical '
+            + 'character recognition yields nothing usable either. Files above the configured '
+            + 'maximum size (50 MB by default) are skipped as well, as are formats whose reader '
+            + 'module is not installed – Word, Excel or video/audio transcription, for instance. '
+            + 'Damaged or password-protected documents fail to open and are silently left out too, '
+            + 'so that a single file cannot stop the entire indexing run.',
         'knowledge.stat.chunks':         'Chunks',
         'knowledge.stat.chunks_help':
             'Chunks are the text segments each document is split into during indexing – '

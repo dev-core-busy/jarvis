@@ -797,7 +797,8 @@ class JarvisKnowledgeManager {
                     <span class="kb-stat-value">${stats.total_files}</span>
                     <span class="kb-stat-label">${window.t('knowledge.stat.files')}</span>
                 </div>
-                <div class="kb-stat">
+                <div class="kb-stat kb-stat-help" data-i18n-title="knowledge.stat.indexed_help"
+                     title="${window.t('knowledge.stat.indexed_help')}">
                     <span class="kb-stat-value">${stats.indexed_files}</span>
                     <span class="kb-stat-label">${window.t('knowledge.stat.indexed')}</span>
                 </div>

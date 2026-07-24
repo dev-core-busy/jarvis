@@ -233,8 +233,13 @@ class VectorStore:
 
     # ─── Schreib-Operationen ─────────────────────────────────────────────────
 
-    def add_chunks(self, file_path: str, chunks: list[str], mtime: float):
-        """Fuegt Chunks fuer eine Datei hinzu (ersetzt bestehende)."""
+    def add_chunks(self, file_path: str, chunks: list[str], mtime: float, save: bool = True):
+        """Fuegt Chunks fuer eine Datei hinzu (ersetzt bestehende).
+
+        ``save=False`` unterdrueckt das Schreiben auf Platte – fuer den
+        Bulk-Reindex, der gedrosselt selbst per ``save()`` persistiert (sonst
+        wuerde bei jeder Datei der komplette Index neu serialisiert).
+        """
         if not chunks:
             self.remove_file(file_path)
             return
@@ -242,25 +247,40 @@ class VectorStore:
         # Neue Vektoren berechnen (ausserhalb des Locks – dauert laenger)
         new_vecs = _encode(chunks, prefix="passage")
 
-        with self._lock:
-            # Bestehende Chunks dieser Datei entfernen
-            keep = [i for i, m in enumerate(self._meta) if m["file_path"] != file_path]
-            old_meta = [self._meta[i] for i in keep]
-            old_vecs = self._vectors_at(keep)
+        new_meta = [
+            {"file_path": file_path, "mtime": mtime, "chunk_index": i, "text": t}
+            for i, t in enumerate(chunks)
+        ]
 
-            # Neue Chunks anfuegen
-            new_meta = [
-                {"file_path": file_path, "mtime": mtime, "chunk_index": i, "text": t}
-                for i, t in enumerate(chunks)
-            ]
-            combined_meta = old_meta + new_meta
-            combined_vecs = (
-                np.vstack([old_vecs, new_vecs])
-                if len(old_vecs) > 0
-                else new_vecs
-            )
-            self._rebuild(combined_meta, combined_vecs)
+        with self._lock:
+            has_existing = any(m["file_path"] == file_path for m in self._meta)
+            if has_existing:
+                # Datei war schon im Index (geaenderte Datei) → alte Chunks
+                # entfernen. Das erfordert einen Neuaufbau; _rebuild speichert.
+                keep = [i for i, m in enumerate(self._meta) if m["file_path"] != file_path]
+                old_meta = [self._meta[i] for i in keep]
+                old_vecs = self._vectors_at(keep)
+                combined_vecs = (
+                    np.vstack([old_vecs, new_vecs]) if len(old_vecs) > 0 else new_vecs
+                )
+                self._rebuild(old_meta + new_meta, combined_vecs)
+            else:
+                # Schnellpfad (Normalfall beim Voll-Reindex): NUR anhaengen –
+                # kein Reconstruct/vstack/Neuaufbau des Gesamtindex. Das war die
+                # Ursache fuer O(N²)-Speicherwachstum und OOM-Kills bei ~600
+                # Dateien; jetzt konstanter Aufwand pro Datei.
+                self._index.add(new_vecs)
+                self._meta.extend(new_meta)
+                self._gen += 1
+                if save:
+                    self._save()
         _log.debug(f"Indexiert: {file_path} ({len(chunks)} Chunks)")
+
+    def save(self):
+        """Persistiert Index + Metadaten auf Platte (fuer gedrosseltes
+        Speichern beim Bulk-Reindex – siehe ``add_chunks(save=False)``)."""
+        with self._lock:
+            self._save()
 
     def remove_file(self, file_path: str):
         """Entfernt alle Chunks einer Datei."""

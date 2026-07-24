@@ -803,7 +803,7 @@
         if (!text) return;
 
         // Status-Nachrichten erkennen: beginnen immer mit einem bekannten Emoji
-        const STATUS_PREFIXES = ['🚀','🔧','📋','⏳','💬','💻','✅','⚠️','❌','🧠','⏸','▶','⏹','📊','🧩','🔎'];
+        const STATUS_PREFIXES = ['🚀','🔧','📋','⏳','💬','💻','✅','⚠️','❌','🧠','⏸','▶','⏹','📊','🧩','🔎','🔄'];
         const isStatus = STATUS_PREFIXES.some(p => text.startsWith(p));
 
         // Multi-Agent: Sub-Agent-Ausgabe in eine eigene (getaggte) Bubble lenken

@@ -671,7 +671,7 @@ KRITISCH – Autonomie-Regeln:
             )
         return declarations
 
-    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None, kb_groups=_KB_GROUPS_UNSET, session_id: str = ""):
+    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None, kb_groups=_KB_GROUPS_UNSET, session_id: str = "", is_final_attempt: bool = True):
         """Führt eine Aufgabe aus – der Agent-Loop."""
         import sys
         from backend.telemetry import tracer
@@ -715,6 +715,12 @@ KRITISCH – Autonomie-Regeln:
         self._stop_scopes[_rkey] = stop_scope
         _scope_token = _run_stop_scope.set(stop_scope)
         self._tool_cache.clear()  # Cache für diesen Task-Run leeren
+        # Ergebnis dieses Laufs fuer den Auto-Neuversuch am Aufrufort:
+        #   ok      – Antwort geliefert
+        #   empty   – LLM lieferte keine Antwort (0 Parts / Reset erfolglos)
+        #   error   – Exception (LLM-Fehler/Timeout)
+        #   stopped – vom Benutzer gestoppt (NIE automatisch wiederholen)
+        run_outcome = "ok"
 
         # Provider bei jedem Start neu initialisieren (für geänderte Einstellungen)
         self.provider = get_provider(
@@ -1010,7 +1016,11 @@ KRITISCH – Autonomie-Regeln:
                             break
                     except Exception as _re:
                         _log(f"Retry fehlgeschlagen: {_re}")
-                    await self._send_status(ws, "⚠️ Keine Antwort vom LLM erhalten. Bitte versuche es erneut.", highlight=True)
+                    run_outcome = "empty"
+                    if is_final_attempt:
+                        await self._send_status(ws, "⚠️ Keine Antwort vom LLM erhalten. Bitte versuche es erneut.", highlight=True)
+                    else:
+                        await self._send_status(ws, "⚠️ Keine Antwort vom LLM – automatischer Neuversuch folgt …")
                     break
 
                 # Function Calls und Text trennen
@@ -1277,12 +1287,16 @@ KRITISCH – Autonomie-Regeln:
                     ))
                     _conv_messages.append({"role": "assistant", "content": _final_text})
                 else:
-                    await self._send_status(
-                        ws,
-                        "⚠️ Auch nach Reset-Versuch keine Antwort vom LLM. "
-                        "Bitte Frage neu stellen (eventuell präziser/kürzer).",
-                        highlight=True,
-                    )
+                    run_outcome = "empty"
+                    if is_final_attempt:
+                        await self._send_status(
+                            ws,
+                            "⚠️ Auch nach Reset-Versuch keine Antwort vom LLM. "
+                            "Bitte Frage neu stellen (eventuell präziser/kürzer).",
+                            highlight=True,
+                        )
+                    else:
+                        await self._send_status(ws, "⚠️ Keine Antwort vom LLM – automatischer Neuversuch folgt …")
 
             # LLM-Stats senden (Dauer + Token-Verbrauch)
             _task_duration_ms = int((time.time() - task_start_time) * 1000)
@@ -1370,11 +1384,17 @@ KRITISCH – Autonomie-Regeln:
 
         except Exception as e:
             import traceback; _tb = traceback.format_exc(); _log(f"EXCEPTION: {e}\n{_tb}")
+            run_outcome = "error"
             err_msg = _friendly_api_error(e)
             # WICHTIG: als highlight senden -> sichtbare Antwort-Bubble. Ohne highlight
             # wird die Fehlermeldung nur als dezente Status-Zeile gezeigt (und vom
             # Debug-Toggle ausgeblendet) -> der Nutzer sieht "keine Antwort".
-            await self._send_status(ws, err_msg, highlight=True)
+            # Bei geplantem Auto-Neuversuch nur eine dezente Status-Zeile senden – der
+            # sichtbare Fehler-Bubble kommt erst nach dem letzten Versuch.
+            if is_final_attempt:
+                await self._send_status(ws, err_msg, highlight=True)
+            else:
+                await self._send_status(ws, f"⚠️ LLM-Fehler – automatischer Neuversuch folgt … ({err_msg[:120]})")
             # Fehler-Span fuer die Telemetrie anreichern: str(e) ist bei manchen
             # Exceptions leer (z.B. TimeoutError) -> dann den Exception-Typ als
             # Meldung nehmen, damit das Fehler-Log nicht nur "agent:Hauptagent"
@@ -1425,6 +1445,11 @@ KRITISCH – Autonomie-Regeln:
                 _run_stop_scope.reset(_scope_token)
             except Exception:
                 pass
+        # Benutzer-Stop hat immer Vorrang: nach einem manuellen Abbruch NIE
+        # automatisch neu versuchen (auch wenn zwischendrin ein Fehler auftrat).
+        if stop_scope.stopped:
+            run_outcome = "stopped"
+        return run_outcome
 
     async def run_task_headless(self, task_text: str) -> str:
         """Führt eine Aufgabe ohne WebSocket aus. Gibt das Ergebnis als String zurück.

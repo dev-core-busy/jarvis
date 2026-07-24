@@ -96,6 +96,10 @@ class Config:
     WEBSOCKIFY_PORT: int = int(os.getenv("WEBSOCKIFY_PORT", "6080"))
     MAX_AGENT_STEPS: int = int(os.getenv("MAX_AGENT_STEPS", "40"))
     COMMAND_TIMEOUT: int = int(os.getenv("COMMAND_TIMEOUT", "120"))
+    # Auto-Neuversuch einer /chat-Anfrage bei LLM-Abbruch/Fehler/leerer Antwort
+    # (NICHT bei benutzerausgelöstem Stopp). 0 = deaktiviert.
+    AUTO_RETRY_MAX: int = int(os.getenv("AUTO_RETRY_MAX", "2"))
+    AUTO_RETRY_DELAY_SEC: float = float(os.getenv("AUTO_RETRY_DELAY_SEC", "2.0"))
     # Im Docker-Modus settings.json im persistenten Data-Volume speichern
     _data_dir = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data")))
     SETTINGS_FILE = _data_dir / "settings.json"

@@ -10402,7 +10402,29 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Aufgabe im Hintergrund starten – sendet 'finished' wenn fertig (für Windows-TTS)
         async def _run_main_agent_and_notify():
             try:
-                await agent.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_get_ws_username(ws), lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups, session_id=chat_sid)
+                # Automatischer Neuversuch, wenn das LLM abbricht, einen Fehler wirft
+                # oder keine Antwort liefert – NICHT bei benutzerausgelöstem Stopp
+                # (run_task liefert dann outcome == "stopped").
+                _max_retries = getattr(config, "AUTO_RETRY_MAX", 2)
+                _retry_delay = getattr(config, "AUTO_RETRY_DELAY_SEC", 2.0)
+                _attempts = max(1, _max_retries + 1)
+                for _i in range(_attempts):
+                    _final = (_i == _attempts - 1)
+                    outcome = await agent.run_task(
+                        task_text, ws, client_type=client_type, client_ip=client_ip,
+                        username=_get_ws_username(ws), lang=ui_lang,
+                        attachments=image_attachments, kb_groups=kb_groups,
+                        session_id=chat_sid, is_final_attempt=_final,
+                    )
+                    # Erfolg oder Benutzer-Stopp -> nicht wiederholen; letzter Versuch -> aufhören
+                    if outcome in ("ok", "stopped") or _final:
+                        break
+                    await ws.send_json({
+                        "type": "status",
+                        "message": f"🔄 Automatischer Neuversuch ({_i + 1}/{_max_retries}) …",
+                        "highlight": False,
+                    })
+                    await asyncio.sleep(_retry_delay)
             except Exception:
                 pass
             finally:

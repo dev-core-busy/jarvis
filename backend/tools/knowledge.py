@@ -47,9 +47,17 @@ _log = logging.getLogger("jarvis.knowledge")
 # started_at/finished_at sind Unix-Zeitstempel (float) – die Oberflaeche zeigt
 # damit Startzeit und Laufdauer an.
 _index_progress: dict = {"running": False, "phase": "", "done": 0, "total": 0,
-                         "vector_done": 0, "vector_total": 0, "error": "",
+                         "vector_done": 0, "vector_total": 0, "vector_base": 0,
+                         "error": "", "current_file": "",
                          "started_at": 0.0, "finished_at": 0.0, "cancelled": False}
 _progress_lock = threading.Lock()
+# Alle wieviel Dateien der Bulk-Reindex auf Platte sichert + Speicher ans OS
+# zurueckgibt. Kompromiss: haeufiger = weniger Verlust bei Absturz, aber mehr
+# I/O; 25 verliert im schlimmsten Fall 25 Dateien, die die Wiederaufnahme ohnehin
+# nachholt.
+CHECKPOINT_EVERY = 25
+# Metadaten des gerade laufenden Laufs (fuer die Platten-Checkpoints).
+_current_run: dict = {}
 # Verhindert PARALLELE Reindex-Laeufe – sonst teilen sie sich _index_progress und
 # die Zaehler ueberschreiben sich (z.B. vector_done=48 / vector_total=10 -> 480%).
 _reindex_lock = threading.Lock()
@@ -153,7 +161,12 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
         _log.info(f"{len(to_index)} neue/geaenderte Dateien – nur {INLINE_LIMIT} inline, Rest via Neu-Indizieren")
         to_index = to_index[:INLINE_LIMIT]
 
-    _set_progress(phase="Vektor", vector_done=0, vector_total=len(to_index))
+    # Bereits indizierte Dateien zaehlen mit (der Voll-Reindex ueberspringt
+    # unveraenderte Dateien) – so zeigt der Balken bei einer WIEDERAUFNAHME nach
+    # Absturz den echten Gesamtstand, nicht nur die Rest-Dateien.
+    already = max(0, len(indexed) - len([f for f in to_index if str(f) in indexed]))
+    total = len(to_index)
+    _set_progress(phase="Vektor", vector_done=0, vector_total=total, vector_base=already)
 
     changed = 0
     cancelled = False
@@ -162,24 +175,48 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
         # bleiben gueltig, der Index ist danach lediglich unvollstaendig.
         if _reindex_cancel.is_set():
             cancelled = True
-            _log.info(f"Vektor-Index: Abbruch nach {i}/{len(to_index)} Dateien")
+            _log.info(f"Vektor-Index: Abbruch nach {i}/{total} Dateien")
             break
         path_str = str(filepath)
-        _set_progress(vector_done=i + 1, phase=f"Vektor: {filepath.name[:40]}")
+        _set_progress(vector_done=i + 1, phase=f"Vektor: {filepath.name[:40]}",
+                      current_file=filepath.name)
         try:
             mtime = filepath.stat().st_mtime
             text = _extract_text(filepath, max_bytes)
             if text and text.strip():
                 chunks = _chunk_text(text)
-                vs.add_chunks(path_str, chunks, mtime)
+                # save=False: nicht bei jeder Datei den ganzen Index schreiben.
+                vs.add_chunks(path_str, chunks, mtime, save=False)
                 changed += 1
             else:
                 vs.remove_file(path_str)
         except Exception:
             pass
 
+        # Checkpoint: alle CHECKPOINT_EVERY Dateien auf Platte sichern, Speicher
+        # ans OS zurueckgeben (verhindert Heap-Wachstum → OOM) und den
+        # Fortschritt persistent festhalten (welche Datei, wie weit) – so ist
+        # nach einem Absturz sichtbar, wo es endete, und die Wiederaufnahme
+        # setzt genau dort fort.
+        if (i + 1) % CHECKPOINT_EVERY == 0:
+            try:
+                vs.save()
+                from backend.tools.vector_store import release_memory_to_os
+                release_memory_to_os()
+            except Exception as e:
+                _log.warning(f"Checkpoint fehlgeschlagen: {e}")
+            _write_run_checkpoint(done=i + 1, total=total,
+                                  current_file=filepath.name,
+                                  indexed_files=already + changed)
+
+    # Rest sichern (der letzte, unvollstaendige Checkpoint-Block).
+    try:
+        vs.save()
+    except Exception as e:
+        _log.warning(f"Abschluss-Speichern fehlgeschlagen: {e}")
+
     if not cancelled:
-        _set_progress(vector_done=len(to_index), vector_total=len(to_index))
+        _set_progress(vector_done=total, vector_total=total)
     if changed:
         _log.info(f"Vektor-Index aktualisiert: {changed} Datei(en)")
     return vs.chunk_count() > 0
@@ -443,8 +480,25 @@ def _ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 20) -> str:
     return "\n\n".join(out)
 
 
+# Obergrenze fuer extrahierten Text pro Datei. Ein einzelnes grosses
+# Datenmodell-PDF (z.B. "NEXUS KIS Datenmodell – Tabellen", 9 MB) erzeugt sonst
+# zig MB Text → hunderttausende Woerter → tausende Chunks → mehrere GB RAM und
+# OOM. Darueber hinaus bringt Volltext kaum zusaetzlichen Trefferwert.
+MAX_EXTRACT_CHARS = 4_000_000   # ~4 MB Text ≈ max. ~3000 Chunks
+
+
 def _extract_text(filepath: Path, max_bytes: int) -> str | None:
-    """Extrahiert Text aus einer Datei (Text/PDF/DOCX/XLSX/PPTX/Bild-OCR/Video/Audio)."""
+    """Extrahiert Text (Text/PDF/DOCX/XLSX/PPTX/Bild-OCR/Video/Audio) und deckelt
+    die Laenge, damit ein einzelnes Riesendokument nicht den Speicher sprengt."""
+    text = _extract_text_raw(filepath, max_bytes)
+    if text and len(text) > MAX_EXTRACT_CHARS:
+        _log.warning(f"Extrahierter Text gekappt ({len(text)} → {MAX_EXTRACT_CHARS} Zeichen): {filepath.name}")
+        text = text[:MAX_EXTRACT_CHARS]
+    return text
+
+
+def _extract_text_raw(filepath: Path, max_bytes: int) -> str | None:
+    """Rohe Extraktion (ohne Laengen-Deckelung – die macht ``_extract_text``)."""
     try:
         if filepath.stat().st_size > max_bytes:
             return None
@@ -462,8 +516,26 @@ def _extract_text(filepath: Path, max_bytes: int) -> str | None:
     if suffix in EXTENSIONS_PDF:
         try:
             import pdfplumber
+            texts = []
+            total = 0
             with pdfplumber.open(str(filepath)) as pdf:
-                texts = [p.extract_text() for p in pdf.pages if p.extract_text()]
+                for p in pdf.pages:
+                    t = p.extract_text()
+                    # WICHTIG: pdfplumber cached pro Seite alle Layout-Objekte und
+                    # gibt sie nie von selbst frei. Ueber hunderte/tausende Seiten
+                    # (grosse Datenmodell-PDFs) waechst der RAM so auf viele GB →
+                    # OOM-Kill. flush_cache() gibt den Seiten-Cache sofort frei.
+                    try:
+                        p.flush_cache()
+                    except Exception:
+                        pass
+                    if t:
+                        texts.append(t)
+                        total += len(t) + 2
+                        if total >= MAX_EXTRACT_CHARS:
+                            _log.warning(f"PDF-Extraktion bei {MAX_EXTRACT_CHARS} Zeichen "
+                                         f"gestoppt (grosses Dokument): {filepath.name}")
+                            break
             combined = "\n\n".join(texts)
             # OCR-Fallback bei gescannten/bildbasierten PDFs (kein/zu wenig Text-Layer)
             if len(combined.strip()) < 80:
@@ -1287,14 +1359,20 @@ MAX_INDEX_ATTEMPTS = 3      # 1 regulaerer Lauf + 2 automatische Neuversuche
 RETRY_DELAY_SEC = 15        # Pause dazwischen (z.B. bis ein Mount zurueck ist)
 
 
-def force_reindex(resume_count: int = 0) -> dict:
-    """Vollstaendiger Neuaufbau:
+def force_reindex(resume_count: int = 0, incremental: bool = False,
+                  resume_baseline: int = -1) -> dict:
+    """Neuaufbau des Wissens-Index:
     - FAISS verfuegbar → nur Vektor-Index (schneller, besser bei 600+ Dateien)
     - FAISS nicht verfuegbar → TF-IDF-Index
 
+    ``incremental=True`` behaelt den bestehenden Index (kein ``vs.clear()``) und
+    ergaenzt nur fehlende/geaenderte Dateien – so setzt eine Wiederaufnahme nach
+    Absturz dort fort, wo sie war, statt bei 0 zu beginnen.
+
     Scheitert ein Lauf mit einer Ausnahme, wird er bis zu ``MAX_INDEX_ATTEMPTS``
     mal automatisch wiederholt. ``resume_count`` zaehlt Wiederaufnahmen nach
-    einem Prozess-Neustart (siehe ``resume_interrupted_reindex``).
+    einem Prozess-Neustart, ``resume_baseline`` den Dateistand zu deren Beginn
+    (fuer die Fortschritts-Pruefung in ``resume_interrupted_reindex``).
     """
     # Re-Entrancy-Schutz: laeuft bereits ein Reindex, NICHT parallel starten
     # (sonst ueberschreiben sich die Fortschritts-Zaehler -> >100%). Stattdessen
@@ -1305,13 +1383,13 @@ def force_reindex(resume_count: int = 0) -> dict:
         return {"skipped": True, "reason": "reindex already running, rerun scheduled"}
     try:
         _reindex_cancel.clear()
-        result = _run_with_retries(resume_count)
+        result = _run_with_retries(resume_count, incremental, resume_baseline)
         # Waehrenddessen weitere Anfragen? -> genau einmal nachholen (coalesced).
         # Nach einem Abbruch NICHT nachholen – sonst startet der Lauf, den der
         # Benutzer gerade gestoppt hat, sofort wieder von vorn.
         while _reindex_rerun.is_set() and not _reindex_cancel.is_set():
             _reindex_rerun.clear()
-            result = _run_with_retries(resume_count)
+            result = _run_with_retries(resume_count, incremental, resume_baseline)
         return result
     finally:
         _reindex_rerun.clear()
@@ -1321,13 +1399,16 @@ def force_reindex(resume_count: int = 0) -> dict:
         _reindex_lock.release()
 
 
-def _run_with_retries(resume_count: int = 0) -> dict:
+def _run_with_retries(resume_count: int = 0, incremental: bool = False,
+                      resume_baseline: int = -1) -> dict:
     """Fuehrt den Neuaufbau aus und wiederholt ihn nach einem Fehler automatisch."""
     last_exc: Exception | None = None
     first_started = time.time()
     for attempt in range(1, MAX_INDEX_ATTEMPTS + 1):
         try:
-            return _do_force_reindex(attempt=attempt, resume_count=resume_count)
+            return _do_force_reindex(attempt=attempt, resume_count=resume_count,
+                                     incremental=incremental,
+                                     resume_baseline=resume_baseline)
         except Exception as e:
             last_exc = e
             _log.warning(f"Indizierung Versuch {attempt}/{MAX_INDEX_ATTEMPTS} fehlgeschlagen: {e}")
@@ -1343,12 +1424,21 @@ def _run_with_retries(resume_count: int = 0) -> dict:
 
     finished = time.time()
     cancelled = _reindex_cancel.is_set()
+    # Teilstand erhalten: bei incremental bleibt der Index bestehen, die schon
+    # indizierten Dateien sind kein Verlust.
+    try:
+        vs = _get_vector_store()
+        partial_files = vs.file_count() if vs is not None else 0
+        partial_chunks = vs.chunk_count() if vs is not None else 0
+    except Exception:
+        partial_files = partial_chunks = 0
     _set_progress(running=False, phase="Abgebrochen" if cancelled else "Fehler",
                   error=str(last_exc or ""), finished_at=finished, cancelled=cancelled)
     _save_last_run({"started_at": first_started, "finished_at": finished,
                     "status": "cancelled" if cancelled else "error",
                     "error": str(last_exc or "")[:300], "attempts": MAX_INDEX_ATTEMPTS,
-                    "resumed": resume_count, "indexed_files": 0, "total_chunks": 0})
+                    "resumed": resume_count, "indexed_files": partial_files,
+                    "total_chunks": partial_chunks})
     raise last_exc if last_exc else RuntimeError("Indizierung fehlgeschlagen")
 
 
@@ -1389,16 +1479,37 @@ def get_last_run() -> dict:
     return {}
 
 
-MAX_RESUMES = 2   # Schutz vor einer Neustart-Schleife bei dauerhaftem Fehler
+def _write_run_checkpoint(done: int, total: int, current_file: str, indexed_files: int) -> None:
+    """Schreibt den Zwischenstand des laufenden Reindex auf Platte.
+
+    Stirbt der Prozess danach, weiss die Wiederaufnahme (und die Oberflaeche),
+    WIE WEIT es kam und bei WELCHER Datei es zuletzt war."""
+    _save_last_run({**_current_run, "finished_at": 0, "status": "running",
+                    "done": done, "total": total, "current_file": current_file,
+                    "indexed_files": indexed_files})
+
+
+# Sicherheitsnetz gegen eine echte Endlosschleife: selbst wenn jeder Lauf
+# Fortschritt meldet, hoert die automatische Wiederaufnahme nach so vielen
+# Anlaeufen auf. Im Normalfall greift vorher die Fortschritts-Pruefung.
+MAX_RESUMES = 20
 
 
 def resume_interrupted_reindex() -> bool:
     """Setzt einen Lauf fort, der durch einen Prozess-Abbruch geendet hat.
 
     Beim Start aufrufen: steht im Lauf-Protokoll noch ``status: running``, ist
-    der Prozess mittendrin gestorben (Neustart, Absturz, OOM). Der Index ist
-    dann unvollstaendig, ohne dass es irgendwo als Fehler auftaucht. Gibt True
-    zurueck, wenn ein Neuaufbau gestartet wurde.
+    der Prozess mittendrin gestorben (Neustart, Absturz, OOM – z.B. der
+    OOM-Killer). Der Index ist dann unvollstaendig, ohne dass es irgendwo als
+    Fehler auftaucht.
+
+    Die Wiederaufnahme laeuft INKREMENTELL (kein ``vs.clear()``): die bereits
+    indizierten Dateien bleiben erhalten, es werden nur die fehlenden ergaenzt.
+    Fortgesetzt wird nur, solange messbarer Fortschritt entsteht – bringt ein
+    Anlauf keine neue Datei in den Index, wird abgebrochen (sonst liefe eine
+    Datei, die den Prozess zuverlaessig killt, endlos in dieselbe Wand).
+
+    Gibt True zurueck, wenn eine Wiederaufnahme gestartet wurde.
     """
     run = get_last_run()
     if run.get("status") != "running":
@@ -1406,22 +1517,37 @@ def resume_interrupted_reindex() -> bool:
     if get_index_progress().get("running"):
         return False   # laeuft bereits (z.B. durch Auto-Mount angestossen)
 
+    # Aktuellen Stand aus dem Index lesen (ueberlebt den Absturz auf Platte).
+    try:
+        vs = _get_vector_store()
+        current_files = vs.file_count() if vs is not None else 0
+    except Exception:
+        current_files = 0
+
     resumed = int(run.get("resumed") or 0) + 1
-    if resumed > MAX_RESUMES:
-        run["status"] = "interrupted"
-        run["finished_at"] = run.get("finished_at") or time.time()
+    baseline = int(run.get("resume_baseline", -1))   # Stand zu Beginn des letzten Anlaufs
+    stalled = baseline >= 0 and current_files <= baseline
+
+    if stalled or resumed > MAX_RESUMES:
+        reason = ("kein Fortschritt seit letztem Anlauf – vermutlich scheitert eine "
+                  "bestimmte Datei" if stalled else f"{MAX_RESUMES} Anlaeufe erschoepft")
+        run.update(status="interrupted", finished_at=run.get("finished_at") or time.time(),
+                   indexed_files=current_files, interrupt_reason=reason)
         _save_last_run(run)
-        _log.warning(f"Indizierung wurde {MAX_RESUMES}x nach Abbruch fortgesetzt – "
-                     f"kein weiterer automatischer Versuch")
+        _log.warning(f"Wiederaufnahme der Indizierung gestoppt: {reason} "
+                     f"(bei {current_files} Dateien)")
         return False
 
-    _log.warning(f"Unterbrochene Indizierung gefunden (Start "
-                 f"{time.strftime('%d.%m.%Y %H:%M:%S', time.localtime(run.get('started_at') or 0))}) "
-                 f"– Neuaufbau wird automatisch fortgesetzt ({resumed}/{MAX_RESUMES})")
+    _log.warning(
+        f"Unterbrochene Indizierung gefunden (Start "
+        f"{time.strftime('%d.%m.%Y %H:%M:%S', time.localtime(run.get('started_at') or 0))}, "
+        f"zuletzt {current_files} Dateien im Index) – wird inkrementell fortgesetzt "
+        f"(Anlauf {resumed})")
 
     def _run():
         try:
-            force_reindex(resume_count=resumed)
+            force_reindex(resume_count=resumed, incremental=True,
+                          resume_baseline=current_files)
         except Exception as e:
             _log.error(f"Automatisch fortgesetzte Indizierung fehlgeschlagen: {e}")
 
@@ -1429,17 +1555,28 @@ def resume_interrupted_reindex() -> bool:
     return True
 
 
-def _do_force_reindex(attempt: int = 1, resume_count: int = 0) -> dict:
+def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
+                      incremental: bool = False, resume_baseline: int = -1) -> dict:
+    global _current_run
     started = time.time()
+    # Bei einer Wiederaufnahme den urspruenglichen Start beibehalten, damit die
+    # "Letzter Indexlauf"-Zeit nicht bei jedem Anlauf springt.
+    if incremental:
+        prev = get_last_run()
+        started = prev.get("started_at") or started
+    _current_run = {"started_at": started, "attempt": attempt,
+                    "resumed": resume_count, "resume_baseline": resume_baseline,
+                    "incremental": incremental}
     _set_progress(running=True, phase="Starte...", done=0, total=0, vector_done=0,
-                  vector_total=0, error="", started_at=started, finished_at=0.0,
+                  vector_total=0, vector_base=0, error="", current_file="",
+                  started_at=started, finished_at=0.0, resumed=resume_count,
                   cancelled=False, attempt=attempt, max_attempts=MAX_INDEX_ATTEMPTS)
     # Marker "laeuft" auf die Platte: stirbt der Prozess mittendrin (Neustart,
     # OOM-Killer), erkennt resume_interrupted_reindex() das beim naechsten Start
     # und setzt den Lauf fort. Ein sauberes Ende ueberschreibt den Marker.
-    _save_last_run({"started_at": started, "finished_at": 0,
-                    "status": "running", "attempt": attempt,
-                    "resumed": resume_count, "indexed_files": 0, "total_chunks": 0})
+    _save_last_run({**_current_run, "finished_at": 0, "status": "running",
+                    "indexed_files": resume_baseline if resume_baseline > 0 else 0,
+                    "total_chunks": 0})
     # Ausnahmen werden bewusst NICHT hier abgefangen: Endzustand und Protokoll
     # schreibt _run_with_retries – erst wenn alle Versuche verbraucht sind.
     # Sonst zeigte die Oberflaeche zwischen zwei Neuversuchen "Fehler/fertig".
@@ -1457,7 +1594,10 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0) -> dict:
 
     if vs is not None:
         # ── Nur FAISS aufbauen ──────────────────────────────────────────────
-        vs.clear()
+        # incremental: bestehenden Index behalten (Wiederaufnahme nach Absturz);
+        # der Reindex ueberspringt unveraenderte Dateien automatisch.
+        if not incremental:
+            vs.clear()
         _rebuild_vector_index(folders, max_bytes, force=True)
         chunk_count = vs.chunk_count()
         file_count  = vs.file_count()

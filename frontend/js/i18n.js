@@ -673,6 +673,15 @@ const _I18N = {
         'knowledge.stat.files':          'Dateien',
         'knowledge.stat.indexed':        'Indiziert',
         'knowledge.stat.chunks':         'Chunks',
+        'knowledge.stat.chunks_help':
+            'Chunks sind die Textabschnitte, in die jedes Dokument beim Indizieren zerlegt wird – '
+            + 'hier rund 200 Wörter mit 40 Wörtern Überlappung. Gesucht wird nicht in ganzen Dateien, '
+            + 'sondern in diesen Abschnitten: nur so findet die Suche die eine passende Stelle in '
+            + 'einem 300-seitigen Handbuch, statt das ganze Handbuch als Treffer zu melden. '
+            + 'Jeder Chunk wird in einen Vektor umgerechnet, der seine Bedeutung abbildet; die '
+            + 'Überlappung verhindert dabei, dass ein Satz genau an der Schnittstelle verloren geht. '
+            + 'Die Größe ist bewusst begrenzt, weil das Embedding-Modell längere Abschnitte still '
+            + 'abschneiden würde – der Text dahinter wäre dann unauffindbar.',
         'knowledge.stat.size':           'Gesamt',
         'knowledge.search_mode_label':   'Suchmodus:',
         'knowledge.search_active_label': 'Aktiv:',
@@ -2291,6 +2300,15 @@ const _I18N = {
         'knowledge.stat.files':          'Files',
         'knowledge.stat.indexed':        'Indexed',
         'knowledge.stat.chunks':         'Chunks',
+        'knowledge.stat.chunks_help':
+            'Chunks are the text segments each document is split into during indexing – '
+            + 'here about 200 words with a 40-word overlap. Search does not compare whole files but '
+            + 'these segments: only that way can it find the one relevant passage inside a 300-page '
+            + 'manual instead of returning the entire manual as a hit. '
+            + 'Every chunk is converted into a vector representing its meaning, and the overlap '
+            + 'prevents a sentence from being lost exactly at a segment boundary. '
+            + 'The size is deliberately capped because the embedding model would silently truncate '
+            + 'longer segments – anything beyond the cut-off would be unfindable.',
         'knowledge.stat.size':           'Total',
         'knowledge.search_mode_label':   'Search Mode:',
         'knowledge.search_active_label': 'Active:',

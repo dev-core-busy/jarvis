@@ -2079,13 +2079,16 @@ class JarvisKnowledgeManager {
             }
         }
 
-        // Gesamt-Fortschritt: TF-IDF + Vektor zusammen
+        // Gesamt-Fortschritt: TF-IDF + Vektor zusammen. vector_base = bereits vor
+        // diesem Anlauf indizierte Dateien (Wiederaufnahme nach Absturz) – sonst
+        // sähe eine Fortsetzung ab 604/893 wie ein Neustart bei 0 aus.
+        const base   = p.vector_base || 0;
         const tTotal = p.total || 0;
         const tDone  = p.done  || 0;
         const vTotal = p.vector_total || 0;
         const vDone  = p.vector_done  || 0;
-        const grand  = tTotal + vTotal;
-        const done   = tDone  + vDone;
+        const grand  = tTotal + vTotal + base;
+        const done   = tDone  + vDone  + base;
         // Defensiv auf 0–100% klemmen: bei (eigentlich verhinderten) inkonsistenten
         // Zaehlerstaenden niemals >100% / >grand anzeigen.
         const pctRaw = grand > 0 ? Math.round((done / grand) * 100) : (p.phase === 'Fertig' ? 100 : 0);
@@ -2095,7 +2098,8 @@ class JarvisKnowledgeManager {
         bar.style.width = pctVal + '%';
         if (pct)   pct.textContent   = pctVal + '%';
         this._setStatsBadge(p.running ? `⏳ ${pctVal}%` : '');
-        if (phase) phase.textContent = p.phase || '';
+        // Phase-Zeile: bei laufender Indizierung die aktuelle Datei zeigen.
+        if (phase) phase.textContent = p.current_file ? ('▸ ' + p.current_file) : (p.phase || '');
         if (p.error && count) count.textContent = '⚠ ' + p.error.slice(0, 60);
         else if (count) count.textContent = grand > 0 ? `${doneClamped} / ${grand}` : '';
 
@@ -2104,6 +2108,8 @@ class JarvisKnowledgeManager {
             else if (p.phase === 'Abgebrochen') label.textContent = window.t('knowledge.indexing_cancelled');
             else if (p.phase === 'Fehler')      label.textContent = window.t('knowledge.indexing_error_label');
             else if (p.phase === 'Wird abgebrochen…') label.textContent = window.t('knowledge.reindex_cancelling');
+            else if (p.running && p.resumed > 0) label.textContent = window.t('knowledge.indexing_resuming')
+                                                     .replace('{n}', p.resumed);
             else if (p.running && p.attempt > 1) label.textContent = window.t('knowledge.indexing_retry')
                                                      .replace('{n}', p.attempt).replace('{m}', p.max_attempts);
             else if (p.running)                 label.textContent = window.t('knowledge.indexing_running');
@@ -2116,7 +2122,7 @@ class JarvisKnowledgeManager {
         // noch zu verarbeitenden Dateien, z.B. "10" bei 700 Dokumenten).
         if (p.running) {
             const statEls = document.querySelectorAll('#kb-stats-container .kb-stat-value');
-            const liveDone = p.vector_done || p.done || 0;
+            const liveDone = (p.vector_base || 0) + (p.vector_done || p.done || 0);
             if (statEls.length >= 2) statEls[1].textContent = liveDone;
         }
     }
@@ -2130,9 +2136,20 @@ class JarvisKnowledgeManager {
         }
         if (run.status === 'cancelled')        parts.push(window.t('knowledge.index_status_cancelled'));
         else if (run.status === 'error')       parts.push(window.t('knowledge.index_status_error'));
-        else if (run.status === 'interrupted') parts.push(window.t('knowledge.index_status_interrupted'));
+        else if (run.status === 'interrupted') {
+            // Prozess mittendrin gestorben (Absturz/Neustart/OOM) – hier gehoert
+            // die vom Nutzer vermisste Diagnose hin: wie weit, welche Datei, warum.
+            let txt = window.t('knowledge.index_status_interrupted');
+            if (run.total)        txt += ` (${run.indexed_files || 0}/${run.total || '?'})`;
+            else if (run.indexed_files) txt += ` (${run.indexed_files} ${window.t('knowledge.stat.files')})`;
+            parts.push(txt);
+            if (run.current_file) parts.push(`${window.t('knowledge.index_last_file')}: ${run.current_file}`);
+            parts.push(window.t('knowledge.index_interrupt_hint'));
+            if (run.resumed) parts.push(window.t('knowledge.index_resumed_n').replace('{n}', run.resumed));
+        }
         else if (run.status === 'running')     parts.push(window.t('knowledge.index_status_running'));
         else parts.push(`${run.indexed_files || 0} ${window.t('knowledge.stat.files')}, ${run.total_chunks || 0} Chunks`);
+        if (run.error && run.status === 'error') parts.push('⚠ ' + String(run.error).slice(0, 80));
         const color = run.status === 'ok' ? 'var(--text-secondary)' : 'var(--warning)';
         return `<div class="kb-last-run" style="font-size:0.75rem;color:${color};margin:6px 0 2px;">${parts.join(' · ')}</div>`;
     }

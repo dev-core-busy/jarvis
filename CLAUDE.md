@@ -179,9 +179,25 @@ data/
   Lauf mit einer Ausnahme, wiederholt `_run_with_retries()` ihn bis `MAX_INDEX_ATTEMPTS=3`
   (Pause `RETRY_DELAY_SEC`, unterbrechbar). `running` bleibt dabei True, `attempt` zaehlt
   hoch – der Fehler-Endzustand wird erst nach dem letzten Versuch geschrieben.
-  Stirbt der PROZESS mitten im Lauf, bleibt `status: running` in last_index.json stehen;
-  `resume_interrupted_reindex()` (Start-Hook in main.py, +30 s) setzt den Neuaufbau dann
-  automatisch fort – max. `MAX_RESUMES=2`, danach `status: interrupted` (Schleifenschutz).
+- **Stirbt der PROZESS mitten im Lauf** (Absturz/Neustart/**OOM-Killer**), bleibt
+  `status: running` in last_index.json stehen; `resume_interrupted_reindex()` (Start-Hook in
+  main.py, +30 s) setzt den Neuaufbau **inkrementell** fort (`force_reindex(incremental=True)`
+  → KEIN `vs.clear()`, die schon indizierten Dateien bleiben). Fortgesetzt wird nur, solange
+  messbarer Fortschritt entsteht: `resume_baseline` merkt den Dateistand zu Beginn jedes
+  Anlaufs; bringt ein Anlauf keine neue Datei, wird mit `status: interrupted` +
+  `interrupt_reason` gestoppt (sonst liefe eine Datei, die den Prozess zuverlaessig killt,
+  endlos). Sicherheitsnetz `MAX_RESUMES=20`. Ein Checkpoint (`_write_run_checkpoint`, alle
+  `CHECKPOINT_EVERY=25` Dateien) haelt `current_file`/`done`/`total` auf Platte fest – die
+  UI zeigt nach einem Absturz, WIE WEIT und bei WELCHER Datei es endete.
+- **OOM-URSACHE (behoben 2026-07-24):** `VectorStore.add_chunks` hat frueher bei JEDER Datei
+  den kompletten FAISS-Index rekonstruiert (`_vectors_at`→`np.vstack`→neuer Index) UND die
+  vollen ~55 MB auf Platte geschrieben → O(N²) Heap-Wachstum, das den Prozess bei ~600 von
+  893 Dateien per OOM-Killer beendete (Echt-System, 3× in Folge). Jetzt Schnellpfad: neue
+  Datei = nur `index.add()` + `_meta.extend()` (kein Rebuild); der Reindex-Loop speichert
+  gedrosselt (`add_chunks(save=False)` + `vs.save()` alle 25 Dateien) und ruft periodisch
+  `release_memory_to_os()` (malloc_trim). Verifiziert DEV: 300 Dateien = +65 MB RSS statt
+  linear; realer Lauf bleibt bei ~1,6 GB flach. Der langsame Pfad (Rebuild) greift nur noch
+  bei GEAENDERTEN Dateien (alte Chunks entfernen).
 - **"Dateien" vs. "Indiziert":** `total_files` ist die Anzahl indizierbarer Dateien in den
   Wissensordnern (`get_disk_file_count()`, 60 s gecacht, Hintergrund-Refresh),
   `indexed_files` die Anzahl im FAISS-Index. Frueher stand in beiden die Index-Zahl –

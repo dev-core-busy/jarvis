@@ -48,7 +48,7 @@ _log = logging.getLogger("jarvis.knowledge")
 # damit Startzeit und Laufdauer an.
 _index_progress: dict = {"running": False, "phase": "", "done": 0, "total": 0,
                          "vector_done": 0, "vector_total": 0, "vector_base": 0,
-                         "error": "", "current_file": "",
+                         "chunks": 0, "error": "", "current_file": "",
                          "started_at": 0.0, "finished_at": 0.0, "cancelled": False}
 _progress_lock = threading.Lock()
 # Alle wieviel Dateien der Bulk-Reindex auf Platte sichert + Speicher ans OS
@@ -190,6 +190,14 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
                 changed += 1
             else:
                 vs.remove_file(path_str)
+        except Exception:
+            pass
+
+        # Laufende Chunk-Zahl mitfuehren, damit ALLE offenen Clients dieselbe
+        # Live-Zahl sehen (sonst zeigt ein Browser, der die Kachel vor dem Lauf
+        # geladen hat, dauerhaft den alten Stand – z.B. 16453 statt 9715).
+        try:
+            _set_progress(chunks=vs.chunk_count())
         except Exception:
             pass
 
@@ -1568,7 +1576,7 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
                     "resumed": resume_count, "resume_baseline": resume_baseline,
                     "incremental": incremental}
     _set_progress(running=True, phase="Starte...", done=0, total=0, vector_done=0,
-                  vector_total=0, vector_base=0, error="", current_file="",
+                  vector_total=0, vector_base=0, chunks=0, error="", current_file="",
                   started_at=started, finished_at=0.0, resumed=resume_count,
                   cancelled=False, attempt=attempt, max_attempts=MAX_INDEX_ATTEMPTS)
     # Marker "laeuft" auf die Platte: stirbt der Prozess mittendrin (Neustart,

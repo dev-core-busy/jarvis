@@ -36,6 +36,7 @@ class JarvisKnowledgeManager {
         // koennen – stand die Pruefung am Ende, sah der Tab sekundenlang so aus,
         // als passiere nichts. Nicht awaiten: die Anzeige kommt, sobald sie da ist.
         this._checkRunningIndex();
+        this._startStatusHeartbeat();
         // Der Rest ist voneinander unabhaengig und laeuft parallel.
         await Promise.all([
             this.fetchStats(),
@@ -43,6 +44,42 @@ class JarvisKnowledgeManager {
             this.initWebDAV(),
             this.initMounts(),
         ]);
+    }
+
+    /** Erkennt einen Reindex, der von einem ANDEREN Rechner/Browser gestartet
+     *  wurde. Ohne das zeigt ein Client, der den Tab schon vorher offen hatte,
+     *  dauerhaft seinen eingefrorenen Stand (z.B. 16453 Chunks, waehrend der
+     *  laufende Neuaufbau real erst bei 9715 ist). */
+    _startStatusHeartbeat() {
+        if (this._heartbeatTimer) return;
+        this._heartbeatTimer = setInterval(() => this._heartbeatTick(), 8000);
+    }
+
+    async _heartbeatTick() {
+        // Nur arbeiten, wenn der Wissen-Tab wirklich sichtbar ist.
+        const tab = document.getElementById('settings-tab-knowledge');
+        if (!tab || tab.style.display === 'none') return;
+        // Laeuft bereits das feine Fortschritts-Polling? Dann macht das die Arbeit.
+        if (this._progressTimer) return;
+        try {
+            const resp = await fetch('/api/knowledge/index_progress', {
+                headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jarvis_token') || '') }
+            });
+            if (!resp.ok) return;
+            const p = await resp.json();
+            if (p.running) {
+                this._ensureStatsSectionOpen();
+                this._showProgressBar();
+                this._updateProgressBar(p);
+                this._setIndexRunning(true);
+                this._startProgressPolling();
+            } else if (this._sawRunning) {
+                // Lauf ist (anderswo) zu Ende gegangen -> Kacheln angleichen.
+                this._sawRunning = false;
+                await this.fetchStats();
+            }
+            if (p.running) this._sawRunning = true;
+        } catch (_) {}
     }
 
     // ─── Wissensgruppen (logische Tags) ───────────────────────────────
@@ -764,7 +801,8 @@ class JarvisKnowledgeManager {
                     <span class="kb-stat-value">${stats.indexed_files}</span>
                     <span class="kb-stat-label">${window.t('knowledge.stat.indexed')}</span>
                 </div>
-                <div class="kb-stat">
+                <div class="kb-stat kb-stat-help" data-i18n-title="knowledge.stat.chunks_help"
+                     title="${window.t('knowledge.stat.chunks_help')}">
                     <span class="kb-stat-value">${stats.total_chunks}</span>
                     <span class="kb-stat-label">${window.t('knowledge.stat.chunks')}</span>
                 </div>
@@ -2124,6 +2162,13 @@ class JarvisKnowledgeManager {
             const statEls = document.querySelectorAll('#kb-stats-container .kb-stat-value');
             const liveDone = (p.vector_base || 0) + (p.vector_done || p.done || 0);
             if (statEls.length >= 2) statEls[1].textContent = liveDone;
+            // Chunks live mitfuehren: waehrend eines Neuaufbaus faellt die Zahl
+            // erst auf 0 und waechst wieder. Ohne Live-Wert zeigt ein Browser den
+            // Stand VOR dem Lauf, ein anderer den aktuellen – zwei Rechner,
+            // zwei Zahlen zum selben Zeitpunkt.
+            if (statEls.length >= 3 && typeof p.chunks === 'number') {
+                statEls[2].textContent = p.chunks;
+            }
         }
     }
 

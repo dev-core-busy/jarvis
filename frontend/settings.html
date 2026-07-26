@@ -1184,6 +1184,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="sap" id="settings-tab-btn-sap" style="display:none;">SAP</button>
                 <button class="settings-tab-btn" data-settings-tab="kundenverwaltung" id="settings-tab-btn-kundenverwaltung" style="display:none;" data-i18n="settings.tab.kundenverwaltung">Kundenverwaltung</button>
                 <button class="settings-tab-btn" data-settings-tab="support" id="settings-tab-btn-support" style="display:none;">Support</button>
+                <button class="settings-tab-btn" data-settings-tab="google" id="settings-tab-btn-google" style="display:none;" data-i18n="settings.tab.google">Google</button>
+                <button class="settings-tab-btn" data-settings-tab="telegram" id="settings-tab-btn-telegram" style="display:none;" data-i18n="settings.tab.telegram">Telegram</button>
+                <button class="settings-tab-btn" data-settings-tab="browser_control" id="settings-tab-btn-browser" style="display:none;" data-i18n="settings.tab.browser">Browser</button>
+                <button class="settings-tab-btn" data-settings-tab="claude_bridge" id="settings-tab-btn-claude-bridge" style="display:none;" data-i18n="settings.tab.claude_bridge">Claude-Bridge</button>
+                <button class="settings-tab-btn" data-settings-tab="agent_orchestrator" id="settings-tab-btn-orchestrator" style="display:none;" data-i18n="settings.tab.orchestrator">Orchestrator</button>
+                <button class="settings-tab-btn" data-settings-tab="agent_autonomy_kit" id="settings-tab-btn-autonomy" style="display:none;" data-i18n="settings.tab.autonomy">Autonomie</button>
                 <button class="settings-tab-btn" data-settings-tab="telemetry" data-i18n="settings.tab.telemetry">Telemetry</button>
                 <button class="settings-tab-btn" data-settings-tab="security" data-i18n="settings.tab.security">Sicherheit</button>
                 <button class="settings-tab-btn" data-settings-tab="cron" data-i18n="settings.tab.cron">Tasks</button>
@@ -1519,6 +1525,18 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
                             </div>
 
+                            <!-- Nachrichten-Verarbeitung (Skill-Konfiguration aus skill.json) -->
+                            <div class="kb-section">
+                                <div class="kb-section-header kb-collapse-header is-collapsed" id="wa-sect-cfg-hdr">
+                                    <h3 data-i18n="wa.section_processing">Nachrichten-Verarbeitung</h3>
+                                    <span class="sk-openclaw-toggle" id="wa-sect-cfg-tog">▶</span>
+                                </div>
+                                <div id="wa-sect-cfg-body" class="kb-collapse-body" style="display:none;">
+                                    <p class="kb-hint" data-i18n="wa.section_processing_hint">Welche Nachrichten Jarvis beantwortet, von wem, und mit welchem Whisper-Modell Sprachnachrichten transkribiert werden. Der Debug-Modus steckt oben unter „Logs &amp; Debug“.</p>
+                                    <div id="skcfg-whatsapp"></div>
+                                </div>
+                            </div>
+
                             <!-- Logs & Debug -->
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="wa-sect-logs-hdr">
@@ -1619,6 +1637,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         placeholder="Pfad zum Ordner (z.B. data/knowledge)" />
                                     <button class="kb-btn-action" id="btn-kb-add-folder" data-i18n="knowledge.add_btn" data-i18n-title="knowledge.add_title" title="Vorhandenen Ordner/Pfad zum Indizieren einbinden – z.B. „/mnt/share/doku" oder absoluter Pfad. Einfacher Name (z.B. „handbuecher") wird unter data/ angelegt, falls er fehlt.">Hinzufügen</button>
                                     <button class="kb-btn-action" id="btn-kb-create-folder" data-i18n="knowledge.create_btn" data-i18n-title="knowledge.create_title" title="Neuen Ordner physisch unter data/NAME anlegen (nur einfacher Name, z.B. „handbuecher").">Neu anlegen</button>
+                                </div>
+                                <!-- Skill-Konfiguration: Obergrenze pro Datei beim Indizieren -->
+                                <div style="margin-top:14px;max-width:320px;">
+                                    <div id="skcfg-knowledge"></div>
                                 </div>
                             </div>
                         </div>
@@ -2423,6 +2445,61 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <a class="btn-secondary" href="/support" target="_blank" rel="noopener" style="flex:0 0 auto;text-decoration:none;">Support-Oberfläche öffnen ↗</a>
                             <span id="support-status" style="font-size:0.9em;"></span>
                         </div>
+                    </div>
+                </div>
+
+                <!-- ═══ Tab: Google Apps ═══
+                     Zugangsdaten aus dem Skill-Manifest (skillcfg.js) plus die
+                     bestehende Verbindungs-/OAuth-Oberflaeche (google.js). -->
+                <div id="settings-tab-google" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Google-Integration für Kalender, Drive und Gmail. Die OAuth-Zugangsdaten stammen aus der Google Cloud Console; sie werden zusätzlich in die <code>.env</code> geschrieben, damit der Agent sie beim Start findet.</p>
+
+                        <h4 style="margin:16px 0 8px;" data-i18n="skillcfg.section_credentials">OAuth-Zugangsdaten</h4>
+                        <div id="skcfg-google"></div>
+
+                        <h4 style="margin:22px 0 8px;" data-i18n="skillcfg.section_connection">Verbindung</h4>
+                        <div id="google-status-container"></div>
+                    </div>
+                </div>
+
+                <!-- ═══ Tab: Telegram ═══ -->
+                <div id="settings-tab-telegram" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Telegram-Bot für Empfang und Antwort. Den Token gibt <strong>@BotFather</strong> aus; ohne erlaubte Chat-IDs darf jeder Chat den Bot ansprechen.</p>
+                        <div id="skcfg-telegram"></div>
+                    </div>
+                </div>
+
+                <!-- ═══ Tab: Browser Control ═══ -->
+                <div id="settings-tab-browser_control" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Browser-Automation per xdotool und Chrome DevTools Protocol (CDP). Der CDP-Port muss zu dem Port passen, mit dem Chrome gestartet wird (<code>--remote-debugging-port</code>).</p>
+                        <div id="skcfg-browser_control"></div>
+                    </div>
+                </div>
+
+                <!-- ═══ Tab: Claude Bridge ═══ -->
+                <div id="settings-tab-claude_bridge" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Delegiert Aufgaben an die Claude-Desktop-App auf dem Jarvis-Desktop. Die Fokus-Verzögerung gibt der App Zeit, das Eingabefeld zu übernehmen, bevor der Text eingefügt wird.</p>
+                        <div id="skcfg-claude_bridge"></div>
+                    </div>
+                </div>
+
+                <!-- ═══ Tab: Agent Orchestrator ═══ -->
+                <div id="settings-tab-agent_orchestrator" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Zerlegt Aufgaben in koordinierte Sub-Agenten (inbox/outbox). Im Workspace-Verzeichnis legt jeder Auftrag seine Arbeitsdateien ab.</p>
+                        <div id="skcfg-agent_orchestrator"></div>
+                    </div>
+                </div>
+
+                <!-- ═══ Tab: Agent Autonomy Kit ═══ -->
+                <div id="settings-tab-agent_autonomy_kit" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Proaktives Aufgaben-Management: der Agent arbeitet die QUEUE.md ab und protokolliert seine Aktivität tageweise.</p>
+                        <div id="skcfg-agent_autonomy_kit"></div>
                     </div>
                 </div>
 
@@ -3330,12 +3407,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=119"></script>
+    <script src="/static/js/i18n.js?v=121"></script>
     <script src="/static/js/cron.js?v=17"></script>
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
-    <script src="/static/js/skills.js?v=34"></script>
+    <script src="/static/js/skills.js?v=36"></script>
+    <script src="/static/js/skillcfg.js?v=1"></script>
+    <script src="/static/js/google.js?v=12"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
     <script src="/static/js/knowledge.js?v=90"></script>
     <script src="/static/js/mcp.js?v=3"></script>
@@ -3351,7 +3430,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/security_incidents.js?v=19"></script>
     <script src="/static/js/ldap_picker.js?v=7"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=175"></script>
+    <script src="/static/js/app.js?v=176"></script>
 </body>
 
 </html>

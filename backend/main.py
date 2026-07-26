@@ -2335,8 +2335,8 @@ async def get_telemetry_errors(user: str = Depends(require_auth)):
 
 @app.delete("/api/telemetry")
 async def clear_telemetry(user: str = Depends(require_auth)):
-    """Löscht alle erfassten Telemetrie-Daten."""
-    tracer.clear()
+    """Löscht alle erfassten Telemetrie-Daten (Reset-Nachweis: wann/von wem)."""
+    tracer.clear(by=user)
     return JSONResponse({"ok": True})
 
 

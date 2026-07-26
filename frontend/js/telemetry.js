@@ -60,6 +60,19 @@ class JarvisTelemetryManager {
                 `).join('');
             }
 
+            // Reset-Nachweis: wann und von wem zuletzt zurückgesetzt
+            const resetInfo = document.getElementById('tele-reset-info');
+            if (resetInfo) {
+                if (s.last_reset_ts) {
+                    const when = new Date(s.last_reset_ts * 1000).toLocaleString('de-DE');
+                    const who = (s.last_reset_by || '?').replace(/</g, '&lt;');
+                    resetInfo.innerHTML = '↺ ' + window.t('telemetry.last_reset') + ': '
+                        + when + ' · ' + window.t('telemetry.by') + ' ' + who;
+                } else {
+                    resetInfo.innerHTML = '';
+                }
+            }
+
             // Tool-Stats
             const toolBody = document.getElementById('tele-tool-body');
             if (toolBody) {
@@ -67,15 +80,19 @@ class JarvisTelemetryManager {
                 if (tools.length === 0) {
                     toolBody.innerHTML = '<div class="kb-files-empty">' + window.t('telemetry.no_tool_calls') + '</div>';
                 } else {
+                    // Zeitwerte (Ø/Min/Max) beruhen serverseitig nur auf den letzten
+                    // 100 Aufrufen pro Tool; die Calls-Spalte zeigt die WAHRE Gesamtzahl.
+                    const sampled = tools.some(([, t]) => (t.sample || 0) < t.calls);
+                    const timeHdrTitle = window.t('telemetry.sample_hint');
                     toolBody.innerHTML = `
                         <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
                             <thead>
                                 <tr style="color:var(--text-secondary);text-align:left;border-bottom:1px solid var(--border);">
                                     <th style="padding:6px 10px;">Tool</th>
                                     <th style="padding:6px 10px;text-align:right;">Calls</th>
-                                    <th style="padding:6px 10px;text-align:right;">Ø ms</th>
-                                    <th style="padding:6px 10px;text-align:right;">Min</th>
-                                    <th style="padding:6px 10px;text-align:right;">Max</th>
+                                    <th style="padding:6px 10px;text-align:right;" title="${timeHdrTitle}">Ø ms</th>
+                                    <th style="padding:6px 10px;text-align:right;" title="${timeHdrTitle}">Min</th>
+                                    <th style="padding:6px 10px;text-align:right;" title="${timeHdrTitle}">Max</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -83,13 +100,14 @@ class JarvisTelemetryManager {
                                     <tr style="border-bottom:1px solid rgba(var(--fg-rgb),0.04);">
                                         <td style="padding:6px 10px;color:var(--text-primary);font-family:var(--font-mono);">${name}</td>
                                         <td style="padding:6px 10px;text-align:right;color:var(--accent-hover);">${t.calls}</td>
-                                        <td style="padding:6px 10px;text-align:right;">${t.avg_ms}</td>
-                                        <td style="padding:6px 10px;text-align:right;color:var(--text-secondary);">${t.min_ms}</td>
-                                        <td style="padding:6px 10px;text-align:right;color:var(--text-secondary);">${t.max_ms}</td>
+                                        <td style="padding:6px 10px;text-align:right;" title="${timeHdrTitle}">${t.avg_ms}</td>
+                                        <td style="padding:6px 10px;text-align:right;color:var(--text-secondary);" title="${timeHdrTitle}">${t.min_ms}</td>
+                                        <td style="padding:6px 10px;text-align:right;color:var(--text-secondary);" title="${timeHdrTitle}">${t.max_ms}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
-                        </table>`;
+                        </table>
+                        ${sampled ? `<div style="font-size:0.72rem;color:var(--text-muted);padding:6px 10px;">⏱ ${window.t('telemetry.sample_hint')}</div>` : ''}`;
                 }
             }
 

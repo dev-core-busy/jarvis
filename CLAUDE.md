@@ -243,6 +243,24 @@ data/
   `purge_packages` (explizite Entfern-Liste inkl. transitiver Pakete), `data_dirs`,
   `caches` (Globs, z.B. Whisper-Modell), `install_commands` ({cmd,cwd,creates}),
   `systemd_service`
+- **Jeder Skill mit `config_schema` hat einen eigenen Settings-Reiter** (seit 2026-07-26):
+  Das Zahnrad unter *Einstellungen → Skills → Installierte Skills* springt in diesen Reiter
+  (Zuordnung `SKILL_TABS` in `frontend/js/skills.js`). Reiter ohne handgebaute Oberflaeche
+  (google, telegram, browser_control, claude_bridge, agent_orchestrator, agent_autonomy_kit)
+  werden von `frontend/js/skillcfg.js` **generisch aus dem Manifest** gerendert – ein neues
+  `config_schema`-Feld erscheint dort ohne Frontend-Aenderung (`string`/`number`/`boolean`/
+  `enum`/`secret` + `label`/`description`). Zwei Reiter mischen: WhatsApp (`skcfg-whatsapp`,
+  ohne `debug_mode` – das hat seinen Toggle unter „Logs & Debug") und Wissen
+  (`skcfg-knowledge`, nur `max_file_size_mb`).
+  - Diese Reiter sind nur bei AKTIVEM Skill sichtbar (`SkillCfg.updateTabs()`, aufgerufen
+    ueber `window.updateSkillCfgTabVisibility`). Ist der Reiter ausgeblendet, fallen die
+    Zahnraeder auf den generischen Dialog zurueck (`_showConfigDialog`) – der bleibt auch
+    fuer importierte Fremd-/OpenClaw-Skills ohne Reiter der Weg.
+  - `POST /api/skills/{name}/config` **merged** serverseitig (`update_skill_config`), ein
+    Reiter darf also eine Teilmenge der Felder schicken, ohne die anderen zu verlieren.
+  - Neues Reiter-Skill anlegen: Knopf + Panel mit `<div id="skcfg-<skill>">` in
+    `settings.html`, Eintrag in `TARGETS`/`TAB_BUTTONS` (skillcfg.js), `SKILL_TABS`
+    (skills.js) und `SKILLCFG_TABS` (app.js).
 
 ## WhatsApp-Integration
 - **Bridge:** Node.js + Baileys v7, systemd `whatsapp-bridge.service`, Port 3001 (localhost)

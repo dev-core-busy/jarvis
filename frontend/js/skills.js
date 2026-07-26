@@ -70,9 +70,46 @@
         { key: 'sonstige',     label: 'Sonstige' },
     ];
 
+    // Skills mit eigenem Settings-Reiter: Verzeichnisname → data-settings-tab.
+    // Das Zahnrad in "Installierte Skills" springt dorthin, statt den
+    // generischen Config-Dialog zu oeffnen (der Reiter kann deutlich mehr).
+    const SKILL_TABS = {
+        vision:            'vision',
+        'jarvis-vision':   'vision',
+        whatsapp:          'whatsapp',
+        branding:          'branding',
+        confluence:        'confluence',
+        jira:              'jira',
+        sap:               'sap',
+        kundenverwaltung:  'kundenverwaltung',
+        support_assistant: 'support',
+        knowledge:         'knowledge',
+        cron:              'cron',
+        google:             'google',
+        telegram:           'telegram',
+        browser_control:    'browser_control',
+        claude_bridge:      'claude_bridge',
+        agent_orchestrator: 'agent_orchestrator',
+        agent_autonomy_kit: 'agent_autonomy_kit',
+    };
+
+    // Liefert den Reiter-Knopf eines Skills – nur wenn er existiert UND sichtbar
+    // ist (ausgeschaltete Skills blenden ihren Reiter aus).
+    function tabButtonFor(dirName) {
+        const tab = SKILL_TABS[dirName];
+        if (!tab) return null;
+        const btn = document.querySelector(`.settings-tab-btn[data-settings-tab="${tab}"]`);
+        if (!btn) return null;
+        // NICHT ueber offsetParent pruefen: die Liste wird ggf. gerendert,
+        // waehrend das Settings-Modal noch geschlossen ist – dann waeren alle
+        // Reiter "unsichtbar". Die Sichtbarkeit steckt im inline-display.
+        if (btn.style.display === 'none') return null;
+        return btn;
+    }
+
     // SVG-Buttons
-    const SVG_CFG  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.32 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
-    const SVG_INFO = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
+    const SVG_CFG  =`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.32 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+    const SVG_INFO =`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
 
     class JarvisSkillManager {
         constructor() {
@@ -167,11 +204,13 @@
             const dirName   = skill.dir_name || skill.path?.split('/').pop() || skill.name;
             const icon      = ICON_MAP[skill.icon] || ICON_MAP.puzzle;
             const isSystem  = skill.system || false;
-            // Skills mit eigenem Settings-Tab brauchen keinen generischen Config-Button
-            const CUSTOM_TAB_SKILLS = ['vision'];
-            const hasConfig = skill.config_schema
-                && Object.keys(skill.config_schema).length > 0
-                && !CUSTOM_TAB_SKILLS.includes(dirName);
+            // Zahnrad: entweder eigener Settings-Reiter (Vorrang) oder generischer Dialog
+            const tabBtn    = tabButtonFor(dirName);
+            const hasConfig = !!tabBtn || (skill.config_schema
+                && Object.keys(skill.config_schema).length > 0);
+            const cfgTitle  = tabBtn
+                ? `${window.t('skills.cfg_title')} – ${tabBtn.textContent.trim()}`
+                : window.t('skills.cfg_title');
             const catLabel  = CATEGORY_LABELS[skill.category] || skill.category || '';
             const toolCount = (skill.tools || []).length;
 
@@ -194,7 +233,7 @@
                 <div class="sk-item-actions">
                     <button class="sk-btn sk-btn-info" title="${window.t('skills.show_info')}">${SVG_INFO}</button>
                     ${hasConfig
-                        ? `<button class="sk-btn sk-btn-cfg" title="${window.t('skills.cfg_title')}">${SVG_CFG}</button>`
+                        ? `<button class="sk-btn sk-btn-cfg" title="${cfgTitle}">${SVG_CFG}</button>`
                         : '<span class="sk-btn sk-btn-ghost" aria-hidden="true"></span>'}
                     <label class="skill-toggle" title="${isSystem ? 'System-Skill' : 'An / Aus'}">
                         <input type="checkbox" ${skill.enabled ? 'checked' : ''}>
@@ -741,7 +780,7 @@
                 }
                 this._notify(`"${name}" ${window.t('skills.activated')}`, 'success');
                 await this.loadSkills();
-                if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
+                if (typeof window.updateSkillCfgTabVisibility === 'function') window.updateSkillCfgTabVisibility();
                 if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
@@ -826,7 +865,7 @@
                 }
                 this._notify(`"${name}" ${window.t('skills.uninstalled')}`, 'success');
                 await this.loadSkills();
-                if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
+                if (typeof window.updateSkillCfgTabVisibility === 'function') window.updateSkillCfgTabVisibility();
                 if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
@@ -908,7 +947,7 @@
                         st.ok ? 'success' : 'error');
                     await this.loadSkills();
                     if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
-                    if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
+                    if (typeof window.updateSkillCfgTabVisibility === 'function') window.updateSkillCfgTabVisibility();
                     if (st.ok) setTimeout(stop, 1200);
                 } catch (e) {
                     if (!closed) setTimeout(poll, 3000);
@@ -936,7 +975,7 @@
                 }
                 await this.loadSkills();
                 // Tab-Sichtbarkeit nach Skill-Änderung aktualisieren
-                if (typeof window.updateGoogleTabVisibility === 'function') window.updateGoogleTabVisibility();
+                if (typeof window.updateSkillCfgTabVisibility === 'function') window.updateSkillCfgTabVisibility();
                 if (typeof window.updateVisionTabVisibility === 'function') window.updateVisionTabVisibility();
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
@@ -952,15 +991,14 @@
         // ─── Konfiguration ────────────────────────────────────────────
 
         async _openConfig(name) {
-            // Skills mit eigenem Settings-Tab: direkt dorthin wechseln
-            const CUSTOM_TABS = { vision: 'vision' };
-            if (CUSTOM_TABS[name]) {
-                const tabBtn = document.querySelector(
-                    `.settings-tab-btn[data-settings-tab="${CUSTOM_TABS[name]}"]`);
-                if (tabBtn && tabBtn.style.display !== 'none') {
-                    tabBtn.click();
-                    return;
+            // Skills mit eigenem Settings-Reiter: direkt dorthin wechseln
+            const tabBtn = tabButtonFor(name);
+            if (tabBtn) {
+                tabBtn.click();
+                if (typeof tabBtn.scrollIntoView === 'function') {
+                    tabBtn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
                 }
+                return;
             }
 
             const token = localStorage.getItem('jarvis_token') || '';

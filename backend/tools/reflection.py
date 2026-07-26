@@ -710,7 +710,8 @@ class ReflectionTool(BaseTool):
                 await asyncio.sleep(5)
                 try:
                     from backend import broker_client
-                    await broker_client.systemctl("restart", "jarvis.service", user="system")
+                    await broker_client.systemctl("restart", "jarvis.service", user="system",
+                                                  context=f"Selbst-Reflexion: Code geaendert ({file})")
                 except Exception:
                     pass
 

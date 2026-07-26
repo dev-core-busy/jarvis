@@ -2182,7 +2182,7 @@ async def update_apply(user: str = Depends(require_local_auth)):
     from backend.update_manager import apply_update, restart_service_delayed
     result = await asyncio.to_thread(apply_update)
     if result["ok"]:
-        restart_service_delayed(delay_sec=2.0)
+        restart_service_delayed(delay_sec=2.0, context=f"Software-Update angewendet (ausgeloest von {user})")
     return JSONResponse(result)
 
 
@@ -2530,7 +2530,8 @@ async def system_restart(user: str = Depends(require_local_auth)):
     def _do_restart():
         import time; time.sleep(1)
         from backend import broker_client
-        broker_client.systemctl_sync("restart", "jarvis.service", user=user)
+        broker_client.systemctl_sync("restart", "jarvis.service", user=user,
+                                     context=f"Manueller Neustart aus Einstellungen (durch {user})")
     threading.Thread(target=_do_restart, daemon=True).start()
     return JSONResponse({"ok": True, "message": "Neustart eingeleitet"})
 

@@ -121,10 +121,19 @@ async def call(op: str, args: dict | None = None, *, user: str = "",
                                    timeout=timeout, stream_cb=_cb)
 
 
-async def systemctl(action: str, unit: str, *, user: str = "") -> dict:
+def _sysctl_args(action: str, unit: str, context: str) -> dict:
+    args = {"action": action, "unit": unit}
+    if context:
+        # Rein informativer Ausloeser fuers Audit-Log (ops.py liest args["_context"]) –
+        # fliesst nie in Policy/Befehl ein.
+        args["_context"] = context
+    return args
+
+
+async def systemctl(action: str, unit: str, *, user: str = "", context: str = "") -> dict:
     """Komfort-Wrapper fuer die haeufigste Operation."""
-    return await call("systemctl", {"action": action, "unit": unit}, user=user, timeout=90)
+    return await call("systemctl", _sysctl_args(action, unit, context), user=user, timeout=90)
 
 
-def systemctl_sync(action: str, unit: str, *, user: str = "") -> dict:
-    return call_sync("systemctl", {"action": action, "unit": unit}, user=user, timeout=90)
+def systemctl_sync(action: str, unit: str, *, user: str = "", context: str = "") -> dict:
+    return call_sync("systemctl", _sysctl_args(action, unit, context), user=user, timeout=90)

@@ -601,9 +601,10 @@
         const tabCron    = document.getElementById('settings-tab-cron');
         const tabConfluence = document.getElementById('settings-tab-confluence');
         const tabJira    = document.getElementById('settings-tab-jira');
+        const tabSap     = document.getElementById('settings-tab-sap');
         const tabKundenverwaltung = document.getElementById('settings-tab-kundenverwaltung');
         const tabSupport = document.getElementById('settings-tab-support');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron];
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron];
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -663,6 +664,10 @@
                     tabJira.style.display = '';
                     tabJira.classList.add('active');
                     if (window.JiraManager) window.JiraManager.onShow();
+                } else if (target === 'sap' && tabSap) {
+                    tabSap.style.display = '';
+                    tabSap.classList.add('active');
+                    if (window.SapManager) window.SapManager.onShow();
                 } else if (target === 'kundenverwaltung' && tabKundenverwaltung) {
                     tabKundenverwaltung.style.display = '';
                     tabKundenverwaltung.classList.add('active');
@@ -837,6 +842,35 @@
             }
         }
 
+        // ── SAP-Tab: nur sichtbar wenn 'sap'-Skill aktiviert ──
+        const sapTabBtn = document.getElementById('settings-tab-btn-sap');
+        window.updateSapTabVisibility = async function updateSapTabVisibility() {
+            if (!sapTabBtn) return;
+            try {
+                const resp = await fetch('/api/skills', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json();
+                const skills = data.skills || data || [];
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'sap')
+                    : null;
+                const isEnabled = sp && sp.enabled;
+                sapTabBtn.style.display = isEnabled ? '' : 'none';
+                // SAP-Berechtigungsblock in Sicherheit → Berechtigungen nur bei aktivem Skill zeigen
+                const sapSecSub = document.getElementById('sec-sub-sap');
+                if (sapSecSub) sapSecSub.style.display = isEnabled ? '' : 'none';
+                if (!isEnabled && tabSap && tabSap.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Tab bleibt versteckt
+            }
+        }
+
         // ── Kundenverwaltungs-Tab: nur sichtbar wenn 'kundenverwaltung'-Skill aktiviert ──
         const kvTabBtn = document.getElementById('settings-tab-btn-kundenverwaltung');
         window.updateKundenverwaltungTabVisibility = async function updateKundenverwaltungTabVisibility() {
@@ -959,6 +993,7 @@
             await updateBrandingTabVisibility();
             await updateConfluenceTabVisibility();
             await updateJiraTabVisibility();
+            await updateSapTabVisibility();
             await updateKundenverwaltungTabVisibility();
             await updateSupportTabVisibility();
             loadSslStatus();

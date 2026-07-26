@@ -1833,6 +1833,15 @@ KRITISCH – Autonomie-Regeln:
                     result = "Zugriff verweigert: Internet-Zugriff (curl/wget/ssh/git/…) ist fuer deinen Benutzer nicht freigeschaltet."
                     _ldap_blocked = True
 
+            # SAP-Zugriff: SAP-Tools nur fuer freigeschaltete Benutzer (Einstellungen
+            # -> Sicherheit -> Berechtigungen -> SAP-Zugriff). Sensible Faehigkeit
+            # (Roh-SQL/Datenabruf mit Dienstkonto); Default fuer Netzwerk-Nutzer = gesperrt.
+            if (not _ldap_blocked and name.startswith("sap_")
+                    and not getattr(self, '_current_user_sap', True)):
+                print(f"[AGENT] BLOCKED SAP-Tool '{name}' fuer User '{_uname}' (kein SAP-Zugriff)", flush=True)
+                result = "Zugriff verweigert: SAP-Zugriff ist fuer deinen Benutzer nicht freigeschaltet."
+                _ldap_blocked = True
+
             # OS-Sandbox: nicht-privilegierte Shell-Befehle als unprivilegierter
             # OS-Benutzer ausfuehren (harte Grenze via OS-Rechte – wirkt unabhaengig
             # von Base64/Python/etc.). Opt-in via Einstellung 'sandbox_shell_user'.
@@ -1906,6 +1915,7 @@ KRITISCH – Autonomie-Regeln:
             # Sonst liefe der Sub-Agent mit leerem Username = privilegiert (Escalation).
             sub._current_username = getattr(self, '_current_username', '')
             sub._current_user_internet = getattr(self, '_current_user_internet', True)
+            sub._current_user_sap = getattr(self, '_current_user_sap', True)
             asyncio.create_task(agent_manager.run_sub_agent(sub, task, ws))
             return f"Sub-Agent '{label}' gestartet (ID: {sub.agent_id})"
         except Exception as e:
@@ -2399,6 +2409,7 @@ class AgentManager:
         # gespawnten Sub-Agent umgehen (Default waere 'erlaubt').
         if parent is not None:
             agent._current_user_internet = getattr(parent, '_current_user_internet', True)
+            agent._current_user_sap = getattr(parent, '_current_user_sap', True)
             agent._current_username = getattr(parent, '_current_username', '')
         self.agents[agent.agent_id] = agent
         return agent

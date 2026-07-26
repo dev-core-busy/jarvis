@@ -121,12 +121,14 @@ def apply_update() -> dict:
     return {"ok": True, "output": out + pop_note}
 
 
-def restart_service_delayed(delay_sec: float = 2.0):
-    """Startet den Service nach delay_sec Sekunden neu (in einem Thread, via Root-Broker)."""
+def restart_service_delayed(delay_sec: float = 2.0, context: str = "Auto-Update angewendet"):
+    """Startet den Service nach delay_sec Sekunden neu (in einem Thread, via Root-Broker).
+
+    context: informativer Ausloeser fuers Broker-Audit (Standard: Auto-Update)."""
     def _do():
         time.sleep(delay_sec)
         from backend import broker_client
-        res = broker_client.systemctl_sync("restart", "jarvis.service", user="system")
+        res = broker_client.systemctl_sync("restart", "jarvis.service", user="system", context=context)
         if not res.get("ok"):
             print(f"[Update] Neustart via Broker fehlgeschlagen: {res.get('error') or res.get('stderr')}", flush=True)
     threading.Thread(target=_do, daemon=True).start()

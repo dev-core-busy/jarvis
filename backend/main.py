@@ -696,6 +696,43 @@ async def require_knowledge_editor(request: Request, user: str = Depends(require
                "(ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
+def _user_may_use_sap(user: str) -> bool:
+    """Prädikat: Darf der Benutzer den SAP-Zugriff (Reiter + Tools) nutzen?
+
+    SAP ist eine sensible Fähigkeit (Roh-SQL/Datenabruf mit hinterlegtem
+    Dienstkonto), daher explizites Opt-in OHNE Admin-Bypass (wie ``_may_use_profile``):
+    - Erlaubt sind AUSSCHLIESSLICH Benutzer in ``sap_allowed_users`` oder
+      Mitglieder von ``sap_allowed_group`` (memberOf-DNs werden beim Login gecacht).
+    - Ist WEDER Liste NOCH Gruppe gesetzt, darf NIEMAND SAP nutzen –
+      ausdrücklich AUCH KEINE lokalen Administratoren (jarvis/root/ALLOWED_USERS).
+      Wer SAP nutzen soll, muss hier eingetragen sein; für "alle" die AD-Gruppe
+      "Jeder"/Domänen-Benutzer als SAP-Gruppe setzen.
+    """
+    u = (user or "").strip()
+    if not u:
+        return False
+    users_raw = config.get_setting("sap_allowed_users", "").strip()
+    grp = config.get_setting("sap_allowed_group", "").strip()
+    if not users_raw and not grp:
+        return False  # niemand – auch keine lokalen Admins
+    plain = _norm_login(u)
+    if users_raw and plain in {_norm_login(x) for x in users_raw.split(",") if x.strip()}:
+        return True
+    if grp and _member_of_any_group(_user_group_dns_cache.get(plain, []), grp):
+        return True
+    return False
+
+
+async def require_sap_access(request: Request, user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Prüft die SAP-Berechtigung (Reiter → /api/sap/*)."""
+    if _user_may_use_sap(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein SAP-Zugriff – nicht in der SAP-Benutzerliste/-Gruppe freigeschaltet "
+               "(Einstellungen → Sicherheit → Berechtigungen → SAP-Zugriff; "
+               "ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
 def _is_kb_group_editor(user: str, group: dict) -> bool:
     """True, wenn der Benutzer als *gruppenspezifischer* Editor hinterlegt ist.
 
@@ -904,13 +941,16 @@ _admin_access_cache: dict[str, bool] = {}
 def _check_internet_access_with_conn(username: str, conn, base_dn: str) -> bool:
     """Prüft ob ein AD-User Internet-Abfragen machen darf (nur beim Login – LDAP-Bind aktiv).
 
-    Gibt True zurück wenn: weder Liste noch Gruppe konfiguriert (alle dürfen),
-    Benutzer in ad_internet_users-Liste, oder Mitglied der ad_internet_group.
+    Explizites Opt-in OHNE Admin-Bypass (wie beim SAP-Zugriff): Zugriff NUR für
+    Benutzer in ``ad_internet_users`` oder Mitglieder der ``ad_internet_group``.
+    Ist WEDER Liste NOCH Gruppe gesetzt, darf NIEMAND ins Internet – ausdrücklich
+    auch keine lokalen Administratoren. Für "alle" die AD-Gruppe "Jeder"/
+    Domänen-Benutzer als Internet-Gruppe eintragen.
     """
     users_raw = config.get_setting("ad_internet_users", "").strip()
     grp = config.get_setting("ad_internet_group", "").strip()
     if not users_raw and not grp:
-        return True
+        return False  # niemand – auch keine lokalen Admins
 
     plain = username.split("@")[0].split("\\")[-1].lower()
 
@@ -945,20 +985,21 @@ def _check_internet_access_with_conn(username: str, conn, base_dn: str) -> bool:
 def _user_has_internet_access(user: str) -> bool:
     """Laufzeit-Check: Darf dieser Benutzer Internet-Abfragen machen?
 
-    Lokale/privilegierte User immer. Sonst: keine Einschränkung konfiguriert → alle;
-    in ad_internet_users-Liste → ja; Gruppen-Mitgliedschaft via Login-Cache.
+    Explizites Opt-in OHNE Admin-Bypass (wie beim SAP-Zugriff):
+    - Erlaubt sind AUSSCHLIESSLICH Benutzer in ``ad_internet_users`` oder
+      Mitglieder von ``ad_internet_group`` (Login-Cache).
+    - Ist WEDER Liste NOCH Gruppe gesetzt, darf NIEMAND ins Internet –
+      ausdrücklich auch keine lokalen Administratoren (jarvis/root/ALLOWED_USERS)
+      und keine credential-losen (API-Key-)Sitzungen. Für "alle" die AD-Gruppe
+      "Jeder"/Domänen-Benutzer als Internet-Gruppe setzen.
     """
     u = (user or "").strip()
-    if not u or u in ALLOWED_USERS or u in {"jarvis", "root"}:
-        return True
-    # "Internet fuer alle sperren": kein Netzwerk-Benutzer darf ins Internet
-    # (lokale Administratoren oben sind ausgenommen).
-    if str(config.get_setting("ad_internet_deny_all", False)).strip().lower() in ("1", "true", "yes", "on"):
+    if not u:
         return False
     users_raw = config.get_setting("ad_internet_users", "").strip()
     grp = config.get_setting("ad_internet_group", "").strip()
     if not users_raw and not grp:
-        return True
+        return False  # niemand – auch keine lokalen Admins
     plain = u.split("@")[0].split("\\")[-1].lower()
     if users_raw:
         allowed = {_norm_login(x) for x in users_raw.split(",") if x.strip()}
@@ -3259,8 +3300,10 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         _internet_access_cache.clear()
     if "ad_internet_group" in body:
         config.save_setting("ad_internet_group", body["ad_internet_group"])
-    if "ad_internet_deny_all" in body:
-        config.save_setting("ad_internet_deny_all", bool(body["ad_internet_deny_all"]))
+    if "sap_allowed_users" in body:
+        config.save_setting("sap_allowed_users", body["sap_allowed_users"])
+    if "sap_allowed_group" in body:
+        config.save_setting("sap_allowed_group", body["sap_allowed_group"])
     if "ad_bind_user" in body:
         _bu = (body["ad_bind_user"] or "").strip()
         config.save_setting("ad_bind_user", _bu)
@@ -3370,12 +3413,10 @@ async def get_ad_status(user: str = Depends(require_auth)):
         ),
         "internet_users": config.get_setting("ad_internet_users", ""),
         "internet_group": config.get_setting("ad_internet_group", ""),
-        "internet_deny_all": str(config.get_setting("ad_internet_deny_all", False)).strip().lower() in ("1", "true", "yes", "on"),
         "internet_mode": (
-            "none"      if str(config.get_setting("ad_internet_deny_all", False)).strip().lower() in ("1", "true", "yes", "on") else
             "group"     if config.get_setting("ad_internet_group", "") else
             "users"     if config.get_setting("ad_internet_users", "") else
-            "all"       # alle Benutzer haben Internet-Zugang
+            "none"      # nichts konfiguriert → niemand (auch keine lokalen Admins)
         ),
         "admins": config.get_setting("ad_admins", ""),
         "admins_group": config.get_setting("ad_admins_group", ""),
@@ -3383,6 +3424,13 @@ async def get_ad_status(user: str = Depends(require_auth)):
             "group"     if config.get_setting("ad_admins_group", "") else
             "users"     if config.get_setting("ad_admins", "") else
             "none"      # nur lokaler jarvis
+        ),
+        "sap_users": config.get_setting("sap_allowed_users", ""),
+        "sap_group": config.get_setting("sap_allowed_group", ""),
+        "sap_mode": (
+            "group"     if config.get_setting("sap_allowed_group", "") else
+            "users"     if config.get_setting("sap_allowed_users", "") else
+            "none"      # nichts konfiguriert → nur lokale Admins
         ),
         # Service-Konto für das Verzeichnis-Durchsuchen (Passwort nie ausliefern)
         "bind_user": config.get_setting("ad_bind_user", ""),
@@ -4671,6 +4719,128 @@ async def confluence_page_api(id: str = "", title: str = "", space: str = "",
                              "text": html_to_text(body, 8000)})
     except ConfluenceError as e:
         return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+
+
+# ─── SAP (Reiter: Read-Only-Zugriff) ─────────────────────────────────
+
+def _sap_client():
+    from backend.sap_client import SapClient
+    return SapClient()
+
+
+@app.get("/api/sap/test")
+async def sap_test(user: str = Depends(require_sap_access)):
+    """Prueft die gespeicherte SAP-Verbindung (fuer den Reiter)."""
+    from backend.sap_client import SapError
+    c = _sap_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "configured": False,
+                             "type": c.connection_type,
+                             "error": "Nicht konfiguriert (Zugangsdaten fehlen)."})
+    try:
+        res = await asyncio.to_thread(c.test)
+        return JSONResponse({"ok": True, "configured": True,
+                             "type": res.get("type"), "product": c.product,
+                             "detail": res.get("detail")})
+    except SapError as e:
+        return JSONResponse({"ok": False, "configured": True, "status": e.status,
+                             "type": c.connection_type, "error": str(e)})
+
+
+@app.get("/api/sap/odata/query")
+async def sap_odata_query_api(entity_set: str, service: str = "", select: str = "",
+                              filter: str = "", top: int = 50, skip: int = 0,
+                              orderby: str = "", expand: str = "",
+                              user: str = Depends(require_sap_access)):
+    """Lesende OData-Abfrage fuer den Reiter (nur GET)."""
+    from backend.sap_client import SapError
+    c = _sap_client()
+    if not c.odata.configured:
+        return JSONResponse({"ok": False, "error": "OData nicht konfiguriert."}, status_code=400)
+    try:
+        top = max(1, min(int(top), 5000))
+    except (TypeError, ValueError):
+        top = 50
+    try:
+        rows = await asyncio.to_thread(
+            c.odata.query, entity_set.strip(), service.strip(),
+            select=select.strip(), filter=filter.strip(), top=top,
+            skip=int(skip or 0), orderby=orderby.strip(), expand=expand.strip())
+        clean = [{k: v for k, v in r.items() if k != "__metadata"} for r in rows]
+        cols = list(clean[0].keys()) if clean else []
+        return JSONResponse({"ok": True, "columns": cols, "rows": clean, "count": len(clean)})
+    except SapError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+
+
+@app.get("/api/sap/odata/entity-sets")
+async def sap_odata_entity_sets_api(service: str = "", user: str = Depends(require_sap_access)):
+    """EntitySets eines OData-Service (aus $metadata) – fuer den Reiter."""
+    from backend.sap_client import SapError
+    c = _sap_client()
+    if not c.odata.configured:
+        return JSONResponse({"ok": False, "error": "OData nicht konfiguriert."}, status_code=400)
+    try:
+        sets = await asyncio.to_thread(c.odata.entity_sets, service.strip())
+        return JSONResponse({"ok": True, "entity_sets": sets, "count": len(sets)})
+    except SapError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+
+
+@app.post("/api/sap/sql")
+async def sap_sql_api(request: Request, user: str = Depends(require_sap_access)):
+    """Lesende SQL-Abfrage gegen HANA fuer den Reiter (nur SELECT/WITH)."""
+    from backend.sap_client import SapError
+    c = _sap_client()
+    if not c.hana.configured:
+        return JSONResponse({"ok": False, "error": "HANA nicht konfiguriert."}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    sql = (body.get("sql") or "").strip()
+    if not sql:
+        return JSONResponse({"ok": False, "error": "sql fehlt."}, status_code=400)
+    try:
+        max_rows = max(1, min(int(body.get("max_rows") or 200), 10000))
+    except (TypeError, ValueError):
+        max_rows = 200
+    try:
+        res = await asyncio.to_thread(c.hana.run_select, sql, max_rows)
+        return JSONResponse({"ok": True, "columns": res.get("columns", []),
+                             "rows": res.get("rows", []),
+                             "count": len(res.get("rows", [])),
+                             "truncated": res.get("truncated", False)})
+    except SapError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+
+
+@app.get("/api/sap/tables")
+async def sap_tables_api(schema: str = "", limit: int = 200,
+                         user: str = Depends(require_sap_access)):
+    """Tabellen/Views eines HANA-Schemas – fuer den Reiter."""
+    from backend.sap_client import SapError
+    c = _sap_client()
+    if not c.hana.configured:
+        return JSONResponse({"ok": False, "error": "HANA nicht konfiguriert."}, status_code=400)
+    try:
+        limit = max(1, min(int(limit), 5000))
+    except (TypeError, ValueError):
+        limit = 200
+    try:
+        rows = await asyncio.to_thread(c.hana.list_tables, schema.strip(), limit)
+        return JSONResponse({"ok": True, "rows": rows, "count": len(rows)})
+    except SapError as e:
+        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+
+
+@app.get("/api/sap/reporting-endpoints")
+async def sap_reporting_endpoints_api(user: str = Depends(require_sap_access)):
+    """Verbindungshinweise fuer BI-/Reporting-Tools – fuer den Reiter."""
+    from backend.sap_client import reporting_endpoints
+    c = _sap_client()
+    eps = await asyncio.to_thread(reporting_endpoints, c)
+    return JSONResponse({"ok": True, "endpoints": eps})
 
 
 # ─── Jira (Reiter: Ticketsuche) ──────────────────────────────────────
@@ -10352,15 +10522,18 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Nachricht als Follow-Up an den Sub-Agent senden (neuer Task)
         _ws_user = _get_ws_username(ws)
         _ws_internet = _user_has_internet_access(_ws_user)
+        _ws_sap = _user_may_use_sap(_ws_user)
         if target_agent_id and agent_manager.get_agent(target_agent_id):
             target = agent_manager.get_agent(target_agent_id)
             if target.is_sub_agent:
                 target._current_user_internet = _ws_internet
+                target._current_user_sap = _ws_sap
                 asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups))
                 return
 
         agent = agent_manager.get_or_create_main()
         agent._current_user_internet = _ws_internet
+        agent._current_user_sap = _ws_sap
         agent_instance = agent  # Kompatibilitaet
 
         # ── Edit-Modus: vor neuem Task History trimmen ─────────────────

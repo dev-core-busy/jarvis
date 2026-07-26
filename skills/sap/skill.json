@@ -1,0 +1,168 @@
+{
+    "name": "SAP",
+    "description": "Read-only-Zugriff auf SAP-Systeme (S/4HANA, ECC, BW/4HANA, HANA Cloud, Datasphere) ueber OData, HANA-SQL und RFC. Direkte SQL-Abfragen und Anbindung an die gaengigen Reporting-Tools (Power BI, Tableau, Qlik).",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["sap_test_connection", "sap_odata_services", "sap_odata_entity_sets", "sap_odata_query", "sap_sql_query", "sap_list_tables", "sap_describe_table", "sap_rfc_read_table", "sap_reporting_endpoints"],
+    "category": "daten",
+    "icon": "database",
+    "system": false,
+    "enabled": false,
+    "dependencies": ["hdbcli"],
+    "optional_dependencies": ["pyodata", "pyrfc"],
+    "config_schema": {
+        "connection_type": {
+            "type": "string",
+            "label": "Verbindungstyp (odata | hana | rfc)",
+            "description": "Aktiver Kanal: odata (S/4HANA/Gateway/BW REST), hana (direktes SQL auf HANA/Cloud/Datasphere), rfc (klassisch ECC/NetWeaver).",
+            "default": "odata",
+            "required": true
+        },
+        "sap_product": {
+            "type": "string",
+            "label": "SAP-Produkt/Version (informativ)",
+            "description": "z.B. 'S/4HANA 2023', 'S/4HANA Cloud Public 2508', 'ECC 6.0 EhP8', 'BW/4HANA 2023', 'HANA Cloud'.",
+            "default": ""
+        },
+        "read_only": {
+            "type": "boolean",
+            "label": "Nur-Lesen erzwingen",
+            "description": "Bleibt immer aktiv: OData nur GET, SQL nur SELECT/WITH, RFC nur lesende Bausteine.",
+            "default": true
+        },
+        "odata_base_url": {
+            "type": "string",
+            "label": "OData Basis-URL",
+            "description": "z.B. https://s4host:44300/sap/opu/odata (ohne Service-Pfad).",
+            "default": ""
+        },
+        "odata_service": {
+            "type": "string",
+            "label": "OData Standard-Service (optional)",
+            "description": "z.B. sap/API_SALES_ORDER_SRV – Vorgabe fuer Abfragen ohne explizites Service.",
+            "default": ""
+        },
+        "auth_kind": {
+            "type": "string",
+            "label": "OData-Auth (basic | bearer)",
+            "description": "basic = Benutzer/Passwort, bearer = OAuth-/Bearer-Token.",
+            "default": "basic"
+        },
+        "username": {
+            "type": "string",
+            "label": "OData-Benutzer",
+            "default": ""
+        },
+        "password": {
+            "type": "string",
+            "label": "OData-Passwort",
+            "secret": true,
+            "default": ""
+        },
+        "bearer_token": {
+            "type": "string",
+            "label": "OData Bearer-Token",
+            "secret": true,
+            "default": ""
+        },
+        "sap_client": {
+            "type": "string",
+            "label": "Mandant (sap-client)",
+            "description": "Optionaler SAP-Mandant fuer OData (Query-Parameter sap-client).",
+            "default": ""
+        },
+        "verify_ssl": {
+            "type": "boolean",
+            "label": "SSL-Zertifikat pruefen (OData)",
+            "default": true
+        },
+        "hana_host": {
+            "type": "string",
+            "label": "HANA Host",
+            "description": "z.B. myhana.hanacloud.ondemand.com oder interne IP.",
+            "default": ""
+        },
+        "hana_port": {
+            "type": "number",
+            "label": "HANA Port",
+            "description": "HANA Cloud: 443. On-Prem MDC Tenant: 3NN15 (NN=Instanznummer).",
+            "default": 443
+        },
+        "hana_user": {
+            "type": "string",
+            "label": "HANA Benutzer",
+            "default": ""
+        },
+        "hana_password": {
+            "type": "string",
+            "label": "HANA Passwort",
+            "secret": true,
+            "default": ""
+        },
+        "hana_schema": {
+            "type": "string",
+            "label": "HANA Standard-Schema (optional)",
+            "default": ""
+        },
+        "hana_encrypt": {
+            "type": "boolean",
+            "label": "HANA-Verbindung verschluesseln (TLS)",
+            "default": true
+        },
+        "hana_ssl_validate": {
+            "type": "boolean",
+            "label": "HANA-Serverzertifikat pruefen",
+            "default": true
+        },
+        "rfc_ashost": {
+            "type": "string",
+            "label": "RFC Application Server (ashost)",
+            "default": ""
+        },
+        "rfc_sysnr": {
+            "type": "string",
+            "label": "RFC Systemnummer (sysnr)",
+            "default": ""
+        },
+        "rfc_client": {
+            "type": "string",
+            "label": "RFC Mandant (client)",
+            "default": ""
+        },
+        "rfc_user": {
+            "type": "string",
+            "label": "RFC Benutzer",
+            "default": ""
+        },
+        "rfc_password": {
+            "type": "string",
+            "label": "RFC Passwort",
+            "secret": true,
+            "default": ""
+        },
+        "rfc_lang": {
+            "type": "string",
+            "label": "RFC Sprache",
+            "default": "EN"
+        }
+    },
+    "knowledge_docs": [],
+    "permissions": [],
+    "help": {
+        "details": "Liest aus SAP-Systemen ueber die drei Standard-Schnittstellen und erzwingt dabei durchgehend Nur-Lesen. OData (V2/V4) fuer S/4HANA, SAP Gateway und BW/4HANA; direktes SQL (SELECT) auf SAP HANA, HANA Cloud und Datasphere via hdbcli; klassisches RFC (nur lesende Bausteine wie RFC_READ_TABLE) fuer ECC/NetWeaver (pyrfc + NW RFC SDK optional). Konfiguration ueber den SAP-Reiter in den Einstellungen (erscheint, sobald der Skill aktiv ist).",
+        "tools": [
+            {"name": "sap_test_connection", "label": "Verbindung testen", "desc": "Prueft die aktive SAP-Verbindung (je nach Typ OData/HANA/RFC)."},
+            {"name": "sap_sql_query", "label": "SQL-Abfrage (HANA)", "desc": "Fuehrt eine reine SELECT-Abfrage gegen SAP HANA aus (schreibende Statements werden abgelehnt)."},
+            {"name": "sap_odata_query", "label": "OData lesen", "desc": "Liest ein EntitySet mit $filter/$select/$top ueber OData (nur GET)."},
+            {"name": "sap_reporting_endpoints", "label": "Reporting-Anbindung", "desc": "Fertige Verbindungsangaben fuer Power BI, Tableau, Qlik & Co. zum konfigurierten System."}
+        ],
+        "use_cases": [
+            "Teste die SAP-Verbindung",
+            "Zeig mir die ersten 20 Verkaufsauftraege aus SAP",
+            "Fuehre diese SQL-Abfrage gegen SAP HANA aus: SELECT ... FROM ...",
+            "Wie binde ich Power BI an dieses SAP-System an?"
+        ],
+        "notes": "Nur-Lesen ist hart durchgesetzt und laesst sich nicht per Config abschalten. RFC ist optional und braucht das native SAP NW RFC SDK. hdbcli wird beim Aktivieren installiert."
+    }
+}

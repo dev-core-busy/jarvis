@@ -1462,6 +1462,16 @@ KRITISCH – Autonomie-Regeln:
         self._stop_flag = False
         self._stop_event.clear()
 
+        # Agent-Span: auch Headless-Laeufe (WhatsApp/Telegram/Cron/geplante Auftraege)
+        # in agent_runs zaehlen – sonst spiegelt die Statistik nur Browser-Laeufe.
+        from backend.telemetry import tracer
+        agent_span = tracer.start_span(f"agent:{self.label}", kind="agent")
+        agent_span.attributes["agent.id"] = self.agent_id
+        agent_span.attributes["agent.is_sub"] = self.is_sub_agent
+        agent_span.attributes["agent.headless"] = True
+        agent_span.attributes["task"] = task_text[:200]
+        _hl_error = None
+
         # Pro-Task Bild-Erfassung (Kanaele ohne Markdown senden das Bild als Medium)
         from backend.tools.image_gen import current_task_images
         self.last_task_images = []
@@ -1671,9 +1681,17 @@ KRITISCH – Autonomie-Regeln:
                         _log(f"Auto-Learning (headless) fehlgeschlagen: {le}")
 
         except Exception as e:
+            _hl_error = str(e).strip() or type(e).__name__
             collected_texts.append(f"Fehler: {str(e)}")
         finally:
             self.state = AgentState.IDLE
+            try:
+                if _hl_error:
+                    tracer.end_span(agent_span, status="error", error=_hl_error)
+                else:
+                    tracer.end_span(agent_span)
+            except Exception:
+                pass
             try:
                 self.last_task_images = list(current_task_images.get() or [])
                 current_task_images.reset(_img_token)

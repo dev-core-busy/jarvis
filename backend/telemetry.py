@@ -62,9 +62,17 @@ class JarvisTracer:
             "llm_calls": 0,
             "errors": 0,
             "total_duration_ms": 0,
+            # WAHRE Gesamtzahl der Aufrufe pro Tool (unbegrenzt). Die Zeit-Statistik
+            # (min/avg/max) nutzt weiterhin nur die letzten 100 Dauer-Werte pro Tool
+            # (tool_durations) – die "Calls"-Spalte darf davon aber NICHT gedeckelt
+            # werden, sonst zeigen alle viel genutzten Tools stumpf "100".
+            "tool_call_counts": defaultdict(int),
             "tool_durations": defaultdict(list),
             "llm_durations": [],
         }
+        # Reset-Nachweis (wann/von wem zuletzt zurueckgesetzt) – ueberlebt Neustart.
+        self._last_reset_ts: float | None = None
+        self._last_reset_by: str = ""
         self._load_stats()
 
     def start_span(self, name: str, kind: str = "internal", parent_id: str | None = None) -> TraceSpan:
@@ -87,8 +95,11 @@ class JarvisTracer:
             elif span.kind == "tool":
                 self._stats["tool_calls"] += 1
                 tool_name = span.attributes.get("tool.name", span.name)
+                # Wahre Gesamtzahl: unbegrenzt hochzaehlen (fuer die "Calls"-Spalte).
+                self._stats["tool_call_counts"][tool_name] += 1
+                # Zeit-Stichprobe: nur die letzten 100 Dauer-Werte pro Tool behalten
+                # (fuer min/avg/max – nicht fuer die Aufrufzahl).
                 self._stats["tool_durations"][tool_name].append(span.duration_ms)
-                # Nur letzte 100 pro Tool behalten
                 if len(self._stats["tool_durations"][tool_name]) > 100:
                     self._stats["tool_durations"][tool_name] = \
                         self._stats["tool_durations"][tool_name][-100:]
@@ -107,10 +118,16 @@ class JarvisTracer:
         """Gibt aggregierte Statistiken zurueck."""
         with self._lock:
             tool_stats = {}
+            counts = self._stats["tool_call_counts"]
             for name, durations in self._stats["tool_durations"].items():
                 if durations:
                     tool_stats[name] = {
-                        "calls": len(durations),
+                        # Wahre Gesamtzahl (unbegrenzt); Fallback auf Stichprobengroesse
+                        # fuer Alt-Daten ohne tool_call_counts.
+                        "calls": counts.get(name, len(durations)),
+                        # Anzahl Dauer-Werte, aus denen avg/min/max berechnet sind
+                        # (max. 100) – macht die "100"-Deckelung transparent.
+                        "sample": len(durations),
                         "avg_ms": round(sum(durations) / len(durations), 1),
                         "min_ms": round(min(durations), 1),
                         "max_ms": round(max(durations), 1),
@@ -134,6 +151,8 @@ class JarvisTracer:
                 "total_duration_ms": round(self._stats["total_duration_ms"], 1),
                 "tool_stats": tool_stats,
                 "llm_stats": llm_stats,
+                "last_reset_ts": self._last_reset_ts,
+                "last_reset_by": self._last_reset_by,
             }
 
     def get_recent_spans(self, limit: int = 50) -> list[dict]:
@@ -176,8 +195,11 @@ class JarvisTracer:
                 "llm_calls": self._stats["llm_calls"],
                 "errors": self._stats["errors"],
                 "total_duration_ms": self._stats["total_duration_ms"],
+                "tool_call_counts": dict(self._stats["tool_call_counts"]),
                 "tool_durations": dict(self._stats["tool_durations"]),
                 "llm_durations": self._stats["llm_durations"],
+                "last_reset_ts": self._last_reset_ts,
+                "last_reset_by": self._last_reset_by,
             }
             _STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
             _STATS_FILE.write_text(json.dumps(data))
@@ -196,11 +218,23 @@ class JarvisTracer:
                 self._stats["total_duration_ms"] = data.get("total_duration_ms", 0)
                 self._stats["tool_durations"] = defaultdict(list, data.get("tool_durations", {}))
                 self._stats["llm_durations"] = data.get("llm_durations", [])
+                # Alt-Daten ohne tool_call_counts: mit der Stichprobengroesse
+                # vorbelegen (untere Schranke – besser als 0), damit die Zahl
+                # ab sofort korrekt weiterwaechst.
+                saved_counts = data.get("tool_call_counts")
+                if saved_counts is None:
+                    saved_counts = {n: len(d) for n, d in self._stats["tool_durations"].items()}
+                self._stats["tool_call_counts"] = defaultdict(int, saved_counts)
+                self._last_reset_ts = data.get("last_reset_ts")
+                self._last_reset_by = data.get("last_reset_by", "")
         except Exception:
             pass
 
-    def clear(self):
-        """Loescht alle Spans, Statistiken und persistierte Fehler."""
+    def clear(self, by: str = ""):
+        """Loescht alle Spans, Statistiken und persistierte Fehler.
+
+        by: Benutzer, der den Reset ausgeloest hat – wird als Reset-Nachweis
+        (wann/von wem) fuer die naechste Anzeige festgehalten."""
         with self._lock:
             self._spans.clear()
             self._stats = {
@@ -209,9 +243,12 @@ class JarvisTracer:
                 "llm_calls": 0,
                 "errors": 0,
                 "total_duration_ms": 0,
+                "tool_call_counts": defaultdict(int),
                 "tool_durations": defaultdict(list),
                 "llm_durations": [],
             }
+            self._last_reset_ts = time.time()
+            self._last_reset_by = (by or "unbekannt")[:80]
             self._persist_stats()
             try:
                 _ERRORS_FILE.write_text("[]")

@@ -1487,6 +1487,9 @@ const _I18N = {
         // ── Telemetry (dynamisch) ─────────────────────────────────────────────
         'telemetry.refresh':          '↻ Aktualisieren',
         'telemetry.reset':            'Zurücksetzen',
+        'telemetry.last_reset':       'Zuletzt zurückgesetzt',
+        'telemetry.by':               'von',
+        'telemetry.sample_hint':      'Ø/Min/Max je Tool aus den letzten max. 100 Aufrufen; die Calls-Spalte zeigt die Gesamtzahl.',
         'telemetry.stat_errors':      'Fehler',
         'telemetry.stat_duration':    'Gesamtdauer',
         'telemetry.no_tool_calls':    'Noch keine Tool-Calls aufgezeichnet',
@@ -3123,6 +3126,9 @@ const _I18N = {
         // ── Telemetry (dynamic) ───────────────────────────────────────────────
         'telemetry.refresh':          '↻ Refresh',
         'telemetry.reset':            'Reset',
+        'telemetry.last_reset':       'Last reset',
+        'telemetry.by':               'by',
+        'telemetry.sample_hint':      'Avg/Min/Max per tool from the last 100 calls at most; the Calls column shows the total.',
         'telemetry.stat_errors':      'Errors',
         'telemetry.stat_duration':    'Total Duration',
         'telemetry.no_tool_calls':    'No tool calls recorded yet',

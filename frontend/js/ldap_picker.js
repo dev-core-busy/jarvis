@@ -19,7 +19,9 @@
         'ad-admins':                  { kind: 'users',  multi: true, sep: ',',  list: true },
         'ad-admins-group':            { kind: 'groups', multi: true, sep: '\n', list: true },
         'ad-knowledge-editors':       { kind: 'users',  multi: true, sep: ',',  list: true },
-        'ad-knowledge-editors-group': { kind: 'groups', multi: true, sep: '\n', list: true }
+        'ad-knowledge-editors-group': { kind: 'groups', multi: true, sep: '\n', list: true },
+        'sap-allowed-users':          { kind: 'users',  multi: true, sep: ',',  list: true },
+        'sap-allowed-group':          { kind: 'groups', multi: true, sep: '\n', list: true }
     };
 
     var _cred = { user: '', password: '' };

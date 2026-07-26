@@ -746,6 +746,7 @@
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
+                if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
@@ -830,6 +831,7 @@
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
+                if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
@@ -939,6 +941,7 @@
                 if (typeof window.updateBrandingTabVisibility === 'function') window.updateBrandingTabVisibility();
                 if (typeof window.updateConfluenceTabVisibility === 'function') window.updateConfluenceTabVisibility();
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
+                if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen

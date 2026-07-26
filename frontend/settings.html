@@ -1181,6 +1181,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="branding" id="settings-tab-btn-branding" style="display:none;">Branding</button>
                 <button class="settings-tab-btn" data-settings-tab="confluence" id="settings-tab-btn-confluence" style="display:none;">Confluence</button>
                 <button class="settings-tab-btn" data-settings-tab="jira" id="settings-tab-btn-jira" style="display:none;">Jira</button>
+                <button class="settings-tab-btn" data-settings-tab="sap" id="settings-tab-btn-sap" style="display:none;">SAP</button>
                 <button class="settings-tab-btn" data-settings-tab="kundenverwaltung" id="settings-tab-btn-kundenverwaltung" style="display:none;" data-i18n="settings.tab.kundenverwaltung">Kundenverwaltung</button>
                 <button class="settings-tab-btn" data-settings-tab="support" id="settings-tab-btn-support" style="display:none;">Support</button>
                 <button class="settings-tab-btn" data-settings-tab="telemetry" data-i18n="settings.tab.telemetry">Telemetry</button>
@@ -2078,6 +2079,213 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     </div>
                 </div>
 
+                <!-- ═══ SAP-Tab (Read-Only) ═══ -->
+                <div id="settings-tab-sap" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint">Nur-Lesen-Zugriff auf SAP-Systeme (S/4HANA, ECC, BW/4HANA, HANA&nbsp;Cloud, Datasphere). Wähle einen Verbindungstyp und trage die Zugangsdaten ein. <strong>Schreibzugriffe sind hart gesperrt:</strong> OData nur GET, SQL nur SELECT/WITH, RFC nur lesende Bausteine. Der Agent liest über die Skill-Tools; hier kannst du testen, Daten ansehen und direkte SQL-Abfragen absetzen.</p>
+
+                        <h4 style="margin:16px 0 8px;">Verbindung</h4>
+                        <div class="form-group">
+                            <label>Verbindungstyp</label>
+                            <select id="sap-conn-type" class="config-input" style="width:100%;box-sizing:border-box;">
+                                <option value="odata">OData (S/4HANA, Gateway, BW/4HANA – REST)</option>
+                                <option value="hana">HANA-SQL (HANA, HANA Cloud, Datasphere – direktes SQL)</option>
+                                <option value="rfc">RFC (ECC / NetWeaver – klassisch, optional)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>SAP-Produkt / Version <span class="kb-hint">(informativ)</span></label>
+                            <input type="text" id="sap-product" class="config-input" list="sap-product-list" placeholder="z.B. S/4HANA 2023" style="width:100%;box-sizing:border-box;">
+                            <datalist id="sap-product-list">
+                                <option value="S/4HANA 2023 (On-Premise)"></option>
+                                <option value="S/4HANA 2022 (On-Premise)"></option>
+                                <option value="S/4HANA 2021 (On-Premise)"></option>
+                                <option value="S/4HANA Cloud Private Edition"></option>
+                                <option value="S/4HANA Cloud Public Edition 2508"></option>
+                                <option value="S/4HANA Cloud Public Edition 2502"></option>
+                                <option value="ECC 6.0 EhP8"></option>
+                                <option value="ECC 6.0 EhP7"></option>
+                                <option value="BW/4HANA 2023"></option>
+                                <option value="BW/4HANA 2021"></option>
+                                <option value="SAP HANA Cloud"></option>
+                                <option value="SAP Datasphere"></option>
+                                <option value="SAP BusinessObjects BI 4.3"></option>
+                                <option value="SAP NetWeaver 7.5"></option>
+                            </datalist>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-group" style="opacity:.85;cursor:not-allowed;">
+                                <input type="checkbox" id="sap-read-only" checked disabled>
+                                <span>Nur-Lesen erzwingen (immer aktiv, nicht abschaltbar)</span>
+                            </label>
+                        </div>
+
+                        <!-- OData-Felder -->
+                        <div id="sap-group-odata" class="sap-conn-group">
+                            <div class="form-group">
+                                <label>OData Basis-URL</label>
+                                <input type="text" id="sap-odata-url" class="config-input" placeholder="https://s4host:44300/sap/opu/odata" style="width:100%;box-sizing:border-box;">
+                            </div>
+                            <div class="form-group">
+                                <label>Standard-Service <span class="kb-hint">(optional)</span></label>
+                                <input type="text" id="sap-odata-service" class="config-input" placeholder="sap/API_SALES_ORDER_SRV" style="width:100%;box-sizing:border-box;">
+                            </div>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                <div class="form-group" style="flex:1;min-width:160px;">
+                                    <label>Authentifizierung</label>
+                                    <select id="sap-auth-kind" class="config-input" style="width:100%;box-sizing:border-box;">
+                                        <option value="basic">Basic (Benutzer/Passwort)</option>
+                                        <option value="bearer">Bearer / OAuth-Token</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:160px;">
+                                    <label>Mandant (sap-client) <span class="kb-hint">optional</span></label>
+                                    <input type="text" id="sap-odata-client" class="config-input" placeholder="100" style="width:100%;box-sizing:border-box;">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Benutzer</label>
+                                <input type="text" id="sap-odata-user" class="config-input" autocomplete="off" style="width:100%;box-sizing:border-box;">
+                            </div>
+                            <div class="form-group">
+                                <label>Passwort</label>
+                                <div style="display:flex;align-items:center;gap:4px;">
+                                    <input type="password" id="sap-odata-pass" class="config-input" placeholder="••••••••" autocomplete="new-password" style="flex:1;min-width:0;box-sizing:border-box;">
+                                    <button type="button" class="sap-eye" data-target="sap-odata-pass" title="Anzeigen/Verbergen" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Bearer-Token <span class="kb-hint">(nur bei Bearer/OAuth)</span></label>
+                                <div style="display:flex;align-items:center;gap:4px;">
+                                    <input type="password" id="sap-odata-token" class="config-input" placeholder="••••••••" autocomplete="new-password" style="flex:1;min-width:0;box-sizing:border-box;">
+                                    <button type="button" class="sap-eye" data-target="sap-odata-token" title="Anzeigen/Verbergen" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-group"><input type="checkbox" id="sap-verify-ssl" checked><span>SSL-Zertifikat prüfen</span></label>
+                            </div>
+                        </div>
+
+                        <!-- HANA-Felder -->
+                        <div id="sap-group-hana" class="sap-conn-group" style="display:none;">
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                <div class="form-group" style="flex:2;min-width:220px;">
+                                    <label>HANA Host</label>
+                                    <input type="text" id="sap-hana-host" class="config-input" placeholder="myhana.hanacloud.ondemand.com" style="width:100%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:100px;">
+                                    <label>Port</label>
+                                    <input type="number" id="sap-hana-port" class="config-input" placeholder="443" style="width:100%;box-sizing:border-box;">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Benutzer</label>
+                                <input type="text" id="sap-hana-user" class="config-input" autocomplete="off" style="width:100%;box-sizing:border-box;">
+                            </div>
+                            <div class="form-group">
+                                <label>Passwort</label>
+                                <div style="display:flex;align-items:center;gap:4px;">
+                                    <input type="password" id="sap-hana-pass" class="config-input" placeholder="••••••••" autocomplete="new-password" style="flex:1;min-width:0;box-sizing:border-box;">
+                                    <button type="button" class="sap-eye" data-target="sap-hana-pass" title="Anzeigen/Verbergen" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Standard-Schema <span class="kb-hint">(optional)</span></label>
+                                <input type="text" id="sap-hana-schema" class="config-input" placeholder="SAPHANADB" style="width:100%;box-sizing:border-box;">
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-group"><input type="checkbox" id="sap-hana-encrypt" checked><span>Verbindung verschlüsseln (TLS)</span></label>
+                                <label class="checkbox-group"><input type="checkbox" id="sap-hana-validate" checked><span>Serverzertifikat prüfen</span></label>
+                            </div>
+                        </div>
+
+                        <!-- RFC-Felder -->
+                        <div id="sap-group-rfc" class="sap-conn-group" style="display:none;">
+                            <p class="kb-hint">RFC benötigt das native <strong>SAP NW RFC SDK</strong> und <code>pyrfc</code> auf dem Server (optional). Ohne SDK melden die RFC-Tools das sauber.</p>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                <div class="form-group" style="flex:2;min-width:200px;">
+                                    <label>Application Server (ashost)</label>
+                                    <input type="text" id="sap-rfc-ashost" class="config-input" placeholder="sap-ecc.firma.de" style="width:100%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:90px;">
+                                    <label>SysNr</label>
+                                    <input type="text" id="sap-rfc-sysnr" class="config-input" placeholder="00" style="width:100%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:90px;">
+                                    <label>Mandant</label>
+                                    <input type="text" id="sap-rfc-client" class="config-input" placeholder="100" style="width:100%;box-sizing:border-box;">
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                <div class="form-group" style="flex:2;min-width:180px;">
+                                    <label>Benutzer</label>
+                                    <input type="text" id="sap-rfc-user" class="config-input" autocomplete="off" style="width:100%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:90px;">
+                                    <label>Sprache</label>
+                                    <input type="text" id="sap-rfc-lang" class="config-input" placeholder="DE" style="width:100%;box-sizing:border-box;">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Passwort</label>
+                                <div style="display:flex;align-items:center;gap:4px;">
+                                    <input type="password" id="sap-rfc-pass" class="config-input" placeholder="••••••••" autocomplete="new-password" style="flex:1;min-width:0;box-sizing:border-box;">
+                                    <button type="button" class="sap-eye" data-target="sap-rfc-pass" title="Anzeigen/Verbergen" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
+                            <button class="btn-primary" id="sap-save" type="button" data-i18n="common.save">Speichern</button>
+                            <button class="btn-secondary" id="sap-test" type="button" data-i18n="profile.test">Verbindung testen</button>
+                            <span id="sap-status" style="font-size:0.9em;"></span>
+                        </div>
+
+                        <!-- Datenzugriff: OData -->
+                        <div id="sap-data-odata" class="sap-data-group">
+                            <h4 style="margin:22px 0 8px;">OData lesen</h4>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                <input type="text" id="sap-odata-entity" class="config-input" placeholder="EntitySet, z.B. A_SalesOrder" style="flex:1;min-width:180px;">
+                                <input type="text" id="sap-odata-qservice" class="config-input" placeholder="Service (optional)" style="width:200px;">
+                                <input type="number" id="sap-odata-top" class="config-input" placeholder="Top" value="20" style="width:90px;">
+                                <button class="btn-secondary" id="sap-odata-run" type="button" data-i18n="sap.query">Abfragen</button>
+                            </div>
+                        </div>
+
+                        <!-- Datenzugriff: HANA-SQL -->
+                        <div id="sap-data-hana" class="sap-data-group" style="display:none;">
+                            <h4 style="margin:22px 0 8px;">Direkte SQL-Abfrage (nur SELECT)</h4>
+                            <textarea id="sap-sql" class="config-input" rows="4" placeholder="SELECT * FROM SAPHANADB.MARA LIMIT 20" style="width:100%;box-sizing:border-box;font-family:var(--font-mono);font-size:0.84rem;"></textarea>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
+                                <input type="number" id="sap-sql-max" class="config-input" placeholder="Max. Zeilen" value="200" style="width:130px;">
+                                <button class="btn-secondary" id="sap-sql-run" type="button" data-i18n="sap.execute">Ausführen</button>
+                                <span class="kb-hint">Schreibende Statements werden serverseitig abgelehnt.</span>
+                            </div>
+                        </div>
+
+                        <!-- Datenzugriff: RFC-Hinweis -->
+                        <div id="sap-data-rfc" class="sap-data-group" style="display:none;">
+                            <h4 style="margin:22px 0 8px;">RFC-Tabellenzugriff</h4>
+                            <p class="kb-hint">RFC-Abfragen laufen über das Agent-Tool <code>sap_rfc_read_table</code> (z.&nbsp;B. „Lies die ersten 50 Zeilen der Tabelle MARA per RFC"). Verbindung oben testen.</p>
+                        </div>
+
+                        <div id="sap-results" style="margin-top:12px;overflow:auto;"></div>
+
+                        <h4 style="margin:22px 0 8px;">Reporting-/BI-Anbindung</h4>
+                        <p class="kb-hint">Fertige Verbindungsangaben, mit denen Power&nbsp;BI, Tableau, Qlik &amp; Co. dasselbe SAP-System über die Standard-Schnittstellen (OData/SQL/BW) anbinden.</p>
+                        <button class="btn-secondary" id="sap-reporting-btn" type="button" data-i18n="sap.show_endpoints">Anbindungen anzeigen</button>
+                        <div id="sap-reporting" style="margin-top:10px;"></div>
+                    </div>
+                </div>
+
                 <!-- ═══ Tab: Jira (Ticketsuche) ═══ -->
                 <div id="settings-tab-jira" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
@@ -2541,25 +2749,47 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </details>
 
-                                <!-- ── Unter-Container: Internet-Zugang ── -->
-                                <details class="sec-sub" data-sub="internet">
-                                    <summary><span data-i18n="security.sub_internet">Internet-Zugang</span><span class="sec-sub-hint" data-i18n="security.sub_internet_hint">– Wer darf Abfragen mit Internet-Ergebnissen machen?</span></summary>
+                                <!-- ── Unter-Container: SAP-Zugriff (nur bei aktivem SAP-Skill sichtbar) ── -->
+                                <details class="sec-sub" data-sub="sap" id="sec-sub-sap" style="display:none;">
+                                    <summary><span>SAP-Zugriff</span><span class="sec-sub-hint">– Wer darf SAP-Daten lesen (Reiter, SQL, Tools)?</span></summary>
                                     <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Leer lassen = alle angemeldeten Benutzer dürfen das Internet nutzen. Lokale Admins sind immer berechtigt. Eingeschränkte Benutzer können Web-Suche, Browser und Bildersuche nicht nutzen.</p>
-
-                                <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;cursor:pointer;font-size:0.86rem;">
-                                    <input type="checkbox" id="ad-internet-deny-all" style="margin-top:2px;flex-shrink:0;">
-                                    <span>Internet für <b>alle</b> Netzwerk-Benutzer sperren
-                                        <span style="color:var(--text-muted);font-weight:400;">– niemand außer lokalen Administratoren erhält Internet-Zugang; übersteuert die beiden Felder unten.</span>
-                                    </span>
-                                </label>
+                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf den <b>SAP-Reiter</b> und die SAP-Tools des Agenten (OData/HANA-SQL/RFC, nur lesend). Weil SAP mit einem hinterlegten Dienstkonto auf sensible Daten zugreift, ist der Zugriff <b>ausdrücklich freizuschalten</b>: leer = <b>niemand</b> darf SAP nutzen – ausdrücklich <b>auch keine lokalen Administratoren</b>. Jeder Nutzer (auch Admins) muss hier explizit eingetragen sein; für „alle" die AD-Gruppe „Jeder"/Domänen-Benutzer eintragen.</p>
 
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
                                         <span>Erlaubte Benutzer</span>
                                         <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
                                     </label>
-                                    <input type="text" id="ad-internet-users" placeholder="Leer = alle Benutzer dürfen ins Internet" style="width:60%;box-sizing:border-box;">
+                                    <input type="text" id="sap-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>SAP-Gruppe (AD-Gruppe)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                                    </label>
+                                    <textarea id="sap-allowed-group" rows="1" placeholder="z.B. CN=SAP-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
+                                    </div>
+                                </div>
+
+                                <!-- SAP-Zugang Status -->
+                                <div id="ad-sap-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:4px;border:1px solid;"></div>
+                                    </div>
+                                </details>
+
+                                <!-- ── Unter-Container: Internet-Zugang ── -->
+                                <details class="sec-sub" data-sub="internet">
+                                    <summary><span data-i18n="security.sub_internet">Internet-Zugang</span><span class="sec-sub-hint" data-i18n="security.sub_internet_hint">– Wer darf Abfragen mit Internet-Ergebnissen machen?</span></summary>
+                                    <div class="sec-sub-body">
+                                <p class="kb-hint" style="margin-bottom:10px;">Explizites Opt-in: leer = <b>niemand</b> darf das Internet nutzen – ausdrücklich <b>auch keine lokalen Administratoren</b>. Jeder Nutzer (auch Admins) muss hier explizit eingetragen sein; für „alle" die AD-Gruppe „Jeder"/Domänen-Benutzer als Internet-Gruppe eintragen. Nicht freigeschaltete Benutzer können Web-Suche, Browser und Bildersuche nicht nutzen.</p>
+
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Erlaubte Benutzer</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
+                                    </label>
+                                    <input type="text" id="ad-internet-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
                                 </div>
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
@@ -2666,14 +2896,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             document.getElementById('ad-knowledge-editors-group').value = d.knowledge_editors_group || '';
                                             document.getElementById('ad-internet-users').value = d.internet_users || '';
                                             document.getElementById('ad-internet-group').value = d.internet_group || '';
-                                            document.getElementById('ad-internet-deny-all').checked = !!d.internet_deny_all;
                                             document.getElementById('ad-bind-user').value = d.bind_user || '';
                                             document.getElementById('ad-bind-password').value = '';
                                             document.getElementById('ad-bind-pw-hint').textContent = d.bind_password_set ? '✓ Passwort gespeichert (leer lassen = unverändert)' : 'Kein Passwort gespeichert.';
                                             document.getElementById('ad-admins').value = d.admins || '';
                                             document.getElementById('ad-admins-group').value = d.admins_group || '';
+                                            var _sapU = document.getElementById('sap-allowed-users'); if (_sapU) _sapU.value = d.sap_users || '';
+                                            var _sapG = document.getElementById('sap-allowed-group'); if (_sapG) _sapG.value = d.sap_group || '';
                                             // Token-Listen (Chips) aller AD-Felder neu aufbauen (nach dem Setzen aller Werte)
-                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
+                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
                                             _adUpdateStatus(d);
                                         } catch(e) {}
                                     }
@@ -2742,6 +2973,31 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                 kst.style.display = 'none';
                                             }
                                         }
+                                        // SAP-Zugang Status
+                                        const sst = document.getElementById('ad-sap-status');
+                                        if (sst) {
+                                            if (!d.sap_users && !d.sap_group) {
+                                                sst.style.display = 'block';
+                                                sst.style.borderColor = '#f59e0b';
+                                                sst.style.background  = 'rgba(var(--warning-rgb),0.06)';
+                                                sst.style.color       = '#f59e0b';
+                                                sst.textContent = '🗄 SAP-Zugriff: Niemand ist freigeschaltet – auch keine lokalen Administratoren. Jeder Nutzer muss explizit eingetragen sein; für „alle" die AD-Gruppe „Jeder"/Domänen-Benutzer als SAP-Gruppe eintragen.';
+                                            } else if (d.sap_mode === 'users') {
+                                                sst.style.display = 'block';
+                                                sst.style.borderColor = '#34d399';
+                                                sst.style.background  = 'rgba(52,211,153,0.06)';
+                                                sst.style.color       = '#34d399';
+                                                sst.textContent = '🗄 SAP-Benutzer: ' + d.sap_users;
+                                            } else if (d.sap_mode === 'group') {
+                                                sst.style.display = 'block';
+                                                sst.style.borderColor = '#6366f1';
+                                                sst.style.background  = 'rgba(var(--accent-rgb),0.06)';
+                                                sst.style.color       = '#a5b4fc';
+                                                sst.textContent = '🗄 SAP-Gruppe: ' + d.sap_group;
+                                            } else {
+                                                sst.style.display = 'none';
+                                            }
+                                        }
                                         // Internet-Zugang Status
                                         const ist = document.getElementById('ad-internet-status');
                                         if (ist) {
@@ -2750,7 +3006,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                 ist.style.borderColor = '#f59e0b';
                                                 ist.style.background  = 'rgba(var(--warning-rgb),0.06)';
                                                 ist.style.color       = '#f59e0b';
-                                                ist.textContent = '🌐 Internet-Zugang: Alle angemeldeten Benutzer dürfen Internet-Abfragen machen';
+                                                ist.textContent = '🌐 Internet-Zugang: Niemand ist freigeschaltet – auch keine lokalen Administratoren. Jeder Nutzer muss explizit eingetragen sein; für „alle" die AD-Gruppe „Jeder"/Domänen-Benutzer als Internet-Gruppe eintragen.';
                                             } else if (d.internet_mode === 'users') {
                                                 ist.style.display = 'block';
                                                 ist.style.borderColor = '#34d399';
@@ -2812,11 +3068,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                     ad_knowledge_editors_group: document.getElementById('ad-knowledge-editors-group').value.trim(),
                                                     ad_internet_users:         document.getElementById('ad-internet-users').value.trim(),
                                                     ad_internet_group:         document.getElementById('ad-internet-group').value.trim(),
-                                                    ad_internet_deny_all:      document.getElementById('ad-internet-deny-all').checked,
                                                     ad_bind_user:              document.getElementById('ad-bind-user').value.trim(),
                                                     ad_bind_password:          document.getElementById('ad-bind-password').value,
                                                     ad_admins:                 document.getElementById('ad-admins').value.trim(),
                                                     ad_admins_group:           document.getElementById('ad-admins-group').value.trim(),
+                                                    sap_allowed_users:         (document.getElementById('sap-allowed-users')||{}).value ? document.getElementById('sap-allowed-users').value.trim() : '',
+                                                    sap_allowed_group:         (document.getElementById('sap-allowed-group')||{}).value ? document.getElementById('sap-allowed-group').value.trim() : '',
                                                 })
                                             });
                                             if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -3073,27 +3330,28 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=118"></script>
+    <script src="/static/js/i18n.js?v=119"></script>
     <script src="/static/js/cron.js?v=17"></script>
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
-    <script src="/static/js/skills.js?v=33"></script>
+    <script src="/static/js/skills.js?v=34"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
     <script src="/static/js/knowledge.js?v=90"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>
     <script src="/static/js/jira.js?v=7"></script>
+    <script src="/static/js/sap.js?v=2"></script>
     <script src="/static/js/kundenverwaltung.js?v=6"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
     <script src="/static/js/telemetry.js?v=8"></script>
     <script src="/static/js/branding.js?v=22"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=19"></script>
-    <script src="/static/js/ldap_picker.js?v=6"></script>
+    <script src="/static/js/ldap_picker.js?v=7"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=173"></script>
+    <script src="/static/js/app.js?v=175"></script>
 </body>
 
 </html>

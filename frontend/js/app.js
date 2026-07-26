@@ -571,6 +571,7 @@
         function _initWaCollapse() {
             _collapseInit([
                 { hdr: 'wa-sect-status-hdr', body: 'wa-sect-status-body', tog: 'wa-sect-status-tog' },
+                { hdr: 'wa-sect-cfg-hdr',    body: 'wa-sect-cfg-body',    tog: 'wa-sect-cfg-tog'    },
                 { hdr: 'wa-sect-logs-hdr',   body: 'wa-sect-logs-body',   tog: 'wa-sect-logs-tog'   },
             ]);
         }
@@ -604,7 +605,11 @@
         const tabSap     = document.getElementById('settings-tab-sap');
         const tabKundenverwaltung = document.getElementById('settings-tab-kundenverwaltung');
         const tabSupport = document.getElementById('settings-tab-support');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron];
+        // Reiter, deren Inhalt generisch aus dem Skill-Manifest kommt (skillcfg.js)
+        const SKILLCFG_TABS = ['telegram', 'browser_control', 'claude_bridge',
+                               'agent_orchestrator', 'agent_autonomy_kit'];
+        const tabsSkillCfg = SKILLCFG_TABS.map(n => document.getElementById('settings-tab-' + n));
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -633,16 +638,27 @@
                     tabWhatsApp.classList.add('active');
                     _initWaCollapse();
                     if (window.waManager) window.waManager.refresh();
+                    if (window.SkillCfg) window.SkillCfg.render('whatsapp');
                 } else if (target === 'knowledge' && tabKnowledge) {
                     tabKnowledge.style.display = '';
                     tabKnowledge.classList.add('active');
                     _initKbCollapse();
                     if (window.knowledgeManager) window.knowledgeManager.init();
                     if (window.extractorManager) window.extractorManager.init();
+                    if (window.SkillCfg) window.SkillCfg.render('knowledge');
                 } else if (target === 'google' && tabGoogle) {
                     tabGoogle.style.display = '';
                     tabGoogle.classList.add('active');
+                    if (window.SkillCfg) window.SkillCfg.render('google');
                     if (window.googleManager) window.googleManager.init();
+                } else if (SKILLCFG_TABS.includes(target)) {
+                    // Reiter mit rein manifest-generierter Konfiguration
+                    const panel = document.getElementById('settings-tab-' + target);
+                    if (panel) {
+                        panel.style.display = '';
+                        panel.classList.add('active');
+                        if (window.SkillCfg) window.SkillCfg.onShow(target);
+                    }
                 } else if (target === 'mcp' && tabMcp) {
                     tabMcp.style.display = '';
                     tabMcp.classList.add('active');
@@ -698,8 +714,14 @@
             });
         });
 
-        // ── Google-Tab entfernt – Config erfolgt über Skill-Einstellungen ──
-        window.updateGoogleTabVisibility = function() {}; // No-Op (Rückwärtskompatibilität)
+        // ── Reiter der manifest-konfigurierten Skills (Google, Telegram,
+        //    Browser, Claude-Bridge, Orchestrator, Autonomie): jeweils nur
+        //    sichtbar, wenn der Skill aktiviert ist (skillcfg.js) ──
+        window.updateSkillCfgTabVisibility = function updateSkillCfgTabVisibility() {
+            if (window.SkillCfg) return window.SkillCfg.updateTabs();
+        };
+        // Alt-Name bleibt gueltig – der Google-Reiter haengt jetzt mit dran
+        window.updateGoogleTabVisibility = window.updateSkillCfgTabVisibility;
 
         // ── WhatsApp-Tab-Button: nur sichtbar wenn 'whatsapp'-Skill aktiviert ──
         const waTabBtn = document.getElementById('settings-tab-btn-whatsapp');
@@ -987,7 +1009,7 @@
         // ── Modal öffnen/schließen ──
         const openModal = async () => {
             await loadProfiles();
-            await updateGoogleTabVisibility();
+            await updateSkillCfgTabVisibility();
             await updateWhatsAppTabVisibility();
             await updateVisionTabVisibility();
             await updateBrandingTabVisibility();

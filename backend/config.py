@@ -32,6 +32,56 @@ def _write_preserve_owner(path: Path, text: str) -> None:
         pass
 
 
+# Zulaessige Reasoning-Stufen (Denktiefe). "" = Provider-Standard.
+# Bewusst hier dupliziert statt aus backend.llm importiert: llm.py importiert
+# config.py, ein Gegenimport waere zirkulaer.
+REASONING_EFFORT_VALUES = ("", "off", "low", "medium", "high", "max")
+
+
+def _valid_effort(value) -> str:
+    """Filtert eine Reasoning-Stufe; alles Unbekannte wird zu "" (Provider-Standard)."""
+    s = str(value or "").strip().lower()
+    return s if s in REASONING_EFFORT_VALUES else ""
+
+
+# Grenzen fuer die Sampling-Temperature. 2.0 ist die Obergrenze, die alle
+# unterstuetzten Provider akzeptieren (OpenAI/vLLM 0..2, Gemini 0..2, Anthropic 0..1 –
+# ein zu hoher Wert wird dort vom Server abgelehnt, nicht hier).
+TEMPERATURE_MIN, TEMPERATURE_MAX = 0.0, 2.0
+# Sonderwert: Parameter gar nicht senden (Provider entscheidet selbst). Nötig für
+# aktuelle Claude-Modelle, die temperature mit HTTP 400 ablehnen.
+TEMPERATURE_AUTO = "auto"
+
+
+def _valid_temperature(value):
+    """Filtert einen Temperature-Wert fuer ein Profil.
+
+    Rueckgabe:
+      ""     – nicht gesetzt, es gilt der eingebaute Standard 0.2 (Altverhalten)
+      "auto" – Parameter weglassen, der Provider entscheidet
+      float  – dieser Wert, auf 0.0..2.0 begrenzt
+
+    Unbrauchbare Eingaben werden zu "" statt zu einem Fehler: ein Tippfehler im
+    Profilformular darf kein Profil unbenutzbar machen.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if not s:
+            return ""
+        if s == TEMPERATURE_AUTO:
+            return TEMPERATURE_AUTO
+        value = s.replace(",", ".")   # deutsche Dezimalkommas zulassen
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if f != f:                        # NaN
+        return ""
+    return max(TEMPERATURE_MIN, min(f, TEMPERATURE_MAX))
+
+
 class Config:
     """Zentrale Konfiguration für Jarvis mit Profil-Verwaltung."""
 
@@ -111,6 +161,15 @@ class Config:
     # Timeout (Sekunden) fuer LLM-Anfragen (read/total). Langsame lokale Modelle
     # brauchen mehr Zeit als Cloud-APIs – daher konfigurierbar (10..1800).
     LLM_TIMEOUT: int = int(os.getenv("LLM_TIMEOUT", "180"))
+    # Voreinstellung fuer die Denktiefe (Reasoning) aller LLM-Aufrufe.
+    # "" = Provider-Standard. Zulaessig: off|low|medium|high|max.
+    # Vorrang: pro Chat-Anfrage > Profil > diese globale Vorgabe.
+    LLM_REASONING_EFFORT: str = os.getenv("LLM_REASONING_EFFORT", "")
+    # Obergrenze fuer die Antwortlaenge OpenAI-kompatibler Aufrufe (256..131072).
+    # Wird von llm.py::_llm_max_tokens() gelesen. Bis 2026-07-27 existierte das
+    # Feld NICHT – der getattr-Default 8192 galt immer, obwohl der Docstring
+    # Konfigurierbarkeit versprach.
+    LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "8192"))
 
     def __init__(self):
         self.profiles: list[dict] = []
@@ -221,6 +280,11 @@ class Config:
             self.LLM_TIMEOUT = max(10, min(int(data.get("llm_timeout") or 180), 1800))
         except (TypeError, ValueError):
             self.LLM_TIMEOUT = 180
+        self.LLM_REASONING_EFFORT = _valid_effort(data.get("llm_reasoning_effort"))
+        try:
+            self.LLM_MAX_TOKENS = max(256, min(int(data.get("llm_max_tokens") or 8192), 131072))
+        except (TypeError, ValueError):
+            self.LLM_MAX_TOKENS = 8192
         self._skill_states = data.get("skills", {})
         self._mcp_servers = data.get("mcp_servers", [])
         # AGENT_API_KEY: aus settings.json laden, ENV hat Vorrang
@@ -296,6 +360,8 @@ class Config:
             "tts_voice": self.TTS_VOICE,
             "use_physical_desktop": self.USE_PHYSICAL_DESKTOP,
             "llm_timeout": self.LLM_TIMEOUT,
+            "llm_reasoning_effort": self.LLM_REASONING_EFFORT,
+            "llm_max_tokens": self.LLM_MAX_TOKENS,
             "agent_api_key": self.AGENT_API_KEY,
             "profiles": self.profiles,
             "skills": self._skill_states,
@@ -316,6 +382,13 @@ class Config:
         if "llm_timeout" in settings:
             try:
                 self.LLM_TIMEOUT = max(10, min(int(settings["llm_timeout"]), 1800))
+            except (TypeError, ValueError):
+                pass
+        if "llm_reasoning_effort" in settings:
+            self.LLM_REASONING_EFFORT = _valid_effort(settings["llm_reasoning_effort"])
+        if "llm_max_tokens" in settings:
+            try:
+                self.LLM_MAX_TOKENS = max(256, min(int(settings["llm_max_tokens"]), 131072))
             except (TypeError, ValueError):
                 pass
         if "agent_api_key" in settings:
@@ -431,6 +504,14 @@ class Config:
             "api_key": data.get("api_key", ""),
             "auth_method": data.get("auth_method", "api_key"),
             "session_key": data.get("session_key", ""),
+            # Denktiefe dieses Profils ("" = Provider-Standard). Eine einzelne
+            # Chat-Anfrage darf den Wert ueberschreiben (reasoning_effort im Task).
+            "reasoning_effort": _valid_effort(data.get("reasoning_effort")),
+            # Sampling-Temperature ("" = Standard 0.2, "auto" = nicht senden).
+            "temperature": _valid_temperature(data.get("temperature")),
+            # Prompt-basiertes Tool-Calling. Stand bis 2026-07-27 in KEINER
+            # Persistenz-Liste – der Schalter im Profilformular wirkte deshalb nie.
+            "prompt_tool_calling": bool(data.get("prompt_tool_calling", False)),
             # Pro-Profil-Berechtigung (leer = alle duerfen nutzen); analog Wissensgruppen.
             "allowed_users": data.get("allowed_users", ""),
             "allowed_group": data.get("allowed_group", ""),
@@ -445,12 +526,20 @@ class Config:
         """Aktualisiert ein bestehendes Profil."""
         for p in self.profiles:
             if p["id"] == profile_id:
-                for key in ["name", "provider", "model", "api_url", "api_key", "auth_method", "session_key", "allowed_users", "allowed_group"]:
+                for key in ["name", "provider", "model", "api_url", "api_key", "auth_method",
+                            "session_key", "reasoning_effort", "temperature",
+                            "prompt_tool_calling", "allowed_users", "allowed_group"]:
                     if key in data:
                         val = data[key]
                         # Maskierte Keys (***...) nicht überschreiben – Wert unverändert lassen
                         if key in ("api_key", "session_key") and isinstance(val, str) and val.startswith("***"):
                             continue
+                        if key == "reasoning_effort":
+                            val = _valid_effort(val)
+                        elif key == "temperature":
+                            val = _valid_temperature(val)
+                        elif key == "prompt_tool_calling":
+                            val = bool(val)
                         p[key] = val
                 self._save_to_file()
                 return p

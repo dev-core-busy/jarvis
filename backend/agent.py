@@ -328,6 +328,12 @@ _run_stop_scope: contextvars.ContextVar = contextvars.ContextVar(
 # Sentinel: unterscheidet "kb_groups nicht uebergeben" (Sub-Agent erbt) von
 # "explizit None" (Benutzer hat alle Gruppen gewaehlt -> kein Filter).
 _KB_GROUPS_UNSET = object()
+# Gleiches Muster fuer die Denktiefe: NICHT uebergeben (intern gespawnter
+# Sub-Agent) = Wahl des Eltern-Agenten erben. Explizit None = keine Vorgabe fuer
+# diesen Task. Wichtig, weil der Hauptagent von mehreren Nutzern geteilt wird –
+# ohne diese Unterscheidung wuerde die Stufe des einen Nutzers beim naechsten
+# haengenbleiben.
+_EFFORT_UNSET = object()
 
 
 def _hist_key(username: str, session_id: str = "") -> str:
@@ -636,6 +642,33 @@ KRITISCH – Autonomie-Regeln:
         p = self._eff_profile
         return bool(p.get("prompt_tool_calling", False)) if p else False
 
+    @property
+    def current_reasoning_effort(self) -> str | None:
+        """Denktiefe fuer die LLM-Aufrufe dieses Laufs.
+
+        Vorrang: pro Chat-Anfrage (WebSocket-Feld `reasoning_effort`) > LLM-Profil >
+        globale Einstellung (letztere loest llm.py selbst auf). None = Provider-Standard.
+        """
+        from backend.llm import normalize_effort
+        per_request = normalize_effort(getattr(self, "_current_reasoning_effort", None))
+        if per_request:
+            return per_request
+        p = self._eff_profile
+        return normalize_effort(p.get("reasoning_effort")) if p else None
+
+    @property
+    def current_temperature(self):
+        """Sampling-Temperature aus dem LLM-Profil.
+
+        Rohwert wie im Profil hinterlegt: "" (= Standard 0.2), "auto" (= Parameter
+        weglassen) oder eine Zahl. Die Aufloesung macht llm.py::_resolve_temperature().
+        Bewusst KEINE Pro-Anfrage-Steuerung: eine hohe Temperature zerlegt die
+        JSON-Argumente von Tool-Aufrufen, das gehoert an das Modell (= Profil),
+        nicht an die einzelne Chat-Nachricht.
+        """
+        p = self._eff_profile
+        return p.get("temperature", "") if p else ""
+
     def _resolve_profile_for_user(self):
         """Setzt das effektive Profil anhand des aktuellen Benutzers (_current_username)."""
         self._active_profile = config.profile_for_user(getattr(self, "_current_username", ""))
@@ -671,7 +704,7 @@ KRITISCH – Autonomie-Regeln:
             )
         return declarations
 
-    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None, kb_groups=_KB_GROUPS_UNSET, session_id: str = "", is_final_attempt: bool = True):
+    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None, kb_groups=_KB_GROUPS_UNSET, session_id: str = "", is_final_attempt: bool = True, reasoning_effort=_EFFORT_UNSET):
         """Führt eine Aufgabe aus – der Agent-Loop."""
         import sys
         from backend.telemetry import tracer
@@ -691,6 +724,9 @@ KRITISCH – Autonomie-Regeln:
         # gewaehlt -> Filter fuer diesen Task loeschen (kein Erben eines Altwerts).
         if kb_groups is not _KB_GROUPS_UNSET:
             self._current_kb_groups = kb_groups
+        # Denktiefe dieses Laufs (analog kb_groups: Sentinel = vom Eltern-Agent erben)
+        if reasoning_effort is not _EFFORT_UNSET:
+            self._current_reasoning_effort = reasoning_effort
         # Kontext für die Verstoß-Protokollierung (ausführliches Logging bei Deny)
         self._current_task = task_text or getattr(self, '_current_task', '')
         self._current_client_ip = client_ip or getattr(self, '_current_client_ip', '')
@@ -967,7 +1003,9 @@ KRITISCH – Autonomie-Regeln:
                 model=self.current_model,
                 system_prompt=system_prompt,
                 contents=[*chat_history, _user_msg],
-                tools=self._tool_instances
+                tools=self._tool_instances,
+                reasoning_effort=self.current_reasoning_effort,
+                temperature=self.current_temperature,
             ))
             tracer.end_span(llm_span)
             if _stopped:
@@ -1193,7 +1231,9 @@ KRITISCH – Autonomie-Regeln:
                     model=self.current_model,
                     system_prompt=system_prompt,
                     contents=chat_history,
-                    tools=self._tool_instances
+                    tools=self._tool_instances,
+                    reasoning_effort=self.current_reasoning_effort,
+                    temperature=self.current_temperature,
                 ))
                 tracer.end_span(llm_span)
                 if _stopped:
@@ -1451,11 +1491,18 @@ KRITISCH – Autonomie-Regeln:
             run_outcome = "stopped"
         return run_outcome
 
-    async def run_task_headless(self, task_text: str) -> str:
+    async def run_task_headless(self, task_text: str, reasoning_effort=None) -> str:
         """Führt eine Aufgabe ohne WebSocket aus. Gibt das Ergebnis als String zurück.
 
         Wird von der WhatsApp-Pipeline genutzt.
+
+        reasoning_effort: Denktiefe fuer diesen Lauf. Default None = keine Vorgabe
+        (Profil/globale Einstellung greifen). Bewusst NICHT der Erben-Sentinel:
+        Kanaele ohne Oberflaeche (WhatsApp/Telegram/Cron) sollen nicht die Stufe
+        uebernehmen, die zuletzt ein Browser-Nutzer auf dem geteilten Hauptagenten
+        gesetzt hat.
         """
+        self._current_reasoning_effort = reasoning_effort
         # Effektives LLM-Profil des (ggf. via _current_username gesetzten) Benutzers
         self._resolve_profile_for_user()
         self.state = AgentState.RUNNING
@@ -1510,7 +1557,9 @@ KRITISCH – Autonomie-Regeln:
                         parts=[types.Part.from_text(text=task_text)],
                     )
                 ],
-                tools=self._tool_instances
+                tools=self._tool_instances,
+                reasoning_effort=self.current_reasoning_effort,
+                temperature=self.current_temperature,
             )
 
             steps = 0
@@ -1593,7 +1642,9 @@ KRITISCH – Autonomie-Regeln:
                         ),
                         *chat_history,
                     ],
-                    tools=self._tool_instances
+                    tools=self._tool_instances,
+                    reasoning_effort=self.current_reasoning_effort,
+                    temperature=self.current_temperature,
                 )
 
                 steps += 1

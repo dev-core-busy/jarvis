@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.config import config
+from backend.config import config, REASONING_EFFORT_VALUES
 from backend.security import get_certificate_path
 from backend import security_guard
 
@@ -3270,8 +3270,12 @@ async def get_settings(user: str = Depends(require_auth)):
         "tts_voice": config.TTS_VOICE,
         "use_physical_desktop": config.USE_PHYSICAL_DESKTOP,
         "llm_timeout": config.LLM_TIMEOUT,
+        "llm_reasoning_effort": config.LLM_REASONING_EFFORT,
+        "llm_max_tokens": config.LLM_MAX_TOKENS,
         "agent_api_key": _mask_key(config.AGENT_API_KEY),
         "defaults": config.DEFAULT_PROVIDERS,
+        # Auswahlliste fuer die Oberflaeche ("" = Provider-Standard)
+        "reasoning_effort_values": list(REASONING_EFFORT_VALUES),
     })
 
 
@@ -5991,10 +5995,13 @@ async def agent_task(request: Request):
     """Führt eine Aufgabe headless über den Agenten aus.
 
     Auth: X-API-Key Header oder Bearer Token mit AGENT_API_KEY.
-    Body: {"text": "Andreas auf Kamera erkannt", "source": "Raspberry Pi Vision"}
+    Body: {"text": "Andreas auf Kamera erkannt", "source": "Raspberry Pi Vision",
+           "reasoning_effort": "high"}
     Response: {"success": true, "result": "..."}
 
     Der optionale 'source'-Parameter benennt das sendende System.
+    Der optionale 'reasoning_effort' steuert die Denktiefe des LLM
+    (off|low|medium|high|max); fehlt er, gilt Profil-/globale Vorgabe.
     Der Task-Text wird automatisch mit Kontext gewrappt, damit das LLM
     weiß, dass die Nachricht extern kommt und NICHT lokale Tools nutzt.
 
@@ -6048,7 +6055,9 @@ async def agent_task(request: Request):
         if agent_instance is None:
             agent_instance = JarvisAgent()
 
-        result = await agent_instance.run_task_headless(wrapped_task)
+        from backend.llm import normalize_effort as _norm_effort
+        result = await agent_instance.run_task_headless(
+            wrapped_task, reasoning_effort=_norm_effort(body.get("reasoning_effort")))
 
         # Ergebnis an Frontend broadcasten
         if result:
@@ -10498,6 +10507,12 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         kb_groups = msg.get("kb_groups")
         if kb_groups is not None and not isinstance(kb_groups, list):
             kb_groups = None
+        # Denktiefe (Reasoning) fuer genau diese Anfrage: off|low|medium|high|max.
+        # Fehlt das Feld oder ist der Wert unbekannt -> None, dann greifen
+        # Profil-Vorgabe und globale Einstellung. Immer explizit uebergeben, damit
+        # die Wahl eines Nutzers nicht am geteilten Hauptagenten haengenbleibt.
+        from backend.llm import normalize_effort as _norm_effort
+        reasoning_effort = _norm_effort(msg.get("reasoning_effort"))
 
         # ── Sicherheitsschicht: Eingabe auf Jailbreak/Injection pruefen ──
         # Bei Erkennung wird der Account sofort gesperrt; der Client wird
@@ -10528,7 +10543,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             if target.is_sub_agent:
                 target._current_user_internet = _ws_internet
                 target._current_user_sap = _ws_sap
-                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups))
+                asyncio.create_task(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups, reasoning_effort=reasoning_effort))
                 return
 
         agent = agent_manager.get_or_create_main()
@@ -10589,6 +10604,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                         username=_get_ws_username(ws), lang=ui_lang,
                         attachments=image_attachments, kb_groups=kb_groups,
                         session_id=chat_sid, is_final_attempt=_final,
+                        reasoning_effort=reasoning_effort,
                     )
                     # Erfolg oder Benutzer-Stopp -> nicht wiederholen; letzter Versuch -> aufhören
                     if outcome in ("ok", "stopped") or _final:

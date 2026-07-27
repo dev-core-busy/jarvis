@@ -1256,6 +1256,23 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- Maximale Antwortlänge (global, alle Profile) -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-maxtok-hdr">
+                                <h3 data-i18n="profile.section_maxtok">Maximale Antwortlänge</h3>
+                                <span class="sk-openclaw-toggle" id="prof-sect-maxtok-tog">▶</span>
+                            </div>
+                            <div id="prof-sect-maxtok-body" class="kb-collapse-body" style="display:none;">
+                                <label style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;" data-i18n="profile.maxtok_label">Obergrenze der Antwort (Token)</label>
+                                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                    <input type="number" id="setting-llm-max-tokens" min="256" max="131072" step="256" value="8192" style="width:120px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.85rem;">
+                                    <button class="btn-secondary btn-small" id="btn-save-llm-max-tokens" type="button" style="flex-shrink:0;padding:4px 12px;font-size:0.78rem;" data-i18n="profile.save_btn">Speichern</button>
+                                    <span id="llm-max-tokens-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
+                                </div>
+                                <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="profile.maxtok_hint">Dieser Wert begrenzt, wie viele Token ein Modell in einer einzelnen Antwort erzeugen darf. Er ist vor allem bei Reasoning-Modellen wichtig: ohne Obergrenze kann ein Modell einen sehr langen Gedankengang produzieren und dabei das Antwort-Timeout reißen, sodass die Anfrage komplett verloren geht. Ist der Wert zu klein gewählt, wird die Antwort mitten im Satz abgeschnitten – ein typisches Anzeichen sind Antworten, die ohne Punkt enden. Bei hoher Denktiefe zählen Denk- und Antworttoken gemeinsam gegen dieses Limit, hier sind 16000 oder mehr sinnvoll. Erlaubt sind 256 bis 131072 Token; der Wert gilt global für alle Profile und wirkt bei OpenAI-kompatiblen Anbietern sowie bei Anthropic.</small>
+                            </div>
+                        </div>
+
                         <!-- Agent API Key -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-api-hdr">
@@ -1341,6 +1358,24 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <datalist id="model-suggestions"></datalist>
                             <div id="model-discover-list" class="model-discover-list" style="display: none;"></div>
                         </div>
+                    </div>
+
+                    <!-- Temperature (pro Profil; leer = Standard 0.2, "auto" = nicht senden) -->
+                    <div class="form-group">
+                        <label data-i18n="profile.temp_label">Temperature (Kreativität)</label>
+                        <div class="input-group">
+                            <input type="text" id="profile-temperature" inputmode="decimal"
+                                   data-i18n-placeholder="profile.temp_ph" placeholder="leer = Standard 0.2"
+                                   list="temperature-suggestions" autocomplete="off">
+                            <datalist id="temperature-suggestions">
+                                <option value="0.0"></option>
+                                <option value="0.2"></option>
+                                <option value="0.7"></option>
+                                <option value="1.0"></option>
+                                <option value="auto"></option>
+                            </datalist>
+                        </div>
+                        <small class="tab-note" style="margin-top: 4px; opacity: 0.7; display: block;" data-i18n="profile.temp_hint">Die Temperature steuert, wie stark das Modell vom wahrscheinlichsten nächsten Wort abweicht: niedrige Werte liefern sachliche und gut reproduzierbare Antworten, hohe Werte mehr Abwechslung und Kreativität. Für den Jarvis-Agenten ist ein niedriger Wert der Regelfall, denn ab etwa 0.7 zerfallen die JSON-Argumente von Werkzeugaufrufen zunehmend und Tools werden fehlerhaft aufgerufen. Bleibt das Feld leer, gilt der eingebaute Standard 0.2 – genau das bisherige Verhalten und die Empfehlung für alle Profile, die Werkzeuge nutzen. Erlaubt sind Werte von 0.0 bis 2.0; für reine Text- und Schreibaufgaben ohne Tools sind 0.7 bis 1.0 ein guter Ausgangspunkt. Der Sonderwert „auto“ sendet den Parameter gar nicht mit und überlässt die Wahl dem Anbieter – das ist für aktuelle Claude-Modelle nötig, die Temperature-Angaben mit einem Fehler ablehnen.</small>
                     </div>
 
                     <!-- Prompt-Tool-Calling (nur openai_compatible) -->
@@ -3407,7 +3442,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=121"></script>
+    <script src="/static/js/i18n.js?v=122"></script>
     <script src="/static/js/cron.js?v=17"></script>
     <script src="/static/js/context.js?v=5"></script>
     <script src="/static/js/audit.js?v=3"></script>
@@ -3430,7 +3465,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/security_incidents.js?v=19"></script>
     <script src="/static/js/ldap_picker.js?v=7"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=176"></script>
+    <script src="/static/js/app.js?v=177"></script>
 </body>
 
 </html>

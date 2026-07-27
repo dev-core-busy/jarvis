@@ -456,6 +456,7 @@
         const modelSuggestions = document.getElementById('model-suggestions');
         const promptToolGroup = document.getElementById('prompt-tool-group');
         const checkPromptTool = document.getElementById('profile-prompt-tool-calling');
+        const inputTemperature = document.getElementById('profile-temperature');
         const inputKey = document.getElementById('profile-api-key');
         const inputSessionKey = document.getElementById('profile-session-key');
         const apikeyHint = document.querySelector('.apikey-hint');
@@ -562,6 +563,7 @@
                 { hdr: 'prof-sect-list-hdr', body: 'prof-sect-list-body', tog: 'prof-sect-list-tog' },
                 { hdr: 'prof-sect-tts-hdr',  body: 'prof-sect-tts-body',  tog: 'prof-sect-tts-tog'  },
                 { hdr: 'prof-sect-timeout-hdr', body: 'prof-sect-timeout-body', tog: 'prof-sect-timeout-tog' },
+                { hdr: 'prof-sect-maxtok-hdr', body: 'prof-sect-maxtok-body', tog: 'prof-sect-maxtok-tog' },
                 { hdr: 'prof-sect-api-hdr',  body: 'prof-sect-api-body',  tog: 'prof-sect-api-tog'  },
                 { hdr: 'prof-sect-ssl-hdr',  body: 'prof-sect-ssl-body',  tog: 'prof-sect-ssl-tog'  },
             ]);
@@ -1048,6 +1050,30 @@
                     }
                 });
             }
+            // Maximale Antwortlaenge speichern (einmalig verdrahten).
+            // Grenzen wie im Backend (config.py): 256..131072.
+            const _btnMt = document.getElementById('btn-save-llm-max-tokens');
+            if (_btnMt && !_btnMt._wired) {
+                _btnMt._wired = true;
+                _btnMt.addEventListener('click', async () => {
+                    const el = document.getElementById('setting-llm-max-tokens');
+                    const st = document.getElementById('llm-max-tokens-status');
+                    let v = parseInt(el && el.value, 10);
+                    if (isNaN(v) || v < 256) v = 256;
+                    if (v > 131072) v = 131072;
+                    if (el) el.value = v;
+                    try {
+                        await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ llm_max_tokens: v })
+                        });
+                        if (st) { st.textContent = '✓ ' + (window.t ? window.t('profile.save_btn') : 'Gespeichert'); setTimeout(() => { st.textContent = ''; }, 2000); }
+                    } catch (e) {
+                        if (st) st.textContent = '✗';
+                    }
+                });
+            }
             if (tabSkills) { tabSkills.style.display = 'none'; tabSkills.classList.remove('active'); }
             if (tabWhatsApp) { tabWhatsApp.style.display = 'none'; tabWhatsApp.classList.remove('active'); }
             if (tabKnowledge) { tabKnowledge.style.display = 'none'; tabKnowledge.classList.remove('active'); }
@@ -1112,6 +1138,9 @@
                 // LLM-Timeout (global) ins Eingabefeld
                 const _tmEl = document.getElementById('setting-llm-timeout');
                 if (_tmEl) _tmEl.value = data.llm_timeout || 180;
+                // Maximale Antwortlaenge (global) ins Eingabefeld
+                const _mtEl = document.getElementById('setting-llm-max-tokens');
+                if (_mtEl) _mtEl.value = data.llm_max_tokens || 8192;
                 // Stimmen laden und gespeicherte Auswahl setzen
                 _loadTtsVoices(data.tts_voice || '');
                 // Agent API Key: vollen Key vom Server holen → type=password zeigt korrekte Sternanzahl
@@ -1386,8 +1415,16 @@
                 if (checkPromptTool) {
                     checkPromptTool.checked = !!profile.prompt_tool_calling;
                 }
-            } else if (checkPromptTool) {
-                checkPromptTool.checked = false;
+                // Temperature: Backend liefert "" (Standard), "auto" oder eine Zahl.
+                // 0 ist ein gueltiger Wert – daher explizit auf null/undefined pruefen
+                // und NICHT auf Falsyness, sonst wuerde 0 als "leer" angezeigt.
+                if (inputTemperature) {
+                    const _t = profile.temperature;
+                    inputTemperature.value = (_t === null || _t === undefined || _t === '') ? '' : String(_t);
+                }
+            } else {
+                if (checkPromptTool) checkPromptTool.checked = false;
+                if (inputTemperature) inputTemperature.value = '';
             }
 
             showEditView(!id);
@@ -1476,6 +1513,9 @@
                 auth_method: isSession ? 'session' : 'api_key',
                 session_key: isSession && inputSessionKey ? inputSessionKey.value : '',
                 prompt_tool_calling: provider === 'openai_compatible' && checkPromptTool ? checkPromptTool.checked : false,
+                // Rohwert senden ("", "auto" oder Zahl als Text) – die Validierung
+                // und Begrenzung auf 0..2 macht das Backend (config._valid_temperature).
+                temperature: inputTemperature ? inputTemperature.value.trim() : '',
             };
 
             btnSaveProfile.textContent = window.t('common.saving');

@@ -388,6 +388,13 @@ const _I18N = {
         'profile.timeout_label':    'Timeout für LLM-Anfragen (Sekunden)',
         'profile.timeout_hint':     'Wie lange auf die Antwort des Modells gewartet wird, bevor abgebrochen wird. Langsame lokale Modelle brauchen höhere Werte (10–1800 s). Gilt global für alle Profile.',
         'profile.save_btn':         'Speichern',
+        // ── Antwortlänge (global) + Temperature (pro Profil) ──
+        'profile.section_maxtok':   'Maximale Antwortlänge',
+        'profile.maxtok_label':     'Obergrenze der Antwort (Token)',
+        'profile.maxtok_hint':      'Dieser Wert begrenzt, wie viele Token ein Modell in einer einzelnen Antwort erzeugen darf. Er ist vor allem bei Reasoning-Modellen wichtig: ohne Obergrenze kann ein Modell einen sehr langen Gedankengang produzieren und dabei das Antwort-Timeout reißen, sodass die Anfrage komplett verloren geht. Ist der Wert zu klein gewählt, wird die Antwort mitten im Satz abgeschnitten – ein typisches Anzeichen sind Antworten, die ohne Punkt enden. Bei hoher Denktiefe zählen Denk- und Antworttoken gemeinsam gegen dieses Limit, hier sind 16000 oder mehr sinnvoll. Erlaubt sind 256 bis 131072 Token; der Wert gilt global für alle Profile und wirkt bei OpenAI-kompatiblen Anbietern sowie bei Anthropic.',
+        'profile.temp_label':       'Temperature (Kreativität)',
+        'profile.temp_ph':          'leer = Standard 0.2',
+        'profile.temp_hint':        'Die Temperature steuert, wie stark das Modell vom wahrscheinlichsten nächsten Wort abweicht: niedrige Werte liefern sachliche und gut reproduzierbare Antworten, hohe Werte mehr Abwechslung und Kreativität. Für den Jarvis-Agenten ist ein niedriger Wert der Regelfall, denn ab etwa 0.7 zerfallen die JSON-Argumente von Werkzeugaufrufen zunehmend und Tools werden fehlerhaft aufgerufen. Bleibt das Feld leer, gilt der eingebaute Standard 0.2 – genau das bisherige Verhalten und die Empfehlung für alle Profile, die Werkzeuge nutzen. Erlaubt sind Werte von 0.0 bis 2.0; für reine Text- und Schreibaufgaben ohne Tools sind 0.7 bis 1.0 ein guter Ausgangspunkt. Der Sonderwert „auto“ sendet den Parameter gar nicht mit und überlässt die Wahl dem Anbieter – das ist für aktuelle Claude-Modelle nötig, die Temperature-Angaben mit einem Fehler ablehnen.',
         'profile.section_key':      'Agent API Key',
         'profile.section_ssl':      'HTTPS / SSL-Zertifikat',
 
@@ -2046,6 +2053,13 @@ const _I18N = {
         'profile.timeout_label':    'Timeout for LLM requests (seconds)',
         'profile.timeout_hint':     'How long to wait for the model\'s response before aborting. Slow local models need higher values (10–1800 s). Applies globally to all profiles.',
         'profile.save_btn':         'Save',
+        // ── Response length (global) + temperature (per profile) ──
+        'profile.section_maxtok':   'Maximum response length',
+        'profile.maxtok_label':     'Response cap (tokens)',
+        'profile.maxtok_hint':      'This value caps how many tokens a model may generate in a single response. It matters most with reasoning models: without a cap, a model can produce a very long chain of thought and blow past the response timeout, losing the request entirely. Set it too low and the answer is cut off mid-sentence – responses ending without a full stop are the usual tell. At high reasoning depth, thinking and answer tokens both count against this limit, so 16000 or more is sensible there. The allowed range is 256 to 131072 tokens; the value applies globally to all profiles and takes effect for OpenAI-compatible providers as well as Anthropic.',
+        'profile.temp_label':       'Temperature (creativity)',
+        'profile.temp_ph':          'empty = default 0.2',
+        'profile.temp_hint':        'Temperature controls how far the model strays from the most likely next word: low values give factual, reproducible answers, high values more variety and creativity. A low value is the norm for the Jarvis agent, because from roughly 0.7 upwards the JSON arguments of tool calls degrade and tools get invoked incorrectly. Leave the field empty to use the built-in default of 0.2 – exactly the previous behaviour, and the recommendation for any profile that uses tools. The allowed range is 0.0 to 2.0; for pure writing tasks without tools, 0.7 to 1.0 is a good starting point. The special value \'auto\' omits the parameter entirely and lets the provider decide – required for current Claude models, which reject temperature settings with an error.',
         'profile.section_key':      'Agent API Key',
         'profile.section_ssl':      'HTTPS / SSL Certificate',
 

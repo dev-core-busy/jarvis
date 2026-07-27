@@ -131,6 +131,101 @@ data/
 - **Debug-Toggle**: Pill-Button blendet nicht-highlight Zeilen aus (nur LLM-Dialog sichtbar)
 - **WebSocket-Protokoll**: `agent_event` (started/spawned/finished/paused), `agent_list`, `status` mit `agent_id`
 
+## Reasoning-Steuerung (Denktiefe, seit 2026-07-27)
+- **Eine providerunabhaengige Stufenleiter** (`REASONING_LEVELS` in `llm.py`):
+  `off | low | medium | high | max`. `normalize_effort()` nimmt tolerant Synonyme an
+  (DE/EN, `xhigh`→`max`, `none`/`aus`/`0`→`off`); **unbekannte Werte werden zu None**,
+  ein Tippfehler im API-Aufruf darf die Anfrage nicht mit einem Provider-400 killen.
+- **Vorrang:** pro Chat-Anfrage (`reasoning_effort` im WS-`task`) > LLM-Profil
+  (`reasoning_effort`) > global (`config.LLM_REASONING_EFFORT`, Einstellungen/ENV).
+  `agent.py::current_reasoning_effort` loest Anfrage>Profil auf, `llm.py::_resolve_effort()`
+  haengt die globale Vorgabe hinten an.
+- **Sentinel `_EFFORT_UNSET`** (analog `_KB_GROUPS_UNSET`): `main.py` uebergibt den Wert
+  IMMER explizit (auch `None`), Sub-Agents uebergeben ihn nicht und erben damit die Stufe
+  des Eltern-Agenten. Ohne diese Unterscheidung wuerde die Stufe eines Nutzers am
+  **geteilten Hauptagenten** beim naechsten Nutzer haengenbleiben.
+  `run_task_headless()` setzt bewusst `None` (WhatsApp/Telegram/Cron haben keine Oberflaeche).
+- **Uebersetzung je Provider** (`_apply_reasoning` / `_thinking_config`):
+  | Provider | Feld | `off` |
+  |---|---|---|
+  | Gemini | `thinking_config.thinking_budget` (0/1024/4096/12288/24576 Token) | Budget 0 |
+  | OpenAI-kompatibel | `reasoning_effort: minimal\|low\|medium\|high` | `minimal` (Annaeherung!) |
+  | OpenRouter | `reasoning: {effort}` bzw. `{enabled: false}` | `enabled:false` |
+  | Anthropic | `thinking:{type:adaptive}` + `output_config:{effort}` | `thinking:{type:disabled}` |
+  | Anthropic-Session (claude.ai) | – (Wert wird angenommen und ignoriert) | – |
+- **Anthropic-Besonderheiten:** bei gesetzter Stufe wird `temperature` **weggelassen** –
+  aktuelle Modelle (Opus 5/4.8/4.7, Sonnet 5, Fable 5) lehnen Sampling-Parameter mit 400 ab.
+  Bei `high`/`max` wird `max_tokens` auf mind. 16000 gehoben (deckelt Denk- UND Antworttoken
+  gemeinsam). Bei `off` wird KEIN `output_config` gesendet (thinking-aus + hohe Stufe = 400).
+- **Selbstheilender Fallback:** lehnt ein Modell/Server einen dieser Parameter mit 400 ab
+  (`_is_unsupported_param_error()`), wird die Anfrage EINMAL ohne thinking/effort/temperature
+  wiederholt – der Nutzer bekommt eine Antwort ohne Feinsteuerung statt einer Fehlermeldung.
+  Echte Fehler (429/500/Kontextfenster) laufen NICHT in den Fallback.
+- **Verifiziert auf DEV (Gemini 3.5 flash, harte Rechenfrage):** `off` = keine Denk-Token /
+  3,4 s, `low` = 1344 / 6,6 s, `high` = 1515 / 8,2 s, `max` = 1631 / 8,6 s. Der Regler wirkt.
+- **Kein UI-Element** – bislang nur API (WS-`task` + `POST /api/agent/task`) und Profil-/
+  Globalfeld. Ein Frontend-Schalter muesste `data-i18n` + CSS-Variablen beachten.
+- **Alte google-genai-Versionen** (< ~1.10) kennen `thinking_budget` nicht. Weil ThinkingConfig
+  ein pydantic-Modell ist, kommt dann ein **ValidationError** (nicht TypeError) – daher das
+  breite `except Exception` in `_thinking_config()`. DEV hat 1.72.0 (unterstuetzt es).
+
+## Sampling & Antwortlaenge (temperature, LLM_MAX_TOKENS, seit 2026-07-27)
+
+- **`temperature` ist ein Profil-Feld, kein Anfrage-Parameter.** Der Wert liegt in
+  `config.py::create_profile`/`update_profile` neben `reasoning_effort` und wird von
+  `agent.py::current_temperature` gelesen. Die Begruendung fuer „Profil statt Anfrage": die
+  Temperature ist faktisch eine Modell-Eigenschaft, und in Jarvis IST das Profil das Modell –
+  ausserdem zerlegen Werte ab etwa 0.7 die JSON-Argumente von Tool-Aufrufen, was pro Nachricht
+  umschaltbar ein reiner Fussangel-Schalter waere. Drei Zustaende sind moeglich: `""` bedeutet
+  eingebauter Standard `0.2` (exakt das Verhalten vor dieser Aenderung), eine Zahl `0.0`–`2.0`
+  bedeutet genau diesen Wert, und der Sonderwert `"auto"` laesst den Parameter **komplett weg**.
+  `"auto"` ist kein Schoenheitsfehler, sondern notwendig: aktuelle Claude-Modelle (Opus 5/4.8/4.7,
+  Sonnet 5, Fable 5) lehnen Sampling-Parameter mit HTTP 400 ab, und ohne `"auto"` faengt das nur
+  der 400-Fallback ab – also erst nach einem verschwendeten Aufruf. Validierung:
+  `config._valid_temperature()` (nimmt auch deutsche Dezimalkommas, begrenzt auf 0..2, macht aus
+  Muell `""` statt einen Fehler); Aufloesung: `llm.py::_resolve_temperature()` (gibt `None`
+  zurueck = Feld weglassen, **nicht** 0).
+- **`temperature` war an vier Stellen hart codiert** (Gemini-Config, OpenAI-nativ,
+  OpenAI-Prompt-Modus, Anthropic-kwargs) und ist jetzt an allen vier durch den aufgeloesten Wert
+  ersetzt. Jeder Provider sendet das Feld nur, wenn der aufgeloeste Wert nicht `None` ist –
+  das Muster ist immer `if temperature is not None: payload["temperature"] = temperature`.
+  Bei Anthropic gilt zusaetzlich die aeltere Regel weiter, dass bei **gesetzter Reasoning-Stufe**
+  gar keine Temperature mitgeht. `AnthropicSessionProvider` (claude.ai) nimmt den Wert an und
+  ignoriert ihn, weil die Session-Schnittstelle keine Sampling-Parameter kennt. Verifiziert auf
+  DEV mit Gemini: `0.0` und `0.2` liefern dreimal dasselbe Wort, `1.8` variiert, `"auto"` laeuft
+  fehlerfrei ohne das Feld.
+- **`config.LLM_MAX_TOKENS` existierte vorher NICHT.** `llm.py::_llm_max_tokens()` las es per
+  `getattr(config, "LLM_MAX_TOKENS", 8192)`, sodass immer 8192 galt – obwohl der Docstring
+  Einstellbarkeit ueber *Einstellungen → LLM* versprach. Das Feld ist jetzt eine echte globale
+  Einstellung mit Laden (`_load_v2`), Speichern (`_save_to_file`), Schreib-Endpunkt
+  (`save_global_settings`) und Anzeige in `GET /api/settings`. Der Wert wird an drei Stellen auf
+  256..131072 begrenzt (Laden, Speichern, Auslesen), damit auch eine handgeschriebene
+  settings.json nichts kaputt machen kann. Praktische Relevanz: bei Reasoning-Stufe `high`/`max`
+  zaehlen Denk- UND Antworttoken gegen dieses Limit, ein zu kleiner Wert schneidet die Antwort
+  mitten im Satz ab.
+- **`prompt_tool_calling` wurde nie persistiert** (behoben 2026-07-27). Das Frontend sendet das
+  Feld seit Langem im Profil-Payload und `agent.py::current_prompt_tool_calling` liest es, aber
+  es stand weder in `create_profile` noch in der Whitelist von `update_profile` – der Schalter im
+  Profilformular hatte also **keine Wirkung**. Wer Prompt-basiertes Tool-Calling brauchte, musste
+  den Wert direkt in settings.json eintragen. Jetzt ist das Feld in beiden Funktionen vorhanden
+  und wird als `bool()` normalisiert. Beim Erweitern von Profil-Feldern immer BEIDE Stellen
+  anfassen, sonst entsteht genau dieser stille Fehler wieder.
+- **Oberflaeche:** *Einstellungen → Profile* hat einen neuen Klappabschnitt „Maximale
+  Antwortlaenge" (global, neben „Antwort-Timeout") und das Profil-Formular ein Freitextfeld
+  „Temperature" mit `datalist`-Vorschlaegen (0.0/0.2/0.7/1.0/auto). Beide tragen einen
+  Infotext mit fuenf Saetzen, per `data-i18n` in DE und EN
+  (`profile.maxtok_hint`, `profile.temp_hint`). Das Temperature-Feld ist absichtlich ein
+  Textfeld und kein `number`-Input, weil `"auto"` ein gueltiger Wert ist. Beim Laden eines
+  Profils wird auf `null`/`undefined`/`""` geprueft und **nicht** auf Falsyness – sonst wuerde
+  ein gespeicherter Wert `0` als leeres Feld erscheinen. Die Validierung passiert bewusst nur
+  im Backend; das Frontend schickt den Rohtext.
+- **API-Nutzung:** Profil-Feld ueber `POST`/`PUT /api/profiles` als `temperature`
+  (`""`|`"auto"`|Zahl), globaler Wert ueber `POST /api/settings` als `llm_max_tokens`.
+  Achtung Asymmetrie: das Profil-Feld `reasoning_effort` akzeptiert nur die fuenf kanonischen
+  Stufen, waehrend das Anfrage-Feld `reasoning_effort` im WS-Task tolerant Synonyme annimmt
+  (`xhigh`, `aus`, …). Grund ist die Import-Richtung: `llm.py` importiert `config.py`, nicht
+  umgekehrt, deshalb liegt die Alias-Tabelle nur in `llm.py`.
+
 ## Vektor-Datenbank (Wissenssuche)
 - **FAISS** (`IndexFlatIP`, normierte Vektoren = Cosine) + **sentence-transformers**
   (`intfloat/multilingual-e5-small`, 384d) – Persistenz: `data/vector_store/faiss_index.bin`
@@ -305,6 +400,13 @@ data/
 - **Shell-Streaming:** `PYTHONUNBUFFERED=1` muss gesetzt sein, sonst kein Live-Output
 - **Sub-Agent 0 Parts:** Wenn LLM leere Antwort liefert, pruefen ob Task-Text korrekt uebergeben wird
 - **Doppelter Hauptagent:** Frontend resettet `_agentInfos` bei `started`-Event des Hauptagents
+- **`llm.py` hat KEINEN Modul-Import von `config`:** jede Funktion, die `config` nutzt, braucht
+  ein lokales `from backend.config import config`. Fehlte in `GeminiProvider.generate_response`
+  → **jeder** Gemini-Chat scheiterte still mit `NameError: name 'config' is not defined`
+  (behoben 2026-07-27). Beim Erweitern von llm.py darauf achten.
+- **Neues Profil-Feld = ZWEI Stellen in config.py:** `create_profile()` (Anlegen) UND die
+  Whitelist in `update_profile()`. Fehlt eine, wird das Feld still verworfen – genau so war
+  `prompt_tool_calling` jahrelang wirkungslos, obwohl Frontend und agent.py es kannten.
 - **Embedding-Modell-Cache liegt beim jarvis-User:** Skripte, die `sentence-transformers`
   nutzen (z.B. manueller Reindex), brauchen `HOME=/home/jarvis`. Sonst sucht HF in
   `/root/.cache` → `OSError: PermissionError ... when downloading` → jedes Encoding

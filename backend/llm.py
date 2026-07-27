@@ -44,7 +44,15 @@ class LLMProvider(ABC):
     image_label: str = "Das aktive LLM-Profil"
 
     @abstractmethod
-    async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
+    async def generate_response(self, model: str, system_prompt: str, contents: list,
+                                tools: list = None, reasoning_effort: str | None = None,
+                                temperature=None) -> LLMResponse:
+        """reasoning_effort: Stufe aus REASONING_LEVELS oder None (Provider-Standard).
+        temperature: Zahl, "auto" (= Feld weglassen) oder None (= Standard 0.2).
+
+        Provider, die einen der Werte nicht kennen, nehmen ihn an und ignorieren ihn –
+        so bleibt der Aufruf im Agent-Loop fuer alle Provider identisch.
+        """
         pass
 
     async def generate_image(self, model: str, prompt: str) -> bytes:
@@ -120,12 +128,140 @@ def _llm_max_tokens() -> int:
     sehr langen Gedankengang generieren und dabei den Read-Timeout reissen. Der
     Wert ist ueber Einstellungen -> LLM (config.LLM_MAX_TOKENS) anpassbar; der
     Default begrenzt die Generierung auf ein Mass, das i.d.R. unter dem Timeout
-    bleibt."""
+    bleibt. Das Feld existiert seit 2026-07-27 wirklich in config.py – vorher
+    griff hier immer der getattr-Default 8192."""
     try:
         from backend.config import config
         return max(256, min(int(getattr(config, "LLM_MAX_TOKENS", 8192) or 8192), 131072))
     except Exception:
         return 8192
+
+
+# Eingebauter Temperature-Standard, wenn das Profil nichts vorgibt. 0.2 ist auf
+# werkzeugnutzende Agenten ausgelegt: hohe Werte zerlegen die JSON-Argumente von
+# Tool-Aufrufen. Wert war bis 2026-07-27 an vier Stellen hart codiert.
+DEFAULT_TEMPERATURE = 0.2
+# Profil-Sonderwert: Parameter gar nicht senden.
+TEMPERATURE_AUTO = "auto"
+
+
+def _resolve_temperature(value) -> float | None:
+    """Bringt eine Temperature-Angabe auf den Wert, der an den Provider geht.
+
+    Rueckgabe None bedeutet ausdruecklich "Feld weglassen" – nicht 0. Das ist
+    der Weg fuer aktuelle Claude-Modelle (Opus 5/4.8/4.7, Sonnet 5, Fable 5),
+    die Sampling-Parameter mit HTTP 400 ablehnen.
+    """
+    if value is None:
+        return DEFAULT_TEMPERATURE
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if not s:
+            return DEFAULT_TEMPERATURE
+        if s == TEMPERATURE_AUTO:
+            return None
+        try:
+            value = float(s.replace(",", "."))
+        except ValueError:
+            return DEFAULT_TEMPERATURE
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_TEMPERATURE
+    if f != f:                     # NaN
+        return DEFAULT_TEMPERATURE
+    return max(0.0, min(f, 2.0))
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Reasoning-Steuerung (pro Anfrage)
+# ═══════════════════════════════════════════════════════════════════
+#
+# Jeder Provider nennt die Denktiefe anders (Anthropic: thinking + effort,
+# OpenAI: reasoning_effort, OpenRouter: reasoning.effort, Gemini:
+# thinking_budget in Token). Nach aussen – WebSocket-Feld `reasoning_effort`,
+# Profil-Feld, globale Einstellung – gilt deshalb EINE providerunabhaengige
+# Stufenleiter; die Uebersetzung passiert je Provider unten.
+
+REASONING_LEVELS = ("off", "low", "medium", "high", "max")
+
+# Schreibweisen, die von aussen akzeptiert werden. Absichtlich tolerant (DE/EN,
+# Synonyme), damit API-Aufrufer die Stufen nicht raten muessen.
+_EFFORT_ALIASES = {
+    "off": "off", "none": "off", "disabled": "off", "aus": "off", "0": "off",
+    "minimal": "low", "min": "low", "low": "low", "niedrig": "low",
+    "medium": "medium", "mid": "medium", "normal": "medium", "mittel": "medium",
+    "high": "high", "hoch": "high",
+    # xhigh liegt bei Anthropic zwischen high und max; hier auf max abgebildet,
+    # damit die Stufenleiter providerunabhaengig bleibt.
+    "xhigh": "max", "x_high": "max", "very_high": "max", "max": "max", "maximum": "max",
+}
+
+# Gemini rechnet in Denk-Token statt in Stufen.
+_GEMINI_THINKING_BUDGET = {"off": 0, "low": 1024, "medium": 4096, "high": 12288, "max": 24576}
+
+# OpenAI-kompatible Server kennen nur minimal|low|medium|high.
+_OPENAI_EFFORT = {"off": "minimal", "low": "low", "medium": "medium", "high": "high", "max": "high"}
+
+# Anthropic: output_config.effort. "max" existiert dort wirklich.
+_ANTHROPIC_EFFORT = {"low": "low", "medium": "medium", "high": "high", "max": "max"}
+
+# Ab dieser Stufe braucht Anthropic Platz zum Denken – max_tokens deckelt
+# Denk- UND Antworttoken gemeinsam, ein zu kleiner Wert schneidet die Antwort ab.
+_ANTHROPIC_THINKING_MIN_TOKENS = 16000
+
+
+def normalize_effort(value) -> str | None:
+    """Bringt eine Reasoning-Angabe auf eine kanonische Stufe aus REASONING_LEVELS.
+
+    Rueckgabe None = keine Angabe, es gilt der Provider-Standard. Unbekannte
+    Werte ergeben ebenfalls None: ein Tippfehler im API-Aufruf darf die Anfrage
+    nicht mit einem Provider-400 abbrechen.
+    """
+    if value is None:
+        return None
+    s = str(value).strip().lower().replace(" ", "_").replace("-", "_")
+    if not s:
+        return None
+    return _EFFORT_ALIASES.get(s)
+
+
+def _default_effort() -> str | None:
+    """Globaler Standard aus den Einstellungen (leer = Provider-Standard)."""
+    try:
+        from backend.config import config
+        return normalize_effort(getattr(config, "LLM_REASONING_EFFORT", "") or None)
+    except Exception:
+        return None
+
+
+def _resolve_effort(value) -> str | None:
+    """Pro-Anfrage-Wert, sonst globaler Standard."""
+    return normalize_effort(value) or _default_effort()
+
+
+# Fehlertext-Marker, die auf einen vom Modell/Server NICHT unterstuetzten
+# Reasoning- oder Sampling-Parameter hindeuten.
+_UNSUPPORTED_PARAM_MARKERS = (
+    "thinking", "reasoning", "output_config", "effort", "budget_tokens",
+    "temperature", "top_p", "unexpected keyword", "unknown field",
+    "unrecognized", "not supported", "unsupported parameter",
+    "extra inputs are not permitted", "additional properties",
+)
+
+
+def _is_unsupported_param_error(exc_or_text) -> bool:
+    """Erkennt, ob ein Provider einen der gesetzten Zusatzparameter ablehnt.
+
+    Aeltere Modelle kennen `thinking`/`output_config` nicht, neuere Claude-Modelle
+    lehnen umgekehrt `temperature` ab (400). Statt die Anfrage scheitern zu
+    lassen, wird sie einmal ohne diese Parameter wiederholt – der Nutzer bekommt
+    eine Antwort ohne Feinsteuerung statt einer Fehlermeldung.
+    """
+    txt = str(exc_or_text).lower()
+    if not ("400" in txt or "invalid" in txt or "bad request" in txt):
+        return False
+    return any(m in txt for m in _UNSUPPORTED_PARAM_MARKERS)
 
 
 async def _get_shared_client() -> httpx.AsyncClient:
@@ -228,26 +364,90 @@ class GeminiProvider(LLMProvider):
                 last_err = e
         raise RuntimeError(f"Bildgenerierung fehlgeschlagen: {last_err}")
 
-    async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
+    def _thinking_config(self, effort: str | None):
+        """Uebersetzt eine Reasoning-Stufe in Geminis Token-Budget.
+
+        Rueckgabe None = Feld weglassen (Modell entscheidet selbst).
+
+        WICHTIG – breites except: die ThinkingConfig alter google-genai-Versionen
+        kennt `thinking_budget` nicht (1.5.0 hat nur `include_thoughts`). Weil
+        ThinkingConfig ein pydantic-Modell ist, kommt dann ein ValidationError und
+        NICHT TypeError/AttributeError. Ein zu enges except wuerde jeden
+        Gemini-Chat mit Reasoning-Vorgabe abbrechen statt die Vorgabe zu ignorieren.
+        """
+        if not effort:
+            return None
+        budget = _GEMINI_THINKING_BUDGET.get(effort)
+        if budget is None:
+            return None
+        try:
+            return types.ThinkingConfig(thinking_budget=budget)
+        except Exception as exc:  # noqa: BLE001 – siehe Docstring
+            print(f"[LLM] Gemini: ThinkingConfig(thinking_budget) nicht unterstuetzt "
+                  f"({type(exc).__name__}) – Reasoning-Vorgabe wird ignoriert. "
+                  f"Abhilfe: google-genai aktualisieren.", flush=True)
+            return None
+
+    async def generate_response(self, model: str, system_prompt: str, contents: list,
+                                tools: list = None, reasoning_effort: str | None = None,
+                                temperature=None) -> LLMResponse:
         gemini_tools = [types.Tool(function_declarations=tools)] if tools else None
+        thinking = self._thinking_config(_resolve_effort(reasoning_effort))
+        _temp = _resolve_temperature(temperature)
 
         # Harte Zeitgrenze: das Gemini-SDK laeuft in einem Thread OHNE eigenen
         # Timeout – ein stehengebliebener Upstream-Call wuerde den Chat sonst
         # unbegrenzt haengen lassen. wait_for wirft nach Ablauf TimeoutError
         # (nicht retry-faehig -> wird als Fehler gemeldet, Nutzer kann wiederholen).
+        # config wird lokal importiert (llm.py hat keinen Modul-Import davon) –
+        # ohne diese Zeile scheiterte JEDER Gemini-Aufruf mit NameError.
+        from backend.config import config
         _to = max(10, min(int(getattr(config, "LLM_TIMEOUT", 180) or 180), 1800))
 
+        def _build_config(with_thinking):
+            kwargs = {
+                "system_instruction": system_prompt,
+                "tools": gemini_tools,
+            }
+            if _temp is not None:      # None = Feld weglassen (Profil "auto")
+                kwargs["temperature"] = _temp
+            if with_thinking is None:
+                return types.GenerateContentConfig(**kwargs)
+            kwargs["thinking_config"] = with_thinking
+            try:
+                return types.GenerateContentConfig(**kwargs)
+            except Exception as exc:  # noqa: BLE001
+                # Aeltere SDKs kennen das Feld thinking_config nicht (pydantic
+                # ValidationError). Dann ohne Vorgabe bauen statt zu scheitern.
+                print(f"[LLM] Gemini: thinking_config vom SDK nicht akzeptiert "
+                      f"({type(exc).__name__}) – Vorgabe ignoriert", flush=True)
+                kwargs.pop("thinking_config", None)
+                return types.GenerateContentConfig(**kwargs)
+
         async def _call():
-            resp = await asyncio.wait_for(asyncio.to_thread(
-                self.client.models.generate_content,
-                model=model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    tools=gemini_tools,
-                    temperature=0.2,
-                ),
-            ), timeout=_to)
+            try:
+                resp = await asyncio.wait_for(asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=model,
+                    contents=contents,
+                    config=_build_config(thinking),
+                ), timeout=_to)
+            except asyncio.TimeoutError:
+                raise
+            except Exception as exc:
+                # Nicht jedes Gemini-Modell laesst sich die Denktiefe vorgeben
+                # (2.5 Pro kann Thinking z.B. nicht auf 0 setzen). Dann einmal
+                # ohne thinking_config wiederholen statt den Chat abzubrechen.
+                if thinking is None or not _is_unsupported_param_error(exc):
+                    raise
+                print(f"[LLM] Gemini {model}: thinking_config abgelehnt ({exc}) "
+                      f"→ Wiederholung ohne Reasoning-Vorgabe", flush=True)
+                resp = await asyncio.wait_for(asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=model,
+                    contents=contents,
+                    config=_build_config(None),
+                ), timeout=_to)
             parts = []
             if resp.candidates and resp.candidates[0].content and resp.candidates[0].content.parts:
                 for p in resp.candidates[0].content.parts:
@@ -302,17 +502,48 @@ class OpenAICompatibleProvider(LLMProvider):
         # (Einstellungen -> LLM -> Timeout).
         return _llm_timeout()
 
-    async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
+    def _apply_reasoning(self, payload: dict, effort: str | None):
+        """Setzt die Reasoning-Stufe im Payload (OpenAI-Konvention).
+
+        `off` wird zu "minimal" – die breit unterstuetzte Stufenliste kennt nur
+        minimal|low|medium|high. Das ist bewusst eine Annaeherung: "minimal"
+        denkt noch etwas. Ein echtes Abschalten (neueres "none") wuerde von
+        vielen lokalen Servern mit 400 abgelehnt, und der 400-Fallback laesst den
+        Parameter dann ganz weg – das Ergebnis waere die VOLLE Denktiefe, also
+        das Gegenteil des Gewuenschten.
+
+        OpenRouter ueberschreibt das, weil es ein eigenes `reasoning`-Objekt nutzt.
+        """
+        if not effort:
+            return
+        mapped = _OPENAI_EFFORT.get(effort)
+        if mapped:
+            payload["reasoning_effort"] = mapped
+
+    def _reasoning_keys(self) -> tuple[str, ...]:
+        """Payload-Felder, die beim Fallback entfernt werden muessen."""
+        return ("reasoning_effort",)
+
+    async def generate_response(self, model: str, system_prompt: str, contents: list,
+                                tools: list = None, reasoning_effort: str | None = None,
+                                temperature=None) -> LLMResponse:
         """Wählt zwischen nativem und Prompt-basiertem Tool-Calling (mit Retry bei 429/503)."""
+        effort = _resolve_effort(reasoning_effort)
+        temp = _resolve_temperature(temperature)
+
         async def _call():
             if self.prompt_tool_calling:
-                return await self._generate_prompt_mode(model, system_prompt, contents, tools or [])
-            return await self._generate_native(model, system_prompt, contents, tools)
+                return await self._generate_prompt_mode(model, system_prompt, contents, tools or [], effort, temp)
+            return await self._generate_native(model, system_prompt, contents, tools, effort, temp)
         return await _retry_with_backoff(_call)
 
     # ── Nativer Modus (OpenAI tool_calls API) ────────────────────────
 
-    async def _generate_native(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
+    async def _generate_native(self, model: str, system_prompt: str, contents: list,
+                               tools: list = None, reasoning_effort: str | None = None,
+                               temperature: float | None = DEFAULT_TEMPERATURE) -> LLMResponse:
+        """temperature ist hier ein BEREITS aufgeloester Wert (Zahl oder None =
+        weglassen) – nicht der Rohwert aus dem Profil."""
         messages = [{"role": "system", "content": system_prompt}]
 
         # KRITISCH: Tool-Call-IDs muessen zwischen assistant-Message (tool_calls[i].id)
@@ -410,11 +641,13 @@ class OpenAICompatibleProvider(LLMProvider):
         payload = {
             "model": model,
             "messages": messages,
-            "temperature": 0.2,
             "stream": False,   # Kein Streaming – wir lesen die komplette JSON-Antwort
             # Cap gegen endlose Reasoning-Laeufe (sonst Read-Timeout bei Qwen3 & Co.)
             "max_tokens": _llm_max_tokens(),
         }
+        if temperature is not None:    # None = Feld weglassen (Profil "auto")
+            payload["temperature"] = temperature
+        self._apply_reasoning(payload, reasoning_effort)
 
         if tools:
             openai_tools = []
@@ -446,6 +679,13 @@ class OpenAICompatibleProvider(LLMProvider):
             # Prompt-basiertes Tool-Calling zurueckfallen – der Agent behaelt so volle
             # Tool-Faehigkeit ueber das XML-Protokoll, ohne Server-Neustart noetig.
             _d = str(err_detail).lower()
+            # Server ohne Reasoning-Unterstuetzung (aeltere vLLM/llama.cpp-Builds
+            # validieren streng und lehnen unbekannte Felder mit 400 ab): einmal
+            # ohne die Stufen-Vorgabe wiederholen, statt den Chat abzubrechen.
+            if resp.status_code == 400 and reasoning_effort and _is_unsupported_param_error(err_detail):
+                print(f"[LLM] {self.base_url}: Reasoning-Parameter abgelehnt "
+                      f"({err_detail}) → Wiederholung ohne Vorgabe", flush=True)
+                return await self._generate_native(model, system_prompt, contents, tools, None, temperature)
             if resp.status_code == 400 and tools and (
                 "tool choice" in _d or "tool_choice" in _d
                 or "auto-tool-choice" in _d or "tool-call-parser" in _d
@@ -453,7 +693,7 @@ class OpenAICompatibleProvider(LLMProvider):
             ):
                 print(f"[LLM] {self.base_url}: 400 bei nativem Tool-Calling "
                       f"({err_detail}) → Fallback auf Prompt-Modus", flush=True)
-                return await self._generate_prompt_mode(model, system_prompt, contents, tools)
+                return await self._generate_prompt_mode(model, system_prompt, contents, tools, reasoning_effort, temperature)
             if "context length" in _d or "maximum context" in _d or "input_tokens" in _d or "max_model_len" in _d:
                 raise ValueError(
                     "Das gewählte Modell hat ein zu kleines Kontextfenster für den "
@@ -552,8 +792,12 @@ class OpenAICompatibleProvider(LLMProvider):
 
     # ── Prompt-Modus (Tools im System-Prompt, XML-Tag-Parsing) ───────
 
-    async def _generate_prompt_mode(self, model: str, system_prompt: str, contents: list, tools: list) -> LLMResponse:
-        """Prompt-basiertes Tool-Calling: keine tools-API, stattdessen XML-Tags im Text."""
+    async def _generate_prompt_mode(self, model: str, system_prompt: str, contents: list, tools: list,
+                                    reasoning_effort: str | None = None,
+                                    temperature: float | None = DEFAULT_TEMPERATURE) -> LLMResponse:
+        """Prompt-basiertes Tool-Calling: keine tools-API, stattdessen XML-Tags im Text.
+
+        temperature ist ein BEREITS aufgeloester Wert (Zahl oder None = weglassen)."""
         # Tools in System-Prompt einbetten
         if tools:
             tools_section = (
@@ -608,7 +852,10 @@ class OpenAICompatibleProvider(LLMProvider):
                 messages.append({"role": role, "content": "\n".join(parts_text)})
             messages.extend(tool_result_msgs)
 
-        payload = {"model": model, "messages": messages, "temperature": 0.2, "stream": False}
+        payload = {"model": model, "messages": messages, "stream": False}
+        if temperature is not None:    # None = Feld weglassen (Profil "auto")
+            payload["temperature"] = temperature
+        self._apply_reasoning(payload, reasoning_effort)
 
         client = await _get_shared_client()
         resp = await client.post(self.base_url, headers=self._build_headers(), json=payload, timeout=self._get_timeout())
@@ -622,6 +869,11 @@ class OpenAICompatibleProvider(LLMProvider):
             except Exception:
                 err_detail = resp.text[:300]
             _d = str(err_detail).lower()
+            # Server ohne Reasoning-Unterstuetzung: einmal ohne Stufen-Vorgabe wiederholen.
+            if resp.status_code == 400 and reasoning_effort and _is_unsupported_param_error(err_detail):
+                print(f"[LLM] {self.base_url}: Reasoning-Parameter abgelehnt "
+                      f"({err_detail}) → Wiederholung ohne Vorgabe", flush=True)
+                return await self._generate_prompt_mode(model, system_prompt, contents, tools, None, temperature)
             # Kontextfenster zu klein (z.B. vLLM --max-model-len 8192): klare, handlungs-
             # bezogene Meldung statt rohem httpx-Fehler.
             if "context length" in _d or "maximum context" in _d or "input_tokens" in _d or "max_model_len" in _d:
@@ -700,6 +952,21 @@ class OpenRouterProvider(OpenAICompatibleProvider):
     def _get_timeout(self) -> httpx.Timeout:
         return _llm_timeout()
 
+    def _apply_reasoning(self, payload: dict, effort: str | None):
+        """OpenRouter nutzt ein eigenes `reasoning`-Objekt statt reasoning_effort.
+
+        `off` wird zu `{"enabled": false}` – die Stufen-Variante kennt kein "aus".
+        """
+        if not effort:
+            return
+        if effort == "off":
+            payload["reasoning"] = {"enabled": False}
+        else:
+            payload["reasoning"] = {"effort": _OPENAI_EFFORT[effort]}
+
+    def _reasoning_keys(self) -> tuple[str, ...]:
+        return ("reasoning",)
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  Anthropic Claude – API Key (offiziell)
@@ -712,7 +979,9 @@ class AnthropicProvider(LLMProvider):
         import anthropic
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
 
-    async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
+    async def generate_response(self, model: str, system_prompt: str, contents: list,
+                                tools: list = None, reasoning_effort: str | None = None,
+                                temperature=None) -> LLMResponse:
         messages = []
         tool_id_queues: dict[str, deque] = defaultdict(deque)
         step = 0
@@ -802,27 +1071,66 @@ class AnthropicProvider(LLMProvider):
                     "input_schema": _normalize_schema(raw_schema),
                 })
 
-        kwargs: dict = {
-            "model": model,
-            "max_tokens": 8096,
-            "system": system_prompt,
-            "messages": messages,
-            "temperature": 0.2,
-        }
-        if anthropic_tools:
-            kwargs["tools"] = anthropic_tools
+        _effort = _resolve_effort(reasoning_effort)
+        _temp = _resolve_temperature(temperature)
 
-        try:
-            response = await self.client.messages.create(**kwargs)
-        except Exception as exc:
+        def _build_kwargs(with_reasoning: bool) -> dict:
+            kw: dict = {
+                "model": model,
+                "max_tokens": 8096,
+                "system": system_prompt,
+                "messages": messages,
+            }
+            if anthropic_tools:
+                kw["tools"] = anthropic_tools
+            if not (with_reasoning and _effort):
+                # Ohne Reasoning-Vorgabe bleibt es beim bisherigen Verhalten.
+                # ACHTUNG: aktuelle Claude-Modelle (Opus 5/4.8/4.7, Sonnet 5)
+                # lehnen temperature mit 400 ab – der Fallback unten faengt das.
+                # Wer das vermeiden will, setzt im Profil temperature="auto".
+                if _temp is not None:
+                    kw["temperature"] = _temp
+                return kw
+            if _effort == "off":
+                # Kein output_config: "thinking aus" plus hohe Effort-Stufe ist bei
+                # Opus 5 eine ungueltige Kombination (400).
+                kw["thinking"] = {"type": "disabled"}
+                if _temp is not None:
+                    kw["temperature"] = _temp
+            else:
+                # Adaptives Thinking + Effort-Stufe. temperature wird bewusst NICHT
+                # gesetzt: die Modelle, die effort kennen, lehnen Sampling-Parameter ab.
+                kw["thinking"] = {"type": "adaptive"}
+                kw["output_config"] = {"effort": _ANTHROPIC_EFFORT[_effort]}
+                if _effort in ("high", "max"):
+                    # max_tokens deckelt Denk- UND Antworttoken gemeinsam.
+                    kw["max_tokens"] = max(kw["max_tokens"], _ANTHROPIC_THINKING_MIN_TOKENS)
+            return kw
+
+        def _to_value_error(exc) -> ValueError:
             # Anthropic SDK-Exceptions in lesbare ValueError umwandeln
             raw = str(exc)
             # Typ aus Anthropic-Fehlerstruktur extrahieren
-            err_type = getattr(getattr(exc, "body", None) or {}, "get", lambda k, d=None: d)("type", "")
-            err_msg  = getattr(getattr(exc, "body", None) or {}, "get", lambda k, d=None: d)("error", {})
+            err_msg = getattr(getattr(exc, "body", None) or {}, "get", lambda k, d=None: d)("error", {})
             if isinstance(err_msg, dict):
                 err_msg = err_msg.get("message", raw)
-            raise ValueError(f"Anthropic API {getattr(exc, 'status_code', '')} – {err_msg or raw}") from exc
+            return ValueError(f"Anthropic API {getattr(exc, 'status_code', '')} – {err_msg or raw}")
+
+        try:
+            response = await self.client.messages.create(**_build_kwargs(True))
+        except Exception as exc:
+            # Zwei Faelle landen hier: ein aeltere Modell kennt thinking/output_config
+            # nicht, oder ein neues Modell lehnt temperature ab. Beides einmal ohne
+            # die strittigen Parameter wiederholen (nur model/messages/tools).
+            if not _is_unsupported_param_error(_to_value_error(exc)):
+                raise _to_value_error(exc) from exc
+            _minimal = {k: v for k, v in _build_kwargs(False).items() if k != "temperature"}
+            print(f"[LLM] Anthropic {model}: Zusatzparameter abgelehnt ({exc}) "
+                  f"→ Wiederholung ohne thinking/effort/temperature", flush=True)
+            try:
+                response = await self.client.messages.create(**_minimal)
+            except Exception as exc2:
+                raise _to_value_error(exc2) from exc2
 
         parts = []
         for block in response.content:
@@ -944,7 +1252,11 @@ class AnthropicSessionProvider(LLMProvider):
 
     # ─── Haupt-Methode ──────────────────────────────────────────
 
-    async def generate_response(self, model: str, system_prompt: str, contents: list, tools: list = None) -> LLMResponse:
+    async def generate_response(self, model: str, system_prompt: str, contents: list,
+                                tools: list = None, reasoning_effort: str | None = None,
+                                temperature=None) -> LLMResponse:
+        # reasoning_effort und temperature werden bewusst ignoriert: claude.ai kennt
+        # ueber die Session-Schnittstelle keine Sampling-Parameter.
         await self._ensure_org_id()
 
         is_first_call = self.conversation_id is None

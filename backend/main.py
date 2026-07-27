@@ -3180,8 +3180,16 @@ async def chat_preprompt_save(request: Request, user: str = Depends(require_auth
 
 @app.get("/api/chat/sessions")
 async def chat_sessions_list(user: str = Depends(require_auth)):
-    """Alle Chat-Sitzungen des Benutzers (neueste zuerst)."""
+    """Alle Chat-Sitzungen des Benutzers (neueste zuerst).
+
+    Beim ERSTEN Aufruf eines Benutzers wird zusaetzlich der Willkommens-Chat
+    "Beispiel Prompts" mit anklickbaren Beispiel-Prompts angelegt (einmalig,
+    per Marker – nach dem Loeschen kommt er nicht wieder)."""
     from backend import chat_sessions as cs
+    try:
+        cs.ensure_welcome_session(user)
+    except Exception:  # noqa: BLE001 – eine fehlende Begruessung darf /chat nicht blockieren
+        pass
     return JSONResponse({"ok": True, "sessions": cs.list_sessions(user)})
 
 

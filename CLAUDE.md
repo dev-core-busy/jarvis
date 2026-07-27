@@ -339,6 +339,36 @@ data/
   Wurzelordner zugeordnet ist: `POST`/`PUT /api/wissen/subfolders`, Prüfung über
   `_wissen_may_write_path()`. Wurzelordner bleiben der Admin-Fläche vorbehalten.
 
+## Kontext-API (/api/context/*) – Rechte und Wirkungsbereich (geklaert 2026-07-27)
+| Endpunkt | Auth | Wirkungsbereich |
+|---|---|---|
+| `GET /stats` | jeder Benutzer | eigener Kontext: mit `session_id` diese /chat-Sitzung, ohne den sitzungslosen Bucket `_hist_key(user)` |
+| `POST /clear` | jeder Benutzer | eigener Kontext (gleicher Schluessel) |
+| `POST /truncate` | jeder Benutzer | eigener Kontext |
+| `POST /compress` | **Admin** (`require_local_auth`) | `_current_chat_history` – der ZULETZT GELADENE Kontext, ggf. fremd |
+| `POST /threshold` | **Admin** (`require_local_auth`) | **global**: gemeinsamer Hauptagent + `settings.json` |
+- **Der Schwellwert ist bewusst GLOBAL** (Vorgabe 2026-07-27): `_compress_threshold` liegt am
+  gemeinsamen Hauptagenten, nicht pro History-Schluessel. Die Oberflaeche sagt es jetzt auch
+  (`telemetry.ctx_threshold_hint`). Nur Admins duerfen ihn setzen – vorher hing `/threshold` an
+  `require_auth`, sodass JEDER angemeldete Benutzer per API die Einstellung aller aendern konnte,
+  obwohl das Feld nur unter *Einstellungen → Logs & Debug → Kontext* (Admin) erreichbar ist.
+  Die Admin-Schranke auf `/settings` ist rein clientseitig (`app.js`: `is_admin === false` →
+  Weiterleitung aufs Portal) – die Route selbst ist ungeschuetzt. Serverseitige Rechte gehoeren
+  deshalb IMMER an den jeweiligen API-Endpunkt, nie an die Seite.
+- **FALLSTRICK – `main_agent` ist lazy:** `agent_manager.main_agent` bleibt nach jedem Neustart
+  `None`, bis der erste Chat-Auftrag laeuft (`get_or_create_main()`). `GET /stats` gab in diesem
+  Zustand eine fest verdrahtete `compress_threshold: 30` zurueck; nach dem Speichern von 50 sprang
+  das Feld also wieder auf 30 und die Einstellung sah wirkungslos aus – obwohl sie griff, sobald
+  der Agent entstand (`JarvisAgent.__init__` liest `compress_threshold`). Jetzt liefert der
+  No-Agent-Zweig den gespeicherten Wert. Beim Ergaenzen solcher Zweige NIEMALS Standardwerte
+  hart hinschreiben, sondern aus der Konfiguration lesen.
+- **Token-Zaehler sind Agent-weit, nicht pro Benutzer:** `_session_input_tokens`/`_output` werden
+  bei JEDEM Auftrag zurueckgesetzt und gehoeren zum zuletzt gelaufenen. `get_context_stats(...,
+  include_session_tokens=False)` nullt sie, wenn der abgefragte Kontext nicht der laufende ist.
+- **`context.js`-Falle:** Der 5-Sekunden-Poll (`_render`) belegt das Schwellwert-Feld neu. Der
+  `_userEdited`-Merker wird beim Speichern zurueckgesetzt, deckte also eine danach begonnene
+  Eingabe nicht ab – deshalb zusaetzlich `document.activeElement !== inp`.
+
 ## Willkommens-Chat „Beispiel Prompts" (/chat, seit 2026-07-27)
 - **Jeder Benutzer** erhaelt beim ERSTEN Aufruf von `GET /api/chat/sessions` eine vorbereitete
   Sitzung mit dem Titel `Beispiel Prompts` (`chat_sessions.ensure_welcome_session`). Sie enthaelt

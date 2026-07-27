@@ -2377,10 +2377,16 @@ KRITISCH – Autonomie-Regeln:
     def set_speed(self, speed: float):
         self._speed = max(0.1, min(5.0, speed))
 
-    def get_context_stats(self, history=None) -> dict:
+    def get_context_stats(self, history=None, include_session_tokens: bool = True) -> dict:
         """Gibt Kontext-Statistiken zurück (History-Länge, Tokens, Schwellwert).
         Ohne history: die aktuell live geladene; mit history: die einer bestimmten
-        Sitzung (fuer die Sidebar-Anzeige beim Chat-Wechsel)."""
+        Sitzung (fuer die Sidebar-Anzeige beim Chat-Wechsel).
+
+        `include_session_tokens=False` nullt die drei Token-Zaehler. Die zaehlen am
+        gemeinsamen Hauptagenten und werden bei JEDEM Auftrag zurueckgesetzt – sie
+        gehoeren also zum ZULETZT gelaufenen Auftrag, egal von wem. Fragt ein
+        Benutzer die Zahlen eines Kontexts ab, der gerade nicht der laufende ist,
+        waeren es fremde Werte."""
         if history is None:
             history = self._current_chat_history
         n = len(history)
@@ -2395,13 +2401,15 @@ KRITISCH – Autonomie-Regeln:
             except Exception:
                 pass
         estimated_tokens = estimated_chars // 4
+        _in  = self._session_input_tokens  if include_session_tokens else 0
+        _out = self._session_output_tokens if include_session_tokens else 0
         return {
             "history_entries":    n,
             "compress_threshold": self._compress_threshold,
             "fills_pct":          round(min(100, n / max(1, self._compress_threshold) * 100), 1),
-            "session_input_tokens":  self._session_input_tokens,
-            "session_output_tokens": self._session_output_tokens,
-            "session_total_tokens":  self._session_input_tokens + self._session_output_tokens,
+            "session_input_tokens":  _in,
+            "session_output_tokens": _out,
+            "session_total_tokens":  _in + _out,
             "estimated_history_tokens": estimated_tokens,
             "agent_state": self.state.value,
         }

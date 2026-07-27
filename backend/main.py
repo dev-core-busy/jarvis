@@ -2411,27 +2411,55 @@ async def api_conv_log_clear(user: str = Depends(require_auth)):
 
 @app.get("/api/context/stats")
 async def api_context_stats(session_id: str = "", user: str = Depends(require_auth)):
-    """Kontext-Statistiken. Mit session_id: fuer genau diese /chat-Sitzung
-    (auch wenn sie gerade nicht der zuletzt gelaufene Kontext ist)."""
+    """Kontext-Statistiken – IMMER nur zum eigenen Kontext des Aufrufers.
+
+    Mit `session_id`: genau diese /chat-Sitzung des Benutzers (auch wenn sie gerade
+    nicht der zuletzt gelaufene Kontext ist). Ohne `session_id`: der sitzungslose
+    Kontext dieses Benutzers (Hauptfenster/WhatsApp/Telegram).
+
+    Frueher lieferte der Zweig ohne `session_id` `_current_chat_history` – also den
+    ZULETZT GELADENEN Kontext des gemeinsamen Hauptagenten, der einem beliebigen
+    anderen Benutzer gehoeren konnte. Inhalte waren nie sichtbar, aber Eintragszahl,
+    Fuellstand und Token-Verbrauch eines Fremden schon."""
     agent = agent_manager.main_agent
     if not agent:
-        return JSONResponse({"history_entries": 0, "compress_threshold": 30,
+        # Der Hauptagent entsteht erst beim ersten Chat-Auftrag. Bis dahin MUSS hier
+        # der gespeicherte Schwellwert stehen und nicht die feste 30 – sonst zeigt
+        # die Oberflaeche nach dem Speichern wieder den alten Wert an und der
+        # Benutzer haelt die Einstellung fuer wirkungslos (sie greift, sobald der
+        # Agent entsteht: JarvisAgent.__init__ liest compress_threshold).
+        try:
+            _thr = int(config.get_setting("compress_threshold") or 30)
+        except (TypeError, ValueError):
+            _thr = 30
+        return JSONResponse({"history_entries": 0, "compress_threshold": max(4, min(200, _thr)),
                              "fills_pct": 0, "session_input_tokens": 0,
                              "session_output_tokens": 0, "session_total_tokens": 0,
                              "estimated_history_tokens": 0, "agent_state": "idle"})
+    from backend.agent import _hist_key as _hk, deserialize_history as _deser
     if session_id:
-        from backend.agent import _hist_key as _hk, deserialize_history as _deser
         hist = agent._user_histories.get(_hk(user, session_id))
         if hist is None:
             from backend import chat_sessions as _cs
             hist = _deser(_cs.load_context(user, session_id))
-        return JSONResponse(agent.get_context_stats(hist))
-    return JSONResponse(agent.get_context_stats())
+    else:
+        # Sitzungsloser Kontext GENAU DIESES Benutzers – derselbe Schluessel, den
+        # /api/context/clear und /truncate verwenden (_hist_key ohne session_id).
+        hist = agent._user_histories.get(_hk(user)) or []
+    # Token-Zaehler nur, wenn der abgefragte Kontext auch der gerade laufende ist –
+    # sonst waeren es die Werte des zuletzt gelaufenen (fremden) Auftrags.
+    own_run = agent._current_chat_history is hist
+    return JSONResponse(agent.get_context_stats(hist, include_session_tokens=own_run))
 
 
 @app.post("/api/context/compress")
-async def api_context_compress(user: str = Depends(require_auth)):
-    """Erzwingt sofortige History-Komprimierung."""
+async def api_context_compress(user: str = Depends(require_local_auth)):
+    """Erzwingt sofortige History-Komprimierung. NUR ADMIN.
+
+    Wirkt auf den ZULETZT GELADENEN Kontext des gemeinsamen Hauptagenten
+    (`_current_chat_history`) – das kann die Sitzung eines anderen Benutzers sein.
+    Deshalb (und weil der Knopf nur in der Admin-Oberflaeche existiert) nicht mehr
+    require_auth. Benutzerbezogen arbeiten /api/context/clear und /truncate."""
     agent = agent_manager.main_agent
     if not agent:
         return JSONResponse({"error": "Kein aktiver Agent"}, status_code=404)
@@ -2550,8 +2578,13 @@ async def api_context_truncate(request: Request, user: str = Depends(require_aut
 
 
 @app.post("/api/context/threshold")
-async def api_context_threshold(request: Request, user: str = Depends(require_auth)):
-    """Setzt den Komprimierungs-Schwellwert (Anzahl History-Einträge)."""
+async def api_context_threshold(request: Request, user: str = Depends(require_local_auth)):
+    """Setzt den Komprimierungs-Schwellwert (Anzahl History-Einträge). NUR ADMIN.
+
+    Der Wert ist GLOBAL (gemeinsamer Hauptagent + settings.json), gilt also fuer
+    alle Benutzer. Vorher stand hier require_auth – damit konnte jeder angemeldete
+    Benutzer per API die Einstellung aller anderen aendern, obwohl das Feld in der
+    Oberflaeche nur Admins erreichen (Einstellungen -> Logs & Debug -> Kontext)."""
     body = await request.json()
     threshold = int(body.get("threshold", 30))
     threshold = max(4, min(200, threshold))

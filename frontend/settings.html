@@ -2628,7 +2628,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             <input id="ctx-threshold-input" type="number" min="4" max="200" step="2" value="30" class="kb-input" style="height:28px;font-size:0.8rem;">
                                             <button id="ctx-threshold-save" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 10px;" data-i18n="common.save">Speichern</button>
                                         </div>
-                                        <p class="kb-hint" style="margin-top:3px;">Min: 4 · Max: 200 · Standard: 30</p>
+                                        <p class="kb-hint" style="margin-top:3px;" data-i18n="telemetry.ctx_threshold_hint">Min: 4 · Max: 200 · Standard: 30 · gilt für alle Benutzer</p>
                                     </div>
                                     <div style="flex:0 0 auto;">
                                         <button id="ctx-compress-btn" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 12px;" data-i18n="telemetry.ctx_compress_btn">🗜️ Jetzt komprimieren</button>
@@ -3439,9 +3439,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=123"></script>
+    <script src="/static/js/i18n.js?v=124"></script>
     <script src="/static/js/cron.js?v=17"></script>
-    <script src="/static/js/context.js?v=5"></script>
+    <script src="/static/js/context.js?v=6"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
     <script src="/static/js/skills.js?v=36"></script>

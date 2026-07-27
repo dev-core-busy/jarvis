@@ -77,9 +77,12 @@ window.contextManager = new (class JarvisContextManager {
         // Schwellwert-Anzeige
         $('ctx-threshold-display') && ($('ctx-threshold-display').textContent = fmt(d.compress_threshold));
 
-        // Schwellwert-Input nur vorbelegen wenn noch nicht vom User verändert
+        // Schwellwert-Input nur vorbelegen, wenn der Benutzer ihn nicht gerade
+        // bearbeitet. Zusaetzlich zum _userEdited-Merker auch auf den Fokus pruefen:
+        // nach dem Speichern wird der Merker zurueckgesetzt, und der 5-Sekunden-Poll
+        // wuerde eine danach begonnene Eingabe sonst mitten im Tippen ueberschreiben.
         const inp = $('ctx-threshold-input');
-        if (inp && !inp._userEdited) {
+        if (inp && !inp._userEdited && document.activeElement !== inp) {
             inp.value = d.compress_threshold ?? 30;
             inp.addEventListener('input', () => { inp._userEdited = true; }, { once: true });
         }
@@ -112,7 +115,14 @@ window.contextManager = new (class JarvisContextManager {
                 body: JSON.stringify({ threshold: val })
             });
             const d = await r.json();
+            if (!r.ok || !d || d.threshold === undefined) {
+                // Vorher wurde auch bei 401/500 ein Erfolg mit "undefined" gemeldet
+                this._notify(`${window.t('common.error')}: ${(d && d.detail) || r.status}`, 'error');
+                return;
+            }
             this._notify(`✅ ${window.t('ctx.threshold_set')}: ${d.threshold}`);
+            // Den vom Server bestaetigten (ggf. begrenzten) Wert uebernehmen
+            inp.value = d.threshold;
             inp._userEdited = false;
             this._load();
         } catch (e) { this._notify('Netzwerkfehler: ' + e.message, 'error'); }

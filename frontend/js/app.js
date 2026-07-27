@@ -561,9 +561,9 @@
         function _initProfilesCollapse() {
             _collapseInit([
                 { hdr: 'prof-sect-list-hdr', body: 'prof-sect-list-body', tog: 'prof-sect-list-tog' },
-                { hdr: 'prof-sect-tts-hdr',  body: 'prof-sect-tts-body',  tog: 'prof-sect-tts-tog'  },
-                { hdr: 'prof-sect-timeout-hdr', body: 'prof-sect-timeout-body', tog: 'prof-sect-timeout-tog' },
-                { hdr: 'prof-sect-maxtok-hdr', body: 'prof-sect-maxtok-body', tog: 'prof-sect-maxtok-tog' },
+                // Tuning fasst Sprachausgabe, Antwort-Timeout und maximale
+                // Antwortlaenge zusammen (vorher drei eigene Klappabschnitte).
+                { hdr: 'prof-sect-tuning-hdr', body: 'prof-sect-tuning-body', tog: 'prof-sect-tuning-tog' },
                 { hdr: 'prof-sect-api-hdr',  body: 'prof-sect-api-body',  tog: 'prof-sect-api-tog'  },
                 { hdr: 'prof-sect-ssl-hdr',  body: 'prof-sect-ssl-body',  tog: 'prof-sect-ssl-tog'  },
             ]);

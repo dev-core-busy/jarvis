@@ -660,14 +660,20 @@ KRITISCH – Autonomie-Regeln:
     def current_temperature(self):
         """Sampling-Temperature aus dem LLM-Profil.
 
-        Rohwert wie im Profil hinterlegt: "" (= Standard 0.2), "auto" (= Parameter
-        weglassen) oder eine Zahl. Die Aufloesung macht llm.py::_resolve_temperature().
+        Rohwert wie im Profil hinterlegt: "auto" (Standard, = Parameter weglassen)
+        oder eine Zahl. Die Aufloesung macht llm.py::_resolve_temperature().
         Bewusst KEINE Pro-Anfrage-Steuerung: eine hohe Temperature zerlegt die
         JSON-Argumente von Tool-Aufrufen, das gehoert an das Modell (= Profil),
         nicht an die einzelne Chat-Nachricht.
         """
+        from backend.llm import TEMPERATURE_AUTO
         p = self._eff_profile
-        return p.get("temperature", "") if p else ""
+        if not p:
+            return TEMPERATURE_AUTO
+        v = p.get("temperature")
+        # Fehlender Key (Altprofil vor der Migration) oder leer = Standard "auto".
+        # NICHT auf Falsyness pruefen: 0.0 ist ein gueltiger Temperature-Wert.
+        return TEMPERATURE_AUTO if v is None or v == "" else v
 
     def _resolve_profile_for_user(self):
         """Setzt das effektive Profil anhand des aktuellen Benutzers (_current_username)."""

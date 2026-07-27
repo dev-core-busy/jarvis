@@ -137,39 +137,46 @@ def _llm_max_tokens() -> int:
         return 8192
 
 
-# Eingebauter Temperature-Standard, wenn das Profil nichts vorgibt. 0.2 ist auf
-# werkzeugnutzende Agenten ausgelegt: hohe Werte zerlegen die JSON-Argumente von
-# Tool-Aufrufen. Wert war bis 2026-07-27 an vier Stellen hart codiert.
-DEFAULT_TEMPERATURE = 0.2
-# Profil-Sonderwert: Parameter gar nicht senden.
+# Profil-Sonderwert UND Standard: Parameter gar nicht senden, der Anbieter
+# entscheidet. Bis 2026-07-27 war stattdessen 0.2 an vier Stellen hart codiert;
+# seither ist "auto" der Standard, damit aktuelle Claude-Modelle nicht in den
+# 400-Fallback laufen (sie lehnen Sampling-Parameter ab).
 TEMPERATURE_AUTO = "auto"
+# Nur noch als benannte Konstante fuer Aufrufer, die bewusst den alten Wert
+# wollen – NICHT mehr der Fallback fuer leere Angaben.
+LEGACY_TEMPERATURE = 0.2
+# Interner Default der Provider-Hilfsmethoden: None = Feld weglassen.
+DEFAULT_TEMPERATURE = None
 
 
 def _resolve_temperature(value) -> float | None:
     """Bringt eine Temperature-Angabe auf den Wert, der an den Provider geht.
 
     Rueckgabe None bedeutet ausdruecklich "Feld weglassen" – nicht 0. Das ist
-    der Weg fuer aktuelle Claude-Modelle (Opus 5/4.8/4.7, Sonnet 5, Fable 5),
-    die Sampling-Parameter mit HTTP 400 ablehnen.
+    seit 2026-07-27 der Standard fuer leere/fehlende Angaben und der Weg fuer
+    aktuelle Claude-Modelle (Opus 5/4.8/4.7, Sonnet 5, Fable 5), die
+    Sampling-Parameter mit HTTP 400 ablehnen.
+
+    ACHTUNG Nebenwirkung: ohne Feld gilt der Anbieter-Default, und der liegt bei
+    vielen OpenAI-kompatiblen Servern und bei Gemini deutlich ueber 0.2. Wer
+    verlaessliche Tool-Aufrufe braucht, traegt im Profil eine Zahl ein.
     """
     if value is None:
-        return DEFAULT_TEMPERATURE
+        return None
     if isinstance(value, str):
         s = value.strip().lower()
-        if not s:
-            return DEFAULT_TEMPERATURE
-        if s == TEMPERATURE_AUTO:
+        if not s or s == TEMPERATURE_AUTO:
             return None
         try:
             value = float(s.replace(",", "."))
         except ValueError:
-            return DEFAULT_TEMPERATURE
+            return None
     try:
         f = float(value)
     except (TypeError, ValueError):
-        return DEFAULT_TEMPERATURE
+        return None
     if f != f:                     # NaN
-        return DEFAULT_TEMPERATURE
+        return None
     return max(0.0, min(f, 2.0))
 
 

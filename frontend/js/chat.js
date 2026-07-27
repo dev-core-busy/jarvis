@@ -1123,6 +1123,12 @@
     // Loescht NUR die angeklickte Bubble (analog Android-App-Verhalten).
     // Nachfolgende Antworten/Dialoge bleiben erhalten. Backend-Agent-History
     // wird nicht angetastet (User-Anker/Tool-Call-Verkettung bleibt intakt).
+    // Verlaufseintrag, dem im DOM genau eine .msg-row entspricht. Der Willkommens-
+    // Eintrag (kind:"welcome") hat role:"bot", wird aber als Karte gerendert – er
+    // darf deshalb bei JEDER Index-Zuordnung DOM<->Verlauf uebersprungen werden,
+    // sonst loescht ein Klick auf die erste Bot-Antwort den falschen Eintrag.
+    function _isRowEntry(e) { return !!e && e.kind !== 'welcome'; }
+
     function _deleteBubble(row, role) {
         if (!row || !row.parentNode) return;
         if (_editingRow && _editingRow !== row) {
@@ -1153,7 +1159,7 @@
             let seen = 0;
             for (let i = 0; i < _chatHistory.length; i++) {
                 const e = _chatHistory[i];
-                if (e && wantRoles.includes(e.role)) {
+                if (_isRowEntry(e) && wantRoles.includes(e.role)) {
                     if (seen === roleIndex) { _chatHistory.splice(i, 1); break; }
                     seen++;
                 }
@@ -1201,6 +1207,7 @@
                 let uSeen = 0, bSeen = 0;
                 _chatHistory = _chatHistory.filter(e => {
                     if (!e) return false;
+                    if (!_isRowEntry(e)) return true;   // Willkommens-Karte: keine .msg-row
                     if (e.role === 'user') { const keep = !delUser.has(uSeen); uSeen++; return keep; }
                     if (e.role === 'bot' || e.role === 'assistant') { const keep = !delBot.has(bSeen); bSeen++; return keep; }
                     return true;
@@ -1685,6 +1692,104 @@
         }
     }
 
+    // ── Willkommens-Karte "Beispiel Prompts" ─────────────────────────────────
+    // Das Backend legt pro Benutzer EINMALIG eine Sitzung "Beispiel Prompts" an,
+    // deren Transkript nur einen Eintrag mit kind:"welcome" enthaelt (siehe
+    // backend/chat_sessions.py::ensure_welcome_session). Der sichtbare Inhalt
+    // entsteht hier aus i18n-Keys – so bleibt DE/EN umschaltbar und der Text muss
+    // nicht doppelt (Backend + Oberflaeche) gepflegt werden.
+    // Reihenfolge = Anzeigereihenfolge; icon ist reine Deko (aria-hidden).
+    const _WELCOME_EXAMPLES = [
+        { key: 'excel', icon: '📊' },
+        { key: 'word',  icon: '📝' },
+        { key: 'ppt',   icon: '📑' },
+        { key: 'data',  icon: '📎' },
+        { key: 'kb',    icon: '📚' },
+        { key: 'web',   icon: '🌐' },
+        { key: 'image', icon: '🎨' },
+        { key: 'cron',  icon: '⏰' },
+        { key: 'multi', icon: '🧩' },
+        { key: 'code',  icon: '💻' },
+    ];
+
+    /** Baut die Willkommens-Karte mit anklickbaren Beispiel-Prompts. */
+    function _renderWelcomeCard(entry) {
+        const card = document.createElement('div');
+        card.className = 'welcome-card';
+
+        const head = document.createElement('p');
+        head.className = 'welcome-card-head';
+        head.setAttribute('data-i18n', 'chat.welcome_head');
+        head.textContent = window.t('chat.welcome_head');
+
+        const intro = document.createElement('p');
+        intro.className = 'welcome-card-intro';
+        intro.setAttribute('data-i18n', 'chat.welcome_intro');
+        // Notfall-Text des Backends nutzen, falls die i18n-Tabelle den Key nicht kennt
+        intro.textContent = window.t('chat.welcome_intro') === 'chat.welcome_intro'
+            ? ((entry && entry.text) || '') : window.t('chat.welcome_intro');
+
+        const grid = document.createElement('div');
+        grid.className = 'wex-grid';
+        _WELCOME_EXAMPLES.forEach(ex => {
+            const labelKey  = 'chat.wex_' + ex.key + '_label';
+            const descKey   = 'chat.wex_' + ex.key + '_desc';
+            const promptKey = 'chat.wex_' + ex.key + '_prompt';
+
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'wex-chip';
+            // Prompt NICHT hier einfrieren, sondern beim Klick frisch uebersetzen –
+            // sonst haette ein Sprachwechsel den alten Text weitergesendet.
+            chip.dataset.promptKey = promptKey;
+            chip.setAttribute('data-i18n-title', promptKey);
+            chip.title = window.t(promptKey);
+
+            const icon = document.createElement('span');
+            icon.className = 'wex-icon';
+            icon.setAttribute('aria-hidden', 'true');
+            icon.textContent = ex.icon;
+
+            const txt = document.createElement('span');
+            txt.className = 'wex-text';
+            const lab = document.createElement('span');
+            lab.className = 'wex-label';
+            lab.setAttribute('data-i18n', labelKey);
+            lab.textContent = window.t(labelKey);
+            const desc = document.createElement('span');
+            desc.className = 'wex-desc';
+            desc.setAttribute('data-i18n', descKey);
+            desc.textContent = window.t(descKey);
+            txt.appendChild(lab); txt.appendChild(desc);
+
+            chip.appendChild(icon); chip.appendChild(txt);
+            chip.addEventListener('click', () => _useExamplePrompt(window.t(chip.dataset.promptKey)));
+            grid.appendChild(chip);
+        });
+
+        const hint = document.createElement('p');
+        hint.className = 'welcome-card-hint';
+        hint.setAttribute('data-i18n', 'chat.welcome_hint');
+        hint.textContent = window.t('chat.welcome_hint');
+
+        card.appendChild(head);
+        card.appendChild(intro);
+        card.appendChild(grid);
+        card.appendChild(hint);
+        return card;
+    }
+
+    /** Beispiel-Prompt in die Eingabe uebernehmen und abschicken. */
+    function _useExamplePrompt(text) {
+        if (!text) return;
+        msgInput.value = text;
+        msgInput.dispatchEvent(new Event('input'));   // Auto-Resize + Senden-Knopf aktivieren
+        // Laeuft schon eine Anfrage, bleibt der Text stehen (sendMessage warnt) –
+        // der Benutzer kann ihn dann nach dem Stoppen selbst abschicken.
+        sendMessage();
+        if (!agentRunning) msgInput.focus();
+    }
+
     // ── Chat-Sitzungen: Persistenz je aktiver Sitzung (statt geteilter History) ──
     function _csHeaders(extra) { return Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {}); }
     function _sidKey() { return 'jarvis_chat_sid_' + (_currentUser || 'anon'); }
@@ -1927,6 +2032,7 @@
 
         removeWelcome();
         let restoredDate = '';
+        let hasWelcome = false;   // Willkommens-Karte gerendert? -> applyLang nachziehen
 
         for (const entry of _chatHistory) {
             if (entry.date && entry.date !== restoredDate) {
@@ -1935,6 +2041,13 @@
                 sep.className = 'date-sep';
                 sep.innerHTML = `<span>${_dateLabel(entry.date)}</span>`;
                 messagesEl.appendChild(sep);
+            }
+
+            // Willkommens-Eintrag: Karte mit anklickbaren Beispiel-Prompts statt Bubble
+            if (entry.kind === 'welcome') {
+                messagesEl.appendChild(_renderWelcomeCard(entry));
+                hasWelcome = true;
+                continue;
             }
 
             if (entry.role === 'user' || entry.role === 'bot') {
@@ -1946,12 +2059,22 @@
         // damit maybeAddDateSep() keinen doppelten Separator erzeugt
         if (restoredDate) lastDate = restoredDate;
 
-        // Visueller Trenner zwischen alten und neuen Nachrichten
-        const divider = document.createElement('div');
-        divider.className = 'date-sep';
-        divider.style.opacity = '0.45';
-        divider.innerHTML = `<span>── ${escapeHtml(window.t('chat.new_session'))} ──</span>`;
-        messagesEl.appendChild(divider);
+        // Visueller Trenner zwischen alten und neuen Nachrichten – entfaellt beim
+        // noch unbenutzten Willkommens-Chat (dort gibt es keine "alten" Nachrichten)
+        const onlyWelcome = _chatHistory.length === 1 && _chatHistory[0] && _chatHistory[0].kind === 'welcome';
+        if (!onlyWelcome) {
+            const divider = document.createElement('div');
+            divider.className = 'date-sep';
+            divider.style.opacity = '0.45';
+            divider.innerHTML = `<span>── ${escapeHtml(window.t('chat.new_session'))} ──</span>`;
+            messagesEl.appendChild(divider);
+        }
+
+        // Sprache/Branding auf die frisch gerenderte Willkommens-Karte anwenden
+        if (hasWelcome) {
+            if (window.applyLang) window.applyLang();
+            if (window.applyBrandingNow) window.applyBrandingNow();
+        }
 
         scrollToBottom();
     }

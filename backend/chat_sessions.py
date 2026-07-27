@@ -130,6 +130,56 @@ def create_session(user: str, title: str = "") -> dict:
     return meta
 
 
+# ─── Willkommens-Chat "Beispiel Prompts" ─────────────────────────────────────
+# Jeder Benutzer bekommt beim ERSTEN /chat-Aufruf eine vorbereitete Sitzung mit
+# anklickbaren Beispiel-Prompts. Der Eintrag traegt nur `kind: "welcome"` – den
+# sichtbaren Text baut das Frontend aus i18n-Keys (DE/EN), damit die Inhalte
+# nicht doppelt (Backend + Oberflaeche) gepflegt werden muessen. `text` ist eine
+# reine Notfall-Beschreibung, falls die Oberflaeche den Sondertyp nicht kennt.
+WELCOME_TITLE = "Beispiel Prompts"
+_WELCOME_MARK = ".welcome_v1"      # Marker: schon angelegt (auch nach Loeschen)
+_WELCOME_FALLBACK = ("Willkommen! Hier findest du Beispiel-Prompts, die zeigen, "
+                     "was ich fuer dich tun kann.")
+
+
+def welcome_done(user: str) -> bool:
+    """True, wenn der Willkommens-Chat fuer diesen Benutzer bereits angelegt wurde."""
+    return (_user_dir(user) / _WELCOME_MARK).exists()
+
+
+def ensure_welcome_session(user: str) -> dict | None:
+    """Legt einmalig den Willkommens-Chat "Beispiel Prompts" an.
+
+    Rueckgabe: die neue Sitzung oder None, wenn schon vorhanden/nicht noetig.
+    Der Marker verhindert ein Wiederauftauchen, nachdem der Benutzer die Sitzung
+    geloescht hat – eine Willkommensmeldung, die sich nicht wegraeumen laesst,
+    waere eine Zumutung.
+    """
+    with _LOCK:
+        ud = _user_dir(user)
+        mark = ud / _WELCOME_MARK
+        if mark.exists():
+            return None
+        sess = create_session(user, WELCOME_TITLE)
+        now = time.localtime()
+        save_transcript(user, sess["id"], [{
+            "role": "bot",
+            "kind": "welcome",
+            "text": _WELCOME_FALLBACK,
+            "time": time.strftime("%H:%M", now),
+            "date": time.strftime("%d.%m.%Y", now),
+            "ts": int(time.time() * 1000),
+        }])
+        try:
+            ud.mkdir(parents=True, exist_ok=True)
+            mark.write_text("1", encoding="utf-8")
+        except Exception:
+            # Ohne Marker wuerde der Chat beim naechsten Aufruf erneut entstehen;
+            # das ist unschoen, aber kein Grund, den /chat-Aufruf scheitern zu lassen.
+            pass
+        return sess
+
+
 def rename_session(user: str, sid: str, title: str) -> dict | None:
     with _LOCK:
         if not _valid(user, sid):

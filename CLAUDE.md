@@ -339,6 +339,30 @@ data/
   Wurzelordner zugeordnet ist: `POST`/`PUT /api/wissen/subfolders`, Prüfung über
   `_wissen_may_write_path()`. Wurzelordner bleiben der Admin-Fläche vorbehalten.
 
+## Willkommens-Chat „Beispiel Prompts" (/chat, seit 2026-07-27)
+- **Jeder Benutzer** erhaelt beim ERSTEN Aufruf von `GET /api/chat/sessions` eine vorbereitete
+  Sitzung mit dem Titel `Beispiel Prompts` (`chat_sessions.ensure_welcome_session`). Sie enthaelt
+  genau einen Transkript-Eintrag `{role:"bot", kind:"welcome", …}` – **kein LLM-Kontext**, die
+  Begruessung landet also nicht im Gedaechtnis des Agenten.
+- **Marker `data/chats/<user>/.welcome_v1`** verhindert das Wiederauftauchen, nachdem der Benutzer
+  die Sitzung geloescht hat. Eine Willkommensmeldung, die sich nicht wegraeumen laesst, waere eine
+  Zumutung. Fuer eine neue Beispiel-Generation den Markernamen hochzaehlen (`_WELCOME_MARK`) –
+  dann bekommen ALLE Benutzer den Chat erneut.
+- **Inhalt liegt in der Oberflaeche, nicht im Backend:** `chat.js::_renderWelcomeCard` baut die
+  Karte aus i18n-Keys (`chat.welcome_head|_intro|_hint`, je Beispiel `chat.wex_<key>_label|_desc|
+  _prompt`), das Backend liefert nur `text` als Notfall-Text. So bleibt DE/EN umschaltbar und der
+  Text steht nicht doppelt. Katalog + Reihenfolge: `_WELCOME_EXAMPLES` in chat.js (10 Beispiele:
+  Excel+Chart, Word→PDF, PPTX-Schaubild, Anhang-Analyse, Wissensdatenbank, Web, Bild, Cron,
+  Multi-Agent, Skript). Der Prompt wird ERST BEIM KLICK uebersetzt – sonst wuerde nach einem
+  Sprachwechsel der alte Text gesendet.
+- **Klick = sofort senden** (`_useExamplePrompt` → `sendMessage()`). Die Karte bleibt danach
+  stehen, damit weitere Beispiele erreichbar sind.
+- **FALLSTRICK – Index-Zuordnung DOM↔Verlauf:** Der Eintrag hat `role:"bot"`, erzeugt aber KEINE
+  `.msg-row`. Alle Stellen, die eine DOM-Zeile per Rollen-Index auf `_chatHistory` abbilden
+  (`_deleteBubble`, Mehrfach-Loeschen `onDelete`), muessen ihn ueberspringen – dafuer gibt es
+  `_isRowEntry()`. Ohne das loescht ein Klick auf die erste Bot-Antwort den falschen Eintrag.
+  `_submitEdit`/`truncateHistoryToUserIndex` zaehlen nur `user`-Eintraege und sind nicht betroffen.
+
 ## Skill-System
 - Skills liegen unter `skills/<name>/` mit `skill.json` (Manifest) + `main.py` (get_tools())
 - Tools erben von `backend/tools/base.py:BaseTool`

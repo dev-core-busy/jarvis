@@ -176,15 +176,26 @@ data/
   `agent.py::current_temperature` gelesen. Die Begruendung fuer „Profil statt Anfrage": die
   Temperature ist faktisch eine Modell-Eigenschaft, und in Jarvis IST das Profil das Modell –
   ausserdem zerlegen Werte ab etwa 0.7 die JSON-Argumente von Tool-Aufrufen, was pro Nachricht
-  umschaltbar ein reiner Fussangel-Schalter waere. Drei Zustaende sind moeglich: `""` bedeutet
-  eingebauter Standard `0.2` (exakt das Verhalten vor dieser Aenderung), eine Zahl `0.0`–`2.0`
-  bedeutet genau diesen Wert, und der Sonderwert `"auto"` laesst den Parameter **komplett weg**.
-  `"auto"` ist kein Schoenheitsfehler, sondern notwendig: aktuelle Claude-Modelle (Opus 5/4.8/4.7,
-  Sonnet 5, Fable 5) lehnen Sampling-Parameter mit HTTP 400 ab, und ohne `"auto"` faengt das nur
-  der 400-Fallback ab – also erst nach einem verschwendeten Aufruf. Validierung:
-  `config._valid_temperature()` (nimmt auch deutsche Dezimalkommas, begrenzt auf 0..2, macht aus
-  Muell `""` statt einen Fehler); Aufloesung: `llm.py::_resolve_temperature()` (gibt `None`
-  zurueck = Feld weglassen, **nicht** 0).
+  umschaltbar ein reiner Fussangel-Schalter waere. Zwei Zustaende: **`"auto"` ist der STANDARD**
+  (seit 2026-07-27) und laesst den Parameter komplett weg, eine Zahl `0.0`–`2.0` sendet genau
+  diesen Wert. Validierung: `config._valid_temperature()` (nimmt deutsche Dezimalkommas, begrenzt
+  auf 0..2, macht aus Leerem und Muell `"auto"`); Aufloesung: `llm.py::_resolve_temperature()`
+  (gibt `None` zurueck = Feld weglassen, **nicht** 0).
+- **Warum `"auto"` der Standard ist – und was das kostet.** Aktuelle Claude-Modelle
+  (Opus 5/4.8/4.7, Sonnet 5, Fable 5) lehnen Sampling-Parameter mit HTTP 400 ab; ohne `"auto"`
+  faengt das erst der 400-Fallback ab, also nach einem verschwendeten Aufruf. **Nebenwirkung, die
+  man kennen muss:** ohne Feld gilt der Anbieter-Default, und der liegt bei vielen
+  OpenAI-kompatiblen Servern und bei Gemini deutlich ueber den frueher fest verdrahteten 0.2.
+  Fuer werkzeuglastige Profile kann das die Zuverlaessigkeit von Tool-Aufrufen senken – dort
+  gehoert eine feste Zahl ins Profil (0.2 stellt das Verhalten vor Juli 2026 wieder her).
+  `llm.LEGACY_TEMPERATURE = 0.2` dokumentiert diesen Altwert als benannte Konstante.
+- **Migration bestehender Profile** (`_load_v2`): Profile ohne `temperature`-Key oder mit leerem
+  Wert werden beim Laden auf `"auto"` gesetzt und **einmalig** zurueckgeschrieben – nur wenn
+  wirklich etwas geaendert wurde, sonst schriebe jeder Start die settings.json neu. Ein bereits
+  gesetzter Zahlenwert bleibt unangetastet, **auch `0.0`** (die Pruefung ist
+  `in ("", None)`, NICHT auf Falsyness – sonst wuerde 0.0 als „leer" gelten). Schlaegt das
+  Schreiben fehl (Rechte), gelten die Werte nur fuer diesen Lauf und der Start laeuft weiter.
+  Auf DEV verifiziert: 4 Profile migriert, API-Keys unveraendert, zweiter Start schreibt nicht.
 - **`temperature` war an vier Stellen hart codiert** (Gemini-Config, OpenAI-nativ,
   OpenAI-Prompt-Modus, Anthropic-kwargs) und ist jetzt an allen vier durch den aufgeloesten Wert
   ersetzt. Jeder Provider sendet das Feld nur, wenn der aufgeloeste Wert nicht `None` ist –
@@ -210,15 +221,22 @@ data/
   den Wert direkt in settings.json eintragen. Jetzt ist das Feld in beiden Funktionen vorhanden
   und wird als `bool()` normalisiert. Beim Erweitern von Profil-Feldern immer BEIDE Stellen
   anfassen, sonst entsteht genau dieser stille Fehler wieder.
-- **Oberflaeche:** *Einstellungen → Profile* hat einen neuen Klappabschnitt „Maximale
-  Antwortlaenge" (global, neben „Antwort-Timeout") und das Profil-Formular ein Freitextfeld
-  „Temperature" mit `datalist`-Vorschlaegen (0.0/0.2/0.7/1.0/auto). Beide tragen einen
-  Infotext mit fuenf Saetzen, per `data-i18n` in DE und EN
-  (`profile.maxtok_hint`, `profile.temp_hint`). Das Temperature-Feld ist absichtlich ein
+- **Oberflaeche – Klappabschnitt „Tuning"** (*Einstellungen → KI & System*): fasst seit
+  2026-07-27 „Sprachausgabe (TTS)", „Antwort-Timeout" und „Maximale Antwortlaenge" in EINEM
+  Abschnitt zusammen (vorher drei einzelne). Die drei Untergruppen nutzen `.tuning-group` +
+  `.tuning-group-title` (style.css), getrennt durch eine Linie ab der zweiten Gruppe. **Alle
+  Element-IDs sind unveraendert geblieben** (`setting-tts-voice`, `setting-llm-timeout`,
+  `setting-llm-max-tokens`, die zugehoerigen Buttons und Status-Spans) – app.js verdrahtet sie
+  darueber, ein Umbenennen haette die Speichern-Knoepfe still gebrochen. In
+  `_initProfilesCollapse()` ersetzt ein Eintrag `prof-sect-tuning-*` die drei alten.
+  Die Untergruppen-Titel recyceln die vorhandenen i18n-Keys `profile.section_tts|timeout|maxtok`.
+- **Oberflaeche – Temperature-Feld:** Freitextfeld im Profil-Formular mit `datalist`
+  (auto/0.0/0.2/0.7/1.0), Platzhalter „leer = auto (Anbieter entscheidet)". Absichtlich ein
   Textfeld und kein `number`-Input, weil `"auto"` ein gueltiger Wert ist. Beim Laden eines
   Profils wird auf `null`/`undefined`/`""` geprueft und **nicht** auf Falsyness – sonst wuerde
   ein gespeicherter Wert `0` als leeres Feld erscheinen. Die Validierung passiert bewusst nur
-  im Backend; das Frontend schickt den Rohtext.
+  im Backend; das Frontend schickt den Rohtext. Infotexte mit je fuenf Saetzen in DE und EN
+  (`profile.maxtok_hint`, `profile.temp_hint`).
 - **API-Nutzung:** Profil-Feld ueber `POST`/`PUT /api/profiles` als `temperature`
   (`""`|`"auto"`|Zahl), globaler Wert ueber `POST /api/settings` als `llm_max_tokens`.
   Achtung Asymmetrie: das Profil-Feld `reasoning_effort` akzeptiert nur die fuenf kanonischen
@@ -404,6 +422,13 @@ data/
   ein lokales `from backend.config import config`. Fehlte in `GeminiProvider.generate_response`
   → **jeder** Gemini-Chat scheiterte still mit `NameError: name 'config' is not defined`
   (behoben 2026-07-27). Beim Erweitern von llm.py darauf achten.
+- **Icon-Knoepfe in Klapp-Kopfzeilen brauchen `.kb-hdr-btn`**, nicht `.kb-btn-action`:
+  Letztere ist ein grosser CTA (Akzent-Hintergrund, weisse Schrift, 0.45rem Padding) und fuellte
+  im Telemetry-Reiter die Zeile mit Akzentfarbe. `.kb-btn-danger` war bei 0.72rem umgekehrt zu
+  blass. `.kb-hdr-btn` (+ Modifier `.is-danger`) vereinheitlicht Groesse, Rahmen und Hover fuer
+  LLM-Verlauf, Kontext/History und Tool-Audit-Log; Farben kommen aus `var(--danger)` per
+  `color-mix`. Icon ist `⟳`/`×` als Textglyph statt Emoji – 🔄 wird je nach System farbig
+  gerendert und passt sich keinem Theme an.
 - **Neues Profil-Feld = ZWEI Stellen in config.py:** `create_profile()` (Anlegen) UND die
   Whitelist in `update_profile()`. Fehlt eine, wird das Feld still verworfen – genau so war
   `prompt_tool_calling` jahrelang wirkungslos, obwohl Frontend und agent.py es kannten.

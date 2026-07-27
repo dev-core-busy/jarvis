@@ -57,28 +57,26 @@ def _valid_temperature(value):
     """Filtert einen Temperature-Wert fuer ein Profil.
 
     Rueckgabe:
-      ""     – nicht gesetzt, es gilt der eingebaute Standard 0.2 (Altverhalten)
-      "auto" – Parameter weglassen, der Provider entscheidet
+      "auto" – Parameter weglassen, der Provider entscheidet (STANDARD)
       float  – dieser Wert, auf 0.0..2.0 begrenzt
 
-    Unbrauchbare Eingaben werden zu "" statt zu einem Fehler: ein Tippfehler im
-    Profilformular darf kein Profil unbenutzbar machen.
+    Leere und unbrauchbare Eingaben werden zu "auto": ein Tippfehler im
+    Profilformular darf kein Profil unbenutzbar machen, und "auto" ist seit
+    2026-07-27 der Standard (vorher wurde daraus der feste Wert 0.2).
     """
     if value is None:
-        return ""
+        return TEMPERATURE_AUTO
     if isinstance(value, str):
         s = value.strip().lower()
-        if not s:
-            return ""
-        if s == TEMPERATURE_AUTO:
+        if not s or s == TEMPERATURE_AUTO:
             return TEMPERATURE_AUTO
         value = s.replace(",", ".")   # deutsche Dezimalkommas zulassen
     try:
         f = float(value)
     except (TypeError, ValueError):
-        return ""
+        return TEMPERATURE_AUTO
     if f != f:                        # NaN
-        return ""
+        return TEMPERATURE_AUTO
     return max(TEMPERATURE_MIN, min(f, TEMPERATURE_MAX))
 
 
@@ -291,12 +289,37 @@ class Config:
         if not os.getenv("AGENT_API_KEY") and data.get("agent_api_key"):
             self.AGENT_API_KEY = data["agent_api_key"]
 
+        # Migration 2026-07-27: "auto" ist der neue Standard fuer temperature.
+        # Bestehende Profile haben das Feld gar nicht oder leer – beides wird auf
+        # "auto" gesetzt und EINMAL zurueckgeschrieben, damit die Oberflaeche den
+        # tatsaechlich wirksamen Wert anzeigt. Ein bereits gesetzter Zahlenwert
+        # bleibt unangetastet.
+        _migrated = 0
+        for p in self.profiles:
+            if not isinstance(p, dict):
+                continue
+            if p.get("temperature", "") in ("", None):
+                p["temperature"] = TEMPERATURE_AUTO
+                _migrated += 1
+
         # Sicherstellen, dass active_profile_id gültig ist
         if self.profiles and not any(p["id"] == self.active_profile_id for p in self.profiles):
             self.active_profile_id = self.profiles[0]["id"]
         # Verwaiste Benutzer-Profilwahlen (geloeschte Profile) entfernen
         valid_ids = {p["id"] for p in self.profiles}
         self.user_profiles = {u: pid for u, pid in self.user_profiles.items() if pid in valid_ids}
+
+        # Migration erst NACH allen Aufraeumschritten zurueckschreiben, und nur
+        # wenn wirklich etwas geaendert wurde (kein Schreiben bei jedem Start).
+        if _migrated:
+            print(f"[config] temperature-Migration: {_migrated} Profil(e) auf "
+                  f"'{TEMPERATURE_AUTO}' gesetzt", flush=True)
+            try:
+                self._save_to_file()
+            except Exception as e:  # noqa: BLE001
+                # Nicht schreibbar (z.B. Rechte) darf den Start nicht verhindern –
+                # die Werte gelten dann nur fuer diesen Lauf.
+                print(f"[config] temperature-Migration nicht persistiert: {e}", flush=True)
 
     def _migrate_v1_to_v2(self, data: dict):
         """Migriert settings.json v1 (flach) nach v2 (Profile)."""
@@ -507,8 +530,9 @@ class Config:
             # Denktiefe dieses Profils ("" = Provider-Standard). Eine einzelne
             # Chat-Anfrage darf den Wert ueberschreiben (reasoning_effort im Task).
             "reasoning_effort": _valid_effort(data.get("reasoning_effort")),
-            # Sampling-Temperature ("" = Standard 0.2, "auto" = nicht senden).
-            "temperature": _valid_temperature(data.get("temperature")),
+            # Sampling-Temperature. Standard "auto" = Parameter nicht senden,
+            # der Anbieter entscheidet. Alternativ eine Zahl 0.0..2.0.
+            "temperature": _valid_temperature(data.get("temperature", TEMPERATURE_AUTO)),
             # Prompt-basiertes Tool-Calling. Stand bis 2026-07-27 in KEINER
             # Persistenz-Liste – der Schalter im Profilformular wirkte deshalb nie.
             "prompt_tool_calling": bool(data.get("prompt_tool_calling", False)),

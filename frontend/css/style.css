@@ -3973,6 +3973,62 @@ select option:hover {
     padding-top: 6px;
 }
 
+/* Untergruppen innerhalb eines Klappabschnitts (z.B. "Tuning" im Reiter
+   KI & System). Trennlinie zwischen den Gruppen, nicht vor der ersten. */
+.tuning-group + .tuning-group {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.tuning-group-title {
+    margin: 0 0 0.6rem 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.01em;
+}
+
+/* Kleine Icon-Knoepfe in aufklappbaren Kopfzeilen (Telemetry: LLM-Verlauf,
+   Tool-Audit-Log). Vorher nutzten die beiden Zeilen unterschiedliche Klassen –
+   einmal den grossen CTA .kb-btn-action (fuellte die Zeile mit Akzentfarbe),
+   einmal .kb-btn-secondary/.kb-btn-danger. Diese Klasse vereinheitlicht Groesse
+   und Rahmen; die Bedeutung (neutral vs. loeschend) kommt ueber den Modifier. */
+.kb-hdr-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 24px;
+    padding: 0 7px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-glass);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    line-height: 1;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.kb-hdr-btn:hover {
+    background: rgba(var(--fg-rgb), 0.08);
+    color: var(--text-primary);
+}
+
+/* Loeschen-Variante: als Rahmen/Schrift erkennbar, aber nicht so blass wie
+   .kb-btn-danger es bei 0.72rem war. */
+.kb-hdr-btn.is-danger {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.kb-hdr-btn.is-danger:hover {
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    color: var(--danger);
+    border-color: var(--danger);
+}
+
 .kb-hint {
     font-size: 0.8rem;
     color: var(--text-secondary);

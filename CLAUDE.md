@@ -176,6 +176,81 @@ data/
   bzw. `unattended-upgrade`), der haelt dann die apt-Sperre und laesst jede weitere
   Aktion warten. Sie feuern ohnehin nach Plan.
 
+## Auftraggeber-Bindung zeitversetzter Läufe (Fix 2026-07-28)
+**Der Vorfall:** Auf ECHT lief am 28.07. um 03:00 der Cron-Job `system_auto_update`
+(`git pull && systemctl restart jarvis.service`) und wurde mit „der aktuell angemeldete
+Benutzer hat keine Berechtigung" abgebrochen – obwohl niemand angemeldet war. Der Job hatte
+die Rechte eines *fremden Chat-Nutzers* geerbt. Dieselbe Mechanik trifft in der anderen
+Richtung: **ein Domain-Nutzer konnte per Chat einen Cron-Job anlegen, der später mit
+Root-Rechten feuerte.**
+- **Ursache – drei Zeilen, die zusammen die Lücke bilden:**
+  1. `agent.py::_execute_tool` entschied über Rechte anhand von `self._current_username`.
+  2. `_LOCAL_PRIVILEGED_USERS = {"jarvis", "root", ""}` – **der leere String ist privilegiert.**
+  3. `run_task_headless()` setzte diesen Wert NIE, und Cron/Watcher/WhatsApp/Telegram/Notify
+     laufen alle auf dem **geteilten** Hauptagenten (`get_or_create_main()`).
+  Ergebnis: der zeitversetzte Lauf bekam die Identität, die zufällig zuletzt am Objekt hing –
+  nach einem Dienststart `""` → `_root_broker=True`, keine Shell-Deny-Muster, kein
+  Pfad-Confinement, keine Dokument-Eigentümer-Schranke. **Nichtdeterministisch:** derselbe Job
+  läuft je nach Vorgeschichte als root oder scheitert an einer Domain-Sperre.
+- **Die Lösung heißt Actor-Bindung** (`agent.py`): `_actor_cv` (ContextVar) hält
+  `(username, privileged)` für den LAUFENDEN Auftrag, `actor_scope()` setzt und **stellt
+  zurück**, `_actor_is_privileged()` ist ab jetzt die EINZIGE Quelle für die Rechtefrage.
+  Alle vier Gate-Stellen im Dispatch (Tool-Sperrliste, filesystem, shell, Root-Broker) prüfen
+  nur noch das – nicht mehr den Namen.
+  - **ContextVar, nicht Objekt-Attribut:** ein Cron-Lauf um 03:00 und ein Chat-Auftrag können
+    GLEICHZEITIG auf demselben Agenten liegen. Ein Attribut würde den Sicherheitsentscheid des
+    jeweils anderen Laufs mitregieren; jeder `asyncio.Task` hat seine eigene Kopie, Sub-Agenten
+    erben sie. Der Test „parallel Chat + Cron" prüft genau das.
+  - `run_task_headless(actor=…)` ist **fail-closed**: nicht übergeben = unprivilegiert.
+    Der Sentinel `_ACTOR_UNSET` unterscheidet das von `actor=None` (= bestehenden Kontext
+    behalten, nur für Läufe, die schon in einem Scope stehen).
+  - `_ANON_ACTOR = "__unprivilegiert__"`: unprivilegierte Läufe OHNE Namen bekommen einen
+    Platzhalter, **nie den leeren String** – leer heißt bei `set_tool_user()` „keine Schranke",
+    fremde Dokumente wären damit wieder lesbar.
+- **Jeder Job trägt seinen Besitzer** (`scheduler.py`, `file_watcher.py`): `owner` +
+  `owner_privileged` + `created_via` werden beim Anlegen festgeschrieben; `_actor_for()` baut
+  daraus den Actor. **Privilegiert wird nur, wer beides hat** (`owner_privileged and owner`) –
+  ein manipulierter Eintrag ohne Besitzer zählt nicht.
+  - **`UPDATABLE_FIELDS` ist die Kernschranke:** `update_job(**fields)` nahm vorher BELIEBIGE
+    Felder – ein Domain-Nutzer hätte sich per `PUT /api/cron/<id>` einfach
+    `owner_privileged: true` gesetzt. Jetzt Whitelist; die Bindung ändert **nur** `claim_job()`.
+  - **Altbestand ohne `owner` läuft unprivilegiert** (fail-closed) und wird beim Laden
+    protokolliert. Nicht geraten: der Besitzer ist nicht rekonstruierbar. Reparatur =
+    `POST /api/cron/{id}/claim` (Admin, `require_local_auth`) bzw. 🔑 in der Oberfläche.
+    **Das ist die bewusste Attestierung** – der einzige Weg zu Systemrechten.
+- **Kanäle ohne Konto sind IMMER unprivilegiert** – nicht konfigurierbar: WhatsApp
+  (`wa:+49…`), Telegram (`tg:<chat>`), Notify-API (`api:<quelle>`). Der Absender ist eine
+  Telefonnummer/ein Gerät, keine Anmeldung. Wer hier Systemrechte braucht, legt einen
+  Cron-Job als Admin an.
+- **Zweite Schranke beim ANLEGEN** (`cron_tool.py::_root_intent`): ein unprivilegierter
+  Benutzer darf keinen Auftrag mit System-/Root-Absicht anlegen (sudo/systemctl/apt/`.ssh`/
+  `/etc/shadow`/…), Verstoß geht in `security_guard`. Das ist ausdrücklich **Zusatz**: die
+  harte Garantie ist die Bindung – ein umformulierter Text läuft später einfach in die Rechte
+  des Anlegenden. Auch an `POST /api/cron` und `POST /api/watchers` geprüft.
+- **Fremde Aufträge sind unsichtbar:** `cron_list` zeigt Nicht-Admins nur eigene Jobs (nennt
+  die **Anzahl** ausgeblendeter, sonst hält das Modell die Liste für vollständig),
+  `cron_delete` antwortet bei fremden Jobs „nicht gefunden" (nicht „verboten"),
+  `GET/PUT/DELETE/run /api/cron` filtern über `_cron_visible()`. **`run` nutzt die Rechte des
+  BESITZERS** – sonst wäre „fremden Job starten" der bequemste Eskalationsweg.
+- **Werkzeuge, die die Grundlage künftiger Läufe ändern, sind für Domain-Nutzer gesperrt**
+  (`_BLOCKED_TOOLS_FOR_LDAP`): `reflection` (schreibt `data/instructions/*.md` → fließt in
+  JEDEN System-Prompt, auch den eines Admins; kann Code-Fixes anwenden), `evolution_propose|
+  apply|cycle` (schreibt/aktiviert Skills), `queue_add` (Aufträge für spätere autonome Läufe).
+  Das sind dieselben Persistenz-Substrate wie Cron, nur ohne Uhrzeit.
+- **Die Auftrags-Dateien selbst sind zu** (`sandbox.py`): `data/scheduled_jobs.json`,
+  `data/file_watchers.json`, `data/security_state.json` stehen in `_APP_DENY_REL` +
+  `SHELL_SECRET_PATHS` und werden von `harden_data_dirs()` auf **0640** gesetzt
+  (`PRIVATE_FILES`). Ohne das umgeht ein `cat` in der Sandbox den `cron_list`-Filter –
+  genau die Lücke, die am selben Tag für `data/chats` geschlossen wurde.
+- **Verifiziert auf DEV:** 17 Dispatch-Tests (Rechte-Matrix inkl. Nachwirkung, Parallelität,
+  Sub-Agent-Vererbung) + 22 Manager-Tests (Bindung, Whitelist, Übernahme, Migration,
+  Sichtbarkeit) = 39/39. Live geprüft: Shell- und filesystem-Zugriff auf die Auftragsdatei
+  gesperrt, `data/knowledge` weiter lesbar, Dienst nach Neustart aktiv (HTTP 200).
+- **Merkregel:** Ein Lauf ohne angemeldeten Benutzer ist NICHT dasselbe wie ein Lauf mit
+  Systemrechten. Wer einen neuen entkoppelten Auslöser ergänzt (Queue, Webhook, Mail-Trigger),
+  muss `actor=` mitgeben – sonst ist er still unprivilegiert (gewollt), und wer ihn
+  privilegiert braucht, muss den Besitzer speichern.
+
 ## Multi-Agent System
 - **AgentManager** in `agent.py`: Verwaltet Haupt- und Sub-Agents
   - `get_or_create_main()`: Erstellt/gibt Hauptagent zurueck

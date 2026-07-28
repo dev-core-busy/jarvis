@@ -6239,8 +6239,12 @@ async def agent_task(request: Request):
             agent_instance = JarvisAgent()
 
         from backend.llm import normalize_effort as _norm_effort
+        # Externe Benachrichtigung -> unprivilegierter Lauf. Der Absender ist ein
+        # Geraet mit API-Key, kein angemeldeter Benutzer; Systemrechte gehoeren
+        # nicht an einen Kanal, dessen Inhalt von aussen kommt.
         result = await agent_instance.run_task_headless(
-            wrapped_task, reasoning_effort=_norm_effort(body.get("reasoning_effort")))
+            wrapped_task, reasoning_effort=_norm_effort(body.get("reasoning_effort")),
+            actor={"user": f"api:{source or 'extern'}", "privileged": False})
 
         # Ergebnis an Frontend broadcasten
         if result:
@@ -10394,8 +10398,13 @@ async def _run_wa_task(task_text: str, sender: str, source_info: str, auto_reply
         full_task = WA_TASK_PROMPT.format(sender=f"+{sender}", text=task_text)
         wa_log("INFO", "agent", f"Starte Agent-Task: {task_text[:150]}")
 
-        # Agent-Task ohne WebSocket ausführen (Ergebnis sammeln)
-        result = await agent_instance.run_task_headless(full_task)
+        # Agent-Task ohne WebSocket ausführen (Ergebnis sammeln).
+        # UNPRIVILEGIERT und nicht verhandelbar: WhatsApp kennt kein Konto – der
+        # Absender ist eine Telefonnummer, die jeder behaupten kann. Bis
+        # 2026-07-28 lief so eine Nachricht mit der Identitaet, die zufaellig am
+        # geteilten Hauptagenten hing (leer = privilegiert = Root ueber Broker).
+        result = await agent_instance.run_task_headless(
+            full_task, actor={"user": f"wa:+{sender}", "privileged": False})
 
         wa_log("INFO", "agent", f"Ergebnis: {result[:200] if result else '(leer)'}")
         wa_log("DEBUG", "agent", "Volles Ergebnis", meta={"result": result, "sender": sender}, debug_only=True)
@@ -11023,16 +11032,47 @@ async def _start_http_redirect():
 # ─── Cron-Trigger ────────────────────────────────────────────────────
 from backend.scheduler import cron_manager
 
+# Ein Cron-Job ist eine ZEITVERSETZTE Ausfuehrung mit den Rechten seines
+# Besitzers. Deshalb gilt hier die gleiche Regel wie im Chat-Werkzeug:
+# Nicht-Admins sehen und aendern nur ihre eigenen Auftraege, und nur ein Admin
+# kann einem Auftrag Systemrechte geben (Uebernahme, siehe /claim).
+def _cron_visible(job: dict, user: str) -> bool:
+    return _is_admin_user(user) or (job.get("owner") or "") == user
+
+
+def _cron_owned_or_404(job_id: str, user: str) -> dict:
+    job = cron_manager.get_job(job_id)
+    # 404 statt 403: dass ein fremder Auftrag existiert, ist selbst eine Information.
+    if not job or not _cron_visible(job, user):
+        raise HTTPException(404, "Job nicht gefunden")
+    return job
+
+
 @app.get("/api/cron")
 async def cron_list(user: str = Depends(require_auth)):
-    """Liefert die Liste aller zeitgesteuerten Aufträge (Cron-Jobs)."""
-    return JSONResponse(cron_manager.list_jobs())
+    """Liefert die zeitgesteuerten Aufträge (Cron-Jobs). Nicht-Admins sehen nur eigene."""
+    jobs = [j for j in cron_manager.list_jobs() if _cron_visible(j, user)]
+    return JSONResponse(jobs)
 
 
 @app.post("/api/cron")
 async def cron_create_api(req: Request, user: str = Depends(require_auth)):
-    """Legt einen neuen zeitgesteuerten Auftrag (Cron-Job) an."""
+    """Legt einen neuen zeitgesteuerten Auftrag (Cron-Job) an.
+
+    Der Auftrag wird an den anlegenden Benutzer gebunden und läuft später mit
+    dessen Rechten. Systemrechte erhält er nur, wenn ein Administrator ihn anlegt.
+    """
     body = await req.json()
+    _admin = _is_admin_user(user)
+    if not _admin:
+        from backend.tools.cron_tool import _root_intent
+        hit = _root_intent(f"{body.get('label', '')}\n{body.get('task', '')}")
+        if hit:
+            security_guard.record_violation(
+                user, "api", "cron-root-intent", hit,
+                snippet=str(body.get("task", ""))[:200], tool="POST /api/cron")
+            raise HTTPException(403, f"System-/Root-Anweisung im Auftrag ('{hit}') – "
+                                     f"zeitgesteuerte Aufträge laufen mit deinen Rechten.")
     try:
         job = cron_manager.add_job(
             label=body.get("label", "Job"),
@@ -11040,6 +11080,9 @@ async def cron_create_api(req: Request, user: str = Depends(require_auth)):
             task=body["task"],
             enabled=body.get("enabled", True),
             once=body.get("once", False),
+            owner=user,
+            owner_privileged=_admin,
+            created_via="api",
         )
         return JSONResponse(job, status_code=201)
     except (ValueError, KeyError) as e:
@@ -11048,8 +11091,17 @@ async def cron_create_api(req: Request, user: str = Depends(require_auth)):
 
 @app.put("/api/cron/{job_id}")
 async def cron_update(job_id: str, req: Request, user: str = Depends(require_auth)):
-    """Aktualisiert einen zeitgesteuerten Auftrag (Cron-Job)."""
+    """Aktualisiert einen zeitgesteuerten Auftrag (nur eigene; Admins alle).
+
+    owner/owner_privileged sind nicht änderbar (siehe CronManager.UPDATABLE_FIELDS).
+    """
+    _cron_owned_or_404(job_id, user)
     body = await req.json()
+    if not _is_admin_user(user):
+        from backend.tools.cron_tool import _root_intent
+        hit = _root_intent(f"{body.get('label', '')}\n{body.get('task', '')}")
+        if hit:
+            raise HTTPException(403, f"System-/Root-Anweisung im Auftrag ('{hit}').")
     try:
         job = cron_manager.update_job(job_id, **body)
         return JSONResponse(job)
@@ -11059,7 +11111,8 @@ async def cron_update(job_id: str, req: Request, user: str = Depends(require_aut
 
 @app.delete("/api/cron/{job_id}")
 async def cron_delete_api(job_id: str, user: str = Depends(require_auth)):
-    """Löscht einen zeitgesteuerten Auftrag (Cron-Job)."""
+    """Löscht einen zeitgesteuerten Auftrag (nur eigene; Admins alle)."""
+    _cron_owned_or_404(job_id, user)
     try:
         cron_manager.delete_job(job_id)
         return JSONResponse({"ok": True})
@@ -11069,10 +11122,32 @@ async def cron_delete_api(job_id: str, user: str = Depends(require_auth)):
 
 @app.post("/api/cron/{job_id}/run")
 async def cron_run_now(job_id: str, user: str = Depends(require_auth)):
-    """Führt einen zeitgesteuerten Auftrag sofort manuell aus."""
+    """Führt einen zeitgesteuerten Auftrag sofort aus (nur eigene; Admins alle).
+
+    Der Lauf nutzt die Rechte des BESITZERS, nicht die des Auslösers – sonst wäre
+    „fremden Job starten" der bequemste Weg zur Rechteerhöhung.
+    """
+    _cron_owned_or_404(job_id, user)
     try:
         result = await cron_manager.run_now(job_id)
         return JSONResponse({"ok": True, "result": result[:500] if result else ""})
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/cron/{job_id}/claim")
+async def cron_claim(job_id: str, user: str = Depends(require_local_auth)):
+    """Übernimmt einen Auftrag als Administrator – er läuft danach mit Systemrechten.
+
+    Der einzige Weg, einem Cron-Job Systemrechte zu geben. Gedacht für Aufträge
+    ohne Besitzer (Altbestand vor 2026-07-28), die sonst dauerhaft unprivilegiert
+    laufen und an System-Befehlen scheitern.
+    """
+    try:
+        job = cron_manager.claim_job(job_id, user, privileged=True)
+        print(f"[CRON] '{job['label']}' von Admin '{user}' übernommen "
+              f"(läuft künftig mit Systemrechten)", flush=True)
+        return JSONResponse(job)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -11105,18 +11180,46 @@ async def audit_log_clear(_u: str = Depends(require_auth)):
 # ─── Datei-Watcher ───────────────────────────────────────────────────
 from backend.file_watcher import watcher_manager
 
+def _watcher_visible(w: dict, user: str) -> bool:
+    return _is_admin_user(user) or (w.get("owner") or "") == user
+
+
+def _watcher_owned_or_404(watcher_id: str, user: str) -> dict:
+    w = watcher_manager.get_watcher(watcher_id)
+    if not w or not _watcher_visible(w, user):
+        raise HTTPException(404, "Watcher nicht gefunden")
+    return w
+
+
 @app.get("/api/watchers")
 async def watcher_list(user: str = Depends(require_auth)):
-    """Liefert die Liste aller Trigger-Watcher (Datei-/Ereignis-Trigger)."""
-    return JSONResponse(watcher_manager.list_watchers())
+    """Liefert die Trigger-Watcher (Datei-/Ereignis-Trigger). Nicht-Admins nur eigene."""
+    return JSONResponse([w for w in watcher_manager.list_watchers()
+                         if _watcher_visible(w, user)])
 
 
 @app.post("/api/watchers")
 async def watcher_create(req: Request, user: str = Depends(require_auth)):
-    """Legt einen neuen Trigger-Watcher mit Trigger und Aktion an."""
+    """Legt einen neuen Trigger-Watcher mit Trigger und Aktion an.
+
+    Wie beim Cron-Job: der Watcher wird an den anlegenden Benutzer gebunden und
+    seine Agent-Aktion läuft später mit dessen Rechten (Systemrechte nur für Admins).
+    """
     body = await req.json()
+    _admin = _is_admin_user(user)
+    if not _admin and body.get("action_type", "agent_task") == "agent_task":
+        from backend.tools.cron_tool import _root_intent
+        hit = _root_intent(f"{body.get('label', '')}\n{body.get('task', '')}")
+        if hit:
+            security_guard.record_violation(
+                user, "api", "watcher-root-intent", hit,
+                snippet=str(body.get("task", ""))[:200], tool="POST /api/watchers")
+            raise HTTPException(403, f"System-/Root-Anweisung im Trigger-Auftrag ('{hit}') – "
+                                     f"Trigger laufen mit deinen Rechten.")
     try:
         w = watcher_manager.add_watcher(
+            owner=user,
+            owner_privileged=_admin,
             label=body.get("label", "Trigger"),
             trigger_type=body.get("trigger_type", "file"),
             action_type=body.get("action_type", "agent_task"),
@@ -11140,8 +11243,17 @@ async def watcher_create(req: Request, user: str = Depends(require_auth)):
 
 @app.put("/api/watchers/{watcher_id}")
 async def watcher_update(watcher_id: str, req: Request, user: str = Depends(require_auth)):
-    """Aktualisiert einen bestehenden Trigger-Watcher."""
+    """Aktualisiert einen Trigger-Watcher (nur eigene; Admins alle).
+
+    owner/owner_privileged sind nicht änderbar (WatcherManager.UPDATABLE_FIELDS).
+    """
+    _watcher_owned_or_404(watcher_id, user)
     body = await req.json()
+    if not _is_admin_user(user):
+        from backend.tools.cron_tool import _root_intent
+        hit = _root_intent(f"{body.get('label', '')}\n{body.get('task', '')}")
+        if hit:
+            raise HTTPException(403, f"System-/Root-Anweisung im Trigger-Auftrag ('{hit}').")
     try:
         w = watcher_manager.update_watcher(watcher_id, **body)
         return JSONResponse(w)
@@ -11151,7 +11263,8 @@ async def watcher_update(watcher_id: str, req: Request, user: str = Depends(requ
 
 @app.delete("/api/watchers/{watcher_id}")
 async def watcher_delete(watcher_id: str, user: str = Depends(require_auth)):
-    """Löscht einen Trigger-Watcher."""
+    """Löscht einen Trigger-Watcher (nur eigene; Admins alle)."""
+    _watcher_owned_or_404(watcher_id, user)
     try:
         watcher_manager.delete_watcher(watcher_id)
         return JSONResponse({"ok": True})

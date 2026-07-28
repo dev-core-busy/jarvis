@@ -12,6 +12,11 @@ from apscheduler.triggers.cron import CronTrigger
 
 JOBS_FILE = Path("data/scheduled_jobs.json")
 
+# Auftraggeber-Name für Jobs ohne gespeicherten Besitzer (Altbestand). Bewusst
+# ein Name, der keinem echten Benutzer entspricht: er ist damit unprivilegiert
+# UND besitzt keine Dokumente (Eigentümer-Schranke greift fail-closed).
+_LEGACY_ACTOR = "__cron_ohne_besitzer__"
+
 # Wird von main.py gesetzt
 _agent_manager = None
 _broadcast_fn = None  # async fn(msg: dict) → sendet an alle WS-Clients
@@ -52,7 +57,19 @@ class CronManager:
         return next((j for j in self._jobs if j["id"] == job_id), None)
 
     def add_job(self, label: str, cron: str, task: str, enabled: bool = True,
-                job_id: str | None = None, once: bool = False) -> dict:
+                job_id: str | None = None, once: bool = False,
+                owner: str = "", owner_privileged: bool = False,
+                created_via: str = "") -> dict:
+        """Legt einen Job an.
+
+        owner/owner_privileged sind die AUFTRAGGEBER-BINDUNG: sie entscheiden,
+        mit welchen Rechten der Job spaeter laeuft (siehe _execute). Ohne diese
+        Bindung lief ein Job mit der Identitaet, die zufaellig am geteilten
+        Hauptagenten hing – ein leerer Wert galt als privilegiert, ein Job eines
+        Domain-Nutzers konnte also mit Root-Rechten feuern.
+        Default ist bewusst unprivilegiert: privilegiert wird nur, wer es
+        ausdruecklich anfordert und es auch selbst sein darf (siehe Aufrufer).
+        """
         job = {
             "id": job_id or str(uuid.uuid4()),
             "label": label,
@@ -60,6 +77,10 @@ class CronManager:
             "task": task,
             "enabled": enabled,
             "once": once,   # True → Job löscht sich nach einmaligem Ausführen
+            "owner": owner or "",
+            "owner_privileged": bool(owner_privileged),
+            "created_via": created_via or "",
+            "created_at": int(time.time()),
             "last_run": None,
             "last_result": None,
         }
@@ -73,10 +94,18 @@ class CronManager:
         self._save()
         return job
 
+    # Nur diese Felder dürfen von aussen geändert werden. Die Auftraggeber-Bindung
+    # (owner/owner_privileged) ist NICHT dabei: sonst könnte sich ein Domain-Nutzer
+    # per PUT selbst `owner_privileged: true` setzen und hätte damit genau die
+    # Rechteerhöhung, die diese Bindung verhindern soll. Übernahme nur über
+    # claim_job() (Admin).
+    UPDATABLE_FIELDS = {"label", "cron", "task", "enabled", "once"}
+
     def update_job(self, job_id: str, **fields) -> dict:
         job = self.get_job(job_id)
         if not job:
             raise ValueError(f"Job {job_id} nicht gefunden")
+        fields = {k: v for k, v in fields.items() if k in self.UPDATABLE_FIELDS}
         # Cron prüfen wenn geändert
         if "cron" in fields:
             self._validate_cron(fields["cron"])
@@ -102,6 +131,23 @@ class CronManager:
         if not job:
             raise ValueError(f"Job {job_id} nicht gefunden")
         return await self._execute(job_id)
+
+    def claim_job(self, job_id: str, user: str, privileged: bool) -> dict:
+        """Auftraggeber-Bindung eines Jobs neu setzen (Admin-Übernahme).
+
+        Der einzige Weg, einem Job Systemrechte zu geben – bewusst eine
+        ausdrückliche Handlung eines Admins und kein Nebeneffekt eines Updates
+        (vgl. UPDATABLE_FIELDS). Damit ist auch ein Altbestand-Job ohne Besitzer
+        reparierbar, statt dauerhaft unprivilegiert zu scheitern.
+        """
+        job = self.get_job(job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} nicht gefunden")
+        job["owner"] = user or ""
+        job["owner_privileged"] = bool(privileged)
+        job["claimed_at"] = int(time.time())
+        self._save()
+        return job
 
     # ─── Interna ─────────────────────────────────────────────────────────────
 
@@ -153,7 +199,8 @@ class CronManager:
         try:
             if _agent_manager:
                 agent = _agent_manager.get_or_create_main()
-                result = await agent.run_task_headless(task_text)
+                result = await agent.run_task_headless(
+                    task_text, actor=self._actor_for(job))
             duration = round(time.time() - t0, 1)
             result_short = (result[:200] + "…") if len(result) > 200 else result
             print(f"[Scheduler] Job '{label}' abgeschlossen in {duration}s", flush=True)
@@ -187,6 +234,23 @@ class CronManager:
 
         return result
 
+    def _actor_for(self, job: dict) -> dict:
+        """Auftraggeber-Bindung eines Jobs in die Form für run_task_headless.
+
+        Ein Job ohne Besitzer (Altbestand vor 2026-07-28) läuft UNPRIVILEGIERT –
+        fail-closed. Sein Besitzer ist nicht rekonstruierbar, und die Alternative
+        wäre genau die Lücke: bis 2026-07-28 erbte so ein Job die Rechte des
+        zuletzt aktiven Chat-Nutzers, bei leerem Wert also Root über den Broker.
+        Ein Admin kann ihn über claim_job() übernehmen.
+        """
+        owner = (job.get("owner") or "").strip()
+        return {
+            "user": owner or _LEGACY_ACTOR,
+            "privileged": bool(job.get("owner_privileged")) and bool(owner),
+            "internet": True,
+            "sap": False,
+        }
+
     def _validate_cron(self, cron_expr: str):
         """Wirft ValueError wenn Cron-Ausdruck ungültig."""
         try:
@@ -203,6 +267,20 @@ class CronManager:
                 self._jobs = []
         else:
             self._jobs = []
+        # Altbestand ohne Auftraggeber-Bindung sichtbar machen. Nicht geraten:
+        # ohne Besitzer laeuft der Job unprivilegiert (siehe _actor_for), und die
+        # Oberflaeche zeigt es an, damit ein Admin ihn bewusst uebernehmen kann.
+        _legacy = 0
+        for job in self._jobs:
+            if "owner" not in job:
+                job["owner"] = ""
+                job["owner_privileged"] = False
+                job["created_via"] = job.get("created_via") or "legacy"
+                _legacy += 1
+        if _legacy:
+            print(f"[Scheduler] {_legacy} Job(s) ohne Auftraggeber – laufen "
+                  f"unprivilegiert bis ein Admin sie uebernimmt "
+                  f"(Einstellungen -> Cron -> Übernehmen)", flush=True)
 
     def _save(self):
         JOBS_FILE.write_text(json.dumps(self._jobs, indent=2, ensure_ascii=False))

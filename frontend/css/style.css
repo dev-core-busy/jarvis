@@ -3153,6 +3153,33 @@ select option:hover {
     flex-shrink: 0;
     white-space: nowrap;
 }
+/* Fehlende Abhängigkeiten: Warn-Plakette + Reparatur-Knopf am Skill.
+   system_packages werden nur beim Einschalten installiert – ein nachträglich
+   ergänztes Systempaket (z.B. LibreOffice für den Office-Skill) fehlt sonst
+   unbemerkt, und der Skill sieht dabei völlig gesund aus. */
+.sk-badge-missing {
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 0.05rem 0.4rem;
+    border-radius: 4px;
+    background: rgba(var(--warning-rgb), 0.15);
+    color: var(--warning);
+    border: 1px solid rgba(var(--warning-rgb), 0.45);
+    flex-shrink: 0;
+    white-space: nowrap;
+    cursor: help;
+}
+.sk-btn.sk-btn-fix {
+    color: var(--warning);
+    border-color: rgba(var(--warning-rgb), 0.45);
+    font-weight: 700;
+}
+.sk-btn.sk-btn-fix:hover {
+    background: rgba(var(--warning-rgb), 0.15);
+    color: var(--warning);
+}
 /* Unsichtbarer Platzhalter für fehlende Aktions-Buttons (Config/Löschen),
    damit die Aktionsspalten aller Skill-Zeilen symmetrisch fluchten. */
 .sk-btn.sk-btn-ghost {

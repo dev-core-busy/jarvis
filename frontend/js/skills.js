@@ -215,6 +215,14 @@
             const toolCount = (skill.tools || []).length;
 
             const isOpenClaw = skill.source === 'openclaw';
+            // Fehlende Abhaengigkeiten (vom Backend mitgeliefert): system_packages
+            // werden NUR beim Einschalten installiert – ein laengst aktiver Skill,
+            // der nachtraeglich eine Systemabhaengigkeit bekommt, braucht einen
+            // Reparatur-Knopf (sonst muesste man ihn aus- und wieder einschalten).
+            const fehlt = skill.missing || null;
+            const fehltListe = fehlt
+                ? [].concat(fehlt.apt || [], fehlt.pip || []).join(', ')
+                : '';
 
             const item = document.createElement('div');
             item.className = 'sk-item' + (isOpenClaw ? ' sk-item-oc' : '')
@@ -229,8 +237,10 @@
                     <span class="sk-item-cat">${catLabel}</span>
                     <span class="sk-item-tools">${toolCount} Tool${toolCount !== 1 ? 's' : ''}</span>
                     <span class="sk-item-desc">${skill.description || ''}</span>
+                    ${fehlt ? `<span class="sk-badge-missing" title="${fehltListe}">${window.t('skills.deps_missing')}</span>` : ''}
                 </div>
                 <div class="sk-item-actions">
+                    ${fehlt ? `<button class="sk-btn sk-btn-fix" title="${window.t('skills.deps_install')}: ${fehltListe}">⤓</button>` : ''}
                     <button class="sk-btn sk-btn-info" title="${window.t('skills.show_info')}">${SVG_INFO}</button>
                     ${hasConfig
                         ? `<button class="sk-btn sk-btn-cfg" title="${cfgTitle}">${SVG_CFG}</button>`
@@ -260,6 +270,12 @@
             // Entfernen
             const rmBtn  = item.querySelector('.sk-btn-rm');
             if (rmBtn)  rmBtn.addEventListener('click',  () => this._deactivate(dirName));
+            // Abhaengigkeiten nachinstallieren (Reparatur)
+            const fixBtn = item.querySelector('.sk-btn-fix');
+            if (fixBtn) fixBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._installMissing(dirName);
+            });
 
             return item;
         }
@@ -790,6 +806,29 @@
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
                 if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
+            } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
+        }
+
+        async _installMissing(name) {
+            const token = localStorage.getItem('jarvis_token') || '';
+            try {
+                const resp = await fetch(`/api/skills/${name}/install`, {
+                    method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (data.installing) {
+                    // Gleiche Fortschrittsanzeige wie beim Einschalten. Wichtig bei
+                    // apt-Paketen: laeuft der Root-Broker, braucht der Befehl ggf.
+                    // eine Freigabe – das Protokoll sagt es dann.
+                    this._showInstallProgress(name);
+                    return;
+                }
+                if (data.success) {
+                    this._notify(window.t('skills.deps_ok'), 'success');
+                    await this.loadSkills();
+                } else {
+                    this._notify(data.error || window.t('skills.deps_failed'), 'error');
+                }
             } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
         }
 

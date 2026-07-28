@@ -80,6 +80,16 @@ class SkillManager:
             skill_info["installed"] = state.get("installed", skill_info["enabled"])
             skill_info["config"] = state.get("config", {})
             skill_info["loaded"] = skill_name in self.loader.loaded_skills
+            # Fehlende Abhaengigkeiten mitliefern, damit die Oberflaeche einen
+            # Reparatur-Knopf anbieten kann. Nur fuer INSTALLIERTE Skills und nur
+            # wenn wirklich etwas fehlt – sonst blaeht es die Liste auf.
+            if skill_info["installed"]:
+                try:
+                    fehlt = self.missing_for(skill_name)
+                    if fehlt["pip"] or fehlt["apt"] or fehlt["commands"]:
+                        skill_info["missing"] = fehlt
+                except Exception:  # noqa: BLE001
+                    pass
 
             skills.append(skill_info)
 
@@ -138,18 +148,57 @@ class SkillManager:
         installed = self._installed_packages()
         return [d for d in info.get("dependencies", []) if _spec_name(d) not in installed]
 
-    @staticmethod
-    def _missing_system_packages(info: dict) -> list[str]:
+    # dpkg -s ist ein Unterprozess je Paket. Die Skill-Liste fragt den Zustand
+    # jetzt bei JEDEM Aufruf ab, deshalb prozessweit merken. Nach einer
+    # Installation wird der Cache geleert (_install_worker), sonst blieben die
+    # Pakete in der Oberflaeche bis zum Dienst-Neustart "fehlend".
+    _apt_cache: dict = {}
+
+    @classmethod
+    def _apt_installed(cls, pkg: str) -> bool:
+        if pkg in cls._apt_cache:
+            return cls._apt_cache[pkg]
+        try:
+            r = subprocess.run(["dpkg", "-s", pkg], capture_output=True, timeout=10)
+            da = r.returncode == 0
+        except Exception:  # noqa: BLE001
+            da = False
+        cls._apt_cache[pkg] = da
+        return da
+
+    @classmethod
+    def _missing_system_packages(cls, info: dict) -> list[str]:
         """Noch nicht installierte apt-Pakete (Pruefung via dpkg -s)."""
-        missing = []
-        for pkg in info.get("system_packages", []):
-            try:
-                r = subprocess.run(["dpkg", "-s", pkg], capture_output=True, timeout=10)
-                if r.returncode != 0:
-                    missing.append(pkg)
-            except Exception:  # noqa: BLE001
-                missing.append(pkg)
-        return missing
+        return [p for p in info.get("system_packages", []) if not cls._apt_installed(p)]
+
+    def missing_for(self, name: str) -> dict:
+        """Was fehlt diesem Skill an Abhaengigkeiten? {pip, apt, commands}.
+
+        Gebraucht fuer den Reparatur-Weg: `system_packages` werden NUR beim
+        Einschalten installiert. Ein Skill, der schon lange eingeschaltet ist und
+        nachtraeglich eine Systemabhaengigkeit ins Manifest bekommt (so bei
+        LibreOffice fuer den Office-Skill, 2026-07-28), hat sie deshalb nie
+        bekommen – es gab bis dahin keinen Weg, das ohne Aus-/Einschalten
+        nachzuholen.
+        """
+        info = self._skill_info(name) or {}
+        return {
+            "pip": self._missing_dependencies(info),
+            "apt": self._missing_system_packages(info),
+            "commands": [c.get("cmd") for c in self._pending_install_commands(info)],
+        }
+
+    def install_missing(self, name: str) -> dict:
+        """Installiert fehlende Abhaengigkeiten OHNE den Ein/Aus-Zustand anzufassen."""
+        info = self._skill_info(name)
+        if not info:
+            return {"success": False, "error": "Skill nicht gefunden"}
+        fehlt = self.missing_for(name)
+        pending_cmds = self._pending_install_commands(info)
+        if not (fehlt["pip"] or fehlt["apt"] or pending_cmds):
+            return {"success": True, "installing": False, "missing": fehlt}
+        self._start_install(name, info, fehlt["pip"], fehlt["apt"], pending_cmds)
+        return {"success": True, "installing": True, "missing": fehlt}
 
     @staticmethod
     def _pending_install_commands(info: dict) -> list[dict]:
@@ -236,6 +285,9 @@ class SkillManager:
                 except Exception:  # noqa: BLE001
                     pass
         finally:
+            # dpkg-Zwischenspeicher leeren: sonst zeigt die Oberflaeche die
+            # gerade installierten Systempakete weiter als fehlend an.
+            type(self)._apt_cache.clear()
             status["ok"] = ok
             status["running"] = False
             log.append("Installation abgeschlossen." if ok
@@ -254,8 +306,15 @@ class SkillManager:
         if res.get("ok"):
             return True
         if res.get("decision") == "pending":
-            log.append("Systempakete warten auf Root-Freigabe "
-                       "(Einstellungen → Sicherheit → Root-Freigaben).")
+            # shell_root ist im Broker IMMER erst 'pending' (broker/ops.py:
+            # default_allow=False). Der Befehl lief also NICHT – nach der Freigabe
+            # muss die Installation erneut angestossen werden. Das gehoert in die
+            # Meldung, sonst wartet der Admin auf etwas, das nie kommt.
+            log.append("Systempakete brauchen eine Root-Freigabe: Einstellungen → "
+                       "Sicherheit → Root-Freigaben, den Eintrag "
+                       f"'apt-get install {' '.join(packages)}' freigeben und danach "
+                       "hier erneut auf ⤓ (Fehlende Abhängigkeiten nachinstallieren) "
+                       "klicken.")
         else:
             log.append(f"Systempaket-Installation fehlgeschlagen: "
                        f"{res.get('error') or res.get('stderr') or res}")

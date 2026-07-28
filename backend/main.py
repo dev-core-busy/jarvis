@@ -4452,10 +4452,21 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
 
 @app.post("/api/skills/{name}/install")
 async def install_skill_deps(name: str, user: str = Depends(require_local_auth)):
-    """Installiert die Abhängigkeiten eines Skills."""
+    """Installiert fehlende Abhängigkeiten eines Skills nachträglich (Reparatur).
+
+    Deckt alle drei Arten ab (pip, apt via Root-Broker, install_commands) und
+    laesst den Ein/Aus-Zustand unberührt. Läuft im Hintergrund – Fortschritt über
+    `GET /api/skills/{name}/install-status`. Rückgabe: `{success, installing,
+    missing:{pip,apt,commands}}`.
+
+    Gebraucht, weil `system_packages` sonst NUR beim Einschalten installiert
+    werden: ein längst aktiver Skill, der nachträglich eine Systemabhängigkeit
+    ins Manifest bekommt, bekäme sie nie (so beim Office-Skill/LibreOffice).
+    Der frühere Rumpf rief `install_dependencies()` – nur pip, blockierend,
+    ohne apt – und hätte genau diesen Fall nicht gelöst.
+    """
     sm = _get_skill_manager()
-    result = sm.install_dependencies(name)
-    return JSONResponse({"result": result})
+    return JSONResponse(sm.install_missing(name))
 
 
 @app.get("/api/skills/{name}/install-status")

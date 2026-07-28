@@ -597,6 +597,26 @@ Confluence) – gewirkt hat er nur bei der Datei. Ursache war eine verschluckte 
   `[Errno 2] No such file or directory: 'soffice'` – aus dem konnten weder Modell noch Nutzer
   ableiten, was zu tun ist. Der Hinweis sagt ausdrücklich, dass das Office-Dokument selbst erzeugt
   wurde und abrufbar bleibt.
+- **`system_packages` wirken NUR beim Einschalten** – deshalb blieb der PDF-Export auf ECHT auch
+  nach dem Update tot: der Office-Skill war dort längst aktiv, `enable_skill()` lief also nie
+  wieder und die Pakete wurden nie installiert. Der Skill sah dabei völlig gesund aus.
+  Gegenmittel (2026-07-28):
+  - `SkillManager.missing_for(name)` liefert `{pip, apt, commands}`, `install_missing(name)`
+    installiert nach, **ohne den Ein/Aus-Zustand anzufassen**. `GET /api/skills` liefert für
+    installierte Skills ein `missing`-Feld (nur wenn wirklich etwas fehlt).
+  - `POST /api/skills/{name}/install` ist auf `install_missing()` umgestellt. Der alte Rumpf rief
+    `install_dependencies()` – **nur pip, blockierend, ohne apt** – und hätte genau diesen Fall
+    nicht gelöst. (`install_dependencies()` existiert noch, ist aber ohne Aufrufer.)
+  - Oberfläche: *Einstellungen → Skills* zeigt am Skill die Plakette „Abhängigkeit fehlt"
+    (`.sk-badge-missing`) und den Knopf ⤓ (`.sk-btn-fix`) → gleiche Fortschrittsanzeige wie beim
+    Einschalten.
+  - **`dpkg -s` wird prozessweit gecacht** (`_apt_cache`), weil die Skill-Liste den Zustand jetzt
+    bei jedem Aufruf abfragt. `_install_worker` leert den Cache im `finally` – sonst gälten die
+    gerade installierten Pakete bis zum Dienst-Neustart weiter als fehlend.
+  - **Im getrennten Betrieb sind es ZWEI Schritte:** `_apt_install` geht über den Broker als
+    `shell_root`, und das ist per `default_allow=False` **immer erst `pending`**. Also: ⤓ drücken →
+    unter *Sicherheit → Root-Freigaben* freigeben → ⤓ **erneut** drücken. Die Log-Zeile sagt das
+    jetzt ausdrücklich, sonst wartet der Admin auf etwas, das nie kommt.
 - **`_resolve_existing()` löst jetzt auch den ANZEIGENAMEN auf.** Auf Platte heißt die Datei
   `<32-Hex>__<Anzeigename>`, der Erfolgstext von `office_create_word` nennt aber nur
   `IT-Projektangebot.docx`. Genau den gibt das Modell an `office_to_pdf` weiter → bis 2026-07-28

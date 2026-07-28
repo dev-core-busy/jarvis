@@ -106,11 +106,44 @@ data/
 ## Rechte-Trennung (Root-Broker)
 - **Getrennter Betrieb (empfohlen):** Backend laeuft unprivilegiert (`jarvis.service`, User=jarvis, Port 443 via `CAP_NET_BIND_SERVICE`); Root-Operationen laufen ueber den **Root-Broker** (`jarvis-broker.service`, root, Unix-Socket `/run/jarvis-broker.sock`, Gruppe jarvis 0660)
 - **Code:** `backend/broker/` (policy.py, ops.py, daemon.py) + `backend/broker_client.py` (Client mit root-Fallback fuer Alt-Installationen) + `backend/desktop_control.py` (aus main.py herausgeloeste Desktop-/Session-Root-Logik)
-- **Benannte Ops mit harter Validierung:** systemctl (Unit-Whitelist), unlock_screen, switch_session, vnc_restart, chpasswd, sandbox_exec (nur `jarvis_sandbox*`), sandbox/egress_setup|teardown|status, mount_share/umount_share (nur /mnt/), certbot_obtain, shell_root (generisch)
+- **Benannte Ops mit harter Validierung:** systemctl (Unit-Whitelist), unlock_screen, switch_session, vnc_restart, chpasswd, sandbox_exec (nur `jarvis_sandbox*`), sandbox/egress_setup|teardown|status, apt_upgrades_setup|teardown|status, mount_share/umount_share (nur /mnt/), certbot_obtain, shell_root (generisch)
+- **FALLSTRICK Deploy:** Der Broker ist ein EIGENER Prozess mit eigener Kopie von `backend/broker/*`. Wer dort etwas aendert (neue Op!), muss **`systemctl restart jarvis-broker.service`** – ein Neustart von `jarvis.service` allein genuegt nicht, die neue Op ist dann „unbekannt" und der Endpunkt antwortet 502. Nach dem Neustart dauert es einige Sekunden bis zum Socket: `start_jarvis_root.sh` startet erst x11vnc und websockify, dann den Broker („[Broker] Bereit auf …" im Journal). Wer sofort danach testet, bekommt denselben 502 und sucht den Fehler im Code.
 - **Auditierbare Freigabeliste:** Jede Op wird beim ersten Auftauchen als Policy-Eintrag registriert (`/etc/jarvis/broker-policy.json`, root-only). System-Ops: auto-allow (widerrufbar). `shell_root:<befehl>`: startet **pending** → Admin entscheidet unter *Einstellungen → Sicherheit → Root-Freigaben* (`/api/broker/*`, security_incidents.js)
 - **Shell-Routing:** `shell.py::_needs_root()` erkennt Root-Befehle (sudo/systemctl/apt/mount/...); privilegierte Nutzer → Broker shell_root, Domain-Nutzer → Broker sandbox_exec (runuser). Audit: `/var/log/jarvis-broker-audit.jsonl`
 - **Migration pro Server:** `bash deploy/security/setup_broker.sh` (chown, Units installieren, Dienste starten, Verifikation). Alt-Betrieb (Backend als root, repo-root `jarvis.service`) funktioniert weiter: broker_client fuehrt Ops dann lokal aus (inkl. Policy/Audit)
 - **Achtung:** settings.json-Schreiben erhaelt Eigentuemer (`config._write_preserve_owner`) – der root-Broker darf die Datei dem jarvis-Backend nicht entziehen
+
+## Automatische Sicherheitsupdates (Schalter, seit 2026-07-28)
+- **Warum es das gibt:** Auf ECHT hatte ein lokaler Admin eine eigene Einheit
+  `apt-daily-custom.timer` gebaut, die naechtlich `apt-get update` **und
+  `apt-get autoremove -y`** ausfuehrte. Das Aufraeumen war das Problem –
+  unbeaufsichtigtes Paket-Loeschen kann Abhaengigkeiten des Agenten entfernen
+  (cmake/boost fuer dlib, ffmpeg fuer Whisper, X/VNC, LibreOffice-Teile), und der
+  Dienst bricht Stunden spaeter ohne erkennbaren Zusammenhang. Beim Rueckbau fiel
+  auf: `unattended-upgrades` war gar nicht installiert, die Maschine bekam also
+  **keine** Sicherheitspatches. Der Schalter macht daraus einen bewussten,
+  umschaltbaren Zustand statt undokumentierter Handarbeit.
+- **Code:** `backend/apt_upgrades.py` (analog `egress_guard.py`/`sandbox_guard.py`)
+  + Broker-Ops `apt_upgrades_setup|teardown|status` + `GET/POST
+  /api/security/unattended[/setup|/teardown]` + Panel unter *Einstellungen →
+  Sicherheit → Systemschutz* (`security_incidents.js`, `sec-unatt-*`).
+- **Die Begrenzungen SIND das Feature** (`/etc/apt/apt.conf.d/52jarvis-unattended`):
+  nur `origin=Debian,label=Debian-Security`; `Automatic-Reboot "false"`;
+  `Remove-Unused-Dependencies "false"` **und** `Remove-New-Unused-Dependencies
+  "false"` – genau das, was gerade zurueckgebaut wurde, darf nicht durch die
+  Hintertuer zurueckkommen. Eigene Datei (52 > 50), damit ein
+  `dpkg-reconfigure unattended-upgrades` sie nicht ueberschreibt.
+- **Ausschalten laesst den Index-Refresh AN** (`Update-Package-Lists "1"`) und das
+  Paket installiert. Grund: ein veralteter Index laesst Installationen mit
+  `404 Not Found` scheitern – genau daran starb auf ECHT die LibreOffice-
+  Installation (die Version im lokalen Index lag nicht mehr auf dem Spiegel).
+  Deshalb fuehrt `manager.py::_apt_install` zusaetzlich immer selbst
+  `apt-get update` unmittelbar vor der Installation aus.
+- **Status wird aus `apt-config dump` gelesen**, nicht aus der Datei: nur so sieht
+  man, was apt ueber ALLE `conf.d`-Dateien hinweg tatsaechlich anwendet (eine
+  spaeter einsortierte Datei kann die eigene ueberstimmen).
+- `?live=1` fuehrt `unattended-upgrade --dry-run` aus – aendert nichts, dauert
+  aber einige Sekunden, daher nicht im Standard-Status.
 
 ## Multi-Agent System
 - **AgentManager** in `agent.py`: Verwaltet Haupt- und Sub-Agents

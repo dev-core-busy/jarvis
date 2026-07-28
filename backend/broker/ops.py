@@ -31,7 +31,8 @@ MOUNT_PREFIX = "/mnt/"                      # Mounts nur unterhalb /mnt/
 # feuernde Bildschirm-Entsperrung, VNC-Neustart). Aussagekraeftige Ops
 # (shell_root, systemctl, chpasswd, mount_share, certbot, switch_session) werden
 # weiterhin vollstaendig auditiert.
-READONLY_OPS = {"sandbox_status", "egress_status", "unlock_screen", "vnc_restart"}
+READONLY_OPS = {"sandbox_status", "egress_status", "apt_upgrades_status",
+                "unlock_screen", "vnc_restart"}
 
 
 def _norm_cmd(cmd: str) -> str:
@@ -196,6 +197,23 @@ def _op_egress_teardown(args, stream):
 def _op_egress_status(args, stream):
     from backend import egress_guard
     return {"ok": True, "rc": 0, "result": egress_guard.status(live=bool(args.get("live"))),
+            "stdout": "", "stderr": ""}
+
+
+def _op_apt_upgrades_setup(args, stream):
+    from backend import apt_upgrades
+    return {"ok": True, "rc": 0, "result": apt_upgrades.setup(), "stdout": "", "stderr": ""}
+
+
+def _op_apt_upgrades_teardown(args, stream):
+    from backend import apt_upgrades
+    return {"ok": True, "rc": 0, "result": apt_upgrades.teardown(), "stdout": "", "stderr": ""}
+
+
+def _op_apt_upgrades_status(args, stream):
+    from backend import apt_upgrades
+    return {"ok": True, "rc": 0,
+            "result": apt_upgrades.status(live=bool(args.get("live"))),
             "stdout": "", "stderr": ""}
 
 
@@ -483,6 +501,22 @@ _REGISTRY = {
     "egress_status": (
         _op_egress_status, lambda a: "egress_status",
         lambda a: "Egress-Sperre-Status abfragen (inkl. Live-Test)",
+        True, (),
+    ),
+    "apt_upgrades_setup": (
+        _op_apt_upgrades_setup, lambda a: "apt_upgrades_setup",
+        lambda a: "Automatische Sicherheitsupdates einschalten (unattended-upgrades, "
+                  "nur Sicherheits-Quelle, kein Reboot, kein Aufraeumen)",
+        True, (),
+    ),
+    "apt_upgrades_teardown": (
+        _op_apt_upgrades_teardown, lambda a: "apt_upgrades_teardown",
+        lambda a: "Automatische Sicherheitsupdates ausschalten (Index-Refresh bleibt)",
+        True, (),
+    ),
+    "apt_upgrades_status": (
+        _op_apt_upgrades_status, lambda a: "apt_upgrades_status",
+        lambda a: "Status der automatischen Sicherheitsupdates abfragen (inkl. Trockenlauf)",
         True, (),
     ),
     "mount_share": (

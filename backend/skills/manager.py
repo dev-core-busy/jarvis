@@ -300,11 +300,31 @@ class SkillManager:
         except Exception as e:  # noqa: BLE001
             log.append(f"Broker-Client nicht verfuegbar: {e}")
             return False
-        cmd = "DEBIAN_FRONTEND=noninteractive apt-get install -y " + " ".join(packages)
+        # apt-get update MUSS mitlaufen. Auf ECHT scheiterte die LibreOffice-
+        # Installation am 2026-07-28 mit rc=100 und
+        #   "E: Fehlschlag beim Holen von …libreoffice-style-colibre_…deb 404 Not Found",
+        # weil der lokale Paketindex eine Version nannte, die auf dem Spiegel
+        # nicht mehr liegt (Debian-security rollt Versionen weiter). Ein Server,
+        # auf dem lange kein apt lief, kann ohne update NICHTS installieren.
+        # Bewusst mit ';' statt '&&': schlaegt update teilweise fehl (ein Spiegel
+        # nicht erreichbar), soll die Installation trotzdem versucht werden.
+        # Der Rueckgabewert ist der des letzten Befehls, also der Installation.
+        # ACHTUNG: Der Broker-Policy-Key ist der KOMMANDOTEXT – wer diese Zeile
+        # aendert, erzeugt einen neuen Pending-Eintrag, der erneut freigegeben
+        # werden muss.
+        apt = "DEBIAN_FRONTEND=noninteractive apt-get"
+        cmd = f"{apt} update; {apt} install -y " + " ".join(packages)
         res = broker_client.call_sync("shell_root", {"command": cmd},
                                       timeout=900, stream_cb=lambda l: log.append(l))
         if res.get("ok"):
             return True
+        # Bleibt es bei 404 trotz update, ist es kein veralteter Index mehr –
+        # dann zeigt der Hinweis in die richtige Richtung (Spiegel/Proxy/Netz).
+        _aus = f"{res.get('stderr') or ''}\n{res.get('error') or ''}"
+        if "404" in _aus or "Fehlschlag beim Holen" in _aus:
+            log.append("Hinweis: Paketdateien nicht abrufbar, obwohl 'apt-get update' "
+                       "mitgelaufen ist – Paketspiegel, Proxy oder Netzzugang des "
+                       "Servers pruefen.")
         if res.get("decision") == "pending":
             # shell_root ist im Broker IMMER erst 'pending' (broker/ops.py:
             # default_allow=False). Der Befehl lief also NICHT – nach der Freigabe

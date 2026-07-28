@@ -369,6 +369,61 @@ data/
   `_userEdited`-Merker wird beim Speichern zurueckgesetzt, deckte also eine danach begonnene
   Eingabe nicht ab – deshalb zusaetzlich `document.activeElement !== inp`.
 
+## Erzeugte Dokumente (`/api/documents`) – drei Schranken (seit 2026-07-28)
+- **Lieferweg:** Erzeugt der Agent eine Datei (Office-Skill ODER Shell/python-pptx in `/tmp`),
+  zieht `agent.py::_deliver_docs` sie nach `data/documents/` und sendet EINEN Markdown-Link
+  `[📥 … herunterladen](/api/documents/<32-Hex>__<Basis>.<ext>)`, den die Frontends als Chip
+  rendern. `_clean_doc_refs` entfernt vorher alle Pfade aus dem Anzeigetext – der Chip ist der
+  EINZIGE Weg zur Datei. Fällt er aus, sieht der Nutzer eine Antwort ohne jeden Hinweis.
+- **Bis 2026-07-28 war der Capability-Name der einzige Schutz:** keine Anmeldung, kein Bezug zum
+  Ersteller, kein Verfall, kein Aufräumen. 122 Bit Entropie sind zwar nicht erratbar, aber ein
+  geleakter Link (Browser-Verlauf, Proxy-Log, weitergeleiteter Screenshot) gab dauerhaft Zugriff –
+  auf ECHT liegen dort Jira-Exporte mit Kundendaten. Jetzt gilt zusätzlich:
+  1. **Anmeldung** – `require_auth_or_query`: Bearer-Header ODER `?token=`. Die Query-Variante ist
+     nötig, weil `<a download>` und `<img src>` keine Header setzen können.
+  2. **Eigentümer** – `backend/documents.py`: `data/documents/.owners.json` bildet
+     Capability → Benutzer ab; nur der Ersteller und Admins dürfen laden.
+  3. **Vorhaltezeit** – `cleanup_old()` beim Start und danach täglich
+     (`startup_documents_retention`). Capability-URLs verfallen nicht von selbst,
+     **das Löschen der Datei IST der Widerruf.**
+- **Vorhaltezeit einstellbar** unter *Einstellungen → KI & System → Tuning* (vierte
+  `.tuning-group`, seit 2026-07-28): Zahlenfeld **15–90 Tage** + Kontrollkästchen „dauerhaft" (= 0,
+  nie löschen). Feld `docs_retention_days` in `POST /api/settings`, Anzeige in `GET /api/settings`,
+  Validierung `config._valid_retention()`, ENV-Startwert `JARVIS_DOCS_RETENTION_DAYS`.
+  - **`_valid_retention` darf NICHT über Falsyness prüfen** (`int(v or 30)`) – 0 ist ein gültiger
+    Wert und würde still zum Standard. Werte 1–14 werden auf 15 **gehoben**, nicht auf 0
+    abgerundet: aus einer zu knappen Eingabe darf nicht versehentlich „dauerhaft" werden.
+    Dasselbe im Frontend beim Laden (`data.docs_retention_days == null`, nicht `|| 30`).
+  - **`documents.retention_days()` ist eine Funktion, keine Modulkonstante.** Ein beim Import
+    gelesener Wert hätte die Einstellung bis zum nächsten Dienststart wirkungslos gemacht.
+    Aus demselben Grund läuft die Tagesschleife auch bei „dauerhaft" weiter und prüft die
+    Frist bei jedem Durchlauf neu.
+  - **Speichern räumt sofort auf** und meldet `docs_removed` zurück – wer die Frist verkürzt,
+    erwartet, dass die Altdateien jetzt weg sind, nicht erst morgen.
+- **Der Agent-API-Key (Benutzer `api`) ist von der Eigentümerprüfung ausgenommen** – er darf
+  ohnehin beliebige Aufgaben starten, eine Leseschranke gewinnt dort nichts.
+- **Fail-closed:** Ohne Registry-Eintrag ist eine Datei nur für Admins erreichbar. Betrifft den
+  Altbestand aus der Zeit vor der Registry – dessen Eigentümer ist nicht rekonstruierbar, und
+  Raten wäre schlechter als Verweigern. Die Frist räumt ihn ohnehin ab. Verweigert wird mit
+  **404, nicht 403** – ob eine Datei existiert, ist selbst eine Information.
+- **Erster Schreiber gewinnt:** `register()` überschreibt einen bestehenden Eintrag NICHT. Sonst
+  könnte ein Nutzer (oder ein Prompt-Injection-Text) eine fremde Capability-URL in seine Antwort
+  schreiben und die Datei so auf sich umschreiben – Pfad (a) in `_deliver_docs` registriert jede
+  URL, die im Text auftaucht.
+- **Nur Capability-Dateien werden abgeräumt.** Roh-Dateien im selben Ordner (Skill-Exporte,
+  hochgeladene Anhänge wie `Manager_IDs.xml`) sind über den Endpunkt gar nicht erreichbar
+  (`fullmatch` → 400) und werden von Tools über ihren Namen weiterbenutzt – Löschen würde
+  laufende Abläufe brechen.
+- **FALLSTRICK – das Token gehört NUR ins DOM, nie in den Markdown:** `chatlib.js::_withToken()`
+  hängt `?token=` erst beim Rendern an (`_inline()` läuft bei jeder Anzeige neu). Der Chat-Verlauf
+  liegt auf Platte, geht teils in den LLM-Kontext und wird exportiert – ein Sitzungstoken hat dort
+  nichts zu suchen. Ergänzt wird ausschliesslich `/api/documents/…`; sonst flösse das Token beim
+  Rendern eines fremden Links an einen fremden Host ab. Token-Schlüssel in dieser Reihenfolge:
+  `jarvis_token`, `jarvis_chat_token`, `jarvis_uc_token` (gleiche Kette wie `support.js::TOKEN_KEYS`).
+- **`run_task_headless` (WhatsApp/Telegram/Cron) liefert keine Dokumente aus** – `_deliver_docs`
+  wird dort nicht aufgerufen. Wer das ergänzt, braucht einen anderen Auslieferungsweg als einen
+  Link, der eine Portal-Anmeldung verlangt.
+
 ## Willkommens-Chat „Beispiel Prompts" (/chat, seit 2026-07-27)
 - **Jeder Benutzer** erhaelt beim ERSTEN Aufruf von `GET /api/chat/sessions` eine vorbereitete
   Sitzung mit dem Titel `Beispiel Prompts` (`chat_sessions.ensure_welcome_session`). Sie enthaelt
@@ -392,6 +447,39 @@ data/
   (`_deleteBubble`, Mehrfach-Loeschen `onDelete`), muessen ihn ueberspringen – dafuer gibt es
   `_isRowEntry()`. Ohne das loescht ein Klick auf die erste Bot-Antwort den falschen Eintrag.
   `_submitEdit`/`truncateHistoryToUserIndex` zaehlen nur `user`-Eintraege und sind nicht betroffen.
+
+## Verlaufs-Buchhaltung im Agent-Loop (Fix 2026-07-28)
+**Vorfall:** Auf ECHT kam die Antwort auf eine PowerPoint-Anfrage (07:01) erst beim
+*nächsten* Auftrag (07:25) heraus – vermischt mit dessen Antwort. Der gespeicherte
+Kontext (`data/chats/<user>/<sid>/context.json`) sah so aus:
+`[user PPTX] [model fc:shell_execute] [user Bild] [model fc:generate_image] [user fresp]
+[user Bild] [model Antwort auf BEIDES]` – ein `function_call` ohne `function_response`,
+die PPTX-Frage ohne Antwort, und die Bild-Frage doppelt.
+- **Regel:** Ein Lauf hinterlässt den Kontext ENTWEDER vollständig (Frage genau einmal +
+  Antwort als letzter Eintrag, jeder `function_call` mit seiner `function_response`) ODER
+  unverändert. Ein Zwischenzustand lässt das Modell die offene Frage beim nächsten Lauf
+  mitbeantworten – das ist der ganze Fehler.
+- **Behoben:** (a) Der Leere-Antwort-Zweig endete mit einem nackten `break`, nachdem der
+  Kurz-Prompt-Neuversuch seinen Text an den Nutzer gesendet hatte – der Nutzer sah eine
+  Antwort, der Kontext kannte sie nicht. Jetzt wird sie eingetragen. (b) Endet ein Lauf
+  ohne jede Antwort, setzt `_rollback_history()` auf den Schnappschuss `_hist_before_run`
+  zurück (Inhalt per `[:] =` ersetzen, NICHT die Liste – darauf zeigen noch
+  `_user_histories` und `_current_chat_history`).
+- **`_ensure_user_msg()` statt Verlaufs-Vergleich:** Die Frage darf pro Lauf genau einmal
+  in den Verlauf; gemerkt wird das über den lauf-lokalen Merker `_user_msg_added`.
+  Die alten Prüfungen (`chat_history[-1] != _user_msg`, an drei Stellen) übersahen sie
+  nach einem Werkzeugschritt, weil dort die `function_response` steht → Frage doppelt.
+  **Ein Wächter, der den ganzen Verlauf durchsucht, ist ebenfalls falsch** – er
+  unterschlägt eine wiederholte, wortgleiche Frage. Deshalb der Merker.
+- **`serialize_history`/`deserialize_history` protokollieren Verluste.** Beide hatten
+  `except Exception: pass` pro Eintrag – ein nicht konvertierbarer Eintrag verschwand
+  lautlos und konnte so aus einem gültigen Gespräch ein ungültiges machen.
+- **Regressionstest:** fünf Abläufe (direkte Antwort / Werkzeug+Antwort / Werkzeug+leer+
+  Neuversuch / gar keine Antwort / **dieselbe Frage zweimal**). Der alte Stand fiel in
+  3 von 4 durch, der neue besteht 5/5 – zusätzlich live gegen ein echtes Modell geprüft.
+- **Nicht behoben (offen):** Die „Neue Sitzung" im Chat-Fenster hat auf ECHT KEINE neue
+  Backend-Sitzung erzeugt – beide Aufträge liefen in `f8fb6ee0b419`. Der geteilte Kontext
+  war damit erwartungswidrig, unabhängig von der Buchhaltung oben.
 
 ## Skill-System
 - Skills liegen unter `skills/<name>/` mit `skill.json` (Manifest) + `main.py` (get_tools())

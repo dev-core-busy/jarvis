@@ -129,6 +129,7 @@ from backend.llm import get_provider
 from backend.skills.manager import SkillManager
 from backend.tools.memory import load_memory_context, load_selective_memory
 import backend.conv_log as conv_log
+import backend.documents as _documents
 
 # ── Sicherheit: LDAP-Benutzer duerfen diese Tools NICHT verwenden ─────────
 _LOCAL_PRIVILEGED_USERS = {"jarvis", "root", ""}
@@ -345,25 +346,47 @@ def _hist_key(username: str, session_id: str = "") -> str:
 
 def serialize_history(history: list) -> list:
     """types.Content-Liste -> JSON-taugliche Dicts (verlustfrei inkl. Anhaenge/
-    function_call), fuer die Persistenz des Sitzungs-Kontexts."""
+    function_call), fuer die Persistenz des Sitzungs-Kontexts.
+
+    Ein Eintrag, der sich nicht wandeln laesst, wird uebersprungen – aber NICHT
+    mehr stillschweigend: fehlt dabei die ``function_response`` zu einem
+    ``function_call``, wird aus einem gueltigen Gespraech ein ungueltiges, und das
+    Modell beantwortet beim naechsten Mal eine schon erledigte Frage erneut. Ohne
+    Protokollzeile war das von aussen nicht zu erkennen.
+    """
     out = []
+    verloren = 0
     for c in history or []:
         try:
             out.append(c.model_dump(mode="json", exclude_none=True))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            verloren += 1
+            _log(f"serialize_history: Eintrag (role={getattr(c, 'role', '?')}) "
+                 f"nicht speicherbar und VERWORFEN: {e}")
+    if verloren:
+        _log(f"serialize_history: {verloren} von {len(history or [])} Eintraegen verloren – "
+             f"der gespeicherte Kontext ist unvollstaendig")
     return out
 
 
 def deserialize_history(dicts: list) -> list:
-    """Umkehrung von serialize_history -> types.Content-Liste."""
+    """Umkehrung von serialize_history -> types.Content-Liste.
+
+    Verworfene Eintraege werden protokolliert – siehe serialize_history.
+    """
     from google.genai import types as _types
     out = []
+    verloren = 0
     for d in dicts or []:
         try:
             out.append(_types.Content.model_validate(d))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            verloren += 1
+            _log(f"deserialize_history: Eintrag (role={(d or {}).get('role', '?')}) "
+                 f"nicht ladbar und VERWORFEN: {e}")
+    if verloren:
+        _log(f"deserialize_history: {verloren} von {len(dicts or [])} Eintraegen verloren – "
+             f"der geladene Kontext ist unvollstaendig")
     return out
 
 
@@ -951,6 +974,12 @@ KRITISCH – Autonomie-Regeln:
                             chat_history = []
                     self._user_histories[_history_key] = chat_history
             self._current_chat_history  = chat_history  # Live-Referenz für Context-Stats-API
+            # Schnappschuss des Verlaufs VOR diesem Lauf. Bricht der Lauf ohne
+            # Antwort ab, wird darauf zurueckgesetzt: sonst bleibt die Nutzerfrage
+            # (samt abgerissenem Werkzeug-Turn) unbeantwortet im Kontext stehen und
+            # der NAECHSTE Lauf beantwortet sie mit – so kamen am 2026-07-28 auf dem
+            # Echt-System die Antworten durcheinander heraus.
+            _hist_before_run = list(chat_history)
             self._session_input_tokens  = 0             # Token-Zähler zurücksetzen
             self._session_output_tokens = 0
             task_start_time = _task_start_time
@@ -1003,6 +1032,22 @@ KRITISCH – Autonomie-Regeln:
                 except Exception as _att_err:
                     _log(f"Anhang übersprungen ({_att.get('name','?')}): {_att_err}")
             _user_msg = types.Content(role="user", parts=_user_parts)
+
+            # Die Frage darf pro Lauf GENAU EINMAL in den Verlauf – gemerkt wird das
+            # ueber diesen Merker, nicht durch Suchen im Verlauf. Ein Vergleich mit
+            # vorhandenen Eintraegen wuerde eine WIEDERHOLTE, wortgleiche Frage
+            # unterschlagen; ein Blick nur auf chat_history[-1] (so war es bis
+            # 2026-07-28) uebersieht sie dagegen nach einem Werkzeugschritt, weil
+            # dort die function_response steht -> die Frage stand doppelt im
+            # Kontext (auf ECHT nachgewiesen, Anthropic lehnt das mit 400 ab).
+            _user_msg_added = False
+
+            def _ensure_user_msg():
+                nonlocal _user_msg_added
+                if not _user_msg_added:
+                    chat_history.append(_user_msg)
+                    _user_msg_added = True
+
             llm_span = tracer.start_span("llm:initial", kind="llm", parent_id=self.agent_id)
             llm_span.attributes["model"] = self.current_model
             _stopped, response = await self._await_or_stop(self.provider.generate_response(
@@ -1057,6 +1102,15 @@ KRITISCH – Autonomie-Regeln:
                         retry_text = " ".join(p.text for p in (retry_resp.parts or []) if p.text).strip()
                         if retry_text:
                             await self._send_status(ws, retry_text, highlight=True)
+                            # Die gelieferte Antwort MUSS in den Verlauf – vorher endete
+                            # dieser Zweig mit einem nackten break: der Nutzer sah eine
+                            # Antwort, der Kontext kannte sie nicht, und der naechste
+                            # Lauf beantwortete dieselbe Frage ein zweites Mal mit.
+                            _ensure_user_msg()
+                            chat_history.append(types.Content(
+                                role="model",
+                                parts=[types.Part.from_text(text=retry_text)]))
+                            _conv_messages.append({"role": "assistant", "content": retry_text})
                             break
                     except Exception as _re:
                         _log(f"Retry fehlgeschlagen: {_re}")
@@ -1065,6 +1119,10 @@ KRITISCH – Autonomie-Regeln:
                         await self._send_status(ws, "⚠️ Keine Antwort vom LLM erhalten. Bitte versuche es erneut.", highlight=True)
                     else:
                         await self._send_status(ws, "⚠️ Keine Antwort vom LLM – automatischer Neuversuch folgt …")
+                    # Ohne Antwort darf dieser Lauf KEINE Spur im Kontext lassen:
+                    # eine offene Frage samt Werkzeug-Turn ohne Ergebnis wuerde den
+                    # naechsten Lauf dazu bringen, sie mitzubeantworten.
+                    chat_history = self._rollback_history(chat_history, _hist_before_run)
                     break
 
                 # Function Calls und Text trennen
@@ -1083,11 +1141,16 @@ KRITISCH – Autonomie-Regeln:
                             await self._send_status(ws, _display, highlight=True, intermediate=is_intermediate)
                         _conv_messages.append({"role": "assistant", "content": text.strip()})
                         # In der Antwort genannte Dokumente (auch /tmp-Pfade) als Chip ausliefern
-                        await self._deliver_docs(ws, text, _delivered_docs)
+                        await self._deliver_docs(ws, text, _delivered_docs, username)
 
                 # Wenn keine Function Calls → fertig; User+Antwort in History eintragen
                 if not function_calls:
-                    chat_history.append(_user_msg)
+                    # NUR anhaengen, wenn die Frage nicht schon im Verlauf steht:
+                    # bei einem Lauf MIT Werkzeugschritten hat Z. 1230 sie bereits
+                    # eingetragen, und die Pruefung dort schaut nur aufs letzte
+                    # Element (= function_response). Ohne diese Pruefung stand die
+                    # Frage doppelt im Kontext (nachgewiesen auf ECHT, 2026-07-28).
+                    _ensure_user_msg()
                     if self.LLM_PROVIDER == "google" and hasattr(response, 'raw') and response.raw and response.raw.candidates:
                         chat_history.append(response.raw.candidates[0].content)
                     else:
@@ -1183,7 +1246,7 @@ KRITISCH – Autonomie-Regeln:
 
                     # Office-Dokumente DIREKT als Download-Chip ausliefern (Seitenkanal,
                     # erkennt auch per Shell erzeugte Dateien in /tmp etc.).
-                    await self._deliver_docs(ws, result_str, _delivered_docs)
+                    await self._deliver_docs(ws, result_str, _delivered_docs, username)
 
                     _conv_messages.append({"role": "tool", "tool": tool_name, "content": result_str})
 
@@ -1209,8 +1272,7 @@ KRITISCH – Autonomie-Regeln:
 
                 # Nächsten LLM-Aufruf mit Tool-Ergebnissen
                 # Beim ersten Tool-Step: User-Nachricht als Anker in History einbauen
-                if steps == 0 and (not chat_history or chat_history[-1] != _user_msg):
-                    chat_history.append(_user_msg)
+                _ensure_user_msg()
                 if self.LLM_PROVIDER == "google":
                     chat_history.append(response.raw.candidates[0].content)
                 else:
@@ -1325,8 +1387,7 @@ KRITISCH – Autonomie-Regeln:
                     # _user_msg nur anhaengen, wenn es noch nicht in der History steht
                     # (kann durch Z. 668 beim ersten Tool-Call bereits drin sein) –
                     # sonst entstehen doppelte user-Eintraege, was Anthropic strict ablehnt.
-                    if not chat_history or chat_history[-1] != _user_msg:
-                        chat_history.append(_user_msg)
+                    _ensure_user_msg()
                     chat_history.append(types.Content(
                         role="model",
                         parts=[types.Part.from_text(text=_final_text)]
@@ -2113,6 +2174,27 @@ KRITISCH – Autonomie-Regeln:
         except Exception:
             pass
 
+    def _rollback_history(self, chat_history, snapshot):
+        """Setzt den Verlauf auf den Stand VOR diesem Lauf zurueck.
+
+        Fuer Laeufe, die ohne Antwort enden: was dieser Lauf angehaengt hat
+        (Frage, Werkzeugaufrufe, Ergebnisse) verschwindet wieder. Ein
+        ``function_call`` ohne ``function_response`` oder eine Frage ohne Antwort
+        wuerde den naechsten Lauf sonst dazu bringen, sie nachzuholen.
+
+        Ersetzt den INHALT der Liste (``[:] =``), nicht die Liste selbst – auf das
+        Objekt zeigen noch ``_user_histories`` und ``_current_chat_history``.
+        """
+        try:
+            entfernt = len(chat_history) - len(snapshot)
+            chat_history[:] = snapshot
+            if entfernt > 0:
+                _log(f"Verlauf zurueckgesetzt: {entfernt} Eintrag(e) dieses Laufs verworfen "
+                     f"(Lauf endete ohne Antwort)")
+        except Exception as e:  # noqa: BLE001
+            _log(f"Verlauf-Ruecksetzen fehlgeschlagen: {e}")
+        return chat_history
+
     def _clean_doc_refs(self, text):
         """Entfernt Dokument-Links/-Pfade aus dem ANZEIGE-Text des LLM.
 
@@ -2155,7 +2237,7 @@ KRITISCH – Autonomie-Regeln:
         text = re.sub(r"[ \t]{2,}", " ", text)
         return text
 
-    async def _deliver_docs(self, ws, text, delivered):
+    async def _deliver_docs(self, ws, text, delivered, username: str = ""):
         """Liefert erzeugte Office-Dokumente als Download-Chip ans Frontend –
         UNABHAENGIG davon, ob sie via office_*-Tool oder per Shell-Skript (z.B.
         python-pptx fuer Diagramme) erzeugt wurden.
@@ -2199,9 +2281,20 @@ KRITISCH – Autonomie-Regeln:
             except Exception as e:
                 _log(f"Quelle nach Ingest nicht entfernbar (bleibt liegen): {src} – {e}")
 
+        # Eigentuemer der ausgelieferten Dateien: der Benutzer DIESES Laufs. Nicht
+        # blind self._current_username nehmen – der Hauptagent ist geteilt, und bei
+        # parallelen Anfragen zweier Nutzer wuerde die Datei dem falschen zugeordnet.
+        _owner = username or getattr(self, "_current_username", "")
+
         async def _emit(name, url):
             # Bilder inline im Chat anzeigen (Frontend rendert ![..](/api/documents/..)
             # als <img>), Office-Dokumente als Download-Chip.
+            # Vorher: Datei an den Ersteller binden – ohne Eintrag ist sie nur fuer
+            # Admins ladbar (backend/documents.py, fail-closed).
+            try:
+                _documents.register(url.rsplit("/", 1)[-1], _owner)
+            except Exception as e:
+                _log(f"Eigentuemer-Eintrag fehlgeschlagen fuer {url}: {e}")
             ext = url.rsplit(".", 1)[-1].lower() if "." in url else ""
             md = f"![{name}]({url})" if ext in _IMG_EXT else f"[📥 {name} herunterladen]({url})"
             await self._send_status(ws, md, highlight=True)

@@ -44,21 +44,52 @@ Inhalt:
 _QA_RULE_DEFAULT = "5–15 Frage-Antwort-Paare – präzise, eigenständig verständlich, direkt aus dem Inhalt"
 
 
+# Regel fuer "gar keine Fragen erzeugen". Der Schluessel muss trotzdem im JSON
+# stehen, sonst weicht das Modell vom vorgegebenen Schema ab.
+_QA_RULE_NONE = ('KEINE Frage-Antwort-Paare. Das Feld "qa_pairs" MUSS ein leeres '
+                 'Array [] sein – erfinde auf keinen Fall Fragen')
+
+
 def _clamp_qa_count(qa_count) -> int | None:
-    """Gewuenschte Fragenanzahl validieren (1..50); None/ungueltig = Default-Regel."""
+    """Gewuenschte Fragenanzahl validieren.
+
+    Rueckgabe:
+      ``None`` – kein Wunsch angegeben (unbrauchbare Eingabe) -> Default-Regel
+      ``0``    – AUSDRUECKLICH keine Fragen erzeugen
+      1..50    – genau diese Anzahl
+
+    Die 0 war bis 2026-07-28 nicht von "kein Wunsch" zu unterscheiden (beides
+    ``None``) – deshalb erzeugte der Extraktor auch dann Fragen, wenn der Haken
+    „Fragen & Antworten generieren (KI)" AUS war. Aufrufer duerfen daher NICHT
+    per Falsyness pruefen (``if n:``), sondern muessen ``n == 0`` abfragen.
+    """
     try:
         n = int(qa_count)
     except (TypeError, ValueError):
         return None
-    return max(1, min(n, 50)) if n > 0 else None
+    return max(1, min(n, 50)) if n > 0 else 0
 
 
 def _build_prompt(content: str, qa_count=None) -> str:
     """Extraktions-Prompt bauen; qa_count = vom Benutzer gewuenschte Fragenanzahl."""
     n = _clamp_qa_count(qa_count)
-    rule = (f"genau {n} Frage-Antwort-Paare – präzise, eigenständig verständlich, "
-            f"direkt aus dem Inhalt") if n else _QA_RULE_DEFAULT
+    if n == 0:
+        rule = _QA_RULE_NONE
+    elif n:
+        rule = (f"genau {n} Frage-Antwort-Paare – präzise, eigenständig verständlich, "
+                f"direkt aus dem Inhalt")
+    else:
+        rule = _QA_RULE_DEFAULT
     return _EXTRACT_PROMPT.replace("{qa_rule}", rule).replace("{content}", content)
+
+
+def _drop_qa_if_unwanted(qa_list, qa_count):
+    """Erzwingt "keine Fragen" auch dann, wenn das Modell die Anweisung ignoriert.
+
+    Ein Prompt ist eine Bitte, keine Garantie – ohne diese Schranke landen bei
+    ``qa_count=0`` trotzdem Fragen im Entwurf.
+    """
+    return [] if _clamp_qa_count(qa_count) == 0 else qa_list
 
 
 def _profile_provider(prof=None):
@@ -110,26 +141,32 @@ async def extract_structured_from_text(text: str, fallback_title: str = "", qa_c
         "title": str(data.get("title", fallback_title)).strip()[:300],
         "summary": str(data.get("summary", "")).strip(),
         "facts": [str(f).strip() for f in data.get("facts", []) if str(f).strip()],
-        "qa_pairs": [
+        "qa_pairs": _drop_qa_if_unwanted([
             {"q": str(p.get("q", "")).strip(), "a": str(p.get("a", "")).strip()}
             for p in data.get("qa_pairs", []) if str(p.get("q", "")).strip()
-        ],
+        ], qa_count),
     }
 
 
-async def extract_to_pending(text: str, title: str = "", source: str = "") -> dict:
+async def extract_to_pending(text: str, title: str = "", source: str = "",
+                             qa_count=None, prof: dict = None) -> dict:
     """Beliebigen Text → strukturierte Extraktion → gespeichertes Pending-Dokument.
 
     Wiederverwendbar fuer Quellen ohne eigene Datei-/HTTP-Pipeline (z.B. Confluence).
     ``source`` wird als Herkunft/Link im Pending-Dokument hinterlegt.
+    ``qa_count``: 0 = ausdruecklich keine Fragen, 1..50 = genau so viele,
+    None = Default-Regel. Fehlte bis 2026-07-28 komplett – der Confluence-Import
+    erzeugte deshalb IMMER Fragen, egal was in der Oberflaeche eingestellt war.
+    ``prof``: LLM-Profil des Benutzers (None = globales Aktiv-Profil).
     """
-    structured = await extract_structured_from_text(text, fallback_title=title)
+    structured = await extract_structured_from_text(text, fallback_title=title,
+                                                   qa_count=qa_count, prof=prof)
     doc_id = str(uuid.uuid4())[:8]
-    qa_pairs = [
+    qa_pairs = _drop_qa_if_unwanted([
         {"id": str(uuid.uuid4())[:6], "q": p.get("q", ""), "a": p.get("a", ""),
          "approved": True}
         for p in structured.get("qa_pairs", []) if p.get("q")
-    ]
+    ], qa_count)
     pending = {
         "id": doc_id,
         "url": source,
@@ -305,6 +342,7 @@ async def extract_from_url(url: str, qa_count=None, prof: dict = None) -> dict:
             "a": str(pair.get("a", "")).strip(),
             "approved": True,  # Default: alle vorausgewählt
         })
+    qa_pairs = _drop_qa_if_unwanted(qa_pairs, qa_count)
 
     pending = {
         "id": doc_id,

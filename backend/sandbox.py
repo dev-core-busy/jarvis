@@ -117,6 +117,45 @@ _APP_DENY_REL = (
 )
 
 
+# ── Dateirechte: fremde OS-Benutzer aussperren ───────────────────────────────
+# Die Eigentuemer-Schranke der Werkzeuge (may_see_document) wirkt nur IM Backend.
+# Shell-Befehle von Domain-Nutzern laufen ueber den Broker als `jarvis_sandbox`
+# (runuser) – ein `cat` dort umgeht jede Policy und braucht nur Leserechte im
+# Dateisystem. Mit 0755/0644 war das gegeben: jeder Domain-Nutzer konnte die
+# Ergebnisdateien UND die Chat-Verlaeufe aller anderen lesen (nachgewiesen auf DEV
+# 2026-07-28). Diese Verzeichnisse gehoeren dem Dienst allein.
+#
+# WICHTIG – was das NICHT leisten kann: alle Domain-Nutzer teilen EINEN
+# Sandbox-Benutzer. OS-Rechte koennen sie deshalb nicht voneinander trennen,
+# nur vom Dienst-Verzeichnis. Deswegen bekommt der Agent Anhaenge als
+# Arbeitskopie in /tmp (main.py) und nicht ueber data/documents.
+#
+# data/knowledge bleibt ABSICHTLICH lesbar: die Shell soll Wissensdateien
+# verarbeiten koennen (READ_ROOTS erlaubt es ausdruecklich).
+PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs")
+PRIVATE_MODE = 0o750
+
+
+def harden_data_dirs() -> list[str]:
+    """Setzt die Dienst-Verzeichnisse auf 0750. Idempotent, Rueckgabe = Aenderungen."""
+    geaendert = []
+    for rel in PRIVATE_DIRS:
+        d = PROJECT_ROOT / rel
+        try:
+            if not d.is_dir():
+                continue
+            ist = d.stat().st_mode & 0o777
+            if ist == PRIVATE_MODE:
+                continue
+            d.chmod(PRIVATE_MODE)
+            geaendert.append(f"{rel}: {oct(ist)} -> {oct(PRIVATE_MODE)}")
+        except Exception as e:  # noqa: BLE001
+            # Kein harter Fehler: laeuft das Backend nicht als Eigentuemer, bleibt
+            # es beim alten Modus – dann muss ein Admin es einmal setzen.
+            geaendert.append(f"{rel}: FEHLER {e}")
+    return geaendert
+
+
 def _resolve(path: str) -> Path:
     # expanduser + absolut + Symlinks aufloesen (strict=False -> kein Fehler bei
     # nicht existierendem Ziel, z.B. neue Datei in /tmp).

@@ -41,6 +41,8 @@ PERIODIC_CONF = "/etc/apt/apt.conf.d/20auto-upgrades"
 LIMITS_CONF = "/etc/apt/apt.conf.d/52jarvis-unattended"
 LOG = "/var/log/unattended-upgrades/unattended-upgrades.log"
 TIMERS = ("apt-daily.timer", "apt-daily-upgrade.timer")
+# Obergrenze fuer den Trockenlauf (siehe status(live=True)).
+DRY_RUN_TIMEOUT = 45
 
 _LIMITS = """// Von Jarvis verwaltet (Einstellungen -> Sicherheit -> Automatische
 // Sicherheitsupdates). Haendische Aenderungen werden beim naechsten
@@ -48,8 +50,18 @@ _LIMITS = """// Von Jarvis verwaltet (Einstellungen -> Sicherheit -> Automatisch
 
 // NUR die Sicherheits-Quelle einspielen – keine allgemeinen Versionssprunge
 // unter dem laufenden Dienst.
+//
+// #clear IST HIER PFLICHT: apt ERGAENZT Listen, es ersetzt sie nicht. Ohne die
+// beiden clear-Zeilen bleibt die Vorgabe aus 50unattended-upgrades stehen
+// ("origin=Debian,codename=${distro_codename},label=Debian" = ALLE Updates) und
+// die eigene Zeile kommt nur hinzu. Nachgewiesen auf DEV am 2026-07-28:
+// `apt-config dump` zeigte vier Origins-Pattern, darunter label=Debian, und der
+// Trockenlauf meldete 282 Kandidaten statt der 93 Sicherheitspakete.
+#clear Unattended-Upgrade::Origins-Pattern;
+#clear Unattended-Upgrade::Allowed-Origins;
 Unattended-Upgrade::Origins-Pattern {
         "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+        "origin=Debian,codename=${distro_codename},label=Debian-Security";
 };
 
 // Ein Produktionsserver startet nicht von selbst neu.
@@ -137,15 +149,33 @@ def _last_run() -> str:
         return ""
 
 
+def effective_origins() -> list[str]:
+    """Ursprungs-Liste, die apt TATSAECHLICH anwendet (ueber alle conf.d-Dateien).
+
+    Nicht am Dateiinhalt pruefen: apt ergaenzt Listen. Erst diese Abfrage zeigt,
+    ob die Vorgabe aus 50unattended-upgrades wirklich verdraengt wurde.
+    """
+    out = (_run([APT_CONFIG, "dump"], timeout=20).stdout or "")
+    werte = []
+    for zeile in out.splitlines():
+        m = re.match(r'Unattended-Upgrade::(?:Origins-Pattern|Allowed-Origins)::\s+"([^"]*)"',
+                     zeile.strip())
+        if m and m.group(1):
+            werte.append(m.group(1))
+    return werte
+
+
 def _limits_ok() -> bool:
-    """Sind unsere Begrenzungen gesetzt? (Datei vorhanden UND Aufraeumen aus)"""
-    try:
-        txt = Path(LIMITS_CONF).read_text()
-    except Exception:  # noqa: BLE001
+    """Greifen die Begrenzungen WIRKSAM? (nicht nur: steht es in der Datei)"""
+    dump = (_run([APT_CONFIG, "dump"], timeout=20).stdout or "")
+    if 'Unattended-Upgrade::Remove-Unused-Dependencies "false"' not in dump:
         return False
-    return ('Remove-Unused-Dependencies "false"' in txt
-            and 'Automatic-Reboot "false"' in txt
-            and "Debian-Security" in txt)
+    if 'Unattended-Upgrade::Automatic-Reboot "false"' not in dump:
+        return False
+    origins = effective_origins()
+    # JEDER Eintrag muss die Sicherheits-Quelle sein – ein einziger allgemeiner
+    # Eintrag (label=Debian) wuerde beliebige Updates einspielen lassen.
+    return bool(origins) and all("Debian-Security" in o for o in origins)
 
 
 def status(live: bool = False) -> dict:
@@ -160,6 +190,7 @@ def status(live: bool = False) -> dict:
         "update_lists": per.get("Update-Package-Lists", ""),
         "unattended": per.get("Unattended-Upgrade", ""),
         "limits_ok": _limits_ok(),
+        "origins": effective_origins(),
         "timers": {u: _timer_enabled(u) for u in TIMERS},
         "last_run": _last_run(),
         "dry_run": None,
@@ -170,9 +201,26 @@ def status(live: bool = False) -> dict:
     st["ok"] = bool(st["enabled"] and st["limits_ok"]
                     and all(st["timers"].get(u) for u in TIMERS))
     if live and st["package_installed"]:
-        r = _run([UU, "--dry-run", "--verbose"], timeout=180)
-        aus = ((r.stdout or "") + (r.stderr or ""))
-        st["dry_run"] = (aus.strip()[-600:] or f"rc={r.returncode}")
+        # HARTE Obergrenze: `unattended-upgrade --dry-run` simuliert die komplette
+        # Installation und braucht auf einem Rechner mit viel Rueckstand Minuten
+        # (auf DEV gemessen > 2 min). Ohne Deckel haengt die Oberflaeche daran.
+        try:
+            r = subprocess.run([UU, "--dry-run", "--verbose"], capture_output=True,
+                               text=True, timeout=DRY_RUN_TIMEOUT)
+            aus = ((r.stdout or "") + (r.stderr or "")).strip()
+            st["dry_run"] = aus[-600:] or f"rc={r.returncode}"
+        except subprocess.TimeoutExpired:
+            # Kein Fehler, sondern eine Eigenschaft des Rechners: der Trockenlauf
+            # simuliert JEDES Kandidatenpaket einzeln. Klar sagen, was gilt.
+            st["dry_run"] = (f"Trockenlauf nach {DRY_RUN_TIMEOUT} s abgebrochen – er "
+                             "simuliert jedes Kandidatenpaket einzeln und dauert bei "
+                             "grossem Rueckstand laenger. Das sagt NICHTS ueber die "
+                             "Einstellungen aus: die Zeilen oben zeigen den wirksamen "
+                             "Zustand (aus apt-config gelesen).")
+            aus = ""
+        except Exception as e:  # noqa: BLE001
+            st["dry_run"] = f"Trockenlauf nicht ausfuehrbar: {e}"
+            aus = ""
         # Nachweis, dass nur die Sicherheits-Quelle erlaubt ist
         st["security_only"] = ("Debian-Security" in aus) or ("security" in aus.lower())
     return st
@@ -216,12 +264,19 @@ def setup() -> dict:
     except Exception as e:  # noqa: BLE001
         step("Automatik eingeschaltet", False, str(e))
 
-    # 4) Timer aktivieren (ohne sie passiert trotz Schalter nichts)
+    # 4) Timer aktivieren (ohne sie passiert trotz Schalter nichts).
+    #    BEWUSST ohne `--now`: beide Timer haben `Persistent=true`, ein Start
+    #    kann den zugehoerigen Dienst SOFORT ausloesen (apt-get update bzw.
+    #    unattended-upgrade). Das haelt dann die apt-Sperre und laesst jede
+    #    weitere Aktion warten. Sie feuern ohnehin nach Plan.
     for unit in TIMERS:
-        r = _run([SYSTEMCTL, "enable", "--now", unit], timeout=60)
-        step(f"{unit} aktiv", _timer_enabled(unit), r.stderr)
+        r = _run([SYSTEMCTL, "enable", unit], timeout=60)
+        step(f"{unit} aktiviert", _timer_enabled(unit), r.stderr)
 
-    st = status(live=True)
+    # ABSICHTLICH ohne Trockenlauf: der dauert Minuten (siehe DRY_RUN_TIMEOUT) und
+    # die Einrichtung selbst ist in Millisekunden fertig. Wer die Simulation sehen
+    # will, drueckt "Status pruefen (Trockenlauf)".
+    st = status(live=False)
     return {"ok": bool(st.get("ok")), "steps": steps, "status": st}
 
 

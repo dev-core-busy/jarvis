@@ -6,11 +6,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jarvis – KI Linux Agent</title>
     <meta name="description" content="Jarvis – Autonomer KI-Agent für Linux-Systeme">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
-        rel="stylesheet">
+    <!-- KEINE externe Schriftquelle. Hier stand bis 2026-07-28 ein
+         render-blockierendes <link> auf fonts.googleapis.com (plus zwei
+         preconnects). Erreicht der BROWSER diesen Host nicht (Firmen-Proxy,
+         gesperrter Egress), wartet er bis zum Verbindungs-Timeout, bevor er
+         ueberhaupt etwas zeichnet – auf ECHT waren das ~10 Sekunden, und zwar
+         nur auf dieser Seite: alle anderen Frontends (/chat, /portal, /wissen,
+         /support, /userchat, /api) haben die Einbindung nie gehabt.
+         Die Schrift-Kette in theme.css (--font-body: 'Inter', -apple-system, …)
+         greift ohnehin auf Systemschriften zurueck, deshalb sieht die Seite
+         jetzt genauso aus wie die uebrigen. Nebeneffekt: die Admin-Oberflaeche
+         verraet einem Dritten nicht mehr per Font-Abruf, dass sie geoeffnet wird.
+         Wer Inter zwingend will, muss die Dateien selbst ausliefern
+         (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=7">
     <link rel="stylesheet" href="/static/css/style.css?v=141">
@@ -951,7 +959,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <li>Anzeige: „Letzte Zugriffs-Verstöße" und „Gesperrte Konten" in diesem Bereich; API: <code>/api/security/violations</code>, <code>/api/security/incidents</code>, <code>/api/security/sandbox</code>.</li>
                     <li>Internet-Egress-Sperre (harte Firewall-Grenze für Benutzer ohne Internet-Freigabe): Status via <code>GET /api/security/egress</code> (mit <code>?live=1</code> Live-Test), Ein-Klick-Einrichtung via <code>POST /api/security/egress/setup</code>, Deaktivierung via <code>POST /api/security/egress/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Harte Egress-Sperre</i>.</li>
                     <li>OS-Sandbox (Systemschutz Netzwerk-Benutzer): Status via <code>GET /api/security/sandbox</code> (mit <code>?live=1</code> Isolationstest), Ein-/Ausschalten via <code>POST /api/security/sandbox/setup</code> bzw. <code>/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Systemschutz / Sandbox</i>.</li>
-                    <li>Automatische Sicherheitsupdates (System): Status via <code>GET /api/security/unattended</code> (mit <code>?live=1</code> Trockenlauf), Ein-/Ausschalten via <code>POST /api/security/unattended/setup</code> bzw. <code>/teardown</code>. Richtet <code>unattended-upgrades</code> bewusst eng ein: nur die Debian-Sicherheits-Quelle, kein automatischer Neustart, kein automatisches Aufräumen von Paketen. Beim Ausschalten bleibt die tägliche Aktualisierung des Paketindex aktiv. Bedienung unter <i>Sicherheit → Berechtigungen → Automatische Sicherheitsupdates</i>.</li>
+                    <li>Automatische Sicherheitsupdates (System): Status via <code>GET /api/security/unattended</code> (mit <code>?live=1</code> Trockenlauf), Ein-/Ausschalten via <code>POST /api/security/unattended/setup</code> bzw. <code>/teardown</code>. Richtet <code>unattended-upgrades</code> bewusst eng ein: nur die Debian-Sicherheits-Quelle, kein automatischer Neustart, kein automatisches Aufräumen von Paketen. Beim Ausschalten bleibt die tägliche Aktualisierung des Paketindex aktiv. Bedienung unter <i>KI &amp; System → System-Einstellungen → Automatische Sicherheitsupdates</i>.</li>
                     <li>Root-Broker (Trennung UI-/Ausführungsebene): Betriebsmodus via <code>GET /api/broker/status</code>, Ein-Klick-Umschaltung via <code>POST /api/broker/setup</code> (getrennter Betrieb) bzw. <code>POST /api/broker/teardown</code> (Alt-Betrieb), Freigabeliste via <code>GET /api/broker/ops</code>, Admin-Entscheidung via <code>POST /api/broker/ops/decide</code> (Body <code>{key, decision: allow|deny|pending}</code>), Eintrag löschen via <code>POST /api/broker/ops/remove</code>, Audit-Log via <code>GET /api/broker/audit?n=100</code>. Bedienung unter <i>Sicherheit → Root-Freigaben (Root-Broker)</i>.</li>
                 </ul>
 
@@ -1221,13 +1229,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <!-- Sprachausgabe -->
-                        <!-- Tuning: Sprachausgabe + Antwort-Timeout + Maximale Antwortlänge.
-                             Zusammengefasst 2026-07-27; alle Element-IDs bleiben unverändert,
-                             app.js verdrahtet sie darüber. -->
+                        <!-- System-Einstellungen (hiess bis 2026-07-28 „Tuning"): Sprachausgabe,
+                             Antwort-Timeout, Maximale Antwortlänge, Vorhaltezeit erzeugter
+                             Dokumente, Automatische Sicherheitsupdates.
+                             Zusammengefasst 2026-07-27; alle Element-IDs bleiben unverändert
+                             (auch die Container-IDs prof-sect-tuning-*, app.js verdrahtet sie
+                             darüber) – umbenannt wurde nur die Beschriftung. -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-tuning-hdr">
-                                <h3 data-i18n="profile.section_tuning">Tuning</h3>
+                                <h3 data-i18n="profile.section_tuning">System-Einstellungen</h3>
                                 <span class="sk-openclaw-toggle" id="prof-sect-tuning-tog">▶</span>
                             </div>
                             <div id="prof-sect-tuning-body" class="kb-collapse-body" style="display:none;">
@@ -1282,6 +1292,24 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <span id="docs-retention-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
                                     </div>
                                     <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="profile.docsret_hint">Erzeugte Dateien (Präsentationen, Tabellen, PDFs, Bilder) liegen auf dem Server und sind über den Download-Link im Chat erreichbar. Dieser Link verfällt nicht von selbst – das Löschen der Datei ist der einzige Widerruf. Nach Ablauf der Frist werden die Dateien beim täglichen Lauf entfernt; der Chat-Verlauf bleibt erhalten, nur der Download funktioniert dann nicht mehr. Erlaubt sind 15 bis 90 Tage. Mit „dauerhaft“ wird nie automatisch gelöscht – das bedeutet, dass auch Dateien mit vertraulichem Inhalt unbegrenzt abrufbar bleiben.</small>
+                                </div>
+
+
+                                <!-- Automatische Sicherheitsupdates (System).
+                                     Verschoben 2026-07-28 aus Sicherheit -> Systemschutz hierher.
+                                     Die IDs sec-unatt-* bleiben, security_incidents.js verdrahtet
+                                     sie darueber – ein Umbenennen haette die Knoepfe still
+                                     gebrochen. -->
+                                <div class="tuning-group">
+                                    <h4 class="tuning-group-title" data-i18n="security.section_unattended">Automatische Sicherheitsupdates (System)</h4>
+                                    <div id="sec-unatt-status" class="kb-hint" style="margin:0 0 4px;">Status wird geladen…</div>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                        <button type="button" id="sec-unatt-setup" data-i18n="security.unattended_setup" class="sec-btn primary">Einschalten / Reparieren</button>
+                                        <button type="button" id="sec-unatt-verify" data-i18n="security.unattended_verify" class="sec-btn">Status prüfen (Trockenlauf)</button>
+                                        <button type="button" id="sec-unatt-teardown" data-i18n="security.unattended_teardown" class="sec-btn danger">Ausschalten</button>
+                                    </div>
+                                    <div id="sec-unatt-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="security.unattended_desc">Spielt Debian-Sicherheitspatches automatisch ein (unattended-upgrades). Bewusst eng gefasst: nur die Sicherheits-Quelle – keine allgemeinen Versionssprünge unter dem laufenden Dienst, kein automatischer Neustart und kein automatisches Aufräumen von Paketen (Letzteres würde Abhängigkeiten des Agenten entfernen, etwa cmake/boost für die Gesichtserkennung, ffmpeg für die Sprachausgabe oder LibreOffice-Teile). Die tägliche Aktualisierung des Paketindex bleibt beim Ausschalten aktiv – ein veralteter Index lässt Paketinstallationen mit „404 Not Found“ scheitern.</small>
                                 </div>
 
                             </div>
@@ -3380,16 +3408,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
                                 <div id="sec-sandbox-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
 
-                                <h4 style="margin:18px 0 6px;" data-i18n="security.section_unattended">Automatische Sicherheitsupdates (System)</h4>
-                                <div id="sec-unatt-status" class="kb-hint" style="margin:0 0 4px;">Status wird geladen…</div>
-                                <p class="kb-hint" data-i18n="security.unattended_desc">Spielt Debian-Sicherheitspatches automatisch ein (<code>unattended-upgrades</code>). Bewusst eng gefasst: <b>nur die Sicherheits-Quelle</b> – keine allgemeinen Versionssprünge unter dem laufenden Dienst, <b>kein automatischer Neustart</b> und <b>kein automatisches Aufräumen</b> von Paketen (Letzteres würde Abhängigkeiten des Agenten entfernen, etwa cmake/boost für die Gesichtserkennung, ffmpeg für die Sprachausgabe oder LibreOffice-Teile). Die tägliche Aktualisierung des Paketindex bleibt beim Ausschalten aktiv – ein veralteter Index lässt Paketinstallationen mit „404 Not Found" scheitern.</p>
-                                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                                    <button type="button" id="sec-unatt-setup" data-i18n="security.unattended_setup" class="sec-btn primary">Einschalten / Reparieren</button>
-                                    <button type="button" id="sec-unatt-verify" data-i18n="security.unattended_verify" class="sec-btn">Status prüfen (Trockenlauf)</button>
-                                    <button type="button" id="sec-unatt-teardown" data-i18n="security.unattended_teardown" class="sec-btn danger">Ausschalten</button>
-                                </div>
-                                <div id="sec-unatt-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
-
                                 <h4 style="margin:18px 0 6px;" data-i18n="security.section_violations">Letzte Zugriffs-Verstöße</h4>
                                 <p class="kb-hint" data-i18n="security.violations_desc">Im Tool-Dispatch verweigerte Zugriffe (Secrets/Root/Base64) von Netzwerk-Benutzern. Nach mehreren Verstößen innerhalb kurzer Zeit wird der Account automatisch gesperrt (lokale Administratoren ausgenommen).</p>
                                 <div id="sec-viol-list"></div>
@@ -3466,12 +3484,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=128"></script>
+    <script src="/static/js/i18n.js?v=130"></script>
     <script src="/static/js/cron.js?v=17"></script>
     <script src="/static/js/context.js?v=6"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
-    <script src="/static/js/skills.js?v=37"></script>
+    <script src="/static/js/skills.js?v=38"></script>
     <script src="/static/js/skillcfg.js?v=1"></script>
     <script src="/static/js/google.js?v=12"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
@@ -3486,10 +3504,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=8"></script>
     <script src="/static/js/branding.js?v=22"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/security_incidents.js?v=20"></script>
+    <script src="/static/js/security_incidents.js?v=22"></script>
     <script src="/static/js/ldap_picker.js?v=7"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=179"></script>
+    <script src="/static/js/app.js?v=181"></script>
 </body>
 
 </html>

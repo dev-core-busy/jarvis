@@ -44,6 +44,18 @@ def _new_path(friendly: str, ext: str):
 
 
 def _ok(download_name: str, fname: str, disk_path: Path, extra: str = "") -> str:
+    # Eigentuemer beim ERZEUGEN vermerken, nicht erst beim Ausliefern.
+    # agent.py::_deliver_docs registriert die Datei ebenfalls, laeuft aber bei
+    # Sub-Agenten gar nicht – dort waere die eigene Datei sonst sofort wieder
+    # unsichtbar (Eigentuemer-Schranke ist fail-closed) und ein folgendes
+    # office_to_pdf/office_read wuerde "Datei nicht gefunden" melden.
+    try:
+        from backend import documents as _documents, sandbox as _sbx
+        _u = _sbx.tool_user()
+        if _u:
+            _documents.register(fname, _u)
+    except Exception:
+        pass
     # Markdown-Download-Link, den die Frontends als Download-Chip rendern.
     return (
         f"✅ '{download_name}' wurde erstellt.\n\n"
@@ -52,11 +64,32 @@ def _ok(download_name: str, fname: str, disk_path: Path, extra: str = "") -> str
     )
 
 
+def _sichtbar(p: Path | None) -> Path | None:
+    """Eigentuemer-Schranke fuer data/documents (dieselbe wie am HTTP-Endpunkt).
+
+    Fremde Dateien werden behandelt, als gaebe es sie nicht (None) – die
+    Aufrufer melden dann "Datei nicht gefunden". Dass eine Datei existiert, ist
+    selbst eine Information; deshalb keine eigene Fehlermeldung.
+    """
+    if p is None:
+        return None
+    try:
+        from backend import sandbox as _sbx
+        rp = p.resolve()
+        if rp.parent == _sbx.DOCS_ROOT and not _sbx.may_see_document(rp.name):
+            return None
+    except Exception:
+        pass
+    return p
+
+
 def _resolve_existing(path: str) -> Path | None:
     """Loest einen Eingabepfad zu einer existierenden Datei auf.
 
     Akzeptiert: reinen Dateinamen in data/documents/, '/api/documents/<name>'
-    oder einen beliebigen (absoluten/relativen) Dateisystempfad.
+    oder einen beliebigen (absoluten/relativen) Dateisystempfad. Dateien in
+    data/documents, die einem ANDEREN Benutzer gehoeren, gelten als nicht
+    vorhanden (siehe ``_sichtbar``).
     """
     if not path:
         return None
@@ -65,10 +98,25 @@ def _resolve_existing(path: str) -> Path | None:
         path = path[len("/api/documents/"):]
     cand = DOCS_DIR / path
     if cand.exists():
-        return cand
+        return _sichtbar(cand)
     p = Path(path)
     if p.exists():
-        return p
+        return _sichtbar(p)
+    # ANZEIGENAME: Auf Platte heisst die Datei '<32-Hex>__<Anzeigename>', der
+    # Werkzeug-Erfolgstext nennt aber nur den Anzeigenamen. Das LLM gibt genau
+    # den weiter ("office_to_pdf: IT-Projektangebot.docx") und lief bis
+    # 2026-07-28 in "Datei nicht gefunden" – die Kette Erstellen→PDF war damit
+    # ueber den natuerlichen Weg nicht benutzbar. Daher hier nachschlagen;
+    # bei mehreren Treffern der jüngste (= der gerade erzeugte).
+    name = Path(path).name
+    if name and "/" not in path.strip("/"):
+        try:
+            treffer = [f for f in DOCS_DIR.glob(f"*__{name}")
+                       if f.is_file() and _sichtbar(f) is not None]
+            if treffer:
+                return max(treffer, key=lambda f: f.stat().st_mtime)
+        except Exception:
+            pass
     return None
 
 
@@ -351,6 +399,30 @@ class ReadDocumentTool(BaseTool):
 # ─────────────────────────────────────────────────────────────────────────
 # PDF-Export via LibreOffice
 # ─────────────────────────────────────────────────────────────────────────
+# Wo LibreOffice liegen kann. `soffice` steht bei Debian-Paketen in /usr/bin,
+# eigenstaendige Installationen (LibreOffice-Download, Flatpak-Export) legen es
+# nur unter /opt bzw. /usr/lib ab.
+_SOFFICE_KANDIDATEN = (
+    "soffice", "libreoffice",
+    "/usr/bin/soffice", "/usr/lib/libreoffice/program/soffice",
+    "/opt/libreoffice/program/soffice", "/snap/bin/libreoffice",
+)
+
+
+def _find_soffice() -> str | None:
+    """Sucht die LibreOffice-Binaerdatei; None = nicht installiert."""
+    import shutil as _sh
+    for k in _SOFFICE_KANDIDATEN:
+        if k.startswith("/"):
+            if Path(k).is_file():
+                return k
+        else:
+            gefunden = _sh.which(k)
+            if gefunden:
+                return gefunden
+    return None
+
+
 class ExportPdfTool(BaseTool):
     @property
     def name(self) -> str:
@@ -380,12 +452,29 @@ class ExportPdfTool(BaseTool):
         if src.suffix.lower() not in (".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp"):
             return f"Fehler: Format '{src.suffix}' wird fuer PDF-Export nicht unterstuetzt."
 
+        # Fehlt LibreOffice, gab es bis 2026-07-28 nur das rohe
+        # "[Errno 2] No such file or directory: 'soffice'" – daraus konnte weder
+        # das LLM noch der Nutzer ableiten, WAS zu tun ist. Jetzt eine Meldung,
+        # die den Grund nennt und den Weg zeigt (auf ECHT war LibreOffice nie
+        # installiert, auf DEV schon – daher "geht bei mir, dort nicht").
+        binary = _find_soffice()
+        if not binary:
+            return (
+                "Fehler: PDF-Export nicht moeglich – auf diesem Server ist LibreOffice "
+                "nicht installiert (weder 'soffice' noch 'libreoffice' gefunden). "
+                "Ein Administrator kann es nachinstallieren: 'apt install libreoffice-writer "
+                "libreoffice-calc libreoffice-impress' oder den Office-Skill unter "
+                "Einstellungen → Skills einmal aus- und wieder einschalten (die Systempakete "
+                "stehen im Skill-Manifest und werden beim Aktivieren installiert). "
+                "Das Office-Dokument selbst wurde erzeugt und kann heruntergeladen werden."
+            )
+
         DOCS_DIR.mkdir(parents=True, exist_ok=True)
         token = uuid.uuid4().hex
         # Eigenes UserInstallation-Profil, um Konflikte mit dem Desktop-LibreOffice zu vermeiden
         profile = f"/tmp/lo_jarvis_{token}"
         cmd = [
-            "soffice", "--headless", "--norestore", "--convert-to", "pdf",
+            binary, "--headless", "--norestore", "--convert-to", "pdf",
             "--outdir", str(DOCS_DIR),
             f"-env:UserInstallation=file://{profile}",
             str(src),

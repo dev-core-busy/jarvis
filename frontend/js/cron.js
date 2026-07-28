@@ -377,6 +377,24 @@ window.cronManager = new (class JarvisCronManager {
             const lastRun  = job.last_run ? new Date(job.last_run * 1000).toLocaleString('de-DE') : '—';
             const dotCls   = job.enabled ? 'active' : 'inactive';
             const onceBadge = job.once ? `<span style="font-size:.7rem;background:var(--accent-muted,rgba(99,102,241,.2));color:var(--accent);border-radius:4px;padding:1px 6px;margin-left:4px;">einmalig</span>` : '';
+            // Auftraggeber-Bindung sichtbar machen: mit WESSEN Rechten laeuft der
+            // Auftrag? Ohne Besitzer laeuft er unprivilegiert und scheitert an
+            // System-Befehlen – deshalb der Uebernehmen-Knopf (nur Admins).
+            const owner    = job.owner || '';
+            const rightsCls = job.owner_privileged ? 'cron-badge-sys' : 'cron-badge-user';
+            const rightsTxt = !owner ? window.t('cron.owner_none')
+                            : job.owner_privileged ? window.t('cron.rights_system')
+                            : window.t('cron.rights_user');
+            const ownerBadge = `<span class="cron-owner-badge ${owner ? rightsCls : 'cron-badge-none'}" `
+                + `title="${this._esc(window.t('cron.owner_hint'))}">${this._esc(rightsTxt)}`
+                + `${owner ? ` · ${this._esc(owner)}` : ''}</span>`;
+            // Übernehmen nur anbieten, wenn der Auftrag noch keine Systemrechte hat.
+            // Ob der Benutzer übernehmen DARF, entscheidet der Server
+            // (/api/cron/{id}/claim hängt an require_local_auth) – /settings ist
+            // ohnehin nur für Admins erreichbar.
+            const claimBtn = !job.owner_privileged
+                ? `<button class="kb-btn-icon cron-claim-btn" data-id="${job.id}" `
+                  + `title="${this._esc(window.t('cron.claim_title'))}">🔑</button>` : '';
             return `
             <div class="cron-item" data-id="${job.id}">
                 <div class="cron-item-row">
@@ -385,6 +403,7 @@ window.cronManager = new (class JarvisCronManager {
                     <code  class="cron-item-code" data-tip="${this._esc(this._cronToText(job.cron))}">${this._esc(job.cron)}</code>
                     <div   class="cron-item-actions">
                         <button class="kb-btn-run  cron-run-btn"  data-id="${job.id}" title="Jetzt ausführen">▶</button>
+                        ${claimBtn}
                         <button class="kb-btn-icon cron-edit-btn" data-id="${job.id}" title="Bearbeiten">✏️</button>
                         <button class="kb-btn-danger cron-del-btn" data-id="${job.id}" title="Löschen">×</button>
                         <label class="kb-form-checkbox-label" style="margin-left:4px;" title="${job.enabled ? 'Aktiv' : 'Inaktiv'}">
@@ -393,10 +412,11 @@ window.cronManager = new (class JarvisCronManager {
                     </div>
                 </div>
                 <div class="cron-item-task">${this._esc(job.task)}</div>
-                <div class="cron-item-meta">${window.t('cron.last_run')}: ${lastRun}${job.last_result ? ` · ${this._esc(job.last_result.substring(0,80))}${job.last_result.length>80?'…':''}` : ''}</div>
+                <div class="cron-item-meta">${ownerBadge} ${window.t('cron.last_run')}: ${lastRun}${job.last_result ? ` · ${this._esc(job.last_result.substring(0,80))}${job.last_result.length>80?'…':''}` : ''}</div>
             </div>`;
         }).join('')}</div>`;
 
+        el.querySelectorAll('.cron-claim-btn').forEach(btn => { btn.onclick = () => this._claimJob(btn.dataset.id); });
         el.querySelectorAll('.cron-del-btn').forEach(btn => { btn.onclick = () => this._deleteJob(btn.dataset.id); });
         el.querySelectorAll('.cron-edit-btn').forEach(btn => { btn.onclick = () => this._editJob(btn.dataset.id); });
         el.querySelectorAll('.cron-run-btn').forEach(btn  => { btn.onclick = () => this._runJobNow(btn.dataset.id, btn); });
@@ -462,6 +482,21 @@ window.cronManager = new (class JarvisCronManager {
             errEl.textContent = 'Netzwerkfehler: ' + e.message;
             errEl.style.display = 'block';
         }
+    }
+
+    async _claimJob(id) {
+        // Übernahme ist die AUSDRÜCKLICHE Entscheidung, diesem Auftrag
+        // Systemrechte zu geben – deshalb eine eigene Bestätigung und kein
+        // Nebeneffekt des Bearbeiten-Formulars.
+        if (!confirm(window.t('cron.claim_confirm'))) return;
+        const r = await fetch(`/api/cron/${id}/claim`, { method: 'POST', headers: _authHeaders() });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            this._notify(d.detail || window.t('cron.claim_failed'), 'error');
+            return;
+        }
+        this._loadJobs();
+        this._notify(window.t('cron.claim_done'));
     }
 
     async _deleteJob(id) {

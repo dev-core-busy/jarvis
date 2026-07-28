@@ -13,6 +13,10 @@ from watchdog.observers import Observer
 
 WATCHERS_FILE = Path("data/file_watchers.json")
 
+# Auftraggeber-Name fuer Watcher ohne gespeicherten Besitzer (Altbestand):
+# unprivilegiert und ohne eigene Dokumente (Eigentuemer-Schranke fail-closed).
+_LEGACY_ACTOR = "__trigger_ohne_besitzer__"
+
 # Wird von main.py gesetzt
 _agent_manager = None
 _broadcast_fn = None  # async fn(msg: dict) → sendet an alle WS-Clients
@@ -119,10 +123,17 @@ class WatcherManager:
                     task: str = "", wa_to: str = "", wa_message: str = "",
                     webhook_url: str = "", webhook_body: str = "",
                     email_to: str = "", email_subject: str = "", email_body: str = "",
-                    enabled: bool = True) -> dict:
+                    enabled: bool = True,
+                    owner: str = "", owner_privileged: bool = False) -> dict:
         watcher = {
             "id": str(uuid.uuid4()),
             "label": label,
+            # Auftraggeber-Bindung: entscheidet, mit welchen Rechten die
+            # Agent-Aktion spaeter laeuft (analog scheduler.py). Ein Trigger ist
+            # eine zeitversetzte Ausfuehrung – ohne Bindung liefe er mit der
+            # Identitaet, die zufaellig am geteilten Hauptagenten hing.
+            "owner": owner or "",
+            "owner_privileged": bool(owner_privileged),
             "trigger_type": trigger_type,      # "file" | "llm_down"
             "action_type": action_type,        # "agent_task" | "whatsapp" | "webhook"
             "path": path,
@@ -147,10 +158,20 @@ class WatcherManager:
         self._save()
         return watcher
 
+    # Die Auftraggeber-Bindung ist bewusst NICHT aenderbar (analog
+    # scheduler.UPDATABLE_FIELDS): sonst koennte ein Domain-Nutzer per PUT
+    # `owner_privileged: true` setzen.
+    UPDATABLE_FIELDS = {
+        "label", "trigger_type", "action_type", "path", "pattern", "events",
+        "task", "wa_to", "wa_message", "webhook_url", "webhook_body",
+        "email_to", "email_subject", "email_body", "enabled",
+    }
+
     def update_watcher(self, watcher_id: str, **fields) -> dict:
         watcher = self.get_watcher(watcher_id)
         if not watcher:
             raise ValueError(f"Watcher {watcher_id} nicht gefunden")
+        fields = {k: v for k, v in fields.items() if k in self.UPDATABLE_FIELDS}
         self._unregister(watcher_id)
         watcher.update(fields)
         if watcher.get("enabled"):
@@ -234,7 +255,13 @@ class WatcherManager:
             else:  # agent_task
                 if _agent_manager:
                     agent = _agent_manager.get_or_create_main()
-                    result = await agent.run_task_headless(_fill(watcher.get("task", "")))
+                    # Rechte des Anlegenden, nicht des Zufalls: ein Watcher ohne
+                    # Besitzer laeuft unprivilegiert (fail-closed, s. scheduler.py).
+                    _owner = (watcher.get("owner") or "").strip()
+                    result = await agent.run_task_headless(
+                        _fill(watcher.get("task", "")),
+                        actor={"user": _owner or _LEGACY_ACTOR,
+                               "privileged": bool(watcher.get("owner_privileged")) and bool(_owner)})
                 else:
                     result = "Fehler: AgentManager nicht verfügbar"
             duration = round(time.time() - t0, 1)

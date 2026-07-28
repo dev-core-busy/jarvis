@@ -4965,6 +4965,33 @@ select option:hover {
     padding-left: 16px;
     font-family: monospace;
 }
+/* Auftraggeber-Bindung eines Auftrags (mit welchen Rechten laeuft er?).
+   Farben ausschliesslich ueber Theme-Variablen + color-mix, damit Light/Dark
+   und Branding-Ueberschreibungen greifen. */
+.cron-owner-badge {
+    display: inline-block;
+    font-size: 0.68rem;
+    border-radius: 4px;
+    padding: 1px 6px;
+    margin-right: 6px;
+    border: 1px solid transparent;
+    opacity: 1;
+}
+.cron-owner-badge.cron-badge-sys {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+    border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.cron-owner-badge.cron-badge-user {
+    color: var(--text-secondary);
+    background: rgba(var(--fg-rgb), 0.06);
+    border-color: var(--border-color);
+}
+.cron-owner-badge.cron-badge-none {
+    color: var(--warning, var(--text-secondary));
+    background: color-mix(in srgb, var(--warning, var(--text-secondary)) 12%, transparent);
+    border-color: color-mix(in srgb, var(--warning, var(--text-secondary)) 30%, transparent);
+}
 .cron-event-badge {
     font-size: 0.68rem;
     background: rgba(var(--fg-rgb), 0.07);

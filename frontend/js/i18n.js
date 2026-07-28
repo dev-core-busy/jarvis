@@ -392,6 +392,11 @@ const _I18N = {
         // ── Antwortlänge (global) + Temperature (pro Profil) ──
         'profile.section_maxtok':   'Maximale Antwortlänge',
         'profile.maxtok_label':     'Obergrenze der Antwort (Token)',
+        'profile.section_docsret':  'Vorhaltezeit erzeugter Dokumente',
+        'profile.docsret_label':    'Dateien aufbewahren (Tage)',
+        'profile.docsret_forever':  'dauerhaft',
+        'profile.docsret_removed':  '{n} Dateien entfernt',
+        'profile.docsret_hint':     'Erzeugte Dateien (Präsentationen, Tabellen, PDFs, Bilder) liegen auf dem Server und sind über den Download-Link im Chat erreichbar. Dieser Link verfällt nicht von selbst – das Löschen der Datei ist der einzige Widerruf. Nach Ablauf der Frist werden die Dateien beim täglichen Lauf entfernt; der Chat-Verlauf bleibt erhalten, nur der Download funktioniert dann nicht mehr. Erlaubt sind 15 bis 90 Tage. Mit „dauerhaft“ wird nie automatisch gelöscht – das bedeutet, dass auch Dateien mit vertraulichem Inhalt unbegrenzt abrufbar bleiben.',
         'profile.maxtok_hint':      'Dieser Wert begrenzt, wie viele Token ein Modell in einer einzelnen Antwort erzeugen darf. Er ist vor allem bei Reasoning-Modellen wichtig: ohne Obergrenze kann ein Modell einen sehr langen Gedankengang produzieren und dabei das Antwort-Timeout reißen, sodass die Anfrage komplett verloren geht. Ist der Wert zu klein gewählt, wird die Antwort mitten im Satz abgeschnitten – ein typisches Anzeichen sind Antworten, die ohne Punkt enden. Bei hoher Denktiefe zählen Denk- und Antworttoken gemeinsam gegen dieses Limit, hier sind 16000 oder mehr sinnvoll. Erlaubt sind 256 bis 131072 Token; der Wert gilt global für alle Profile und wirkt bei OpenAI-kompatiblen Anbietern sowie bei Anthropic.',
         'profile.temp_label':       'Temperature (Kreativität)',
         'profile.temp_ph':          'leer = auto (Anbieter entscheidet)',
@@ -2098,6 +2103,11 @@ const _I18N = {
         // ── Response length (global) + temperature (per profile) ──
         'profile.section_maxtok':   'Maximum response length',
         'profile.maxtok_label':     'Response cap (tokens)',
+        'profile.section_docsret':  'Retention of generated documents',
+        'profile.docsret_label':    'Keep files for (days)',
+        'profile.docsret_forever':  'keep forever',
+        'profile.docsret_removed':  '{n} files removed',
+        'profile.docsret_hint':     'Generated files (presentations, spreadsheets, PDFs, images) are stored on the server and reachable through the download link in the chat. That link never expires on its own – deleting the file is the only way to revoke it. Once the retention period passes, the files are removed by the daily sweep; the chat history stays, only the download stops working. The allowed range is 15 to 90 days. With "keep forever" nothing is ever deleted automatically – which means files with confidential content stay retrievable indefinitely.',
         'profile.maxtok_hint':      'This value caps how many tokens a model may generate in a single response. It matters most with reasoning models: without a cap, a model can produce a very long chain of thought and blow past the response timeout, losing the request entirely. Set it too low and the answer is cut off mid-sentence – responses ending without a full stop are the usual tell. At high reasoning depth, thinking and answer tokens both count against this limit, so 16000 or more is sensible there. The allowed range is 256 to 131072 tokens; the value applies globally to all profiles and takes effect for OpenAI-compatible providers as well as Anthropic.',
         'profile.temp_label':       'Temperature (creativity)',
         'profile.temp_ph':          'empty = auto (provider decides)',

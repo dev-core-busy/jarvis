@@ -101,6 +101,32 @@
         // Download-Icon (Office-Chip)
         const _DL_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
 
+        /* ── Dokument-URLs: Sitzungstoken ERST BEIM RENDERN anhaengen ──────
+         * /api/documents/<cap> verlangt seit 2026-07-28 eine Anmeldung. Ein
+         * <a download> und ein <img> koennen keinen Authorization-Header setzen,
+         * deshalb nimmt der Endpunkt zusaetzlich ?token= (require_auth_or_query).
+         *
+         * WICHTIG: Das Token darf NUR in das gerenderte DOM, niemals in den
+         * gespeicherten Markdown. Der Chat-Verlauf liegt auf der Platte, geht in
+         * den LLM-Kontext und wird exportiert – ein Sitzungstoken hat dort nichts
+         * zu suchen. Weil _inline() bei jeder Anzeige neu laeuft, genuegt das.
+         * Nur eigene Pfade werden ergaenzt, sonst wuerde das Token an fremde
+         * Hosts abfliessen. */
+        function _sessToken() {
+            try {
+                return localStorage.getItem('jarvis_token')
+                    || localStorage.getItem('jarvis_chat_token')
+                    || localStorage.getItem('jarvis_uc_token') || '';
+            } catch (e) { return ''; }
+        }
+
+        function _withToken(url) {
+            if (!/^\/api\/documents\//.test(url || '')) return url;
+            const tk = _sessToken();
+            if (!tk) return url;
+            return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(tk);
+        }
+
         function _inline(t) {
             // Platzhalter fuer fertiges HTML, das die **/_/* -Formatierung UND das
             // URL-Autolinking NICHT mehr anfassen duerfen (Bilder, Download-Chips):
@@ -117,7 +143,7 @@
             // Bilder ![alt](url)
             t = t.replace(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g, (_, alt, url) => {
                 const raw = url.replace(/&amp;/g, '&');
-                const safe = /^https?:\/\/|^\/|^data:image\//.test(raw) ? raw : '';
+                const safe = /^https?:\/\/|^\/|^data:image\//.test(raw) ? _withToken(raw) : '';
                 if (!safe) return '';
                 return _hold(`<img src="${safe}" alt="${alt}" class="chat-img" loading="lazy" `
                      + `onload="window.__jarvisImgScroll&&window.__jarvisImgScroll(this)" `
@@ -126,7 +152,7 @@
             // Office-Download-Chips als Platzhalter extrahieren
             const _chip = (label, url) => {
                 const safe = (label || 'Datei').replace(/^[📥\s]+/, '').trim() || 'Datei';
-                return _hold(`<a href="${url}" download class="chat-doc-dl">${_DL_SVG}<span>${safe}</span></a>`);
+                return _hold(`<a href="${_withToken(url)}" download class="chat-doc-dl">${_DL_SVG}<span>${safe}</span></a>`);
             };
             // Markdown-Form [label](/api/documents/..)
             t = t.replace(/\[([^\]\n]*)\]\((\/api\/documents\/[A-Za-z0-9_\-]+\.(?:docx|xlsx|pptx|pdf))\)/g,
@@ -145,7 +171,9 @@
             t = t.replace(/~~(.+?)~~/g, '<del>$1</del>');
             t = t.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_, tit, url) => {
                 const raw = url.replace(/&amp;/g, '&');
-                const safe = /^https?:\/\/|^\//.test(raw) ? raw : '#';
+                // Auch hier Token anhaengen: per Liefer-Marker koennen Dateien
+                // beliebigen Typs (zip/csv/mp4 …) kommen, die kein Chip werden.
+                const safe = /^https?:\/\/|^\//.test(raw) ? _withToken(raw) : '#';
                 return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${tit}</a>`;
             });
 

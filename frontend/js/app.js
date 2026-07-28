@@ -1074,6 +1074,59 @@
                     }
                 });
             }
+            // Vorhaltezeit erzeugter Dokumente (einmalig verdrahten).
+            // Grenzen wie im Backend (config.py::_valid_retention): 0 oder 15..90.
+            const _retNum = document.getElementById('setting-docs-retention');
+            const _retChk = document.getElementById('setting-docs-retention-forever');
+            const _retSt = document.getElementById('docs-retention-status');
+            if (_retChk && !_retChk._wired) {
+                _retChk._wired = true;
+                // "dauerhaft" und Tageszahl schliessen sich aus – das Feld wird
+                // ausgegraut statt geleert, damit der alte Wert beim Abwaehlen
+                // wieder da ist und der Nutzer ihn nicht neu tippen muss.
+                _retChk.addEventListener('change', () => {
+                    if (_retNum) {
+                        _retNum.disabled = _retChk.checked;
+                        _retNum.style.opacity = _retChk.checked ? '0.45' : '1';
+                    }
+                });
+            }
+            const _btnRet = document.getElementById('btn-save-docs-retention');
+            if (_btnRet && !_btnRet._wired) {
+                _btnRet._wired = true;
+                _btnRet.addEventListener('click', async () => {
+                    let v;
+                    if (_retChk && _retChk.checked) {
+                        v = 0;
+                    } else {
+                        v = parseInt(_retNum && _retNum.value, 10);
+                        if (isNaN(v) || v < 15) v = 15;
+                        if (v > 90) v = 90;
+                        if (_retNum) _retNum.value = v;
+                    }
+                    try {
+                        const r = await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ docs_retention_days: v })
+                        });
+                        const d = await r.json().catch(() => ({}));
+                        if (_retSt) {
+                            // Beim Verkuerzen der Frist raeumt der Server sofort auf –
+                            // die Anzahl zurueckmelden, sonst wirkt das Speichern folgenlos.
+                            let msg = '✓';
+                            if (d && d.docs_removed > 0) {
+                                msg += ' ' + (window.t ? window.t('profile.docsret_removed').replace('{n}', d.docs_removed)
+                                                       : d.docs_removed + ' Dateien entfernt');
+                            }
+                            _retSt.textContent = msg;
+                            setTimeout(() => { _retSt.textContent = ''; }, 4000);
+                        }
+                    } catch (e) {
+                        if (_retSt) _retSt.textContent = '✗';
+                    }
+                });
+            }
             if (tabSkills) { tabSkills.style.display = 'none'; tabSkills.classList.remove('active'); }
             if (tabWhatsApp) { tabWhatsApp.style.display = 'none'; tabWhatsApp.classList.remove('active'); }
             if (tabKnowledge) { tabKnowledge.style.display = 'none'; tabKnowledge.classList.remove('active'); }
@@ -1141,6 +1194,17 @@
                 // Maximale Antwortlaenge (global) ins Eingabefeld
                 const _mtEl = document.getElementById('setting-llm-max-tokens');
                 if (_mtEl) _mtEl.value = data.llm_max_tokens || 8192;
+                // Vorhaltezeit: 0 = dauerhaft -> Haken setzen, Feld ausgrauen.
+                // Pruefung auf null/undefined, NICHT auf Falsyness – 0 ist gueltig.
+                const _rN = document.getElementById('setting-docs-retention');
+                const _rC = document.getElementById('setting-docs-retention-forever');
+                const _rv = (data.docs_retention_days == null) ? 30 : Number(data.docs_retention_days);
+                if (_rC) _rC.checked = (_rv === 0);
+                if (_rN) {
+                    if (_rv > 0) _rN.value = _rv;      // bei 0 den letzten Tageswert stehen lassen
+                    _rN.disabled = (_rv === 0);
+                    _rN.style.opacity = (_rv === 0) ? '0.45' : '1';
+                }
                 // Stimmen laden und gespeicherte Auswahl setzen
                 _loadTtsVoices(data.tts_voice || '');
                 // Agent API Key: vollen Key vom Server holen → type=password zeigt korrekte Sternanzahl

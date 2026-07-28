@@ -35,6 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import config, REASONING_EFFORT_VALUES
 from backend.security import get_certificate_path
 from backend import security_guard
+from backend import documents as _documents
 
 # ─── App erstellen ────────────────────────────────────────────────────
 JARVIS_VERSION = "0.9.1"
@@ -2288,6 +2289,33 @@ async def startup_knowledge_compactor():
 
 
 @app.on_event("startup")
+async def startup_documents_retention():
+    """Aufbewahrungsfrist fuer erzeugte Dokumente durchsetzen.
+
+    Einmal beim Start und danach taeglich – ein Server, der monatelang laeuft,
+    wuerde sonst nie aufraeumen. Die Capability-URLs verfallen nicht von selbst;
+    das Loeschen der Datei IST der Widerruf. Frist unter *Einstellungen →
+    KI & System → Tuning* (``docs_retention_days``: 0 = dauerhaft, sonst 15..90).
+
+    Die Schleife laeuft AUCH bei "dauerhaft" weiter und prueft die Frist bei jedem
+    Durchlauf neu – sonst wuerde ein Umstellen von "dauerhaft" auf 30 Tage erst
+    beim naechsten Dienststart greifen.
+    """
+    async def _loop():
+        while True:
+            try:
+                if _documents.retention_days() > 0:
+                    await asyncio.to_thread(_documents.cleanup_old)
+            except Exception as e:
+                print(f"[documents] Aufraeumen fehlgeschlagen: {e}", flush=True)
+            await asyncio.sleep(86400)
+    try:
+        asyncio.create_task(_loop())
+    except Exception as e:
+        print(f"[documents] Startup-Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_mcp():
     """MCP-Server beim Start verbinden."""
     try:
@@ -3095,10 +3123,18 @@ async def get_generated_image(name: str):
 
 
 @app.get("/api/documents/{name}")
-async def get_document(name: str):
+async def get_document(name: str, user: str = Depends(require_auth_or_query)):
     """Liefert ein erzeugtes Office-Dokument aus (Office-Skill).
 
-    Auth via Capability-URL: der Name hat das Schema <32-Hex>__<Basis>.<ext>.
+    DREI Schranken (bis 2026-07-28 gab es nur die erste):
+      1. Capability-Name ``<32-Hex>__<Basis>.<ext>`` – 122 Bit, nicht erratbar.
+      2. Anmeldung: Bearer-Header ODER ``?token=`` (``<a download>``/``<img>``
+         koennen keine Header setzen, deshalb ``require_auth_or_query``).
+      3. Eigentuemer: nur der Ersteller und Admins duerfen laden
+         (``backend/documents.py``). Ohne Registry-Eintrag – also Altbestand aus
+         der Zeit ohne Registry – bleibt die Datei admin-only (fail-closed).
+    Der Agent-API-Key (Benutzer ``api``) ist ausgenommen: er darf ohnehin
+    beliebige Aufgaben starten, eine Leseschranke gewinnt dort nichts.
     Der Download traegt den lesbaren Originalnamen (Content-Disposition).
     """
     import re, mimetypes
@@ -3110,15 +3146,18 @@ async def get_document(name: str):
         "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
         "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp", "svg": "image/svg+xml",
     }
-    # Capability-Name mit beliebiger (kurzer) Endung – die 32-Hex-Capability schuetzt
-    # den Zugriff. So lassen sich auch per Liefer-Marker erzeugte Dateien beliebigen
-    # Typs (zip/csv/json/mp4 …) ausliefern.
+    # Capability-Name mit beliebiger (kurzer) Endung. So lassen sich auch per
+    # Liefer-Marker erzeugte Dateien beliebigen Typs (zip/csv/json/mp4 …) ausliefern.
     m = re.fullmatch(r"([0-9a-f]{32})__([A-Za-z0-9_\-]+)\.([A-Za-z0-9]{1,8})", name)
     if not m:
         return JSONResponse({"error": "ungueltiger Name"}, status_code=400)
     base, ext = m.group(2), m.group(3).lower()
     p = Path(__file__).parent.parent / "data" / "documents" / name
     if not p.exists():
+        return JSONResponse({"error": "nicht gefunden"}, status_code=404)
+    if user != "api" and not _documents.may_access(name, user, _is_admin_user(user)):
+        # 404 statt 403: ob die Datei existiert, ist selbst eine Information.
+        print(f"[documents] Zugriff verweigert: {user} -> {name}", flush=True)
         return JSONResponse({"error": "nicht gefunden"}, status_code=404)
     media = _MEDIA.get(ext) or mimetypes.guess_type(name)[0] or "application/octet-stream"
     # Bilder inline (fuer <img> im Chat), alles andere als Download.
@@ -3313,6 +3352,7 @@ async def get_settings(user: str = Depends(require_auth)):
         "llm_timeout": config.LLM_TIMEOUT,
         "llm_reasoning_effort": config.LLM_REASONING_EFFORT,
         "llm_max_tokens": config.LLM_MAX_TOKENS,
+        "docs_retention_days": config.DOCS_RETENTION_DAYS,
         "agent_api_key": _mask_key(config.AGENT_API_KEY),
         "defaults": config.DEFAULT_PROVIDERS,
         # Auswahlliste fuer die Oberflaeche ("" = Provider-Standard)
@@ -3363,7 +3403,20 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
     if "ad_admins_group" in body:
         config.save_setting("ad_admins_group", body["ad_admins_group"])
         _admin_access_cache.clear()
-    return JSONResponse({"success": True})
+    extra = {}
+    if "docs_retention_days" in body:
+        # Neue Vorhaltezeit SOFORT anwenden statt erst beim naechsten Tageslauf –
+        # wer die Frist verkuerzt, erwartet, dass die Altdateien jetzt weg sind.
+        # Der gespeicherte Wert wird zurueckgemeldet, weil das Backend ihn
+        # begrenzt (0 oder 15..90) und die Oberflaeche das anzeigen soll.
+        extra["docs_retention_days"] = config.DOCS_RETENTION_DAYS
+        try:
+            if _documents.retention_days() > 0:
+                removed, _ = await asyncio.to_thread(_documents.cleanup_old)
+                extra["docs_removed"] = removed
+        except Exception as e:
+            print(f"[documents] Aufraeumen nach Speichern fehlgeschlagen: {e}", flush=True)
+    return JSONResponse({"success": True, **extra})
 
 
 @app.post("/api/auth/ad_test")

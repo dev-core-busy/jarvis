@@ -581,6 +581,32 @@ data/
   `_isRowEntry()`. Ohne das loescht ein Klick auf die erste Bot-Antwort den falschen Eintrag.
   `_submitEdit`/`truncateHistoryToUserIndex` zaehlen nur `user`-Eintraege und sind nicht betroffen.
 
+## Chat-Sitzungen: „Neue Sitzung" war nur ein Trenner (geklaert 2026-07-28)
+**Der vermutete Fehler existierte nicht.** Verdacht war: „Neue Sitzung" im Chat erzeugt keine
+neue Backend-Sitzung, weil auf ECHT zwei Auftraege (07:00 PPTX, 07:25 Bild) trotz sichtbarem
+Trenner „── Neue Sitzung ──" denselben Kontext teilten. Nachgemessen mit 13 Pruefungen
+(zwei echte Sitzungen ueber die API, Laeufe mit LLM-Stub): die Trennung ist auf JEDER Ebene
+intakt – `_hist_key(user, sid)`-Buckets, der an das Modell gereichte Kontext, die
+`context.json` je Sitzung, und der sitzungslose Bucket bleibt separat.
+- **Die Ursache war die Beschriftung.** Der Trenner wird von `_restoreHistory()` an das ENDE
+  des wiederhergestellten Verlaufs gesetzt – er erscheint also, wenn eine BESTEHENDE Sitzung
+  geoeffnet wird, und trennt nur alte von neuen Nachrichten. Er hiess trotzdem „Neue Sitzung".
+  Jetzt: **„Sitzung fortgesetzt"** (`chat.session_continued`). Eine neue Sitzung entsteht
+  ausschliesslich ueber „+ Neuer Chat" (`_newSession` → `POST /api/chat/sessions`).
+- **Sichtbar gemacht:** die Kontext-Pille traegt jetzt einen Titel-Tooltip mit Name UND Id der
+  Sitzung, zu der der Kontext gehoert (`chat.ctx_session_hint`). Die Verwechslung war nur
+  moeglich, weil man das nirgends ablesen konnte.
+- **Echte Luecke, die dabei auffiel:** zwischen Seitenaufbau und dem Ende von
+  `_initSessions()` ist `_activeSid` noch `null`. Wer in dieser Zehntelsekunde abschickt,
+  sendet den Auftrag OHNE `session_id` – der Kontext landet im sitzungslosen Bucket und
+  gehoert zu keiner Sitzung der Seitenleiste. `sendMessage()` beschafft jetzt zuerst eine
+  Sitzung (`_ensureSession()`) und sendet dann; **genau ein** Nachversuch, danach wird auch
+  ohne Sitzung gesendet – eine Endlosschleife waere schlimmer als ein Auftrag ohne
+  Sitzungsbezug.
+- Merkregel: eine Beschriftung, die einen Zustand behauptet, den sie nicht kennt, kostet
+  Stunden Fehlersuche. `/userchat` und `/support` sind nicht betroffen, die kennen keine
+  Sitzungen.
+
 ## Verlaufs-Buchhaltung im Agent-Loop (Fix 2026-07-28)
 **Vorfall:** Auf ECHT kam die Antwort auf eine PowerPoint-Anfrage (07:01) erst beim
 *nächsten* Auftrag (07:25) heraus – vermischt mit dessen Antwort. Der gespeicherte

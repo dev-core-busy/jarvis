@@ -35,6 +35,9 @@
 
         // ── Einstellungen ───────────────────────────────────────────────
         onShow: function () { this._bind(); this.load(); },
+        // Nur der Teil, der im Reiter "KI & System" gebraucht wird (der
+        // Update-Schalter liegt dort). _bind() ist idempotent (this._bound).
+        onShowUnattended: function () { this._bind(); this.loadUnattended(false); },
 
         _bind: function () {
             if (this._bound) return;
@@ -671,11 +674,20 @@
         // ── Automatische Sicherheitsupdates (unattended-upgrades) ────────
         loadUnattended: function (live) {
             var box = $('sec-unatt-status');
-            if (box && live) box.innerHTML = '⏳ Trockenlauf läuft…';
+            var btn = $('sec-unatt-verify');
+            // Der Trockenlauf simuliert die komplette Installation und darf bis zu
+            // 90 s brauchen (Deckel im Backend). Deshalb ansagen, wie lange es
+            // dauern kann, und den Knopf sperren – sonst klickt man nach.
+            if (live) {
+                if (box) box.innerHTML = '⏳ ' + esc(T('security.unatt_dryrun_wait',
+                    'Trockenlauf läuft – das kann bis zu 45 Sekunden dauern…'));
+                if (btn) btn.disabled = true;
+            }
             fetch('/api/security/unattended' + (live ? '?live=1' : ''), { headers: authHeaders() })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) { Mgr.renderUnattended(d); })
-                .catch(function () {});
+                .catch(function () {})
+                .then(function () { if (btn) btn.disabled = false; });
         },
 
         renderUnattended: function (d) {
@@ -703,6 +715,13 @@
                     ? 'nur Debian-Security-Quelle' : 'Quelle nicht erkannt – Ausgabe prüfen'));
             }
             var extra = '';
+            if (d.origins && d.origins.length) {
+                // Der eigentliche Nachweis: was apt WIRKLICH anwendet. apt ergaenzt
+                // Listen, deshalb ist die Datei allein keine Aussage.
+                extra += '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">'
+                    + esc(T('security.unatt_origins', 'Wirksame Paketquellen')) + ': '
+                    + esc(d.origins.join(' · ')) + '</div>';
+            }
             if (d.last_run) {
                 extra += '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">'
                     + esc(T('security.unatt_last', 'Letzter Lauf')) + ': ' + esc(d.last_run) + '</div>';

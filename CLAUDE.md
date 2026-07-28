@@ -126,13 +126,33 @@ data/
 - **Code:** `backend/apt_upgrades.py` (analog `egress_guard.py`/`sandbox_guard.py`)
   + Broker-Ops `apt_upgrades_setup|teardown|status` + `GET/POST
   /api/security/unattended[/setup|/teardown]` + Panel unter *Einstellungen →
-  Sicherheit → Systemschutz* (`security_incidents.js`, `sec-unatt-*`).
+  KI & System → System-Einstellungen* (fuenfte `.tuning-group`).
+  **Die Logik liegt weiter in `security_incidents.js`** (`sec-unatt-*`), das
+  Panel aber in einem ANDEREN Reiter – deshalb ruft `app.js` beim Aktivieren des
+  Reiters `SecurityIncidents.onShowUnattended()` (bindet idempotent + laedt den
+  Status). Ohne diesen Aufruf waeren die Knoepfe unverdrahtet und der Status
+  leer, solange der Sicherheits-Reiter nicht geoeffnet wurde.
 - **Die Begrenzungen SIND das Feature** (`/etc/apt/apt.conf.d/52jarvis-unattended`):
   nur `origin=Debian,label=Debian-Security`; `Automatic-Reboot "false"`;
   `Remove-Unused-Dependencies "false"` **und** `Remove-New-Unused-Dependencies
   "false"` – genau das, was gerade zurueckgebaut wurde, darf nicht durch die
   Hintertuer zurueckkommen. Eigene Datei (52 > 50), damit ein
   `dpkg-reconfigure unattended-upgrades` sie nicht ueberschreibt.
+- **FALLSTRICK `#clear` – apt ERGAENZT Listen, es ersetzt sie nicht.** Die erste
+  Fassung schrieb nur den eigenen `Origins-Pattern`-Block. Wirksam war danach die
+  VEREINIGUNG mit der Vorgabe aus `50unattended-upgrades`, also auch
+  `origin=Debian,codename=${distro_codename},label=Debian` = **alle** Updates.
+  Nachgewiesen auf DEV: `apt-config dump` zeigte vier Eintraege (einer davon
+  `label=Debian`) und der Trockenlauf meldete 282 Kandidaten statt der 93
+  Sicherheitspakete – die zentrale Zusage des Moduls war damit gebrochen. Fix:
+  `#clear Unattended-Upgrade::Origins-Pattern;` (+ `Allowed-Origins` fuer
+  Alt-Setups) VOR dem eigenen Block.
+- **Deshalb prueft `_limits_ok()` die WIRKSAME Liste, nicht den Dateiinhalt:**
+  `effective_origins()` liest `apt-config dump` und verlangt, dass JEDER Eintrag
+  `Debian-Security` enthaelt. Ein Test, der nur „`Debian-Security` kommt im Dump
+  vor" prueft, ist bei einer Vereinigung gruen und beweist nichts – genau dieser
+  zu schwache Test hat den Fehler zunaechst durchgelassen. Das Panel zeigt die
+  Liste jetzt an („Wirksame Paketquellen").
 - **Ausschalten laesst den Index-Refresh AN** (`Update-Package-Lists "1"`) und das
   Paket installiert. Grund: ein veralteter Index laesst Installationen mit
   `404 Not Found` scheitern – genau daran starb auf ECHT die LibreOffice-
@@ -142,8 +162,19 @@ data/
 - **Status wird aus `apt-config dump` gelesen**, nicht aus der Datei: nur so sieht
   man, was apt ueber ALLE `conf.d`-Dateien hinweg tatsaechlich anwendet (eine
   spaeter einsortierte Datei kann die eigene ueberstimmen).
-- `?live=1` fuehrt `unattended-upgrade --dry-run` aus – aendert nichts, dauert
-  aber einige Sekunden, daher nicht im Standard-Status.
+- **`setup()` darf KEINEN Trockenlauf enthalten.** Erste Fassung endete mit
+  `status(live=True)`; das Einschalten haing dadurch **ueber zwei Minuten**, obwohl
+  die eigentliche Arbeit in 0,5 s fertig war. `unattended-upgrade --dry-run`
+  simuliert JEDES Kandidatenpaket einzeln und braucht bei Rueckstand Minuten.
+  Jetzt: `setup()` → `status(live=False)` (0,5 s), Trockenlauf nur auf Knopfdruck
+  mit hartem Deckel `DRY_RUN_TIMEOUT = 45` s; laeuft er ab, sagt die Meldung
+  ausdruecklich, dass das **nichts** ueber die Einstellungen aussagt (die stehen
+  darueber, aus `apt-config` gelesen). Das Frontend sperrt den Knopf waehrenddessen
+  und nennt die Wartezeit.
+- **Timer nur `enable`, NICHT `enable --now`:** beide Timer haben
+  `Persistent=true`, ein Start kann den Dienst SOFORT ausloesen (`apt-get update`
+  bzw. `unattended-upgrade`), der haelt dann die apt-Sperre und laesst jede weitere
+  Aktion warten. Sie feuern ohnehin nach Plan.
 
 ## Multi-Agent System
 - **AgentManager** in `agent.py`: Verwaltet Haupt- und Sub-Agents
@@ -254,9 +285,13 @@ data/
   den Wert direkt in settings.json eintragen. Jetzt ist das Feld in beiden Funktionen vorhanden
   und wird als `bool()` normalisiert. Beim Erweitern von Profil-Feldern immer BEIDE Stellen
   anfassen, sonst entsteht genau dieser stille Fehler wieder.
-- **Oberflaeche – Klappabschnitt „Tuning"** (*Einstellungen → KI & System*): fasst seit
+- **Oberflaeche – Klappabschnitt „System-Einstellungen"** (*Einstellungen → KI & System*;
+  hiess bis 2026-07-28 „Tuning"): fasst seit
   2026-07-27 „Sprachausgabe (TTS)", „Antwort-Timeout" und „Maximale Antwortlaenge" in EINEM
-  Abschnitt zusammen (vorher drei einzelne). Die drei Untergruppen nutzen `.tuning-group` +
+  Abschnitt zusammen (vorher drei einzelne), seit 2026-07-28 zusaetzlich „Vorhaltezeit
+  erzeugter Dokumente" und „Automatische Sicherheitsupdates". **Umbenannt wurde nur die
+  Beschriftung** (`profile.section_tuning`) – die Container-IDs heissen weiter
+  `prof-sect-tuning-*`, weil app.js sie darueber verdrahtet. Die drei Untergruppen nutzen `.tuning-group` +
   `.tuning-group-title` (style.css), getrennt durch eine Linie ab der zweiten Gruppe. **Alle
   Element-IDs sind unveraendert geblieben** (`setting-tts-voice`, `setting-llm-timeout`,
   `setting-llm-max-tokens`, die zugehoerigen Buttons und Status-Spans) – app.js verdrahtet sie
@@ -716,6 +751,35 @@ Confluence) – gewirkt hat er nur bei der Datei. Ursache war eine verschluckte 
 - **Abhaengigkeiten:** `face-recognition>=1.3.0`, `opencv-python-headless>=4.8.0`, `setuptools<75` (fuer pkg_resources)
   - System-Pakete: `cmake`, `libboost-all-dev`
   - SSE41-Warnung von dlib auf der VM ist harmlos (funktioniert trotzdem)
+
+## Ladezeit /settings: 9× dieselbe Abfrage (Fix 2026-07-28)
+Die Einstellungsseite brauchte **~10 Sekunden** bis zur Anzeige. Der Weg zur Ursache ist
+lehrreich, weil zwei naheliegende Verdaechtige falsch waren:
+- **NICHT der LLM-Erreichbarkeitstest** (die erste Vermutung): `/api/llm/active-status`
+  wird von `/settings` gar nicht aufgerufen – nur von /chat, /portal, /support,
+  /userchat, /wissen – und kostet auf ECHT 12 ms.
+- **NICHT die externe Schriftquelle:** `settings.html` hatte als EINZIGE Seite ein
+  render-blockierendes `<link>` auf `fonts.googleapis.com`. Das war eine plausible
+  Erklaerung (nur diese Seite betroffen, ~10 s ist ein typischer Verbindungs-Timeout),
+  aber nach dem Entfernen blieb die Seite genauso langsam. Die Einbindung ist trotzdem
+  raus – in einer internen Admin-Oberflaeche hat ein Abruf zu Google nichts zu suchen,
+  und `--font-body` faellt ohnehin auf Systemschriften zurueck. **Nie wieder extern
+  einbinden**; wer Inter zwingend will, liefert WOFF2 selbst aus.
+- **Die Ursache:** `openModal()` ruft NEUN Sichtbarkeits-Funktionen **hintereinander**
+  (`await … await …`), und jede holte sich `/api/skills` selbst – bei 0,77 s je Abruf
+  rund 7 Sekunden. Zwei Fixes:
+  1. **`list_skills()` 788 ms → 71 ms:** `_missing_dependencies()` rief
+     `_installed_packages()` (45 ms, laeuft alle Distributionen durch) einmal PRO SKILL
+     → bei 25 Skills 1,05 s. Jetzt wird die Menge einmal pro Aufruf berechnet und
+     durchgereicht (`installed`-Parameter, lazy). Das war eine Regression vom selben
+     Tag: vorher gab es den `missing`-Block in `list_skills()` gar nicht.
+  2. **9 Abrufe → 1:** `_skillsOnce()` in app.js (TTL 5 s + Bündelung paralleler
+     Aufrufer). `skills.js::loadSkills()` ruft `window.invalidateSkillsCache()`, damit
+     nach einem Skill-Toggle die Reiter-Sichtbarkeit sofort stimmt und nicht bis zu
+     5 s alt ist.
+- **Merkregel:** erst messen, wo die Zeit liegt – Endpunkte EINZELN, statische Dateien,
+  HTML von aussen, und dann zaehlen, **wie oft** die Seite denselben Endpunkt aufruft.
+  Ein einzelner Endpunkt mit 0,77 s sieht harmlos aus; neunmal in Serie sind es 7 s.
 
 ## Konventionen
 - **Sprache:** Code-Kommentare und Commit-Messages auf Deutsch

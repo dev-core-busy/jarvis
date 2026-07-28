@@ -1267,6 +1267,22 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="profile.maxtok_hint">Dieser Wert begrenzt, wie viele Token ein Modell in einer einzelnen Antwort erzeugen darf. Er ist vor allem bei Reasoning-Modellen wichtig: ohne Obergrenze kann ein Modell einen sehr langen Gedankengang produzieren und dabei das Antwort-Timeout reißen, sodass die Anfrage komplett verloren geht. Ist der Wert zu klein gewählt, wird die Antwort mitten im Satz abgeschnitten – ein typisches Anzeichen sind Antworten, die ohne Punkt enden. Bei hoher Denktiefe zählen Denk- und Antworttoken gemeinsam gegen dieses Limit, hier sind 16000 oder mehr sinnvoll. Erlaubt sind 256 bis 131072 Token; der Wert gilt global für alle Profile und wirkt bei OpenAI-kompatiblen Anbietern sowie bei Anthropic.</small>
                                 </div>
 
+                                <!-- Vorhaltezeit erzeugter Dokumente (global) -->
+                                <div class="tuning-group">
+                                    <h4 class="tuning-group-title" data-i18n="profile.section_docsret">Vorhaltezeit erzeugter Dokumente</h4>
+                                    <label style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;" data-i18n="profile.docsret_label">Dateien aufbewahren (Tage)</label>
+                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                        <input type="number" id="setting-docs-retention" min="15" max="90" step="1" value="30" style="width:120px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.85rem;">
+                                        <label style="display:flex;gap:5px;align-items:center;font-size:0.82rem;color:var(--text-secondary);cursor:pointer;">
+                                            <input type="checkbox" id="setting-docs-retention-forever" style="cursor:pointer;">
+                                            <span data-i18n="profile.docsret_forever">dauerhaft</span>
+                                        </label>
+                                        <button class="btn-secondary btn-small" id="btn-save-docs-retention" type="button" style="flex-shrink:0;padding:4px 12px;font-size:0.78rem;" data-i18n="profile.save_btn">Speichern</button>
+                                        <span id="docs-retention-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
+                                    </div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="profile.docsret_hint">Erzeugte Dateien (Präsentationen, Tabellen, PDFs, Bilder) liegen auf dem Server und sind über den Download-Link im Chat erreichbar. Dieser Link verfällt nicht von selbst – das Löschen der Datei ist der einzige Widerruf. Nach Ablauf der Frist werden die Dateien beim täglichen Lauf entfernt; der Chat-Verlauf bleibt erhalten, nur der Download funktioniert dann nicht mehr. Erlaubt sind 15 bis 90 Tage. Mit „dauerhaft“ wird nie automatisch gelöscht – das bedeutet, dass auch Dateien mit vertraulichem Inhalt unbegrenzt abrufbar bleiben.</small>
+                                </div>
+
                             </div>
                         </div>
 
@@ -3439,7 +3455,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=124"></script>
+    <script src="/static/js/i18n.js?v=125"></script>
     <script src="/static/js/cron.js?v=17"></script>
     <script src="/static/js/context.js?v=6"></script>
     <script src="/static/js/audit.js?v=3"></script>
@@ -3462,7 +3478,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/security_incidents.js?v=19"></script>
     <script src="/static/js/ldap_picker.js?v=7"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=178"></script>
+    <script src="/static/js/app.js?v=179"></script>
 </body>
 
 </html>

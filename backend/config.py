@@ -53,6 +53,32 @@ TEMPERATURE_MIN, TEMPERATURE_MAX = 0.0, 2.0
 TEMPERATURE_AUTO = "auto"
 
 
+# Grenzen fuer die Vorhaltezeit erzeugter Dokumente (Tage). Unter 15 Tagen
+# verschwinden Dateien, die ein Nutzer im Chat-Verlauf noch braucht; ueber 90
+# Tagen ist die Aufbewahrung praktisch keine Begrenzung mehr.
+DOCS_RETENTION_MIN, DOCS_RETENTION_MAX = 15, 90
+# Sonderwert: dauerhaft behalten (kein Aufraeumen).
+DOCS_RETENTION_FOREVER = 0
+
+
+def _valid_retention(value, fallback: int = 30) -> int:
+    """Filtert die Vorhaltezeit: 0 (dauerhaft) oder 15..90 Tage.
+
+    ACHTUNG: Die Pruefung darf NICHT ueber Falsyness laufen (``int(v or 30)``) –
+    0 ist ein gueltiger Wert ("dauerhaft") und wuerde dabei still zum Standard.
+    Werte zwischen 1 und 14 werden auf das Minimum gehoben, nicht auf 0
+    abgerundet: aus einer zu knappen Eingabe darf nicht versehentlich
+    "dauerhaft" werden, das waere die Umkehrung der Absicht.
+    """
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    if n <= DOCS_RETENTION_FOREVER:
+        return DOCS_RETENTION_FOREVER
+    return max(DOCS_RETENTION_MIN, min(n, DOCS_RETENTION_MAX))
+
+
 def _valid_temperature(value):
     """Filtert einen Temperature-Wert fuer ein Profil.
 
@@ -168,6 +194,11 @@ class Config:
     # Feld NICHT – der getattr-Default 8192 galt immer, obwohl der Docstring
     # Konfigurierbarkeit versprach.
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "8192"))
+    # Vorhaltezeit erzeugter Dokumente in data/documents/ (Tage). 0 = dauerhaft
+    # behalten, sonst 15..90. Wird von backend/documents.py::retention_days()
+    # gelesen; das Loeschen der Datei IST der Widerruf der Capability-URL, denn
+    # die URL selbst verfaellt nicht.
+    DOCS_RETENTION_DAYS: int = int(os.getenv("JARVIS_DOCS_RETENTION_DAYS", "30"))
 
     def __init__(self):
         self.profiles: list[dict] = []
@@ -283,6 +314,12 @@ class Config:
             self.LLM_MAX_TOKENS = max(256, min(int(data.get("llm_max_tokens") or 8192), 131072))
         except (TypeError, ValueError):
             self.LLM_MAX_TOKENS = 8192
+        # Vorhaltezeit: fehlt der Schluessel, bleibt der ENV-/Klassenwert stehen –
+        # NICHT auf 30 zurueckfallen, sonst ueberschreibt ein Laden ohne den
+        # Schluessel eine bewusst per ENV gesetzte Vorgabe.
+        if "docs_retention_days" in data:
+            self.DOCS_RETENTION_DAYS = _valid_retention(
+                data.get("docs_retention_days"), self.DOCS_RETENTION_DAYS)
         self._skill_states = data.get("skills", {})
         self._mcp_servers = data.get("mcp_servers", [])
         # AGENT_API_KEY: aus settings.json laden, ENV hat Vorrang
@@ -385,6 +422,7 @@ class Config:
             "llm_timeout": self.LLM_TIMEOUT,
             "llm_reasoning_effort": self.LLM_REASONING_EFFORT,
             "llm_max_tokens": self.LLM_MAX_TOKENS,
+            "docs_retention_days": self.DOCS_RETENTION_DAYS,
             "agent_api_key": self.AGENT_API_KEY,
             "profiles": self.profiles,
             "skills": self._skill_states,
@@ -414,6 +452,11 @@ class Config:
                 self.LLM_MAX_TOKENS = max(256, min(int(settings["llm_max_tokens"]), 131072))
             except (TypeError, ValueError):
                 pass
+        if "docs_retention_days" in settings:
+            # Bei Muell den ALTEN Wert behalten (Fallback = aktueller Stand), nicht
+            # stillschweigend auf 30 zuruecksetzen.
+            self.DOCS_RETENTION_DAYS = _valid_retention(
+                settings["docs_retention_days"], self.DOCS_RETENTION_DAYS)
         if "agent_api_key" in settings:
             self.AGENT_API_KEY = settings["agent_api_key"]
         self._save_to_file()

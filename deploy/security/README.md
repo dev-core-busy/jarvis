@@ -85,3 +85,49 @@ gefahrlos.
 DNS zu den internen Resolvern ist erlaubt (nötig für Namensauflösung). Ein
 theoretisches DNS-Tunneling bleibt damit möglich; für noch strengere Isolation
 DNS für uid 996 ganz sperren (Zeilen mit `dport 53` in der .conf entfernen).
+
+# Re-Test der Zugriffskontrolle (`security_retest.py`)
+
+Nach jeder Änderung an `backend/sandbox.py`, am Tool-Dispatch
+(`agent._execute_tool`) oder an `security_guard` prüfen:
+
+```bash
+cd /opt/jarvis && sudo ./venv/bin/python deploy/security/security_retest.py
+```
+
+Das Skript importiert die **echten** Enforcement-Funktionen und repliziert die
+Dispatch-Entscheidung 1:1 – es prüft also den Produktivpfad, nicht die
+LLM-/Prompt-Ebene. Abgedeckt: die sieben Pentest-Vektoren (Secrets lesen,
+Schreiben außerhalb des Arbeitsbereichs, Verschleierung inkl. **kurzer**
+Base64-Payloads, settings.json/.env, Lern-Filter, Sub-Agent-Eskalation,
+OS-Sandbox via `runuser`) plus Auto-Sperr-Schwelle und Admin-Gegenprobe.
+
+Als root ausführen, sonst entfällt der `runuser`-Teil (Vektor 7). Der
+Autoblock-Test läuft in-memory (`_load`/`_save` gepatcht) und verändert die
+echte Violations-/Sperr-Datei **nicht** – das Skript ist auf einem
+Produktionssystem gefahrlos.
+
+Stand 2026-07-28: alle Prüfungen grün auf Test- **und** Echt-System.
+
+# Dateirechte der Dienst-Verzeichnisse
+
+`sandbox.harden_data_dirs()` setzt `data/documents`, `data/chats` und
+`data/logs` bei jedem Start auf **0750**. Grund: die Eigentümer-Schranke der
+Werkzeuge wirkt nur im Backend – Shell-Befehle von Domain-Benutzern laufen als
+`jarvis_sandbox`, und ein `cat` dort braucht nur Dateisystemrechte. Mit den
+Vorgabe-Rechten (0755) konnte damit jeder Domain-Benutzer die Ergebnisdateien
+und Chat-Verläufe **aller** anderen lesen.
+
+`data/knowledge` bleibt absichtlich lesbar (die Shell soll Wissensdateien
+verarbeiten). Angehängte Dateien bekommt der Agent deshalb als Arbeitskopie
+unter `/tmp/anhang_<12 Hex>_<name>`.
+
+Grenze: alle Domain-Benutzer teilen **einen** Sandbox-Benutzer – OS-Rechte
+trennen sie vom Dienst-Verzeichnis, aber nicht voneinander. Echte Trennung
+bräuchte einen Sandbox-Benutzer pro Person.
+
+```bash
+# Prüfen (als root):
+stat -c '%a %U:%G %n' /opt/jarvis/data/{documents,chats,logs,knowledge}
+runuser -u jarvis_sandbox -- ls /opt/jarvis/data/documents   # -> muss scheitern
+```

@@ -2896,6 +2896,65 @@ async def security_egress_teardown(user: str = Depends(require_local_auth)):
     return JSONResponse(res, status_code=200 if res.get("ok") else 500)
 
 
+@app.get("/api/security/unattended")
+async def security_unattended_status(live: int = 0, user: str = Depends(require_local_auth)):
+    """Status der automatischen Sicherheitsupdates (unattended-upgrades) (Admin).
+
+    Liefert: package_installed, update_lists + unattended (die APT::Periodic-Werte,
+    wie apt sie ueber ALLE conf.d-Dateien sieht), limits_ok (nur Sicherheits-Quelle,
+    kein Reboot, kein Aufraeumen), timers (apt-daily/apt-daily-upgrade aktiv?),
+    last_run (letzte Zeile des Logs), enabled, ok. Mit `?live=1` zusaetzlich ein
+    **Trockenlauf** (`unattended-upgrade --dry-run`, aendert nichts) – dauert
+    einige Sekunden, daher nur auf Anforderung.
+    """
+    from backend import broker_client
+    res = await broker_client.call("apt_upgrades_status", {"live": bool(live)},
+                                   user=user, timeout=240)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "error": res.get("error") or res.get("stderr")},
+                            status_code=502)
+    return JSONResponse(res.get("result") or {})
+
+
+@app.post("/api/security/unattended/setup")
+async def security_unattended_setup(user: str = Depends(require_local_auth)):
+    """Schaltet automatische Sicherheitsupdates EIN (Admin, root). Idempotent.
+
+    Installiert `unattended-upgrades` falls noetig (mit vorherigem Index-Refresh),
+    schreibt die Begrenzungen (`/etc/apt/apt.conf.d/52jarvis-unattended`) und den
+    Schalter (`20auto-upgrades`), aktiviert `apt-daily.timer` +
+    `apt-daily-upgrade.timer`. Bewusst eng gefasst: **nur die Debian-Sicherheits-
+    Quelle**, **kein automatischer Neustart**, **kein automatisches Aufraeumen**
+    (Letzteres wuerde Abhaengigkeiten des Agenten entfernen). Gibt die Schritte +
+    den neuen Status inkl. Trockenlauf zurueck.
+    """
+    from backend import broker_client
+    bres = await broker_client.call("apt_upgrades_setup", {}, user=user, timeout=900)
+    if not bres.get("ok"):
+        return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")},
+                            status_code=502)
+    res = bres.get("result") or {}
+    return JSONResponse(res, status_code=200 if res.get("ok") else 500)
+
+
+@app.post("/api/security/unattended/teardown")
+async def security_unattended_teardown(user: str = Depends(require_local_auth)):
+    """Schaltet automatische Sicherheitsupdates AUS (Admin, root). Idempotent.
+
+    Setzt `APT::Periodic::Unattended-Upgrade "0"` und deaktiviert
+    `apt-daily-upgrade.timer`. Das Paket bleibt installiert und die taegliche
+    **Index-Aktualisierung bleibt an** – ein veralteter Paketindex laesst
+    Installationen mit 404 scheitern.
+    """
+    from backend import broker_client
+    bres = await broker_client.call("apt_upgrades_teardown", {}, user=user, timeout=120)
+    if not bres.get("ok"):
+        return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")},
+                            status_code=502)
+    res = bres.get("result") or {}
+    return JSONResponse(res, status_code=200 if res.get("ok") else 500)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Root-Broker – auditierbare Freigabeliste fuer Root-Operationen
 # ═══════════════════════════════════════════════════════════════════════════

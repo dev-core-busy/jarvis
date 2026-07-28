@@ -63,6 +63,15 @@ class SkillManager:
         """Gibt alle Skills mit Manifest und Status zurück."""
         skills = []
         skill_states = config.get_skill_states()
+        # EINMAL pro Aufruf, nicht pro Skill (siehe _missing_dependencies).
+        # Lazy: nur berechnen, wenn wirklich ein installierter Skill
+        # Abhaengigkeiten deklariert.
+        _installed_cache: list = []
+
+        def _installed() -> set:
+            if not _installed_cache:
+                _installed_cache.append(self._installed_packages())
+            return _installed_cache[0]
 
         for skill_info in self.loader.discover_skills():
             if "error" in skill_info:
@@ -85,7 +94,7 @@ class SkillManager:
             # wenn wirklich etwas fehlt – sonst blaeht es die Liste auf.
             if skill_info["installed"]:
                 try:
-                    fehlt = self.missing_for(skill_name)
+                    fehlt = self.missing_for(skill_name, _installed())
                     if fehlt["pip"] or fehlt["apt"] or fehlt["commands"]:
                         skill_info["missing"] = fehlt
                 except Exception:  # noqa: BLE001
@@ -143,9 +152,19 @@ class SkillManager:
                 continue
         return pkgs
 
-    def _missing_dependencies(self, info: dict) -> list[str]:
-        """Noch nicht installierte pip-Abhaengigkeiten (volle Specs)."""
-        installed = self._installed_packages()
+    def _missing_dependencies(self, info: dict, installed: set | None = None) -> list[str]:
+        """Noch nicht installierte pip-Abhaengigkeiten (volle Specs).
+
+        ``installed`` erlaubt es, die Paketliste EINMAL zu berechnen und
+        wiederzuverwenden. Ohne das lief ``_installed_packages()`` (45 ms: es
+        laeuft alle installierten Distributionen durch) einmal PRO SKILL – bei 25
+        Skills 1,05 s, und weil ``list_skills()`` das seit 2026-07-28 fuer den
+        Reparatur-Knopf aufruft, kostete ``GET /api/skills`` 0,77 s statt
+        Millisekunden. Die Einstellungsseite ruft den Endpunkt neunmal auf
+        (Reiter-Sichtbarkeiten) -> rund 7 Sekunden Ladezeit.
+        """
+        if installed is None:
+            installed = self._installed_packages()
         return [d for d in info.get("dependencies", []) if _spec_name(d) not in installed]
 
     # dpkg -s ist ein Unterprozess je Paket. Die Skill-Liste fragt den Zustand
@@ -171,7 +190,7 @@ class SkillManager:
         """Noch nicht installierte apt-Pakete (Pruefung via dpkg -s)."""
         return [p for p in info.get("system_packages", []) if not cls._apt_installed(p)]
 
-    def missing_for(self, name: str) -> dict:
+    def missing_for(self, name: str, installed: set | None = None) -> dict:
         """Was fehlt diesem Skill an Abhaengigkeiten? {pip, apt, commands}.
 
         Gebraucht fuer den Reparatur-Weg: `system_packages` werden NUR beim
@@ -183,7 +202,7 @@ class SkillManager:
         """
         info = self._skill_info(name) or {}
         return {
-            "pip": self._missing_dependencies(info),
+            "pip": self._missing_dependencies(info, installed),
             "apt": self._missing_system_packages(info),
             "commands": [c.get("cmd") for c in self._pending_install_commands(info)],
         }

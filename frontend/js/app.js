@@ -627,6 +627,12 @@
                     tabProfiles.style.display = '';
                     tabProfiles.classList.add('active');
                     _initProfilesCollapse();
+                    // Der Schalter "Automatische Sicherheitsupdates" liegt seit
+                    // 2026-07-28 in den System-Einstellungen dieses Reiters, seine
+                    // Logik aber weiter in security_incidents.js. Ohne diesen Aufruf
+                    // waeren die Knoepfe unverdrahtet und der Status leer, solange
+                    // der Sicherheits-Reiter nicht geoeffnet wurde.
+                    if (window.SecurityIncidents) window.SecurityIncidents.onShowUnattended();
                 } else if (target === 'instructions' && tabInstructions) {
                     tabInstructions.style.display = '';
                     tabInstructions.classList.add('active');
@@ -728,15 +734,38 @@
         // ── WhatsApp-Tab-Button: nur sichtbar wenn 'whatsapp'-Skill aktiviert ──
         const waTabBtn = document.getElementById('settings-tab-btn-whatsapp');
 
+        // ── Skill-Liste EINMAL holen ────────────────────────────────────────
+        // Acht Reiter-Sichtbarkeiten (+ skillcfg.js) fragten jede fuer sich
+        // /api/skills ab, und im Oeffnen-Pfad des Modals liegen sie HINTEREINANDER
+        // (await … await …). Bei 0,77 s je Abruf waren das rund 7 Sekunden, bevor
+        // die Einstellungsseite stand. Jetzt teilen sie sich EINE Antwort.
+        // TTL statt "einmal fuer immer": nach einem Skill-Toggle muss die
+        // Sichtbarkeit stimmen. skills.js ruft nach jeder Aenderung
+        // window.invalidateSkillsCache(); der TTL ist nur das Sicherheitsnetz.
+        let _skillsCache = null, _skillsCacheTs = 0, _skillsInflight = null;
+        const _SKILLS_TTL = 5000;
+        window.invalidateSkillsCache = function () { _skillsCache = null; _skillsInflight = null; };
+        async function _skillsOnce() {
+            if (_skillsCache && (Date.now() - _skillsCacheTs) < _SKILLS_TTL) return _skillsCache;
+            if (_skillsInflight) return _skillsInflight;      // parallele Aufrufer buendeln
+            const tk = localStorage.getItem('jarvis_token') || '';
+            _skillsInflight = fetch('/api/skills', { headers: { 'Authorization': `Bearer ${tk}` } })
+                .then(r => r.json())
+                .then(d => {
+                    const liste = d.skills || d || [];
+                    _skillsCache = Array.isArray(liste) ? liste : [];
+                    _skillsCacheTs = Date.now();
+                    _skillsInflight = null;
+                    return _skillsCache;
+                })
+                .catch(e => { _skillsInflight = null; throw e; });
+            return _skillsInflight;
+        }
+
         window.updateWhatsAppTabVisibility = async function updateWhatsAppTabVisibility() {
             if (!waTabBtn) return;
             try {
-                const token = localStorage.getItem('jarvis_token') || '';
-                const resp = await fetch('/api/skills', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await resp.json();
-                const skills = data.skills || data || [];
+                const skills = await _skillsOnce();
                 const waSkill = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'whatsapp')
                     : null;
@@ -760,12 +789,7 @@
         window.updateVisionTabVisibility = async function updateVisionTabVisibility() {
             if (!visionTabBtn) return;
             try {
-                const token = localStorage.getItem('jarvis_token') || '';
-                const resp = await fetch('/api/skills', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await resp.json();
-                const skills = data.skills || data || [];
+                const skills = await _skillsOnce();
                 const visionSkill = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'vision')
                     : null;
@@ -790,11 +814,7 @@
         window.updateBrandingTabVisibility = async function updateBrandingTabVisibility() {
             if (!brandingTabBtn) return;
             try {
-                const resp = await fetch('/api/skills', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await resp.json();
-                const skills = data.skills || data || [];
+                const skills = await _skillsOnce();
                 const brSkill = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'branding')
                     : null;
@@ -816,11 +836,7 @@
         window.updateConfluenceTabVisibility = async function updateConfluenceTabVisibility() {
             if (!confluenceTabBtn) return;
             try {
-                const resp = await fetch('/api/skills', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await resp.json();
-                const skills = data.skills || data || [];
+                const skills = await _skillsOnce();
                 const cf = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'confluence')
                     : null;
@@ -845,11 +861,7 @@
         window.updateJiraTabVisibility = async function updateJiraTabVisibility() {
             if (!jiraTabBtn) return;
             try {
-                const resp = await fetch('/api/skills', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await resp.json();
-                const skills = data.skills || data || [];
+                const skills = await _skillsOnce();
                 const jr = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'jira')
                     : null;
@@ -871,11 +883,7 @@
         window.updateSapTabVisibility = async function updateSapTabVisibility() {
             if (!sapTabBtn) return;
             try {
-                const resp = await fetch('/api/skills', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await resp.json();
-                const skills = data.skills || data || [];
+                const skills = await _skillsOnce();
                 const sp = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'sap')
                     : null;
@@ -900,11 +908,7 @@
         window.updateKundenverwaltungTabVisibility = async function updateKundenverwaltungTabVisibility() {
             if (!kvTabBtn) return;
             try {
-                const resp = await fetch('/api/skills', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await resp.json();
-                const skills = data.skills || data || [];
+                const skills = await _skillsOnce();
                 const kv = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'kundenverwaltung')
                     : null;
@@ -925,11 +929,7 @@
         window.updateSupportTabVisibility = async function updateSupportTabVisibility() {
             if (!supportTabBtn) return;
             try {
-                const resp = await fetch('/api/skills', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await resp.json();
-                const skills = data.skills || data || [];
+                const skills = await _skillsOnce();
                 const sp = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'support_assistant')
                     : null;
@@ -1027,6 +1027,12 @@
             if (settingsTabs[0]) settingsTabs[0].classList.add('active');
             if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
             _initProfilesCollapse();
+            // WICHTIG: „KI & System" ist der VOREINGESTELLT aktive Reiter – hier wird
+            // er ohne Klick geoeffnet. Der Hook im Klick-Handler greift dann nie,
+            // und die Knoepfe des Update-Schalters blieben unverdrahtet
+            // ("Klick macht nichts", 2026-07-28). Deshalb auch hier aufrufen;
+            // onShowUnattended/_bind sind idempotent.
+            if (window.SecurityIncidents) window.SecurityIncidents.onShowUnattended();
             // LLM-Timeout speichern (einmalig verdrahten)
             const _btnTm = document.getElementById('btn-save-llm-timeout');
             if (_btnTm && !_btnTm._wired) {

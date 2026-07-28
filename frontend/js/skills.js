@@ -125,6 +125,11 @@
 
         async loadSkills() {
             try {
+                // Jede Aenderung (Ein/Aus, Purge, Nachinstallation) laeuft hier
+                // durch. Den gemeinsamen Zwischenspeicher von app.js verwerfen,
+                // sonst zeigen die Reiter-Sichtbarkeiten bis zu 5 s den alten
+                // Stand (z.B. Reiter eines gerade aktivierten Skills fehlt).
+                if (typeof window.invalidateSkillsCache === 'function') window.invalidateSkillsCache();
                 const token = localStorage.getItem('jarvis_token') || '';
                 const resp  = await fetch('/api/skills', {
                     headers: { 'Authorization': `Bearer ${token}` }

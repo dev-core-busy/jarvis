@@ -481,6 +481,42 @@ die PPTX-Frage ohne Antwort, und die Bild-Frage doppelt.
   Backend-Sitzung erzeugt – beide Aufträge liefen in `f8fb6ee0b419`. Der geteilte Kontext
   war damit erwartungswidrig, unabhängig von der Buchhaltung oben.
 
+## Wissens-Extraktor: „Fragen & Antworten generieren (KI)" (Fix 2026-07-28)
+Der Haken steht in `/wissen` bewusst **unter allen drei Eingabearten** (Datei, URL,
+Confluence) – gewirkt hat er nur bei der Datei. Ursache war eine verschluckte Null:
+- **`_clamp_qa_count()` gab für 0 UND für „keine Angabe" beides `None` zurück**, und `None`
+  bedeutete Standardregel (`5–15 Frage-Antwort-Paare`). Ein ausdrückliches „keine Fragen"
+  war damit gar nicht ausdrückbar. Jetzt drei Zustände: `None` = keine Angabe → Standard,
+  `0` = ausdrücklich keine, `1..50` = genau so viele. **Aufrufer dürfen nicht per Falsyness
+  prüfen** (`if n:`), sondern müssen `n == 0` abfragen – genau daran lag der Fehler.
+- **`extract_to_pending()` kannte `qa_count` überhaupt nicht** – der Weg, den BEIDE
+  Confluence-Importe nutzen (`/api/wissen/extract/confluence` und
+  `/api/knowledge/extract/confluence`). Parameter ergänzt und in allen vier Aufrufstellen
+  durchgereicht (Einzelseite + Bulk je Endpunkt).
+- **`_drop_qa_if_unwanted()` als zweite Schranke:** Der Prompt sagt bei 0 „qa_pairs MUSS
+  ein leeres Array sein", aber ein Prompt ist eine Bitte, keine Garantie – Modelle liefern
+  trotzdem Fragen. Verifiziert mit einem absichtlich widersprechenden Stub-Modell.
+- **Frontend:** `qaWish()` in `wissen.js` liefert die Anzahl **einschließlich** des
+  Haken-Zustands (0 wenn aus) und wird von allen drei Eingabearten benutzt. Vorher sandte
+  der Confluence-Import gar kein Feld und der URL-Import `qa_count` bedingungslos.
+- **FALLSTRICK Datei-Upload:** Dort gatet `if qa_n > 0` die GESAMTE Extraktion – bei
+  ausgeschaltetem Haken wird die Datei nur abgelegt, es entsteht kein Entwurf. Das ist
+  gewollt; `qa_n` darf in `/api/wissen/upload` deshalb **nicht** auf `None` umgestellt
+  werden (der Vergleich `> 0` würde mit `None` werfen).
+- **Verifiziert auf DEV** gegen echtes Confluence: `qa_count=0` → keine Fragen, aber
+  Zusammenfassung und Fakten weiterhin extrahiert; `qa_count=3` → genau 3; ohne Feld →
+  Standardregel. Dazu 19 Einheitentests der Zustandslogik.
+
+## /wissen → „Deine Entwürfe": kein Scroll-Sprung bei „Prüfen" (Fix 2026-07-28)
+`window.scrollTo(0, document.body.scrollHeight)` sprang ans **Seitenende** – und damit von
+der Vorschau WEG, denn `#wi-ext-review` liegt im DOM **oberhalb** der Liste
+(`#wi-pending-list`). Zweiter, subtilerer Sprung: das Einblenden der Vorschau verlängert
+den Bereich über der Liste, schiebt sie nach unten und zieht den angeklickten Eintrag unter
+dem Zeiger weg. Beides gelöst, indem die Verschiebung der eigenen Zeile gemessen und per
+`window.scrollBy(0, delta)` ausgeglichen wird – der Eintrag bleibt optisch stehen.
+Die anderen `scrollIntoView`-Aufrufe auf `#wi-ext-review` (nach Generieren bzw. nach einem
+Einzel-Import) bleiben bewusst: dort ist der Sprung zur Vorschau die gewünschte Reaktion.
+
 ## Skill-System
 - Skills liegen unter `skills/<name>/` mit `skill.json` (Manifest) + `main.py` (get_tools())
 - Tools erben von `backend/tools/base.py:BaseTool`

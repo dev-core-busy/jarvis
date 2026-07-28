@@ -114,6 +114,10 @@ _APP_DENY_REL = (
     ".env", "settings.json", "data/settings.json", "data/memory.json",
     "data/instructions", "data/logs", "data/conv_log.jsonl",
     "data/audit_log.jsonl", "certs",
+    # Zeitgesteuerte Auftraege/Trigger ALLER Benutzer + Sicherheits-Zustand:
+    # cron_list zeigt nur eigene Auftraege, ein direktes Lesen der Datei wuerde
+    # diese Schranke aushebeln.
+    "data/scheduled_jobs.json", "data/file_watchers.json", "data/security_state.json",
 )
 
 
@@ -135,9 +139,21 @@ _APP_DENY_REL = (
 PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs")
 PRIVATE_MODE = 0o750
 
+# Einzelne Dateien direkt in data/, die kein Domain-Nutzer lesen darf. Das
+# Verzeichnis data/ selbst bleibt begehbar (Wissensdateien!), deshalb greift hier
+# nur der Dateimodus. Inhalt: zeitgesteuerte Auftraege und Trigger ALLER Benutzer
+# (Aufgabentexte, Telefonnummern, Webhook-URLs) sowie der Sicherheits-Zustand
+# (wer wie oft auffaellig war). Die Werkzeug-Schranken in cron_tool.py filtern
+# fremde Auftraege – ein `cat` in der Sandbox umgeht das und braucht nur
+# Leserechte, genau wie 2026-07-28 bei data/chats.
+PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
+                 "data/security_state.json")
+PRIVATE_FILE_MODE = 0o640
+
 
 def harden_data_dirs() -> list[str]:
-    """Setzt die Dienst-Verzeichnisse auf 0750. Idempotent, Rueckgabe = Aenderungen."""
+    """Setzt Dienst-Verzeichnisse auf 0750 und private Dateien auf 0640.
+    Idempotent, Rueckgabe = Aenderungen."""
     geaendert = []
     for rel in PRIVATE_DIRS:
         d = PROJECT_ROOT / rel
@@ -152,6 +168,18 @@ def harden_data_dirs() -> list[str]:
         except Exception as e:  # noqa: BLE001
             # Kein harter Fehler: laeuft das Backend nicht als Eigentuemer, bleibt
             # es beim alten Modus – dann muss ein Admin es einmal setzen.
+            geaendert.append(f"{rel}: FEHLER {e}")
+    for rel in PRIVATE_FILES:
+        f = PROJECT_ROOT / rel
+        try:
+            if not f.is_file():
+                continue
+            ist = f.stat().st_mode & 0o777
+            if ist == PRIVATE_FILE_MODE:
+                continue
+            f.chmod(PRIVATE_FILE_MODE)
+            geaendert.append(f"{rel}: {oct(ist)} -> {oct(PRIVATE_FILE_MODE)}")
+        except Exception as e:  # noqa: BLE001
             geaendert.append(f"{rel}: FEHLER {e}")
     return geaendert
 
@@ -230,6 +258,7 @@ SHELL_OBFUSCATION = re.compile(
 )
 SHELL_SECRET_PATHS = re.compile(
     r'\.env\b|settings\.json\b|memory\.json\b|auth_state\.json\b|credentials\.json\b|'
+    r'scheduled_jobs\.json\b|file_watchers\.json\b|security_state\.json\b|'
     r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'
     r'/etc/shadow\b|/etc/gshadow\b|/etc/sudoers|'
     r'\.key\b|\.pem\b|\.crt\b|\.p12\b|\.pfx\b|\.jks\b|'

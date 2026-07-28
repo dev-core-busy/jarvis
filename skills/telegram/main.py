@@ -137,11 +137,11 @@ class TelegramBotManager:
 
                 if main_loop and main_loop.is_running():
                     future = asyncio.run_coroutine_threadsafe(
-                        self._run_agent(text), main_loop
+                        self._run_agent(text, chat_id), main_loop
                     )
                     result, images = future.result(timeout=120)
                 else:
-                    result, images = await self._run_agent(text)
+                    result, images = await self._run_agent(text, chat_id)
             except Exception as e:
                 result = f"Fehler: {e}"
 
@@ -169,10 +169,19 @@ class TelegramBotManager:
         elif not images and not text_out:
             await update.message.reply_text("✅ Erledigt.")
 
-    async def _run_agent(self, task_text: str):
-        """Führt einen Agent-Task headless aus. Gibt (Text, Bilder-Liste) zurück."""
+    async def _run_agent(self, task_text: str, chat_id=None):
+        """Führt einen Agent-Task headless aus. Gibt (Text, Bilder-Liste) zurück.
+
+        UNPRIVILEGIERT: Telegram kennt kein Jarvis-Konto – die Chat-Freigabe
+        (`_is_allowed`) sagt nur, WER schreiben darf, nicht mit welchen Rechten.
+        Ohne diese Bindung liefe die Nachricht mit der Identität, die zufällig am
+        geteilten Hauptagenten hing (leer = privilegiert = Root über den Broker).
+        """
         agent = self._agent_manager.get_or_create_main()
-        result = await agent.run_task_headless(task_text)
+        result = await agent.run_task_headless(
+            task_text,
+            actor={"user": f"tg:{chat_id}" if chat_id else "tg:unbekannt",
+                   "privileged": False})
         images = list(getattr(agent, "last_task_images", []) or [])
         return result, images
 

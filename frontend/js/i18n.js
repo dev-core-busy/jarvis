@@ -1006,6 +1006,15 @@ const _I18N = {
         'cron.last_trigger':    'Letzter Trigger',
         'cron.no_jobs':         'Noch keine geplanten Aufgaben. Klicke <strong>+ Neue Aufgabe</strong> um loszulegen.',
         'cron.no_watchers':     'Noch keine Trigger. Klicke <strong>+ Neuer Watcher</strong> um loszulegen.',
+        // Auftraggeber-Bindung: mit welchen Rechten laeuft der Auftrag?
+        'cron.rights_system':   'Systemrechte',
+        'cron.rights_user':     'Benutzerrechte',
+        'cron.owner_none':      'ohne Auftraggeber (unprivilegiert)',
+        'cron.owner_hint':      'Ein zeitgesteuerter Auftrag läuft mit den Rechten seines Auftraggebers. Aufträge ohne Auftraggeber laufen unprivilegiert und scheitern an System-Befehlen.',
+        'cron.claim_title':     'Als Administrator übernehmen (läuft danach mit Systemrechten)',
+        'cron.claim_confirm':   'Diesen Auftrag übernehmen? Er läuft danach mit SYSTEMRECHTEN unter deinem Namen – auch Root-Befehle darin werden dann ausgeführt (Root-Befehle bleiben freigabepflichtig).',
+        'cron.claim_done':      'Auftrag übernommen – läuft künftig mit Systemrechten.',
+        'cron.claim_failed':    'Übernahme fehlgeschlagen.',
 
         // ── Common ────────────────────────────────────────────
         'common.save':          'Speichern',
@@ -2740,6 +2749,15 @@ const _I18N = {
         'cron.last_trigger':    'Last trigger',
         'cron.no_jobs':         'No scheduled jobs yet. Click <strong>+ New Job</strong> to get started.',
         'cron.no_watchers':     'No triggers yet. Click <strong>+ New Watcher</strong> to get started.',
+        // Actor binding: which privileges does the job run with?
+        'cron.rights_system':   'system rights',
+        'cron.rights_user':     'user rights',
+        'cron.owner_none':      'no requester (unprivileged)',
+        'cron.owner_hint':      'A scheduled job runs with the rights of its requester. Jobs without a requester run unprivileged and will fail on system commands.',
+        'cron.claim_title':     'Claim as administrator (will then run with system rights)',
+        'cron.claim_confirm':   'Claim this job? It will then run with SYSTEM RIGHTS under your name – root commands inside it will be executed (root commands still require approval).',
+        'cron.claim_done':      'Job claimed – it now runs with system rights.',
+        'cron.claim_failed':    'Claim failed.',
 
         // ── Common ────────────────────────────────────────────
         'common.save':          'Save',

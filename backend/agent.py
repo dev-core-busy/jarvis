@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import contextlib
 import contextvars
 import json
 import re
@@ -134,6 +135,27 @@ import backend.documents as _documents
 # ── Sicherheit: LDAP-Benutzer duerfen diese Tools NICHT verwenden ─────────
 _LOCAL_PRIVILEGED_USERS = {"jarvis", "root", ""}
 
+# Platzhalter-Auftraggeber fuer unprivilegierte Laeufe ohne bekannten Benutzer
+# (Legacy-Cron-Jobs ohne Besitzer, Kanaele ohne Konto). Bewusst ein Name, der
+# keinem echten Benutzer und keinem Dokument-Eigentuemer entsprechen kann:
+# damit ist die Eigentuemer-Schranke in data/documents fail-closed, waehrend ein
+# leerer Name "keine Einschraenkung" bedeuten wuerde.
+_ANON_ACTOR = "__unprivilegiert__"
+
+# Sentinel fuer run_task_headless(actor=...) – analog _KB_GROUPS_UNSET/_EFFORT_UNSET:
+# nicht uebergeben = fail-closed unprivilegiert; explizit None = bestehenden
+# Kontext beibehalten (nur fuer Laeufe, die schon in einem actor_scope stehen).
+_ACTOR_UNSET = object()
+
+# Auftraggeber des LAUFENDEN Auftrags, lauf-isoliert.
+# Warum ContextVar und nicht (nur) ein Objekt-Attribut: der Hauptagent ist
+# GETEILT und laeuft parallel – ein Cron-Job um 03:00 und ein Chat-Auftrag
+# koennen gleichzeitig auf demselben Objekt liegen. Ein Attribut wuerde dabei
+# den Sicherheitsentscheid des jeweils anderen Laufs mitregieren. Jeder
+# asyncio.Task hat seine eigene Kopie, Sub-Agent-Tasks erben sie.
+# Wert: (username, privileged) oder None = keine Bindung.
+_actor_cv: contextvars.ContextVar = contextvars.ContextVar("jarvis_actor", default=None)
+
 # Confluence/Jira sind im Chat ausschliesslich lesend nutzbar: schreibende Tools
 # werden dem Agenten gar nicht erst angeboten (gezielte read-only Abfragen).
 _EXTERNAL_WRITE_TOOLS = {
@@ -145,6 +167,19 @@ _EXTERNAL_WRITE_TOOLS = {
 _BLOCKED_TOOLS_FOR_LDAP = {
     "spawn_agent",         # Keine Sub-Agents (koennten Shell/FS ungefiltert nutzen)
     "write_clipboard",     # Kein Clipboard-Schreibzugriff
+    # ── Werkzeuge, die die GRUNDLAGE kuenftiger Laeufe aendern ───────────────
+    # Diese schreiben nicht Daten, sondern Verhalten: System-Instruktionen,
+    # Skill-Code, Auftrags-Queue. Was hier hineingeschrieben wird, wirkt spaeter
+    # in JEDEM Lauf – auch in dem eines Admins. Ein unprivilegierter Benutzer
+    # (oder ein per Prompt-Injection gesteuerter Lauf) haette damit einen
+    # dauerhaften Kanal, der die Rechtepruefung des Augenblicks ueberlebt:
+    # 'reflection' schreibt data/instructions/*.md (fliesst in jeden
+    # System-Prompt) und kann Code-Fixes anwenden, 'evolution_*' schreibt und
+    # aktiviert Skills, 'queue_*' legt Auftraege fuer spaetere autonome Laeufe ab.
+    # Gleiche Ueberlegung wie bei zeitgesteuerten Auftraegen (siehe actor_scope).
+    "reflection",
+    "evolution_propose", "evolution_apply", "evolution_cycle",
+    "queue_add",
     # HINWEIS: 'filesystem' wird NICHT pauschal geblockt, sondern per
     # sandbox.authorize_fs pfadbezogen eingeschraenkt (Schreiben nur /tmp+documents,
     # Lesen nur Wissens-/Arbeitsverzeichnisse). Frueher stand hier faelschlich
@@ -702,6 +737,69 @@ KRITISCH – Autonomie-Regeln:
         """Setzt das effektive Profil anhand des aktuellen Benutzers (_current_username)."""
         self._active_profile = config.profile_for_user(getattr(self, "_current_username", ""))
 
+    # ── Auftraggeber-Bindung (Actor) ─────────────────────────────────────────
+    # Die Rechte-Confinement im Dispatch haengt am Benutzer des LAUFENDEN Auftrags.
+    # Der Hauptagent ist aber GETEILT: ohne explizite Bindung regiert der Wert,
+    # den zuletzt irgendein Chat-Nutzer hinterlassen hat – und ein leerer Wert
+    # gilt als privilegiert. Zeitversetzte Laeufe (Cron, Trigger-Watcher,
+    # WhatsApp/Telegram/API) haben deshalb ihre Rechte vom Zufall bezogen.
+    # `_current_actor_privileged` macht die Entscheidung explizit:
+    #   None  -> alte Herleitung aus dem Namen (interaktive Chat-Laeufe)
+    #   False -> unprivilegiert, unabhaengig vom Namen (fail-closed)
+    #   True  -> privilegiert (nur wenn ein Admin den Auftrag angelegt hat)
+    def actor_name(self) -> str:
+        """Benutzer des laufenden Auftrags – Bindung hat Vorrang vor dem Attribut."""
+        bound = _actor_cv.get()
+        if bound is not None:
+            return bound[0]
+        return getattr(self, "_current_username", "")
+
+    def _actor_is_privileged(self) -> bool:
+        """Darf der Auftraggeber dieses Laufs Root-/Systemoperationen nutzen?"""
+        bound = _actor_cv.get()
+        if bound is not None:
+            return bool(bound[1])
+        flag = getattr(self, "_current_actor_privileged", None)
+        if flag is not None:
+            return bool(flag)
+        uname = getattr(self, "_current_username", "")
+        return (not uname) or uname in _LOCAL_PRIVILEGED_USERS
+
+    @contextlib.contextmanager
+    def actor_scope(self, username: str, privileged: bool = False,
+                    internet: bool = True, sap: bool = False, task: str = ""):
+        """Bindet einen Lauf an einen Auftraggeber und stellt den Vorzustand danach
+        wieder her. WICHTIG fuer den geteilten Hauptagenten: ein stehengebliebener
+        Wert wuerde den naechsten Lauf mitregieren (genau der Fehler, den diese
+        Klammer behebt)."""
+        keys = ("_current_username", "_current_actor_privileged", "_current_user_internet",
+                "_current_user_sap", "_current_task", "_current_client_type")
+        before = {k: getattr(self, k, None) for k in keys}
+        had = {k: hasattr(self, k) for k in keys}
+        self._current_username = username or ""
+        self._current_actor_privileged = bool(privileged)
+        self._current_user_internet = bool(internet)
+        self._current_user_sap = bool(sap)
+        if task:
+            self._current_task = task
+        # Lauf-isolierte Bindung (maßgeblich fuer den Sicherheitsentscheid)
+        cv_token = _actor_cv.set((username or "", bool(privileged)))
+        try:
+            yield
+        finally:
+            try:
+                _actor_cv.reset(cv_token)
+            except Exception:  # noqa: BLE001
+                pass
+            for k in keys:
+                if had[k]:
+                    setattr(self, k, before[k])
+                else:
+                    try:
+                        delattr(self, k)
+                    except AttributeError:
+                        pass
+
     def reload_skills(self):
         """Hot-Reload: Lädt Skills neu und aktualisiert die Tool-Liste."""
         self.skill_manager.reload_all()
@@ -779,6 +877,17 @@ KRITISCH – Autonomie-Regeln:
         _rkey = self._run_key(self._current_username)
         self._stop_scopes[_rkey] = stop_scope
         _scope_token = _run_stop_scope.set(stop_scope)
+        # Auftraggeber-Bindung dieses Laufs (lauf-isoliert, siehe _actor_cv):
+        # verhindert, dass die Rechte zweier gleichzeitiger Nutzer am GETEILTEN
+        # Hauptagenten sich vermischen. Eine geerbte Bindung (Sub-Agent eines
+        # unprivilegierten Laufs) hat Vorrang vor der Namens-Heuristik.
+        _inherited = getattr(self, "_current_actor_privileged", None)
+        _actor_token = _actor_cv.set((
+            self._current_username,
+            bool(_inherited) if _inherited is not None
+            else ((not self._current_username)
+                  or self._current_username in _LOCAL_PRIVILEGED_USERS),
+        ))
         self._tool_cache.clear()  # Cache für diesen Task-Run leeren
         # Ergebnis dieses Laufs fuer den Auto-Neuversuch am Aufrufort:
         #   ok      – Antwort geliefert
@@ -1552,23 +1661,50 @@ KRITISCH – Autonomie-Regeln:
                 _run_stop_scope.reset(_scope_token)
             except Exception:
                 pass
+            try:
+                _actor_cv.reset(_actor_token)
+            except Exception:
+                pass
         # Benutzer-Stop hat immer Vorrang: nach einem manuellen Abbruch NIE
         # automatisch neu versuchen (auch wenn zwischendrin ein Fehler auftrat).
         if stop_scope.stopped:
             run_outcome = "stopped"
         return run_outcome
 
-    async def run_task_headless(self, task_text: str, reasoning_effort=None) -> str:
+    async def run_task_headless(self, task_text: str, reasoning_effort=None,
+                                actor=_ACTOR_UNSET) -> str:
         """Führt eine Aufgabe ohne WebSocket aus. Gibt das Ergebnis als String zurück.
 
-        Wird von der WhatsApp-Pipeline genutzt.
+        Wird von Cron, Trigger-Watchern, WhatsApp, Telegram und der Notify-API genutzt.
 
         reasoning_effort: Denktiefe fuer diesen Lauf. Default None = keine Vorgabe
         (Profil/globale Einstellung greifen). Bewusst NICHT der Erben-Sentinel:
         Kanaele ohne Oberflaeche (WhatsApp/Telegram/Cron) sollen nicht die Stufe
         uebernehmen, die zuletzt ein Browser-Nutzer auf dem geteilten Hauptagenten
         gesetzt hat.
+
+        actor: Auftraggeber dieses Laufs als dict
+        ``{"user": str, "privileged": bool, "internet": bool, "sap": bool}``.
+        NICHT uebergeben = fail-closed unprivilegiert – ein headless-Lauf hat
+        keinen angemeldeten Benutzer, und "kein Benutzer" galt bis 2026-07-28 als
+        privilegiert (siehe _actor_is_privileged). Wer bewusst mit Systemrechten
+        laufen will, muss ``privileged=True`` setzen.
         """
+        if actor is _ACTOR_UNSET:
+            actor = {"user": _ANON_ACTOR, "privileged": False}
+        if actor is not None:
+            with self.actor_scope(
+                    str(actor.get("user") or _ANON_ACTOR),
+                    privileged=bool(actor.get("privileged")),
+                    internet=bool(actor.get("internet", True)),
+                    sap=bool(actor.get("sap", False)),
+                    task=task_text):
+                return await self._run_headless(task_text, reasoning_effort)
+        # actor=None: bestehenden Kontext des Agenten bewusst weiterverwenden
+        # (nur fuer Sub-Laeufe, die schon in einem actor_scope stehen).
+        return await self._run_headless(task_text, reasoning_effort)
+
+    async def _run_headless(self, task_text: str, reasoning_effort=None) -> str:
         self._current_reasoning_effort = reasoning_effort
         # Effektives LLM-Profil des (ggf. via _current_username gesetzten) Benutzers
         self._resolve_profile_for_user()
@@ -1859,6 +1995,13 @@ KRITISCH – Autonomie-Regeln:
             # Benutzer-spezifischer Memory-Namespace
             if name == "memory_manage":
                 exec_args.setdefault('_username', getattr(self, '_current_username', ''))
+            # Zeitgesteuerte Auftraege: der ANLEGENDE Benutzer wird im Job
+            # festgeschrieben und regiert spaeter dessen Ausfuehrung. Ohne diese
+            # Bindung waere jeder Cron-Job eine zeitversetzte Rechteerhoehung.
+            if name.startswith("cron_"):
+                exec_args.setdefault('_username', getattr(self, '_current_username', ''))
+                exec_args.setdefault('_privileged', self._actor_is_privileged())
+                exec_args.setdefault('_client_type', getattr(self, '_current_client_type', ''))
             # Vom Benutzer gewaehlter Wissensgruppen-Filter fuer die Wissenssuche
             if name == "knowledge_search":
                 exec_args.setdefault('_kb_groups', getattr(self, '_current_kb_groups', None))
@@ -1871,11 +2014,15 @@ KRITISCH – Autonomie-Regeln:
 
             # ── Netzwerk-/Domain-Benutzer: HARTE, LLM-unabhaengige Zugriffskontrolle ──
             # Erzwungen im Dispatch – NICHT per Prompt/Base64/"gelernten Fakten" umgehbar.
-            _uname = getattr(self, '_current_username', '')
+            _uname = self.actor_name()
+            # Nicht der Name entscheidet, sondern die Auftraggeber-Bindung dieses
+            # Laufs (siehe actor_scope): zeitversetzte Laeufe ohne privilegierten
+            # Besitzer sind unprivilegiert, auch wenn kein Name gesetzt ist.
+            _privileged = self._actor_is_privileged()
             _t0 = _time.monotonic()
             _ldap_blocked = False
             _viol = None   # (kind, detail) eines sicherheitsrelevanten Deny -> Eskalation
-            if _uname and _uname not in _LOCAL_PRIVILEGED_USERS:
+            if not _privileged:
                 from backend import sandbox as _sbx
                 if name in _BLOCKED_TOOLS_FOR_LDAP:
                     print(f"[AGENT] BLOCKED Tool '{name}' fuer Domain-User '{_uname}'", flush=True)
@@ -1917,7 +2064,7 @@ KRITISCH – Autonomie-Regeln:
 
             # Sicherheitsrelevanten Verstoss protokollieren + ggf. Auto-Sperre.
             # (NICHT die reine Internet-/Feature-Gating-Sperre unten.)
-            if _viol and _uname and _uname not in _LOCAL_PRIVILEGED_USERS:
+            if _viol and not _privileged:
                 try:
                     from backend import security_guard as _sg
                     _exempt = False
@@ -1963,8 +2110,7 @@ KRITISCH – Autonomie-Regeln:
             # OS-Sandbox: nicht-privilegierte Shell-Befehle als unprivilegierter
             # OS-Benutzer ausfuehren (harte Grenze via OS-Rechte – wirkt unabhaengig
             # von Base64/Python/etc.). Opt-in via Einstellung 'sandbox_shell_user'.
-            if (name == "shell_execute" and not _ldap_blocked
-                    and _uname and _uname not in _LOCAL_PRIVILEGED_USERS):
+            if (name == "shell_execute" and not _ldap_blocked and not _privileged):
                 _sbx_user = (config.get_setting("sandbox_shell_user", "") or "").strip()
                 # Benutzer OHNE Internet-Freigabe: netzwerkgesperrten Sandbox-User
                 # verwenden (harte Egress-Grenze via nftables owner-match). Faengt
@@ -1976,14 +2122,13 @@ KRITISCH – Autonomie-Regeln:
                         _sbx_user = _noinet
                 if _sbx_user:
                     exec_args['_sandbox_user'] = _sbx_user
-                    exec_args['_broker_user'] = _uname
+                    exec_args['_broker_user'] = _uname or "unprivilegiert"
                     exec_args['_broker_context'] = self._broker_context()
 
             # Privilegierte Benutzer (lokal/System): Root-Befehle laufen ueber
             # den Root-Broker (shell_root) – unbekannte Befehle erzeugen dort
             # einen auditierbaren Pending-Eintrag zur Admin-Freigabe.
-            if (name == "shell_execute" and not _ldap_blocked
-                    and (not _uname or _uname in _LOCAL_PRIVILEGED_USERS)):
+            if (name == "shell_execute" and not _ldap_blocked and _privileged):
                 exec_args['_root_broker'] = True
                 exec_args['_broker_user'] = _uname or "system"
                 exec_args['_broker_context'] = self._broker_context()
@@ -1996,8 +2141,11 @@ KRITISCH – Autonomie-Regeln:
                 # Wird immer gesetzt und im finally zurueckgenommen – ein
                 # stehengebliebener Wert wuerde den naechsten Lauf mitregieren.
                 from backend import sandbox as _sbx_ctx
+                # Unprivilegierter Lauf OHNE Namen (z.B. Legacy-Cron-Job ohne
+                # Besitzer): Platzhalter statt "" – leer hiesse "keine Schranke",
+                # und dann waeren fremde Dokumente wieder lesbar.
                 _u_token = _sbx_ctx.set_tool_user(
-                    "" if (not _uname or _uname in _LOCAL_PRIVILEGED_USERS) else _uname)
+                    "" if _privileged else (_uname or _ANON_ACTOR))
                 try:
                     result = await tool.execute(**exec_args)
                 finally:
@@ -2012,7 +2160,7 @@ KRITISCH – Autonomie-Regeln:
             try:
                 from backend.audit_log import log_tool as _audit
                 _audit(
-                    user=getattr(self, '_current_username', '') or 'unknown',
+                    user=_uname or 'unknown',
                     tool=name,
                     args=args,
                     result_len=len(result) if result else 0,
@@ -2044,6 +2192,7 @@ KRITISCH – Autonomie-Regeln:
             # vererben, damit die Rechte-Confinement (Domain-Nutzer) auch dort greift.
             # Sonst liefe der Sub-Agent mit leerem Username = privilegiert (Escalation).
             sub._current_username = getattr(self, '_current_username', '')
+            sub._current_actor_privileged = self._actor_is_privileged()
             sub._current_user_internet = getattr(self, '_current_user_internet', True)
             sub._current_user_sap = getattr(self, '_current_user_sap', True)
             asyncio.create_task(agent_manager.run_sub_agent(sub, task, ws))
@@ -2644,6 +2793,10 @@ class AgentManager:
             agent._current_user_internet = getattr(parent, '_current_user_internet', True)
             agent._current_user_sap = getattr(parent, '_current_user_sap', True)
             agent._current_username = getattr(parent, '_current_username', '')
+            # Privileg-Bindung mitvererben: ein Sub-Agent eines unprivilegierten
+            # Laufs (z.B. Cron-Job eines Domain-Nutzers) darf nicht ueber die
+            # Namens-Heuristik wieder privilegiert werden.
+            agent._current_actor_privileged = parent._actor_is_privileged()
         self.agents[agent.agent_id] = agent
         return agent
 

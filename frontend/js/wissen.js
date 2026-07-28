@@ -382,6 +382,13 @@
     }
 
     // Gewuenschte Fragenanzahl aus dem Zahlenfeld (1..30, Fallback 20)
+    // Gewuenschte Fragenanzahl EINSCHLIESSLICH des Haken-Zustands:
+    // 0 = ausdruecklich keine Fragen. Gilt fuer alle drei Eingabearten
+    // (Datei, URL, Confluence) – der Haken steht bewusst unter allen dreien.
+    function qaWish() {
+        return ($('wi-genq') && $('wi-genq').checked) ? qaCount() : 0;
+    }
+
     function qaCount() {
         var n = parseInt(($('wi-genq-count') || {}).value, 10);
         if (isNaN(n) || n < 1) n = 20; if (n > 30) n = 30;
@@ -491,7 +498,10 @@
         fd.append('groups', groups.join(','));
         // Optional: Frage-Antwort-Paare generieren (Checkbox + gewuenschte Anzahl)
         var genQ = $('wi-genq') && $('wi-genq').checked;
-        if (genQ) fd.append('gen_questions', String(qaCount()));
+        // Bei ausgeschaltetem Haken die 0 AUSDRUECKLICH senden. Frueher blieb das Feld
+        // weg und das Backend leitete daraus die Standardregel ab -> es entstanden
+        // trotzdem Fragen. Auf ein weggelassenes Feld darf man sich nicht verlassen.
+        fd.append('gen_questions', String(qaWish()));
         // Abbrechbar machen (wie bei Confluence): Client-Abort + server-seitiger job_id
         _uploadJobId = 'wup_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
         _uploadAbort = new AbortController();
@@ -702,7 +712,7 @@
         _uploadAbort = new AbortController(); _uploadJobId = null;
         setBusy(true, true);
         var cancel = $('wi-extract-cancel'); if (cancel) cancel.style.display = '';
-        fetch('/api/wissen/extract', { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify({ url: url, qa_count: qaCount() }), signal: _uploadAbort.signal })
+        fetch('/api/wissen/extract', { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify({ url: url, qa_count: qaWish() }), signal: _uploadAbort.signal })
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (d.error) { st.style.color = 'var(--danger)'; st.textContent = '✗ ' + d.error; return; }
@@ -838,7 +848,18 @@
                     cb.style.cssText = 'flex-shrink:0;width:16px;height:16px;margin:0 2px 0 0;cursor:pointer;';
                     var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = it.title || t('wissen.untitled');
                     var rev = document.createElement('button'); rev.className = 'sec-btn small'; rev.textContent = t('wissen.review_btn');
-                    rev.addEventListener('click', function () { showReview(it); window.scrollTo(0, document.body.scrollHeight); });
+                    rev.addEventListener('click', function () {
+                        // Kein Sprung: die Vorschau (#wi-ext-review) liegt OBERHALB der
+                        // Liste. window.scrollTo(…scrollHeight) sprang ans Seitenende –
+                        // also von der Vorschau WEG. Und weil das Einblenden die Liste
+                        // nach unten schiebt, rutscht der angeklickte Eintrag zusaetzlich
+                        // unter dem Zeiger weg. Beides ausgleichen: Verschiebung der
+                        // eigenen Zeile messen und um genau diesen Betrag nachscrollen.
+                        var vorher = row.getBoundingClientRect().top;
+                        showReview(it);
+                        var delta = row.getBoundingClientRect().top - vorher;
+                        if (delta) window.scrollBy(0, delta);
+                    });
                     var del = document.createElement('button'); del.className = 'sec-btn small danger'; del.textContent = '×';
                     del.addEventListener('click', function () { deletePending(it.id, false); });
                     row.appendChild(cb); row.appendChild(nm); row.appendChild(rev); row.appendChild(del);
@@ -1081,6 +1102,10 @@
         if (picked.indexOf('__ALL__') !== -1) { body = { space: space }; bulk = true; }
         else if (picked.length > 1) { body = { page_ids: picked }; bulk = true; }
         else { body = { page_id: picked[0] }; bulk = false; }
+        // Der Haken „Fragen & Antworten generieren (KI)" gilt laut Oberflaeche fuer
+        // ALLE drei Eingabearten – wurde beim Confluence-Import aber nie mitgesendet,
+        // sodass immer Fragen entstanden. 0 heisst ausdruecklich "keine Fragen".
+        body.qa_count = qaWish();
         var jobId = _cfJobId = 'wcf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
         body.job_id = jobId;
         var btn = $('wi-extract-btn'), cancel = $('wi-extract-cancel');

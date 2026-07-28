@@ -7787,7 +7787,11 @@ async def wissen_upload(
         return JSONResponse(
             {"error": f"Ordner '{folder}' ist den gewählten Wissensgruppen nicht zugeordnet"},
             status_code=403)
-    # Gewuenschte Fragenanzahl (Checkbox "Fragen generieren" im /wissen-Upload)
+    # Gewuenschte Fragenanzahl (Checkbox "Fragen generieren" im /wissen-Upload).
+    # ACHTUNG: 0 gatet hier die GESAMTE Extraktion (`if qa_n > 0` weiter unten) –
+    # bei ausgeschaltetem Haken wird die Datei nur abgelegt, kein Entwurf erzeugt.
+    # Das ist das gewollte Verhalten dieses Pfads und darf NICHT auf None
+    # umgestellt werden (der Vergleich `> 0` wuerde mit None werfen).
     try:
         qa_n = max(0, min(int(gen_questions or 0), 50))
     except (TypeError, ValueError):
@@ -8297,7 +8301,13 @@ async def wissen_extract_confluence(request: Request, user: str = Depends(requir
     """Confluence-Import fuer /wissen -> Entwuerfe (Pending), dem Nutzer zugeordnet.
 
     Body: ``{"page_id": "123"}`` (synchron) | ``{"page_ids": [...]}`` |
-    ``{"space": "KEY"}`` (Hintergrund-Job). ALLE sichtbaren Bereiche."""
+    ``{"space": "KEY"}`` (Hintergrund-Job). ALLE sichtbaren Bereiche.
+
+    Optional ``qa_count``: 0 = ausdruecklich KEINE Frage-Antwort-Paare erzeugen,
+    1..50 = genau so viele, weggelassen = Standardregel (5-15). Bis 2026-07-28
+    wurde der Wert nicht ausgewertet – der Import erzeugte immer Fragen, obwohl
+    der Haken „Fragen & Antworten generieren (KI)" laut Oberflaeche auch fuer
+    Confluence gilt."""
     if not _editable_groups_for(user):
         return JSONResponse({"error": "Dir ist kein Wissensbereich zugewiesen."}, status_code=403)
     from backend.confluence_client import ConfluenceError, html_to_text
@@ -8307,6 +8317,11 @@ async def wissen_extract_confluence(request: Request, user: str = Depends(requir
     space = (body.get("space") or "").strip()
     page_ids = [str(p).strip() for p in (body.get("page_ids") or []) if str(p).strip()]
     job_id = (body.get("job_id") or "").strip()
+    # Fehlt der Schluessel, bleibt es bei der Standardregel (None). Ein uebergebener
+    # Wert 0 heisst ausdruecklich "keine Fragen" – deshalb auf VORHANDENSEIN pruefen
+    # und nicht per Falsyness (``or``), sonst wird die 0 wieder zum Standard.
+    qa_n = body.get("qa_count") if "qa_count" in body else None
+    _prof = config.profile_for_user(user)
     me = _norm_login(user)
     c = _confluence_client()
     if not c.configured:
@@ -8323,7 +8338,8 @@ async def wissen_extract_confluence(request: Request, user: str = Depends(requir
             text = _page_text(page)
             if not text.strip():
                 return (422, {"error": "Seite enthält keinen lesbaren Text."})
-            doc = await extract_to_pending(text, page.get("title", ""), c.link_for(page, page))
+            doc = await extract_to_pending(text, page.get("title", ""), c.link_for(page, page),
+                                           qa_count=qa_n, prof=_prof)
             try:
                 update_pending(doc["id"], {"created_by": me})
             except Exception:  # noqa: BLE001
@@ -8362,7 +8378,8 @@ async def wissen_extract_confluence(request: Request, user: str = Depends(requir
                     text = _page_text(full)
                     if text.strip():
                         doc = await extract_to_pending(text, full.get("title", ""),
-                                                       c.link_for(full, full))
+                                                       c.link_for(full, full),
+                                                       qa_count=qa_n, prof=_prof)
                         try:
                             update_pending(doc["id"], {"created_by": me})
                         except Exception:  # noqa: BLE001
@@ -8730,6 +8747,8 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
     - ``{"space": "KEY"}``             – ganzer Bereich (Hintergrund-Job)
     - ``{"audit": false}``             – auditlos: direkt in die Wissens-DB schreiben
       (ohne Pending/Review). Standard ist ``audit: true`` (mit Review).
+    - ``{"qa_count": 0}``              – KEINE Frage-Antwort-Paare erzeugen
+      (1..50 = genau so viele, weggelassen = Standardregel 5-15).
     """
     from backend.confluence_client import ConfluenceError, html_to_text
     from backend.web_extractor import extract_to_pending, approve_pending
@@ -8739,6 +8758,7 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
     page_ids = [str(p).strip() for p in (body.get("page_ids") or []) if str(p).strip()]
     job_id = (body.get("job_id") or "").strip()
     audit = body.get("audit", True)  # False = auditloser Direkt-Import
+    qa_n = body.get("qa_count") if "qa_count" in body else None   # 0 = keine Fragen
     c = _confluence_client()
     if not c.configured:
         return JSONResponse({"error": "Confluence ist nicht konfiguriert."}, status_code=400)
@@ -8754,7 +8774,7 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
                 text = _page_text(full)
                 if text.strip():
                     doc = await extract_to_pending(text, full.get("title", ""),
-                                                   c.link_for(full, full))
+                                                   c.link_for(full, full), qa_count=qa_n)
                     if not do_audit:
                         # auditlos: schreiben, aber NICHT pro Seite reindizieren
                         await asyncio.to_thread(approve_pending, doc["id"], False)
@@ -8805,7 +8825,8 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
             text = _page_text(page)
             if not text.strip():
                 return (422, {"error": "Seite enthält keinen lesbaren Text."})
-            doc = await extract_to_pending(text, page.get("title", ""), c.link_for(page, page))
+            doc = await extract_to_pending(text, page.get("title", ""), c.link_for(page, page),
+                                           qa_count=qa_n)
             if not audit:
                 # auditlos: sofort in die Wissens-DB schreiben
                 res = await asyncio.to_thread(approve_pending, doc["id"], True)

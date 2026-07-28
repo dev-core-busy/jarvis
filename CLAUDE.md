@@ -375,6 +375,21 @@ data/
   `[📥 … herunterladen](/api/documents/<32-Hex>__<Basis>.<ext>)`, den die Frontends als Chip
   rendern. `_clean_doc_refs` entfernt vorher alle Pfade aus dem Anzeigetext – der Chip ist der
   EINZIGE Weg zur Datei. Fällt er aus, sieht der Nutzer eine Antwort ohne jeden Hinweis.
+- **Nur was in DIESEM Lauf entstand (mtime-Schranke, seit 2026-07-28).** `_deliver_docs` hat vier
+  Erkennungspfade: (a) fertige `/api/documents/`-URLs, (m) explizite `[[JARVIS_DELIVER:…]]`-Marker,
+  (b) Dateipfade, (c) **bloße Dateinamen**. (b) und (c) raten über Namen – und ein Werkzeug-Ergebnis
+  wie `filesystem list data/documents` ist voll von Namen. Auf ECHT kam so am 2026-07-28 mitten in
+  einer Word/PDF-Aufgabe ein `b45.xlsx` **aus einem Chat vom Juni** als Ergebnis-Chip heraus (es war
+  die einzige Roh-Datei ohne Capability-Präfix im Ordner; die drei `…__b45.xlsx` daneben zeigen, dass
+  das schon öfter passiert war). Deshalb bekommt `_deliver_docs` jetzt `since=_task_start_time` und
+  (b)+(c) liefern nur Dateien mit `mtime >= since - _DELIVER_TOLERANCE_SEC` (120 s Toleranz für
+  Anhänge, die der Nutzer unmittelbar vor dem Absenden hochlädt).
+  - `since=0` schaltet die Prüfung ab (Aufrufer ohne Laufzeitbezug) – beim Ergänzen neuer Aufrufer
+    den Startzeitpunkt **mitgeben**, sonst ist die Schranke dort still wirkungslos.
+  - Die mtime-Prüfung ist **fail-open**: ist `stat()` nicht lesbar, wird ausgeliefert. Ein fehlender
+    Chip ist der schlimmere Fehler (der Nutzer hat dann gar nichts), ein Chip zu viel nur Rauschen.
+  - (m) ist absichtlich ausgenommen: dort benennt der Agent die Datei ausdrücklich, das ist Absicht
+    und keine Namensraterei. Schutz dort: Ortsprüfung (/tmp, data/documents) + Secret-Sperrliste.
 - **Bis 2026-07-28 war der Capability-Name der einzige Schutz:** keine Anmeldung, kein Bezug zum
   Ersteller, kein Verfall, kein Aufräumen. 122 Bit Entropie sind zwar nicht erratbar, aber ein
   geleakter Link (Browser-Verlauf, Proxy-Log, weitergeleiteter Screenshot) gab dauerhaft Zugriff –
@@ -400,6 +415,42 @@ data/
     Frist bei jedem Durchlauf neu.
   - **Speichern räumt sofort auf** und meldet `docs_removed` zurück – wer die Frist verkürzt,
     erwartet, dass die Altdateien jetzt weg sind, nicht erst morgen.
+- **Vierte Schranke: der WERKZEUG-Weg (seit 2026-07-28).** Die drei Schranken oben hängen am
+  HTTP-Endpunkt. Der Agent kommt aber ganz anders an den Ordner: `filesystem list data/documents`
+  zeigte JEDEM Domain-Benutzer die Dateinamen aller anderen (auf ECHT Jira-Exporte mit Kundendaten,
+  fremde Angebote, `Manager_IDs.xml`), `filesystem read` und `office_read` konnten sie öffnen.
+  Jetzt gilt dieselbe Eigentümer-Regel auch dort:
+  - **`backend/sandbox.py`** hält die Policy: `may_see_document(name)` (delegiert an
+    `documents.may_access`, fail-closed) und `may_list_entry(dir, name)` (greift **nur** in
+    `data/documents`). `authorize_fs` verweigert `read`/`exists` auf fremde Dateien; das
+    **Verzeichnis bleibt auflistbar**, gefiltert wird der Inhalt.
+  - **Der Benutzer kommt über einen ContextVar** (`set_tool_user`/`tool_user`), den
+    `agent.py::_execute_tool` für die Dauer EINES Aufrufs setzt (`try/finally`, sonst regiert ein
+    stehengebliebener Wert den nächsten Lauf). Grund für den ContextVar statt eines Parameters:
+    `filesystem` und der Office-Skill lösen Pfade selbst auf – jede Signatur anzufassen hätte
+    fremde Skills gebrochen. **LEER = keine Einschränkung** (privilegierte Benutzer, Systemläufe);
+    genau wie die übrigen Sandbox-Prüfungen gilt die Schranke nur für Domain-Benutzer.
+  - **Kein Admin-Bypass im Werkzeug-Weg** (anders als am HTTP-Endpunkt): ein Admin, der einen Link
+    anklickt, ist eine bewusste Handlung – ein Agent, der im Auftrag eines Admins den Ordner
+    durchwühlt, ist es nicht. Admins arbeiten über Einstellungen/Shell.
+  - **Wer schreibt, besitzt.** Damit die Schranke nicht die eigenen Dateien verschluckt, wird der
+    Eigentümer beim ENTSTEHEN vermerkt: `documents.register_upload()` für Chat-Anhänge
+    (`main.py`, Anhang-Block) und für `filesystem write/append` in den Ordner
+    (`FileSystemTool._claim`), `register()` schon im Office-Skill (`_ok`) statt erst in
+    `_deliver_docs` – letzteres läuft bei **Sub-Agenten gar nicht**, deren eigene Datei wäre
+    sonst sofort unsichtbar.
+  - `register_upload()` ist absichtlich von `register()` getrennt: `register()` bekommt Namen aus
+    LLM-Text und darf deshalb nur unerratbare Capability-Namen annehmen.
+  - **`.owners.json` steht in `_SECRET_NAMES`** – die Datei bildet Dokument→Benutzer ab und wird
+    weder gelistet noch gelesen.
+  - Die Auflistung nennt die **Anzahl** ausgeblendeter Dateien, keine Namen: sonst wüsste das
+    Modell wieder, dass fremde Dateien existieren – ohne den Hinweis hielte es die gefilterte
+    Liste aber für vollständig.
+  - **Restlücke (bewusst offen):** Shell-Befehle von Domain-Benutzern laufen als
+    `jarvis_sandbox`, und die Dateien sind mit 0644 world-readable – ein `cat` käme also durch.
+    Das zu schließen heißt Dateirechte umbauen (0640 + Gruppen), nicht Policy-Code.
+  - **Altbestand ohne Registry-Eintrag ist für Werkzeuge unsichtbar** (fail-closed). Wer eine alte
+    Anhangsdatei wieder braucht, lädt sie erneut hoch – dann ist sie registriert.
 - **Der Agent-API-Key (Benutzer `api`) ist von der Eigentümerprüfung ausgenommen** – er darf
   ohnehin beliebige Aufgaben starten, eine Leseschranke gewinnt dort nichts.
 - **Fail-closed:** Ohne Registry-Eintrag ist eine Datei nur für Admins erreichbar. Betrifft den
@@ -507,15 +558,50 @@ Confluence) – gewirkt hat er nur bei der Datei. Ursache war eine verschluckte 
   Zusammenfassung und Fakten weiterhin extrahiert; `qa_count=3` → genau 3; ohne Feld →
   Standardregel. Dazu 19 Einheitentests der Zustandslogik.
 
-## /wissen → „Deine Entwürfe": kein Scroll-Sprung bei „Prüfen" (Fix 2026-07-28)
-`window.scrollTo(0, document.body.scrollHeight)` sprang ans **Seitenende** – und damit von
-der Vorschau WEG, denn `#wi-ext-review` liegt im DOM **oberhalb** der Liste
-(`#wi-pending-list`). Zweiter, subtilerer Sprung: das Einblenden der Vorschau verlängert
-den Bereich über der Liste, schiebt sie nach unten und zieht den angeklickten Eintrag unter
-dem Zeiger weg. Beides gelöst, indem die Verschiebung der eigenen Zeile gemessen und per
-`window.scrollBy(0, delta)` ausgeglichen wird – der Eintrag bleibt optisch stehen.
-Die anderen `scrollIntoView`-Aufrufe auf `#wi-ext-review` (nach Generieren bzw. nach einem
-Einzel-Import) bleiben bewusst: dort ist der Sprung zur Vorschau die gewünschte Reaktion.
+## /wissen → „Deine Entwürfe": Vorschau-Platz + Sammel-Übernahme (2026-07-28)
+- **Kein Scroll-Sprung bei „Prüfen":** `window.scrollTo(0, document.body.scrollHeight)` sprang ans
+  **Seitenende** – und damit von der Vorschau WEG, denn `#wi-ext-review` steht im HTML **oberhalb**
+  der Liste (`#wi-pending-list`). Zweiter, subtilerer Sprung: das Einblenden verlängert den Bereich
+  über der Liste und zieht den angeklickten Eintrag unter dem Zeiger weg. Gelöst, indem die
+  Verschiebung der eigenen Zeile gemessen und per `window.scrollBy(0, delta)` ausgeglichen wird.
+- **„Prüfen" ist ein Umschalter:** ein zweiter Klick auf denselben Knopf schließt die Vorschau
+  wieder (`_revId === it.id` + gefüllter Container → `clearReview()`). Vorher war „Prüfen" eine
+  Einbahnstraße – die Vorschau ließ sich nur über Freigeben oder Verwerfen loswerden.
+- **Die Vorschau wandert, es gibt aber nur EINEN Container.** `showReview(d, anchor)` verschiebt
+  `#wi-ext-review` per `insertBefore` **direkt unter die angeklickte Zeile**; ohne `anchor` (nach
+  einer Extraktion) zurück an seinen Heimatplatz unter dem Extraktor. Zwei Container hätten zwei
+  Wege zum Freigeben/Verwerfen bedeutet.
+  - **FALLSTRICK:** Liegt die Vorschau in der Liste, würde `box.innerHTML = ''` in `loadPending()`
+    sie **mitlöschen** (danach liefert `$('wi-ext-review')` null). Deshalb holt `loadPending()` sie
+    per `_revPlace(null)` VOR dem Leeren heim und setzt sie danach über `_revId` wieder unter ihre
+    Zeile. Aus demselben Grund gibt es `clearReview()` statt `innerHTML = ''` an den Aufrufstellen.
+  - `_revHome` wird **nur beim ersten Verschieben** gesetzt – ein erneutes Auslesen würde die
+    verschobene Position als „Heimat" merken.
+- **Sammel-Übernahme** (Knopf `#wi-drafts-appsel`, seit 2026-07-28): markierte Entwürfe lassen sich
+  jetzt nicht nur löschen, sondern auch übernehmen. Sind ALLE markiert, heißt der Knopf „Alle
+  übernehmen (n)". Übernommen wird **wie vorliegend** – Titel/Q&A korrigiert man einzeln unter
+  „Prüfen". Die Zielgruppen fehlen aber zwingend, deshalb der Klappkasten `#wi-drafts-approve` mit
+  eigenem Gruppen-Präfix **`bulk`** (`checkedGroups()` sucht global im Dokument, `rev` würde
+  kollidieren). Er ist gleichzeitig die Bestätigung – kein zusätzliches `confirm()`.
+  Die Aufrufe laufen **sequenziell** (jede Übernahme schreibt Dateien und indiziert).
+
+## Office-Skill: PDF-Export (Fix 2026-07-28)
+- **LibreOffice steht jetzt im Manifest** (`system_packages: libreoffice-writer|-calc|-impress`).
+  Vorher war es eine undokumentierte Handinstallation: auf DEV vorhanden, auf ECHT **nie** – daher
+  „bei dir geht PDF, bei mir nicht". Aktivieren des Skills installiert die Pakete jetzt per apt
+  (Root-Broker). **Purge entfernt sie absichtlich NICHT** – LibreOffice ist auch die Office-Suite
+  des Desktops.
+- **`_find_soffice()`** sucht `soffice`/`libreoffice` in PATH und an den üblichen festen Orten
+  (`/usr/lib/libreoffice/program/soffice`, `/opt/libreoffice/program/soffice`, snap). Fehlt es,
+  kommt ein **Klartext-Hinweis mit apt-Befehl** statt des rohen
+  `[Errno 2] No such file or directory: 'soffice'` – aus dem konnten weder Modell noch Nutzer
+  ableiten, was zu tun ist. Der Hinweis sagt ausdrücklich, dass das Office-Dokument selbst erzeugt
+  wurde und abrufbar bleibt.
+- **`_resolve_existing()` löst jetzt auch den ANZEIGENAMEN auf.** Auf Platte heißt die Datei
+  `<32-Hex>__<Anzeigename>`, der Erfolgstext von `office_create_word` nennt aber nur
+  `IT-Projektangebot.docx`. Genau den gibt das Modell an `office_to_pdf` weiter → bis 2026-07-28
+  „Fehler: Datei nicht gefunden". Die Kette Erstellen→PDF war damit über den natürlichen Weg
+  unbenutzbar. Nachschlag über `DOCS_DIR.glob("*__<name>")`, bei mehreren Treffern der **jüngste**.
 
 ## Skill-System
 - Skills liegen unter `skills/<name>/` mit `skill.json` (Manifest) + `main.py` (get_tools())

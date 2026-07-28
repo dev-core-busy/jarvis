@@ -133,6 +133,33 @@ def register(fname: str, username: str) -> bool:
         return _save(data)
 
 
+def register_upload(fname: str, username: str) -> bool:
+    """Vermerkt den Eigentuemer einer ROH-Datei (hochgeladener Chat-Anhang).
+
+    Getrennt von ``register()``, weil dort der Capability-Name die Schranke IST:
+    ``register()`` wird mit Namen aufgerufen, die aus LLM-Text stammen, und darf
+    deshalb nur unerratbare Capability-Namen annehmen. Diese Funktion wird
+    ausschliesslich aus Server-Code mit einem echten Dateinamen aufgerufen.
+
+    Ohne diesen Eintrag waere der eigene Anhang nach der Eigentuemer-Schranke
+    (2026-07-28) fuer den Hochladenden selbst unsichtbar – die Werkzeuge
+    sprechen Anhaenge ueber ihren Namen an.
+    """
+    fname = os.path.basename(fname or "")
+    if not fname or fname.startswith("."):
+        return False
+    user = _norm(username)
+    if not user:
+        _log(f"kein Benutzer zum Registrieren von {fname} – bleibt admin-only")
+        return False
+    with _lock:
+        data = _load()
+        if fname in data:
+            return True
+        data[fname] = {"user": user, "ts": int(time.time()), "kind": "upload"}
+        return _save(data)
+
+
 def owner_of(fname: str) -> str | None:
     entry = _load().get(os.path.basename(fname or ""))
     if isinstance(entry, dict):

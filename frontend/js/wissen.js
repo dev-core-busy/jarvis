@@ -750,7 +750,37 @@
             + '</div>';
     }
 
-    function showReview(d) {
+    // ── Platz der Vorschau ──────────────────────────────────────────────
+    // Es gibt nur EINEN Vorschau-Container (#wi-ext-review) und damit nur eine
+    // Logik zum Freigeben/Verwerfen. Sein Platz wechselt: nach einer Extraktion
+    // steht er unter dem Extraktor (Heimatplatz aus dem HTML), beim „Prüfen"
+    // eines Entwurfs wird das GLEICHE Element unter die angeklickte Zeile
+    // verschoben – dort wird es erwartet, nicht ueber der ganzen Liste.
+    var _revHome = null;   // { parent, next } – Heimatplatz laut HTML
+    var _revId = '';       // Entwurf, der aktuell in der Vorschau liegt
+
+    function _revPlace(anchor) {
+        var el = $('wi-ext-review');
+        if (!el) return;
+        // Heimatplatz beim ersten Verschieben festhalten (danach nie neu lesen,
+        // sonst merkt sich der Merker die verschobene Position).
+        if (!_revHome) _revHome = { parent: el.parentNode, next: el.nextSibling };
+        if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(el, anchor.nextSibling);
+        else if (_revHome.parent) _revHome.parent.insertBefore(el, _revHome.next);
+    }
+
+    // Vorschau leeren UND aus der Liste zurueckholen – sonst wuerde sie beim
+    // naechsten `innerHTML = ''` der Liste mitgeloescht (Element waere weg).
+    function clearReview() {
+        _revId = '';
+        _revPlace(null);
+        var el = $('wi-ext-review');
+        if (el) el.innerHTML = '';
+    }
+
+    function showReview(d, anchor) {
+        _revId = d.id || '';
+        _revPlace(anchor || null);
         var box = $('wi-ext-review');
         var qa = (d.qa_pairs || []);
         var qaHtml = qa.length
@@ -818,14 +848,19 @@
           .then(function (d) {
               if (d.error) { st.style.color = 'var(--danger)'; st.textContent = '✗ ' + d.error; return; }
               st.style.color = 'var(--success)'; st.textContent = t('wissen.approved_ok');
-              $('wi-ext-review').innerHTML = ''; loadPending(); loadFiles();
+              clearReview(); loadPending(); loadFiles();
           })
           .catch(function () { st.style.color = 'var(--danger)'; st.textContent = t('wissen.approve_failed'); });
     }
 
-    function deletePending(id, clearReview) {
+    function deletePending(id, alsoReview) {
         fetch('/api/wissen/pending/' + encodeURIComponent(id), { method: 'DELETE', headers: authH() })
-            .then(function () { if (clearReview) $('wi-ext-review').innerHTML = ''; loadPending(); })
+            .then(function () {
+                // Auch ohne Flag: liegt der geloeschte Entwurf in der Vorschau,
+                // muss sie weg – sonst zeigt sie auf etwas, das es nicht mehr gibt.
+                if (alsoReview || _revId === id) clearReview();
+                loadPending();
+            })
             .catch(function () {});
     }
 
@@ -837,26 +872,38 @@
                 var items = (d && d.pending) || [];
                 var bulk = $('wi-drafts-bulk');
                 if (bulk) bulk.style.display = items.length ? 'flex' : 'none';
-                if (!items.length) { box.innerHTML = '<div class="wi-empty">' + t('wissen.no_drafts') + '</div>'; return; }
+                // Vorschau VOR dem Leeren der Liste heimholen: liegt sie gerade
+                // unter einer Zeile, wuerde `innerHTML = ''` sie mitreissen.
+                _revPlace(null);
+                if (!items.length) {
+                    box.innerHTML = '<div class="wi-empty">' + t('wissen.no_drafts') + '</div>';
+                    hideBulkApprove();
+                    return;
+                }
                 box.innerHTML = '';
+                var zeilen = {};   // Entwurfs-Id -> Zeile (fuer das Wiedereinsetzen unten)
                 items.forEach(function (it) {
                     var row = document.createElement('div');
                     row.className = 'wi-item';
                     var cb = document.createElement('input');
                     cb.type = 'checkbox'; cb.className = 'wi-draft-cb'; cb.value = it.id;
-                    cb.title = t('wissen.mark_delete');
+                    // Die Markierung dient jetzt BEIDEM (uebernehmen + loeschen),
+                    // der alte Titel „Zum Löschen markieren" waere irrefuehrend.
+                    cb.title = t('wissen.mark_select');
                     cb.style.cssText = 'flex-shrink:0;width:16px;height:16px;margin:0 2px 0 0;cursor:pointer;';
                     var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = it.title || t('wissen.untitled');
                     var rev = document.createElement('button'); rev.className = 'sec-btn small'; rev.textContent = t('wissen.review_btn');
                     rev.addEventListener('click', function () {
-                        // Kein Sprung: die Vorschau (#wi-ext-review) liegt OBERHALB der
-                        // Liste. window.scrollTo(…scrollHeight) sprang ans Seitenende –
-                        // also von der Vorschau WEG. Und weil das Einblenden die Liste
-                        // nach unten schiebt, rutscht der angeklickte Eintrag zusaetzlich
-                        // unter dem Zeiger weg. Beides ausgleichen: Verschiebung der
-                        // eigenen Zeile messen und um genau diesen Betrag nachscrollen.
+                        // Umschalter: derselbe Knopf schliesst die eigene Vorschau
+                        // wieder. Ohne das ist „Prüfen" eine Einbahnstrasse – die
+                        // Vorschau liess sich nur ueber Freigeben/Verwerfen loswerden.
+                        var offen = (_revId === it.id) && !!($('wi-ext-review') || {}).innerHTML;
+                        // Kein Sprung: die Vorschau wird DIREKT UNTER diese Zeile gesetzt.
+                        // Kam sie vom Heimatplatz (oberhalb der Liste), schrumpft der
+                        // Bereich darueber und die Zeile rutscht nach oben weg –
+                        // deshalb die eigene Verschiebung messen und ausgleichen.
                         var vorher = row.getBoundingClientRect().top;
-                        showReview(it);
+                        if (offen) clearReview(); else showReview(it, row);
                         var delta = row.getBoundingClientRect().top - vorher;
                         if (delta) window.scrollBy(0, delta);
                     });
@@ -864,35 +911,119 @@
                     del.addEventListener('click', function () { deletePending(it.id, false); });
                     row.appendChild(cb); row.appendChild(nm); row.appendChild(rev); row.appendChild(del);
                     box.appendChild(row);
+                    zeilen[it.id] = row;
                 });
+                // Offene Vorschau wieder unter ihren Entwurf setzen (der Neuaufbau
+                // der Liste hat sie eben heimgeholt). Ist der Entwurf verschwunden,
+                // bleibt sie am Heimatplatz stehen.
+                if (_revId && zeilen[_revId]) _revPlace(zeilen[_revId]);
                 bindDraftsBulk(box);
             })
             .catch(function () {});
     }
 
-    // Mehrfachauswahl zum Verwerfen mehrerer Entwuerfe (analog Einstellungen-Extraktor).
+    // Mehrfachauswahl zum Uebernehmen ODER Verwerfen mehrerer Entwuerfe
+    // (analog Einstellungen-Extraktor).
     function bindDraftsBulk(box) {
         var boxes = Array.prototype.slice.call(box.querySelectorAll('.wi-draft-cb'));
-        var selAll = $('wi-drafts-selall'), delSel = $('wi-drafts-delsel');
+        var selAll = $('wi-drafts-selall'), delSel = $('wi-drafts-delsel'),
+            appSel = $('wi-drafts-appsel');
+        function marked() {
+            return boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+        }
         function sync() {
-            var checked = boxes.filter(function (b) { return b.checked; }).length;
+            var checked = marked().length;
+            var alle = boxes.length > 0 && checked === boxes.length;
             if (delSel) {
                 delSel.disabled = checked === 0;
                 delSel.textContent = checked ? t('wissen.delete_selected') + ' (' + checked + ')' : t('wissen.delete_selected');
             }
-            if (selAll) selAll.textContent = (checked && checked === boxes.length) ? t('wissen.unselect_all') : t('wissen.select_all');
+            if (appSel) {
+                // Sind ALLE markiert, heisst der Knopf auch „Alle übernehmen" –
+                // sonst „Auswahl übernehmen (n)".
+                appSel.disabled = checked === 0;
+                appSel.textContent = alle
+                    ? t('wissen.approve_all') + ' (' + checked + ')'
+                    : (checked ? t('wissen.approve_selected') + ' (' + checked + ')' : t('wissen.approve_selected'));
+            }
+            if (selAll) selAll.textContent = alle ? t('wissen.unselect_all') : t('wissen.select_all');
         }
-        boxes.forEach(function (b) { b.onchange = sync; });
+        boxes.forEach(function (b) {
+            b.onchange = function () { sync(); hideBulkApprove(); };
+        });
         if (selAll) selAll.onclick = function () {
             var all = boxes.length && boxes.every(function (b) { return b.checked; });
             boxes.forEach(function (b) { b.checked = !all; });
-            sync();
+            hideBulkApprove(); sync();
         };
         if (delSel) delSel.onclick = function () {
-            var ids = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+            var ids = marked();
             if (ids.length) bulkDeleteDrafts(ids);
         };
+        if (appSel) appSel.onclick = function () {
+            var ids = marked();
+            if (ids.length) showBulkApprove(ids);
+        };
         sync();
+    }
+
+    // ── Sammel-Uebernahme ───────────────────────────────────────────────
+    // Uebernommen wird der Entwurf, WIE ER IST – Titel und Q&A-Paare koennen
+    // nur einzeln unter „Prüfen" korrigiert werden. Die Zielgruppen fehlen
+    // aber zwingend, deshalb dieser kleine Auswahlkasten als Zwischenschritt
+    // (er ist gleichzeitig die Bestaetigung; ein zusaetzliches confirm() waere
+    // eine Klick-Schikane).
+    function hideBulkApprove() {
+        var p = $('wi-drafts-approve');
+        if (p) p.style.display = 'none';
+    }
+
+    function showBulkApprove(ids) {
+        var p = $('wi-drafts-approve');
+        if (!p) return;
+        var st = $('wi-drafts-appstatus'); if (st) st.textContent = '';
+        var ttl = $('wi-drafts-apptitle');
+        if (ttl) ttl.textContent = t('wissen.approve_selected_title', { n: ids.length });
+        $('wi-drafts-groups').innerHTML = groupBoxes('bulk', checkedGroups('up'));
+        p.style.display = '';
+        $('wi-drafts-appcancel').onclick = hideBulkApprove;
+        $('wi-drafts-appgo').onclick = function () { bulkApproveDrafts(ids); };
+    }
+
+    function bulkApproveDrafts(ids) {
+        var st = $('wi-drafts-appstatus');
+        var groups = checkedGroups('bulk');
+        if (!groups.length) { st.style.color = 'var(--danger)'; st.textContent = t('wissen.pick_target'); return; }
+        var go = $('wi-drafts-appgo');
+        go.disabled = true;
+        st.style.color = 'var(--text-secondary)';
+        st.textContent = t('wissen.approve_selected_run', { n: ids.length });
+        var ok = 0, fehler = 0;
+        // Bewusst SEQUENZIELL: jede Uebernahme schreibt Dateien und indiziert;
+        // parallel wuerden sich die Laeufe auf dem Server gegenseitig behindern.
+        var chain = Promise.resolve();
+        ids.forEach(function (id) {
+            chain = chain.then(function () {
+                return fetch('/api/wissen/pending/' + encodeURIComponent(id) + '/approve', {
+                    method: 'POST', headers: authH({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ groups: groups })
+                }).then(function (r) { return r.json(); })
+                  .then(function (d) { if (d && d.error) fehler++; else ok++; })
+                  .catch(function () { fehler++; });
+            });
+        });
+        chain.then(function () {
+            go.disabled = false;
+            hideBulkApprove();
+            var s = $('wi-ext-status');
+            if (s) {
+                s.style.color = fehler ? 'var(--warning)' : 'var(--success)';
+                s.textContent = fehler
+                    ? t('wissen.approve_selected_part', { n: ok, f: fehler })
+                    : t('wissen.approve_selected_ok', { n: ok });
+            }
+            clearReview(); loadPending(); loadFiles();
+        });
     }
 
     function bulkDeleteDrafts(ids) {
@@ -903,7 +1034,7 @@
                 return fetch('/api/wissen/pending/' + encodeURIComponent(id), { method: 'DELETE', headers: authH() }).catch(function () {});
             });
         });
-        chain.then(function () { $('wi-ext-review').innerHTML = ''; loadPending(); });
+        chain.then(function () { hideBulkApprove(); clearReview(); loadPending(); });
     }
 
     // ── Eingabe-Tabs: URL / Datei / Confluence ──────────────────────────

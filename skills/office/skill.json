@@ -12,6 +12,7 @@
     "config_schema": {},
     "knowledge_docs": [],
     "dependencies": ["python-docx", "openpyxl", "python-pptx"],
+    "system_packages": ["libreoffice-writer", "libreoffice-calc", "libreoffice-impress"],
     "permissions": ["filesystem"],
     "help": {
         "details": "Der Office-Skill erzeugt Dokumente programmatisch (deterministisch, ohne sichtbare GUI): Word ueber python-docx, Excel ueber openpyxl, PowerPoint ueber python-pptx. Der PDF-Export nutzt das auf dem Server installierte LibreOffice (soffice --headless --convert-to pdf) mit eigenem Profil, um Konflikte mit dem Desktop zu vermeiden. Erzeugte Dateien werden unter data/documents/ mit einem nicht erratbaren Capability-Namen gespeichert und ueber /api/documents/{name} zum Download bereitgestellt; der Download traegt den lesbaren Originalnamen.",
@@ -28,6 +29,6 @@
             "Erstelle eine PowerPoint 'Quartalsupdate' mit 4 Folien",
             "Exportiere data/documents/<datei>.docx nach PDF"
         ],
-        "notes": "Benoetigt python-docx, openpyxl und python-pptx (auf dem Server vorhanden). PDF-Export benoetigt LibreOffice (soffice). Dateien werden serverseitig unter data/documents/ abgelegt."
+        "notes": "Benoetigt python-docx, openpyxl und python-pptx (auf dem Server vorhanden). Der PDF-Export benoetigt LibreOffice; die Pakete libreoffice-writer/-calc/-impress stehen im Manifest (system_packages) und werden beim AKTIVIEREN des Skills per apt installiert. Fehlt LibreOffice, melden die Werkzeuge das im Klartext – das erzeugte Office-Dokument bleibt trotzdem abrufbar. Beim Deinstallieren (purge) wird LibreOffice ABSICHTLICH nicht entfernt: es ist auch die Office-Suite des Desktops. Dateien werden serverseitig unter data/documents/ abgelegt."
     }
 }

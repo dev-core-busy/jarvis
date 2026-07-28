@@ -10585,6 +10585,14 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                             _stem, _sfx = os.path.splitext(_safe)
                             _dest = _docs_dir / f"{_stem}_{_uuidatt.uuid4().hex[:8]}{_sfx}"
                         _dest.write_bytes(_doc_bytes)
+                        # Eigentuemer vermerken: data/documents unterliegt seit
+                        # 2026-07-28 der Eigentuemer-Schranke (backend/sandbox.py).
+                        # Ohne Eintrag waere der eigene Anhang fuer den
+                        # Hochladenden selbst nicht mehr auffindbar.
+                        try:
+                            _documents.register_upload(_dest.name, _get_ws_username(ws))
+                        except Exception as _e_reg:
+                            print(f"[chat] Anhang-Eigentuemer nicht vermerkt: {_e_reg}", flush=True)
                         _note = (f"[Angehängte Datei '{_name}' wurde gespeichert unter: {_dest.as_posix()} "
                                  f"(als Dateiname '{_dest.name}' auch via office_read erreichbar). "
                                  f"Lies/bearbeite sie wie gewünscht und liefere das Ergebnis als Download-Datei.]")

@@ -483,6 +483,17 @@ data/
   LLM-Verlauf, Kontext/History und Tool-Audit-Log; Farben kommen aus `var(--danger)` per
   `color-mix`. Icon ist `⟳`/`×` als Textglyph statt Emoji – 🔄 wird je nach System farbig
   gerendert und passt sich keinem Theme an.
+- **`shutil.move()` auf Agent-Dateien in `/tmp` schlaegt im getrennten Betrieb fehl:** Shell-Befehle
+  von Domain-Nutzern laufen ueber den Broker als `jarvis_sandbox` (runuser), die erzeugte Datei
+  gehoert also NICHT dem Backend (`jarvis`) – und `/tmp` ist sticky (`drwxrwxrwt`), also darf nur
+  der Eigentuemer loeschen. `shutil.move` ist bei Geraetewechsel (tmpfs → Platte) `copy2 + unlink`
+  und wirft, wenn NUR das unlink scheitert. In `agent.py::_deliver_docs` sprang die Ausnahme
+  dadurch vor `_emit()` heraus: die Kopie lag fertig in `data/documents`, aber der Download-Chip
+  wurde nie gesendet – der Nutzer sah eine Antwort **ohne Ergebnisdatei** (`_clean_doc_refs`
+  entfernt den Pfad aus dem Anzeigetext, es blieb also gar kein Hinweis). Behoben ueber den
+  Helfer `_ingest()`: kopieren muss klappen, Quelle loeschen ist best-effort (Restdatei in tmpfs
+  ist harmlos, wird protokolliert). Bei allen Datei-Uebernahmen aus Agent-Arbeitsverzeichnissen
+  gilt: **Erfolg am Kopieren messen, nicht am Aufraeumen.**
 - **Neues Profil-Feld = ZWEI Stellen in config.py:** `create_profile()` (Anlegen) UND die
   Whitelist in `update_profile()`. Fehlt eine, wird das Feld still verworfen – genau so war
   `prompt_tool_calling` jahrelang wirkungslos, obwohl Frontend und agent.py es kannten.

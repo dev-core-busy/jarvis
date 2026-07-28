@@ -2178,6 +2178,27 @@ KRITISCH – Autonomie-Regeln:
 
         _IMG_EXT = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"}
 
+        def _ingest(src, dst):
+            """Holt die Datei nach data/documents – Aufraeumen der Quelle ist OPTIONAL.
+
+            Hier stand frueher ``shutil.move``. Das ist bei Geraetewechsel
+            (/tmp ist tmpfs, data/ liegt auf der Platte) ``copy2`` + ``unlink`` –
+            und es WIRFT, wenn nur das unlink scheitert. Genau das passiert im
+            getrennten Betrieb: Shell-Befehle von Domain-Nutzern laufen ueber den
+            Broker als ``jarvis_sandbox``, die erzeugte Datei gehoert also
+            jarvis_sandbox, und /tmp ist sticky (drwxrwxrwt) – das Backend (jarvis)
+            darf sie NICHT loeschen. Die Kopie lag dann schon fertig in
+            data/documents, aber die Ausnahme sprang vor ``_emit()`` heraus:
+            Datei vorhanden, Download-Chip fehlt, der Nutzer bekommt kein Ergebnis.
+            Deshalb: kopieren (das muss klappen), dann loeschen versuchen (darf
+            scheitern – eine Restdatei in tmpfs ist harmlos).
+            """
+            _shutil.copy2(str(src), str(dst))
+            try:
+                _Path(src).unlink()
+            except Exception as e:
+                _log(f"Quelle nach Ingest nicht entfernbar (bleibt liegen): {src} – {e}")
+
         async def _emit(name, url):
             # Bilder inline im Chat anzeigen (Frontend rendert ![..](/api/documents/..)
             # als <img>), Office-Dokumente als Download-Chip.
@@ -2242,9 +2263,9 @@ KRITISCH – Autonomie-Regeln:
             fname = f"{_uuid.uuid4().hex}__{base}.{safe_ext}"
             try:
                 docs_dir.mkdir(parents=True, exist_ok=True)
-                _shutil.move(str(p), str(docs_dir / fname))
+                _ingest(p, docs_dir / fname)
             except Exception as e:
-                _log(f"Liefer-Marker move fehlgeschlagen fuer {raw}: {e}")
+                _log(f"Liefer-Marker Ingest fehlgeschlagen fuer {raw}: {e}")
                 continue
             await _emit(f"{base}.{safe_ext}", f"/api/documents/{fname}")
 
@@ -2279,9 +2300,11 @@ KRITISCH – Autonomie-Regeln:
             fname = f"{token}__{base}.{ext}"
             try:
                 docs_dir.mkdir(parents=True, exist_ok=True)
-                # VERSCHIEBEN (nicht kopieren): Original (z.B. /tmp/x.pptx oder Roh-Name
-                # in data/documents) wird zur Capability-Datei -> es bleibt nur EINE Datei.
-                _shutil.move(str(p), str(docs_dir / fname))
+                # UMZIEHEN, wenn moeglich: Original (z.B. /tmp/x.pptx oder Roh-Name
+                # in data/documents) wird zur Capability-Datei -> es bleibt nur EINE
+                # Datei. Scheitert nur das Loeschen der Quelle (fremder Eigentuemer in
+                # sticky /tmp), zaehlt der Ingest trotzdem als Erfolg – siehe _ingest().
+                _ingest(p, docs_dir / fname)
             except Exception as e:
                 _log(f"Doc-Ingest fehlgeschlagen fuer {raw}: {e}")
                 continue

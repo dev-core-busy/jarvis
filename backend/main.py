@@ -2289,6 +2289,25 @@ async def startup_knowledge_compactor():
 
 
 @app.on_event("startup")
+async def startup_harden_data_dirs():
+    """Dienst-Verzeichnisse gegen fremde OS-Benutzer schliessen (0750).
+
+    Die Eigentuemer-Schranke der Werkzeuge wirkt nur im Backend. Shell-Befehle von
+    Domain-Nutzern laufen als ``jarvis_sandbox`` – ein ``cat`` dort braucht nur
+    Dateisystemrechte. Mit den Vorgabe-Rechten (0755/0644) konnte damit jeder
+    Domain-Nutzer die Ergebnisdateien UND die Chat-Verlaeufe aller anderen lesen.
+    Bei jedem Start gesetzt, damit es nach einem Neuinstall/Restore nicht driftet.
+    """
+    try:
+        from backend import sandbox as _sbx
+        aenderungen = _sbx.harden_data_dirs()
+        for a in aenderungen:
+            print(f"[security] Verzeichnisrechte {a}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[security] Verzeichnisrechte konnten nicht gesetzt werden: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_documents_retention():
     """Aufbewahrungsfrist fuer erzeugte Dokumente durchsetzen.
 
@@ -10663,8 +10682,31 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                             _documents.register_upload(_dest.name, _get_ws_username(ws))
                         except Exception as _e_reg:
                             print(f"[chat] Anhang-Eigentuemer nicht vermerkt: {_e_reg}", flush=True)
-                        _note = (f"[Angehängte Datei '{_name}' wurde gespeichert unter: {_dest.as_posix()} "
-                                 f"(als Dateiname '{_dest.name}' auch via office_read erreichbar). "
+                        # ARBEITSKOPIE in /tmp. data/documents ist seit 2026-07-28
+                        # 0750 (sandbox.harden_data_dirs) – die Shell von
+                        # Domain-Nutzern laeuft als jarvis_sandbox und kommt dort
+                        # NICHT mehr hinein. Ohne diese Kopie waere "analysiere die
+                        # angehaengte Tabelle" fuer Netzwerk-Benutzer tot, sobald
+                        # pandas/openpyxl per Shell laufen. Zufaelliges Praefix, weil
+                        # /tmp von allen Sandbox-Laeufen geteilt wird: der Name ist
+                        # damit nicht erratbar. 0644 ist hier vertretbar, /tmp ist der
+                        # Arbeitsbereich und die Datei ist fluechtig.
+                        _work = None
+                        try:
+                            _wdir = Path("/tmp")
+                            _work = _wdir / f"anhang_{_uuidatt.uuid4().hex[:12]}_{_safe}"
+                            _work.write_bytes(_doc_bytes)
+                            os.chmod(_work, 0o644)
+                        except Exception as _e_work:
+                            print(f"[chat] Arbeitskopie fehlgeschlagen: {_e_work}", flush=True)
+                            _work = None
+                        _wo = (f"{_work.as_posix()} (per Shell lesbar) bzw. "
+                               if _work else "")
+                        _note = (f"[Angehängte Datei '{_name}' liegt unter: {_wo}"
+                                 f"'{_dest.name}' via office_read/filesystem. "
+                                 f"Fuer Shell-Skripte (pandas, openpyxl) IMMER den "
+                                 f"/tmp-Pfad verwenden – data/documents ist fuer die "
+                                 f"Shell gesperrt. "
                                  f"Lies/bearbeite sie wie gewünscht und liefere das Ergebnis als Download-Datei.]")
                         # Kleine Text-/CSV-Dateien direkt einblenden, damit der LLM die Daten sofort sieht
                         if _ext in {"csv","tsv","txt","md","json","xml","html","htm","log"} and len(_doc_bytes) <= 200_000:

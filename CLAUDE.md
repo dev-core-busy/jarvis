@@ -514,9 +514,23 @@ data/
   - Die Auflistung nennt die **Anzahl** ausgeblendeter Dateien, keine Namen: sonst wüsste das
     Modell wieder, dass fremde Dateien existieren – ohne den Hinweis hielte es die gefilterte
     Liste aber für vollständig.
-  - **Restlücke (bewusst offen):** Shell-Befehle von Domain-Benutzern laufen als
-    `jarvis_sandbox`, und die Dateien sind mit 0644 world-readable – ein `cat` käme also durch.
-    Das zu schließen heißt Dateirechte umbauen (0640 + Gruppen), nicht Policy-Code.
+  - **Dateirechte-Lücke geschlossen (2026-07-28):** Shell-Befehle von Domain-Benutzern laufen
+    als `jarvis_sandbox`; mit den Vorgabe-Rechten (0755/0644) kam ein `cat` an JEDE Datei –
+    nicht nur an Dokumente, sondern auch an `data/chats` (fremde Chat-Verläufe!) und
+    `data/logs`. `sandbox.harden_data_dirs()` setzt diese drei Verzeichnisse auf **0750**
+    (`PRIVATE_DIRS`), aufgerufen beim Start (`startup_harden_data_dirs`), damit es nach
+    Neuinstall/Restore nicht driftet. Das Verzeichnis-x-Bit ist die ganze Sperre – die
+    Dateimodi darin sind dann gleichgültig. `data/knowledge` bleibt ABSICHTLICH lesbar
+    (`READ_ROOTS` erlaubt es, die Shell soll Wissensdateien verarbeiten).
+    - **Was OS-Rechte hier NICHT leisten:** alle Domain-Benutzer teilen EINEN
+      Sandbox-Benutzer. Sie sind damit vom Dienst-Verzeichnis getrennt, aber nicht
+      voneinander – eine Datei, die `jarvis_sandbox` lesen darf, darf jeder Domain-Benutzer
+      lesen. Echte Trennung bräuchte einen Sandbox-Benutzer pro Person.
+    - **Deshalb bekommt der Agent Anhänge als Arbeitskopie in `/tmp`** (`anhang_<12 Hex>_<name>`,
+      main.py): `data/documents` ist für die Shell zu, aber „analysiere die angehängte Tabelle"
+      muss mit pandas/openpyxl weiter funktionieren. Der Hinweistext an das Modell nennt den
+      /tmp-Pfad ausdrücklich für Shell-Skripte. Wer den Anhang-Block anfasst: **diese Kopie
+      nicht entfernen**, sonst ist die Anhang-Verarbeitung für Netzwerk-Benutzer tot.
   - **Altbestand ohne Registry-Eintrag ist für Werkzeuge unsichtbar** (fail-closed). Wer eine alte
     Anhangsdatei wieder braucht, lädt sie erneut hoch – dann ist sie registriert.
 - **Der Agent-API-Key (Benutzer `api`) ist von der Eigentümerprüfung ausgenommen** – er darf

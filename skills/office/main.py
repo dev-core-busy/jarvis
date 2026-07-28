@@ -462,10 +462,12 @@ class ExportPdfTool(BaseTool):
             return (
                 "Fehler: PDF-Export nicht moeglich – auf diesem Server ist LibreOffice "
                 "nicht installiert (weder 'soffice' noch 'libreoffice' gefunden). "
-                "Ein Administrator kann es nachinstallieren: 'apt install libreoffice-writer "
-                "libreoffice-calc libreoffice-impress' oder den Office-Skill unter "
-                "Einstellungen → Skills einmal aus- und wieder einschalten (die Systempakete "
-                "stehen im Skill-Manifest und werden beim Aktivieren installiert). "
+                "Ein Administrator behebt das unter Einstellungen → Skills: der Office-Skill "
+                "zeigt dann die Plakette 'Abhängigkeit fehlt' und daneben den Knopf ⤓ "
+                "'Fehlende Abhängigkeiten nachinstallieren'. Alternativ von Hand: "
+                "'apt install libreoffice-writer libreoffice-calc libreoffice-impress'. "
+                "Laeuft der Root-Broker, muss die apt-Installation ggf. einmal unter "
+                "Einstellungen → Sicherheit → Root-Freigaben freigegeben werden. "
                 "Das Office-Dokument selbst wurde erzeugt und kann heruntergeladen werden."
             )
 

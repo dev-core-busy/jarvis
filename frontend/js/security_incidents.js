@@ -98,6 +98,13 @@
             if (sbVerify) sbVerify.addEventListener('click', function () { Mgr.loadSandbox(true); });
             var sbDown = $('sec-sandbox-teardown');
             if (sbDown) sbDown.addEventListener('click', function () { Mgr.teardownSandbox(); });
+            // Automatische Sicherheitsupdates: Ein / Trockenlauf / Aus
+            var uuSetup = $('sec-unatt-setup');
+            if (uuSetup) uuSetup.addEventListener('click', function () { Mgr.setupUnattended(); });
+            var uuVerify = $('sec-unatt-verify');
+            if (uuVerify) uuVerify.addEventListener('click', function () { Mgr.loadUnattended(true); });
+            var uuDown = $('sec-unatt-teardown');
+            if (uuDown) uuDown.addEventListener('click', function () { Mgr.teardownUnattended(); });
             // Root-Broker: Freigabeliste aktualisieren / Audit-Log
             var brRefresh = $('sec-broker-refresh');
             if (brRefresh) brRefresh.addEventListener('click', function () { Mgr.loadBroker(); });
@@ -158,6 +165,8 @@
                 .catch(function () {});
             // OS-Sandbox-Status
             Mgr.loadSandbox(false);
+            // Ohne live=1: nur Zustand lesen, kein Trockenlauf (der dauert)
+            Mgr.loadUnattended(false);
             // Letzte Zugriffs-Verstöße
             fetch('/api/security/violations', { headers: authHeaders() })
                 .then(function (r) { return r.ok ? r.json() : null; })
@@ -656,6 +665,77 @@
                     + 'Shell-Befehle von Netzwerk-Benutzern MIT Internet-Freigabe laufen danach '
                     + 'wieder als Dienst-Benutzer (nur Code-Härtung, keine harte OS-Grenze). '
                     + 'Benutzer OHNE Internet-Freigabe bleiben über die Egress-Sperre gekapselt.'
+            });
+        },
+
+        // ── Automatische Sicherheitsupdates (unattended-upgrades) ────────
+        loadUnattended: function (live) {
+            var box = $('sec-unatt-status');
+            if (box && live) box.innerHTML = '⏳ Trockenlauf läuft…';
+            fetch('/api/security/unattended' + (live ? '?live=1' : ''), { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) { Mgr.renderUnattended(d); })
+                .catch(function () {});
+        },
+
+        renderUnattended: function (d) {
+            var box = $('sec-unatt-status');
+            if (!box) return;
+            if (!d) { box.innerHTML = '<span style="color:var(--text-muted);">Status nicht verfügbar.</span>'; return; }
+            function row(ok, label) {
+                var mark = ok === true ? '✅' : (ok === false ? '❌' : '❔');
+                return '<div>' + mark + ' ' + esc(label) + '</div>';
+            }
+            var head;
+            if (d.ok) head = '🟢 <b>' + esc(T('security.unatt_on', 'Aktiv – Sicherheitspatches werden automatisch eingespielt')) + '</b>';
+            else if (d.enabled) head = '🟠 <b>' + esc(T('security.unatt_partial', 'Eingeschaltet, aber nicht vollständig eingerichtet')) + '</b>';
+            else head = '⚪ <b>' + esc(T('security.unatt_off', 'Aus – Sicherheitspatches müssen von Hand eingespielt werden')) + '</b>';
+            var timers = d.timers || {};
+            var rows = ''
+                + row(d.package_installed, 'Paket unattended-upgrades installiert')
+                + row(d.unattended === '1', 'Automatik eingeschaltet (APT::Periodic::Unattended-Upgrade)')
+                + row(d.update_lists === '1', 'Paketindex wird täglich aktualisiert')
+                + row(d.limits_ok, 'Begrenzungen gesetzt: nur Sicherheits-Quelle, kein Neustart, kein Aufräumen')
+                + row(timers['apt-daily.timer'], 'apt-daily.timer aktiv')
+                + row(timers['apt-daily-upgrade.timer'], 'apt-daily-upgrade.timer aktiv');
+            if (d.security_only === true || d.security_only === false) {
+                rows += row(d.security_only, 'Trockenlauf: ' + (d.security_only
+                    ? 'nur Debian-Security-Quelle' : 'Quelle nicht erkannt – Ausgabe prüfen'));
+            }
+            var extra = '';
+            if (d.last_run) {
+                extra += '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">'
+                    + esc(T('security.unatt_last', 'Letzter Lauf')) + ': ' + esc(d.last_run) + '</div>';
+            }
+            if (d.dry_run) {
+                extra += '<pre style="max-height:150px;overflow:auto;background:rgba(var(--fg-rgb),.04);'
+                    + 'border-radius:8px;padding:8px;font-size:0.72rem;white-space:pre-wrap;'
+                    + 'word-break:break-word;margin-top:6px;">' + esc(d.dry_run) + '</pre>';
+            }
+            box.innerHTML = '<div style="margin-bottom:6px;">' + head + '</div>'
+                + '<div style="line-height:1.75;">' + rows + '</div>' + extra;
+        },
+
+        setupUnattended: function () {
+            Mgr._runAction({
+                url: '/api/security/unattended/setup', btn: 'sec-unatt-setup', result: 'sec-unatt-result',
+                busy: T('security.busy_setup', 'Wird eingerichtet…'),
+                okMsg: 'Automatische Sicherheitsupdates aktiv & geprüft.',
+                failMsg: 'Einrichtung unvollständig – Details:',
+                render: function (s) { Mgr.renderUnattended(s); }
+            });
+        },
+
+        teardownUnattended: function () {
+            Mgr._runAction({
+                url: '/api/security/unattended/teardown', btn: 'sec-unatt-teardown', result: 'sec-unatt-result',
+                busy: T('security.busy_teardown', 'Wird ausgeschaltet…'),
+                okMsg: 'Automatische Sicherheitsupdates ausgeschaltet.',
+                failMsg: 'Ausschalten unvollständig – Details:',
+                render: function (s) { Mgr.renderUnattended(s); },
+                confirm: 'Automatische Sicherheitsupdates wirklich ausschalten?\n\n'
+                    + 'Debian-Sicherheitspatches müssen danach von Hand eingespielt werden. '
+                    + 'Die tägliche Aktualisierung des Paketindex bleibt aktiv.'
             });
         },
 

@@ -390,6 +390,13 @@
             const d = await r.json();
             const n = d.history_entries || 0;
             text.textContent = window.t('chat.ctx_label').replace('{n}', n).replace('{pct}', d.fills_pct ?? 0);
+            // Welche Sitzung dieser Kontext ist, gehoert sichtbar dazu: die
+            // Verwechslung von "Trenner" und "neue Sitzung" war nur moeglich, weil
+            // man es nirgends ablesen konnte.
+            const _s = _sessions.find(x => x.id === _activeSid);
+            pill.title = window.t('chat.ctx_session_hint')
+                .replace('{title}', (_s && _s.title) || window.t('chat.untitled_session'))
+                .replace('{id}', _activeSid || '–');
         } catch (e) { /* offline – Pille bleibt mit letztem Stand sichtbar */ }
     }
 
@@ -664,7 +671,19 @@
         });
     }
 
-    function sendMessage() {
+    function sendMessage(_zweiterVersuch) {
+        // Ohne aktive Sitzung erst eine beschaffen und dann erneut senden – sonst
+        // ginge dieser Auftrag am Sitzungskontext vorbei (siehe _ensureSession).
+        // GENAU EIN Nachversuch: klappt das Anlegen nicht (Server weg), wird die
+        // Nachricht trotzdem gesendet. Eine Endlosschleife aus Sende-Versuchen
+        // waere schlimmer als ein Auftrag ohne Sitzungsbezug.
+        if (!_activeSid && !_zweiterVersuch) {
+            const _t = msgInput.value;
+            _ensureSession().then(function () {
+                if (msgInput.value === _t) sendMessage(true);
+            });
+            return;
+        }
         const text = msgInput.value.trim();
         if (!text && _pendingAttachments.length === 0) return;
         // Nur EINE laufende Anfrage pro Fenster: das Frontend fuehrt Streaming-,
@@ -1865,6 +1884,22 @@
         });
     }
 
+    // Sicherstellen, dass eine Sitzung aktiv IST, bevor gesendet wird.
+    // Fenster, in dem das fehlen konnte: zwischen Seitenaufbau und dem Ende von
+    // _initSessions() (Liste holen / erste Sitzung anlegen) ist _activeSid noch
+    // null. Wer in dieser Zehntelsekunde abschickt, sendet den Auftrag OHNE
+    // session_id – der Kontext landet dann im sitzungslosen Bucket
+    // (_hist_key ohne Id) und gehoert zu keiner Sitzung der Seitenleiste.
+    async function _ensureSession() {
+        if (_activeSid) return _activeSid;
+        try { await _initSessions(); } catch (e) {}
+        if (!_activeSid) {
+            const ns = await _csCreate('');
+            if (ns) { _sessions.unshift(ns); _activeSid = ns.id; _renderSidebar(); }
+        }
+        return _activeSid;
+    }
+
     async function _initSessions() {
         _sessions = await _csList();
         let want = null; try { want = localStorage.getItem(_sidKey()); } catch (e) {}
@@ -2060,13 +2095,22 @@
         if (restoredDate) lastDate = restoredDate;
 
         // Visueller Trenner zwischen alten und neuen Nachrichten – entfaellt beim
-        // noch unbenutzten Willkommens-Chat (dort gibt es keine "alten" Nachrichten)
+        // noch unbenutzten Willkommens-Chat (dort gibt es keine "alten" Nachrichten).
+        //
+        // ACHTUNG BESCHRIFTUNG: Der Trenner hiess bis 2026-07-28 "Neue Sitzung" und
+        // war damit grob irrefuehrend – er erscheint, wenn eine BESTEHENDE Sitzung
+        // wieder geoeffnet wird, und trennt nur wiederhergestellte von neuen
+        // Nachrichten. Der Kontext lief weiter. Auf ECHT fuehrte genau das zu der
+        // Fehlannahme, "Neue Sitzung" habe eine neue Backend-Sitzung erzeugt, und
+        // damit zur Suche nach einem Fehler, den es nicht gab (die Trennung ueber
+        // session_id/_hist_key ist nachgewiesen intakt). Eine neue Sitzung entsteht
+        // AUSSCHLIESSLICH ueber "+ Neuer Chat" (_newSession).
         const onlyWelcome = _chatHistory.length === 1 && _chatHistory[0] && _chatHistory[0].kind === 'welcome';
         if (!onlyWelcome) {
             const divider = document.createElement('div');
             divider.className = 'date-sep';
             divider.style.opacity = '0.45';
-            divider.innerHTML = `<span>── ${escapeHtml(window.t('chat.new_session'))} ──</span>`;
+            divider.innerHTML = `<span>── ${escapeHtml(window.t('chat.session_continued'))} ──</span>`;
             messagesEl.appendChild(divider);
         }
 

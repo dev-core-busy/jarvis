@@ -1494,6 +1494,9 @@ const _I18N = {
         'chat.mic':             'Spracheingabe',
         'chat.send':            'Senden',
         'chat.ctx_label':       'Kontext Speicher: {n} Einträge · {pct} %',
+        'chat.session_continued': 'Sitzung fortgesetzt',
+        'chat.ctx_session_hint':  'Dieser Kontext gehört zur Sitzung „{title}“ ({id}). Eine neue, leere Sitzung startet „+ Neuer Chat“.',
+        'chat.untitled_session':  'ohne Titel',
         'chat.ctx_info':        'Kurzzeitgedächtnis dieses Chats: Anzahl der gemerkten Gesprächseinträge und Füllstand in % bis zur automatischen Komprimierung. Die KI nutzt diese Einträge als Kontext für ihre Antworten.',
 
         // ── Bubble-Kontextmenue + Edit + Delete-Confirms ─────────────────────
@@ -3222,6 +3225,9 @@ const _I18N = {
         'chat.mic':             'Speech Input',
         'chat.send':            'Send',
         'chat.ctx_label':       'Context Memory: {n} entries · {pct} %',
+        'chat.session_continued': 'session continued',
+        'chat.ctx_session_hint':  'This context belongs to session "{title}" ({id}). "+ New chat" starts a fresh, empty one.',
+        'chat.untitled_session':  'untitled',
         'chat.ctx_info':        'Short-term memory of this chat: number of stored conversation entries and fill level in % until automatic compression. The AI uses these entries as context for its replies.',
 
         // ── Bubble context menu + edit + delete confirms ─────────────────────

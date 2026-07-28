@@ -45,6 +45,21 @@ class FileSystemTool(BaseTool):
             "required": ["action", "path"],
         }
 
+    @staticmethod
+    def _claim(p: Path) -> None:
+        """Selbst geschriebene Datei in data/documents dem Benutzer zuordnen.
+
+        Die Eigentuemer-Schranke ist fail-closed: ohne Eintrag waere eine gerade
+        selbst geschriebene Datei fuer den Schreiber sofort wieder unsichtbar.
+        """
+        try:
+            from backend import documents as _documents, sandbox as _sbx
+            u = _sbx.tool_user()
+            if u and p.resolve().parent == _sbx.DOCS_ROOT:
+                _documents.register_upload(p.name, u)
+        except Exception:
+            pass
+
     async def execute(
         self,
         action: str,
@@ -72,12 +87,14 @@ class FileSystemTool(BaseTool):
             elif action == "write":
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text(content, encoding="utf-8")
+                self._claim(p)
                 return f"✅ Datei geschrieben: {p} ({len(content)} Zeichen)"
 
             elif action == "append":
                 p.parent.mkdir(parents=True, exist_ok=True)
                 with open(p, "a", encoding="utf-8") as f:
                     f.write(content)
+                self._claim(p)
                 return f"✅ An Datei angehängt: {p}"
 
             elif action == "list":
@@ -86,8 +103,17 @@ class FileSystemTool(BaseTool):
                 if not p.is_dir():
                     return f"{p} ist kein Verzeichnis"
 
+                from backend import sandbox as _sbx
                 entries = []
+                verborgen = 0
                 for item in sorted(p.iterdir()):
+                    # Eigentuemer-Schranke: in data/documents liegen die Ergebnis-
+                    # und Anhangsdateien ALLER Benutzer. Ein Domain-Benutzer sah
+                    # hier bis 2026-07-28 fremde Dateinamen (Jira-Exporte,
+                    # Angebote). Die Entscheidung trifft backend/sandbox.py.
+                    if not _sbx.may_list_entry(p, item.name):
+                        verborgen += 1
+                        continue
                     prefix = "📁" if item.is_dir() else "📄"
                     size = ""
                     if item.is_file():
@@ -100,9 +126,15 @@ class FileSystemTool(BaseTool):
                             size = f" ({s / (1024 * 1024):.1f} MB)"
                     entries.append(f"{prefix} {item.name}{size}")
 
+                # Die Zahl der ausgeblendeten Einträge nennen, aber KEINE Namen:
+                # sonst wüsste das Modell wieder, dass fremde Dateien existieren.
+                # Der Hinweis verhindert, dass es eine gefilterte Liste für
+                # vollständig hält und daraus falsche Schlüsse zieht.
+                rest = (f"\n({verborgen} Datei(en) anderer Benutzer ausgeblendet)"
+                        if verborgen else "")
                 if not entries:
-                    return f"(Verzeichnis ist leer: {p})"
-                return "\n".join(entries)
+                    return f"(Verzeichnis ist leer: {p}){rest}"
+                return "\n".join(entries) + rest
 
             elif action == "exists":
                 if p.exists():

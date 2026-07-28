@@ -1141,7 +1141,7 @@ KRITISCH – Autonomie-Regeln:
                             await self._send_status(ws, _display, highlight=True, intermediate=is_intermediate)
                         _conv_messages.append({"role": "assistant", "content": text.strip()})
                         # In der Antwort genannte Dokumente (auch /tmp-Pfade) als Chip ausliefern
-                        await self._deliver_docs(ws, text, _delivered_docs, username)
+                        await self._deliver_docs(ws, text, _delivered_docs, username, since=_task_start_time)
 
                 # Wenn keine Function Calls → fertig; User+Antwort in History eintragen
                 if not function_calls:
@@ -1246,7 +1246,7 @@ KRITISCH – Autonomie-Regeln:
 
                     # Office-Dokumente DIREKT als Download-Chip ausliefern (Seitenkanal,
                     # erkennt auch per Shell erzeugte Dateien in /tmp etc.).
-                    await self._deliver_docs(ws, result_str, _delivered_docs, username)
+                    await self._deliver_docs(ws, result_str, _delivered_docs, username, since=_task_start_time)
 
                     _conv_messages.append({"role": "tool", "tool": tool_name, "content": result_str})
 
@@ -1989,7 +1989,19 @@ KRITISCH – Autonomie-Regeln:
                 exec_args['_broker_context'] = self._broker_context()
 
             if not _ldap_blocked:
-                result = await tool.execute(**exec_args)
+                # Benutzerbezug fuer Werkzeuge, die selbst Dateien aufloesen
+                # (filesystem-Auflistung, office_read/office_to_pdf): sie fragen
+                # damit die Eigentuemer-Schranke in data/documents ab. Fuer
+                # privilegierte Benutzer ABSICHTLICH leer = keine Einschraenkung.
+                # Wird immer gesetzt und im finally zurueckgenommen – ein
+                # stehengebliebener Wert wuerde den naechsten Lauf mitregieren.
+                from backend import sandbox as _sbx_ctx
+                _u_token = _sbx_ctx.set_tool_user(
+                    "" if (not _uname or _uname in _LOCAL_PRIVILEGED_USERS) else _uname)
+                try:
+                    result = await tool.execute(**exec_args)
+                finally:
+                    _sbx_ctx.reset_tool_user(_u_token)
             _dur_ms = int((_time.monotonic() - _t0) * 1000)
             tracer.end_span(span, status="ok")
             # Ergebnis cachen wenn Tool cacheable ist
@@ -2237,7 +2249,13 @@ KRITISCH – Autonomie-Regeln:
         text = re.sub(r"[ \t]{2,}", " ", text)
         return text
 
-    async def _deliver_docs(self, ws, text, delivered, username: str = ""):
+    # Wie weit VOR dem Laufbeginn eine Datei geaendert sein darf, um noch als
+    # "in diesem Lauf entstanden" zu gelten. Deckt die Anhaenge ab, die der
+    # Nutzer unmittelbar vor dem Absenden hochlaedt.
+    _DELIVER_TOLERANCE_SEC = 120
+
+    async def _deliver_docs(self, ws, text, delivered, username: str = "",
+                            since: float = 0.0):
         """Liefert erzeugte Office-Dokumente als Download-Chip ans Frontend –
         UNABHAENGIG davon, ob sie via office_*-Tool oder per Shell-Skript (z.B.
         python-pptx fuer Diagramme) erzeugt wurden.
@@ -2248,6 +2266,15 @@ KRITISCH – Autonomie-Regeln:
               nach data/documents/ mit Capability-Namen kopiert.
         Sendet je Fund EINEN Markdown-Download-Link (highlight) -> Frontend-Chip.
         Verlaesst sich NICHT auf woertliche URL-Wiedergabe durch das LLM.
+
+        ``since`` = Startzeit des Laufs (``time.time()``). Fuer die BEIDEN
+        namensratenden Pfade (b) und (c) gilt: nur ausliefern, was in diesem Lauf
+        entstanden ist. Ohne diese Schranke reicht es, dass ein Dateiname im Text
+        AUFTAUCHT – und eine Verzeichnisauflistung von data/documents ist voll
+        davon. Auf ECHT kam so am 2026-07-28 ein ``b45.xlsx`` aus einem Chat vom
+        Juni als Ergebnis-Chip einer Word/PDF-Aufgabe heraus (``filesystem list
+        data/documents`` als Zwischenschritt). ``since=0`` schaltet die Pruefung
+        ab (Aufrufer ohne Laufzeitbezug).
         """
         if not text or self.is_sub_agent:
             return
@@ -2280,6 +2307,20 @@ KRITISCH – Autonomie-Regeln:
                 _Path(src).unlink()
             except Exception as e:
                 _log(f"Quelle nach Ingest nicht entfernbar (bleibt liegen): {src} – {e}")
+
+        def _aus_diesem_lauf(p) -> bool:
+            """True, wenn die Datei zu diesem Lauf gehoert (mtime-Fenster).
+
+            Absichtlich fail-OPEN bei nicht lesbarer mtime: ein Statfehler darf
+            eine echte Ergebnisdatei nicht verschlucken – der umgekehrte Fehler
+            (Chip fehlt) ist der schlimmere, weil der Nutzer dann gar nichts hat.
+            """
+            if not since:
+                return True
+            try:
+                return p.stat().st_mtime >= (since - self._DELIVER_TOLERANCE_SEC)
+            except Exception:
+                return True
 
         # Eigentuemer der ausgelieferten Dateien: der Benutzer DIESES Laufs. Nicht
         # blind self._current_username nehmen – der Hauptagent ist geteilt, und bei
@@ -2385,6 +2426,10 @@ KRITISCH – Autonomie-Regeln:
             if p.parent == docs_dir and re.fullmatch(r"[0-9a-f]{32}__.+", p.name):
                 delivered.add(key)
                 continue
+            if not _aus_diesem_lauf(rp):
+                _log(f"Pfad-Treffer verworfen (nicht aus diesem Lauf): {rp}")
+                delivered.add(key)
+                continue
             delivered.add(key)
             ext = p.suffix.lower().lstrip(".")
             base = _os.path.splitext(_os.path.basename(raw))[0].translate(_UML)
@@ -2435,6 +2480,13 @@ KRITISCH – Autonomie-Regeln:
                 continue
             # Schon eine Capability-Datei? -> via (a) erledigt
             if found.parent == docs_dir and re.fullmatch(r"[0-9a-f]{32}__.+", found.name):
+                delivered.add(key)
+                continue
+            # Dieser Pfad raet ueber den Namen – deshalb MUSS die Datei aus diesem
+            # Lauf stammen. Sonst liefert jede Verzeichnisauflistung im Werkzeug-
+            # Ergebnis Altlasten aus fremden Chats als "Ergebnis" aus.
+            if not _aus_diesem_lauf(found):
+                _log(f"Namens-Treffer verworfen (nicht aus diesem Lauf): {found}")
                 delivered.add(key)
                 continue
             delivered.add(key)

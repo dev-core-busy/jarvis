@@ -15,12 +15,68 @@ Modell:
   Garantie liefert die OS-Sandbox (runuser als unprivilegierter User).
 """
 
+import contextvars
 import os
 import re
 import shlex
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DOCS_ROOT = (PROJECT_ROOT / "data" / "documents").resolve()
+
+# ── Benutzer des laufenden Werkzeug-Aufrufs ──────────────────────────────────
+# Wird im Dispatch (agent.py::_execute_tool) fuer die Dauer EINES Aufrufs
+# gesetzt. Werkzeuge, die selbst Dateien aufloesen (filesystem, office), fragen
+# darueber die Eigentuemer-Schranke ab, ohne dass der Benutzername durch jede
+# Signatur gereicht werden muss. LEER = keine Einschraenkung (privilegierte
+# Benutzer, Systemlaeufe) – die Schranke gilt nur fuer Domain-Benutzer, genau
+# wie die uebrigen Pruefungen in diesem Modul.
+_tool_user: contextvars.ContextVar = contextvars.ContextVar("jarvis_tool_user", default="")
+
+
+def set_tool_user(username: str):
+    """Setzt den Benutzer fuer diesen Werkzeug-Aufruf; Rueckgabe = Reset-Token."""
+    return _tool_user.set(username or "")
+
+
+def reset_tool_user(token) -> None:
+    try:
+        _tool_user.reset(token)
+    except Exception:
+        pass
+
+
+def tool_user() -> str:
+    return _tool_user.get()
+
+
+def may_see_document(name: str, username: str | None = None) -> bool:
+    """Darf dieser Benutzer die Datei in data/documents sehen?
+
+    Dieselbe Regel wie am HTTP-Endpunkt (`backend/documents.py::may_access`):
+    nur der Ersteller, fail-closed ohne Registry-Eintrag. Bis 2026-07-28 gab es
+    diese Schranke nur beim Download – ein `filesystem list data/documents` zeigte
+    dagegen JEDEM Domain-Benutzer die Dateinamen aller anderen (auf ECHT u.a.
+    Jira-Exporte mit Kundendaten und fremde Angebote).
+    """
+    user = tool_user() if username is None else username
+    if not user:
+        return True                      # privilegiert / kein Benutzerbezug
+    from backend import documents
+    return documents.may_access(name, user, is_admin=False)
+
+
+def may_list_entry(directory, name: str, username: str | None = None) -> bool:
+    """Filter fuer Verzeichnis-Auflistungen; greift NUR in data/documents."""
+    user = tool_user() if username is None else username
+    if not user:
+        return True
+    try:
+        if _resolve(directory) != DOCS_ROOT:
+            return True
+    except Exception:
+        return True
+    return may_see_document(name, user)
 
 
 def _roots(*paths):
@@ -43,6 +99,9 @@ READ_ROOTS = _roots(
 )
 
 _SECRET_NAMES = {
+    # .owners.json bildet Dokument -> Benutzer ab: verraet, WER was erzeugt hat.
+    # Datei ist zwar 0600, aber ausdruecklich sperren (und aus Auflistungen halten).
+    ".owners.json",
     ".env", "settings.json", "memory.json", "auth_state.json",
     "credentials.json", "id_rsa", "id_ed25519", "id_dsa", ".htpasswd",
     ".netrc", "shadow", "gshadow", "sudoers",
@@ -113,6 +172,11 @@ def authorize_fs(action: str, path: str) -> tuple[bool, str]:
     if not _under(rp, READ_ROOTS):
         return False, ("Lesen ist nur in den Wissens-/Arbeitsverzeichnissen erlaubt – "
                        "System-, Root- und App-interne Bereiche sind gesperrt")
+    # Eigentuemer-Schranke in data/documents: dort liegen die Ergebnis- und
+    # Anhangsdateien ALLER Benutzer. Das VERZEICHNIS bleibt auflistbar (der
+    # Inhalt wird in filesystem.py gefiltert), einzelne fremde Dateien nicht.
+    if rp != DOCS_ROOT and _under(rp, [DOCS_ROOT]) and not may_see_document(rp.name):
+        return False, "diese Datei gehört einem anderen Benutzer"
     return True, ""
 
 

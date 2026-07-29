@@ -92,3 +92,24 @@ body.light {
     --text-secondary: #4a5568;
     --text-muted: #7a8599;
 }
+
+/* ─── Native Dropdowns (option/optgroup) ────────────────────────────────────
+   Steht ABSICHTLICH hier und nicht in style.css: style.css wird nur von
+   settings.html und wissen.html geladen. Auf portal/chat/userchat/support gab
+   es die Regel deshalb nicht – der Browser fuellte das Auswahlmenue mit Weiss,
+   erbte aber die helle Schriftfarbe des Feldes: weisse Schrift auf weissem
+   Grund (gemeldet 2026-07-29 fuer "Issue bearbeiten" → Status). theme.css laedt
+   JEDE Seite, damit gilt die Regel auch fuer Widgets, die ihr CSS selbst
+   mitbringen (issues.js, extractor.js, profile_switcher.js …).
+   Deckende Flaeche ist Pflicht: ein halbtransparenter Feld-Hintergrund
+   (rgba(var(--fg-rgb),.06)) wird im Popup zu fast Weiss. */
+select option,
+select optgroup {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+}
+select option:checked,
+select option:hover {
+    background-color: var(--accent);
+    color: #ffffff;   /* Text auf Akzentflaeche – gilt in beiden Themes */
+}

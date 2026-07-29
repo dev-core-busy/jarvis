@@ -180,11 +180,44 @@ _BLOCKED_TOOLS_FOR_LDAP = {
     "reflection",
     "evolution_propose", "evolution_apply", "evolution_cycle",
     "queue_add",
+    # 'cron_create' gehoert in dieselbe Familie (Sperre seit 2026-07-29). Die
+    # Auftraggeber-Bindung (siehe actor_scope) regelt nur, MIT WELCHEN RECHTEN ein
+    # zeitversetzter Lauf feuert – nicht, OB ein unprivilegierter Benutzer sich
+    # ueberhaupt einen Auslöser einrichten darf, der ausserhalb jeder Chat-Sitzung
+    # dauerhaft einen Agenten mit vollem Werkzeugkasten startet. Genau das war der
+    # verbleibende Prompt-Injection-Weg (Telefon → Zusammenfassung → Agent legt
+    # Auftrag an): ein neuer Job ist sofort aktiv, wiederkehrend und braucht keine
+    # Freigabe. 'cron_list'/'cron_delete' bleiben erlaubt – sie schaffen keine
+    # Persistenz, sondern zeigen bzw. entfernen nur die EIGENEN Auftraege
+    # (Altbestand aus der Zeit vor dieser Sperre bleibt so aufraeumbar).
+    # EINE Ausnahme: ein in den Einstellungen freigegebener Messenger-Absender darf
+    # sich einmalige ERINNERUNGEN setzen. Das ist kein Agentenlauf, sondern ein
+    # reiner Sendeauftrag (siehe _reminder_exempt und backend/reminders.py).
+    "cron_create",
     # HINWEIS: 'filesystem' wird NICHT pauschal geblockt, sondern per
     # sandbox.authorize_fs pfadbezogen eingeschraenkt (Schreiben nur /tmp+documents,
     # Lesen nur Wissens-/Arbeitsverzeichnisse). Frueher stand hier faelschlich
     # 'write_file' – dieses Tool existiert nicht, die Sperre lief also ins Leere.
 }
+
+
+def _reminder_exempt(tool_name: str, user: str) -> bool:
+    """True, wenn 'cron_create' fuer diesen Absender ausnahmsweise erlaubt ist.
+
+    Nur fuer freigegebene Messenger-Absender (Einstellungen → Sicherheit →
+    Erinnerungen). Das Tool prueft die Bedingungen anschliessend selbst und legt
+    ausschliesslich einen SENDEAUFTRAG an (kind='reminder', kein Agentenlauf) –
+    diese Funktion oeffnet also nur die Tuer, sie entscheidet nicht.
+    Fail-closed: jeder Fehler (Modul fehlt, settings.json kaputt) = keine Ausnahme.
+    """
+    if tool_name != "cron_create":
+        return False
+    try:
+        from backend import reminders
+        return reminders.is_allowed(user)
+    except Exception as e:  # noqa: BLE001
+        print(f"[AGENT] Erinnerungs-Ausnahme nicht pruefbar ({e}) – gesperrt", flush=True)
+        return False
 
 # Regex fuer Shell-Befehle die LDAP-Benutzern verboten sind
 # (destruktive Operationen, Secret-Dateien, System-Aenderungen)
@@ -2024,7 +2057,7 @@ KRITISCH – Autonomie-Regeln:
             _viol = None   # (kind, detail) eines sicherheitsrelevanten Deny -> Eskalation
             if not _privileged:
                 from backend import sandbox as _sbx
-                if name in _BLOCKED_TOOLS_FOR_LDAP:
+                if name in _BLOCKED_TOOLS_FOR_LDAP and not _reminder_exempt(name, _uname):
                     print(f"[AGENT] BLOCKED Tool '{name}' fuer Domain-User '{_uname}'", flush=True)
                     result = f"Zugriff verweigert: Das Tool '{name}' steht Netzwerk-Benutzern nicht zur Verfuegung."
                     _ldap_blocked = True

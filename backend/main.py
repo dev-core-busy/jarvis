@@ -2270,6 +2270,15 @@ async def update_settings_set(request: Request, user: str = Depends(require_loca
             ),
             enabled=True,
             job_id=_AUTO_JOB_ID,
+            # Auftraggeber-Bindung nachgetragen (2026-07-29): ohne owner lief der
+            # Job seit dem Fix vom 28.07. UNPRIVILEGIERT (fail-closed) und wäre an
+            # 'git pull'/'systemctl restart' gescheitert – das Auto-Update war
+            # damit still tot. Der Endpunkt verlangt require_local_auth, der
+            # Anleger IST also ein Administrator; Systemrechte sind hier gewollt
+            # und ausdrücklich, nicht geerbt.
+            owner=user,
+            owner_privileged=True,
+            created_via="auto_update_settings",
         )
 
     return JSONResponse({"ok": True, "auto_update_schedule": schedule})
@@ -10347,26 +10356,35 @@ Beispiel-Nachrichten und was du tun sollst:
 - "Wie ist das Wetter?" → shell_execute: curl -s wttr.in/Berlin?format=3
 - "Suche nach X" → knowledge_search nutzen
 - "Hallo" / "Test" → Kurz antworten, z.B. "Jarvis hier, was kann ich tun?"
-- "Starte den Webserver neu" → shell_execute: systemctl restart ...
-- "Liste die letzten Logs" → shell_execute: journalctl oder tail
 
-ERINNERUNGEN per WhatsApp (immer cron_create verwenden – nie ablehnen!):
-- "Erinnere mich morgen um 06:15 per WhatsApp an Datensicherung"
+ERINNERUNGEN per WhatsApp (nur EINMALIG und nur fuer freigegebene Nummern):
+- "Erinnere mich morgen um 06:15 an Datensicherung"
   → cron_create: label="WA Erinnerung: Datensicherung", cron="15 6 <morgen-tag> <monat> *",
-    task="Sende WhatsApp an {sender}: Erinnerung: Datensicherung erstellen!", einmalig=True
+    nachricht="Erinnerung: Datensicherung erstellen!", einmalig=True
   → Antwort: "Erinnerung gesetzt: morgen um 06:15 bekommst du eine WhatsApp."
-- "Erinnere mich jeden Montag um 09:00 per WhatsApp"
-  → cron_create: label="WA Wochenerinnerung", cron="0 9 * * 1",
-    task="Sende WhatsApp an {sender}: Deine wöchentliche Erinnerung!", einmalig=False
-  → Antwort: "Wöchentliche Erinnerung jeden Montag um 09:00 gesetzt."
 - "Welche Erinnerungen habe ich?" → cron_list
 - "Lösche die Erinnerung / den Cron-Job X" → cron_delete mit der Job-ID
 
 WICHTIG fuer Erinnerungen:
 - Das aktuelle Datum und die Uhrzeit per shell_execute ermitteln (date '+%d %m %Y %H:%M') bevor du den Cron-Ausdruck berechnest.
-- Fuer einmalige Termine (morgen, uebermorgen, naechsten Dienstag etc.): einmalig=True setzen.
-- Die Telefonnummer im task IMMER als {sender} eintragen (das ist die Nummer des Absenders).
+- IMMER einmalig=True. Wiederkehrende Erinnerungen und ueberhaupt jeder zeitgesteuerte
+  AUFTRAG (etwas tun statt nur erinnern) sind ueber WhatsApp nicht moeglich – das muss ein
+  Administrator im Portal anlegen. Sag das dann klar und versuche es NICHT umformuliert erneut.
+- Es wird ausschliesslich der Text aus 'nachricht' an dich selbst geschickt; zur Faelligkeit
+  laeuft KEINE Aufgabe. Versprich also keine Aktionen ("ich pruefe dann die Logs").
+- Keinen Empfaenger angeben – die Erinnerung geht immer an den Absender selbst.
+- Wird der Aufruf mit "Zugriff verweigert" abgelehnt, ist diese Nummer nicht freigegeben:
+  antworte, dass ein Administrator die Nummer unter Einstellungen → Sicherheit freigeben muss.
 - Timezone ist Europe/Berlin – Cron-Zeiten entsprechend setzen.
+
+WAS UEBER WHATSAPP NICHT GEHT (nicht versuchen, sondern kurz sagen und auf einen Administrator verweisen):
+- System- und Root-Aufgaben: Dienste starten/stoppen/neustarten (systemctl/service), Pakete
+  installieren (apt/pip/npm), Rechte oder Eigentuemer aendern (chmod/chown), Loeschen (rm),
+  Neustart/Herunterfahren, Benutzer/Kennwoerter, Schreiben in Systemdateien, System-Logs.
+- Zeitgesteuerte AUFTRAEGE (etwas tun statt nur erinnern) und wiederkehrende Auftraege.
+- Grund: eine WhatsApp-Nachricht hat kein Jarvis-Konto – der Absender ist eine Telefonnummer.
+  Solche Auftraege laufen deshalb IMMER mit eingeschraenkten Rechten. Versuche sie NICHT
+  umformuliert erneut; jeder Versuch wird protokolliert.
 
 WICHTIG allgemein: Antworte NUR mit dem Ergebnis. Kein "Ich werde...", kein "Lass mich...". Direkte Antwort.
 Wenn du ein Tool nutzt, fuehre es aus und antworte mit dem Ergebnis.
@@ -11048,6 +11066,26 @@ def _cron_owned_or_404(job_id: str, user: str) -> dict:
     return job
 
 
+def _require_trigger_admin(user: str, body: dict, endpoint: str):
+    """Verwehrt Nicht-Admins das ANLEGEN/ÄNDERN entkoppelter Auslöser (seit 2026-07-29).
+
+    Cron-Jobs und Trigger-Watcher starten später selbständig einen Agenten mit
+    vollem Werkzeugkasten – außerhalb jeder Chat-Sitzung, ohne Freigabe, bei Cron
+    zusätzlich wiederkehrend. Die Auftraggeber-Bindung (2026-07-28) regelt nur die
+    RECHTE des späteren Laufs, nicht das Einrichten selbst; über Prompt-Injection
+    (z.B. WhatsApp-Text → Agent) blieb das der Weg zu dauerhafter Präsenz. Sehen
+    (GET) und Löschen (DELETE) eigener Einträge bleiben erlaubt: beides schafft
+    keine Persistenz, und Altbestand muss aufräumbar bleiben.
+    """
+    if _is_admin_user(user):
+        return
+    from backend.tools.cron_tool import CRON_DENIED_MSG, record_cron_denied
+    record_cron_denied(user, "api",
+                       f"{body.get('label', '')}\n{body.get('task', '')}",
+                       tool=endpoint)
+    raise HTTPException(403, CRON_DENIED_MSG)
+
+
 @app.get("/api/cron")
 async def cron_list(user: str = Depends(require_auth)):
     """Liefert die zeitgesteuerten Aufträge (Cron-Jobs). Nicht-Admins sehen nur eigene."""
@@ -11057,22 +11095,13 @@ async def cron_list(user: str = Depends(require_auth)):
 
 @app.post("/api/cron")
 async def cron_create_api(req: Request, user: str = Depends(require_auth)):
-    """Legt einen neuen zeitgesteuerten Auftrag (Cron-Job) an.
+    """Legt einen neuen zeitgesteuerten Auftrag (Cron-Job) an – nur Administratoren.
 
     Der Auftrag wird an den anlegenden Benutzer gebunden und läuft später mit
-    dessen Rechten. Systemrechte erhält er nur, wenn ein Administrator ihn anlegt.
+    dessen Rechten. Nicht-Admins erhalten 403 (siehe _require_trigger_admin).
     """
     body = await req.json()
-    _admin = _is_admin_user(user)
-    if not _admin:
-        from backend.tools.cron_tool import _root_intent
-        hit = _root_intent(f"{body.get('label', '')}\n{body.get('task', '')}")
-        if hit:
-            security_guard.record_violation(
-                user, "api", "cron-root-intent", hit,
-                snippet=str(body.get("task", ""))[:200], tool="POST /api/cron")
-            raise HTTPException(403, f"System-/Root-Anweisung im Auftrag ('{hit}') – "
-                                     f"zeitgesteuerte Aufträge laufen mit deinen Rechten.")
+    _require_trigger_admin(user, body, "POST /api/cron")
     try:
         job = cron_manager.add_job(
             label=body.get("label", "Job"),
@@ -11081,7 +11110,8 @@ async def cron_create_api(req: Request, user: str = Depends(require_auth)):
             enabled=body.get("enabled", True),
             once=body.get("once", False),
             owner=user,
-            owner_privileged=_admin,
+            # Ab hier ist der Anleger immer Admin (_require_trigger_admin oben).
+            owner_privileged=True,
             created_via="api",
         )
         return JSONResponse(job, status_code=201)
@@ -11091,17 +11121,16 @@ async def cron_create_api(req: Request, user: str = Depends(require_auth)):
 
 @app.put("/api/cron/{job_id}")
 async def cron_update(job_id: str, req: Request, user: str = Depends(require_auth)):
-    """Aktualisiert einen zeitgesteuerten Auftrag (nur eigene; Admins alle).
+    """Aktualisiert einen zeitgesteuerten Auftrag – nur Administratoren.
 
+    Ändern ist gleichwertig mit Anlegen: wer `task`/`cron` eines bestehenden
+    Auftrags umschreiben darf, hat damit einen neuen Dauerauftrag. Sonst wäre die
+    Anlege-Sperre über jeden Altbestand-Job umgehbar.
     owner/owner_privileged sind nicht änderbar (siehe CronManager.UPDATABLE_FIELDS).
     """
     _cron_owned_or_404(job_id, user)
     body = await req.json()
-    if not _is_admin_user(user):
-        from backend.tools.cron_tool import _root_intent
-        hit = _root_intent(f"{body.get('label', '')}\n{body.get('task', '')}")
-        if hit:
-            raise HTTPException(403, f"System-/Root-Anweisung im Auftrag ('{hit}').")
+    _require_trigger_admin(user, body, "PUT /api/cron")
     try:
         job = cron_manager.update_job(job_id, **body)
         return JSONResponse(job)
@@ -11122,12 +11151,15 @@ async def cron_delete_api(job_id: str, user: str = Depends(require_auth)):
 
 @app.post("/api/cron/{job_id}/run")
 async def cron_run_now(job_id: str, user: str = Depends(require_auth)):
-    """Führt einen zeitgesteuerten Auftrag sofort aus (nur eigene; Admins alle).
+    """Führt einen zeitgesteuerten Auftrag sofort aus – nur Administratoren.
 
     Der Lauf nutzt die Rechte des BESITZERS, nicht die des Auslösers – sonst wäre
-    „fremden Job starten" der bequemste Weg zur Rechteerhöhung.
+    „fremden Job starten" der bequemste Weg zur Rechteerhöhung. Für Nicht-Admins
+    gesperrt, weil ein gespeicherter Auftragstext sonst der bequemste Weg wäre,
+    einen Agentenlauf außerhalb einer nachvollziehbaren Chat-Sitzung auszulösen.
     """
     _cron_owned_or_404(job_id, user)
+    _require_trigger_admin(user, {}, "POST /api/cron/run")
     try:
         result = await cron_manager.run_now(job_id)
         return JSONResponse({"ok": True, "result": result[:500] if result else ""})
@@ -11150,6 +11182,43 @@ async def cron_claim(job_id: str, user: str = Depends(require_local_auth)):
         return JSONResponse(job)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+# ─── Erinnerungs-Freigaben (Messenger) ───────────────────────────────
+@app.get("/api/reminders/senders")
+async def reminder_senders_get(user: str = Depends(require_local_auth)):
+    """Liefert die für Erinnerungen freigegebenen Messenger-Absender (Admin).
+
+    Diese Absender (WhatsApp-Nummer `wa:+49…` oder `tg:<chat-id>`) dürfen sich
+    EINMALIGE Erinnerungen an sich selbst setzen, obwohl das Anlegen
+    zeitgesteuerter Aufträge sonst Admins vorbehalten ist. Eine Erinnerung ist
+    ein reiner Sendeauftrag ohne Agent (siehe backend/reminders.py).
+    """
+    from backend import reminders
+    return JSONResponse({
+        "senders": reminders.allowed_senders(),
+        "max_open": reminders.MAX_OPEN,
+        "max_message_len": reminders.MAX_MESSAGE_LEN,
+    })
+
+
+@app.post("/api/reminders/senders")
+async def reminder_senders_set(req: Request, user: str = Depends(require_local_auth)):
+    """Setzt die Erinnerungs-Freigaben (Admin). Body: {"senders": [...] | "…"}.
+
+    Ungültige Einträge werden verworfen (nicht geraten) – die übernommene Liste
+    steht in der Antwort, `dropped` nennt die Anzahl der verworfenen.
+    """
+    from backend import reminders
+    body = await req.json()
+    raw = body.get("senders", [])
+    before = reminders.allowed_senders()
+    clean = reminders.set_allowed_senders(raw)
+    _n_in = len(raw if isinstance(raw, list) else str(raw).splitlines())
+    print(f"[Reminder] Freigaben geändert von '{user}': "
+          f"{len(before)} → {len(clean)} Absender", flush=True)
+    return JSONResponse({"ok": True, "senders": clean,
+                         "dropped": max(0, _n_in - len(clean))})
 
 
 # ─── Audit-Log ───────────────────────────────────────────────────────
@@ -11200,26 +11269,20 @@ async def watcher_list(user: str = Depends(require_auth)):
 
 @app.post("/api/watchers")
 async def watcher_create(req: Request, user: str = Depends(require_auth)):
-    """Legt einen neuen Trigger-Watcher mit Trigger und Aktion an.
+    """Legt einen neuen Trigger-Watcher mit Trigger und Aktion an – nur Administratoren.
 
     Wie beim Cron-Job: der Watcher wird an den anlegenden Benutzer gebunden und
-    seine Agent-Aktion läuft später mit dessen Rechten (Systemrechte nur für Admins).
+    seine Agent-Aktion läuft später mit dessen Rechten. Ein Watcher ist derselbe
+    entkoppelte Auslöser wie ein Cron-Job, nur ohne Uhrzeit – deshalb dieselbe
+    Sperre für Nicht-Admins (siehe _require_trigger_admin).
     """
     body = await req.json()
-    _admin = _is_admin_user(user)
-    if not _admin and body.get("action_type", "agent_task") == "agent_task":
-        from backend.tools.cron_tool import _root_intent
-        hit = _root_intent(f"{body.get('label', '')}\n{body.get('task', '')}")
-        if hit:
-            security_guard.record_violation(
-                user, "api", "watcher-root-intent", hit,
-                snippet=str(body.get("task", ""))[:200], tool="POST /api/watchers")
-            raise HTTPException(403, f"System-/Root-Anweisung im Trigger-Auftrag ('{hit}') – "
-                                     f"Trigger laufen mit deinen Rechten.")
+    _require_trigger_admin(user, body, "POST /api/watchers")
     try:
         w = watcher_manager.add_watcher(
             owner=user,
-            owner_privileged=_admin,
+            # Ab hier ist der Anleger immer Admin (_require_trigger_admin oben).
+            owner_privileged=True,
             label=body.get("label", "Trigger"),
             trigger_type=body.get("trigger_type", "file"),
             action_type=body.get("action_type", "agent_task"),
@@ -11243,17 +11306,15 @@ async def watcher_create(req: Request, user: str = Depends(require_auth)):
 
 @app.put("/api/watchers/{watcher_id}")
 async def watcher_update(watcher_id: str, req: Request, user: str = Depends(require_auth)):
-    """Aktualisiert einen Trigger-Watcher (nur eigene; Admins alle).
+    """Aktualisiert einen Trigger-Watcher – nur Administratoren.
 
+    Gleiche Begründung wie bei PUT /api/cron: Ändern des Auftragstexts ist
+    gleichwertig mit Anlegen.
     owner/owner_privileged sind nicht änderbar (WatcherManager.UPDATABLE_FIELDS).
     """
     _watcher_owned_or_404(watcher_id, user)
     body = await req.json()
-    if not _is_admin_user(user):
-        from backend.tools.cron_tool import _root_intent
-        hit = _root_intent(f"{body.get('label', '')}\n{body.get('task', '')}")
-        if hit:
-            raise HTTPException(403, f"System-/Root-Anweisung im Trigger-Auftrag ('{hit}').")
+    _require_trigger_admin(user, body, "PUT /api/watchers")
     try:
         w = watcher_manager.update_watcher(watcher_id, **body)
         return JSONResponse(w)

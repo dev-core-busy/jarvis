@@ -392,7 +392,17 @@ window.cronManager = new (class JarvisCronManager {
             // Ob der Benutzer übernehmen DARF, entscheidet der Server
             // (/api/cron/{id}/claim hängt an require_local_auth) – /settings ist
             // ohnehin nur für Admins erreichbar.
-            const claimBtn = !job.owner_privileged
+            // Erinnerungen (kind='reminder') sind reine Sendeauftraege: zur
+            // Faelligkeit geht nur eine Nachricht raus, es laeuft KEIN Agent.
+            // Das muss man sehen koennen – sonst haelt ein Admin den Eintrag fuer
+            // einen Auftrag, den ein Netzwerk-Benutzer angelegt hat.
+            const isRem = job.kind === 'reminder';
+            const kindBadge = isRem
+                ? `<span class="cron-owner-badge cron-badge-user" title="${this._esc(window.t('cron.kind_reminder_hint'))}">`
+                  + `${this._esc(window.t('cron.kind_reminder'))}</span> ` : '';
+            // Übernehmen (= Systemrechte) ist bei einer Erinnerung sinnlos: sie
+            // fuehrt nichts aus. Knopf deshalb nur bei Agenten-Auftraegen.
+            const claimBtn = (!job.owner_privileged && !isRem)
                 ? `<button class="kb-btn-icon cron-claim-btn" data-id="${job.id}" `
                   + `title="${this._esc(window.t('cron.claim_title'))}">🔑</button>` : '';
             return `
@@ -412,7 +422,7 @@ window.cronManager = new (class JarvisCronManager {
                     </div>
                 </div>
                 <div class="cron-item-task">${this._esc(job.task)}</div>
-                <div class="cron-item-meta">${ownerBadge} ${window.t('cron.last_run')}: ${lastRun}${job.last_result ? ` · ${this._esc(job.last_result.substring(0,80))}${job.last_result.length>80?'…':''}` : ''}</div>
+                <div class="cron-item-meta">${kindBadge}${ownerBadge} ${window.t('cron.last_run')}: ${lastRun}${job.last_result ? ` · ${this._esc(job.last_result.substring(0,80))}${job.last_result.length>80?'…':''}` : ''}</div>
             </div>`;
         }).join('')}</div>`;
 

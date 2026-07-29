@@ -108,6 +108,11 @@
             if (uuVerify) uuVerify.addEventListener('click', function () { Mgr.loadUnattended(true); });
             var uuDown = $('sec-unatt-teardown');
             if (uuDown) uuDown.addEventListener('click', function () { Mgr.teardownUnattended(); });
+            // Erinnerungs-Freigaben (Messenger): speichern / neu laden
+            var remSave = $('sec-rem-save');
+            if (remSave) remSave.addEventListener('click', function () { Mgr.saveReminders(); });
+            var remRef = $('sec-rem-refresh');
+            if (remRef) remRef.addEventListener('click', function () { Mgr.loadReminders(); });
             // Root-Broker: Freigabeliste aktualisieren / Audit-Log
             var brRefresh = $('sec-broker-refresh');
             if (brRefresh) brRefresh.addEventListener('click', function () { Mgr.loadBroker(); });
@@ -179,6 +184,69 @@
             Mgr.loadEgress(false);
             // Root-Broker (Rechte-Trennung + Freigabeliste)
             Mgr.loadBroker();
+            // Erinnerungs-Freigaben (Messenger-Absender)
+            Mgr.loadReminders();
+        },
+
+        // ── Erinnerungs-Freigaben (Messenger) ───────────────────────────
+        // Freigegebene Absender dürfen sich EINMALIGE Erinnerungen setzen –
+        // reiner Nachrichtenversand, kein Agentenlauf (backend/reminders.py).
+        loadReminders: function () {
+            var ta = $('sec-rem-list'), st = $('sec-rem-status');
+            if (!ta) return;
+            fetch('/api/reminders/senders', { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    if (!d) { if (st) st.textContent = ''; return; }
+                    // Ein gerade getippter Text darf nicht überschrieben werden.
+                    if (document.activeElement !== ta) ta.value = (d.senders || []).join('\n');
+                    if (st) {
+                        var n = (d.senders || []).length;
+                        st.textContent = n
+                            ? (n + ' ' + T('security.reminders_count', 'freigegeben')
+                               + ' · ' + T('security.reminders_limits', 'max.') + ' ' + d.max_open
+                               + ' ' + T('security.reminders_open', 'offene Erinnerungen je Absender'))
+                            : T('security.reminders_none', 'Keine Freigaben – niemand kann Erinnerungen setzen.');
+                    }
+                })
+                .catch(function () {});
+        },
+
+        saveReminders: function () {
+            var ta = $('sec-rem-list'), box = $('sec-rem-result'), btn = $('sec-rem-save');
+            if (!ta) return;
+            if (btn) btn.disabled = true;
+            fetch('/api/reminders/senders', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ senders: ta.value.split('\n') })
+            })
+                .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+                .then(function (res) {
+                    var d = res.d || {};
+                    var ok = res.ok && d.ok;
+                    if (ok) ta.value = (d.senders || []).join('\n');
+                    if (box) {
+                        var msg = ok
+                            ? '✅ ' + (d.senders || []).length + ' ' + T('security.reminders_saved', 'Absender freigegeben.')
+                              + (d.dropped ? ' ' + d.dropped + ' ' + T('security.reminders_dropped', 'ungültige Zeile(n) verworfen.') : '')
+                            : '❌ ' + esc(d.detail || d.error || T('security.reminders_failed', 'Speichern fehlgeschlagen.'));
+                        box.style.display = 'block';
+                        box.style.borderColor = ok ? 'rgba(var(--success-rgb),0.5)' : 'rgba(var(--danger-rgb),0.5)';
+                        box.style.background = ok ? 'rgba(var(--success-rgb),0.10)' : 'rgba(var(--danger-rgb),0.10)';
+                        box.innerHTML = msg;
+                    }
+                    Mgr.loadReminders();
+                })
+                .catch(function (e) {
+                    if (box) {
+                        box.style.display = 'block';
+                        box.style.borderColor = 'rgba(var(--danger-rgb),0.5)';
+                        box.style.background = 'rgba(var(--danger-rgb),0.10)';
+                        box.innerHTML = '❌ ' + esc(String(e));
+                    }
+                })
+                .finally(function () { if (btn) btn.disabled = false; });
         },
 
         // ── Root-Broker: Freigabeliste + Audit ──────────────────────────

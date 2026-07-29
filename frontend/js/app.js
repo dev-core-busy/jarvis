@@ -554,6 +554,7 @@
                 { hdr: 'sec-sect-2fa-hdr', body: 'sec-sect-2fa-body', tog: 'sec-sect-2fa-tog' },
                 { hdr: 'sec-sect-incidents-hdr', body: 'sec-sect-incidents-body', tog: 'sec-sect-incidents-tog' },
                 { hdr: 'sec-sect-broker-hdr', body: 'sec-sect-broker-body', tog: 'sec-sect-broker-tog' },
+                { hdr: 'sec-sect-rem-hdr', body: 'sec-sect-rem-body', tog: 'sec-sect-rem-tog' },
             ]);
         }
 

@@ -96,3 +96,6 @@ data/generated_images/
 
 # Benutzerhandbuch: enthaelt Screenshots vom Echt-System mit potenziell privaten Daten – NIE committen (Repo ist public); Quelle der Wahrheit ist Confluence-Seite 315077818
 Benutzerhandbuch/
+
+# Lokale Sitzungs-Startskripte (session.sh, session_main.sh, …) – Arbeitsumgebung des Entwicklers, nicht Teil des Projekts
+session*.sh

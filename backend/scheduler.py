@@ -59,7 +59,8 @@ class CronManager:
     def add_job(self, label: str, cron: str, task: str, enabled: bool = True,
                 job_id: str | None = None, once: bool = False,
                 owner: str = "", owner_privileged: bool = False,
-                created_via: str = "") -> dict:
+                created_via: str = "", kind: str = "agent",
+                payload: dict | None = None) -> dict:
         """Legt einen Job an.
 
         owner/owner_privileged sind die AUFTRAGGEBER-BINDUNG: sie entscheiden,
@@ -69,6 +70,16 @@ class CronManager:
         Domain-Nutzers konnte also mit Root-Rechten feuern.
         Default ist bewusst unprivilegiert: privilegiert wird nur, wer es
         ausdruecklich anfordert und es auch selbst sein darf (siehe Aufrufer).
+
+        kind unterscheidet ZWEI Job-Arten (seit 2026-07-29):
+          'agent'    – der Auftragstext geht an den Agenten (Werkzeugkasten).
+                       Nur Administratoren duerfen solche Jobs anlegen.
+          'reminder' – reiner Sendeauftrag, `payload` = {channel,to,message}.
+                       Wird DIREKT versendet, ohne LLM und ohne Werkzeuge
+                       (siehe backend/reminders.py). Nur so kann ein
+                       unprivilegierter Messenger-Absender eine Erinnerung
+                       setzen, ohne sich damit einen zeitversetzten
+                       Agentenlauf einzurichten.
         """
         job = {
             "id": job_id or str(uuid.uuid4()),
@@ -77,6 +88,8 @@ class CronManager:
             "task": task,
             "enabled": enabled,
             "once": once,   # True → Job löscht sich nach einmaligem Ausführen
+            "kind": kind if kind in ("agent", "reminder") else "agent",
+            "payload": dict(payload or {}),
             "owner": owner or "",
             "owner_privileged": bool(owner_privileged),
             "created_via": created_via or "",
@@ -99,6 +112,10 @@ class CronManager:
     # per PUT selbst `owner_privileged: true` setzen und hätte damit genau die
     # Rechteerhöhung, die diese Bindung verhindern soll. Übernahme nur über
     # claim_job() (Admin).
+    # Ebenfalls NICHT dabei: `kind`/`payload` (seit 2026-07-29) – ein
+    # Erinnerungs-Job (reiner Versand) dürfte sonst nachträglich in einen
+    # Agenten-Job umgeschrieben werden und wäre damit wieder ein zeitversetzter
+    # Auftrag mit Werkzeugkasten.
     UPDATABLE_FIELDS = {"label", "cron", "task", "enabled", "once"}
 
     def update_job(self, job_id: str, **fields) -> dict:
@@ -197,7 +214,15 @@ class CronManager:
         result = "Fehler: AgentManager nicht verfügbar"
         t0 = time.time()
         try:
-            if _agent_manager:
+            if job.get("kind") == "reminder":
+                # Reiner Sendeauftrag: KEIN Agent, kein LLM, kein Werkzeug.
+                # Das ist die ganze Sicherheitsaussage der Erinnerungs-Ausnahme
+                # (backend/reminders.py) – wer das hier durch einen Agentenlauf
+                # ersetzt, macht aus jeder Erinnerung wieder einen zeitversetzten
+                # Auftrag, den ein injizierter Nachrichtentext steuern kann.
+                from backend import reminders
+                result = await reminders.deliver(job.get("payload") or {})
+            elif _agent_manager:
                 agent = _agent_manager.get_or_create_main()
                 result = await agent.run_task_headless(
                     task_text, actor=self._actor_for(job))

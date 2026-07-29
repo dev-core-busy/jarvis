@@ -251,6 +251,79 @@ Root-Rechten feuerte.**
   muss `actor=` mitgeben – sonst ist er still unprivilegiert (gewollt), und wer ihn
   privilegiert braucht, muss den Besitzer speichern.
 
+## Zeitversetzte Auslöser nur für Admins (2026-07-29)
+**Was der Test vom 29.07. zeigte:** Die Bindung vom 28.07. regelt, **mit welchen Rechten** ein
+zeitversetzter Lauf feuert – nicht, **ob** ein Nicht-Admin sich überhaupt einen einrichten darf.
+Ein Domain-Nutzer (und damit auch eine per Prompt-Injection gesteuerte WhatsApp-Nachricht) konnte
+weiter einen wiederkehrenden Auftrag anlegen, der **sofort aktiv** ist und außerhalb jeder
+Chat-Sitzung einen Agenten mit vollem Werkzeugkasten startet. Es gab kein `enabled`-Feld im
+Werkzeug und keine Freigabe. Das war inkonsistent zur eigenen Sperrliste: `queue_add`,
+`reflection`, `evolution_*` sind genau deshalb gesperrt – `cron_create` tat dasselbe, nur mit Uhr.
+- **Gesperrt ist jetzt das ANLEGEN und ÄNDERN, nicht das Sehen/Löschen:**
+  `cron_create` steht in `_BLOCKED_TOOLS_FOR_LDAP`; `POST/PUT /api/cron`,
+  `POST /api/cron/{id}/run`, `POST/PUT /api/watchers` verlangen Admin
+  (`main.py::_require_trigger_admin`). `GET` und `DELETE` bleiben mit Eigentümer-Filter offen –
+  beides schafft keine Persistenz, und der **Altbestand muss aufräumbar bleiben**.
+  `cron_list`/`cron_delete` bleiben aus demselben Grund erlaubte Werkzeuge.
+- **`PUT` ist gleichwertig mit Anlegen.** Wer `task`/`cron` eines bestehenden Auftrags umschreiben
+  darf, hat einen neuen Dauerauftrag – über jeden Altbestand-Job wäre die Sperre sonst umgehbar.
+  Dasselbe gilt für `run`: ein gespeicherter Auftragstext wäre sonst der bequemste Weg, einen
+  Agentenlauf ohne nachvollziehbare Chat-Sitzung auszulösen.
+- **Nur der Treffer wird als Verstoß protokolliert** (`cron_tool.record_cron_denied`):
+  `security_guard.record_violation()` sperrt Konten ab einer Schwelle. Zählte jeder abgelehnte
+  Versuch, sperrte „erinnere mich täglich um 8" beim dritten Mal einen harmlosen Benutzer. Der
+  Versuch steht im Journal; als Verstoß gilt nur, was `_root_intent` trifft (Angriffsindiz).
+- **Nebenbefund, mitbehoben:** `POST /api/update/settings` legte den Job `system_auto_update`
+  **ohne `owner`** an. Seit dem 28.07. lief er damit unprivilegiert und wäre an
+  `git pull`/`systemctl restart` gescheitert – das Auto-Update war still tot. Jetzt
+  `owner=user, owner_privileged=True` (der Endpunkt verlangt `require_local_auth`).
+
+### Erinnerungs-Ausnahme (`backend/reminders.py`)
+Messenger-Kanäle sind **immer** unprivilegiert (`wa:+49…`, `tg:<chat>`) – auch das Telefon des
+Admins. Mit der Sperre allein wäre „Erinnere mich morgen um 06:15 per WhatsApp" tot. Die Ausnahme
+holt genau das zurück, ohne die Lücke zu öffnen; **vier Bedingungen, alle nötig:**
+1. **Whitelist** – nur freigegebene Absender (*Einstellungen → Sicherheit → Erinnerungen per
+   Messenger*, `GET/POST /api/reminders/senders`, Feld `reminder_senders` im `extra`-Bereich).
+   Vorgabe ist LEER: ohne bewusste Freigabe kann niemand etwas anlegen.
+2. **KEIN AGENT** – der Job trägt `kind="reminder"` + `payload={channel,to,message}` und wird von
+   `scheduler._execute` **direkt versendet**, ohne LLM und ohne Werkzeuge. **Das ist der Kern:**
+   liefe der gespeicherte Text später durch ein Modell, wäre der Nachrichtentext wieder ein
+   zeitversetzt ausgeführter Auftrag – also genau die geschlossene Lücke. Wer diesen Zweig
+   anfasst, macht die Ausnahme zur Hintertür.
+3. **Nur an sich selbst** – der Empfänger kommt aus der Actor-Kennung, NICHT aus dem Auftragstext.
+   `_reminder_message()` holt aus „Sende WhatsApp an +49…: Text" nur den *Text*; die Nummer darin
+   wird verworfen. Sonst wäre die Ausnahme ein Versandweg für fremde Nummern (Spam/Phishing).
+4. **Einmalig + Deckel** – nur `once=True` (wiederkehrend = dauerhafte Präsenz = Admin-Sache),
+   höchstens `MAX_OPEN=20` offene je Absender (ohne Deckel legt eine injizierte Nachricht
+   tausende Jobs an – DoS ohne Rechteerhöhung), Text auf `MAX_MESSAGE_LEN=500` gekürzt.
+- **Zwei Tore, beide fail-closed:** `agent.py::_reminder_exempt()` lässt `cron_create` im Dispatch
+  überhaupt erst durch, `CronCreateTool` prüft danach selbst noch einmal (ein Skill könnte das
+  Werkzeug außerhalb des Dispatchs benutzen). Jeder Fehler beim Prüfen = keine Ausnahme.
+- **`kind`/`payload` stehen NICHT in `UPDATABLE_FIELDS`** – sonst ließe sich eine Erinnerung
+  nachträglich in einen Agenten-Job umschreiben.
+- **Telefonnummern werden normiert** (`_norm_phone`): JID-Suffix, LID-Anteil, `00`-Präfix,
+  Leerzeichen. Ohne das wäre die Whitelist ein Zufallsspiel – dieselbe Nummer stünde drin und
+  würde je nach Eingangsweg nicht erkannt. Ungültige Einträge werden **verworfen, nicht geraten**.
+- **`WA_TASK_PROMPT` wurde umgeschrieben:** vorher stand dort „immer cron_create verwenden – nie
+  ablehnen!". Ein Prompt, der etwas verspricht, was der Dispatch verweigert, produziert
+  Endlosversuche und Fehlermeldungen beim Absender. Jetzt: nur einmalige Erinnerungen über
+  `nachricht`, klarer Hinweis auf den Administrator, ausdrücklich **keine** Aktionszusagen.
+  Aus demselben Grund sind die Beispiele „Starte den Webserver neu → `systemctl restart`" und
+  „Liste die letzten Logs → `journalctl`" **entfernt** (2026-07-29) und durch einen Abschnitt
+  „WAS ÜBER WHATSAPP NICHT GEHT" ersetzt: WhatsApp ist immer unprivilegiert, `systemctl` fällt
+  in `_LDAP_SHELL_FORBIDDEN` – das Beispiel lud also zu einem Aufruf ein, der als
+  **Sicherheitsverstoß protokolliert** wird (und bei Wiederholung das Konto sperren könnte).
+  System-Logs sind für den Sandbox-Benutzer ohnehin nicht lesbar.
+- **Oberfläche:** Klappabschnitt im Sicherheits-Reiter (`sec-sect-rem-*`, Logik in
+  `security_incidents.js::loadReminders/saveReminders`, Collapse-Eintrag in `app.js`).
+  Der Cron-Reiter zeigt bei `kind='reminder'` das Abzeichen „Erinnerung" und **keinen
+  🔑-Übernehmen-Knopf** (Systemrechte sind dort sinnlos – es wird nichts ausgeführt).
+- **Verifiziert auf DEV:** 61 Einheitentests (Normierung, Whitelist, Dispatch-Ausnahme,
+  Tool-Matrix, Deckel, Scheduler ohne Agent, Update-Whitelist) + 21 Endpunkt-Tests
+  (403/404/200-Matrix für Cron/Watcher/Freigaben) = 82/82. Live: Routen registriert und
+  401-geschützt, Dienst nach Neustart aktiv (HTTP 200), `data/scheduled_jobs.json` und
+  `data/file_watchers.json` unverändert.
+
 ## Multi-Agent System
 - **AgentManager** in `agent.py`: Verwaltet Haupt- und Sub-Agents
   - `get_or_create_main()`: Erstellt/gibt Hauptagent zurueck

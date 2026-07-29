@@ -716,6 +716,52 @@ holt genau das zurück, ohne die Lücke zu öffnen; **vier Bedingungen, alle nö
   wird dort nicht aufgerufen. Wer das ergänzt, braucht einen anderen Auslieferungsweg als einen
   Link, der eine Portal-Anmeldung verlangt.
 
+## Info-Dokumente im Portal (`frontend_info_files/`, seit 2026-07-29)
+- **Was es ist:** Ein Ablage-Ordner neben dem Backend (`/opt/jarvis/frontend_info_files`,
+  umstellbar über `JARVIS_INFO_DIR`). Ein Administrator kopiert Dateien hinein (Handbuch,
+  Merkblatt, Formular), das Portal zeigt sie oben rechts hinter einem **Ordnersymbol**.
+  Code: `backend/info_files.py`, `GET /api/info_files` (+ `/{name}`), `frontend/js/info_files.js`,
+  Markup/CSS in `portal.html` (`pt-info-*`).
+- **Das Symbol erscheint NUR, wenn Dateien vorhanden sind** (`#pt-info-wrap` startet auf
+  `display:none`, `info_files.js::load()` blendet es ein). Ein Knopf, der ein leeres Fach
+  öffnet, ist eine Enttäuschung – und der leere Ordner ist der Normalzustand nach dem Deploy.
+- **Bewusst NICHT `data/documents`** (siehe dort): jenes hält vom Agenten ERZEUGTE Dateien mit
+  Capability-Namen, Eigentümer-Bindung und Verfallsfrist. Hier liegen bewusst abgelegte Dateien
+  mit sprechenden Namen, die **jeder angemeldete Benutzer** lesen darf – deshalb keine
+  Eigentümer-Prüfung. Vertrauliches gehört in die Wissensdatenbank mit Gruppenrechten.
+- **Pfad-Sicherheit in `resolve()`:** Der Name aus der URL wird nicht bloß angehängt und
+  gehofft – nach `resolve(strict=True)` wird geprüft, dass `parent` **wirklich** der Info-Ordner
+  ist. Ein Prefix-Vergleich allein wäre durch einen Symlink zu umgehen; der Test legt genau so
+  einen an. Abgewiesen werden zusätzlich Pfadanteile (`/`, `\`), `..`, versteckte Dateien und
+  NUL-Bytes – Antwort immer **404**, nie 400/403 (der Grund verrät sonst, was im Ordner liegt).
+- **`inline` nur für PDF/Bild/Text**, alles andere ist ein Download (ein „inline" geliefertes
+  `.docx` erscheint als Zeichenmüll). **Ausnahme `_NEVER_INLINE_EXT`: SVG/HTML/XML sind trotz
+  passender Kategorie immer Download** – SVG darf Skripte enthalten, die im Tab im **Origin des
+  Portals** liefen und dort an `localStorage` samt Sitzungstoken kämen. Dazu
+  `X-Content-Type-Options: nosniff`, damit der Browser den Typ nicht selbst „errät".
+- **Die Kategorie (`kind`) kommt vom Backend**, nicht aus einer zweiten Endungs-Tabelle im
+  Frontend: sonst müsste ein neuer Dateityp an zwei Stellen nachgetragen werden und Symbol und
+  Auslieferungsart würden auseinanderlaufen. Symbole/Farben in `info_files.js` je `kind`
+  (CSS-Klassen `.pt-ico-*`, Farben aus Theme-Variablen).
+- **Panel ist DECKEND** (`var(--bg-secondary)`), nicht Glas: darunter liegen die Portal-Karten
+  mit Text, der bei halbtransparentem Hintergrund durch die Dateinamen scheint (im UI-Test
+  sichtbar geworden). `backdrop-filter` ist kein Ersatz – er wird nicht überall gerendert.
+- **Token gehört nur ins DOM:** die Links tragen `?token=` (ein `<a>`/Tab kann keinen
+  Authorization-Header setzen, gleiche Begründung wie bei `/api/documents`); die Liste wird bei
+  jedem Öffnen neu gebaut, nichts davon wird gespeichert. Der Ordner wird beim Öffnen des Panels
+  neu geladen, damit eine gerade abgelegte Datei ohne Neuladen der Seite auftaucht.
+- **Der Ordner wird beim Start angelegt** (`startup_info_files_dir`, gehört dann `jarvis`), damit
+  ein Admin nur noch hineinkopieren muss. Fehlende Rechte sind KEIN Startfehler – dann bleibt die
+  Liste leer und das Symbol aus.
+- **Verifiziert auf DEV:** 52 Backend-Tests (Kategorien, inline/attachment, Traversal inkl.
+  Symlink, leerer/fehlender Ordner) + 17 UI-Tests gegen die echte Portalseite mit gemockter API
+  (Symbol aus/ein, Panel, typgerechte Symbole, `target=_blank` vs. `download`, Escape,
+  Hell-Modus). Live gegen echte Dateien geprüft: Umlaut- und Leerzeichen-Namen laufen
+  (`filename*=utf-8''…`), ohne Token 401.
+  **FALLSTRICK im UI-Test:** Playwright prüft Routen in **umgekehrter** Registrierungsreihenfolge
+  – ein zuletzt registrierter `**/api/**`-Catch-all verschluckt die spezifische Mock-Route, der
+  Test läuft dann grün ohne etwas zu prüfen.
+
 ## Willkommens-Chat „Beispiel Prompts" (/chat, seit 2026-07-27)
 - **Jeder Benutzer** erhaelt beim ERSTEN Aufruf von `GET /api/chat/sessions` eine vorbereitete
   Sitzung mit dem Titel `Beispiel Prompts` (`chat_sessions.ensure_welcome_session`). Sie enthaelt

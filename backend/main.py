@@ -2317,6 +2317,24 @@ async def startup_harden_data_dirs():
 
 
 @app.on_event("startup")
+async def startup_info_files_dir():
+    """Ablage-Ordner fuer die Portal-Info-Dokumente bereitstellen.
+
+    Damit ein Administrator Dateien einfach hineinkopieren kann, ohne den Ordner
+    erst von Hand anzulegen. Fehlende Rechte sind KEIN Startfehler: dann bleibt
+    die Liste leer und das Portal blendet das Ordnersymbol aus.
+    """
+    try:
+        from backend import info_files as _info
+        if _info.ensure_dir():
+            n = len(_info.list_files())
+            print(f"[InfoFiles] {_info.INFO_DIR} – {n} Datei(en)"
+                  + ("" if n else " (Portalsymbol bleibt ausgeblendet)"), flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[InfoFiles] Startup-Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_documents_retention():
     """Aufbewahrungsfrist fuer erzeugte Dokumente durchsetzen.
 
@@ -11182,6 +11200,47 @@ async def cron_claim(job_id: str, user: str = Depends(require_local_auth)):
         return JSONResponse(job)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+# ─── Info-Dokumente (Portal, Ordner frontend_info_files/) ────────────
+@app.get("/api/info_files")
+async def info_files_list(user: str = Depends(require_auth)):
+    """Liefert die im Portal angebotenen Info-Dokumente.
+
+    Inhalt des Ordners ``frontend_info_files/`` (umstellbar über
+    ``JARVIS_INFO_DIR``). Jeder angemeldete Benutzer darf die Liste sehen –
+    es ist eine bewusst abgelegte Informationssammlung, keine Benutzerdatei.
+    Ist die Liste leer, blendet das Portal das Ordnersymbol aus.
+    """
+    from backend import info_files as _info
+    files = _info.list_files()
+    return JSONResponse({"files": files, "count": len(files)})
+
+
+@app.get("/api/info_files/{name}")
+async def info_files_get(name: str, user: str = Depends(require_auth_or_query)):
+    """Liefert ein Info-Dokument aus.
+
+    ``require_auth_or_query``, weil ein Link/Tab keine Header setzen kann
+    (gleiche Begründung wie bei ``/api/documents/{name}``). Der Name wird über
+    ``info_files.resolve()`` geprüft – Pfadanteile, versteckte Dateien und
+    Symlinks aus dem Ordner heraus werden abgewiesen. PDF, Bilder und Textdateien
+    kommen ``inline`` (im Tab anzeigbar), alles andere als Download.
+    """
+    from backend import info_files as _info
+    p = _info.resolve(name)
+    if not p:
+        # 404 statt 400/403: der Grund der Ablehnung ist für den Aufrufer
+        # gleichgültig und verrät sonst, was es im Ordner gibt.
+        return JSONResponse({"error": "nicht gefunden"}, status_code=404)
+    return FileResponse(str(p), media_type=_info.media_type(p.name),
+                        filename=p.name,
+                        content_disposition_type=_info.disposition(p.name),
+                        headers={"Cache-Control": "private, max-age=300",
+                                 # Kein MIME-Raten des Browsers: sonst koennte eine
+                                 # als Text deklarierte Datei doch als HTML im
+                                 # Portal-Origin ausgefuehrt werden.
+                                 "X-Content-Type-Options": "nosniff"})
 
 
 # ─── Erinnerungs-Freigaben (Messenger) ───────────────────────────────

@@ -19,6 +19,9 @@ const _I18N = {
 
         // ── Portal (/portal) ───────────────────────────────────
         'portal.welcome':            'Willkommen',
+        'portal.info_files':       'Dokumente',
+        'portal.info_files_count': 'Dateien',
+        'portal.info_files_empty': 'Keine Dokumente vorhanden.',
         'portal.choose':             'Wähle einen Bereich:',
         'portal.card_chat':          'Chat',
         'portal.card_chat_desc':     'Mit dem KI-Assistenten chatten.',
@@ -1779,6 +1782,9 @@ const _I18N = {
 
         // ── Portal (/portal) ───────────────────────────────────
         'portal.welcome':            'Welcome',
+        'portal.info_files':       'Documents',
+        'portal.info_files_count': 'files',
+        'portal.info_files_empty': 'No documents available.',
         'portal.choose':             'Choose an area:',
         'portal.card_chat':          'Chat',
         'portal.card_chat_desc':     'Chat with the AI assistant.',

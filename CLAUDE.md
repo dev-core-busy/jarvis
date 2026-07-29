@@ -316,6 +316,17 @@ holt genau das zurück, ohne die Lücke zu öffnen; **vier Bedingungen, alle nö
   System-Logs sind für den Sandbox-Benutzer ohnehin nicht lesbar.
 - **Oberfläche:** Klappabschnitt im Sicherheits-Reiter (`sec-sect-rem-*`, Logik in
   `security_incidents.js::loadReminders/saveReminders`, Collapse-Eintrag in `app.js`).
+  **Sichtbar nur, wenn WhatsApp ODER Telegram aktiv ist** (`app.js::
+  updateReminderSectionVisibility`, gleiches Muster wie der SAP-Berechtigungsblock
+  `sec-sub-sap`): ohne Kanal gibt es keinen Absender `wa:`/`tg:`, die Freigabe wäre eine
+  Freigabe für nichts. `sec-sect-rem-box` startet deshalb mit `display:none` im HTML –
+  sonst blitzt der Abschnitt beim Öffnen auf und verschwindet wieder. Aufgerufen in
+  `openModal()` **und** an den drei Stellen in `skills.js`, die nach einem Skill-Wechsel die
+  Reiter-Sichtbarkeit erneuern. Zwei Feinheiten, die zusammengehören: `loadReminders()`
+  bricht bei versteckter Box ab (kein Abruf für einen unsichtbaren Abschnitt), und beim
+  Sichtbar**werden** ruft `updateReminderSectionVisibility()` es nach – ohne das stünde die
+  Liste nach dem Einschalten eines Kanals leer da, obwohl Einträge gespeichert sind.
+  Der Hinweis nennt die tatsächlich aktiven Kanäle (`sec-rem-channels`).
   Der Cron-Reiter zeigt bei `kind='reminder'` das Abzeichen „Erinnerung" und **keinen
   🔑-Übernehmen-Knopf** (Systemrechte sind dort sinnlos – es wird nichts ausgeführt).
 - **Verifiziert auf DEV:** 61 Einheitentests (Normierung, Whitelist, Dispatch-Ausnahme,

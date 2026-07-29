@@ -904,6 +904,42 @@
             }
         }
 
+        // ── „Erinnerungen per Messenger" (Sicherheit): nur sichtbar, wenn ueberhaupt
+        //    ein Messenger-Kanal aktiv ist. Ohne WhatsApp/Telegram kann niemand eine
+        //    Erinnerung setzen (es gibt keinen Absender 'wa:'/'tg:'), der Abschnitt
+        //    waere also eine Freigabe fuer nichts. Reine Anzeige-Frage: die Liste
+        //    bleibt gespeichert und wirkt sofort wieder, sobald ein Kanal zurueckkommt.
+        const REMINDER_SKILLS = ['whatsapp', 'telegram'];
+        window.updateReminderSectionVisibility = async function updateReminderSectionVisibility() {
+            const box = document.getElementById('sec-sect-rem-box');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const active = Array.isArray(skills)
+                    ? skills.filter(s => REMINDER_SKILLS.includes(s.dir_name) && s.enabled)
+                    : [];
+                var wasHidden = box.style.display === 'none';
+                box.style.display = active.length ? '' : 'none';
+                // Sichtbar geworden (Kanal gerade eingeschaltet): Liste nachladen –
+                // loadReminders() bricht bei versteckter Box bewusst ab, sonst waere
+                // die Freigabeliste jetzt leer, obwohl Eintraege gespeichert sind.
+                if (active.length && wasHidden && window.SecurityIncidents) {
+                    window.SecurityIncidents.loadReminders();
+                }
+                // Hinweis nennt die tatsaechlich verfuegbaren Kanaele – sonst raet ein
+                // Admin, ob "Messenger" hier WhatsApp, Telegram oder beides meint.
+                const ch = document.getElementById('sec-rem-channels');
+                if (ch) {
+                    const names = active.map(s => s.name || s.dir_name);
+                    ch.textContent = names.length
+                        ? (window.t('security.reminders_channels') || 'Aktive Kanäle:') + ' ' + names.join(', ')
+                        : '';
+                }
+            } catch (e) {
+                // Fehler ignorieren – Abschnitt bleibt versteckt (fail-closed)
+            }
+        }
+
         // ── Kundenverwaltungs-Tab: nur sichtbar wenn 'kundenverwaltung'-Skill aktiviert ──
         const kvTabBtn = document.getElementById('settings-tab-btn-kundenverwaltung');
         window.updateKundenverwaltungTabVisibility = async function updateKundenverwaltungTabVisibility() {
@@ -1021,6 +1057,7 @@
             await updateSapTabVisibility();
             await updateKundenverwaltungTabVisibility();
             await updateSupportTabVisibility();
+            await updateReminderSectionVisibility();
             loadSslStatus();
             showListView();
             // Ersten Tab aktivieren

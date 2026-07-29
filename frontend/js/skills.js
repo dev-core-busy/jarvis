@@ -809,6 +809,8 @@
                 if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
+                // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit
+                if (typeof window.updateReminderSectionVisibility === 'function') window.updateReminderSectionVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
                 if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
             } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
@@ -917,6 +919,8 @@
                 if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
+                // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit
+                if (typeof window.updateReminderSectionVisibility === 'function') window.updateReminderSectionVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
                 if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
             } catch (e) { this._notify('Fehler: ' + e.message, 'error'); }
@@ -1027,6 +1031,8 @@
                 if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
+                // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit
+                if (typeof window.updateReminderSectionVisibility === 'function') window.updateReminderSectionVisibility();
                 // Branding sofort anwenden bzw. (bei Deaktivierung) zuruecksetzen
                 if (name === 'branding' && typeof window.refreshBranding === 'function') window.refreshBranding();
             } catch (e) { console.error('Toggle fehlgeschlagen:', e); }

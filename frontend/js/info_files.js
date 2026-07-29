@@ -66,12 +66,29 @@
         archive:    '<path d="M21 8v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"/><rect x="1" y="3" width="22" height="5" rx="1"/><line x1="10" y1="12" x2="14" y2="12"/>',
         video:      '<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>',
         audio:      '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+        // Verknuepfung (.url): Weltkugel – zeigt an, dass hier eine Seite und
+        // keine Datei geoeffnet wird.
+        link:       '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/>',
         file:       SHEET
     };
 
     function icon(kind) {
         var k = ICONS[kind] ? kind : 'file';
         return '<svg class="pt-ico-' + k + '" viewBox="0 0 24 24" ' + P + '>' + ICONS[k] + '</svg>';
+    }
+
+    // Zweite Schranke neben der Pruefung im Backend: nur http/https ins href.
+    // Ein `javascript:`-Ziel wuerde beim Klick im Origin des Portals laufen und
+    // an das Sitzungstoken kommen – eine abgelegte Verknuepfung darf kein Skript
+    // ausfuehren koennen. Doppelt geprueft, weil der Wert aus einer Datei stammt.
+    function isWebUrl(u) {
+        return typeof u === 'string' && /^https?:\/\/\S+$/i.test(u.trim());
+    }
+
+    // Fuer die Meta-Spalte: bei einer Verknuepfung steht dort der Host statt
+    // einer Dateigroesse – so sieht man, wohin der Klick fuehrt.
+    function hostOf(u) {
+        try { return new URL(u).host; } catch (e) { return ''; }
     }
 
     // PDF/Bild/Text zeigt der Browser im Tab an; alles andere waere dort
@@ -138,6 +155,18 @@
             }
             var tk = token();
             list.innerHTML = Mgr._files.map(function (f) {
+                // ── Verknuepfung (.url): oeffnet das Ziel, nicht die Datei ──
+                if (f.kind === 'link' && isWebUrl(f.url)) {
+                    // rel="noreferrer" zusaetzlich zu noopener: die Zieladresse
+                    // soll nicht erfahren, aus welcher internen Seite der Klick kam.
+                    return '<a class="pt-info-item" href="' + esc(f.url)
+                         + '" target="_blank" rel="noopener noreferrer"'
+                         + ' title="' + esc(f.url) + '">'
+                         + icon('link')
+                         + '<span class="pt-info-name">' + esc(f.label || f.name) + '</span>'
+                         + '<span class="pt-info-meta">' + esc(hostOf(f.url)) + '</span>'
+                         + '</a>';
+                }
                 // Das Token gehoert NUR ins DOM (wie chatlib.js::_withToken):
                 // die Liste wird bei jedem Laden neu gebaut, nichts gespeichert.
                 var href = '/api/info_files/' + encodeURIComponent(f.name)
@@ -146,9 +175,13 @@
                 var attrs = inline
                     ? 'target="_blank" rel="noopener"'
                     : 'download="' + esc(f.name) + '"';
+                // Eine Verknuepfung, die hier landet, hatte kein brauchbares Ziel
+                // (das Backend degradiert sie normalerweise schon). Dann auch das
+                // Datei-Symbol zeigen – ein Globus, der eine Datei herunterlaedt,
+                // waere eine falsche Ansage.
                 return '<a class="pt-info-item" href="' + esc(href) + '" ' + attrs
                      + ' title="' + esc(f.name) + '">'
-                     + icon(f.kind)
+                     + icon(f.kind === 'link' ? 'file' : f.kind)
                      + '<span class="pt-info-name">' + esc(f.name) + '</span>'
                      + '<span class="pt-info-meta">' + esc(fmtSize(f.size)) + '</span>'
                      + '</a>';

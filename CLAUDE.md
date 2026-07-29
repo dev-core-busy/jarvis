@@ -739,6 +739,21 @@ holt genau das zurück, ohne die Lücke zu öffnen; **vier Bedingungen, alle nö
   passender Kategorie immer Download** – SVG darf Skripte enthalten, die im Tab im **Origin des
   Portals** liefen und dort an `localStorage` samt Sitzungstoken kämen. Dazu
   `X-Content-Type-Options: nosniff`, damit der Browser den Typ nicht selbst „errät".
+- **Verknüpfungen (`.url`, seit 2026-07-29):** Eine Datei mit der Endung `.url`/`.link`/
+  `.weblink` wird nicht zum Download angeboten, sondern **öffnet ihr Ziel** (Kategorie `link`,
+  Weltkugel-Symbol, in der Meta-Spalte steht der Host statt der Größe, Anzeigename ist der
+  Dateiname **ohne** Endung). `read_link()` versteht das Windows-Format
+  (`[InternetShortcut]` + `URL=…`, so entsteht die Datei beim Ziehen aus der Adresszeile) und
+  – tolerant – eine Datei, die nur die Adresse enthält.
+  - **Nur `http`/`https`, an ZWEI Stellen geprüft** (`_LINK_SCHEMES` im Backend,
+    `isWebUrl()` im Frontend): ein `javascript:`-Ziel liefe beim Klick im **Origin des Portals**
+    und käme an das Sitzungstoken im `localStorage`; `file:`/`data:` führen am Server vorbei.
+    Wer eine Verknüpfung ablegen darf, soll damit **kein Skript ausführen** können.
+  - **Unbrauchbare Verknüpfung wird zur normalen Datei** (kein `url`-Feld → Download, und dann
+    auch das Datei-Symbol statt der Weltkugel; ein Globus, der eine Datei herunterlädt, wäre
+    eine falsche Ansage). Deckel `_LINK_MAX_BYTES = 8192` – eine Verknüpfung ist winzig.
+  - Links tragen `rel="noopener noreferrer"`: das Ziel soll nicht erfahren, aus welcher
+    internen Seite der Klick kam.
 - **Die Kategorie (`kind`) kommt vom Backend**, nicht aus einer zweiten Endungs-Tabelle im
   Frontend: sonst müsste ein neuer Dateityp an zwei Stellen nachgetragen werden und Symbol und
   Auslieferungsart würden auseinanderlaufen. Symbole/Farben in `info_files.js` je `kind`

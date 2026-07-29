@@ -1002,6 +1002,21 @@ lehrreich, weil zwei naheliegende Verdaechtige falsch waren:
   ein lokales `from backend.config import config`. Fehlte in `GeminiProvider.generate_response`
   → **jeder** Gemini-Chat scheiterte still mit `NameError: name 'config' is not defined`
   (behoben 2026-07-27). Beim Erweitern von llm.py darauf achten.
+- **Globale UI-Regeln gehoeren in `theme.css`, NICHT in `style.css`:** `style.css` wird nur von
+  `settings.html` und `wissen.html` geladen – `portal/chat/userchat/support/api/supportagent`
+  laden ausschliesslich `theme.css` (+ chat.css). Die Regel `select option {background-color:
+  var(--bg-secondary); color: var(--text-primary)}` stand in style.css und griff deshalb auf
+  genau jenen Seiten nicht: der Browser fuellte das Auswahlmenue mit Weiss, erbte aber die helle
+  Schriftfarbe des Feldes → **weisse Schrift auf weissem Grund** (gemeldet 2026-07-29 fuer
+  *Issue bearbeiten → Status*; betroffen waren alle Dropdowns dort, auch die von Widgets, die
+  ihr CSS selbst mitbringen: `issues.js`, `extractor.js`, `profile_switcher.js`).
+  Seit 2026-07-29 steht sie in `theme.css` und in style.css nur noch ein Verweis – **nicht
+  duplizieren**, sonst driftet es. Merkregel: Betrifft eine Regel Widgets, die auf mehreren
+  Seiten auftauchen, muss sie dort stehen, wo ALLE Seiten hinschauen. `color-scheme: dark|light`
+  allein genuegt nicht: ein halbtransparenter Feld-Hintergrund (`rgba(var(--fg-rgb),.06)`)
+  wird im Popup zu fast Weiss, deshalb braucht `option` eine DECKENDE Flaeche.
+  Verifiziert (Playwright, berechnete Farben): normale Eintraege 16.96:1 (dunkel) / 15.90:1
+  (hell), ausgewaehlter Eintrag 4.67:1 – jeweils ueber WCAG AA.
 - **Icon-Knoepfe in Klapp-Kopfzeilen brauchen `.kb-hdr-btn`**, nicht `.kb-btn-action`:
   Letztere ist ein grosser CTA (Akzent-Hintergrund, weisse Schrift, 0.45rem Padding) und fuellte
   im Telemetry-Reiter die Zeile mit Akzentfarbe. `.kb-btn-danger` war bei 0.72rem umgekehrt zu

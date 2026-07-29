@@ -2834,19 +2834,10 @@ select.input-field {
     padding-right: 40px;
 }
 
-/* Globale Lesbarkeit der Dropdown-Eintraege. Theme-Variablen statt harter Farben,
-   damit das native Dropdown auch im Hell-Modus passt (sonst dunkles Menue auf
-   heller Seite). --bg-secondary/--text-primary schalten via body.light um. */
-select option,
-select optgroup {
-    background-color: var(--bg-secondary);
-    color: var(--text-primary);
-}
-select option:checked,
-select option:hover {
-    background-color: var(--accent);
-    color: #ffffff;
-}
+/* Dropdown-Eintraege (option/optgroup): Regel liegt jetzt in theme.css, weil
+   style.css nur von settings.html und wissen.html geladen wird – auf allen
+   anderen Seiten fehlte sie und die Auswahlmenues waren weiss auf weiss.
+   Hier bewusst NICHT dupliziert (eine Quelle, sonst driftet es auseinander). */
 
 .modal-actions {
     display: flex;

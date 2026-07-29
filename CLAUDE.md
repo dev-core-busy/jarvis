@@ -335,6 +335,121 @@ holt genau das zurück, ohne die Lücke zu öffnen; **vier Bedingungen, alle nö
   401-geschützt, Dienst nach Neustart aktiv (HTTP 200), `data/scheduled_jobs.json` und
   `data/file_watchers.json` unverändert.
 
+## Login-Freigabe: Benutzerliste ODER Gruppe (Fix 2026-07-29)
+**Der Vorfall:** Ein Domain-Benutzer konnte sich anmelden, solange er unter *Einstellungen →
+Sicherheit → Berechtigungen → Anmeldung* als **Benutzer** eingetragen war. Wurde er dort entfernt
+und stattdessen eine **AD-Gruppe** eingetragen, in der er Mitglied ist, war die Anmeldung tot –
+obwohl `memberOf` die Gruppe nachweislich enthielt (am DC geprüft: direkte Mitgliedschaft).
+- **Ursache:** `_ad_user_allowed()` behandelte eine nicht-leere `ad_allowed_users`-Liste als
+  ALLEINENTSCHEIDEND: `if plain not in allowed: return False` – der Gruppen-Zweig darunter wurde
+  **nie erreicht**. Wer neben der Liste eine Gruppe eintrug, sperrte damit jedes Gruppenmitglied
+  aus, das nicht zusätzlich in der Liste stand. Die Symptombeschreibung „Benutzer raus, Gruppe
+  rein" trifft das genau dann, wenn **noch andere Benutzer in der Liste stehen** – die Liste war
+  nicht leer, also entschied sie weiter.
+- **Die Oberfläche versprach das GEGENTEIL** – an fünf Stellen „– hat Vorrang gegenüber
+  Benutzerliste wenn beide gesetzt" und zusätzlich „⚠ Wenn eine Gruppe eingetragen ist, wird die
+  Benutzerliste ignoriert." Dazu meldete `GET /api/settings/ldap` bei gesetzter Gruppe
+  `access_mode: "group"`, obwohl die Liste entschied. Der Fehler war von außen deshalb nicht
+  erklärbar: die Anzeige behauptete „Gruppen-Filter aktiv", während die Liste sperrte.
+- **Jetzt ODER-verknüpft** – Liste und Gruppe sind zwei Freigabewege, jeder genügt allein. Das ist
+  dieselbe Semantik, die **alle anderen** Berechtigungsfelder schon immer hatten (Wissens-Editoren,
+  Internet, Admins, SAP: `if plain in allowed: return True` … dann Gruppen-Check). Der Login war
+  der einzige Ausreißer.
+- **Vier Stellen gehören zusammen – eine allein reicht NICHT:**
+  1. `_ad_user_allowed()` – die Login-Entscheidung.
+  2. `_login_still_allowed()` – läuft bei **jedem Request**. Gab vorher bei nicht-leerer Liste
+     hart `_norm_login(username) in allowed` zurück: ein über die Gruppe angemeldeter Benutzer
+     wäre beim ersten Request wieder hinausgeflogen (403 NOT_AUTHORIZED direkt nach erfolgreichem
+     Login). Jetzt: in der Liste → True, sonst → `bool(allowed_group)`, weil die Mitgliedschaft
+     ohne Benutzer-Bind (= ohne Passwort) live nicht prüfbar ist.
+  3. `_revalidate_ad_groups_once()` – `enforce_login` war `bool(group) and not users_raw`, die
+     Nachprüfung war bei gesetzter Liste also komplett aus. Jetzt greift sie, sobald eine Gruppe
+     konfiguriert ist, **überspringt aber jeden Benutzer aus der Liste** (`allowed_set`) – sonst
+     würde die 10-Minuten-Revalidierung genau die Benutzer abmelden, die per Liste freigegeben sind.
+  4. `access_mode` – neuer Wert **`users_group`**, wenn beides gesetzt ist (Frontend zeigt Liste
+     UND Gruppe an). Ein Modus, der einen der beiden Werte verschweigt, ist die Anzeige, die den
+     Fehler überhaupt erst unerklärbar gemacht hat.
+- **Diagnose-Log nachgezogen:** Der Gruppen-Zweig sucht mit dem Bind des ANMELDENDEN Benutzers.
+  Scheiterte diese Suche, flog die Ausnahme bis in `authenticate_linux_user` und erschien nur als
+  generisches „[AUTH] AD Fehler" – das sieht wie ein Netzproblem aus. Jetzt eigenes `try/except`
+  mit Klartext, und „nicht im Directory gefunden" nennt die **Suchbasis** (`DC=…` aus `ad_domain`
+  abgeleitet): liegt das Konto in einer anderen Domäne als der konfigurierten, findet die Suche
+  nichts, obwohl der Bind per UPN geklappt hat. Der Bind allein beweist die Suchbasis NICHT –
+  im Benutzerlisten-Modus wird gar nicht gesucht, deshalb fällt eine falsche Domäne dort nie auf.
+- **Merkregel:** Zwei Freigabefelder nebeneinander sind für den Benutzer additiv. Wenn eines das
+  andere aushebelt, ist das ein Fehler – und wenn Oberfläche und Status-Endpunkt dazu noch das
+  Gegenteil behaupten, kostet es Stunden.
+
+### „Leer = niemand" statt „leer = alle" (Vorgabe 2026-07-29)
+Beim Aufräumen fiel auf, dass **leer** in diesem einen Panel je Feld das Gegenteil bedeutete:
+Anmeldung leer = **jeder** Domänen-Benutzer, Wissens-Editoren/Internet/Administratoren leer =
+**niemand** (explizites Opt-in). Auf DEV konnte sich damit jeder Domänen-Benutzer mit gültigem
+Passwort anmelden, obwohl kein einziger Eintrag gesetzt war. Auf Anweisung des Nutzers gilt jetzt
+überall dieselbe Regel: **wer nicht eingetragen ist, darf nicht.**
+- `_ad_user_allowed()`: beide Felder leer → `False` (mit Klartext-Log, das den Weg zur Einstellung
+  nennt). Der frühere `return True` ist weg.
+- **`_login_still_allowed()` braucht die Prüfung EBENFALLS** – sonst behielte jede bestehende
+  Sitzung ihren Zugriff, bis sich der Benutzer abmeldet, und das Leeren der Felder wäre eine
+  Maßnahme ohne Wirkung.
+- `access_mode` heißt in diesem Fall **`none`** (vorher `open`); Oberfläche zeigt „⛔ Niemand
+  freigegeben" plus Warnkasten `security.ad_warn_none`. Feldhinweis und Platzhalter sagen jetzt
+  „leer = niemand" statt „Leer lassen für alle Domänen-Benutzer".
+- **Der lokale Benutzer `jarvis` ist der Rückweg** und bewusst NICHT betroffen: er authentifiziert
+  per PAM in `authenticate_linux_user`, **bevor** AD überhaupt befragt wird (`ALLOWED_USERS`), und
+  `_login_still_allowed` gibt für ihn früh `True` zurück. Ohne diese Ausnahme wäre eine leere
+  Freigabe ein Totalausschluss ohne Weg zurück in die Einstellungen.
+- **Beim Ausrollen ist das eine abschaltende Änderung:** Wo bisher „leer" stand, meldet sich nach
+  dem Neustart NIEMAND mehr per AD an. Vor dem Deploy auf einem System mit leeren Feldern also
+  zuerst den eigenen Benutzer (oder die Gruppe) eintragen – oder danach als lokaler `jarvis`
+  anmelden und nachtragen.
+- **Verifiziert:** die Rechte-Matrix wuchs auf 34/34 (leer→niemand am Login UND pro Request,
+  Modus `none`, kein `open` mehr im Endpunkt, lokaler `jarvis` bleibt trotz leerer Freigabe drin).
+- **Verifiziert auf DEV:** 29 Prüfungen (Rechte-Matrix aus Liste/Gruppe/Mitgliedschaft, CN statt
+  DN, mehrere Gruppen, Benutzer nicht im Verzeichnis, scheiternde LDAP-Suche, kein zusätzlicher
+  LDAP-Roundtrip bei Listen-Treffer, `_login_still_allowed`, Revalidierungs-Entzug, `access_mode`)
+  = 29/29; der alte Stand fällt in genau 5 davon durch, inklusive des gemeldeten Falls. Gegen den
+  echten DC geprüft, dass `andrea.ladd` direktes Mitglied von `DP-BEFUNDKOMMUNIKATION` ist.
+  Dienst nach Neustart aktiv, `/settings` HTTP 200.
+
+## AD-Picker: Mitgliederliste + Klick auf den ganzen Eintrag (2026-07-29)
+- **Der Klick auf den Eintragstext hat NICHTS getan** (`ldap_picker.js`). Der Treffer ist ein
+  `<label>` um die Checkbox, ein Klick darin schaltet sie also **schon vom Browser aus** um.
+  Der Handler schaltete zusätzlich selbst (`if (e.target !== cb) cb.checked = !cb.checked`), und
+  weil das `<label>` den Klick danach an die Checkbox weiterreicht, kippte sie **zweimal** –
+  unterm Strich gar nicht. Nur ein Treffer genau auf das 13-Pixel-Kästchen wirkte. Jetzt hört der
+  Picker ausschliesslich auf `change` der Checkbox und schaltet **nie selbst**. Gilt für Benutzer-
+  und Gruppen-Picker (`ad-allowed-users`, `ad-allowed-group`, Internet/Admins/Editoren/SAP).
+  **Merkregel:** In einem `<label>` ist die Aktivierung Browser-Sache – wer dort zusätzlich per JS
+  schaltet, hebt sich selbst auf.
+- **Gruppen-Mitglieder auf Klick:** Der Gruppen**name** ist jetzt ein Knopf (`.ldap-members-btn`,
+  gepunktet unterstrichen, 👥) und öffnet ein Unter-Popup mit den Mitgliedern. Der restliche
+  Eintrag schaltet weiter die Auswahl um – der Knopf muss deshalb `preventDefault()` **und**
+  `stopPropagation()` rufen, sonst aktiviert er über das `<label>` doch die Checkbox.
+  Escape schliesst **zuerst** das Unter-Popup (`membersOpen()`), sonst bliebe eine Mitgliederliste
+  ohne Bezug über einem geschlossenen Picker stehen; `close()` räumt es ebenfalls mit ab.
+- **`ldap_directory.group_members(group)`** + `POST /api/ldap/group_members` (Admin,
+  `require_local_auth`; Body `{group|dn,[password],[bind_user]}` → `{cn,dn,members:[{sam,display,
+  mail,kind}],count}`). `group` darf **DN oder blosser CN** sein – die Token-Liste erlaubt beides
+  (Auswahl liefert den DN, manuelle Eingabe oft nur den Namen).
+- **Gelesen wird über `(memberOf=<dn>)`, NICHT über das `member`-Attribut der Gruppe:** dessen
+  Werte liefert AD ab ~1500 Einträgen nur in Häppchen (Range-Retrieval), die Liste wäre dann
+  stillschweigend unvollständig.
+- **Bewusst nur DIREKTE Mitgliedschaften** – genau die prüft auch die Anmeldung
+  (`_ad_user_allowed` vergleicht `memberOf`). Eine Liste, die zusätzlich verschachtelte Mitglieder
+  zeigt, würde Zugriff versprechen, den der Login verweigert. Verschachtelte Gruppen erscheinen als
+  Eintrag mit `kind="group"` (🗂️ + Beschriftung „verschachtelte Gruppe"), Mitglieder über die
+  **Primärgruppe** (`primaryGroupID`, typisch „Domänen-Benutzer") fehlen hier wie dort – der
+  Hinweistext unter der Liste sagt beides ausdrücklich.
+- **Das On-Demand-Passwort wird wiederverwendet** (`_cred`): ohne Service-Konto müsste der Admin es
+  sonst für die Mitgliederliste ein zweites Mal eingeben.
+- **Verifiziert:** 12 Backend-Prüfungen gegen den echten DC (per DN und per CN, Benutzer vor
+  Gruppen sortiert, verschachtelte Gruppe erkannt, unbekannte Gruppe → RuntimeError, unbekannter
+  DN → leere Liste, Filter-Escaping von `(`/`*`) + 32 UI-Prüfungen in jsdom gegen die echten
+  Dateien (Textklick setzt/löscht die Checkbox, Vorbelegung, Popup-Inhalt, keine Auswahl-Änderung
+  beim Namensklick, Escape-Reihenfolge, Aufräumen, DE/EN-Keys). **jsdom ist hier Pflicht, nicht
+  Bequemlichkeit:** es setzt die `<label>`-Aktivierungsweitergabe um – ein Test ohne echte
+  Label-Semantik sieht den Doppel-Toggle NICHT. Der alte Stand fällt in genau diesen Punkten durch.
+
 ## Multi-Agent System
 - **AgentManager** in `agent.py`: Verwaltet Haupt- und Sub-Agents
   - `get_or_create_main()`: Erstellt/gibt Hauptagent zurueck

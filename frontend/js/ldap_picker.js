@@ -83,7 +83,11 @@
         el('ldap-picker-close').addEventListener('click', close);
         m.addEventListener('click', function (e) { if (e.target === m) close(); });
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && m.classList.contains('open')) close();
+            if (e.key !== 'Escape') return;
+            // Zuerst das obere Popup: sonst schliesst Escape den Picker UNTER der
+            // noch offenen Mitgliederliste, und die bliebe ohne Bezug stehen.
+            if (membersOpen()) { closeMembers(); return; }
+            if (m.classList.contains('open')) close();
         });
         el('ldap-picker-search').addEventListener('input', function () {
             clearTimeout(_searchTimer);
@@ -99,6 +103,7 @@
     }
 
     function close() {
+        closeMembers();   // kein verwaistes Unter-Popup zuruecklassen
         var m = el('ldap-picker-modal');
         if (m) m.classList.remove('open');
         _state = null;
@@ -168,15 +173,21 @@
             var key = (users ? r.sam : r.dn) || '';
             var main = users ? r.display : r.cn;
             var sub = users ? (r.sam + (r.mail ? ' · ' + r.mail : '')) : (r.dn + (r.desc ? ' · ' + r.desc : ''));
+            // Bei Gruppen ist der NAME zusaetzlich ein Knopf: er oeffnet die
+            // Mitgliederliste. Der restliche Eintrag schaltet die Auswahl um.
+            var mainHtml = users
+                ? '<span class="ldap-row-main">' + esc(main) + '</span>'
+                : '<button type="button" class="ldap-row-main ldap-members-btn" data-group="' + esc(key) +
+                  '" title="' + esc(window.t('ldap.show_members_title')) + '">' + esc(main) + ' 👥</button>';
             if (_state.multi) {
                 var checked = _state.selected[key.toLowerCase()] ? ' checked' : '';
                 html += '<label class="ldap-row" data-key="' + esc(key) + '" title="' + esc(key) + '">' +
                     '<input type="checkbox"' + checked + ' style="flex-shrink:0;">' +
-                    '<span class="ldap-row-main">' + esc(main) + '</span>' +
+                    mainHtml +
                     '<span class="ldap-row-sub">' + esc(sub) + '</span></label>';
             } else {
                 html += '<div class="ldap-row" data-key="' + esc(key) + '" role="button" tabindex="0" title="' + esc(key) + '">' +
-                    '<span class="ldap-row-main">' + esc(main) + '</span>' +
+                    mainHtml +
                     '<span class="ldap-row-sub">' + esc(sub) + '</span></div>';
             }
         });
@@ -184,9 +195,15 @@
         box.querySelectorAll('.ldap-row').forEach(function (row) {
             var key = row.getAttribute('data-key');
             if (_state.multi) {
+                // Der Eintrag IST ein <label> um die Checkbox – ein Klick irgendwo
+                // darin schaltet sie also schon vom Browser aus um. Frueher hat der
+                // Klick-Handler zusaetzlich selbst umgeschaltet ("if (e.target !== cb)
+                // cb.checked = !cb.checked"), und weil das <label> den Klick danach an
+                // die Checkbox weiterreicht, kippte sie ZWEIMAL – unterm Strich also
+                // gar nicht. Nur ein Klick genau auf das Kaestchen wirkte. Deshalb
+                // jetzt ausschliesslich auf 'change' hoeren und NICHT selbst schalten.
                 var cb = row.querySelector('input');
-                row.addEventListener('click', function (e) {
-                    if (e.target !== cb) cb.checked = !cb.checked;
+                cb.addEventListener('change', function () {
                     if (cb.checked) _state.selected[key.toLowerCase()] = key;
                     else delete _state.selected[key.toLowerCase()];
                 });
@@ -194,6 +211,115 @@
                 row.addEventListener('click', function () { setTarget(_state.target, key); close(); });
             }
         });
+        // Mitglieder-Knopf: darf die Auswahl NICHT umschalten und das <label>
+        // nicht aktivieren -> preventDefault + stopPropagation.
+        box.querySelectorAll('.ldap-members-btn').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                openMembers(b.getAttribute('data-group'));
+            });
+        });
+    }
+
+    // ── Mitglieder einer Gruppe (Unter-Popup ueber dem Picker) ────────────
+    function ensureMembersModal() {
+        if (el('ldap-members-modal')) return;
+        var m = document.createElement('div');
+        m.id = 'ldap-members-modal';
+        m.className = 'modal';
+        m.style.zIndex = '10003';   // ueber dem Picker (10002)
+        m.innerHTML =
+            '<div class="modal-content glass" style="max-width:560px;">' +
+              '<div class="modal-header">' +
+                '<h2 id="ldap-members-title">' + window.t('ldap.members_title') + '</h2>' +
+                '<button class="btn-icon" id="ldap-members-close" aria-label="' + window.t('common.close') + '">' +
+                  '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>' +
+                '</button>' +
+              '</div>' +
+              '<div class="modal-body" style="overflow-y:auto;">' +
+                '<div id="ldap-members-dn" style="font-size:0.74rem;color:var(--text-muted);word-break:break-all;margin-bottom:6px;"></div>' +
+                '<div id="ldap-members-info" style="font-size:0.78rem;color:var(--text-muted);min-height:1.2em;margin-bottom:6px;"></div>' +
+                '<div id="ldap-members-list" style="max-height:46vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px;"></div>' +
+                '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:8px;" data-i18n="ldap.members_hint">' +
+                  window.t('ldap.members_hint') +
+                '</div>' +
+              '</div>' +
+            '</div>';
+        document.body.appendChild(m);
+        el('ldap-members-close').addEventListener('click', closeMembers);
+        m.addEventListener('click', function (e) { if (e.target === m) closeMembers(); });
+    }
+
+    function closeMembers() {
+        var m = el('ldap-members-modal');
+        if (m) m.classList.remove('open');
+    }
+
+    function membersOpen() {
+        var m = el('ldap-members-modal');
+        return !!(m && m.classList.contains('open'));
+    }
+
+    function openMembers(group) {
+        if (!group) return;
+        ensureMembersModal();
+        el('ldap-members-title').textContent = shortDn(group);
+        el('ldap-members-dn').textContent = group;
+        el('ldap-members-list').innerHTML = '';
+        var inf = el('ldap-members-info');
+        inf.style.color = 'var(--text-muted)';
+        inf.textContent = window.t('ldap.members_loading');
+        el('ldap-members-modal').classList.add('open');
+
+        var payload = { group: group };
+        // Dasselbe On-Demand-Passwort wie die Suche – sonst muesste der Admin es
+        // fuer die Mitgliederliste ein zweites Mal eingeben.
+        if (_cred.password) { payload.password = _cred.password; payload.bind_user = _cred.user; }
+        fetch('/api/ldap/group_members', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() },
+            body: JSON.stringify(payload)
+        }).then(function (r) {
+            return r.json().then(function (j) { return { status: r.status, j: j }; });
+        }).then(function (res) {
+            if (res.status !== 200) {
+                inf.style.color = 'var(--danger)';
+                inf.textContent = (res.j && (res.j.error === 'NO_CREDENTIALS'
+                    ? window.t('ldap.cred_hint')
+                    : res.j.error)) || (window.t('common.error') + ' ' + res.status);
+                return;
+            }
+            renderMembers(res.j);
+        }).catch(function () {
+            inf.style.color = 'var(--danger)';
+            inf.textContent = window.t('ldap.network_error');
+        });
+    }
+
+    function renderMembers(d) {
+        var list = el('ldap-members-list');
+        var rows = (d && d.members) || [];
+        var nUsers = rows.filter(function (r) { return r.kind !== 'group'; }).length;
+        var nGroups = rows.length - nUsers;
+        var inf = el('ldap-members-info');
+        inf.style.color = 'var(--text-muted)';
+        inf.textContent = nUsers + ' ' + window.t('ldap.members_users') +
+            (nGroups ? ' · ' + nGroups + ' ' + window.t('ldap.members_groups') : '');
+        if (!rows.length) {
+            list.innerHTML = '<div style="padding:14px;color:var(--text-muted);font-size:0.85rem;">' +
+                window.t('ldap.members_empty') + '</div>';
+            return;
+        }
+        list.innerHTML = rows.map(function (r) {
+            var isGrp = r.kind === 'group';
+            var sub = (r.sam || '') + (r.mail ? ' · ' + r.mail : '');
+            return '<div class="ldap-row" style="cursor:default;">' +
+                '<span style="flex-shrink:0;">' + (isGrp ? '🗂️' : '👤') + '</span>' +
+                '<span class="ldap-row-main">' + esc(r.display) + '</span>' +
+                '<span class="ldap-row-sub">' + esc(sub) +
+                (isGrp ? ' · ' + esc(window.t('ldap.members_nested')) : '') + '</span></div>';
+        }).join('');
     }
 
     function applyMulti() {

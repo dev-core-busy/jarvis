@@ -537,7 +537,8 @@ def _login_still_allowed(username: str) -> bool:
     Grenzen: rein GRUPPEN-basierte AD-Freigaben lassen sich ohne aktiven LDAP-Bind
     (= ohne das Benutzerpasswort) nicht live pruefen und bleiben bis zum Abmelden
     bestehen. Die AD-Benutzer-Whitelist (ad_allowed_users) und ALLOWED_USERS werden
-    dagegen sofort durchgesetzt."""
+    dagegen sofort durchgesetzt – ebenso der Fall "gar nichts freigegeben", der
+    seit 2026-07-29 NIEMAND bedeutet (siehe _ad_user_allowed)."""
     # Letzte Aktivitaet fuer ALLE angemeldeten Benutzer festhalten (Grundlage fuer
     # die Online-Anzeige im Benutzerchat = "hat eine aktive Portal-Session").
     _ad_seen_users[_norm_login(username)] = time.time()
@@ -551,13 +552,27 @@ def _login_still_allowed(username: str) -> bool:
     if not (ad_srv and ad_dom):
         # Kein LDAP und kein lokaler User → keine gueltige Berechtigungsgrundlage mehr
         return False
-    allowed_users_raw = config.get_setting("ad_allowed_users", "")
-    if allowed_users_raw.strip():
-        # Benutzer-Whitelist konfiguriert → Mitgliedschaft ist allein entscheidend
-        # (gleiche Logik wie _ad_user_allowed beim Login).
+    allowed_users_raw = config.get_setting("ad_allowed_users", "").strip()
+    allowed_group_raw = config.get_setting("ad_allowed_group", "").strip()
+    if not allowed_users_raw and not allowed_group_raw:
+        # Nichts freigegeben = niemand darf. Muss AUCH hier stehen, sonst behielte
+        # eine bestehende Sitzung ihren Zugriff, bis der Benutzer sich abmeldet –
+        # das Leeren der Felder waere dann eine Massnahme ohne Wirkung.
+        return False
+    if allowed_users_raw:
+        # Benutzer-Whitelist konfiguriert (gleiche ODER-Logik wie _ad_user_allowed
+        # beim Login): Eintrag in der Liste genuegt.
         allowed = {_norm_login(u) for u in allowed_users_raw.split(",") if u.strip()}
-        return _norm_login(username) in allowed
-    # Nur Gruppen-Filter oder keine Einschraenkung → Login-Entscheidung bleibt bestehen
+        if _norm_login(username) in allowed:
+            return True
+        # Nicht in der Liste: ist ZUSAETZLICH eine Gruppe konfiguriert, kann der
+        # Benutzer ueber sie angemeldet sein. Das ist hier nicht pruefbar (kein
+        # Benutzer-Bind ohne Passwort), also bleibt die Login-Entscheidung stehen –
+        # sonst wuerde jeder ueber die Gruppe angemeldete Benutzer beim naechsten
+        # Request wieder hinausgeworfen. Den Entzug uebernimmt die periodische
+        # Revalidierung (_revalidate_ad_groups_once) mit dem Service-Konto.
+        return bool(allowed_group_raw)
+    # Nur Gruppen-Filter → Login-Entscheidung bleibt bestehen (live nicht pruefbar)
     return True
 
 
@@ -797,30 +812,55 @@ def _mask_key(key: str) -> str:
 
 
 def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
-    """Prüft AD-Whitelist nach erfolgreichem Bind.
+    """Prüft die Anmeldeberechtigung eines AD-Benutzers nach erfolgreichem Bind.
 
-    Gibt True zurück wenn:
-    - Weder Benutzerliste noch Gruppe konfiguriert (alle AD-User erlaubt)
+    EXPLIZITES OPT-IN: Anmelden darf NUR, wer eingetragen ist –
     - Benutzername in ad_allowed_users-Liste
-    - User ist Mitglied der ad_allowed_group
-    """
-    import ldap3
+    - ODER Mitglied einer der ad_allowed_group-Gruppen
 
+    Liste und Gruppe sind ODER-verknuepft: BEIDE sind Freigabewege, jeder
+    genuegt allein. Das ist dieselbe Semantik wie bei allen anderen
+    Berechtigungsfeldern (Wissens-Editoren, Internet, Admins, SAP).
+    FRUEHER hat eine nicht-leere Benutzerliste die Gruppe komplett verdeckt
+    (``return False``, ohne den Gruppen-Zweig je zu erreichen) – wer neben der
+    Liste eine Gruppe eintrug, sperrte damit alle Gruppenmitglieder aus, die
+    nicht zusaetzlich in der Liste standen. Die Oberflaeche versprach sogar das
+    Gegenteil ("Gruppe hat Vorrang"), der Fehler war also von aussen nicht
+    erklaerbar.
+
+    Sind WEDER Liste NOCH Gruppe gesetzt, darf KEIN AD-Benutzer sich anmelden
+    (Vorgabe seit 2026-07-29 – vorher hiess leer "alle Domaenen-Benutzer", also
+    das genaue Gegenteil dessen, was die uebrigen Felder desselben Panels unter
+    leer verstehen). Der lokale Benutzer ``jarvis`` ist davon nicht betroffen:
+    er authentifiziert per PAM, bevor AD ueberhaupt befragt wird – damit bleibt
+    eine Fehlkonfiguration immer reparierbar.
+    """
     # Benutzernamen normalisieren (nur den sAMAccountName, ohne Domain-Teil)
-    plain = username.split("@")[0].split("\\")[-1].lower()
+    plain = _norm_login(username)
+
+    allowed_users_raw = config.get_setting("ad_allowed_users", "").strip()
+    allowed_group_raw = config.get_setting("ad_allowed_group", "").strip()
+
+    # ── Nichts eingetragen → niemand darf sich anmelden ───────────────
+    if not allowed_users_raw and not allowed_group_raw:
+        print(f"[AUTH] AD-Freigabe: '{plain}' abgelehnt – es ist WEDER ein Benutzer NOCH "
+              f"eine Gruppe zur Anmeldung freigegeben (Einstellungen → Sicherheit → "
+              f"Berechtigungen → Anmeldung)", flush=True)
+        return False
 
     # ── Benutzerliste prüfen ──────────────────────────────────────────
-    allowed_users_raw = config.get_setting("ad_allowed_users", "")
-    if allowed_users_raw.strip():
+    if allowed_users_raw:
         allowed = {_norm_login(u) for u in allowed_users_raw.split(",") if u.strip()}
-        if plain not in allowed:
+        if plain in allowed:
+            print(f"[AUTH] AD-Whitelist: '{plain}' in Benutzerliste – Zugriff erlaubt", flush=True)
+            return True
+        if not allowed_group_raw:
             print(f"[AUTH] AD-Whitelist: '{plain}' nicht in erlaubten Benutzern {allowed}", flush=True)
             return False
-        print(f"[AUTH] AD-Whitelist: '{plain}' in Benutzerliste – Zugriff erlaubt", flush=True)
-        return True
+        # Nicht in der Liste, aber eine Gruppe ist konfiguriert → zweiter Weg
+        print(f"[AUTH] AD-Whitelist: '{plain}' nicht in Benutzerliste – pruefe Gruppen", flush=True)
 
     # ── Gruppen-Filter prüfen (eine ODER mehrere Gruppen, zeilengetrennt) ──
-    allowed_group_raw = config.get_setting("ad_allowed_group", "").strip()
     if allowed_group_raw:
         # Mehrere Gruppen-DNs sind durch Zeilenumbruch getrennt (DNs enthalten
         # selbst Kommas, daher NICHT komma-getrennt). Ein einzelner Legacy-DN
@@ -829,14 +869,24 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
         # LDAP-Sonderzeichen escapen (verhindert LDAP-Injection)
         safe_plain = plain.replace("\\", "\\5c").replace("*", "\\2a").replace(
             "(", "\\28").replace(")", "\\29").replace("\x00", "\\00")
-        # User-DN über sAMAccountName suchen
-        conn.search(
-            search_base=base_dn,
-            search_filter=f"(sAMAccountName={safe_plain})",
-            attributes=["memberOf", "dn"],
-        )
+        # User-DN über sAMAccountName suchen. Die Suche laeuft ueber den Bind des
+        # ANMELDENDEN Benutzers – scheitert sie (Leserecht, Referral, DC-Eigenheit),
+        # wird das hier ausdruecklich protokolliert. Ohne das eigene try/except
+        # flog die Ausnahme bis in authenticate_linux_user und erschien nur als
+        # generisches "[AUTH] AD Fehler", was nach einem Netzproblem aussieht.
+        try:
+            conn.search(
+                search_base=base_dn,
+                search_filter=f"(sAMAccountName={safe_plain})",
+                attributes=["memberOf"],
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[AUTH] AD-Gruppe: Suche fuer '{plain}' unter '{base_dn}' "
+                  f"fehlgeschlagen ({type(e).__name__}: {e}) – Zugriff verweigert", flush=True)
+            return False
         if not conn.entries:
-            print(f"[AUTH] AD-Gruppe: User '{plain}' nicht im Directory gefunden", flush=True)
+            print(f"[AUTH] AD-Gruppe: User '{plain}' nicht im Directory gefunden "
+                  f"(Suchbasis '{base_dn}' – passt die Domaene?)", flush=True)
             return False
         member_of = conn.entries[0]["memberOf"].values if "memberOf" in conn.entries[0] else []
         member_lower = [g.lower() for g in member_of]
@@ -850,8 +900,9 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
         print(f"[AUTH] AD-Gruppe: '{plain}' NICHT Mitglied der erlaubten Gruppen {groups} – Zugriff verweigert", flush=True)
         return False
 
-    # ── Keine Einschränkung konfiguriert → alle AD-User erlaubt ──────
-    return True
+    # Nicht erreichbar: "keine Einschraenkung" ist oben abgehandelt, jeder
+    # andere Fall endet in einem der beiden Zweige. Fail-closed als Netz.
+    return False
 
 
 # ─── Wissens-Bearbeitungsrechte ───────────────────────────────────────
@@ -1095,9 +1146,10 @@ def _revalidate_ad_groups_once() -> dict:
     """Ein Revalidierungs-Durchlauf (blocking – via asyncio.to_thread aufrufen).
 
     Prueft alle in den letzten 24h aktiven AD-Benutzer per Service-Konto-Bind.
-    Widerrufen wird NUR im reinen Gruppen-Modus (ad_allowed_group gesetzt und
-    KEINE ad_allowed_users-Liste – die Liste wird bereits pro Request in
-    _login_still_allowed durchgesetzt)."""
+    Widerrufen wird, sobald ad_allowed_group gesetzt ist – aber NIE fuer Benutzer,
+    die in ad_allowed_users stehen: Liste und Gruppe sind ODER-verknuepft, ein
+    gelisteter Benutzer braucht die Gruppe nicht. (Die Liste selbst wird bereits
+    pro Request in _login_still_allowed durchgesetzt.)"""
     res = {"checked": 0, "revoked": [], "skipped": ""}
     now = time.time()
     users = sorted({u for u, ts in list(_ad_seen_users.items())
@@ -1116,7 +1168,11 @@ def _revalidate_ad_groups_once() -> dict:
 
     allowed_users_raw = config.get_setting("ad_allowed_users", "").strip()
     allowed_group = config.get_setting("ad_allowed_group", "").strip()
-    enforce_login = bool(allowed_group) and not allowed_users_raw
+    # Gruppen-Mitgliedschaft wird nachgeprueft, sobald eine Gruppe konfiguriert ist –
+    # auch wenn zusaetzlich eine Benutzerliste existiert (ODER-Verknuepfung). Wer in
+    # der Liste steht, ist davon ausgenommen (allowed_set).
+    enforce_login = bool(allowed_group)
+    allowed_set = {_norm_login(u) for u in allowed_users_raw.split(",") if u.strip()}
     try:
         for plain in users:
             safe = plain.replace("\\", "\\5c").replace("*", "\\2a").replace(
@@ -1139,7 +1195,8 @@ def _revalidate_ad_groups_once() -> dict:
                 _knowledge_editor_cache[plain] = _check_knowledge_edit_permission_with_conn(plain, conn, base_dn)
                 _internet_access_cache[plain] = _check_internet_access_with_conn(plain, conn, base_dn)
                 _admin_access_cache[plain] = _check_admin_with_conn(plain, conn, base_dn)
-            if enforce_login and (not found or not _member_of_any_group(member_of, allowed_group)):
+            if (enforce_login and plain not in allowed_set
+                    and (not found or not _member_of_any_group(member_of, allowed_group))):
                 _revoked_logins[plain] = int(now)
                 res["revoked"].append(plain)
                 print(f"[AUTH] Revalidierung: Login-Gruppe entzogen -> Sitzung widerrufen: '{plain}'", flush=True)
@@ -3142,6 +3199,30 @@ async def broker_audit(n: int = 100, user: str = Depends(require_local_auth)):
     return JSONResponse({"ok": True, "entries": res.get("entries") or []})
 
 
+def _ldap_creds(body: dict, admin_user: str):
+    """Bind-Credentials fuer die Verzeichnissuche: Service-Konto (dann (None, None)),
+    sonst On-Demand aus dem Body. Wirft RuntimeError('NO_CREDENTIALS'), wenn weder
+    Service-Konto noch Passwort vorliegt."""
+    svc = (config.get_setting("ad_bind_user", "") or "").strip()
+    if svc:
+        return None, None
+    bind_pw = body.get("password") or ""
+    if not bind_pw:
+        raise RuntimeError("NO_CREDENTIALS")
+    return (body.get("bind_user") or admin_user or "").strip(), bind_pw
+
+
+def _ldap_error_response(e: RuntimeError):
+    """Einheitliche Fehlerabbildung der Verzeichnis-Endpunkte: 428 = Passwort noetig
+    (die UI fragt dann danach), 401 = Bind abgelehnt, 400 = alles andere."""
+    code = str(e)
+    if code == "NO_CREDENTIALS":
+        return JSONResponse({"error": "NO_CREDENTIALS"}, status_code=428)
+    if code.startswith("BIND_FAILED"):
+        return JSONResponse({"error": "BIND_FAILED", "detail": code}, status_code=401)
+    return JSONResponse({"error": code}, status_code=400)
+
+
 async def _ldap_dir_search(request: Request, kind: str, admin_user: str):
     """Gemeinsame Logik für die AD-Verzeichnissuche (User/Gruppen). Nutzt das
     Service-Konto, falls gesetzt; sonst On-Demand-Credentials aus dem Body."""
@@ -3152,25 +3233,13 @@ async def _ldap_dir_search(request: Request, kind: str, admin_user: str):
     except Exception:
         body = {}
     q = (body.get("q") or "").strip()
-    svc = (config.get_setting("ad_bind_user", "") or "").strip()
-    bind_user = None
-    bind_pw = None
-    if not svc:
-        bind_pw = body.get("password") or ""
-        bind_user = (body.get("bind_user") or admin_user or "").strip()
-        if not bind_pw:
-            return JSONResponse({"error": "NO_CREDENTIALS"}, status_code=428)
     fn = ldap_directory.search_users if kind == "users" else ldap_directory.search_groups
     try:
+        bind_user, bind_pw = _ldap_creds(body, admin_user)
         rows = await _asyncio.to_thread(fn, q, bind_user, bind_pw)
         return JSONResponse({kind: rows, "count": len(rows)})
     except RuntimeError as e:
-        code = str(e)
-        if code == "NO_CREDENTIALS":
-            return JSONResponse({"error": "NO_CREDENTIALS"}, status_code=428)
-        if code.startswith("BIND_FAILED"):
-            return JSONResponse({"error": "BIND_FAILED", "detail": code}, status_code=401)
-        return JSONResponse({"error": code}, status_code=400)
+        return _ldap_error_response(e)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": str(e)[:200]}, status_code=500)
 
@@ -3188,6 +3257,37 @@ async def ldap_search_groups(request: Request, user: str = Depends(require_local
     """Sucht AD-Gruppen für den Gruppen-Picker (Admin). Body: {q, [password], [bind_user]}.
     Antwort: {groups:[{cn,dn,desc}], count} oder 428 NO_CREDENTIALS / 401 BIND_FAILED."""
     return await _ldap_dir_search(request, "groups", user)
+
+
+@app.post("/api/ldap/group_members")
+async def ldap_group_members(request: Request, user: str = Depends(require_local_auth)):
+    """Listet die DIREKTEN Mitglieder einer AD-Gruppe (Admin) – für die
+    Mitglieder-Ansicht im Gruppen-Picker.
+
+    Body: ``{group|dn, [password], [bind_user]}`` (``group`` darf DN oder blosser
+    CN sein). Antwort: ``{cn, dn, members:[{sam,display,mail,kind}], count}`` mit
+    ``kind`` = ``user`` | ``group`` (verschachtelte Gruppe), oder
+    428 NO_CREDENTIALS / 401 BIND_FAILED / 400 bei unbekannter Gruppe.
+
+    Nur direkte Mitgliedschaften (``memberOf``) – dieselbe Grundlage, die auch die
+    Anmeldung prüft; Mitglieder über die Primärgruppe sind dort wie hier unsichtbar."""
+    from backend import ldap_directory
+    import asyncio as _asyncio
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    grp = (body.get("group") or body.get("dn") or "").strip()
+    if not grp:
+        return JSONResponse({"error": "Keine Gruppe angegeben."}, status_code=400)
+    try:
+        bind_user, bind_pw = _ldap_creds(body, user)
+        res = await _asyncio.to_thread(ldap_directory.group_members, grp, bind_user, bind_pw)
+        return JSONResponse(res)
+    except RuntimeError as e:
+        return _ldap_error_response(e)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)[:200]}, status_code=500)
 
 
 @app.get("/api/cert")
@@ -3603,9 +3703,15 @@ async def get_ad_status(user: str = Depends(require_auth)):
         "allowed_users": allowed_users,
         "allowed_group": allowed_group,
         "access_mode": (
+            # Liste UND Gruppe sind ODER-verknuepft – das ist ein eigener Modus.
+            # Frueher meldete der Endpunkt hier "group", obwohl die Benutzerliste
+            # entschied: die Anzeige behauptete das Gegenteil der Wirkung.
+            "users_group" if allowed_users and allowed_group else
             "group"   if allowed_group else
             "users"   if allowed_users else
-            "open"    # alle AD-User erlaubt
+            # Nichts eingetragen = NIEMAND (explizites Opt-in, wie bei den uebrigen
+            # Feldern dieses Panels). Hiess bis 2026-07-29 "open" = alle AD-User.
+            "none"
         ),
         "knowledge_editors": knowledge_editors,
         "knowledge_editors_group": knowledge_editors_group,

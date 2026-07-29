@@ -21,7 +21,7 @@
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=143">
+    <link rel="stylesheet" href="/static/css/style.css?v=144">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -2852,18 +2852,18 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
                                         <span data-i18n="security.ad_users_label">Erlaubte Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n-html="security.ad_users_hint">– kommagetrennt, z.B. <code>mueller,schmidt</code> (leer = alle AD-Benutzer)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n-html="security.ad_users_hint">– kommagetrennt, z.B. <code>mueller,schmidt</code> (leer = niemand)</span>
                                     </label>
-                                    <input type="text" id="ad-allowed-users" data-i18n-placeholder="security.ad_users_ph" placeholder="Leer lassen für alle Domänen-Benutzer" style="width:50%;box-sizing:border-box;">
+                                    <input type="text" id="ad-allowed-users" data-i18n-placeholder="security.ad_users_ph" placeholder="Leer = niemand darf sich anmelden" style="width:50%;box-sizing:border-box;">
                                 </div>
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
                                         <span data-i18n="security.ad_group_label">Erlaubte Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
                                     </label>
                                     <textarea id="ad-allowed-group" rows="1" placeholder="z.B. CN=Jarvis-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;" data-i18n="security.ad_group_warning">
-                                        ⚠ Wenn eine Gruppe eingetragen ist, wird die Benutzerliste ignoriert.
+                                        Anmelden darf, wer in der Benutzerliste steht ODER Mitglied einer dieser Gruppen ist – beide Felder sind Freigabewege, jeder genügt allein. Beide leer = niemand (nur das lokale Konto jarvis bleibt möglich).
                                     </div>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;" data-i18n="security.ad_reval_hint">
                                         Mit hinterlegtem Service-Konto (Verzeichnis-Suche) wird die Gruppen-Mitgliedschaft aktiver Benutzer automatisch nachgeprüft (Standard: alle 10 Min.) – ein Entzug meldet die Sitzung ohne Neuanmeldung ab.
@@ -2891,7 +2891,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
                                         <span>Editor-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
                                     </label>
                                     <textarea id="ad-knowledge-editors-group" rows="1" placeholder="z.B. CN=Knowledge-Editors,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
@@ -2920,7 +2920,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
                                         <span>SAP-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
                                     </label>
                                     <textarea id="sap-allowed-group" rows="1" placeholder="z.B. CN=SAP-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
@@ -2949,7 +2949,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
                                         <span>Internet-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
                                     </label>
                                     <textarea id="ad-internet-group" rows="1" placeholder="z.B. CN=Internet-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
@@ -2997,7 +2997,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div class="form-group" style="margin-bottom:8px;">
                                     <label>
                                         <span>Admin-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– hat Vorrang gegenüber Benutzerliste wenn beide gesetzt</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
                                     </label>
                                     <textarea id="ad-admins-group" rows="1" placeholder="z.B. CN=Jarvis-Admins,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
                                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
@@ -3075,7 +3075,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             hint.style.display   = 'none';
                                             return;
                                         }
-                                        const modeLabels = { open: window.t('security.ad_mode_open'), users: window.t('security.ad_mode_users'), group: window.t('security.ad_mode_group') };
+                                        const modeLabels = { none: window.t('security.ad_mode_none'), users: window.t('security.ad_mode_users'), group: window.t('security.ad_mode_group'), users_group: window.t('security.ad_mode_users_group') };
                                         if (d.reachable === false) {
                                             // Konfiguriert heisst NICHT erreichbar: rot statt gruen
                                             dot.style.background = '#ef4444';
@@ -3087,11 +3087,11 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             txt.textContent = window.t('security.ad_active_label') + ' · ' + d.server + ' · ' + d.domain + ' · ' + (modeLabels[d.access_mode] || d.access_mode);
                                         }
                                         hint.style.display     = 'block';
-                                        if (d.access_mode === 'open') {
+                                        if (d.access_mode === 'none') {
                                             hint.style.borderColor = '#f59e0b';
                                             hint.style.background  = 'rgba(var(--warning-rgb),0.08)';
                                             hint.style.color       = '#f59e0b';
-                                            hint.textContent       = window.t('security.ad_warn_open');
+                                            hint.textContent       = window.t('security.ad_warn_none');
                                         } else if (d.access_mode === 'users') {
                                             hint.style.borderColor = '#34d399';
                                             hint.style.background  = 'rgba(52,211,153,0.08)';
@@ -3102,6 +3102,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             hint.style.background  = 'rgba(var(--accent-rgb),0.08)';
                                             hint.style.color       = '#a5b4fc';
                                             hint.textContent       = window.t('security.ad_group_active') + ' ' + d.allowed_group;
+                                        } else if (d.access_mode === 'users_group') {
+                                            // Liste UND Gruppe: ODER-verknuepft. Beide Werte nennen, damit
+                                            // ablesbar ist, dass KEINES der Felder das andere aushebelt.
+                                            hint.style.borderColor = '#6366f1';
+                                            hint.style.background  = 'rgba(var(--accent-rgb),0.08)';
+                                            hint.style.color       = '#a5b4fc';
+                                            hint.textContent       = window.t('security.ad_users_group_active') + ' ' + d.allowed_users +
+                                                                     ' ' + window.t('security.ad_or_group') + ' ' +
+                                                                     (d.allowed_group || '').split('\n').join(', ');
                                         }
                                         // Wissens-Editor Status
                                         const kst = document.getElementById('ad-knowledge-status');
@@ -3514,7 +3523,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=134"></script>
+    <script src="/static/js/i18n.js?v=137"></script>
     <script src="/static/js/cron.js?v=19"></script>
     <script src="/static/js/context.js?v=6"></script>
     <script src="/static/js/audit.js?v=3"></script>
@@ -3535,7 +3544,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/branding.js?v=22"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=23"></script>
-    <script src="/static/js/ldap_picker.js?v=7"></script>
+    <script src="/static/js/ldap_picker.js?v=8"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/app.js?v=183"></script>
 </body>

@@ -2286,6 +2286,19 @@ body.light .modal-header h2 {
 .ldap-row input[type="checkbox"] { margin-right: 4px; }
 .ldap-row-main { font-size: 0.88rem; color: var(--text-primary); font-weight: 500; }
 .ldap-row-sub { font-size: 0.74rem; color: var(--text-muted); }
+/* Gruppenname als Knopf: oeffnet die Mitgliederliste. Sieht wie Text aus, ist
+   aber anklickbar – daher Unterstreichung erst beim Hover (sonst liest der
+   ganze Treffer wie ein Link, obwohl ein Klick daneben die Auswahl umschaltet). */
+.ldap-members-btn {
+    background: none; border: none; padding: 0; margin: 0;
+    font: inherit; font-size: 0.88rem; font-weight: 500;
+    color: var(--text-primary); cursor: pointer; text-align: left;
+    text-decoration: underline dotted rgba(var(--fg-rgb), 0.35);
+    text-underline-offset: 3px;
+}
+.ldap-members-btn:hover, .ldap-members-btn:focus-visible {
+    color: var(--accent); text-decoration: underline solid var(--accent);
+}
 
 /* ── Token-Liste (Chips mit ✕) für AD-Felder ── */
 .token-list { margin: 2px 0 2px; }

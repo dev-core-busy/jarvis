@@ -97,6 +97,72 @@ def search_users(query, bind_user=None, bind_password=None, limit=100):
             pass
 
 
+def group_members(group, bind_user=None, bind_password=None, limit=500):
+    """Listet die DIREKTEN Mitglieder einer Gruppe (Benutzer und verschachtelte
+    Gruppen). Gibt ``{"cn","dn","members":[{sam,display,mail,kind}],"count"}`` zurück.
+
+    ``group`` darf ein DN ODER ein blosser CN sein – die Token-Liste im Frontend
+    erlaubt beides (Auswahl liefert den DN, manuelle Eingabe oft nur den Namen).
+    Ist es kein DN (kein ``=`` enthalten), wird erst der DN dazu gesucht.
+
+    Bewusst ueber ``(memberOf=<dn>)`` statt ueber das ``member``-Attribut der
+    Gruppe: dessen Werte liefert AD ab ~1500 Eintraegen nur in Haeppchen
+    (Range-Retrieval), die Liste waere dann stillschweigend unvollstaendig.
+
+    Bewusst NUR direkte Mitgliedschaften: genau die prueft auch die Anmeldung
+    (``_ad_user_allowed`` vergleicht ``memberOf``). Eine Liste, die zusaetzlich
+    verschachtelte Mitglieder zeigt, wuerde Zugriff versprechen, den der Login
+    verweigert. Verschachtelte Gruppen erscheinen daher als Eintrag mit
+    ``kind="group"`` – sichtbar, aber nicht als Benutzer ausgewiesen.
+    Ebenfalls nicht enthalten: Mitglieder ueber die PRIMAERGRUPPE
+    (``primaryGroupID``, typisch "Domaenen-Benutzer") – die stehen bei AD nicht
+    in ``memberOf``, weder hier noch beim Login.
+    """
+    conn, base = _bind(bind_user, bind_password)
+    try:
+        g = (group or "").strip()
+        dn, cn = "", ""
+        if "=" in g:
+            dn = g
+        else:
+            # Blosser Name → DN nachschlagen
+            conn.search(search_base=base,
+                        search_filter="(&(objectClass=group)(cn=%s))" % _esc(g),
+                        attributes=["cn", "distinguishedName"], paged_size=2)
+            if not conn.entries:
+                raise RuntimeError("Gruppe '%s' nicht gefunden." % g[:80])
+            dn = _val(conn.entries[0], "distinguishedName") or str(conn.entries[0].entry_dn)
+            cn = _val(conn.entries[0], "cn")
+        if not cn:
+            cn = dn.split(",")[0][3:] if dn[:3].lower() == "cn=" else dn.split(",")[0]
+
+        conn.search(search_base=base,
+                    search_filter="(memberOf=%s)" % _esc(dn),
+                    attributes=["sAMAccountName", "displayName", "mail", "objectClass"],
+                    paged_size=limit)
+        out = []
+        for e in conn.entries:
+            classes = []
+            try:
+                if "objectClass" in e and e["objectClass"]:
+                    classes = [str(c).lower() for c in e["objectClass"].values]
+            except Exception:  # noqa: BLE001
+                pass
+            sam = _val(e, "sAMAccountName")
+            out.append({"sam": sam,
+                        "display": _val(e, "displayName") or sam or str(e.entry_dn),
+                        "mail": _val(e, "mail"),
+                        "kind": "group" if "group" in classes else "user"})
+        # Benutzer zuerst, danach verschachtelte Gruppen – jeweils alphabetisch
+        out.sort(key=lambda x: (x["kind"] != "user", x["display"].lower()))
+        return {"cn": cn, "dn": dn, "members": out[:limit], "count": len(out)}
+    finally:
+        try:
+            conn.unbind()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def search_groups(query, bind_user=None, bind_password=None, limit=100):
     q = _esc((query or "").strip())
     conn, base = _bind(bind_user, bind_password)

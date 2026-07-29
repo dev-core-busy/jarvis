@@ -194,6 +194,11 @@
         loadReminders: function () {
             var ta = $('sec-rem-list'), st = $('sec-rem-status');
             if (!ta) return;
+            // Abschnitt ist ausgeblendet, wenn kein Messenger-Skill aktiv ist
+            // (app.js::updateReminderSectionVisibility) – dann auch nicht abfragen.
+            // Wird ein Kanal eingeschaltet, ruft jene Funktion loadReminders() nach.
+            var box = $('sec-sect-rem-box');
+            if (box && box.style.display === 'none') return;
             fetch('/api/reminders/senders', { headers: authHeaders() })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {

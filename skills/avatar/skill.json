@@ -13,9 +13,10 @@
         "graphic": {
             "type": "string",
             "label": "Figur / Grafik",
-            "description": "Welche Avatar-Grafik angezeigt wird. 'clippy' = klassische Büroklammer (Sprite-Animation), 'placeholder' = schlichte, leicht austauschbare SVG-Figur. Eigene Sprite-Sätze im clippy.js-Format unter frontend/vendor/clippy/agents/<Name> ablegen und hier eintragen.",
-            "enum": ["clippy", "placeholder"],
-            "default": "clippy",
+            "description": "Welche Figur angezeigt wird. 'placeholder' = schlichte SVG-Figur (übernimmt die Branding-Farben), 'branding' = das im Branding-Skill hochgeladene Firmenlogo, alle weiteren Einträge sind Sprite-Sätze im clippy.js-Format. Eigene Grafik: Ordner mit agent.js + map.png unter frontend/vendor/clippy/agents/<Name> ablegen – er erscheint hier automatisch, ohne Code-Änderung und ohne Dienst-Neustart.",
+            "enum": ["placeholder", "branding", "Clippy"],
+            "enum_source": "/api/avatar/graphics",
+            "default": "Clippy",
             "required": false
         },
         "position": {
@@ -50,6 +51,40 @@
             "label": "Beim Laden geöffnet",
             "description": "Zeigt die Sprechblase des Avatars direkt beim Laden der Seite (sonst nur die Figur, Klick öffnet).",
             "default": false,
+            "required": false
+        },
+        "answer_mode": {
+            "type": "string",
+            "label": "Antwortquelle",
+            "description": "'agent' = voller Assistent mit Werkzeugen und Wissensdatenbank (wie im Chat). 'sources' = antwortet AUSSCHLIESSLICH aus den eigenen Antworten unten und den hinterlegten Confluence-Seiten – ohne Werkzeuge und ohne eigenes Vorwissen. Das Sprachmodell wird dabei weiterhin genutzt, um die Frage zu verstehen und die Antwort zu formulieren.",
+            "enum": ["agent", "sources"],
+            "default": "agent",
+            "required": false
+        },
+        "confluence_pages": {
+            "type": "text",
+            "label": "Confluence-Seiten (nur bei Antwortquelle 'sources')",
+            "description": "Je Zeile eine Confluence-Seite – als URL aus dem Browser (…/pages/123456/Titel) oder als reine Seiten-ID. Benötigt einen konfigurierten Confluence-Skill.",
+            "required": false
+        },
+        "include_subpages": {
+            "type": "boolean",
+            "label": "Unterseiten mitlesen",
+            "description": "Liest zusätzlich alle Unterseiten der angegebenen Seiten (rekursiv, max. 40 je Startseite). Für mehrseitige Handbücher.",
+            "default": true,
+            "required": false
+        },
+        "use_rag": {
+            "type": "boolean",
+            "label": "Wissensdatenbank (RAG) einbeziehen",
+            "description": "Zieht im Modus 'sources' zusätzlich die interne Wissensdatenbank als Quelle heran. Aus = ausschließlich eigene Antworten und Confluence.",
+            "default": false,
+            "required": false
+        },
+        "no_answer_text": {
+            "type": "text",
+            "label": "Antwort, wenn nichts passt",
+            "description": "Wird ausgegeben, wenn weder die eigenen Antworten noch die Quellen die Frage abdecken (leer = Standardhinweis). Verhindert erfundene Antworten.",
             "required": false
         },
         "overrides": {

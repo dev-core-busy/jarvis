@@ -4881,6 +4881,25 @@ async def avatar_get_config(request: Request):
     return JSONResponse(_av.public_config())
 
 
+@app.get("/api/avatar/graphics")
+async def avatar_graphics(request: Request):
+    """Auswaehlbare Avatar-Grafiken (eingebaut + gefundene Sprite-Saetze).
+
+    Speist die Auswahlliste im Einstellungs-Reiter (`enum_source` im Manifest).
+    Wird bei JEDEM Aufruf frisch von der Platte gelesen, damit ein neu
+    abgelegter Sprite-Ordner ohne Code-Aenderung und ohne Dienst-Neustart
+    auftaucht.
+    """
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    xkey = request.headers.get("X-API-Key", "")
+    if not (verify_token(token) or verify_token(xkey) or _verify_agent_api_key(request)):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    from backend import avatar as _av
+    return JSONResponse({"options": _av.available_graphics(),
+                         "builtin": _av.BUILTIN_GRAPHICS,
+                         "sprites": _av.sprite_agents()})
+
+
 @app.post("/api/avatar/ask")
 async def avatar_ask(request: Request):
     """Beantwortet eine Avatar-Frage.
@@ -4954,6 +4973,24 @@ async def avatar_ask(request: Request):
     # Abbruch waehrend der Vorpruefung? Dann gar nicht erst starten.
     if _cancelled():
         return _stopped_reply()
+
+    # (1b) Modus "sources": NUR aus den hinterlegten Quellen antworten.
+    # Kein Agent, keine Werkzeuge – ein einzelner LLM-Aufruf ueber den
+    # Quelltext. Braucht deshalb weder die Agenten-Sperre noch stop():
+    # es laeuft kein Agent, den man anhalten koennte; der fetch-Abbruch im
+    # Widget beendet die Wartezeit auf der Client-Seite.
+    if cfg.get("answer_mode") == "sources":
+        try:
+            res = await _av.answer_from_sources(text, cfg, username=username)
+        except Exception as e:
+            print(f"[avatar] Quellen-Modus fehlgeschlagen: {e}", flush=True)
+            _cleanup()
+            return JSONResponse({"detail": f"Fehler: {e}"}, status_code=500)
+        stopped = _cancelled()
+        _cleanup()
+        return JSONResponse({"answer": res["answer"], "source": "sources",
+                             "found": res["found"], "sources": res["sources"],
+                             "voice": voice, "stopped": stopped})
 
     # (2) Agentenlauf (headless, unprivilegiert, Identitaet = Benutzer)
     from backend.agent import JarvisAgent

@@ -10410,7 +10410,30 @@ _whisper_model = None
 _whisper_lock = threading.Lock()
 
 
-def _get_whisper_model():
+def _tr_log(level: str, message: str, meta: dict | None = None, source: str = "chat"):
+    """Protokolliert ein Transkriptions-Ereignis – WhatsApp-Log NUR bei WhatsApp.
+
+    Die Whisper-Transkription ist GETEILTE Infrastruktur: sie bedient die
+    WhatsApp-Sprachnachricht, Audio-/Video-Anhaenge im Chat, die Spracheingabe des
+    Windows-Clients (``[Voice]``, ``transcribe_only``) und die Wake-Word-Pruefung.
+    Weil beide Helfer historisch im WhatsApp-Abschnitt dieser Datei stehen, ging
+    JEDES dieser Ereignisse ueber ``wa_log`` in ``data/logs/whatsapp.log`` – auf
+    einem System OHNE installierten WhatsApp-Skill entstand dadurch ein
+    WhatsApp-Log, in dem nur Whisper-Meldungen standen (gemeldet 2026-07-30).
+    Ein Log, dessen Name nicht zu seinem Inhalt passt, schickt jede Fehlersuche
+    in die falsche Richtung.
+
+    Deshalb: ins Journal geht es immer (mit sprechender Quelle), in das
+    WhatsApp-Log nur, wenn das Ereignis wirklich von dort kommt.
+    """
+    if source == "whatsapp":
+        wa_log(level, "transcription", message, meta=meta)
+        return
+    suffix = f" | {meta}" if meta else ""
+    print(f"[Transkription/{source}] {level}: {message}{suffix}", flush=True)
+
+
+def _get_whisper_model(source: str = "chat"):
     """Lädt das Whisper-Modell (lazy, thread-safe)."""
     global _whisper_model
     if _whisper_model is not None:
@@ -10425,31 +10448,41 @@ def _get_whisper_model():
         except ImportError:
             # Optionales Feature: ohne faster-whisper (z.B. WhatsApp-Skill purged)
             # keine Transkription – Hinweis statt Fehler
-            wa_log("INFO", "transcription",
-                   "faster-whisper nicht installiert – Sprach-Transkription deaktiviert")
+            _tr_log("INFO", "faster-whisper nicht installiert – Sprach-Transkription deaktiviert",
+                    source=source)
             return None
 
         try:
-            # Modell aus WhatsApp-Skill-Config lesen
+            # Modellname aus der WhatsApp-Skill-Config, falls vorhanden. Ohne
+            # installierten Skill liefert get_skill_config ein leeres dict (kein
+            # Fehler) – dann gilt "small". Die Transkription haengt also NICHT am
+            # WhatsApp-Skill, nur ihre Feineinstellung liegt (noch) dort.
             sm = _get_skill_manager()
-            wa_config = sm.get_skill_config("whatsapp")
+            wa_config = sm.get_skill_config("whatsapp") or {}
             model_name = wa_config.get("whisper_model", "small")
 
-            wa_log("INFO", "transcription", f"Lade Whisper-Modell '{model_name}'...")
+            _tr_log("INFO", f"Lade Whisper-Modell '{model_name}'...", source=source)
             _whisper_model = WhisperModel(model_name, device="cpu", compute_type="int8")
-            wa_log("INFO", "transcription", f"Whisper-Modell '{model_name}' geladen")
+            _tr_log("INFO", f"Whisper-Modell '{model_name}' geladen", source=source)
             return _whisper_model
         except Exception as e:
-            wa_log("ERROR", "transcription", f"Whisper-Fehler: {e}")
+            _tr_log("ERROR", f"Whisper-Fehler: {e}", source=source)
             return None
 
 
-def _transcribe_audio(filepath: str, language: str = "de", initial_prompt: str = None) -> str:
-    """Transkribiert eine Audiodatei mit faster-whisper."""
+def _transcribe_audio(filepath: str, language: str = "de", initial_prompt: str = None,
+                      source: str = "chat") -> str:
+    """Transkribiert eine Audiodatei mit faster-whisper.
+
+    ``source`` benennt den Ausloeser (``whatsapp`` | ``voice`` | ``attachment`` |
+    ``transcribe_only`` | ``wakeword``) und entscheidet, wohin protokolliert wird –
+    siehe ``_tr_log``. Wer einen NEUEN Aufrufer ergaenzt, gibt ihn mit; ohne Angabe
+    landet der Eintrag im Journal (nicht im WhatsApp-Log), was der sichere Weg ist.
+    """
     import time as _time
-    model = _get_whisper_model()
+    model = _get_whisper_model(source=source)
     if model is None:
-        wa_log("ERROR", "transcription", "Whisper-Modell nicht verfuegbar")
+        _tr_log("ERROR", "Whisper-Modell nicht verfuegbar", source=source)
         return "[Transkription fehlgeschlagen: Whisper-Modell nicht verfuegbar]"
 
     try:
@@ -10462,17 +10495,21 @@ def _transcribe_audio(filepath: str, language: str = "de", initial_prompt: str =
         text = " ".join([seg.text for seg in segments]).strip()
         duration = round(_time.time() - t0, 2)
         if text:
-            wa_log("INFO", "transcription", f"Transkription OK ({duration}s): {text[:100]}")
-            wa_log("DEBUG", "transcription", f"Voller Text: {text}", meta={
-                "duration_s": duration, "language": info.language,
-                "language_prob": round(info.language_probability, 3),
-                "file": filepath,
-            }, debug_only=True)
+            _tr_log("INFO", f"Transkription OK ({duration}s): {text[:100]}", source=source)
+            # Der VOLLE Text ist nur im WhatsApp-Debug-Modus interessant und bleibt
+            # deshalb an wa_log gebunden (debug_only). Fremde Quellen schreiben ihn
+            # nicht ins Journal – dort stehen sonst komplette Diktate im Klartext.
+            if source == "whatsapp":
+                wa_log("DEBUG", "transcription", f"Voller Text: {text}", meta={
+                    "duration_s": duration, "language": info.language,
+                    "language_prob": round(info.language_probability, 3),
+                    "file": filepath,
+                }, debug_only=True)
             return text
-        wa_log("WARN", "transcription", "Keine Sprache erkannt", meta={"file": filepath})
+        _tr_log("WARN", "Keine Sprache erkannt", meta={"file": filepath}, source=source)
         return "[Keine Sprache erkannt]"
     except Exception as e:
-        wa_log("ERROR", "transcription", f"Transkription fehlgeschlagen: {e}", meta={"file": filepath})
+        _tr_log("ERROR", f"Transkription fehlgeschlagen: {e}", meta={"file": filepath}, source=source)
         return f"[Transkription fehlgeschlagen: {e}]"
 
 
@@ -10647,7 +10684,9 @@ async def wa_incoming(request: Request):
 
         # Transkription in Thread-Pool (blockiert nicht den Event-Loop)
         loop = asyncio.get_event_loop()
-        task_text = await loop.run_in_executor(None, _transcribe_audio, media_path)
+        # source="whatsapp": nur dieser Aufrufer protokolliert ins WhatsApp-Log
+        task_text = await loop.run_in_executor(None, _transcribe_audio, media_path,
+                                               "de", None, "whatsapp")
 
         wa_log("INFO", "transcription", f"Ergebnis: {task_text[:200]}")
 
@@ -10914,7 +10953,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                         f.write(wav_bytes)
                         tmp_path = f.name
                     transcript = await asyncio.to_thread(
-                        _transcribe_audio, tmp_path, "de", "Jarvis Sprachsteuerung:")
+                        _transcribe_audio, tmp_path, "de", "Jarvis Sprachsteuerung:", "voice")
                     os.unlink(tmp_path)
                     print(f"[voice-task] Transkript: {transcript!r}", flush=True)
                     if not transcript:
@@ -10960,7 +10999,8 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                         with tempfile.NamedTemporaryFile(suffix=_ext, delete=False) as _tf:
                             _tf.write(_raw_bytes)
                             _tmp_path = _tf.name
-                        _transcript = await asyncio.to_thread(_transcribe_audio, _tmp_path, "de", None)
+                        _transcript = await asyncio.to_thread(_transcribe_audio, _tmp_path,
+                                                             "de", None, "attachment")
                         os.unlink(_tmp_path)
                         if _transcript:
                             _text_prepend.append(f"[Transkript von {_name}]: {_transcript}")
@@ -11311,7 +11351,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                 f.write(wav_bytes)
                 tmp_path = f.name
             transcript = await asyncio.to_thread(
-                _transcribe_audio, tmp_path, "de", "Jarvis Sprachsteuerung:")
+                _transcribe_audio, tmp_path, "de", "Jarvis Sprachsteuerung:", "transcribe_only")
             os.unlink(tmp_path)
             print(f"[transcribe_only] Transkript: {transcript!r}", flush=True)
             await ws.send_json({"type": "voice_transcript", "text": transcript})
@@ -11336,7 +11376,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                 f.write(wav_bytes)
                 tmp_path = f.name
             def _transcribe():
-                model = _get_whisper_model()
+                model = _get_whisper_model(source="wakeword")
                 segments, _ = model.transcribe(tmp_path, language="de", beam_size=3,
                                                without_timestamps=True)
                 return " ".join(s.text for s in segments).strip()

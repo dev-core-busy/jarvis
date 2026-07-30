@@ -224,6 +224,40 @@ class ConfluenceClient:
             return res[0]
         raise ConfluenceError(0, "page_id oder title erforderlich.")
 
+    def get_child_pages(self, page_id: str, limit: int = 100) -> list:
+        """Direkte Unterseiten einer Seite (id + title, ohne Inhalt)."""
+        d = self._request("GET", "/rest/api/content/%s/child/page" % page_id,
+                          params={"limit": limit})
+        return [{"id": str(r.get("id")), "title": r.get("title", "")}
+                for r in (d.get("results") or [])]
+
+    def get_descendants(self, page_id: str, max_pages: int = 40) -> list:
+        """Alle Unterseiten rekursiv (Breitensuche), gedeckelt auf ``max_pages``.
+
+        Der Deckel ist Absicht: ein Confluence-Baum kann hunderte Seiten haben,
+        und jede kostet einen HTTP-Aufruf. Wer mehr braucht, gibt mehrere
+        Start-Seiten an. Fehler an einem Ast brechen den Lauf NICHT ab – eine
+        unlesbare Unterseite darf nicht die ganze Quelle unbrauchbar machen.
+        """
+        out: list = []
+        queue = [str(page_id)]
+        seen = {str(page_id)}
+        while queue and len(out) < max_pages:
+            cur = queue.pop(0)
+            try:
+                kinder = self.get_child_pages(cur)
+            except ConfluenceError:
+                continue
+            for k in kinder:
+                if k["id"] in seen:
+                    continue
+                seen.add(k["id"])
+                out.append(k)
+                queue.append(k["id"])
+                if len(out) >= max_pages:
+                    break
+        return out
+
     def create_page(self, space: str, title: str, body: str,
                     parent_id: str | None = None) -> dict:
         payload = {
@@ -267,6 +301,129 @@ class ConfluenceClient:
         d = self._request("GET", "/rest/api/content/%s/child/attachment" % page_id,
                          params={"limit": 50})
         return d.get("results", [])
+
+    def attachment_size(self, att: dict) -> int | None:
+        """Gemeldete Groesse eines Anhangs aus den Metadaten (oder None)."""
+        for src in (att.get("extensions") or {}, att.get("metadata") or {}):
+            v = src.get("fileSize")
+            if v is not None:
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    pass
+        return None
+
+    def download_attachment(self, page_id: str, filename: str,
+                            dest_dir: str = "/tmp") -> tuple[str, int]:
+        """Laedt EINEN Anhang authentifiziert herunter. Gibt (Zielpfad, Bytes) zurueck.
+
+        **Warum ueberhaupt eine eigene Methode:** Der Link aus ``list_attachments``
+        (``/download/attachments/…``) ist eine **Web-UI-Route**, keine REST-Route. Ein
+        ``curl`` darauf laeuft ohne Anmeldung in ``302 -> /login.action`` und schreibt
+        wegen fehlendem ``-f`` eine **0 Byte grosse** Datei, ohne zu meckern – genau so
+        entstanden am 2026-07-30 sechs leere CSV-Dateien.
+
+        **Und warum sie trotzdem scheitern kann:** Auf diesem Confluence (Server/DC)
+        greift vor der Web-Route ein **Zwei-Faktor-Filter**. Der PAT wird akzeptiert,
+        die Antwort ist aber ``302`` auf
+        ``/plugins/servlet/twofactor/validate_otp`` – folgt man dem, kommt eine
+        HTML-Seite mit **HTTP 200** zurueck. Wer die einfach speichert, hat eine
+        53 KB grosse HTML-Datei mit der Endung ``.csv`` und merkt es nicht. Eine
+        REST-Route fuer die Bytes gibt es auf Server/DC nicht (geprueft:
+        ``/rest/api/content/<id>/download``, ``/rest/api/attachment/<id>/download``,
+        ``/rest/api/content/<id>/data`` -> alle 404; Basic-Auth mit PAT -> 401).
+        Deshalb wird hier NICHT umgeleitet und jede HTML-Antwort als Fehlschlag
+        gewertet, mit Klartext-Hinweis, was der Administrator freischalten muss.
+        """
+        import os
+        import re as _re
+
+        atts = self.list_attachments(page_id)
+        want = (filename or "").strip()
+        match = None
+        for a in atts:
+            if (a.get("title") or "") == want:
+                match = a
+                break
+        if match is None:                     # Gross-/Kleinschreibung tolerieren
+            for a in atts:
+                if (a.get("title") or "").lower() == want.lower():
+                    match = a
+                    break
+        if match is None:
+            # status=0, damit die eigene Meldung erhalten bleibt: _fmt_err ersetzt
+            # 404 durch einen generischen Text und die Namensliste waere weg.
+            raise ConfluenceError(0, "Anhang '%s' nicht an Seite %s gefunden. Vorhanden: %s"
+                                  % (want, page_id,
+                                     ", ".join((a.get("title") or "?") for a in atts) or "keine"))
+        dl = (match.get("_links", {}) or {}).get("download", "")
+        if not dl:
+            raise ConfluenceError(0, "Anhang '%s' hat keinen Download-Link." % want)
+
+        # KEIN allow_redirects: die Umleitung fuehrt auf die Anmelde-/2FA-Seite, und
+        # deren HTML kaeme mit HTTP 200 zurueck (siehe Docstring).
+        r = requests.get(self.base + dl, headers=self._headers({"Accept": "*/*"}),
+                         timeout=60, stream=True, allow_redirects=False)
+        if r.is_redirect or r.status_code in (301, 302, 303, 307, 308):
+            loc = r.headers.get("Location", "")
+            if "twofactor" in loc or "validate_otp" in loc:
+                raise ConfluenceError(0,
+                    "Download von '%s' durch die Zwei-Faktor-Pruefung blockiert: der "
+                    "Anhang-Link ist eine Web-UI-Route, und der Zugriffstoken darf sie "
+                    "nicht passieren (Umleitung auf validate_otp). Abhilfe nur "
+                    "serverseitig: den Pfad /download/attachments/* im 2FA-Plugin "
+                    "ausnehmen ODER ein Dienstkonto ohne 2FA verwenden. Ein curl/wget "
+                    "auf den Link scheitert genauso (leere oder HTML-Datei)." % want)
+            raise ConfluenceError(0, "Download von '%s' wurde umgeleitet (HTTP %s -> %s) – "
+                                     "nicht angemeldet." % (want, r.status_code, loc[:120]))
+        if r.status_code >= 400:
+            raise ConfluenceError(r.status_code, "Download fehlgeschlagen (HTTP %s)" % r.status_code)
+
+        ctype = (r.headers.get("Content-Type") or "").lower()
+        head = b""
+        chunks = []
+        total = 0
+        for chunk in r.iter_content(chunk_size=65536):
+            if not chunk:
+                continue
+            if not head:
+                head = chunk[:200]
+            chunks.append(chunk)
+            total += len(chunk)
+
+        # Erst pruefen, DANN schreiben – eine falsche Datei soll nie entstehen.
+        low = head.lstrip()[:80].lower()
+        if "text/html" in ctype or low.startswith(b"<!doctype") or low.startswith(b"<html"):
+            raise ConfluenceError(0,
+                "Download von '%s' lieferte eine HTML-Seite statt der Datei "
+                "(Content-Type %s, %d Byte) – das ist die Anmelde-/2FA-Seite, nicht der "
+                "Anhang. Es wurde NICHTS gespeichert." % (want, ctype or "unbekannt", total))
+        if total == 0:
+            raise ConfluenceError(0, "Anhang '%s' kam leer an (0 Byte, Content-Type %s)."
+                                  % (want, ctype or "unbekannt"))
+        # Gegen die gemeldete Groesse pruefen: faellt auf, wenn eine Fehlerseite
+        # gespeichert wuerde, die nicht als HTML erkennbar ist.
+        # Toleranz ist PROZENTUAL (5 %, mindestens 4 Byte) und bewusst nicht absolut:
+        # eine feste Untergrenze von 64 Byte liess bei einer 12-Byte-Datei jede
+        # Abweichung durch – gerade kleine Dateien braeuchten die Pruefung am meisten.
+        # Kein Byte-genauer Vergleich, damit eine geringfuegig abweichende
+        # Server-Angabe nicht jeden Download blockiert.
+        expect = self.attachment_size(match)
+        if expect and abs(total - expect) > max(4, expect * 0.05):
+            raise ConfluenceError(0,
+                "Anhang '%s' kam in falscher Groesse an (%d Byte, erwartet %d) – "
+                "es wurde NICHTS gespeichert." % (want, total, expect))
+
+        # Dateiname aus dem Titel bilden, NICHT aus der URL: der Download-Pfad traegt
+        # Query-Parameter (version/modificationDate), die sonst im Namen landen.
+        safe = _re.sub(r'[^A-Za-z0-9._-]', "_", os.path.basename(want)).lstrip(".") or "anhang"
+        dest_dir = dest_dir or "/tmp"
+        os.makedirs(dest_dir, exist_ok=True)
+        target = os.path.join(dest_dir, safe)
+        with open(target, "wb") as fh:
+            for chunk in chunks:
+                fh.write(chunk)
+        return target, total
 
     def upload_attachment(self, page_id: str, file_path: str) -> dict:
         import os

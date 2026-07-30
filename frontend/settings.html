@@ -1200,6 +1200,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="claude_bridge" id="settings-tab-btn-claude-bridge" style="display:none;" data-i18n="settings.tab.claude_bridge">Claude-Bridge</button>
                 <button class="settings-tab-btn" data-settings-tab="agent_orchestrator" id="settings-tab-btn-orchestrator" style="display:none;" data-i18n="settings.tab.orchestrator">Orchestrator</button>
                 <button class="settings-tab-btn" data-settings-tab="agent_autonomy_kit" id="settings-tab-btn-autonomy" style="display:none;" data-i18n="settings.tab.autonomy">Autonomie</button>
+                <button class="settings-tab-btn" data-settings-tab="avatar" id="settings-tab-btn-avatar" style="display:none;" data-i18n="settings.tab.avatar">Avatar</button>
                 <button class="settings-tab-btn" data-settings-tab="telemetry" data-i18n="settings.tab.telemetry">Telemetry</button>
                 <button class="settings-tab-btn" data-settings-tab="security" data-i18n="settings.tab.security">Sicherheit</button>
                 <button class="settings-tab-btn" data-settings-tab="cron" data-i18n="settings.tab.cron">Tasks</button>
@@ -1374,8 +1375,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                         </button>
                     </div>
-                        <label data-i18n="profile.name_label">Profilname</label>
                     <div class="form-group">
+                        <label data-i18n="profile.name_label">Profilname</label>
                         <div class="input-group">
                             <input type="text" id="profile-name" data-i18n-placeholder="profile.name_ph" placeholder="z.B. Google Standard">
                         </div>
@@ -2591,6 +2592,20 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     </div>
                 </div>
 
+                <!-- ═══ Tab: Avatar-Assistent ═══ -->
+                <!-- Scrollen: Der Reiter ist laenger als das Modal (mehrzeiliges
+                     Feld "Eigene Antworten"). Scroll-Container ist bewusst der
+                     gemeinsame .modal-body (overflow-y:auto) – die Reiterleiste
+                     steht darueber und bleibt dadurch stehen. KEIN zweiter
+                     Scroll-Bereich hier: das gaebe eine doppelte Scrollleiste.
+                     Gemessen auf DEV: Inhalt 1201 px, sichtbar 504 px, scrollt. -->
+                <div id="settings-tab-avatar" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint" data-i18n="settings.avatar.hint">Zeigt eine sprechende Assistenten-Figur im Chat. Texteingabe wird als Text beantwortet, Mikrofon-Eingabe zusätzlich vorgelesen. Eigene Antworten werden ohne KI direkt ausgeliefert – je Zeile „Frage ||| Antwort“, mehrere gleichbedeutende Fragen mit | trennen.</p>
+                        <div id="skcfg-avatar"></div>
+                    </div>
+                </div>
+
                 <!-- ═══ Tab: Telemetry ═══ -->
                 <div id="settings-tab-telemetry" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
@@ -3023,6 +3038,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <script>
                                 // Auf-/Zuklapp-Zustand der Unter-Container merken (localStorage).
                                 // Default: alle geschlossen; gespeicherter Zustand gewinnt.
+                                //
+                                // WICHTIG – erst wenn das Dokument fertig geparst ist: dieses
+                                // Skript steht MITTEN in der Seite und sah bisher nur die
+                                // Unter-Container OBERHALB von sich. Weiter unten stehende
+                                // (z.B. "Letzte Zugriffs-Verstöße" im Vorfalls-Abschnitt) gingen
+                                // leer aus – ohne Fehlermeldung, sie merkten sich einfach nichts.
                                 (function () {
                                     var KEY = 'jarvis_sec_sub_open';
                                     function init() {
@@ -3047,12 +3068,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 })();
                                 </script>
 
-                                //
-                                // WICHTIG – erst wenn das Dokument fertig geparst ist: dieses
-                                // Skript steht MITTEN in der Seite und sah bisher nur die
-                                // Unter-Container OBERHALB von sich. Weiter unten stehende
-                                // (z.B. "Letzte Zugriffs-Verstöße" im Vorfalls-Abschnitt) gingen
-                                // leer aus – ohne Fehlermeldung, sie merkten sich einfach nichts.
                                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
                                     <button class="kb-btn-action" id="ad-save-btn" onclick="window._adSave()" data-i18n="common.save">Speichern</button>
                                     <button class="kb-btn-secondary" onclick="window._adTest()" data-i18n="profile.test">Verbindung testen</button>
@@ -3560,13 +3575,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=137"></script>
+    <script src="/static/js/i18n.js?v=138"></script>
     <script src="/static/js/cron.js?v=19"></script>
     <script src="/static/js/context.js?v=6"></script>
     <script src="/static/js/audit.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
-    <script src="/static/js/skills.js?v=39"></script>
-    <script src="/static/js/skillcfg.js?v=1"></script>
+    <script src="/static/js/skills.js?v=40"></script>
+    <script src="/static/js/skillcfg.js?v=2"></script>
     <script src="/static/js/google.js?v=12"></script>
     <script src="/static/js/whatsapp.js?v=15"></script>
     <script src="/static/js/knowledge.js?v=90"></script>

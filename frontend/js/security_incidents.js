@@ -831,10 +831,52 @@
             });
         },
 
+        // Sichtbare Laenge der Verstossliste; der Rest ist per Scrollbalken erreichbar.
+        VIOL_VISIBLE: 10,
+
+        /* Begrenzt die Liste auf VIOL_VISIBLE Eintraege.
+         *
+         * Gemessen statt per fester CSS-Hoehe: ein Eintrag ist je nach Detail-
+         * und Anfrage-Zeile ein bis drei Zeilen hoch, eine feste Hoehe wuerde also
+         * je nach Inhalt mitten in einen Eintrag schneiden oder zu viel Luft lassen. */
+        applyViolLimit: function () {
+            var box = $('sec-viol-list');
+            if (!box) return;
+            var rows = box.querySelectorAll('.sec-viol-row');
+            if (rows.length <= Mgr.VIOL_VISIBLE) {
+                box.style.maxHeight = '';
+                box.classList.remove('sec-scrollbox');
+                return;
+            }
+            var h = 0;
+            for (var i = 0; i < Mgr.VIOL_VISIBLE; i++) h += rows[i].offsetHeight;
+            // Im EINGEKLAPPTEN Abschnitt sind alle Hoehen 0. Dann nichts setzen –
+            // maxHeight:0 haette die Liste beim Aufklappen unsichtbar gemacht.
+            // Nachgemessen wird beim Aufklappen (bindViolRemeasure).
+            if (h <= 0) return;
+            box.style.maxHeight = h + 'px';
+            box.classList.add('sec-scrollbox');
+        },
+
+        /* Der Abschnitt startet zugeklappt, dort ist nicht messbar. app.js klappt
+         * ueber einen eigenen Klick-Handler auf derselben Kopfzeile auf; unser
+         * Handler laeuft danach, das setTimeout wartet noch auf das display-Update. */
+        bindViolRemeasure: function () {
+            var hdr = $('sec-sect-incidents-hdr');
+            if (!hdr || hdr._violBound) return;
+            hdr._violBound = true;
+            hdr.addEventListener('click', function () {
+                setTimeout(Mgr.applyViolLimit, 0);
+            });
+        },
+
         renderViolations: function (list) {
             var box = $('sec-viol-list');
             if (!box) return;
+            Mgr.bindViolRemeasure();
             if (!list.length) {
+                box.style.maxHeight = '';
+                box.classList.remove('sec-scrollbox');
                 box.innerHTML = '<p class="kb-hint">' + esc(T('security.no_violations', 'Keine Verstöße protokolliert.')) + '</p>';
                 return;
             }
@@ -843,13 +885,14 @@
                     + esc(chanLabel(v.channel)) + ' · ' + esc(v.pattern || '');
                 if (v.tool) meta += ' · ' + esc(v.tool);
                 if (v.ip) meta += ' · IP ' + esc(v.ip);
-                var html = '<div style="padding:6px 0;border-bottom:1px solid rgba(var(--fg-rgb),.08);">'
+                var html = '<div class="sec-viol-row" style="padding:6px 0;border-bottom:1px solid rgba(var(--fg-rgb),.08);">'
                     + '<div style="font-size:0.78rem;color:var(--text-muted);">' + meta + '</div>';
                 if (v.detail) html += '<div style="font-size:0.82rem;color:var(--text-primary);">' + esc(v.detail) + '</div>';
                 if (v.task) html += '<div style="font-size:0.78rem;color:var(--text-secondary);">'
                     + esc(T('security.f_request', 'Anfrage')) + ': ' + esc(v.task) + '</div>';
                 return html + '</div>';
             }).join('');
+            Mgr.applyViolLimit();
         },
 
         saveConfig: function () {

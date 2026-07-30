@@ -21,7 +21,7 @@
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=144">
+    <link rel="stylesheet" href="/static/css/style.css?v=146">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
 
@@ -1365,6 +1365,16 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <!-- ── Ansicht 2: Profil bearbeiten/erstellen ── -->
                 <div id="profile-edit-view" style="display: none;">
                     <div class="form-group">
+                    <!-- Abbrechen oben rechts: das Formular ist laenger als das
+                         Sichtfenster, der "Abbrechen"-Knopf am Ende ist dann nur
+                         nach dem Scrollen erreichbar. Gleiche Funktion. -->
+                    <div class="prof-edit-top">
+                        <button class="btn-icon" id="btn-close-profile-edit"
+                                data-i18n-title="profile.cancel" data-i18n-aria="profile.cancel"
+                                title="Abbrechen" aria-label="Abbrechen">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                    </div>
                         <label data-i18n="profile.name_label">Profilname</label>
                         <div class="input-group">
                             <input type="text" id="profile-name" data-i18n-placeholder="profile.name_ph" placeholder="z.B. Google Standard">
@@ -3543,10 +3553,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=8"></script>
     <script src="/static/js/branding.js?v=22"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/security_incidents.js?v=23"></script>
+    <script src="/static/js/security_incidents.js?v=24"></script>
     <script src="/static/js/ldap_picker.js?v=8"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
-    <script src="/static/js/app.js?v=183"></script>
+    <script src="/static/js/app.js?v=185"></script>
 </body>
 
 </html>

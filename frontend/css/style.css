@@ -2858,6 +2858,15 @@ select.input-field {
     margin-top: 30px;
 }
 
+/* Kopfzeile des Profil-Formulars: nimmt nur das Abbrechen-× auf. Negativer
+   Rand oben, damit das × auf der Hoehe des ersten Feld-Labels sitzt und keine
+   leere Zeile entsteht. */
+.prof-edit-top {
+    display: flex;
+    justify-content: flex-end;
+    margin: -8px 0 -14px;
+}
+
 .btn-primary {
     flex: 1;
     padding: 12px;
@@ -4748,6 +4757,18 @@ select.input-field {
 }
 .sec-btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-hover); background: rgba(var(--fg-rgb), 0.05); }
 .sec-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Lange Liste im Sicherheits-Reiter (z.B. "Letzte Zugriffs-Verstoesse"): zeigt
+   die ersten Eintraege, der Rest ist scrollbar. Die max-height setzt das Skript
+   aus den gemessenen Zeilenhoehen – hier steht nur das Aussehen.
+   padding-right haelt den Text vom Scrollbalken frei, der Rahmen macht den
+   Ausschnitt als solchen erkennbar (sonst sieht die abgeschnittene Zeile wie
+   das Ende der Liste aus). */
+.sec-scrollbox {
+    overflow-y: auto;
+    padding-right: 8px;
+    border-bottom: 1px solid var(--border);
+    overscroll-behavior: contain;
+}
 .sec-btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
 .sec-btn.primary:hover:not(:disabled) { opacity: 0.88; color: #fff; background: var(--accent); }
 .sec-btn.danger { border-color: rgba(var(--danger-rgb), 0.5); color: var(--danger); }

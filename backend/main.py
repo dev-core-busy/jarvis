@@ -4041,7 +4041,15 @@ async def _probe_llm_connection(provider: str, api_url: str, api_key: str,
       latency_ms: int
     Wird sowohl vom Formular-Test (POST) als auch vom Profil-Status (GET) genutzt.
     """
-    api_url = (api_url or "").rstrip("/")
+    # Keys/URL normalisieren: ein mitkopiertes Leerzeichen im Key liess httpx mit
+    # "Illegal header value" scheitern, und die Meldung landete als angeblicher
+    # Verbindungsfehler im Profil-Formular (siehe llm.clean_api_key).
+    from backend.llm import clean_api_key, scrub_secrets
+    raw_key, raw_session = api_key, session_key
+    api_url = (api_url or "").strip().rstrip("/")
+    api_key = clean_api_key(api_key)
+    session_key = clean_api_key(session_key)
+    model = (model or "").strip()
     headers = {"Content-Type": "application/json"}
     if auth_method == "session" and session_key:
         headers["Authorization"] = f"Bearer {session_key}"
@@ -4132,7 +4140,9 @@ async def _probe_llm_connection(provider: str, api_url: str, api_key: str,
     except httpx.TimeoutException:
         return {"success": False, "error": "Timeout (Zeitüberschreitung) – Server antwortet nicht innerhalb von 15s"}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        # scrub_secrets: die HTTP-Schicht zitiert beanstandete Header-Werte woertlich,
+        # der Key stand damit im Klartext in der Oberflaeche.
+        return {"success": False, "error": scrub_secrets(e, raw_key, raw_session)}
 
 
 @app.post("/api/profiles/test")
@@ -4153,7 +4163,11 @@ async def test_profile_connection(request: Request, user: str = Depends(require_
 async def _list_llm_models(provider: str, api_url: str, api_key: str,
                            auth_method: str = "api_key", session_key: str = "") -> dict:
     """Liefert die VOLLE Liste verfuegbarer Modelle eines Providers (fuer 'Discover')."""
-    api_url = (api_url or "").rstrip("/")
+    from backend.llm import clean_api_key, scrub_secrets
+    raw_key, raw_session = api_key, session_key
+    api_url = (api_url or "").strip().rstrip("/")
+    api_key = clean_api_key(api_key)          # siehe llm.clean_api_key
+    session_key = clean_api_key(session_key)
     key = session_key if (auth_method == "session" and session_key) else api_key
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
@@ -4196,7 +4210,7 @@ async def _list_llm_models(provider: str, api_url: str, api_key: str,
     except httpx.TimeoutException:
         return {"success": False, "error": "Timeout – Server antwortet nicht"}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": scrub_secrets(e, raw_key, raw_session)}
 
 
 @app.post("/api/profiles/models")

@@ -38,6 +38,12 @@ class AvatarInfoTool(BaseTool):
             f"- Anzeigename: {cfg['title'] or '(Standard)'}",
             f"- Bei Spracheingabe vorlesen: {'ja' if cfg['speak_on_voice'] else 'nein'}",
             f"- Eigene Antworten hinterlegt: {n}",
+            f"- Waehlbare Grafiken: {', '.join(av.available_graphics())}",
+            "",
+            "Eigene Figur gestalten und einbinden: siehe skills/avatar/"
+            "AVATAR-DESIGN.md (Schritt-fuer-Schritt inkl. Prompt-Vorlagen); "
+            "Bau-Skript: python3 skills/avatar/tools/build_agent.py "
+            "<bilderordner> <Name>.",
         ]
         return "\n".join(lines)
 

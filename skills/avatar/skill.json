@@ -1,0 +1,80 @@
+{
+    "name": "Avatar-Assistent",
+    "description": "Blendet eine sprechende Assistenten-Figur (klassischer Clippy oder ein austauschbarer Platzhalter) auf der Chat-Seite ein. Text- und Spracheingabe werden über die Jarvis-API beantwortet; bei Spracheingabe zusätzlich vorgelesen. Beim Deaktivieren verschwindet die Figur wieder.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["avatar_info"],
+    "category": "sonstige",
+    "icon": "smile",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "graphic": {
+            "type": "string",
+            "label": "Figur / Grafik",
+            "description": "Welche Avatar-Grafik angezeigt wird. 'clippy' = klassische Büroklammer (Sprite-Animation), 'placeholder' = schlichte, leicht austauschbare SVG-Figur. Eigene Sprite-Sätze im clippy.js-Format unter frontend/vendor/clippy/agents/<Name> ablegen und hier eintragen.",
+            "enum": ["clippy", "placeholder"],
+            "default": "clippy",
+            "required": false
+        },
+        "position": {
+            "type": "string",
+            "label": "Bildschirmecke",
+            "description": "In welcher Ecke das Widget sitzt.",
+            "enum": ["bottom-right", "bottom-left"],
+            "default": "bottom-right",
+            "required": false
+        },
+        "title": {
+            "type": "string",
+            "label": "Anzeigename",
+            "description": "Name in der Kopfzeile des Widgets (leer = Standard 'Assistent' bzw. Branding-Name).",
+            "required": false
+        },
+        "greeting": {
+            "type": "text",
+            "label": "Begrüßung",
+            "description": "Text, den die Figur beim Öffnen anzeigt/spricht (leer = Standardbegrüßung).",
+            "required": false
+        },
+        "speak_on_voice": {
+            "type": "boolean",
+            "label": "Bei Spracheingabe vorlesen",
+            "description": "Wird die Frage per Mikrofon gestellt, wird die Antwort zusätzlich über den Lautsprecher vorgelesen (TTS). Bei Texteingabe erscheint die Antwort nur als Text.",
+            "default": true,
+            "required": false
+        },
+        "auto_open": {
+            "type": "boolean",
+            "label": "Beim Laden geöffnet",
+            "description": "Zeigt die Sprechblase des Avatars direkt beim Laden der Seite (sonst nur die Figur, Klick öffnet).",
+            "default": false,
+            "required": false
+        },
+        "overrides": {
+            "type": "text",
+            "label": "Eigene Antworten (Frage ||| Antwort)",
+            "description": "Feste Antworten auf bestimmte Fragen – je Zeile 'Frage | Antwort' (z.B. 'Öffnungszeiten | Mo–Fr 8–17 Uhr'). Sollen MEHRERE Fragen dieselbe Antwort bekommen, diese mit | aufzählen und die Antwort mit ||| abtrennen: 'öffnungszeiten | wann habt ihr auf ||| Mo–Fr 8–17 Uhr'. Treffer werden serverseitig ohne KI beantwortet. Leere Zeilen und mit # beginnende Zeilen werden ignoriert.",
+            "required": false
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [],
+    "help": {
+        "details": "Der Avatar-Assistent zeigt eine schwebende Figur auf der Chat-Seite (/chat; /portal und /support folgen). Über ein eigenes Eingabefeld sind Text- und Spracheingabe möglich; die Anfrage wird über die normale Jarvis-API (Agent) beantwortet. Bei Texteingabe erscheint die Antwort als Text in der Sprechblase, bei Mikrofon-Eingabe wird sie zusätzlich vorgelesen. Die Grafik ist austauschbar: mitgeliefert sind der klassische 'Clippy' (Sprite-Animation) und ein neutraler SVG-'Platzhalter', der als Vorlage für eigene Grafiken dient. Feste Antworten auf spezielle Fragen lassen sich in den Einstellungen hinterlegen (Feld 'Eigene Antworten'). Alle Parameter stehen unter Einstellungen → Skills → Avatar-Assistent (Zahnrad). Beim Deaktivieren des Skills verschwindet die Figur.",
+        "tools": [
+            {
+                "name": "avatar_info",
+                "label": "Avatar-Status",
+                "desc": "Gibt die aktuelle Avatar-Konfiguration zurück (Grafik, Position, Anzahl eigener Antworten)."
+            }
+        ],
+        "use_cases": [
+            "Aktiviere den Avatar-Assistenten im Chat",
+            "Wie ist der Avatar konfiguriert?"
+        ],
+        "notes": "Hinweis: Der Avatar läuft mit den Rechten des angemeldeten Benutzers, aber bewusst unprivilegiert (keine System-/Root-Aktionen). Für privilegierte Aktionen den normalen Chat verwenden. Die Original-Clippy-Grafik ist Microsoft-Eigentum; die clippy.js-Bibliothek selbst steht unter MIT."
+    }
+}

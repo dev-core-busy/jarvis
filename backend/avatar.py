@@ -124,11 +124,12 @@ def load_config() -> dict:
         cfg["graphic"] = "Clippy"
     avail = available_graphics()
     if cfg["graphic"] not in avail:
-        # Unbekannt (z.B. Sprite-Ordner entfernt) -> sichtbare Figur behalten,
-        # nicht stumm auf einen anderen Sprite-Satz raten.
-        print(f"[avatar] Unbekannte Grafik {cfg['graphic']!r} – nutze 'placeholder'. "
+        # Unbekannt (z.B. Sprite-Ordner entfernt) -> Rueckfall auf Clippy
+        # (Vorgabe 2026-07-30); fehlt auch der, bleibt die SVG-Figur.
+        rueckfall = "Clippy" if "Clippy" in avail else "placeholder"
+        print(f"[avatar] Unbekannte Grafik {cfg['graphic']!r} – nutze {rueckfall!r}. "
               f"Verfuegbar: {', '.join(avail)}", flush=True)
-        cfg["graphic"] = "placeholder"
+        cfg["graphic"] = rueckfall
     if cfg["position"] not in POSITIONS:
         cfg["position"] = "bottom-right"
     cfg["speak_on_voice"] = bool(cfg["speak_on_voice"])

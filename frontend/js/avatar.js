@@ -227,20 +227,41 @@
     // leere Ecke darf es nie geben.
     var FALLBACK = 'Clippy';
     var figurGen = 0;          // zaehlt Renderversuche (verwaiste Rueckrufe verwerfen)
+    var figurTimer = null;
+    // Wartezeit, bevor der Platzhalter als LADEZUSTAND erscheint.
+    // Er wurde frueher sofort gezeichnet – dadurch blitzte bei jedem
+    // Seitenwechsel kurz eine ANDERE Figur auf, bevor die gewaehlte da war
+    // (gemessen auf DEV: Sprite nach 73–147 ms, Aufblitzen 37–59 ms).
+    // Deutlich darueber liegen heisst: im Normalfall sieht man ihn nie, bei
+    // echter Verzoegerung aber schon – eine dauerhaft leere Ecke waere
+    // schlimmer als ein spaeter Ladezustand.
+    var PLACEHOLDER_DELAY = 1200;
 
     function renderFigure() {
-        // Sofort etwas Sichtbares: ein Sprite laedt asynchron, und der
-        // Platzhalter ist der Ladezustand. Er wird ersetzt, sobald die
-        // eigentliche Figur da ist.
-        placeholder();
+        clearTimeout(figurTimer);
 
-        if (cfg.graphic === 'placeholder') return;      // ausdrueckliche Wahl
+        if (cfg.graphic === 'placeholder') { placeholder(); return; }  // Wunschfigur
+
+        if (cfg.graphic === 'branding' && brandLogo()) {
+            // Bild per DOM setzen statt per innerHTML, damit ein kaputter
+            // Logo-Link nicht als Bildruine stehenbleibt, sondern auf Clippy
+            // zurueckfaellt (Rueckfallkette gilt auch hier).
+            var img = document.createElement('img');
+            img.className = 'jav-logo';
+            img.id = 'jav-ph';
+            img.alt = '';
+            img.addEventListener('error', function () { loadSprite(FALLBACK, true); });
+            img.src = brandLogo();
+            els.figure.innerHTML = '';
+            els.figure.appendChild(img);
+            return;
+        }
+
+        figurTimer = setTimeout(function () {
+            if (!els.figure.firstChild) placeholder();
+        }, PLACEHOLDER_DELAY);
+
         if (cfg.graphic === 'branding') {
-            if (brandLogo()) {
-                els.figure.innerHTML = '<img class="jav-logo" id="jav-ph" alt="" src="'
-                    + esc(brandLogo()) + '">';
-                return;
-            }
             loadSprite(FALLBACK, true);                 // kein Logo -> Clippy
             return;
         }
@@ -267,6 +288,7 @@
             window.clippy.load(name, function (ag) {
                 if (gen !== figurGen) return;           // ueberholter Versuch
                 erledigt = true;
+                clearTimeout(figurTimer);               // kein Ladezustand mehr noetig
                 agent = ag;
                 try { ag.show(true); } catch (e) {}
                 // clippy haengt sein Element an <body>; bevorzugt das Element

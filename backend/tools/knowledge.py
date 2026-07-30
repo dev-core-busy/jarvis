@@ -49,7 +49,8 @@ _log = logging.getLogger("jarvis.knowledge")
 _index_progress: dict = {"running": False, "phase": "", "done": 0, "total": 0,
                          "vector_done": 0, "vector_total": 0, "vector_base": 0,
                          "chunks": 0, "error": "", "current_file": "",
-                         "started_at": 0.0, "finished_at": 0.0, "cancelled": False}
+                         "started_at": 0.0, "finished_at": 0.0, "cancelled": False,
+                         "failed": 0}
 _progress_lock = threading.Lock()
 # Alle wieviel Dateien der Bulk-Reindex auf Platte sichert + Speicher ans OS
 # zurueckgibt. Kompromiss: haeufiger = weniger Verlust bei Absturz, aber mehr
@@ -85,11 +86,21 @@ _stats_cache: dict | None = None
 _stats_cache_lock = threading.Lock()
 
 
+# Nach einem FEHLER (nicht: fehlender Abhaengigkeit) wird die Initialisierung
+# spaeter erneut versucht. Frueher galt ein einmaliger Fehler bis zum Neustart –
+# der Dienst lief dann dauerhaft ohne semantische Suche weiter, mit einer
+# einzigen Warnzeile im Journal.
+_VS_RETRY_SEC = 60.0
+_vector_store_retry_after = 0.0
+
+
 def _get_vector_store():
     """Gibt VectorStore-Singleton zurueck oder None wenn Dependencies fehlen."""
-    global _vector_store, _vector_store_checked
-    if _vector_store_checked:
+    global _vector_store, _vector_store_checked, _vector_store_retry_after
+    if _vector_store is not None:
         return _vector_store
+    if _vector_store_checked and time.time() < _vector_store_retry_after:
+        return None
     _vector_store_checked = True
     try:
         from backend.tools.vector_store import VectorStore
@@ -98,11 +109,39 @@ def _get_vector_store():
         _log.info("VectorStore verfuegbar – semantische Suche aktiv")
         return vs
     except ImportError as e:
+        # Fehlende Abhaengigkeit aendert sich zur Laufzeit nicht -> kein Neuversuch.
+        _vector_store_retry_after = float("inf")
         _log.info(f"VectorStore nicht verfuegbar (faiss-cpu/sentence-transformers fehlt): {e}")
         return None
     except Exception as e:
-        _log.warning(f"VectorStore Initialisierung fehlgeschlagen: {e}")
+        # Voruebergehend (Rechte, Platte voll, beschaedigter Index) -> spaeter erneut.
+        _vector_store_retry_after = time.time() + _VS_RETRY_SEC
+        _log.warning(f"VectorStore Initialisierung fehlgeschlagen (Neuversuch in "
+                     f"{int(_VS_RETRY_SEC)}s): {e}")
         return None
+
+
+def vector_store_status() -> dict:
+    """Zustand der Vektorsuche fuer die Statistik-Anzeige."""
+    # DREI Zustaende, nicht zwei: _vector_store entsteht erst beim ersten
+    # Zugriff. "noch nicht initialisiert" darf NICHT als "nicht verfuegbar"
+    # gemeldet werden – sonst zeigt die Oberflaeche nach jedem Neustart eine
+    # Stoerung an, die es nicht gibt (gleiche Lazy-Falle wie beim Hauptagenten).
+    if _vector_store is not None:
+        state = "ok"
+    elif not _vector_store_checked:
+        state = "unbenutzt"           # noch nie gebraucht – keine Aussage moeglich
+    elif _vector_store_retry_after == float("inf"):
+        state = "nicht_installiert"   # faiss/sentence-transformers fehlen
+    else:
+        state = "fehler"              # Aufbau gescheitert, Neuversuch laeuft
+    return {
+        "state": state,
+        "available": _vector_store is not None,
+        "permanently_off": state == "nicht_installiert",
+        "retry_in": max(0, int(_vector_store_retry_after - time.time()))
+        if state == "fehler" else 0,
+    }
 
 
 def preload_embedding_model():
@@ -123,8 +162,15 @@ def preload_embedding_model():
 def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = False) -> bool:
     """Inkrementeller Vektor-Index Aufbau. Gibt True zurueck wenn Index Inhalt hat.
 
-    force=False (Suchpfad): Kein Bulk-Aufbau bei leerem Index, max. INLINE_LIMIT Dateien.
-    force=True  (Neu-Indizieren): Alle Dateien werden verarbeitet, kein Limit.
+    force=False (Suchpfad): Kein Bulk-Aufbau bei leerem Index, max. INLINE_LIMIT
+    Dateien, und AUSDRUECKLICH KEIN Entfernen verwaister Eintraege.
+    force=True  (Neu-Indizieren): Alle Dateien, inkl. Aufraeumen.
+
+    Warum das Aufraeumen nicht mehr im Suchpfad passiert: Es hielt "Datei nicht
+    auffindbar" fuer "Datei geloescht". Antwortete ein Netzlaufwerk kurz nicht,
+    ueberging ``_all_files`` den ganzen Ordner – und die naechstbeste Suche loeschte
+    saemtliche Chunks dieses Shares aus dem Index. Aufraeumen ist eine
+    Wartungsaufgabe und gehoert in den ausdruecklichen Neuaufbau.
     """
     vs = _get_vector_store()
     if vs is None:
@@ -138,13 +184,29 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
             _log.debug("Vektor-Index leer – bitte Neu-Indizieren ausfuehren")
             return False
 
-    files = _all_files(folders)
+    # Nur erreichbare Ordner betrachten. Die Liste wird VOR dem Scan bestimmt,
+    # damit Scan und Aufraeumen garantiert denselben Stand sehen.
+    alive = [f for f in folders if _safe_exists(f)]
+    if len(alive) != len(folders):
+        missing = [str(f) for f in folders if f not in alive]
+        _log.warning("Nicht erreichbare Wissensordner werden uebersprungen "
+                     "(Index bleibt unangetastet): %s", ", ".join(missing))
+    # Suchpfad: kurz gecachte Liste (der Ordner-Scan lief bisher bei JEDER Suche
+    # ueber alle Wissensordner inkl. Netzlaufwerken). Der Neuaufbau nimmt den
+    # echten Stand.
+    files = _all_files(alive) if force else _all_files_cached(alive)
     current_paths = {str(f) for f in files}
 
-    # Geloeschte Dateien entfernen
-    for path_str in list(indexed.keys()):
-        if path_str not in current_paths:
-            vs.remove_file(path_str)
+    # Verwaiste Eintraege entfernen – nur beim ausdruecklichen Neuaufbau und nur
+    # fuer Dateien aus ERREICHBAREN Ordnern. In EINEM Neuaufbau statt N.
+    if force:
+        alive_prefixes = tuple(str(r).rstrip(os.sep) + os.sep for r in alive)
+        stale = [p for p in indexed
+                 if p not in current_paths and p.startswith(alive_prefixes)]
+        if stale:
+            removed = vs.remove_files(stale)
+            _log.info(f"{len(stale)} verwaiste Datei(en) aus dem Index entfernt "
+                      f"({removed} Chunks)")
 
     # Neue/geaenderte Dateien ermitteln
     to_index = []
@@ -169,6 +231,7 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
     _set_progress(phase="Vektor", vector_done=0, vector_total=total, vector_base=already)
 
     changed = 0
+    failed = 0
     cancelled = False
     for i, filepath in enumerate(to_index):
         # Abbruch nur ZWISCHEN zwei Dateien – die bereits geschriebenen Chunks
@@ -188,10 +251,22 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
                 # save=False: nicht bei jeder Datei den ganzen Index schreiben.
                 vs.add_chunks(path_str, chunks, mtime, save=False)
                 changed += 1
+            elif text is None:
+                # NICHT lesbar (zu gross, Parser fehlt, defekt) – der bisherige
+                # Indexstand BLEIBT. Frueher wurde hier entfernt: eine wachsende
+                # Datei verlor beim Ueberschreiten des Groessenlimits still ihre
+                # Chunks, ohne dass irgendwo ein Fehler auftauchte.
+                failed += 1
+                if path_str in indexed:
+                    _log.warning("Nicht lesbar, bisheriger Indexstand bleibt: %s", path_str)
+                else:
+                    _log.info("Nicht lesbar, wird nicht indiziert: %s", path_str)
             else:
+                # Lesbar, aber leer -> Eintrag ist gegenstandslos.
                 vs.remove_file(path_str)
-        except Exception:
-            pass
+        except Exception as e:
+            failed += 1
+            _log.warning("Indizierung fehlgeschlagen fuer %s: %s", path_str, e)
 
         # Laufende Chunk-Zahl mitfuehren, damit ALLE offenen Clients dieselbe
         # Live-Zahl sehen (sonst zeigt ein Browser, der die Kachel vor dem Lauf
@@ -225,8 +300,11 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
 
     if not cancelled:
         _set_progress(vector_done=total, vector_total=total)
-    if changed:
-        _log.info(f"Vektor-Index aktualisiert: {changed} Datei(en)")
+    # Fehlerzahl mitfuehren: ein Lauf, der die Haelfte der Dateien verschluckt,
+    # sah bisher wie ein Erfolg aus (die Ausnahmen wurden still geschluckt).
+    _set_progress(failed=failed)
+    if changed or failed:
+        _log.info(f"Vektor-Index aktualisiert: {changed} Datei(en), {failed} fehlgeschlagen")
     return vs.chunk_count() > 0
 
 
@@ -244,16 +322,26 @@ def _is_learned_note(path_str: str) -> bool:
     return "/knowledge/learned/" in p or "/knowledge/pending/" in p
 
 
+def _learned_weight(file_path: str) -> float:
+    """Herkunfts-Gewicht fuer das Ranking (1.0 = normal)."""
+    return LEARNED_PENALTY if _is_learned_note(file_path) else 1.0
+
+
 def _vector_search(query: str, max_results: int) -> list[tuple[float, str, str]] | None:
     """Hybride Suche (semantisch + BM25) via VectorStore.
 
     Gibt None zurueck wenn kein VectorStore verfuegbar ist.
+
+    Die Abwertung gelernter Notizen wird als ``weight_fn`` IN die Suche gereicht,
+    damit sie VOR dem relativen Cut greift. Vorher lief sie hier nachtraeglich:
+    Stand eine gelernte Notiz auf Platz 1, wurde der Cut an ihrem unabgewerteten
+    Score gemessen – Primaerdokumente, die nach der Abwertung vorn gelegen
+    haetten, waren da schon verworfen.
     """
     vs = _get_vector_store()
     if vs is None:
         return None
-    # Ueber-abfragen: die Abwertung gelernter Notizen sortiert danach um.
-    results = vs.search_hybrid(query, max(max_results * 2, 20))
+    results = vs.search_hybrid(query, max_results, weight_fn=_learned_weight)
     if not results:
         return None
 
@@ -263,12 +351,8 @@ def _vector_search(query: str, max_results: int) -> list[tuple[float, str, str]]
             rel = str(Path(file_path).relative_to(PROJECT_ROOT))
         except ValueError:
             rel = file_path
-        if _is_learned_note(file_path):
-            score *= LEARNED_PENALTY
         converted.append((score, rel, chunk))
-
-    converted.sort(key=lambda x: x[0], reverse=True)
-    return converted[:max_results]
+    return converted
 
 
 def _get_skill_config() -> dict:
@@ -918,9 +1002,9 @@ def purge_file_index(file: Path) -> dict:
     vs = _get_vector_store()
     if vs is not None:
         try:
-            before = len(vs._meta)
-            vs.remove_file(file_s)
-            removed_vec = before - len(vs._meta)
+            # remove_file() liefert die Anzahl selbst – frueher wurde dafuer
+            # ungeschuetzt auf die private Liste vs._meta zugegriffen.
+            removed_vec = vs.remove_file(file_s)
         except Exception as e:
             _log.warning(f"FAISS-Bereinigung fehlgeschlagen: {e}")
 
@@ -995,8 +1079,17 @@ def relocate_file_index(old_file: Path, new_file: Path) -> dict:
 
 
 def _all_files(folders: list[Path]) -> list[Path]:
-    """Gibt alle unterstützten Dateien in den konfigurierten Ordnern zurück."""
-    all_exts = EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO
+    """Gibt alle unterstützten Dateien in den konfigurierten Ordnern zurück.
+
+    EXTENSIONS_IMAGE gehoert dazu: Der Upload nimmt Bilder an und `_extract_text`
+    liest sie per OCR. Fehlten sie hier, wurde ein hochgeladenes Bild nie
+    indiziert UND beim naechsten Reindex verlor es seine Gruppen-Zuordnung
+    (``kg.prune`` arbeitet auf dieser Liste) – es verschwand damit aus
+    „Meine Dateien", obwohl es unveraendert auf der Platte lag.
+    """
+    all_exts = (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX
+                | EXTENSIONS_PPTX | EXTENSIONS_VIDEO | EXTENSIONS_AUDIO
+                | EXTENSIONS_IMAGE)
     files = []
     for folder in folders:
         # Totes Netzlaufwerk nicht anfassen -> sonst blockiert os.walk minutenlang.
@@ -1059,6 +1152,36 @@ def get_disk_file_count() -> int | None:
     # Timeout, fuellt der (weiterlaufende) Daemon-Thread den Cache trotzdem –
     # der naechste Aufruf hat den Wert dann sofort.
     return _bounded_call(lambda: len(_all_files(_get_folders())), timeout=5.0, default=None)
+
+
+# Kurz gecachte Dateiliste fuer HEISSE Pfade (Suche). Der Ordner-Scan laeuft
+# ueber alle Wissensordner inkl. Netzlaufwerken; ihn pro Suche mehrfach
+# auszufuehren war der groesste vermeidbare Posten im Suchpfad.
+# Der ausdrueckliche Neuaufbau ruft weiterhin _all_files() direkt – er MUSS den
+# echten Stand sehen.
+_FILES_TTL = 30.0
+_files_cache: dict = {"key": None, "value": None, "ts": 0.0}
+_files_cache_lock = threading.Lock()
+
+
+def _all_files_cached(folders: list[Path]) -> list[Path]:
+    """``_all_files`` mit kurzer Vorhaltezeit – nur fuer Lesepfade."""
+    key = tuple(str(f) for f in folders)
+    now = time.time()
+    with _files_cache_lock:
+        if (_files_cache["key"] == key and _files_cache["value"] is not None
+                and now - _files_cache["ts"] < _FILES_TTL):
+            return _files_cache["value"]
+    value = _all_files(folders)
+    with _files_cache_lock:
+        _files_cache.update(key=key, value=value, ts=time.time())
+    return value
+
+
+def invalidate_files_cache() -> None:
+    """Vorhaltezeit der Dateiliste vorzeitig beenden (nach Upload/Loeschen)."""
+    with _files_cache_lock:
+        _files_cache.update(key=None, value=None, ts=0.0)
 
 
 INLINE_LIMIT = 10  # Maximale Dateien die inline (im Suchpfad) indiziert werden
@@ -1192,10 +1315,9 @@ async def rag_search(query: str, max_results: int = 8, groups=None) -> list[tupl
         return []
     folders = _get_folders()
     max_bytes = _get_max_bytes()
-    cfg = _get_skill_config()
-    # Wissenssuche laeuft ausschliesslich ueber die Vektor-/Datenbank-Suche.
-    # Der frueher waehlbare Suchmodus (Auto/TF-IDF/Vektor) wurde entfernt.
-    search_mode_cfg = "vector"
+    # "auto": ohne FAISS Rueckfall auf TF-IDF statt gar keiner Suche (siehe
+    # gleichlautende Stelle in KnowledgeTool.execute).
+    search_mode_cfg = "auto"
 
     # Bei aktivem Gruppenfilter ueber-abfragen, damit nach dem Filtern noch
     # genug Treffer uebrig bleiben.
@@ -1206,17 +1328,19 @@ async def rag_search(query: str, max_results: int = 8, groups=None) -> list[tupl
     need_tfidf_cache = search_mode_cfg == "tfidf" or (
         search_mode_cfg == "auto" and not vector_index_ready)
 
+    # Kein _load_cache() im Normalfall: die Datei traegt alle Chunk-Texte und
+    # wurde bisher bei jedem Aufruf komplett geparst.
     cache = await asyncio.to_thread(_rebuild_cache, folders, max_bytes, False) \
-        if need_tfidf_cache else _load_cache()
+        if need_tfidf_cache else None
 
     results = None
     if search_mode_cfg in ("auto", "vector"):
         has_vector = await asyncio.to_thread(_rebuild_vector_index, folders, max_bytes)
         if has_vector:
             results = await asyncio.to_thread(_vector_search, query, fetch_n)
-        elif search_mode_cfg == "auto":
+        elif search_mode_cfg == "auto" and cache:
             results = _search(query, cache, fetch_n)
-    elif search_mode_cfg == "tfidf":
+    elif search_mode_cfg == "tfidf" and cache:
         results = _search(query, cache, fetch_n)
     results = results or []
 
@@ -1352,10 +1476,14 @@ def get_stats() -> dict:
         "vector_db_name": vector_db_name,
         "vector_db_version": vector_db_version,
         "vector_model": vector_model,
-        "search_mode": "vector",
+        "search_mode": "auto",
         "indexing": get_index_progress()["running"],
         "index_phase": get_index_progress()["phase"],
+        "index_failed": get_index_progress().get("failed", 0),
         "last_index_run": get_last_run(),
+        # Zustand der Vektorsuche sichtbar machen: ein fehlgeschlagener Aufbau
+        # war bisher nur an einer Journal-Zeile erkennbar.
+        "vector_store_state": vector_store_status(),
     }
 
 
@@ -1578,7 +1706,8 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
     _set_progress(running=True, phase="Starte...", done=0, total=0, vector_done=0,
                   vector_total=0, vector_base=0, chunks=0, error="", current_file="",
                   started_at=started, finished_at=0.0, resumed=resume_count,
-                  cancelled=False, attempt=attempt, max_attempts=MAX_INDEX_ATTEMPTS)
+                  cancelled=False, attempt=attempt, max_attempts=MAX_INDEX_ATTEMPTS,
+                  failed=0)
     # Marker "laeuft" auf die Platte: stirbt der Prozess mittendrin (Neustart,
     # OOM-Killer), erkennt resume_interrupted_reindex() das beim naechsten Start
     # und setzt den Lauf fort. Ein sauberes Ende ueberschreibt den Marker.
@@ -1592,13 +1721,9 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
     max_bytes = _get_max_bytes()
     vs = _get_vector_store()
 
-    # Verwaiste Gruppen-Zuordnungen (Modell B) entfernen: Dateien, die es
-    # nicht mehr gibt, verlieren ihre logischen Tags.
-    try:
-        from backend import knowledge_groups as _kg
-        _kg.prune(_all_files(folders))
-    except Exception:
-        pass
+    # Die Dateiliste kann sich geaendert haben – der Neuaufbau muss den echten
+    # Stand sehen, nicht den kurz gecachten.
+    invalidate_files_cache()
 
     if vs is not None:
         # ── Nur FAISS aufbauen ──────────────────────────────────────────────
@@ -1621,6 +1746,27 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
                   "vector_info": ""}
 
     cancelled = _reindex_cancel.is_set()
+    failed = int(get_index_progress().get("failed") or 0)
+
+    # Gruppen-Pflege NACH dem Neuaufbau: erst jetzt entspricht der Index dem
+    # tatsaechlichen Bestand. Zaehl-Basis ist Index + Platte (nicht nur die
+    # Platte) – ein voruebergehend nicht erreichbares Netzlaufwerk darf die
+    # Gruppen-Zuordnungen seiner Dateien nicht mitreissen.
+    try:
+        from backend import knowledge_groups as _kg
+        basis = known_paths_with_disk()
+        pruned = _kg.prune(basis)
+        # Systemgenerierte Dateien der Gruppe "Erlernt" zuordnen. Das lief
+        # bisher NUR beim Oeffnen der Gruppenseite – bis dahin galten gelernte
+        # Dateien als "ungruppiert", der Gruppenfilter lieferte je nach
+        # Vorgeschichte andere Ergebnisse.
+        assigned = _kg.auto_assign_system_files(basis)
+        if pruned or assigned:
+            _log.info(f"Wissensgruppen gepflegt: {pruned} verwaiste Zuordnung(en) "
+                      f"entfernt, {assigned} Datei(en) automatisch zugeordnet")
+    except Exception as e:
+        _log.warning(f"Gruppen-Pflege nach Reindex fehlgeschlagen: {e}")
+
     finished = time.time()
     _set_progress(running=False, phase="Abgebrochen" if cancelled else "Fertig",
                   finished_at=finished, cancelled=cancelled)
@@ -1628,8 +1774,10 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
                     "status": "cancelled" if cancelled else "ok",
                     "attempt": attempt, "resumed": resume_count,
                     "indexed_files": result["indexed_files"],
-                    "total_chunks": result["total_chunks"]})
+                    "total_chunks": result["total_chunks"],
+                    "failed_files": failed})
     result["cancelled"] = cancelled
+    result["failed_files"] = failed
     return result
 
 
@@ -1661,7 +1809,7 @@ class KnowledgeTool(BaseTool):
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximale Anzahl der Ergebnisse (Standard: 5)."
+                    "description": "Maximale Anzahl der Ergebnisse (Standard: 8)."
                 }
             },
             "required": ["query"]
@@ -1691,10 +1839,12 @@ class KnowledgeTool(BaseTool):
         folders = _get_folders()
         max_bytes = _get_max_bytes()
 
-        # Wissenssuche laeuft ausschliesslich ueber die Vektor-/Datenbank-Suche.
-        # Der frueher waehlbare Suchmodus (Auto/TF-IDF/Vektor) wurde entfernt.
-        cfg = _get_skill_config()
-        search_mode_cfg = "vector"
+        # Wissenssuche laeuft ueber die Vektor-/Datenbank-Suche. "auto" heisst:
+        # ohne FAISS faellt sie auf TF-IDF zurueck, statt gar nichts zu liefern.
+        # (Bis 2026-07-30 stand hier fest "vector" – ohne FAISS gab es dann
+        # ueberhaupt keine Wissenssuche mehr, weil der Rueckfall-Zweig
+        # unerreichbar war.)
+        search_mode_cfg = "auto"
 
         # TF-IDF Cache nur laden wenn benoetigt (nicht bei reinem Vektor-Modus)
         # Spart bei 600+ Dateien das Laden aller Chunks in den RAM
@@ -1704,14 +1854,25 @@ class KnowledgeTool(BaseTool):
             search_mode_cfg == "auto" and not vector_index_ready
         )
 
+        # cache=None heisst "nicht geladen". Frueher wurde die komplette
+        # knowledge_index.json (enthaelt ALLE Chunk-Texte) bei JEDER Suche
+        # geparst, nur um zu pruefen, ob sie leer ist.
+        cache = None
         if need_tfidf_cache:
             cache = await asyncio.to_thread(_rebuild_cache, folders, max_bytes, False)
-        else:
-            cache = _load_cache()  # nur fuer die Leer-Pruefung, kein Rebuild
 
-        # Dateien vorhanden aber noch kein Index?
-        files_on_disk = _all_files(folders)
-        if not cache["files"] and not vector_index_ready:
+        if not vector_index_ready and not (cache and cache["files"]):
+            # Laeuft gerade ein Neuaufbau, ist der Index nur voruebergehend leer –
+            # "keine Treffer" waere die falsche Auskunft.
+            prog = get_index_progress()
+            if prog.get("running"):
+                done = prog.get("vector_done") or prog.get("done") or 0
+                total = prog.get("vector_total") or prog.get("total") or 0
+                return (f"⏳ Der Wissensindex wird gerade neu aufgebaut "
+                        f"({done}/{total} Dateien). Deshalb sind aktuell keine "
+                        f"Treffer möglich – bitte in einigen Minuten erneut fragen. "
+                        f"Es fehlt KEIN Wissen, es ist nur vorübergehend nicht durchsuchbar.")
+            files_on_disk = _all_files_cached(folders)
             if files_on_disk:
                 return f"⚠️ Knowledge Base hat {len(files_on_disk)} Dateien, aber noch keinen Index. Bitte einmal 'Neu Indizieren' in den Einstellungen ausführen."
             folder_display = ", ".join(
@@ -1731,12 +1892,16 @@ class KnowledgeTool(BaseTool):
                 results = await asyncio.to_thread(_vector_search, query, fetch_n)
                 search_mode = "Hybrid: Vektor+BM25"
             elif search_mode_cfg == "auto":
-                # Kein Vektor-Index → TF-IDF als Fallback
+                # Kein Vektor-Index → TF-IDF als Fallback. ``cache`` kann None
+                # sein, wenn der Index zwischen Pruefung und Suche verschwand.
+                if cache is None:
+                    cache = await asyncio.to_thread(_rebuild_cache, folders, max_bytes, False)
                 results = _search(query, cache, fetch_n)
                 search_mode = "TF-IDF"
-            # search_mode_cfg == "vector" ohne Index → keine Ergebnisse (hat_vector=False)
 
         elif search_mode_cfg == "tfidf":
+            if cache is None:
+                cache = await asyncio.to_thread(_rebuild_cache, folders, max_bytes, False)
             results = _search(query, cache, fetch_n)
             search_mode = "TF-IDF"
 
@@ -1752,9 +1917,16 @@ class KnowledgeTool(BaseTool):
             results = results[:max_results]
 
         if not results:
-            total = sum(len(d.get("chunks", [])) for d in cache["files"].values())
+            # Bestandszahlen aus der Quelle nehmen, die tatsaechlich gesucht hat.
+            if vector_index_ready and vs is not None:
+                n_files, n_chunks = vs.file_count(), vs.chunk_count()
+            elif cache:
+                n_files = len(cache["files"])
+                n_chunks = sum(len(d.get("chunks", [])) for d in cache["files"].values())
+            else:
+                n_files = n_chunks = 0
             _grp = " in den gewählten Wissensgruppen" if kb_groups else ""
-            return f"🔍 Keine Treffer für '{query}'{_grp} ({len(cache['files'])} Dateien, {total} Chunks)."
+            return f"🔍 Keine Treffer für '{query}'{_grp} ({n_files} Dateien, {n_chunks} Chunks)."
 
         output = f"🔍 {len(results)} Treffer für '{query}' ({search_mode}):\n\n"
         for i, (score, filename, chunk) in enumerate(results, 1):
@@ -1845,7 +2017,12 @@ class KnowledgeManageTool(BaseTool):
 
         elif action == "reindex":
             result = await asyncio.to_thread(force_reindex)
-            return f"✅ Index neu aufgebaut: {result['indexed_files']} Dateien, {result['total_chunks']} Chunks{result.get('vector_info', '')}."
+            if result.get("skipped"):
+                return "ℹ️ Es läuft bereits eine Indizierung – ein Nachlauf ist vorgemerkt."
+            _fail = result.get("failed_files") or 0
+            _fail_txt = f", ⚠️ {_fail} Datei(en) fehlgeschlagen" if _fail else ""
+            return (f"✅ Index neu aufgebaut: {result['indexed_files']} Dateien, "
+                    f"{result['total_chunks']} Chunks{result.get('vector_info', '')}{_fail_txt}.")
 
         elif action == "list_docs":
             folders = _get_folders()

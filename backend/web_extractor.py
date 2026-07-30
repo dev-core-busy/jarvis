@@ -7,7 +7,16 @@ import time
 import uuid
 from pathlib import Path
 
-PENDING_DIR = Path("data/knowledge/pending")
+# Absolut ableiten, nicht relativ zum Arbeitsverzeichnis: sonst legt jeder
+# Aufrufer ausserhalb des Dienstes (Wartungsskript, Cron, Test) seine Entwuerfe
+# woanders ab – und dort greift _is_pending_path() nicht, die Entwuerfe wuerden
+# als Wissen indiziert.
+PROJECT_ROOT = Path(__file__).parent.parent
+PENDING_DIR = PROJECT_ROOT / "data" / "knowledge" / "pending"
+
+# Vorhaltezeit fuer bereits uebernommene Entwuerfe (Revisionsspur: "was schlug
+# das Modell vor, was machte der Mensch daraus"). 0 = nie aufraeumen.
+APPROVED_RETENTION_DAYS = 90
 
 # ─── LLM-Prompt ──────────────────────────────────────────────────────────────
 
@@ -407,19 +416,80 @@ def update_pending(doc_id: str, data: dict) -> bool:
     return True
 
 
+def _target_dir_for_groups(groups) -> Path:
+    """Zielordner fuer ein freigegebenes Dokument.
+
+    Bevorzugt einen Speicherordner der gewaehlten Wissensgruppe – dort liegt auch
+    die hochgeladene Originaldatei. Vorher landete jeder Extrakt im ERSTEN
+    konfigurierten Ordner (in der Regel ``data/knowledge``), also ausgerechnet in
+    dem Ordner, den /wissen als Ablageziel gar nicht anbietet: Original und
+    Extrakt lagen dann in verschiedenen Ordnern.
+    Rueckfall bleibt der erste konfigurierte Ordner.
+    """
+    from backend.tools.knowledge import _get_folders, PROJECT_ROOT as _ROOT
+    folders = _get_folders()
+    default = folders[0]
+    if not groups:
+        return default
+    try:
+        from backend import knowledge_groups as kg
+        configured = {str(f) for f in folders}
+        for gid in groups:
+            g = kg.get_group(gid) or {}
+            for rel in g.get("folders", []):
+                cand = Path(rel)
+                if not cand.is_absolute():
+                    cand = _ROOT / rel
+                if str(cand) in configured:
+                    return cand
+    except Exception:
+        pass
+    return default
+
+
+def _index_single_file(path: Path, content: str) -> bool:
+    """Haengt EINE neue Wissensdatei sofort in den Vektor-Index ein.
+
+    Ersetzt den frueheren ``force_reindex()``-Aufruf. Der baute den Index mit
+    ``vs.clear()`` von Grund auf neu – fuer eine einzige neue Markdown-Datei
+    wurde die gesamte Wissensdatenbank erneut geparst und eingebettet (auf dem
+    Produktivsystem 893 Dateien inkl. PDF/OCR/Whisper), und waehrend des Laufs
+    war der Index leer, sodass JEDE Suche "keine Treffer" meldete.
+
+    Gleiches Muster wie ``learning.py::_index_immediately()``.
+    Gibt False zurueck, wenn kein Vektor-Index verfuegbar ist (dann muss der
+    Aufrufer den TF-IDF-Weg gehen).
+    """
+    try:
+        from backend.tools.knowledge import (_get_vector_store, _chunk_text,
+                                             invalidate_files_cache)
+        vs = _get_vector_store()
+        if vs is None:
+            return False
+        chunks = _chunk_text(content)
+        if chunks:
+            vs.add_chunks(str(path), chunks, path.stat().st_mtime)
+        invalidate_files_cache()
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[Extraktor] Sofort-Indizierung fehlgeschlagen ({e}) – "
+              f"fallback auf Reindex", flush=True)
+        return False
+
+
 def approve_pending(doc_id: str, reindex: bool = True, groups=None) -> dict:
     """Genehmigte Items als .md in die Wissens-DB schreiben.
     Das Pending-Dokument bleibt erhalten (status='approved') fuer die Verlaufsansicht.
-    ``reindex=False`` ueberspringt den Reindex (fuer Bulk-Importe, die am Ende
-    EINMAL reindizieren). ``groups`` (optional): Liste von Gruppen-IDs, denen das
-    erzeugte Dokument als logisches Tag zugeordnet wird (Modell B)."""
+    ``reindex=False`` ueberspringt die Index-Aktualisierung (fuer Bulk-Importe).
+    ``groups`` (optional): Liste von Gruppen-IDs, denen das erzeugte Dokument als
+    logisches Tag zugeordnet wird (Modell B)."""
     doc = get_pending(doc_id)
     if not doc:
         raise FileNotFoundError(f"Pending-Dokument {doc_id} nicht gefunden")
 
-    from backend.tools.knowledge import PROJECT_ROOT, _get_folders, force_reindex
+    from backend.tools.knowledge import PROJECT_ROOT, force_reindex
 
-    target_dir = _get_folders()[0]
+    target_dir = _target_dir_for_groups(groups)
     target_dir.mkdir(parents=True, exist_ok=True)
 
     # Sicherer Dateiname
@@ -455,7 +525,15 @@ def approve_pending(doc_id: str, reindex: bool = True, groups=None) -> dict:
     # Pending-Dokument als "approved" markieren (nicht loeschen – Verlauf erhalten)
     doc["status"] = "approved"
     doc["approved_at"] = int(time.time())
-    doc["file"] = str(target_path.relative_to(PROJECT_ROOT))
+    # Wissensordner duerfen ABSOLUT und ausserhalb des Projektverzeichnisses
+    # liegen (Netzlaufwerke sind ausdruecklich vorgesehen). relative_to() wirft
+    # dann ValueError – und zwar NACHDEM die Datei schon geschrieben wurde: die
+    # Freigabe endete mit HTTP 500, der Entwurf blieb "offen", die Datei lag
+    # aber bereits im Ordner. Beim Testen aufgefallen (2026-07-30).
+    try:
+        doc["file"] = str(target_path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        doc["file"] = str(target_path)
     doc["qa_count"] = len(approved_qa)
     doc["fact_count"] = len(approved_facts)
     save_pending(doc)
@@ -468,8 +546,11 @@ def approve_pending(doc_id: str, reindex: bool = True, groups=None) -> dict:
         except Exception:
             pass
 
-    # Wissens-Index neu aufbauen (im Hintergrund-Thread)
-    if reindex:
+    # Neue Datei in den Index einhaengen. Das ist ein Anhaengen (Millisekunden),
+    # KEIN Neuaufbau – siehe _index_single_file().
+    if reindex and not _index_single_file(target_path, md_content):
+        # Kein Vektor-Index verfuegbar (nur TF-IDF): dort bleibt der Voll-Lauf
+        # der einzige Weg, den Bestand nachzuziehen.
         def _reindex_and_trim():
             force_reindex()
             try:
@@ -494,6 +575,37 @@ def delete_pending(doc_id: str) -> bool:
         path.unlink()
         return True
     return False
+
+
+def cleanup_approved(days: int = None) -> int:
+    """Raeumt uebernommene Entwuerfe nach Ablauf der Vorhaltezeit ab.
+
+    OFFENE Entwuerfe werden NIE geloescht – nur was bereits in der
+    Wissensdatenbank steht (``status='approved'``). Ohne diese Routine wuchs
+    ``pending/`` unbegrenzt, und ``list_pending()`` liest bei jedem Aufruf alle
+    Dateien. Gibt die Anzahl geloeschter Dateien zurueck.
+    """
+    limit = APPROVED_RETENTION_DAYS if days is None else int(days)
+    if limit <= 0:
+        return 0
+    cutoff = time.time() - limit * 86400
+    removed = 0
+    try:
+        _ensure_dir()
+        for f in PENDING_DIR.glob("*.json"):
+            try:
+                doc = json.loads(f.read_text(encoding="utf-8"))
+                if str(doc.get("status") or "") != "approved":
+                    continue
+                stamp = float(doc.get("approved_at") or doc.get("created_at") or 0)
+                if stamp and stamp < cutoff:
+                    f.unlink()
+                    removed += 1
+            except Exception:  # noqa: BLE001 – eine kaputte Datei stoppt nicht den Rest
+                continue
+    except Exception:  # noqa: BLE001
+        return removed
+    return removed
 
 
 # ─── Datei-Extraktion ────────────────────────────────────────────────────────

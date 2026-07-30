@@ -832,7 +832,7 @@
         },
 
         // Sichtbare Laenge der Verstossliste; der Rest ist per Scrollbalken erreichbar.
-        VIOL_VISIBLE: 10,
+        VIOL_VISIBLE: 50,
 
         /* Begrenzt die Liste auf VIOL_VISIBLE Eintraege.
          *
@@ -858,22 +858,41 @@
             box.classList.add('sec-scrollbox');
         },
 
-        /* Der Abschnitt startet zugeklappt, dort ist nicht messbar. app.js klappt
-         * ueber einen eigenen Klick-Handler auf derselben Kopfzeile auf; unser
-         * Handler laeuft danach, das setTimeout wartet noch auf das display-Update. */
+        /* Nachmessen, sobald die Liste sichtbar wird. ZWEI Ebenen koennen sie
+         * verbergen, beide muessen gebunden werden:
+         *   1. der Abschnitt "Angriffspraevention" (Klick auf die Kopfzeile;
+         *      app.js hat dort einen eigenen Handler, unser setTimeout wartet auf
+         *      dessen display-Umschaltung)
+         *   2. der Unter-Container "Letzte Zugriffs-Verstoesse" (<details>, das
+         *      'toggle'-Ereignis)
+         * Ohne (2) bliebe die Liste nach dem Aufklappen unbegrenzt lang, weil beim
+         * Rendern im geschlossenen Zustand nichts messbar war. */
         bindViolRemeasure: function () {
             var hdr = $('sec-sect-incidents-hdr');
-            if (!hdr || hdr._violBound) return;
-            hdr._violBound = true;
-            hdr.addEventListener('click', function () {
-                setTimeout(Mgr.applyViolLimit, 0);
-            });
+            if (hdr && !hdr._violBound) {
+                hdr._violBound = true;
+                hdr.addEventListener('click', function () {
+                    setTimeout(Mgr.applyViolLimit, 0);
+                });
+            }
+            var sub = $('sec-sub-viol');
+            if (sub && !sub._violBound) {
+                sub._violBound = true;
+                sub.addEventListener('toggle', function () {
+                    if (sub.open) Mgr.applyViolLimit();
+                });
+            }
         },
 
         renderViolations: function (list) {
             var box = $('sec-viol-list');
             if (!box) return;
             Mgr.bindViolRemeasure();
+            // Anzahl in die Kopfzeile des Unter-Containers: der startet zu, ohne die
+            // Zahl waere nicht erkennbar, ob sich das Aufklappen lohnt. Reine Ziffern,
+            // daher kein i18n-Schluessel noetig.
+            var cnt = $('sec-viol-count');
+            if (cnt) cnt.textContent = list.length ? '(' + list.length + ')' : '';
             if (!list.length) {
                 box.style.maxHeight = '';
                 box.classList.remove('sec-scrollbox');

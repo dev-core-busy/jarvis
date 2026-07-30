@@ -632,6 +632,38 @@ das × auf die Höhe des ersten Feld-Labels, sonst entsteht eine leere Zeile. Be
 und Position, × schliesst und stellt die Liste wieder her, identischer Zustand wie „Abbrechen",
 **kein** Speichern-Aufruf, Titel/aria folgen dem Sprachwechsel).
 
+## „Letzte Zugriffs-Verstöße": Unter-Container + 10 sichtbare Zeilen (2026-07-30)
+Die Liste (bis 150 Einträge aus `/api/security/violations`) füllte den Abschnitt
+*Sicherheit → Angriffsprävention* und drückte „Gesperrte Konten" weit nach unten. Jetzt:
+**einklappbarer Unter-Container** (`details.sec-sub[data-sub=violations]`, `#sec-sub-viol`) mit
+den ersten **50 Einträgen** sichtbar (`VIOL_VISIBLE`), Rest scrollbar (`.sec-scrollbox`). Alle Einträge bleiben im
+DOM – es wird nichts abgeschnitten. Die Anzahl steht in der Kopfzeile (`#sec-viol-count`, „(37)"):
+der Container startet zu, ohne die Zahl wäre nicht erkennbar, ob sich das Aufklappen lohnt.
+- **Die Höhe wird GEMESSEN, nicht per fester CSS-Höhe gesetzt** (`applyViolLimit`, Summe der
+  `offsetHeight` der ersten `VIOL_VISIBLE` `.sec-viol-row`): ein Eintrag ist je nach Detail- und
+  Anfrage-Zeile ein bis drei Zeilen hoch, eine feste Höhe würde mitten in einen Eintrag schneiden.
+- **FALLSTRICK – im eingeklappten Zustand ist NICHTS messbar** (`offsetHeight` = 0). Wer das naiv
+  übernimmt, setzt `max-height: 0` und die Liste ist nach dem Aufklappen unsichtbar. Deshalb: bei
+  Höhe 0 gar nichts setzen und nachmessen, sobald sie sichtbar wird. **Zwei Ebenen verbergen sie,
+  beide müssen gebunden sein** (`bindViolRemeasure`): der Abschnitt (Klick auf die Kopfzeile –
+  `app.js::_collapseInit` hat dort einen eigenen Handler, das `setTimeout 0` wartet auf dessen
+  `display`-Umschaltung) UND der Unter-Container (`toggle`-Ereignis des `<details>`).
+- **Der Rahmen unten (`.sec-scrollbox`) ist Absicht:** ohne ihn sieht die angeschnittene Zeile wie
+  das Ende der Liste aus. Dazu `padding-right`, damit der Scrollbalken nicht im Text liegt.
+- **Nebenbefund, mitbehoben – das Inline-Skript für die Klapp-Zustände lief zu früh.** Die
+  Speicherung (`jarvis_sec_sub_open`, localStorage) steht als `<script>` MITTEN in `settings.html`
+  und sah per `querySelectorAll` nur die Unter-Container **oberhalb** von sich. Jeder weiter unten
+  stehende ging leer aus – ohne Fehlermeldung, er merkte sich einfach nichts. Jetzt läuft die
+  Initialisierung nach `DOMContentLoaded` (mit `_subBound`-Merker gegen Doppelbindung), damit sie
+  **alle** sieben erfasst. Nachgewiesen: mit dem alten Skript bleibt genau `violations` ungebunden.
+  **Merkregel:** Ein Inline-Skript, das per Selektor über die ganze Seite greift, gehört ans
+  Dokument-Ende oder hinter `DOMContentLoaded` – sonst wächst die Seite an ihm vorbei.
+- **Verifiziert:** 35 UI-Prüfungen zur Liste (4 / genau `VIOL_VISIBLE` / `+1` / 150 Einträge, Rückweg auf wenige,
+  leere Liste, zugeklappt → aufklappen, Zähler, Mehrfachbindung) + 8 zur Zustands-Speicherung
+  (alle Container gebunden, Speichern, Wiederherstellen), jsdom gegen die echten Dateien; die
+  Persistenz-Tests laufen mit `runScripts:'dangerously'`, weil das Inline-Skript sonst nicht
+  ausgeführt wird und der Test grün wäre, ohne etwas zu prüfen.
+
 ## Vektor-Datenbank (Wissenssuche)
 - **FAISS** (`IndexFlatIP`, normierte Vektoren = Cosine) + **sentence-transformers**
   (`intfloat/multilingual-e5-small`, 384d) – Persistenz: `data/vector_store/faiss_index.bin`

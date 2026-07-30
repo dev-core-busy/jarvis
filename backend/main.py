@@ -4835,6 +4835,197 @@ async def get_branding():
     })
 
 
+# ── Avatar-Assistent ────────────────────────────────────────────────
+# Ein Frontend-Widget (frontend/js/avatar.js) zeigt eine sprechende Figur auf
+# der Chat-Seite. GET /api/avatar/config liefert die Anzeige-Konfiguration,
+# POST /api/avatar/ask beantwortet eine Frage (erst serverseitiger
+# Override-Abgleich, sonst Agent – bewusst unprivilegiert).
+
+# Dedizierter Avatar-Agent + Sperre: laeuft getrennt vom geteilten Chat-Agenten,
+# damit `_current_username`/Provider nicht mit einer aktiven Chat-Sitzung rennen.
+_avatar_agent = None
+_avatar_lock = asyncio.Lock()
+
+# ── Buchhaltung fuer den Abbrechen-Knopf ────────────────────────────
+# Ein Auftrag durchlaeuft drei Phasen, und in JEDER muss er abbrechbar sein:
+#   1. Vorpruefung (Sicherheitsschicht) – kann selbst Sekunden dauern,
+#   2. Warten auf `_avatar_lock` (ein anderer Lauf ist noch aktiv),
+#   3. Ausfuehrung im Agenten.
+# Ein einzelnes "aktuell laufend" reicht dafuer NICHT: gemessen auf DEV kam das
+# Abbrechen nach 6 s an, waehrend der Auftrag noch in Phase 1 stand – die
+# Antwort war "kein laufender Auftrag" und der Lauf lief 62 s weiter.
+#
+# `_avatar_pending`  Benutzer -> run_id, gesetzt SOFORT bei Eingang (Phase 1-3).
+#                    Je Benutzer nur ein Auftrag; das Widget sperrt waehrend
+#                    eines Laufs ohnehin die Eingabe.
+# `_avatar_active`   der Auftrag, der GERADE im Agenten laeuft (Phase 3). Nur
+#                    fuer ihn darf `stop()` gerufen werden: das Signal wirkt bei
+#                    headless-Laeufen global, ein Abbruch von Benutzer B wuerde
+#                    sonst den Lauf von Benutzer A treffen.
+# `_avatar_cancelled` abgebrochene run_ids – so wirkt ein Abbruch auch dann,
+#                    wenn er VOR dem Start des Laufs eintrifft (Phase 1/2).
+_avatar_pending: dict = {}
+_avatar_active: dict = {"user": None, "id": None}
+_avatar_cancelled: set = set()
+
+
+@app.get("/api/avatar/config")
+async def avatar_get_config(request: Request):
+    """Anzeige-Konfiguration des Avatar-Widgets (OHNE die serverseitigen
+    Override-Antworten). Erfordert eine gueltige Anmeldung."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    xkey = request.headers.get("X-API-Key", "")
+    if not (verify_token(token) or verify_token(xkey) or _verify_agent_api_key(request)):
+        return JSONResponse({"active": False, "detail": "Nicht autorisiert"}, status_code=401)
+    from backend import avatar as _av
+    return JSONResponse(_av.public_config())
+
+
+@app.post("/api/avatar/ask")
+async def avatar_ask(request: Request):
+    """Beantwortet eine Avatar-Frage.
+
+    Ablauf: (1) serverseitiger Abgleich benutzerdefinierter Antworten
+    (Overrides) – ein Treffer wird OHNE LLM zurueckgegeben und spart den
+    Agentenlauf; (2) sonst laeuft der Agent headless. Der Lauf ist bewusst
+    UNPRIVILEGIERT (wie WhatsApp/Telegram): der Avatar ist ein Auskunfts-Widget,
+    keine System-Steuerung. Er laeuft aber unter der Identitaet des angemeldeten
+    Benutzers, sodass Wissensgruppen und Dokument-Eigentuemer greifen.
+    """
+    global _avatar_agent
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    xkey = request.headers.get("X-API-Key", "")
+    user = verify_token(token) or verify_token(xkey)
+    is_api = _verify_agent_api_key(request)
+    if not (user or is_api):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    if not _skill_active("avatar"):
+        return JSONResponse({"detail": "Avatar-Assistent ist deaktiviert"}, status_code=403)
+
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"detail": "Keine Frage angegeben"}, status_code=400)
+    if len(text) > 4000:
+        text = text[:4000]
+    voice = bool(body.get("voice"))
+    username = user or "api:extern"
+
+    # Auftrag SOFORT anmelden – ab hier ist er abbrechbar, auch waehrend der
+    # Sicherheitspruefung und waehrend des Wartens auf die Sperre.
+    run_id = uuid.uuid4().hex[:12]
+    _avatar_pending[username] = run_id
+
+    def _cancelled() -> bool:
+        return run_id in _avatar_cancelled
+
+    def _cleanup():
+        if _avatar_pending.get(username) == run_id:
+            _avatar_pending.pop(username, None)
+        _avatar_cancelled.discard(run_id)
+        if _avatar_active.get("id") == run_id:
+            _avatar_active["user"], _avatar_active["id"] = None, None
+
+    def _stopped_reply():
+        _cleanup()
+        return JSONResponse({"answer": "", "source": "stopped",
+                             "voice": voice, "stopped": True})
+
+    # Sicherheitsschicht wie im Chat: Jailbreak/Injection sperrt das Konto.
+    if user and await _sec_inspect_user(text, user, "avatar"):
+        _cleanup()
+        return JSONResponse({"detail": "security_blocked",
+                             "message": "Konto wegen eines Sicherheitsverstosses gesperrt."},
+                            status_code=423)
+
+    from backend import avatar as _av
+    cfg = _av.load_config()
+
+    # (1) Benutzerdefinierte Antwort?
+    try:
+        hit = _av.match_override(text, cfg)
+    except Exception as _e_ov:
+        print(f"[avatar] Override-Abgleich fehlgeschlagen: {_e_ov}", flush=True)
+        hit = None
+    if hit is not None:
+        _cleanup()
+        return JSONResponse({"answer": hit, "source": "override", "voice": voice})
+
+    # Abbruch waehrend der Vorpruefung? Dann gar nicht erst starten.
+    if _cancelled():
+        return _stopped_reply()
+
+    # (2) Agentenlauf (headless, unprivilegiert, Identitaet = Benutzer)
+    from backend.agent import JarvisAgent
+    from backend.llm import normalize_effort as _norm_effort
+    async with _avatar_lock:
+        # Zweite Pruefung: waehrend des Wartens auf die Sperre kann der Abbruch
+        # eingetroffen sein (davor lief ein fremder Auftrag).
+        if _cancelled():
+            return _stopped_reply()
+        if _avatar_agent is None:
+            _avatar_agent = JarvisAgent(label="Avatar")
+        _avatar_agent._current_username = username
+        # Erst hier ist der Lauf AKTIV – nur fuer ihn darf stop() gerufen werden.
+        _avatar_active["user"], _avatar_active["id"] = username, run_id
+        try:
+            answer = await _avatar_agent.run_task_headless(
+                text,
+                reasoning_effort=_norm_effort(body.get("reasoning_effort")),
+                actor={"user": username, "privileged": False,
+                       "internet": _user_has_internet_access(user) if user else True,
+                       "sap": _user_may_use_sap(user) if user else False},
+            )
+            stopped = _cancelled() or bool(getattr(_avatar_agent, "_stop_flag", False))
+        except Exception as e:
+            print(f"[avatar] Agentenlauf fehlgeschlagen: {e}", flush=True)
+            return JSONResponse({"detail": f"Fehler: {e}"}, status_code=500)
+        finally:
+            # laeuft auch im Fehlerfall – `stopped` ist zu diesem Zeitpunkt
+            # bereits berechnet, das Aufraeumen darf es nicht mehr beeinflussen.
+            _cleanup()
+    return JSONResponse({"answer": answer or "", "source": "agent",
+                         "voice": voice, "stopped": stopped})
+
+
+@app.post("/api/avatar/stop")
+async def avatar_stop(request: Request):
+    """Bricht den laufenden Avatar-Auftrag DES ANFRAGENDEN Benutzers ab.
+
+    Gegenstueck zum Stop-Knopf im Chat (dort ``control/stop`` ueber WebSocket).
+    Der Avatar laeuft ueber HTTP, das Frontend bricht zusaetzlich den fetch ab –
+    ohne diesen Endpunkt liefe der Agent serverseitig weiter und verbrauchte
+    Modell-Aufrufe fuer eine Antwort, die niemand mehr sieht.
+
+    Fremde Laeufe werden NICHT angetastet (``stopped: false``): der Avatar-Agent
+    ist geteilt, und ``stop()`` wirkt bei headless-Laeufen global.
+    """
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    xkey = request.headers.get("X-API-Key", "")
+    user = verify_token(token) or verify_token(xkey)
+    if not (user or _verify_agent_api_key(request)):
+        return JSONResponse({"detail": "Nicht autorisiert"}, status_code=401)
+    username = user or "api:extern"
+
+    run_id = _avatar_pending.get(username)
+    if not run_id:
+        return JSONResponse({"stopped": False, "reason": "kein laufender Auftrag"})
+
+    # Vormerken – wirkt auch, wenn der Auftrag noch in der Vorpruefung steht
+    # oder auf die Sperre wartet (dann startet er gar nicht erst).
+    _avatar_cancelled.add(run_id)
+
+    # Den Agenten NUR anhalten, wenn genau dieser Auftrag gerade laeuft:
+    # `stop()` wirkt bei headless-Laeufen global und wuerde sonst den Lauf
+    # eines anderen Benutzers treffen.
+    phase = "vorgemerkt"
+    if _avatar_active.get("id") == run_id and _avatar_agent is not None:
+        _avatar_agent.stop()
+        phase = "laufend"
+    print(f"[avatar] Auftrag {run_id} von {username} abgebrochen ({phase})", flush=True)
+    return JSONResponse({"stopped": True, "phase": phase})
+
+
 @app.get("/api/branding/logo")
 async def get_branding_logo(variant: str = "dark", kind: str = "compact"):
     """Serviert ein hochgeladenes Firmenlogo (öffentlich).

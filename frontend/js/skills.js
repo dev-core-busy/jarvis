@@ -91,6 +91,7 @@
         claude_bridge:      'claude_bridge',
         agent_orchestrator: 'agent_orchestrator',
         agent_autonomy_kit: 'agent_autonomy_kit',
+        avatar:             'avatar',
     };
 
     // Liefert den Reiter-Knopf eines Skills – nur wenn er existiert UND sichtbar
@@ -1067,16 +1068,25 @@
         _showConfigDialog(name, schema, currentConfig) {
             const overlay = document.createElement('div');
             overlay.className = 'skill-config-overlay';
+            const _e = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
             let formHTML = '';
             for (const [key, def] of Object.entries(schema)) {
                 const val   = currentConfig[key] !== undefined ? currentConfig[key] : (def.default || '');
                 const label = def.label || key;
+                const hint  = def.description ? `<small class="config-hint">${_e(def.description)}</small>` : '';
                 if (def.type === 'boolean') {
-                    formHTML += `<div class="form-group"><label class="checkbox-group"><input type="checkbox" name="${key}" ${val ? 'checked' : ''}><span>${label}</span></label></div>`;
+                    formHTML += `<div class="form-group"><label class="checkbox-group"><input type="checkbox" name="${key}" ${val ? 'checked' : ''}><span>${label}</span></label>${hint}</div>`;
                 } else if (def.type === 'number') {
-                    formHTML += `<div class="form-group"><label>${label}</label><input type="number" name="${key}" value="${val}" class="config-input"></div>`;
+                    formHTML += `<div class="form-group"><label>${label}</label><input type="number" name="${key}" value="${_e(val)}" class="config-input">${hint}</div>`;
+                } else if (Array.isArray(def.enum) && def.enum.length) {
+                    // Auswahlliste (z.B. Avatar-Grafik/Position)
+                    const opts = def.enum.map(o => `<option value="${_e(o)}"${String(o) === String(val) ? ' selected' : ''}>${_e(o)}</option>`).join('');
+                    formHTML += `<div class="form-group"><label>${label}</label><select name="${key}" class="config-input">${opts}</select>${hint}</div>`;
+                } else if (def.type === 'text') {
+                    // Mehrzeiliges Feld (z.B. eigene Antworten des Avatars)
+                    formHTML += `<div class="form-group"><label>${label}</label><textarea name="${key}" rows="6" class="config-input" style="resize:vertical;font-family:inherit;">${_e(val)}</textarea>${hint}</div>`;
                 } else {
-                    formHTML += `<div class="form-group"><label>${label}</label><input type="text" name="${key}" value="${val}" class="config-input"></div>`;
+                    formHTML += `<div class="form-group"><label>${label}</label><input type="text" name="${key}" value="${_e(val)}" class="config-input">${hint}</div>`;
                 }
             }
             overlay.innerHTML = `

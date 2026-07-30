@@ -1784,26 +1784,39 @@ KRITISCH – Autonomie-Regeln:
         try:
             chat_history = []
 
-            response = await self.provider.generate_response(
-                model=self.current_model,
-                system_prompt=system_prompt,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[types.Part.from_text(text=task_text)],
-                    )
-                ],
-                tools=self._tool_instances,
-                reasoning_effort=self.current_reasoning_effort,
-                temperature=self.current_temperature,
+            # _await_or_stop wie in run_task: ohne die Umhuellung waere ein
+            # laufender LLM-Call NICHT unterbrechbar und stop() wuerde erst am
+            # naechsten Schleifendurchlauf greifen – bei einer langen Antwort
+            # also erst nach Minuten (gemessen: Abbruch nach 6 s, Lauf endete
+            # trotzdem erst nach 82 s). Betrifft alle headless-Kanaele
+            # (Avatar-Abbrechen, WhatsApp/Telegram/Cron ueber stop_all).
+            _stopped, response = await self._await_or_stop(
+                self.provider.generate_response(
+                    model=self.current_model,
+                    system_prompt=system_prompt,
+                    contents=[
+                        types.Content(
+                            role="user",
+                            parts=[types.Part.from_text(text=task_text)],
+                        )
+                    ],
+                    tools=self._tool_instances,
+                    reasoning_effort=self.current_reasoning_effort,
+                    temperature=self.current_temperature,
+                )
             )
+            if _stopped:
+                response = None
 
             steps = 0
             while steps < config.MAX_AGENT_STEPS:
                 if self._stop_flag:
                     break
 
-                if not response.parts:
+                # response ist None, wenn _await_or_stop den Aufruf abgebrochen hat
+                # (dann greift oben schon _stop_flag – die Pruefung ist der Gurt
+                # zum Hosentraeger, damit hier nie ein AttributeError entsteht).
+                if response is None or not response.parts:
                     break
 
                 function_calls = [p.function_call for p in response.parts if p.function_call]
@@ -1868,20 +1881,24 @@ KRITISCH – Autonomie-Regeln:
                     types.Content(role="user", parts=function_response_parts)
                 )
 
-                response = await self.provider.generate_response(
-                    model=self.current_model,
-                    system_prompt=system_prompt,
-                    contents=[
-                        types.Content(
-                            role="user",
-                            parts=[types.Part.from_text(text=task_text)],
-                        ),
-                        *chat_history,
-                    ],
-                    tools=self._tool_instances,
-                    reasoning_effort=self.current_reasoning_effort,
-                    temperature=self.current_temperature,
+                _stopped, response = await self._await_or_stop(
+                    self.provider.generate_response(
+                        model=self.current_model,
+                        system_prompt=system_prompt,
+                        contents=[
+                            types.Content(
+                                role="user",
+                                parts=[types.Part.from_text(text=task_text)],
+                            ),
+                            *chat_history,
+                        ],
+                        tools=self._tool_instances,
+                        reasoning_effort=self.current_reasoning_effort,
+                        temperature=self.current_temperature,
+                    )
                 )
+                if _stopped:
+                    break
 
                 steps += 1
 

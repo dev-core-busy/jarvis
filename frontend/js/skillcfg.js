@@ -9,7 +9,7 @@
    Frontend-Aenderung erscheinen.
 
    Reiter-Skills:  google, telegram, browser_control, claude_bridge,
-                   agent_orchestrator, agent_autonomy_kit
+                   agent_orchestrator, agent_autonomy_kit, avatar
    Ergaenzungen:   whatsapp (alles ausser debug_mode – das hat schon
                    einen Toggle im Logs-Abschnitt), knowledge
                    (max_file_size_mb; folders/search_mode haben
@@ -32,6 +32,7 @@
         claude_bridge:      { container: 'skcfg-claude_bridge' },
         agent_orchestrator: { container: 'skcfg-agent_orchestrator' },
         agent_autonomy_kit: { container: 'skcfg-agent_autonomy_kit' },
+        avatar:             { container: 'skcfg-avatar' },
         whatsapp:           { container: 'skcfg-whatsapp', exclude: ['debug_mode'] },
         knowledge:          { container: 'skcfg-knowledge', only: ['max_file_size_mb'] },
     };
@@ -44,6 +45,7 @@
         claude_bridge:      'settings-tab-btn-claude-bridge',
         agent_orchestrator: 'settings-tab-btn-orchestrator',
         agent_autonomy_kit: 'settings-tab-btn-autonomy',
+        avatar:             'settings-tab-btn-avatar',
     };
 
     const SVG_EYE_OPEN   = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -158,6 +160,14 @@
                         + f.enum.map(o => '<option value="' + esc(o) + '"'
                             + (String(val) === String(o) ? ' selected' : '') + '>' + esc(o) + '</option>').join('')
                         + '</select>' + hint + '</div>';
+                } else if (f.type === 'text') {
+                    // Mehrzeiliges Feld (z.B. Avatar: eigene Antworten "Frage ||| Antwort")
+                    html += '<div class="form-group"><label for="' + id + '">' + label + '</label>'
+                        + '<textarea id="' + id + '" class="config-input" rows="8"'
+                        + ' data-key="' + esc(key) + '" data-type="string"'
+                        + ' style="width:100%;box-sizing:border-box;resize:vertical;'
+                        + 'font-family:inherit;line-height:1.45;">'
+                        + esc(val != null ? val : '') + '</textarea>' + hint + '</div>';
                 } else if (f.secret) {
                     html += '<div class="form-group"><label for="' + id + '">' + label + '</label>'
                         + '<div style="display:flex;align-items:center;gap:4px;">'

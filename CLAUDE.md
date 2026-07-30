@@ -1386,6 +1386,14 @@ lehrreich, weil zwei naheliegende Verdaechtige falsch waren:
 - **Deadlock in wa_logger.py:** `clear_logs()` darf `log()` nur NACH Lock-Release aufrufen
 - **Synchrone Bridge-Requests:** Blockieren den asyncio Event-Loop → Server friert ein. Immer `_wa_bridge_async()` verwenden
 - **Self-Chat Feedback-Loop:** Bridge trackt gesendete Message-IDs in `sentByBridge` Set
+- **jsdom-Tests beenden sich NICHT von selbst:** Laedt der Test eine echte Seite, laufen
+  deren Dauer-Abfragen weiter (`setInterval` fuer LLM-Status/CPU in wissen.js, Poll-Timer
+  in anderen Modulen) und halten den Node-Event-Loop offen. `pretendToBeVisual: true`
+  kommt mit einem eigenen requestAnimationFrame-Dauerlauf dazu. Der Test laeuft dann
+  inhaltlich sauber durch – der PROZESS bleibt fuer immer stehen. Am 2026-07-30 hingen so
+  sechs node-Prozesse mit vollstaendiger gruener Ausgabe. Jeder jsdom-Test braucht am Ende
+  `window.close()` **und** ein ausdrueckliches `process.exit(ok ? 0 : 1)`; im Zweifel mit
+  `timeout 60 node …` laufen lassen und den Exit-Code pruefen (124 = haengt).
 - **Browser-Cache:** Bei Frontend-Aenderungen Cache-Buster in index.html hochzaehlen (`?v=N`)
 - **SSH Heredocs:** Quoting-Probleme mit Python f-strings. Besser: lokal schreiben + `scp`
 - **Python-Code via Shell:** NIEMALS `python3 -c "..."` mit verschachtelten Quotes. Code in Temp-Datei schreiben (`_code_to_command()` in shell.py)

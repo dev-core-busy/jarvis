@@ -586,6 +586,52 @@ Passwort anmelden, obwohl kein einziger Eintrag gesetzt war. Auf Anweisung des N
   (`xhigh`, `aus`, …). Grund ist die Import-Richtung: `llm.py` importiert `config.py`, nicht
   umgekehrt, deshalb liegt die Alias-Tabelle nur in `llm.py`.
 
+## „Illegal header value" im LLM-Profil (Fix 2026-07-30)
+**Der Fehler:** Das Profil `google/gemma-4-12B-it (HH-AI01)` meldete im Formular
+`Illegal header value` – klingt wie ein Serverfehler, war aber **ein einziges mitkopiertes
+Leerzeichen am Ende des API-Keys**. Ein Header-Wert darf laut RFC 9110 kein führendes oder
+abschliessendes Leerzeichen tragen; httpx/h11 prüfen das und werfen
+`LocalProtocolError: Illegal header value b'Bearer sk-… '`, bevor überhaupt gesendet wird.
+- **`llm.clean_api_key()`** ist die eine Stelle, die Keys für Header normalisiert: `strip()`,
+  danach **Steuerzeichen und Nicht-ASCII verwerfen** (ein Zeilenumbruch MITTEN im Wert wäre eine
+  Header-Injection, Trimmen allein reicht dafür nicht). Benutzt in
+  `OpenAICompatibleProvider._build_headers`, `AnthropicSessionProvider._headers` (Cookie!),
+  `_probe_llm_connection` und `_list_llm_models`.
+- **Die Normalisierung muss BEIM VERWENDEN passieren, nicht nur beim Speichern** – sonst bleiben
+  bereits gespeicherte Keys kaputt. `config._clean_profile_str()` räumt zusätzlich an der Wurzel
+  auf (`api_key`, `session_key`, `api_url`, `model` in `create_profile` UND der Whitelist von
+  `update_profile` – siehe die Regel „neues Profil-Feld = ZWEI Stellen"). **`name` bleibt
+  ausgenommen**, ein Anzeigename ist Freitext.
+- **Der Provider-Pfad war schon sauber, die Test-Pfade nicht.** `_build_headers` strippte seit
+  Langem; `_probe_llm_connection` (Verbindungstest) und `_list_llm_models` (Discover-Knopf) bauten
+  `f"Bearer {api_key}"` roh. Deshalb schlug ausgerechnet der Knopf fehl, mit dem man den Fehler
+  suchen wollte – während ein Chat über dasselbe Profil funktionierte.
+- **`llm.scrub_secrets()`: die Fehlermeldung enthielt den API-Key im Klartext.** Die HTTP-Schicht
+  zitiert den beanstandeten Header-Wert wörtlich, und `except Exception: return str(e)` schob das
+  unverändert in die Oberfläche (und ins Journal). Nachgewiesen im Test: der alte Stand liefert
+  `{'success': False, 'error': "Illegal header value b'Bearer sk-abcdef… '"}`. Jetzt ersetzt
+  `scrub_secrets` Rohwert und bereinigte Fassung durch `***` (erst ab 8 Zeichen, damit kurze
+  Zufallstreffer keinen Text zerlegen).
+- **FALLSTRICK beim Nachstellen:** Ein Test gegen einen geschlossenen Port beweist NICHTS – h11
+  serialisiert die Header erst nach dem Verbinden, man bekommt `ConnectError` und hält den Fehler
+  für nicht reproduzierbar (genau daran lief die erste Testfassung vorbei). Es braucht einen echten
+  Zuhörer (`asyncio.start_server`), dann schlägt die Header-Prüfung zu.
+- **Verifiziert auf DEV:** 28 Prüfungen (echter httpx/h11-Stack mit und ohne Leerzeichen,
+  Zeilenumbruch mitten im Wert, Emoji, Provider-Header, `scrub_secrets`, Speicher-Normalisierung,
+  Ende-zu-Ende über `_probe_llm_connection`). Gegenprobe: der alte Stand liefert genau die
+  gemeldete Meldung samt Key.
+
+## Profil-Formular: Abbrechen-× oben rechts (2026-07-30)
+`#profile-edit-view` hatte nur den `Abbrechen`-Knopf **am Ende** des Formulars – bei elf Feldern
+liegt der ausserhalb des Sichtfensters, Abbrechen ging also nur nach Scrollen. Jetzt sitzt oben
+rechts ein `×` (`#btn-close-profile-edit`, `.prof-edit-top`, `.btn-icon`) mit **derselben**
+Funktion (`showListView`); der untere Knopf bleibt. Der negative Rand in `.prof-edit-top` setzt
+das × auf die Höhe des ersten Feld-Labels, sonst entsteht eine leere Zeile. Beschriftung über
+`data-i18n-title` + `data-i18n-aria` auf dem vorhandenen Key `profile.cancel` – kein neuer Text.
+**Verifiziert:** 19 UI-Prüfungen in jsdom gegen die echte `settings.html` **mit app.js** (Markup
+und Position, × schliesst und stellt die Liste wieder her, identischer Zustand wie „Abbrechen",
+**kein** Speichern-Aufruf, Titel/aria folgen dem Sprachwechsel).
+
 ## Vektor-Datenbank (Wissenssuche)
 - **FAISS** (`IndexFlatIP`, normierte Vektoren = Cosine) + **sentence-transformers**
   (`intfloat/multilingual-e5-small`, 384d) – Persistenz: `data/vector_store/faiss_index.bin`

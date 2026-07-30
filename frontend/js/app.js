@@ -1669,6 +1669,9 @@
 
         // ── Abbrechen (zurück zur Liste) ──
         btnCancelProfile.addEventListener('click', showListView);
+        // × oben rechts im Profil-Formular – dieselbe Funktion wie "Abbrechen".
+        const btnCloseProfileEdit = document.getElementById('btn-close-profile-edit');
+        if (btnCloseProfileEdit) btnCloseProfileEdit.addEventListener('click', showListView);
 
         // ── Verbindung testen ──
         if (btnTestProfile) {

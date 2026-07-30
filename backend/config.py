@@ -106,6 +106,26 @@ def _valid_temperature(value):
     return max(TEMPERATURE_MIN, min(f, TEMPERATURE_MAX))
 
 
+def _clean_profile_str(value) -> str:
+    """Raeumt ein technisches Profil-Textfeld auf (api_key, session_key, api_url, model).
+
+    Rand-Leerzeichen und Zeilenumbrueche wandern beim Kopieren aus Mail, Terminal
+    oder Passwortmanager mit. Im API-Key macht schon EIN angehaengtes Leerzeichen
+    den Authorization-Header ungueltig – httpx/h11 antworten mit
+    ``Illegal header value``, was im Profil-Formular wie ein Serverfehler aussieht
+    (gemeldet 2026-07-30). In Modellname oder URL fuehrt es zu Aufrufen, die ohne
+    erkennbaren Grund scheitern. Steuerzeichen werden entfernt, nicht nur getrimmt:
+    ein Zeilenumbruch MITTEN im Wert waere eine Header-Injection.
+
+    Bewusst NICHT auf ``name`` angewandt – ein Anzeigename ist Freitext.
+    Die Verwendung normalisiert zusaetzlich (``llm.clean_api_key``), damit auch
+    bereits gespeicherte Altwerte funktionieren.
+    """
+    if not isinstance(value, str):
+        return value if value is None else str(value)
+    return "".join(c for c in value.strip() if ord(c) >= 32 and ord(c) != 127)
+
+
 class Config:
     """Zentrale Konfiguration für Jarvis mit Profil-Verwaltung."""
 
@@ -565,11 +585,16 @@ class Config:
             "id": str(uuid.uuid4()),
             "name": data.get("name", "Neues Profil"),
             "provider": provider,
-            "model": data.get("model", ""),
-            "api_url": data.get("api_url", default_url),
-            "api_key": data.get("api_key", ""),
+            # Rand-Leerzeichen raus: ein mitkopiertes Leerzeichen im Key macht den
+            # Authorization-Header ungueltig ("Illegal header value"), eines in
+            # Modell/URL laesst den Aufruf ohne erkennbaren Grund scheitern. Die
+            # Verwendung normalisiert zusaetzlich (llm.clean_api_key) – das hier
+            # ist die Wurzel, damit nichts Schmutziges erst gespeichert wird.
+            "model": _clean_profile_str(data.get("model", "")),
+            "api_url": _clean_profile_str(data.get("api_url", default_url)),
+            "api_key": _clean_profile_str(data.get("api_key", "")),
             "auth_method": data.get("auth_method", "api_key"),
-            "session_key": data.get("session_key", ""),
+            "session_key": _clean_profile_str(data.get("session_key", "")),
             # Denktiefe dieses Profils ("" = Provider-Standard). Eine einzelne
             # Chat-Anfrage darf den Wert ueberschreiben (reasoning_effort im Task).
             "reasoning_effort": _valid_effort(data.get("reasoning_effort")),
@@ -607,6 +632,8 @@ class Config:
                             val = _valid_temperature(val)
                         elif key == "prompt_tool_calling":
                             val = bool(val)
+                        elif key in ("api_key", "session_key", "api_url", "model"):
+                            val = _clean_profile_str(val)   # siehe create_profile
                         p[key] = val
                 self._save_to_file()
                 return p

@@ -149,6 +149,51 @@ LEGACY_TEMPERATURE = 0.2
 DEFAULT_TEMPERATURE = None
 
 
+def clean_api_key(key) -> str:
+    """Normalisiert einen API-Key/Session-Key fuer die Verwendung in einem HTTP-Header.
+
+    Entfernt Rand-Leerzeichen (auch Zeilenumbrueche, wie sie beim Kopieren aus
+    einer Mail oder einem Terminal mitkommen), verwirft danach Steuerzeichen und
+    Nicht-ASCII.
+
+    **Warum das noetig ist:** Ein Header-Wert darf laut RFC 9110 kein
+    fuehrendes/abschliessendes Leerzeichen tragen. httpx/h11 pruefen das und
+    werfen ``LocalProtocolError: Illegal header value b'Bearer sk-… '`` – ein
+    einziges mitkopiertes Leerzeichen im Key laesst so JEDE Anfrage des Profils
+    scheitern, mit einer Meldung, die nach einem Serverfehler klingt. Ein
+    Zeilenumbruch MITTEN im Wert waere sogar eine Header-Injection, deshalb
+    werden Steuerzeichen entfernt und nicht nur die Raender getrimmt.
+
+    Muss an JEDER Stelle angewandt werden, die einen Key in einen Header
+    schreibt: Provider-Header, Verbindungstest UND Modell-Abruf – nicht nur beim
+    Speichern, sonst bleiben bereits gespeicherte Keys kaputt.
+    """
+    if not key or not isinstance(key, str):
+        return ""
+    return "".join(c for c in key.strip() if 32 <= ord(c) < 127)
+
+
+def scrub_secrets(text, *secrets) -> str:
+    """Ersetzt Geheimnisse in einem Fehlertext durch ``***``.
+
+    Fehlermeldungen der HTTP-Schicht zitieren den beanstandeten Header-Wert
+    WOERTLICH (``Illegal header value b'Bearer sk-…'``) und landen ueber
+    ``str(e)`` in der Oberflaeche und im Journal – der API-Key waere damit
+    sichtbar. Beide Formen werden ersetzt: der Rohwert und die um Rand-/
+    Steuerzeichen bereinigte Fassung.
+    """
+    out = str(text)
+    seen = set()
+    for s in secrets:
+        if not s or not isinstance(s, str):
+            continue
+        for variant in (s, s.strip(), clean_api_key(s)):
+            if len(variant) >= 8 and variant not in seen:
+                seen.add(variant)
+                out = out.replace(variant, "***")
+    return out
+
+
 def _resolve_temperature(value) -> float | None:
     """Bringt eine Temperature-Angabe auf den Wert, der an den Provider geht.
 
@@ -497,10 +542,8 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def _build_headers(self) -> dict:
         headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            # Nur ASCII-Zeichen behalten (verhindert UnicodeEncodeError bei versehentlich
-            # kopierten Emojis oder Sonderzeichen im API-Key)
-            clean_key = self.api_key.strip().encode("ascii", errors="ignore").decode("ascii")
+        clean_key = clean_api_key(self.api_key)
+        if clean_key:
             headers["Authorization"] = f"Bearer {clean_key}"
         return headers
 
@@ -1182,7 +1225,9 @@ class AnthropicSessionProvider(LLMProvider):
 
     def _headers(self) -> dict:
         return {
-            "Cookie": f"sessionKey={self.session_key}",
+            # clean_api_key auch hier: ein mitkopiertes Leerzeichen im Session-Key
+            # macht den Cookie-Header ungueltig (siehe clean_api_key).
+            "Cookie": f"sessionKey={clean_api_key(self.session_key)}",
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                           "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json",

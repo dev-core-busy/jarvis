@@ -276,7 +276,11 @@
                 if (cl && els.figure) {
                     els.figure.innerHTML = '';          // Platzhalter ersetzen
                     els.figure.appendChild(cl);
-                    cl.addEventListener('click', toggle);
+                    // KEIN eigener Klick-Handler auf dem Sprite: der Klick
+                    // blubbert zu #jav-figure, das schon `toggle` traegt. Ein
+                    // zweiter Handler hier schaltete zweimal um – unterm Strich
+                    // gar nicht, und ein Klick direkt auf Clippy tat nichts
+                    // (nur der schmale Rand daneben wirkte).
                 }
                 // verwaiste Knoten des gescheiterten Versuchs entfernen
                 Array.prototype.forEach.call(

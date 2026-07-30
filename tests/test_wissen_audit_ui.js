@@ -49,7 +49,8 @@ async function baueSeite() {
     const dom = new JSDOM(html, {
         url: 'https://localhost/wissen',
         runScripts: 'outside-only',       // NUR die Skripte, die wir bewusst laden
-        pretendToBeVisual: true,
+        // pretendToBeVisual startet einen requestAnimationFrame-Dauerlauf, der
+        // den Node-Event-Loop offen haelt. Wir setzen rAF unten selbst.
     });
     const { window } = dom;
 
@@ -85,7 +86,7 @@ async function baueSeite() {
     }
     window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
     await sleep(60);
-    return { window, calls };
+    return { dom, window, calls };
 }
 
 async function main() {
@@ -93,7 +94,8 @@ async function main() {
     console.log('UI-Test Audit-Formular /wissen (jsdom, echte Dateien)');
     console.log('='.repeat(70));
 
-    const { window, calls } = await baueSeite();
+    const { dom, window, calls } = await baueSeite();
+    globalThis.__dom = dom;   // fuer das Aufraeumen am Ende
     const doc = window.document;
     const $ = (id) => doc.getElementById(id);
 
@@ -211,8 +213,20 @@ async function main() {
     console.log('='.repeat(70));
     if (ok !== results.length) {
         results.filter((r) => !r.ok).forEach((r) => console.log('  FEHLGESCHLAGEN: ' + r.name + ' – ' + r.detail));
-        process.exit(1);
     }
+    return ok === results.length;
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+// AUFRAEUMEN NICHT VERGESSEN: wissen.js startet Dauer-Abfragen
+// (setInterval fuer LLM-Status alle 30 s und CPU alle 3 s). Diese Timer halten
+// den Node-Event-Loop offen – ohne window.close() + process.exit() laeuft der
+// Test inhaltlich durch, der PROZESS bleibt aber fuer immer stehen. Genau das
+// ist am 2026-07-30 passiert: sechs haengende node-Prozesse, jeder mit
+// vollstaendiger, gruener Ausgabe.
+main()
+    .then((ok) => { schliessen(); process.exit(ok ? 0 : 1); })
+    .catch((e) => { console.error(e); schliessen(); process.exit(1); });
+
+function schliessen() {
+    try { if (globalThis.__dom) globalThis.__dom.window.close(); } catch (e) { /* egal */ }
+}

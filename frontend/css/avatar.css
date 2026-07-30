@@ -59,6 +59,7 @@
 
 /* ── Sprech-/Eingabepanel ── */
 #jav-panel {
+    position: relative;          /* Bezug fuer den Ziehgriff */
     width: 320px;
     max-width: calc(100vw - 36px);
     background: var(--bg-secondary, #1b1f27);
@@ -79,6 +80,38 @@
     height: 0;
     border: 0;
 }
+
+/* ── Groesse aendern ──
+   Der Griff sitzt in der Ecke, die VOM Bildschirmrand weg zeigt: das Widget
+   ist unten rechts verankert, es waechst also nach oben/links. Ein Griff unten
+   rechts (CSS `resize`) wuerde aus dem Bild heraus ziehen. */
+#jav-grip {
+    position: absolute;
+    top: 0;
+    width: 16px; height: 16px;
+    z-index: 2;
+    touch-action: none;          /* sonst scrollt der Finger statt zu ziehen */
+}
+#jav-root.jav-pos-br #jav-grip { left: 0;  cursor: nwse-resize; }
+#jav-root.jav-pos-bl #jav-grip { right: 0; cursor: nesw-resize; }
+/* Zwei dezente Striche als Anfasser-Hinweis */
+#jav-grip::before,
+#jav-grip::after {
+    content: '';
+    position: absolute;
+    background: var(--text-muted, #9ca3af);
+    opacity: .5;
+    height: 1px;
+    transform-origin: center;
+}
+#jav-root.jav-pos-br #jav-grip::before { width: 9px;  top: 5px; left: 2px; transform: rotate(45deg); }
+#jav-root.jav-pos-br #jav-grip::after  { width: 5px;  top: 8px; left: 2px; transform: rotate(45deg); }
+#jav-root.jav-pos-bl #jav-grip::before { width: 9px;  top: 5px; right: 2px; transform: rotate(-45deg); }
+#jav-root.jav-pos-bl #jav-grip::after  { width: 5px;  top: 8px; right: 2px; transform: rotate(-45deg); }
+#jav-grip:hover::before, #jav-grip:hover::after { opacity: 1; }
+/* Waehrend des Ziehens keine Textauswahl und keine Groessen-Animation */
+body.jav-resizing { user-select: none; }
+body.jav-resizing #jav-panel { transition: none; }
 
 .jav-header {
     display: flex;

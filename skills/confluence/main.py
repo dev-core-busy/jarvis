@@ -319,7 +319,8 @@ class ConfluenceListAttachmentsTool(_Base):
 
     @property
     def description(self):
-        return "Listet die Anhaenge einer Seite (Dateiname und Download-Link)."
+        return ("Listet die Anhaenge einer Seite (Dateiname und Groesse). Zum HERUNTERLADEN "
+                "confluence_download_attachment benutzen – NICHT curl/wget.")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
@@ -338,12 +339,83 @@ class ConfluenceListAttachmentsTool(_Base):
             return _fmt_err(e)
         if not atts:
             return "Keine Anhaenge an Seite %s." % page_id
+        # Der Download-Link wird ABSICHTLICH nicht mehr ausgegeben: er ist ohne den
+        # PAT nutzlos, und solange er dastand, hat das Modell zuverlaessig curl darauf
+        # angesetzt – Ergebnis waren 0-Byte-Dateien ohne Fehlermeldung (2026-07-30).
+        # Stattdessen Groesse + der ausdrueckliche Hinweis auf das Download-Tool.
         lines = []
         for a in atts:
-            dl = (a.get("_links", {}) or {}).get("download", "")
-            link = (c.base + dl) if dl else ""
-            lines.append("- %s%s" % (a.get("title", "?"), ("\n  " + link) if link else ""))
-        return "%d Anhang/Anhaenge:\n%s" % (len(atts), "\n".join(lines))
+            size = ((a.get("extensions", {}) or {}).get("fileSize")
+                    or (a.get("metadata", {}) or {}).get("fileSize"))
+            try:
+                size_txt = " (%s Byte)" % int(size) if size is not None else ""
+            except (TypeError, ValueError):
+                size_txt = ""
+            lines.append("- %s%s" % (a.get("title", "?"), size_txt))
+        return ("%d Anhang/Anhaenge:\n%s\n\nHerunterladen mit "
+                "confluence_download_attachment(page_id=\"%s\", filename=\"…\") – "
+                "ohne filename werden alle geladen." % (len(atts), "\n".join(lines), page_id))
+
+
+class ConfluenceDownloadAttachmentTool(_Base):
+    @property
+    def name(self): return "confluence_download_attachment"
+
+    @property
+    def description(self):
+        return ("Laedt einen Anhang einer Seite nach /tmp und gibt den lokalen Pfad zurueck – "
+                "zum Weiterverarbeiten mit pandas/shell. Ohne 'filename' werden ALLE Anhaenge "
+                "der Seite geladen. NUR dieses Tool benutzen, NIE curl/wget auf den Anhang-Link: "
+                "der Link ist eine Web-Route, die ohne Anmeldung eine leere oder eine "
+                "HTML-Datei liefert. Meldet dieses Tool, dass die Zwei-Faktor-Pruefung den "
+                "Download blockiert, ist der Anhang NICHT abrufbar – dann NICHT mit curl/wget "
+                "weiterprobieren (scheitert genauso), sondern dem Benutzer sagen, dass ein "
+                "Administrator den Download-Pfad freischalten muss.")
+
+    def parameters_schema(self):
+        return {"type": "OBJECT", "properties": {
+            "page_id": {"type": "STRING", "description": "ID der Seite."},
+            "filename": {"type": "STRING",
+                         "description": "Dateiname des Anhangs (wie in confluence_list_attachments). "
+                                        "Leer = alle Anhaenge der Seite."},
+        }, "required": ["page_id"]}
+
+    async def execute(self, **kwargs):
+        c = self._guard()
+        if not c:
+            return "Confluence ist nicht konfiguriert."
+        page_id = (kwargs.get("page_id") or "").strip()
+        if not page_id:
+            return "page_id ist erforderlich."
+        filename = (kwargs.get("filename") or "").strip()
+
+        names = [filename]
+        if not filename:
+            try:
+                atts = await _to_thread(c.list_attachments, page_id)
+            except ConfluenceError as e:
+                return _fmt_err(e)
+            names = [(a.get("title") or "") for a in atts if a.get("title")]
+            if not names:
+                return "Keine Anhaenge an Seite %s." % page_id
+
+        ok, failed = [], []
+        for nm in names:
+            try:
+                path, size = await _to_thread(c.download_attachment, page_id, nm, "/tmp")
+                ok.append((nm, path, size))
+            except ConfluenceError as e:
+                failed.append((nm, _fmt_err(e)))
+            except Exception as e:  # noqa: BLE001
+                failed.append((nm, str(e)[:200]))
+
+        lines = []
+        for nm, path, size in ok:
+            lines.append("- %s -> %s (%d Byte)" % (nm, path, size))
+        for nm, why in failed:
+            lines.append("- %s -> FEHLER: %s" % (nm, why))
+        head = "%d von %d Anhang/Anhaengen geladen:" % (len(ok), len(names))
+        return head + "\n" + "\n".join(lines)
 
 
 class ConfluenceUploadAttachmentTool(_Base):
@@ -393,5 +465,6 @@ def get_tools():
         ConfluenceDeletePageTool(),
         ConfluenceAddCommentTool(),
         ConfluenceListAttachmentsTool(),
+        ConfluenceDownloadAttachmentTool(),
         ConfluenceUploadAttachmentTool(),
     ]

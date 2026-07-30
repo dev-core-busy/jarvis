@@ -128,6 +128,21 @@
                 return;
             }
 
+            // Felder mit `enum_source` holen ihre Auswahl zur Laufzeit von einem
+            // Endpunkt statt aus dem Manifest. Noetig, wenn die moeglichen Werte
+            // erst auf dem Server feststehen – z.B. die Avatar-Grafiken, die aus
+            // den vorhandenen Sprite-Ordnern gelesen werden. Faellt der Abruf
+            // aus, greift das statische `enum` aus dem Manifest.
+            await Promise.all(keys.map(async key => {
+                const f = schema[key] || {};
+                if (!f.enum_source) return;
+                try {
+                    const d = await fetch(f.enum_source, { headers: authHeaders() }).then(r => r.json());
+                    const opts = Array.isArray(d) ? d : (d && d.options);
+                    if (Array.isArray(opts) && opts.length) f.enum = opts;
+                } catch (e) { /* statisches enum bleibt */ }
+            }));
+
             let html = '';
             keys.forEach(key => {
                 const f     = schema[key] || {};

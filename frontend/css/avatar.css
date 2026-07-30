@@ -36,6 +36,18 @@
 /* Clippy haengt sein .clippy-Element hier ein (position:relative gesetzt in JS) */
 #jav-figure .clippy { position: relative !important; left: 0 !important; top: 0 !important; }
 
+/* Firmenlogo als Figur (graphic = "branding").
+   Das Logo ist ein fertiges Bild – es hat keinen Mund, den man animieren
+   koennte. Beim Sprechen pulsiert es daher dezent, damit die Rueckmeldung
+   nicht ganz fehlt. */
+.jav-logo {
+    width: 84px; height: 84px;
+    object-fit: contain;
+    animation: jav-bob 3.2s ease-in-out infinite;
+}
+.jav-logo.talking { animation: jav-bob 3.2s ease-in-out infinite, jav-pulse-soft .7s ease-in-out infinite; }
+@keyframes jav-pulse-soft { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+
 /* SVG-Platzhalter */
 .jav-ph { width: 96px; height: 96px; animation: jav-bob 3.2s ease-in-out infinite; }
 @keyframes jav-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }

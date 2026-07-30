@@ -664,6 +664,65 @@ der Container startet zu, ohne die Zahl wäre nicht erkennbar, ob sich das Aufkl
   Persistenz-Tests laufen mit `runScripts:'dangerously'`, weil das Inline-Skript sonst nicht
   ausgeführt wird und der Test grün wäre, ohne etwas zu prüfen.
 
+## Confluence-Anhänge + Shell-Redirect-Fehlalarm (Fix 2026-07-30)
+**Der gemeldete Ablauf:** `confluence_list_attachments` gab Download-Links aus → der Agent setzte
+`curl` darauf an → **sechs 0-Byte-CSV-Dateien** in /tmp → der nächste Versuch
+(`curl -sv … -o test.csv 2>&1 | tail`) wurde mit „Datei-Schreiben via Shell ist nur im
+temporären Arbeitsbereich /tmp erlaubt" **abgewiesen, obwohl er nach /tmp schrieb**. Zwei
+unabhängige Fehler.
+
+### 1. `2>&1` galt als Datei-Schreibzugriff
+Zwei Regexes widersprachen sich: `_LDAP_SHELL_WRITE_REDIRECT` (`(?<![<|&])>\s*\S`) entschied
+**dass** geschrieben wird, `_REDIRECT_TARGETS` (`(?<![<|&\d])>>?\s*(…)`) **wohin** – letzterer
+schloss fd-Präfixe aus. Ergebnis: `2>&1` traf den Detektor, lieferte aber kein Ziel, und „keine
+Ziele" wurde als unsicher gewertet. Betroffen waren u.a. `ls -l 2>&1` und
+`python3 x.py 2>/tmp/err.txt` (Schreiben **nach /tmp** – genau das, was erlaubt sein soll).
+- Ersetzt durch **einen Parser** (`_shell_redirect_writes`), der `(Datei-Ziele, unlesbare)`
+  liefert und dabei unterscheidet: `2>&1`/`>&2` = Deskriptor-Duplikat (keine Datei), `2>datei` =
+  Datei (fd-Präfix unerheblich), `&>datei` = beide Ströme, `> "mit leerzeichen"` = Ziel in
+  Anführungszeichen. **`>` INNERHALB von Anführungszeichen ist kein Redirect** (`grep "a > b"`,
+  `awk '$1 > 5'`) – wurde vorher zum Ziel `b"` und abgewiesen.
+- **Der Detektor-Regex ist ganz weg**, nicht nur ergänzt: er übersah `&>datei` (das `&` fiel in
+  seine Lookbehind-Ausnahme), womit ein Ziel außerhalb /tmp **ungeprüft** durchkam.
+- Fail-closed bleibt: ein Ziel, das sich nicht lesen lässt (`>` ohne Ziel, offenes
+  Anführungszeichen), gilt als unsicher. **Kein Ziel = in Ordnung** (das war die Fehlerquelle).
+- Diese Schicht ist Tiefenverteidigung, die harte Grenze ist der OS-Benutzer `jarvis_sandbox`.
+- **Verifiziert:** 37 Prüfungen (14 „muss erlaubt sein", 14 „muss gesperrt bleiben",
+  Parser-Details) – der alte Stand weist 3 davon falsch ab und lässt `&>` durch.
+
+### 2. Anhänge waren gar nicht abrufbar – und das fiel niemandem auf
+Es gab **kein** Download-Tool, nur `confluence_upload_attachment`. Die Liste gab aber
+Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
+`/download/attachments/…` ist eine **Web-UI-Route**, keine REST-Route:
+- ohne Anmeldung → `302 → /login.action`; `curl` ohne `-f` wertet das nicht als Fehler und legt
+  eine **0-Byte-Datei** an (der gemeldete Zustand),
+- **mit** PAT → `302 → /plugins/servlet/twofactor/validate_otp`: der Token wird akzeptiert, aber
+  der **Zwei-Faktor-Filter** lässt ihn nicht an die Web-Route. Folgt man der Umleitung, kommt eine
+  HTML-Seite mit **HTTP 200** – eine erste Fassung dieses Fixes hat die gespeichert und damit
+  6× dieselbe 53 KB große HTML-Datei mit Endung `.csv` erzeugt. Am Größenvergleich aufgefallen
+  (alle gleich groß, obwohl die Liste 25133/19402/12190/… meldet).
+- **Eine REST-Route für die Bytes gibt es auf Server/DC nicht** – geprüft:
+  `/rest/api/content/<id>/download`, `/rest/api/attachment/<id>/download`,
+  `/rest/api/content/<id>/data` → alle 404; Basic-Auth mit PAT → 401; `os_authType=basic` und
+  `X-Atlassian-Token: no-check` ändern nichts.
+- **Konsequenz:** `client.download_attachment()` + `confluence_download_attachment` existieren
+  jetzt, können aber **auf diesem Server nicht liefern**. Sie scheitern dafür mit Klartext:
+  „durch die Zwei-Faktor-Prüfung blockiert … Abhilfe nur serverseitig: Pfad
+  `/download/attachments/*` im 2FA-Plugin ausnehmen ODER Dienstkonto ohne 2FA" – und mit dem
+  ausdrücklichen Hinweis, dass `curl` genauso scheitert (sonst probiert das Modell es wieder).
+- **Vier Schranken, damit NIE eine falsche Datei entsteht:** kein `allow_redirects` (Umleitung =
+  Fehler), HTML-Erkennung über Content-Type **und** Inhalt (`<!doctype`/`<html`), 0-Byte-Prüfung,
+  Größenvergleich gegen `fileSize` aus den Metadaten (Toleranz 5 %, mind. 4 Byte – **prozentual**,
+  eine feste 64-Byte-Grenze ließ bei einer 12-Byte-Datei jede Abweichung durch). Geschrieben wird
+  **erst nach** allen Prüfungen.
+- `confluence_list_attachments` gibt den **Link nicht mehr aus** (er ist ohne PAT nutzlos und war
+  die Einladung zu curl), sondern Dateigröße + den Verweis auf das Download-Tool.
+- „Anhang nicht gefunden" wirft `status=0`, damit die Meldung samt Liste der vorhandenen Namen
+  erhalten bleibt – `_fmt_err` ersetzt 404 durch einen generischen Text.
+- **Verifiziert:** 27 Prüfungen mit gefälschten Antworten (Erfolgspfad schreibt korrekt, HTML mit
+  und ohne verräterischen Content-Type, 302 auf 2FA bzw. Login, 0 Byte, falsche Größe, Toleranz,
+  fehlende Metadaten, Pfad-Entschärfung) + live gegen das echte Confluence.
+
 ## Vektor-Datenbank (Wissenssuche)
 - **FAISS** (`IndexFlatIP`, normierte Vektoren = Cosine) + **sentence-transformers**
   (`intfloat/multilingual-e5-small`, 384d) – Persistenz: `data/vector_store/faiss_index.bin`
@@ -1189,6 +1248,37 @@ Confluence) – gewirkt hat er nur bei der Datei. Ursache war eine verschluckte 
 - **wa_logger.py:** Thread-Lock, NIEMALS `log()` innerhalb von `_lock` aufrufen (Deadlock!)
 - **WhatsApp-Task-Prompt:** `WA_TASK_PROMPT` in main.py – Few-Shot Beispiele fuer Agent
 - **Voice-Pipeline:** OGG/Opus → faster-whisper (small, CPU, int8) → Agent-Task
+
+## Transkription protokolliert nicht mehr ins WhatsApp-Log (Fix 2026-07-30)
+**Der Befund:** Auf einem System **ohne installierten WhatsApp-Skill** entstand
+`data/logs/whatsapp.log`, gefüllt mit `{"cat": "transcription", "msg": "Lade Whisper-Modell
+'small'..."}`. Kein Fehlverhalten der Transkription – ein falsch benanntes Log.
+- **Ursache:** `_get_whisper_model` und `_transcribe_audio` stehen im WhatsApp-Abschnitt von
+  `main.py` und protokollierten über `wa_log`. Sie sind aber **geteilte Infrastruktur** mit
+  VIER Aufrufern, von denen nur EINER WhatsApp ist:
+  | Quelle | Auslöser |
+  |---|---|
+  | `whatsapp` | Sprachnachricht über die Bridge (der einzige echte WhatsApp-Fall) |
+  | `voice` | `[Voice]`-Aufgabe des Windows-/Desktop-Clients im WS-`task` |
+  | `attachment` | Audio-/Video-Anhang im Chat |
+  | `transcribe_only` | Windows-App mit abgeschaltetem AutoSend |
+  | `wakeword` | Wake-Word-Prüfung (nutzt nur `_get_whisper_model`) |
+- **Fix:** `_tr_log(level, msg, meta, source)` als einzige Log-Stelle der Transkription. Ins
+  **Journal** geht es immer (`[Transkription/<quelle>]`), ins **WhatsApp-Log nur bei
+  `source="whatsapp"`**. `_transcribe_audio(..., source=...)` reicht die Quelle an
+  `_get_whisper_model` weiter. **Vorgabe ist `chat`, also NICHT das WhatsApp-Log** – wer einen
+  neuen Aufrufer ergänzt und die Quelle vergisst, verschmutzt kein fremdes Log (fail-safe).
+- **Der volle Transkript-Text bleibt an `wa_log`+`debug_only` gebunden** und wird für fremde
+  Quellen NICHT ins Journal geschrieben: dort stünden sonst komplette Diktate im Klartext.
+- **Die Transkription hängt NICHT am WhatsApp-Skill** – nur ihre Feineinstellung liegt dort
+  (`whisper_model` aus der Skill-Config). Ohne Skill liefert `get_skill_config` ein leeres dict
+  (kein Fehler), es gilt `small`. Wer das entkoppeln will, braucht eine globale Einstellung.
+- **Das bestehende `whatsapp.log` verschwindet nicht von selbst** – der Fix verhindert nur neue
+  Einträge. Aufräumen über *Einstellungen → WhatsApp → Logs löschen* bzw. Datei entfernen.
+- **Verifiziert auf DEV:** 34 Prüfungen (Weiche je Quelle, ganzer Lauf mit Stub-Modell für Erfolg/
+  keine-Sprache/kein-Modell, Modellname ohne Skill, Quelltext-Prüfung aller Aufrufstellen).
+  **FALLSTRICK im Test:** Aufrufe gehen über zwei Zeilen – eine zeilenweise Suche findet das
+  Argument auf der Fortsetzungszeile nicht und meldet fälschlich „keine Quelle übergeben".
 
 ## Vision-Integration (Gesichtserkennung)
 - **Engine:** `VisionEngine` Singleton in `skills/vision/vision_engine.py`, Background-Thread

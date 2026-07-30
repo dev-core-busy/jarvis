@@ -233,10 +233,10 @@ _LDAP_SHELL_FORBIDDEN = re.compile(
     r'tee\s)',
     re.IGNORECASE,
 )
-# Schreib-Redirects und Secret-Pfade als separate Pattern
-_LDAP_SHELL_WRITE_REDIRECT = re.compile(r'(?<![<|&])>\s*\S')
-# Ziel-Pfade von >/>>-Redirects (ohne fd-Praefix wie 2>, ohne <|&)
-_REDIRECT_TARGETS = re.compile(r'(?<![<|&\d])>>?\s*([^\s"\'|&;<>]+)')
+# Schreib-Redirects werden GEPARST, nicht per Regex erkannt: siehe
+# _shell_redirect_writes(). Die beiden fruehreren Pattern (_LDAP_SHELL_WRITE_REDIRECT
+# fuer "schreibt ueberhaupt" und _REDIRECT_TARGETS fuer "wohin") widersprachen sich
+# bei fd-Praefixen und haben harmlose Befehle abgewiesen.
 _LDAP_SHELL_SECRET_PATHS = re.compile(
     r'(?:/opt/jarvis/\.env\b|auth_state\.json\b)',
     re.IGNORECASE,
@@ -262,14 +262,93 @@ def _strip_heredocs(cmd: str) -> str:
     return "\n".join(out)
 
 
+def _shell_redirect_writes(cmd: str) -> tuple[list[str], int]:
+    """Zerlegt die Schreib-Redirects eines Shell-Befehls.
+
+    Rueckgabe: ``(Datei-Ziele, Anzahl unlesbarer Ziele)``.
+
+    Unterschieden wird, was die beiden fruehreren Regexes NICHT auseinanderhalten
+    konnten:
+      * ``2>&1`` / ``>&2`` – Deskriptor-**Duplikat**, schreibt in KEINE Datei
+      * ``2>/tmp/err.txt`` – schreibt in eine Datei (fd-Praefix ist unerheblich)
+      * ``&>/tmp/all.txt`` – beide Stroeme in eine Datei
+      * ``> "/tmp/mit leerzeichen.txt"`` – Ziel in Anfuehrungszeichen
+
+    **Warum das eine Funktion sein MUSS:** Vorher entschied ein Detektor-Regex
+    ``(?<![<|&])>\\s*\\S``, DASS geschrieben wird, und ein zweiter Regex, WOHIN –
+    letzterer schloss per ``(?<!\\d)`` fd-Praefixe aus. Ergebnis: ``2>&1`` galt als
+    Schreibzugriff (Detektor trifft), lieferte aber kein Ziel, und "keine Ziele"
+    wurde als unsicher gewertet → ``ls -l 2>&1`` und
+    ``curl … -o x 2>&1 | tail`` wurden abgewiesen, obwohl sie nichts schreiben.
+    Umgekehrt galt ``python3 x.py 2>/tmp/err.txt`` als unsicher, obwohl /tmp
+    ausdruecklich erlaubt ist (gemeldet 2026-07-30).
+    """
+    targets: list[str] = []
+    unparsed = 0
+    i, n = 0, len(cmd)
+    while i < n:
+        ch = cmd[i]
+        # Anfuehrungszeichen ueberspringen: ein '>' IN einer Zeichenkette ist fuer die
+        # Shell kein Redirect (z.B. grep "a > b"). Vorher wurde daraus das Ziel 'b"'
+        # und der Befehl abgewiesen. Ein NICHT geschlossenes Anfuehrungszeichen ist ein
+        # kaputter Befehl – fail-closed als unlesbar zaehlen, nicht stillschweigend
+        # durchlassen.
+        if ch in "\"'":
+            k = cmd.find(ch, i + 1)
+            if k == -1:
+                unparsed += 1
+                break
+            i = k + 1
+            continue
+        if ch != ">":
+            i += 1
+            continue
+        # '<>' und '>>' korrekt behandeln, '2>' / '&>' als Praefix erkennen
+        if i > 0 and cmd[i - 1] == "<":
+            i += 1
+            continue
+        j = i + 1
+        if j < n and cmd[j] == ">":      # >> (anhaengen)
+            j += 1
+        while j < n and cmd[j] in " \t":
+            j += 1
+        if j >= n:
+            unparsed += 1               # '>' am Ende: Ziel unbekannt
+            break
+        if cmd[j] == "&":               # fd-Duplikat (2>&1, >&2) – keine Datei
+            i = j + 1
+            continue
+        if cmd[j] in "\"'":             # Ziel in Anfuehrungszeichen
+            q = cmd[j]
+            k = cmd.find(q, j + 1)
+            if k == -1:
+                unparsed += 1
+                break
+            targets.append(cmd[j + 1:k])
+            i = k + 1
+            continue
+        k = j
+        while k < n and cmd[k] not in " \t|&;<>":
+            k += 1
+        tok = cmd[j:k]
+        if tok:
+            targets.append(tok)
+        else:
+            unparsed += 1
+        i = k if k > i else i + 1
+    return targets, unparsed
+
+
 def _ldap_redirects_safe(cmd: str) -> bool:
-    """True, wenn ALLE Schreib-Redirects in cmd auf den temporaeren Arbeitsbereich
-    /tmp zielen (kein '..'). LDAP-Benutzer duerfen so temporaere Skripte/Ausgaben
-    fuer die Dokumentenverarbeitung erzeugen, ohne System-/App-Dateien schreiben zu
-    koennen. Leere Trefferliste -> nicht sicher (z.B. fd-Redirects).
+    """True, wenn kein Schreib-Redirect in eine Datei ausserhalb von /tmp geht.
+
+    LDAP-Benutzer duerfen temporaere Skripte/Ausgaben fuer die Dokumentenverarbeitung
+    erzeugen, aber keine System-/App-Dateien schreiben. **Kein Datei-Ziel = in Ordnung**
+    (z.B. ``2>&1``); ein Ziel, das sich nicht lesen laesst, gilt weiter als unsicher
+    (fail-closed – sonst waere ein bewusst zerlegtes Ziel ein Umweg).
     Erwartet einen bereits Heredoc-bereinigten Befehl (siehe _strip_heredocs)."""
-    targets = _REDIRECT_TARGETS.findall(cmd)
-    if not targets:
+    targets, unparsed = _shell_redirect_writes(cmd)
+    if unparsed:
         return False
     return all((t == "/tmp" or t.startswith("/tmp/")) and ".." not in t for t in targets)
 
@@ -2105,7 +2184,11 @@ KRITISCH – Autonomie-Regeln:
                         result = f"Zugriff verweigert: {_shwhy}."
                         _ldap_blocked = True
                         _viol = ("shell-illegal", _cmd[:120])
-                    elif _LDAP_SHELL_WRITE_REDIRECT.search(_cmd_sh) and not _ldap_redirects_safe(_cmd_sh):
+                    # Nur noch der Parser entscheidet. Der frueher vorgeschaltete
+                    # Detektor-Regex uebersah ausserdem '&>datei' (das '&' fiel in
+                    # seine Lookbehind-Ausnahme) – ein Schreibziel ausserhalb /tmp
+                    # kam damit ungeprueft durch.
+                    elif not _ldap_redirects_safe(_cmd_sh):
                         print(f"[AGENT] BLOCKED shell write-redirect for Domain-User '{_uname}': {_cmd[:80]}", flush=True)
                         result = ("Zugriff verweigert: Datei-Schreiben via Shell ist für Netzwerk-Benutzer nur "
                                   "im temporären Arbeitsbereich /tmp erlaubt (z.B. > /tmp/skript.py).")

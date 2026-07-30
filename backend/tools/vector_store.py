@@ -269,9 +269,16 @@ class VectorStore:
                 # kein Reconstruct/vstack/Neuaufbau des Gesamtindex. Das war die
                 # Ursache fuer O(N²)-Speicherwachstum und OOM-Kills bei ~600
                 # Dateien; jetzt konstanter Aufwand pro Datei.
+                base = len(self._meta)
                 self._index.add(new_vecs)
                 self._meta.extend(new_meta)
                 self._gen += 1
+                # BM25 inkrementell nachtragen: beim ANHAENGEN verschieben sich
+                # keine bestehenden Positionen, ein Vollaufbau waere Verschwendung
+                # (gemessen 2,85 s bei 16k Chunks – und das unter dem Lock).
+                # Nur wenn der lexikalische Index vorher aktuell war.
+                if self._lex_postings is not None and self._lex_gen == self._gen - 1:
+                    self._append_lexical(base, chunks)
                 if save:
                     self._save()
         _log.debug(f"Indexiert: {file_path} ({len(chunks)} Chunks)")
@@ -282,15 +289,33 @@ class VectorStore:
         with self._lock:
             self._save()
 
-    def remove_file(self, file_path: str):
-        """Entfernt alle Chunks einer Datei."""
+    def remove_file(self, file_path: str) -> int:
+        """Entfernt alle Chunks einer Datei. Gibt die Anzahl zurueck.
+
+        Der Rueckgabewert erspart Aufrufern den Griff auf ``_meta`` (private
+        Struktur, ohne Lock) nur um eine Differenz zu zaehlen.
+        """
+        return self.remove_files([file_path])
+
+    def remove_files(self, file_paths) -> int:
+        """Entfernt mehrere Dateien mit EINEM Index-Neuaufbau.
+
+        Wichtig fuer den Aufraeum-Schritt des Reindex: ``remove_file`` je Datei
+        bedeutete N vollstaendige Neuaufbauten samt N Plattenschreibvorgaengen
+        (bei 10k Chunks ~30 MB pro Runde). Hier faellt genau einer an.
+        """
+        drop = {str(p) for p in (file_paths or [])}
+        if not drop:
+            return 0
         with self._lock:
-            keep = [i for i, m in enumerate(self._meta) if m["file_path"] != file_path]
-            if len(keep) == len(self._meta):
-                return  # nichts zu tun
+            keep = [i for i, m in enumerate(self._meta) if m["file_path"] not in drop]
+            removed = len(self._meta) - len(keep)
+            if not removed:
+                return 0  # nichts zu tun
             new_meta = [self._meta[i] for i in keep]
             new_vecs = self._vectors_at(keep)
             self._rebuild(new_meta, new_vecs)
+            return removed
 
     def rename_file_path(self, old_path: str, new_path: str) -> int:
         """Schreibt die Metadaten EINER Datei auf einen neuen Pfad um – ohne
@@ -375,30 +400,67 @@ class VectorStore:
             out.append((int(idx), float(score)))
         return out
 
-    def _ensure_lexical_index(self):
-        """Baut den invertierten BM25-Index, falls er zur aktuellen Generation fehlt.
-
-        Aufrufer muss self._lock halten.
-        """
-        if self._lex_postings is not None and self._lex_gen == self._gen:
-            return
+    @staticmethod
+    def _build_postings(meta_snapshot: list[dict]):
+        """Baut den invertierten Index aus einer Meta-Kopie. Haelt KEIN Lock."""
         postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
         doc_lens: list[int] = []
-        for i, m in enumerate(self._meta):
+        for i, m in enumerate(meta_snapshot):
             toks = _lex_tokens(m.get("text", ""))
             doc_lens.append(len(toks) or 1)
             for tok, tf in Counter(toks).items():
                 postings[tok].append((i, tf))
-        self._lex_postings = dict(postings)
-        self._lex_doc_lens = doc_lens
-        self._lex_avg_len = (sum(doc_lens) / len(doc_lens)) if doc_lens else 1.0
+        return dict(postings), doc_lens
+
+    def _append_lexical(self, base: int, chunks: list[str]) -> None:
+        """Traegt angehaengte Chunks in den bestehenden BM25-Index nach.
+        Aufrufer muss self._lock halten und darf NUR angehaengt haben."""
+        for off, txt in enumerate(chunks):
+            toks = _lex_tokens(txt)
+            self._lex_doc_lens.append(len(toks) or 1)
+            for tok, tf in Counter(toks).items():
+                self._lex_postings.setdefault(tok, []).append((base + off, tf))
+        if self._lex_doc_lens:
+            self._lex_avg_len = sum(self._lex_doc_lens) / len(self._lex_doc_lens)
         self._lex_gen = self._gen
-        _log.debug(f"BM25-Index gebaut: {len(doc_lens)} Chunks, {len(postings)} Terme")
+
+    def _ensure_lexical_index(self):
+        """Baut den invertierten BM25-Index, falls er zur aktuellen Generation fehlt.
+
+        Der Aufbau laeuft AUSSERHALB des Locks: er kostet bei 16k Chunks knapp
+        drei Sekunden, und unter dem Lock wartet in dieser Zeit JEDE andere Suche.
+        Gebaut wird auf einer Kopie der Meta-Liste; eingehaengt wird nur, wenn sich
+        die Generation zwischenzeitlich nicht geaendert hat (sonst passten die
+        Positionen nicht mehr).
+
+        Aufrufer darf self._lock NICHT halten.
+        """
+        for _ in range(2):
+            with self._lock:
+                if self._lex_postings is not None and self._lex_gen == self._gen:
+                    return
+                gen = self._gen
+                snapshot = list(self._meta)
+            postings, doc_lens = self._build_postings(snapshot)
+            with self._lock:
+                if gen != self._gen:
+                    continue    # Index hat sich geaendert -> genau ein Neuversuch
+                self._lex_postings = postings
+                self._lex_doc_lens = doc_lens
+                self._lex_avg_len = (sum(doc_lens) / len(doc_lens)) if doc_lens else 1.0
+                self._lex_gen = gen
+                _log.debug(f"BM25-Index gebaut: {len(doc_lens)} Chunks, {len(postings)} Terme")
+                return
 
     def _search_lexical_idx(self, query: str, k: int) -> list[tuple[int, float]]:
         """Lexikalischer BM25-Kanal. Gibt (meta_index, bm25_score) absteigend zurueck."""
+        self._ensure_lexical_index()        # ohne Lock (baut ggf. neu)
         with self._lock:
-            self._ensure_lexical_index()
+            # Passt der Index nicht zur aktuellen Generation, liefert der
+            # lexikalische Kanal diese Runde nichts – lieber ein Kanal weniger
+            # als Treffer auf verschobenen Positionen.
+            if not self._lex_postings or self._lex_gen != self._gen:
+                return []
             n_docs = len(self._meta)
             if n_docs == 0:
                 return []
@@ -427,7 +489,8 @@ class VectorStore:
             out = [(s, self._meta[i]["file_path"], self._meta[i]["text"]) for i, s in hits]
         return out[:max_results]
 
-    def search_hybrid(self, query: str, max_results: int) -> list[tuple[float, str, str]]:
+    def search_hybrid(self, query: str, max_results: int,
+                      weight_fn=None) -> list[tuple[float, str, str]]:
         """Hybride Suche: semantisch + BM25, fusioniert per Reciprocal Rank Fusion.
 
         Drei Kanaele gehen in die Fusion:
@@ -436,12 +499,37 @@ class VectorStore:
              (Frage-Floskeln verwaessern den Query-Vektor spuerbar)
           3. lexikalisch (BM25)
 
+        ``weight_fn(file_path) -> float`` gewichtet Treffer nach ihrer HERKUNFT
+        (z.B. Abwertung gelernter Notizen). Die Gewichtung passiert VOR dem
+        relativen Cut – wird sie erst danach angewendet, misst der Cut noch am
+        unabgewerteten Spitzenreiter und verwirft Primaerdokumente, die nach der
+        Abwertung vorn laegen.
+
         Der zurueckgegebene Score ist der auf 1.0 normierte RRF-Wert (Top-Treffer
         = 1.00) – ein Rang-Mass, kein Cosine-Wert. Das ist fuer die Anzeige
         aussagekraeftiger als die stark komprimierten e5-Rohscores.
+
+        Aendert sich der Index waehrend der Suche, verschieben sich die
+        Meta-Positionen und die Kanal-Treffer zeigen auf fremde Chunks. Deshalb
+        wird die Generation geprueft und die Suche EINMAL wiederholt.
+        """
+        out = self._search_hybrid_once(query, max_results, weight_fn, strict=True)
+        if out is None:
+            _log.debug("Index waehrend der Suche geaendert – ein Neuversuch")
+            out = self._search_hybrid_once(query, max_results, weight_fn, strict=False)
+        return out or []
+
+    def _search_hybrid_once(self, query: str, max_results: int, weight_fn,
+                            strict: bool) -> list[tuple[float, str, str]] | None:
+        """Ein Durchgang der Hybridsuche.
+
+        ``strict=True``: Hat sich der Index zwischendurch geaendert, wird ``None``
+        zurueckgegeben (der Aufrufer wiederholt). ``strict=False``: bestmoegliches
+        Ergebnis mit Bereichspruefung.
         """
         with self._lock:
             total = len(self._meta)
+            gen_at_start = self._gen
         if total == 0:
             return []
 
@@ -467,17 +555,40 @@ class VectorStore:
             for rank, (idx, _score) in enumerate(hits):
                 rrf[idx] += 1.0 / (RRF_K + rank + 1)
 
-        ranked = sorted(rrf.items(), key=lambda x: x[1], reverse=True)
-        top = ranked[0][1]
-
         output: list[tuple[float, str, str]] = []
         with self._lock:
+            if gen_at_start != self._gen:
+                if strict:
+                    return None
+                # Bestmoeglich weiter: die Bereichspruefung unten faengt
+                # zumindest Ueberlaeufe ab.
+            meta = self._meta
+
+            # Herkunfts-Gewichtung VOR dem Cut anwenden (siehe Docstring).
+            if weight_fn is not None:
+                weighted = []
+                for idx, score in rrf.items():
+                    if idx >= len(meta):
+                        continue
+                    try:
+                        w = float(weight_fn(meta[idx]["file_path"]))
+                    except Exception:
+                        w = 1.0
+                    weighted.append((idx, score * w))
+                ranked = sorted(weighted, key=lambda x: x[1], reverse=True)
+            else:
+                ranked = sorted(rrf.items(), key=lambda x: x[1], reverse=True)
+
+            if not ranked:
+                return []
+            top = ranked[0][1] or 1.0
+
             for pos, (idx, score) in enumerate(ranked):
                 if pos >= MIN_KEEP and score < top * RELATIVE_CUT:
                     break
-                if idx >= len(self._meta):
+                if idx >= len(meta):
                     continue
-                m = self._meta[idx]
+                m = meta[idx]
                 output.append((score / top, m["file_path"], m["text"]))
                 if len(output) >= max_results:
                     break
@@ -505,11 +616,13 @@ class VectorStore:
     # ─── Hilfsmethoden ───────────────────────────────────────────────────────
 
     def _vectors_at(self, indices: list[int]) -> np.ndarray:
-        """Extrahiert Vektoren fuer gegebene Indizes aus dem FAISS-Index."""
+        """Extrahiert Vektoren fuer gegebene Indizes aus dem FAISS-Index.
+
+        ``reconstruct_n`` holt ALLE Vektoren in EINEM Aufruf; die Auswahl macht
+        danach numpy. Die fruehere Variante rief ``reconstruct`` je Vektor auf –
+        bei 16k Chunks 16k einzelne Uebergaenge nach C++ fuer jede Entfernung.
+        """
         if not indices or self._index.ntotal == 0:
             return np.empty((0, EMBEDDING_DIM), dtype=np.float32)
-        # IndexFlatIP speichert Vektoren dicht – direkter Zugriff via reconstruct
-        vecs = np.zeros((len(indices), EMBEDDING_DIM), dtype=np.float32)
-        for out_i, idx in enumerate(indices):
-            self._index.reconstruct(int(idx), vecs[out_i])
-        return vecs
+        all_vecs = self._index.reconstruct_n(0, self._index.ntotal)
+        return np.asarray(all_vecs, dtype=np.float32)[np.asarray(indices, dtype=np.int64)]

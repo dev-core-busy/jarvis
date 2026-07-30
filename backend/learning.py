@@ -254,6 +254,16 @@ def _save_and_index(task: str, facts_text: str) -> None:
     # Sofort in FAISS indexieren
     _index_immediately(filepath, content)
 
+    # Der Gruppe "Erlernt" zuordnen. Das geschah bisher NUR beim Oeffnen der
+    # Gruppenseite – bis dahin galt die Datei als "ungruppiert", und der
+    # Wissensgruppen-Filter lieferte je nach Vorgeschichte andere Ergebnisse.
+    try:
+        from backend import knowledge_groups as kg
+        rel = str(filepath.relative_to(PROJECT_ROOT))
+        kg.auto_assign_system_files([rel])
+    except Exception as e:  # noqa: BLE001 – Lernen darf daran nicht scheitern
+        _log.debug(f"Gruppen-Zuordnung der Lernnotiz fehlgeschlagen: {e}")
+
 
 def _index_immediately(filepath: Path, content: str) -> None:
     """Indexiert eine neue Wissensdatei direkt in FAISS ohne Bulk-Rebuild."""

@@ -2392,6 +2392,31 @@ async def startup_info_files_dir():
 
 
 @app.on_event("startup")
+async def startup_pending_retention():
+    """Vorhaltezeit fuer bereits uebernommene Extraktions-Entwuerfe durchsetzen.
+
+    OFFENE Entwuerfe bleiben unangetastet – abgeraeumt wird nur, was laengst in
+    der Wissensdatenbank steht (``status='approved'``, Revisionsspur). Ohne diese
+    Schleife wuchs ``data/knowledge/pending/`` unbegrenzt, und jede Abfrage der
+    Entwurfsliste liest saemtliche Dateien.
+    """
+    async def _loop():
+        while True:
+            try:
+                from backend.web_extractor import cleanup_approved
+                n = await asyncio.to_thread(cleanup_approved)
+                if n:
+                    print(f"[Extraktor] {n} uebernommene Entwuerfe abgeraeumt", flush=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"[Extraktor] Aufraeumen fehlgeschlagen: {e}", flush=True)
+            await asyncio.sleep(86400)
+    try:
+        asyncio.create_task(_loop())
+    except Exception as e:  # noqa: BLE001
+        print(f"[Extraktor] Startup-Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_documents_retention():
     """Aufbewahrungsfrist fuer erzeugte Dokumente durchsetzen.
 
@@ -6817,8 +6842,9 @@ async def delete_knowledge_file(request: Request, user: str = Depends(require_kn
     # (Sonst bliebe die geloeschte Datei als Karteileiche in der Zaehl-Basis und
     # die Wissensgruppen-Zaehler wuerden nicht sinken.)
     try:
-        from backend.tools.knowledge import purge_file_index
+        from backend.tools.knowledge import purge_file_index, invalidate_files_cache
         purge_file_index(resolved)
+        invalidate_files_cache()
     except Exception:
         pass
     return JSONResponse({"ok": True, "deleted": file_path})
@@ -8264,8 +8290,10 @@ async def wissen_upload(
         qa_n = max(0, min(int(gen_questions or 0), 50))
     except (TypeError, ValueError):
         qa_n = 0
-    # Formate, die der Extraktor lesen kann (Teilmenge der Upload-Formate)
-    _QA_EXTS = {".pdf", ".txt", ".md", ".rst", ".csv", ".docx", ".doc", ".xlsx", ".ods",
+    # Formate, die der Extraktor lesen kann (Teilmenge der Upload-Formate).
+    # .ods/.rst standen hier, obwohl der Upload sie ablehnt und _extract_text sie
+    # nicht lesen kann – das erzeugte nur irrefuehrende Fehlermeldungen.
+    _QA_EXTS = {".pdf", ".txt", ".md", ".csv", ".docx", ".doc", ".xlsx",
                 ".pptx", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp",
                 ".mp3", ".m4a", ".wav", ".ogg", ".mp4", ".mov", ".mkv", ".avi"}
 
@@ -8372,6 +8400,14 @@ async def wissen_upload(
                 qa_pending.append({"id": doc["id"], "title": doc.get("title", dest.name)})
             except Exception as e:  # noqa: BLE001 – Upload bleibt erfolgreich
                 qa_errors.append({"name": dest.name, "error": str(e)[:300]})
+    # Kurz gecachte Dateiliste verwerfen, damit frisch Hochgeladenes sofort
+    # gefunden/indiziert wird (siehe knowledge._all_files_cached).
+    if saved:
+        try:
+            from backend.tools.knowledge import invalidate_files_cache
+            invalidate_files_cache()
+        except Exception:  # noqa: BLE001
+            pass
     return JSONResponse({"saved": saved, "rejected": rejected,
                          "total_saved": len(saved), "total_rejected": len(rejected),
                          "created_dirs": created_dirs,
@@ -9402,8 +9438,16 @@ async def knowledge_extract_file_delete(request: Request, user: str = Depends(re
         return JSONResponse({"ok": False, "error": "Nur extract_*-Dateien können gelöscht werden"}, status_code=400)
     if target.exists():
         target.unlink()
-    # Reindex im Hintergrund
-    asyncio.create_task(asyncio.to_thread(lambda: __import__('backend.tools.knowledge', fromlist=['force_reindex']).force_reindex()))
+    # Gezielt aus dem Index nehmen (FAISS + TF-IDF + Gruppen-Zuordnung) statt
+    # den GESAMTEN Index neu aufzubauen. Der fruehere force_reindex() bettete
+    # fuer eine geloeschte Datei die ganze Wissensdatenbank neu ein und liess
+    # waehrenddessen jede Suche ins Leere laufen.
+    try:
+        from backend.tools.knowledge import purge_file_index, invalidate_files_cache
+        await asyncio.to_thread(purge_file_index, target)
+        invalidate_files_cache()
+    except Exception as e:  # noqa: BLE001
+        print(f"[knowledge] Index-Bereinigung nach Loeschen fehlgeschlagen: {e}", flush=True)
     return JSONResponse({"ok": True})
 
 

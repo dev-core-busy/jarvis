@@ -787,11 +787,24 @@
             ? '<label style="font-size:0.78rem;color:var(--text-secondary);display:block;margin-top:10px;">' + t('wissen.qa_audit_label', { n: qa.length }) + '</label>'
               + '<div id="wi-rev-qa" style="margin:6px 0 10px;">' + qa.map(qaRowHtml).join('') + '</div>'
             : '';
+        // Zusammenfassung und Kernfakten sind BEARBEITBAR. Vorher standen sie in
+        // einem reinen Anzeigefeld: der Pruefer konnte einen falschen Kernfakt
+        // sehen, aber nicht korrigieren – seine einzige Handlung waere gewesen,
+        // den ganzen Entwurf zu verwerfen. Das Backend nimmt beide Felder seit
+        // jeher entgegen (PATCH /api/wissen/pending/{id}).
+        var facts = (d.facts || []);
         box.innerHTML = '<div class="wi-review">'
             + '<div style="font-weight:600;margin-bottom:6px;">' + t('wissen.review_title') + '</div>'
             + '<label style="font-size:0.78rem;color:var(--text-secondary);">' + t('wissen.title_label') + '</label>'
             + '<input class="wi-input" id="wi-rev-title" value="' + esc(d.title || '') + '">'
-            + '<pre>' + esc(docPreview(d)) + '</pre>'
+            + '<label style="font-size:0.78rem;color:var(--text-secondary);display:block;margin-top:8px;">'
+            + t('wissen.summary_label') + '</label>'
+            + '<textarea class="wi-input" id="wi-rev-summary" rows="4" style="resize:vertical;">'
+            + esc(d.summary || '') + '</textarea>'
+            + '<label style="font-size:0.78rem;color:var(--text-secondary);display:block;margin-top:8px;">'
+            + t('wissen.facts_edit_label', { n: facts.length }) + '</label>'
+            + '<textarea class="wi-input" id="wi-rev-facts" rows="' + Math.min(10, Math.max(3, facts.length + 1))
+            + '" style="resize:vertical;">' + esc(facts.join('\n')) + '</textarea>'
             + qaHtml
             + '<label style="font-size:0.78rem;color:var(--text-secondary);">' + t('wissen.target_groups') + '</label>'
             + '<div class="wi-groups" id="wi-rev-groups" style="margin:6px 0 10px;">' + groupBoxes('rev') + '</div>'
@@ -832,6 +845,17 @@
         var title = ($('wi-rev-title') || {}).value;
         var patch = {};
         if (title != null) patch.title = title;
+        // Zusammenfassung + Kernfakten aus dem Formular uebernehmen.
+        // `!= null` statt Falsyness: ein absichtlich GELEERTES Feld muss auch
+        // leer gespeichert werden, sonst bliebe der alte Text stehen.
+        var summary = ($('wi-rev-summary') || {}).value;
+        if (summary != null) patch.summary = summary.trim();
+        var factsRaw = ($('wi-rev-facts') || {}).value;
+        if (factsRaw != null) {
+            patch.facts = factsRaw.split('\n')
+                .map(function (l) { return l.replace(/^\s*[-*•]\s*/, '').trim(); })
+                .filter(function (l) { return l.length > 0; });
+        }
         var qa = collectQa();
         if (qa !== null) patch.qa_pairs = qa;
         var chain = Promise.resolve();

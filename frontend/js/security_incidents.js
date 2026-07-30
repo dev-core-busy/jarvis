@@ -1039,6 +1039,7 @@
     document.addEventListener('DOMContentLoaded', function () {
         var lo = $('blocked-logout');
         if (lo) lo.addEventListener('click', function () {
+            if (window.JarvisSession) window.JarvisSession.logout();
             localStorage.removeItem('jarvis_token');
             localStorage.removeItem('jarvis_user');
             window.location.reload();

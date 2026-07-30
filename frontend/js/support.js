@@ -276,6 +276,7 @@
     }
 
     function logout() {
+        if (window.JarvisSession) window.JarvisSession.logout();
         TOKEN_KEYS.forEach(function (k) { localStorage.removeItem(k); });
         $('sup-app').classList.add('hidden');
         $('sup-login').classList.remove('hidden');

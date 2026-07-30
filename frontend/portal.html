@@ -142,6 +142,46 @@
         .pt-info-head .pt-info-count { margin-left:auto; font-weight:500; font-size:.75rem;
             color:var(--text-muted); }
         .pt-info-list { max-height:min(60vh, 420px); overflow-y:auto; padding:6px; }
+        /* ── Angemeldete Benutzer (Admin) ── */
+        .pt-usr-wrap { position:relative; display:flex; }
+        /* DECKEND wie das Dokumente-Panel: darunter liegen die Portal-Karten mit
+           Text, der bei halbtransparentem Grund durch die Namen scheint. */
+        .pt-usr-panel { position:absolute; top:calc(100% + 8px); right:0; z-index:60;
+            min-width:320px; max-width:min(440px, calc(100vw - 32px));
+            background:var(--bg-secondary); border:1px solid var(--border);
+            border-radius:12px; box-shadow:0 12px 32px rgba(var(--shadow-rgb),.28);
+            overflow:hidden; }
+        .pt-usr-panel[hidden] { display:none; }
+        .pt-usr-head { display:flex; align-items:center; gap:8px; padding:10px 12px;
+            border-bottom:1px solid var(--border); font-size:.82rem; font-weight:600;
+            color:var(--text-primary); }
+        .pt-usr-count { margin-left:auto; font-weight:500; font-size:.75rem;
+            color:var(--text-muted); }
+        .pt-usr-list { max-height:min(60vh, 420px); overflow-y:auto; padding:6px; }
+        .pt-usr-item { padding:8px 10px; border-radius:8px; }
+        .pt-usr-item:hover { background:rgba(var(--accent-rgb),.10); }
+        .pt-usr-top { display:flex; align-items:center; gap:8px; }
+        .pt-usr-name { font-size:.85rem; color:var(--text-primary); overflow:hidden;
+            text-overflow:ellipsis; white-space:nowrap; }
+        /* Die Pille traegt die Aussage doppelt (Farbe UND Text) – Farbe allein
+           waere fuer Farbfehlsichtige keine Information. */
+        .pt-usr-pill { flex:0 0 auto; font-size:.68rem; font-weight:700;
+            letter-spacing:.02em; padding:2px 8px; border-radius:999px;
+            text-transform:uppercase; }
+        .pt-usr-pill.is-on { background:color-mix(in srgb, var(--success, #22c55e) 22%, transparent);
+            color:var(--success, #22c55e);
+            border:1px solid color-mix(in srgb, var(--success, #22c55e) 45%, transparent); }
+        .pt-usr-pill.is-off { background:rgba(var(--fg-rgb),.07); color:var(--text-muted);
+            border:1px solid var(--border); }
+        .pt-usr-tag { font-size:.62rem; font-weight:700; padding:1px 6px; border-radius:6px;
+            background:rgba(var(--accent-rgb),.18); color:var(--text-secondary); }
+        .pt-usr-meta { margin-top:3px; font-size:.7rem; color:var(--text-muted);
+            display:flex; flex-wrap:wrap; gap:4px; align-items:baseline; }
+        .pt-usr-meta b { font-weight:600; color:var(--text-secondary); }
+        .pt-usr-sep { opacity:.5; }
+        .pt-usr-empty { padding:14px 12px; font-size:.8rem; color:var(--text-muted); }
+        .pt-usr-hint { padding:8px 12px 10px; font-size:.68rem; line-height:1.35;
+            color:var(--text-muted); border-top:1px solid var(--border); }
         .pt-info-item { display:flex; align-items:center; gap:10px; padding:8px 10px;
             border-radius:8px; text-decoration:none; color:var(--text-primary);
             transition:background .15s; }
@@ -201,6 +241,21 @@
     <button class="pt-btn" id="pt-vnc-btn" title="Desktop (VNC)" data-i18n-title="chat.desktop" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
     </button>
+    <!-- Angemeldete Benutzer: nur fuer Admins (wie der Desktop-Knopf daneben) -->
+    <div class="pt-usr-wrap" id="pt-usr-wrap" style="display:none;">
+        <button class="pt-btn" id="pt-usr-btn" title="Angemeldete Benutzer"
+                data-i18n-title="sessions.title" aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </button>
+        <div class="pt-usr-panel" id="pt-usr-panel" hidden>
+            <div class="pt-usr-head">
+                <span data-i18n="sessions.title">Angemeldete Benutzer</span>
+                <span class="pt-usr-count" id="pt-usr-count"></span>
+            </div>
+            <div class="pt-usr-list" id="pt-usr-list"></div>
+            <div class="pt-usr-hint" id="pt-usr-hint"></div>
+        </div>
+    </div>
     <!-- Info-Dokumente: Ordnersymbol, nur sichtbar wenn frontend_info_files/ Dateien enthaelt -->
     <div class="pt-info-wrap" id="pt-info-wrap" style="display:none;">
         <button class="pt-btn" id="pt-info-btn" title="Dokumente" data-i18n-title="portal.info_files" aria-haspopup="true" aria-expanded="false">
@@ -394,13 +449,14 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=89"></script>
+<script src="/static/js/i18n.js?v=91"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=22"></script>
-<script src="/static/js/security_incidents.js?v=10"></script>
+<script src="/static/js/security_incidents.js?v=11"></script>
 <script src="/static/js/update_widget.js?v=3"></script>
 <script src="/static/js/issues.js?v=6"></script>
 <script src="/static/js/info_files.js?v=3"></script>
+<script src="/static/js/sessions.js?v=1"></script>
 <script src="/static/js/vnc.js?v=18"></script>
 <script>
 (function () {
@@ -440,6 +496,8 @@ sudo update-ca-certificates</code></pre>
             // Desktop/VNC-Button (Admin) – verschoben von /chat
             var vb = document.getElementById('pt-vnc-btn');
             if (vb) vb.style.display = '';
+            // Angemeldete Benutzer (Admin): init() blendet den Knopf selbst ein
+            if (window.UserSessions) window.UserSessions.init();
             // API-Dokumentation (Admin)
             var apiCard = document.getElementById('pt-card-api');
             if (apiCard) apiCard.classList.remove('hidden');
@@ -471,7 +529,13 @@ sudo update-ca-certificates</code></pre>
     window.addEventListener('focus', refreshUnread);
 
     var lo = document.getElementById('pt-logout');
-    if (lo) lo.addEventListener('click', function(){ KEYS.forEach(function(k){localStorage.removeItem(k);}); window.location.replace('/'); });
+    if (lo) lo.addEventListener('click', function(){
+        // Erst dem Server sagen, DANN das Token verwerfen – sonst fehlt der
+        // Anfrage die Anmeldung. `keepalive` haelt sie ueber die Navigation.
+        var _p = (window.JarvisSession ? window.JarvisSession.logout() : Promise.resolve());
+        KEYS.forEach(function(k){localStorage.removeItem(k);});
+        _p.catch(function(){}).then(function(){ window.location.replace('/'); });
+    });
 
     // LLM-Verbindungsstatus-Pill (wie in /chat, /userchat)
     function pollLlm(){

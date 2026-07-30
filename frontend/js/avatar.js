@@ -66,24 +66,119 @@
     // ── Start ───────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', function () {
         if (!token()) return;   // nicht angemeldet
-        Promise.all([
-            fetch('/api/avatar/config', { headers: { 'Authorization': 'Bearer ' + token() } })
-                .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
-            // Branding ist oeffentlich; ohne aktiven Branding-Skill kommt
-            // {active:false} und alle Rueckfaelle greifen wie bisher.
-            fetch('/api/branding').then(function (r) { return r.ok ? r.json() : null; })
-                .catch(function () { return null; })
-        ]).then(function (res) {
-            var d = res[0];
-            if (!d || !d.active) return;   // Skill aus
-            cfg = d;
-            brand = res[1];
-            build();
-        }).catch(function () {});
+        fetch('/api/avatar/config', { headers: { 'Authorization': 'Bearer ' + token() } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.active) return;   // Skill aus
+                cfg = d;
+                // Der Schalter haengt NUR an dieser Antwort – nicht zusaetzlich
+                // am Branding. Sonst erscheint er bei langsamem Netz spaet, und
+                // wer den Avatar ausgeschaltet hat, sieht ihn erst gar nicht
+                // (und kaeme nicht zurueck).
+                injectToggle();
+                if (istAus()) return;
+                // Branding ist oeffentlich; ohne aktiven Branding-Skill kommt
+                // {active:false} und alle Rueckfaelle greifen wie bisher.
+                return fetch('/api/branding')
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .catch(function () { return null; })
+                    .then(function (bd) { brand = bd; build(); });
+            })
+            .catch(function () {});
     });
+
+    // ── Ein/Aus je Seite ────────────────────────────────────────────
+    // Der Zustand haengt am Pfad, nicht global: der Avatar soll z.B. im Chat
+    // stoeren duerfen und im Portal sichtbar bleiben (Vorgabe „pro Seite").
+    var AUS_KEY = 'jarvis_avatar_off:';
+    var toggleBtn = null;
+
+    function seitenSchluessel() {
+        return AUS_KEY + ((location.pathname || '/').replace(/\/+$/, '') || '/');
+    }
+    function istAus() {
+        try { return localStorage.getItem(seitenSchluessel()) === '1'; } catch (e) { return false; }
+    }
+    function setzeAus(aus) {
+        try {
+            if (aus) localStorage.setItem(seitenSchluessel(), '1');
+            else localStorage.removeItem(seitenSchluessel());
+        } catch (e) {}
+    }
+
+    // Sichtbarer Zustand: durchgestrichenes Symbol = Avatar aus
+    var SVG_AN = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"'
+        + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        + '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'
+        + '<circle cx="9.5" cy="11" r="1"/><circle cx="14.5" cy="11" r="1"/>'
+        + '<path d="M9 14.5c.8.7 1.9 1 3 1s2.2-.3 3-1"/></svg>';
+    var SVG_AUS = SVG_AN.replace('</svg>', '<line x1="3" y1="21" x2="21" y2="3"/></svg>');
+
+    // Der Knopf wird zur Laufzeit eingehaengt und uebernimmt die Klassen des
+    // Theme-Knopfes – so passt er ohne Extrawurst zum Stil JEDER Seite und
+    // sitzt ueberall an derselben Stelle (direkt links davon).
+    function injectToggle() {
+        if (toggleBtn) return;
+        var anker = document.getElementById('btn-theme-toggle')
+                 || document.getElementById('btn-theme');   // /chat; NICHT btn-theme-login
+        toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.id = 'jav-toggle';
+        if (anker && anker.parentNode) {
+            toggleBtn.className = anker.className;
+            anker.parentNode.insertBefore(toggleBtn, anker);
+        } else {
+            // Seiten ohne Symbolleiste (z.B. /settings): frei schwebend oben rechts
+            toggleBtn.className = 'jav-toggle-float';
+            document.body.appendChild(toggleBtn);
+        }
+        toggleBtn.addEventListener('click', function () {
+            var ausJetzt = !istAus();
+            setzeAus(ausJetzt);
+            zeichneToggle();
+            if (ausJetzt) { destroy(); return; }
+            // Beim Einschalten kann das Branding noch fehlen: es wird beim
+            // Laden uebersprungen, wenn der Avatar aus ist. Ohne dieses
+            // Nachladen bekaeme man Standardname statt Marke und kein Logo.
+            if (brand !== null) { build(); return; }
+            fetch('/api/branding')
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .catch(function () { return null; })
+                .then(function (bd) { brand = bd; build(); });
+        });
+        zeichneToggle();
+    }
+
+    function zeichneToggle() {
+        if (!toggleBtn) return;
+        var aus = istAus();
+        toggleBtn.innerHTML = aus ? SVG_AUS : SVG_AN;
+        toggleBtn.classList.toggle('jav-toggle-off', aus);
+        var t = aus ? T('avatar.toggle_show', 'Avatar einblenden')
+                    : T('avatar.toggle_hide', 'Avatar ausblenden');
+        toggleBtn.title = t;
+        toggleBtn.setAttribute('aria-label', t);
+        toggleBtn.setAttribute('aria-pressed', aus ? 'false' : 'true');
+    }
+
+    // Widget vollstaendig abraeumen. Wichtig: laufende Sprite-Rueckrufe ueber
+    // figurGen entwerten und die von clippy an <body> gehaengten Knoten
+    // mitnehmen – sonst bleibt beim Ausschalten eine Figur stehen.
+    function destroy() {
+        clearTimeout(figurTimer);
+        figurGen++;
+        if (els.root) els.root.remove();
+        Array.prototype.forEach.call(
+            document.querySelectorAll('body > .clippy, body > .clippy-balloon'),
+            function (n) { n.remove(); });
+        agent = null;
+        busy = false;
+        els = {};
+    }
 
     // ── DOM aufbauen ────────────────────────────────────────────────
     function build() {
+        if (els.root) return;          // schon aufgebaut (Doppelklick auf den Schalter)
         var root = document.createElement('div');
         root.id = 'jav-root';
         root.className = (cfg.position === 'bottom-left') ? 'jav-pos-bl' : 'jav-pos-br';
@@ -213,12 +308,18 @@
 
         // Kleineres Fenster in der naechsten Sitzung: gespeicherte Groesse
         // wieder einpassen, sonst ragt das Panel aus dem Bild.
-        window.addEventListener('resize', function () {
-            if (!els.panel.style.width) return;
-            applySize(parseInt(els.panel.style.width, 10) || MIN_W,
-                      parseInt(els.log.style.height, 10) || MIN_H);
-        });
+        // Nur EINMAL registrieren – build() laeuft beim Ein-/Ausschalten erneut,
+        // sonst sammeln sich Zuhoerer auf einem laengst entfernten Panel.
+        if (!resizeGebunden) {
+            resizeGebunden = true;
+            window.addEventListener('resize', function () {
+                if (!els.panel || !els.panel.style.width) return;
+                applySize(parseInt(els.panel.style.width, 10) || MIN_W,
+                          parseInt(els.log.style.height, 10) || MIN_H);
+            });
+        }
     }
+    var resizeGebunden = false;
 
     // ── Figur rendern ───────────────────────────────────────────────
     // Reihenfolge: gewaehlte Figur → RUECKFALL 'Clippy' → SVG-Platzhalter.

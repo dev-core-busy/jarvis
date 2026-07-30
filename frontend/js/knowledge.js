@@ -740,7 +740,11 @@ class JarvisKnowledgeManager {
         const imageIcon = stats.image_support ? '✅' : '⚠️';
         const imageTitle = stats.image_support ? window.t('knowledge.support_image_ok') : window.t('knowledge.support_image_missing');
         const vectorAvail = stats.vector_db_available;
-        const vectorIcon = vectorAvail ? '✅' : (stats.indexing ? '🔄' : '⚠️');
+        // Drei Zustaende des Vektorspeichers unterscheiden (siehe
+        // knowledge.vector_store_status): "noch nie gebraucht" ist KEINE Stoerung.
+        const vsState = (stats.vector_store_state || {}).state || '';
+        const vectorIcon = vectorAvail ? '✅'
+            : (stats.indexing ? '🔄' : (vsState === 'fehler' ? '⛔' : '⚠️'));
         const vectorDbLabel = stats.vector_db_name
             ? `${stats.vector_db_name}${stats.vector_db_version ? ' ' + stats.vector_db_version : ''}`
             : 'Vektor-DB';
@@ -2196,7 +2200,12 @@ class JarvisKnowledgeManager {
         else if (run.status === 'running')     parts.push(window.t('knowledge.index_status_running'));
         else parts.push(`${run.indexed_files || 0} ${window.t('knowledge.stat.files')}, ${run.total_chunks || 0} Chunks`);
         if (run.error && run.status === 'error') parts.push('⚠ ' + String(run.error).slice(0, 80));
-        const color = run.status === 'ok' ? 'var(--text-secondary)' : 'var(--warning)';
+        // Fehlgeschlagene Dateien sichtbar machen: der Reindex faengt Fehler PRO
+        // DATEI ab, ein Lauf mit 200 unlesbaren Dateien sah bisher aus wie ein
+        // sauberer Erfolg ("ok, 693 Dateien") – die fehlenden fielen niemandem auf.
+        const failed = run.failed_files || 0;
+        if (failed) parts.push('⚠ ' + window.t('knowledge.index_failed_n').replace('{n}', failed));
+        const color = (run.status === 'ok' && !failed) ? 'var(--text-secondary)' : 'var(--warning)';
         return `<div class="kb-last-run" style="font-size:0.75rem;color:${color};margin:6px 0 2px;">${parts.join(' · ')}</div>`;
     }
 

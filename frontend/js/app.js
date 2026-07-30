@@ -410,6 +410,10 @@
     });
 
     function showLoginScreen() {
+        // Sitzungsende beim Server melden, SOLANGE das Token noch gilt. Ist es
+        // bereits abgelaufen, lehnt der Server ab und es wird nichts vermerkt –
+        // genau richtig, denn dann war es keine Abmeldung.
+        if (window.JarvisSession) window.JarvisSession.logout(token);
         mainScreen.classList.remove('active');
         loginScreen.classList.add('active');
         token = '';

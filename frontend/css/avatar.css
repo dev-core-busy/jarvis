@@ -206,6 +206,12 @@ body.jav-resizing #jav-panel { transition: none; }
     border-radius: 9px; cursor: pointer; font-size: 1rem;
 }
 .jav-ibtn:hover { background: rgba(var(--accent-rgb, 99, 102, 241), .18); border-color: var(--accent, #6366f1); }
+/* Lautsprecher (Stummschalter fuer Figur-Geraeusche UND Sprachausgabe):
+   stumm = blass und ohne Rahmenakzent. Die Farbe allein traegt die Aussage
+   nicht – das Symbol selbst wechselt zwischen 🔊 und 🔇. */
+#jav-speak.jav-off { opacity: .5; }
+#jav-speak.jav-off:hover { opacity: .85; }
+#jav-speak:not(.jav-off) { border-color: color-mix(in srgb, var(--accent, #6366f1) 60%, transparent); }
 #jav-send { background: var(--accent, #6366f1); border-color: var(--accent, #6366f1); color: #fff; }
 #jav-send:hover { background: var(--accent-hover, #4f52d6); }
 /* Abbrechen ersetzt Senden waehrend eines Laufs (wie der Stop-Knopf im Chat).

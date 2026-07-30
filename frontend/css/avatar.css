@@ -57,6 +57,28 @@
 .jav-ph.talking .jav-antenna { animation: jav-blink .6s steps(1) infinite; }
 @keyframes jav-blink { 50% { opacity: .4; } }
 
+/* ── Ein/Aus-Schalter in der Kopfzeile ──
+   Der Knopf uebernimmt normalerweise die Klassen des Theme-Knopfes der
+   jeweiligen Seite; hier nur der Aus-Zustand und die Notloesung fuer Seiten
+   ohne Symbolleiste. */
+#jav-toggle { display: inline-flex; align-items: center; justify-content: center; }
+#jav-toggle.jav-toggle-off { opacity: .55; }
+#jav-toggle.jav-toggle-off:hover { opacity: .85; }
+
+/* Seiten ohne Kopfzeilen-Symbolleiste (z.B. /settings) */
+.jav-toggle-float {
+    position: fixed;
+    top: 12px; right: 14px;
+    z-index: 1300;
+    width: 32px; height: 32px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border, rgba(255, 255, 255, .14));
+    background: var(--bg-secondary, #1b1f27);
+    color: var(--text-secondary, #9ca3af);
+    border-radius: 8px; cursor: pointer;
+}
+.jav-toggle-float:hover { color: var(--text-primary, #f3f4f6); border-color: var(--accent, #6366f1); }
+
 /* ── Sprech-/Eingabepanel ── */
 #jav-panel {
     position: relative;          /* Bezug fuer den Ziehgriff */

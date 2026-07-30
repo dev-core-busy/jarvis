@@ -21,6 +21,8 @@
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="stylesheet" href="/static/css/theme.css?v=8">
+    <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
+    <link rel="stylesheet" href="/static/css/avatar.css?v=6">
     <link rel="stylesheet" href="/static/css/style.css?v=146">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
 </head>
@@ -3575,7 +3577,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=138"></script>
+    <script src="/static/js/i18n.js?v=139"></script>
     <script src="/static/js/cron.js?v=19"></script>
     <script src="/static/js/context.js?v=6"></script>
     <script src="/static/js/audit.js?v=3"></script>
@@ -3599,6 +3601,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/ldap_picker.js?v=8"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/app.js?v=185"></script>
+<!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
+<script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/clippy/clippy.min.js"></script>
+<script src="/static/js/avatar.js?v=11"></script>
 </body>
 
 </html>

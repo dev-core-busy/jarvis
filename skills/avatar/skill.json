@@ -13,7 +13,7 @@
         "graphic": {
             "type": "string",
             "label": "Figur / Grafik",
-            "description": "Welche Figur angezeigt wird. 'placeholder' = schlichte SVG-Figur (übernimmt die Branding-Farben), 'branding' = das im Branding-Skill hochgeladene Firmenlogo, alle weiteren Einträge sind Sprite-Sätze im clippy.js-Format. Eigene Grafik: Ordner mit agent.js + map.png unter frontend/vendor/clippy/agents/<Name> ablegen – er erscheint hier automatisch, ohne Code-Änderung und ohne Dienst-Neustart.",
+            "description": "Welche Figur angezeigt wird. 'placeholder' = schlichte SVG-Figur (übernimmt die Branding-Farben), 'branding' = das im Branding-Skill hochgeladene Firmenlogo, alle weiteren Einträge sind Sprite-Sätze im clippy.js-Format. Eigene Grafik: Ordner mit agent.js + map.png unter frontend/vendor/clippy/agents/<Name> ablegen – er erscheint hier automatisch, ohne Code-Änderung und ohne Dienst-Neustart. Vollständige Schritt-für-Schritt-Anleitung inkl. fertiger LLM-Prompts und Bau-Skript: skills/avatar/AVATAR-DESIGN.md (Skript: python3 skills/avatar/tools/build_agent.py <bilderordner> <Name>).",
             "enum": ["placeholder", "branding", "Clippy"],
             "enum_source": "/api/avatar/graphics",
             "default": "Clippy",
@@ -98,7 +98,7 @@
     "dependencies": [],
     "permissions": [],
     "help": {
-        "details": "Der Avatar-Assistent zeigt eine schwebende Figur auf der Chat-Seite (/chat; /portal und /support folgen). Über ein eigenes Eingabefeld sind Text- und Spracheingabe möglich; die Anfrage wird über die normale Jarvis-API (Agent) beantwortet. Bei Texteingabe erscheint die Antwort als Text in der Sprechblase, bei Mikrofon-Eingabe wird sie zusätzlich vorgelesen. Die Grafik ist austauschbar: mitgeliefert sind der klassische 'Clippy' (Sprite-Animation) und ein neutraler SVG-'Platzhalter', der als Vorlage für eigene Grafiken dient. Feste Antworten auf spezielle Fragen lassen sich in den Einstellungen hinterlegen (Feld 'Eigene Antworten'). Alle Parameter stehen unter Einstellungen → Skills → Avatar-Assistent (Zahnrad). Beim Deaktivieren des Skills verschwindet die Figur.",
+        "details": "EIGENES DESIGN: Die vollständige Anleitung steht in skills/avatar/AVATAR-DESIGN.md – drei Wege (Firmenlogo, SVG-Platzhalter, eigener Sprite-Satz), das genaue Dateiformat, fünf harte Funktionsregeln, fertige Prompt-Vorlagen für Bild- und Code-Modelle sowie das Bau-Skript skills/avatar/tools/build_agent.py, das aus einzelnen PNG-Frames map.png + agent.js erzeugt. Der Avatar-Assistent zeigt eine schwebende Figur auf der Chat-Seite (/chat; /portal und /support folgen). Über ein eigenes Eingabefeld sind Text- und Spracheingabe möglich; die Anfrage wird über die normale Jarvis-API (Agent) beantwortet. Bei Texteingabe erscheint die Antwort als Text in der Sprechblase, bei Mikrofon-Eingabe wird sie zusätzlich vorgelesen. Die Grafik ist austauschbar: mitgeliefert sind der klassische 'Clippy' (Sprite-Animation) und ein neutraler SVG-'Platzhalter', der als Vorlage für eigene Grafiken dient. Feste Antworten auf spezielle Fragen lassen sich in den Einstellungen hinterlegen (Feld 'Eigene Antworten'). Alle Parameter stehen unter Einstellungen → Skills → Avatar-Assistent (Zahnrad). Beim Deaktivieren des Skills verschwindet die Figur.",
         "tools": [
             {
                 "name": "avatar_info",

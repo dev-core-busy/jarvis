@@ -4,7 +4,9 @@
    Zeigt eine sprechende Figur (Clippy-Sprite via clippy.js ODER einen
    SVG-Platzhalter) mit eigener Text-/Spracheingabe. Anfragen laufen ueber
    /api/avatar/ask (serverseitiger Override-Abgleich, sonst Agent). Bei
-   Spracheingabe wird die Antwort zusaetzlich per /api/tts vorgelesen.
+   Spracheingabe wird die Antwort zusaetzlich per /api/tts vorgelesen. Der
+   Lautsprecher-Schalter in der Eingabezeile schaltet den Avatar komplett
+   stumm – Figur-Geraeusche UND Sprachausgabe.
 
    Aktiv nur, wenn der Avatar-Skill eingeschaltet ist (/api/avatar/config
    liefert active:true). Eingebunden in chat.html (spaeter portal/support).
@@ -62,6 +64,7 @@
     var recog = null;
     var listening = false;
     var els = {};
+    var aktivAudio = null;   // laufende Sprachausgabe (fuer den Stumm-Schalter)
 
     // ── Start ───────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', function () {
@@ -104,6 +107,70 @@
             if (aus) localStorage.setItem(seitenSchluessel(), '1');
             else localStorage.removeItem(seitenSchluessel());
         } catch (e) {}
+    }
+
+    // ── Stummschaltung ──────────────────────────────────────────────
+    // Der Lautsprecher in der Eingabezeile schaltet ALLES stumm, was der Avatar
+    // von sich gibt – nicht nur die Sprachausgabe:
+    //   * die Geraeusche der Figur (Clippy bringt 15 Toene mit, die clippy.js
+    //     bei bestimmten Animations-Frames abspielt),
+    //   * die vorgelesene Antwort nach einer Mikrofon-Frage.
+    // WANN vorgelesen wird, entscheidet weiterhin die Skill-Einstellung
+    // „Bei Spracheingabe vorlesen"; der Schalter hier legt nur den Hauptschalter
+    // um. Wahl des Nutzers, im Browser gemerkt (wie die Fenstergroesse).
+    // Vorgabe ist NICHT stumm – der Ton gehoert zur Figur.
+    var MUTE_KEY = 'jarvis_avatar_mute';
+
+    function stumm() {
+        try { return localStorage.getItem(MUTE_KEY) === '1'; } catch (e) { return false; }
+    }
+    function setzeStumm(an) {
+        try {
+            if (an) localStorage.setItem(MUTE_KEY, '1');
+            else localStorage.removeItem(MUTE_KEY);
+        } catch (e) {}
+    }
+
+    // Die Figur-Toene liegen als vorgeladene Audio-Objekte im Animator
+    // (clippy.js: `_animator._sounds`, Name -> Audio). Es gibt keine
+    // oeffentliche Schnittstelle dafuer, deshalb der Zugriff auf die interne
+    // Struktur – abgesichert, damit eine andere clippy-Fassung nichts bricht.
+    // `muted` statt `volume = 0`, weil clippy die Objekte wiederverwendet und
+    // eine Lautstaerke sonst bei jedem Abspielen zurueckgesetzt werden koennte.
+    function applyMute() {
+        var aus = stumm();
+        try {
+            var s = agent && agent._animator && agent._animator._sounds;
+            if (s) Object.keys(s).forEach(function (k) {
+                var a = s[k];
+                if (!a) return;
+                a.muted = aus;
+                // Ein gerade laufender Ton muss sofort aufhoeren – sonst
+                // klingt die Figur nach dem Stummschalten noch zu Ende.
+                if (aus) { try { a.pause(); a.currentTime = 0; } catch (e) {} }
+            });
+        } catch (e) {}
+        if (aus) stopSpeech();
+    }
+
+    function stopSpeech() {
+        if (!aktivAudio) return;
+        try { aktivAudio.pause(); } catch (e) {}
+        try { if (aktivAudio.src) URL.revokeObjectURL(aktivAudio.src); } catch (e) {}
+        aktivAudio = null;
+        setTalking(false);
+    }
+
+    function zeichneSpeak() {
+        if (!els.speak) return;
+        var aus = stumm();
+        els.speak.textContent = aus ? '🔇' : '🔊';
+        els.speak.classList.toggle('jav-off', aus);
+        var titel = aus ? T('avatar.sound_on', 'Ton einschalten')
+                        : T('avatar.sound_off', 'Stummschalten');
+        els.speak.title = titel;
+        els.speak.setAttribute('aria-label', titel);
+        els.speak.setAttribute('aria-pressed', aus ? 'true' : 'false');
     }
 
     // Sichtbarer Zustand: durchgestrichenes Symbol = Avatar aus
@@ -167,6 +234,7 @@
     function destroy() {
         clearTimeout(figurTimer);
         figurGen++;
+        stopSpeech();                  // sonst spricht eine Figur weiter, die es nicht mehr gibt
         if (els.root) els.root.remove();
         Array.prototype.forEach.call(
             document.querySelectorAll('body > .clippy, body > .clippy-balloon'),
@@ -201,6 +269,7 @@
             + '  <div id="jav-log"></div>'
             + '  <div class="jav-input">'
             + '    <button id="jav-mic" class="jav-ibtn" title="' + esc(T('avatar.mic', 'Sprechen')) + '">🎤</button>'
+            + '    <button id="jav-speak" class="jav-ibtn" aria-pressed="false"></button>'
             + '    <input id="jav-text" type="text" autocomplete="off" placeholder="' + esc(T('avatar.placeholder', 'Frag mich etwas…')) + '">'
             + '    <button id="jav-send" class="jav-ibtn" title="' + esc(T('avatar.send', 'Senden')) + '">➤</button>'
             + '    <button id="jav-stop" class="jav-ibtn jav-hidden" title="' + esc(T('avatar.stop', 'Abbrechen')) + '">■</button>'
@@ -215,6 +284,7 @@
         els.figure = root.querySelector('#jav-figure');
         els.text = root.querySelector('#jav-text');
         els.mic = root.querySelector('#jav-mic');
+        els.speak = root.querySelector('#jav-speak');
         els.send = root.querySelector('#jav-send');
         els.stop = root.querySelector('#jav-stop');
         els.grip = root.querySelector('#jav-grip');
@@ -229,6 +299,12 @@
             if (e.key === 'Enter') { e.preventDefault(); sendFromInput(); }
         });
         els.mic.addEventListener('click', toggleMic);
+        els.speak.addEventListener('click', function () {
+            setzeStumm(!stumm());
+            zeichneSpeak();
+            applyMute();               // wirkt sofort, auch auf laufenden Ton
+        });
+        zeichneSpeak();
         initResize();
 
         renderFigure();
@@ -391,6 +467,10 @@
                 erledigt = true;
                 clearTimeout(figurTimer);               // kein Ladezustand mehr noetig
                 agent = ag;
+                // Die Toene der Figur entstehen ERST hier (clippy laedt sie mit
+                // dem Sprite). Ohne diesen Aufruf waere die Figur nach einem
+                // Seitenwechsel wieder laut, obwohl der Schalter auf stumm steht.
+                applyMute();
                 try { ag.show(true); } catch (e) {}
                 // clippy haengt sein Element an <body>; bevorzugt das Element
                 // DIESES Agenten nehmen – bei einem Rueckfall liegen sonst zwei
@@ -518,7 +598,7 @@
             }
             addBot(ans || T('avatar.empty', '(keine Antwort)'));
             gesture('answer');
-            if (viaVoice && cfg.speak_on_voice && ans) speak(ans);
+            if (viaVoice && cfg.speak_on_voice && !stumm() && ans) speak(ans);
         }).catch(function (err) {
             think.remove();
             // Vom Abbrechen-Knopf ausgeloest -> kein Fehler, sondern Absicht.
@@ -587,8 +667,10 @@
         if (on) play(['Explain', 'GestureRight']);
     }
     function speak(text) {
+        if (stumm()) return;
         var clean = stripForSpeech(text);
         if (!clean) return;
+        stopSpeech();                       // nie zwei Ansagen uebereinander
         var voice = localStorage.getItem('jarvis_chat_tts_voice') || '';
         fetch('/api/tts', {
             method: 'POST',
@@ -597,12 +679,21 @@
         }).then(function (r) { return r.ok ? r.blob() : null; })
           .then(function (blob) {
               if (!blob) return;
+              // Der Nutzer kann waehrend der TTS-Erzeugung stumm geschaltet
+              // haben – dann darf die fertige Datei nicht doch noch losplappern.
+              if (stumm()) return;
               var url = URL.createObjectURL(blob);
               var a = new Audio(url);
+              aktivAudio = a;
+              function fertig() {
+                  if (aktivAudio === a) aktivAudio = null;
+                  setTalking(false);
+                  URL.revokeObjectURL(url);
+              }
               setTalking(true);
-              a.onended = function () { setTalking(false); URL.revokeObjectURL(url); };
-              a.onerror = function () { setTalking(false); URL.revokeObjectURL(url); };
-              a.play().catch(function () { setTalking(false); });
+              a.onended = fertig;
+              a.onerror = fertig;
+              a.play().catch(fertig);
           }).catch(function () {});
     }
 

@@ -42,7 +42,7 @@
         "speak_on_voice": {
             "type": "boolean",
             "label": "Bei Spracheingabe vorlesen",
-            "description": "Wird die Frage per Mikrofon gestellt, wird die Antwort zusätzlich über den Lautsprecher vorgelesen (TTS). Bei Texteingabe erscheint die Antwort nur als Text.",
+            "description": "Wird die Frage per Mikrofon gestellt, wird die Antwort zusätzlich über den Lautsprecher vorgelesen (TTS). Bei Texteingabe erscheint die Antwort nur als Text. Unabhängig davon kann jeder Benutzer den Avatar über den Lautsprecher-Knopf in der Eingabezeile komplett stummschalten (Figur-Geräusche und Sprachausgabe); diese Wahl wird im Browser gemerkt.",
             "default": true,
             "required": false
         },

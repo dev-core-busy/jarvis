@@ -1364,7 +1364,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                 <!-- ── Ansicht 2: Profil bearbeiten/erstellen ── -->
                 <div id="profile-edit-view" style="display: none;">
-                    <div class="form-group">
                     <!-- Abbrechen oben rechts: das Formular ist laenger als das
                          Sichtfenster, der "Abbrechen"-Knopf am Ende ist dann nur
                          nach dem Scrollen erreichbar. Gleiche Funktion. -->
@@ -1376,6 +1375,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </button>
                     </div>
                         <label data-i18n="profile.name_label">Profilname</label>
+                    <div class="form-group">
                         <div class="input-group">
                             <input type="text" id="profile-name" data-i18n-placeholder="profile.name_ph" placeholder="z.B. Google Standard">
                         </div>
@@ -3025,19 +3025,34 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 // Default: alle geschlossen; gespeicherter Zustand gewinnt.
                                 (function () {
                                     var KEY = 'jarvis_sec_sub_open';
-                                    var saved = {};
-                                    try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
-                                    document.querySelectorAll('details.sec-sub[data-sub]').forEach(function (d) {
-                                        var k = d.getAttribute('data-sub');
-                                        if (saved[k]) d.open = true;
-                                        d.addEventListener('toggle', function () {
-                                            saved[k] = d.open;
-                                            try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+                                    function init() {
+                                        var saved = {};
+                                        try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+                                        document.querySelectorAll('details.sec-sub[data-sub]').forEach(function (d) {
+                                            if (d._subBound) return;
+                                            d._subBound = true;
+                                            var k = d.getAttribute('data-sub');
+                                            if (saved[k]) d.open = true;
+                                            d.addEventListener('toggle', function () {
+                                                saved[k] = d.open;
+                                                try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+                                            });
                                         });
-                                    });
+                                    }
+                                    if (document.readyState === 'loading') {
+                                        document.addEventListener('DOMContentLoaded', init);
+                                    } else {
+                                        init();
+                                    }
                                 })();
                                 </script>
 
+                                //
+                                // WICHTIG – erst wenn das Dokument fertig geparst ist: dieses
+                                // Skript steht MITTEN in der Seite und sah bisher nur die
+                                // Unter-Container OBERHALB von sich. Weiter unten stehende
+                                // (z.B. "Letzte Zugriffs-Verstöße" im Vorfalls-Abschnitt) gingen
+                                // leer aus – ohne Fehlermeldung, sie merkten sich einfach nichts.
                                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
                                     <button class="kb-btn-action" id="ad-save-btn" onclick="window._adSave()" data-i18n="common.save">Speichern</button>
                                     <button class="kb-btn-secondary" onclick="window._adTest()" data-i18n="profile.test">Verbindung testen</button>
@@ -3428,9 +3443,21 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
                                 <div id="sec-sandbox-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
 
-                                <h4 style="margin:18px 0 6px;" data-i18n="security.section_violations">Letzte Zugriffs-Verstöße</h4>
-                                <p class="kb-hint" data-i18n="security.violations_desc">Im Tool-Dispatch verweigerte Zugriffe (Secrets/Root/Base64) von Netzwerk-Benutzern. Nach mehreren Verstößen innerhalb kurzer Zeit wird der Account automatisch gesperrt (lokale Administratoren ausgenommen).</p>
-                                <div id="sec-viol-list"></div>
+                                <!-- ── Unter-Container: Letzte Zugriffs-Verstöße ──
+                                     Eigener Klappbereich, weil die Liste lang wird (bis 150
+                                     Einträge) und den Rest des Abschnitts sonst nach unten
+                                     drückt. Startet zu; die Zahl in der Kopfzeile sagt, ob
+                                     sich das Aufklappen lohnt. -->
+                                <details class="sec-sub" data-sub="violations" id="sec-sub-viol" style="margin-top:18px;">
+                                    <summary>
+                                        <span data-i18n="security.section_violations">Letzte Zugriffs-Verstöße</span>
+                                        <span class="sec-sub-hint" id="sec-viol-count"></span>
+                                    </summary>
+                                    <div class="sec-sub-body">
+                                        <p class="kb-hint" data-i18n="security.violations_desc">Im Tool-Dispatch verweigerte Zugriffe (Secrets/Root/Base64) von Netzwerk-Benutzern. Nach mehreren Verstößen innerhalb kurzer Zeit wird der Account automatisch gesperrt (lokale Administratoren ausgenommen).</p>
+                                        <div id="sec-viol-list"></div>
+                                    </div>
+                                </details>
 
                                 <h4 style="margin:18px 0 6px;" data-i18n="security.blocked_accounts">Gesperrte Konten</h4>
                                 <div id="sec-blocked-list"></div>
@@ -3553,7 +3580,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=8"></script>
     <script src="/static/js/branding.js?v=22"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/security_incidents.js?v=24"></script>
+    <script src="/static/js/security_incidents.js?v=26"></script>
     <script src="/static/js/ldap_picker.js?v=8"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/app.js?v=185"></script>

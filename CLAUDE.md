@@ -968,6 +968,56 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
   wird dort nicht aufgerufen. Wer das ergänzt, braucht einen anderen Auslieferungsweg als einen
   Link, der eine Portal-Anmeldung verlangt.
 
+## Anwesenheit: „Angemeldete Benutzer" (seit 2026-07-30)
+- **Was es ist:** Ein Personen-Symbol oben rechts im Portal – **zwischen** Desktop (VNC)
+  und Dokumente –, das zeigt, wer am System angemeldet war und ist: grüne Pille = online,
+  graue = offline, dazu letzte Anmeldung, letzte Abmeldung und (bei Online) die Zeit seit
+  der letzten Aktivität. **Nur für Administratoren.**
+  Code: `backend/user_sessions.py`, `GET /api/sessions` + `POST /api/logout`,
+  `frontend/js/sessions.js`, Markup/CSS in `portal.html` (`pt-usr-*`).
+- **Warum es ein eigenes Modul braucht:** Jarvis hat **keine Sitzungstabelle**. Tokens
+  sind zustandslose HMAC-Zeichenketten (`generate_token`); der Server weiß von sich aus
+  weder, wer da ist, noch wer sich abgemeldet hat. Das Modul führt genau diese
+  Buchhaltung, **ohne am Token-Verfahren etwas zu ändern**.
+- **Drei Ereignisse:** `record_login` (aus `/api/login`), `record_logout` (aus dem neuen
+  `/api/logout`), `touch` (aus `require_auth`, also bei JEDER authentifizierten Anfrage).
+- **FALLSTRICK Leistung – `touch()` darf NICHT bei jedem Aufruf schreiben.** Es läuft
+  mehrmals pro Sekunde (Portal- und Chat-Polls). Alles liegt im Speicher, auf Platte geht
+  es gedrosselt (`FLUSH_INTERVAL = 20 s`) sowie sofort bei An-/Abmeldung; `shutdown`
+  ruft `flush()`, sonst fehlen die letzten 20 Sekunden. Geschrieben wird atomar
+  (`os.replace`) – ein Absturz mitten im Schreiben darf keine halbe Datei hinterlassen.
+- **„Online" ist ABGELEITET, nicht gemeldet:** letzte Anfrage jünger als
+  `ONLINE_WINDOW = 120 s` UND keine Abmeldung danach. Wer den Tab schließt, meldet sich
+  nicht ab, sondern verstummt – er erscheint deshalb noch bis zu zwei Minuten als online.
+  Der Hinweistext im Panel sagt das ausdrücklich.
+- **`record_logout` setzt `last_seen` NICHT hoch** – sonst gälte der Benutzer nach dem
+  Abmelden noch zwei Minuten als online. Genau dafür gibt es einen Test.
+- **Das Abmelde-Signal muss VOR dem Verwerfen des Tokens raus** und braucht
+  `keepalive: true` (`sessions.js::logout`): die Seite navigiert unmittelbar danach weg,
+  ohne keepalive bricht der Browser die Anfrage ab. `sendBeacon` scheidet aus – es kann
+  keinen `Authorization`-Header setzen. Verdrahtet in **allen** Abmeldewegen: portal.html,
+  chat.js, support.js, wissen.js, userchat.js, app.js (`showLoginScreen`) und
+  security_incidents.js (Sperr-Abmeldung).
+- **Schlüssel wird normalisiert** (`_key`): klein, ohne UPN-Suffix und ohne
+  Domänen-Präfix. Sonst stünde dieselbe Person mehrfach in der Liste, je nachdem wie sie
+  sich angemeldet hat. Der **Anzeigename** behält die Originalform (`nexus\andreas.bender`).
+- **Altbestand:** Wer sich vor Einführung angemeldet hat, zeigt „Anmeldung: –" – ein
+  Zeitpunkt, den niemand aufgezeichnet hat, wird nicht geraten. Heilt sich beim nächsten
+  Login. `MAX_USERS = 500` deckelt die Datei (ältester Eintrag nach `last_seen` fliegt).
+- **Die Pille trägt die Aussage doppelt** (Farbe UND Text „online"/„offline") – Farbe
+  allein ist für Farbfehlsichtige keine Information. Panel **deckend**
+  (`var(--bg-secondary)`), gleiche Begründung wie beim Dokumente-Panel.
+- **Verifiziert auf DEV:** 53 Einheitentests (`tests/test_user_sessions.py`: Normierung,
+  Lebenszyklus, Online-Fenster, Persistenz über Neustart, beschädigte Datei, Drosselung,
+  Sortierung, Verdrahtung) + Live gegen den laufenden Dienst (Übersicht, Abmeldung wirkt
+  sofort, ohne Token 401) + Browser-Sichtprüfung (Knopf zwischen Desktop und Dokumente
+  bei x=814/860/906, grüne Pille `--success`, Escape schließt, Hell-Modus deckend,
+  keine Konsolenfehler).
+  **FALLSTRICK im Test:** Zwei Schreibvorgänge im Abstand von 0,3 ms bekommen unter Linux
+  **denselben** mtime-Tick (grobe Uhr). Ein mtime-Vergleich meldet dann „nicht
+  geschrieben", obwohl geschrieben wurde – die Drosselung wird deshalb über den
+  DATEIINHALT geprüft.
+
 ## Info-Dokumente im Portal (`frontend_info_files/`, seit 2026-07-29)
 - **Was es ist:** Ein Ablage-Ordner neben dem Backend (`/opt/jarvis/frontend_info_files`,
   umstellbar über `JARVIS_INFO_DIR`). Ein Administrator kopiert Dateien hinein (Handbuch,

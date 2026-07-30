@@ -35,6 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import config, REASONING_EFFORT_VALUES
 from backend.security import get_certificate_path
 from backend import security_guard
+from backend import user_sessions as _user_sessions
 from backend import documents as _documents
 
 # ─── App erstellen ────────────────────────────────────────────────────
@@ -593,6 +594,12 @@ async def require_auth(request: Request) -> str:
     # Anmeldeberechtigung laufend pruefen: Entzug greift sofort, nicht erst beim Login.
     if not _login_still_allowed(username):
         raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
+    # Anwesenheit festhalten (nur Speicher, Platte gedrosselt – siehe
+    # user_sessions.touch). Darf die Anfrage NIE scheitern lassen.
+    try:
+        _user_sessions.touch(username, request.client.host if request.client else "")
+    except Exception:  # noqa: BLE001
+        pass
     return username
 
 
@@ -2108,6 +2115,13 @@ async def login(request: Request):
             )
 
     token = generate_token(username)
+    # Anwesenheits-Buchhaltung: ab hier ist die Anmeldung erfolgreich. Auch ein
+    # gesperrter Account kommt bis hierher (er sieht danach nur den Sperrhinweis)
+    # – genau das soll in der Uebersicht sichtbar sein.
+    try:
+        _user_sessions.record_login(username, client_ip)
+    except Exception:  # noqa: BLE001
+        pass
     # Sicherheitsschicht: gesperrter Account darf sich anmelden, sieht danach
     # aber nur den Sperr-Hinweis + das Protokoll (Frontend wertet account_blocked aus).
     _block = security_guard.get_block(username)
@@ -2124,6 +2138,40 @@ async def login(request: Request):
     return JSONResponse({"success": True, "token": token, "username": username,
                          "must_change_password": must_change,
                          "is_admin": _is_admin_user(username)})
+
+
+@app.post("/api/logout")
+async def logout(user: str = Depends(require_auth)):
+    """Ausdrueckliche Abmeldung festhalten.
+
+    Das Token bleibt technisch gueltig – es ist zustandslos und wird
+    clientseitig verworfen. Der Endpunkt existiert allein fuer die
+    Anwesenheits-Uebersicht: ohne ihn koennte der Server "abgemeldet" nicht von
+    "still geworden" unterscheiden.
+    """
+    try:
+        _user_sessions.record_logout(user)
+    except Exception:  # noqa: BLE001
+        pass
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/sessions")
+async def list_user_sessions(user: str = Depends(require_local_auth)):
+    """Wer war/ist am System angemeldet (nur Administratoren).
+
+    Antwort: ``{ok, online, total, online_window, users:[…]}``; je Benutzer
+    ``online``, ``last_login``, ``last_logout``, ``last_seen``, ``last_ip``,
+    ``logins`` (Unix-Zeitstempel, 0 = nie).
+
+    "Online" ist ABGELEITET, nicht gemeldet: letzte Anfrage juenger als
+    ``online_window`` Sekunden und keine Abmeldung danach. Wer den Browser
+    schliesst, erscheint deshalb noch bis zu ``online_window`` als anwesend.
+    """
+    try:
+        return JSONResponse({"ok": True, **_user_sessions.stats()})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 # ─── 2FA / TOTP (Google Authenticator etc.) ──────────────────────────
@@ -12209,6 +12257,12 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     """Scheduler und Watcher sauber beenden."""
+    # Anwesenheits-Buchhaltung sichern: touch() schreibt gedrosselt, die letzten
+    # bis zu 20 Sekunden Aktivitaet liegen also nur im Speicher.
+    try:
+        _user_sessions.flush()
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from backend.scheduler import cron_manager
         cron_manager.stop()

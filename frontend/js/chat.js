@@ -454,6 +454,10 @@
     };
 
     function logout() {
+        // Abmeldung beim Server melden, SOLANGE das Token noch gilt – danach
+        // ist sie nicht mehr authentifizierbar. Ohne dieses Signal kann der
+        // Server "abgemeldet" nicht von "still geworden" unterscheiden.
+        if (window.JarvisSession) window.JarvisSession.logout(token);
         token = '';
         // Global abmelden (SSO): alle Seiten-Token entfernen
         localStorage.removeItem('jarvis_chat_token');

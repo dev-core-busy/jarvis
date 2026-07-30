@@ -1077,6 +1077,8 @@
     const logoutBtn = $('btn-uc-logout');
     if (logoutBtn) {
         logoutBtn.addEventListener('click', () => {
+            // Abmeldung melden, SOLANGE das Token noch gilt (siehe sessions.js)
+            if (window.JarvisSession) window.JarvisSession.logout();
             // Global abmelden (SSO): alle Seiten-Token entfernen
             localStorage.removeItem('jarvis_uc_token');
             localStorage.removeItem('jarvis_token');

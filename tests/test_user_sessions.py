@@ -133,6 +133,28 @@ def test_klassifizierung():
     check("Oberflaeche zeigt die letzte Handlung", "last_action_label" in js)
 
 
+def test_sperr_rechte():
+    section("Sperren/Entsperren: Administratoren, nicht nur lokale Benutzer")
+    root = Path(__file__).resolve().parent.parent
+    src = (root / "backend" / "main.py").read_text(encoding="utf-8")
+    for name in ("security_incidents_block", "security_incidents_unblock"):
+        block = src.split("async def " + name + "(")[1].split("\n")[0]
+        check(f"{name} verlangt require_local_auth", "require_local_auth" in block, block)
+    # Die alte Huerde darf in KEINEM der beiden Endpunkte mehr stehen.
+    for name in ("security_incidents_block", "security_incidents_unblock"):
+        rumpf = src.split("async def " + name + "(")[1].split("@app.")[0]
+        check(f"{name} ohne ALLOWED_USERS-Huerde", "not in ALLOWED_USERS" not in rumpf,
+              "ALLOWED_USERS noch vorhanden")
+    check("Selbstsperre bleibt ausgeschlossen", 'error": "SELF"' in src)
+    check("may_block wird nicht mehr eingeschraenkt", 'daten["may_block"] = True' in src)
+    guard = (root / "backend" / "security_guard.py").read_text(encoding="utf-8")
+    check("manuelles Sperren vorhanden", "def block(" in guard and 'method": "manuell"' in guard)
+    i18n = (root / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+    check("Hinweistext behauptet nicht mehr 'nur lokal'",
+          "Nur ein lokaler Benutzer darf Konten freischalten" not in i18n
+          and "Only a local user may restore accounts" not in i18n)
+
+
 def test_online_fenster():
     section("Online-Fenster")
     with tempfile.TemporaryDirectory() as tmp:
@@ -283,7 +305,7 @@ def main():
     print("Tests Anwesenheits-Uebersicht")
     print("=" * 70)
     for fn in (test_schluessel, test_lebenszyklus, test_anwesenheit_vs_aktivitaet,
-               test_klassifizierung, test_online_fenster, test_persistenz,
+               test_klassifizierung, test_sperr_rechte, test_online_fenster, test_persistenz,
                test_kaputte_datei, test_drosselung, test_sortierung_und_stats,
                test_verdrahtung):
         try:

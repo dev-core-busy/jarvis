@@ -2252,7 +2252,19 @@ async def list_user_sessions(user: str = Depends(require_local_auth)):
     schliesst, erscheint deshalb noch bis zu ``online_window`` als anwesend.
     """
     try:
-        return JSONResponse({"ok": True, **_user_sessions.stats()})
+        daten = _user_sessions.stats()
+        # Sperrzustand dazu: das Menue in der Liste soll "sperren" oder
+        # "entsperren" anbieten, nicht raten muessen.
+        for u in daten.get("users", []):
+            try:
+                u["blocked"] = security_guard.is_blocked(u["username"])
+            except Exception:  # noqa: BLE001
+                u["blocked"] = False
+        # Sperren/Entsperren ist lokalen Benutzern vorbehalten (siehe
+        # /api/security/incidents/block). Das Frontend blendet die Eintraege
+        # sonst aus, statt in ein 403 zu laufen.
+        daten["may_block"] = user in ALLOWED_USERS
+        return JSONResponse({"ok": True, **daten})
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -3043,6 +3055,30 @@ async def security_incidents_log(target: str, user: str = Depends(require_local_
     """Vorfall-Protokoll eines gesperrten Accounts (Admin)."""
     return JSONResponse({"ok": True, "user": target,
                          "incidents": security_guard.get_incidents(target)})
+
+
+@app.post("/api/security/incidents/block")
+async def security_incidents_block(request: Request, user: str = Depends(require_auth)):
+    """Sperrt einen Account von Hand. NUR ein lokaler Benutzer (ALLOWED_USERS).
+
+    Dieselbe Schranke wie beim Entsperren: wer sperren darf, muss auch
+    entsperren koennen – sonst kann sich ein AD-Administrator selbst in eine
+    Lage bringen, aus der er nicht mehr herauskommt.
+    """
+    if user not in ALLOWED_USERS:
+        raise HTTPException(status_code=403,
+                            detail="Nur ein lokaler Benutzer darf Accounts sperren.")
+    body = await request.json()
+    target = (body.get("user") or "").strip()
+    grund = (body.get("reason") or "").strip()
+    if not target:
+        return JSONResponse({"ok": False, "error": "Kein Benutzer angegeben."}, status_code=400)
+    if _norm_login(target) == _norm_login(user):
+        return JSONResponse({"ok": False, "error": "SELF",
+                             "detail": "Das eigene Konto lässt sich nicht sperren."},
+                            status_code=400)
+    ok = security_guard.block(target, grund, by=user)
+    return JSONResponse({"ok": True, "changed": ok, "already": not ok})
 
 
 @app.post("/api/security/incidents/unblock")

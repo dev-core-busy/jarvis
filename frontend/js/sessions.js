@@ -141,17 +141,27 @@
             + ': <b>' + esc(fmt(u.last_login)) + '</b></span>');
         zeilen.push('<span class="pt-usr-kv">' + t('sessions.last_logout', 'Abmeldung')
             + ': <b>' + esc(u.last_logout ? fmt(u.last_logout) : t('sessions.never', 'nie')) + '</b></span>');
+        var gesperrt = u.blocked
+            ? ' <span class="pt-usr-tag pt-usr-blocked">'
+              + esc(t('sessions.blocked', 'gesperrt')) + '</span>' : '';
+        // Sichtbarer Auslöser NEBEN dem Rechtsklick: ein Menü, das man nur per
+        // Rechtsklick findet, findet niemand.
+        var menue = '<button class="pt-usr-menubtn" type="button" tabindex="0"'
+            + ' aria-haspopup="menu" title="' + esc(t('sessions.menu_open', 'Aktionen')) + '">⋯</button>';
         return '<div class="pt-usr-item" data-user="' + esc(u.username) + '"'
-            + ' title="' + esc(t('sessions.kick_hint', 'Rechtsklick: Benutzer abmelden')) + '">'
+            + ' data-blocked="' + (u.blocked ? '1' : '0') + '">'
             + '<div class="pt-usr-top">' + pill
             + '<span class="pt-usr-name" title="' + esc(u.username) + '">' + esc(u.display) + '</span>'
-            + api + '</div>'
+            + api + gesperrt + menue + '</div>'
             + '<div class="pt-usr-meta">' + zeilen.join('<span class="pt-usr-sep">·</span>') + '</div>'
             + '</div>';
     }
 
+    var _mayBlock = false;
+
     function render(d) {
         if (!els.list) return;
+        _mayBlock = !!(d && d.may_block);
         var users = (d && d.users) || [];
         if (!users.length) {
             els.list.innerHTML = '<div class="pt-usr-empty">'
@@ -180,34 +190,99 @@
             .catch(function () { });
     }
 
-    // ── Zwangsabmeldung per Rechtsklick ─────────────────────────────────
-    // Tokens sind zustandslos; der Server widerruft alle aelteren Tokens des
-    // Benutzers (siehe /api/sessions/{user}/logout). Wirkung beim naechsten
-    // Request des Betroffenen - kein Sperren, eine Neuanmeldung geht sofort.
-    function kick(name) {
+    // ── Aktionen ────────────────────────────────────────────────────────
+    // ABMELDEN: Tokens sind zustandslos; der Server widerruft alle aelteren
+    // Tokens des Benutzers. Wirkung beim naechsten Request des Betroffenen –
+    // kein Sperren, eine Neuanmeldung geht sofort wieder.
+    // SPERREN: dauerhaft, bis jemand entsperrt (security_guard).
+    function ruf(pfad, koerper, fehlerText) {
         var tok = anyToken();
         if (!tok) return;
-        var frage = t('sessions.kick_confirm', '{u} abmelden?').replace('{u}', name);
-        if (!window.confirm(frage)) return;
-        fetch('/api/sessions/' + encodeURIComponent(name) + '/logout', {
-            method: 'POST', headers: { 'Authorization': 'Bearer ' + tok },
+        fetch(pfad, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' },
+            body: JSON.stringify(koerper || {}),
         }).then(function (r) { return r.json().catch(function () { return {}; }); })
           .then(function (d) {
-              if (!d || !d.ok) {
-                  window.alert((d && d.detail)
-                      || t('sessions.kick_failed', 'Abmelden fehlgeschlagen.'));
-                  return;
-              }
+              if (!d || !d.ok) { window.alert((d && d.detail) || fehlerText); return; }
               load();
           })
-          .catch(function () {
-              window.alert(t('sessions.kick_failed', 'Abmelden fehlgeschlagen.'));
-          });
+          .catch(function () { window.alert(fehlerText); });
+    }
+
+    function kick(name) {
+        if (!window.confirm(t('sessions.kick_confirm', '{u} abmelden?').replace('{u}', name))) return;
+        ruf('/api/sessions/' + encodeURIComponent(name) + '/logout', null,
+            t('sessions.kick_failed', 'Abmelden fehlgeschlagen.'));
+    }
+
+    function sperren(name) {
+        if (!window.confirm(t('sessions.block_confirm', '{u} sperren?').replace('{u}', name))) return;
+        ruf('/api/security/incidents/block', { user: name },
+            t('sessions.block_failed', 'Sperren fehlgeschlagen.'));
+    }
+
+    function entsperren(name) {
+        if (!window.confirm(t('sessions.unblock_confirm', 'Sperre für {u} aufheben?').replace('{u}', name))) return;
+        ruf('/api/security/incidents/unblock', { user: name },
+            t('sessions.unblock_failed', 'Entsperren fehlgeschlagen.'));
+    }
+
+    // ── Kontextmenue ────────────────────────────────────────────────────
+    var _menu = null;
+
+    function menuZu() {
+        if (_menu) { _menu.remove(); _menu = null; }
+    }
+
+    function menuAuf(zeile, x, y) {
+        menuZu();
+        var name = zeile.getAttribute('data-user') || '';
+        var gesperrt = zeile.getAttribute('data-blocked') === '1';
+        if (!name) return;
+        var m = document.createElement('div');
+        m.className = 'pt-usr-menu';
+        m.setAttribute('role', 'menu');
+        var eintraege = [
+            { key: 'kick', text: t('sessions.menu_kick', 'Benutzer abmelden'), icon: '⎋' },
+        ];
+        // Sperren/Entsperren ist lokalen Benutzern vorbehalten – der Server
+        // wuerde sonst mit 403 antworten. Lieber gar nicht anbieten.
+        if (_mayBlock) {
+            eintraege.push(gesperrt
+                ? { key: 'unblock', text: t('sessions.menu_unblock', 'Benutzer entsperren'), icon: '🔓' }
+                : { key: 'block', text: t('sessions.menu_block', 'Benutzer sperren'), icon: '🔒', gefahr: true });
+        }
+        m.innerHTML = '<div class="pt-usr-menu-head">' + esc(name) + '</div>'
+            + eintraege.map(function (e) {
+                return '<button type="button" class="pt-usr-menu-item'
+                    + (e.gefahr ? ' is-danger' : '') + '" data-do="' + e.key + '" role="menuitem">'
+                    + '<span class="pt-usr-menu-ico">' + e.icon + '</span>' + esc(e.text) + '</button>';
+            }).join('');
+        document.body.appendChild(m);
+        // Im Fenster halten (das Panel sitzt am rechten Rand).
+        var br = m.getBoundingClientRect();
+        m.style.left = Math.max(6, Math.min(x, window.innerWidth - br.width - 6)) + 'px';
+        m.style.top = Math.max(6, Math.min(y, window.innerHeight - br.height - 6)) + 'px';
+        _menu = m;
+        m.addEventListener('click', function (e) {
+            var b = e.target.closest ? e.target.closest('.pt-usr-menu-item') : null;
+            if (!b) return;
+            var was = b.getAttribute('data-do');
+            menuZu();
+            if (was === 'kick') kick(name);
+            else if (was === 'block') sperren(name);
+            else if (was === 'unblock') entsperren(name);
+        });
+        // Erster Eintrag bekommt den Fokus (Tastaturbedienung).
+        var erster = m.querySelector('.pt-usr-menu-item');
+        if (erster) erster.focus();
     }
 
     function offen() { return els.panel && !els.panel.hasAttribute('hidden'); }
 
     function schliessen() {
+        menuZu();
         if (_zuTimer) { clearTimeout(_zuTimer); _zuTimer = null; }
         _viaHover = false;
         if (els.panel) els.panel.setAttribute('hidden', '');
@@ -267,17 +342,35 @@
             }, HOVER_ZU_MS);
         });
 
-        // Rechtsklick auf eine Zeile: Benutzer abmelden.
+        // Menue: per Rechtsklick auf die Zeile ODER ueber den ⋯-Knopf.
+        function oeffneMenue(e, row) {
+            // Ein per Hover geoeffnetes Panel darf waehrend des Menues nicht
+            // zufallen – der Mauszeiger verlaesst es dabei.
+            _viaHover = false;
+            if (_zuTimer) { clearTimeout(_zuTimer); _zuTimer = null; }
+            menuAuf(row, e.clientX, e.clientY);
+        }
         els.list.addEventListener('contextmenu', function (e) {
             var row = e.target && e.target.closest ? e.target.closest('.pt-usr-item') : null;
             if (!row) return;
             e.preventDefault();
-            // Ein per Hover geoeffnetes Panel darf waehrend des Bestaetigungs-
-            // dialogs nicht zufallen - der Dialog nimmt den Mauszeiger weg.
-            _viaHover = false;
-            if (_zuTimer) { clearTimeout(_zuTimer); _zuTimer = null; }
-            kick(row.getAttribute('data-user') || '');
+            oeffneMenue(e, row);
         });
+        els.list.addEventListener('click', function (e) {
+            var btn = e.target && e.target.closest ? e.target.closest('.pt-usr-menubtn') : null;
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            var row = btn.closest('.pt-usr-item');
+            if (row) oeffneMenue(e, row);
+        });
+        // Klick daneben / Escape schliesst das Menue – vor dem Panel.
+        document.addEventListener('click', function (e) {
+            if (_menu && !_menu.contains(e.target)) menuZu();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && _menu) { menuZu(); e.stopPropagation(); }
+        }, true);
         // Klick daneben schließt – wie beim Dokumente-Panel.
         document.addEventListener('click', function (e) {
             if (offen() && els.wrap && !els.wrap.contains(e.target)) schliessen();

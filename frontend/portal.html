@@ -157,16 +157,32 @@
             color:var(--text-primary); }
         .pt-usr-count { margin-left:auto; font-weight:500; font-size:.75rem;
             color:var(--text-muted); }
-        .pt-usr-list { max-height:min(60vh, 420px); overflow-y:auto; padding:6px; }
-        .pt-usr-item { padding:8px 10px; border-radius:8px; }
+        /* Filterfeld: bei vielen Anmeldungen der einzige Weg, einen bestimmten
+           Benutzer zu finden, ohne durch die Liste zu scrollen. */
+        .pt-usr-filter { padding:8px 10px; border-bottom:1px solid var(--border); }
+        .pt-usr-filter input { width:100%; box-sizing:border-box; padding:6px 9px;
+            font-size:.8rem; font-family:inherit; border-radius:8px;
+            border:1px solid var(--border); background:rgba(var(--fg-rgb),.05);
+            color:var(--text-primary); }
+        .pt-usr-filter input::placeholder { color:var(--text-muted); }
+        .pt-usr-filter input:focus { outline:none; border-color:var(--accent);
+            background:rgba(var(--fg-rgb),.08); }
+        .pt-usr-list { max-height:min(60vh, 420px); overflow-y:auto; padding:4px; }
+        /* KOMPAKT: zwei Zeilen à ~16 px statt eines umbrechenden Metablocks.
+           Bei zwanzig Anmeldungen ist Ueberblick wichtiger als Vollstaendigkeit –
+           die Zeitstempel stehen im title des Eintrags. */
+        .pt-usr-item { padding:4px 8px; border-radius:7px; }
         .pt-usr-item:hover { background:rgba(var(--accent-rgb),.10); }
-        .pt-usr-top { display:flex; align-items:center; gap:8px; }
-        .pt-usr-name { font-size:.85rem; color:var(--text-primary); overflow:hidden;
-            text-overflow:ellipsis; white-space:nowrap; }
+        .pt-usr-top { display:flex; align-items:center; gap:7px; min-width:0; }
+        /* min-width:0 ist Pflicht: ein Flex-Kind schrumpft sonst nicht unter
+           seine Textbreite und der lange Name schiebt den ⋯-Knopf hinaus. */
+        .pt-usr-name { flex:0 1 auto; min-width:0; font-size:.82rem; line-height:1.3;
+            color:var(--text-primary); overflow:hidden; text-overflow:ellipsis;
+            white-space:nowrap; }
         /* Die Pille traegt die Aussage doppelt (Farbe UND Text) – Farbe allein
            waere fuer Farbfehlsichtige keine Information. */
-        .pt-usr-pill { flex:0 0 auto; font-size:.68rem; font-weight:700;
-            letter-spacing:.02em; padding:2px 8px; border-radius:999px;
+        .pt-usr-pill { flex:0 0 auto; font-size:.6rem; font-weight:700;
+            letter-spacing:.02em; padding:1px 6px; border-radius:999px;
             text-transform:uppercase; }
         .pt-usr-pill.is-on { background:color-mix(in srgb, var(--success, #22c55e) 22%, transparent);
             color:var(--success, #22c55e);
@@ -175,13 +191,20 @@
             border:1px solid var(--border); }
         .pt-usr-tag { font-size:.62rem; font-weight:700; padding:1px 6px; border-radius:6px;
             background:rgba(var(--accent-rgb),.18); color:var(--text-secondary); }
-        .pt-usr-meta { margin-top:3px; font-size:.7rem; color:var(--text-muted);
-            display:flex; flex-wrap:wrap; gap:4px; align-items:baseline; }
+        /* EINE Zeile, kein Umbruch: sonst waechst der Eintrag je nach Textlaenge
+           auf zwei bis drei Zeilen und die Liste wird unregelmaessig hoch. */
+        .pt-usr-meta { font-size:.68rem; line-height:1.35; color:var(--text-muted);
+            white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+            padding-left:2px; }
         .pt-usr-meta b { font-weight:600; color:var(--text-secondary); }
+        .pt-usr-meta i { font-style:normal; opacity:.85; }
         .pt-usr-sep { opacity:.5; }
-        /* "untätig seit …" faellt bewusst auf – es ist die Aussage, die man
-           beim Blick in die Liste sucht. */
-        .pt-usr-idle { color:var(--warning); font-weight:600; }
+        /* "untätig seit …" steht ab 5 Minuten da, faellt aber erst ab 30 auf:
+           in einer langen Liste ist die Mehrheit fast immer laenger als fuenf
+           Minuten untaetig – eine Warnfarbe, die fast ueberall steht, ist keine
+           Warnung mehr, sondern Tapete. Ohne .is-warn nur leichte Betonung. */
+        .pt-usr-idle { color:var(--text-secondary); font-weight:600; }
+        .pt-usr-idle.is-warn { color:var(--warning); }
         .pt-usr-blocked { background:color-mix(in srgb, var(--danger) 22%, transparent);
             color:var(--danger); }
         /* Der ⋯-Knopf ist der SICHTBARE Weg ins Menue – ein Menue, das man nur
@@ -209,7 +232,6 @@
         .pt-usr-menu-item.is-danger:hover, .pt-usr-menu-item.is-danger:focus {
             background:color-mix(in srgb, var(--danger) 16%, transparent); }
         .pt-usr-menu-ico { width:1.1em; text-align:center; flex:0 0 auto; }
-        .pt-usr-kv i { font-style:normal; opacity:.85; }
         .pt-usr-empty { padding:14px 12px; font-size:.8rem; color:var(--text-muted); }
         .pt-usr-hint { padding:8px 12px 10px; font-size:.68rem; line-height:1.35;
             color:var(--text-muted); border-top:1px solid var(--border); }
@@ -282,6 +304,11 @@
             <div class="pt-usr-head">
                 <span data-i18n="sessions.title">Angemeldete Benutzer</span>
                 <span class="pt-usr-count" id="pt-usr-count"></span>
+            </div>
+            <div class="pt-usr-filter" id="pt-usr-filter">
+                <input type="search" id="pt-usr-search" autocomplete="off" spellcheck="false"
+                       placeholder="Benutzer filtern…" data-i18n-placeholder="sessions.search_ph"
+                       aria-label="Benutzerliste filtern" data-i18n-aria="sessions.search_aria">
             </div>
             <div class="pt-usr-list" id="pt-usr-list"></div>
             <div class="pt-usr-hint" id="pt-usr-hint"></div>
@@ -480,14 +507,14 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=96"></script>
+<script src="/static/js/i18n.js?v=97"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=22"></script>
 <script src="/static/js/security_incidents.js?v=12"></script>
 <script src="/static/js/update_widget.js?v=3"></script>
 <script src="/static/js/issues.js?v=6"></script>
 <script src="/static/js/info_files.js?v=3"></script>
-<script src="/static/js/sessions.js?v=4"></script>
+<script src="/static/js/sessions.js?v=6"></script>
 <script src="/static/js/vnc.js?v=18"></script>
 <script>
 (function () {

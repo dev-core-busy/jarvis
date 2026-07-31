@@ -74,6 +74,65 @@ def test_lebenszyklus():
         check("alte Abmeldezeit bleibt sichtbar", u["last_logout"] > 0)
 
 
+def test_anwesenheit_vs_aktivitaet():
+    section("Anwesenheit ist nicht Aktivitaet")
+    with tempfile.TemporaryDirectory() as tmp:
+        frisch(tmp)
+        US.record_login("erna")
+        u = US.list_users()[0]
+        check("nach der Anmeldung noch keine Handlung", u["last_action"] == 0, str(u["last_action"]))
+        check("idle_seconds ist None, solange nichts getan wurde", u["idle_seconds"] is None,
+              str(u["idle_seconds"]))
+
+        # 50 Hintergrund-Abrufe (so verhaelt sich ein offener Tab)
+        for _ in range(50):
+            US.touch("erna")
+        u = US.list_users()[0]
+        check("Polls machen anwesend", u["online"] is True)
+        # DAS ist der Kern: ein offener Tab darf NICHT als "aktiv" gelten.
+        check("Polls zaehlen NICHT als Handlung", u["last_action"] == 0, str(u["last_action"]))
+        check("Handlungszaehler bleibt 0", u["actions"] == 0, str(u["actions"]))
+
+        US.note_action("erna", "Chat-Anfrage")
+        u = US.list_users()[0]
+        check("Handlung wird festgehalten", u["last_action"] > 0)
+        check("Beschriftung wird uebernommen", u["last_action_label"] == "Chat-Anfrage",
+              u["last_action_label"])
+        check("Handlungszaehler steigt", u["actions"] == 1, str(u["actions"]))
+        check("untaetig seit ~0 Sekunden", u["idle_seconds"] is not None and u["idle_seconds"] < 3,
+              str(u["idle_seconds"]))
+        check("Handlung macht auch anwesend", u["online"] is True)
+
+        # Untaetigkeit waechst, Anwesenheit bleibt
+        US._users[US._key("erna")]["last_action"] = time.time() - 1800
+        US.touch("erna")
+        u = US.list_users()[0]
+        check("30 Minuten untaetig, aber online", u["online"] is True and 1750 < u["idle_seconds"] < 1850,
+              str(u["idle_seconds"]))
+        check("lange Beschriftung wird gekuerzt",
+              len(US.note_action("erna", "x" * 200) or "") == 0
+              and len(US.list_users()[0]["last_action_label"]) <= 60,
+              str(len(US.list_users()[0]["last_action_label"])))
+
+
+def test_klassifizierung():
+    section("Welche Anfrage gilt als Handlung")
+    root = Path(__file__).resolve().parent.parent
+    src = (root / "backend" / "main.py").read_text(encoding="utf-8")
+    check("GET zaehlt nicht als Handlung",
+          'request.method in ("POST", "PUT", "PATCH", "DELETE")' in src)
+    check("technisches Rauschen ausgenommen", "_ACTION_IGNORE" in src
+          and "/api/logout" in src.split("_ACTION_IGNORE = (")[1].split(")")[0])
+    check("Beschriftungen vorhanden", "_ACTION_LABELS" in src and '"Chat-Anfrage"' in src)
+    check("WebSocket-Chat meldet die Handlung",
+          '_user_sessions.note_action(_ws_user, "Chat-Anfrage")' in src)
+    check("Benutzer kommt dort aus der WS-Registrierung",
+          "_ws_usernames.get(id(ws), \"\")" in src)
+    js = (root / "frontend" / "js" / "sessions.js").read_text(encoding="utf-8")
+    check("Oberflaeche zeigt Untaetigkeit", "sessions.idle_for" in js and "IDLE_AB" in js)
+    check("Oberflaeche zeigt die letzte Handlung", "last_action_label" in js)
+
+
 def test_online_fenster():
     section("Online-Fenster")
     with tempfile.TemporaryDirectory() as tmp:
@@ -223,7 +282,8 @@ def main():
     print("=" * 70)
     print("Tests Anwesenheits-Uebersicht")
     print("=" * 70)
-    for fn in (test_schluessel, test_lebenszyklus, test_online_fenster, test_persistenz,
+    for fn in (test_schluessel, test_lebenszyklus, test_anwesenheit_vs_aktivitaet,
+               test_klassifizierung, test_online_fenster, test_persistenz,
                test_kaputte_datei, test_drosselung, test_sortierung_und_stats,
                test_verdrahtung):
         try:

@@ -27,14 +27,31 @@ function check(name, cond, detail) {
 function section(t) { console.log('\n' + t); }
 
 const USERS = {
-    ok: true, online_window: 120, online: 1, total: 2,
+    ok: true, online_window: 120, online: 3, total: 4,
     users: [
+        // anna: anwesend UND gerade taetig
         { username: 'anna', display: 'nexus\\anna', online: true, kind: 'user',
           last_login: 1785470000, last_logout: 0, last_seen: Date.now() / 1000 - 5,
-          last_ip: '10.0.0.5', logins: 3 },
+          last_ip: '10.0.0.5', logins: 3,
+          last_action: Date.now() / 1000 - 20, last_action_label: 'Chat-Anfrage',
+          actions: 12, idle_seconds: 20 },
+        // bob: offline
         { username: 'bob', display: 'bob', online: false, kind: 'user',
           last_login: 1785400000, last_logout: 1785460000, last_seen: 1785460000,
-          last_ip: '10.0.0.9', logins: 1 },
+          last_ip: '10.0.0.9', logins: 1,
+          last_action: 1785459000, last_action_label: 'Wissen', actions: 4,
+          idle_seconds: 999999 },
+        // clara: Tab offen, aber seit 40 Minuten untaetig – der Fall, um den es geht
+        { username: 'clara', display: 'clara', online: true, kind: 'user',
+          last_login: 1785470000, last_logout: 0, last_seen: Date.now() / 1000 - 3,
+          last_ip: '10.0.0.7', logins: 2,
+          last_action: Date.now() / 1000 - 2400, last_action_label: 'Support-Suche',
+          actions: 1, idle_seconds: 2400 },
+        // dora: anwesend, hat aber noch nie etwas getan
+        { username: 'dora', display: 'dora', online: true, kind: 'user',
+          last_login: 1785470000, last_logout: 0, last_seen: Date.now() / 1000 - 2,
+          last_ip: '10.0.0.8', logins: 1,
+          last_action: 0, last_action_label: '', actions: 0, idle_seconds: null },
     ],
 };
 
@@ -91,7 +108,7 @@ async function main() {
     hover(window, $('pt-usr-wrap'), 'mouseenter');
     await sleep(30);
     check('mouseenter oeffnet', !$('pt-usr-panel').hasAttribute('hidden'));
-    check('Liste geladen', doc.querySelectorAll('.pt-usr-item').length === 2,
+    check('Liste geladen', doc.querySelectorAll('.pt-usr-item').length === 4,
           String(doc.querySelectorAll('.pt-usr-item').length));
     hover(window, $('pt-usr-wrap'), 'mouseleave');
     await sleep(80);
@@ -138,7 +155,22 @@ async function main() {
           zeilen[1].getAttribute('data-user'));
     check('Abmeldezeit sichtbar', /Abmeldung/.test(zeilen[1].textContent), zeilen[1].textContent.slice(0, 60));
 
-    section('5. Rechtsklick meldet ab');
+    section('5. Anwesenheit vs. Aktivitaet');
+    const finde = (u) => doc.querySelector('.pt-usr-item[data-user="' + u + '"]');
+    const txt = (u) => finde(u).querySelector('.pt-usr-meta').textContent.replace(/\s+/g, ' ');
+    check('taetiger Benutzer: keine Untaetig-Meldung',
+          !finde('anna').querySelector('.pt-usr-idle'), txt('anna'));
+    check('taetiger Benutzer: Handlung wird benannt', /Chat-Anfrage/.test(txt('anna')), txt('anna'));
+    // Der Kern: Tab offen (online), aber seit 40 Minuten nichts getan.
+    check('untaetiger Benutzer wird als solcher markiert',
+          !!finde('clara').querySelector('.pt-usr-idle'), txt('clara'));
+    check('Untaetigkeit mit Dauer', /untätig seit 40 Min/.test(txt('clara')), txt('clara'));
+    check('trotzdem online', finde('clara').querySelector('.pt-usr-pill').className.indexOf('is-on') !== -1);
+    check('ohne Handlung: ausdruecklicher Hinweis',
+          /noch keine Aktion/.test(txt('dora')), txt('dora'));
+    check('offline: Dauer statt Untaetigkeit', /offline seit/.test(txt('bob')), txt('bob'));
+
+    section('6. Rechtsklick meldet ab');
     const vorher = calls.length;
     const ev = new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true });
     zeilen[1].dispatchEvent(ev);
@@ -151,7 +183,7 @@ async function main() {
     check('Liste danach neu geladen',
           calls.slice(vorher).some((c) => c.method === 'GET' && c.url.indexOf('/api/sessions') === 0));
 
-    section('6. Ohne Bestaetigung kein Abmelden');
+    section('7. Ohne Bestaetigung kein Abmelden');
     window.confirm = () => false;
     const vorher2 = calls.length;
     doc.querySelectorAll('.pt-usr-item')[0].dispatchEvent(

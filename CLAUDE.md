@@ -1401,6 +1401,56 @@ lehrreich, weil zwei naheliegende Verdaechtige falsch waren:
 - **Secrets:** `.env` Datei, NICHT in Code committen
 - **numpy:** Muss < 2.1 bleiben (VM hat kein SSE4.2 / X86_V2)
 
+## Update scheitert an Eigentuemerschaft (Vorfall + Fix 2026-07-31)
+**Der Vorfall:** Auf ECHT brach der Update ab mit
+`unable to unlink old 'tests/test_portal_sessions_ui.js': Keine Berechtigung` und
+`cannot create directory at 'tests/tools': Keine Berechtigung`.
+- **Ursache:** `/opt/jarvis/tests` gehoerte **root**, alles andere `jarvis`. Zum ERSETZEN
+  einer Datei oder ANLEGEN eines Verzeichnisses braucht git Schreibrecht auf dem
+  **uebergeordneten Verzeichnis**, nicht auf der Datei. Ein einziges fremdes Verzeichnis
+  legt damit jeden Update lahm, der darin etwas aendert – und zwar erst dann, oft Monate
+  nachdem es entstanden ist (hier durch einen frueheren `git pull`/`scp` als root).
+  Dazu 34 weitere root-eigene Dateien und 36 in `.git`.
+- **Der abgebrochene Pull hinterlaesst einen Teilstand:** fuenf Dateien waren schon
+  geschrieben. **Vor dem Aufraeumen jede gegen `HEAD` UND `origin/master` pruefen**
+  (`git show origin/master:<datei> | md5sum`): war sie identisch mit origin/master, ist es
+  Pull-Rueckstand und darf zurueckgesetzt werden; weicht sie von beidem ab, ist es
+  Server-Handarbeit und muss bleiben. Blind `git checkout --` waere Datenverlust.
+- **Reparatur:** `chown -R jarvis:jarvis /opt/jarvis`, dann Pull **als Dienstbenutzer**
+  (`runuser -u jarvis -- git pull origin master`). Die Modi auf `data/chats|documents|logs`
+  setzt `harden_data_dirs()` beim Start selbst wieder auf 0750 – nicht von Hand nachziehen.
+- **Vorbeugung 1 – `start_jarvis_root.sh` Schritt 6b:** zieht bei jedem Boot die
+  Eigentuemerschaft gerade (nur wenn wirklich etwas abweicht, sonst kostet ein `chown -R`
+  ueber zehntausende Dateien Startzeit). Steht dort, weil der Root-Bootstrap ohnehin als
+  root laeuft – **eine neue Broker-Op waere der falsche Weg**, die verlangt zusaetzlich
+  einen Broker-Neustart auf jedem Server (sonst 502 „unbekannte Op").
+- **Vorbeugung 2 – `update_manager.diagnose_permissions()`:** haengt bei Rechtefehlern eine
+  Klartext-Erklaerung samt fertigem `chown`-Befehl an die Git-Meldung.
+  - **Die Marker sind die ENGLISCHEN Git-Fragmente** (`unable to unlink`,
+    `cannot create directory`): Git uebersetzt diese Meldungen nicht, wohl aber die
+    errno-Beschreibung dahinter (auf ECHT „Keine Berechtigung"). Wer nur auf den
+    uebersetzten Teil prueft, findet den Fall genau auf dem System nicht, auf dem er auftritt.
+  - Geprueft wird ueber `git ls-files` + `os.lstat`, **nicht** per Verzeichnis-Durchlauf:
+    `PROJECT_ROOT` enthaelt `venv/` mit ~100.000 Dateien, die git nie anfasst.
+  - **ALS ROOT MELDET SIE NICHTS** – root umgeht die Rechtepruefung, dort gibt es das
+    Problem nicht. Ohne diese Schranke schlug die Funktion aus einer Root-Shell heraus
+    `chown -R root:root /opt/jarvis` vor und haette dem Dienstbenutzer das Verzeichnis
+    entzogen. Beim Ausrollen auf DEV genau so passiert und dort behoben.
+  - Fail-safe: schlaegt die Diagnose selbst fehl, bleibt die Original-Meldung stehen.
+- **Vorbeugung 3 – `deploy/sparse_checkout.sh` (nur PRODUKTION):** blendet `tests/`,
+  `android/` und `windows-app-go/` aus dem Checkout aus. Auf ECHT aktiv.
+  - **`--no-cone` ist Absicht:** der Cone-Modus kennt nur EINSCHLIESSEN, man muesste alle
+    uebrigen Verzeichnisse aufzaehlen – ein spaeter hinzukommendes fehlte dann **still**.
+    Mit `/*` + Negationen ist die Vorgabe „alles". Nachgewiesen: ein Pull mit neuem
+    Top-Level-Verzeichnis bringt es mit, waehrend `tests/` draussen bleibt.
+  - **NICHT auf DEV** – dort laufen die Tests. Das Skript fragt nach, wenn es eine
+    git-Identitaet findet (Indiz fuer eine Entwicklungsmaschine).
+  - Als **Dienstbenutzer** ausfuehren, nicht als root: sonst entstehen in `.git` wieder
+    root-eigene Dateien und man baut genau den Fehler nach, den man behebt.
+- **Merkregel:** Wer auf einem Server mit unprivilegiertem Backend `sudo`/`scp als root`
+  benutzt, erzeugt eine Zeitbombe, die erst beim naechsten Commit auf dasselbe Verzeichnis
+  hochgeht. Deploys gehoeren dem Dienstbenutzer (`install -o jarvis -g jarvis …`).
+
 ## Bekannte Fallstricke
 - **NIEMALS Write-Tool auf bestehende Dateien:** Das Write-Tool ueberschreibt Dateien vollstaendig – bei Fehlern entstehen 0-Byte-Dateien. Fuer bestehende Dateien (z.B. index.html, main.py, etc.) IMMER nur das Edit-Tool verwenden. Write nur fuer NEUE Dateien!
 - **Deadlock in wa_logger.py:** `clear_logs()` darf `log()` nur NACH Lock-Release aufrufen

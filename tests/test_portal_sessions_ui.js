@@ -27,7 +27,7 @@ function check(name, cond, detail) {
 function section(t) { console.log('\n' + t); }
 
 const USERS = {
-    ok: true, online_window: 120, online: 3, total: 4,
+    ok: true, online_window: 120, online: 3, total: 4, may_block: true,
     users: [
         // anna: anwesend UND gerade taetig
         { username: 'anna', display: 'nexus\\anna', online: true, kind: 'user',
@@ -40,7 +40,7 @@ const USERS = {
           last_login: 1785400000, last_logout: 1785460000, last_seen: 1785460000,
           last_ip: '10.0.0.9', logins: 1,
           last_action: 1785459000, last_action_label: 'Wissen', actions: 4,
-          idle_seconds: 999999 },
+          idle_seconds: 999999, blocked: true },
         // clara: Tab offen, aber seit 40 Minuten untaetig – der Fall, um den es geht
         { username: 'clara', display: 'clara', online: true, kind: 'user',
           last_login: 1785470000, last_logout: 0, last_seen: Date.now() / 1000 - 3,
@@ -170,28 +170,84 @@ async function main() {
           /noch keine Aktion/.test(txt('dora')), txt('dora'));
     check('offline: Dauer statt Untaetigkeit', /offline seit/.test(txt('bob')), txt('bob'));
 
-    section('6. Rechtsklick meldet ab');
-    const vorher = calls.length;
+    section('6. Menue statt Direktaktion');
+    check('sichtbarer Menue-Knopf je Zeile',
+          doc.querySelectorAll('.pt-usr-menubtn').length === 4,
+          String(doc.querySelectorAll('.pt-usr-menubtn').length));
     const ev = new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true });
-    zeilen[1].dispatchEvent(ev);
+    finde('anna').dispatchEvent(ev);
+    await sleep(40);
+    check('Standard-Kontextmenue unterdrueckt', ev.defaultPrevented);
+    let menu = doc.querySelector('.pt-usr-menu');
+    check('Menue geoeffnet', !!menu);
+    // Wichtig: der Rechtsklick loest jetzt NICHTS mehr direkt aus.
+    check('noch keine Aktion ausgeloest',
+          !calls.some((c) => c.method === 'POST'), JSON.stringify(calls.filter(c => c.method === 'POST')));
+    check('Menue nennt den Benutzer',
+          /anna/.test(menu.querySelector('.pt-usr-menu-head').textContent));
+    let punkte = Array.from(menu.querySelectorAll('.pt-usr-menu-item')).map((b) => b.getAttribute('data-do'));
+    check('Punkte: abmelden + sperren', punkte.join(',') === 'kick,block', punkte.join(','));
+    check('Sperren ist als gefaehrlich markiert',
+          !!menu.querySelector('.pt-usr-menu-item[data-do=block].is-danger'));
+
+    section('7. Menue-Punkt "abmelden"');
+    let vorher = calls.length;
+    menu.querySelector('.pt-usr-menu-item[data-do=kick]').click();
     await sleep(60);
     const kick = calls.slice(vorher).find((c) => c.method === 'POST' && c.url.indexOf('/api/sessions/') === 0);
-    check('Standard-Kontextmenue unterdrueckt', ev.defaultPrevented);
     check('Abmelde-Aufruf abgesetzt', !!kick, JSON.stringify(calls.slice(vorher)));
-    check('richtiger Benutzer im Pfad', kick && kick.url.indexOf('/api/sessions/bob/logout') === 0,
+    check('richtiger Benutzer im Pfad', kick && kick.url.indexOf('/api/sessions/anna/logout') === 0,
           kick ? kick.url : '');
-    check('Liste danach neu geladen',
+    check('Menue danach geschlossen', !doc.querySelector('.pt-usr-menu'));
+    check('Liste neu geladen',
           calls.slice(vorher).some((c) => c.method === 'GET' && c.url.indexOf('/api/sessions') === 0));
 
-    section('7. Ohne Bestaetigung kein Abmelden');
+    section('8. Gesperrter Benutzer: Entsperren statt Sperren');
+    check('Sperr-Plakette in der Zeile', !!finde('bob').querySelector('.pt-usr-blocked'));
+    doc.querySelector('.pt-usr-item[data-user="bob"] .pt-usr-menubtn').click();
+    await sleep(40);
+    menu = doc.querySelector('.pt-usr-menu');
+    check('Menue ueber den ⋯-Knopf geoeffnet', !!menu);
+    punkte = Array.from(menu.querySelectorAll('.pt-usr-menu-item')).map((b) => b.getAttribute('data-do'));
+    check('bietet entsperren statt sperren', punkte.join(',') === 'kick,unblock', punkte.join(','));
+    vorher = calls.length;
+    menu.querySelector('.pt-usr-menu-item[data-do=unblock]').click();
+    await sleep(60);
+    const unb = calls.slice(vorher).find((c) => c.method === 'POST');
+    check('Entsperr-Endpunkt aufgerufen',
+          unb && unb.url.indexOf('/api/security/incidents/unblock') === 0, unb ? unb.url : '');
+
+    section('9. Ohne Bestaetigung keine Aktion');
     window.confirm = () => false;
+    doc.querySelector('.pt-usr-item[data-user="clara"] .pt-usr-menubtn').click();
+    await sleep(40);
     const vorher2 = calls.length;
-    doc.querySelectorAll('.pt-usr-item')[0].dispatchEvent(
-        new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    doc.querySelector('.pt-usr-menu .pt-usr-menu-item[data-do=block]').click();
     await sleep(60);
     check('kein Aufruf bei Abbruch',
           !calls.slice(vorher2).some((c) => c.method === 'POST'),
           JSON.stringify(calls.slice(vorher2)));
+    window.confirm = () => true;
+
+    section('10. Ohne Sperrrecht keine Sperr-Eintraege');
+    // Der Server meldet may_block=false fuer AD-Admins – dann darf das Menue
+    // die Punkte gar nicht erst anbieten, statt in ein 403 zu laufen.
+    window.__nurAbmelden = true;
+    const alteFetch = window.fetch;
+    window.fetch = function (url, opts) {
+        if (String(url).indexOf('/api/sessions') === 0 && (!opts || !opts.method)) {
+            return Promise.resolve({ ok: true, status: 200,
+                json: () => Promise.resolve(Object.assign({}, USERS, { may_block: false })) });
+        }
+        return alteFetch(url, opts);
+    };
+    window.UserSessions.load();
+    await sleep(80);
+    doc.querySelector('.pt-usr-item[data-user="anna"] .pt-usr-menubtn').click();
+    await sleep(40);
+    punkte = Array.from(doc.querySelectorAll('.pt-usr-menu .pt-usr-menu-item'))
+        .map((b) => b.getAttribute('data-do'));
+    check('nur "abmelden" im Menue', punkte.join(',') === 'kick', punkte.join(','));
 
     const ok = results.filter((r) => r.ok).length;
     console.log('\n' + '='.repeat(70));

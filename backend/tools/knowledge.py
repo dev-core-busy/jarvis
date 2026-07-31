@@ -50,7 +50,20 @@ _index_progress: dict = {"running": False, "phase": "", "done": 0, "total": 0,
                          "vector_done": 0, "vector_total": 0, "vector_base": 0,
                          "chunks": 0, "error": "", "current_file": "",
                          "started_at": 0.0, "finished_at": 0.0, "cancelled": False,
-                         "failed": 0}
+                         "failed": 0,
+                         # WELCHE Dateien gescheitert sind, mit Grund. Bis
+                         # 2026-07-31 gab es nur die ZAHL, und die Oberflaeche
+                         # verwies auf „siehe Journal" – wo die Namen gar nicht
+                         # standen: der haeufigste Zweig protokolliert mit
+                         # _log.info, und ohne Logging-Konfiguration verwirft
+                         # Python alles unterhalb von WARNING. Der Hinweis zeigte
+                         # damit auf Information, die nie geschrieben wurde.
+                         "failed_list": []}
+# Deckel fuer failed_list: bei einem unerreichbaren Netzlaufwerk koennen tausende
+# Dateien scheitern. Die Liste geht in JEDE Fortschritts-Antwort (das Frontend
+# pollt im Sekundentakt) und in last_index.json – unbegrenzt waere sie eine
+# Bremse und ein Speicherleck zugleich.
+MAX_FAILED_LIST = 50
 _progress_lock = threading.Lock()
 # Alle wieviel Dateien der Bulk-Reindex auf Platte sichert + Speicher ans OS
 # zurueckgibt. Kompromiss: haeufiger = weniger Verlust bei Absturz, aber mehr
@@ -76,6 +89,23 @@ def get_index_progress() -> dict:
 def _set_progress(**kwargs):
     with _progress_lock:
         _index_progress.update(kwargs)
+
+
+def _note_failed(path: str, grund: str) -> None:
+    """Haelt eine gescheiterte Datei MIT GRUND fest – fuer die Oberflaeche.
+
+    Der Grund ist so formuliert, dass er ohne Vorwissen handlungsleitend ist
+    („zu gross", „kein Parser") – nicht als Ausnahmetext, mit dem ein Admin
+    nichts anfangen kann.
+    """
+    try:
+        rel = str(Path(path).relative_to(PROJECT_ROOT))
+    except (ValueError, TypeError):
+        rel = str(path)
+    with _progress_lock:
+        liste = _index_progress.setdefault("failed_list", [])
+        if len(liste) < MAX_FAILED_LIST:
+            liste.append({"file": rel, "reason": grund})
 
 # ─── Vector Store (optional, Fallback auf TF-IDF) ────────────────
 _vector_store = None
@@ -257,15 +287,21 @@ def _rebuild_vector_index(folders: list[Path], max_bytes: int, force: bool = Fal
                 # Datei verlor beim Ueberschreiten des Groessenlimits still ihre
                 # Chunks, ohne dass irgendwo ein Fehler auftauchte.
                 failed += 1
+                grund = _unlesbar_grund(filepath, max_bytes)
                 if path_str in indexed:
-                    _log.warning("Nicht lesbar, bisheriger Indexstand bleibt: %s", path_str)
+                    _note_failed(path_str, f"{grund} – bisheriger Indexstand bleibt erhalten")
+                    _log.warning("Nicht lesbar (%s), bisheriger Indexstand bleibt: %s",
+                                 grund, path_str)
                 else:
-                    _log.info("Nicht lesbar, wird nicht indiziert: %s", path_str)
+                    _note_failed(path_str, grund)
+                    _log.warning("Nicht lesbar (%s), wird nicht indiziert: %s",
+                                 grund, path_str)
             else:
                 # Lesbar, aber leer -> Eintrag ist gegenstandslos.
                 vs.remove_file(path_str)
         except Exception as e:
             failed += 1
+            _note_failed(path_str, f"{type(e).__name__}: {e}"[:200])
             _log.warning("Indizierung fehlgeschlagen fuer %s: %s", path_str, e)
 
         # Laufende Chunk-Zahl mitfuehren, damit ALLE offenen Clients dieselbe
@@ -594,6 +630,48 @@ def _ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 20) -> str:
 # zig MB Text → hunderttausende Woerter → tausende Chunks → mehrere GB RAM und
 # OOM. Darueber hinaus bringt Volltext kaum zusaetzlichen Trefferwert.
 MAX_EXTRACT_CHARS = 4_000_000   # ~4 MB Text ≈ max. ~3000 Chunks
+
+
+def _unlesbar_grund(filepath: Path, max_bytes: int) -> str:
+    """Warum lieferte die Extraktion nichts? Antwort in Klartext.
+
+    ``_extract_text_raw`` gibt bei JEDEM Problem schlicht ``None`` zurueck – zu
+    gross, unbekanntes Format, kaputte Datei, fehlender Parser sind dort nicht
+    unterscheidbar. Fuer die Oberflaeche wird der Grund deshalb hier nachtraeglich
+    ermittelt: „4 Dateien fehlgeschlagen" ohne das WARUM ist keine Meldung,
+    sondern eine Aufgabe fuer den Leser.
+
+    Rueckgabe ist absichtlich handlungsleitend formuliert (was ist zu tun?),
+    nicht als Ausnahmetext.
+    """
+    try:
+        groesse = filepath.stat().st_size
+    except OSError as e:
+        return f"nicht lesbar ({e.strerror or type(e).__name__})"
+    if groesse == 0:
+        return "Datei ist leer (0 Byte)"
+    if groesse > max_bytes:
+        return (f"zu gross: {groesse / 1048576:.1f} MB, erlaubt sind "
+                f"{max_bytes / 1048576:.0f} MB (Einstellungen → Skills → Wissen)")
+    suffix = filepath.suffix.lower()
+    if not suffix:
+        return "ohne Dateiendung – Format nicht bestimmbar"
+    bekannt = (EXTENSIONS_TEXT | EXTENSIONS_PDF | EXTENSIONS_DOCX | EXTENSIONS_XLSX
+               | EXTENSIONS_PPTX | EXTENSIONS_IMAGE | EXTENSIONS_VIDEO
+               | EXTENSIONS_AUDIO)
+    if suffix not in bekannt:
+        return f"Format {suffix} wird nicht unterstuetzt"
+    # Bekanntes Format, passende Groesse -> der Parser selbst ist gescheitert.
+    # Haeufigste Ursachen: beschaedigte Datei, passwortgeschuetztes PDF, oder ein
+    # rein bildbasiertes PDF ohne OCR-Paket.
+    if suffix in EXTENSIONS_PDF:
+        return ("PDF nicht lesbar – beschaedigt, passwortgeschuetzt oder ein "
+                "reines Scan-PDF ohne Text (dann OCR noetig: tesseract-ocr)")
+    if suffix in EXTENSIONS_IMAGE:
+        return "Bild ohne erkennbaren Text (OCR benoetigt tesseract-ocr)"
+    if suffix in (EXTENSIONS_VIDEO | EXTENSIONS_AUDIO):
+        return "Audio/Video ohne Transkript (benoetigt faster-whisper)"
+    return f"{suffix}-Datei liess sich nicht auslesen (beschaedigt?)"
 
 
 def _extract_text(filepath: Path, max_bytes: int) -> str | None:
@@ -1724,7 +1802,7 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
                   vector_total=0, vector_base=0, chunks=0, error="", current_file="",
                   started_at=started, finished_at=0.0, resumed=resume_count,
                   cancelled=False, attempt=attempt, max_attempts=MAX_INDEX_ATTEMPTS,
-                  failed=0)
+                  failed=0, failed_list=[])
     # Marker "laeuft" auf die Platte: stirbt der Prozess mittendrin (Neustart,
     # OOM-Killer), erkennt resume_interrupted_reindex() das beim naechsten Start
     # und setzt den Lauf fort. Ein sauberes Ende ueberschreibt den Marker.
@@ -1787,7 +1865,9 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
                   "vector_info": ""}
 
     cancelled = _reindex_cancel.is_set()
-    failed = int(get_index_progress().get("failed") or 0)
+    _fortschritt = get_index_progress()
+    failed = int(_fortschritt.get("failed") or 0)
+    failed_list = list(_fortschritt.get("failed_list") or [])
 
     # Gruppen-Pflege NACH dem Neuaufbau: erst jetzt entspricht der Index dem
     # tatsaechlichen Bestand. Zaehl-Basis ist Index + Platte (nicht nur die
@@ -1816,9 +1896,13 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
                     "attempt": attempt, "resumed": resume_count,
                     "indexed_files": result["indexed_files"],
                     "total_chunks": result["total_chunks"],
-                    "failed_files": failed})
+                    "failed_files": failed,
+                    "failed_list": failed_list})
     result["cancelled"] = cancelled
     result["failed_files"] = failed
+    # Die NAMEN mitgeben, nicht nur die Zahl: die Oberflaeche soll den Grund
+    # dort zeigen, wo die Meldung steht.
+    result["failed_list"] = failed_list
     return result
 
 

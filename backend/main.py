@@ -2,6 +2,8 @@
 
 import asyncio
 import hashlib
+import logging
+import os
 import re
 import hmac
 import json
@@ -10,9 +12,32 @@ import time
 import uuid
 from pathlib import Path
 
-import httpx
+# ─── Logging (muss VOR den Jarvis-Importen stehen) ───────────────────────────
+#
+# Bis 2026-07-31 gab es gar keine Konfiguration. Folge: Python nutzt den
+# "handler of last resort", der NUR ab WARNING und ohne jeden Kontext nach
+# stderr schreibt – jedes `_log.info(...)` im gesamten Backend verschwand
+# spurlos. Aufgefallen an der Meldung „4 Datei(en) fehlgeschlagen – siehe
+# Journal": im Journal stand nichts, weil der haeufigste Zweig der
+# Indizierung mit `_log.info` protokollierte.
+#
+# `force=True` ist noetig, weil uvicorn beim Start ebenfalls Handler setzt;
+# ohne das bliebe je nach Importreihenfolge die erste Konfiguration stehen.
+# Format ohne Zeitstempel: journald setzt ihn selbst davor, sonst steht er
+# doppelt in der Zeile.
+logging.basicConfig(
+    level=os.environ.get("JARVIS_LOG_LEVEL", "INFO").upper(),
+    format="[%(levelname)s] %(name)s: %(message)s",
+    force=True,
+)
+# Fremdbibliotheken auf WARNING halten – httpx protokolliert sonst JEDE
+# LLM-Anfrage samt URL, und faiss/sentence-transformers sind auf INFO
+# ausgesprochen gespraechig.
+for _fremd in ("httpx", "httpcore", "urllib3", "sentence_transformers",
+               "transformers", "faiss", "PIL", "pdfminer", "watchdog"):
+    logging.getLogger(_fremd).setLevel(logging.WARNING)
 
-import os
+import httpx
 
 import psutil
 

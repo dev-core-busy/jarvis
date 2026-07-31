@@ -153,7 +153,13 @@ async function main() {
     check('Pille traegt auch Text', /online|offline/i.test(p0.textContent), p0.textContent);
     check('Benutzer am Element hinterlegt', zeilen[1].getAttribute('data-user') === 'bob',
           zeilen[1].getAttribute('data-user'));
-    check('Abmeldezeit sichtbar', /Abmeldung/.test(zeilen[1].textContent), zeilen[1].textContent.slice(0, 60));
+    // Die Zeitstempel stehen seit dem Kompakt-Umbau im title des Eintrags –
+    // sichtbar bleibt nur die eine Aussage, die man beim Ueberfliegen braucht.
+    const finde0 = (u) => doc.querySelector('.pt-usr-item[data-user="' + u + '"]');
+    const tt = (u) => finde0(u).getAttribute('title') || '';
+    check('Abmeldezeit im Tooltip', /Abmeldung/.test(tt('bob')), tt('bob'));
+    check('Anmeldezeit im Tooltip', /Anmeldung/.test(tt('bob')), tt('bob'));
+    check('Tooltip nennt den Kontonamen', tt('bob').indexOf('bob') === 0, tt('bob'));
 
     section('5. Anwesenheit vs. Aktivitaet');
     const finde = (u) => doc.querySelector('.pt-usr-item[data-user="' + u + '"]');
@@ -248,6 +254,186 @@ async function main() {
     punkte = Array.from(doc.querySelectorAll('.pt-usr-menu .pt-usr-menu-item'))
         .map((b) => b.getAttribute('data-do'));
     check('nur "abmelden" im Menue', punkte.join(',') === 'kick', punkte.join(','));
+
+    // Aufraeumen: Menue zu, Originaldaten zurueck, sauber neu oeffnen.
+    window.fetch = alteFetch;
+    window.UserSessions.close();
+    $('pt-usr-btn').click();
+    await sleep(60);
+
+    section('11. Kompakte Zeile');
+    // jsdom kennt keine Layout-Hoehen. Pruefbar ist die STRUKTUR, die die Hoehe
+    // bestimmt: genau EINE Metazeile je Eintrag, kurz genug fuer eine Zeile,
+    // plus die CSS-Regel, die den Umbruch verbietet.
+    const metas = doc.querySelectorAll('.pt-usr-item .pt-usr-meta');
+    check('genau eine Metazeile je Eintrag', metas.length === 4, String(metas.length));
+    const zuLang = Array.from(metas)
+        .map((m) => m.textContent.replace(/\s+/g, ' ').trim())
+        .filter((s) => s.length > 60);
+    check('Metazeile bleibt kurz (<= 60 Zeichen)', zuLang.length === 0, JSON.stringify(zuLang));
+    check('keine aufgereihten Schluessel-Wert-Paare mehr',
+          doc.querySelectorAll('.pt-usr-sep').length === 0,
+          String(doc.querySelectorAll('.pt-usr-sep').length));
+    const css = fs.readFileSync(path.join(ROOT, 'frontend', 'portal.html'), 'utf8');
+    check('CSS verbietet den Umbruch der Metazeile',
+          /\.pt-usr-meta\s*\{[^}]*white-space:\s*nowrap/.test(css));
+    check('CSS kuerzt zu langen Text mit Ellipse',
+          /\.pt-usr-meta\s*\{[^}]*text-overflow:\s*ellipsis/.test(css));
+    // Nicht doppelt: "untätig seit 40 Min." und "zuletzt: 40 Min." waeren
+    // derselbe Wert (idle_seconds = jetzt - last_action).
+    check('untaetiger Benutzer: keine doppelte Zeitangabe',
+          !/zuletzt/i.test(txt('clara')), txt('clara'));
+    check('Handlung wird trotzdem benannt', /Support-Suche/.test(txt('clara')), txt('clara'));
+
+    section('12. Suchfilter');
+    const feld = $('pt-usr-search');
+    check('Filterfeld vorhanden', !!feld);
+    check('Platzhalter uebersetzbar', feld.getAttribute('data-i18n-placeholder') === 'sessions.search_ph');
+    check('Beschriftung fuer Hilfsmittel', !!feld.getAttribute('aria-label'));
+    check('bei gefuellter Liste sichtbar', $('pt-usr-filter').style.display !== 'none',
+          $('pt-usr-filter').style.display);
+
+    const tippe = async (wert) => {
+        feld.value = wert;
+        feld.dispatchEvent(new window.Event('input', { bubbles: true }));
+        await sleep(20);
+    };
+    const namen = () => Array.from(doc.querySelectorAll('.pt-usr-item'))
+        .map((e) => e.getAttribute('data-user')).join(',');
+
+    await tippe('cl');
+    check('filtert auf den Treffer', namen() === 'clara', namen());
+    check('Zaehler nennt Treffer/Gesamt', $('pt-usr-count').textContent === '1/4',
+          $('pt-usr-count').textContent);
+    // Der Anzeigename kann vom Kontonamen abweichen (nexus\anna) – beides muss greifen.
+    await tippe('NEXUS');
+    check('Anzeigename wird mitdurchsucht', namen() === 'anna', namen());
+    await tippe('AnNa');
+    check('Gross-/Kleinschreibung egal', namen() === 'anna', namen());
+    await tippe('gibtsnicht');
+    check('keine Zeile bei fehlendem Treffer', namen() === '', namen());
+    check('Hinweis nennt den Suchbegriff',
+          /gibtsnicht/.test(doc.querySelector('.pt-usr-empty').textContent),
+          doc.querySelector('.pt-usr-empty').textContent);
+    await tippe('');
+    check('Leeren zeigt wieder alle', namen() === 'anna,bob,clara,dora', namen());
+    check('Zaehler wieder online/gesamt', $('pt-usr-count').textContent === '3/4',
+          $('pt-usr-count').textContent);
+
+    section('13. Filter und Panel-Verhalten');
+    await tippe('cl');
+    // Der Poll darf den Filter nicht zuruecksetzen – sonst springt die Liste
+    // spaetestens nach 30 Sekunden auf.
+    window.UserSessions.load();
+    await sleep(80);
+    check('Filter ueberlebt den Abruf', namen() === 'clara', namen());
+    // FALLSTRICK: Wer tippt, bewegt die Maus – ein per Hover geoeffnetes Panel
+    // wuerde mitten in der Eingabe zufallen.
+    hover(window, $('pt-usr-wrap'), 'mouseenter');
+    feld.dispatchEvent(new window.FocusEvent('focus', { bubbles: false }));
+    hover(window, $('pt-usr-wrap'), 'mouseleave');
+    await sleep(500);
+    check('Panel bleibt offen, solange das Feld den Fokus hat',
+          !$('pt-usr-panel').hasAttribute('hidden'));
+    // Escape leert zuerst den Filter …
+    const esc = () => feld.dispatchEvent(new window.KeyboardEvent('keydown',
+        { key: 'Escape', bubbles: true, cancelable: true }));
+    esc();
+    await sleep(20);
+    check('Escape leert den Filter', feld.value === '' && namen() === 'anna,bob,clara,dora',
+          feld.value + ' / ' + namen());
+    check('Panel dabei noch offen', !$('pt-usr-panel').hasAttribute('hidden'));
+    // … und schliesst erst beim zweiten Mal das Panel.
+    esc();
+    await sleep(20);
+    check('zweites Escape schliesst das Panel', $('pt-usr-panel').hasAttribute('hidden'));
+
+    section('14. Filter wird beim Schliessen zurueckgesetzt');
+    $('pt-usr-btn').click();
+    await sleep(60);
+    await tippe('bob');
+    check('gefiltert', namen() === 'bob', namen());
+    window.UserSessions.close();
+    $('pt-usr-btn').click();
+    await sleep(80);
+    check('Feld beim Wiederoeffnen leer', feld.value === '', feld.value);
+    check('vollstaendige Liste', namen() === 'anna,bob,clara,dora', namen());
+
+    section('15. Leere Liste: kein Filterfeld');
+    window.fetch = function (url, opts) {
+        if (String(url).indexOf('/api/sessions') === 0 && (!opts || !opts.method)) {
+            return Promise.resolve({ ok: true, status: 200,
+                json: () => Promise.resolve(Object.assign({}, USERS,
+                    { users: [], online: 0, total: 0 })) });
+        }
+        return alteFetch(url, opts);
+    };
+    window.UserSessions.load();
+    await sleep(80);
+    check('Filterfeld ausgeblendet', $('pt-usr-filter').style.display === 'none',
+          $('pt-usr-filter').style.display);
+    check('Hinweis auf leere Liste', !!doc.querySelector('.pt-usr-empty'));
+
+    section('16. Untaetigkeit: Aussage ab 5 Min., Warnfarbe erst ab 30 Min.');
+    // In einer Liste mit zwanzig Anmeldungen ist die Mehrheit fast immer laenger
+    // als fuenf Minuten untaetig. Faerbte man ab da, waere die halbe Liste orange
+    // und die Warnfarbe saegte sich selbst ab. Die AUSSAGE muss trotzdem stehen.
+    const jetzt = Date.now() / 1000;
+    const bands = {
+        ok: true, online_window: 120, online: 4, total: 4, may_block: true,
+        users: [
+            // frisch (unter 5 Min.): gar keine Untaetigkeits-Meldung
+            { username: 'frisch', display: 'frisch', online: true, kind: 'user',
+              last_login: jetzt - 900, last_seen: jetzt - 2, last_action: jetzt - 120,
+              last_action_label: 'Chat-Anfrage', idle_seconds: 120 },
+            // knapp darueber: Meldung ja, Warnfarbe nein
+            { username: 'mittel', display: 'mittel', online: true, kind: 'user',
+              last_login: jetzt - 900, last_seen: jetzt - 2, last_action: jetzt - 600,
+              last_action_label: 'Wissen', idle_seconds: 600 },
+            // genau an der Grenze: gehoert schon zur Warnung (>=, nicht >)
+            { username: 'grenze', display: 'grenze', online: true, kind: 'user',
+              last_login: jetzt - 3600, last_seen: jetzt - 2, last_action: jetzt - 1800,
+              last_action_label: 'Support-Suche', idle_seconds: 1800 },
+            // deutlich darueber
+            { username: 'lange', display: 'lange', online: true, kind: 'user',
+              last_login: jetzt - 9000, last_seen: jetzt - 2, last_action: jetzt - 5400,
+              last_action_label: 'Datei gespeichert', idle_seconds: 5400 },
+        ],
+    };
+    window.fetch = function (url, opts) {
+        if (String(url).indexOf('/api/sessions') === 0 && (!opts || !opts.method)) {
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(bands) });
+        }
+        return alteFetch(url, opts);
+    };
+    window.UserSessions.load();
+    await sleep(80);
+    const idleEl = (u) => finde0(u).querySelector('.pt-usr-idle');
+    const mtxt = (u) => finde0(u).querySelector('.pt-usr-meta').textContent.replace(/\s+/g, ' ');
+    check('unter 5 Min.: gar keine Untaetigkeits-Meldung', !idleEl('frisch'), mtxt('frisch'));
+    check('unter 5 Min.: stattdessen die Handlung', /zuletzt/.test(mtxt('frisch')), mtxt('frisch'));
+    check('10 Min.: Aussage vorhanden', !!idleEl('mittel'), mtxt('mittel'));
+    check('10 Min.: NICHT als Warnung gefaerbt',
+          idleEl('mittel') && idleEl('mittel').className.indexOf('is-warn') === -1,
+          idleEl('mittel') && idleEl('mittel').className);
+    check('30 Min. (Grenze): als Warnung gefaerbt',
+          idleEl('grenze') && idleEl('grenze').className.indexOf('is-warn') !== -1,
+          idleEl('grenze') && idleEl('grenze').className);
+    check('90 Min.: als Warnung gefaerbt',
+          idleEl('lange') && idleEl('lange').className.indexOf('is-warn') !== -1,
+          idleEl('lange') && idleEl('lange').className);
+    check('Handlung wird in jedem Band benannt',
+          /Wissen/.test(mtxt('mittel')) && /Datei gespeichert/.test(mtxt('lange')));
+    // Die Farbe darf nicht die einzige Unterscheidung sein – der Text nennt in
+    // beiden Baendern die Dauer.
+    check('Dauer steht im Text, nicht nur in der Farbe',
+          /untätig seit 10 Min/.test(mtxt('mittel')) && /untätig seit 1 Std\. 30 Min/.test(mtxt('lange')),
+          mtxt('mittel') + ' | ' + mtxt('lange'));
+    const cssIdle = fs.readFileSync(path.join(ROOT, 'frontend', 'portal.html'), 'utf8');
+    check('CSS: Warnfarbe haengt an .is-warn',
+          /\.pt-usr-idle\.is-warn\s*\{[^}]*var\(--warning\)/.test(cssIdle));
+    check('CSS: Grundfarbe ist NICHT die Warnfarbe',
+          /\.pt-usr-idle\s*\{[^}]*var\(--text-secondary\)/.test(cssIdle));
 
     const ok = results.filter((r) => r.ok).length;
     console.log('\n' + '='.repeat(70));

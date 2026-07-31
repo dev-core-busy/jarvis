@@ -80,6 +80,13 @@
     // Ab wann "untätig" ausdruecklich gemeldet wird. Unter fuenf Minuten ist es
     // keine Aussage, sondern Rauschen (kurz nachgedacht, Kaffee geholt).
     var IDLE_AB = 300;
+    // Ab wann die Angabe zusaetzlich FARBLICH auffaellt. Bewusst deutlich hoeher:
+    // in einer Liste mit zwanzig Anmeldungen ist die Mehrheit fast immer laenger
+    // als fuenf Minuten untaetig. Faerbte man ab IDLE_AB, waere die halbe Liste
+    // orange – und eine Warnfarbe, die fast ueberall steht, ist keine Warnung
+    // mehr, sondern Tapete. Die AUSSAGE kommt weiter ab fuenf Minuten, nur die
+    // Hervorhebung wartet.
+    var IDLE_WARN = 1800;
 
     function dauer(sek) {
         var s = Math.max(0, Math.floor(sek || 0));
@@ -101,6 +108,24 @@
         return Math.floor(s / 86400) + ' ' + t('sessions.d_ago', 'Tg.');
     }
 
+    // Alles, was NICHT in die sichtbare Zeile passt, steht im Titel. Bei vielen
+    // Benutzern ist Ueberblick wichtiger als Vollstaendigkeit – die Zeitstempel
+    // braucht man erst, wenn man einen bestimmten Benutzer schon gefunden hat.
+    function titel(u) {
+        var z = [u.username];
+        if (u.display && u.display !== u.username) z[0] += ' (' + u.display + ')';
+        if (u.last_action) {
+            z.push(t('sessions.last_action', 'zuletzt') + ': ' + relativ(u.last_action)
+                + (u.last_action_label ? ' – ' + u.last_action_label : ''));
+        }
+        z.push(t('sessions.seen', 'Anfrage') + ': '
+            + (u.last_seen ? relativ(u.last_seen) : '–'));
+        z.push(t('sessions.last_login', 'Anmeldung') + ': ' + fmt(u.last_login));
+        z.push(t('sessions.last_logout', 'Abmeldung') + ': '
+            + (u.last_logout ? fmt(u.last_logout) : t('sessions.never', 'nie')));
+        return z.join('\n');
+    }
+
     function zeile(u) {
         // Die Pille trägt die Aussage doppelt: Farbe UND Text. Farbe allein wäre
         // für Farbfehlsichtige keine Information.
@@ -109,38 +134,30 @@
             + '</span>';
         var api = u.kind === 'api'
             ? ' <span class="pt-usr-tag">API</span>' : '';
-        var zeilen = [];
-        // Was hat der Benutzer zuletzt GETAN? Bewusst getrennt von "anwesend":
-        // last_seen setzt jeder Hintergrund-Poll, ein offener Tab saehe sonst
-        // dauerhaft aktiv aus. last_action zaehlt nur echte Handlungen.
-        if (u.last_action) {
-            zeilen.push('<span class="pt-usr-kv">' + t('sessions.last_action', 'zuletzt')
-                + ': <b>' + esc(relativ(u.last_action)) + '</b>'
-                + (u.last_action_label ? ' <i>' + esc(u.last_action_label) + '</i>' : '')
-                + '</span>');
-        } else {
-            zeilen.push('<span class="pt-usr-kv">' + t('sessions.no_action', 'noch keine Aktion') + '</span>');
-        }
-        if (u.online) {
+        // GENAU EINE Meta-Zeile, und zwar die Aussage, die man beim Blick in die
+        // Liste sucht: Was hat der Benutzer zuletzt getan, und wie lange ist das
+        // her? Bewusst getrennt von "anwesend": last_seen setzt jeder
+        // Hintergrund-Poll, ein offener Tab saehe sonst dauerhaft aktiv aus.
+        // "untätig seit X" und "zuletzt vor X" sind DERSELBE Wert
+        // (idle_seconds = jetzt - last_action) – deshalb nie beides zeigen.
+        var kurz;
+        var label = u.last_action_label ? ' <i>' + esc(u.last_action_label) + '</i>' : '';
+        if (!u.online && u.last_seen) {
+            kurz = esc(t('sessions.offline_for', 'offline seit {d}')
+                .replace('{d}', dauer(Math.floor(Date.now() / 1000 - u.last_seen)))) + label;
+        } else if (!u.last_action) {
+            kurz = esc(t('sessions.no_action', 'noch keine Aktion'));
+        } else if (u.online && u.idle_seconds != null && u.idle_seconds >= IDLE_AB) {
             // Anwesend, aber seit einer Weile untaetig -> ausdruecklich sagen.
-            var idle = u.idle_seconds;
-            if (idle != null && idle >= IDLE_AB) {
-                zeilen.push('<span class="pt-usr-kv pt-usr-idle">'
-                    + t('sessions.idle_for', 'untätig seit {d}').replace('{d}', dauer(idle))
-                    + '</span>');
-            }
-            zeilen.push('<span class="pt-usr-kv">' + t('sessions.seen', 'Anfrage')
-                + ': <b>' + esc(relativ(u.last_seen)) + '</b></span>');
-        } else if (u.last_seen) {
-            zeilen.push('<span class="pt-usr-kv">'
-                + t('sessions.offline_for', 'offline seit {d}')
-                    .replace('{d}', dauer(Math.floor(Date.now() / 1000 - u.last_seen)))
-                + '</span>');
+            // Hervorgehoben wird erst ab IDLE_WARN (siehe dort).
+            kurz = '<span class="pt-usr-idle'
+                + (u.idle_seconds >= IDLE_WARN ? ' is-warn' : '') + '">'
+                + esc(t('sessions.idle_for', 'untätig seit {d}').replace('{d}', dauer(u.idle_seconds)))
+                + '</span>' + label;
+        } else {
+            kurz = esc(t('sessions.last_action', 'zuletzt')) + ': <b>'
+                + esc(relativ(u.last_action)) + '</b>' + label;
         }
-        zeilen.push('<span class="pt-usr-kv">' + t('sessions.last_login', 'Anmeldung')
-            + ': <b>' + esc(fmt(u.last_login)) + '</b></span>');
-        zeilen.push('<span class="pt-usr-kv">' + t('sessions.last_logout', 'Abmeldung')
-            + ': <b>' + esc(u.last_logout ? fmt(u.last_logout) : t('sessions.never', 'nie')) + '</b></span>');
         var gesperrt = u.blocked
             ? ' <span class="pt-usr-tag pt-usr-blocked">'
               + esc(t('sessions.blocked', 'gesperrt')) + '</span>' : '';
@@ -149,30 +166,58 @@
         var menue = '<button class="pt-usr-menubtn" type="button" tabindex="0"'
             + ' aria-haspopup="menu" title="' + esc(t('sessions.menu_open', 'Aktionen')) + '">⋯</button>';
         return '<div class="pt-usr-item" data-user="' + esc(u.username) + '"'
-            + ' data-blocked="' + (u.blocked ? '1' : '0') + '">'
+            + ' data-blocked="' + (u.blocked ? '1' : '0') + '"'
+            + ' title="' + esc(titel(u)).replace(/\n/g, '&#10;') + '">'
             + '<div class="pt-usr-top">' + pill
-            + '<span class="pt-usr-name" title="' + esc(u.username) + '">' + esc(u.display) + '</span>'
+            + '<span class="pt-usr-name">' + esc(u.display) + '</span>'
             + api + gesperrt + menue + '</div>'
-            + '<div class="pt-usr-meta">' + zeilen.join('<span class="pt-usr-sep">·</span>') + '</div>'
+            + '<div class="pt-usr-meta">' + kurz + '</div>'
             + '</div>';
     }
 
     var _mayBlock = false;
+    var _users = [];        // letzter Stand vom Server (ungefiltert)
+    var _filter = '';       // aktueller Suchbegriff, klein geschrieben
+    var _stand = null;      // online/total/online_window der letzten Antwort
+
+    function passt(u) {
+        if (!_filter) return true;
+        return String(u.username || '').toLowerCase().indexOf(_filter) !== -1
+            || String(u.display || '').toLowerCase().indexOf(_filter) !== -1;
+    }
+
+    // Zeichnet aus _users + _filter. Getrennt von render(), damit die Eingabe
+    // sofort wirkt, ohne auf den naechsten Abruf zu warten.
+    function zeichne() {
+        if (!els.list) return;
+        var sicht = _users.filter(passt);
+        if (!_users.length) {
+            els.list.innerHTML = '<div class="pt-usr-empty">'
+                + esc(t('sessions.empty', 'Noch keine Anmeldungen aufgezeichnet.')) + '</div>';
+        } else if (!sicht.length) {
+            els.list.innerHTML = '<div class="pt-usr-empty">'
+                + esc(t('sessions.no_match', 'Kein Treffer für „{q}“.').replace('{q}', _filter))
+                + '</div>';
+        } else {
+            els.list.innerHTML = sicht.map(zeile).join('');
+        }
+        // Ein Filterfeld ueber einer leeren Liste ist ein Filter fuer nichts.
+        if (els.filter) els.filter.style.display = _users.length ? '' : 'none';
+        if (els.count) {
+            // Beim Filtern zaehlt die TREFFERZAHL – sonst stuende dort eine Zahl,
+            // die zu der sichtbaren Liste nicht passt.
+            els.count.textContent = _filter
+                ? sicht.length + '/' + _users.length
+                : (_stand && _stand.online != null ? _stand.online + '/' + _stand.total : '');
+        }
+    }
 
     function render(d) {
         if (!els.list) return;
         _mayBlock = !!(d && d.may_block);
-        var users = (d && d.users) || [];
-        if (!users.length) {
-            els.list.innerHTML = '<div class="pt-usr-empty">'
-                + esc(t('sessions.empty', 'Noch keine Anmeldungen aufgezeichnet.')) + '</div>';
-        } else {
-            els.list.innerHTML = users.map(zeile).join('');
-        }
-        if (els.count) {
-            els.count.textContent = (d && d.online != null)
-                ? d.online + '/' + d.total : '';
-        }
+        _users = (d && d.users) || [];
+        _stand = d || null;
+        zeichne();
         if (els.hint && d && d.online_window) {
             els.hint.textContent = t('sessions.hint', 'Online = Aktivität in den letzten {n} Sekunden. Wer den Browser schließt, ohne sich abzumelden, erscheint bis dahin weiter als online.')
                 .replace('{n}', d.online_window);
@@ -283,6 +328,10 @@
 
     function schliessen() {
         menuZu();
+        // Filter zuruecksetzen: ein beim naechsten Oeffnen noch gesetzter
+        // Begriff liesse die Liste unvollstaendig aussehen.
+        if (els.search && els.search.value) els.search.value = '';
+        if (_filter) { _filter = ''; zeichne(); }
         if (_zuTimer) { clearTimeout(_zuTimer); _zuTimer = null; }
         _viaHover = false;
         if (els.panel) els.panel.setAttribute('hidden', '');
@@ -324,6 +373,8 @@
         els.list = document.getElementById('pt-usr-list');
         els.count = document.getElementById('pt-usr-count');
         els.hint = document.getElementById('pt-usr-hint');
+        els.filter = document.getElementById('pt-usr-filter');
+        els.search = document.getElementById('pt-usr-search');
         if (!els.wrap || !els.btn) return;
         els.wrap.style.display = '';        // erst jetzt sichtbar (Admin bestätigt)
         if (_bound) return;
@@ -341,6 +392,31 @@
                 if (_viaHover) schliessen();
             }, HOVER_ZU_MS);
         });
+
+        if (els.search) {
+            els.search.addEventListener('input', function () {
+                _filter = String(els.search.value || '').trim().toLowerCase();
+                zeichne();
+            });
+            // FALLSTRICK: Wer tippt, bewegt die Maus dabei leicht – bei einem
+            // per Hover geoeffneten Panel faellt es sonst mitten in der Eingabe
+            // zu. Fokus im Feld heftet es fest, wie ein Klick.
+            els.search.addEventListener('focus', function () {
+                _viaHover = false;
+                if (_zuTimer) { clearTimeout(_zuTimer); _zuTimer = null; }
+            });
+            // Escape leert ZUERST den Filter und schliesst erst beim zweiten
+            // Druck das Panel – sonst verliert man mit dem Filter die ganze
+            // Liste, obwohl man nur die Eingabe loswerden wollte.
+            els.search.addEventListener('keydown', function (e) {
+                if (e.key !== 'Escape' || !els.search.value) return;
+                els.search.value = '';
+                _filter = '';
+                zeichne();
+                e.stopPropagation();
+                e.preventDefault();
+            });
+        }
 
         // Menue: per Rechtsklick auf die Zeile ODER ueber den ⋯-Knopf.
         function oeffneMenue(e, row) {

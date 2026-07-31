@@ -7299,3 +7299,60 @@ select.input-field {
     body.printing-brkdoc #sec-brkdoc-modal table { page-break-inside: auto; }
     body.printing-brkdoc #sec-brkdoc-modal tr { page-break-inside: avoid; }
 }
+
+
+/* ── Hover-Vorschau fuer Skill-Anleitungen (skillcfg.js) ──────────────────
+   Der Pfad in einer Skill-Beschreibung ist als reiner Text eine Sackgasse:
+   die Datei liegt auf dem Server. Beim Ueberfahren wird sie gezeigt. */
+.skcfg-doc {
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    cursor: help;
+    color: var(--accent);
+}
+.skcfg-doc:hover, .skcfg-doc:focus { color: var(--accent-hover); outline: none; }
+.skcfg-docbox {
+    position: absolute;
+    z-index: 10060;
+    width: min(600px, calc(100vw - 24px));
+    max-height: min(70vh, 560px);
+    display: flex;
+    flex-direction: column;
+    /* DECKEND: darunter liegt das Einstellungs-Formular mit Text. */
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(var(--shadow-rgb), .35);
+    overflow: hidden;
+}
+.skcfg-docbox[hidden] { display: none; }
+.skcfg-doc-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: .78rem; font-weight: 600; color: var(--text-primary);
+    background: rgba(var(--accent-rgb), .10);
+}
+.skcfg-doc-meta { margin-left: auto; font-weight: 500; color: var(--text-muted); }
+.skcfg-doc-body {
+    padding: 10px 14px;
+    overflow-y: auto;
+    font-size: .8rem; line-height: 1.5; color: var(--text-secondary);
+}
+.skcfg-doc-body h1, .skcfg-doc-body h2, .skcfg-doc-body h3 {
+    color: var(--text-primary); margin: .8em 0 .3em; font-size: .92rem;
+}
+.skcfg-doc-body h1 { font-size: 1rem; }
+.skcfg-doc-body code {
+    background: rgba(var(--fg-rgb), .08); padding: 1px 4px; border-radius: 4px;
+    font-size: .92em;
+}
+.skcfg-doc-body pre {
+    background: rgba(var(--fg-rgb), .06); padding: 8px 10px; border-radius: 8px;
+    overflow-x: auto; font-size: .75rem;
+}
+.skcfg-doc-body table { border-collapse: collapse; font-size: .74rem; }
+.skcfg-doc-body th, .skcfg-doc-body td {
+    border: 1px solid var(--border); padding: 3px 6px; text-align: left;
+}
+.skcfg-doc-body img { max-width: 100%; }

@@ -1730,7 +1730,31 @@ def _do_force_reindex(attempt: int = 1, resume_count: int = 0,
         # incremental: bestehenden Index behalten (Wiederaufnahme nach Absturz);
         # der Reindex ueberspringt unveraenderte Dateien automatisch.
         if not incremental:
-            vs.clear()
+            # NICHT blind leeren. `vs.clear()` warf frueher ALLES weg – war
+            # danach ein Ordner nicht erreichbar, blieb sein Wissen dauerhaft
+            # verloren (dieselbe Verwechslung wie im Suchpfad: "nicht
+            # erreichbar" ist nicht "geloescht", nur hier mit dem groesseren
+            # Hebel, weil der Neuaufbau ALLES anfasst).
+            alive = [f for f in folders if _safe_exists(f)]
+            if folders and not alive:
+                # Gar nichts erreichbar: abbrechen statt leeren. Der Aufrufer
+                # sieht einen Fehler, der bestehende Index bleibt unberuehrt.
+                raise RuntimeError(
+                    "Kein Wissensordner erreichbar – Neuaufbau abgebrochen. "
+                    "Der bestehende Index bleibt erhalten. Betroffen: "
+                    + ", ".join(str(f) for f in folders))
+            if len(alive) == len(folders):
+                vs.clear()                      # alles erreichbar -> wie bisher
+            else:
+                # Teilweise erreichbar: nur die erreichbaren Ordner neu
+                # aufbauen, der Rest behaelt seinen Stand.
+                prefixes = tuple(str(r).rstrip(os.sep) + os.sep for r in alive)
+                stale = [p for p in vs.get_indexed_files() if p.startswith(prefixes)]
+                if stale:
+                    vs.remove_files(stale)
+                _log.warning("Teil-Neuaufbau: %d von %d Ordnern erreichbar, "
+                             "der Rest behaelt seinen Indexstand",
+                             len(alive), len(folders))
         _rebuild_vector_index(folders, max_bytes, force=True)
         chunk_count = vs.chunk_count()
         file_count  = vs.file_count()

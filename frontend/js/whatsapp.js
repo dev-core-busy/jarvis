@@ -253,7 +253,12 @@ class JarvisWhatsAppManager {
     async _loadDebugState() {
         try {
             const token = localStorage.getItem('jarvis_token');
-            const resp = await fetch('/api/skills/whatsapp', {
+            // Der Pfad war '/api/skills/whatsapp' – den gibt es nur als DELETE,
+            // ein GET darauf beantwortet der Server mit 405. Weil der Fehler in
+            // `if (resp.ok)` verschwand, blieb der Debug-Schalter STILL auf
+            // "aus", egal was gespeichert war. Richtig ist der Config-Endpunkt.
+            // (Gefunden am 2026-07-31 ueber eine 405-Meldung in der Konsole.)
+            const resp = await fetch('/api/skills/whatsapp/config', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (resp.ok) {

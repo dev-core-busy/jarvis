@@ -220,14 +220,31 @@ def main():
         f.unlink()
     K.invalidate_files_cache()
     t0 = time.time()
-    res_del = K.force_reindex()
+    # incremental=True ist der Pfad, den der Betrieb geht, wenn Dateien
+    # verschwinden: das Aufraeumen verwaister Eintraege haengt an force=True in
+    # _rebuild_vector_index() und laeuft hier mit, der bestehende Index bleibt
+    # aber stehen (kein vs.clear()). Unveraenderte Dateien werden ueber die mtime
+    # uebersprungen, es wird also NICHTS neu eingebettet.
+    #
+    # FALLSTRICK, hier zunaechst selbst hineingelaufen: Mit force_reindex() ohne
+    # Schalter misst dieser Abschnitt einen kompletten Neuaufbau aller 850
+    # verbliebenen Dateien – auf DEV 6568 s. Die Zahl sagt dann nichts ueber das
+    # Loeschen aus, sieht aber wie eine katastrophale Loeschdauer aus. Die
+    # eigentliche Pruefung (Zahl der Index-Neuaufbauten) war davon unberuehrt und
+    # gruen, was den Fehler zusaetzlich verdeckt hat.
+    res_del = K.force_reindex(incremental=True)
     dauer_del = time.time() - t0
     VS.VectorStore._rebuild = echt_rebuild
     print(f"   Index-Neuaufbauten:  {rebuilds['n']} (alter Stand: 50)")
-    print(f"   Dauer:               {dauer_del:.1f}s")
+    print(f"   Dauer:               {dauer_del:.1f}s (nur Aufraeumen, kein Einbetten)")
     print(f"   Dateien danach:      {res_del['indexed_files']} (erwartet {N_DATEIEN-50+1})")
     ergebnis.append(("hoechstens 2 Index-Neuaufbauten", rebuilds["n"] <= 2))
     ergebnis.append(("Dateizahl stimmt", res_del["indexed_files"] == N_DATEIEN - 50 + 1))
+    # Der eigentliche Gewinn von B-4: Entfernen ist eine Aufraeumaktion, keine
+    # Neuberechnung. Bei 900 Dateien kostet ein Voll-Reindex zwei Stunden – wenn
+    # das Loeschen von 50 Dateien in dieselbe Groessenordnung faellt, ist der
+    # Sammelpfad nicht wirksam.
+    ergebnis.append(("Sammel-Entfernung ohne Neu-Einbettung (< 120 s)", dauer_del < 120))
 
     # ── 7. Inkrementeller Lauf ohne Aenderungen ──────────────────────────
     kopfzeile("7. Reindex ohne Aenderungen (mtime-Vergleich)")

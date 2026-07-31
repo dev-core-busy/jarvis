@@ -189,7 +189,14 @@ def hole_go():
         gesehen.add(teile[0])
         pfad, ver, verzeichnis = teile[0], teile[1], teile[2]
         lic = ''
-        for name in ('LICENSE', 'LICENSE.txt', 'LICENSE.md', 'LICENCE', 'COPYING', 'LICENSE-MIT'):
+        # Die Namensliste ist der haeufigste Grund fuer ein falsches „keine
+        # LICENSE-Datei": gobmp liefert seine MIT-Lizenz als COPYING.txt aus, und
+        # solange der Name hier fehlte, meldete die Inventur das Modul als
+        # ungeklaert – obwohl die Datei danebenlag. Wer einen Befund „keine
+        # LICENSE-Datei" sieht, prueft ZUERST diese Liste gegen den Modulordner.
+        for name in ('LICENSE', 'LICENSE.txt', 'LICENSE.md', 'LICENCE', 'LICENCE.txt',
+                     'COPYING', 'COPYING.txt', 'COPYING.md', 'LICENSE-MIT',
+                     'LICENSE-APACHE', 'license', 'license.txt'):
             datei = os.path.join(verzeichnis, name)
             if not os.path.exists(datei):
                 continue
@@ -198,6 +205,13 @@ def hole_go():
                 if re.search(rx, txt, re.S | re.I):
                     lic = kennung
                     break
+            # Dual lizenzierte Module lassen sich nicht am Text erkennen – dort
+            # steht kein Lizenzname, sondern die Aufforderung, EINE zu waehlen.
+            # Die getroffene Wahl steht in NOTICE.md und gehoert hier verlinkt,
+            # sonst taucht das Modul in jeder Inventur als „ungeklaert" auf und
+            # jemand recherchiert es zum dritten Mal.
+            if not lic and re.search(r'your choice of exactly one|dual[- ]licen', txt, re.I):
+                lic = 'Wahlrecht – getroffen in NOTICE.md'
             lic = lic or 'unbekannt (LICENSE vorhanden)'
             break
         out.append({'name': pfad, 'version': ver, 'license': lic or 'keine LICENSE-Datei'})

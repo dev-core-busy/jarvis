@@ -154,9 +154,10 @@ Pakete:
 `skills/claude_bridge/skill.md`, einer veralteten Beschreibung; der tatsächliche Code in
 `claude_bridge/main.py` ruft `xclip` auf.
 
-> ### ✅ Erledigt am 2026-07-31
-> `pyautogui` ist aus `requirements.txt` entfernt, die neun Pakete sind auf DEV
-> deinstalliert. **Damit ist die GPL-Berührung auf der Python-Seite bei null.**
+> ### ✅ Erledigt am 2026-07-31 (DEV **und** ECHT)
+> `pyautogui` ist aus `requirements.txt` entfernt, die neun Pakete sind auf DEV **und auf
+> ECHT** deinstalliert. **Damit ist die GPL-Berührung auf der Python-Seite bei null** –
+> auf ECHT nachgezählt: 154 Distributionen, davon **0 GPL und 0 proprietäre**.
 > Nachgeprüft: `import backend.main` läuft, Dienst nach Neustart aktiv, Portal und
 > Einstellungen HTTP 200. Die Zeile in `requirements.txt` ist durch einen Kommentar
 > ersetzt, der erklärt, warum sie nicht zurückkommen darf.
@@ -215,6 +216,12 @@ einer Weitergabe des Images mitverteilen würde.
 >
 > **Für eine Neuinstallation** steht der Befehl jetzt als Kommentar in
 > `requirements.txt` – ohne ihn zieht `sentence-transformers` das CUDA-Rad wieder herein.
+>
+> **Auf ECHT** war der große CUDA-Stack schon seit dem 2026-07-19 draußen (torch
+> 2.12.0+cpu). Übrig geblieben waren drei Waisen aus jener Aktion – `cuda-bindings`,
+> `cuda-pathfinder`, `cuda-toolkit` –, die niemand mehr anforderte; am 2026-07-31 mit
+> entfernt. Merke: Ein `pip uninstall torch` räumt seine Abhängigkeiten **nicht** mit ab,
+> die bleiben als Waisen liegen und tauchen in jeder Lizenzinventur wieder auf.
 
 ### 4.5 SAP: proprietär und teils gar nicht installiert
 

@@ -538,8 +538,15 @@ class VectorStore:
 
         channels = [self._search_vector_idx(query, pool)]
 
-        # Zweiter semantischer Kanal nur, wenn die Reduktion die Query wirklich
-        # veraendert (sonst doppeltes Encoding fuer dasselbe Ergebnis).
+        # Zweiter semantischer Kanal mit der auf Inhaltswoerter reduzierten Frage.
+        # ACHTUNG, der Kommentar hier versprach frueher eine Ersparnis, die es nicht
+        # gibt: die Bedingung greift in der Praxis FAST IMMER. Der Tokenizer wirft
+        # Satzzeichen und Woerter unter drei Zeichen weg, schon "LDT Import?" wird zu
+        # "ldt import". Abgefangen wird nur der Sonderfall, dass die Frage bereits
+        # ausschliesslich aus Inhaltswoertern besteht. Das zweite Encoding ist also
+        # der Normalfall – gewollt (es hebt Treffer, die Frage-Floskeln sonst
+        # verwaessern), aber KEINE Sparmassnahme. Wer die Suchlatenz druecken will,
+        # hat hier den groessten verbleibenden Posten.
         terms = _content_terms(query)
         reduced = " ".join(terms)
         if terms and reduced != query.strip().lower():

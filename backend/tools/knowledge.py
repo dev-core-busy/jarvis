@@ -1173,6 +1173,27 @@ def relocate_file_index(old_file: Path, new_file: Path) -> dict:
             "group_assignment": moved_group}
 
 
+def _ist_office_hilfsdatei(name: str) -> bool:
+    """Office-Sperr- und Wiederherstellungsdateien erkennen.
+
+    Word, Excel und PowerPoint legen neben jedem GEOEFFNETEN Dokument eine
+    Datei ``~$name.docx`` an (Besitzerkennung, wenige hundert Byte). Sie traegt
+    die Endung eines Office-Dokuments, ist aber keines – python-docx scheitert
+    daran zwangslaeufig.
+
+    GEFUNDEN AM 2026-07-31 auf ECHT: von den vier als „fehlgeschlagen"
+    gemeldeten Dateien waren DREI solche Sperrdateien. Sie erzeugten bei jedem
+    Indexlauf eine Fehlermeldung, die nach einem Problem aussah, aber keines
+    war – und die echte vierte Meldung (ein 130-MB-PDF ueber dem Limit) darin
+    untergehen liess. Ein Fehlerzaehler, der zu drei Vierteln aus Rauschen
+    besteht, wird nicht mehr gelesen.
+
+    Sie verschwinden von selbst, sobald das Dokument geschlossen wird – auf
+    einem Netzlaufwerk mit vielen Bearbeitern aber praktisch nie vollstaendig.
+    """
+    return name.startswith("~$") or name.startswith("~WRL")
+
+
 def _all_files(folders: list[Path]) -> list[Path]:
     """Gibt alle unterstützten Dateien in den konfigurierten Ordnern zurück.
 
@@ -1202,6 +1223,8 @@ def _all_files(folders: list[Path]) -> list[Path]:
                     # Gruppen-Manifest data/knowledge/.groups.json ist KEIN
                     # Wissensdokument und darf weder indiziert noch gelistet werden.
                     if f.startswith("."):
+                        continue
+                    if _ist_office_hilfsdatei(f):
                         continue
                     if Path(f).suffix.lower() in all_exts:
                         files.append(Path(root) / f)

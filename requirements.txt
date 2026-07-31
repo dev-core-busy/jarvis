@@ -4,7 +4,11 @@ google-genai==1.5.0
 anthropic>=0.39.0
 python-dotenv==1.0.1
 psutil==6.1.1
-pyautogui==0.9.54
+# pyautogui wurde am 2026-07-31 ENTFERNT: es war nie importiert (die
+# Desktop-Steuerung laeuft ueber xdotool als Unterprozess, siehe
+# backend/tools/desktop.py), zog aber drei GPL-Pakete in den Backend-Prozess
+# (MouseInfo/PyMsgBox GPL-3.0+, python3-xlib GPL-2.0) – unvereinbar mit der
+# eigenen Apache-2.0. Nicht wieder aufnehmen, ohne das zu pruefen.
 pillow==11.1.0
 pytesseract==0.3.13   # Bild-OCR fuer Wissensbasis; benoetigt System-Paket: tesseract-ocr (+ tesseract-ocr-deu/-eng)
 pdf2image==1.17.0     # OCR-Fallback fuer gescannte PDFs (rendert Seiten zu Bildern); benoetigt System-Paket: poppler-utils
@@ -23,6 +27,15 @@ wsgidav>=4.3.0
 faiss-cpu>=1.7.4
 sentence-transformers>=2.2.0,<4.0
 numpy<2.1
+# WICHTIG – torch VOR dieser Datei aus dem CPU-Index installieren:
+#   pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.10.0+cpu"
+# sentence-transformers zieht sonst das CUDA-Rad und damit 18 proprietaere
+# NVIDIA-Pakete (~6 GB) auf eine VM OHNE GPU – torch.cuda.is_available() ist hier
+# False, sie werden nie geladen. Nachgemessen 2026-07-31: venv 8,4 GB -> 2,4 GB.
+# Die Einbettungen sind bitgleich (gleicher SHA ueber den Vektor), ein Reindex ist
+# nach dem Wechsel also NICHT noetig.
+# Die Versionsangabe muss das lokale Suffix "+cpu" tragen: mit "torch==2.10.0"
+# haelt pip das bereits installierte CUDA-Rad fuer passend und tut nichts.
 mcp>=1.5.0,<1.26
 sse-starlette>=3.0.0,<3.1
 ldap3>=2.9

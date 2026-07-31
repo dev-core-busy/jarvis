@@ -2156,6 +2156,42 @@ async def logout(user: str = Depends(require_auth)):
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/sessions/{username}/logout")
+async def force_logout(username: str, request: Request,
+                       admin: str = Depends(require_local_auth)):
+    """Einen Benutzer zwangsweise abmelden (nur Administratoren).
+
+    Tokens sind zustandslos – "abmelden" heisst deshalb: alle Tokens widerrufen,
+    die VOR diesem Zeitpunkt ausgestellt wurden. Dafuer gibt es bereits den
+    Widerrufs-Mechanismus der AD-Revalidierung (``_revoked_logins``, geprueft in
+    ``verify_token``, persistent in ``data/auth_revocations.json``) – hier wird
+    er nur von Hand ausgeloest.
+
+    Wirkung: beim NAECHSTEN Request des Benutzers greift der Widerruf (kein
+    Aussperren im Wortsinn – eine neue Anmeldung mit frischem Zeitstempel hebt
+    ihn sofort wieder auf). Das ist gewollt: "abmelden", nicht "sperren".
+    Zum Sperren gibt es den Sicherheits-Reiter.
+    """
+    plain = _norm_login(username)
+    if not plain:
+        return JSONResponse({"ok": False, "error": "Kein Benutzer angegeben"}, status_code=400)
+    if plain == _norm_login(admin):
+        # Sich selbst hinauszuwerfen ist kein sinnvoller Vorgang – der Admin
+        # verliert dabei die Oberflaeche, aus der heraus er es getan hat.
+        return JSONResponse({"ok": False, "error": "SELF",
+                             "detail": "Die eigene Sitzung lässt sich hier nicht beenden – "
+                                       "dafür gibt es den Abmelden-Knopf."}, status_code=400)
+    try:
+        _revoked_logins[plain] = int(time.time())
+        _save_revocations()
+        _user_sessions.record_logout(plain)
+        _ip = request.client.host if request.client else "unbekannt"
+        print(f"[AUTH] Zwangsabmeldung durch '{admin}' ({_ip}): '{plain}'", flush=True)
+        return JSONResponse({"ok": True, "user": plain})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.get("/api/sessions")
 async def list_user_sessions(user: str = Depends(require_local_auth)):
     """Wer war/ist am System angemeldet (nur Administratoren).
@@ -4675,6 +4711,44 @@ def _get_skill_manager():
             _standalone_skill_manager = SkillManager()
         _standalone_skill_manager.post_install_hook = _skill_post_install
         return _standalone_skill_manager
+
+
+@app.get("/api/skills/doc")
+async def skill_doc(skill: str = "", file: str = "", user: str = Depends(require_local_auth)):
+    """Liefert eine Markdown-Datei aus einem Skill-Ordner (nur Administratoren).
+
+    Fuer die Hover-Vorschau von Anleitungen, die in Skill-Beschreibungen genannt
+    werden (z.B. ``skills/avatar/AVATAR-DESIGN.md``). Antwort:
+    ``{ok, name, text}``.
+
+    Pfad-Sicherheit wie bei den Info-Dokumenten: nach ``resolve()`` wird geprueft,
+    dass die Datei WIRKLICH unterhalb von ``skills/<skill>/`` liegt – ein
+    Praefix-Vergleich allein waere ueber einen Symlink zu umgehen. Erlaubt sind
+    nur ``.md``-Dateien; abgewiesen wird immer mit 404, nie mit 400/403 (der
+    Grund verraet sonst, was es gibt).
+    """
+    # PROJECT_ROOT ist eine MODUL-Variable von config.py, KEIN Attribut des
+    # config-Objekts – `config.PROJECT_ROOT` wirft AttributeError.
+    from backend.config import PROJECT_ROOT as _ROOT
+    root = Path(_ROOT).resolve() / "skills"
+    name = (skill or "").strip()
+    rel = (file or "").strip().lstrip("/")
+    # Keine Pfadanteile im Skill-Namen, keine Traversal im Dateinamen.
+    if (not name or not rel or "/" in name or "\\" in name or ".." in name
+            or ".." in rel or "\\" in rel or "\x00" in rel
+            or not rel.lower().endswith(".md")):
+        return JSONResponse({"ok": False, "error": "Nicht gefunden"}, status_code=404)
+    try:
+        basis = (root / name).resolve(strict=True)
+        ziel = (basis / rel).resolve(strict=True)
+        if basis != root / name or basis not in ziel.parents:
+            raise ValueError("ausserhalb")
+        if not ziel.is_file():
+            raise ValueError("keine Datei")
+        text = ziel.read_text(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Nicht gefunden"}, status_code=404)
+    return JSONResponse({"ok": True, "name": ziel.name, "text": text})
 
 
 @app.get("/api/skills")
@@ -9475,11 +9549,17 @@ async def knowledge_extract_file_delete(request: Request, user: str = Depends(re
     rel_path = (body.get("file") or "").strip().lstrip("/")
     if not rel_path:
         return JSONResponse({"ok": False, "error": "Kein Dateipfad"}, status_code=400)
-    from backend.config import config as _cfg
-    target = Path(_cfg.PROJECT_ROOT) / rel_path
+    # ACHTUNG: hier stand `config.PROJECT_ROOT` – das Attribut gibt es nicht
+    # (PROJECT_ROOT ist eine Modul-Variable von config.py). Der Endpunkt lief
+    # damit IMMER in einen AttributeError und antwortete mit HTTP 500; das
+    # Loeschen einer Extrakt-Datei aus der Oberflaeche war schlicht tot.
+    # Gefunden am 2026-07-31 beim Bau des Doku-Endpunkts, der dieselbe Zeile
+    # als Vorlage benutzt hatte.
+    from backend.config import PROJECT_ROOT as _ROOT
+    target = Path(_ROOT) / rel_path
     # Sicherheitscheck: Datei muss im knowledge-Ordner liegen und extract_ prefix haben
     try:
-        target.resolve().relative_to(Path(_cfg.PROJECT_ROOT).resolve())
+        target.resolve().relative_to(Path(_ROOT).resolve())
     except ValueError:
         return JSONResponse({"ok": False, "error": "Ungültiger Pfad"}, status_code=400)
     if not target.name.startswith("extract_"):

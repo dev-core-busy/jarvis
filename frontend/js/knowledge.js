@@ -2206,7 +2206,39 @@ class JarvisKnowledgeManager {
         const failed = run.failed_files || 0;
         if (failed) parts.push('⚠ ' + window.t('knowledge.index_failed_n').replace('{n}', failed));
         const color = (run.status === 'ok' && !failed) ? 'var(--text-secondary)' : 'var(--warning)';
-        return `<div class="kb-last-run" style="font-size:0.75rem;color:${color};margin:6px 0 2px;">${parts.join(' · ')}</div>`;
+        let html = `<div class="kb-last-run" style="font-size:0.75rem;color:${color};margin:6px 0 2px;">${parts.join(' · ')}</div>`;
+        // WELCHE Dateien – direkt darunter, aufklappbar.
+        // Vorher stand hier nur "siehe Journal". Das war doppelt unbrauchbar:
+        // an das Journal kommt man ueber die Weboberflaeche gar nicht heran,
+        // UND die Namen standen dort nicht einmal drin (der haeufigste Zweig
+        // protokollierte mit _log.info, und ohne Logging-Konfiguration verwirft
+        // Python alles unterhalb von WARNING). Ein Verweis auf eine Quelle, die
+        // der Leser nicht erreicht und die die Information nicht enthaelt, ist
+        // schlimmer als gar keiner – er kostet die Zeit der Suche.
+        const liste = Array.isArray(run.failed_list) ? run.failed_list : [];
+        if (failed && liste.length) {
+            const zeilen = liste.map((f) => {
+                const name = this._esc(f.file || '?');
+                const grund = this._esc(f.reason || '');
+                return `<li style="margin:2px 0;"><code style="font-size:.72rem;">${name}</code>`
+                     + (grund ? `<br><span style="opacity:.8;">${grund}</span>` : '') + '</li>';
+            }).join('');
+            const mehr = failed > liste.length
+                ? `<li style="opacity:.7;">${window.t('knowledge.index_failed_more').replace('{n}', failed - liste.length)}</li>`
+                : '';
+            html += `<details class="kb-failed" style="margin:0 0 8px;font-size:.75rem;">`
+                  + `<summary style="cursor:pointer;color:var(--warning);">`
+                  + `${window.t('knowledge.index_failed_show')}</summary>`
+                  + `<ul style="margin:6px 0 0 1.1rem;padding:0;line-height:1.35;">${zeilen}${mehr}</ul>`
+                  + `</details>`;
+        }
+        return html;
+    }
+
+    /** Minimales Escaping – Dateinamen kommen aus dem Dateisystem, nicht aus Code. */
+    _esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     }
 
     /** Unix-Zeitstempel → lokale Datums-/Uhrzeit-Anzeige. */

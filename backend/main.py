@@ -577,6 +577,57 @@ def _login_still_allowed(username: str) -> bool:
     return True
 
 
+# ── Welche Anfrage ist eine HANDLUNG, welche nur Anwesenheit? ────────────────
+# Die Oberflaechen fragen staendig Zustaende ab (LLM-Status alle 30 s, CPU alle
+# 3 s, Ungelesen-Zaehler, Fortschritte). Wuerde jede davon als "Aktivitaet"
+# gelten, waere ein offener Tab dauerhaft "aktiv" und die Anzeige wertlos.
+# Faustregel: GET = nachsehen, alles andere = tun.
+_ACTION_LABELS = [
+    ("/api/agent/task",        "Chat-Anfrage"),
+    ("/api/support/",          "Support-Suche"),
+    ("/api/avatar/ask",        "Avatar-Frage"),
+    ("/api/wissen/",           "Wissen"),
+    ("/api/knowledge/",        "Wissen"),
+    ("/api/userchat/",         "Benutzer-Chat"),
+    ("/api/chat/",             "Chat"),
+    ("/api/documents",         "Dokumente"),
+    ("/api/skills/",           "Einstellungen"),
+    ("/api/settings",          "Einstellungen"),
+    ("/api/profiles",          "KI-Profile"),
+    ("/api/cron",              "Auftraege"),
+    ("/api/watchers",          "Auftraege"),
+    ("/api/issues",            "Meldungen"),
+    ("/api/whatsapp/",         "WhatsApp"),
+    ("/api/vision/",           "Vision"),
+    ("/api/jira/",             "Jira"),
+    ("/api/confluence/",       "Confluence"),
+]
+
+# Veraendernde Anfragen, die KEINE Benutzerhandlung sind (technisches Rauschen).
+_ACTION_IGNORE = ("/api/logout", "/api/verify-token", "/api/telemetry")
+
+
+def _action_label(path: str) -> str:
+    for praefix, label in _ACTION_LABELS:
+        if path.startswith(praefix):
+            return label
+    return "Aktion"
+
+
+def _note_activity(username: str, request: Request) -> None:
+    """Anwesenheit immer, Handlung nur bei veraendernden Anfragen."""
+    try:
+        ip = request.client.host if request.client else ""
+        pfad = request.url.path
+        if (request.method in ("POST", "PUT", "PATCH", "DELETE")
+                and not pfad.startswith(_ACTION_IGNORE)):
+            _user_sessions.note_action(username, _action_label(pfad), ip)
+        else:
+            _user_sessions.touch(username, ip)
+    except Exception:  # noqa: BLE001 – Buchhaltung darf keine Anfrage kippen
+        pass
+
+
 async def require_auth(request: Request) -> str:
     """FastAPI Dependency: Prueft Bearer-Token und gibt Username zurueck.
     Sperrt zusaetzlich den lokalen jarvis-User, solange das Erst-Kennwort nicht
@@ -594,12 +645,8 @@ async def require_auth(request: Request) -> str:
     # Anmeldeberechtigung laufend pruefen: Entzug greift sofort, nicht erst beim Login.
     if not _login_still_allowed(username):
         raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
-    # Anwesenheit festhalten (nur Speicher, Platte gedrosselt – siehe
-    # user_sessions.touch). Darf die Anfrage NIE scheitern lassen.
-    try:
-        _user_sessions.touch(username, request.client.host if request.client else "")
-    except Exception:  # noqa: BLE001
-        pass
+    # Anwesenheit bzw. Handlung festhalten (siehe _note_activity).
+    _note_activity(username, request)
     return username
 
 
@@ -11146,6 +11193,17 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         if not task_text:
             await ws.send_json({"type": "error", "message": "Keine Aufgabe angegeben"})
             return
+        # Der Chat laeuft ueber WebSocket und damit NICHT durch require_auth –
+        # ohne diese Zeile waere ausgerechnet die haeufigste Benutzerhandlung
+        # in der Anwesenheits-Uebersicht unsichtbar.
+        try:
+            # Benutzer kommt aus der WS-Registrierung (_ws_usernames), nicht aus
+            # einer Dependency – handle_ws_message kennt kein `username`.
+            _ws_user = _ws_usernames.get(id(ws), "")
+            if _ws_user:
+                _user_sessions.note_action(_ws_user, "Chat-Anfrage")
+        except Exception:  # noqa: BLE001
+            pass
         # /chat-Sitzung (eigener Kontext pro Chat); leer = klassischer Ein-Bucket-Modus
         chat_sid = (msg.get("session_id") or "").strip()
 

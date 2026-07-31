@@ -182,6 +182,33 @@
         /* "untätig seit …" faellt bewusst auf – es ist die Aussage, die man
            beim Blick in die Liste sucht. */
         .pt-usr-idle { color:var(--warning); font-weight:600; }
+        .pt-usr-blocked { background:color-mix(in srgb, var(--danger) 22%, transparent);
+            color:var(--danger); }
+        /* Der ⋯-Knopf ist der SICHTBARE Weg ins Menue – ein Menue, das man nur
+           per Rechtsklick findet, findet niemand. */
+        .pt-usr-menubtn { margin-left:auto; flex:0 0 auto; background:none; border:none;
+            color:var(--text-muted); cursor:pointer; font-size:1rem; line-height:1;
+            padding:2px 6px; border-radius:6px; }
+        .pt-usr-menubtn:hover, .pt-usr-menubtn:focus {
+            background:rgba(var(--fg-rgb),.10); color:var(--text-primary); outline:none; }
+        .pt-usr-menu { position:fixed; z-index:10070; min-width:210px;
+            background:var(--bg-secondary); border:1px solid var(--border);
+            border-radius:10px; box-shadow:0 12px 32px rgba(var(--shadow-rgb),.35);
+            overflow:hidden; padding:4px; }
+        .pt-usr-menu-head { padding:6px 10px 7px; font-size:.72rem; font-weight:600;
+            color:var(--text-muted); border-bottom:1px solid var(--border);
+            margin:-4px -4px 4px; background:rgba(var(--fg-rgb),.04);
+            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .pt-usr-menu-item { display:flex; align-items:center; gap:9px; width:100%;
+            padding:7px 10px; border:none; border-radius:7px; background:none;
+            color:var(--text-primary); font-size:.82rem; font-family:inherit;
+            text-align:left; cursor:pointer; }
+        .pt-usr-menu-item:hover, .pt-usr-menu-item:focus {
+            background:rgba(var(--accent-rgb),.16); outline:none; }
+        .pt-usr-menu-item.is-danger { color:var(--danger); }
+        .pt-usr-menu-item.is-danger:hover, .pt-usr-menu-item.is-danger:focus {
+            background:color-mix(in srgb, var(--danger) 16%, transparent); }
+        .pt-usr-menu-ico { width:1.1em; text-align:center; flex:0 0 auto; }
         .pt-usr-kv i { font-style:normal; opacity:.85; }
         .pt-usr-empty { padding:14px 12px; font-size:.8rem; color:var(--text-muted); }
         .pt-usr-hint { padding:8px 12px 10px; font-size:.68rem; line-height:1.35;
@@ -453,14 +480,14 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=93"></script>
+<script src="/static/js/i18n.js?v=94"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=22"></script>
 <script src="/static/js/security_incidents.js?v=11"></script>
 <script src="/static/js/update_widget.js?v=3"></script>
 <script src="/static/js/issues.js?v=6"></script>
 <script src="/static/js/info_files.js?v=3"></script>
-<script src="/static/js/sessions.js?v=3"></script>
+<script src="/static/js/sessions.js?v=4"></script>
 <script src="/static/js/vnc.js?v=18"></script>
 <script>
 (function () {

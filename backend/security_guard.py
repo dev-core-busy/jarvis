@@ -163,6 +163,44 @@ def get_incidents(user: str) -> list:
     return list(info.get("incidents", [])) if info else []
 
 
+def block(user: str, reason: str = "", by: str = "") -> bool:
+    """Sperrt einen Account VON HAND (Administrator).
+
+    Bis 2026-07-31 entstanden Sperren ausschliesslich automatisch aus einem
+    erkannten Verstoss (``_record``); ein Administrator konnte nur ENTsperren.
+    Der Eintrag hat bewusst dieselbe Form wie eine automatische Sperre, damit
+    die vorhandene Anzeige unter *Sicherheit → Angriffspraevention* ihn ohne
+    Sonderfall darstellt – erkennbar ist er an ``method="manuell"``.
+
+    Gibt False zurueck, wenn der Account bereits gesperrt war.
+    """
+    if not user:
+        return False
+    now = int(time.time())
+    with _lock:
+        state = _load()
+        blk = state.setdefault("blocked", {})
+        if user in blk:
+            return False
+        blk[user] = {
+            "reason": (reason or "Von einem Administrator gesperrt")[:200],
+            "method": "manuell",
+            "channel": "admin",
+            "at": now,
+            "by": by or "",
+            "incidents": [{
+                "ts": now,
+                "channel": "admin",
+                "method": "manuell",
+                "pattern": (reason or "manuelle Sperre")[:200],
+                "snippet": f"Gesperrt durch '{by}'." if by else "Manuell gesperrt.",
+            }],
+        }
+        _save(state)
+    print(f"[SecurityGuard] Account MANUELL gesperrt durch '{by}': {user}", flush=True)
+    return True
+
+
 def unblock(user: str) -> bool:
     """Hebt die Sperre auf. True, wenn der Benutzer gesperrt war."""
     with _lock:

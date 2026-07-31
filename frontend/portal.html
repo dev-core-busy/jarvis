@@ -179,6 +179,10 @@
             display:flex; flex-wrap:wrap; gap:4px; align-items:baseline; }
         .pt-usr-meta b { font-weight:600; color:var(--text-secondary); }
         .pt-usr-sep { opacity:.5; }
+        /* "untätig seit …" faellt bewusst auf – es ist die Aussage, die man
+           beim Blick in die Liste sucht. */
+        .pt-usr-idle { color:var(--warning); font-weight:600; }
+        .pt-usr-kv i { font-style:normal; opacity:.85; }
         .pt-usr-empty { padding:14px 12px; font-size:.8rem; color:var(--text-muted); }
         .pt-usr-hint { padding:8px 12px 10px; font-size:.68rem; line-height:1.35;
             color:var(--text-muted); border-top:1px solid var(--border); }
@@ -449,14 +453,14 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=92"></script>
+<script src="/static/js/i18n.js?v=93"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=22"></script>
 <script src="/static/js/security_incidents.js?v=11"></script>
 <script src="/static/js/update_widget.js?v=3"></script>
 <script src="/static/js/issues.js?v=6"></script>
 <script src="/static/js/info_files.js?v=3"></script>
-<script src="/static/js/sessions.js?v=2"></script>
+<script src="/static/js/sessions.js?v=3"></script>
 <script src="/static/js/vnc.js?v=18"></script>
 <script>
 (function () {

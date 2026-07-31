@@ -77,6 +77,21 @@
         return d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' }) + ' ' + uhr;
     }
 
+    // Ab wann "untätig" ausdruecklich gemeldet wird. Unter fuenf Minuten ist es
+    // keine Aussage, sondern Rauschen (kurz nachgedacht, Kaffee geholt).
+    var IDLE_AB = 300;
+
+    function dauer(sek) {
+        var s = Math.max(0, Math.floor(sek || 0));
+        if (s < 60) return s + ' ' + t('sessions.sec', 'Sek.');
+        if (s < 3600) return Math.floor(s / 60) + ' ' + t('sessions.min', 'Min.');
+        if (s < 86400) {
+            var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+            return h + ' ' + t('sessions.h', 'Std.') + (m ? ' ' + m + ' ' + t('sessions.min', 'Min.') : '');
+        }
+        return Math.floor(s / 86400) + ' ' + t('sessions.d', 'Tg.');
+    }
+
     function relativ(ts) {
         if (!ts) return '';
         var s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
@@ -95,14 +110,37 @@
         var api = u.kind === 'api'
             ? ' <span class="pt-usr-tag">API</span>' : '';
         var zeilen = [];
+        // Was hat der Benutzer zuletzt GETAN? Bewusst getrennt von "anwesend":
+        // last_seen setzt jeder Hintergrund-Poll, ein offener Tab saehe sonst
+        // dauerhaft aktiv aus. last_action zaehlt nur echte Handlungen.
+        if (u.last_action) {
+            zeilen.push('<span class="pt-usr-kv">' + t('sessions.last_action', 'zuletzt')
+                + ': <b>' + esc(relativ(u.last_action)) + '</b>'
+                + (u.last_action_label ? ' <i>' + esc(u.last_action_label) + '</i>' : '')
+                + '</span>');
+        } else {
+            zeilen.push('<span class="pt-usr-kv">' + t('sessions.no_action', 'noch keine Aktion') + '</span>');
+        }
+        if (u.online) {
+            // Anwesend, aber seit einer Weile untaetig -> ausdruecklich sagen.
+            var idle = u.idle_seconds;
+            if (idle != null && idle >= IDLE_AB) {
+                zeilen.push('<span class="pt-usr-kv pt-usr-idle">'
+                    + t('sessions.idle_for', 'untätig seit {d}').replace('{d}', dauer(idle))
+                    + '</span>');
+            }
+            zeilen.push('<span class="pt-usr-kv">' + t('sessions.seen', 'Anfrage')
+                + ': <b>' + esc(relativ(u.last_seen)) + '</b></span>');
+        } else if (u.last_seen) {
+            zeilen.push('<span class="pt-usr-kv">'
+                + t('sessions.offline_for', 'offline seit {d}')
+                    .replace('{d}', dauer(Math.floor(Date.now() / 1000 - u.last_seen)))
+                + '</span>');
+        }
         zeilen.push('<span class="pt-usr-kv">' + t('sessions.last_login', 'Anmeldung')
             + ': <b>' + esc(fmt(u.last_login)) + '</b></span>');
         zeilen.push('<span class="pt-usr-kv">' + t('sessions.last_logout', 'Abmeldung')
             + ': <b>' + esc(u.last_logout ? fmt(u.last_logout) : t('sessions.never', 'nie')) + '</b></span>');
-        if (u.online) {
-            zeilen.push('<span class="pt-usr-kv">' + t('sessions.active', 'aktiv')
-                + ': <b>' + esc(relativ(u.last_seen)) + '</b></span>');
-        }
         return '<div class="pt-usr-item" data-user="' + esc(u.username) + '"'
             + ' title="' + esc(t('sessions.kick_hint', 'Rechtsklick: Benutzer abmelden')) + '">'
             + '<div class="pt-usr-top">' + pill

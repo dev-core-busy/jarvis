@@ -119,7 +119,8 @@ def _entry_unlocked(key: str, display: str) -> dict:
     e = _users.get(key)
     if e is None:
         e = {"display": display or key, "first_login": 0.0, "last_login": 0.0,
-             "last_logout": 0.0, "last_seen": 0.0, "last_ip": "", "logins": 0}
+             "last_logout": 0.0, "last_seen": 0.0, "last_ip": "", "logins": 0,
+             "last_action": 0.0, "last_action_label": "", "actions": 0}
         _users[key] = e
     if display:
         e["display"] = display
@@ -187,6 +188,35 @@ def touch(username: str, ip: str = "") -> None:
             _write_unlocked()
 
 
+def note_action(username: str, label: str = "", ip: str = "") -> None:
+    """Eine echte Benutzer-HANDLUNG festhalten (nicht blosse Anwesenheit).
+
+    Aufrufer: alle veraendernden HTTP-Anfragen (POST/PUT/PATCH/DELETE, siehe
+    ``main.py::_note_activity``) und der Chat-Auftrag ueber WebSocket. Reine
+    Abfragen (GET) zaehlen bewusst NICHT – sonst waere der Wert wieder nur
+    "Tab offen".
+    """
+    global _dirty
+    key = _key(username)
+    if not key:
+        return
+    now = time.time()
+    with _lock:
+        _load_unlocked()
+        e = _entry_unlocked(key, username)
+        e["last_seen"] = now
+        e["last_action"] = now
+        if label:
+            e["last_action_label"] = label[:60]
+        e["actions"] = int(e.get("actions") or 0) + 1
+        if ip:
+            e["last_ip"] = ip
+        _dirty = True
+        # Handlungen sind selten genug, um sie sofort zu sichern – anders als
+        # der Poll-getriebene touch().
+        _write_unlocked()
+
+
 # ─── Abfrage ─────────────────────────────────────────────────────────────────
 
 def is_online(entry: dict, now: float = None) -> bool:
@@ -216,6 +246,14 @@ def list_users() -> list:
             "last_seen": float(e.get("last_seen") or 0),
             "last_ip": e.get("last_ip") or "",
             "logins": int(e.get("logins") or 0),
+            # Echte Handlungen (siehe note_action) – NICHT identisch mit last_seen
+            "last_action": float(e.get("last_action") or 0),
+            "last_action_label": e.get("last_action_label") or "",
+            "actions": int(e.get("actions") or 0),
+            # Untaetig seit … Sekunden (nur sinnvoll, wenn ueberhaupt schon
+            # einmal etwas getan wurde); None = seit Beginn der Aufzeichnung nichts.
+            "idle_seconds": (int(now - float(e["last_action"]))
+                             if float(e.get("last_action") or 0) else None),
         })
     out.sort(key=lambda u: (not u["online"], -u["last_seen"]))
     return out

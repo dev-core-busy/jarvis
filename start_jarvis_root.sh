@@ -174,6 +174,44 @@ if [ -n "$NOVNC_DIR" ] && ! pgrep -f "websockify.*6080" > /dev/null; then
     fi
 fi
 
+# 6b. Eigentuemerschaft des Arbeitsverzeichnisses geradeziehen
+#
+# WARUM: Das Backend laeuft unprivilegiert (jarvis.service, User=jarvis) und
+# aktualisiert sich per `git pull`. Um eine Datei zu ERSETZEN oder ein
+# Verzeichnis ANZULEGEN, braucht git Schreibrecht auf dem uebergeordneten
+# Verzeichnis – nicht auf der Datei. Entsteht also irgendwo unter /opt/jarvis
+# etwas als root (ein `scp` als root, ein `git pull` als root, ein Skript mit
+# sudo), scheitert der naechste Update mit
+#     unable to unlink old '<datei>': Keine Berechtigung
+#     cannot create directory at '<verzeichnis>': Keine Berechtigung
+# und zwar erst dann, wenn ein Commit genau dieses Verzeichnis anfasst. Das kann
+# Monate spaeter sein – auf ECHT am 2026-07-31 an einem root-eigenen `tests/`
+# passiert, das seit einem frueheren root-Pull dort lag.
+#
+# Das Backend selbst kann das NICHT reparieren: chown auf fremde Dateien ist
+# root-pflichtig. Hier laeuft root ohnehin, deshalb steht die Reparatur hier und
+# nicht als weitere Broker-Op (eine neue Op verlangt zusaetzlich einen
+# Broker-Neustart auf jedem Server, sonst antwortet der Endpunkt mit 502).
+#
+# Absichtlich NUR chown, kein chmod: die Rechte auf data/chats, data/documents
+# und data/logs (0750) setzt `sandbox.harden_data_dirs()` beim Start des
+# Backends, und die Secrets (0600) gehoeren setup_broker.sh. Zwei Stellen, die
+# dieselben Modi setzen, driften auseinander.
+SVC_USER="$(systemctl show -p User --value jarvis.service 2>/dev/null)"
+[ -z "$SVC_USER" ] && SVC_USER="jarvis"
+if [ "$SVC_USER" != "root" ] && id "$SVC_USER" &>/dev/null; then
+    # Nur zaehlen und melden, wenn wirklich etwas abweicht – ein `chown -R` bei
+    # jedem Boot ueber zehntausende Dateien kostet unnoetig Zeit.
+    FREMD="$(find "$JARVIS_DIR" ! -user "$SVC_USER" -print -quit 2>/dev/null)"
+    if [ -n "$FREMD" ]; then
+        ANZAHL="$(find "$JARVIS_DIR" ! -user "$SVC_USER" 2>/dev/null | wc -l)"
+        echo "[Rechte] $ANZAHL Datei(en) gehoeren nicht '$SVC_USER' (z.B. ${FREMD#$JARVIS_DIR/}) – korrigiere, sonst scheitert der naechste Update."
+        chown -R "$SVC_USER:$SVC_USER" "$JARVIS_DIR" \
+            && echo "[Rechte] $JARVIS_DIR gehoert jetzt $SVC_USER" \
+            || echo "[Rechte] WARNUNG: chown fehlgeschlagen – Updates koennen scheitern." >&2
+    fi
+fi
+
 # 7. Root-Broker starten (Vordergrund-Prozess dieses Dienstes)
 echo "Starte Root-Broker..."
 export JARVIS_BROKER_GROUP="${JARVIS_BROKER_GROUP:-jarvis}"

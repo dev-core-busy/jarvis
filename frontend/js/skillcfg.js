@@ -79,6 +79,10 @@
     let _docBox = null;
     let _docCache = {};
     let _docTimer = null;
+    // Der ROHTEXT der gerade gezeigten Datei. Bewusst in einer Variablen und
+    // nicht in einem data-Attribut: die Anleitung ist ~15 KB gross, das gehoert
+    // nicht ins DOM.
+    let _docText = '';
 
     function docBox() {
         if (_docBox) return _docBox;
@@ -90,6 +94,29 @@
         // ohne dass sie verschwindet.
         _docBox.addEventListener('mouseenter', () => { if (_docTimer) clearTimeout(_docTimer); });
         _docBox.addEventListener('mouseleave', docHide);
+        // Delegiert, weil der Kopf bei jedem Anzeigen neu gebaut wird.
+        _docBox.addEventListener('click', async (e) => {
+            const btn = e.target && e.target.closest ? e.target.closest('.skcfg-doc-copy') : null;
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const ok = window.JarvisChatLib && window.JarvisChatLib.copyTextToClipboard
+                ? await window.JarvisChatLib.copyTextToClipboard(_docText)
+                : false;
+            // Rueckmeldung am Knopf selbst – ein Kopieren ohne sichtbare
+            // Bestaetigung laesst den Benutzer im Zweifel und er klickt erneut.
+            btn.textContent = ok ? '✓' : '✕';
+            btn.classList.toggle('is-ok', ok);
+            btn.classList.toggle('is-fail', !ok);
+            btn.setAttribute('aria-label', ok
+                ? tr('skcfg.doc_copied', 'In die Zwischenablage kopiert')
+                : tr('skcfg.doc_copy_failed', 'Kopieren fehlgeschlagen'));
+            setTimeout(() => {
+                btn.textContent = '⧉';
+                btn.classList.remove('is-ok', 'is-fail');
+                btn.setAttribute('aria-label', tr('skcfg.doc_copy', 'In die Zwischenablage kopieren'));
+            }, 1400);
+        });
         return _docBox;
     }
 
@@ -125,6 +152,7 @@
         }
         const text = _docCache[key];
         if (text === null || text === undefined) {
+            _docText = '';
             box.innerHTML = '<div class="skcfg-doc-head">' + esc(datei) + '</div>'
                 + '<div class="skcfg-doc-body">'
                 + esc(tr('skcfg.doc_missing', 'Datei nicht gefunden oder nicht lesbar.')) + '</div>';
@@ -138,10 +166,15 @@
         } else {
             inhalt = '<pre>' + esc(text) + '</pre>';
         }
+        _docText = text;
         const zeilen = text.split('\n').length;
+        const kopieren = '<button type="button" class="skcfg-doc-copy"'
+            + ' title="' + esc(tr('skcfg.doc_copy', 'In die Zwischenablage kopieren')) + '"'
+            + ' aria-label="' + esc(tr('skcfg.doc_copy', 'In die Zwischenablage kopieren')) + '"'
+            + '>⧉</button>';
         box.innerHTML = '<div class="skcfg-doc-head">' + esc(datei)
             + '<span class="skcfg-doc-meta">' + zeilen + ' '
-            + esc(tr('skcfg.doc_lines', 'Zeilen')) + '</span></div>'
+            + esc(tr('skcfg.doc_lines', 'Zeilen')) + '</span>' + kopieren + '</div>'
             + '<div class="skcfg-doc-body">' + inhalt + '</div>';
     }
 
@@ -249,8 +282,6 @@
                     if (Array.isArray(opts) && opts.length) f.enum = opts;
                 } catch (e) { /* statisches enum bleibt */ }
             }));
-
-            bindDocPreview();
 
             let html = '';
             keys.forEach(key => {
@@ -374,4 +405,10 @@
     };
 
     window.SkillCfg = Manager;
+
+    // Delegierte Listener der Anleitungs-Vorschau EINMALIG beim Laden setzen –
+    // nicht erst beim Rendern eines Reiters. Sonst haengt die Vorschau von
+    // einer Reihenfolge ab, die niemand garantiert (beim Test aufgefallen:
+    // Markup vorhanden, Hover ohne Wirkung).
+    bindDocPreview();
 })();

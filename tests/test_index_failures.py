@@ -81,6 +81,25 @@ def main():
         pruefe("verschwundene Datei stuerzt nicht ab",
                isinstance(K._unlesbar_grund(weg, 10_000_000), str))
 
+        abschnitt("1b. Office-Sperrdateien gelten gar nicht erst als Dokument")
+        # Auf ECHT waren DREI der vier "fehlgeschlagenen" Dateien solche
+        # Sperrdateien. Sie sind kein Fehler, sie gehoeren nicht in den Index.
+        for n in ("~$ E-Rechnung.docx", "~$TK Terminslots.docx",
+                  "~$ TI-Fachanwendungen - Antrag.docx", "~WRL0001.tmp"):
+            pruefe(f"erkannt: {n}", K._ist_office_hilfsdatei(n))
+        for n in ("Handbuch.docx", "Bericht~.docx", "a~$b.docx", "$~x.docx"):
+            pruefe(f"echte Datei bleibt: {n}", not K._ist_office_hilfsdatei(n))
+
+        # Und der Filter muss in _all_files wirken, nicht nur als Funktion.
+        wissen = tmp / "wissen"
+        wissen.mkdir()
+        (wissen / "echt.txt").write_text("Inhalt", encoding="utf-8")
+        (wissen / "~$ gesperrt.docx").write_bytes(b"\x00" * 162)
+        gefunden = [f.name for f in K._all_files([wissen])]
+        pruefe("_all_files nimmt die echte Datei", "echt.txt" in gefunden, str(gefunden))
+        pruefe("_all_files ueberspringt die Sperrdatei",
+               "~$ gesperrt.docx" not in gefunden, str(gefunden))
+
         abschnitt("2. Erfassung im Fortschritt")
         K._set_progress(failed=0, failed_list=[])
         K._note_failed(str(tmp / "a.pdf"), "PDF nicht lesbar")

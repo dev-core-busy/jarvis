@@ -984,7 +984,10 @@
                 method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ user: user })
             }).then(function (r) {
-                if (r.status === 403) { window.alert(T('security.only_local', 'Nur ein lokaler Benutzer darf Konten freischalten.')); return null; }
+                // 403 heisst seit 2026-07-31 nicht mehr "kein lokaler Benutzer",
+                // sondern schlicht "kein Administrator": Sperren und Freischalten
+                // stehen allen Administratoren offen (lokal wie AD).
+                if (r.status === 403) { window.alert(T('security.only_local', 'Keine Berechtigung – nur Administratoren dürfen Konten sperren oder freischalten.')); return null; }
                 return r.json();
             }).then(function (d) { if (d && d.ok) Mgr.load(); })
               .catch(function () {});

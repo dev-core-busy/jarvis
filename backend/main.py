@@ -2260,10 +2260,11 @@ async def list_user_sessions(user: str = Depends(require_local_auth)):
                 u["blocked"] = security_guard.is_blocked(u["username"])
             except Exception:  # noqa: BLE001
                 u["blocked"] = False
-        # Sperren/Entsperren ist lokalen Benutzern vorbehalten (siehe
-        # /api/security/incidents/block). Das Frontend blendet die Eintraege
-        # sonst aus, statt in ein 403 zu laufen.
-        daten["may_block"] = user in ALLOWED_USERS
+        # Wer diese Liste ueberhaupt abrufen darf, ist bereits Administrator
+        # (require_local_auth) – und Administratoren duerfen sperren. Das Feld
+        # bleibt erhalten, damit das Frontend eine kuenftige Verschaerfung
+        # abbilden kann, ohne selbst Rechte zu raten.
+        daten["may_block"] = True
         return JSONResponse({"ok": True, **daten})
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -3058,16 +3059,15 @@ async def security_incidents_log(target: str, user: str = Depends(require_local_
 
 
 @app.post("/api/security/incidents/block")
-async def security_incidents_block(request: Request, user: str = Depends(require_auth)):
-    """Sperrt einen Account von Hand. NUR ein lokaler Benutzer (ALLOWED_USERS).
+async def security_incidents_block(request: Request, user: str = Depends(require_local_auth)):
+    """Sperrt einen Account von Hand. Administratoren (lokal ODER AD).
 
-    Dieselbe Schranke wie beim Entsperren: wer sperren darf, muss auch
-    entsperren koennen – sonst kann sich ein AD-Administrator selbst in eine
-    Lage bringen, aus der er nicht mehr herauskommt.
+    Sperren und Entsperren haben BEWUSST dieselbe Schranke: wer sperren darf,
+    muss auch entsperren koennen – sonst entstuende eine Lage, aus der der
+    Handelnde nicht mehr herauskommt. Beides steht Administratoren offen; die
+    Verantwortung liegt bei der Rolle, nicht bei einer technischen Huerde.
+    Der lokale Benutzer ``jarvis`` bleibt in jedem Fall der Rueckweg.
     """
-    if user not in ALLOWED_USERS:
-        raise HTTPException(status_code=403,
-                            detail="Nur ein lokaler Benutzer darf Accounts sperren.")
     body = await request.json()
     target = (body.get("user") or "").strip()
     grund = (body.get("reason") or "").strip()
@@ -3082,11 +3082,15 @@ async def security_incidents_block(request: Request, user: str = Depends(require
 
 
 @app.post("/api/security/incidents/unblock")
-async def security_incidents_unblock(request: Request, user: str = Depends(require_auth)):
-    """Hebt die Sperre eines Accounts auf. NUR ein lokaler Benutzer (ALLOWED_USERS)."""
-    if user not in ALLOWED_USERS:
-        raise HTTPException(status_code=403,
-                            detail="Nur ein lokaler Benutzer darf Accounts freischalten.")
+async def security_incidents_unblock(request: Request, user: str = Depends(require_local_auth)):
+    """Hebt die Sperre eines Accounts auf. Administratoren (lokal ODER AD).
+
+    Bis 2026-07-31 war das auf lokale Benutzer (ALLOWED_USERS) beschraenkt.
+    Aufgehoben auf Anweisung: wer als Administrator eingetragen ist, darf auch
+    freischalten – die Rolle IST die Entscheidung. ``require_local_auth`` deckt
+    beide Faelle ab (lokaler Benutzer oder AD-Administrator laut
+    Sicherheitseinstellungen).
+    """
     body = await request.json()
     target = (body.get("user") or "").strip()
     if not target:

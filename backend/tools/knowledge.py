@@ -327,6 +327,21 @@ def _learned_weight(file_path: str) -> float:
     return LEARNED_PENALTY if _is_learned_note(file_path) else 1.0
 
 
+class _TrefferListe(list):
+    """Trefferliste mit einem Zusatzmerkmal am Ergebnis selbst.
+
+    Warum kein Modul-Merker: Suchen laufen ueber ``asyncio.to_thread``, mehrere
+    Benutzer koennen gleichzeitig suchen. Ein Modul-Dict wuerde die Kennzeichnung
+    des einen Laufs an die Antwort des anderen haengen – dieselbe Klasse Fehler
+    wie beim Actor-Kontext (siehe CLAUDE.md). Ein ContextVar hilft hier NICHT:
+    ``to_thread`` kopiert den Kontext IN den Thread, Aenderungen darin kommen
+    nicht zurueck. Also haengt das Merkmal am zurueckgegebenen Objekt.
+
+    ``kein_anker``: kein einziges Wort der Anfrage kommt im Bestand vor.
+    """
+    kein_anker: bool = False
+
+
 def _vector_search(query: str, max_results: int) -> list[tuple[float, str, str]] | None:
     """Hybride Suche (semantisch + BM25) via VectorStore.
 
@@ -344,14 +359,16 @@ def _vector_search(query: str, max_results: int) -> list[tuple[float, str, str]]
     results = vs.search_hybrid(query, max_results, weight_fn=_learned_weight)
     if not results:
         return None
+    kein_anker = vs.has_lexical_anchor(query) is False
 
-    converted = []
+    converted = _TrefferListe()
     for score, file_path, chunk in results:
         try:
             rel = str(Path(file_path).relative_to(PROJECT_ROOT))
         except ValueError:
             rel = file_path
         converted.append((score, rel, chunk))
+    converted.kein_anker = kein_anker
     return converted
 
 
@@ -1907,6 +1924,9 @@ class KnowledgeTool(BaseTool):
 
         results = None
         search_mode = "TF-IDF"
+        # Der TF-IDF-Fallback kennt keinen lexikalischen Anker – dort bleibt es
+        # bei False (keine Warnung ohne Befund).
+        kein_anker = False
 
         if search_mode_cfg in ("auto", "vector"):
             has_vector = await asyncio.to_thread(_rebuild_vector_index, folders, max_bytes)
@@ -1915,6 +1935,13 @@ class KnowledgeTool(BaseTool):
                 # Begruendung: TF-IDF skaliert O(n) mit Dateizahl, Vektor konstant ~35ms
                 results = await asyncio.to_thread(_vector_search, query, fetch_n)
                 search_mode = "Hybrid: Vektor+BM25"
+                # SOFORT sichern. Das Merkmal haengt am Listen-Objekt, und
+                # weiter unten machen GLEICH ZWEI Stellen eine gewoehnliche
+                # Liste daraus: der Gruppenfilter (List Comprehension) und
+                # `results[:max_results]` (Slicing einer list-Unterklasse gibt
+                # list zurueck). Ohne diese Zeile verschwand die Warnung
+                # lautlos – am echten Index nachgewiesen.
+                kein_anker = getattr(results, "kein_anker", False)
             elif search_mode_cfg == "auto":
                 # Kein Vektor-Index → TF-IDF als Fallback. ``cache`` kann None
                 # sein, wenn der Index zwischen Pruefung und Suche verschwand.
@@ -1953,6 +1980,29 @@ class KnowledgeTool(BaseTool):
             return f"🔍 Keine Treffer für '{query}'{_grp} ({n_files} Dateien, {n_chunks} Chunks)."
 
         output = f"🔍 {len(results)} Treffer für '{query}' ({search_mode}):\n\n"
+
+        # Kein Wort der Anfrage kommt im Bestand vor -> die Treffer beruhen
+        # ALLEIN auf Vektor-Aehnlichkeit. Das ist der Fall, in dem die Suche
+        # bisher still drei beliebige Chunks lieferte und das Modell darauf
+        # eine Antwort baute. Der Hinweis geht an das MODELL, nicht an den
+        # Benutzer – deshalb steht er im Werkzeug-Ergebnis und ist als Auftrag
+        # formuliert, nicht als Beobachtung.
+        #
+        # Bewusst KEINE Unterdrueckung der Treffer: nachgemessen am Echt-Index
+        # hat das Signal einen Fehlalarm – eine stark vertippte, aber voellig
+        # legitime Anfrage ("patiententen anlgen") hat ebenfalls keinen Anker.
+        # Wer dort nichts zurueckgibt, bestraft einen Tippfehler mit einer
+        # leeren Antwort. Kennzeichnen kostet nichts und wirkt in beiden Faellen.
+        if kein_anker:
+            output = (
+                f"⚠ HINWEIS ZUR QUALITÄT: Kein einziges Wort aus '{query}' kommt im "
+                f"Wissensbestand vor. Die folgenden Treffer beruhen ausschliesslich auf "
+                f"Vektor-Ähnlichkeit und sind mit hoher Wahrscheinlichkeit NICHT "
+                f"einschlägig. Antworte NUR dann inhaltlich, wenn der Text die Frage "
+                f"tatsächlich beantwortet – andernfalls sage klar, dass die "
+                f"Wissensdatenbank dazu nichts enthält. Erfinde nichts hinzu.\n\n"
+            ) + output
+
         for i, (score, filename, chunk) in enumerate(results, 1):
             output += f"--- [{i}] {filename} (Relevanz: {score:.2f}) ---\n"
             output += chunk.strip()[:CHUNK_OUTPUT_LIMIT] + "\n\n"

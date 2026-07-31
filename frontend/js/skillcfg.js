@@ -59,6 +59,113 @@
         return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
             ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     }
+
+    // ── Hover-Vorschau fuer Anleitungen ─────────────────────────────────────
+    // In Skill-Beschreibungen stehen Pfade wie "skills/avatar/AVATAR-DESIGN.md".
+    // Als Text sind sie eine Sackgasse: der Admin sieht den Namen, kommt aber
+    // nicht an den Inhalt (die Datei liegt auf dem Server). Deshalb wird der
+    // Pfad zu einem Element, das beim Ueberfahren den Inhalt zeigt.
+    // WICHTIG: laeuft auf BEREITS escaptem Text – hier darf nichts mehr
+    // entschaerft werden, sonst waere die Ersetzung eine XSS-Luecke.
+    const DOC_RE = /skills\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.\/-]+\.md)/g;
+
+    function docLinks(escaped, skillName) {
+        return String(escaped).replace(DOC_RE, function (treffer, skill, datei) {
+            return '<span class="skcfg-doc" data-skill="' + skill + '" data-file="' + datei
+                + '" tabindex="0" role="button">' + treffer + '</span>';
+        });
+    }
+
+    let _docBox = null;
+    let _docCache = {};
+    let _docTimer = null;
+
+    function docBox() {
+        if (_docBox) return _docBox;
+        _docBox = document.createElement('div');
+        _docBox.className = 'skcfg-docbox';
+        _docBox.setAttribute('hidden', '');
+        document.body.appendChild(_docBox);
+        // Die Vorschau selbst darf ueberfahren werden (Scrollen im Inhalt),
+        // ohne dass sie verschwindet.
+        _docBox.addEventListener('mouseenter', () => { if (_docTimer) clearTimeout(_docTimer); });
+        _docBox.addEventListener('mouseleave', docHide);
+        return _docBox;
+    }
+
+    function docHide() {
+        if (_docTimer) { clearTimeout(_docTimer); _docTimer = null; }
+        if (_docBox) _docBox.setAttribute('hidden', '');
+    }
+
+    async function docShow(el) {
+        const skill = el.getAttribute('data-skill');
+        const datei = el.getAttribute('data-file');
+        const key = skill + '/' + datei;
+        const box = docBox();
+        if (_docTimer) { clearTimeout(_docTimer); _docTimer = null; }
+
+        // Platzieren: unter dem Element, aber im Fenster gehalten.
+        const r = el.getBoundingClientRect();
+        box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 620)) + 'px';
+        box.style.top = (r.bottom + window.scrollY + 6) + 'px';
+        box.removeAttribute('hidden');
+
+        if (_docCache[key] === undefined) {
+            box.innerHTML = '<div class="skcfg-doc-head">' + esc(datei) + '</div>'
+                + '<div class="skcfg-doc-body"><em>' + esc(tr('skcfg.doc_loading', 'Lade…')) + '</em></div>';
+            try {
+                const r2 = await fetch('/api/skills/doc?skill=' + encodeURIComponent(skill)
+                    + '&file=' + encodeURIComponent(datei), { headers: authHeaders() });
+                const d = await r2.json();
+                _docCache[key] = (d && d.ok) ? d.text : null;
+            } catch (e) {
+                _docCache[key] = null;
+            }
+        }
+        const text = _docCache[key];
+        if (text === null || text === undefined) {
+            box.innerHTML = '<div class="skcfg-doc-head">' + esc(datei) + '</div>'
+                + '<div class="skcfg-doc-body">'
+                + esc(tr('skcfg.doc_missing', 'Datei nicht gefunden oder nicht lesbar.')) + '</div>';
+            return;
+        }
+        // Markdown ueber den gemeinsamen Renderer (chatlib) – faellt auf
+        // vorformatierten Text zurueck, wenn er nicht geladen ist.
+        let inhalt;
+        if (window.JarvisChatLib && window.JarvisChatLib.renderMarkdown) {
+            inhalt = window.JarvisChatLib.renderMarkdown(text);
+        } else {
+            inhalt = '<pre>' + esc(text) + '</pre>';
+        }
+        const zeilen = text.split('\n').length;
+        box.innerHTML = '<div class="skcfg-doc-head">' + esc(datei)
+            + '<span class="skcfg-doc-meta">' + zeilen + ' '
+            + esc(tr('skcfg.doc_lines', 'Zeilen')) + '</span></div>'
+            + '<div class="skcfg-doc-body">' + inhalt + '</div>';
+    }
+
+    // Delegiert: die Beschreibungen werden bei jedem Reiterwechsel neu gebaut.
+    function bindDocPreview() {
+        if (bindDocPreview._bound) return;
+        bindDocPreview._bound = true;
+        document.addEventListener('mouseover', (e) => {
+            const el = e.target && e.target.closest ? e.target.closest('.skcfg-doc') : null;
+            if (el) docShow(el);
+        });
+        document.addEventListener('mouseout', (e) => {
+            const el = e.target && e.target.closest ? e.target.closest('.skcfg-doc') : null;
+            if (!el) return;
+            // Nachlauf: der Weg vom Pfad zur Vorschau darf sie nicht schliessen.
+            _docTimer = setTimeout(docHide, 220);
+        });
+        // Tastatur: Fokus zeigt, Escape schliesst.
+        document.addEventListener('focusin', (e) => {
+            const el = e.target && e.target.closest ? e.target.closest('.skcfg-doc') : null;
+            if (el) docShow(el);
+        });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') docHide(); });
+    }
     function tr(key, fallback) {
         const v = window.t ? window.t(key) : null;
         return (!v || v === key) ? fallback : v;
@@ -143,12 +250,14 @@
                 } catch (e) { /* statisches enum bleibt */ }
             }));
 
+            bindDocPreview();
+
             let html = '';
             keys.forEach(key => {
                 const f     = schema[key] || {};
                 const label = esc(f.label || key);
                 const hint  = f.description
-                    ? '<div class="kb-hint" style="margin-top:4px;">' + esc(f.description) + '</div>' : '';
+                    ? '<div class="kb-hint" style="margin-top:4px;">' + docLinks(esc(f.description), name) + '</div>' : '';
                 const val   = values[key] !== undefined ? values[key] : f.default;
                 const id    = 'skcfg-' + name + '-' + key;
 

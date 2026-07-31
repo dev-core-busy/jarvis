@@ -56,9 +56,16 @@
 
     // ── Admin-Übersicht ─────────────────────────────────────────────────────
     var POLL_MS = 30000;
+    var HOVER_ZU_MS = 350;      // Nachlauf beim Verlassen (Zittern vermeiden)
     var els = {};
     var _timer = null;
     var _bound = false;
+    // Wodurch ist das Panel offen? Ein per KLICK geoeffnetes Panel darf beim
+    // Wegbewegen der Maus NICHT zufallen - sonst waere die Liste nicht
+    // benutzbar (Rechtsklick, Scrollen). Nur was der Hover geoeffnet hat,
+    // schliesst der Hover auch wieder.
+    var _viaHover = false;
+    var _zuTimer = null;
 
     function fmt(ts) {
         if (!ts) return '–';
@@ -96,7 +103,8 @@
             zeilen.push('<span class="pt-usr-kv">' + t('sessions.active', 'aktiv')
                 + ': <b>' + esc(relativ(u.last_seen)) + '</b></span>');
         }
-        return '<div class="pt-usr-item">'
+        return '<div class="pt-usr-item" data-user="' + esc(u.username) + '"'
+            + ' title="' + esc(t('sessions.kick_hint', 'Rechtsklick: Benutzer abmelden')) + '">'
             + '<div class="pt-usr-top">' + pill
             + '<span class="pt-usr-name" title="' + esc(u.username) + '">' + esc(u.display) + '</span>'
             + api + '</div>'
@@ -134,22 +142,67 @@
             .catch(function () { });
     }
 
+    // ── Zwangsabmeldung per Rechtsklick ─────────────────────────────────
+    // Tokens sind zustandslos; der Server widerruft alle aelteren Tokens des
+    // Benutzers (siehe /api/sessions/{user}/logout). Wirkung beim naechsten
+    // Request des Betroffenen - kein Sperren, eine Neuanmeldung geht sofort.
+    function kick(name) {
+        var tok = anyToken();
+        if (!tok) return;
+        var frage = t('sessions.kick_confirm', '{u} abmelden?').replace('{u}', name);
+        if (!window.confirm(frage)) return;
+        fetch('/api/sessions/' + encodeURIComponent(name) + '/logout', {
+            method: 'POST', headers: { 'Authorization': 'Bearer ' + tok },
+        }).then(function (r) { return r.json().catch(function () { return {}; }); })
+          .then(function (d) {
+              if (!d || !d.ok) {
+                  window.alert((d && d.detail)
+                      || t('sessions.kick_failed', 'Abmelden fehlgeschlagen.'));
+                  return;
+              }
+              load();
+          })
+          .catch(function () {
+              window.alert(t('sessions.kick_failed', 'Abmelden fehlgeschlagen.'));
+          });
+    }
+
     function offen() { return els.panel && !els.panel.hasAttribute('hidden'); }
 
     function schliessen() {
+        if (_zuTimer) { clearTimeout(_zuTimer); _zuTimer = null; }
+        _viaHover = false;
         if (els.panel) els.panel.setAttribute('hidden', '');
         if (els.btn) els.btn.setAttribute('aria-expanded', 'false');
         if (_timer) { clearInterval(_timer); _timer = null; }
     }
 
-    function oeffnen() {
+    function oeffnen(viaHover) {
+        if (_zuTimer) { clearTimeout(_zuTimer); _zuTimer = null; }
+        if (offen()) {
+            // Bereits offen: ein Klick auf ein per Hover geoeffnetes Panel
+            // macht es dauerhaft (sonst faellt es beim Wegziehen wieder zu).
+            if (!viaHover) _viaHover = false;
+            return;
+        }
+        _viaHover = !!viaHover;
         if (els.panel) els.panel.removeAttribute('hidden');
         if (els.btn) els.btn.setAttribute('aria-expanded', 'true');
         load();
         if (!_timer) _timer = setInterval(load, POLL_MS);
     }
 
-    function toggle() { if (offen()) schliessen(); else oeffnen(); }
+    // Klick am Knopf. FALLSTRICK: Wer den Knopf anklickt, hat ihn vorher
+    // ueberfahren – mouseenter oeffnet das Panel also SCHON, bevor der Klick
+    // ankommt. Ein reiner Umschalter wuerde es damit sofort wieder schliessen,
+    // der Klick saehe wirkungslos aus. Deshalb: ist das Panel per HOVER offen,
+    // macht der erste Klick es dauerhaft (festhalten), der zweite schliesst.
+    // Fuer den Benutzer bleibt es damit das gewohnte Auf/Zu.
+    function toggle() {
+        if (!offen()) { oeffnen(false); return; }
+        if (_viaHover) { oeffnen(false); return; }   // festhalten statt schliessen
+        schliessen();
+    }
 
     function init() {
         els.wrap = document.getElementById('pt-usr-wrap');
@@ -163,6 +216,30 @@
         if (_bound) return;
         _bound = true;
         els.btn.addEventListener('click', function (e) { e.stopPropagation(); toggle(); });
+
+        // Hover oeffnet, Verlassen schliesst - aber nur, wenn der Hover es auch
+        // geoeffnet hat. Gebunden am WRAP (Knopf + Panel liegen darin), sonst
+        // faellt das Panel beim Weg vom Knopf zur Liste zu.
+        els.wrap.addEventListener('mouseenter', function () { oeffnen(true); });
+        els.wrap.addEventListener('mouseleave', function () {
+            if (!_viaHover) return;                    // per Klick geoeffnet: bleibt
+            if (_zuTimer) clearTimeout(_zuTimer);
+            _zuTimer = setTimeout(function () {
+                if (_viaHover) schliessen();
+            }, HOVER_ZU_MS);
+        });
+
+        // Rechtsklick auf eine Zeile: Benutzer abmelden.
+        els.list.addEventListener('contextmenu', function (e) {
+            var row = e.target && e.target.closest ? e.target.closest('.pt-usr-item') : null;
+            if (!row) return;
+            e.preventDefault();
+            // Ein per Hover geoeffnetes Panel darf waehrend des Bestaetigungs-
+            // dialogs nicht zufallen - der Dialog nimmt den Mauszeiger weg.
+            _viaHover = false;
+            if (_zuTimer) { clearTimeout(_zuTimer); _zuTimer = null; }
+            kick(row.getAttribute('data-user') || '');
+        });
         // Klick daneben schließt – wie beim Dokumente-Panel.
         document.addEventListener('click', function (e) {
             if (offen() && els.wrap && !els.wrap.contains(e.target)) schliessen();

@@ -790,6 +790,26 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
   `release_memory_to_os()` (malloc_trim). Verifiziert DEV: 300 Dateien = +65 MB RSS statt
   linear; realer Lauf bleibt bei ~1,6 GB flach. Der langsame Pfad (Rebuild) greift nur noch
   bei GEAENDERTEN Dateien (alte Chunks entfernen).
+- **MASSSTABSPROBE 2026-07-31** (`tests/scale_rehearsal.py`, DEV, 900 Dateien / 12.387 Chunks,
+  3 h Laufzeit, 366 Messpunkte): Speicher ueber ZWEI vollstaendige Durchgaenge flach bei
+  1269–1518 MB (Spitze 1538 MB) – der historische Abbruchpunkt bei ~600 Dateien wurde zweimal
+  ohne Regung passiert. 12/12 Pruefungen. Suche warm 47 ms (Median), kalt 593 ms inkl.
+  BM25-Aufbau; Lern-Notiz anhaengen 191 ms mit inkrementellem BM25-Nachtrag.
+- **EIN VOLL-REINDEX VON 900 DATEIEN DAUERT ~2 STUNDEN** (7012 s gemessen, **~2 Chunks/s**).
+  Das ist e5-small auf einer CPU ohne SSE4.2/AVX – ECHT liegt mit 893 Dateien gleichauf.
+  Diese Zahl erklaert mehrere Entscheidungen weiter oben und sollte man kennen, BEVOR man
+  einen Neuaufbau anstoesst:
+  - `resume_interrupted_reindex()` ist kein Luxus: ein Neustart bei 80 % kostet ohne
+    Fortsetzung anderthalb Stunden.
+  - Der Unterschied „inkrementell vs. voll" ist kein Feinschliff, sondern Faktor ~30.000
+    (0,2 s Leerlauf gegen 7012 s). Wer im Zweifel ist, nimmt `incremental=True`.
+  - Ein Modellwechsel (anderes Embedding-Modell) bedeutet zwei Stunden Stillstand der
+    Wissenssuche, nicht „einmal neu einlesen".
+  - **FALLSTRICK bei eigenen Messungen:** `force_reindex()` ohne Schalter ist ein
+    VOLLSTAENDIGER Neuaufbau. In der Massstabsprobe hat genau das den Abschnitt
+    „50 Dateien loeschen" mit 6568 s vergiftet – die Zahl sah wie eine katastrophale
+    Loeschdauer aus und war in Wahrheit ein zweiter Voll-Reindex. Das Loeschen selbst ist
+    eine Aufraeumaktion (ein `remove_files()`-Sammelaufruf) und kostet Sekunden.
 - **"Dateien" vs. "Indiziert":** `total_files` ist die Anzahl indizierbarer Dateien in den
   Wissensordnern (`get_disk_file_count()`, 60 s gecacht, Hintergrund-Refresh),
   `indexed_files` die Anzahl im FAISS-Index. Frueher stand in beiden die Index-Zahl –

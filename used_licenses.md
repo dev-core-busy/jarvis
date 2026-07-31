@@ -59,15 +59,15 @@ beliebig kombinierbar.** Zwei Richtungen sind relevant und werden unten konkret:
 
 | Lizenzfamilie | Python | Node | Go | Σ | Bewertung |
 |---|---:|---:|---:|---:|---|
-| MIT / BSD / ISC / 0BSD | 117 | 124 | 21 | **262** | unkritisch, Namensnennung genügt |
-| Apache-2.0 | 49 | 6 | 1 | **56** | unkritisch, `NOTICE` beachten |
+| MIT / BSD / ISC / 0BSD | 110 | 124 | 21 | **255** | unkritisch, Namensnennung genügt |
+| Apache-2.0 | 48 | 6 | 1 | **55** | unkritisch, `NOTICE` beachten |
 | PSF / MIT-CMU / BSL-1.0 / Unlicense / BlueOak | 5 | 1 | 1 | **7** | unkritisch |
 | **MPL-2.0** (auch in Kombination) | 3 | – | – | **3** | dateiweises Copyleft, bei unveränderter Nutzung folgenlos |
 | **LGPL-3.0** | 3 | 2 | – | **5** | Austauschbarkeit muss gewahrt bleiben |
-| **GPL-2.0 / GPL-3.0** | 3 | **1** | – | **4** | **prüfungsbedürftig – Abschnitt 4.1 und 4.2** |
-| **proprietär** | 17 | – | – | **17** | 16× NVIDIA-CUDA, 1× SAP – Abschnitt 4.4/4.5 |
+| **GPL-2.0 / GPL-3.0** | **0** | **1** | – | **1** | nur noch die WhatsApp-Bridge – Abschnitt 4.1 |
+| **proprietär** | **1** | – | – | **1** | nur noch SAP `hdbcli` – Abschnitt 4.5 |
 | keine Angabe / unklar | 1 | – | 2 | **3** | manuell zu klären – Abschnitt 4.3 und 4.7 |
-| | **198** | **134** | **25** | **357** | |
+| | **171** | **134** | **25** | **330** | |
 
 **Zählregel:** Kombinierte Ausdrücke zählen nach ihrem **strengsten** Bestandteil –
 `MPL-2.0 AND MIT` steht bei MPL, nicht bei MIT. Wahlrechte (`Apache-2.0 OR BSD-3-Clause`)
@@ -79,18 +79,24 @@ Die Go-Zahl ist bewusst *nicht* die aus `go list -m all` (193): der Modulgraph e
 Module, die nie übersetzt werden und nicht einmal im Cache liegen. Gezählt wurde, was
 `go list -deps` für `GOOS=windows` tatsächlich einbindet — 25.
 
-Von den 198 Python-Distributionen sind **40 direkt angefordert** (`requirements.txt` +
-`skill.json` — deklariert sind 42, `pyodata` und `pyrfc` sind nicht installiert), die
-übrigen **158 kommen transitiv mit**. Genau dort — und nicht in der kurzen, gut
-überblickbaren `requirements.txt` — sitzen sämtliche GPL- und alle proprietären Pakete.
+Von den 171 Python-Distributionen sind **39 direkt angefordert** (`requirements.txt` +
+`skill.json` — deklariert sind 41, `pyodata` und `pyrfc` sind nicht installiert), die
+übrigen **132 kommen transitiv mit**. Genau dort — und nicht in der kurzen, gut
+überblickbaren `requirements.txt` — saßen sämtliche GPL- und alle proprietären Pakete.
 Die Spalte „Rolle" in Abschnitt 9 macht das je Paket sichtbar.
+
+> **Aufgeräumt am 2026-07-31.** Die erste Fassung dieser Liste zählte 198
+> Python-Distributionen mit 3 GPL- und 17 proprietären Paketen. 27 davon waren
+> nachweislich ungenutzt und wurden entfernt (Abschnitte 4.2 und 4.4). Übrig bleiben
+> **eine** GPL-Bindung (WhatsApp-Bridge, eigener Prozess) und **ein** proprietäres Paket
+> (SAP `hdbcli`, ohne Alternative). Das venv schrumpfte dabei von 8,4 GB auf 2,4 GB.
 
 ---
 
 ## 4. Was Aufmerksamkeit braucht
 
-Sieben Punkte. Die ersten drei betreffen die Lizenzlage, die übrigen sind
-Auffälligkeiten, die bei der Erhebung sichtbar wurden.
+Sieben Punkte. **4.2 und 4.4 sind am 2026-07-31 erledigt** und bleiben als Begründung
+stehen, damit niemand die Pakete versehentlich zurückholt. Die übrigen fünf sind offen.
 
 ### 4.1 GPL-3.0 in der WhatsApp-Bridge
 
@@ -108,9 +114,9 @@ GPL-3.0-Komponente mit und schuldet dafür den Quelltext samt Installationsinfor
 > Dauer-Randbedingung „WhatsApp am Echt-System"). Wer sie dort aktiviert, aktiviert
 > damit auch diese Pflicht.
 
-### 4.2 GPL im Backend-Prozess – über `pyautogui`
+### 4.2 GPL im Backend-Prozess – über `pyautogui` ✅
 
-Drei GPL-Pakete liegen **im selben Python-Prozess** wie das Backend:
+Drei GPL-Pakete lagen **im selben Python-Prozess** wie das Backend:
 
 | Paket | Lizenz | Gezogen von |
 |---|---|---|
@@ -144,7 +150,16 @@ Pakete:
 | `PyGetWindow`, `PyRect`, `PyScreeze`, `pytweening`, `pyperclip` | BSD/MIT | unkritisch |
 
 `pyperclip` ist ebenfalls ungenutzt – die Zwischenablage läuft über `xclip`
-(`backend/tools/clipboard.py`), nicht über Python.
+(`backend/tools/clipboard.py`), nicht über Python. Die einzige Erwähnung steht in
+`skills/claude_bridge/skill.md`, einer veralteten Beschreibung; der tatsächliche Code in
+`claude_bridge/main.py` ruft `xclip` auf.
+
+> ### ✅ Erledigt am 2026-07-31
+> `pyautogui` ist aus `requirements.txt` entfernt, die neun Pakete sind auf DEV
+> deinstalliert. **Damit ist die GPL-Berührung auf der Python-Seite bei null.**
+> Nachgeprüft: `import backend.main` läuft, Dienst nach Neustart aktiv, Portal und
+> Einstellungen HTTP 200. Die Zeile in `requirements.txt` ist durch einen Kommentar
+> ersetzt, der erklärt, warum sie nicht zurückkommen darf.
 
 Ein Streichen der Zeile aus `requirements.txt` samt
 `pip uninstall pyautogui mouseinfo pymsgbox python3-xlib pygetwindow pyrect pyscreeze pytweening pyperclip`
@@ -164,9 +179,9 @@ Wer nicht wählt, wählt nicht implizit die harmlosere Variante. Für eine ausge
 `.exe` ist die **FreeType License (FTL)** die passende Wahl – sie ist BSD-artig, verlangt
 aber einen Hinweis in der Dokumentation („credit"). Dieser Hinweis fehlt derzeit.
 
-### 4.4 17 proprietäre NVIDIA-Pakete auf einer Maschine ohne GPU
+### 4.4 17 proprietäre NVIDIA-Pakete auf einer Maschine ohne GPU ✅
 
-Über `sentence-transformers` → `transformers` → `torch` zieht der Wissens-Index den
+Über `sentence-transformers` → `transformers` → `torch` zog der Wissens-Index den
 kompletten CUDA-Stack: 16 `nvidia-*`-Pakete plus `cuda-bindings`, sämtlich unter
 NVIDIA-eigenen Lizenzen (`Other/Proprietary License`, `LicenseRef-NVIDIA-*`).
 
@@ -175,10 +190,31 @@ der CPU sogar SSE4.2 (deshalb `numpy<2.1`). Die Pakete werden nie geladen. Sie b
 aber mehrere Gigabyte und bringen proprietäre Lizenztexte in die Inventur, die man bei
 einer Weitergabe des Images mitverteilen würde.
 
-Abhilfe wäre `torch` aus dem CPU-Index zu installieren
-(`--index-url https://download.pytorch.org/whl/cpu`); dann entfällt der gesamte Block.
-**Nicht ungeprüft umstellen** – der Wissens-Index müsste danach einmal durchlaufen, und
-der Reindex ist der Vorgang, der auf ECHT schon dreimal per OOM abgebrochen ist.
+> ### ✅ Erledigt am 2026-07-31
+> `torch` läuft jetzt als CPU-Variante, alle 18 CUDA-Pakete (17 proprietäre plus
+> `triton`) sind entfernt. **Das venv schrumpfte von 8,4 GB auf 2,4 GB.**
+>
+> ```bash
+> pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.10.0+cpu"
+> pip uninstall -y cuda-bindings cuda-pathfinder triton nvidia-*-cu12
+> ```
+>
+> **Das Suffix `+cpu` ist Pflicht.** Mit `torch==2.10.0` meldet pip
+> „Requirement already satisfied" und tut nichts – das installierte `2.10.0+cu128`
+> erfüllt die Bedingung ja. Genau darauf bin ich beim ersten Versuch hereingefallen.
+>
+> **Ein Reindex war NICHT nötig, entgegen der ursprünglichen Annahme hier.** Der
+> Gegenbeweis ist einfach: Die Einbettung desselben Satzes hat vor und nach dem Wechsel
+> denselben SHA (`ad10992e7ec1e81f`, 384 Dimensionen, identische Gleitkommawerte). Das
+> ist auch der Grund – `torch.cuda.is_available()` war schon vorher `False`, gerechnet
+> wurde also die ganze Zeit auf denselben CPU-Kernen. Das CUDA-Rad brachte nur
+> Bibliotheken mit, die nie geladen wurden.
+>
+> Gegengeprüft mit einem echten Suchlauf über das Wissens-Werkzeug: 4 Treffer aus dem
+> bestehenden Index, warme Suche 17–20 ms, Dienst nach Neustart aktiv.
+>
+> **Für eine Neuinstallation** steht der Befehl jetzt als Kommentar in
+> `requirements.txt` – ohne ihn zieht `sentence-transformers` das CUDA-Rad wieder herein.
 
 ### 4.5 SAP: proprietär und teils gar nicht installiert
 
@@ -302,9 +338,9 @@ in der Spalte „Rolle":
 
 ---
 
-## 9. Python – Backend, Skills, Wissenssuche (198 Distributionen)
+## 9. Python – Backend, Skills, Wissenssuche (171 Distributionen)
 
-### MIT (65)
+### MIT (62)
 
 | Paket | Version | Rolle |
 |---|---|---|
@@ -352,11 +388,9 @@ in der Spalte „Rolle":
 | `pyotp` | 2.9.0 | Kern |
 | `pyparsing` | 3.3.2 | transitiv |
 | `pyproject_hooks` | 1.2.0 | transitiv |
-| `PyScreeze` | 1.0.1 | transitiv |
 | `python-docx` | 1.2.0 | Kern, Skill `knowledge`, Skill `office` |
 | `python-pam` | 2.0.2 | Kern |
 | `python-pptx` | 1.0.2 | Kern, Skill `office` |
-| `pytweening` | 1.2.0 | transitiv |
 | `PyYAML` | 6.0.3 | transitiv |
 | `referencing` | 0.37.0 | transitiv |
 | `rich` | 14.3.3 | transitiv |
@@ -364,7 +398,6 @@ in der Spalte „Rolle":
 | `setuptools` | 74.1.3 | Skill `vision` |
 | `six` | 1.17.0 | Kern |
 | `tabulate` | 0.10.0 | transitiv |
-| `triton` | 3.6.0 | transitiv |
 | `typer` | 0.24.1 | transitiv |
 | `typer-slim` | 0.24.0 | transitiv |
 | `typing-inspection` | 0.4.2 | transitiv |
@@ -374,14 +407,13 @@ in der Spalte „Rolle":
 | `WsgiDAV` | 4.3.3 | Kern |
 | `zipp` | 3.23.0 | transitiv |
 
-### Apache-2.0 (48)
+### Apache-2.0 (47)
 
 | Paket | Version | Rolle |
 |---|---|---|
 | `aiosignal` | 1.4.0 | transitiv |
 | `bcrypt` | 5.0.0 | transitiv |
 | `chromadb` | 1.5.7 | transitiv |
-| `cuda-pathfinder` | 1.4.3 | transitiv |
 | `distro` | 1.9.0 | transitiv |
 | `flatbuffers` | 25.12.19 | transitiv |
 | `frozenlist` | 1.8.0 | transitiv |
@@ -427,7 +459,7 @@ in der Spalte „Rolle":
 | `websocket-client` | 1.9.0 | transitiv |
 | `yarl` | 1.23.0 | transitiv |
 
-### BSD (23)
+### BSD (19)
 
 | Paket | Version | Rolle |
 |---|---|---|
@@ -438,12 +470,8 @@ in der Spalte „Rolle":
 | `numpy` | 2.0.2 | Kern |
 | `psutil` | 6.1.1 | Kern |
 | `pyasn1_modules` | 0.4.2 | transitiv |
-| `PyAutoGUI` | 0.9.54 | Kern |
 | `pybase64` | 1.4.3 | transitiv |
-| `PyGetWindow` | 0.0.9 | transitiv |
 | `Pygments` | 2.19.2 | transitiv |
-| `pyperclip` | 1.11.0 | transitiv |
-| `PyRect` | 0.2.0 | transitiv |
 | `python-dotenv` | 1.0.1 | Kern |
 | `requests-oauthlib` | 2.0.0 | transitiv |
 | `scipy` | 1.17.1 | transitiv |
@@ -475,26 +503,7 @@ in der Spalte „Rolle":
 | `pypdf` | 6.11.0 | transitiv |
 | `scikit-learn` | 1.8.0 | transitiv |
 | `sse-starlette` | 3.0.3 | Kern |
-| `torch` | 2.10.0 | transitiv |
-
-### proprietär (14)
-
-| Paket | Version | Rolle |
-|---|---|---|
-| `hdbcli` | 2.29.25 | Skill `sap` |
-| `nvidia-cublas-cu12` | 12.8.4.1 | transitiv |
-| `nvidia-cuda-cupti-cu12` | 12.8.90 | transitiv |
-| `nvidia-cuda-nvrtc-cu12` | 12.8.93 | transitiv |
-| `nvidia-cuda-runtime-cu12` | 12.8.90 | transitiv |
-| `nvidia-cudnn-cu12` | 9.10.2.21 | transitiv |
-| `nvidia-cufft-cu12` | 11.3.3.83 | transitiv |
-| `nvidia-cufile-cu12` | 1.13.1.3 | transitiv |
-| `nvidia-curand-cu12` | 10.3.9.90 | transitiv |
-| `nvidia-cusolver-cu12` | 11.7.3.90 | transitiv |
-| `nvidia-cusparse-cu12` | 12.5.8.93 | transitiv |
-| `nvidia-nccl-cu12` | 2.27.5 | transitiv |
-| `nvidia-nvjitlink-cu12` | 12.8.93 | transitiv |
-| `nvidia-nvtx-cu12` | 12.8.90 | transitiv |
+| `torch` | 2.10.0+cpu | transitiv |
 
 ### LGPL-3.0 (3)
 
@@ -503,14 +512,6 @@ in der Spalte „Rolle":
 | `edge-tts` | 7.2.7 | Kern |
 | `ldap3` | 2.9.1 | Kern |
 | `python-telegram-bot` | 22.8 | Skill `telegram` |
-
-### proprietär (NVIDIA) (3)
-
-| Paket | Version | Rolle |
-|---|---|---|
-| `cuda-bindings` | 12.9.4 | transitiv |
-| `nvidia-cusparselt-cu12` | 0.7.1 | transitiv |
-| `nvidia-nvshmem-cu12` | 3.4.5 | transitiv |
 
 ### PSF-2.0 (3)
 
@@ -526,13 +527,6 @@ in der Spalte „Rolle":
 |---|---|---|
 | `cryptography` | 46.0.5 | transitiv |
 | `uritemplate` | 4.2.0 | transitiv |
-
-### GPL-3.0+ (2)
-
-| Paket | Version | Rolle |
-|---|---|---|
-| `MouseInfo` | 0.1.3 | transitiv |
-| `PyMsgBox` | 2.0.1 | transitiv |
 
 ### MIT OR Apache-2.0 (2)
 
@@ -589,12 +583,6 @@ in der Spalte „Rolle":
 |---|---|---|
 | `dlib` | 20.0.0 | transitiv |
 
-### GPL-2.0 (1)
-
-| Paket | Version | Rolle |
-|---|---|---|
-| `python3-xlib` | 0.15 | transitiv |
-
 ### ISC (1)
 
 | Paket | Version | Rolle |
@@ -636,6 +624,12 @@ in der Spalte „Rolle":
 | Paket | Version | Rolle |
 |---|---|---|
 | `tqdm` | 4.67.3 | transitiv |
+
+### proprietär (1)
+
+| Paket | Version | Rolle |
+|---|---|---|
+| `hdbcli` | 2.29.25 | Skill `sap` |
 
 
 ## 10. Node.js – WhatsApp-Bridge (134 Pakete)

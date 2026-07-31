@@ -49,6 +49,14 @@ RELATIVE_CUT = 0.5
 # ... aber nie weniger als so viele Treffer zurueckgeben (sonst kippt der Cut
 # bei einem zufaellig sehr hohen Top-Score die gesamte Trefferliste).
 MIN_KEEP = 3
+# OHNE lexikalischen Anker (kein Wort der Anfrage kommt im Bestand vor) wird
+# NICHT auf MIN_KEEP aufgefuellt. Die Rangfolge beruht dann allein auf
+# Vektor-Aehnlichkeit, und die ist bei bedeutungslosen Anfragen nachweislich
+# nichtssagend: gemessen am Echt-Index liegt Zeichensalat mit Cosine 0.82-0.86
+# im selben Bereich wie echte Fachfragen. Drei erzwungene Treffer sind dort
+# drei Einladungen zum Erfinden – einer reicht, um dem Modell die Einschaetzung
+# zu ueberlassen. Siehe has_lexical_anchor().
+MIN_KEEP_OHNE_ANKER = 1
 
 # BM25-Parameter (Standardwerte aus der Literatur)
 BM25_K1 = 1.5
@@ -519,6 +527,40 @@ class VectorStore:
             out = self._search_hybrid_once(query, max_results, weight_fn, strict=False)
         return out or []
 
+    def has_lexical_anchor(self, query: str) -> bool | None:
+        """Kommt ueberhaupt ein Wort der Anfrage im Bestand vor?
+
+        Das ist das einzige Signal, das MUELL zuverlaessig von einer echten Frage
+        unterscheidet – nachgemessen am Echt-Index (9207 Chunks):
+
+        | Gruppe                              | ohne BM25-Treffer |
+        |-------------------------------------|-------------------|
+        | echte Fachfragen                    | 0 von 12          |
+        | sinnvolle Fragen, falsches Thema    | 0 von 8           |
+        | englische Fragen an deutschen Text  | 0 von 5           |
+        | sehr kurze Anfragen                 | 0 von 4           |
+        | Zeichensalat                        | 5 von 6           |
+
+        **Der Cosine-Wert taugt dafuer NICHT.** Gegen die Erwartung schneidet
+        Zeichensalat dort BESSER ab als sinnvolle Fragen zum falschen Thema:
+        ``qqq www eee rrr ttt`` erreicht 0.8644 und schlaegt damit drei echte
+        Fachfragen (min 0.8434). e5 legt bedeutungslose Zeichenfolgen in eine
+        generische Region, die zu allem maessig aehnlich ist. Ein absoluter
+        Cosine-Boden ist deshalb das falsche Werkzeug – gemessen, nicht geraten.
+
+        Rueckgabe ``None`` = **unbekannt** (kein lexikalischer Index verfuegbar).
+        Der Aufrufer darf daraus KEINE Warnung ableiten: fehlt der Index, ist die
+        Aussage nicht „kein Anker", sondern „nicht pruefbar".
+        """
+        try:
+            self._ensure_lexical_index()
+            with self._lock:
+                if not self._lex_postings:
+                    return None
+            return bool(self._search_lexical_idx(query, 1))
+        except Exception:
+            return None
+
     def _search_hybrid_once(self, query: str, max_results: int, weight_fn,
                             strict: bool) -> list[tuple[float, str, str]] | None:
         """Ein Durchgang der Hybridsuche.
@@ -552,10 +594,26 @@ class VectorStore:
         if terms and reduced != query.strip().lower():
             channels.append(self._search_vector_idx(reduced, pool))
 
-        channels.append(self._search_lexical_idx(query, pool))
+        lexical = self._search_lexical_idx(query, pool)
+        channels.append(lexical)
 
         if not any(channels):
             return []
+
+        # Kein lexikalischer Anker -> nicht auf MIN_KEEP auffuellen (siehe dort).
+        # Nur wenn der lexikalische Index UEBERHAUPT existiert: fehlt er, ist
+        # eine leere Liste keine Aussage ueber die Anfrage, sondern ueber den
+        # Index – dann bleibt es beim normalen MIN_KEEP.
+        with self._lock:
+            lex_da = bool(self._lex_postings)
+        ohne_anker = lex_da and not lexical
+        min_keep = MIN_KEEP_OHNE_ANKER if ohne_anker else MIN_KEEP
+        # FALLSTRICK: MIN_KEEP ist eine UNTERgrenze – der relative Cut kann
+        # darueber hinaus weitere Treffer stehen lassen. Ohne Anker muss deshalb
+        # zusaetzlich hart gedeckelt werden, sonst kommen trotz min_keep=1
+        # weiterhin mehrere Treffer heraus (im Test mit kleinem Bestand: zwei).
+        if ohne_anker:
+            max_results = min(max_results, MIN_KEEP_OHNE_ANKER)
 
         rrf: dict[int, float] = defaultdict(float)
         for hits in channels:
@@ -591,7 +649,7 @@ class VectorStore:
             top = ranked[0][1] or 1.0
 
             for pos, (idx, score) in enumerate(ranked):
-                if pos >= MIN_KEEP and score < top * RELATIVE_CUT:
+                if pos >= min_keep and score < top * RELATIVE_CUT:
                     break
                 if idx >= len(meta):
                     continue

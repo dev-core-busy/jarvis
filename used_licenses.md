@@ -66,14 +66,14 @@ beliebig kombinierbar.** Zwei Richtungen sind relevant und werden unten konkret:
 | **LGPL-3.0** | 3 | 2 | – | **5** | Austauschbarkeit muss gewahrt bleiben |
 | **GPL-2.0 / GPL-3.0** | **0** | **1** | – | **1** | nur noch die WhatsApp-Bridge – Abschnitt 4.1 |
 | **proprietär** | **1** | – | – | **1** | nur noch SAP `hdbcli` – Abschnitt 4.5 |
-| keine Angabe / unklar | 1 | – | 2 | **3** | manuell zu klären – Abschnitt 4.3 und 4.7 |
+| keine Angabe / unklar | 1 | – | **0** | **1** | nur noch `chroma-hnswlib` – in `NOTICE.md` nachgetragen |
 | | **171** | **134** | **25** | **330** | |
 
 **Zählregel:** Kombinierte Ausdrücke zählen nach ihrem **strengsten** Bestandteil –
 `MPL-2.0 AND MIT` steht bei MPL, nicht bei MIT. Wahlrechte (`Apache-2.0 OR BSD-3-Clause`)
 zählen dagegen bei der permissiven Variante, weil man sie wählen darf.
-Das dual lizenzierte `freetype` (FTL **oder** GPL-2.0+) steht deshalb unter „unklar" und
-nicht unter GPL – die Wahl ist noch nicht getroffen, siehe 4.3.
+Das dual lizenzierte `freetype` (FTL **oder** GPL-2.0+) steht unter „Wahlrecht" und nicht
+unter GPL: **die Wahl ist am 2026-07-31 getroffen** (FTL, siehe `NOTICE.md`) – siehe 4.3.
 
 Die Go-Zahl ist bewusst *nicht* die aus `go list -m all` (193): der Modulgraph enthält
 Module, die nie übersetzt werden und nicht einmal im Cache liegen. Gezählt wurde, was
@@ -95,8 +95,13 @@ Die Spalte „Rolle" in Abschnitt 9 macht das je Paket sichtbar.
 
 ## 4. Was Aufmerksamkeit braucht
 
-Sieben Punkte. **4.2 und 4.4 sind am 2026-07-31 erledigt** und bleiben als Begründung
-stehen, damit niemand die Pakete versehentlich zurückholt. Die übrigen fünf sind offen.
+Sieben Punkte. **4.2, 4.3, 4.4 und 4.7 sind am 2026-07-31 erledigt** und bleiben als
+Begründung stehen, damit niemand sie versehentlich rückgängig macht. Von 4.6 ist der
+Lizenzkopf erledigt, die Figur bleibt offen.
+
+**Wirklich offen sind damit nur noch Entscheidungen, keine Codearbeit:** die
+Avatar-Figur (4.6) und die Haltung zur Weitergabe mit WhatsApp-Bridge (4.1). Beides ist
+in [`NOTICE.md`](NOTICE.md) so dokumentiert, dass eine Weitergabe heute möglich wäre.
 
 ### 4.1 GPL-3.0 in der WhatsApp-Bridge
 
@@ -167,7 +172,7 @@ Ein Streichen der Zeile aus `requirements.txt` samt
 entfernt die GPL-Bindung auf der Python-Seite **vollständig**. `Pillow` bleibt dabei
 unangetastet, es steht eigenständig in `requirements.txt`.
 
-### 4.3 FreeType im Windows-Client: Lizenzwahl erforderlich
+### 4.3 FreeType im Windows-Client: Lizenzwahl erforderlich ✅
 
 `github.com/golang/freetype` (über Fyne gebunden) ist **dual lizenziert** und verlangt
 eine ausdrückliche Wahl:
@@ -178,7 +183,14 @@ eine ausdrückliche Wahl:
 
 Wer nicht wählt, wählt nicht implizit die harmlosere Variante. Für eine ausgelieferte
 `.exe` ist die **FreeType License (FTL)** die passende Wahl – sie ist BSD-artig, verlangt
-aber einen Hinweis in der Dokumentation („credit"). Dieser Hinweis fehlt derzeit.
+aber einen Hinweis in der Dokumentation („credit").
+
+> ### ✅ Erledigt am 2026-07-31
+> Die Wahl ist in [`NOTICE.md`](NOTICE.md) Abschnitt 1 **ausdrücklich getroffen** (FTL,
+> nicht GPL-2.0+) und der geforderte Credit dort formuliert. `lizenzen_erheben.py` erkennt
+> dual lizenzierte Module jetzt am Wortlaut („your choice of exactly one") und schreibt
+> **„Wahlrecht – getroffen in NOTICE.md"** statt „unbekannt" – sonst taucht das Modul in
+> jeder Inventur wieder als ungeklärt auf und wird zum dritten Mal recherchiert.
 
 ### 4.4 17 proprietäre NVIDIA-Pakete auf einer Maschine ohne GPU ✅
 
@@ -232,7 +244,7 @@ einer Weitergabe des Images mitverteilen würde.
   Apache-2.0, benötigt zur Übersetzung aber das **NetWeaver RFC SDK**, das nur über ein
   SAP-Kundenkonto zu beziehen ist.
 
-### 4.6 Clippy: die Figur ist nicht mitlizenziert
+### 4.6 Clippy: die Figur ist nicht mitlizenziert ⚠
 
 `frontend/vendor/clippy/` enthält zwei getrennte Dinge, und nur eines davon ist frei:
 
@@ -249,16 +261,32 @@ regelmäßig unproblematisch, für ein vermarktetes Produkt mit Außenwirkung
 eigene Sprites – `skills/avatar/AVATAR-DESIGN.md` beschreibt den Weg dahin, und das ist
 der saubere Ausweg.
 
-Zusätzlich sollte `clippy.min.js` einen Lizenzkopf bekommen. Eine minifizierte Datei
-ohne jede Herkunftsangabe im Repo ist bei jeder späteren Prüfung ein Fragezeichen.
+> ### ✅ Teilweise erledigt am 2026-07-31
+> `clippy.min.js` und `clippy.css` haben jetzt einen Lizenzkopf – Inhalt unverändert
+> (md5 der ursprünglichen Bytes geprüft), nur vorangestellt. Der Kopf nennt die
+> MIT-Lizenz **und** sagt ausdrücklich, dass sie die Figur NICHT abdeckt.
+>
+> **Offen bleibt die Figur selbst** – das ist eine Entscheidung, keine Codearbeit.
 
-### 4.7 Zwei Pakete ohne Lizenzangabe
+### 4.7 Zwei Pakete ohne Lizenzangabe ✅
 
 - `chroma-hnswlib` 0.7.6 (Python, über `chromadb`) – **keine Lizenz in den Metadaten**.
   Das Projekt selbst ist Apache-2.0, das Rad deklariert es nur nicht.
-- `github.com/jsummers/gobmp` – die **angeheftete Fassung** (`v0.0.0-20151104…`) liefert
+- `github.com/jsummers/gobmp` – die **angeheftete Fassung** (`v0.0.0-20151104…`) lieferte
   keine `LICENSE`-Datei aus; erst spätere Fassungen enthalten `COPYING.txt` mit MIT.
-  Ein Anheben der Version behebt es.
+
+> ### ✅ Erledigt am 2026-07-31
+> `gobmp` ist auf `v0.0.0-20230614200233` angehoben; der Windows-Client baut damit
+> unverändert – echter mingw-Cross-Build gegen den Ausgangsstand verglichen: gleiche
+> Größe (25.687.040 Byte), 230 abweichende Byte aus dem Modulpfad im Binärabbild.
+> `chroma-hnswlib` ist als Apache-2.0 in `NOTICE.md` Abschnitt 4 nachgetragen – das
+> Projekt deklariert es nur im Rad nicht.
+>
+> **Dabei fiel ein Fehler im eigenen Erkenner auf:** `gobmp` galt auch nach dem Anheben
+> noch als „keine LICENSE-Datei“, weil die Namensliste in `lizenzen_erheben.py`
+> `COPYING.txt` nicht enthielt – die Datei lag die ganze Zeit daneben. Wer künftig einen
+> solchen Befund sieht, prüft **zuerst die Namensliste** gegen den Modulordner, bevor er
+> das Projekt verdächtigt.
 
 ---
 
@@ -817,13 +845,14 @@ in der Spalte „Rolle":
 - `golang.org/x/sys` v0.20.0
 - `golang.org/x/text` v0.16.0
 
-### MIT (7)
+### MIT (8)
 
 - `github.com/BurntSushi/toml` v1.4.0
 - `github.com/fogleman/gg` v1.3.0
 - `github.com/fredbi/uri` v1.1.0
 - `github.com/go-gl/gl` v0.0.0-20211210172815-726fda9656d6
 - `github.com/jeandeaual/go-locale` v0.0.0-20240223122105-ce5225dcaa49
+- `github.com/jsummers/gobmp` v0.0.0-20230614200233-a9de23ed2e25
 - `github.com/nicksnyder/go-i18n/v2` v2.4.0
 - `github.com/yuin/goldmark` v1.7.1
 
@@ -839,17 +868,13 @@ in der Spalte „Rolle":
 
 - `github.com/nfnt/resize` v0.0.0-20180221191011-83c6a9932646
 
-### keine LICENSE-Datei (1)
-
-- `github.com/jsummers/gobmp` v0.0.0-20151104160322-e2ba15ffa76e
-
-### unbekannt (LICENSE vorhanden) (1)
-
-- `github.com/golang/freetype` v0.0.0-20170609003504-e2365dfdc4a0
-
 ### Unlicense (1)
 
 - `github.com/gen2brain/malgo` v0.11.24
+
+### Wahlrecht – getroffen in NOTICE.md (1)
+
+- `github.com/golang/freetype` v0.0.0-20170609003504-e2365dfdc4a0
 
 ---
 

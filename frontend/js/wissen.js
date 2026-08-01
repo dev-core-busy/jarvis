@@ -783,6 +783,23 @@
         _revPlace(anchor || null);
         var box = $('wi-ext-review');
         var qa = (d.qa_pairs || []);
+        // Wie viel des Dokuments hat das Modell gesehen? Bis 2026-08-01 waren es
+        // immer nur die ersten 8000 Zeichen, und niemand erfuhr davon. Jetzt
+        // wird abschnittsweise verarbeitet – faellt trotzdem etwas weg (sehr
+        // lange Dokumente ueber MAX_FENSTER), steht es HIER. Ein stiller Verlust
+        // ist der schlimmere Fehler als ein sichtbar unvollstaendiges Ergebnis.
+        var cov = d.coverage || null;
+        var covHtml = '';
+        if (cov && cov.chars_total) {
+            var pct = Math.round((cov.chars_seen / cov.chars_total) * 100);
+            if (cov.truncated || pct < 99) {
+                covHtml = '<div style="font-size:.75rem;color:var(--warning);margin:2px 0 8px;">'
+                    + esc(t('wissen.coverage_partial', { pct: pct, n: cov.windows })) + '</div>';
+            } else if (cov.windows > 1) {
+                covHtml = '<div style="font-size:.75rem;color:var(--text-muted);margin:2px 0 8px;">'
+                    + esc(t('wissen.coverage_full', { n: cov.windows })) + '</div>';
+            }
+        }
         var qaHtml = qa.length
             ? '<label style="font-size:0.78rem;color:var(--text-secondary);display:block;margin-top:10px;">' + t('wissen.qa_audit_label', { n: qa.length }) + '</label>'
               + '<div id="wi-rev-qa" style="margin:6px 0 10px;">' + qa.map(qaRowHtml).join('') + '</div>'
@@ -795,6 +812,7 @@
         var facts = (d.facts || []);
         box.innerHTML = '<div class="wi-review">'
             + '<div style="font-weight:600;margin-bottom:6px;">' + t('wissen.review_title') + '</div>'
+            + covHtml
             + '<label style="font-size:0.78rem;color:var(--text-secondary);">' + t('wissen.title_label') + '</label>'
             + '<input class="wi-input" id="wi-rev-title" value="' + esc(d.title || '') + '">'
             + '<label style="font-size:0.78rem;color:var(--text-secondary);display:block;margin-top:8px;">'

@@ -418,6 +418,101 @@ def _vector_search(query: str, max_results: int) -> list[tuple[float, str, str]]
     return converted
 
 
+# ─── Aehnlichkeitspruefung fuer Entwuerfe (Dubletten/Widersprueche) ──────────
+# Ab welcher Cosine-Aehnlichkeit ein vorhandener Chunk dem Menschen gezeigt wird.
+# Nicht geraten: am Echt-Index (9207 Chunks) liegen echte Fachfragen gegen ihren
+# passenden Chunk bei 0.84-0.90, thematisch fremde Texte bei 0.79-0.83. 0.86
+# liegt im oberen Bereich – die Liste soll kurz und einschlaegig sein, nicht
+# vollstaendig. Wer alles sehen will, sucht in /wissen.
+AEHNLICH_AB = 0.86
+# Je Abfrage (Titel, Zusammenfassung, Fakten, Fragen) hoechstens so viele
+# Nachbarn; insgesamt gedeckelt, damit die Pruefansicht nicht zur Trefferliste wird.
+AEHNLICH_JE_ABFRAGE = 3
+AEHNLICH_GESAMT = 8
+# Relativer Schnitt: nur Treffer, die nah am besten liegen. Siehe Begruendung
+# in find_similar_existing() – der Abstand zum Spitzenwert trennt, nicht der
+# Absolutwert.
+AEHNLICH_REL = 0.97
+
+
+def find_similar_existing(doc: dict) -> dict:
+    """Sucht zu einem Entwurf bereits vorhandene, sehr aehnliche Chunks.
+
+    Abgefragt wird der INHALT, nicht nur der Titel: eine Dublette traegt selten
+    dieselbe Ueberschrift. Genommen werden Titel, Zusammenfassung, die ersten
+    Fakten und die ersten Fragen – jede fuer sich, weil ein zusammengesetzter
+    Text den Vektor verwaessert und dann zu allem maessig passt.
+
+    Gelernte Notizen werden AUSGESCHLOSSEN: sie tragen die Benutzerfrage als
+    Ueberschrift und waeren fuer eine Frage-Antwort-Abfrage immer der Top-Treffer,
+    unabhaengig vom Inhalt (dieselbe Selbstverstaerkung, deretwegen sie in der
+    normalen Suche mit LEARNED_PENALTY abgewertet werden).
+
+    Rueckgabe: ``{"items": [{file, score, text, matched}], "checked": n}``
+    """
+    vs = _get_vector_store()
+    if vs is None:
+        raise RuntimeError("Vektor-Index nicht verfuegbar")
+
+    abfragen: list[tuple[str, str]] = []
+    titel = (doc.get("title") or "").strip()
+    if titel:
+        abfragen.append(("Titel", titel))
+    zus = (doc.get("summary") or "").strip()
+    if zus:
+        abfragen.append(("Zusammenfassung", zus[:400]))
+    for f in (doc.get("facts") or [])[:3]:
+        f = str(f).strip()
+        if f:
+            abfragen.append(("Fakt", f[:300]))
+    for qa in (doc.get("qa_pairs") or [])[:3]:
+        frage = str((qa or {}).get("question") or "").strip()
+        antwort = str((qa or {}).get("answer") or "").strip()
+        if frage:
+            # Frage UND Antwort: die Frage allein findet oft nur gleichartige
+            # Fragen, die Antwort traegt die eigentliche Aussage.
+            abfragen.append(("Frage", (frage + " " + antwort)[:300]))
+
+    gesehen: set[str] = set()
+    items: list[dict] = []
+    for wo, text in abfragen:
+        try:
+            treffer = vs.search(text, AEHNLICH_JE_ABFRAGE)
+        except Exception:
+            continue
+        for score, pfad, chunk in treffer:
+            if float(score) < AEHNLICH_AB:
+                continue
+            if _is_learned_note(pfad):
+                continue
+            schluessel = f"{pfad}|{chunk[:80]}"
+            if schluessel in gesehen:
+                continue
+            gesehen.add(schluessel)
+            try:
+                rel = str(Path(pfad).relative_to(PROJECT_ROOT))
+            except (ValueError, TypeError):
+                rel = str(pfad)
+            items.append({"file": rel, "score": round(float(score), 3),
+                          "text": chunk.strip()[:600], "matched": wo})
+    items.sort(key=lambda x: x["score"], reverse=True)
+
+    # RELATIVER SCHNITT – ohne ihn ist die Liste ueberwiegend Beifang.
+    # e5 komprimiert Cosine auf ~0.83-0.93; oberhalb einer absoluten Schwelle
+    # landen deshalb auch voellig unbeteiligte Chunks. Gemessen am Echt-Index:
+    # ein woertlich uebernommener Chunk fand sich mit 0.931 – und daneben drei
+    # thematisch fremde mit 0.868-0.871. Der Abstand zum Spitzenwert ist das
+    # aussagekraeftige Signal, nicht der Absolutwert.
+    #
+    # Der Grund, warum das wichtig ist, ist derselbe wie bei den
+    # "fehlgeschlagenen Dateien": eine Warnung, die zu drei Vierteln aus
+    # Rauschen besteht, wird nach dem zweiten Mal weggeklickt.
+    if items:
+        boden = items[0]["score"] * AEHNLICH_REL
+        items = [x for x in items if x["score"] >= boden]
+    return {"items": items[:AEHNLICH_GESAMT], "checked": len(abfragen)}
+
+
 def _get_skill_config() -> dict:
     try:
         return config.get_skill_states().get("knowledge", {}).get("config", {})

@@ -8946,6 +8946,35 @@ async def wissen_pending_update(doc_id: str, request: Request, user: str = Depen
     return JSONResponse({"ok": update_pending(doc_id, data)})
 
 
+@app.get("/api/wissen/pending/{doc_id}/similar")
+async def wissen_pending_similar(doc_id: str, user: str = Depends(require_auth)):
+    """Was steht zu diesem Entwurf SCHON im Wissensbestand?
+
+    Bis 2026-08-01 pruefte beim Freigeben nichts, ob dieselbe Aussage bereits
+    vorhanden ist – oder ob sie einer vorhandenen widerspricht. Ueber die Zeit
+    sammeln sich mehrere Fassungen derselben Information, die Suche liefert
+    dann beide, und das Modell entscheidet unbegruendet, welcher es glaubt.
+
+    Der Mensch, der ohnehin schon prueft, ist die richtige Instanz dafuer – er
+    braucht nur die Information. Automatisch zusammenfuehren waere falsch: ob
+    zwei aehnliche Aussagen eine Dublette, eine Praezisierung oder ein echter
+    Widerspruch sind, entscheidet der Inhalt, nicht die Distanz.
+    """
+    from backend.web_extractor import get_pending
+    doc = get_pending(doc_id)
+    if not doc or _norm_login(str(doc.get("created_by", ""))) != _norm_login(user):
+        return JSONResponse({"error": "Nicht gefunden"}, status_code=404)
+    try:
+        from backend.tools import knowledge as _k
+        treffer = await asyncio.to_thread(_k.find_similar_existing, doc)
+        return JSONResponse({"ok": True, **treffer})
+    except Exception as e:
+        # Die Aehnlichkeitspruefung ist eine HILFE, keine Bedingung. Faellt sie
+        # aus (kein Vektor-Index, Modell laedt gerade), muss die Freigabe
+        # trotzdem moeglich bleiben – deshalb ok:False statt HTTP-Fehler.
+        return JSONResponse({"ok": False, "error": str(e)[:200], "items": []})
+
+
 @app.post("/api/wissen/pending/{doc_id}/approve")
 async def wissen_pending_approve(doc_id: str, request: Request, user: str = Depends(require_auth)):
     """Entwurf uebernehmen – Zielgruppen MUESSEN im Bereich des Nutzers liegen."""

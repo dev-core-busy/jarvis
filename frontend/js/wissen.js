@@ -808,6 +808,10 @@
             + qaHtml
             + '<label style="font-size:0.78rem;color:var(--text-secondary);">' + t('wissen.target_groups') + '</label>'
             + '<div class="wi-groups" id="wi-rev-groups" style="margin:6px 0 10px;">' + groupBoxes('rev') + '</div>'
+            // Platz fuer die Dubletten-Warnung: sie wird NACHGELADEN und steht
+            // bewusst DIREKT ueber den Knoepfen – dort, wo die Entscheidung
+            // faellt. Weiter oben wuerde sie beim Durchscrollen uebersehen.
+            + '<div id="wi-rev-similar" style="margin:10px 0 0;"></div>'
             + '<button class="sec-btn primary" id="wi-rev-approve" type="button">' + t('wissen.approve') + '</button> '
             + '<button class="sec-btn danger" id="wi-rev-discard" type="button">' + t('wissen.discard') + '</button>'
             + '</div>';
@@ -817,6 +821,52 @@
         });
         $('wi-rev-approve').addEventListener('click', function () { approvePending(d.id); });
         $('wi-rev-discard').addEventListener('click', function () { deletePending(d.id, true); });
+        loadSimilar(d.id);
+    }
+
+    /** Zeigt bereits vorhandenes, sehr aehnliches Wissen zu diesem Entwurf.
+     *
+     * Bewusst NACHGELADEN statt Teil der Entwurfs-Antwort: die Suche braucht
+     * das Einbettungsmodell und kann beim ersten Aufruf Sekunden dauern. Die
+     * Pruefansicht soll sofort da sein; die Warnung kommt nach.
+     *
+     * Blockiert NICHTS. Faellt die Pruefung aus, bleibt der Bereich leer und
+     * die Freigabe funktioniert wie bisher – eine Hilfe, die den Vorgang
+     * aufhaelt, waere keine.
+     */
+    function loadSimilar(id) {
+        var box = $('wi-rev-similar');
+        if (!box || !id) return;
+        box.innerHTML = '<div style="font-size:.75rem;color:var(--text-muted);">'
+            + esc(t('wissen.similar_checking')) + '</div>';
+        fetch('/api/wissen/pending/' + encodeURIComponent(id) + '/similar', { headers: authH() })
+            .then(function (res) { return res.json(); })
+            .then(function (r) {
+            // Der Entwurf koennte inzwischen gewechselt haben (der Nutzer klickt
+            // schnell durch die Liste) – dann gehoert diese Antwort nicht hierher.
+            if (_revId !== id) return;
+            var el = $('wi-rev-similar');
+            if (!el) return;
+            var items = (r && r.items) || [];
+            if (!r || !r.ok || !items.length) { el.innerHTML = ''; return; }
+            el.innerHTML = '<details class="wi-similar" open>'
+                + '<summary style="cursor:pointer;color:var(--warning);font-size:.8rem;font-weight:600;">'
+                + esc(t('wissen.similar_found', { n: items.length })) + '</summary>'
+                + '<div style="font-size:.74rem;color:var(--text-muted);margin:4px 0 8px;">'
+                + esc(t('wissen.similar_hint')) + '</div>'
+                + items.map(function (it) {
+                    return '<div style="border-left:2px solid var(--warning);padding:4px 0 4px 8px;margin:6px 0;">'
+                        + '<div style="font-size:.74rem;color:var(--text-secondary);">'
+                        + '<code>' + esc(it.file) + '</code> · ' + esc(it.matched)
+                        + ' · ' + Math.round((it.score || 0) * 100) + '%</div>'
+                        + '<div style="font-size:.75rem;margin-top:2px;">' + esc(it.text) + '</div>'
+                        + '</div>';
+                }).join('')
+                + '</details>';
+        }).catch(function () {
+            var el = $('wi-rev-similar');
+            if (el) el.innerHTML = '';
+        });
     }
 
     // Auditierte Q&A-Paare aus dem Review-Formular einsammeln

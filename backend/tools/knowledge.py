@@ -20,7 +20,17 @@ from backend.config import config
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 INDEX_CACHE_PATH = PROJECT_ROOT / "data" / "knowledge_index.json"
 DEFAULT_FOLDER = "data/knowledge"
-DEFAULT_MAX_SIZE_MB = 50
+# Groessenlimit je Datei. Von 50 auf 150 angehoben (2026-08-01), nachdem auf
+# ECHT ein 130-MB-PDF (KBV-Bewertungsmassstab) als einziger ECHTER Indexfehler
+# uebrig blieb.
+#
+# Das Anheben war erst vertretbar, NACHDEM die Speicherspitze der PDF-Extraktion
+# von 6000 MB auf 306 MB gesenkt wurde (siehe _extract_text_raw). Mit dem alten
+# Stand haette dieses Limit den OOM-Kill zurueckgeholt, an dem der Reindex
+# historisch dreimal gestorben ist – die VM hat 16 GB und im Betrieb rund 8 GB
+# frei. Wer das Limit weiter anhebt, misst vorher die Spitze am groessten
+# tatsaechlich vorhandenen Dokument.
+DEFAULT_MAX_SIZE_MB = 150
 
 # Maximale Zeichen pro Treffer-Chunk in der Tool-Ausgabe.
 # MUSS groesser sein als ein vollstaendiger Chunk (_chunk_text: 200 Woerter,
@@ -702,18 +712,38 @@ def _extract_text_raw(filepath: Path, max_bytes: int) -> str | None:
 
     if suffix in EXTENSIONS_PDF:
         try:
+            import gc
             import pdfplumber
             texts = []
             total = 0
             with pdfplumber.open(str(filepath)) as pdf:
-                for p in pdf.pages:
+                # ueber den INDEX laufen, nicht ueber `for p in pdf.pages`:
+                # nur so laesst sich der Platz in der Liste danach freigeben.
+                seitenzahl = len(pdf.pages)
+                for i in range(seitenzahl):
+                    p = pdf.pages[i]
                     t = p.extract_text()
-                    # WICHTIG: pdfplumber cached pro Seite alle Layout-Objekte und
-                    # gibt sie nie von selbst frei. Ueber hunderte/tausende Seiten
-                    # (grosse Datenmodell-PDFs) waechst der RAM so auf viele GB →
-                    # OOM-Kill. flush_cache() gibt den Seiten-Cache sofort frei.
+                    # DREI Freigaben, und alle drei werden gebraucht:
+                    #   flush_cache() – leert den Layout-Cache der Seite
+                    #   close()       – gibt den pdfminer-Layoutbaum frei
+                    #   _pages[i]     – die Seiten-INSTANZ selbst; pdfplumber
+                    #                   haelt jede erzeugte Seite dauerhaft in
+                    #                   dieser Liste fest.
+                    # Der dritte Punkt ist der entscheidende und war bis
+                    # 2026-08-01 nicht da. Nachgemessen an einem 130-MB-PDF
+                    # (KBV-Bewertungsmassstab, ~9000 Seiten) auf ECHT:
+                    #   nur flush_cache()          -> Spitze 6000 MB
+                    #   zusaetzlich close+_pages   -> Spitze  306 MB
+                    # bei identischem Text (4.000.122 Zeichen) und gleicher
+                    # Dauer (251 s gegen 243 s). Faktor 20 – der Unterschied
+                    # zwischen "laeuft" und "OOM-Kill" auf dieser VM.
                     try:
                         p.flush_cache()
+                        p.close()
+                    except Exception:
+                        pass
+                    try:
+                        pdf._pages[i] = None      # privat, deshalb abgesichert
                     except Exception:
                         pass
                     if t:
@@ -723,6 +753,10 @@ def _extract_text_raw(filepath: Path, max_bytes: int) -> str | None:
                             _log.warning(f"PDF-Extraktion bei {MAX_EXTRACT_CHARS} Zeichen "
                                          f"gestoppt (grosses Dokument): {filepath.name}")
                             break
+                    # Der Zyklen-Sammler laeuft sonst erst spaet; bei tausenden
+                    # Seiten haelt das die Spitze unnoetig hoch.
+                    if i and i % 200 == 0:
+                        gc.collect()
             combined = "\n\n".join(texts)
             # OCR-Fallback bei gescannten/bildbasierten PDFs (kein/zu wenig Text-Layer)
             if len(combined.strip()) < 80:

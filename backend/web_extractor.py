@@ -2,10 +2,13 @@
 
 import asyncio
 import json
+import logging
 import re
 import time
 import uuid
 from pathlib import Path
+
+_log = logging.getLogger("jarvis.extractor")
 
 # Absolut ableiten, nicht relativ zum Arbeitsverzeichnis: sonst legt jeder
 # Aufrufer ausserhalb des Dienstes (Wartungsskript, Cron, Test) seine Entwuerfe
@@ -123,16 +126,58 @@ def _profile_provider(prof=None):
     return provider, config.current_model
 
 
-async def extract_structured_from_text(text: str, fallback_title: str = "", qa_count=None,
-                                        prof: dict = None) -> dict:
-    """Schickt beliebigen Text durch den Wissensextraktor-LLM und liefert
-    {title, summary, facts, qa_pairs}. Wiederverwendbar – u.a. fuer die
-    LLM-Anreicherung beim Wissens-Export. qa_count: gewuenschte Fragenanzahl.
-    prof: LLM-Profil des Benutzers (None = globales Aktiv-Profil)."""
+# ─── Abschnittsweise Extraktion ──────────────────────────────────────────────
+# Bis 2026-08-01 sah der Extraktor nur die ERSTEN 8000 Zeichen eines Dokuments.
+# Bei einem laengeren Handbuch fiel alles danach STILL weg – niemand erfuhr,
+# dass zwei Drittel nie betrachtet wurden. Das war der unangenehmste Teil: der
+# Fehler war unsichtbar, das Ergebnis sah vollstaendig aus.
+FENSTER_ZEICHEN = 8000
+# Ueberlappung, damit ein Fakt oder eine Anleitung, die genau auf der Grenze
+# liegt, nicht in BEIDEN Fenstern halbiert ankommt und in keinem verwertbar ist.
+FENSTER_UEBERLAPPUNG = 400
+# Deckel. 12 Fenster sind rund 92.000 Zeichen (~14.000 Woerter) und zwoelf
+# LLM-Aufrufe. Darueber hinaus waere der Import weder bezahlbar noch abwartbar;
+# was nicht mehr betrachtet wurde, wird AUSGEWIESEN statt verschwiegen.
+MAX_FENSTER = 12
+
+
+def _fenster(text: str) -> list[str]:
+    """Zerlegt den Text in ueberlappende Fenster, moeglichst an Absatzgrenzen.
+
+    Der Schnitt wandert bis zu 600 Zeichen zurueck, um einen Absatz- oder
+    Satzwechsel zu treffen. Mitten im Satz zu trennen kostet an beiden Seiten
+    Verstaendlichkeit – das Modell erfindet dann den fehlenden Rest dazu.
+    """
+    text = text or ""
+    if len(text) <= FENSTER_ZEICHEN:
+        return [text] if text.strip() else []
+    out, pos = [], 0
+    while pos < len(text) and len(out) < MAX_FENSTER:
+        ende = min(pos + FENSTER_ZEICHEN, len(text))
+        if ende < len(text):
+            fenster = text[pos:ende]
+            for trenner in ("\n\n", "\n", ". "):
+                schnitt = fenster.rfind(trenner)
+                if schnitt > FENSTER_ZEICHEN - 600:
+                    ende = pos + schnitt + len(trenner)
+                    break
+        stueck = text[pos:ende]
+        if stueck.strip():
+            out.append(stueck)
+        if ende >= len(text):
+            break
+        pos = max(ende - FENSTER_UEBERLAPPUNG, pos + 1)
+    return out
+
+
+def _norm_key(s: str) -> str:
+    """Vergleichsform fuer Dubletten zwischen Fenstern (Klein, ohne Satzzeichen)."""
+    return re.sub(r"[^a-z0-9äöüß ]+", "", str(s).lower()).strip()
+
+
+async def _extract_ein_fenster(content: str, fallback_title: str, qa_count, prof) -> dict:
+    """Ein LLM-Durchgang ueber genau ein Fenster."""
     from google.genai import types
-    content = (text or "")[:8000]
-    if not content.strip():
-        return {"title": fallback_title, "summary": "", "facts": [], "qa_pairs": []}
     provider, _model = _profile_provider(prof)
     prompt = _build_prompt(content, qa_count)
     response = await provider.generate_response(
@@ -150,10 +195,98 @@ async def extract_structured_from_text(text: str, fallback_title: str = "", qa_c
         "title": str(data.get("title", fallback_title)).strip()[:300],
         "summary": str(data.get("summary", "")).strip(),
         "facts": [str(f).strip() for f in data.get("facts", []) if str(f).strip()],
-        "qa_pairs": _drop_qa_if_unwanted([
-            {"q": str(p.get("q", "")).strip(), "a": str(p.get("a", "")).strip()}
-            for p in data.get("qa_pairs", []) if str(p.get("q", "")).strip()
-        ], qa_count),
+        "qa_pairs": [{"q": str(p.get("q", "")).strip(), "a": str(p.get("a", "")).strip()}
+                     for p in data.get("qa_pairs", []) if str(p.get("q", "")).strip()],
+    }
+
+
+async def extract_structured_from_text(text: str, fallback_title: str = "", qa_count=None,
+                                        prof: dict = None) -> dict:
+    """Schickt beliebigen Text durch den Wissensextraktor-LLM und liefert
+    {title, summary, facts, qa_pairs, coverage}.
+
+    Lange Texte werden ABSCHNITTSWEISE verarbeitet und die Ergebnisse
+    zusammengefuehrt – vorher sah das Modell nur die ersten 8000 Zeichen.
+
+    ``coverage`` beschreibt, WIE VIEL tatsaechlich betrachtet wurde:
+    ``{chars_total, chars_seen, windows, truncated}``. Das Feld ist der Kern
+    der Aenderung: selbst wenn ein Dokument den Deckel sprengt, ist der Verlust
+    ab jetzt SICHTBAR statt stillschweigend.
+
+    qa_count: gewuenschte Fragenanzahl fuer das GESAMTE Dokument (nicht je
+    Fenster – sie wird verteilt und am Ende zugeschnitten).
+    prof: LLM-Profil des Benutzers (None = globales Aktiv-Profil).
+    """
+    ganz = text or ""
+    fenster = _fenster(ganz)
+    if not fenster:
+        return {"title": fallback_title, "summary": "", "facts": [], "qa_pairs": [],
+                "coverage": {"chars_total": len(ganz), "chars_seen": 0,
+                             "windows": 0, "truncated": False}}
+
+    # Fragen auf die Fenster verteilen. Ohne das liefert jedes Fenster die volle
+    # Anzahl – bei 8 Fenstern und "10 Fragen" waeren es 80.
+    if qa_count is None:
+        je_fenster = None
+    elif qa_count == 0:
+        je_fenster = 0
+    else:
+        je_fenster = max(1, -(-int(qa_count) // len(fenster)))
+
+    titel = fallback_title
+    zusammen: list[str] = []
+    fakten: list[str] = []
+    fakten_gesehen: set[str] = set()
+    qa: list[dict] = []
+    qa_gesehen: set[str] = set()
+
+    for i, stueck in enumerate(fenster):
+        try:
+            teil = await _extract_ein_fenster(stueck, fallback_title, je_fenster, prof)
+        except Exception as e:
+            # EIN gescheitertes Fenster darf nicht das ganze Dokument kosten.
+            # Bei einem einzigen Fenster gibt es aber nichts zu retten – dann
+            # bleibt die Ausnahme, sonst entstuende ein leerer Entwurf ohne
+            # erkennbaren Grund.
+            if len(fenster) == 1:
+                raise
+            _log.warning("Extraktion: Abschnitt %d/%d fehlgeschlagen: %s", i + 1, len(fenster), e)
+            continue
+        # Der Titel kommt aus dem ERSTEN Fenster: dort steht die Ueberschrift des
+        # Dokuments. Spaetere Fenster benennen nur ihren Abschnitt.
+        if i == 0 and teil.get("title"):
+            titel = teil["title"]
+        if teil.get("summary"):
+            zusammen.append(teil["summary"])
+        for f in teil.get("facts", []):
+            k = _norm_key(f)
+            if k and k not in fakten_gesehen:
+                fakten_gesehen.add(k)
+                fakten.append(f)
+        for p in teil.get("qa_pairs", []):
+            k = _norm_key(p.get("q", ""))
+            if k and k not in qa_gesehen:
+                qa_gesehen.add(k)
+                qa.append(p)
+
+    gesehen = sum(len(s) for s in fenster) - FENSTER_UEBERLAPPUNG * max(0, len(fenster) - 1)
+    coverage = {
+        "chars_total": len(ganz),
+        "chars_seen": min(max(gesehen, 0), len(ganz)),
+        "windows": len(fenster),
+        "truncated": len(fenster) >= MAX_FENSTER and gesehen < len(ganz),
+    }
+    # Mehrere Zusammenfassungen bleiben getrennt stehen, statt sie durch einen
+    # weiteren LLM-Aufruf zu verschmelzen: das waere ein zusaetzlicher
+    # Kostenpunkt und eine weitere Fehlerquelle, und die Zusammenfassung ist im
+    # Audit ohnehin bearbeitbar. Der Mensch sieht so ausserdem die Gliederung.
+    summary = "\n\n".join(zusammen)
+    return {
+        "title": titel,
+        "summary": summary,
+        "facts": fakten,
+        "qa_pairs": _drop_qa_if_unwanted(qa[:int(qa_count)] if qa_count else qa, qa_count),
+        "coverage": coverage,
     }
 
 
@@ -183,6 +316,9 @@ async def extract_to_pending(text: str, title: str = "", source: str = "",
         "summary": structured.get("summary", ""),
         "facts": structured.get("facts", []),
         "qa_pairs": qa_pairs,
+        # Wie viel des Dokuments tatsaechlich betrachtet wurde – gehoert an den
+        # Entwurf, damit die Pruefansicht es zeigen kann.
+        "coverage": structured.get("coverage"),
         "created_at": int(time.time()),
         "status": "pending",
     }
@@ -308,58 +444,32 @@ async def extract_from_url(url: str, qa_count=None, prof: dict = None) -> dict:
                                        qa_count=qa_count, prof=prof)
 
     # ── HTML-Pipeline ──────────────────────────────────────────────────────────
-    from google.genai import types
-
     page_title, content = _html_to_text(resp.text)
-    content = content[:8000]
-
     if not content.strip():
         raise ValueError("Seite enthält keinen lesbaren Text")
 
-    # 2. LLM-Extraktion
-    provider, _model = _profile_provider(prof)
+    # Ueber die GEMEINSAME Funktion, nicht mit eigener LLM-Logik: hier stand
+    # bis 2026-08-01 eine zweite, fast identische Kopie des Aufrufs samt
+    # eigenem `content[:8000]`. Lange Webseiten wurden dadurch abgeschnitten,
+    # auch nachdem die abschnittsweise Verarbeitung existierte – und jede
+    # kuenftige Aenderung am Extraktor haette man an zwei Stellen machen muessen.
+    structured = await extract_structured_from_text(
+        content, fallback_title=page_title, qa_count=qa_count, prof=prof)
 
-    prompt = _build_prompt(content, qa_count)
-    response = await provider.generate_response(
-        model=_model,
-        system_prompt="Du bist ein Wissensextraktor. Antworte ausschließlich mit dem angeforderten JSON.",
-        contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
-        tools=[],
-    )
-
-    # 3. JSON parsen
-    raw_text = ""
-    if response.parts:
-        for p in response.parts:
-            if getattr(p, "text", None):
-                raw_text += p.text
-
-    # JSON aus der Antwort extrahieren (auch wenn LLM Markdown-Blöcke liefert)
-    json_match = re.search(r'\{[\s\S]*\}', raw_text)
-    if not json_match:
-        raise ValueError(f"LLM lieferte kein gültiges JSON: {raw_text[:300]}")
-
-    data = json.loads(json_match.group(0))
-
-    # 4. Pending-Dokument erstellen
-    doc_id = str(uuid.uuid4())[:8]
-    qa_pairs = []
-    for pair in data.get("qa_pairs", []):
-        qa_pairs.append({
-            "id": str(uuid.uuid4())[:6],
-            "q": str(pair.get("q", "")).strip(),
-            "a": str(pair.get("a", "")).strip(),
-            "approved": True,  # Default: alle vorausgewählt
-        })
-    qa_pairs = _drop_qa_if_unwanted(qa_pairs, qa_count)
+    qa_pairs = _drop_qa_if_unwanted([
+        {"id": str(uuid.uuid4())[:6], "q": p.get("q", ""), "a": p.get("a", ""),
+         "approved": True}
+        for p in structured.get("qa_pairs", []) if p.get("q")
+    ], qa_count)
 
     pending = {
-        "id": doc_id,
+        "id": str(uuid.uuid4())[:8],
         "url": url,
-        "title": str(data.get("title", page_title)).strip()[:300],
-        "summary": str(data.get("summary", "")).strip(),
-        "facts": [str(f).strip() for f in data.get("facts", []) if str(f).strip()],
+        "title": structured.get("title") or page_title,
+        "summary": structured.get("summary", ""),
+        "facts": structured.get("facts", []),
         "qa_pairs": qa_pairs,
+        "coverage": structured.get("coverage"),
         "created_at": int(time.time()),
         "status": "pending",
     }
@@ -661,9 +771,38 @@ async def extract_from_file(filename: str, content: bytes, source_url: str | Non
                 "Unterstützt: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, Bilder (OCR via Tesseract), "
                 "MP3/M4A/WAV (Transkription via Whisper), MP4/MOV/MKV."
             )
-        content_for_llm = f"[Datei: {filename}]\n\n{ocr_text[:8000]}"
+        # TEXTDATEIEN GEHEN UEBER DIE ABSCHNITTSWEISE EXTRAKTION.
+        # Hier stand bis 2026-08-01 `ocr_text[:8000]` – ein hochgeladenes
+        # Handbuch wurde also nach den ersten Seiten abgeschnitten, ohne dass
+        # es irgendwo auftauchte. Das ist der Hauptfall dieser Funktion.
+        # Der BILD-Pfad unten bleibt einstufig: dort haengt das Bild selbst am
+        # Aufruf (Vision), und ein Bild ist eine Seite – 8000 Zeichen OCR
+        # reichen dafuer.
+        structured = await extract_structured_from_text(
+            f"[Datei: {filename}]\n\n{ocr_text}",
+            fallback_title=filename, qa_count=qa_count, prof=prof)
+        qa_pairs = _drop_qa_if_unwanted([
+            {"id": str(uuid.uuid4())[:6], "q": p.get("q", ""), "a": p.get("a", ""),
+             "approved": True}
+            for p in structured.get("qa_pairs", []) if p.get("q")
+        ], qa_count)
+        pending = {
+            "id":          str(uuid.uuid4())[:8],
+            "url":         source_url or f"file://{filename}",
+            "source_type": "url" if source_url else "file",
+            "source_name": filename,
+            "title":       structured.get("title") or filename,
+            "summary":     structured.get("summary", ""),
+            "facts":       structured.get("facts", []),
+            "qa_pairs":    qa_pairs,
+            "coverage":    structured.get("coverage"),
+            "created_at":  int(time.time()),
+            "status":      "pending",
+        }
+        save_pending(pending)
+        return pending
 
-    # LLM-Extraktion – gleiche Pipeline wie URL-Extraktion
+    # ── Ab hier nur noch der BILD-Pfad (Vision) ────────────────────────────
     from google.genai import types
 
     provider, _model = _profile_provider(prof)
@@ -708,7 +847,7 @@ async def extract_from_file(filename: str, content: bytes, source_url: str | Non
     data = json.loads(json_match.group(0))
 
     doc_id = str(uuid.uuid4())[:8]
-    qa_pairs = [
+    qa_pairs = _drop_qa_if_unwanted([
         {
             "id": str(uuid.uuid4())[:6],
             "q": str(pair.get("q", "")).strip(),
@@ -716,7 +855,7 @@ async def extract_from_file(filename: str, content: bytes, source_url: str | Non
             "approved": True,
         }
         for pair in data.get("qa_pairs", [])
-    ]
+    ], qa_count)
 
     pending = {
         "id":          doc_id,

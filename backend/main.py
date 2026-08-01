@@ -2524,6 +2524,29 @@ async def startup_knowledge_compactor():
 
 
 @app.on_event("startup")
+async def startup_replay_vector_journal():
+    """Nach einem unsanften Ende die noch nicht gesicherten Lernnotizen einspielen.
+
+    Gelernte Notizen gehen aus Kostengruenden nicht mehr einzeln in den grossen
+    Index (das waren rund 50 MB Schreiblast je Notiz), sondern zuerst in ein
+    winziges Journal. Wird der Dienst regulaer beendet, leert der
+    Shutdown-Hook es. Stirbt er unsanft (Absturz, OOM, Stromausfall), holt
+    dieser Hook die Notizen zurueck – ohne ihn waere die Drosselung ein
+    Datenverlust-Risiko und nicht bloss eine Optimierung.
+    """
+    try:
+        from backend.tools.knowledge import _get_vector_store
+        vs = await asyncio.to_thread(_get_vector_store)
+        if vs is None:
+            return
+        n = await asyncio.to_thread(vs.replay_journal)
+        if n:
+            print(f"[Wissen] {n} Lernnotiz(en) aus dem Journal wiederhergestellt")
+    except Exception as e:
+        print(f"[Wissen] Journal-Wiederherstellung fehlgeschlagen: {e}")
+
+
+@app.on_event("startup")
 async def startup_harden_data_dirs():
     """Dienst-Verzeichnisse gegen fremde OS-Benutzer schliessen (0750).
 
@@ -12489,6 +12512,17 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     """Scheduler und Watcher sauber beenden."""
+    # Gelernte Notizen aus dem Journal endgueltig in den Index schreiben. Ohne
+    # das bliebe nach jedem regulaeren Neustart ein Journal liegen, das der
+    # Start-Hook dann einspielt – funktioniert zwar, kostet aber bei JEDEM
+    # Start unnoetig Zeit und meldet einen Absturz, der keiner war.
+    try:
+        from backend.tools.knowledge import _get_vector_store
+        _vs = _get_vector_store()
+        if _vs is not None and _vs.flush_pending():
+            print("[Wissen] Lernnotizen aus dem Journal gesichert")
+    except Exception as e:
+        print(f"⚠️  Journal-Sicherung beim Beenden fehlgeschlagen: {e}")
     # Anwesenheits-Buchhaltung sichern: touch() schreibt gedrosselt, die letzten
     # bis zu 20 Sekunden Aktivitaet liegen also nur im Speicher.
     try:

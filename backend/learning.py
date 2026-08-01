@@ -278,10 +278,17 @@ def _index_immediately(filepath: Path, content: str) -> None:
         mtime = filepath.stat().st_mtime
         chunks = _chunk_text(content)
         if chunks:
-            vs.add_chunks(str(filepath), chunks, mtime)
+            # GEDROSSELT speichern statt bei jeder Notiz den kompletten Index:
+            # add_chunks() mit save=True schrieb Index UND Metadaten vollstaendig
+            # neu – bei 16.000 Chunks rund 50 MB fuer ein paar hundert Byte
+            # neuen Inhalt. Die Notiz ist trotzdem sofort suchbar (der Index im
+            # Speicher ist vollstaendig) und durch das Journal auch sofort
+            # absturzsicher; nur die teure Serialisierung wird gebuendelt.
+            geschrieben = vs.add_chunks_deferred(str(filepath), chunks, mtime)
             _log.info(
                 f"FAISS: {len(chunks)} Chunk(s) fuer {filepath.name} sofort indexiert "
-                f"(Gesamt: {vs.chunk_count()} Chunks)"
+                f"(Gesamt: {vs.chunk_count()} Chunks"
+                + (", Index gesichert)" if geschrieben else ", Journal)")
             )
     except Exception as e:
         _log.warning(f"FAISS-Sofort-Indexierung fehlgeschlagen: {e}")

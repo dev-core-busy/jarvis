@@ -22,8 +22,10 @@ zusammengefuehrt.
 import json
 import logging
 import math
+import os
 import re
 import threading
+import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -190,6 +192,9 @@ class VectorStore:
         # Lexikalischer BM25-Index (lazy). _gen zaehlt Index-Aenderungen hoch;
         # weicht _lex_gen davon ab, wird der invertierte Index neu gebaut.
         self._gen = 0
+        # Journal-Buchhaltung fuer gedrosseltes Speichern (add_chunks_deferred).
+        self._journal_n = 0
+        self._journal_seit = 0.0
         self._lex_gen = -1
         self._lex_postings: dict[str, list[tuple[int, int]]] | None = None
         self._lex_doc_lens: list[int] = []
@@ -296,6 +301,127 @@ class VectorStore:
         Speichern beim Bulk-Reindex – siehe ``add_chunks(save=False)``)."""
         with self._lock:
             self._save()
+
+    # ─── Gedrosseltes Schreiben mit Journal ──────────────────────────────────
+    #
+    # DAS PROBLEM: Jede gelernte Notiz schrieb den KOMPLETTEN FAISS-Index und
+    # die vollstaendigen Metadaten neu – bei 16.000 Chunks rund 50 MB fuer ein
+    # paar hundert Byte neuen Inhalt.
+    #
+    # DER ZIELKONFLIKT, den das hier aufloest: Blosses Entprellen (sammeln und
+    # seltener schreiben) spart die Schreiblast, oeffnet aber ein Fenster –
+    # stirbt der Prozess dazwischen, sind die Notizen weg. Deshalb geht jede
+    # Notiz SOFORT in ein winziges Journal (eine JSON-Zeile, wenige hundert
+    # Byte) und wird beim Start wieder eingespielt, falls der grosse Index sie
+    # noch nicht enthaelt. Gespart wird die teure Serialisierung, NICHT die
+    # Dauerhaftigkeit.
+    JOURNAL_NAME = "pending_adds.jsonl"
+
+    def _journal_path(self) -> Path:
+        return self._dir / self.JOURNAL_NAME
+
+    def add_chunks_deferred(self, file_path: str, chunks: list[str], mtime: float,
+                            max_eintraege: int = 10, max_alter_s: float = 120.0) -> bool:
+        """Chunks aufnehmen, ohne den ganzen Index zu schreiben.
+
+        Der Index ist danach im SPEICHER vollstaendig – Suchen finden die neue
+        Notiz sofort. Auf Platte landet zunaechst nur die Journalzeile.
+
+        Rueckgabe: True, wenn bei diesem Aufruf tatsaechlich gespeichert wurde.
+        """
+        if not chunks:
+            self.remove_file(file_path)
+            return False
+        self.add_chunks(file_path, chunks, mtime, save=False)
+        eintrag = {"file_path": file_path, "mtime": mtime, "chunks": chunks,
+                   "ts": time.time()}
+        with self._lock:
+            try:
+                with open(self._journal_path(), "a", encoding="utf-8") as f:
+                    f.write(json.dumps(eintrag, ensure_ascii=False) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())   # ohne fsync ist das Journal wertlos
+                self._journal_n = getattr(self, "_journal_n", 0) + 1
+                if not getattr(self, "_journal_seit", 0):
+                    self._journal_seit = time.time()
+            except Exception as e:
+                # Journal nicht schreibbar -> KEIN Risiko eingehen und wie
+                # frueher sofort vollstaendig speichern.
+                _log.warning("Journal nicht schreibbar (%s) – speichere vollstaendig", e)
+                self._save()
+                return True
+            faellig = (self._journal_n >= max_eintraege
+                       or (time.time() - self._journal_seit) >= max_alter_s)
+        return self.flush_pending() if faellig else False
+
+    def flush_pending(self) -> bool:
+        """Schreibt den Index vollstaendig und leert das Journal.
+
+        Reihenfolge ist wichtig: ERST der Index, DANN das Journal leeren. Bei
+        umgekehrter Reihenfolge waere ein Absturz dazwischen genau der
+        Datenverlust, den das Journal verhindern soll.
+        """
+        with self._lock:
+            if not getattr(self, "_journal_n", 0):
+                return False
+            self._save()
+            try:
+                self._journal_path().unlink(missing_ok=True)
+            except Exception as e:
+                _log.warning("Journal konnte nicht geleert werden: %s", e)
+            self._journal_n = 0
+            self._journal_seit = 0.0
+        return True
+
+    def replay_journal(self) -> int:
+        """Spielt nach einem Absturz die noch nicht gesicherten Notizen ein.
+
+        Aufzurufen EINMAL beim Start. Eintraege, die der geladene Index schon
+        enthaelt (gleiche Datei, gleiche mtime), werden uebersprungen – das
+        Journal kann Zeilen enthalten, die es noch in den letzten Speichervorgang
+        geschafft haben.
+
+        Die Chunk-TEXTE stehen im Journal, die Vektoren nicht: sie werden beim
+        Einspielen neu berechnet. Das kostet Sekunden im seltenen Absturzfall,
+        haelt das Journal aber klein – Vektoren waeren 384 Gleitkommazahlen je
+        Chunk und damit ein Vielfaches der eingesparten Schreiblast.
+        """
+        pfad = self._journal_path()
+        if not pfad.exists():
+            return 0
+        try:
+            zeilen = pfad.read_text(encoding="utf-8").splitlines()
+        except Exception as e:
+            _log.warning("Journal nicht lesbar: %s", e)
+            return 0
+        vorhanden = self.get_indexed_files()
+        eingespielt = 0
+        for z in zeilen:
+            z = z.strip()
+            if not z:
+                continue
+            try:
+                e = json.loads(z)
+                pfad_e, mtime_e = e["file_path"], float(e.get("mtime") or 0)
+                if abs(float(vorhanden.get(pfad_e, -1)) - mtime_e) < 1e-6:
+                    continue                      # schon im Index
+                self.add_chunks(pfad_e, e.get("chunks") or [], mtime_e, save=False)
+                eingespielt += 1
+            except Exception as ex:
+                _log.warning("Journalzeile uebersprungen: %s", ex)
+        if eingespielt:
+            _log.warning("%d Notiz(en) aus dem Journal wiederhergestellt "
+                         "(der Dienst wurde offenbar unsanft beendet)", eingespielt)
+            with self._lock:
+                self._save()
+        try:
+            pfad.unlink(missing_ok=True)
+        except Exception:
+            pass
+        with self._lock:
+            self._journal_n = 0
+            self._journal_seit = 0.0
+        return eingespielt
 
     def remove_file(self, file_path: str) -> int:
         """Entfernt alle Chunks einer Datei. Gibt die Anzahl zurueck.

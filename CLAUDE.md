@@ -1058,6 +1058,29 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
   geschrieben", obwohl geschrieben wurde – die Drosselung wird deshalb über den
   DATEIINHALT geprüft.
 
+## Skill-Zugangsdaten waren für jeden lesbar (Fix 2026-08-02)
+`GET /api/skills/{name}/config` hing an **`require_auth`** – jeder angemeldete Benutzer konnte
+damit die Zugangsdaten SÄMTLICHER Skills im Klartext abrufen: HANA-/RFC-Kennwort und
+Bearer-Token (SAP), Jira-/Confluence-Token, IBS-API-Key, Google-Client-Secret. Die Antwort ist
+die **rohe** Skill-Config, es gibt keine Feld-Filterung. Der Schreib-Endpunkt daneben war seit
+jeher `require_local_auth` – **Lesen war also freier als Schreiben**, was den Fehler beim
+Überfliegen unsichtbar machte.
+- Jetzt `require_local_auth`. Der Zuschnitt ist unkritisch: **alle** Aufrufer sitzen auf
+  `settings.html` (sap.js, jira.js, confluence.js, whatsapp.js, knowledge.js, vision.js,
+  kundenverwaltung.js, support_admin.js, skillcfg.js, brandingAdmin), die ohnehin Admins
+  vorbehalten ist.
+- **`branding.js` ist die Ausnahme, die man prüfen MUSS:** die Datei liegt auf JEDER Seite. Der
+  Config-Aufruf steckt aber im Admin-Teil (`window.brandingAdmin`), der nur aus `app.js`
+  gestartet wird – und `app.js` lädt allein `settings.html`. Das öffentliche Branding läuft über
+  den eigenen Endpunkt **`GET /api/branding` (ohne Anmeldung)** und ist NICHT betroffen; er wird
+  schon auf der Loginseite gebraucht. Wer hier aufräumt, darf die beiden nicht verwechseln.
+- **Regressionstest `tests/test_skill_config_rights.py`** (11 Prüfungen, ohne fastapi lauffähig)
+  hält beides fest: die Dependency am Endpunkt UND dass kein Aufrufer hinzukommt, der außerhalb
+  der Einstellungsseite sitzt – genau das wäre der Grund, aus dem jemand die Schranke wieder
+  löst. Der alte Stand fällt in den ersten beiden Prüfungen durch (verifiziert).
+- Live auf DEV: Admin 200, angemeldeter Nicht-Admin **403 mit der Admin-Meldung** (nicht der
+  Login-Schranke), ohne Token 401, `/api/branding` weiterhin 200 ohne Anmeldung.
+
 ## SAP-Analysebereich `/sap` (seit 2026-08-02)
 - **Was es ist:** Eine eigene Seite für die Geschäftsleitung – Kachel im Portal, nur für
   SAP-berechtigte Benutzer. Drei Dinge auf einer Fläche: **Management-Analysen** (Vorlage wählen →

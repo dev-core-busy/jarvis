@@ -186,14 +186,16 @@
         if (saved && sel.querySelector('option[value="' + saved.replace(/"/g, '') + '"]')) sel.value = saved;
     }
 
-    function currentAnalysis() {
-        if (!_catalog) return null;
-        var id = $('sp-analysis') ? $('sp-analysis').value : '';
-        if (!id) return null;
+    function currentAnalysisById(id) {
+        if (!_catalog || !id) return null;
         for (var i = 0; i < _catalog.analyses.length; i++) {
             if (_catalog.analyses[i].id === id) return _catalog.analyses[i];
         }
         return null;
+    }
+
+    function currentAnalysis() {
+        return currentAnalysisById($('sp-analysis') ? $('sp-analysis').value : '');
     }
 
     function applyDesc() {
@@ -414,12 +416,23 @@
             el.addEventListener('click', function () {
                 var it = readHistory()[parseInt(el.dataset.i, 10)];
                 if (!it) return;
-                if ($('sp-analysis')) $('sp-analysis').value = it.id || '';
+                // Der Verlauf liegt im Browser und ueberlebt das Ausblenden
+                // einer Vorlage durch den Administrator. Ohne diese Pruefung
+                // faende `value = id` keine Option, das Feld spraenge
+                // wortlos auf "freie Frage" und der Anwender saehe nur, dass
+                // "nichts passiert".
+                var gone = !!it.id && !currentAnalysisById(it.id);
+                if ($('sp-analysis')) $('sp-analysis').value = gone ? '' : (it.id || '');
                 if ($('sp-question')) $('sp-question').value = it.q || '';
                 if (it.tool && $('sp-bitool')) $('sp-bitool').value = it.tool;
                 applyDesc();
                 markMatchingEndpoint();
                 $('sp-hist-panel').classList.add('hidden');
+                if (gone) {
+                    note(T('sap.hidden_by_admin',
+                        'Diese Analyse wurde vom Administrator ausgeblendet.'), 'error');
+                    return;
+                }
                 // Nur eintragen, nicht starten: eine Analyse kostet Zeit und
                 // Last – ein versehentlicher Klick im Verlauf darf sie nicht
                 // ausloesen.

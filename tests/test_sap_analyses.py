@@ -137,5 +137,63 @@ check("englischer Auftrag nutzt die englische Werkzeugvorgabe",
 check("ueberlange Anweisungen werden gekuerzt",
       len(sa.build_task(question="x", instructions="A" * 9000)) < 6000)
 
+print("\n── Sichtbarkeit: normalize_hidden() ──")
+check("None → leer", sa.normalize_hidden(None) == [])
+check("leere Liste → leer", sa.normalize_hidden([]) == [])
+check("Liste bleibt erhalten",
+      sa.normalize_hidden(["ar_aging", "hr_kpis"]) == ["ar_aging", "hr_kpis"])
+check("kommagetrennter Text wird angenommen",
+      sa.normalize_hidden("ar_aging, hr_kpis") == ["ar_aging", "hr_kpis"])
+check("unbekannte Ids werden VERWORFEN, nicht geraten",
+      sa.normalize_hidden(["ar_aging", "gibtsnicht"]) == ["ar_aging"])
+check("Duplikate fallen weg",
+      sa.normalize_hidden(["ar_aging", "ar_aging"]) == ["ar_aging"])
+check("Unsinn (Zahl) → leer statt Absturz", sa.normalize_hidden(42) == [])
+check("Unsinn (dict) → leer statt Absturz", sa.normalize_hidden({"a": 1}) == [])
+
+print("\n── Sichtbarkeit: catalog(hidden=…) ──")
+full = sa.catalog("de")
+check("ohne hidden ist alles sichtbar (leer = ALLES, nicht NICHTS)",
+      len(full["analyses"]) == len(sa.ANALYSES))
+c1 = sa.catalog("de", hidden=["ar_aging"])
+check("ausgeblendete Analyse fehlt",
+      len(c1["analyses"]) == len(sa.ANALYSES) - 1
+      and all(a["id"] != "ar_aging" for a in c1["analyses"]))
+# Eine Kategorie mit genau einer Analyse: 'production' hat nur production_costs.
+c2 = sa.catalog("de", hidden=["production_costs"])
+check("leer gewordene Kategorie verschwindet mit",
+      all(c["id"] != "production" for c in c2["categories"]),
+      str([c["id"] for c in c2["categories"]]))
+check("andere Kategorien bleiben",
+      any(c["id"] == "finance" for c in c2["categories"]))
+c3 = sa.catalog("de", hidden=[a["id"] for a in sa.ANALYSES])
+check("alles ausgeblendet: keine Analyse, keine Kategorie",
+      c3["analyses"] == [] and c3["categories"] == [])
+check("alles ausgeblendet: BI-Werkzeuge bleiben (die Konsole braucht sie)",
+      len(c3["bi_tools"]) == len(sa.BI_TOOLS))
+check("unbekannte Id in hidden blendet nichts aus",
+      len(sa.catalog("de", hidden=["gibtsnicht"])["analyses"]) == len(sa.ANALYSES))
+
+print("\n── Sichtbarkeit: admin_catalog() ──")
+ac = sa.admin_catalog("de", hidden=["ar_aging", "hr_kpis"])
+check("admin_catalog zeigt ALLE Analysen (sonst nichts einblendbar)",
+      len(ac["analyses"]) == len(sa.ANALYSES))
+check("admin_catalog behaelt alle Kategorien",
+      len(ac["categories"]) == len(sa.CATEGORIES))
+check("Merker 'visible' korrekt gesetzt",
+      {a["id"] for a in ac["analyses"] if not a["visible"]} == {"ar_aging", "hr_kpis"})
+check("admin_catalog meldet die hidden-Liste", ac["hidden"] == ["ar_aging", "hr_kpis"])
+check("admin_catalog meldet die Gesamtzahl", ac["total"] == len(sa.ANALYSES))
+check("admin_catalog gibt den Arbeitsauftrag NICHT heraus",
+      all("task" not in a for a in ac["analyses"]))
+check("admin_catalog uebersetzt",
+      sa.admin_catalog("en")["analyses"][0]["title"] == sa.ANALYSES[0]["en"]["title"])
+
+print("\n── Sichtbarkeit: is_hidden() ──")
+check("is_hidden erkennt eine ausgeblendete Analyse",
+      sa.is_hidden("ar_aging", ["ar_aging"]))
+check("is_hidden ist False fuer sichtbare", not sa.is_hidden("hr_kpis", ["ar_aging"]))
+check("is_hidden ohne Liste ist immer False", not sa.is_hidden("ar_aging", None))
+
 print(f"\n{'═' * 46}\nErgebnis: {_ok}/{_ok + _fail} bestanden")
 sys.exit(0 if _fail == 0 else 1)

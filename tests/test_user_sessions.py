@@ -124,8 +124,12 @@ def test_klassifizierung():
     check("technisches Rauschen ausgenommen", "_ACTION_IGNORE" in src
           and "/api/logout" in src.split("_ACTION_IGNORE = (")[1].split(")")[0])
     check("Beschriftungen vorhanden", "_ACTION_LABELS" in src and '"Chat-Anfrage"' in src)
+    # Leerraum normalisieren: der Aufruf steht ueber zwei Zeilen, seit er den
+    # Anzeigenamen mitgibt. Eine woertliche Suche meldete hier faelschlich
+    # "fehlt" (derselbe Fallstrick wie beim Transkriptions-Test).
+    _flach = " ".join(src.split())
     check("WebSocket-Chat meldet die Handlung",
-          '_user_sessions.note_action(_ws_user, "Chat-Anfrage")' in src)
+          '_user_sessions.note_action(_ws_user, "Chat-Anfrage"' in _flach)
     check("Benutzer kommt dort aus der WS-Registrierung",
           "_ws_usernames.get(id(ws), \"\")" in src)
     js = (root / "frontend" / "js" / "sessions.js").read_text(encoding="utf-8")
@@ -263,6 +267,94 @@ def test_sortierung_und_stats():
         check("API-Schluessel ist als solcher gekennzeichnet", api["kind"] == "api", str(api))
 
 
+def test_anzeigename():
+    """Domaenen-Praefix in der Anwesenheitsliste (Fehlerbild: 'nexus' fehlt oft).
+
+    Ursache war, dass der Anzeigename die TIPPFORM des Anmeldefelds uebernahm:
+    'nexus\\andrea.ladd' behielt den Praefix, 'andrea.ladd' und
+    'andrea.ladd@nexus.local' nicht – bei derselben Person.
+    """
+    section("Anzeigename: Domaenen-Praefix")
+
+    # ── (a) Die Nicht-Verschlechterungs-Regel im Modul ──
+    check("reicherer Name (mit Domaene) ersetzt den duerftigen",
+          US._richer("nexus\\andrea.ladd", "andrea.ladd"))
+    check("duerftiger Name ersetzt den reicheren NICHT",
+          not US._richer("andrea.ladd", "nexus\\andrea.ladd"))
+    check("UPN gilt ebenfalls als reich",
+          not US._richer("andrea.ladd", "andrea.ladd@nexus.local"))
+    check("gleichwertig darf ueberschreiben (Schreibweise korrigieren)",
+          US._richer("nexus\\Andrea.Ladd", "nexus\\andrea.ladd"))
+    check("leerer Name ueberschreibt nie", not US._richer("", "andrea.ladd"))
+    check("auf leeren Bestand darf immer geschrieben werden",
+          US._richer("andrea.ladd", ""))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        frisch(tmp)
+        # Anmeldung ohne Praefix, danach eine Anfrage mit aufbereitetem Namen:
+        # der Eintrag muss den Praefix uebernehmen (Altbestand heilt sich).
+        US.record_login("andrea.ladd", "10.0.0.9")
+        check("ohne display bleibt es beim Anmeldenamen",
+              US._users["andrea.ladd"]["display"] == "andrea.ladd")
+        US.touch("andrea.ladd", "10.0.0.9", display="nexus\\andrea.ladd")
+        check("eine Anfrage mit Praefix heilt den Altbestand",
+              US._users["andrea.ladd"]["display"] == "nexus\\andrea.ladd")
+        # ... und ein Aufrufer ohne Praefix darf ihn nicht wieder abraeumen.
+        US.touch("andrea.ladd", "10.0.0.9")
+        check("Anfrage ohne Praefix nimmt ihn nicht wieder weg",
+              US._users["andrea.ladd"]["display"] == "nexus\\andrea.ladd")
+        US.record_logout("andrea.ladd")
+        check("Zwangsabmeldung mit blossem Namen nimmt ihn nicht weg",
+              US._users["andrea.ladd"]["display"] == "nexus\\andrea.ladd")
+        # Nur die Anmeldung setzt unbedingt (force) – sie kennt den Wert frisch.
+        US.record_login("andrea.ladd", "10.0.0.9", display="nexus2\\andrea.ladd")
+        check("Anmeldung setzt den Anzeigenamen unbedingt",
+              US._users["andrea.ladd"]["display"] == "nexus2\\andrea.ladd")
+        # Ein und dieselbe Person, drei Tippformen -> EIN Eintrag.
+        US.record_login("NEXUS\\andrea.ladd", "10.0.0.9")
+        US.record_login("andrea.ladd@nexus.local", "10.0.0.9")
+        check("weiterhin nur ein Eintrag je Person", len(US._users) == 1,
+              str(list(US._users)))
+
+    # ── (b) _display_name() in main.py (ohne fastapi importierbar?) ──
+    root = Path(__file__).resolve().parent.parent
+    src = (root / "backend" / "main.py").read_text(encoding="utf-8")
+    check("_display_name existiert", "def _display_name(" in src)
+    check("lokale Konten bleiben ohne Praefix", "if u in ALLOWED_USERS:" in src)
+    _body = src.split("def _display_name(")[1].split("\ndef ")[0]
+    check("Kurzname wird aus ad_domain abgeleitet",
+          'config.get_setting("ad_domain"' in _body and 'split(".", 1)[0]' in _body)
+    for fn in ("record_login", "record_logout", "note_action", "touch"):
+        check(f"{fn}() bekommt den Anzeigenamen",
+              f"_user_sessions.{fn}(" in src
+              and "display=_display_name(" in src or "display=anzeige" in src)
+
+    # Nachbau der Regeln aus _display_name (main.py laesst sich hier nicht
+    # importieren – fastapi fehlt in dieser Umgebung).
+    def disp(u, allowed, dom):
+        u = (u or "").strip()
+        if not u or "\\" in u:
+            return u
+        if u in allowed:
+            return u
+        plain = u.split("@", 1)[0].lower()
+        kurz = dom.split(".", 1)[0].strip() if dom else ""
+        return f"{kurz}\\{plain}" if kurz else plain
+
+    A = {"jarvis"}
+    check("Domaenen-Benutzer bekommt den Praefix",
+          disp("andrea.ladd", A, "nexus.local") == "nexus\\andrea.ladd")
+    check("UPN-Form bekommt denselben Praefix",
+          disp("andrea.ladd@nexus.local", A, "nexus.local") == "nexus\\andrea.ladd")
+    check("vorhandener Praefix bleibt unveraendert",
+          disp("NEXUS\\andrea.ladd", A, "nexus.local") == "NEXUS\\andrea.ladd")
+    check("lokaler jarvis bekommt KEINEN Praefix",
+          disp("jarvis", A, "nexus.local") == "jarvis")
+    check("ohne konfigurierte Domaene wird nichts geraten",
+          disp("andrea.ladd", A, "") == "andrea.ladd")
+    check("leer bleibt leer", disp("", A, "nexus.local") == "")
+
+
 def test_verdrahtung():
     section("Verdrahtung in main.py und Frontend")
     root = Path(__file__).resolve().parent.parent
@@ -307,7 +399,7 @@ def main():
     for fn in (test_schluessel, test_lebenszyklus, test_anwesenheit_vs_aktivitaet,
                test_klassifizierung, test_sperr_rechte, test_online_fenster, test_persistenz,
                test_kaputte_datei, test_drosselung, test_sortierung_und_stats,
-               test_verdrahtung):
+               test_anzeigename, test_verdrahtung):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

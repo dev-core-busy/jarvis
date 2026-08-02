@@ -97,6 +97,9 @@ function build(htmlFile, me, opts) {
             // Der Verlauf liegt im localStorage – zwischen den Abschnitten
             // leeren, sonst schleppt ein Test die Eintraege des vorigen mit.
             if (opts.clearHistory !== false) win.localStorage.removeItem('jarvis_sap_history');
+            if (opts.seedHistory) {
+                win.localStorage.setItem('jarvis_sap_history', JSON.stringify(opts.seedHistory));
+            }
             win.HTMLCanvasElement.prototype.getContext = () => null;  // Chart.js
             win.fetch = function (url, init) {
                 const u = String(url);
@@ -201,6 +204,21 @@ function loadScript(dom, rel) {
           $('sp-conn').textContent);
     check('Verbindungs-Pille nicht als Fehler markiert',
           !$('sp-conn').classList.contains('is-off'));
+    {
+        // Avatar: die Seite muss dieselben Bausteine einbinden wie /support und
+        // /portal. Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR
+        // #btn-theme-toggle – fehlt diese Id, landet er als frei schwebender
+        // Knopf irgendwo auf der Seite.
+        const raw = fs.readFileSync(path.join(ROOT, 'frontend/sap.html'), 'utf8');
+        ['vendor/clippy/clippy.css', 'css/avatar.css', 'vendor/clippy/jquery-3.7.1.min.js',
+         'vendor/clippy/clippy.min.js', 'js/avatar.js'].forEach((f) => {
+            check('Avatar-Baustein eingebunden: ' + f, raw.includes(f));
+        });
+        check('Anker fuer den Avatar-Schalter vorhanden (#btn-theme-toggle)',
+              $('btn-theme-toggle') !== null);
+        check('Avatar-Skripte stehen NACH der Seitenlogik',
+              raw.indexOf('js/avatar.js') > raw.indexOf('js/sap_portal.js'));
+    }
 
     section('3. Analyse-Pulldown');
     const sel = $('sp-analysis');
@@ -390,6 +408,171 @@ function loadScript(dom, rel) {
         check('ohne permissions-Feld verborgen (fail-closed)',
               card && card.classList.contains('hidden'));
         p.window.close();
+    }
+
+    // ══ 13. /sap: Verlauf zeigt auf eine ausgeblendete Analyse ═══════
+    section('13. Ausgeblendete Analyse im Verlauf');
+    {
+        // Der Verlauf liegt im Browser und ueberlebt das Ausblenden. Ohne
+        // Behandlung spraenge das Feld wortlos auf "freie Frage".
+        const d13 = build('sap.html', { username: 'anna', is_admin: false,
+                                        permissions: { sap: true } },
+            { seedHistory: [{ id: 'weg_damit', title: 'Fruehere Analyse',
+                              q: 'alte Frage', tool: 'powerbi', ts: Date.now() }] });
+        loadScript(d13, 'js/i18n.js');
+        loadScript(d13, 'js/chatlib.js');
+        loadScript(d13, 'js/sap_portal.js');
+        await sleep(120);
+        const w = d13.window, dc = w.document;
+        dc.getElementById('sp-hist-btn').click();
+        await sleep(20);
+        const row = dc.querySelector('#sp-hist-list .sp-hist-item');
+        check('Verlaufseintrag ist da', row !== null);
+        const c13 = askCalls;
+        row.click();
+        await sleep(60);
+        check('ausgeblendete Analyse wird nicht gestartet', askCalls === c13);
+        check('Auswahl faellt auf leer zurueck',
+              dc.getElementById('sp-analysis').value === '');
+        check('Hinweis "vom Administrator ausgeblendet"',
+              /ausgeblendet|hidden by the administrator/i
+                  .test(dc.getElementById('sp-note').textContent),
+              dc.getElementById('sp-note').textContent);
+        check('Hinweis ist als Fehler markiert',
+              dc.getElementById('sp-note').classList.contains('is-error'));
+        w.close();
+    }
+
+    // ══ 14. Einstellungen → SAP: Sichtbarkeits-Kaestchen ═════════════
+    section('14. Einstellungen → SAP: Sichtbarkeit');
+    {
+        // settings.html ohne die eigenen Skripte laden ('outside-only'):
+        // app.js & Co. wuerden hier nur Zeit kosten und fremde Poll-Timer
+        // starten. Geprueft wird allein SapManager.
+        const html = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+        let savedBody = null;
+        const s = new JSDOM(html, {
+            url: 'https://localhost/settings',
+            runScripts: 'outside-only',
+            beforeParse(win) {
+                win.localStorage.setItem('jarvis_token', 'testtoken');
+                win.fetch = (url, init) => {
+                    const u = String(url);
+                    const json = (data) => Promise.resolve({
+                        ok: true, status: 200, json: () => Promise.resolve(data),
+                    });
+                    if (u.startsWith('/api/sap/analyses/catalog')) {
+                        return json({
+                            lang: 'de',
+                            categories: CATALOG.categories,
+                            analyses: [
+                                { id: 'ar_aging', cat: 'finance', title: 'Debitoren-Altersstruktur',
+                                  desc: 'Offene Forderungen.', visible: true },
+                                { id: 'working_capital', cat: 'finance', title: 'Working Capital',
+                                  desc: 'Kapitalbindung.', visible: false },
+                                { id: 'order_backlog', cat: 'sales', title: 'Auftragsbestand',
+                                  desc: 'Fruehindikator.', visible: true },
+                            ],
+                            hidden: ['working_capital'], total: 3,
+                        });
+                    }
+                    if (u.startsWith('/api/skills/sap/config')) {
+                        if (init && init.method === 'POST') {
+                            savedBody = JSON.parse(init.body);
+                            return json({ success: true });
+                        }
+                        return json({ config: { connection_type: 'odata', hana_password: 'geheim' } });
+                    }
+                    return json({ ok: true });
+                };
+            },
+        });
+        const sd = s.window.document;
+        s.window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8'));
+        s.window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/sap.js'), 'utf8'));
+
+        check('Abschnitt im Markup vorhanden', sd.getElementById('sap-vis-list') !== null);
+        check('Knoepfe im Markup vorhanden',
+              sd.getElementById('sap-vis-all') && sd.getElementById('sap-vis-none')
+              && sd.getElementById('sap-vis-save'));
+
+        s.window.SapManager.onShow();
+        await sleep(120);
+
+        const cbs = () => sd.querySelectorAll('#sap-vis-list .sap-vis-cb');
+        check('ein Kaestchen je Analyse', cbs().length === 3, String(cbs().length));
+        check('nach Kategorien gruppiert',
+              /Finanzen/.test(sd.getElementById('sap-vis-list').textContent)
+              && /Vertrieb/.test(sd.getElementById('sap-vis-list').textContent));
+        const byId = (id) => sd.querySelector('#sap-vis-list .sap-vis-cb[data-id="' + id + '"]');
+        check('sichtbare Analyse ist angehakt', byId('ar_aging').checked === true);
+        check('ausgeblendete Analyse ist NICHT angehakt',
+              byId('working_capital').checked === false);
+        check('Zaehler zeigt 2 von 3',
+              /2\D+3/.test(sd.getElementById('sap-vis-count').textContent),
+              sd.getElementById('sap-vis-count').textContent);
+
+        // Speichern schickt die AUSGEBLENDETEN – und NUR dieses Feld, sonst
+        // ueberschriebe ein Klick hier die Zugangsdaten mit dem Formularstand.
+        byId('ar_aging').checked = false;
+        byId('ar_aging').dispatchEvent(new s.window.Event('change', { bubbles: true }));
+        await sleep(20);
+        check('Zaehler folgt der Aenderung',
+              /1\D+3/.test(sd.getElementById('sap-vis-count').textContent),
+              sd.getElementById('sap-vis-count').textContent);
+        sd.getElementById('sap-vis-save').click();
+        await sleep(60);
+        check('Speichern sendet die ausgeblendeten Ids',
+              savedBody && Array.isArray(savedBody.hidden_analyses)
+              && savedBody.hidden_analyses.slice().sort().join(',') === 'ar_aging,working_capital',
+              JSON.stringify(savedBody));
+        check('Speichern sendet NUR dieses Feld (Zugangsdaten unberuehrt)',
+              savedBody && Object.keys(savedBody).length === 1,
+              JSON.stringify(savedBody && Object.keys(savedBody)));
+
+        sd.getElementById('sap-vis-all').click();
+        await sleep(20);
+        check('"Alle auswaehlen" hakt alles an',
+              Array.prototype.every.call(cbs(), (c) => c.checked));
+        savedBody = null;
+        sd.getElementById('sap-vis-save').click();
+        await sleep(60);
+        check('alles sichtbar speichert eine LEERE Liste (leer = alles)',
+              savedBody && savedBody.hidden_analyses.length === 0,
+              JSON.stringify(savedBody));
+
+        sd.getElementById('sap-vis-none').click();
+        await sleep(20);
+        check('"Alle abwaehlen" entfernt alle Haken',
+              Array.prototype.every.call(cbs(), (c) => !c.checked));
+        savedBody = null;
+        sd.getElementById('sap-vis-save').click();
+        await sleep(60);
+        check('alles abgewaehlt speichert ALLE Ids',
+              savedBody && savedBody.hidden_analyses.length === 3);
+
+        // Die Verbindungs-Speicherung darf die Sichtbarkeit nicht mitschicken –
+        // der Server merged, aber ein mitgesendetes leeres Feld wuerde sie loeschen.
+        savedBody = null;
+        sd.getElementById('sap-save').click();
+        await sleep(60);
+        check('Verbindung speichern enthaelt KEIN hidden_analyses',
+              savedBody && !('hidden_analyses' in savedBody),
+              JSON.stringify(savedBody && Object.keys(savedBody)));
+
+        {
+            const KEYS = ['sap.vis_head', 'sap.vis_hint', 'sap.vis_all', 'sap.vis_none',
+                          'sap.vis_count', 'sap.vis_load_fail', 'sap.vis_save_fail',
+                          'sap.hidden_by_admin'];
+            const missing = [];
+            ['de', 'en'].forEach((lg) => {
+                s.window._lang = lg;
+                KEYS.forEach((k) => { if (s.window.t(k) === k) missing.push(lg + ':' + k); });
+            });
+            check('Sichtbarkeits-Schluessel in beiden Sprachen', missing.length === 0,
+                  missing.join(', '));
+        }
+        s.window.close();
     }
 
     // ── Ergebnis ────────────────────────────────────────────────────

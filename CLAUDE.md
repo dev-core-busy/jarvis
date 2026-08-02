@@ -1038,6 +1038,74 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
   geschrieben", obwohl geschrieben wurde – die Drosselung wird deshalb über den
   DATEIINHALT geprüft.
 
+## SAP-Analysebereich `/sap` (seit 2026-08-02)
+- **Was es ist:** Eine eigene Seite für die Geschäftsleitung – Kachel im Portal, nur für
+  SAP-berechtigte Benutzer. Drei Dinge auf einer Fläche: **Management-Analysen** (Vorlage wählen →
+  Agent wertet lesend aus), **BI-Anbindung** (fertige Verbindungsangaben je Werkzeug) und eine
+  **Abfrage-Konsole** (OData/SQL ohne KI). Code: `backend/sap_analyses.py`, Endpunkte
+  `GET /sap`, `/api/sap/status|analyses|instructions|ask|stop`, `frontend/sap.html`,
+  `frontend/js/sap_portal.js`.
+- **Nicht zu verwechseln mit dem SAP-Reiter** (*Einstellungen → SAP*, `frontend/js/sap.js`): dort
+  pflegt ein Admin die **Zugangsdaten**, hier wird nur **ausgewertet**. Die Seite zeigt keine
+  Zugangsdaten und kann keine speichern. Deshalb auch das Präfix **`sp-`** für alles Neue –
+  `sap-` gehört den Reiter-IDs, eine Kollision wäre beim Debuggen kaum zu sehen.
+- **Der Analysekatalog liegt im BACKEND, nicht in `i18n.js`** (`sap_analyses.py`, 24 Analysen in
+  6 Kategorien, DE+EN). Grund: zu jedem Titel gehört ein **Arbeitsauftrag für den Agenten**, und
+  Titel und Auftrag dürfen nicht auseinanderlaufen. Läge der Titel in `i18n.js` und der Auftrag
+  hier, wäre das genau das Drift-Muster, das im Projekt schon mehrfach Stunden gekostet hat.
+  `catalog(lang)` liefert nur EINE Sprache und **gibt das `task`-Feld nicht heraus** – der
+  Arbeitsauftrag ist nichts, was der Browser braucht (Test prüft das).
+- **Zuschnitt Aktiengesellschaft:** neben der klassischen Betriebsauswertung (GuV/Bilanz, Working
+  Capital, Debitoren-Aging, Auftragsbestand, Spend, Bestände, Personal) ausdrücklich die
+  kapitalmarktrechtlichen Pflichten – Segmentberichterstattung (IFRS 8), erwartete Kreditverluste
+  (IFRS 9), Konzernkonsolidierung/Intercompany, IKS und Funktionstrennung (§ 91 Abs. 3 AktG),
+  Umsatzsteuer/Intrastat, ESG/CSRD und die **Prognoseabweichung als Ad-hoc-Frühwarnung**
+  (Art. 17 MAR). Letztere sagt im Auftragstext selbst, dass sie die rechtliche Bewertung NICHT
+  ersetzt – eine Auswertung, die eine Ad-hoc-Pflicht behauptet, wäre gefährlicher als keine.
+- **`build_task()` – die Reihenfolge ist die Semantik:** Vorspann (Read-Only + Vorgehen) →
+  Vorlage → Freitext-Frage → Zielwerkzeug → persönliche Anweisungen. Späteres präzisiert
+  Früheres; kippt die Reihenfolge, gewinnt im Zweifel die Vorlage gegen die ausdrückliche
+  Anweisung des Benutzers. Genau dafür gibt es einen Test.
+- **Read-Only ist die Zusage des Bereichs** und wird zweifach gehalten: hart im `sap_client`
+  (OData nur GET, SQL nur SELECT/WITH, RFC nur Whitelist) und im Katalog – ein Test lehnt jeden
+  Auftragstext ab, der ein schreibendes Schlüsselwort enthält. Grund für den zweiten: der Client
+  würde zwar ablehnen, der Lauf endete dann aber in einer Fehlermeldung statt in einer Auswertung.
+- **Der Lauf ist unprivilegiert mit `sap: True`** (`actor={"privileged": False, "sap": True}`).
+  Das schaltet `agent.py` die `sap_*`-Werkzeuge frei, **ohne** Systemrechte zu geben. Eigener
+  Agent + eigene Sperre (`_sap_agent`, `_sap_agent_lock`) wie beim Avatar: eine Analyse läuft
+  Minuten und dürfte den geteilten Hauptagenten nicht für alle anderen blockieren.
+- **`permissions.sap` in `/api/me` heißt „darf diesen Bereich BETRETEN"** – Freigabe UND aktiver
+  Skill. Eine Kachel, die auf eine 404-Seite führt, ist schlimmer als keine Kachel. Die
+  Datenendpunkte prüfen weiterhin nur die Freigabe (`require_sap_access`), damit der
+  Einstellungs-Reiter unabhängig vom Skill-Zustand bedienbar bleibt. Das Feld ist bewusst ein
+  **Unterobjekt**: jede Kachel mit eigenem Abruf kostet einen Roundtrip – der Grund, aus dem
+  /settings einmal neun Sekunden brauchte.
+- **Die Seitenroute prüft die Berechtigung NICHT** (eine normale Navigation trägt keinen
+  Authorization-Header, der Token liegt im localStorage). `/sap` prüft nur, ob der Skill aktiv
+  ist; die Seite holt als Erstes `/api/me` und schickt Unberechtigte aufs Portal. Sicherheits-
+  relevant ist das nicht – die Seite ist eine leere Hülle. **Fail-closed:** fehlt
+  `permissions` ganz (älteres Backend), gilt „nicht freigegeben".
+- **Der Verlauf speichert die FRAGE, nie das Ergebnis** (`localStorage`, 25 Einträge): sonst
+  lägen Geschäftszahlen im Browser-Speicher. Ein Klick im Verlauf **übernimmt nur, er startet
+  nicht** – eine Analyse kostet Minuten und Last, ein versehentlicher Klick darf sie nicht
+  auslösen. Beides ist getestet.
+- **Sprachwechsel:** der Katalog kommt übersetzt vom Server, `applyLang()` erreicht ihn also
+  nicht. Dafür feuert `i18n.js` jetzt das Ereignis **`jarvis-lang-changed`** (additiv, Zuhörer
+  freiwillig). Der Zuhörer vergleicht mit `_catalog.lang` – ohne diesen Vergleich holte die Seite
+  den Katalog beim Aufbau zweimal, weil `applyLang()` auch bei DOMContentLoaded läuft.
+- **FALLSTRICK im UI-Test:** `window.location` lässt sich in jsdom **weder ersetzen noch
+  überschreiben** (`Cannot redefine property`) – weder am Fenster, noch an `Location.prototype`,
+  noch an der Instanz. Eine Weiterleitung erkennt man über den jsdomError
+  „Not implemented: navigation" (VirtualConsole); das ZIEL gibt jsdom nicht heraus und wird
+  deshalb per Quelltext-Prüfung abgedeckt.
+- **Verifiziert:** 41 Katalog-Tests (`tests/test_sap_analyses.py`, ohne fastapi lauffähig) +
+  59 UI-Tests in jsdom gegen die echten Dateien (`tests/test_sap_portal_ui.js`) = 100/100.
+  Live auf DEV: Gate greift (Nicht-Freigegebener → `permissions.sap: false` + HTTP 403 auf allen
+  `/api/sap/*`), Katalog liefert 24 Analysen in DE und EN, Anweisungen speichern/lesen,
+  `ask` meldet bei unkonfiguriertem SAP Klartext statt eines Agentenlaufs.
+  **Ein echter Agentenlauf gegen ein SAP-System ist NICHT geprüft** – auf DEV sind keine
+  SAP-Zugangsdaten hinterlegt.
+
 ## Info-Dokumente im Portal (`frontend_info_files/`, seit 2026-07-29)
 - **Was es ist:** Ein Ablage-Ordner neben dem Backend (`/opt/jarvis/frontend_info_files`,
   umstellbar über `JARVIS_INFO_DIR`). Ein Administrator kopiert Dateien hinein (Handbuch,

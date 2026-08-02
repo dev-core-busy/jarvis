@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAP-Analysen</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=8">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+        /* ═══════════════════════════════════════════════════════════════
+           SAP-Analysebereich (/sap)
+           ───────────────────────────────────────────────────────────────
+           Aufbau der Titelleiste bewusst identisch zu /support (.topbar,
+           .topbar-left/-right, .btn-theme, .lang-toggle) – wer zwischen den
+           Bereichen wechselt, soll die Knoepfe am selben Platz finden.
+           Praefix `sp-` fuer alles Neue: `sap-` gehoert bereits dem
+           Einstellungs-Reiter (frontend/js/sap.js), eine Kollision waere
+           beim Debuggen kaum zu sehen.
+           Farben ausschliesslich ueber Theme-Variablen – kein hartes Violett
+           oder Weiss, sonst bricht das Branding und der Hell-Modus.
+           ═══════════════════════════════════════════════════════════════ */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); min-height: 100vh; }
+        .hidden { display: none !important; }
+
+        /* ── Titelleiste (Vorbild /support) ── */
+        .topbar { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 16px; border-bottom: 1px solid var(--border);
+            background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 30; }
+        .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .topbar-right { display: flex; align-items: center; gap: 4px; }
+        .topbar-avatar { width: 32px; height: 32px; border-radius: 50%;
+            background: var(--gradient); display: flex; align-items: center;
+            justify-content: center; font-size: 14px; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+        .sp-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+            background: var(--text-muted); transition: background .3s ease; }
+        .sp-status-dot.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
+        .sp-status-dot.disconnected { background: var(--danger); }
+        /* Verbindungs-Pille: sagt auf einen Blick, WELCHE SAP-Schnittstelle
+           aktiv ist. Ohne sie raet der Benutzer, warum eine Abfrage scheitert. */
+        .sp-conn { display: inline-flex; align-items: center; gap: 6px;
+            padding: 3px 10px; border-radius: 12px; font-size: .74rem; font-weight: 600;
+            background: rgba(var(--fg-rgb), .06); border: 1px solid var(--border);
+            color: var(--text-secondary); white-space: nowrap; }
+        .sp-conn.is-off { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+        .sp-conn:empty { display: none; }
+
+        .btn-theme { background: none; border: none; color: #888899;
+            padding: 4px 8px; border-radius: 8px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: color .2s, background .2s; }
+        .btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
+        .btn-theme svg { width: 20px; height: 20px; }
+        body.light .btn-theme { color: #777788; }
+
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), .05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), .1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: .72rem; font-weight: 700; letter-spacing: .04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: var(--font-body);
+            transition: background .15s, color .15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
+
+        /* ── Anweisungen / Verlauf (Knopfform wie /support) ── */
+        .sp-hist-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+            font-size: .85rem; display: flex; align-items: center; gap: 6px;
+            font-family: var(--font-body); white-space: nowrap; }
+        .sp-hist-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .sp-hist-wrap { position: relative; }
+        .sp-hist-panel { position: absolute; right: 0; top: calc(100% + 6px);
+            width: 340px; max-width: 80vw;
+            /* DECKEND, nicht Glas: darunter liegen die Analysekarten mit Text,
+               der sonst durch die Verlaufseintraege scheint (gleiche
+               Begruendung wie beim Dokumente-Panel im Portal). */
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-lg); z-index: 50;
+            max-height: 60vh; overflow-y: auto; }
+        .sp-hist-head { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 14px; border-bottom: 1px solid var(--border);
+            position: sticky; top: 0; background: var(--bg-secondary); }
+        .sp-hist-head strong { font-size: .85rem; }
+        .sp-hist-clear { background: none; border: none; color: var(--text-muted);
+            cursor: pointer; font-size: .78rem; font-family: var(--font-body); }
+        .sp-hist-clear:hover { color: var(--danger); }
+        .sp-hist-item { padding: 9px 14px; cursor: pointer;
+            border-bottom: 1px solid rgba(var(--fg-rgb), .05); }
+        .sp-hist-item:hover { background: rgba(var(--accent-rgb), .08); }
+        .sp-hist-q { font-size: .86rem; color: var(--text-primary);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sp-hist-meta { font-size: .72rem; color: var(--text-muted); margin-top: 2px; }
+        .sp-hist-empty { padding: 22px 14px; text-align: center;
+            color: var(--text-muted); font-size: .84rem; }
+
+        .sp-instr-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 60;
+            display: flex; align-items: center; justify-content: center; padding: 16px; }
+        .sp-instr-overlay.hidden { display: none; }
+        .sp-instr-modal { background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 12px; width: 640px; max-width: 100%; max-height: 85vh;
+            display: flex; flex-direction: column; padding: 18px;
+            box-shadow: 0 20px 60px rgba(var(--shadow-rgb), .5); }
+        .sp-instr-head { display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 8px; }
+        .sp-instr-hint { font-size: .82rem; color: var(--text-muted);
+            margin: 0 0 10px; line-height: 1.4; }
+        .sp-instr-text { width: 100%; min-height: 220px; resize: vertical;
+            background: var(--bg-primary); color: var(--text-primary);
+            border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+            font-family: var(--font-body); font-size: .9rem; line-height: 1.5; }
+        .sp-instr-text:focus { border-color: var(--accent); outline: none; }
+        .sp-instr-foot { display: flex; align-items: center; justify-content: flex-end;
+            gap: 12px; margin-top: 12px; }
+        .sp-instr-status { font-size: .82rem; color: var(--text-muted); margin-right: auto; }
+
+        /* ── Inhalt ── */
+        .sp-wrap { max-width: 940px; margin: 0 auto; padding: 26px 20px 60px; }
+        .sp-card { background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-md); }
+        .sp-card + .sp-card { margin-top: 16px; }
+        .sp-row { display: flex; gap: 14px; flex-wrap: wrap; }
+        .sp-field { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+        .sp-label { font-size: .78rem; font-weight: 600; color: var(--text-secondary); }
+        .sp-select, .sp-input {
+            width: 100%; background: rgba(var(--fg-rgb), .05); border: 1px solid var(--border);
+            color: var(--text-primary); border-radius: var(--radius-md);
+            padding: 9px 11px; font-size: .9rem; font-family: var(--font-body); cursor: pointer; }
+        .sp-select:focus, .sp-input:focus { outline: none; border-color: var(--accent); }
+        /* Deckende Flaeche fuer die Auswahlliste: ein halbtransparenter
+           Feld-Hintergrund wird im Popup zu fast Weiss und die helle Schrift
+           verschwindet darin (theme.css setzt die Regel global – hier nur
+           erwaehnt, damit sie beim Aufraeumen nicht entfernt wird). */
+
+        .sp-desc { margin-top: 12px; padding: 12px 14px; border-radius: var(--radius-md);
+            background: rgba(var(--accent-rgb), .07);
+            border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+            font-size: .86rem; line-height: 1.5; color: var(--text-secondary); }
+        .sp-desc.hidden { display: none; }
+        .sp-desc-title { font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+        .sp-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+        .sp-chip { font-size: .72rem; padding: 2px 8px; border-radius: 999px;
+            background: rgba(var(--fg-rgb), .08); border: 1px solid var(--border);
+            color: var(--text-secondary); }
+        .sp-src { margin-top: 8px; font-size: .74rem; color: var(--text-muted);
+            font-family: var(--font-mono, monospace); word-break: break-word; }
+
+        #sp-question { margin-top: 14px; width: 100%; resize: vertical;
+            min-height: 74px; max-height: 260px;
+            background: rgba(var(--fg-rgb), .05); border: 1px solid var(--border);
+            border-radius: var(--radius-md); color: var(--text-primary);
+            padding: 11px 13px; font-size: .93rem; font-family: var(--font-body); line-height: 1.45; }
+        #sp-question:focus { outline: none; border-color: var(--accent); }
+
+        .sp-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+        .sp-btn { background: var(--accent); color: #fff; border: none; cursor: pointer;
+            border-radius: var(--radius-md); padding: 10px 22px; font-size: .93rem;
+            font-weight: 600; font-family: var(--font-body); white-space: nowrap; }
+        .sp-btn:hover { background: var(--accent-hover); }
+        .sp-btn:disabled { opacity: .55; cursor: default; }
+        .sp-btn-cancel { background: var(--danger); color: #fff; border: none; cursor: pointer;
+            border-radius: var(--radius-md); padding: 8px 16px; font-size: .84rem;
+            font-weight: 600; font-family: var(--font-body); }
+        .sp-btn-cancel:hover { filter: brightness(1.1); }
+        .sp-note { font-size: .8rem; color: var(--text-muted); }
+        .sp-note.is-error { color: var(--danger); }
+        .sp-note.is-ok { color: var(--success); }
+
+        /* ── Ergebnis ── */
+        .sp-result { margin-top: 16px; }
+        .sp-result.hidden { display: none; }
+        .sp-result-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .sp-result-title { font-size: 1rem; font-weight: 600; }
+        .sp-result-body { font-size: .92rem; line-height: 1.6; overflow-wrap: anywhere; }
+        .sp-result-body table { border-collapse: collapse; width: 100%;
+            font-size: .84rem; margin: 10px 0; display: block; overflow-x: auto; }
+        .sp-result-body th, .sp-result-body td { border: 1px solid var(--border);
+            padding: 5px 9px; text-align: left; vertical-align: top; }
+        .sp-result-body th { background: rgba(var(--fg-rgb), .06); color: var(--text-secondary); }
+        .sp-result-body pre { background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: 8px; padding: 10px 12px; overflow-x: auto; font-size: .82rem; }
+        .sp-result-body code { font-family: var(--font-mono, monospace); font-size: .86em; }
+        .sp-result-body h1, .sp-result-body h2, .sp-result-body h3 {
+            font-size: 1rem; margin: 14px 0 6px; }
+        .sp-result-body ul, .sp-result-body ol { margin: 6px 0 6px 20px; }
+
+        /* Wartehinweis mit Laufzeit: eine Analyse kann Minuten dauern – ohne
+           mitlaufende Sekunden haelt der Benutzer die Seite fuer haengen. */
+        .sp-busy { display: flex; align-items: center; gap: 10px;
+            font-size: .86rem; color: var(--text-secondary); }
+        .sp-spin { width: 15px; height: 15px; border: 2px solid var(--border);
+            border-top-color: var(--accent); border-radius: 50%;
+            animation: spSpin .9s linear infinite; flex-shrink: 0; }
+        @keyframes spSpin { to { transform: rotate(360deg); } }
+
+        /* ── Klappabschnitte (Anbindung / Konsole) ── */
+        .sp-sect { margin-top: 16px; border: 1px solid var(--border);
+            border-radius: var(--radius-lg); background: var(--bg-secondary);
+            box-shadow: var(--shadow-md); overflow: hidden; }
+        .sp-sect > summary { list-style: none; cursor: pointer; padding: 14px 18px;
+            display: flex; align-items: center; gap: 9px; font-size: .95rem; font-weight: 600; }
+        .sp-sect > summary::-webkit-details-marker { display: none; }
+        .sp-sect > summary::before { content: '▸'; color: var(--text-muted);
+            transition: transform .15s ease; display: inline-block; }
+        .sp-sect[open] > summary::before { transform: rotate(90deg); }
+        .sp-sect > summary:hover { background: rgba(var(--accent-rgb), .07); }
+        .sp-sect-body { padding: 0 18px 18px; }
+        .sp-sect-hint { font-size: .82rem; color: var(--text-muted);
+            line-height: 1.5; margin-bottom: 12px; }
+
+        .sp-ep { border: 1px solid var(--border); border-radius: var(--radius-md);
+            padding: 11px 13px; margin-bottom: 9px; background: rgba(var(--fg-rgb), .03); }
+        .sp-ep-name { font-weight: 600; font-size: .9rem; }
+        .sp-ep-url { font-size: .78rem; color: var(--text-muted);
+            font-family: var(--font-mono, monospace); word-break: break-all; margin: 3px 0 7px; }
+        .sp-ep-list { margin: 0; padding-left: 18px; font-size: .85rem; line-height: 1.55; }
+        .sp-ep.is-match { border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+            background: rgba(var(--accent-rgb), .08); }
+
+        .sp-console-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+        .sp-tab { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            padding: 6px 13px; border-radius: 8px; cursor: pointer;
+            font-size: .83rem; font-family: var(--font-body); }
+        .sp-tab.active { background: rgba(var(--accent-rgb), .15);
+            color: var(--accent-hover); border-color: var(--accent); }
+        .sp-console-pane.hidden { display: none; }
+        #sp-sql { width: 100%; min-height: 92px; resize: vertical;
+            background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius-md); color: var(--text-primary); padding: 10px 12px;
+            font-family: var(--font-mono, monospace); font-size: .84rem; line-height: 1.5; }
+        #sp-sql:focus { outline: none; border-color: var(--accent); }
+        .sp-table-box { margin-top: 12px; overflow-x: auto; }
+        .sp-table-box table { border-collapse: collapse; width: 100%; font-size: .82rem; }
+        .sp-table-box th { text-align: left; padding: 5px 9px; white-space: nowrap;
+            border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+        .sp-table-box td { padding: 5px 9px; vertical-align: top;
+            border-bottom: 1px solid rgba(var(--fg-rgb), .06); }
+
+        .sp-empty { padding: 26px 14px; text-align: center;
+            color: var(--text-muted); font-size: .88rem; line-height: 1.6; }
+    </style>
+</head>
+<body>
+<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+
+<div id="sp-app" class="hidden">
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-avatar">J</div>
+            <span class="topbar-title"><span class="brand-app-name">Jarvis</span>
+                <span data-i18n="sap.portal_title">SAP-Analysen</span></span>
+            <span class="sp-status-dot" id="sp-status-dot" title="LLM-Status"
+                  data-i18n-title="portal.llm_status"></span>
+            <span class="sp-conn" id="sp-conn"></span>
+        </div>
+        <div class="topbar-right">
+            <div class="lang-toggle" id="sp-lang-toggle">
+                <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang && window.setLang('en')" title="English">EN</button>
+            </div>
+            <button class="sp-hist-btn" id="sp-instr-btn" data-i18n-title="sap.instr_title"
+                    title="Eigene Anweisungen für die Auswertung">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                <span data-i18n="sup.instructions">Anweisungen</span>
+            </button>
+            <div class="sp-hist-wrap">
+                <button class="sp-hist-btn" id="sp-hist-btn" data-i18n-title="sap.hist_title" title="Zuletzt ausgeführte Analysen">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+                    <span data-i18n="sup.history">Verlauf</span>
+                </button>
+                <div class="sp-hist-panel hidden" id="sp-hist-panel">
+                    <div class="sp-hist-head">
+                        <strong data-i18n="sup.history">Verlauf</strong>
+                        <button class="sp-hist-clear" id="sp-hist-clear" type="button" data-i18n="sup.clear">Leeren</button>
+                    </div>
+                    <div id="sp-hist-list"></div>
+                </div>
+            </div>
+            <button class="btn-theme" id="btn-theme-toggle" data-i18n-title="chat.theme" title="Hell/Dunkel umschalten">
+                <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <svg class="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <a href="/portal" class="btn-theme" data-i18n-title="nav.home" title="Startseite"
+               style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </a>
+            <button class="btn-theme" id="sp-issues-btn" data-i18n-title="sup.issues" title="Issues / Feedback"
+                    onclick="window.JarvisIssues && window.JarvisIssues.open()">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </button>
+            <a class="btn-theme" href="/api/cert" download data-i18n-title="chat.ssl_cert" title="SSL-Zertifikat"
+               style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </a>
+            <!-- Einstellungen: nur fuer Admins (dort werden die Zugangsdaten gepflegt) -->
+            <button class="btn-theme" id="sp-settings-btn" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button class="btn-theme" id="sp-logout-btn" data-i18n-title="chat.logout" title="Abmelden">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Anweisungen (dauerhaft, je Benutzer) -->
+    <div id="sp-instr-overlay" class="sp-instr-overlay hidden">
+        <div class="sp-instr-modal">
+            <div class="sp-instr-head">
+                <strong data-i18n="sap.instr_heading">Eigene Anweisungen für SAP-Auswertungen</strong>
+                <button class="sp-hist-clear" id="sp-instr-close" type="button">✕</button>
+            </div>
+            <p class="sp-instr-hint" data-i18n="sap.instr_hint">Diese Anweisungen gelten dauerhaft nur für dich und fließen in jede Auswertung ein – z. B. Buchungskreis, Währung, Berichtsformat oder Detailtiefe.</p>
+            <textarea id="sp-instr-text" class="sp-instr-text"
+                      data-i18n-placeholder="sap.instr_ph"
+                      placeholder="z. B. Immer nur Buchungskreis 1000. Beträge in TEUR. Antworte in Stichpunkten und nenne stets die Quelltabelle."></textarea>
+            <div class="sp-instr-foot">
+                <span id="sp-instr-status" class="sp-instr-status"></span>
+                <button class="sp-hist-btn" id="sp-instr-save" type="button" data-i18n="common.save">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="sp-wrap">
+        <!-- ── Analyse starten ── -->
+        <div class="sp-card">
+            <div class="sp-row">
+                <div class="sp-field">
+                    <label class="sp-label" for="sp-analysis" data-i18n="sap.analysis">Analyse</label>
+                    <select id="sp-analysis" class="sp-select"></select>
+                </div>
+                <div class="sp-field">
+                    <label class="sp-label" for="sp-bitool" data-i18n="sap.bitool">Auswertung für</label>
+                    <select id="sp-bitool" class="sp-select"></select>
+                </div>
+            </div>
+
+            <div id="sp-desc" class="sp-desc hidden">
+                <div class="sp-desc-title" id="sp-desc-title"></div>
+                <div id="sp-desc-text"></div>
+                <div class="sp-chips" id="sp-desc-kpis"></div>
+                <div class="sp-src" id="sp-desc-src"></div>
+            </div>
+
+            <textarea id="sp-question" data-i18n-placeholder="sap.question_ph"
+                      placeholder="Zusätzliche Frage oder Einschränkung (optional) – z. B. „nur Buchungskreis 1000, letzte zwei Quartale“"></textarea>
+
+            <div class="sp-actions">
+                <button class="sp-btn" id="sp-run" type="button" data-i18n="sap.run">Analyse starten</button>
+                <button class="sp-btn-cancel hidden" id="sp-cancel" type="button" data-i18n="common.cancel">Abbrechen</button>
+                <span class="sp-note" id="sp-note"></span>
+            </div>
+        </div>
+
+        <!-- ── Ergebnis ── -->
+        <div class="sp-card sp-result hidden" id="sp-result">
+            <div class="sp-result-head">
+                <span class="sp-result-title" id="sp-result-title" data-i18n="sap.result">Ergebnis</span>
+                <span style="flex:1"></span>
+                <button class="sp-hist-btn" id="sp-copy" type="button" data-i18n="sap.copy">Kopieren</button>
+            </div>
+            <div class="sp-result-body" id="sp-result-body"></div>
+        </div>
+
+        <!-- ── BI-Anbindung ── -->
+        <details class="sp-sect" id="sp-sect-bi">
+            <summary><span data-i18n="sap.section_bi">Anbindung an das BI-Werkzeug</span></summary>
+            <div class="sp-sect-body">
+                <p class="sp-sect-hint" data-i18n="sap.section_bi_hint">Die fertigen Verbindungsangaben, mit denen sich dasselbe SAP-System direkt im gewählten Werkzeug anbinden lässt. Die zur Auswahl oben passende Schnittstelle ist hervorgehoben.</p>
+                <div id="sp-bi-list"></div>
+            </div>
+        </details>
+
+        <!-- ── Abfrage-Konsole (read-only) ── -->
+        <details class="sp-sect" id="sp-sect-console">
+            <summary><span data-i18n="sap.section_console">Abfrage-Konsole (nur lesend)</span></summary>
+            <div class="sp-sect-body">
+                <p class="sp-sect-hint" data-i18n="sap.section_console_hint">Direkte Leseabfragen ohne KI. Schreibende Anweisungen sind serverseitig gesperrt: OData nur GET, SQL nur SELECT bzw. WITH.</p>
+                <div class="sp-console-tabs">
+                    <button class="sp-tab active" id="sp-tab-odata" data-pane="odata" type="button">OData</button>
+                    <button class="sp-tab" id="sp-tab-sql" data-pane="sql" type="button">SQL (HANA)</button>
+                </div>
+
+                <div class="sp-console-pane" id="sp-pane-odata">
+                    <div class="sp-row">
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-od-entity" data-i18n="sap.entityset">EntitySet</label>
+                            <input class="sp-input" id="sp-od-entity" type="text" placeholder="z. B. A_JournalEntry">
+                        </div>
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-od-service" data-i18n="sap.service">Service (optional)</label>
+                            <input class="sp-input" id="sp-od-service" type="text" placeholder="API_JOURNALENTRYITEMBASIC_SRV">
+                        </div>
+                        <div class="sp-field" style="flex:0 0 120px;">
+                            <label class="sp-label" for="sp-od-top" data-i18n="sap.rows">Zeilen</label>
+                            <input class="sp-input" id="sp-od-top" type="number" min="1" max="500" value="20">
+                        </div>
+                    </div>
+                    <div class="sp-actions">
+                        <button class="sp-btn" id="sp-od-run" type="button" data-i18n="sap.query">Abfragen</button>
+                    </div>
+                </div>
+
+                <div class="sp-console-pane hidden" id="sp-pane-sql">
+                    <label class="sp-label" for="sp-sql" data-i18n="sap.sql">SELECT-Abfrage</label>
+                    <textarea id="sp-sql" placeholder="SELECT TOP 20 * FROM SCHEMA.TABELLE"></textarea>
+                    <div class="sp-actions">
+                        <button class="sp-btn" id="sp-sql-run" type="button" data-i18n="sap.execute">Ausführen</button>
+                        <label class="sp-note" style="display:flex;align-items:center;gap:6px;">
+                            <span data-i18n="sap.max_rows">max. Zeilen</span>
+                            <input class="sp-input" id="sp-sql-max" type="number" min="1" max="1000" value="200" style="width:90px;">
+                        </label>
+                    </div>
+                </div>
+
+                <div class="sp-table-box" id="sp-console-out"></div>
+            </div>
+        </details>
+    </div>
+</div>
+
+<script src="/static/js/i18n.js?v=98"></script>
+<script src="/static/js/theme.js?v=2"></script>
+<script src="/static/js/branding.js?v=22"></script>
+<script src="/static/js/issues.js?v=6"></script>
+<script src="/static/js/chatlib.js?v=12"></script>
+<script src="/static/js/sessions.js?v=6"></script>
+<script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
+<script src="/static/js/charts.js?v=3"></script>
+<script src="/static/js/sap_portal.js?v=1"></script>
+</body>
+</html>

@@ -960,24 +960,88 @@ def _lang(lang: str) -> str:
     return "en" if str(lang or "").strip().lower().startswith("en") else "de"
 
 
-def catalog(lang: str = "de") -> dict:
+def normalize_hidden(value) -> list[str]:
+    """Macht aus einem gespeicherten Wert eine saubere Liste von Analyse-Ids.
+
+    Nimmt Liste ODER kommagetrennten Text an (eine handgeschriebene
+    settings.json darf den Bereich nicht lahmlegen) und **verwirft unbekannte
+    Ids, statt sie zu raten**. Das ist wichtig, wenn eine Analyse aus dem
+    Katalog verschwindet: ihre Id wuerde sonst dauerhaft in der Konfiguration
+    stehenbleiben und beim naechsten Speichern wieder mitgeschrieben."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw = [p.strip() for p in value.split(",")]
+    elif isinstance(value, (list, tuple, set)):
+        raw = [str(p).strip() for p in value]
+    else:
+        return []
+    known = {a["id"] for a in ANALYSES}
+    seen, out = set(), []
+    for r in raw:
+        if r in known and r not in seen:
+            seen.add(r)
+            out.append(r)
+    return out
+
+
+def catalog(lang: str = "de", hidden=None) -> dict:
     """Liefert Kategorien, Analysen und BI-Werkzeuge in EINER Sprache.
 
     Die Oberflaeche bekommt bewusst nur die aktive Sprache – sie soll nicht
     selbst zwischen ``de`` und ``en`` waehlen muessen (zwei Auswahlstellen
-    laufen erfahrungsgemaess auseinander)."""
+    laufen erfahrungsgemaess auseinander).
+
+    ``hidden`` sind die vom Administrator ausgeblendeten Analyse-Ids
+    (*Einstellungen → SAP*). Sie fallen hier heraus – **und ebenso jede
+    Kategorie, die dadurch leer wird**: eine Gruppenueberschrift ohne Eintraege
+    sieht im Pulldown wie ein Fehler aus.
+
+    ``hidden=None`` bedeutet "nichts ausgeblendet", NICHT "nichts sichtbar".
+    Das ist Absicht und der Unterschied zu einer Berechtigung: wer den Bereich
+    betreten darf, hat die Freigabe bereits; dies hier ist nur eine
+    Aufraeum-Einstellung. Waere leer = nichts, stuende nach dem Einschalten
+    des Skills ein leeres Pulldown da, und eine spaeter ergaenzte Analyse waere
+    still unsichtbar."""
     lg = _lang(lang)
-    cats = [{"id": c["id"], "title": c[lg]} for c in CATEGORIES]
+    skip = set(normalize_hidden(hidden))
     items = []
     for a in ANALYSES:
+        if a["id"] in skip:
+            continue
         t = a[lg]
         items.append({
             "id": a["id"], "cat": a["cat"], "title": t["title"],
             "desc": t["desc"], "kpis": t["kpis"], "sources": a["sources"],
         })
+    used = {i["cat"] for i in items}
+    cats = [{"id": c["id"], "title": c[lg]} for c in CATEGORIES if c["id"] in used]
     tools = [{"id": b["id"], "name": b["name"], "iface": b["iface"]}
              for b in BI_TOOLS]
     return {"lang": lg, "categories": cats, "analyses": items, "bi_tools": tools}
+
+
+def admin_catalog(lang: str = "de", hidden=None) -> dict:
+    """Vollstaendiger Katalog MIT Sichtbarkeitsmerker – fuer den Reiter
+    *Einstellungen → SAP*.
+
+    Bewusst getrennt von ``catalog()``: dort darf eine ausgeblendete Analyse
+    nicht auftauchen, hier MUSS sie es (man kann sonst nichts wieder
+    einblenden). Alle Kategorien bleiben erhalten, auch leere – der
+    Administrator soll die Gliederung vollstaendig sehen."""
+    lg = _lang(lang)
+    skip = set(normalize_hidden(hidden))
+    cats = [{"id": c["id"], "title": c[lg]} for c in CATEGORIES]
+    items = [{"id": a["id"], "cat": a["cat"], "title": a[lg]["title"],
+              "desc": a[lg]["desc"], "visible": a["id"] not in skip}
+             for a in ANALYSES]
+    return {"lang": lg, "categories": cats, "analyses": items,
+            "hidden": sorted(skip), "total": len(ANALYSES)}
+
+
+def is_hidden(analysis_id: str, hidden=None) -> bool:
+    """True, wenn die Analyse vom Administrator ausgeblendet wurde."""
+    return analysis_id in set(normalize_hidden(hidden))
 
 
 def find(analysis_id: str) -> dict | None:

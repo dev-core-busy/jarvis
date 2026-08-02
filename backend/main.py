@@ -639,16 +639,56 @@ def _action_label(path: str) -> str:
     return "Aktion"
 
 
+def _display_name(username: str) -> str:
+    """Anzeigename fuer die Anwesenheitsliste – mit Domaenen-Praefix.
+
+    **Der Praefix haing frueher davon ab, was der Benutzer ins Anmeldefeld
+    getippt hat.** Wer ``nexus\\andrea.ladd`` eingab, stand mit Praefix in der
+    Liste; wer ``andrea.ladd`` oder ``andrea.ladd@nexus.local`` eingab, ohne –
+    obwohl es dieselbe Person am selben Verzeichnis ist. Genau daher der
+    Eindruck, der Praefix fehle "oft". Er wird jetzt aus dem abgeleitet, was
+    das System WEISS, nicht aus der Tippform.
+
+    Regeln:
+    * lokale Konten (``ALLOWED_USERS``, also ``jarvis``) bekommen **keinen**
+      Praefix – sie stammen nicht aus dem Verzeichnis, ein ``nexus\\`` waere
+      schlicht falsch.
+    * ein bereits vorhandener ``domaene\\benutzer``-Anteil bleibt unveraendert.
+    * sonst: Kurzname der Domaene aus ``ad_domain`` (erste Beschriftung, z.B.
+      ``nexus.local`` → ``nexus``) + ``\\`` + Kontoname.
+    * ohne konfigurierte Domaene bleibt es beim blossen Namen – geraten wird
+      nicht.
+
+    Der Kurzname wird aus dem DNS-Namen abgeleitet; er MUSS nicht mit dem
+    NetBIOS-Namen uebereinstimmen (in den allermeisten Domaenen tut er es).
+    Das ist vertretbar, weil der Wert ausschliesslich der Anzeige dient –
+    angemeldet, gesucht und berechtigt wird ueber den normalisierten Namen.
+    """
+    u = (username or "").strip()
+    if not u or "\\" in u:
+        return u
+    if u in ALLOWED_USERS:
+        return u
+    plain = _norm_login(u) or u
+    try:
+        dom = (config.get_setting("ad_domain", "") or "").strip()
+    except Exception:  # noqa: BLE001
+        dom = ""
+    kurz = dom.split(".", 1)[0].strip() if dom else ""
+    return f"{kurz}\\{plain}" if kurz else plain
+
+
 def _note_activity(username: str, request: Request) -> None:
     """Anwesenheit immer, Handlung nur bei veraendernden Anfragen."""
     try:
         ip = request.client.host if request.client else ""
         pfad = request.url.path
+        anzeige = _display_name(username)
         if (request.method in ("POST", "PUT", "PATCH", "DELETE")
                 and not pfad.startswith(_ACTION_IGNORE)):
-            _user_sessions.note_action(username, _action_label(pfad), ip)
+            _user_sessions.note_action(username, _action_label(pfad), ip, display=anzeige)
         else:
-            _user_sessions.touch(username, ip)
+            _user_sessions.touch(username, ip, display=anzeige)
     except Exception:  # noqa: BLE001 – Buchhaltung darf keine Anfrage kippen
         pass
 
@@ -2191,7 +2231,8 @@ async def login(request: Request):
     # gesperrter Account kommt bis hierher (er sieht danach nur den Sperrhinweis)
     # – genau das soll in der Uebersicht sichtbar sein.
     try:
-        _user_sessions.record_login(username, client_ip)
+        _user_sessions.record_login(username, client_ip,
+                                    display=_display_name(username))
     except Exception:  # noqa: BLE001
         pass
     # Sicherheitsschicht: gesperrter Account darf sich anmelden, sieht danach
@@ -2222,7 +2263,7 @@ async def logout(user: str = Depends(require_auth)):
     "still geworden" unterscheiden.
     """
     try:
-        _user_sessions.record_logout(user)
+        _user_sessions.record_logout(user, display=_display_name(user))
     except Exception:  # noqa: BLE001
         pass
     return JSONResponse({"ok": True})
@@ -2256,7 +2297,10 @@ async def force_logout(username: str, request: Request,
     try:
         _revoked_logins[plain] = int(time.time())
         _save_revocations()
-        _user_sessions.record_logout(plain)
+        # Zwangsabmeldung kennt nur den normalisierten Namen – der
+        # Anzeigename darf dadurch nicht seinen Domaenen-Praefix verlieren
+        # (siehe user_sessions._richer).
+        _user_sessions.record_logout(plain, display=_display_name(plain))
         _ip = request.client.host if request.client else "unbekannt"
         print(f"[AUTH] Zwangsabmeldung durch '{admin}' ({_ip}): '{plain}'", flush=True)
         return JSONResponse({"ok": True, "user": plain})
@@ -5756,15 +5800,49 @@ async def sap_portal_status(user: str = Depends(require_sap_access)):
     })
 
 
+def _sap_hidden_analyses() -> list:
+    """Vom Administrator ausgeblendete Analysen (*Einstellungen → SAP*).
+
+    Liegt in der SAP-Skill-Config unter ``hidden_analyses``. Fail-open: laesst
+    sich der Wert nicht lesen, ist NICHTS ausgeblendet – ein kaputter Eintrag
+    darf den Bereich nicht leerraeumen."""
+    from backend import sap_analyses
+    try:
+        cfg = config.get_skill_states().get("sap", {}).get("config", {}) or {}
+        return sap_analyses.normalize_hidden(cfg.get("hidden_analyses"))
+    except Exception as e:
+        print(f"[sap] Sichtbarkeitsliste nicht lesbar: {e}", flush=True)
+        return []
+
+
 @app.get("/api/sap/analyses")
 async def sap_analyses_api(lang: str = "de", user: str = Depends(require_sap_access)):
     """Katalog der Management-Analysen + BI-Werkzeuge in EINER Sprache.
 
     Der Katalog liegt in ``backend/sap_analyses.py`` und nicht in ``i18n.js``:
     zu jedem Titel gehoert ein Arbeitsauftrag fuer den Agenten, und die beiden
-    duerfen nicht auseinanderlaufen."""
+    duerfen nicht auseinanderlaufen.
+
+    Vom Administrator ausgeblendete Analysen fehlen hier – samt der Kategorien,
+    die dadurch leer werden."""
     from backend import sap_analyses
-    return JSONResponse(sap_analyses.catalog(lang))
+    return JSONResponse(sap_analyses.catalog(lang, hidden=_sap_hidden_analyses()))
+
+
+@app.get("/api/sap/analyses/catalog")
+async def sap_analyses_catalog_api(lang: str = "de",
+                                   user: str = Depends(require_local_auth)):
+    """VOLLSTAENDIGER Katalog mit Sichtbarkeitsmerker – fuer *Einstellungen → SAP*.
+
+    Haengt an ``require_local_auth`` und **nicht** an ``require_sap_access``:
+    ``_user_may_use_sap`` kennt bewusst keinen Admin-Bypass, ein Administrator
+    ohne SAP-Freigabe koennte die Sichtbarkeit sonst nicht pflegen. Der Katalog
+    ist ohnehin kein Geheimnis – er enthaelt keine Daten aus dem SAP-System.
+
+    Gespeichert wird ueber den vorhandenen ``POST /api/skills/sap/config``
+    (Admin, serverseitiger Merge) mit dem Feld ``hidden_analyses``."""
+    from backend import sap_analyses
+    return JSONResponse(sap_analyses.admin_catalog(lang, hidden=_sap_hidden_analyses()))
 
 
 def _sap_instr_path(user: str) -> Path:
@@ -5838,6 +5916,14 @@ async def sap_ask(request: Request, user: str = Depends(require_sap_access)):
     if analysis_id and not sap_analyses.find(analysis_id):
         return JSONResponse({"ok": False, "error": "Unbekannte Analyse."},
                             status_code=400)
+    # Ausgeblendete Analysen laufen auch dann nicht, wenn die Id noch von
+    # irgendwo kommt: der Verlauf liegt im localStorage des Browsers und
+    # ueberlebt das Ausblenden, ein offener Reiter ebenso. Ohne diese Pruefung
+    # waere "ausgeblendet" nur eine Empfehlung.
+    if analysis_id and sap_analyses.is_hidden(analysis_id, _sap_hidden_analyses()):
+        return JSONResponse({"ok": False, "hidden": True,
+                             "error": "Diese Analyse wurde vom Administrator "
+                                      "ausgeblendet."}, status_code=400)
     if not analysis_id and not question:
         return JSONResponse({"ok": False, "error": "Bitte eine Analyse waehlen "
                                                    "oder eine Frage eingeben."},
@@ -11527,7 +11613,8 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             # einer Dependency – handle_ws_message kennt kein `username`.
             _ws_user = _ws_usernames.get(id(ws), "")
             if _ws_user:
-                _user_sessions.note_action(_ws_user, "Chat-Anfrage")
+                _user_sessions.note_action(_ws_user, "Chat-Anfrage",
+                                           display=_display_name(_ws_user))
         except Exception:  # noqa: BLE001
             pass
         # /chat-Sitzung (eigener Kontext pro Chat); leer = klassischer Ein-Bucket-Modus

@@ -2396,6 +2396,23 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <p class="kb-hint">Fertige Verbindungsangaben, mit denen Power&nbsp;BI, Tableau, Qlik &amp; Co. dasselbe SAP-System über die Standard-Schnittstellen (OData/SQL/BW) anbinden.</p>
                         <button class="btn-secondary" id="sap-reporting-btn" type="button" data-i18n="sap.show_endpoints">Anbindungen anzeigen</button>
                         <div id="sap-reporting" style="margin-top:10px;"></div>
+
+                        <!-- ══ Sichtbare Analysen im Bereich /sap ══════════════════
+                             Steuert das Analyse-Pulldown unter /sap. Gespeichert wird
+                             die Liste der AUSGEBLENDETEN Ids (`hidden_analyses` in der
+                             SAP-Skill-Config) – leer heisst also "alles sichtbar".
+                             Das ist Absicht: eine spaeter ergaenzte Analyse soll
+                             erscheinen und nicht still fehlen. -->
+                        <h4 style="margin:22px 0 8px;" data-i18n="sap.vis_head">Sichtbare Analysen im Bereich /sap</h4>
+                        <p class="kb-hint" data-i18n-html="sap.vis_hint">Bestimmt, welche Analyse-Vorlagen die Anwender im Bereich <strong>/sap</strong> im Pulldown sehen. Abgewählte Vorlagen verschwinden dort und lassen sich auch nicht mehr über den Verlauf starten. Kategorien ohne sichtbare Vorlage werden ausgeblendet. Die freie Frage bleibt immer möglich.</p>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                            <button class="btn-secondary" id="sap-vis-all" type="button" data-i18n="sap.vis_all">Alle auswählen</button>
+                            <button class="btn-secondary" id="sap-vis-none" type="button" data-i18n="sap.vis_none">Alle abwählen</button>
+                            <button class="btn-primary" id="sap-vis-save" type="button" data-i18n="common.save">Speichern</button>
+                            <span id="sap-vis-count" class="kb-hint"></span>
+                            <span id="sap-vis-status" style="font-size:0.9em;"></span>
+                        </div>
+                        <div id="sap-vis-list"></div>
                     </div>
                 </div>
 

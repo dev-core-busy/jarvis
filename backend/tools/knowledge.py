@@ -388,10 +388,15 @@ class _TrefferListe(list):
     kein_anker: bool = False
 
 
-def _vector_search(query: str, max_results: int) -> list[tuple[float, str, str]] | None:
+def _vector_search(query: str, max_results: int,
+                   allow_paths: set | None = None) -> list[tuple[float, str, str]] | None:
     """Hybride Suche (semantisch + BM25) via VectorStore.
 
     Gibt None zurueck wenn kein VectorStore verfuegbar ist.
+
+    ``allow_paths`` schraenkt auf die Wissensgruppen des Fragenden ein und wird
+    IN die Suche gereicht – nicht nachtraeglich gefiltert (Begruendung siehe
+    ``VectorStore.search_hybrid``).
 
     Die Abwertung gelernter Notizen wird als ``weight_fn`` IN die Suche gereicht,
     damit sie VOR dem relativen Cut greift. Vorher lief sie hier nachtraeglich:
@@ -402,7 +407,8 @@ def _vector_search(query: str, max_results: int) -> list[tuple[float, str, str]]
     vs = _get_vector_store()
     if vs is None:
         return None
-    results = vs.search_hybrid(query, max_results, weight_fn=_learned_weight)
+    results = vs.search_hybrid(query, max_results, weight_fn=_learned_weight,
+                               allow_paths=allow_paths)
     if not results:
         return None
     kein_anker = vs.has_lexical_anchor(query) is False
@@ -1555,7 +1561,8 @@ async def rag_search(query: str, max_results: int = 8, groups=None) -> list[tupl
 
     ``groups`` (optional): Liste von Gruppen-IDs (Modell B). Ist sie gesetzt,
     werden nur Treffer aus Dateien dieser Gruppen zurueckgegeben (ODER-Filter;
-    "ungrouped" moeglich). Es wird ueber-abgefragt und danach gefiltert.
+    "ungrouped" moeglich). Die Einschraenkung geht IN die Vektorsuche; nur der
+    TF-IDF-Rueckfall filtert noch nachtraeglich (siehe KnowledgeTool.execute).
     """
     query = (query or "").strip()
     if not query:
@@ -1566,8 +1573,8 @@ async def rag_search(query: str, max_results: int = 8, groups=None) -> list[tupl
     # gleichlautende Stelle in KnowledgeTool.execute).
     search_mode_cfg = "auto"
 
-    # Bei aktivem Gruppenfilter ueber-abfragen, damit nach dem Filtern noch
-    # genug Treffer uebrig bleiben.
+    # Ueber-Abfrage nur noch als Rueckfall fuer TF-IDF (Begruendung bei
+    # KnowledgeTool.execute: der Nachfilter verliert still Treffer).
     fetch_n = max(max_results * 5, 40) if groups else max_results
 
     vs = _get_vector_store()
@@ -1581,23 +1588,41 @@ async def rag_search(query: str, max_results: int = 8, groups=None) -> list[tupl
         if need_tfidf_cache else None
 
     results = None
+    gruppen_in_suche = False
     if search_mode_cfg in ("auto", "vector"):
         has_vector = await asyncio.to_thread(_rebuild_vector_index, folders, max_bytes)
         if has_vector:
-            results = await asyncio.to_thread(_vector_search, query, fetch_n)
+            # Erlaubte Pfade ERST NACH dem Reindex bestimmen – er kann gerade
+            # geaenderte Dateien nachgetragen haben.
+            allow_paths = None
+            if groups and vs is not None:
+                try:
+                    from backend import knowledge_groups as kg
+                    allow_paths = set(kg.filter_paths_by_groups(
+                        list(vs.get_indexed_files().keys()), groups))
+                except Exception as e:  # noqa: BLE001
+                    print(f"[knowledge] Gruppenfilter nicht vorbereitbar, "
+                          f"nutze Nachfilter: {e}", flush=True)
+                    allow_paths = None
+            n = max_results if allow_paths is not None else fetch_n
+            results = await asyncio.to_thread(_vector_search, query, n, allow_paths)
+            gruppen_in_suche = allow_paths is not None
         elif search_mode_cfg == "auto" and cache:
             results = _search(query, cache, fetch_n)
     elif search_mode_cfg == "tfidf" and cache:
         results = _search(query, cache, fetch_n)
     results = results or []
 
-    if groups:
+    # Nachfilter nur, wenn die Suche selbst nicht einschraenken konnte.
+    if groups and not gruppen_in_suche:
         try:
             from backend import knowledge_groups as kg
             kept = set(kg.filter_paths_by_groups([r[1] for r in results], groups))
             results = [r for r in results if r[1] in kept][:max_results]
         except Exception:
             results = results[:max_results]
+    else:
+        results = results[:max_results]
     return results
 
 
@@ -2104,7 +2129,14 @@ class KnowledgeTool(BaseTool):
         if isinstance(kb_groups, list) and len(kb_groups) == 0:
             return ("🔒 Keine Wissensgruppen ausgewählt – es wird kein Wissen aus der "
                     "Knowledge Base verwendet. (Auswahl über den Wissensgruppen-Filter änderbar.)")
-        # Bei aktivem Filter ueber-abfragen, damit nach dem Filtern genug uebrig bleibt.
+        # Ueber-Abfrage NUR noch als Rueckfall. Bis 2026-08-02 galt sie immer:
+        # das Fuenffache holen und danach nach Gruppen filtern. Das verliert
+        # still Treffer – wer nur eine kleine Gruppe freigegeben hat, dessen
+        # bester Treffer kann jenseits der global besten 5·k liegen, und dann
+        # kam "keine Treffer" heraus, obwohl passendes Wissen in seiner Gruppe
+        # lag. Die Vektorsuche filtert jetzt WAEHREND der Bewertung
+        # (FAISS-IDSelector + BM25-Skip). Der TF-IDF-Rueckfall kann das nicht,
+        # dort bleibt es bei Ueber-Abfrage + Nachfilter.
         fetch_n = max(max_results * 5, 40) if kb_groups else max_results
 
         if not query.strip():
@@ -2163,13 +2195,40 @@ class KnowledgeTool(BaseTool):
         # Der TF-IDF-Fallback kennt keinen lexikalischen Anker – dort bleibt es
         # bei False (keine Warnung ohne Befund).
         kein_anker = False
+        # True, sobald der Gruppenfilter IN der Suche gewirkt hat – dann darf
+        # unten nicht noch einmal nachgefiltert werden.
+        gruppen_in_suche = False
 
+        def _erlaubte_pfade():
+            """Erlaubte Pfade aus den INDIZIERTEN Dateien (~900), nicht aus den
+            Treffern. Rueckgabe None = nicht ermittelbar; dann gilt der alte Weg
+            (Ueber-Abfrage + Nachfilter). Ein Fehler hier darf den Filter nicht
+            stillschweigend aufheben."""
+            if not kb_groups or vs is None:
+                return None
+            try:
+                from backend import knowledge_groups as kg
+                return set(kg.filter_paths_by_groups(
+                    list(vs.get_indexed_files().keys()), kb_groups))
+            except Exception as e:  # noqa: BLE001
+                print(f"[knowledge] Gruppenfilter nicht vorbereitbar, nutze Nachfilter: {e}",
+                      flush=True)
+                return None
+
+        allow_paths = None
         if search_mode_cfg in ("auto", "vector"):
             has_vector = await asyncio.to_thread(_rebuild_vector_index, folders, max_bytes)
             if has_vector:
                 # Vektor-Index vorhanden → ausschliesslich Vektor verwenden (kein TF-IDF-Fallback)
                 # Begruendung: TF-IDF skaliert O(n) mit Dateizahl, Vektor konstant ~35ms
-                results = await asyncio.to_thread(_vector_search, query, fetch_n)
+                # ERST HIER die erlaubten Pfade bestimmen: _rebuild_vector_index()
+                # kann gerade geaenderte Dateien nachgetragen haben. Frueher
+                # ermittelt, fehlten die in der Liste und waeren fuer diesen Lauf
+                # unsichtbar gewesen.
+                allow_paths = await asyncio.to_thread(_erlaubte_pfade)
+                n = max_results if allow_paths is not None else fetch_n
+                results = await asyncio.to_thread(_vector_search, query, n, allow_paths)
+                gruppen_in_suche = allow_paths is not None
                 search_mode = "Hybrid: Vektor+BM25"
                 # SOFORT sichern. Das Merkmal haengt am Listen-Objekt, und
                 # weiter unten machen GLEICH ZWEI Stellen eine gewoehnliche
@@ -2192,8 +2251,9 @@ class KnowledgeTool(BaseTool):
             results = _search(query, cache, fetch_n)
             search_mode = "TF-IDF"
 
-        # Auf die gewaehlten Wissensgruppen einschraenken (ODER-Filter ueber Pfade)
-        if kb_groups and results:
+        # Nachfilter nur noch, wenn die Suche selbst NICHT einschraenken konnte
+        # (TF-IDF-Rueckfall oder fehlgeschlagene Vorbereitung oben).
+        if kb_groups and results and not gruppen_in_suche:
             try:
                 from backend import knowledge_groups as kg
                 kept = set(kg.filter_paths_by_groups([r[1] for r in results], kb_groups))

@@ -738,6 +738,34 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
   Grund fuer BM25: reine Embeddings sind bei exakten Bezeichnern (`@STR_UCASE`,
   Fehlercodes, Parameternamen) strukturell schwach – `STR_UCASE` und `STR_LCASE`
   landen fast auf demselben Punkt. Latenz gemessen: 19–58 ms bei 1155 Chunks.
+- **Wissensgruppen-Filter gehoert IN die Suche, nicht dahinter (Fix 2026-08-02).** Bis dahin
+  holte `knowledge.py` bei gesetztem Gruppenfilter das **Fuenffache** (`max(k*5, 40)`) und
+  filterte danach in Python. Das verliert still Treffer – und zwar nicht nur ueber die Anzahl:
+  der **relative Cut misst am globalen Spitzenreiter**, der in einer fremden Gruppe liegen kann.
+  Der beste erlaubte Treffer faellt dann schon vor dem Nachfilter heraus, und der Benutzer liest
+  „keine Treffer", obwohl passendes Wissen in seiner Gruppe liegt.
+  **Nachgemessen** (60 laute Chunks in Gruppe A, 1 leiser in Gruppe B): bei drei von vier
+  Anfragen stand der B-Treffer **gar nicht** in den ueber-abgefragten 40.
+  - `search_hybrid(..., allow_paths=…)` reicht die Erlaubnis an BEIDE Kanaele durch: semantisch
+    ueber `faiss.IDSelectorBatch` + `SearchParameters`, lexikalisch ueber ein `continue` in der
+    BM25-Schleife. Damit sind die k Treffer die besten der **erlaubten** Chunks, und Cut,
+    `MIN_KEEP` und Normierung rechnen auf derselben Grundlage.
+  - **`sel` und `params` muessen bis nach `search()` am Leben bleiben** – SWIG-Objekte mit
+    C++-Speicher. Inline als Ausdruck geschrieben kann der Selector vorher eingesammelt werden.
+  - **`df`/`n_docs` in BM25 bleiben die Werte des GESAMTBESTANDS.** Sonst haenge die Seltenheit
+    eines Wortes davon ab, wer fragt – derselbe Begriff waere in einer kleinen Gruppe ploetzlich
+    „haeufig" und wuerde abgewertet.
+  - **Die erlaubten Pfade werden ERST NACH `_rebuild_vector_index()` bestimmt** (aus
+    `get_indexed_files()`, nicht aus den Treffern): der Reindex kann gerade geaenderte Dateien
+    nachgetragen haben, die sonst fuer diesen Lauf unsichtbar waeren. Kosten: **0,61 ms** bei
+    12.387 Chunks.
+  - **Die Ueber-Abfrage bleibt fuer den TF-IDF-Rueckfall** – der kann nicht filtern. Schlaegt das
+    Ermitteln der Pfade fehl, faellt der Code bewusst auf den alten Weg zurueck (`gruppen_in_suche
+    = False`), statt den Filter stillschweigend aufzuheben.
+  - Betroffen waren ZWEI Stellen: `KnowledgeTool.execute` und `rag_search()` (Support-Assistent).
+  - **Verifiziert:** 20 Tests (`tests/test_kb_group_filter.py`, u.a. der reproduzierte Verlust)
+    + Gegenprobe, dass der **ungefilterte** Weg gegenueber dem alten Code Treffer, Reihenfolge
+    und Scores **bitgleich** liefert (6 Anfragen inkl. Zeichensalat).
 - **Der zurueckgegebene Score ist ein normierter RRF-Rang** (Top = 1.00), KEIN Cosine-Wert.
 - **Chunking:** 200 Woerter / 40 Overlap. MUSS unter dem 512-Token-Limit von e5 bleiben –
   laengere Chunks werden vom Modell still abgeschnitten und der Inhalt dahinter ist

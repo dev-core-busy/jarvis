@@ -766,6 +766,23 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
   - **Verifiziert:** 20 Tests (`tests/test_kb_group_filter.py`, u.a. der reproduzierte Verlust)
     + Gegenprobe, dass der **ungefilterte** Weg gegenueber dem alten Code Treffer, Reihenfolge
     und Scores **bitgleich** liefert (6 Anfragen inkl. Zeichensalat).
+- **`search_hybrid_ex()` statt `search_hybrid()` + `has_lexical_anchor()`** (seit 2026-08-02):
+  letzteres rechnete denselben BM25-Durchlauf ein ZWEITES Mal, obwohl die Hybridsuche das
+  Ergebnis Millisekunden vorher schon hatte und wegwarf. `search_hybrid()` bleibt unveraendert
+  (gibt nur die Liste), `search_hybrid_ex()` gibt `(treffer, ohne_anker)`.
+  **Feiner Unterschied:** bei gesetztem `allow_paths` bezieht sich die Anker-Aussage auf die
+  ERLAUBTEN Chunks – fuer den Zweck richtiger, denn die Warnung soll sagen, worauf die
+  gelieferten Treffer beruhen. `has_lexical_anchor()` bleibt fuer Aufrufer erhalten, die nur
+  diese eine Frage haben.
+- **BM25-Index wird beim Start vorgebaut** (`startup_warm_lexical_index`, +45 s, im Thread):
+  kalt kostet der Aufbau 593 ms, und die traf bisher immer den ERSTEN Benutzer nach jedem
+  Deploy. Faellt der Vorbau aus, ist nichts kaputt – die erste Suche baut ihn dann selbst.
+- **`add_chunks(save=False)` wirkte nur auf dem Anhaeng-Pfad** (behoben 2026-08-02): der Zweig
+  fuer GEAENDERTE Dateien ruft `_rebuild()`, und das speicherte bedingungslos. Ein Bulk-Lauf
+  ueber geaenderte Dateien schrieb also je Datei den vollstaendigen Index (~700 ms bei 12.387
+  Chunks), obwohl der Aufrufer das ausdruecklich unterdruecken wollte. `_rebuild(..., save=…)`
+  reicht das Flag jetzt durch; die uebrigen Aufrufer (remove_files, rename_*, clear) speichern
+  ueber den Vorgabewert `True` weiter wie bisher.
 - **Der zurueckgegebene Score ist ein normierter RRF-Rang** (Top = 1.00), KEIN Cosine-Wert.
 - **Chunking:** 200 Woerter / 40 Overlap. MUSS unter dem 512-Token-Limit von e5 bleiben –
   laengere Chunks werden vom Modell still abgeschnitten und der Inhalt dahinter ist
@@ -823,16 +840,37 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
   1269–1518 MB (Spitze 1538 MB) – der historische Abbruchpunkt bei ~600 Dateien wurde zweimal
   ohne Regung passiert. 12/12 Pruefungen. Suche warm 47 ms (Median), kalt 593 ms inkl.
   BM25-Aufbau; Lern-Notiz anhaengen 191 ms mit inkrementellem BM25-Nachtrag.
-- **EIN VOLL-REINDEX VON 900 DATEIEN DAUERT ~2 STUNDEN** (7012 s gemessen, **~2 Chunks/s**).
-  Das ist e5-small auf einer CPU ohne SSE4.2/AVX – ECHT liegt mit 893 Dateien gleichauf.
-  Diese Zahl erklaert mehrere Entscheidungen weiter oben und sollte man kennen, BEVOR man
-  einen Neuaufbau anstoesst:
-  - `resume_interrupted_reindex()` ist kein Luxus: ein Neustart bei 80 % kostet ohne
-    Fortsetzung anderthalb Stunden.
-  - Der Unterschied „inkrementell vs. voll" ist kein Feinschliff, sondern Faktor ~30.000
-    (0,2 s Leerlauf gegen 7012 s). Wer im Zweifel ist, nimmt `incremental=True`.
-  - Ein Modellwechsel (anderes Embedding-Modell) bedeutet zwei Stunden Stillstand der
-    Wissenssuche, nicht „einmal neu einlesen".
+- **⚠ DIE ~2-STUNDEN-ZAHL GALT NUR FUER DEV – auf ECHT sind es ~13 Minuten** (korrigiert
+  2026-08-02). Die Maßstabsprobe lief auf der DEV-VM, und der Satz „ECHT liegt gleichauf" war
+  eine **Annahme, keine Messung**. Nachgemessen auf ECHT (Xeon Gold 6526Y, AVX-512, 4 Kerne,
+  gleiche Thread-Zahl wie die Produktion): **57,8 Chunks/s** gegen **11,3 auf DEV** – Faktor 5,3.
+  Auf 200-Wort-Chunks hochgerechnet rund 15 Chunks/s, also **~13 min fuer 12.387 Chunks**.
+  Seit der Thread-Aenderung (siehe unten) schafft DEV 21,1 Chunks/s, der Voll-Reindex dort
+  also ~1 h statt 2 h.
+  **Merkregel:** DEV ist eine VM OHNE AVX/SSE4.2 mit 8 Kernen, ECHT hat AVX-512 mit 4 Kernen.
+  Leistungszahlen von DEV tragen keine Entscheidung – auf ECHT messen (kurz und lesend,
+  es ist Produktion).
+- **PyTorch-Threads: zwei Kerne bleiben frei** (`_get_embedding_model`). Vorher stand dort fest
+  `set_num_threads(2)`; auf einer 8-Kern-Maschine verschenkte das drei Viertel. Gemessen auf
+  ECHT (32 Chunks je Lauf): 1 Thread 29,1 · 2 Threads 57,8 · 3 Threads 80,3 · 4 Threads
+  91,5 Chunks/s – nahezu linear. Jetzt `max(1, min(cpu_count - 2, 8))`: auf ECHT weiterhin 2
+  (**Produktionsverhalten unveraendert**), auf DEV 6 (+87 %). Zwei Kerne bleiben bewusst frei,
+  damit eine laufende Indexierung den Webdienst nicht aushungert. Fuer die SUCHE ist die Zahl
+  fast gleichgueltig (10,6 ms bei 2 Threads gegen 8,5 ms bei 4) – sie wirkt auf die Indexierung.
+- **Die Batchgroesse ist NICHT der Hebel** (gemessen, damit es niemand erneut versucht): auf DEV
+  ist der Durchsatz ueber 1/3/8/32/64 Texte konstant (~11/s), die CPU ist schon mit einem Text
+  ausgelastet. Auf ECHT bringt Batching etwas (58 → 100/s von 1 auf 32 Texte), aber `add_chunks`
+  encodiert ohnehin alle Chunks EINER Datei zusammen, und das sind im Schnitt 14
+  (12.387/893) – damit liegt es bereits nahe am Optimum. Dateiuebergreifendes Buendeln braechte
+  ~12 % und lohnt die Komplexitaet nicht. `batch_size=16` bleibt (RAM-Schonung ist gratis).
+- Die folgenden Punkte gelten unveraendert – nur mit den korrigierten Zeiten im Kopf:
+  - `resume_interrupted_reindex()` bleibt sinnvoll, ist aber kein Notnagel mehr: ein
+    Neustart bei 80 % kostet auf ECHT wenige Minuten, nicht anderthalb Stunden.
+  - Der Unterschied „inkrementell vs. voll" ist kein Feinschliff (0,2 s Leerlauf gegen
+    Minuten bis Stunden). Wer im Zweifel ist, nimmt `incremental=True`.
+  - Ein Modellwechsel (anderes Embedding-Modell) kostet auf ECHT rund eine Viertelstunde
+    Stillstand der Wissenssuche – nicht zwei Stunden. Das aendert die Kosten-Nutzen-Rechnung
+    fuer Quantisierung/Modellwechsel erheblich.
   - **FALLSTRICK bei eigenen Messungen:** `force_reindex()` ohne Schalter ist ein
     VOLLSTAENDIGER Neuaufbau. In der Massstabsprobe hat genau das den Abschnitt
     „50 Dateien loeschen" mit 6568 s vergiftet – die Zahl sah wie eine katastrophale

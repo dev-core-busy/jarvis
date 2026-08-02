@@ -320,8 +320,8 @@ def test_anzeigename():
     root = Path(__file__).resolve().parent.parent
     src = (root / "backend" / "main.py").read_text(encoding="utf-8")
     check("_display_name existiert", "def _display_name(" in src)
-    check("lokale Konten bleiben ohne Praefix", "if u in ALLOWED_USERS:" in src)
     _body = src.split("def _display_name(")[1].split("\ndef ")[0]
+    check("lokale Konten bleiben ohne Praefix", "ALLOWED_USERS" in _body)
     check("Kurzname wird aus ad_domain abgeleitet",
           'config.get_setting("ad_domain"' in _body and 'split(".", 1)[0]' in _body)
     for fn in ("record_login", "record_logout", "note_action", "touch"):
@@ -344,6 +344,8 @@ def test_anzeigename():
     A = {"jarvis"}
     check("Domaenen-Benutzer bekommt den Praefix",
           disp("andrea.ladd", A, "nexus.local") == "nexus\\andrea.ladd")
+    check("Dienst-Konten bleiben ohne Praefix",
+          "_NON_DOMAIN_USERS" in src and '"api"' in src.split("_NON_DOMAIN_USERS = {")[1][:60])
     check("UPN-Form bekommt denselben Praefix",
           disp("andrea.ladd@nexus.local", A, "nexus.local") == "nexus\\andrea.ladd")
     check("vorhandener Praefix bleibt unveraendert",
@@ -353,6 +355,20 @@ def test_anzeigename():
     check("ohne konfigurierte Domaene wird nichts geraten",
           disp("andrea.ladd", A, "") == "andrea.ladd")
     check("leer bleibt leer", disp("", A, "nexus.local") == "")
+
+    # ── (c) Der Praefix muss BEIM AUSLESEN entstehen, nicht nur beim Schreiben ──
+    # Vorfall auf ECHT (2026-08-02): drei Eintraege blieben ohne Praefix, weil
+    # sich diese Benutzer seit dem Update nicht mehr gemeldet hatten. Der
+    # gespeicherte Name wird nur bei Aktivitaet aufgefrischt – und gerade die
+    # laengst offlinen Eintraege sind in einer "wer war da"-Liste die
+    # interessanten. Auf Aktivitaet zu warten hilft dort nie.
+    sess = src.split('@app.get("/api/sessions")')[1].split("@app.")[0]
+    check("/api/sessions bereitet den Anzeigenamen beim Auslesen auf",
+          "_display_name(" in sess, "Aufbereitung fehlt im Endpunkt")
+    check("... und zwar aus display ODER username (kein leerer Name)",
+          'u.get("display") or u.get("username")' in sess)
+    check("... fail-safe: ein Fehler dabei kippt die Liste nicht",
+          "except Exception" in sess.split("_display_name(")[1][:200])
 
 
 def test_verdrahtung():

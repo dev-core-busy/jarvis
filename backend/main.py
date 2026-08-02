@@ -639,6 +639,12 @@ def _action_label(path: str) -> str:
     return "Aktion"
 
 
+# Konten, die NICHT aus dem Verzeichnis stammen und deshalb nie einen
+# Domaenen-Praefix bekommen duerfen. ``ALLOWED_USERS`` deckt den lokalen
+# ``jarvis`` ab; ``api`` ist der Agent-API-Benutzer (require_auth_or_agent).
+_NON_DOMAIN_USERS = {"api", "root", "system"}
+
+
 def _display_name(username: str) -> str:
     """Anzeigename fuer die Anwesenheitsliste – mit Domaenen-Praefix.
 
@@ -650,9 +656,9 @@ def _display_name(username: str) -> str:
     das System WEISS, nicht aus der Tippform.
 
     Regeln:
-    * lokale Konten (``ALLOWED_USERS``, also ``jarvis``) bekommen **keinen**
-      Praefix – sie stammen nicht aus dem Verzeichnis, ein ``nexus\\`` waere
-      schlicht falsch.
+    * lokale und Dienst-Konten (``ALLOWED_USERS``, also ``jarvis``, sowie der
+      Agent-API-Benutzer ``api``) bekommen **keinen** Praefix – sie stammen
+      nicht aus dem Verzeichnis, ein ``nexus\\`` waere schlicht falsch.
     * ein bereits vorhandener ``domaene\\benutzer``-Anteil bleibt unveraendert.
     * sonst: Kurzname der Domaene aus ``ad_domain`` (erste Beschriftung, z.B.
       ``nexus.local`` → ``nexus``) + ``\\`` + Kontoname.
@@ -667,7 +673,7 @@ def _display_name(username: str) -> str:
     u = (username or "").strip()
     if not u or "\\" in u:
         return u
-    if u in ALLOWED_USERS:
+    if u in ALLOWED_USERS or u.lower() in _NON_DOMAIN_USERS:
         return u
     plain = _norm_login(u) or u
     try:
@@ -2329,6 +2335,18 @@ async def list_user_sessions(user: str = Depends(require_local_auth)):
                 u["blocked"] = security_guard.is_blocked(u["username"])
             except Exception:  # noqa: BLE001
                 u["blocked"] = False
+            # Domaenen-Praefix BEIM AUSLESEN erzeugen, nicht nur beim Schreiben.
+            # Der gespeicherte Anzeigename wird nur bei Aktivitaet aufgefrischt –
+            # ein Benutzer, der seit dem Update nicht mehr da war, behielte sonst
+            # fuer immer die Form, die er damals ins Anmeldefeld getippt hat.
+            # Genau das war auf ECHT zu sehen: drei Eintraege ohne Praefix,
+            # daneben zwei mit (die hatten ihn selbst mitgetippt). Und gerade die
+            # laengst offlinen Eintraege sind in einer "wer war da"-Liste die
+            # interessanten – auf Aktivitaet zu warten hilft dort nie.
+            try:
+                u["display"] = _display_name(u.get("display") or u.get("username") or "")
+            except Exception:  # noqa: BLE001
+                pass
         # Wer diese Liste ueberhaupt abrufen darf, ist bereits Administrator
         # (require_local_auth) – und Administratoren duerfen sperren. Das Feld
         # bleibt erhalten, damit das Frontend eine kuenftige Verschaerfung

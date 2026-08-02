@@ -1038,9 +1038,27 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
     scheinbar zufällig verschwunden. Regel: ein Name MIT Domänenanteil wird nie durch einen OHNE
     ersetzt. **Nur `record_login()` setzt unbedingt** (`force=True`) – nur sie ermittelt den Wert
     frisch aus der Konfiguration.
-  - **Altbestand heilt sich von selbst:** der erste authentifizierte Request nach dem Update
-    schreibt den Präfix nach. Auf DEV verifiziert (`andreas.bender` → `nexus\andreas.bender`,
-    `jarvis` unverändert ohne Präfix).
+  - **Der Präfix muss BEIM AUSLESEN entstehen, nicht nur beim Schreiben** (Nachbesserung am
+    selben Tag). Die erste Fassung reicherte den Namen nur bei Aktivität an – „Altbestand heilt
+    sich beim nächsten Request". Auf ECHT blieben damit **drei Einträge ohne Präfix**:
+    `sven.sander`, `jonas.reichelt`, `kai-olaf.pieth` waren seit dem Update nicht mehr da.
+    Daneben standen zwei MIT Präfix (`rene.pfeiffer`, `dieter.jeske`) – die hatten ihn damals
+    schlicht selbst eingetippt. Das sah nach Zufall aus und war es auch.
+    **Genau die längst offlinen Einträge sind in einer „wer war da"-Liste die interessanten** –
+    auf Aktivität zu warten hilft dort nie. `GET /api/sessions` schickt den Namen jetzt durch
+    `_display_name()`, bevor er hinausgeht (fail-safe: ein Fehler dabei kippt die Liste nicht).
+    Die Anreicherung beim Schreiben bleibt, sie hält die Datei konsistent.
+  - **`_NON_DOMAIN_USERS = {"api", "root", "system"}`** neben `ALLOWED_USERS`: `api` ist der
+    Agent-API-Benutzer. Er kommt heute nicht in die Liste (`_note_activity` hängt an
+    `require_auth`, das nie `api` liefert), aber die Leseaufbereitung greift auf JEDEN Eintrag –
+    ein `nexus\api` wäre schlicht falsch.
+  - **Merkregel:** Wenn eine Anzeige aus gespeicherten Altdaten kommt, reicht es nicht, das
+    Schreiben zu reparieren. Entweder man migriert den Bestand oder man bereitet beim Lesen auf.
+    „Heilt sich beim nächsten Request" ist keine Lösung für Daten, deren Wert gerade darin
+    besteht, dass kein Request mehr kommt.
+  - **Verifiziert auf DEV mit nachgestelltem Alt-Eintrag** (offline seit 2,2 Tagen, `display`
+    ohne Präfix): erscheint sofort als `nexus\sven.sander`, ganz ohne Aktivität; `jarvis` bleibt
+    ohne Präfix. Testdaten danach entfernt, Datei feldgleich zur Sicherung.
 - **Altbestand:** Wer sich vor Einführung angemeldet hat, zeigt „Anmeldung: –" – ein
   Zeitpunkt, den niemand aufgezeichnet hat, wird nicht geraten. Heilt sich beim nächsten
   Login. `MAX_USERS = 500` deckelt die Datei (ältester Eintrag nach `last_seen` fliegt).

@@ -2995,8 +2995,29 @@ def _is_admin_user(username: str) -> bool:
 
 @app.get("/api/me")
 async def get_me(user: str = Depends(require_auth)):
-    """Gibt den aktuell angemeldeten Benutzernamen zurueck (fuer Titelleisten-Anzeige)."""
-    return JSONResponse({"username": user, "is_admin": _is_admin_user(user)})
+    """Gibt den aktuell angemeldeten Benutzer samt seiner Bereichs-Freigaben
+    zurueck (Titelleisten-Anzeige + Sichtbarkeit der Portal-Kacheln).
+
+    ``permissions`` buendelt die Freigaben, die das Portal zum Ein-/Ausblenden
+    braucht. Das Feld ist bewusst ein Unterobjekt: kommt eine weitere Freigabe
+    dazu, waechst hier ein Schluessel statt eines weiteren Endpunkts – jede
+    Kachel mit eigenem Abruf kostet die Seite einen Roundtrip (der Grund, aus
+    dem /settings einmal neun Sekunden brauchte).
+
+    ``permissions.sap`` beantwortet die Frage **"darf dieser Benutzer den
+    SAP-Bereich betreten"** – also Freigabe UND aktiver Skill. Beides gehoert
+    zusammen: eine Kachel, die auf eine 404-Seite fuehrt, ist schlimmer als
+    keine Kachel. Die Datenendpunkte ``/api/sap/*`` pruefen weiterhin nur die
+    Freigabe (``require_sap_access``), damit der Einstellungs-Reiter
+    unabhaengig vom Skill-Zustand bedienbar bleibt."""
+    return JSONResponse({
+        "username": user,
+        "is_admin": _is_admin_user(user),
+        "permissions": {
+            "sap": _user_may_use_sap(user) and _skill_active("sap"),
+            "internet": _user_has_internet_access(user),
+        },
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -5685,6 +5706,194 @@ async def sap_reporting_endpoints_api(user: str = Depends(require_sap_access)):
     c = _sap_client()
     eps = await asyncio.to_thread(reporting_endpoints, c)
     return JSONResponse({"ok": True, "endpoints": eps})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  SAP-Analysebereich (/sap) – Management-Auswertungen
+# ═══════════════════════════════════════════════════════════════════════════
+# Eigene Oberflaeche fuer die Geschaeftsleitung, getrennt vom Admin-Reiter in
+# den Einstellungen: dort werden Zugangsdaten gepflegt, hier wird ausgewertet.
+# ALLE Endpunkte haengen an ``require_sap_access`` – dieselbe Schranke wie der
+# Reiter. Die Seite selbst prueft zusaetzlich clientseitig, damit ein
+# unberechtigter Benutzer nicht auf einer Oberflaeche landet, die ihm nur
+# Fehlermeldungen zeigt.
+
+@app.get("/sap", response_class=HTMLResponse)
+async def sap_page():
+    """SAP-Analysebereich ausliefern – nur wenn der SAP-Skill aktiv ist.
+
+    Die Berechtigungspruefung passiert NICHT hier: eine normale Navigation
+    traegt keinen Authorization-Header, der Token liegt im localStorage. Die
+    Seite holt deshalb als Erstes ``/api/me`` und schickt Unberechtigte zurueck
+    aufs Portal. Sicherheitsrelevant ist das nicht – die Seite ist eine leere
+    Huelle, jeder Datenabruf haengt an ``require_sap_access``."""
+    if not _skill_active("sap"):
+        return HTMLResponse("<h1>404 – SAP-Bereich nicht aktiv</h1>", status_code=404)
+    f = FRONTEND_DIR / "sap.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
+    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/api/sap/status")
+async def sap_portal_status(user: str = Depends(require_sap_access)):
+    """Zustand fuer die SAP-Oberflaeche: was ist konfiguriert, was geht?
+
+    Bewusst OHNE Verbindungstest – der kostet je nach Netz Sekunden und die
+    Seite soll sofort stehen. Den Test loest der Benutzer per Knopf aus
+    (``/api/sap/test``)."""
+    c = _sap_client()
+    return JSONResponse({
+        "ok": True,
+        "configured": bool(c.configured),
+        "connection_type": c.connection_type,
+        "product": c.product,
+        "odata": bool(c.odata.configured),
+        "hana": bool(c.hana.configured),
+        "rfc": bool(c.rfc.configured),
+        "is_admin": _is_admin_user(user),
+    })
+
+
+@app.get("/api/sap/analyses")
+async def sap_analyses_api(lang: str = "de", user: str = Depends(require_sap_access)):
+    """Katalog der Management-Analysen + BI-Werkzeuge in EINER Sprache.
+
+    Der Katalog liegt in ``backend/sap_analyses.py`` und nicht in ``i18n.js``:
+    zu jedem Titel gehoert ein Arbeitsauftrag fuer den Agenten, und die beiden
+    duerfen nicht auseinanderlaufen."""
+    from backend import sap_analyses
+    return JSONResponse(sap_analyses.catalog(lang))
+
+
+def _sap_instr_path(user: str) -> Path:
+    """Ablage der persoenlichen SAP-Anweisungen (je Benutzer eine Datei).
+
+    Gleiche Bauart wie ``_support_instr_path``; der Dateiname wird auf
+    unbedenkliche Zeichen reduziert, damit ein Domaenenname mit Backslash
+    (``nexus\\andreas.bender``) keinen Pfadwechsel ausloest."""
+    d = Path(__file__).parent.parent / "data" / "sap_instructions"
+    d.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", (user or "unbekannt").strip().lower())
+    return d / f"{safe or 'unbekannt'}.md"
+
+
+def _load_sap_instructions(user: str) -> str:
+    try:
+        p = _sap_instr_path(user)
+        return p.read_text(encoding="utf-8") if p.exists() else ""
+    except Exception:
+        return ""
+
+
+@app.get("/api/sap/instructions")
+async def sap_instructions_get(user: str = Depends(require_sap_access)):
+    """Liest die persoenlichen Analyse-Anweisungen des Benutzers (Markdown)."""
+    return JSONResponse({"ok": True, "instructions": _load_sap_instructions(user)})
+
+
+@app.post("/api/sap/instructions")
+async def sap_instructions_set(request: Request, user: str = Depends(require_sap_access)):
+    """Speichert die persoenlichen Analyse-Anweisungen (dauerhaft, je Benutzer)."""
+    body = await request.json()
+    text = (body.get("instructions") or "")[:20000]
+    try:
+        _sap_instr_path(user).write_text(text, encoding="utf-8")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# Ein eigener Agent fuer den SAP-Bereich, mit eigener Sperre – genau wie beim
+# Avatar. Grund: eine Analyse laeuft je nach Datenmenge Minuten; liefe sie auf
+# dem geteilten Hauptagenten, blockierte sie den Chat aller anderen. Die Sperre
+# serialisiert die Analysen untereinander (ein SAP-System vertraegt keine
+# beliebige Parallelitaet an Leseabfragen).
+_sap_agent = None
+_sap_agent_lock = asyncio.Lock()
+
+
+@app.post("/api/sap/ask")
+async def sap_ask(request: Request, user: str = Depends(require_sap_access)):
+    """Fuehrt eine Management-Analyse als Agentenlauf aus (lesend).
+
+    Body: ``{analysis_id?, question?, bi_tool?, lang?}``. Mindestens eines von
+    ``analysis_id`` und ``question`` muss gesetzt sein. Der Auftrag wird aus
+    Vorlage, Frage, Zielwerkzeug und den persoenlichen Anweisungen gebaut
+    (``sap_analyses.build_task``).
+
+    Der Lauf ist **unprivilegiert** (``privileged: False``) und traegt
+    ``sap: True`` – das schaltet dem Agenten die SAP-Werkzeuge frei, ohne ihm
+    Systemrechte zu geben. Schreibzugriffe sind zusaetzlich im ``sap_client``
+    hart gesperrt (OData nur GET, SQL nur SELECT/WITH)."""
+    from backend import sap_analyses
+
+    body = await request.json()
+    analysis_id = (body.get("analysis_id") or "").strip()
+    question = (body.get("question") or "").strip()[:4000]
+    bi_tool = (body.get("bi_tool") or "").strip()
+    lang = (body.get("lang") or "de").strip()
+
+    if analysis_id and not sap_analyses.find(analysis_id):
+        return JSONResponse({"ok": False, "error": "Unbekannte Analyse."},
+                            status_code=400)
+    if not analysis_id and not question:
+        return JSONResponse({"ok": False, "error": "Bitte eine Analyse waehlen "
+                                                   "oder eine Frage eingeben."},
+                            status_code=400)
+
+    c = _sap_client()
+    if not c.configured:
+        return JSONResponse({"ok": False, "configured": False,
+                             "error": "SAP ist nicht konfiguriert. Zugangsdaten "
+                                      "hinterlegt ein Administrator unter "
+                                      "Einstellungen → SAP."}, status_code=400)
+
+    # Sicherheitsschicht wie im Chat/Avatar: der Freitext geht in einen
+    # Agentenlauf, also gilt hier dieselbe Jailbreak-Pruefung.
+    if question and user and await _sec_inspect_user(question, user, "sap"):
+        return JSONResponse({"detail": "security_blocked",
+                             "message": "Konto wegen eines Sicherheitsverstosses gesperrt."},
+                            status_code=423)
+
+    task = sap_analyses.build_task(
+        analysis_id=analysis_id, question=question, tool_id=bi_tool,
+        instructions=_load_sap_instructions(user), lang=lang)
+    if not task:
+        return JSONResponse({"ok": False, "error": "Leerer Auftrag."}, status_code=400)
+
+    global _sap_agent
+    from backend.agent import JarvisAgent
+    async with _sap_agent_lock:
+        if _sap_agent is None:
+            _sap_agent = JarvisAgent(label="SAP-Analyse")
+        _sap_agent._current_username = user
+        try:
+            answer = await _sap_agent.run_task_headless(
+                task,
+                actor={"user": user, "privileged": False,
+                       "internet": _user_has_internet_access(user),
+                       "sap": True},
+            )
+        except Exception as e:
+            print(f"[sap] Analyse fehlgeschlagen: {e}", flush=True)
+            return JSONResponse({"ok": False, "error": f"Analyse fehlgeschlagen: {e}"},
+                                status_code=500)
+
+    return JSONResponse({"ok": True, "answer": answer or "",
+                         "analysis_id": analysis_id, "bi_tool": bi_tool})
+
+
+@app.post("/api/sap/stop")
+async def sap_stop(user: str = Depends(require_sap_access)):
+    """Bricht die laufende SAP-Analyse ab (der Bereich kennt nur einen Lauf)."""
+    if _sap_agent is not None:
+        try:
+            _sap_agent.stop()
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True})
 
 
 # ─── Jira (Reiter: Ticketsuche) ──────────────────────────────────────

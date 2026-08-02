@@ -4992,8 +4992,23 @@ async def remove_skill(name: str, user: str = Depends(require_local_auth)):
 
 
 @app.get("/api/skills/{name}/config")
-async def get_skill_config(name: str, user: str = Depends(require_auth)):
-    """Gibt die Konfiguration eines Skills zurück."""
+async def get_skill_config(name: str, user: str = Depends(require_local_auth)):
+    """Gibt die Konfiguration eines Skills zurück – **nur für Administratoren**.
+
+    Bis 2026-08-02 hing hier ``require_auth``: JEDER angemeldete Benutzer konnte
+    damit die Zugangsdaten SAEMTLICHER Skills im Klartext lesen – HANA- und
+    RFC-Kennwort und Bearer-Token (SAP), Jira-/Confluence-Token, der IBS-API-Key,
+    die Google-Client-Secrets. Die Antwort ist die rohe Skill-Config, es gibt
+    keine Feld-Filterung; der Schreib-Endpunkt daneben war seit jeher
+    ``require_local_auth``. Lesen war also freier als Schreiben.
+
+    Der Zuschnitt ist unkritisch: alle Aufrufer sitzen auf der Einstellungsseite
+    (sap.js, jira.js, confluence.js, whatsapp.js, knowledge.js, vision.js,
+    kundenverwaltung.js, support_admin.js, skillcfg.js, brandingAdmin), die
+    ohnehin Administratoren vorbehalten ist. Das oeffentliche Branding laeuft
+    ueber den eigenen Endpunkt ``GET /api/branding`` und ist NICHT betroffen –
+    er wird schon auf der Loginseite gebraucht.
+    """
     sm = _get_skill_manager()
     cfg = sm.get_skill_config(name)
 

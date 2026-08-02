@@ -516,16 +516,41 @@ class VectorStore:
 
     # ─── Suche ───────────────────────────────────────────────────────────────
 
-    def _search_vector_idx(self, query: str, k: int) -> list[tuple[int, float]]:
-        """Semantischer Kanal. Gibt (meta_index, cosine_score) absteigend zurueck."""
+    def _search_vector_idx(self, query: str, k: int,
+                           allowed: set | None = None) -> list[tuple[int, float]]:
+        """Semantischer Kanal. Gibt (meta_index, cosine_score) absteigend zurueck.
+
+        ``allowed`` schraenkt auf diese Meta-Positionen ein. Die Einschraenkung
+        passiert IN der FAISS-Suche (``IDSelectorBatch``), nicht danach – nur so
+        sind die k Treffer die besten der erlaubten Chunks. Ein Nachfilter wuerde
+        aus den global besten k auswaehlen und dabei genau die Treffer verlieren,
+        die knapp unterhalb lagen (siehe Kommentar in ``search_hybrid``)."""
         with self._lock:
             total = len(self._meta)
         if total == 0:
             return []
+        if allowed is not None:
+            if not allowed:
+                return []
+            k = min(k, len(allowed))
+            if k <= 0:
+                return []
 
         query_vec = _encode([query], prefix="query")  # (1, 384)
+        import faiss  # lokal wie ueberall sonst in dieser Datei
         with self._lock:
-            scores, indices = self._index.search(query_vec, min(k, total))
+            if allowed is None:
+                scores, indices = self._index.search(query_vec, min(k, total))
+            else:
+                # sel UND params muessen bis nach dem search() am Leben bleiben –
+                # es sind SWIG-Objekte, die C++-Speicher besitzen. Als Ausdruck
+                # inline geschrieben koennte der Selector schon vor dem Aufruf
+                # eingesammelt werden.
+                sel = faiss.IDSelectorBatch(
+                    np.fromiter(allowed, dtype="int64", count=len(allowed)))
+                params = faiss.SearchParameters(sel=sel)
+                scores, indices = self._index.search(
+                    query_vec, min(k, total), params=params)
 
         out = []
         for score, idx in zip(scores[0], indices[0]):
@@ -586,9 +611,15 @@ class VectorStore:
                 _log.debug(f"BM25-Index gebaut: {len(doc_lens)} Chunks, {len(postings)} Terme")
                 return
 
-    def _search_lexical_idx(self, query: str, k: int) -> list[tuple[int, float]]:
-        """Lexikalischer BM25-Kanal. Gibt (meta_index, bm25_score) absteigend zurueck."""
+    def _search_lexical_idx(self, query: str, k: int,
+                            allowed: set | None = None) -> list[tuple[int, float]]:
+        """Lexikalischer BM25-Kanal. Gibt (meta_index, bm25_score) absteigend zurueck.
+
+        ``allowed`` schraenkt auf diese Meta-Positionen ein – wie im semantischen
+        Kanal WAEHREND der Bewertung, nicht danach."""
         self._ensure_lexical_index()        # ohne Lock (baut ggf. neu)
+        if allowed is not None and not allowed:
+            return []
         with self._lock:
             # Passt der Index nicht zur aktuellen Generation, liefert der
             # lexikalische Kanal diese Runde nichts – lieber ein Kanal weniger
@@ -603,9 +634,15 @@ class VectorStore:
                 post = self._lex_postings.get(tok)
                 if not post:
                     continue
+                # df/n_docs bleiben die Werte des GESAMTBESTANDS, auch wenn
+                # gefiltert wird. Sonst haenge die Seltenheit eines Wortes davon
+                # ab, wer fragt – derselbe Begriff waere in einer kleinen
+                # Wissensgruppe ploetzlich "haeufig" und wuerde abgewertet.
                 df = len(post)
                 idf = math.log(1 + (n_docs - df + 0.5) / (df + 0.5))
                 for doc_i, tf in post:
+                    if allowed is not None and doc_i not in allowed:
+                        continue
                     dl = self._lex_doc_lens[doc_i]
                     denom = tf + BM25_K1 * (1 - BM25_B + BM25_B * dl / self._lex_avg_len)
                     scores[doc_i] += idf * (tf * (BM25_K1 + 1)) / denom
@@ -623,8 +660,8 @@ class VectorStore:
             out = [(s, self._meta[i]["file_path"], self._meta[i]["text"]) for i, s in hits]
         return out[:max_results]
 
-    def search_hybrid(self, query: str, max_results: int,
-                      weight_fn=None) -> list[tuple[float, str, str]]:
+    def search_hybrid(self, query: str, max_results: int, weight_fn=None,
+                      allow_paths: set | None = None) -> list[tuple[float, str, str]]:
         """Hybride Suche: semantisch + BM25, fusioniert per Reciprocal Rank Fusion.
 
         Drei Kanaele gehen in die Fusion:
@@ -643,14 +680,26 @@ class VectorStore:
         = 1.00) – ein Rang-Mass, kein Cosine-Wert. Das ist fuer die Anzeige
         aussagekraeftiger als die stark komprimierten e5-Rohscores.
 
+        ``allow_paths`` schraenkt die Suche auf diese Dateipfade ein (z.B. die
+        Wissensgruppen des Fragenden). **Die Einschraenkung gehoert IN die Suche,
+        nicht dahinter.** Bis 2026-08-02 hat der Aufrufer das Fuenffache geholt
+        und danach gefiltert – eine Heuristik, die still Treffer verliert: wer
+        nur eine kleine Gruppe freigegeben hat, dessen bester Treffer kann
+        jenseits der global besten 5·k liegen und taucht dann nie auf. Jetzt
+        filtern beide Kanaele waehrend der Bewertung, und die k Treffer sind die
+        besten der ERLAUBTEN Chunks. ``None`` = keine Einschraenkung, leere Menge
+        = nichts erlaubt (liefert nichts).
+
         Aendert sich der Index waehrend der Suche, verschieben sich die
         Meta-Positionen und die Kanal-Treffer zeigen auf fremde Chunks. Deshalb
         wird die Generation geprueft und die Suche EINMAL wiederholt.
         """
-        out = self._search_hybrid_once(query, max_results, weight_fn, strict=True)
+        out = self._search_hybrid_once(query, max_results, weight_fn, strict=True,
+                                       allow_paths=allow_paths)
         if out is None:
             _log.debug("Index waehrend der Suche geaendert – ein Neuversuch")
-            out = self._search_hybrid_once(query, max_results, weight_fn, strict=False)
+            out = self._search_hybrid_once(query, max_results, weight_fn, strict=False,
+                                           allow_paths=allow_paths)
         return out or []
 
     def has_lexical_anchor(self, query: str) -> bool | None:
@@ -688,7 +737,9 @@ class VectorStore:
             return None
 
     def _search_hybrid_once(self, query: str, max_results: int, weight_fn,
-                            strict: bool) -> list[tuple[float, str, str]] | None:
+                            strict: bool,
+                            allow_paths: set | None = None
+                            ) -> list[tuple[float, str, str]] | None:
         """Ein Durchgang der Hybridsuche.
 
         ``strict=True``: Hat sich der Index zwischendurch geaendert, wird ``None``
@@ -698,13 +749,22 @@ class VectorStore:
         with self._lock:
             total = len(self._meta)
             gen_at_start = self._gen
+            # Erlaubte Meta-Positionen EINMAL bestimmen, unter demselben Lock wie
+            # die Generation: die Positionen verschieben sich, sobald jemand
+            # indiziert. Ein Durchlauf ueber alle Chunks, ~1 ms bei 12k.
+            allowed = None
+            if allow_paths is not None:
+                allowed = {i for i, m in enumerate(self._meta)
+                           if m["file_path"] in allow_paths}
         if total == 0:
+            return []
+        if allowed is not None and not allowed:
             return []
 
         # Grosszuegiger Pool je Kanal: die Fusion soll aus allen Listen schoepfen
         pool = min(max(max_results * 4, 40), total)
 
-        channels = [self._search_vector_idx(query, pool)]
+        channels = [self._search_vector_idx(query, pool, allowed)]
 
         # Zweiter semantischer Kanal mit der auf Inhaltswoerter reduzierten Frage.
         # ACHTUNG, der Kommentar hier versprach frueher eine Ersparnis, die es nicht
@@ -718,9 +778,9 @@ class VectorStore:
         terms = _content_terms(query)
         reduced = " ".join(terms)
         if terms and reduced != query.strip().lower():
-            channels.append(self._search_vector_idx(reduced, pool))
+            channels.append(self._search_vector_idx(reduced, pool, allowed))
 
-        lexical = self._search_lexical_idx(query, pool)
+        lexical = self._search_lexical_idx(query, pool, allowed)
         channels.append(lexical)
 
         if not any(channels):

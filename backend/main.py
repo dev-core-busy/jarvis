@@ -2609,6 +2609,35 @@ async def startup_replay_vector_journal():
 
 
 @app.on_event("startup")
+async def startup_warm_lexical_index():
+    """BM25-Index im Hintergrund vorbauen, damit die ERSTE Wissenssuche nach
+    einem Neustart ihn nicht bezahlt.
+
+    Gemessen (12.387 Chunks): kalt 593 ms nur fuer den Aufbau des invertierten
+    Index, warm 47 ms. Diese 0,55 s traf bisher immer den ersten Benutzer nach
+    jedem Deploy – ohne erkennbaren Grund, denn die zweite Suche war schnell.
+
+    Bewusst mit Verzoegerung und in einem Thread: der Aufbau haelt kurz das
+    Store-Lock, und beim Start ist die CPU ohnehin mit Modell-Laden und
+    Journal-Wiedergabe beschaeftigt. Faellt es aus, ist nichts kaputt – die
+    erste Suche baut ihn dann wie bisher selbst."""
+    async def _warm():
+        await asyncio.sleep(45)
+        try:
+            from backend.tools.knowledge import _get_vector_store
+            vs = await asyncio.to_thread(_get_vector_store)
+            if vs is None or vs.chunk_count() == 0:
+                return
+            t0 = time.time()
+            await asyncio.to_thread(vs._ensure_lexical_index)
+            print(f"[Wissen] BM25-Index vorgebaut ({vs.chunk_count()} Chunks, "
+                  f"{time.time() - t0:.1f}s)", flush=True)
+        except Exception as e:
+            print(f"[Wissen] BM25-Vorbau uebersprungen: {e}", flush=True)
+    asyncio.create_task(_warm())
+
+
+@app.on_event("startup")
 async def startup_harden_data_dirs():
     """Dienst-Verzeichnisse gegen fremde OS-Benutzer schliessen (0750).
 

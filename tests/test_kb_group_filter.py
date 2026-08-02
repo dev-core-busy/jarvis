@@ -134,6 +134,53 @@ with tempfile.TemporaryDirectory() as tmp:
           str([store._meta[i]["file_path"] for i, _ in vek]))
     check("... und liefert ohne Filter mehr", len(store._search_vector_idx("Drucker", 50)) > len(vek))
 
+section("search_hybrid_ex: Anker ohne zweiten BM25-Durchlauf")
+with tempfile.TemporaryDirectory() as tmp:
+    st = vs_mod.VectorStore(Path(tmp))
+    st.add_chunks("/kb/a.md", ["Zwei-Faktor-Authentifizierung mit Authenticator einrichten"],
+                  mtime=1.0, save=False)
+    st.add_chunks("/kb/b.md", ["Urlaubsantrag beim Vorgesetzten stellen"], mtime=1.0)
+    tr, anker = st.search_hybrid_ex("Zwei-Faktor einrichten", 5)
+    check("Treffer wie gehabt", len(tr) >= 1)
+    check("mit Anker: ohne_anker=False", anker is False, str(anker))
+    tr2, anker2 = st.search_hybrid_ex("qqqq wwww eeee", 5)
+    check("ohne Anker: ohne_anker=True", anker2 is True, str(anker2))
+    check("deckt sich mit has_lexical_anchor()",
+          (st.has_lexical_anchor("Zwei-Faktor einrichten") is False) is (anker is True)
+          and (st.has_lexical_anchor("qqqq wwww eeee") is False) is (anker2 is True))
+    check("search_hybrid liefert weiterhin nur die Liste",
+          isinstance(st.search_hybrid("Zwei-Faktor einrichten", 5), list))
+
+section("save=False wird auch auf dem Aenderungs-Pfad beachtet")
+with tempfile.TemporaryDirectory() as tmp:
+    st = vs_mod.VectorStore(Path(tmp))
+    st.add_chunks("/kb/x.md", ["Erster Inhalt zum Thema Drucker"], mtime=1.0, save=True)
+    idx = Path(tmp) / "faiss_index.bin"
+    vorher = idx.stat().st_mtime_ns
+    # Dieselbe Datei erneut -> Aenderungs-Pfad (has_existing) mit save=False
+    st.add_chunks("/kb/x.md", ["Geaenderter Inhalt zum Thema Drucker"], mtime=2.0, save=False)
+    check("save=False schreibt NICHT (der eigentliche Fehler)",
+          idx.stat().st_mtime_ns == vorher, "Index wurde trotzdem geschrieben")
+    check("der Index im Speicher ist trotzdem aktuell",
+          any("Geaenderter" in m["text"] for m in st._meta))
+    st.save()
+    check("save() schreibt dann doch", idx.stat().st_mtime_ns != vorher)
+    # Und save=True verhaelt sich unveraendert
+    vorher2 = idx.stat().st_mtime_ns
+    st.add_chunks("/kb/x.md", ["Nochmals geaendert"], mtime=3.0, save=True)
+    check("save=True schreibt weiterhin sofort", idx.stat().st_mtime_ns != vorher2)
+
+section("Thread-Zahl: zwei Kerne bleiben frei")
+import os as _os
+try:
+    import torch as _torch
+    vs_mod._get_embedding_model()
+    erwartet = max(1, min((_os.cpu_count() or 4) - 2, 8))
+    check(f"torch nutzt {erwartet} Threads bei {_os.cpu_count()} Kernen",
+          _torch.get_num_threads() == erwartet, str(_torch.get_num_threads()))
+except Exception as e:  # noqa: BLE001
+    check("Thread-Zahl pruefbar", False, str(e))
+
 section("Quelltext: keine Ueber-Abfrage mehr auf dem Vektor-Weg")
 kb = (Path(__file__).resolve().parent.parent / "backend" / "tools" / "knowledge.py").read_text(encoding="utf-8")
 check("KnowledgeTool reicht allow_paths in die Suche",

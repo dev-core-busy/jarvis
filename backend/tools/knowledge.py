@@ -407,11 +407,15 @@ def _vector_search(query: str, max_results: int,
     vs = _get_vector_store()
     if vs is None:
         return None
-    results = vs.search_hybrid(query, max_results, weight_fn=_learned_weight,
-                               allow_paths=allow_paths)
+    # search_hybrid_ex statt search_hybrid + has_lexical_anchor: letzteres hat
+    # denselben BM25-Durchlauf ein ZWEITES Mal gerechnet, obwohl die Hybridsuche
+    # das Ergebnis Millisekunden vorher schon hatte und wegwarf.
+    results, ohne_anker = vs.search_hybrid_ex(query, max_results,
+                                              weight_fn=_learned_weight,
+                                              allow_paths=allow_paths)
     if not results:
         return None
-    kein_anker = vs.has_lexical_anchor(query) is False
+    kein_anker = ohne_anker is True
 
     converted = _TrefferListe()
     for score, file_path, chunk in results:

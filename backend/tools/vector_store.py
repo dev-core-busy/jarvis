@@ -124,10 +124,24 @@ def _get_embedding_model():
         if _embedding_model is not None:
             return _embedding_model
         from sentence_transformers import SentenceTransformer
-        # PyTorch auf 2 Kerne begrenzen (verhindert CPU-Sättigung bei Indexierung)
+        # PyTorch-Threads begrenzen, damit eine laufende Indexierung den
+        # Webdienst nicht aushungert – aber nicht mehr auf die feste Zahl 2.
+        #
+        # Gemessen auf ECHT (4 Kerne, AVX-512, 2026-08-02), 32 Chunks je Lauf:
+        #   1 Thread  29,1 Chunks/s   |  kurze Query 17,5 ms
+        #   2 Threads 57,8 Chunks/s   |              10,6 ms
+        #   3 Threads 80,3 Chunks/s   |               9,6 ms
+        #   4 Threads 91,5 Chunks/s   |               8,5 ms
+        # Der Durchsatz skaliert also fast linear – die feste 2 verschenkte auf
+        # einer 8-Kern-Maschine drei Viertel. Regel jetzt: ZWEI Kerne bleiben
+        # fuer den Dienst frei, der Rest darf rechnen. Auf ECHT (4 Kerne) sind
+        # das weiterhin 2 – das Verhalten der Produktion aendert sich NICHT.
+        # Fuer die Suche ist die Zahl fast gleichgueltig (eine kurze Query ist
+        # zu klein, um zu parallelisieren); sie wirkt auf die Indexierung.
         try:
             import torch
-            torch.set_num_threads(2)
+            kerne = os.cpu_count() or 4
+            torch.set_num_threads(max(1, min(kerne - 2, 8)))
         except Exception:
             pass
         _log.info(f"Lade Embedding-Modell: {MODEL_NAME}")
@@ -233,8 +247,15 @@ class VectorStore:
         except Exception as e:
             _log.error(f"FAISS-Index speichern fehlgeschlagen: {e}")
 
-    def _rebuild(self, meta: list[dict], vectors: np.ndarray):
-        """Baut den FAISS-Index aus einer neuen Meta+Vektor-Liste neu auf."""
+    def _rebuild(self, meta: list[dict], vectors: np.ndarray, save: bool = True):
+        """Baut den FAISS-Index aus einer neuen Meta+Vektor-Liste neu auf.
+
+        ``save=False`` unterdrueckt das Schreiben – gebraucht vom Bulk-Reindex,
+        der gedrosselt selbst persistiert. Bis 2026-08-02 speicherte diese
+        Methode IMMER, und `add_chunks(save=False)` reichte das Flag auf dem
+        Aenderungs-Pfad nicht durch: jede geaenderte Datei schrieb den
+        vollstaendigen Index (~700 ms bei 12.387 Chunks), obwohl der Aufrufer
+        das ausdruecklich unterdruecken wollte."""
         import faiss
         idx = faiss.IndexFlatIP(EMBEDDING_DIM)
         if len(vectors) > 0:
@@ -242,7 +263,8 @@ class VectorStore:
         self._index = idx
         self._meta = meta
         self._gen += 1
-        self._save()
+        if save:
+            self._save()
 
     # ─── Schreib-Operationen ─────────────────────────────────────────────────
 
@@ -276,7 +298,7 @@ class VectorStore:
                 combined_vecs = (
                     np.vstack([old_vecs, new_vecs]) if len(old_vecs) > 0 else new_vecs
                 )
-                self._rebuild(old_meta + new_meta, combined_vecs)
+                self._rebuild(old_meta + new_meta, combined_vecs, save=save)
             else:
                 # Schnellpfad (Normalfall beim Voll-Reindex): NUR anhaengen –
                 # kein Reconstruct/vstack/Neuaufbau des Gesamtindex. Das war die
@@ -694,13 +716,36 @@ class VectorStore:
         Meta-Positionen und die Kanal-Treffer zeigen auf fremde Chunks. Deshalb
         wird die Generation geprueft und die Suche EINMAL wiederholt.
         """
+        return self.search_hybrid_ex(query, max_results, weight_fn, allow_paths)[0]
+
+    def search_hybrid_ex(self, query: str, max_results: int, weight_fn=None,
+                         allow_paths: set | None = None
+                         ) -> tuple[list[tuple[float, str, str]], bool | None]:
+        """Wie ``search_hybrid``, gibt zusaetzlich den lexikalischen Anker zurueck.
+
+        Zweiter Rueckgabewert: ``True`` = kein Wort der Anfrage kommt vor
+        (Treffer beruhen allein auf Vektor-Aehnlichkeit), ``False`` = Anker
+        vorhanden, ``None`` = nicht pruefbar (kein lexikalischer Index).
+
+        Warum es diese Variante gibt: ``has_lexical_anchor()`` hat denselben
+        BM25-Durchlauf ein ZWEITES Mal gerechnet, obwohl die Hybridsuche das
+        Ergebnis Millisekunden vorher schon hatte und wegwarf.
+
+        **Feiner Unterschied zu ``has_lexical_anchor()``:** bei gesetztem
+        ``allow_paths`` bezieht sich die Aussage auf die ERLAUBTEN Chunks. Das
+        ist fuer den Zweck richtiger – die Warnung soll sagen, worauf die
+        gelieferten Treffer beruhen, und geliefert wird nur aus der Erlaubnis.
+        """
         out = self._search_hybrid_once(query, max_results, weight_fn, strict=True,
                                        allow_paths=allow_paths)
         if out is None:
             _log.debug("Index waehrend der Suche geaendert – ein Neuversuch")
             out = self._search_hybrid_once(query, max_results, weight_fn, strict=False,
                                            allow_paths=allow_paths)
-        return out or []
+        if out is None:
+            return [], None
+        treffer, ohne_anker = out
+        return treffer, ohne_anker
 
     def has_lexical_anchor(self, query: str) -> bool | None:
         """Kommt ueberhaupt ein Wort der Anfrage im Bestand vor?
@@ -739,8 +784,13 @@ class VectorStore:
     def _search_hybrid_once(self, query: str, max_results: int, weight_fn,
                             strict: bool,
                             allow_paths: set | None = None
-                            ) -> list[tuple[float, str, str]] | None:
+                            ) -> tuple[list[tuple[float, str, str]], bool | None] | None:
         """Ein Durchgang der Hybridsuche.
+
+        Rueckgabe ``(treffer, ohne_anker)`` – oder ``None``, wenn sich der Index
+        waehrend der Suche geaendert hat und ``strict`` gesetzt ist. ``ohne_anker``
+        wird mitgegeben, damit der Aufrufer den BM25-Durchlauf nicht ein zweites
+        Mal rechnen muss (siehe ``search_hybrid_ex``).
 
         ``strict=True``: Hat sich der Index zwischendurch geaendert, wird ``None``
         zurueckgegeben (der Aufrufer wiederholt). ``strict=False``: bestmoegliches
@@ -757,9 +807,9 @@ class VectorStore:
                 allowed = {i for i, m in enumerate(self._meta)
                            if m["file_path"] in allow_paths}
         if total == 0:
-            return []
+            return [], None
         if allowed is not None and not allowed:
-            return []
+            return [], None
 
         # Grosszuegiger Pool je Kanal: die Fusion soll aus allen Listen schoepfen
         pool = min(max(max_results * 4, 40), total)
@@ -783,9 +833,6 @@ class VectorStore:
         lexical = self._search_lexical_idx(query, pool, allowed)
         channels.append(lexical)
 
-        if not any(channels):
-            return []
-
         # Kein lexikalischer Anker -> nicht auf MIN_KEEP auffuellen (siehe dort).
         # Nur wenn der lexikalische Index UEBERHAUPT existiert: fehlt er, ist
         # eine leere Liste keine Aussage ueber die Anfrage, sondern ueber den
@@ -793,6 +840,12 @@ class VectorStore:
         with self._lock:
             lex_da = bool(self._lex_postings)
         ohne_anker = lex_da and not lexical
+        # "nicht pruefbar" sauber von "kein Anker" trennen: ohne lexikalischen
+        # Index ist die leere Trefferliste eine Aussage ueber den INDEX, nicht
+        # ueber die Anfrage (gleiche Semantik wie has_lexical_anchor()).
+        anker_info = ohne_anker if lex_da else None
+        if not any(channels):
+            return [], anker_info
         min_keep = MIN_KEEP_OHNE_ANKER if ohne_anker else MIN_KEEP
         # FALLSTRICK: MIN_KEEP ist eine UNTERgrenze – der relative Cut kann
         # darueber hinaus weitere Treffer stehen lassen. Ohne Anker muss deshalb
@@ -831,7 +884,7 @@ class VectorStore:
                 ranked = sorted(rrf.items(), key=lambda x: x[1], reverse=True)
 
             if not ranked:
-                return []
+                return [], anker_info
             top = ranked[0][1] or 1.0
 
             for pos, (idx, score) in enumerate(ranked):
@@ -843,7 +896,7 @@ class VectorStore:
                 output.append((score / top, m["file_path"], m["text"]))
                 if len(output) >= max_results:
                     break
-        return output
+        return output, anker_info
 
     # ─── Metadaten-Abfragen ──────────────────────────────────────────────────
 

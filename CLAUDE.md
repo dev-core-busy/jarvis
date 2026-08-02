@@ -1020,7 +1020,27 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
   security_incidents.js (Sperr-Abmeldung).
 - **Schlüssel wird normalisiert** (`_key`): klein, ohne UPN-Suffix und ohne
   Domänen-Präfix. Sonst stünde dieselbe Person mehrfach in der Liste, je nachdem wie sie
-  sich angemeldet hat. Der **Anzeigename** behält die Originalform (`nexus\andreas.bender`).
+  sich angemeldet hat.
+- **Der Domänen-Präfix hing an der TIPPFORM des Anmeldefelds (Fix 2026-08-02).** Gemeldet als
+  „im Popup fehlt oft der Präfix `nexus`". Ursache: der Anzeigename war schlicht der Text aus dem
+  Login-Feld. Wer `nexus\andrea.ladd` eingab, stand mit Präfix in der Liste; wer `andrea.ladd`
+  oder `andrea.ladd@nexus.int` eingab, ohne – bei derselben Person am selben Verzeichnis.
+  - `main.py::_display_name()` leitet ihn jetzt aus dem ab, was das System **weiß**: lokale
+    Konten (`ALLOWED_USERS`, also `jarvis`) bekommen **keinen** Präfix (sie stammen nicht aus dem
+    Verzeichnis, `nexus\jarvis` wäre schlicht falsch), ein vorhandener `domäne\`-Anteil bleibt,
+    sonst Kurzname aus `ad_domain` (erste Beschriftung: `nexus.int` → `nexus`). **Ohne
+    konfigurierte Domäne wird nichts geraten.** Der Kurzname stammt aus dem DNS-Namen und muss
+    nicht dem NetBIOS-Namen entsprechen – vertretbar, weil er reine Anzeige ist; angemeldet,
+    gesucht und berechtigt wird über den normalisierten Namen.
+  - **`_richer()` verhindert das Zurückfallen:** `touch()`/`note_action()` laufen bei jeder
+    Anfrage, die Zwangsabmeldung kennt nur den normalisierten Namen. Ohne diese Regel hätte der
+    nächstbeste Aufruf den guten Namen wieder durch den dürftigen ersetzt – der Präfix wäre
+    scheinbar zufällig verschwunden. Regel: ein Name MIT Domänenanteil wird nie durch einen OHNE
+    ersetzt. **Nur `record_login()` setzt unbedingt** (`force=True`) – nur sie ermittelt den Wert
+    frisch aus der Konfiguration.
+  - **Altbestand heilt sich von selbst:** der erste authentifizierte Request nach dem Update
+    schreibt den Präfix nach. Auf DEV verifiziert (`andreas.bender` → `nexus\andreas.bender`,
+    `jarvis` unverändert ohne Präfix).
 - **Altbestand:** Wer sich vor Einführung angemeldet hat, zeigt „Anmeldung: –" – ein
   Zeitpunkt, den niemand aufgezeichnet hat, wird nicht geraten. Heilt sich beim nächsten
   Login. `MAX_USERS = 500` deckelt die Datei (ältester Eintrag nach `last_seen` fliegt).
@@ -1093,11 +1113,45 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
   nicht. Dafür feuert `i18n.js` jetzt das Ereignis **`jarvis-lang-changed`** (additiv, Zuhörer
   freiwillig). Der Zuhörer vergleicht mit `_catalog.lang` – ohne diesen Vergleich holte die Seite
   den Katalog beim Aufbau zweimal, weil `applyLang()` auch bei DOMContentLoaded läuft.
+- **Avatar:** `/sap` bindet dieselben Bausteine ein wie `/support` und `/portal` (clippy.css,
+  avatar.css, jQuery, clippy.min.js, avatar.js – Skripte NACH `sap_portal.js`). Der Ein/Aus-
+  Schalter baut sich selbst und hängt sich **vor `#btn-theme-toggle`** – fehlt diese Id auf einer
+  Seite, landet er als frei schwebender Knopf irgendwo. Der Zustand wird pro Pfad gemerkt
+  (`jarvis_avatar_off:/sap`).
+- **Sichtbarkeit je Analyse (seit 2026-08-02):** *Einstellungen → SAP → „Sichtbare Analysen im
+  Bereich /sap"* – ein Kästchen je Vorlage, nach Kategorien gruppiert, plus „Alle auswählen/
+  abwählen" und Zähler.
+  - Gespeichert wird die Liste der **AUSGEBLENDETEN** Ids (`hidden_analyses` in der
+    SAP-Skill-Config), nicht der sichtbaren. **Leer heißt „alles sichtbar"** – anders als bei den
+    Berechtigungsfeldern, und das ist Absicht: dies ist eine Aufräum-Einstellung, keine Freigabe
+    (wer den Bereich betreten darf, hat die Freigabe schon). Bei „leer = nichts" stünde nach dem
+    Einschalten des Skills ein leeres Pulldown da, und eine später ergänzte Analyse wäre still
+    unsichtbar.
+  - **Eine leer gewordene Kategorie verschwindet mit** – eine Gruppenüberschrift ohne Einträge
+    sieht im Pulldown wie ein Fehler aus. `admin_catalog()` behält dagegen ALLE Kategorien und
+    ALLE Analysen: sonst ließe sich nichts wieder einblenden.
+  - **`/api/sap/ask` lehnt ausgeblendete Analysen ab.** Der Verlauf liegt im localStorage des
+    Browsers und überlebt das Ausblenden, ein offener Reiter ebenso – ohne diese Prüfung wäre
+    „ausgeblendet" nur eine Empfehlung. Das Frontend fängt den Fall zusätzlich ab und sagt es,
+    statt das Feld wortlos auf „freie Frage" springen zu lassen.
+  - **`GET /api/sap/analyses/catalog` hängt an `require_local_auth`, NICHT an
+    `require_sap_access`:** `_user_may_use_sap` kennt bewusst keinen Admin-Bypass – ein
+    Administrator ohne SAP-Freigabe könnte die Sichtbarkeit sonst nicht pflegen (auf DEV genau
+    dieser Fall). Der Katalog enthält keine Daten aus dem SAP-System.
+  - **Gespeichert wird über den vorhandenen `POST /api/skills/sap/config`** (Admin,
+    `update_skill_config` merged per `current_config.update(data)`). Der Sichtbarkeits-Knopf
+    sendet **nur** `hidden_analyses`, der Verbindungs-Knopf **nie** dieses Feld – sonst
+    überschriebe ein Klick den jeweils anderen Teil mit dem Formularstand. Beides ist getestet.
+  - `normalize_hidden()` nimmt Liste ODER kommagetrennten Text und **verwirft unbekannte Ids,
+    statt sie zu raten**: sonst bliebe die Id einer entfernten Analyse dauerhaft in der
+    Konfiguration stehen und würde bei jedem Speichern mitgeschrieben.
 - **FALLSTRICK im UI-Test:** `window.location` lässt sich in jsdom **weder ersetzen noch
   überschreiben** (`Cannot redefine property`) – weder am Fenster, noch an `Location.prototype`,
   noch an der Instanz. Eine Weiterleitung erkennt man über den jsdomError
   „Not implemented: navigation" (VirtualConsole); das ZIEL gibt jsdom nicht heraus und wird
-  deshalb per Quelltext-Prüfung abgedeckt.
+  deshalb per Quelltext-Prüfung abgedeckt. Für den Einstellungen-Reiter wird `settings.html` mit
+  `runScripts: 'outside-only'` geladen und nur `i18n.js` + `sap.js` eingespielt – `app.js` würde
+  sonst fremde Poll-Timer starten.
 - **Verifiziert:** 41 Katalog-Tests (`tests/test_sap_analyses.py`, ohne fastapi lauffähig) +
   59 UI-Tests in jsdom gegen die echten Dateien (`tests/test_sap_portal_ui.js`) = 100/100.
   Live auf DEV: Gate greift (Nicht-Freigegebener → `permissions.sap: false` + HTTP 403 auf allen

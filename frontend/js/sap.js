@@ -57,6 +57,7 @@
         onShow: function () {
             this._bind();
             this.loadConfig();
+            this.loadVisibility();
         },
 
         _bind: function () {
@@ -70,6 +71,10 @@
             var oq = $('sap-odata-run'); if (oq) oq.addEventListener('click', this.runOData.bind(this));
             var sq = $('sap-sql-run'); if (sq) sq.addEventListener('click', this.runSql.bind(this));
             var rp = $('sap-reporting-btn'); if (rp) rp.addEventListener('click', this.loadReporting.bind(this));
+            // Sichtbarkeit der Analysen im Bereich /sap
+            var va = $('sap-vis-all'); if (va) va.addEventListener('click', function () { self._visSetAll(true); });
+            var vn = $('sap-vis-none'); if (vn) vn.addEventListener('click', function () { self._visSetAll(false); });
+            var vs = $('sap-vis-save'); if (vs) vs.addEventListener('click', this.saveVisibility.bind(this));
             // Passwort-Augen (delegiert)
             document.querySelectorAll('#settings-tab-sap .sap-eye').forEach(function (btn) {
                 btn.addEventListener('click', function () {
@@ -232,6 +237,109 @@
                     }
               })
               .catch(function () { box.innerHTML = '<span class="kb-hint" style="color:var(--danger);">Abfrage fehlgeschlagen</span>'; });
+        },
+
+        // ── Sichtbare Analysen im Bereich /sap ──────────────────────────
+        // Gespeichert wird die Liste der AUSGEBLENDETEN Ids (`hidden_analyses`),
+        // nicht der sichtbaren: so erscheint eine spaeter ergaenzte Analyse von
+        // selbst, statt still zu fehlen. Die Kaesten zeigen deshalb "sichtbar",
+        // gespeichert wird das Gegenteil.
+        _visStatus: function (msg, kind) {
+            var el = $('sap-vis-status'); if (!el) return;
+            el.textContent = msg || '';
+            el.style.color = kind === 'error' ? 'var(--danger)'
+                : kind === 'ok' ? 'var(--success)' : 'var(--text-secondary)';
+        },
+
+        _visCount: function () {
+            var el = $('sap-vis-count'); if (!el) return;
+            var boxes = document.querySelectorAll('#sap-vis-list .sap-vis-cb');
+            var on = document.querySelectorAll('#sap-vis-list .sap-vis-cb:checked').length;
+            var tpl = (window.t ? window.t('sap.vis_count') : '');
+            if (!tpl || tpl === 'sap.vis_count') tpl = '{n} von {total} sichtbar';
+            el.textContent = tpl.replace('{n}', on).replace('{total}', boxes.length);
+            // Alles abgewaehlt ist erlaubt (die freie Frage bleibt), aber der
+            // Anwender saehe ein leeres Pulldown – das gehoert angesagt.
+            el.style.color = (boxes.length && !on) ? 'var(--warning)' : '';
+        },
+
+        _visSetAll: function (on) {
+            document.querySelectorAll('#sap-vis-list .sap-vis-cb').forEach(function (cb) {
+                cb.checked = !!on;
+            });
+            this._visCount();
+        },
+
+        loadVisibility: function () {
+            var self = this;
+            var box = $('sap-vis-list'); if (!box) return;
+            var lg = (function () {
+                try { return localStorage.getItem('jarvis_lang') || 'de'; } catch (e) { return 'de'; }
+            })();
+            box.innerHTML = '<span class="kb-hint">' + esc(window.t ? window.t('common.loading') : 'Lädt…') + '</span>';
+            fetch('/api/sap/analyses/catalog?lang=' + encodeURIComponent(lg), { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    if (!d) {
+                        box.innerHTML = '<span class="kb-hint" style="color:var(--danger);">'
+                            + esc(window.t ? window.t('sap.vis_load_fail') : 'Analysen konnten nicht geladen werden')
+                            + '</span>';
+                        return;
+                    }
+                    box.innerHTML = d.categories.map(function (c) {
+                        var items = d.analyses.filter(function (a) { return a.cat === c.id; });
+                        if (!items.length) return '';
+                        return '<div style="margin-bottom:14px;">'
+                            + '<div style="font-weight:600;font-size:0.88rem;margin-bottom:5px;'
+                            + 'color:var(--text-secondary);">' + esc(c.title) + '</div>'
+                            + items.map(function (a) {
+                                return '<label class="checkbox-group" style="align-items:flex-start;'
+                                    + 'gap:8px;margin-bottom:4px;" title="' + esc(a.desc) + '">'
+                                    + '<input type="checkbox" class="sap-vis-cb" data-id="' + esc(a.id) + '"'
+                                    + (a.visible ? ' checked' : '') + '>'
+                                    + '<span>' + esc(a.title) + '</span></label>';
+                            }).join('')
+                            + '</div>';
+                    }).join('');
+                    // Delegiert statt je Kasten: die Liste wird bei jedem
+                    // Sprachwechsel neu gebaut, Einzel-Listener haetten sich
+                    // dabei angesammelt.
+                    box.addEventListener('change', function (e) {
+                        if (e.target && e.target.classList.contains('sap-vis-cb')) self._visCount();
+                    });
+                    self._visCount();
+                })
+                .catch(function () {
+                    box.innerHTML = '<span class="kb-hint" style="color:var(--danger);">'
+                        + esc(window.t ? window.t('sap.vis_load_fail') : 'Analysen konnten nicht geladen werden')
+                        + '</span>';
+                });
+        },
+
+        saveVisibility: function () {
+            var self = this;
+            var boxes = document.querySelectorAll('#sap-vis-list .sap-vis-cb');
+            if (!boxes.length) return;
+            var hidden = [];
+            boxes.forEach(function (cb) { if (!cb.checked) hidden.push(cb.dataset.id); });
+            this._visStatus(window.t ? window.t('confluence.saving') : 'Speichere…');
+            // NUR dieses eine Feld senden – der Server merged (update_skill_config),
+            // die Zugangsdaten bleiben also unberuehrt. Wuerde hier die ganze
+            // Konfiguration mitgehen, ueberschriebe ein Klick hier die
+            // Verbindungsfelder mit dem Formularstand.
+            fetch('/api/skills/sap/config', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ hidden_analyses: hidden })
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                  if (d && d.success === false) throw new Error('save');
+                  self._visStatus('✓ ' + (window.t ? window.t('confluence.saved') : 'Gespeichert'), 'ok');
+                  setTimeout(function () { self._visStatus(''); }, 2500);
+              })
+              .catch(function () {
+                  self._visStatus('✗ ' + (window.t ? window.t('sap.vis_save_fail') : 'Speichern fehlgeschlagen'), 'error');
+              });
         },
 
         loadReporting: function () {

@@ -115,20 +115,47 @@ def _key(username: str) -> str:
 
 # ─── Ereignisse ──────────────────────────────────────────────────────────────
 
-def _entry_unlocked(key: str, display: str) -> dict:
+def _richer(neu: str, alt: str) -> bool:
+    """Traegt ``neu`` mindestens so viel Information wie ``alt``?
+
+    Hintergrund: der Anzeigename kommt je nach Aufrufer in unterschiedlicher
+    Qualitaet an. Die Anmeldung kennt die Domaene (``nexus\\andrea.ladd``), die
+    Zwangsabmeldung durch einen Admin dagegen nur den normalisierten Namen
+    (``andrea.ladd``). Ohne diese Pruefung wuerde der naechstbeste Aufruf den
+    guten Namen durch den duerftigen ersetzen – der Domaenen-Praefix
+    verschwaende dann scheinbar zufaellig aus der Liste.
+
+    Regel: ein Name MIT Domaenenanteil wird nie durch einen OHNE ersetzt.
+    Alles andere darf ueberschreiben (z.B. Korrektur der Schreibweise)."""
+    if not neu:
+        return False
+    if not alt:
+        return True
+    hat_dom = lambda s: ("\\" in s) or ("@" in s)  # noqa: E731
+    return hat_dom(neu) or not hat_dom(alt)
+
+
+def _entry_unlocked(key: str, display: str, force: bool = False) -> dict:
+    """Holt/erzeugt den Eintrag. ``force`` setzt den Anzeigenamen unbedingt –
+    das darf nur die Anmeldung, weil nur sie ihn frisch ermittelt hat."""
     e = _users.get(key)
     if e is None:
         e = {"display": display or key, "first_login": 0.0, "last_login": 0.0,
              "last_logout": 0.0, "last_seen": 0.0, "last_ip": "", "logins": 0,
              "last_action": 0.0, "last_action_label": "", "actions": 0}
         _users[key] = e
-    if display:
+    if display and (force or _richer(display, e.get("display") or "")):
         e["display"] = display
     return e
 
 
-def record_login(username: str, ip: str = "") -> None:
-    """Erfolgreiche Anmeldung festhalten (sofort auf Platte)."""
+def record_login(username: str, ip: str = "", display: str = "") -> None:
+    """Erfolgreiche Anmeldung festhalten (sofort auf Platte).
+
+    ``display`` ist der aufbereitete Anzeigename (bei Domaenen-Konten mit
+    Domaenen-Praefix, siehe ``main.py::_display_name``). Nur die Anmeldung
+    setzt ihn UNBEDINGT – sie ist die einzige Stelle, die ihn frisch aus der
+    Konfiguration ermittelt. Fehlt er, gilt der Anmeldename wie bisher."""
     global _dirty
     key = _key(username)
     if not key:
@@ -136,7 +163,7 @@ def record_login(username: str, ip: str = "") -> None:
     now = time.time()
     with _lock:
         _load_unlocked()
-        e = _entry_unlocked(key, username)
+        e = _entry_unlocked(key, display or username, force=bool(display))
         if not e["first_login"]:
             e["first_login"] = now
         e["last_login"] = now
@@ -151,7 +178,7 @@ def record_login(username: str, ip: str = "") -> None:
         _write_unlocked()
 
 
-def record_logout(username: str) -> None:
+def record_logout(username: str, display: str = "") -> None:
     """Ausdrueckliche Abmeldung festhalten (sofort auf Platte)."""
     global _dirty
     key = _key(username)
@@ -160,7 +187,7 @@ def record_logout(username: str) -> None:
     now = time.time()
     with _lock:
         _load_unlocked()
-        e = _entry_unlocked(key, username)
+        e = _entry_unlocked(key, display or username)
         e["last_logout"] = now
         # last_seen NICHT hochsetzen: sonst gilt der Benutzer nach dem Abmelden
         # noch zwei Minuten als online.
@@ -168,7 +195,7 @@ def record_logout(username: str) -> None:
         _write_unlocked()
 
 
-def touch(username: str, ip: str = "") -> None:
+def touch(username: str, ip: str = "", display: str = "") -> None:
     """Aktivitaet festhalten. Wird bei JEDER authentifizierten Anfrage gerufen –
     daher nur Speicher, Platte gedrosselt."""
     global _dirty
@@ -178,7 +205,7 @@ def touch(username: str, ip: str = "") -> None:
     now = time.time()
     with _lock:
         _load_unlocked()
-        e = _entry_unlocked(key, username)
+        e = _entry_unlocked(key, display or username)
         e["last_seen"] = now
         if ip:
             e["last_ip"] = ip
@@ -188,7 +215,7 @@ def touch(username: str, ip: str = "") -> None:
             _write_unlocked()
 
 
-def note_action(username: str, label: str = "", ip: str = "") -> None:
+def note_action(username: str, label: str = "", ip: str = "", display: str = "") -> None:
     """Eine echte Benutzer-HANDLUNG festhalten (nicht blosse Anwesenheit).
 
     Aufrufer: alle veraendernden HTTP-Anfragen (POST/PUT/PATCH/DELETE, siehe
@@ -203,7 +230,7 @@ def note_action(username: str, label: str = "", ip: str = "") -> None:
     now = time.time()
     with _lock:
         _load_unlocked()
-        e = _entry_unlocked(key, username)
+        e = _entry_unlocked(key, display or username)
         e["last_seen"] = now
         e["last_action"] = now
         if label:

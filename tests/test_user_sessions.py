@@ -399,7 +399,26 @@ def test_verdrahtung():
 
     js = (root / "frontend" / "js" / "sessions.js").read_text(encoding="utf-8")
     check("keepalive gesetzt (Navigation bricht die Anfrage sonst ab)", "keepalive: true" in js)
-    check("gruene/graue Pille", "is-on" in js and "is-off" in js)
+    # Bis 2026-08-04 stand hier: "is-on" in js and "is-off" in js. Die Klasse wird
+    # jetzt aus zustand(u) BERECHNET ('is-' + z), die Literale stehen also nicht mehr
+    # im Quelltext – die Pruefung haette den Umbau als Fehler gemeldet. Jetzt auf die
+    # drei Zustaende und ihre Stilregeln pruefen.
+    check("Pillen-Klasse wird aus dem Zustand gebaut", "pt-usr-pill is-' + z" in js)
+    check("drei Zustaende: on / idle / off",
+          "function zustand(" in js
+          and "return 'off'" in js and "return 'idle'" in js and "return 'on'" in js)
+    check("Schwelle fuer inaktiv ist IDLE_WARN, nicht IDLE_AB",
+          "idle_seconds >= IDLE_WARN) return 'idle'" in js)
+    check("unbekannte Untaetigkeit wird NICHT als inaktiv geraten",
+          "u.idle_seconds != null" in js.split("function zustand(")[1].split("}")[0])
+    for _kl, _farbe in (("is-on", "--success"), ("is-idle", "--warning"), ("is-off", None)):
+        _regel = [z for z in portal.splitlines() if ".pt-usr-pill." + _kl in z]
+        check("CSS-Regel fuer ." + _kl + " vorhanden", bool(_regel), str(_regel))
+        if _farbe:
+            check("." + _kl + " nutzt " + _farbe, any(_farbe in z for z in _regel), str(_regel))
+    check("Pille traegt die Aussage auch als TEXT (nicht nur Farbe)",
+          "sessions.inactive'" in js and "sessions.online'" in js
+          and "sessions.offline'" in js)
 
     i18n = (root / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
     for k in ("sessions.title", "sessions.online", "sessions.offline",

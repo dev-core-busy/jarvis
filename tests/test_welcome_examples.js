@@ -13,13 +13,36 @@ const i18njs = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
 
 // Liste der Beispiel-Keys aus dem Quelltext ziehen
 const arr = chatjs.slice(chatjs.indexOf('_WELCOME_EXAMPLES = ['), chatjs.indexOf('];', chatjs.indexOf('_WELCOME_EXAMPLES = [')));
-const keys = [...arr.matchAll(/key:\s*'([a-z]+)'/g)].map(m => m[1]);
+const keys = [...arr.matchAll(/key:\s*'([a-z0-9]+)'/g)].map(m => m[1]);
 console.log('\n\x1b[1mBeispiel-Keys\x1b[0m');
 check('genau 10 Beispiele', keys.length === 10, keys.join(','));
-check("'web' entfernt", !keys.includes('web'), keys.join(','));
-check("'image' entfernt", !keys.includes('image'), keys.join(','));
-check("'jira' vorhanden", keys.includes('jira'));
-check("'conf' vorhanden", keys.includes('conf'));
+// Diese Keys standen fuer Faehigkeiten, die es hier NICHT gibt. Sie duerfen nicht
+// zurueckkehren: 'web' (kein Web-Werkzeug), 'image' (generate_image laeuft ueber das
+// aktive Profil = Textmodell), 'cron'/'multi' (cron_create und spawn_agent stehen in
+// _BLOCKED_TOOLS_FOR_LDAP, also fuer Domaenen-Benutzer gesperrt).
+['web', 'image', 'cron', 'multi'].forEach(k =>
+  check(`'${k}' nicht mehr enthalten (Faehigkeit fehlt bzw. ist gesperrt)`,
+        !keys.includes(k), keys.join(',')));
+['jira', 'conf', 'ibs', 'multi2'].forEach(k =>
+  check(`'${k}' vorhanden`, keys.includes(k), keys.join(',')));
+
+// Gegenprobe am Backend: keiner der beworbenen Wege darf in der Sperrliste stehen.
+const agentpy = fs.readFileSync(path.join(ROOT, 'backend/agent.py'), 'utf8');
+const blocked = agentpy.slice(agentpy.indexOf('_BLOCKED_TOOLS_FOR_LDAP = '),
+                              agentpy.indexOf('}', agentpy.indexOf('_BLOCKED_TOOLS_FOR_LDAP = ')));
+['cron_create', 'spawn_agent'].forEach(t =>
+  check(`${t} ist tatsaechlich gesperrt (Begruendung belegt)`, blocked.includes(t)));
+const prompts = keys.map(k => {
+  const m = i18njs.match(new RegExp("'chat\\.wex_" + k + "_prompt':\\s*'([^']*)'"));
+  return (m && m[1]) || '';
+}).join(' ');
+// Praezise auf die AUFTRAGS-Anlage pruefen. Ein zu weites /wiederkehrend/ trifft
+// sonst "wiederkehrende Themen" im IBS-Beispiel – ein Fehlalarm im Test selbst.
+check('kein Prompt verlangt einen zeitgesteuerten Auftrag',
+      !/wiederkehrenden Auftrag|jeden Montag um|zeitgesteuert|Richte einen .*Auftrag ein/i.test(prompts));
+check('kein Prompt verlangt Sub-Agenten', !/eigenen Agenten|Agenten parallel/i.test(prompts));
+check('kein Prompt verlangt Bildgenerierung', !/Generiere ein Bild/i.test(prompts));
+check('kein Prompt verlangt Web-Recherche', !/im Web/i.test(prompts));
 
 console.log('\n\x1b[1mi18n: jeder Key hat label/desc/prompt in DE UND EN\x1b[0m');
 keys.forEach(k => ['label', 'desc', 'prompt'].forEach(part => {
@@ -49,8 +72,12 @@ check('10 Chips', card.querySelectorAll('.wex-chip').length === 10,
       String(card.querySelectorAll('.wex-chip').length));
 check('neues Jira-Beispiel sichtbar', /Tickets auswerten/.test(txt), txt.slice(0, 200));
 check('neues Confluence-Beispiel sichtbar', /Confluence durchsuchen/.test(txt));
+check('neues IBS-Beispiel sichtbar', /Kundenvorg/.test(txt));
+check('neues Mehrquellen-Beispiel sichtbar', /Alle Quellen auf einmal/.test(txt));
 check('altes Bild-Beispiel verschwunden', !/Bild generieren/.test(txt));
 check('altes Web-Beispiel verschwunden', !/Web-Recherche/.test(txt));
+check('altes Cron-Beispiel verschwunden', !/Auftrag wiederholen/.test(txt));
+check('altes Multi-Agenten-Beispiel verschwunden', !/Mehrere Agenten/.test(txt));
 check('alter Server-Notfalltext NICHT verwendet (i18n gewinnt)',
       !txt.includes('Alter Notfalltext vom Server'));
 

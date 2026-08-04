@@ -435,6 +435,21 @@ async function main() {
     check('CSS: Grundfarbe ist NICHT die Warnfarbe',
           /\.pt-usr-idle\s*\{[^}]*var\(--text-secondary\)/.test(cssIdle));
 
+    section('Hinweistext: beide {n}-Platzhalter aufgeloest');
+    // String.replace mit einem STRING tauscht nur das ERSTE Vorkommen. Der Text nennt
+    // {n} zweimal ("in den letzten {n} Sekunden" und "bis zu {n} Sekunden weiter als
+    // online") – der zweite Platzhalter stand woertlich in der Oberflaeche (2026-08-04).
+    {
+        const hint = doc.getElementById('pt-usr-hint');
+        const htxt = hint ? hint.textContent : '';
+        check('Hinweistext gefuellt', htxt.length > 40, JSON.stringify(htxt).slice(0, 90));
+        check('KEIN {n} mehr im Text', !htxt.includes('{n}'), htxt);
+        const nn = (htxt.match(/120/g) || []).length;
+        check('Fenster zweimal eingesetzt (120)', nn === 2, `${nn}x gefunden: ${htxt}`);
+        check('nennt den offenen Tab als Grund fuer "online"',
+              /Tab|Hintergrund/i.test(htxt), htxt);
+    }
+
     const ok = results.filter((r) => r.ok).length;
     console.log('\n' + '='.repeat(70));
     console.log(`ERGEBNIS: ${ok}/${results.length} Pruefungen bestanden`);

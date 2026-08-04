@@ -1734,8 +1734,11 @@
         // Quellen, die intern und ohne Internet-Freigabe erreichbar sind.
         { key: 'jira',  icon: '🎫' },
         { key: 'conf',  icon: '📘' },
-        { key: 'cron',  icon: '⏰' },
-        { key: 'multi', icon: '🧩' },
+        // 'cron' und 'multi' entfernt (2026-08-04): cron_create und spawn_agent stehen
+        // beide in _BLOCKED_TOOLS_FOR_LDAP – fuer Domaenen-Benutzer also gesperrt; der
+        // Cron-Prompt nannte zusaetzlich Kalendertermine (google-Skill nicht aktiv).
+        { key: 'ibs',   icon: '👥' },
+        { key: 'multi2', icon: '🔎' },
         { key: 'code',  icon: '💻' },
     ];
 

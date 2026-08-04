@@ -1344,6 +1344,33 @@ jeher `require_local_auth` – **Lesen war also freier als Schreiben**, was den 
   Excel+Chart, Word→PDF, PPTX-Schaubild, Anhang-Analyse, Wissensdatenbank, Web, Bild, Cron,
   Multi-Agent, Skript). Der Prompt wird ERST BEIM KLICK uebersetzt – sonst wuerde nach einem
   Sprachwechsel der alte Text gesendet.
+- **Beispiele müssen mit den AKTIVEN Fähigkeiten übereinstimmen** (Korrektur 2026-08-04).
+  `web` („Web-Recherche") und `image` („Bild generieren") sind **entfernt**: für
+  Web-Recherche existiert **gar kein Werkzeug** (`backend/tools/` hat kein
+  `web_search.py`), und `generate_image` läuft über das **aktive Profil** – ist das ein
+  Textmodell (auf ECHT `Qwen/Qwen3.6-35B-A3B-FP8`, `openai_compatible`), gibt das
+  Beispiel nur die Fehlermeldung des Tools aus. Ersetzt durch `jira` und `conf`: beide
+  Skills sind aktiv UND konfiguriert (live geprüft: Jira liefert offene Tickets,
+  Confluence 21 Spaces und 10 Treffer je Suchbegriff), beide sind **intern** und stehen
+  daher nicht in `_INTERNET_TOOLS` – funktionieren also auch für Benutzer ohne
+  Internet-Freigabe. Beide Beispiele sind bewusst **nur lesend**: ein Beispiel-Prompt
+  darf kein echtes Ticket anlegen.
+  - **SAP wäre der naheliegende Kandidat gewesen und ist es NICHT:** der Skill ist auf
+    ECHT aktiv, aber die Verbindung ist nicht konfiguriert (`sap`-Config leer) – das
+    Beispiel hätte genauso versagt. Vor dem Setzen eines Beispiels immer prüfen, ob der
+    Skill aktiv **und** konfiguriert ist.
+  - **Noch offen (gemeldet, nicht geändert):** `cron` und `multi` funktionieren für
+    Domänen-Benutzer ebenfalls nicht – `cron_create` und `spawn_agent` stehen beide in
+    `_BLOCKED_TOOLS_FOR_LDAP`; der Cron-Prompt nennt zusätzlich Kalendertermine, der
+    `google`-Skill ist auf ECHT nicht aktiv.
+- **Eine Änderung an `_WELCOME_EXAMPLES`/i18n wirkt SOFORT auch in bereits
+  ausgelieferten Sitzungen** – `_WELCOME_MARK` muss dafür NICHT hochgezählt werden. Das
+  Backend speichert nur `{role:"bot", kind:"welcome", text}` als Notfalltext; die Karte
+  baut `_renderWelcomeCard()` bei JEDER Anzeige neu aus der Liste und den i18n-Keys.
+  Der Marker ist nur nötig, wenn Benutzer die gelöschte Sitzung erneut bekommen sollen.
+  Ein jsdom-Test (`tests/test_welcome_examples.js`, 44 Prüfungen) hält das fest: er
+  rendert mit einem Backend-Eintrag samt ALTEM Notfalltext und erwartet die neuen
+  Beispiele.
 - **Klick = sofort senden** (`_useExamplePrompt` → `sendMessage()`). Die Karte bleibt danach
   stehen, damit weitere Beispiele erreichbar sind.
 - **FALLSTRICK – Index-Zuordnung DOM↔Verlauf:** Der Eintrag hat `role:"bot"`, erzeugt aber KEINE

@@ -407,27 +407,64 @@ def _shell_hits_internet(cmd: str) -> bool:
     return False
 
 # ── Instructions aus data/instructions/*.md laden ─────────────────────────
+#
+# ``data/instructions/`` ist NICHT mehr git-verfolgt (seit 2026-08-04, .gitignore).
+# Diese Dateien werden pro Server gepflegt – ueber die Oberflaeche oder das
+# ``reflection``-Werkzeug – und weichen deshalb absichtlich voneinander ab
+# (auf ECHT z.B. auf "Nexerius" umbenannt und um SAP erweitert).
+#
+# Solange sie verfolgt waren, machte der Update-Pill (stash -> pull -> pop) aus
+# ihnen bei jedem Pull einen Merge-Konflikt: am 2026-07-13 blockierte genau das
+# auf ECHT jedes weitere Update, weil Konfliktmarker in den Dateien standen.
+# Der damalige Gegenzug (``git update-index --skip-worktree``) ist seit der
+# Einfuehrung von sparse-checkout (2026-07-31) WIRKUNGSLOS – sparse-checkout
+# verwaltet dieses Bit selbst und ueberschreibt manuelle Setzungen. Ein Schutz,
+# der still ausfaellt, ist kein Schutz; deshalb sind die Dateien jetzt einfach
+# nicht mehr im Index.
+#
+# Die Vorgabe-Fassungen liegen versioniert unter ``data/instructions_default/``
+# und werden beim ERSTEN Start kopiert – sonst startete eine Neuinstallation
+# ohne jede Instruktion und der Agent verhielte sich grundlos anders.
 INSTRUCTIONS_DIR = Path(__file__).parent.parent / "data" / "instructions"
+INSTRUCTIONS_DEFAULT_DIR = Path(__file__).parent.parent / "data" / "instructions_default"
+
+
+def _seed_instructions() -> None:
+    """Kopiert die Vorgabe-Instruktionen, wenn NOCH KEINE vorhanden sind.
+
+    Die Bedingung ist bewusst "keine einzige ``.md`` vorhanden" und NICHT
+    "diese Datei fehlt": auf gepflegten Systemen sind einzelne Vorgaben
+    absichtlich geloescht (auf ECHT ``browser_automation.md`` und ``user.md``).
+    Ein Auffuellen einzelner Dateien wuerde sie bei jedem Start zurueckholen –
+    aus einer bewussten Entscheidung wuerde ein wiederkehrender Fehler.
+    """
+    try:
+        INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        if any(INSTRUCTIONS_DIR.glob("*.md")):
+            return
+        if not INSTRUCTIONS_DEFAULT_DIR.is_dir():
+            return
+        import shutil
+        n = 0
+        for src in sorted(INSTRUCTIONS_DEFAULT_DIR.iterdir()):
+            if not src.is_file():
+                continue
+            dst = INSTRUCTIONS_DIR / src.name
+            if not dst.exists():
+                shutil.copy2(src, dst)
+                n += 1
+        if n:
+            print(f"[INSTRUCTIONS] {n} Vorgabe-Instruktionen nach "
+                  f"data/instructions/ kopiert (Erststart)", flush=True)
+    except Exception as e:  # noqa: BLE001
+        # Kein Startfehler: ohne Instruktionen laeuft der Agent weiter, nur ohne
+        # die Zusatz-Anweisungen.
+        print(f"[INSTRUCTIONS] Vorgaben nicht kopiert: {e}", flush=True)
 
 
 def load_instructions() -> str:
     """Laedt alle .md Dateien aus data/instructions/ als System-Prompt-Erweiterung."""
-    if not INSTRUCTIONS_DIR.exists():
-        INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
-        # Beispiel-Datei anlegen
-        example = INSTRUCTIONS_DIR / "beispiel.md.disabled"
-        if not example.exists():
-            example.write_text(
-                "# Beispiel-Instruktion\n\n"
-                "Hier kannst du dem LLM Anweisungen geben, die bei JEDEM Gespraech gelten.\n"
-                "Benenne die Datei in beispiel.md um, damit sie geladen wird.\n\n"
-                "Beispiele:\n"
-                "- Antworte immer formal/informell\n"
-                "- Nutze bestimmte Tools bevorzugt\n"
-                "- Beachte bestimmte Sicherheitsregeln\n",
-                encoding="utf-8"
-            )
-        return ""
+    _seed_instructions()
 
     sections = []
     for md_file in sorted(INSTRUCTIONS_DIR.glob("*.md")):

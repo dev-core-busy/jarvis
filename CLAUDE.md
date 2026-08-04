@@ -1502,6 +1502,334 @@ Confluence) – gewirkt hat er nur bei der Datei. Ursache war eine verschluckte 
   „Fehler: Datei nicht gefunden". Die Kette Erstellen→PDF war damit über den natürlichen Weg
   unbenutzbar. Nachschlag über `DOCS_DIR.glob("*__<name>")`, bei mehreren Treffern der **jüngste**.
 
+## Telemetrie belastbar gemacht (2026-08-04)
+Drei Zusagen, die der Reiter *Einstellungen → Logs & Debug* vorher nicht hielt.
+
+### a) Selbstbereinigung nach 90 Tagen – **Alter ist die EINZIGE Schranke**
+Erste Fassung hatte zusätzlich Stückzahl-Schranken (5000 Konversationen, 200 Fehler,
+10-MB-Rotation im Audit-Log). Die sind auf Anweisung des Nutzers **wieder entfernt** – und das
+war richtig: eine Stückzahl hebelt die Zusage aus. „Diagnosedaten werden 90 Tage vorgehalten"
+ist falsch, wenn ein Tag mit viel Verkehr die Einträge von vorgestern verdrängt, und zwar
+unsichtbar, genau dann, wenn man sie braucht.
+- **Die 10-MB-Rotation im Audit-Log war eine Stückzahl-Schranke in Verkleidung:** bei 10 MB
+  wurde nach `.jsonl.bak` umbenannt, und `read_log()` las nur die aktive Datei. Die Einträge
+  waren aus der Oberfläche verschwunden, ohne gelöscht zu sein – Sichtbarkeit nach Datenmenge
+  statt nach Alter. `read_log()` liest die alte `.bak` jetzt mit, damit vorhandener Bestand
+  wieder auftaucht; `prune_older_than()` räumt beide.
+- **Ohne Deckel kann jede Datei lang werden – deshalb liest nichts mehr alles ein:**
+  `conv_log._iter_index_reversed()` und `audit_log._iter_reversed()` lesen **blockweise von
+  hinten** und brechen ab, sobald `limit` Treffer da sind. Die Antwortzeit hängt am Limit, nicht
+  an der Historie. Messbar besser als vorher: `/api/logs/retention` 12,6 → **5,9 ms**,
+  `/api/conv_log?limit=100` 9,8 → **5,3 ms**.
+  - **FALLSTRICK beim Rückwärtslesen:** der erste Teil eines rückwärts gelesenen Blocks ist in
+    der Regel eine **angeschnittene Zeile**. Sie muss zurückgehalten und mit dem nächsten – weiter
+    vorne liegenden – Block zusammengesetzt werden. Wer das vergisst, verliert je Block eine Zeile
+    oder bekommt Bruchstücke. Der Test prüft dasselbe Ergebnis mit `chunk=64` wie mit 256 KB.
+  - **Der Filter wirkt WÄHREND des Lesens, nicht danach.** Ein Nachfilter auf den letzten n
+    Zeilen meldet „keine Treffer", obwohl weiter hinten welche liegen – derselbe Fehler wie beim
+    Wissensgruppen-Filter am 2026-08-02. Test: ein seltener Benutzer wird hinter 120 neueren
+    Einträgen gefunden.
+  - `get_stats()` (beide Module) zählt nur Zeilenumbrüche und wertet **erste und letzte** Zeile
+    aus – O(1) statt O(n) JSON-Arbeit, weil der Wert am Telemetrie-Reiter hängt.
+- **Was NICHT als Aufbewahrungs-Schranke zählt und deshalb bleibt:** der Span-Ringpuffer
+  (`MAX_SPANS = 1000`) liegt nur im Speicher, trägt keinen Zeitstempel auf Platte und ist nach
+  einem Neustart weg – das ist eine Live-Anzeige mit Speicher-Grenze, kein aufbewahrtes Log.
+  Ebenso die 100 Dauer-Werte je Tool: eine Stichprobe für Ø/Min/Max. Und die Größen-Notbremsen
+  **je Eintrag** in `conv_log` (1 MB/Nachricht, 8 MB/Konversation) begrenzen eine einzelne
+  Antwort, nicht die Anzahl der Einträge.
+- **Test hält die Abwesenheit fest:** `not hasattr(conv_log, "_MAX_ENTRIES")`,
+  `not hasattr(telemetry, "_MAX_ERRORS")`, `not hasattr(audit_log, "_MAX_BYTES")` – plus
+  250 Konversationen ohne Verdrängung, 300 Fehler (früher bei 200 gedeckelt), 400 Audit-Zeilen
+  in einer Datei ohne `.bak`.
+- **`audit_log._bak()` ist eine FUNKTION, keine Konstante.** Als Modulkonstante wäre der Wert
+  beim Import an den damaligen `AUDIT_FILE` gebunden; Tests biegen den auf ein Wegwerf-
+  Verzeichnis um und hätten weiter auf die echte Datei unter `data/logs/` gezeigt.
+
+### a2) Der Zeitplan (`backend/log_retention.py`)
+Vorher wuchsen alle Diagnose-Speicher **nur gegen Stückzahlen, nie gegen Alter**: 200
+Konversationen, 200 Fehler, Audit-Rotation erst bei 10 MB. Wie weit der Verlauf zurückreichte,
+war damit reine Zufallsgröße – auf DEV waren 200 Konversationen **37,9 Tage**, auf einem stillen
+System Jahre, auf einem lauten drei Tage. Eine Frist in TAGEN ist die einzige Größe, die man
+einem Betreiber zusagen kann.
+- **Ein Zeitplan, drei Speicher:** `run_all()` ruft `conv_log.prune_older_than()`,
+  `tracer.prune_errors_older_than()`, `audit_log.prune_older_than()`. Startup-Hook
+  `startup_log_retention` (main.py): +60 s nach dem Start, danach täglich. Sofortlauf über
+  `POST /api/logs/retention/run`, Status über `GET /api/logs/retention`.
+- **Frist über `JARVIS_LOG_RETENTION_DAYS`** (Vorgabe 90, `0` = dauerhaft, Deckel 3650).
+  Bewusst **keine** Oberflächen-Einstellung: wie lange Diagnosedaten vorliegen, ist eine
+  Betriebsvorgabe – und in manchen Häusern muss ein Audit-Log länger vorgehalten werden.
+  `retention_days()` ist eine **Funktion**, keine Modulkonstante (ein beim Import gelesener
+  Wert wäre bis zum Neustart eingefroren – dieselbe Begründung wie bei
+  `documents.retention_days()`).
+- **`run_all()` ist je Speicher fehlerrobust:** ein Aufräumlauf, der beim ersten Problem
+  abbricht, lässt genau die Datei stehen, die am dringendsten aufgeräumt werden muss.
+- **Eintrag OHNE Zeitstempel bleibt stehen** (Altbestand): ein fehlendes Datum ist kein
+  Altersbeweis. Er fällt über die Stückzahl-Schranke heraus, nicht durch Raten.
+- **`audit.jsonl.bak` wird mitbereinigt UND mitgelesen** – siehe a) oben.
+- **Live auf DEV:** erster Lauf entfernte 11 Telemetrie-Fehler + 61 Audit-Zeilen.
+
+### b) LLM-Verlauf ohne Kürzung – zwei Dateien je Konversation (`backend/conv_log.py`)
+Vorher war **jedes** Feld beschnitten: Aufgabe `[:200]`, System-Prompt `[:500]` (und im
+Frontend gar nicht angezeigt), jede Nachricht `[:300]`. Auf DEV waren **19 von 200** Aufgaben
+abgeschnitten. Für eine Fehlersuche ist ein halber Prompt schlimmer als kein Prompt: man sucht
+den Fehler in der Antwort, obwohl er in der abgeschnittenen Frage stand.
+- **Das Kürzen hatte einen Grund, und der gilt weiter:** die Datei wurde bei JEDER
+  Konversation komplett gelesen und komplett neu geschrieben. Ein einzelnes Tool-Ergebnis
+  erreichte auf DEV **1,28 MB** (p50 750 B, p90 11 KB, p99 25 KB) – unbeschnitten *und*
+  monolithisch geht nicht. Deshalb getrennt:
+  - `data/logs/conv/index.jsonl` – eine Zeile je Konversation, nur Kopfdaten + die
+    **vollständige Aufgabe**. Wird nur ANGEHÄNGT, das Schreiben kostet unabhängig von der
+    Historie immer gleich viel. Die Liste in der Oberfläche kommt allein hieraus.
+  - `data/logs/conv/<id>.json` – der vollständige Rumpf (System-Prompt + alle Nachrichten).
+    Einmal geschrieben, gelesen nur beim Aufklappen (`GET /api/conv_log/{id}`).
+- **Erst der Rumpf, dann die Index-Zeile.** Umgekehrt bliebe bei einem Absturz ein Eintrag
+  zurück, der beim Aufklappen leer ist. Verwaiste Rümpfe (Absturz *zwischen* beiden) räumt
+  `prune_older_than()` mit auf – sonst würde die niemand je entfernen.
+- **Die Zusage lautet: PROMPTS werden nie gekürzt.** Aufgabe, System-Prompt und Nachrichten
+  der Rollen `user`/`system` (`_NEVER_TRUNCATE`) haben **keine** Grenze. Andere Rollen
+  (Tool-Ergebnisse, Modell-Antworten) haben mit `_MAX_MSG_CHARS` (1 MB) und `_MAX_BODY_CHARS`
+  (8 MB) Notbremsen, die um Größenordnungen über dem p99 liegen und praktisch nie greifen.
+  - **`_prepare_messages()` zieht die Prompts ZUERST vom Rumpf-Budget ab.** Sonst könnte ein
+    großes Tool-Ergebnis *vor* dem Prompt das Budget aufbrauchen und die unkürzbare Frage
+    hätte keinen Platz mehr. Test „Prompt nach großem Tool-Ergebnis vollständig".
+  - **Greift eine Bremse, steht es AUSDRÜCKLICH im Eintrag** (`truncated` + `full_len`, in der
+    Oberfläche „[gekürzt: 1234.6k Zeichen]"). Der alten Fassung fehlte genau das: ein „…" am
+    Ende war der einzige Hinweis, und der sah nach Satzende aus.
+- **`_new_id()` = Millisekunden + Zähler.** Zwei Konversationen können in derselben
+  Millisekunde enden (Parallelbetrieb); eine doppelte Id würde den Rumpf der einen mit dem der
+  anderen überschreiben.
+- **Migration ist automatisch und einmalig** (`_migrate_once()`, lazy beim ersten Zugriff):
+  `data/conv_log.json` → neue Ablage, Quelldatei wird zu `conv_log.json.migrated`
+  **umbenannt, nicht gelöscht**. Alt-Einträge tragen `legacy: true` und ein Abzeichen
+  „gekürzt (Altbestand)" – ihre Texte SIND gekürzt und lassen sich nicht vervollständigen; ohne
+  den Hinweis hielte man sie für vollständig.
+  - **FALLSTRICK:** der Alt-Rumpf hat **kein `task`-Feld** (die Aufgabe stand nur im Index).
+    `_renderConvBody(d, idx)` fällt deshalb auf den Index zurück – sonst fehlte die Aufgabe in
+    der aufgeklappten Ansicht genau bei den Einträgen, bei denen sie ohnehin gekürzt ist.
+- **Oberfläche:** die Kopfzeile zeigt die Aufgabe per CSS-Ellipse, der aufgeklappte Bereich den
+  **vollen** Text plus Zeichenzahl; der System-Prompt steht darunter **eingeklappt** (er hat
+  gut 33.000 Zeichen und machte jeden Eintrag sonst unlesbar). Rümpfe werden je Id
+  zwischengespeichert (`_convBodies`), Zu- und Aufklappen ruft nicht erneut ab.
+- **Es gibt keine Stückzahl-Schranke** (siehe a) – der Index wird nur nach Alter gekürzt.
+- **Beschädigte Index-Zeile wird übersprungen**, nicht als Fehler behandelt: eine halb
+  geschriebene Zeile darf nicht den ganzen Verlauf unlesbar machen. `_write_index()` schreibt
+  atomar über `os.replace`.
+
+### c) Alle fünf Statistiken/Logs einzeln leerbar
+Vorher gab es genau EINEN Knopf „Zurücksetzen" für alles. Wer die Tool-Zeiten nach einer
+Optimierung frisch messen wollte, verlor dabei das Fehler-Log – also genau die Daten, die man
+nach einer Änderung braucht.
+| Abschnitt | Endpunkt |
+|---|---|
+| Tool-Statistiken | `DELETE /api/telemetry/tool_stats` |
+| LLM-Statistiken | `DELETE /api/telemetry/llm_stats` |
+| Fehler-Log | `DELETE /api/telemetry/errors` |
+| Letzte Spans | `DELETE /api/telemetry/spans` |
+| LLM-Verlauf | `DELETE /api/conv_log` (bestand schon) |
+- **Was NICHT mitgelöscht wird:** `agent_runs`, `total_duration_ms`. Die gehören zu keinem der
+  Abschnitte und verschwinden nur beim vollständigen Zurücksetzen – sonst würde das Leeren der
+  Tool-Tabelle stillschweigend auch die Stat-Karten oben verändern. Umgekehrt nullt
+  `clear_errors()` den `errors`-**Zähler** mit: eine Karte „7 Fehler" über einem leeren
+  Fehler-Log sieht wie ein Fehler der Oberfläche aus.
+- **Nachweis je Bereich** (`_area_resets`, überlebt Neustart): unter dem Abschnitt steht
+  „↺ Zuletzt geleert: … von …" – **auch im Leerzustand**. Ohne den Hinweis ist „0" nicht von
+  „noch nichts passiert" zu unterscheiden; genau dafür gab es den globalen Nachweis schon.
+  Ein vollständiges Zurücksetzen **verwirft** die Bereichs-Nachweise (ein älterer Hinweis
+  daneben wäre irreführend).
+- **FALLSTRICK – das × sitzt IN der klickbaren Kopfzeile.** Ohne
+  `onclick="event.stopPropagation()"` am umgebenden `<span>` klappt derselbe Klick den
+  Abschnitt auf/zu. Gleiches Muster wie bei LLM-Verlauf/Audit-Log. Der UI-Test prüft für jeden
+  der fünf Knöpfe: genau ein DELETE auf den **eigenen** Endpunkt UND `display` unverändert.
+- **Spans liegen nur im Speicher** – nach einem Neustart sind sie ohnehin weg. Der Knopf ist
+  trotzdem sinnvoll: er schafft einen definierten Nullpunkt für eine Messung, ohne den Dienst
+  anzufassen.
+- Nebenbefund, mitbehoben: die Kopfzeilen von Tool- und LLM-Statistiken riefen beim Aufklappen
+  `_loadSpans()` statt `_loadStats()` (Kopierfehler, folgenlos weil beide Abschnitte offen
+  starten) – jetzt richtig.
+
+## Vollständige Endpunkt-Rechte-Durchsicht (2026-08-04)
+Auslöser war der Telemetrie-Befund unten. Auf Anweisung des Nutzers wurden danach **alle 342
+Routen** in `main.py` systematisch geprüft (Route → Dependency → tatsächliche Rückgabe →
+Frontend-Aufrufer). Ergebnis: **63 Endpunkte** hingen an `require_auth`, obwohl sie
+Administratoren-Material liefern oder Administratoren-Aktionen ausführen. Alle korrigiert.
+Wächter: `tests/test_endpoint_rights.py` (105 Prüfungen).
+
+**Die vier Muster – wichtiger als die Einzelfälle:**
+1. **Lesen war freier als Schreiben.** Das macht den Fehler beim Überfliegen unsichtbar, weil
+   der schreibende Endpunkt daneben korrekt aussieht. Drei Vorkommen: Skill-Config (2026-08-02),
+   `/api/knowledge/pending` (PATCH/approve = Editor, GET = jeder), Telemetrie.
+2. **Die Oberfläche war die einzige Schranke.** Desktop-Knopf und Update-Pille im Portal
+   erscheinen nur unter `if (d.is_admin)` – die Endpunkte dahinter standen jedem offen. Eine
+   clientseitige Sichtbarkeit ist keine Berechtigung (steht so schon bei der Kontext-API).
+3. **Fremde Zugangsdaten als Vollmacht.** `/api/jira/*`, `/api/confluence/*`,
+   `/api/kundenverwaltung/*` fragen mit den **Server**-Zugangsdaten ab und umgehen damit die
+   Rechte des Benutzers im Zielsystem vollständig.
+4. **Verbindungstests sind SSRF-Werkzeuge.** `/api/profiles/test`, `/api/profiles/models`,
+   `/api/auth/ad_test` nehmen das **Ziel aus dem Request** und melden, ob es erreichbar war –
+   ein Portscanner aus dem Inneren des Netzes, für jeden angemeldeten Benutzer.
+
+**Der schwerste Einzelfall: `POST /api/instructions/{name}`.** `data/instructions/*.md` wird von
+`agent.py::load_instructions()` an den System-Prompt **jedes** Laufs angehängt – auch an den
+eines Admins. Genau deshalb steht `reflection` in `_BLOCKED_TOOLS_FOR_LDAP` („schreibt
+data/instructions/*.md → fließt in JEDEN System-Prompt"). Der Werkzeug-Weg war gesperrt, der
+HTTP-Weg daneben stand jedem Domänen-Benutzer offen – GET, POST **und** DELETE. Das ist genau
+die dauerhafte Rechteerhöhung, gegen die die Sperrliste gebaut wurde.
+
+**Weitere Befunde, gruppiert:**
+| Gruppe | Was möglich war |
+|---|---|
+| WhatsApp | `GET /qr` = fremdes Telefon an die Bridge koppeln; `logout`/`reconnect` = Integration abschalten; `logs`/`bridge-logs` (GET+DELETE) = Nachrichtentexte lesen und löschen |
+| Vision | `events` = wer wann erkannt wurde (biometrisch); `cleanup` = **gesamte Gesichts-DB löschen**; `control`/`training`/`profiles`/`profile DELETE`; dazu die Medien `snapshot`/`face-crop`/`preview`/`thumbnail`/`greet-audio` (Gesichtsbilder) |
+| Google | `revoke` = dem ganzen System den Zugriff entziehen; `gog-setup` = OAuth-Zugangsdaten schreiben |
+| Wissen | `GET /api/knowledge/pending[/{id}]` = **alle** unfreigegebenen Extraktions-Entwürfe im Volltext (die /wissen-Variante filtert korrekt auf die eigenen); `GET /api/knowledge/learned` = Titel + Vorschau der Lern-Notizen, abgeleitet aus fremden Gesprächen |
+| System | `POST /api/vnc/unlock` = Desktop-Sperre aufheben; `ad_status` = DC-Name, Freigabe- und Admin-Listen; `settings/ssl`; `update/status|settings`; `mcp/servers`; `openclaw/*` |
+
+**Zwei Fallen, in die ich beim Korrigieren selbst gelaufen bin** – beide vom Wächter gefangen:
+- **`require_knowledge_editor` hätte Admins ausgesperrt.** `_may_edit_knowledge()` gibt bei
+  LEERER Editoren-Konfiguration für **jeden** `False` zurück, ausdrücklich auch für lokale
+  Admins (bewusst so). Der Wissens-Reiter unter /settings wäre auf einem frisch installierten
+  System für niemanden lesbar gewesen. Deshalb neu: **`require_admin_or_knowledge_editor`**.
+  Merkregel: eine Sperre, die den Administrator aus seiner eigenen Oberfläche aussperrt, ist
+  schlimmer als die Lücke, die sie schließt.
+- **Die Vision-Medien brauchen `?token=`** (`<img src>` kann keinen Header setzen) – sie standen
+  daher auf `require_auth_or_query`. Richtig ist das **schon vorhandene**
+  `require_admin_or_query` (Admin **und** Query-Token). Genau diese fünf hat der
+  Namensraum-Wächter beim ersten Lauf gefunden, nachdem ich sie beim ersten Durchgang übersehen
+  hatte.
+
+**Bewusst NICHT geändert** (mit Begründung, damit es niemand „nachbessert"):
+- `/api/settings` und `/api/profiles` (GET) geben Schlüssel **maskiert** heraus (`_mask_key`) –
+  ein eigener Test hält das fest. Die Asymmetrie zu POST (Admin) ist damit in Ordnung.
+- `/api/branding/logo|portal-video` (GET, ohne Anmeldung) müssen **vor** dem Login sichtbar sein.
+- `/api/knowledge/groups|assignments|files|stats|content_search` – von `chat.html`,
+  `support.html` und `wissen.html` für Gruppenfilter und die Editor-Matrix gebraucht; Schreiben
+  ist längst über `_can_edit_kb_group`/`_may_edit_knowledge` gesichert. **Offener Restpunkt:**
+  `content_search` und `files` liefern Datei**pfade** ohne Gruppenfilter – kein Inhalt, aber ein
+  Namens-/Existenz-Orakel. Eine Korrektur bräuchte ein Gruppenfilter-Konzept für diese Reads,
+  keine Admin-Sperre (die bräche das Wissensportal für Gruppen-Editoren).
+- `/api/skills` – `branding.js` braucht es auf **jeder** Seite. Enthält keine Zugangsdaten (die
+  liegen hinter `/api/skills/{n}/config`, seit 2026-08-02 Admin).
+- `/api/cron`, `/api/watchers` – prüfen intern `_require_trigger_admin` (2026-07-29).
+- Endpunkte ganz ohne Dependency (40) haben durchweg eine eigene Prüfung im Rumpf:
+  Capability-URL (`/api/generated/{name}`), Stream-Key (`/api/vision/stream`), localhost-Zwang
+  (`/api/whatsapp/incoming`), Agent-API-Key (`/api/agent/task`), Token im WS-`auth`-Rahmen.
+  Die Seiten-Routen (`/chat`, `/settings`, …) sind leere Hüllen.
+
+**Der Wächter prüft drei Dinge – die Liste ist nur eines davon:**
+1. Namentliche Muss-Liste (63 Endpunkte + Telemetrie).
+2. **Namensraum-Wächter:** jede Route unter `/api/telemetry|conv_log|audit_log|logs/|
+   instructions|whatsapp/|vision/|google/|confluence/|jira/|kundenverwaltung/|mcp/|openclaw/|
+   broker/` muss auf Admin-Ebene liegen. Damit fällt auch eine **künftige** Route auf, ohne dass
+   jemand die Liste pflegt. Ausnahmen sind einzeln aufgeführt und begründet, keine Sammelfreigabe.
+3. **Regel „Lesen nicht freier als Schreiben":** für jeden Pfad mit Schreibmethode wird geprüft,
+   ob ein GET darauf schwächer geschützt ist. Das ist Muster 1 als Test.
+4. **Gegenprobe in die andere Richtung:** 19 Endpunkte, die für normale Benutzer erreichbar
+   **bleiben müssen** (`/api/me`, `/api/chat/sessions`, `/api/wissen/*`, …). Ohne diese Hälfte
+   wäre der Test durch „alles auf Admin" trivial erfüllbar – und die Anwendung kaputt.
+
+**Verifiziert auf DEV, und dabei ein untauglicher Testaufbau korrigiert:** Der erste Live-Test
+nutzte `nexus\andrea.ladd` – der Benutzer steht auf DEV nicht in `ad_allowed_users`, bekommt
+also bei **jedem** Endpunkt 403 (`NOT_AUTHORIZED`). Damit beweist ein 403 nichts über die
+Admin-Schranke. Wiederholt mit `jonas.reichelt` (login-freigegeben, **kein** Admin): 23 gesperrte
+Endpunkte je 200 (Admin) / **403 mit der Admin-Meldung** (Nicht-Admin) / 401 (ohne Token), der
+Eskalationsversuch `POST /api/instructions/boeswillig` → 403 und **keine Datei angelegt**; dazu
+22 normale Endpunkte für den Nicht-Admin weiterhin 200 und 10 Admin-Reiter-Datenquellen 200.
+**Merkregel: ein Rechte-Test mit einem Benutzer, der gar nicht anmeldeberechtigt ist, ist grün
+aus dem falschen Grund.**
+
+### Rechte: die Telemetrie war für JEDEN angemeldeten Benutzer lesbar
+Alle Endpunkte hingen an `require_auth`. Ein Domänen-Benutzer konnte damit den **LLM-Verlauf
+sämtlicher Benutzer** abrufen (Aufgaben, Modell, IP, Nachrichten), das **Tool-Audit-Log** aller
+Benutzer lesen und beides löschen. Mit vollständigen Prompts (b) wäre daraus eine echte
+Datenpreisgabe geworden – ein Prompt enthält regelmäßig genau die Inhalte, um die es geht.
+Jetzt `require_local_auth` für **alle** `/api/telemetry/*`, `/api/conv_log/*`,
+`/api/audit_log`, `/api/logs/retention*`. Der Zuschnitt ist unkritisch: der Reiter liegt
+ausschließlich auf `settings.html`, und die ist Administratoren vorbehalten (gleiche Lage wie
+bei den Skill-Zugangsdaten am 2026-08-02). Live auf DEV: Admin 200, Domänen-Benutzer **403 mit
+der Admin-Meldung**, ohne Token 401.
+- **FALLSTRICK Routen-Reihenfolge:** `GET /api/conv_log/{conv_id}` muss **nach**
+  `/api/conv_log/ips` und `/api/conv_log/users` registriert sein – FastAPI prüft in
+  Registrierungsreihenfolge, sonst fängt die Sammelroute deren Pfade ab und die Filter im
+  Verlauf bleiben leer, ohne dass ein Fehler sichtbar wird. Ein Test hält die Reihenfolge fest.
+- Unbekannte Id → **404**, nicht 403.
+
+### Verifiziert
+- **177 Backend-Prüfungen** (`tests/test_log_retention.py`, ohne fastapi lauffähig): Alterung
+  je Speicher, verwaiste Rümpfe, beschädigte Zeilen, Frist-Auflösung inkl. Tippfehlern,
+  fehlerrobustes `run_all()`, Vollständigkeit der Prompts, Notbremsen + Ausweisung,
+  Budget-Reihenfolge, Id-Eindeutigkeit, Pfad-Entschärfung, Selektivität aller fünf Clears,
+  Migration, Stückzahl-Schranke, Endpunkt-/Rechte-/Reihenfolge-Prüfung am Quelltext.
+  - **Der Test hat eine Sandkasten-Schranke, und die war nötig:** bei der Gegenprobe gegen den
+    alten Modulstand (`git stash`) heißen die Pfadvariablen anders (`_LOG_FILE` statt
+    `_INDEX`/`_OLD_FILE`), die Umbiegung greift dann nicht und der Test schrieb Testinhalte in
+    das **echte** `data/conv_log.json`. Jetzt prüft der Test jedes `Path`-Attribut der drei
+    Module und bricht mit Exit 2 ab, wenn eines aus dem Wegwerf-Verzeichnis herauszeigt.
+    `data/conv_log.json*` + die beiden `telemetry_*.json` stehen zusätzlich in `.gitignore`.
+- **Laufzeiten auf DEV** (200 Konversationen, 1516 Audit-Zeilen): `GET /api/logs/retention`
+  5,9 ms · `GET /api/conv_log?limit=100` 5,3 ms / 30 KB · `GET /api/audit_log?limit=200` 5,8 ms
+  · Rumpf-Abruf 4,4 ms. Die Liste ist
+  klein geblieben, obwohl die Inhalte jetzt vollständig sind – genau das war der Zweck der
+  getrennten Ablage. `GET /api/logs/retention` liest den Audit-Bestand und stat()et alle
+  Rumpfdateien; das ist vertretbar, weil der Reiter **nicht pollt** (nur Öffnen + Knopf).
+- **40 UI-Prüfungen** (`tests/test_telemetry_ui.js`, jsdom gegen die echten Dateien):
+  Rumpf erst beim Aufklappen und nur einmal, vollständiger Prompt im DOM, System-Prompt
+  eingeklappt + Umschalter, Kürzungs-Hinweis, Alt-Eintrag mit Index-Rückfall, alle fünf
+  Leeren-Knöpfe (eigener Endpunkt, kein Umklappen), Bereichs-Nachweis, `init()` idempotent.
+  **jsdom läuft nur lokal** – auf DEV ist es nicht installiert.
+- **Gegenproben:** der alte Stand kürzt einen 5012-Zeichen-Prompt nachweislich auf 200
+  (Aufgabe) / 301 (Nachricht) / 500 (System-Prompt); der UI-Test scheitert am alten Stand
+  sofort (die Knöpfe existieren nicht).
+- **Live auf DEV:** Migration der 200 echten Einträge, erster Retention-Lauf (72 Einträge),
+  Probe-Konversation mit 8232-Zeichen-Aufgabe + 33.337-Zeichen-System-Prompt über den echten
+  Schreibpfad **unverkürzt** wieder ausgelesen, alle vier granularen Clears mit belegter
+  Selektivität, Verlauf leeren (201 → 0 inkl. Rumpfdateien) und aus der Sicherung
+  wiederhergestellt. Dienst aktiv, `/settings` HTTP 200.
+
+## Instruktionen sind nicht mehr git-verfolgt (2026-08-04)
+`data/instructions/` steht in `.gitignore`; die Vorgabe-Fassungen liegen versioniert unter
+**`data/instructions_default/`** und werden von `agent.py::_seed_instructions()` beim ERSTEN
+Start kopiert.
+- **Warum:** Diese Dateien werden pro Server gepflegt (Oberfläche bzw. `reflection`-Werkzeug)
+  und weichen absichtlich voneinander ab – auf ECHT sind sie auf „Nexerius" umbenannt und um
+  SAP erweitert. Solange sie verfolgt waren, machte der Update-Pill (stash → pull → pop) aus
+  ihnen bei jedem Pull einen Merge-Konflikt; am 2026-07-13 blockierte genau das auf ECHT jedes
+  weitere Update (Konfliktmarker in den Dateien).
+- **Der bisherige Gegenzug ist WIRKUNGSLOS und war es unbemerkt:** `git update-index
+  --skip-worktree` (eingerichtet 2026-07-13) greift auf ECHT nicht mehr – `git ls-files -v`
+  zeigt `H` statt `S`, erneutes Setzen bleibt ohne Effekt (Exit 0, Bit ungesetzt, auch bei
+  unveränderten Dateien). Ursache: **`core.sparseCheckout = true`** seit 2026-07-31
+  (`deploy/sparse_checkout.sh`) – sparse-checkout verwaltet das skip-worktree-Bit selbst.
+  **Zwei dokumentierte Schutzmaßnahmen schlossen sich gegenseitig aus.** Merkregel: ein Schutz,
+  der still ausfällt, ist kein Schutz – deshalb jetzt der Weg über `.gitignore`.
+- **`_seed_instructions()` säet NUR, wenn keine einzige `.md` vorhanden ist** – nicht pro
+  fehlender Datei. Auf gepflegten Systemen sind einzelne Vorgaben absichtlich gelöscht (ECHT:
+  `browser_automation.md`, `user.md`); ein Auffüllen einzelner Dateien holte sie bei jedem Start
+  zurück und machte aus einer Entscheidung einen wiederkehrenden Fehler. `beispiel.md.disabled`
+  zählt dabei NICHT als vorhandene Instruktion (Endung ist nicht `.md`).
+- Fehlschlag beim Säen ist **kein Startfehler** – der Agent läuft dann ohne Zusatz-Anweisungen.
+- **Beim Ausrollen auf einen Server, der die Dateien noch verfolgt:** vorher dort
+  `git rm --cached data/instructions` + lokaler Commit, sonst bricht der Pull mit „local changes
+  would be overwritten" ab (die Server-Fassungen sind modifiziert).
+
+## Wissensgruppen: Editoren-Felder nicht mehr für jeden lesbar (2026-08-04)
+`GET /api/knowledge/groups` muss für **jeden** angemeldeten Benutzer erreichbar bleiben – /chat
+und /support brauchen es für das Gruppen-Filter-Pulldown. Es lieferte aber auch
+`editors_users`/`editors_group` mit, also **AD-Kontonamen und Gruppen-DNs aus der
+Rechtekonfiguration** (auf DEV z.B. `'nxIS' editors_users='Peter.Sachs, marita.muscholl'`).
+Das Pulldown braucht davon nichts (nur `id`/`name`/`color`/`count`).
+- `main.py::_kb_strip_editor_fields()` entfernt die beiden Felder – **pro Gruppe**, nicht
+  pauschal: ein gruppenspezifischer Editor pflegt die Editoren SEINER Gruppe im Wissensportal;
+  global entfernt wäre das Formular dort leer und ein Speichern löschte die Einträge.
+  Admins und globale Wissens-Editoren sehen alles. Fail-closed bei Fehlern.
+- **Nicht geändert wurde der Rest der Wissens-Reads** (`content_search`, `files`, `assignments`,
+  `groups/ungrouped`): Wissensgruppen sind in diesem System **keine Leseschranke**. `_kb_groups`
+  ist ausdrücklich ein *vom Benutzer gewählter* Filter (`None`/fehlt = alle Gruppen), nirgends
+  gegen Rechte validiert – jeder angemeldete Benutzer kann den Volltext aller Gruppen per Chat
+  abrufen. Eine Pfadliste verrät also nichts, was nicht schon offen liegt; ein Filter nur auf
+  den Listen wäre eine Fassade. Bewusste Entscheidung des Nutzers am 2026-08-04.
+  (Inkonsistenz zum Kenntnisnehmen: `/api/wissen/file` beschränkt den Datei-**Download** sehr
+  wohl auf den Bereich des Nutzers.)
+
 ## Skill-System
 - Skills liegen unter `skills/<name>/` mit `skill.json` (Manifest) + `main.py` (get_tools())
 - Tools erben von `backend/tools/base.py:BaseTool`

@@ -1128,6 +1128,21 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
 - **Altbestand:** Wer sich vor Einführung angemeldet hat, zeigt „Anmeldung: –" – ein
   Zeitpunkt, den niemand aufgezeichnet hat, wird nicht geraten. Heilt sich beim nächsten
   Login. `MAX_USERS = 500` deckelt die Datei (ältester Eintrag nach `last_seen` fliegt).
+- **FALLSTRICK Platzhalter (Fix 2026-08-04):** `sessions.hint` nennt `{n}` **zweimal**
+  („in den letzten {n} Sekunden" und „bis zu {n} Sekunden weiter als online"), die
+  Auflösung lief aber über `.replace('{n}', …)`. `String.replace` mit einem **String**
+  tauscht nur das ERSTE Vorkommen – der zweite Platzhalter stand wörtlich in der
+  Oberfläche. Jetzt `.replace(/\{n\}/g, …)`. Beim Ergänzen von Texten mit mehr als
+  einem gleichen Platzhalter immer global ersetzen. Ein Sweep über alle i18n-Werte zeigte:
+  `sessions.hint` ist der **einzige** Schlüssel mit doppeltem Platzhalter, die übrigen 23
+  `.replace('{n}', …)`-Stellen sind korrekt.
+- **„online" heißt „es kommen Anfragen", nicht „arbeitet gerade".** Ein offener Tab
+  pollt im Hintergrund und hält damit `last_seen` frisch – der Benutzer bleibt online,
+  während `last_action` (echte Handlung: Nachricht, Suche, Speichern; `_ACTION_IGNORE`
+  filtert technisches Rauschen) beliebig alt wird. Auf ECHT gemessen: letzte Anfrage vor
+  35 s, letzte Handlung vor 20.916 s (5,8 h) → online **und** 5,8 h untätig. Das ist
+  gewollt und steht so im Hinweistext; genau dieser Hinweis war durch den
+  Platzhalter-Fehler oben halb unlesbar.
 - **Die Pille trägt die Aussage doppelt** (Farbe UND Text „online"/„offline") – Farbe
   allein ist für Farbfehlsichtige keine Information. Panel **deckend**
   (`var(--bg-secondary)`), gleiche Begründung wie beim Dokumente-Panel.

@@ -219,8 +219,11 @@
         _stand = d || null;
         zeichne();
         if (els.hint && d && d.online_window) {
+            // GLOBAL ersetzen: der Text nennt {n} ZWEIMAL. String.replace mit einem
+            // String tauscht nur das ERSTE Vorkommen – der zweite Platzhalter blieb
+            // wortwörtlich als "{n} Sekunden" im Hinweis stehen (gemeldet 2026-08-04).
             els.hint.textContent = t('sessions.hint', 'Online = Aktivität in den letzten {n} Sekunden. Wer den Browser schließt, ohne sich abzumelden, erscheint bis dahin weiter als online.')
-                .replace('{n}', d.online_window);
+                .replace(/\{n\}/g, d.online_window);
         }
     }
 

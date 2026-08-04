@@ -171,7 +171,15 @@ async function main() {
     check('untaetiger Benutzer wird als solcher markiert',
           !!finde('clara').querySelector('.pt-usr-idle'), txt('clara'));
     check('Untaetigkeit mit Dauer', /untätig seit 40 Min/.test(txt('clara')), txt('clara'));
-    check('trotzdem online', finde('clara').querySelector('.pt-usr-pill').className.indexOf('is-on') !== -1);
+    // Bis 2026-08-04 stand hier "trotzdem online" – die Pille kannte nur online/offline.
+    // Jetzt gibt es die dritte Stufe: verbunden, aber untaetig. Die Zeile behaelt ihren
+    // Platz in der Liste (sie IST verbunden), sagt aber "inaktiv".
+    check('Pille sagt inaktiv, nicht online',
+          finde('clara').querySelector('.pt-usr-pill').className.indexOf('is-idle') !== -1,
+          finde('clara').querySelector('.pt-usr-pill').className);
+    check('Text der Pille ist "inaktiv"',
+          finde('clara').querySelector('.pt-usr-pill').textContent.trim() === 'inaktiv',
+          finde('clara').querySelector('.pt-usr-pill').textContent);
     check('ohne Handlung: ausdruecklicher Hinweis',
           /noch keine Aktion/.test(txt('dora')), txt('dora'));
     check('offline: Dauer statt Untaetigkeit', /offline seit/.test(txt('bob')), txt('bob'));
@@ -317,7 +325,9 @@ async function main() {
           doc.querySelector('.pt-usr-empty').textContent);
     await tippe('');
     check('Leeren zeigt wieder alle', namen() === 'anna,bob,clara,dora', namen());
-    check('Zaehler wieder online/gesamt', $('pt-usr-count').textContent === '3/4',
+    // Der Zaehler nennt zusaetzlich die Inaktiven, sonst widerspraeche er den Pillen.
+    check('Zaehler wieder online/gesamt (+ Inaktive)',
+          $('pt-usr-count').textContent === '3/4 · 1 inaktiv',
           $('pt-usr-count').textContent);
 
     section('13. Filter und Panel-Verhalten');
@@ -434,6 +444,50 @@ async function main() {
           /\.pt-usr-idle\.is-warn\s*\{[^}]*var\(--warning\)/.test(cssIdle));
     check('CSS: Grundfarbe ist NICHT die Warnfarbe',
           /\.pt-usr-idle\s*\{[^}]*var\(--text-secondary\)/.test(cssIdle));
+
+    section('Dritte Pillen-Stufe: verbunden, aber untaetig');
+    // Die Abschnitte davor haben eigene Datensaetze gerendert – erst den
+    // Ausgangsdatensatz (USERS) zurueckholen, sonst prueft dieser Block ein
+    // fremdes DOM und meldet ueberall null.
+    window.fetch = function (url, opts) {
+        if (String(url).indexOf('/api/sessions') === 0 && (!opts || !opts.method)) {
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(USERS) });
+        }
+        return alteFetch(url, opts);
+    };
+    window.UserSessions.load();
+    await sleep(80);
+    // clara ist im Testdatensatz online mit idle_seconds = 2400 (40 Min) -> "inaktiv";
+    // anna ist online mit 20 s -> "online"; bob ist offline; dora ist online OHNE
+    // last_action (idle unbekannt) -> muss "online" bleiben, nicht geraten werden.
+    {
+        const p = (u) => {
+            const row = finde(u);   // Helfer der Datei – kennt den echten Selektor
+            const pill = row && row.querySelector('.pt-usr-pill');
+            return pill ? { txt: pill.textContent.trim(), cls: pill.className } : null;
+        };
+        const anna = p('anna'), clara = p('clara'), bob = p('bob'), dora = p('dora');
+        check('anna (20 s untaetig) = online', anna && anna.txt === 'online', JSON.stringify(anna));
+        check('anna traegt is-on', anna && /is-on/.test(anna.cls), anna && anna.cls);
+        check('clara (40 Min untaetig) = inaktiv', clara && clara.txt === 'inaktiv',
+              JSON.stringify(clara));
+        check('clara traegt is-idle', clara && /is-idle/.test(clara.cls), clara && clara.cls);
+        check('clara hat einen erklaerenden Titel',
+              clara && /30 Minuten/.test(doc.querySelector('.pt-usr-pill.is-idle').getAttribute('title') || ''));
+        check('bob bleibt offline', bob && bob.txt === 'offline', JSON.stringify(bob));
+        check('dora (idle unbekannt) bleibt online – nichts geraten',
+              dora && dora.txt === 'online', JSON.stringify(dora));
+        // Farbe UND Text tragen die Aussage (Projekt-Regel fuer Farbfehlsichtige)
+        const cssP = fs.readFileSync(path.join(ROOT, 'frontend', 'portal.html'), 'utf8');
+        check('CSS: is-idle nutzt die Warnfarbe',
+              /\.pt-usr-pill\.is-idle\s*\{[^}]*var\(--warning/.test(cssP));
+        check('CSS: is-idle ist NICHT die Erfolgsfarbe',
+              !/\.pt-usr-pill\.is-idle\s*\{[^}]*var\(--success/.test(cssP));
+        // Zaehler darf der Pille nicht widersprechen
+        const cnt = doc.getElementById('pt-usr-count');
+        check('Zaehler nennt die Zahl der Inaktiven',
+              cnt && /inaktiv/.test(cnt.textContent), cnt && cnt.textContent);
+    }
 
     section('Hinweistext: beide {n}-Platzhalter aufgeloest');
     // String.replace mit einem STRING tauscht nur das ERSTE Vorkommen. Der Text nennt

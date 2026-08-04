@@ -1136,6 +1136,25 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
   einem gleichen Platzhalter immer global ersetzen. Ein Sweep über alle i18n-Werte zeigte:
   `sessions.hint` ist der **einzige** Schlüssel mit doppeltem Platzhalter, die übrigen 23
   `.replace('{n}', …)`-Stellen sind korrekt.
+- **Die Pille hat DREI Stufen** (seit 2026-08-04): `online` (grün) · `inaktiv` (orange,
+  `is-idle`) · `offline` (grau). Schwelle für „inaktiv" ist `IDLE_WARN` (30 Min), **nicht**
+  `IDLE_AB` (5 Min) – bei fünf Minuten wäre in einer Liste mit zwanzig Anmeldungen fast
+  jeder „inaktiv", dieselbe Begründung wie bei der Färbung der Untätigkeits-Angabe.
+  - **Ist `idle_seconds` null, bleibt es bei „online".** Das ist der Fall „frisch
+    angemeldet, noch keine Handlung" – Untätigkeit, die nicht gemessen werden kann, wird
+    nicht behauptet (Test `dora`).
+  - **Der Zähler musste mit:** „2/11" neben einer Zeile, die „inaktiv" sagt, liest sich wie
+    ein Fehler. Er zeigt jetzt `2/11 · 1 inaktiv` (nur ungefiltert; beim Filtern zählt
+    weiterhin die Trefferzahl). Zustand und Zähler kommen aus **einer** Funktion
+    (`zustand(u)`), damit sie nicht auseinanderlaufen können.
+  - **Zwei bestehende Tests schrieben das alte Verhalten fest** und mussten nachgezogen
+    werden: „trotzdem online" für den 40-Minuten-Fall und „Zähler wieder online/gesamt"
+    (`=== '3/4'`). Wer die Pille anfasst, muss dort nachsehen.
+  - **FALLSTRICK beim Erweitern des UI-Tests:** die späteren Abschnitte rendern eigene
+    Datensätze. Ein neuer Block am Ende muss den Ausgangsdatensatz erst wieder laden,
+    sonst prüft er ein fremdes DOM und meldet überall `null`.
+  - Auf ECHT nachgerechnet: `silke.nitschkowski` (idle 21.482 s) → **inaktiv**,
+    `andreas.bender` (idle 310 s) → online, Zähler `2/11 · 1 inaktiv`.
 - **„online" heißt „es kommen Anfragen", nicht „arbeitet gerade".** Ein offener Tab
   pollt im Hintergrund und hält damit `last_seen` frisch – der Benutzer bleibt online,
   während `last_action` (echte Handlung: Nachricht, Suche, Speichern; `_ACTION_IGNORE`

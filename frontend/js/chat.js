@@ -1728,8 +1728,12 @@
         { key: 'ppt',   icon: '📑' },
         { key: 'data',  icon: '📎' },
         { key: 'kb',    icon: '📚' },
-        { key: 'web',   icon: '🌐' },
-        { key: 'image', icon: '🎨' },
+        // 'web' und 'image' entfernt (2026-08-04): fuer Web-Recherche existiert kein
+        // Werkzeug, und generate_image laeuft ueber das AKTIVE Profil – ist das ein
+        // Textmodell, liefert das Beispiel nur eine Fehlermeldung. Ersetzt durch zwei
+        // Quellen, die intern und ohne Internet-Freigabe erreichbar sind.
+        { key: 'jira',  icon: '🎫' },
+        { key: 'conf',  icon: '📘' },
         { key: 'cron',  icon: '⏰' },
         { key: 'multi', icon: '🧩' },
         { key: 'code',  icon: '💻' },

@@ -1359,10 +1359,22 @@ jeher `require_local_auth` – **Lesen war also freier als Schreiben**, was den 
     ECHT aktiv, aber die Verbindung ist nicht konfiguriert (`sap`-Config leer) – das
     Beispiel hätte genauso versagt. Vor dem Setzen eines Beispiels immer prüfen, ob der
     Skill aktiv **und** konfiguriert ist.
-  - **Noch offen (gemeldet, nicht geändert):** `cron` und `multi` funktionieren für
-    Domänen-Benutzer ebenfalls nicht – `cron_create` und `spawn_agent` stehen beide in
-    `_BLOCKED_TOOLS_FOR_LDAP`; der Cron-Prompt nennt zusätzlich Kalendertermine, der
-    `google`-Skill ist auf ECHT nicht aktiv.
+  - **`cron` und `multi` ebenfalls ersetzt** (gleicher Tag): `cron_create` und
+    `spawn_agent` stehen beide in `_BLOCKED_TOOLS_FOR_LDAP`, für Domänen-Benutzer also
+    gesperrt; der Cron-Prompt nannte zusätzlich Kalendertermine, obwohl der
+    `google`-Skill auf ECHT nicht aktiv ist. Neu: `ibs` (Kundenvorgänge nach
+    Schlagworten – live geprüft, liefert echte Vorgänge mit Nummer und Datum; die
+    IBS-Zugangsdaten liegen unter der **jira**-Skill-Config, `ibs_api_url`/`ibs_api_key`)
+    und `multi2` („Alle Quellen auf einmal": Wissensdatenbank + Confluence + Tickets in
+    EINEM Auftrag zusammenführen, Widersprüche benennen). Letzteres behält die Absicht
+    des alten Multi-Agenten-Beispiels – eine große Aufgabe – ohne Sub-Agenten.
+  - **Der Wächter-Test verbietet die Rückkehr:** `web`, `image`, `cron`, `multi` dürfen
+    als Key nicht wieder auftauchen, und kein Prompt darf Bildgenerierung, Web-Recherche,
+    Sub-Agenten oder einen zeitgesteuerten Auftrag verlangen. Er belegt zusätzlich am
+    Quelltext von `agent.py`, dass `cron_create`/`spawn_agent` wirklich gesperrt sind.
+    **FALLSTRICK im Test selbst:** ein Muster `/wiederkehrend/` trifft „wiederkehrende
+    **Themen**" im IBS-Prompt – der Test schlug an der eigenen Unschärfe fehl, nicht am
+    Inhalt. Jetzt auf die Auftrags-Anlage präzisiert.
 - **Eine Änderung an `_WELCOME_EXAMPLES`/i18n wirkt SOFORT auch in bereits
   ausgelieferten Sitzungen** – `_WELCOME_MARK` muss dafür NICHT hochgezählt werden. Das
   Backend speichert nur `{role:"bot", kind:"welcome", text}` als Notfalltext; die Karte

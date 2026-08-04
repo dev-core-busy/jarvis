@@ -88,6 +88,21 @@
     // Hervorhebung wartet.
     var IDLE_WARN = 1800;
 
+    // Drei Zustaende statt zwei. "online" hiess bisher nur "es kommen Anfragen" –
+    // und ein offener Tab pollt im Hintergrund weiter. Auf ECHT stand so ein
+    // Benutzer als "online", der seit 5,8 Stunden nichts getan hatte; die Erklaerung
+    // stand nur im Hinweistext darunter. Die Pille sagt es jetzt selbst.
+    //
+    // Schwelle ist IDLE_WARN (30 Min), NICHT IDLE_AB (5 Min): mit fuenf Minuten
+    // waere fast jeder "inaktiv" – dieselbe Begruendung wie bei der Faerbung oben.
+    // Ist idle_seconds unbekannt (frisch angemeldet, noch keine Handlung), bleibt es
+    // bei "online": Untaetigkeit, die wir nicht messen koennen, wird nicht behauptet.
+    function zustand(u) {
+        if (!u.online) return 'off';
+        if (u.idle_seconds != null && u.idle_seconds >= IDLE_WARN) return 'idle';
+        return 'on';
+    }
+
     function dauer(sek) {
         var s = Math.max(0, Math.floor(sek || 0));
         if (s < 60) return s + ' ' + t('sessions.sec', 'Sek.');
@@ -129,9 +144,14 @@
     function zeile(u) {
         // Die Pille trägt die Aussage doppelt: Farbe UND Text. Farbe allein wäre
         // für Farbfehlsichtige keine Information.
-        var pill = '<span class="pt-usr-pill ' + (u.online ? 'is-on' : 'is-off') + '">'
-            + (u.online ? t('sessions.online', 'online') : t('sessions.offline', 'offline'))
-            + '</span>';
+        var z = zustand(u);
+        var pillText = z === 'off' ? t('sessions.offline', 'offline')
+                     : z === 'idle' ? t('sessions.inactive', 'inaktiv')
+                     : t('sessions.online', 'online');
+        var pill = '<span class="pt-usr-pill is-' + z + '"'
+            + (z === 'idle' ? ' title="' + esc(t('sessions.inactive_title',
+                'Verbunden (ein offener Tab ruft weiter ab), aber seit über 30 Minuten keine Handlung.')) + '"' : '')
+            + '>' + esc(pillText) + '</span>';
         var api = u.kind === 'api'
             ? ' <span class="pt-usr-tag">API</span>' : '';
         // GENAU EINE Meta-Zeile, und zwar die Aussage, die man beim Blick in die
@@ -206,9 +226,15 @@
         if (els.count) {
             // Beim Filtern zaehlt die TREFFERZAHL – sonst stuende dort eine Zahl,
             // die zu der sichtbaren Liste nicht passt.
-            els.count.textContent = _filter
+            // Ohne diesen Zusatz widerspraeche der Zaehler den Pillen: "2/11" neben
+            // einer Zeile, die "inaktiv" sagt, liest sich wie ein Fehler.
+            var inaktiv = _users.filter(function (u) { return zustand(u) === 'idle'; }).length;
+            var basis = _filter
                 ? sicht.length + '/' + _users.length
                 : (_stand && _stand.online != null ? _stand.online + '/' + _stand.total : '');
+            els.count.textContent = basis + (!_filter && inaktiv
+                ? ' · ' + t('sessions.n_inactive', '{n} inaktiv').replace(/\{n\}/g, inaktiv)
+                : '');
         }
     }
 

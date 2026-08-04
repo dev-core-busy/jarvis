@@ -9,7 +9,20 @@ from typing import Any
 
 _STATS_FILE  = Path(__file__).parent.parent / "data" / "telemetry_stats.json"
 _ERRORS_FILE = Path(__file__).parent.parent / "data" / "telemetry_errors.json"
-_MAX_ERRORS  = 200
+
+# KEINE Stueckzahl-Schranke fuer das Fehler-Log (Vorgabe 2026-08-04): was
+# entfernt wird, entscheidet ausschliesslich das Alter
+# (``prune_errors_older_than()``, Zeitplan in backend/log_retention.py).
+# Die frueheren 200 Eintraege hoben die Zusage auf: ein Tag mit einem
+# hartnaeckigen Fehler verdraengte die Fehler der Vorwoche – und zwar genau
+# dann, wenn man sie zum Vergleich gebraucht haette.
+#
+# Der Span-Ringpuffer (``JarvisTracer.MAX_SPANS``) bleibt begrenzt und ist kein
+# Widerspruch dazu: Spans liegen NUR im Speicher, tragen keinen Zeitstempel auf
+# Platte und sind nach einem Neustart weg. Das ist kein aufbewahrtes Log,
+# sondern eine Live-Anzeige – dort ist die Grenze eine Speicher-Schranke, keine
+# Aufbewahrungsregel. Dasselbe gilt fuer die 100 Dauer-Werte je Tool: das ist
+# eine Stichprobe fuer Ø/Min/Max, kein Protokoll.
 
 # ─── Leichtgewichtiger Trace-Speicher (kein externer Collector noetig) ───────
 
@@ -73,6 +86,11 @@ class JarvisTracer:
         # Reset-Nachweis (wann/von wem zuletzt zurueckgesetzt) – ueberlebt Neustart.
         self._last_reset_ts: float | None = None
         self._last_reset_by: str = ""
+        # Nachweis JE BEREICH (tools/llm/errors/spans/all). Ohne diesen wuesste
+        # ein Admin nach dem Leeren eines einzelnen Bereichs nicht, ob die "0"
+        # bedeutet "noch nichts passiert" oder "gerade geleert" – genau die
+        # Frage, fuer die der globale Nachweis eingefuehrt wurde.
+        self._area_resets: dict[str, dict] = {}
         self._load_stats()
 
     def start_span(self, name: str, kind: str = "internal", parent_id: str | None = None) -> TraceSpan:
@@ -153,6 +171,9 @@ class JarvisTracer:
                 "llm_stats": llm_stats,
                 "last_reset_ts": self._last_reset_ts,
                 "last_reset_by": self._last_reset_by,
+                "area_resets": dict(self._area_resets),
+                "span_count": len(self._spans),
+                "span_capacity": self.MAX_SPANS,
             }
 
     def get_recent_spans(self, limit: int = 50) -> list[dict]:
@@ -180,8 +201,7 @@ class JarvisTracer:
             entry = span.to_dict()
             entry["ts"] = span.start_time
             existing.append(entry)
-            if len(existing) > _MAX_ERRORS:
-                existing = existing[-_MAX_ERRORS:]
+            # Keine Deckelung – nur die Zeitfrist entfernt Eintraege.
             _ERRORS_FILE.write_text(json.dumps(existing))
         except Exception:
             pass
@@ -200,6 +220,7 @@ class JarvisTracer:
                 "llm_durations": self._stats["llm_durations"],
                 "last_reset_ts": self._last_reset_ts,
                 "last_reset_by": self._last_reset_by,
+                "area_resets": self._area_resets,
             }
             _STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
             _STATS_FILE.write_text(json.dumps(data))
@@ -227,8 +248,111 @@ class JarvisTracer:
                 self._stats["tool_call_counts"] = defaultdict(int, saved_counts)
                 self._last_reset_ts = data.get("last_reset_ts")
                 self._last_reset_by = data.get("last_reset_by", "")
+                ar = data.get("area_resets")
+                self._area_resets = dict(ar) if isinstance(ar, dict) else {}
         except Exception:
             pass
+
+    # ─── Leeren: einzeln je Bereich und alles zusammen ────────────────────────
+    #
+    # Vier Bereiche stehen in der Oberflaeche als eigene Abschnitte und sind
+    # deshalb auch EINZELN leerbar. Der Grund ist nicht Bequemlichkeit: wer die
+    # Tool-Zeiten nach einer Optimierung frisch messen will, musste vorher den
+    # gesamten Reiter zuruecksetzen und verlor dabei das Fehler-Log – also genau
+    # die Daten, die man nach einer Aenderung braucht.
+    #
+    # ACHTUNG bei den Zaehlern: "tools" leert ``tool_calls`` mit, "llm" leert
+    # ``llm_calls``. ``agent_runs``/``total_duration_ms``/``errors`` gehoeren zu
+    # KEINEM der vier Bereiche und bleiben stehen – sie verschwinden nur beim
+    # vollstaendigen Zuruecksetzen. Sonst wuerde das Leeren der Tool-Tabelle
+    # stillschweigend auch die Stat-Karten oben veraendern.
+
+    def _note_reset(self, area: str, by: str):
+        """Haelt fest, wann/von wem ein Bereich geleert wurde (innerhalb Lock)."""
+        self._area_resets[area] = {"ts": time.time(),
+                                   "by": (by or "unbekannt")[:80]}
+
+    def clear_tool_stats(self, by: str = "") -> dict:
+        """Leert nur die Tool-Statistiken (Aufrufzahlen + Zeit-Stichproben)."""
+        with self._lock:
+            removed = len(self._stats["tool_durations"])
+            self._stats["tool_call_counts"] = defaultdict(int)
+            self._stats["tool_durations"] = defaultdict(list)
+            self._stats["tool_calls"] = 0
+            self._note_reset("tools", by)
+            self._persist_stats()
+        return {"removed": removed}
+
+    def clear_llm_stats(self, by: str = "") -> dict:
+        """Leert nur die LLM-Statistiken (Zeit-Stichprobe + Aufrufzahl)."""
+        with self._lock:
+            removed = len(self._stats["llm_durations"])
+            self._stats["llm_durations"] = []
+            self._stats["llm_calls"] = 0
+            self._note_reset("llm", by)
+            self._persist_stats()
+        return {"removed": removed}
+
+    def clear_spans(self, by: str = "") -> dict:
+        """Leert den Span-Ringpuffer.
+
+        Spans liegen NUR im Speicher – nach einem Dienst-Neustart sind sie
+        ohnehin weg. Der Knopf ist trotzdem sinnvoll: er schafft einen
+        definierten Nullpunkt fuer eine Messung, ohne den Dienst anzufassen."""
+        with self._lock:
+            removed = len(self._spans)
+            self._spans.clear()
+            self._note_reset("spans", by)
+            self._persist_stats()
+        return {"removed": removed}
+
+    def clear_errors(self, by: str = "") -> dict:
+        """Leert das persistierte Fehler-Log.
+
+        Der Zaehler ``errors`` in den Stat-Karten wird MITGENULLT: eine Karte,
+        die "7 Fehler" zeigt, waehrend das Fehler-Log leer ist, sieht wie ein
+        Fehler der Oberflaeche aus."""
+        with self._lock:
+            removed = 0
+            try:
+                if _ERRORS_FILE.exists():
+                    removed = len(json.loads(_ERRORS_FILE.read_text()))
+            except Exception:
+                pass
+            self._stats["errors"] = 0
+            self._note_reset("errors", by)
+            self._persist_stats()
+            try:
+                _ERRORS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                _ERRORS_FILE.write_text("[]")
+            except Exception:
+                pass
+        return {"removed": removed}
+
+    def prune_errors_older_than(self, cutoff_ts: float) -> int:
+        """Entfernt Fehler-Eintraege, die aelter als ``cutoff_ts`` sind.
+
+        Alt-Eintraege ohne ``ts`` (aus der Zeit vor dem Zeitstempel) werden
+        BEHALTEN, nicht geraten: ein fehlendes Datum ist kein Beweis fuer Alter.
+        Sie lassen sich nur ueber „Fehler-Log leeren" entfernen – eine
+        Stueckzahl-Schranke, die sie irgendwann verdraengt, gibt es bewusst
+        nicht mehr.
+        """
+        with self._lock:
+            try:
+                if not _ERRORS_FILE.exists():
+                    return 0
+                data = json.loads(_ERRORS_FILE.read_text())
+                if not isinstance(data, list):
+                    return 0
+                keep = [e for e in data
+                        if e.get("ts") is None or e.get("ts", 0) >= cutoff_ts]
+                removed = len(data) - len(keep)
+                if removed:
+                    _ERRORS_FILE.write_text(json.dumps(keep))
+                return removed
+            except Exception:
+                return 0
 
     def clear(self, by: str = ""):
         """Loescht alle Spans, Statistiken und persistierte Fehler.
@@ -249,6 +373,10 @@ class JarvisTracer:
             }
             self._last_reset_ts = time.time()
             self._last_reset_by = (by or "unbekannt")[:80]
+            # Die Bereichs-Nachweise werden verworfen: nach einem vollstaendigen
+            # Zuruecksetzen ist der globale Nachweis die richtige Auskunft, ein
+            # aelterer Bereichs-Hinweis daneben waere irrefuehrend.
+            self._area_resets = {}
             self._persist_stats()
             try:
                 _ERRORS_FILE.write_text("[]")

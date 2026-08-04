@@ -823,6 +823,28 @@ def _may_use_profile(user: str, profile: dict) -> bool:
     return False
 
 
+async def require_admin_or_knowledge_editor(request: Request,
+                                            user: str = Depends(require_auth)) -> str:
+    """Administrator ODER Wissens-Editor.
+
+    Fuer LESE-Endpunkte, die Wissensinhalte fremder Benutzer herausgeben
+    (Lern-Notizen, ausstehende Extraktions-Entwuerfe). Ihre Schreib-Geschwister
+    (PATCH/approve/DELETE) haengen seit jeher an ``require_knowledge_editor`` –
+    dass das LESEN offener war als das SCHREIBEN, war der Fehler.
+
+    Warum nicht einfach ``require_knowledge_editor``: ``_may_edit_knowledge()``
+    gibt bei LEERER Editoren-Konfiguration fuer JEDEN False zurueck, **auch fuer
+    lokale Administratoren** (bewusst so, siehe dort). Der Wissens-Reiter unter
+    /settings waere damit auf einem frisch installierten System fuer niemanden
+    lesbar – eine Sperre, die den Administrator aus seiner eigenen Oberflaeche
+    aussperrt, waere schlimmer als die Luecke, die sie schliesst.
+    """
+    if _is_admin_user(user) or _may_edit_knowledge(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Nur Administratoren oder Wissens-Editoren dürfen diese Daten lesen.")
+
+
 async def require_knowledge_editor(request: Request, user: str = Depends(require_auth)) -> str:
     """FastAPI Dependency: Prüft ob der Benutzer *generell* Wissen bearbeiten darf.
 
@@ -905,6 +927,52 @@ def _can_edit_kb_group(user: str, gid: str) -> bool:
         return True
     from backend import knowledge_groups as kg
     return _is_kb_group_editor(user, kg.get_group(gid))
+
+
+# Felder der Gruppenliste, die die BERECHTIGUNGSKONFIGURATION preisgeben:
+# AD-Kontonamen (``editors_users``) und AD-Gruppen-DNs (``editors_group``).
+_KB_EDITOR_FIELDS = ("editors_users", "editors_group")
+
+
+def _kb_strip_editor_fields(user: str, data: dict) -> dict:
+    """Entfernt die Editoren-Felder aus der Gruppenliste fuer jeden, der die
+    jeweilige Gruppe nicht verwalten darf.
+
+    Warum: ``GET /api/knowledge/groups`` wird von /chat und /support fuer das
+    Gruppen-Filter-Pulldown gebraucht und muss daher fuer jeden angemeldeten
+    Benutzer erreichbar bleiben. Es lieferte aber bis 2026-08-04 auch
+    ``editors_users``/``editors_group`` mit – auf DEV z.B.
+    ``'nxIS' editors_users='Peter.Sachs, marita.muscholl'``. Das sind
+    AD-Kontonamen aus der Rechtekonfiguration, keine Wissensinhalte, und das
+    Pulldown braucht davon nichts (nur id/name/color/count).
+
+    Bewusst PRO GRUPPE entschieden, nicht pauschal: ein gruppenspezifischer
+    Editor pflegt die Editoren SEINER Gruppe im Wissensportal – wuerde man die
+    Felder global entfernen, waere das Formular dort leer und ein Speichern
+    loeschte die Eintraege. Fail-closed: schlaegt die Pruefung fehl, werden die
+    Felder entfernt.
+    """
+    try:
+        groups = data.get("groups")
+        if not isinstance(groups, list):
+            return data
+        alles_erlaubt = _may_edit_knowledge(user) or _is_admin_user(user)
+        out = []
+        for g in groups:
+            if not isinstance(g, dict):
+                out.append(g)
+                continue
+            if alles_erlaubt or _is_kb_group_editor(user, g):
+                out.append(g)
+            else:
+                out.append({k: v for k, v in g.items() if k not in _KB_EDITOR_FIELDS})
+        return {**data, "groups": out}
+    except Exception:  # noqa: BLE001
+        return {**data, "groups": [
+            {k: v for k, v in g.items() if k not in _KB_EDITOR_FIELDS}
+            if isinstance(g, dict) else g
+            for g in (data.get("groups") or [])
+        ]}
 
 
 async def require_auth_or_query(request: Request) -> str:
@@ -1690,9 +1758,14 @@ async def api_doc_page():
 
 
 async def require_admin_or_query(request: Request) -> str:
-    """Admin-Auth via Bearer-Header ODER ?token= (fuer navigierbare Doku-Seiten wie
-    /docs, die keinen Header mitschicken koennen). Nur lokale/als Admin freigeschaltete
-    Benutzer duerfen das API-Schema und die Swagger-/ReDoc-UI sehen."""
+    """Admin-Auth via Bearer-Header ODER ``?token=``.
+
+    Fuer alles, was der Browser OHNE Header abruft und trotzdem nur
+    Administratoren zusteht: navigierbare Doku-Seiten (/docs, /redoc,
+    openapi.json) und ``<img src>``/``<audio src>`` der Vision-Oberflaeche
+    (Kamerabild, Gesichts-Ausschnitte, Trainings-Vorschauen, Begruessungs-Audio).
+    Letztere sind biometrische Daten und standen bis 2026-08-04 jedem
+    angemeldeten Benutzer offen (``require_auth_or_query``)."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     username = verify_token(token)
     if not username:
@@ -1700,7 +1773,7 @@ async def require_admin_or_query(request: Request) -> str:
     if not username:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
     if username not in ALLOWED_USERS and not _user_is_admin(username):
-        raise HTTPException(status_code=403, detail="Nur Administratoren dürfen die API-Dokumentation einsehen.")
+        raise HTTPException(status_code=403, detail="Nur Administratoren dürfen diese Daten abrufen.")
     if not _login_still_allowed(username):
         raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
     return username
@@ -2498,7 +2571,7 @@ async def get_version():
 # ─── Update-System ────────────────────────────────────────────────────────────
 
 @app.get("/api/update/status")
-async def update_status(user: str = Depends(require_auth)):
+async def update_status(user: str = Depends(require_local_auth)):
     """Prüft ob eine neue Version im Git-Repository verfügbar ist (git fetch)."""
     from backend.update_manager import check_update
     result = await asyncio.to_thread(check_update)
@@ -2517,7 +2590,7 @@ async def update_apply(user: str = Depends(require_local_auth)):
 
 
 @app.get("/api/update/settings")
-async def update_settings_get(user: str = Depends(require_auth)):
+async def update_settings_get(user: str = Depends(require_local_auth)):
     """Gibt Auto-Update-Einstellungen zurück."""
     auto_schedule = config.get_setting("auto_update_schedule", "never")
     return JSONResponse({"auto_update_schedule": auto_schedule})
@@ -2727,6 +2800,38 @@ async def startup_documents_retention():
 
 
 @app.on_event("startup")
+async def startup_log_retention():
+    """Diagnose-Logs altern lassen (Vorgabe 90 Tage).
+
+    Betrifft LLM-Verlauf, Telemetrie-Fehler und Tool-Audit-Log. Vorher wuchsen
+    alle drei nur gegen Stueckzahlen – wie weit sie zurueckreichten, hing damit
+    allein davon ab, wie viel Verkehr das System hatte (auf DEV 37,9 Tage fuer
+    200 Konversationen, auf einem stillen System Jahre).
+
+    Verzoegerter Start: der erste Lauf liest und schreibt drei Dateien und soll
+    dem Dienststart (Wissens-Index-Vorbau, Broker-Socket) nicht in die Quere
+    kommen. Danach taeglich – ein Server, der monatelang laeuft, wuerde sonst
+    nie wieder aufraeumen. Die Schleife laeuft AUCH bei "dauerhaft" weiter und
+    prueft die Frist bei jedem Durchlauf neu, damit ein Umstellen der Umgebungs-
+    variable nicht erst beim naechsten Neustart wirkt.
+    """
+    from backend import log_retention as _lr
+
+    async def _loop():
+        await asyncio.sleep(60)
+        while True:
+            try:
+                await asyncio.to_thread(_lr.run_all)
+            except Exception as e:  # noqa: BLE001
+                print(f"[Retention] Lauf fehlgeschlagen: {e}", flush=True)
+            await asyncio.sleep(86400)
+    try:
+        asyncio.create_task(_loop())
+    except Exception as e:  # noqa: BLE001
+        print(f"[Retention] Startup-Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_mcp():
     """MCP-Server beim Start verbinden."""
     try:
@@ -2740,7 +2845,7 @@ async def shutdown_mcp():
     await mcp_manager.disconnect_all()
 
 @app.get("/api/mcp/servers")
-async def get_mcp_servers(user: str = Depends(require_auth)):
+async def get_mcp_servers(user: str = Depends(require_local_auth)):
     """Liefert Status und Liste aller konfigurierten MCP-Server."""
     return JSONResponse(mcp_manager.get_status())
 
@@ -2797,55 +2902,136 @@ async def reconnect_mcp_server(server_id: str, user: str = Depends(require_local
 # ─── Telemetry API ─────────────────────────────────────────────────────────
 from backend.telemetry import tracer
 
+# ACHTUNG RECHTE: Alle Telemetrie-Endpunkte haengen an `require_local_auth`
+# (Admin), NICHT an `require_auth`. Bis 2026-08-04 war es umgekehrt – jeder
+# angemeldete Domaenen-Benutzer konnte den LLM-Verlauf SAEMTLICHER Benutzer
+# lesen (Aufgaben, Modell, IP, Nachrichten) und ihn loeschen. Mit vollstaendigen
+# Prompts (siehe conv_log.py) waere das eine echte Datenpreisgabe geworden:
+# ein Prompt enthaelt regelmaessig genau die Inhalte, um die es geht.
+# Der Zuschnitt ist unkritisch – der Telemetrie-Reiter liegt ausschliesslich
+# auf `settings.html`, und die ist ohnehin Administratoren vorbehalten.
+
 @app.get("/api/telemetry/stats")
-async def get_telemetry_stats(user: str = Depends(require_auth)):
-    """Liefert aggregierte Telemetrie-Statistiken."""
+async def get_telemetry_stats(user: str = Depends(require_local_auth)):
+    """Liefert aggregierte Telemetrie-Statistiken (nur Administratoren)."""
     return JSONResponse(tracer.get_stats())
 
 @app.get("/api/telemetry/spans")
-async def get_telemetry_spans(request: Request, user: str = Depends(require_auth)):
+async def get_telemetry_spans(request: Request, user: str = Depends(require_local_auth)):
     """Liefert die letzten Telemetrie-Spans (Anzahl via limit-Parameter)."""
     limit = int(request.query_params.get("limit", "50"))
     return JSONResponse(tracer.get_recent_spans(limit))
 
 @app.get("/api/telemetry/errors")
-async def get_telemetry_errors(user: str = Depends(require_auth)):
+async def get_telemetry_errors(user: str = Depends(require_local_auth)):
     """Liefert die erfassten Telemetrie-Fehler."""
     return JSONResponse(tracer.get_errors())
 
 @app.delete("/api/telemetry")
-async def clear_telemetry(user: str = Depends(require_auth)):
-    """Löscht alle erfassten Telemetrie-Daten (Reset-Nachweis: wann/von wem)."""
+async def clear_telemetry(user: str = Depends(require_local_auth)):
+    """Löscht ALLE erfassten Telemetrie-Daten (Reset-Nachweis: wann/von wem)."""
     tracer.clear(by=user)
     return JSONResponse({"ok": True})
 
+@app.delete("/api/telemetry/tool_stats")
+async def clear_telemetry_tool_stats(user: str = Depends(require_local_auth)):
+    """Löscht nur die Tool-Statistiken (Aufrufzahlen und Zeit-Stichproben)."""
+    return JSONResponse({"ok": True, **tracer.clear_tool_stats(by=user)})
+
+@app.delete("/api/telemetry/llm_stats")
+async def clear_telemetry_llm_stats(user: str = Depends(require_local_auth)):
+    """Löscht nur die LLM-Statistiken (Antwortzeit-Stichprobe und Aufrufzahl)."""
+    return JSONResponse({"ok": True, **tracer.clear_llm_stats(by=user)})
+
+@app.delete("/api/telemetry/errors")
+async def clear_telemetry_errors(user: str = Depends(require_local_auth)):
+    """Löscht nur das Fehler-Log (inkl. Fehler-Zähler der Übersichtskarten)."""
+    return JSONResponse({"ok": True, **tracer.clear_errors(by=user)})
+
+@app.delete("/api/telemetry/spans")
+async def clear_telemetry_spans(user: str = Depends(require_local_auth)):
+    """Löscht nur die aufgezeichneten Spans (Ringpuffer im Speicher)."""
+    return JSONResponse({"ok": True, **tracer.clear_spans(by=user)})
+
+
+# ─── Aufbewahrungsfrist der Diagnose-Logs ─────────────────────────────────────
+
+@app.get("/api/logs/retention")
+async def api_logs_retention(user: str = Depends(require_local_auth)):
+    """Frist, letzter Bereinigungslauf und Umfang der Diagnose-Speicher.
+
+    Die Frist stammt aus ``JARVIS_LOG_RETENTION_DAYS`` (Vorgabe 90 Tage,
+    0 = dauerhaft aufbewahren) und ist bewusst keine Oberflächen-Einstellung:
+    wie lange Diagnosedaten vorgehalten werden, ist eine Betriebsvorgabe und
+    soll nicht versehentlich im Chat-Betrieb umgestellt werden.
+    """
+    from backend import log_retention as _lr
+    from backend import audit_log as _al
+    from backend import conv_log as _cl
+    out = _lr.last_run()
+    try:
+        out["conv_log"] = _cl.get_stats()
+    except Exception:  # noqa: BLE001
+        out["conv_log"] = {}
+    try:
+        out["audit_log"] = _al.stats()
+    except Exception:  # noqa: BLE001
+        out["audit_log"] = {}
+    return JSONResponse(out)
+
+
+@app.post("/api/logs/retention/run")
+async def api_logs_retention_run(user: str = Depends(require_local_auth)):
+    """Führt die Bereinigung sofort aus (statt auf den Tageslauf zu warten)."""
+    from backend import log_retention as _lr
+    result = await asyncio.to_thread(_lr.run_all)
+    return JSONResponse(result)
+
 
 # ─── Konversations-Verlauf ────────────────────────────────────────────────────
-from backend.conv_log import get_conversations, get_known_ips, get_known_users, clear as clear_conv_log
+from backend.conv_log import (get_conversations, get_known_ips, get_known_users,
+                              get_body as get_conv_body, clear as clear_conv_log)
 
 @app.get("/api/conv_log")
-async def api_conv_log(request: Request, user: str = Depends(require_auth)):
-    """Liefert den Konversations-Verlauf, optional gefiltert nach IP oder Benutzer."""
+async def api_conv_log(request: Request, user: str = Depends(require_local_auth)):
+    """Liefert die Kopfdaten des Konversations-Verlaufs (neueste zuerst).
+
+    Ohne Nachrichten – die holt die Oberfläche je Eintrag beim Aufklappen über
+    ``GET /api/conv_log/{id}``. Die Aufgabe ist hier bereits **vollständig**
+    enthalten (früher auf 200 Zeichen gekürzt).
+    """
     limit = int(request.query_params.get("limit", "50"))
     ip = request.query_params.get("ip") or None
     username = request.query_params.get("user") or None
     return JSONResponse(get_conversations(limit=limit, ip_filter=ip, user_filter=username))
 
 @app.get("/api/conv_log/ips")
-async def api_conv_log_ips(user: str = Depends(require_auth)):
+async def api_conv_log_ips(user: str = Depends(require_local_auth)):
     """Liefert die Liste der bekannten IP-Adressen aus dem Konversations-Log."""
     return JSONResponse(get_known_ips())
 
 @app.get("/api/conv_log/users")
-async def api_conv_log_users(user: str = Depends(require_auth)):
+async def api_conv_log_users(user: str = Depends(require_local_auth)):
     """Liefert die Liste der bekannten Benutzer aus dem Konversations-Log."""
     return JSONResponse(get_known_users())
 
 @app.delete("/api/conv_log")
-async def api_conv_log_clear(user: str = Depends(require_auth)):
-    """Löscht den kompletten Konversations-Verlauf."""
+async def api_conv_log_clear(user: str = Depends(require_local_auth)):
+    """Löscht den kompletten Konversations-Verlauf (Index und alle Inhalte)."""
     clear_conv_log()
     return JSONResponse({"ok": True})
+
+# Diese Route MUSS nach /ips und /users stehen – sonst fängt sie deren Pfade als
+# {conv_id} ab (FastAPI prüft in Registrierungsreihenfolge) und der Filter im
+# Verlauf bliebe leer, ohne dass ein Fehler sichtbar wird.
+@app.get("/api/conv_log/{conv_id}")
+async def api_conv_log_body(conv_id: str, user: str = Depends(require_local_auth)):
+    """Liefert den vollständigen Inhalt einer Konversation: System-Prompt und
+    alle Nachrichten in voller Länge (nichts gekürzt)."""
+    body = get_conv_body(conv_id)
+    if body is None:
+        return JSONResponse({"error": "Konversation nicht gefunden"}, status_code=404)
+    return JSONResponse(body)
 
 
 @app.get("/api/context/stats")
@@ -3063,7 +3249,7 @@ def _check_vnc_available() -> bool:
 
 
 @app.post("/api/vnc/unlock")
-async def vnc_unlock(user: str = Depends(require_auth)):
+async def vnc_unlock(user: str = Depends(require_local_auth)):
     """Desktop-Sperre manuell aufheben (Screensaver deaktivieren)."""
     await asyncio.to_thread(_unlock_desktop_screen)
     return JSONResponse({"ok": True})
@@ -3981,7 +4167,7 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
 
 
 @app.post("/api/auth/ad_test")
-async def test_ad_connection(request: Request, _username: str = Depends(require_auth)):
+async def test_ad_connection(request: Request, _username: str = Depends(require_local_auth)):
     """Prüft ob der Domain-Controller erreichbar ist (reiner Verbindungstest, kein Bind)."""
     body = await request.json()
     ad_server = body.get("ad_server", "").strip()
@@ -4002,7 +4188,7 @@ async def test_ad_connection(request: Request, _username: str = Depends(require_
 
 
 @app.get("/api/auth/ad_status")
-async def get_ad_status(user: str = Depends(require_auth)):
+async def get_ad_status(user: str = Depends(require_local_auth)):
     """Gibt den aktuellen AD/LDAP-Konfigurationsstatus zurueck.
 
     ``reachable`` ist das Ergebnis eines echten Verbindungstests zum
@@ -4105,7 +4291,7 @@ async def get_ad_status(user: str = Depends(require_auth)):
 
 # ─── SSL / Let's Encrypt Endpoints ────────────────────────────────────
 @app.get("/api/settings/ssl")
-async def get_ssl_info(user: str = Depends(require_auth)):
+async def get_ssl_info(user: str = Depends(require_local_auth)):
     """Gibt aktuelle SSL-Zertifikat-Infos zurück: Domain, Ablaufdatum, Is-Let's-Encrypt."""
     import ssl as _ssl
     import datetime
@@ -4502,7 +4688,7 @@ async def _probe_llm_connection(provider: str, api_url: str, api_key: str,
 
 
 @app.post("/api/profiles/test")
-async def test_profile_connection(request: Request, user: str = Depends(require_auth)):
+async def test_profile_connection(request: Request, user: str = Depends(require_local_auth)):
     """Testet die Verbindung mit den aktuellen Formularwerten (nicht gespeicherten)."""
     body = await request.json()
     result = await _probe_llm_connection(
@@ -4570,7 +4756,7 @@ async def _list_llm_models(provider: str, api_url: str, api_key: str,
 
 
 @app.post("/api/profiles/models")
-async def list_profile_models(request: Request, user: str = Depends(require_auth)):
+async def list_profile_models(request: Request, user: str = Depends(require_local_auth)):
     """Liefert verfuegbare Modelle fuer die aktuellen Formularwerte (Discover-Button)."""
     body = await request.json()
     result = await _list_llm_models(
@@ -4584,7 +4770,7 @@ async def list_profile_models(request: Request, user: str = Depends(require_auth
 
 
 @app.get("/api/profiles/{profile_id}/test")
-async def test_saved_profile_connection(profile_id: str, user: str = Depends(require_auth)):
+async def test_saved_profile_connection(profile_id: str, user: str = Depends(require_local_auth)):
     """Prüft die Erreichbarkeit eines GESPEICHERTEN Profils (Status-Pill in der Übersicht).
 
     Nutzt den serverseitig hinterlegten Key → der echte Key verlässt den Server nicht.
@@ -5595,7 +5781,7 @@ _bg_confluence_tasks: set = set()
 
 
 @app.get("/api/confluence/test")
-async def confluence_test(user: str = Depends(require_auth)):
+async def confluence_test(user: str = Depends(require_local_auth)):
     """Prueft die gespeicherte Confluence-Verbindung (fuer den Reiter)."""
     from backend.confluence_client import ConfluenceError
     c = _confluence_client()
@@ -5613,7 +5799,7 @@ async def confluence_test(user: str = Depends(require_auth)):
 
 
 @app.get("/api/confluence/spaces")
-async def confluence_spaces_api(user: str = Depends(require_auth)):
+async def confluence_spaces_api(user: str = Depends(require_local_auth)):
     """Listet alle Confluence-Bereiche (Spaces) mit Link – fuer den Wissen-Reiter."""
     from backend.confluence_client import ConfluenceError
     c = _confluence_client()
@@ -5631,7 +5817,7 @@ async def confluence_spaces_api(user: str = Depends(require_auth)):
 
 
 @app.get("/api/confluence/pages")
-async def confluence_pages_api(space: str = "", user: str = Depends(require_auth)):
+async def confluence_pages_api(space: str = "", user: str = Depends(require_local_auth)):
     """Listet die Seiten eines Bereichs (Space) – fuer die Auswahl im Extraktor."""
     from backend.confluence_client import ConfluenceError
     c = _confluence_client()
@@ -5649,7 +5835,7 @@ async def confluence_pages_api(space: str = "", user: str = Depends(require_auth
 
 @app.get("/api/confluence/search")
 async def confluence_search_api(q: str = "", space: str = "", label: str = "",
-                                limit: int = 20, user: str = Depends(require_auth)):
+                                limit: int = 20, user: str = Depends(require_local_auth)):
     """Suche fuer den Reiter – liefert Treffer mit Link."""
     from backend.confluence_client import ConfluenceError
     c = _confluence_client()
@@ -5673,7 +5859,7 @@ async def confluence_search_api(q: str = "", space: str = "", label: str = "",
 
 @app.get("/api/confluence/page")
 async def confluence_page_api(id: str = "", title: str = "", space: str = "",
-                              user: str = Depends(require_auth)):
+                              user: str = Depends(require_local_auth)):
     """Seiteninhalt fuer den Reiter (als Text)."""
     from backend.confluence_client import ConfluenceError, html_to_text
     c = _confluence_client()
@@ -6052,7 +6238,7 @@ def _jira_client():
 
 
 @app.get("/api/jira/test")
-async def jira_test(user: str = Depends(require_auth)):
+async def jira_test(user: str = Depends(require_local_auth)):
     """Prueft die gespeicherte Jira-Verbindung (fuer den Reiter)."""
     from backend.jira_client import JiraError
     c = _jira_client()
@@ -6072,7 +6258,7 @@ async def jira_test(user: str = Depends(require_auth)):
 @app.get("/api/jira/search")
 async def jira_search_api(q: str = "", project: str = "", status: str = "",
                           issuetype: str = "", assignee: str = "", jql: str = "",
-                          limit: int = 25, user: str = Depends(require_auth)):
+                          limit: int = 25, user: str = Depends(require_local_auth)):
     """Ticketsuche fuer den Reiter – liefert Treffer mit Link."""
     from backend.jira_client import JiraError, issue_brief
     c = _jira_client()
@@ -6095,7 +6281,7 @@ async def jira_search_api(q: str = "", project: str = "", status: str = "",
 
 
 @app.get("/api/jira/issue")
-async def jira_issue_api(key: str = "", user: str = Depends(require_auth)):
+async def jira_issue_api(key: str = "", user: str = Depends(require_local_auth)):
     """Ticketdetails fuer den Reiter (Beschreibung als Text + Kommentare)."""
     from backend.jira_client import JiraError, html_to_text, issue_brief
     c = _jira_client()
@@ -6314,7 +6500,7 @@ def _support_jira_jql(query: str, open_only: bool = True) -> str:
 
 # ─── Kundenverwaltung (IBS-API) ──────────────────────────────────────
 @app.get("/api/kundenverwaltung/test")
-async def kv_test_api(user: str = Depends(require_auth)):
+async def kv_test_api(user: str = Depends(require_local_auth)):
     """Testet die Verbindung zur Kundenverwaltungs-API (IBS): prueft die
     Erreichbarkeit der konfigurierten Basis-URL (X-API-Key wird mitgesendet,
     self-signed TLS erlaubt). Jede HTTP-Antwort gilt als erreichbar;
@@ -6326,7 +6512,7 @@ async def kv_test_api(user: str = Depends(require_auth)):
 @app.get("/api/kundenverwaltung/tickets-by-buzzwords")
 async def kv_tickets_by_buzzwords_api(buzzwords: str = "", limit: int = 25,
                                       address_id: str = "",
-                                      user: str = Depends(require_auth)):
+                                      user: str = Depends(require_local_auth)):
     """Ticket-/Ereignissuche ueber die Kundenverwaltungs-API (IBS) nach 1-5
     Schlagworten (kommagetrennt), optional eingeschraenkt auf eine
     Kunden-Adress-ID. Ruft serverseitig die API-Funktion 'getMatchingEvents'
@@ -7550,7 +7736,7 @@ async def move_knowledge_files(request: Request, user: str = Depends(require_kno
 
 
 @app.get("/api/knowledge/learned")
-async def list_learned_files(user: str = Depends(require_auth)):
+async def list_learned_files(user: str = Depends(require_admin_or_knowledge_editor)):
     """Listet alle automatisch gelernten Konversations-Dateien."""
     from backend.learning import LEARNED_DIR, PROJECT_ROOT as LRN_ROOT
     result = []
@@ -9617,7 +9803,8 @@ async def knowledge_groups_list(user: str = Depends(require_auth)):
         # Systemgenerierte Dateien (data/knowledge/learned/*) automatisch der
         # Gruppe "Erlernt" zuordnen, statt sie als "ungruppiert" zu zeigen.
         kg.auto_assign_system_files(paths)
-        return JSONResponse({"ok": True, **kg.list_groups(paths)})
+        data = kg.list_groups(paths)
+        return JSONResponse({"ok": True, **_kb_strip_editor_fields(user, data)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -10009,14 +10196,14 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
 
 
 @app.get("/api/knowledge/pending")
-async def knowledge_pending_list(user: str = Depends(require_auth)):
+async def knowledge_pending_list(user: str = Depends(require_admin_or_knowledge_editor)):
     """Liefert die Liste der zur Freigabe ausstehenden Wissensdokumente."""
     from backend.web_extractor import list_pending
     return JSONResponse(list_pending())
 
 
 @app.get("/api/knowledge/pending/{doc_id}")
-async def knowledge_pending_get(doc_id: str, user: str = Depends(require_auth)):
+async def knowledge_pending_get(doc_id: str, user: str = Depends(require_admin_or_knowledge_editor)):
     """Liefert ein einzelnes zur Freigabe ausstehendes Wissensdokument."""
     from backend.web_extractor import get_pending
     doc = get_pending(doc_id)
@@ -10355,7 +10542,7 @@ INSTRUCTIONS_DIR = Path(__file__).parent.parent / "data" / "instructions"
 
 
 @app.get("/api/instructions")
-async def list_instructions(user: str = Depends(require_auth)):
+async def list_instructions(user: str = Depends(require_local_auth)):
     """Listet alle Instruction-Dateien auf."""
     INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
     files = []
@@ -10366,7 +10553,7 @@ async def list_instructions(user: str = Depends(require_auth)):
 
 
 @app.get("/api/instructions/{name}")
-async def get_instruction(name: str, user: str = Depends(require_auth)):
+async def get_instruction(name: str, user: str = Depends(require_local_auth)):
     """Liest eine einzelne Instruction-Datei."""
     safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
     if not safe_name:
@@ -10379,7 +10566,7 @@ async def get_instruction(name: str, user: str = Depends(require_auth)):
 
 
 @app.post("/api/instructions/{name}")
-async def save_instruction(name: str, request: Request, user: str = Depends(require_auth)):
+async def save_instruction(name: str, request: Request, user: str = Depends(require_local_auth)):
     """Erstellt oder aktualisiert eine Instruction-Datei."""
     data = await request.json()
     content = data.get("content", "")
@@ -10396,7 +10583,7 @@ async def save_instruction(name: str, request: Request, user: str = Depends(requ
 
 
 @app.delete("/api/instructions/{name}")
-async def delete_instruction(name: str, user: str = Depends(require_auth)):
+async def delete_instruction(name: str, user: str = Depends(require_local_auth)):
     """Loescht eine Instruction-Datei."""
     safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
     if not safe_name:
@@ -10447,7 +10634,7 @@ def _update_env_google(client_id: str, client_secret: str):
 # ─── Google OAuth2 (Device Flow) ─────────────────────────────────────
 
 @app.get("/api/google/status")
-async def google_status(user: str = Depends(require_auth)):
+async def google_status(user: str = Depends(require_local_auth)):
     """Gibt den aktuellen Google-Auth-Status zurück."""
     from backend.google_auth import get_status
     import asyncio as _aio
@@ -10456,7 +10643,7 @@ async def google_status(user: str = Depends(require_auth)):
 
 
 @app.post("/api/google/device-start")
-async def google_device_start(user: str = Depends(require_auth)):
+async def google_device_start(user: str = Depends(require_local_auth)):
     """Startet den Device Flow – gibt user_code + verification_url zurück."""
     from backend.google_auth import start_device_flow
     import asyncio as _aio
@@ -10467,14 +10654,14 @@ async def google_device_start(user: str = Depends(require_auth)):
 
 
 @app.get("/api/google/device-status")
-async def google_device_status(user: str = Depends(require_auth)):
+async def google_device_status(user: str = Depends(require_local_auth)):
     """Polling-Endpoint: Status des laufenden Device Flows."""
     from backend.google_auth import get_flow_status
     return JSONResponse(get_flow_status())
 
 
 @app.post("/api/google/revoke")
-async def google_revoke(user: str = Depends(require_auth)):
+async def google_revoke(user: str = Depends(require_local_auth)):
     """Widerruft den Google-Zugriff und löscht das Token."""
     from backend.google_auth import revoke
     import asyncio as _aio
@@ -10524,7 +10711,7 @@ def _run_gog(*args, timeout: int = 10) -> dict:
 
 
 @app.get("/api/google/gog-status")
-async def gog_status(user: str = Depends(require_auth)):
+async def gog_status(user: str = Depends(require_local_auth)):
     """Gibt verbundene gog-Konten zurück."""
     import asyncio as _aio
     result = await _aio.to_thread(_run_gog, "auth", "list")
@@ -10532,7 +10719,7 @@ async def gog_status(user: str = Depends(require_auth)):
 
 
 @app.post("/api/google/gog-setup")
-async def gog_setup(request: Request, user: str = Depends(require_auth)):
+async def gog_setup(request: Request, user: str = Depends(require_local_auth)):
     """Speichert OAuth-Credentials als client_secret.json + registriert bei gog."""
     import asyncio as _aio, json as _json
     body = await request.json()
@@ -10575,7 +10762,7 @@ async def gog_setup(request: Request, user: str = Depends(require_auth)):
 
 
 @app.post("/api/google/gog-auth-url")
-async def gog_get_auth_url(request: Request, user: str = Depends(require_auth)):
+async def gog_get_auth_url(request: Request, user: str = Depends(require_local_auth)):
     """Remote-Flow Schritt 1: Gibt die Google-Auth-URL zurück (kein Browser auf Server nötig)."""
     import asyncio as _aio
     body  = await request.json()
@@ -10611,7 +10798,7 @@ async def gog_get_auth_url(request: Request, user: str = Depends(require_auth)):
 
 
 @app.post("/api/google/gog-auth-exchange")
-async def gog_auth_exchange(request: Request, user: str = Depends(require_auth)):
+async def gog_auth_exchange(request: Request, user: str = Depends(require_local_auth)):
     """Remote-Flow Schritt 2: Tauscht Redirect-URL gegen Token."""
     import asyncio as _aio
     body         = await request.json()
@@ -10632,7 +10819,7 @@ async def gog_auth_exchange(request: Request, user: str = Depends(require_auth))
 
 
 @app.delete("/api/google/gog-account")
-async def gog_remove_account(request: Request, user: str = Depends(require_auth)):
+async def gog_remove_account(request: Request, user: str = Depends(require_local_auth)):
     """Entfernt ein gog-Konto."""
     import asyncio as _aio
     body  = await request.json()
@@ -10646,7 +10833,7 @@ async def gog_remove_account(request: Request, user: str = Depends(require_auth)
 # ─── OpenClaw Marketplace ─────────────────────────────────────────────
 
 @app.get("/api/openclaw/search")
-async def openclaw_search(q: str = "", user: str = Depends(require_auth)):
+async def openclaw_search(q: str = "", user: str = Depends(require_local_auth)):
     """Sucht Skills auf OpenClaw Marketplace.
     Gibt Ergebnisliste zurück – Import erfolgt separat.
     """
@@ -10680,7 +10867,7 @@ async def openclaw_search(q: str = "", user: str = Depends(require_auth)):
 @app.get("/api/openclaw/workflow-task")
 async def openclaw_workflow_task(
     description: str = "",
-    user: str = Depends(require_auth),
+    user: str = Depends(require_local_auth),
 ):
     """Gibt den fertigen Agent-Task-Text zurück, der den Import-Workflow ausführt.
     Liest data/workflows/import_openclaw_skill.md und bettet ihn in den Task ein.
@@ -10754,7 +10941,7 @@ def _get_vision_engine():
 
 
 @app.get("/api/vision/status")
-async def vision_status(user: str = Depends(require_auth)):
+async def vision_status(user: str = Depends(require_local_auth)):
     """Vision-Engine-Status + aktuelle Gesichter."""
     engine = _get_vision_engine()
     if not engine:
@@ -10763,7 +10950,7 @@ async def vision_status(user: str = Depends(require_auth)):
 
 
 @app.post("/api/vision/control")
-async def vision_control(request: Request, user: str = Depends(require_auth)):
+async def vision_control(request: Request, user: str = Depends(require_local_auth)):
     """Kamera starten/stoppen. Body: {action: 'start'|'stop', source: '0'}."""
     engine = _get_vision_engine()
     if not engine:
@@ -10794,7 +10981,7 @@ async def vision_control(request: Request, user: str = Depends(require_auth)):
 
 
 @app.get("/api/vision/snapshot")
-async def vision_snapshot(user: str = Depends(require_auth_or_query)):
+async def vision_snapshot(user: str = Depends(require_admin_or_query)):
     """Aktuelles Kamerabild als JPEG (mit Annotationen). Token via Header ODER ?token= Query."""
     engine = _get_vision_engine()
     if not engine:
@@ -10840,7 +11027,7 @@ async def vision_mjpeg_stream(request: Request):
 
 
 @app.get("/api/vision/face-crop/{index}")
-async def vision_face_crop(index: int, user: str = Depends(require_auth_or_query)):
+async def vision_face_crop(index: int, user: str = Depends(require_admin_or_query)):
     """Aktuellen Face-Crop als JPEG. Token via Header ODER ?token= Query."""
     engine = _get_vision_engine()
     if not engine:
@@ -10854,7 +11041,7 @@ async def vision_face_crop(index: int, user: str = Depends(require_auth_or_query
 
 
 @app.get("/api/vision/cameras")
-async def vision_cameras(user: str = Depends(require_auth)):
+async def vision_cameras(user: str = Depends(require_local_auth)):
     """Verfuegbare Kameras auflisten."""
     engine = _get_vision_engine()
     if not engine:
@@ -10866,7 +11053,7 @@ async def vision_cameras(user: str = Depends(require_auth)):
 
 
 @app.get("/api/vision/preview/{index}")
-async def vision_preview(index: int, user: str = Depends(require_auth_or_query)):
+async def vision_preview(index: int, user: str = Depends(require_admin_or_query)):
     """Einzelbild einer bestimmten Kamera (fuer Preview)."""
     engine = _get_vision_engine()
     if not engine:
@@ -10880,7 +11067,7 @@ async def vision_preview(index: int, user: str = Depends(require_auth_or_query))
 
 
 @app.get("/api/vision/profiles")
-async def vision_profiles(user: str = Depends(require_auth)):
+async def vision_profiles(user: str = Depends(require_local_auth)):
     """Alle Profile mit Aktionen auflisten."""
     engine = _get_vision_engine()
     if not engine:
@@ -10892,7 +11079,7 @@ async def vision_profiles(user: str = Depends(require_auth)):
 
 
 @app.post("/api/vision/profiles")
-async def vision_profile_update(request: Request, user: str = Depends(require_auth)):
+async def vision_profile_update(request: Request, user: str = Depends(require_local_auth)):
     """Profil aktualisieren (Name, Aktion, Aktions-Wert)."""
     engine = _get_vision_engine()
     if not engine:
@@ -10923,7 +11110,7 @@ async def vision_profile_update(request: Request, user: str = Depends(require_au
 
 
 @app.post("/api/vision/profiles/rename")
-async def vision_profile_rename(request: Request, user: str = Depends(require_auth)):
+async def vision_profile_rename(request: Request, user: str = Depends(require_local_auth)):
     """Profil umbenennen (z.B. nach Training mit Temp-Name)."""
     engine = _get_vision_engine()
     if not engine:
@@ -10940,7 +11127,7 @@ async def vision_profile_rename(request: Request, user: str = Depends(require_au
 
 
 @app.delete("/api/vision/profile/{name}")
-async def vision_profile_delete(name: str, user: str = Depends(require_auth)):
+async def vision_profile_delete(name: str, user: str = Depends(require_local_auth)):
     """Profil loeschen."""
     engine = _get_vision_engine()
     if not engine:
@@ -10950,7 +11137,7 @@ async def vision_profile_delete(name: str, user: str = Depends(require_auth)):
 
 
 @app.get("/api/vision/thumbnail/{name}")
-async def vision_thumbnail(name: str, user: str = Depends(require_auth_or_query)):
+async def vision_thumbnail(name: str, user: str = Depends(require_admin_or_query)):
     """Profilbild (erstes Trainingsfoto) als JPEG. Token via Header ODER ?token= Query."""
     engine = _get_vision_engine()
     if not engine:
@@ -10963,7 +11150,7 @@ async def vision_thumbnail(name: str, user: str = Depends(require_auth_or_query)
 
 
 @app.post("/api/vision/training/start")
-async def vision_training_start(request: Request, user: str = Depends(require_auth)):
+async def vision_training_start(request: Request, user: str = Depends(require_local_auth)):
     """Training starten. Body: {name: '...', samples: 30}."""
     engine = _get_vision_engine()
     if not engine:
@@ -10979,7 +11166,7 @@ async def vision_training_start(request: Request, user: str = Depends(require_au
 
 
 @app.post("/api/vision/training/stop")
-async def vision_training_stop(user: str = Depends(require_auth)):
+async def vision_training_stop(user: str = Depends(require_local_auth)):
     """Training stoppen + Modell neu berechnen."""
     engine = _get_vision_engine()
     if not engine:
@@ -10989,7 +11176,7 @@ async def vision_training_stop(user: str = Depends(require_auth)):
 
 
 @app.get("/api/vision/training/status")
-async def vision_training_status(user: str = Depends(require_auth)):
+async def vision_training_status(user: str = Depends(require_local_auth)):
     """Training-Fortschritt abfragen."""
     engine = _get_vision_engine()
     if not engine:
@@ -10998,7 +11185,7 @@ async def vision_training_status(user: str = Depends(require_auth)):
 
 
 @app.get("/api/vision/events")
-async def vision_events(limit: int = 50, user: str = Depends(require_auth)):
+async def vision_events(limit: int = 50, user: str = Depends(require_local_auth)):
     """Letzte Erkennungs-Events."""
     engine = _get_vision_engine()
     if not engine:
@@ -11007,7 +11194,7 @@ async def vision_events(limit: int = 50, user: str = Depends(require_auth)):
 
 
 @app.post("/api/vision/cleanup")
-async def vision_cleanup(user: str = Depends(require_auth)):
+async def vision_cleanup(user: str = Depends(require_local_auth)):
     """Alle Vision-Daten zuruecksetzen."""
     engine = _get_vision_engine()
     if not engine:
@@ -11017,7 +11204,7 @@ async def vision_cleanup(user: str = Depends(require_auth)):
 
 
 @app.get("/api/vision/greet-audio/{name}")
-async def vision_greet_audio(name: str, user: str = Depends(require_auth_or_query)):
+async def vision_greet_audio(name: str, user: str = Depends(require_admin_or_query)):
     """Vorgerenderte Begruessungs-Audio (MP3 bevorzugt, WAV Fallback). Token via Header ODER ?token= Query."""
 
     from pathlib import Path as _Path
@@ -11276,49 +11463,49 @@ async def _wa_bridge_async(path: str, method: str = "GET", data: dict = None) ->
 
 
 @app.get("/api/whatsapp/status")
-async def wa_status(user: str = Depends(require_auth)):
+async def wa_status(user: str = Depends(require_local_auth)):
     """WhatsApp Bridge Status (Proxy)."""
     result = await _wa_bridge_async("/status")
     return JSONResponse(result)
 
 
 @app.get("/api/whatsapp/qr")
-async def wa_qr(user: str = Depends(require_auth)):
+async def wa_qr(user: str = Depends(require_local_auth)):
     """WhatsApp QR-Code zum Scannen (Proxy)."""
     result = await _wa_bridge_async("/qr")
     return JSONResponse(result)
 
 
 @app.post("/api/whatsapp/logout")
-async def wa_logout(user: str = Depends(require_auth)):
+async def wa_logout(user: str = Depends(require_local_auth)):
     """WhatsApp abmelden (Proxy)."""
     result = await _wa_bridge_async("/logout", method="POST")
     return JSONResponse(result)
 
 
 @app.post("/api/whatsapp/reconnect")
-async def wa_reconnect(user: str = Depends(require_auth)):
+async def wa_reconnect(user: str = Depends(require_local_auth)):
     """WhatsApp Reconnect erzwingen (Proxy)."""
     result = await _wa_bridge_async("/reconnect", method="POST")
     return JSONResponse(result)
 
 
 @app.get("/api/whatsapp/logs")
-async def wa_logs(lines: int = 100, level: str = None, category: str = None, user: str = Depends(require_auth)):
+async def wa_logs(lines: int = 100, level: str = None, category: str = None, user: str = Depends(require_local_auth)):
     """WhatsApp-Logs abrufen (gefiltert)."""
     entries = wa_get_logs(lines=lines, level=level, category=category)
     return JSONResponse({"logs": entries, "total": len(entries)})
 
 
 @app.delete("/api/whatsapp/logs")
-async def wa_logs_clear(user: str = Depends(require_auth)):
+async def wa_logs_clear(user: str = Depends(require_local_auth)):
     """WhatsApp-Logs loeschen."""
     wa_clear_logs()
     return JSONResponse({"status": "ok", "message": "Logs geloescht"})
 
 
 @app.get("/api/whatsapp/bridge-logs")
-async def wa_bridge_logs(lines: int = 100, level: str = None, category: str = None, user: str = Depends(require_auth)):
+async def wa_bridge_logs(lines: int = 100, level: str = None, category: str = None, user: str = Depends(require_local_auth)):
     """Bridge-Logs abrufen (Proxy zum Bridge-Service)."""
     params = f"?lines={lines}"
     if level:
@@ -11330,7 +11517,7 @@ async def wa_bridge_logs(lines: int = 100, level: str = None, category: str = No
 
 
 @app.delete("/api/whatsapp/bridge-logs")
-async def wa_bridge_logs_clear(user: str = Depends(require_auth)):
+async def wa_bridge_logs_clear(user: str = Depends(require_local_auth)):
     """Bridge-Logs loeschen (Proxy zum Bridge-Service + lokaler Fallback)."""
     # Versuche ueber Bridge-API
     result = await _wa_bridge_async("/logs", method="DELETE")
@@ -12374,9 +12561,11 @@ async def reminder_senders_set(req: Request, user: str = Depends(require_local_a
 
 
 # ─── Audit-Log ───────────────────────────────────────────────────────
+# Rechte wie bei der Telemetrie: das Audit-Log enthaelt die Tool-Argumente ALLER
+# Benutzer (Dateipfade, Suchbegriffe, Aufgabentexte) – das ist Admin-Material.
 @app.get("/api/audit_log")
 async def audit_log_list(request: Request, limit: int = 200, user: str = "", tool: str = "",
-                         _u: str = Depends(require_auth)):
+                         _u: str = Depends(require_local_auth)):
     """Liefert die Audit-Log-Einträge, optional gefiltert nach Benutzer oder Tool."""
     from backend.audit_log import read_log
     entries = read_log(limit=limit, user_filter=user, tool_filter=tool)
@@ -12384,8 +12573,8 @@ async def audit_log_list(request: Request, limit: int = 200, user: str = "", too
 
 
 @app.delete("/api/audit_log")
-async def audit_log_clear(_u: str = Depends(require_auth)):
-    """Löscht das Audit-Log."""
+async def audit_log_clear(_u: str = Depends(require_local_auth)):
+    """Löscht das Audit-Log (aktive Datei und Rotations-Sicherung)."""
     from backend.audit_log import AUDIT_FILE
     try:
         if AUDIT_FILE.exists():

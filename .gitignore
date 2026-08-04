@@ -22,6 +22,15 @@ services/whatsapp-bridge/.wwebjs_auth/
 
 # ─── Daten & Logs ───────────────────────────────────────────────────────────
 data/logs/
+# Live-Instruktionen: werden pro Server gepflegt (Oberflaeche bzw. reflection-Tool)
+# und duerfen NICHT aus dem Repo ueberschrieben werden. Der Update-Pill machte aus
+# ihnen sonst bei jedem Pull einen Merge-Konflikt (Vorfall 2026-07-13 auf ECHT).
+# Die Vorgabe-Fassungen liegen versioniert unter data/instructions_default/ und
+# werden von load_instructions() beim ERSTEN Start kopiert.
+data/instructions/
+data/conv_log.json*
+data/telemetry_stats.json
+data/telemetry_errors.json
 data/memory.json
 data/knowledge_index.json
 data/.secret_key

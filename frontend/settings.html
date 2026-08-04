@@ -2629,19 +2629,33 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <div id="settings-tab-telemetry" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <div id="tele-stat-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:10px;"></div>
-                        <div id="tele-reset-info" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:16px;"></div>
+                        <div id="tele-reset-info" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px;"></div>
+                        <!-- Aufbewahrungsfrist: sagt an EINER Stelle fuer alle Abschnitte,
+                             wie lange Diagnosedaten ueberhaupt vorliegen. Ohne diese Zeile
+                             sieht ein leerer Abschnitt nach "nichts passiert" aus, obwohl
+                             die Eintraege bloss abgelaufen sind. -->
+                        <div id="tele-retention-info" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                            <span id="tele-retention-text"></span>
+                            <button id="tele-retention-run" class="kb-hdr-btn" style="display:none;" data-i18n="telemetry.ret_run">Jetzt bereinigen</button>
+                        </div>
                         <div class="sk-openclaw-section" id="tele-tool-section">
-                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadSpans();})(this)">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadStats();})(this)">
                                 <span class="kb-folder-icon">🔧</span>
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.tool_stats">Tool-Statistiken</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" onclick="event.stopPropagation()">
+                                    <button id="tele-tool-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_tool_title" title="Tool-Statistiken leeren">×</button>
+                                </span>
                                 <span class="kb-folder-arrow">▼</span>
                             </div>
                             <div id="tele-tool-body"><div class="kb-loading">Lade…</div></div>
                         </div>
                         <div class="sk-openclaw-section" style="margin-top:10px;">
-                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadSpans();})(this)">
+                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadStats();})(this)">
                                 <span class="kb-folder-icon">🧠</span>
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.llm_stats">LLM-Statistiken</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" onclick="event.stopPropagation()">
+                                    <button id="tele-llm-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_llm_title" title="LLM-Statistiken leeren">×</button>
+                                </span>
                                 <span class="kb-folder-arrow">▼</span>
                             </div>
                             <div id="tele-llm-body"><div class="kb-loading">Lade…</div></div>
@@ -2668,6 +2682,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadErrors();})(this)">
                                 <span class="kb-folder-icon">❌</span>
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.error_log">Fehler-Log</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" onclick="event.stopPropagation()">
+                                    <button id="tele-errors-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_errors_title" title="Fehler-Log leeren">×</button>
+                                </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
                             <div id="tele-errors-body" style="display:none;"><div class="kb-loading">Lade…</div></div>
@@ -2676,6 +2693,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.telemetryManager)window.telemetryManager._loadSpans();})(this)">
                                 <span class="kb-folder-icon">📋</span>
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.last_spans">Letzte Spans</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" onclick="event.stopPropagation()">
+                                    <button id="tele-spans-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_spans_title" title="Spans leeren">×</button>
+                                </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
                             <div id="tele-spans-body" style="display:none;"><div class="kb-loading">Lade…</div></div>
@@ -3594,7 +3614,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=145"></script>
+    <script src="/static/js/i18n.js?v=146"></script>
     <script src="/static/js/cron.js?v=19"></script>
     <script src="/static/js/context.js?v=6"></script>
     <script src="/static/js/audit.js?v=3"></script>
@@ -3612,7 +3632,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/sap.js?v=2"></script>
     <script src="/static/js/kundenverwaltung.js?v=6"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
-    <script src="/static/js/telemetry.js?v=8"></script>
+    <script src="/static/js/telemetry.js?v=9"></script>
     <script src="/static/js/branding.js?v=22"></script>
     <script src="/static/js/theme.js?v=2"></script>
     <script src="/static/js/security_incidents.js?v=28"></script>

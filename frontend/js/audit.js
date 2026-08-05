@@ -6,6 +6,14 @@
 window.auditManager = new (class JarvisAuditManager {
     constructor() {
         this._initialized = false;
+        // Filter, mit dem die ANGEZEIGTE Liste geholt wurde. Der Zaehler nennt ihn,
+        // und weicht der Feldinhalt davon ab, sagt die Anzeige das ausdruecklich.
+        // Grund (2026-08-05): Chrome trug den Login-Namen per Autofill in das
+        // Benutzer-Feld ein, ohne ein Laden auszuloesen. Die Liste war ungefiltert,
+        // das Feld sah gefiltert aus – und die Anzeige behauptete nichts dazu.
+        // Merkregel im Projekt: eine Anzeige darf keinen Zustand suggerieren,
+        // den sie nicht kennt.
+        this._applied = null;
     }
 
     init() {
@@ -25,6 +33,10 @@ window.auditManager = new (class JarvisAuditManager {
         // Enter in Filter-Feldern löst Laden aus
         ['audit-filter-user', 'audit-filter-tool'].forEach(id => {
             $(id).addEventListener('keydown', e => { if (e.key === 'Enter') this._load(); });
+            // Jede Aenderung am Feld (Tippen, Einfuegen, Autofill mit Ereignis)
+            // aktualisiert den Hinweis, dass die Liste noch zum alten Filter gehoert.
+            ['input', 'change', 'focus'].forEach(ev =>
+                $(id).addEventListener(ev, () => this._renderCount()));
         });
     }
 
@@ -39,23 +51,62 @@ window.auditManager = new (class JarvisAuditManager {
 
         try {
             const r = await fetch(`/api/audit_log?${params}`, { headers: { 'Authorization': 'Bearer ' + (window.authToken || localStorage.getItem('jarvis_token') || '') } });
-            if (!r.ok) { this._notify('Ladefehler: ' + r.status, 'error'); return; }
+            if (!r.ok) {
+                this._notify('Ladefehler: ' + r.status, 'error');
+                // Die sichtbare Liste gehoert weiter zum vorherigen Filter – der
+                // Hinweis darauf muss trotzdem erneuert werden, sonst steht nach
+                // einem Fehlversuch wieder eine Anzeige da, die zum Feldinhalt
+                // nicht passt und nichts dazu sagt.
+                this._renderCount();
+                return;
+            }
             const entries = await r.json();
+            // Erst NACH erfolgreicher Antwort festhalten: bei einem Fehler gehoert
+            // die noch sichtbare Liste weiter zum vorherigen Filter.
+            this._applied = { user, tool };
             this._render(entries);
         } catch (e) {
             this._notify('Netzwerkfehler: ' + e.message, 'error');
+            this._renderCount();   // s.o.: Anzeige und Feldinhalt nicht auseinanderlaufen lassen
+        }
+    }
+
+    /** Zeigt Trefferzahl UND den Filter, mit dem die Liste geholt wurde. */
+    _renderCount(n) {
+        const count = document.getElementById('audit-count');
+        if (!count) return;
+        if (n !== undefined) count._n = n;
+        const anz = count._n || 0;
+        const T = (k, f) => (window.t ? window.t(k) : f);
+        const a = this._applied;
+        let txt = T('telemetry.audit_count', '{n} Einträge').replace(/\{n\}/g, anz);
+        if (a) {
+            const teile = [];
+            if (a.user) teile.push(`${T('telemetry.audit_user_label', 'Benutzer')}: ${a.user}`);
+            if (a.tool) teile.push(`${T('telemetry.audit_tool_label', 'Tool')}: ${a.tool}`);
+            txt += ' · ' + (teile.length
+                ? T('telemetry.audit_filter_on', 'Filter').replace('{f}', teile.join(' · '))
+                : T('telemetry.audit_filter_off', 'ohne Filter'));
+        }
+        count.innerHTML = this._esc(txt);
+        // Weicht der Feldinhalt vom angewandten Filter ab, ist die Liste veraltet.
+        const jetztU = document.getElementById('audit-filter-user')?.value.trim() || '';
+        const jetztT = document.getElementById('audit-filter-tool')?.value.trim() || '';
+        if (a && (jetztU !== a.user || jetztT !== a.tool)) {
+            count.innerHTML += ` <span style="color:var(--warning,#f39c12);">⚠ ${
+                this._esc(T('telemetry.audit_filter_stale', 'Filter geändert – „Anwenden" drücken'))}</span>`;
         }
     }
 
     _render(entries) {
         const tbody = document.getElementById('audit-tbody');
-        const count = document.getElementById('audit-count');
         if (!tbody) return;
 
-        if (count) count.textContent = `${entries.length} Einträge`;
+        this._renderCount(entries.length);
 
         if (!entries.length) {
-            tbody.innerHTML = `<tr><td colspan="6" class="audit-empty">Keine Einträge vorhanden.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="audit-empty">${
+                this._esc(window.t ? window.t('telemetry.audit_empty') : 'Keine Einträge vorhanden.')}</td></tr>`;
             return;
         }
 

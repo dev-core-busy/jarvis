@@ -3110,19 +3110,15 @@ async def api_context_stats(session_id: str = "", user: str = Depends(require_au
     return JSONResponse(agent.get_context_stats(hist, include_session_tokens=own_run))
 
 
-@app.post("/api/context/compress")
-async def api_context_compress(user: str = Depends(require_local_auth)):
-    """Erzwingt sofortige History-Komprimierung. NUR ADMIN.
-
-    Wirkt auf den ZULETZT GELADENEN Kontext des gemeinsamen Hauptagenten
-    (`_current_chat_history`) – das kann die Sitzung eines anderen Benutzers sein.
-    Deshalb (und weil der Knopf nur in der Admin-Oberflaeche existiert) nicht mehr
-    require_auth. Benutzerbezogen arbeiten /api/context/clear und /truncate."""
-    agent = agent_manager.main_agent
-    if not agent:
-        return JSONResponse({"error": "Kein aktiver Agent"}, status_code=404)
-    result = await agent.force_compress()
-    return JSONResponse(result)
+# POST /api/context/compress ist am 2026-08-05 ENTFERNT (Entscheidung des Nutzers).
+# Es erzwang die Komprimierung von `_current_chat_history` – also des ZULETZT
+# GELADENEN Kontexts des geteilten Hauptagenten, und das kann die Sitzung eines
+# ANDEREN Benutzers sein. Ein Admin hätte damit per LLM ein fremdes Gespräch
+# zusammengefasst, ohne zu wissen, welches. Die Oberflaeche dazu (Logs & Debug ->
+# Kontext / History) ist am selben Tag entfallen, ein Aufrufer existierte danach
+# nirgends mehr. Die AUTOMATISCHE Komprimierung ist davon unberuehrt: sie laeuft
+# im Agent-Loop gegen `_compress_threshold` und trifft immer den Verlauf des
+# laufenden Auftrags (Einstellung: KI & System -> System-Einstellungen).
 
 
 @app.post("/api/context/clear")
@@ -3214,25 +3210,16 @@ def _truncate_history_to_user_index(history: list, keep_user_count: int) -> int:
     return removed
 
 
-@app.post("/api/context/truncate")
-async def api_context_truncate(request: Request, user: str = Depends(require_auth)):
-    """
-    Trimmt die Chat-History des Users auf die ersten N User-Nachrichten.
-    Wird für das 'Nachricht editieren'-Feature genutzt: bevor die editierte
-    Frage gesendet wird, löscht der Client alles ab dem Edit-Punkt.
-
-    Body: { "keep_user_count": int }
-    """
-    body = await request.json()
-    keep = int(body.get("keep_user_count", 0))
-    agent = agent_manager.main_agent
-    if not agent:
-        return JSONResponse({"ok": True, "removed": 0, "remaining": 0})
-    history = agent._user_histories.get(user)
-    if history is None:
-        return JSONResponse({"ok": True, "removed": 0, "remaining": 0})
-    removed = _truncate_history_to_user_index(history, keep)
-    return JSONResponse({"ok": True, "removed": removed, "remaining": len(history)})
+# POST /api/context/truncate ist am 2026-08-05 ENTFERNT (Entscheidung des Nutzers).
+# Sein Docstring nannte das „Nachricht editieren"-Feature – das war seit Langem
+# falsch: alle Clients (Web, Windows, Android) kuerzen ueber die WS-Nachricht
+# `truncate_user_msg_index` (Protokoll-Block oben), und die ruft
+# `_truncate_history_to_user_index()` direkt auf. Der HTTP-Endpunkt hatte in
+# keinem Client einen Aufrufer und kuerzte ausserdem nur den SITZUNGSLOSEN Eimer
+# `_user_histories[user]`, nicht den Verlauf einer /chat-Sitzung – fuer das
+# Editieren in /chat war er also gar nicht brauchbar.
+# Die Helferfunktion `_truncate_history_to_user_index()` BLEIBT: sie ist der Kern
+# des WS-Pfades (main.py ~12175).
 
 
 @app.post("/api/context/threshold")
@@ -4133,6 +4120,15 @@ async def get_settings(user: str = Depends(require_auth)):
         "llm_reasoning_effort": config.LLM_REASONING_EFFORT,
         "llm_max_tokens": config.LLM_MAX_TOKENS,
         "docs_retention_days": config.DOCS_RETENTION_DAYS,
+        # Kontext-Komprimierungs-Schwelle: nur zum ANZEIGEN im Feld unter
+        # „System-Einstellungen" (seit 2026-08-05 steht es dort, vorher im
+        # Telemetrie-Reiter). Gespeichert wird weiter ueber
+        # POST /api/context/threshold – nur der setzt auch den laufenden Agenten.
+        # Gelesen wird aus settings.json und NICHT vom Agenten: der entsteht
+        # lazy und ist nach einem Neustart bis zum ersten Auftrag None, das Feld
+        # zeigte dann einen falschen Standardwert (derselbe Fallstrick wie bei
+        # GET /api/context/stats).
+        "compress_threshold": max(4, min(200, int(config.get_setting("compress_threshold") or 30))),
         "agent_api_key": _mask_key(config.AGENT_API_KEY),
         "defaults": config.DEFAULT_PROVIDERS,
         # Auswahlliste fuer die Oberflaeche ("" = Provider-Standard)

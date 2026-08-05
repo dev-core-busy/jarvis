@@ -722,8 +722,9 @@
                 }
 
                 // Polling stoppen wenn weg-navigiert
+                // (contextManager entfiel 2026-08-05 mit dem Abschnitt „Kontext / History";
+                //  er war der einzige 5-Sekunden-Poll im Telemetrie-Reiter.)
                 if (target !== 'vision'    && window.visionManager)   window.visionManager.stop();
-                if (target !== 'telemetry' && window.contextManager)  window.contextManager.stop();
             });
         });
 
@@ -1122,6 +1123,40 @@
                     }
                 });
             }
+            // Kontext-Komprimierungs-Schwelle speichern (einmalig verdrahten).
+            // Grenzen wie im Backend (main.py::api_context_threshold): 4..200.
+            // ANDERER Endpunkt als die Nachbarfelder: /api/context/threshold setzt
+            // den Wert am laufenden Hauptagenten UND in settings.json. Ueber
+            // /api/settings zu speichern haette den Agenten-Teil verdoppelt – und
+            // ein Wert, der erst nach einem Dienstneustart wirkt, sieht wie eine
+            // Einstellung ohne Wirkung aus.
+            const _btnCt = document.getElementById('btn-save-compress-threshold');
+            if (_btnCt && !_btnCt._wired) {
+                _btnCt._wired = true;
+                _btnCt.addEventListener('click', async () => {
+                    const el = document.getElementById('setting-compress-threshold');
+                    const st = document.getElementById('compress-threshold-status');
+                    let v = parseInt(el && el.value, 10);
+                    if (isNaN(v) || v < 4) v = 4;
+                    if (v > 200) v = 200;
+                    if (el) el.value = v;
+                    try {
+                        const r = await fetch('/api/context/threshold', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ threshold: v })
+                        });
+                        const d = await r.json().catch(() => null);
+                        // Auf die Rueckgabe pruefen: der Endpunkt verlangt Admin-Rechte,
+                        // ein 403 darf nicht als Erfolg erscheinen.
+                        if (!r.ok || !d || d.threshold === undefined) throw new Error(r.status);
+                        if (el) el.value = d.threshold;
+                        if (st) { st.textContent = '✓ ' + (window.t ? window.t('profile.save_btn') : 'Gespeichert'); setTimeout(() => { st.textContent = ''; }, 2000); }
+                    } catch (e) {
+                        if (st) st.textContent = '✗';
+                    }
+                });
+            }
             // Vorhaltezeit erzeugter Dokumente (einmalig verdrahten).
             // Grenzen wie im Backend (config.py::_valid_retention): 0 oder 15..90.
             const _retNum = document.getElementById('setting-docs-retention');
@@ -1242,6 +1277,9 @@
                 // Maximale Antwortlaenge (global) ins Eingabefeld
                 const _mtEl = document.getElementById('setting-llm-max-tokens');
                 if (_mtEl) _mtEl.value = data.llm_max_tokens || 8192;
+                // Kontext-Komprimierungs-Schwelle (global) ins Eingabefeld
+                const _ctEl = document.getElementById('setting-compress-threshold');
+                if (_ctEl) _ctEl.value = data.compress_threshold || 30;
                 // Vorhaltezeit: 0 = dauerhaft -> Haken setzen, Feld ausgrauen.
                 // Pruefung auf null/undefined, NICHT auf Falsyness – 0 ist gueltig.
                 const _rN = document.getElementById('setting-docs-retention');

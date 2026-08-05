@@ -1299,6 +1299,26 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
 
 
+                                <!-- Kontext-Komprimierung (global).
+                                     Verschoben 2026-08-05 aus „Logs & Debug -> Kontext / History"
+                                     hierher: der Wert ist eine globale Einstellung fuer ALLE
+                                     Benutzer (settings.json + laufender Hauptagent), keine
+                                     Diagnose-Anzeige. Der Rest jenes Abschnitts ist entfallen
+                                     (Begruendung dort im Kommentar). Gespeichert wird weiter
+                                     ueber POST /api/context/threshold – der Endpunkt setzt den
+                                     Wert am laufenden Agenten UND in settings.json; ein
+                                     Zweitweg ueber /api/settings haette diese Logik verdoppelt. -->
+                                <div class="tuning-group">
+                                    <h4 class="tuning-group-title" data-i18n="profile.section_ctxthr">Kontext-Komprimierung</h4>
+                                    <label style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;" data-i18n="profile.ctxthr_label">Schwellwert (Gesprächseinträge)</label>
+                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                        <input type="number" id="setting-compress-threshold" min="4" max="200" step="2" value="30" style="width:120px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.85rem;">
+                                        <button class="btn-secondary btn-small" id="btn-save-compress-threshold" type="button" style="flex-shrink:0;padding:4px 12px;font-size:0.78rem;" data-i18n="profile.save_btn">Speichern</button>
+                                        <span id="compress-threshold-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
+                                    </div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="profile.ctxthr_hint">Ab wie vielen Gesprächseinträgen der Verlauf eines Chats automatisch zusammengefasst wird, damit er in das Kontextfenster des Modells passt. Ein Eintrag ist eine Frage, eine Antwort oder ein Werkzeug-Ergebnis. Kleinere Werte sparen Token und Kosten, verlieren aber früher Details aus dem Gesprächsanfang; größere Werte behalten mehr, machen jede Anfrage aber teurer und langsamer. Erlaubt sind 4 bis 200 Einträge, Standard ist 30. Der Wert gilt global für alle Benutzer und alle Sitzungen; den aktuellen Füllstand einer Sitzung zeigt die Kontext-Anzeige im Chat.</small>
+                                </div>
+
                                 <!-- Automatische Sicherheitsupdates (System).
                                      Verschoben 2026-07-28 aus Sicherheit -> Systemschutz hierher.
                                      Die IDs sec-unatt-* bleiben, security_incidents.js verdrahtet
@@ -2700,55 +2720,20 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                             <div id="tele-spans-body" style="display:none;"><div class="kb-loading">Lade…</div></div>
                         </div>
-                        <!-- ── Kontext / History ── -->
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
-                            <div class="kb-folder-header" style="cursor:pointer;" onclick="(function(h){var b=h.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';h.querySelector('.kb-folder-arrow').textContent=b.style.display==='none'?'▶':'▼';if(b.style.display!=='none'&&window.contextManager)window.contextManager.init();else if(b.style.display==='none'&&window.contextManager)window.contextManager.stop();})(this)">
-                                <span class="kb-folder-icon">🧩</span>
-                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.context_history">Kontext / History</span>
-                                <span style="margin-left:auto;margin-right:8px;" onclick="event.stopPropagation()">
-                                    <button id="ctx-refresh-btn" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
-                                </span>
-                                <span class="kb-folder-arrow">▶</span>
-                            </div>
-                            <div id="ctx-section-body" style="display:none;padding:10px 0 4px;">
-                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="telemetry.ctx_hint">Zustand des laufenden Hauptagenten. Token-Angaben werden nur aktualisiert, wenn eine Aufgabe aktiv ist.</p>
-                                <div class="kb-stat-grid" id="ctx-stat-grid" style="margin-top:0;">
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-history-entries">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_entries">History-Einträge</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-fills-pct">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_load">Auslastung</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-input-tokens">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_input_tok">Input-Tokens</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-output-tokens">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_output_tok">Output-Tokens</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-total-tokens">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_total_tok">Tokens gesamt</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-hist-tokens">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_hist_tok">History-Tokens (Schätz.)</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-agent-state">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_agent_state">Agent-Status</div></div>
-                                    <div class="kb-stat"><div class="kb-stat-value" id="ctx-threshold-display">—</div><div class="kb-stat-label" data-i18n="telemetry.ctx_threshold">Komprimierungs-Schwelle</div></div>
-                                </div>
-                                <div style="margin-top:10px;">
-                                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-                                        <span class="kb-hint" style="margin:0;" data-i18n="telemetry.ctx_utilization">History-Auslastung</span>
-                                        <span class="kb-hint" id="ctx-fills-label" style="margin:0;">0 / 30 Einträge</span>
-                                    </div>
-                                    <div style="height:6px;background:rgba(var(--fg-rgb),0.08);border-radius:4px;overflow:hidden;">
-                                        <div id="ctx-fills-bar" style="height:100%;width:0%;background:var(--accent);border-radius:4px;transition:width 0.4s;"></div>
-                                    </div>
-                                </div>
-                                <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
-                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:160px;">
-                                        <label class="kb-label" style="margin-bottom:2px;" for="ctx-threshold-input" data-i18n="telemetry.ctx_threshold_label">Schwellwert (History-Einträge)</label>
-                                        <div style="display:flex;gap:6px;">
-                                            <input id="ctx-threshold-input" type="number" min="4" max="200" step="2" value="30" class="kb-input" style="height:28px;font-size:0.8rem;">
-                                            <button id="ctx-threshold-save" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 10px;" data-i18n="common.save">Speichern</button>
-                                        </div>
-                                        <p class="kb-hint" style="margin-top:3px;" data-i18n="telemetry.ctx_threshold_hint">Min: 4 · Max: 200 · Standard: 30 · gilt für alle Benutzer</p>
-                                    </div>
-                                    <div style="flex:0 0 auto;">
-                                        <button id="ctx-compress-btn" class="kb-btn-action" style="height:28px;font-size:0.8rem;padding:0 12px;" data-i18n="telemetry.ctx_compress_btn">🗜️ Jetzt komprimieren</button>
-                                        <button id="ctx-clear-btn" class="kb-btn-danger" style="height:28px;font-size:0.8rem;padding:0 12px;margin-top:6px;" data-i18n="telemetry.ctx_clear_btn">× Verlauf löschen</button>
-                                        <p class="kb-hint" style="margin-top:3px;" id="ctx-compress-result"></p>
-                                    </div>
-                                </div>
-                                <div id="ctx-notification" class="kb-notification" style="display:none;margin-top:8px;"></div>
-                            </div>
-                        </div>
+                        <!-- „Kontext / History" wurde am 2026-08-05 hier ENTFERNT.
+                             Grund: der Abschnitt zeigte und bediente nicht, was er behauptete.
+                             `GET /api/context/stats` liefert ohne `session_id` den SITZUNGSLOSEN
+                             Kontext-Eimer des abfragenden Admins – nicht den eines Chats; die
+                             Token-Kacheln sind agent-weit und werden bei jedem Auftrag
+                             zurueckgesetzt (also die Zahlen des zuletzt gelaufenen, ggf. fremden
+                             Auftrags); „Jetzt komprimieren" wirkte auf `_current_chat_history`,
+                             also auf den ZULETZT GELADENEN – moeglicherweise fremden – Verlauf.
+                             Der Fuellstandsbalken mass damit einen leeren Eimer gegen die globale
+                             Schwelle. Die Kontext-Pille in /chat zeigt denselben Wert
+                             sitzungsbezogen und richtig (`?session_id=`).
+                             Geblieben ist die einzige echte Einstellung darin: der Schwellwert –
+                             er steht jetzt unter „KI & System -> System-Einstellungen", weil er
+                             global fuer alle Benutzer gilt und keine Diagnose ist. -->
 
                         <!-- ── Audit-Log ── -->
                         <div class="sk-openclaw-section" style="margin-top:10px;">
@@ -2762,15 +2747,27 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
                             <div id="audit-section-body" style="display:none;padding:10px 0 4px;">
-                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="telemetry.audit_hint">Jeder Tool-Aufruf des Agenten wird hier protokolliert (max. 10 MB, danach automatische Rotation).</p>
+                                <!-- Der frühere Zusatz „max. 10 MB, danach automatische Rotation" war
+                                     ab 2026-08-04 falsch: die Größen-Rotation ist aus audit_log.py
+                                     entfernt (eine Stückzahl-Schranke hebelt die Aufbewahrungszusage
+                                     aus). Der Text blieb stehen und behauptete sie weiter. -->
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="telemetry.audit_hint">Jeder Tool-Aufruf des Agenten wird hier protokolliert. Was entfernt wird, entscheidet ausschließlich das Alter: Einträge älter als die Aufbewahrungsfrist werden täglich gelöscht. Es gibt keine Größen- oder Mengengrenze.</p>
                                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:flex-end;">
                                     <div class="kb-form-field" style="margin:0;flex:1;min-width:120px;">
                                         <label class="kb-label" style="margin-bottom:2px;" for="audit-filter-user" data-i18n="telemetry.audit_user_label">Benutzer</label>
-                                        <input id="audit-filter-user" type="text" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
+                                        <!-- autocomplete/name: Chrome hielt dieses Feld fuer ein
+                                             Anmelde-Feld („Benutzer" + type=text) und trug beim
+                                             Seitenaufbau den Login-Namen ein, OHNE ein Laden
+                                             auszuloesen – die Liste blieb ungefiltert, das Feld
+                                             sah gefiltert aus (gemeldet 2026-08-05). Der sprechende
+                                             name-Wert nimmt der Heuristik die Grundlage; die
+                                             Anzeige nennt zusaetzlich den wirklich angewandten
+                                             Filter, damit ein solcher Widerspruch sichtbar ist. -->
+                                        <input id="audit-filter-user" type="text" name="audit-log-user-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
                                     </div>
                                     <div class="kb-form-field" style="margin:0;flex:1;min-width:120px;">
                                         <label class="kb-label" style="margin-bottom:2px;" for="audit-filter-tool" data-i18n="telemetry.audit_tool_label">Tool</label>
-                                        <input id="audit-filter-tool" type="text" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
+                                        <input id="audit-filter-tool" type="text" name="audit-log-tool-filter" autocomplete="off" data-i18n-placeholder="common.all" placeholder="Alle" class="kb-input" style="height:28px;font-size:0.8rem;">
                                     </div>
                                     <select id="audit-limit" class="kb-input" style="flex:0 0 auto;width:90px;height:28px;font-size:0.8rem;">
                                         <option value="50">50</option>
@@ -3616,8 +3613,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     </style>
     <script src="/static/js/i18n.js?v=146"></script>
     <script src="/static/js/cron.js?v=19"></script>
-    <script src="/static/js/context.js?v=6"></script>
-    <script src="/static/js/audit.js?v=3"></script>
+    <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
+    <script src="/static/js/audit.js?v=4"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
     <script src="/static/js/skills.js?v=40"></script>
     <script src="/static/js/chatlib.js?v=1"></script>

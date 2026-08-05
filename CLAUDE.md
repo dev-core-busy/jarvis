@@ -723,6 +723,56 @@ Download-Links aus, also griff das Modell zwangsläufig zu `curl`. Der Link
   und ohne verräterischen Content-Type, 302 auf 2FA bzw. Login, 0 Byte, falsche Größe, Toleranz,
   fehlende Metadaten, Pfad-Entschärfung) + live gegen das echte Confluence.
 
+## `2>/dev/null` sperrte Konten (Vorfall + Fix 2026-08-05)
+**Der Vorfall:** Auf ECHT wurde `nexus\rene.pfeiffer` um 17:03 mit `policy:shell-write`
+**gesperrt** – ausgelöst von drei `grep`-Befehlen innerhalb von drei Sekunden, die je eine
+YAML-Datei in `/tmp` durchsuchten und mit `2>/dev/null` das Rauschen unterdrückten. Kein
+Schreibzugriff, keine Umgehung, keine Systemänderung.
+- **Ursache:** `_shell_redirect_writes()` liefert `/dev/null` korrekt als Redirect-Ziel, und
+  `_ldap_redirects_safe()` verlangt, dass **jedes** Ziel unter `/tmp` liegt. `/dev/null` liegt
+  dort nicht → „Schreibziel außerhalb /tmp" → `shell-write` → drei Treffer in
+  `security_autoblock_window` (600 s) bei `security_autoblock_count` (3) → **Konto zu**.
+  `ls -l 2>/dev/null` und `find … 2>/dev/null | head` waren damit ebenfalls gesperrt.
+- **Nachgemessen im Produktiv-Zustand:** von 28 protokollierten `shell-write`-Verstößen waren
+  **15 genau dieses Muster**, verteilt auf **vier** Konten seit dem 24.07. Der Fehler lief also
+  zwölf Tage unbemerkt – die Meldung „Datei-Schreiben nur in /tmp erlaubt" war für einen
+  Benutzer, der nichts geschrieben hat, nicht deutbar.
+- **`_SHELL_DEV_SINKS`** (`/dev/null|stdout|stderr|tty|zero|full`) wird in
+  `_shell_write_targets()` herausgefiltert; der Roh-Parser bleibt wahrheitsgetreu (ein Test hält
+  fest, dass er `/dev/null` weiter meldet) – **die Bewertung eines Ziels gehört in die Policy,
+  nicht in die Zerlegung.** Bewusst eine **Aufzählung und kein `/dev/`-Präfix**: `> /dev/sda`
+  wäre ein Plattenschreibzugriff, `> /dev/mem` ein Speicherzugriff.
+- **Zweiter, unabhängiger Fehler: eine Sandbox-Grenze wurde als Angriff gezählt.** Dieselbe
+  Lehre stand seit dem 2026-07-29 bei `cron_create` („zählte jeder abgelehnte Versuch, sperrte
+  *erinnere mich täglich um 8* beim dritten Mal einen harmlosen Benutzer") – bei `shell-write`
+  war sie nicht angewandt. Jetzt entscheidet `_shell_write_is_attack()`: nur ein Ziel in einem
+  System-/Secret-Bereich (`/etc`, `/root`, `/var`, `/opt`, `.ssh`, `.env`, `settings.json`,
+  `data/chats|documents|logs|instructions`, `scheduled_jobs.json`, …) ist ein Angriffsindiz.
+  Ein relativer Pfad, `~/notiz.txt` oder `/mnt/…` wird **abgewiesen und protokolliert, zählt
+  aber nicht**.
+- **`record_violation(..., escalate=False)`** ist der Weg dafür: der Eintrag bleibt in der
+  Oberfläche sichtbar, trägt aber `soft: True`. **Die Zählung filtert das FELD, nicht den
+  Parameter** (`not e.get("soft")`) – sonst wäre ein bereits gespeicherter weicher Eintrag
+  weiter Futter für eine spätere Sperre. Journal-Marke `GRENZE` statt `VERSTOSS`.
+  Der Dispatch-Standard ist `_viol_soft = False`: ein neuer Deny-Zweig eskaliert wie bisher,
+  fail-closed.
+- **Die Fehlermeldung nennt jetzt das beanstandete Ziel** und sagt ausdrücklich, dass
+  `/dev/null` und `2>&1` erlaubt sind. Vorher stand dort nur „Datei-Schreiben … nur in /tmp",
+  obwohl der Befehl mehrere Ziele haben kann – Modell und Benutzer konnten nicht ableiten, was
+  zu ändern ist, und **wiederholten den Versuch. Drei Wiederholungen sind die Sperre.**
+- **Warum es zwölf Tage niemandem auffiel: die 37 Prüfungen des 2026-07-30-Fixes lagen in einem
+  Wegwerf-Skript, nicht im Repo** (`grep -rn _ldap_redirects_safe tests/` fand nichts). Jetzt
+  **`tests/test_shell_redirects.py`** (68 Prüfungen, ohne fastapi lauffähig: die Funktionen
+  werden per Quelltext aus `agent.py` extrahiert, `backend.config` ist ein Stub – der echte
+  Import würde bei einer Migration die **Live-`settings.json` zurückschreiben**).
+  Enthält den gemeldeten Befehl wörtlich. Gegenprobe: der alte Stand sperrt alle fünf
+  `/dev/null`-Fälle.
+- **Verifiziert:** 68/68 lokal und auf DEV im echten venv, Dienst aktiv, `/settings` HTTP 200,
+  echtes Modul geprüft (`grep … 2>/dev/null` erlaubt & nicht eskalierend, `> /etc/passwd`
+  gesperrt & eskalierend). Konto auf ECHT freigeschaltet (Sicherung
+  `data/security_state.json.bak-20260805-193614`) – **der Code-Fix ist auf ECHT noch nicht
+  ausgerollt.**
+
 ## Vektor-Datenbank (Wissenssuche)
 - **FAISS** (`IndexFlatIP`, normierte Vektoren = Cosine) + **sentence-transformers**
   (`intfloat/multilingual-e5-small`, 384d) – Persistenz: `data/vector_store/faiss_index.bin`
@@ -2025,6 +2075,10 @@ lehrreich, weil zwei naheliegende Verdaechtige falsch waren:
   Ein einzelner Endpunkt mit 0,77 s sieht harmlos aus; neunmal in Serie sind es 7 s.
 
 ## Konventionen
+- **Git:** `git commit` und `git push` NUR auf ausdrückliches Kommando des Nutzers (`c+p`) –
+  niemals aus eigenem Antrieb, auch nicht wenn eine Aufgabe fertig und getestet ist. Fertige
+  Änderungen bleiben im Arbeitsbaum liegen. Der DEV-Deploy zum Testen (`scp` nach
+  `/opt/jarvis` + `systemctl restart`) ist davon unberührt und läuft ohne Rückfrage.
 - **Sprache:** Code-Kommentare und Commit-Messages auf Deutsch
 - **CSS:** Verwende `var(--text-primary)`, `var(--bg-glass)` etc. aus `:root` – keine hardcoded Farben
 - **Frontend:** Kein Build-System, keine Frameworks – reines Vanilla JS

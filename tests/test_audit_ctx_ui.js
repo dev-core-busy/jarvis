@@ -366,6 +366,22 @@ function makeDom(url = 'https://localhost/settings') {
         /api_context_threshold[\s\S]{0,200}require_local_auth/.test(main)
         || /def api_context_threshold\([^)]*require_local_auth/.test(main));
 
+    section('16b) Audit-Tabelle: Kopfzeile ueberlappt die erste Zeile nicht');
+    // Gemeldet 2026-08-05, mit Chrome-Screenshot nachgestellt: die erste Datenzeile
+    // lag UEBER den Kopftexten. Zwei Ursachen zusammen – sticky auf dem <tr> bei
+    // border-collapse: collapse, und ein halbtransparenter Kopf-Hintergrund.
+    // jsdom rechnet kein Layout, geprueft wird deshalb die Regel selbst.
+    const css = read('frontend/css/style.css');
+    const thBlock = (css.match(/\.audit-table th \{[^}]*\}/) || [''])[0];
+    check('sticky sitzt auf .audit-table th', /position:\s*sticky/.test(thBlock), thBlock.slice(0, 80));
+    check('Kopf hat einen DECKENDEN Hintergrund (var(--bg-secondary))',
+          /background-color:\s*var\(--bg-secondary\)/.test(thBlock));
+    check('z-index liegt ueber den Datenzeilen', /z-index:\s*[2-9]/.test(thBlock), thBlock);
+    check('kein sticky mehr auf .audit-table thead tr',
+          !/\.audit-table thead tr \{[^}]*position:\s*sticky/.test(css));
+    check('die alte Toenung bleibt als Gradient ueber der deckenden Basis',
+          /background-image:\s*linear-gradient\(rgba\(var\(--fg-rgb\), 0\.05\)/.test(thBlock));
+
     section('17) app.js: kein Rest des Kontext-Managers');
     const app = read('frontend/js/app.js');
     check('kein contextManager.stop() mehr', !/contextManager\.stop\(\)/.test(app));

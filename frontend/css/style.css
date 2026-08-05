@@ -5072,14 +5072,23 @@ select.input-field {
     font-size: 0.8rem;
 }
 
-.audit-table thead tr {
-    background: rgba(var(--fg-rgb), 0.05);
+/* Kopfzeile bleibt beim Scrollen stehen (der Rahmen hat max-height: 400px).
+   ZWEI Fehler steckten hier und ergaben zusammen die gemeldete Ueberlappung
+   (2026-08-05): `position: sticky` sass auf dem `<tr>` – bei
+   `border-collapse: collapse` bleiben die Zellen dann nicht zuverlaessig beim
+   Kopf, und die durchscrollende Zeile wurde UEBER die Kopftexte gezeichnet.
+   Und der Hintergrund war mit `rgba(..., 0.05)` halbtransparent, sodass die
+   Zeile zusaetzlich durchschien. Richtig ist sticky auf den `th`-Zellen mit
+   DECKENDEM Grund – genau wie `.kbm-table thead th` im selben Projekt.
+   Die alte leichte Toenung bleibt als Gradient-Schicht ueber der deckenden
+   Basis erhalten, damit sich die Optik nicht aendert. */
+.audit-table th {
     position: sticky;
     top: 0;
-    z-index: 1;
-}
-
-.audit-table th {
+    z-index: 2;
+    background-color: var(--bg-secondary);
+    background-image: linear-gradient(rgba(var(--fg-rgb), 0.05),
+                                      rgba(var(--fg-rgb), 0.05));
     padding: 0.5rem 0.75rem;
     text-align: left;
     color: var(--text-secondary);

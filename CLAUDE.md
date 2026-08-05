@@ -2143,6 +2143,22 @@ byte-identische `audit_log.py`/`audit.js` (md5 verglichen).
   (DE+EN + HTML-Fallback). Ein Test prüft, dass „10 MB" nicht zurückkommt und
   `audit_log.py` kein `_MAX_BYTES` hat.
 
+### Nachtrag gleicher Tag: Kopfzeile lag über der ersten Listenzeile
+Gemeldet und mit Chrome-Screenshot (headless, isolierte Seite mit der echten `style.css`)
+nachgestellt: beim Scrollen wurde die erste Datenzeile **über** die Kopftexte gezeichnet.
+**Zwei Fehler in derselben Regel, die zusammen den Effekt ergaben:**
+- `position: sticky` sass auf `.audit-table thead tr` – bei `border-collapse: collapse` bleiben
+  die Zellen dann nicht zuverlässig beim Kopf, und die Datenzeile stapelt darüber.
+- Der Kopf-Hintergrund war `rgba(var(--fg-rgb), 0.05)`, also **halbtransparent**: die Zeile
+  schien zusätzlich durch. Dieselbe Lehre wie bei den Panels (Dokumente, Info-Dateien,
+  Anwesenheit): **was über anderem Inhalt liegt, braucht eine DECKENDE Fläche.**
+Richtig ist sticky auf den **`th`**-Zellen mit `background-color: var(--bg-secondary)` und
+`z-index: 2` – genau so macht es `.kbm-table thead th` (Wissens-Matrix) im selben Projekt; die
+Audit-Tabelle war der einzige Ausreißer (im CSS gegengeprüft). Die frühere leichte Tönung bleibt
+als `linear-gradient`-Schicht **über** der deckenden Basis, damit sich die Optik nicht ändert.
+Verifiziert: Screenshot vorher/nachher in Dunkel **und** Hell, dazu fünf CSS-Prüfungen im
+UI-Test (jsdom rechnet kein Layout – geprüft wird die Regel selbst).
+
 ## „Kontext / History" aus dem Telemetrie-Reiter entfernt (2026-08-05)
 Der Abschnitt zeigte und bediente **nicht, was er behauptete** – auf Entscheidung des Nutzers
 ist er weg; geblieben ist die einzige echte Einstellung darin.
@@ -2359,6 +2375,57 @@ lehrreich, weil zwei naheliegende Verdaechtige falsch waren:
 - **Frontend:** Kein Build-System, keine Frameworks – reines Vanilla JS
 - **Secrets:** `.env` Datei, NICHT in Code committen
 - **numpy:** Muss < 2.1 bleiben (VM hat kein SSE4.2 / X86_V2)
+
+## Dienst wurde beim Neustart per SIGKILL abgeraeumt (Fix 2026-08-05)
+**Der Befund:** Im Journal stand bei jedem zweiten bis dritten Neustart
+`State 'stop-sigterm' timed out. Killing.` + `Failed with result 'timeout'`. Gemessen auf DEV:
+**28 von 154 Stops** in 16 Tagen (18 %). Das sah nach einem Dienstfehler aus und war keiner –
+verdeckte aber echte Fehler im Journal.
+- **Ursache (nachgemessen, nicht vermutet):** `uvicorn` wartet beim Beenden darauf, dass offene
+  Verbindungen von selbst schliessen, und **jeder geoeffnete Browser-Tab haelt einen WebSocket**
+  (`/ws` Agent-Steuerung, `/ws/users`, `/ws/vnc`). Stop **ohne** offene Verbindung: **0,4 s**.
+  Stop **mit einer** offenen WS-Verbindung: **16,1 s**. Dazu kommt, dass
+  `/etc/systemd/system.conf` auf diesem Server `DefaultTimeoutStopSec=5s` setzt (Debian-Vorgabe
+  waere 90 s) – der Dienst hatte also fuenf Sekunden, und die reichen bei einem offenen Tab nicht.
+  Die sauberen Stops lagen bei 0–4 s, also ohnehin dicht an der Grenze; deshalb wirkte es
+  „intermittierend".
+- **Was der Kill wirklich kostet:** SIGKILL trifft den Prozess **vor** dem Shutdown-Hook. Damit
+  fallen `user_sessions.flush()` (bis zu 20 s Anwesenheits-Buchhaltung, siehe dort) und die
+  Sicherung der Lernnotizen aus dem Journal (`flush_pending()`) aus – letzteres laesst beim
+  naechsten Start ein Journal liegen, das dann eingespielt wird und „einen Absturz meldet, der
+  keiner war" (so steht es im Hook selbst).
+- **Drei Aenderungen, die zusammengehoeren:**
+  1. `start_jarvis.sh`: **`--timeout-graceful-shutdown 5`** – uvicorn bricht den
+     Verbindungs-Teardown nach 5 s ab und laeuft dann in den Lifespan-Shutdown (die Hooks laufen
+     also weiterhin). **Nicht mehr als 5 s:** ein laufender Agent-Auftrag endet mit dem Prozess
+     ohnehin, Auftraege dauern Minuten – ein groesserer Wert verlaengert nur jeden Deploy.
+  2. Unit (`deploy/security/jarvis.service` **und** die Alt-Betrieb-Datei `jarvis.service`):
+     **`TimeoutStopSec=30`** – ausdruecklich gesetzt, statt sich auf den systemweiten Standard zu
+     verlassen (der ist pro Server anders; hier 5 s). 5 s Verbindungen + Hooks + Reserve.
+  3. **`Environment=PYTHONUNBUFFERED=1`** – ohne das sind die Hook-Meldungen unsichtbar: stdout
+     ist zur Pipe nach journald blockgepuffert, bei SIGKILL ist der Puffer weg, und selbst bei
+     einem sauberen Stop erschienen `⏹️ Cron-Scheduler gestoppt` / `⏹️ Datei-Watcher gestoppt`
+     nie. Genau diese Zeilen braucht man, um einen haengenden Stop zu beurteilen.
+- **Der systemweite `DefaultTimeoutStopSec=5s` wurde NICHT angefasst** – er betrifft alle Dienste
+  und kann Absicht sein (schnelle Reboots). `jarvis-broker.service` und
+  `whatsapp-bridge.service` sind nachweislich nicht betroffen (0 Timeouts in 16 Tagen).
+- **BEIM AUSROLLEN:** die Unit liegt unter `/etc/systemd/system/jarvis.service` – ein `git pull`
+  aktualisiert sie **nicht**. Also Datei kopieren (bzw. `bash deploy/security/setup_broker.sh`)
+  **und `systemctl daemon-reload`**, sonst gilt weiter der 5-Sekunden-Wert und nur die
+  uvicorn-Haelfte des Fixes wirkt.
+- **Bewusst NICHT gebaut:** die offenen WebSockets beim Beenden aktiv schliessen (`_active_ws`
+  ist vorhanden). Das wuerde den Stop auf ~0,5 s druecken, braucht aber einen eigenen
+  SIGTERM-Handler – der Lifespan-Shutdown laeuft in uvicorn **nach** dem Verbindungs-Teardown,
+  ein Hook kaeme also zu spaet. Fuer fuenf Sekunden Deploy-Zeit nicht angemessen.
+- **Verifiziert auf DEV:** vier Stops/Neustarts mit offener WS-Verbindung → **0 Timeouts, 0
+  SIGKILL**, jedes Mal `Deactivated successfully`; Stopdauer 5,4 s mit offener Verbindung, 0,37 s
+  ohne. Die Hook-Meldungen stehen jetzt im Journal. Dienst aktiv, `/settings` HTTP 200,
+  Diagnose-Drop-in entfernt.
+- **FALLSTRICK bei der Diagnose selbst:** eine Auswertung mit `grep "timed out"` ueber das
+  Journal zaehlt die **Vision-Warnung** `MJPEG-Stream Verbindungsfehler: <urlopen error timed
+  out>` mit – daraus wurden scheinbar 185 statt 28 Timeouts und eine Rate von 59 % statt 18 %.
+  Und das Muster `stop-sigterm timed out` trifft nichts: im Journal steht
+  `State 'stop-sigterm' timed out` **mit Apostrophen**.
 
 ## Update scheitert an Eigentuemerschaft (Vorfall + Fix 2026-07-31)
 **Der Vorfall:** Auf ECHT brach der Update ab mit

@@ -11,11 +11,23 @@ User=jarvis
 Group=jarvis
 WorkingDirectory=/opt/jarvis
 Environment=DISPLAY=:0
+# Ohne das gehen die Meldungen des Shutdown-Hooks verloren: stdout ist in eine
+# Pipe (journald) blockgepuffert, und bei einem SIGKILL ist der Puffer weg.
+# Genau die Zeilen braucht man aber, um einen haengenden Stop zu beurteilen.
+Environment=PYTHONUNBUFFERED=1
 # Port 443/80 ohne root binden
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 ExecStart=/opt/jarvis/start_jarvis.sh
 Restart=on-failure
 RestartSec=5
+# NICHT vom systemweiten Standard abhaengig machen: auf dem Testserver steht in
+# /etc/systemd/system.conf DefaultTimeoutStopSec=5s, und so schnell ist dieser
+# Dienst nicht immer fertig – er baut offene WebSockets ab (bis
+# --timeout-graceful-shutdown 5 in start_jarvis.sh) und schreibt danach im
+# Shutdown-Hook Anwesenheitsdaten und Lernnotizen weg. Gemessen: 0,4 s ohne
+# offene Verbindung, 16,1 s mit einer offenen WS-Verbindung; 28 von 154 Stops
+# endeten deshalb in SIGKILL, ohne dass die Hooks liefen.
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

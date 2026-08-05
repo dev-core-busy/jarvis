@@ -62,6 +62,7 @@ from backend.security import get_certificate_path
 from backend import security_guard
 from backend import user_sessions as _user_sessions
 from backend import documents as _documents
+from backend import attachments as _attachments
 
 # ─── App erstellen ────────────────────────────────────────────────────
 JARVIS_VERSION = "0.9.1"
@@ -2797,6 +2798,38 @@ async def startup_documents_retention():
         asyncio.create_task(_loop())
     except Exception as e:
         print(f"[documents] Startup-Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
+async def startup_attachment_cleanup():
+    """Anhang-Arbeitskopien in /tmp altern lassen (Vorgabe 30 min).
+
+    Die Kopie muss fuer `jarvis_sandbox` lesbar sein, und weil ALLE Domain-Benutzer
+    als dieser eine OS-Benutzer laufen, kann jeder die Anhaenge aller anderen lesen
+    (auf DEV nachgestellt 2026-08-05: `cat` und `ls /tmp` gelingen). Dateirechte
+    koennen das nicht loesen – 0600 sperrte den eigenen Lauf aus. Bis eine echte
+    Trennung existiert (privates /tmp pro Lauf via Mount-Namespace), begrenzt dieser
+    Hook wenigstens die LEBENSDAUER: auf DEV lagen Arbeitsdateien von mehreren Tagen
+    in /tmp.
+
+    **Frist statt "loeschen nach dem Lauf":** der /tmp-Pfad steht im Chat-Verlauf und
+    damit im Kontext der Folgeanfragen – ein sofortiges Loeschen laesst "und jetzt
+    Spalte C" mit `No such file or directory` scheitern.
+
+    Erster Lauf sofort (raeumt den Altbestand nach einem Neustart ab), danach alle
+    fuenf Minuten. `JARVIS_ATTACH_TTL_MIN=0` schaltet es ab.
+    """
+    async def _loop():
+        while True:
+            try:
+                await asyncio.to_thread(_attachments.cleanup)
+            except Exception as e:
+                print(f"[Anhang] Aufraeumen fehlgeschlagen: {e}", flush=True)
+            await asyncio.sleep(300)
+    try:
+        asyncio.create_task(_loop())
+    except Exception as e:
+        print(f"[Anhang] Startup-Fehler: {e}", flush=True)
 
 
 @app.on_event("startup")

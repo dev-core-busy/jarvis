@@ -339,6 +339,17 @@ def _shell_redirect_writes(cmd: str) -> tuple[list[str], int]:
     return targets, unparsed
 
 
+# Wie viel eines abgewiesenen Aufrufs protokolliert wird. Vorher 120 (detail) bzw.
+# 200 (args) Zeichen – zu wenig, um einen Vorfall zu BEURTEILEN: bei sieben von 28
+# `shell-write`-Einträgen auf ECHT endete der gespeicherte Befehl mitten im
+# Redirect-Ziel (`2>/dev` statt `2>/dev/null`) oder in einem offenen
+# Anfuehrungszeichen. Ein Administrator, der eine Konto-Sperre pruefen soll, kann
+# daraus nicht entscheiden, ob es ein Angriff war – dieselbe Lehre wie beim
+# LLM-Verlauf (2026-08-04: "ein halber Prompt ist schlimmer als kein Prompt").
+# Verstoesse sind selten (79 Eintraege in vier Wochen), der Platz kostet nichts.
+_VIOL_DETAIL_MAX = 2000
+_VIOL_TASK_MAX = 1000
+
 # Geraete-Senken: ein Redirect DORTHIN erzeugt keine Datei und veraendert nichts.
 # `2>/dev/null` ist das Muster, das JEDES Modell an einen Suchbefehl anhaengt, um
 # Rauschen zu unterdruecken – es wurde bis 2026-08-05 als "Schreibziel ausserhalb
@@ -2256,6 +2267,13 @@ KRITISCH – Autonomie-Regeln:
                     result = f"Zugriff verweigert: Das Tool '{name}' steht Netzwerk-Benutzern nicht zur Verfuegung."
                     _ldap_blocked = True
                     _viol = ("blocked-tool", name)
+                    # IMMER weich: welches Werkzeug aufgerufen wird, entscheidet das
+                    # MODELL, nicht der Benutzer. Auf ECHT standen fuenf solche
+                    # Verstoesse in fuenf Konten – alle `spawn_agent`, keiner davon
+                    # angefordert (die Anfragen waren normale Arbeitsauftraege).
+                    # Dieselbe Begruendung wie bei cron_create (2026-07-29): der
+                    # Versuch steht im Journal, als Verstoss gilt er nicht.
+                    _viol_soft = True
                 elif name == "filesystem":
                     # Pfad-Confinement: Schreiben nur /tmp+data/documents, Lesen nur
                     # in Wissens-/Arbeitsverzeichnissen; Secrets/System/Root gesperrt.
@@ -2265,6 +2283,12 @@ KRITISCH – Autonomie-Regeln:
                         result = f"Zugriff verweigert: {_why}."
                         _ldap_blocked = True
                         _viol = ("fs-deny", f"{args.get('action')} {args.get('path')}")
+                        # Nur ein Secret-/System-Ziel ist ein Angriffsindiz. Ein
+                        # GERATENER Pfad ist keines: das Modell probiert bei
+                        # "suche in allen CSV-Dateien" der Reihe nach /opt, /var,
+                        # /home, '.' durch – vier Fehlversuche in einer Minute
+                        # sperrten am 29.07.2026 auf ECHT ein Konto.
+                        _viol_soft = not _sbx.fs_target_sensitive(str(args.get("path", "")))
                 elif name == "shell_execute":
                     _cmd = args.get("command", "")
                     # Heredoc-Koerper (z.B. eingebetteter Python-Code) NICHT als Shell-
@@ -2275,13 +2299,13 @@ KRITISCH – Autonomie-Regeln:
                         print(f"[AGENT] BLOCKED shell command for Domain-User '{_uname}': {_cmd[:80]}", flush=True)
                         result = "Zugriff verweigert: Dieser Shell-Befehl ist für Netzwerk-Benutzer nicht erlaubt (keine System-Änderungen)."
                         _ldap_blocked = True
-                        _viol = ("shell-forbidden", _cmd[:120])
+                        _viol = ("shell-forbidden", _cmd[:_VIOL_DETAIL_MAX])
                     elif not _shok:
                         # Verschleierung (base64/eval/pipe-in-shell) oder Secret-/Root-Pfad
                         print(f"[AGENT] BLOCKED shell for Domain-User '{_uname}' ({_shwhy}): {_cmd[:80]}", flush=True)
                         result = f"Zugriff verweigert: {_shwhy}."
                         _ldap_blocked = True
-                        _viol = ("shell-illegal", _cmd[:120])
+                        _viol = ("shell-illegal", _cmd[:_VIOL_DETAIL_MAX])
                     # Nur noch der Parser entscheidet. Der frueher vorgeschaltete
                     # Detektor-Regex uebersah ausserdem '&>datei' (das '&' fiel in
                     # seine Lookbehind-Ausnahme) – ein Schreibziel ausserhalb /tmp
@@ -2298,7 +2322,7 @@ KRITISCH – Autonomie-Regeln:
                                   "erlaubt – Dateien nur im temporären Arbeitsbereich /tmp anlegen "
                                   "(z.B. > /tmp/skript.py). Umleitungen nach /dev/null und 2>&1 sind erlaubt.")
                         _ldap_blocked = True
-                        _viol = ("shell-write", _cmd[:120])
+                        _viol = ("shell-write", _cmd[:_VIOL_DETAIL_MAX])
                         # Nur ein System-/Secret-Ziel ist ein Angriffsindiz und darf zur
                         # Konto-Sperre beitragen (siehe _shell_write_is_attack).
                         _viol_soft = not _shell_write_is_attack(_cmd_sh)
@@ -2315,9 +2339,9 @@ KRITISCH – Autonomie-Regeln:
                     except Exception:
                         _exempt = False
                     _vr = _sg.record_violation(_uname, "chat", _viol[0], _viol[1],
-                                               snippet=_json.dumps(args, ensure_ascii=False)[:200],
+                                               snippet=_json.dumps(args, ensure_ascii=False)[:_VIOL_DETAIL_MAX],
                                                tool=name,
-                                               task=getattr(self, '_current_task', '')[:300],
+                                               task=getattr(self, '_current_task', '')[:_VIOL_TASK_MAX],
                                                ip=getattr(self, '_current_client_ip', ''),
                                                client_type=getattr(self, '_current_client_type', ''),
                                                exempt=_exempt, escalate=not _viol_soft)

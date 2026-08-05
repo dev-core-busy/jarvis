@@ -334,6 +334,14 @@ def _autoblock_cfg() -> dict:
     }
 
 
+# Aufbewahrte Textlaenge je Vorfall. Der frueher hier stehende 200/300-Schnitt war
+# der Grund, warum sich mehrere Sperren im Nachhinein nicht mehr beurteilen liessen
+# (Befehl mitten im Redirect-Ziel abgeschnitten). Die Datei bleibt klein, weil je
+# Konto nur die letzten 100 Vorfaelle gehalten werden.
+_DETAIL_MAX = 2000
+_TASK_MAX = 1000
+
+
 def record_violation(user: str, channel: str, kind: str, detail: str = "",
                      snippet: str = "", exempt: bool = False,
                      tool: str = "", task: str = "", ip: str = "",
@@ -355,8 +363,8 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
     Rueckgabe: {'blocked': bool, 'count': int}."""
     ts = int(time.time())
     entry = {"ts": ts, "channel": channel, "method": "policy", "pattern": kind,
-             "detail": (detail or "")[:200], "snippet": (snippet or "")[:300],
-             "tool": tool or "", "task": (task or "")[:300],
+             "detail": (detail or "")[:_DETAIL_MAX], "snippet": (snippet or "")[:_DETAIL_MAX],
+             "tool": tool or "", "task": (task or "")[:_TASK_MAX],
              "ip": ip or "", "client_type": client_type or ""}
     if not escalate:
         entry["soft"] = True

@@ -112,6 +112,12 @@ _SYSTEM_DENY_PREFIX = ("/root", "/boot", "/proc", "/sys")
 # App-interne, sensible Pfade unterhalb des Projekts (relativ)
 _APP_DENY_REL = (
     ".env", "settings.json", "data/settings.json", "data/memory.json",
+    # data/chats = Chat-Verlaeufe ALLER Benutzer. Stand bisher nur in PRIVATE_DIRS
+    # (OS-Rechte 0750), war hier aber nicht als sensibel gefuehrt: `authorize_fs`
+    # verweigerte den Zugriff nur mit der Begruendung "nicht im Arbeitsbereich".
+    # Seit 2026-08-05 macht das einen Unterschied – die Begruendung entscheidet,
+    # ob ein abgewiesener Zugriff als Angriffsindiz zaehlt (fs_target_sensitive).
+    "data/chats",
     "data/instructions", "data/logs", "data/conv_log.jsonl",
     "data/audit_log.jsonl", "certs",
     # Zeitgesteuerte Auftraege/Trigger ALLER Benutzer + Sicherheits-Zustand:
@@ -247,18 +253,71 @@ def authorize_fs(action: str, path: str) -> tuple[bool, str]:
     return True, ""
 
 
+def fs_target_sensitive(path: str) -> bool:
+    """True, wenn der Pfad ein Secret-/System-/App-internes Ziel ist.
+
+    Fuer die Frage, ob ein abgewiesener filesystem-Zugriff ein ANGRIFFSINDIZ ist:
+    ``read /opt/jarvis/data/settings.json`` ist eines, ``list /opt/nxis`` (ein Pfad,
+    den das Modell geraten hat) nicht. Ohne diese Unterscheidung sperrte eine einzige
+    Anfrage wie "suche in allen CSV-Dateien" ein Konto, weil das Modell vier
+    Verzeichnisse durchprobierte (nachgewiesen 29.07.2026, ECHT).
+    Fail-closed: laesst sich der Pfad nicht aufloesen, gilt er als sensibel."""
+    try:
+        return is_sensitive(_resolve(path))
+    except Exception:  # noqa: BLE001
+        return True
+
+
 # ── Shell: Verschleierung + Secret-/Root-Pfade (Domain-Nutzer) ───────────────
+# Zwei Regexes, weil sie unterschiedlich geprueft werden MUESSEN:
+#  * SHELL_OBFUSCATION – ueberall im Befehl (auch in Anfuehrungszeichen): eine
+#    base64-Nutzlast steckt fast immer in einem Argument.
+#  * SHELL_EXEC_WORDS – nur AUSSERHALB von Anfuehrungszeichen: das sind Woerter,
+#    die als Befehl gefaehrlich und als Suchbegriff voellig harmlos sind.
+#    `grep -r "source" /tmp/doku.txt` galt bis 2026-08-05 als "verschleierte
+#    Ausfuehrung" – dieselbe Einstufung wie `curl … | bash`.
 SHELL_OBFUSCATION = re.compile(
     r'\bbase64\b[^\n|]*(?:-d|--decode)|\bbase32\b[^\n|]*-d|'
     r'\bxxd\b[^\n]*\s-r|\buudecode\b|\bopenssl\s+enc\b[^\n]*-d|'
+    # Pipe-in-Shell, aber NICHT das logische ODER: '||' bestand aus zwei Treffern
+    # fuer '\|', deshalb galt `python3 -c "import x" || python3 -c "import y"`
+    # (das Standardmuster fuer Faehigkeitspruefungen) als Verschleierung.
+    r'(?<!\|)\|(?!\|)\s*(?:bash|sh|zsh|dash|python3?|perl|ruby|php|node)\b',
+    re.IGNORECASE,
+)
+SHELL_EXEC_WORDS = re.compile(
     r'\beval\b|\bsource\b|(?:^|\s)\.\s+/|'
-    r'\|\s*(?:bash|sh|zsh|dash|python3?|perl|ruby|php|node)\b|'
     r'\b(?:bash|sh|zsh|dash)\s+-c\b',
     re.IGNORECASE,
 )
+
+
+def strip_quoted(cmd: str) -> str:
+    """Ersetzt Inhalte in Anfuehrungszeichen durch Leerzeichen.
+
+    Damit trifft eine Wort-Regel nur den BEFEHL, nicht einen Suchbegriff oder
+    Dateinamen. **Fail-closed:** ist ein Anfuehrungszeichen nicht geschlossen, wird
+    der Originaltext zurueckgegeben – dann prueft die Regel wieder alles.
+    (Die Umgehung ``ev"a"l`` bleibt moeglich, war es aber vorher genauso: die Regex
+    trifft den zerlegten Namen ohnehin nicht. Die harte Grenze ist der OS-Benutzer.)"""
+    out, i, n = [], 0, len(cmd or "")
+    while i < n:
+        ch = cmd[i]
+        if ch in "\"'":
+            k = cmd.find(ch, i + 1)
+            if k == -1:
+                return cmd                      # offenes Anfuehrungszeichen -> alles pruefen
+            out.append(" ")
+            i = k + 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
 SHELL_SECRET_PATHS = re.compile(
     r'\.env\b|settings\.json\b|memory\.json\b|auth_state\.json\b|credentials\.json\b|'
     r'scheduled_jobs\.json\b|file_watchers\.json\b|security_state\.json\b|'
+    # data/chats: fremde Chat-Verlaeufe (in der Shell zusaetzlich per 0750 gesperrt)
+    r'data/chats\b|'
     r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'
     r'/etc/shadow\b|/etc/gshadow\b|/etc/sudoers|'
     r'\.key\b|\.pem\b|\.crt\b|\.p12\b|\.pfx\b|\.jks\b|'
@@ -271,7 +330,7 @@ def authorize_shell(cmd: str) -> tuple[bool, str]:
     """Zusatzpruefung fuer shell_execute (nur Domain-Nutzer), ergaenzt die
     bestehenden Deny-Muster in agent.py."""
     cmd = cmd or ""
-    if SHELL_OBFUSCATION.search(cmd):
+    if SHELL_OBFUSCATION.search(cmd) or SHELL_EXEC_WORDS.search(strip_quoted(cmd)):
         return False, "verschleierte/dekodierte Ausführung (base64, eval, pipe-in-shell) ist gesperrt"
     if SHELL_SECRET_PATHS.search(cmd):
         return False, "Zugriff auf ein geschütztes Verzeichnis/eine Secret-Datei ist gesperrt"

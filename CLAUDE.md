@@ -773,6 +773,79 @@ Schreibzugriff, keine Umgehung, keine Systemänderung.
   `data/security_state.json.bak-20260805-193614`) – **der Code-Fix ist auf ECHT noch nicht
   ausgerollt.**
 
+### Die Durchsicht der ganzen Verstoßliste (gleicher Tag)
+Auf Anweisung des Nutzers wurden danach **alle 79 Vorfälle** auf ECHT einzeln bewertet (Regel →
+protokollierter Befehl → Anfrage) und die Erkennungsregeln selbst geprüft. Ergebnis: **57 der 79
+Einträge waren keine Angriffsindizien**, und im Journal stehen seit dem 09.07. **zehn**
+Auto-Sperren (nicht eine – die übrigen waren zwischendurch manuell entsperrt worden, deshalb
+stand nur eine in `blocked`). Vier davon sind zweifelsfreie Fehlalarme.
+- **`||` wurde als Pipe gelesen** (`shell-illegal`, die schwerste Einstufung
+  „verschleierte Ausführung"): `\|\s*(?:bash|sh|python3?|…)` traf das zweite `|` eines
+  logischen ODER. Damit galt `python3 -c "import pdfplumber" || python3 -c "import PyPDF2"` –
+  das Standardmuster für Fähigkeitsprüfungen – als Verschleierung, ebenso
+  `test -f x || sh x` und `which node || node -v`. Fix: `(?<!\|)\|(?!\|)`.
+- **`source`/`eval`/`bash -c` trafen SUCHBEGRIFFE:** `grep -r "source" /tmp/doku.txt` war
+  „verschleierte Ausführung". Deshalb sind die Regeln jetzt **getrennt**: `SHELL_OBFUSCATION`
+  (Dekodierer + Pipe-in-Shell) prüft den **ganzen** Befehl – eine base64-Nutzlast steckt fast
+  immer in einem Argument –, `SHELL_EXEC_WORDS` nur `strip_quoted(cmd)`. **`strip_quoted()` ist
+  fail-closed:** bei offenem Anführungszeichen gibt es den Originaltext zurück, dann prüft die
+  Regel wieder alles. Die Umgehung `ev"a"l` bleibt möglich, war es vorher aber genauso.
+- **`blocked-tool` ist jetzt IMMER weich.** Alle fünf Einträge auf ECHT (fünf verschiedene
+  Konten) waren `spawn_agent` – **kein Benutzer hat das verlangt**, das Modell greift von sich
+  aus danach. Wer für die Werkzeugwahl eines LLM gesperrt wird, versteht die Sperre nicht und
+  kann sie auch nicht vermeiden.
+- **`fs-deny` ist weich, außer bei Secret-/System-Zielen** (`sandbox.fs_target_sensitive()`,
+  fail-closed). 20 der 39 Einträge waren vom Modell **geratene Pfade**: bei „suche in allen
+  CSV-Dateien, die mit nxis_Connectors…" probierte es `/opt`, `/var/nxis`, `/home`, `.` durch –
+  vier Fehlversuche in einer Minute, Konto gesperrt (29.07.).
+- **Nebenbefund, mitbehoben: `data/chats` stand nicht in `_APP_DENY_REL`.** Es war nur über
+  `PRIVATE_DIRS` (OS-Rechte 0750) geschützt, `authorize_fs` verweigerte den Zugriff mit der
+  Begründung „nicht im Arbeitsbereich" statt „sensibel". Ab jetzt macht das einen Unterschied –
+  ein Zugriff auf **fremde Chat-Verläufe** wäre sonst als „geratener Pfad" weich eingestuft
+  worden. Zusätzlich in `SHELL_SECRET_PATHS`. Gegengeprüft: `data/knowledge` und
+  `data/documents` bleiben lesbar.
+- **Die Protokollgrenzen waren zu klein, um eine Sperre zu BEURTEILEN** (`_VIOL_DETAIL_MAX`
+  2000 statt 120/200, `_VIOL_TASK_MAX` 1000 statt 300). Bei sieben der 28 `shell-write`-Einträge
+  endete der gespeicherte Befehl mitten im Redirect-Ziel (`2>/dev` statt `2>/dev/null`) oder in
+  einem offenen Anführungszeichen – **ich konnte sie bei der Durchsicht nicht bewerten, ein
+  Administrator kann es auch nicht.** Dieselbe Lehre wie am 2026-08-04 beim LLM-Verlauf, hier
+  aber mit einer Kontosperre am Ende. Kosten: 79 Vorfälle in vier Wochen, je Konto nur die
+  letzten 100 – die Datei wuchs von 48 auf 55 KB.
+- **`deploy/security/reclassify_violations.py`** bewertet den Altbestand nach denselben Regeln
+  neu und setzt `soft` + `soft_reason`. **Es löscht nichts und ändert keinen Text** – das
+  Protokoll bleibt vollständig und in der Oberfläche sichtbar, die Einträge zählen nur nicht
+  mehr zur Auto-Sperre. Nötig, weil die Sperrprüfung über ein Zeitfenster **zurückblickt**:
+  ohne Reklassifizierung hätten alte Fehlalarme weiter zu neuen Sperren beigetragen.
+  - **Die Regeln werden per Quelltext aus `agent.py`/`sandbox.py` GELADEN, nicht nachgebaut** –
+    ein Nachbau würde beim nächsten Regel-Fix auseinanderlaufen und genau die Einträge
+    verschonen, die dann neu als Fehlalarm gelten.
+  - **Trockenlauf ist die Vorgabe**, `--apply` schreibt (mit Sicherung, Eigentümer/Modus der
+    Zieldatei werden übernommen), zweiter Lauf ist idempotent (`0 neu markiert`).
+  - **War der protokollierte Text schon am alten Deckel, steht das in der Begründung**
+    („[Text war gekuerzt – Bewertung anhand des Ausschnitts]"). Ohne diesen Zusatz liest sich
+    „Fehlalarm" wie eine gesicherte Aussage, obwohl der entscheidende Teil fehlt.
+  - **`--soft-entry <ts>` für Fälle, die keine Regel erkennen kann.** Genau einer: 28.07.,
+    **03:00**, `nexus\peter.sachs`, `git pull && systemctl restart jarvis.service`,
+    protokollierte Anfrage „leider gar nicht" – das ist der Cron-Vorfall vom 28.07.
+    (`system_auto_update` lief unter der Identität des letzten Chat-Nutzers). Die Ursache ist
+    mit der Actor-Bindung behoben, der falsch zugeschriebene Verstoß zählte aber weiter in
+    seinem Konto. **Automatisch erkennen wäre Raten**, deshalb eine ausdrückliche
+    Administrator-Entscheidung mit Begründung im Eintrag.
+- **Gesperrte Konten werden NICHT automatisch entsperrt** – das bleibt `/api/security/unblock`
+  bzw. die Oberfläche. Ein Skript, das im Vorbeigehen Konten freischaltet, ist eine
+  Sicherheitsentscheidung ohne Entscheider.
+- **Zur Einordnung:** `security_autoblock_*` ist auf ECHT nicht gesetzt (Standard 3 Verstöße /
+  600 s) und **`ad_admin_users` ist leer** – niemand ist `exempt`, jedes Konto kann sich
+  aussperren.
+- **Verifiziert:** 118/118 (`tests/test_shell_redirects.py` – erweitert um `||`/Suchbegriff,
+  `strip_quoted` fail-closed, `fs_target_sensitive`, und das Reklassifizierungs-Skript
+  end-to-end inkl. Idempotenz, Sicherung, `--soft-entry` und Kürzungs-Hinweis) lokal und auf
+  DEV im echten venv, Dienst aktiv, `/settings` HTTP 200. Auf ECHT angewandt: **57 von 79
+  Einträgen** markiert (56 regelbasiert + der Cron-Einzelfall), Kontrolllauf `0 neu markiert`,
+  Datei valides JSON mit `jarvis:jarvis 0640`, Originaltexte unangetastet, Dienst aktiv,
+  `/portal` HTTP 200. Weiter hart: 19 `fs-deny` auf Secret-Ziele + 3 `shell-illegal` auf
+  `/root`/`settings.json`. Sicherung `data/security_state.json.bak-20260805-195956`.
+
 ## Vektor-Datenbank (Wissenssuche)
 - **FAISS** (`IndexFlatIP`, normierte Vektoren = Cosine) + **sentence-transformers**
   (`intfloat/multilingual-e5-small`, 384d) – Persistenz: `data/vector_store/faiss_index.bin`

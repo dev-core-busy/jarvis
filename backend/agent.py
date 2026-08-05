@@ -233,6 +233,65 @@ _LDAP_SHELL_FORBIDDEN = re.compile(
     r'tee\s)',
     re.IGNORECASE,
 )
+# Trenner, hinter denen ein NEUER Befehl beginnt (Befehlsposition).
+_CMD_SPLIT = re.compile(r'(?:\|\|?|&&?|;|\n|\$\(|`|\()')
+# Woerter, die vor dem eigentlichen Befehl stehen duerfen, ohne die Befehlsposition
+# zu verschieben. Ohne diese Liste wuerde `sudo systemctl restart x` oder
+# `find … | xargs rm -rf` nicht mehr erkannt.
+_CMD_WRAPPERS = re.compile(
+    r'^(?:sudo|doas|nohup|time|command|exec|nice|ionice|stdbuf|setsid|xargs|'
+    r'env(?:\s+[A-Za-z_][A-Za-z0-9_]*=\S*)*|timeout(?:\s+[\d.]+[smhd]?)?)\s+',
+    re.IGNORECASE,
+)
+
+
+def _forbidden_command_hit(cmd: str) -> str:
+    """Sucht ein verbotenes Verb an einer BEFEHLSPOSITION; Rueckgabe = Treffer oder "".
+
+    **Warum nicht einfach `_LDAP_SHELL_FORBIDDEN.search(cmd)`:** das traf das Verb
+    irgendwo im Text – also auch in einem Suchbegriff oder Dateinamen. Gemessen am
+    2026-08-05:
+
+        grep "systemctl restart" /tmp/journal.txt   -> Treffer 'systemctl restart'
+        grep -rn "rm -rf" /tmp/skripte/             -> Treffer 'rm'
+        grep -i passwd /tmp/export.csv              -> Treffer 'passwd'
+        echo "kein chown hier"                      -> Treffer 'chown'
+
+    Jeder davon ist ein reiner Lesebefehl, und jeder zaehlte als
+    Sicherheitsverstoss – drei in zehn Minuten sperren ein Konto. Es ist dieselbe
+    Fehlerklasse, die am selben Tag in `SHELL_OBFUSCATION` behoben wurde
+    (`grep -r "source" …` galt als verschleierte Ausfuehrung).
+
+    Zwei Stufen: erst Anfuehrungszeichen leeren (`sandbox.strip_quoted`, fail-closed),
+    dann jedes Befehls-Segment einzeln **am Anfang** pruefen (`match`, nicht `search`).
+    Restrisiko: ein Wrapper, der nicht in `_CMD_WRAPPERS` steht, verdeckt das Verb.
+    Vertretbar, weil diese Schicht Tiefenverteidigung ist – die harte Grenze ist der
+    unprivilegierte OS-Benutzer, der `rm`/`systemctl` auf Systempfaden ohnehin nicht
+    ausfuehren darf. Fail-closed: schlaegt die Zerlegung fehl, gilt der alte,
+    breitere Test.
+    """
+    try:
+        from backend import sandbox as _sb
+        text = _sb.strip_quoted(cmd or "")
+    except Exception:  # noqa: BLE001
+        m = _LDAP_SHELL_FORBIDDEN.search(cmd or "")
+        return m.group(0) if m else ""
+    for seg in _CMD_SPLIT.split(text):
+        seg = seg.strip().lstrip("({ ")
+        # Wrapper wiederholt abstreifen: `sudo nohup rm -rf …`
+        for _ in range(4):
+            neu = _CMD_WRAPPERS.sub("", seg, count=1)
+            if neu == seg:
+                break
+            seg = neu.strip()
+        if not seg:
+            continue
+        m = _LDAP_SHELL_FORBIDDEN.match(seg)
+        if m:
+            return m.group(0)
+    return ""
+
+
 # Schreib-Redirects werden GEPARST, nicht per Regex erkannt: siehe
 # _shell_redirect_writes(). Die beiden fruehreren Pattern (_LDAP_SHELL_WRITE_REDIRECT
 # fuer "schreibt ueberhaupt" und _REDIRECT_TARGETS fuer "wohin") widersprachen sich
@@ -373,6 +432,23 @@ def _shell_write_targets(cmd: str) -> tuple[list[str], int]:
     return [t for t in targets if t not in _SHELL_DEV_SINKS], unparsed
 
 
+def _resolved_target(t: str) -> str:
+    """Loest ein Redirect-Ziel auf (Symlinks, ``..``, ``~``) – oder "" bei Fehler.
+
+    **Warum das noetig ist:** die Pruefung verglich nur den TEXT auf ein
+    ``/tmp/``-Praefix. ``> /tmp/harmlos.txt`` galt damit als erlaubt, auch wenn
+    ``harmlos.txt`` ein Symlink auf ``/etc/passwd`` ist (nachgestellt 2026-08-05).
+    `authorize_fs` loest fuer das filesystem-Werkzeug seit immer auf, die
+    Shell-Policy nicht – genau die Asymmetrie, die `sandbox.py` im Kopf als
+    geschlossen beschreibt ("Symlinks werden aufgeloest").
+    """
+    try:
+        from backend import sandbox as _sb
+        return str(_sb._resolve(t))
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _ldap_redirects_safe(cmd: str) -> bool:
     """True, wenn kein Schreib-Redirect in eine Datei ausserhalb von /tmp geht.
 
@@ -380,11 +456,20 @@ def _ldap_redirects_safe(cmd: str) -> bool:
     erzeugen, aber keine System-/App-Dateien schreiben. **Kein Datei-Ziel = in Ordnung**
     (z.B. ``2>&1`` oder ``2>/dev/null``); ein Ziel, das sich nicht lesen laesst, gilt
     weiter als unsicher (fail-closed – sonst waere ein bewusst zerlegtes Ziel ein Umweg).
+    Geprueft wird das AUFGELOESTE Ziel (siehe _resolved_target), damit ein Symlink in
+    /tmp kein Umweg ist. Relative Ziele loesen gegen das Arbeitsverzeichnis auf und
+    bleiben damit abgewiesen wie bisher.
     Erwartet einen bereits Heredoc-bereinigten Befehl (siehe _strip_heredocs)."""
     targets, unparsed = _shell_write_targets(cmd)
     if unparsed:
         return False
-    return all((t == "/tmp" or t.startswith("/tmp/")) and ".." not in t for t in targets)
+    for t in targets:
+        rp = _resolved_target(t)
+        if not rp:                                  # nicht aufloesbar -> fail-closed
+            return False
+        if rp != "/tmp" and not rp.startswith("/tmp/"):
+            return False
+    return True
 
 
 # Ziele, bei denen ein abgewiesener Schreib-Redirect ein ANGRIFFSINDIZ ist (System-,
@@ -415,7 +500,18 @@ def _shell_write_is_attack(cmd: str) -> bool:
     weiter gesperrt, aber ein kaputtes Anfuehrungszeichen ist kein Beweis)."""
     try:
         targets, _unparsed = _shell_write_targets(cmd)
-        return any(_SHELL_WRITE_ATTACK_TARGET.match(t) for t in targets)
+        for t in targets:
+            if _SHELL_WRITE_ATTACK_TARGET.match(t):
+                return True
+            # Symlink-Umweg (`> /tmp/link` -> /etc/passwd) IST ein Angriffsindiz.
+            # Nur bei ABSOLUTEN Zielen nachschauen: ein relatives `> out.txt` loest
+            # gegen das Arbeitsverzeichnis (/opt/jarvis) auf und waere sonst
+            # ploetzlich ein "Angriff", obwohl es nur ein vergessener Pfad ist.
+            if t.startswith("/"):
+                rp = _resolved_target(t)
+                if rp and rp != t and _SHELL_WRITE_ATTACK_TARGET.match(rp):
+                    return True
+        return False
     except Exception:  # noqa: BLE001
         return False
 
@@ -2295,9 +2391,12 @@ KRITISCH – Autonomie-Regeln:
                     # Redirects fehlinterpretieren -> nur die Shell-Struktur pruefen.
                     _cmd_sh = _strip_heredocs(_cmd)
                     _shok, _shwhy = _sbx.authorize_shell(_cmd)
-                    if _LDAP_SHELL_FORBIDDEN.search(_cmd):
-                        print(f"[AGENT] BLOCKED shell command for Domain-User '{_uname}': {_cmd[:80]}", flush=True)
-                        result = "Zugriff verweigert: Dieser Shell-Befehl ist für Netzwerk-Benutzer nicht erlaubt (keine System-Änderungen)."
+                    _forb = _forbidden_command_hit(_cmd_sh)
+                    if _forb:
+                        print(f"[AGENT] BLOCKED shell command for Domain-User '{_uname}' (Verb: {_forb!r}): {_cmd[:80]}", flush=True)
+                        result = (f"Zugriff verweigert: '{_forb.strip()}' ist für Netzwerk-Benutzer nicht erlaubt "
+                                  "(keine System-Änderungen). Lesende Befehle sind möglich – ein solches Wort "
+                                  "in Anführungszeichen (z.B. als Suchbegriff) ist ebenfalls erlaubt.")
                         _ldap_blocked = True
                         _viol = ("shell-forbidden", _cmd[:_VIOL_DETAIL_MAX])
                     elif not _shok:

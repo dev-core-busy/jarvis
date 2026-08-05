@@ -336,6 +336,78 @@ subprocess.run([sys.executable, str(_script), "--file", str(_p2), "--apply"],
 _e = json.loads(_p2.read_text())["violations"]["u2"][0]
 check("gekuerzt" in (_e.get("soft_reason") or ""), "gekuerzter Text wird als unsicher gekennzeichnet")
 
+
+# ── 7. Verbotene Verben nur an Befehlsposition (Fix 2026-08-05, Teil 2) ──────
+print("\n7. _forbidden_command_hit: Verb vs. Suchbegriff")
+for _n in ("_LDAP_SHELL_FORBIDDEN", "_CMD_SPLIT", "_CMD_WRAPPERS"):
+    m = re.search(r'\n(' + _n + r'\s*=\s*re\.compile\(.*?\n\))', _src, re.S)
+    assert m, f"{_n} nicht gefunden"
+    exec(m.group(1), _ns)
+m = re.search(r'\ndef _forbidden_command_hit\(.*?(?=\ndef |\n# ──|\Z)', _src, re.S)
+exec(m.group(0), _ns)
+hit = _ns["_forbidden_command_hit"]
+
+# Muss ERLAUBT sein: das Verb ist Suchbegriff, Dateiname oder Argument.
+for c in ['grep "systemctl restart" /tmp/journal.txt',
+          'grep -rn "rm -rf" /tmp/skripte/',
+          'grep -i passwd /tmp/export.csv',
+          'echo "kein chown hier"',
+          'python3 /tmp/analyse.py --mode apt',
+          'cat /tmp/anleitung_chmod.txt',
+          "grep 'dd if=' /tmp/log.txt",
+          'find /tmp -name "*passwd*"',
+          'ls -l /tmp/tee_ausgabe.txt']:
+    check(hit(c) == "", f"erlaubt: {c[:58]!r} (Treffer: {hit(c)!r})")
+
+# Muss GESPERRT bleiben: das Verb steht an einer Befehlsposition.
+for c in ['rm -rf /tmp/x',
+          'chmod 777 /tmp/x',
+          'systemctl restart jarvis.service',
+          'sudo systemctl restart jarvis.service',
+          'apt-get install foo',
+          'pip install requests',
+          'cd /tmp && rm -rf x',
+          'ls /tmp; rm -rf /tmp/x',
+          'test -f /tmp/x || rm /tmp/x',
+          'find /tmp -name x | xargs rm -f',
+          'echo x | tee /tmp/y',
+          'nohup sudo reboot',
+          'true && dd if=/dev/zero of=/tmp/x',
+          'cat /tmp/a > /tmp/b; chown jarvis /tmp/b',
+          'passwd',
+          '(rm -rf /tmp/x)',
+          'timeout 5 rm -rf /tmp/x',
+          'env FOO=1 rm -rf /tmp/x']:
+    check(hit(c) != "", f"gesperrt: {c[:58]!r}")
+
+# Fail-closed: kaputte Anfuehrungszeichen -> strip_quoted gibt das Original zurueck,
+# die Pruefung laeuft dann ueber den vollen Text.
+check(hit('rm -rf "offen') != "", "offenes Anfuehrungszeichen bleibt gesperrt")
+
+# ── 8. Symlink-Aufloesung der Redirect-Ziele ────────────────────────────────
+print("\n8. Redirect-Ziele werden aufgeloest")
+_lnkdir = Path(_tmp) / "lnk"
+_lnkdir.mkdir(exist_ok=True)
+_evil = _lnkdir / "harmlos.txt"
+if not _evil.exists():
+    _evil.symlink_to("/etc/passwd")
+# Ein Symlink AUSSERHALB /tmp ist ohnehin gesperrt; entscheidend ist einer IN /tmp.
+_tmplink = Path("/tmp") / "jarvis_test_symlink_ziel"
+try:
+    if _tmplink.is_symlink() or _tmplink.exists():
+        _tmplink.unlink()
+    _tmplink.symlink_to("/etc/passwd")
+    check(not safe(f"echo boese > {_tmplink}"), "Symlink in /tmp auf /etc/passwd ist gesperrt")
+    check(attack(f"echo boese > {_tmplink}"), "Symlink-Umweg zaehlt als Angriffsindiz")
+    _tmplink.unlink()
+except OSError as e:
+    print(f"  SKIP Symlink in /tmp nicht anlegbar ({e})")
+# Echte /tmp-Datei bleibt erlaubt, relatives Ziel bleibt abgewiesen (nicht eskalierend)
+check(safe("echo x > /tmp/normal.txt"), "echte /tmp-Datei weiter erlaubt")
+check(not safe("echo x > relativ.txt"), "relatives Ziel weiter abgewiesen")
+check(not attack("echo x > relativ.txt"), "relatives Ziel eskaliert NICHT (loest nach /opt/jarvis auf)")
+check(safe("grep x /tmp/a 2>/dev/null"), "Geraete-Senke wird nicht aufgeloest/abgewiesen")
+
 # ── 6. Quelltext-Wache ──────────────────────────────────────────────────────
 print("\n6. Verdrahtung in agent.py")
 check("escalate=not _viol_soft" in _src, "record_violation bekommt escalate= mitgegeben")

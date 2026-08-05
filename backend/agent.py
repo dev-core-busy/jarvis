@@ -339,18 +339,74 @@ def _shell_redirect_writes(cmd: str) -> tuple[list[str], int]:
     return targets, unparsed
 
 
+# Geraete-Senken: ein Redirect DORTHIN erzeugt keine Datei und veraendert nichts.
+# `2>/dev/null` ist das Muster, das JEDES Modell an einen Suchbefehl anhaengt, um
+# Rauschen zu unterdruecken – es wurde bis 2026-08-05 als "Schreibziel ausserhalb
+# /tmp" gewertet. Damit war ein reines `grep … 2>/dev/null` gesperrt, und drei
+# solche Befehle in zehn Minuten sperrten das KONTO (Vorfall 2026-08-05, ECHT).
+# **Bewusst eine Aufzaehlung und KEIN /dev/-Praefix:** `> /dev/sda` waere ein
+# Plattenschreibzugriff, `> /dev/mem` ein Speicherzugriff – die duerfen weiter
+# auffallen.
+_SHELL_DEV_SINKS = frozenset({
+    "/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/zero", "/dev/full",
+})
+
+
+def _shell_write_targets(cmd: str) -> tuple[list[str], int]:
+    """Wie _shell_redirect_writes(), aber ohne Geraete-Senken (siehe _SHELL_DEV_SINKS).
+
+    Damit hat der Aufrufer nur noch die Ziele vor sich, die wirklich eine Datei
+    anlegen oder ueberschreiben. Der Parser selbst bleibt unveraendert wahrheitsgetreu –
+    die Bewertung, was ein Ziel BEDEUTET, gehoert in die Policy, nicht in die Zerlegung."""
+    targets, unparsed = _shell_redirect_writes(cmd)
+    return [t for t in targets if t not in _SHELL_DEV_SINKS], unparsed
+
+
 def _ldap_redirects_safe(cmd: str) -> bool:
     """True, wenn kein Schreib-Redirect in eine Datei ausserhalb von /tmp geht.
 
     LDAP-Benutzer duerfen temporaere Skripte/Ausgaben fuer die Dokumentenverarbeitung
     erzeugen, aber keine System-/App-Dateien schreiben. **Kein Datei-Ziel = in Ordnung**
-    (z.B. ``2>&1``); ein Ziel, das sich nicht lesen laesst, gilt weiter als unsicher
-    (fail-closed – sonst waere ein bewusst zerlegtes Ziel ein Umweg).
+    (z.B. ``2>&1`` oder ``2>/dev/null``); ein Ziel, das sich nicht lesen laesst, gilt
+    weiter als unsicher (fail-closed – sonst waere ein bewusst zerlegtes Ziel ein Umweg).
     Erwartet einen bereits Heredoc-bereinigten Befehl (siehe _strip_heredocs)."""
-    targets, unparsed = _shell_redirect_writes(cmd)
+    targets, unparsed = _shell_write_targets(cmd)
     if unparsed:
         return False
     return all((t == "/tmp" or t.startswith("/tmp/")) and ".." not in t for t in targets)
+
+
+# Ziele, bei denen ein abgewiesener Schreib-Redirect ein ANGRIFFSINDIZ ist (System-,
+# App- und Secret-Bereiche). Alles andere – ein relativer Pfad, das Home-Verzeichnis,
+# ein Ausgabeordner – ist ein Benutzer, der die Sandbox-Grenze nicht kennt.
+_SHELL_WRITE_ATTACK_TARGET = re.compile(
+    r'^(?:/etc/|/root|/boot/|/sys/|/proc/|/dev/|/usr/|/bin/|/sbin/|/lib/|/var/|'
+    r'/opt/|/srv/|/home/[^/]+/\.ssh|.*/\.ssh/|.*/\.env\b|.*/settings\.json\b|'
+    r'.*/data/(?:chats|documents|logs|instructions|vector_store)/|'
+    r'.*/(?:scheduled_jobs|file_watchers|security_state|auth_state)\.json\b)',
+    re.IGNORECASE,
+)
+
+
+def _shell_write_is_attack(cmd: str) -> bool:
+    """True, wenn ein abgewiesener Schreib-Redirect auf einen System-/App-Bereich zeigt.
+
+    **Warum diese Unterscheidung noetig ist:** `security_guard.record_violation()`
+    sperrt ein Konto ab drei Verstoessen in zehn Minuten. Zaehlte JEDER abgewiesene
+    Redirect, sperrt ein Benutzer sich mit drei harmlosen Befehlen selbst aus – genau
+    das ist am 2026-08-05 auf ECHT passiert (`grep … 2>/dev/null`, dreimal in drei
+    Sekunden). Dieselbe Lehre steht seit dem 2026-07-29 bei `cron_create`: abgewiesen
+    wird viel, als VERSTOSS gilt nur das Angriffsindiz.
+
+    Der Befehl wird unabhaengig davon abgewiesen und protokolliert – hier geht es
+    ausschliesslich um die Frage, ob er zur Konto-Sperre beitraegt.
+    Fail-safe: ein unlesbares Ziel zaehlt NICHT als Angriff (ein zerlegtes Ziel ist
+    weiter gesperrt, aber ein kaputtes Anfuehrungszeichen ist kein Beweis)."""
+    try:
+        targets, _unparsed = _shell_write_targets(cmd)
+        return any(_SHELL_WRITE_ATTACK_TARGET.match(t) for t in targets)
+    except Exception:  # noqa: BLE001
+        return False
 
 # Tools, die Informationen AUS DEM INTERNET holen – fuer Benutzer ohne Internet-
 # Zugang gesperrt. Google (Cloud) zaehlt als Internet. Jira/Confluence sind
@@ -2189,6 +2245,10 @@ KRITISCH – Autonomie-Regeln:
             _t0 = _time.monotonic()
             _ldap_blocked = False
             _viol = None   # (kind, detail) eines sicherheitsrelevanten Deny -> Eskalation
+            # True = protokollieren, aber NICHT zur Konto-Sperre zaehlen (Sandbox-Grenze
+            # statt Angriffsindiz). Vorgabe False: ein neuer Deny-Zweig eskaliert wie
+            # bisher, es sei denn er setzt das Flag ausdruecklich.
+            _viol_soft = False
             if not _privileged:
                 from backend import sandbox as _sbx
                 if name in _BLOCKED_TOOLS_FOR_LDAP and not _reminder_exempt(name, _uname):
@@ -2227,11 +2287,21 @@ KRITISCH – Autonomie-Regeln:
                     # seine Lookbehind-Ausnahme) – ein Schreibziel ausserhalb /tmp
                     # kam damit ungeprueft durch.
                     elif not _ldap_redirects_safe(_cmd_sh):
-                        print(f"[AGENT] BLOCKED shell write-redirect for Domain-User '{_uname}': {_cmd[:80]}", flush=True)
-                        result = ("Zugriff verweigert: Datei-Schreiben via Shell ist für Netzwerk-Benutzer nur "
-                                  "im temporären Arbeitsbereich /tmp erlaubt (z.B. > /tmp/skript.py).")
+                        # Das beanstandete ZIEL nennen: die alte Meldung sprach pauschal
+                        # von "Datei-Schreiben", obwohl der Befehl nur ein Ziel von vielen
+                        # hatte – Modell und Benutzer konnten daraus nicht ableiten, was
+                        # zu aendern ist, und wiederholten den Versuch (drei Wiederholungen
+                        # = Konto-Sperre).
+                        _bad = ", ".join(_shell_write_targets(_cmd_sh)[0][:3]) or "unlesbares Ziel"
+                        print(f"[AGENT] BLOCKED shell write-redirect for Domain-User '{_uname}' (Ziel: {_bad}): {_cmd[:80]}", flush=True)
+                        result = (f"Zugriff verweigert: Schreiben nach '{_bad}' ist für Netzwerk-Benutzer nicht "
+                                  "erlaubt – Dateien nur im temporären Arbeitsbereich /tmp anlegen "
+                                  "(z.B. > /tmp/skript.py). Umleitungen nach /dev/null und 2>&1 sind erlaubt.")
                         _ldap_blocked = True
                         _viol = ("shell-write", _cmd[:120])
+                        # Nur ein System-/Secret-Ziel ist ein Angriffsindiz und darf zur
+                        # Konto-Sperre beitragen (siehe _shell_write_is_attack).
+                        _viol_soft = not _shell_write_is_attack(_cmd_sh)
 
             # Sicherheitsrelevanten Verstoss protokollieren + ggf. Auto-Sperre.
             # (NICHT die reine Internet-/Feature-Gating-Sperre unten.)
@@ -2250,7 +2320,7 @@ KRITISCH – Autonomie-Regeln:
                                                task=getattr(self, '_current_task', '')[:300],
                                                ip=getattr(self, '_current_client_ip', ''),
                                                client_type=getattr(self, '_current_client_type', ''),
-                                               exempt=_exempt)
+                                               exempt=_exempt, escalate=not _viol_soft)
                     if _vr.get("blocked"):
                         result = ("🚫 Konto gesperrt: wiederholte sicherheitsrelevante Zugriffsversuche "
                                   "wurden erkannt. Bitte wende dich an einen lokalen Administrator.")

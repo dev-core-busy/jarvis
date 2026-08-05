@@ -337,17 +337,29 @@ def _autoblock_cfg() -> dict:
 def record_violation(user: str, channel: str, kind: str, detail: str = "",
                      snippet: str = "", exempt: bool = False,
                      tool: str = "", task: str = "", ip: str = "",
-                     client_type: str = "") -> dict:
+                     client_type: str = "", escalate: bool = True) -> dict:
     """Protokolliert einen Richtlinien-Verstoss und sperrt den Account ab Schwelle.
     exempt=True (lokale/Admin-Konten) -> nur protokollieren, nie sperren.
     Fuer aussagekraeftiges Logging werden zusaetzlich Tool, ausloesende Anfrage
     (task/Prompt), IP und Client-Typ festgehalten.
+
+    ``escalate=False`` = **weiche** Ablehnung: wird protokolliert und bleibt in der
+    Oberflaeche sichtbar, sperrt aber nicht und **zaehlt auch spaeter nicht mit**
+    (Feld ``soft``). Gedacht fuer Sandbox-Grenzen, die ein Benutzer normal nicht
+    kennen kann – ein abgewiesener Werkzeug-Aufruf ist kein Angriffsindiz.
+    Anlass: am 2026-08-05 sperrte sich auf ECHT ein Benutzer mit drei harmlosen
+    ``grep … 2>/dev/null`` selbst aus (Grund ``policy:shell-write``).
+    **Der Filter unten prueft das Feld, nicht den Parameter** – damit zaehlen auch
+    bereits gespeicherte weiche Einträge nicht mehr als Futter fuer eine spaetere
+    Sperre.
     Rueckgabe: {'blocked': bool, 'count': int}."""
     ts = int(time.time())
     entry = {"ts": ts, "channel": channel, "method": "policy", "pattern": kind,
              "detail": (detail or "")[:200], "snippet": (snippet or "")[:300],
              "tool": tool or "", "task": (task or "")[:300],
              "ip": ip or "", "client_type": client_type or ""}
+    if not escalate:
+        entry["soft"] = True
     blocked_now = False
     with _lock:
         state = _load()
@@ -357,8 +369,9 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
         lst.append(entry)
         allv[key] = lst[-100:]
         cfg = _autoblock_cfg()
-        if not exempt and user and cfg["enabled"] and user not in state.get("blocked", {}):
-            recent = [e for e in allv[key] if ts - e["ts"] <= cfg["window"]]
+        if escalate and not exempt and user and cfg["enabled"] and user not in state.get("blocked", {}):
+            recent = [e for e in allv[key]
+                      if ts - e["ts"] <= cfg["window"] and not e.get("soft")]
             if len(recent) >= cfg["count"]:
                 blk = state.setdefault("blocked", {})
                 blk[user] = {
@@ -370,7 +383,7 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
                 }
                 blocked_now = True
         _save(state)
-    tag = "AUTO-BLOCK" if blocked_now else "VERSTOSS"
+    tag = "AUTO-BLOCK" if blocked_now else ("GRENZE" if not escalate else "VERSTOSS")
     print(f"[SecurityGuard] {tag} ({kind}) [{channel}/{user}] {(detail or '')[:80]}", flush=True)
     return {"blocked": blocked_now, "count": len(allv.get(user or "?", []))}
 

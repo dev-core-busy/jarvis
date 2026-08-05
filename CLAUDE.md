@@ -846,6 +846,117 @@ stand nur eine in `blocked`). Vier davon sind zweifelsfreie Fehlalarme.
   `/portal` HTTP 200. Weiter hart: 19 `fs-deny` auf Secret-Ziele + 3 `shell-illegal` auf
   `/root`/`settings.json`. Sicherung `data/security_state.json.bak-20260805-195956`.
 
+### Nachtrag gleicher Tag: verbotene Verben nur an Befehlsposition + Symlink-Auflösung
+Zwei Punkte aus der Nachfrage „ist das noch so sicher wie vorher".
+- **`_LDAP_SHELL_FORBIDDEN` hatte dieselbe Fehlalarm-Klasse wie die Verschleierungs-Regel –
+  und eskaliert HART.** Gemessen: `grep "systemctl restart" /tmp/journal.txt` (Treffer
+  `systemctl restart`), `grep -rn "rm -rf" /tmp/skripte/` (`rm`), `grep -i passwd
+  /tmp/export.csv` (`passwd`), `echo "kein chown hier"` (`chown`). Alles reine
+  Lesebefehle, drei in zehn Minuten hätten ein Konto gesperrt.
+  **`_forbidden_command_hit()`** prüft jetzt zweistufig: `sandbox.strip_quoted()` leert
+  Anführungszeichen, dann wird jedes Befehls-Segment (`_CMD_SPLIT`: `|`, `||`, `&&`, `;`,
+  Zeilenumbruch, `$(`, Backtick, `(`) **am Anfang** geprüft (`match`, nicht `search`).
+  - **`_CMD_WRAPPERS` ist der Grund, warum `match` nicht naiv ist:** `sudo`, `nohup`,
+    `xargs`, `env VAR=x`, `timeout 5`, `nice`, … werden zuvor abgestreift (bis zu viermal),
+    sonst wäre `sudo systemctl restart x` und `find … | xargs rm -f` **nicht mehr** erkannt.
+    Getestet sind beide Richtungen (18 Muss-gesperrt-Fälle).
+  - Restrisiko benannt: ein Wrapper, der nicht in der Liste steht, verdeckt das Verb.
+    Vertretbar, weil diese Schicht Tiefenverteidigung ist – die harte Grenze ist der
+    unprivilegierte OS-Benutzer. Fail-closed: schlägt die Zerlegung fehl, gilt der alte
+    breitere Test; ein offenes Anführungszeichen lässt `strip_quoted` den Originaltext
+    zurückgeben, also greift die Regel wieder überall.
+  - Die Meldung nennt jetzt **das getroffene Verb** und sagt ausdrücklich, dass dasselbe
+    Wort als Suchbegriff in Anführungszeichen erlaubt ist.
+- **Redirect-Ziele werden AUFGELÖST** (`_resolved_target` → `sandbox._resolve`). Vorher war
+  es ein Textvergleich auf `/tmp/`: `echo x > /tmp/harmlos.txt` galt als erlaubt, auch wenn
+  `harmlos.txt` ein Symlink auf `/etc/passwd` ist (auf DEV nachgestellt und im Test
+  festgehalten). `authorize_fs` löst für das filesystem-Werkzeug seit immer auf – die
+  Shell-Policy nicht, genau die Asymmetrie, die der Modulkopf von `sandbox.py` als
+  geschlossen beschreibt.
+  - **Ein Symlink-Umweg zählt zusätzlich als Angriffsindiz** (`_shell_write_is_attack`
+    prüft den aufgelösten Pfad **nur bei absoluten Zielen**): ein relatives `> out.txt`
+    löst nach `/opt/jarvis/out.txt` auf und wäre sonst plötzlich ein „Angriff", obwohl es
+    nur ein vergessener Pfad ist. Genau dafür gibt es einen Test.
+  - Nicht aufflösbares Ziel = unsicher (fail-closed), Geräte-Senken werden vorher
+    herausgefiltert und gar nicht aufgelöst.
+- **Verifiziert:** 152/152 lokal und auf DEV im echten venv (`_forbidden_command_hit`
+  live: Suchbegriff frei, `systemctl restart` trifft), Dienst aktiv, `/settings` HTTP 200.
+- **Bewusst NICHT gebaut** (Entscheidung des Nutzers): eine zweite, höhere Schwelle für
+  weiche Grenzen als Enumerations-Bremse, ein Ablauf für Auto-Sperren samt Admin-Meldung.
+  **Damit bleibt offen:** für systematisches Durchprobieren (Pfade, Redirect-Ziele) gibt es
+  keine Bremse mehr – es wird protokolliert, nicht unterbrochen.
+
+## Isolation der Domain-Benutzer: ein geteilter Sandbox-Benutzer (Stand 2026-08-05)
+Gemessen auf DEV, damit die Grenze nicht geschätzt ist:
+- `jarvis_sandbox` ist `uid=997`, **einzige Gruppe ist die eigene** – nicht in `jarvis`.
+  Damit ist die Trennung **Dienst ↔ Sandbox intakt**: `data/documents` und `data/chats`
+  (0750 `jarvis:jarvis`), `settings.json`, `.env` sind für Shell-Befehle unerreichbar.
+- **Die Trennung Benutzer ↔ Benutzer existiert in `/tmp` nicht.** `/tmp` ist 1777, und eine
+  vom Backend abgelegte Anhang-Arbeitskopie entsteht mit umask 0022, also **0644**.
+  Nachgestellt: `runuser -u jarvis_sandbox -- cat /tmp/anhang_probe…` liefert den Inhalt,
+  `ls /tmp` listet 110 Einträge. Da **alle** Domain-Benutzer als derselbe OS-Benutzer
+  laufen, kann jeder die Anhänge und Zwischendateien aller anderen lesen.
+- **Dateirechte können das nicht lösen:** die Kopie MUSS für `jarvis_sandbox` lesbar sein,
+  sonst kann der Agent den Anhang nicht mit pandas/openpyxl verarbeiten (das ist der
+  dokumentierte Grund für die Kopie). Bei einem gemeinsamen Benutzer ist „lesbar für den
+  Sandbox-Benutzer" gleichbedeutend mit „lesbar für jeden Domain-Benutzer".
+- **Ein OS-Benutzer pro Person ist NICHT der empfohlene Weg** (ausdrücklich verworfen):
+  lokale Konten je AD-Benutzer bedeuten Anlegen/Löschen im Gleichlauf mit dem Verzeichnis,
+  Home-Verzeichnisse, Aufräumen von Waisen – und die Broker-Op `sandbox_exec` müsste ihre
+  harte Validierung (`jarvis_sandbox*`) auf beliebige uids aufweiten. Vor allem löst es das
+  eigentliche Problem nicht: `/tmp` bliebe gemeinsam (1777), ein privates `/tmp` bräuchte
+  man trotzdem.
+- **Der billigere und wirksamere Weg ist ein privates `/tmp` pro Lauf** – `systemd-run
+  --uid=jarvis_sandbox -p PrivateTmp=yes -p NoNewPrivileges=yes --pipe --wait` oder
+  `bwrap --tmpfs /tmp` mit Bind-Mount von `data/knowledge` (ro). Kein neuer Benutzer, keine
+  Verwaltung. **Der Aufwand liegt nicht in der Isolation, sondern in den Übergaben:**
+  Anhang-Kopien (main.py) und Ergebnisdateien (`agent.py::_deliver_docs` holt sie aus
+  `/tmp`) müssten über ein pro-Lauf-Verzeichnis außerhalb des privaten `/tmp` laufen –
+  sonst ist die Datei beim Prozessende weg und der Download-Chip bleibt aus.
+- **Sofortmaßnahme GEBAUT (2026-08-05): `backend/attachments.py` + `startup_attachment_cleanup`.**
+  Begrenzt die Lebensdauer der Arbeitskopien auf **30 Minuten** (`JARVIS_ATTACH_TTL_MIN`,
+  `0` = aus, Deckel 7 Tage). Erster Lauf beim Start (räumt den Altbestand nach einem Neustart
+  ab), danach alle fünf Minuten im Thread. Das verkleinert das Fenster von „bis zum Reboot"
+  (auf DEV lagen Dateien von mehreren Tagen) auf die Frist – **die gleichzeitige Sichtbarkeit
+  während eines Laufs bleibt.**
+  - **FRIST, nicht „löschen nach dem Lauf".** Der Hinweistext mit dem /tmp-Pfad steht im
+    Chat-Verlauf und geht in den Kontext der Folgeanfragen ein: wer die Datei direkt nach dem
+    Lauf entfernt, lässt „und jetzt Spalte C" mit `No such file or directory` scheitern – genau
+    die Verarbeitung, die die Kopie ermöglichen soll. CLAUDE.md warnt an anderer Stelle
+    ausdrücklich davor, diese Kopie zu entfernen; ein Test hält fest, dass der Anhang-Block
+    selbst **kein** `unlink()` macht.
+  - **Vier Schranken, damit nie etwas Fremdes getroffen wird:** Name muss genau
+    `anhang_<12 Hex>_` sein (kein breites `anhang_*` – in /tmp liegen fremde Dateien), nur
+    direkte Kinder von /tmp, **`lstat` statt `stat`** (ein Symlink auf `/etc/passwd` würde sonst
+    als „alte Datei" entfernt), und der Eigentümer muss der eigene Benutzer sein.
+  - `ttl_minutes()` ist eine **Funktion**, keine Modulkonstante (gleiche Begründung wie
+    `documents.retention_days()`).
+  - **Verifiziert:** 24 Tests (`tests/test_attachment_cleanup.py`: Frist, sechs Nicht-Treffer-
+    Namen, Verzeichnis, Symlink, `0`=aus, Tippfehler, Deckel, fehlendes Verzeichnis, Verdrahtung)
+    + live auf DEV mit zwei echten Kopien: die zwei Stunden alte war nach dem Neustart weg
+    (`[Anhang] 1 Arbeitskopie(n) nach 30 min entfernt`), die junge blieb.
+- **`/tmp/<benutzer>/` mit 0700 ist KEIN Ausweg** (auf DEV geprüft, damit es niemand erneut
+  versucht): `drwx------ jarvis_sandbox` plus Datei 0600 – ein zweiter Lauf liest sie trotzdem,
+  weil er dieselbe uid hat. **Dateirechte sind für dieses Problem die falsche Ebene.**
+- **Eine eigene GRUPPE pro Benutzer funktioniert dagegen** (ebenfalls gemessen):
+  `drwxrwx--- jarvis:jarvis_u_alice` (Owner ist das Backend, nicht der Sandbox-Benutzer) +
+  `runuser -u jarvis_sandbox -g jarvis_u_alice`. Der fremde Lauf bekommt „Keine Berechtigung"
+  **auch auf eine Datei, deren Owner er selbst ist** – ihm fehlt das x-Bit auf dem Verzeichnis,
+  genau wie bei `data/chats`. Drei Bedingungen: Verzeichnis-Owner `jarvis` (sonst `chmod 777`
+  durch den Lauf selbst), **Gruppen ohne Mitglieder** (sonst wechselt `sg` einfach hinüber – ein
+  gut gemeintes `usermod -aG` hebt den Schutz auf, ohne dass etwas kaputt aussieht), und
+  `sandbox_exec` müsste `-g` akzeptieren.
+- **`$TMPDIR` ist die Vorarbeit für JEDE Variante:** der Agent arbeitet strukturell direkt in
+  `/tmp` – `tools/shell.py:126` (`tempfile.NamedTemporaryFile(..., dir='/tmp')` für jedes
+  Python-Skript), `tools/shell.py:180` (`cwd = "/tmp"`), und `MPLCONFIGDIR=/tmp/.mpl-$(id -u)`
+  ist für alle Domain-Benutzer identisch, weil sie dieselbe uid haben. Erst wenn diese Stellen
+  auf ein pro-Lauf-Verzeichnis zeigen, wirkt Isolation überhaupt; die Wahl der Methode ist
+  danach klein. **Keine Variante löst**, dass Läufe sich bei gleicher uid per `ps` sehen und
+  Signale senden können (dafür bräuchte es einen PID-Namespace).
+- **Der Namespace-Umbau steht auf der Todo-Liste** (bewusst zurückgestellt, siehe Memory
+  `open-todos`, dort auch die Messwerte), ebenso die nicht gebaute Enumerations-Bremse und der
+  Sperr-Ablauf.
+
 ## Vektor-Datenbank (Wissenssuche)
 - **FAISS** (`IndexFlatIP`, normierte Vektoren = Cosine) + **sentence-transformers**
   (`intfloat/multilingual-e5-small`, 384d) – Persistenz: `data/vector_store/faiss_index.bin`

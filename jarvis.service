@@ -13,9 +13,16 @@ User=root
 Group=root
 WorkingDirectory=/opt/jarvis
 Environment=DISPLAY=:0
+# Shutdown-Meldungen sichtbar halten (stdout waere zu journald blockgepuffert)
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/jarvis/start_jarvis.sh
 Restart=on-failure
 RestartSec=5
+# Beim Beenden baut uvicorn offene WebSockets ab (jeder Browser-Tab haelt einen);
+# danach laufen die Shutdown-Hooks. Ein zu knapper Wert (auf DEV standen
+# systemweit 5 s) fuehrt zu SIGKILL, bevor die Hooks ihre Daten wegschreiben.
+# Begruendung und Messwerte: deploy/security/jarvis.service.
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

@@ -162,8 +162,11 @@ ADMIN: dict[str, list[tuple[str, str]]] = {
         ("delete", "/api/conv_log"),
         ("get", "/api/audit_log"), ("delete", "/api/audit_log"),
         ("get", "/api/logs/retention"), ("post", "/api/logs/retention/run"),
-        # Global wirkende Kontext-Einstellung bzw. fremder Kontext
-        ("post", "/api/context/threshold"), ("post", "/api/context/compress"),
+        # Global wirkende Kontext-Einstellung.
+        # `/api/context/compress` stand hier bis 2026-08-05 – der Endpunkt ist
+        # ENTFERNT (er wirkte auf den zuletzt geladenen, ggf. fremden Verlauf),
+        # ebenso `/api/context/truncate`. Ihre Abwesenheit prueft GONE unten.
+        ("post", "/api/context/threshold"),
     ],
 }
 
@@ -301,6 +304,26 @@ for method, route in MUST_STAY_USER:
     fn, deps = got
     check(f"{method.upper():6} {route} bleibt fuer angemeldete Benutzer",
           "require_local_auth" not in deps, f"{fn}: {sorted(deps)}")
+
+section("Entfernte Kontext-Endpunkte duerfen nicht zurueckkommen (2026-08-05)")
+# /compress erzwang die Komprimierung von `_current_chat_history` – dem ZULETZT
+# GELADENEN Verlauf des GETEILTEN Hauptagenten, bei parallelen Nutzern also dem
+# eines Fremden. /truncate kuerzte nur den sitzungslosen Eimer und hatte in
+# keinem Client einen Aufrufer (das Editieren laeuft ueber die WS-Nachricht
+# `truncate_user_msg_index`). Beide sind entfernt; wer sie wieder einfuehrt,
+# braucht einen ausdruecklich uebergebenen Zielverlauf.
+for _m, _r in (("post", "/api/context/compress"), ("post", "/api/context/truncate")):
+    check(f"{_m.upper()} {_r} ist entfernt", BY_KEY.get((_m, _r)) is None,
+          "Route wieder vorhanden")
+check("agent.force_compress() ist mit dem Endpunkt entfernt",
+      "async def force_compress" not in
+      (ROOT / "backend" / "agent.py").read_text(encoding="utf-8"))
+check("der WS-Pfad zum Kuerzen bleibt (Nachricht editieren)",
+      "_truncate_history_to_user_index(_hist, _keep)" in SRC)
+check("kein Frontend ruft die entfernten Endpunkte",
+      not any("context/compress" in p.read_text(encoding="utf-8")
+              or "context/truncate" in p.read_text(encoding="utf-8")
+              for p in (ROOT / "frontend").rglob("*.js")))
 
 section("Wissensgruppen: Editoren-Felder nur fuer Verwalter der Gruppe")
 # GET /api/knowledge/groups muss fuer JEDEN angemeldeten Benutzer erreichbar

@@ -1143,14 +1143,32 @@ Gemessen auf DEV, damit die Grenze nicht geschätzt ist:
 |---|---|---|
 | `GET /stats` | jeder Benutzer | eigener Kontext: mit `session_id` diese /chat-Sitzung, ohne den sitzungslosen Bucket `_hist_key(user)` |
 | `POST /clear` | jeder Benutzer | eigener Kontext (gleicher Schluessel) |
-| `POST /truncate` | jeder Benutzer | eigener Kontext |
-| `POST /compress` | **Admin** (`require_local_auth`) | `_current_chat_history` – der ZULETZT GELADENE Kontext, ggf. fremd |
 | `POST /threshold` | **Admin** (`require_local_auth`) | **global**: gemeinsamer Hauptagent + `settings.json` |
+- **Die API besteht nur noch aus diesen DREI Endpunkten.** `POST /compress` und `POST /truncate`
+  sind am 2026-08-05 **entfernt** (Entscheidung des Nutzers), samt `agent.force_compress()`:
+  - `/compress` wirkte auf `_current_chat_history`, also den ZULETZT GELADENEN Verlauf des
+    **geteilten** Hauptagenten – bei parallelen Nutzern den eines Fremden.
+  - `/truncate` behauptete im Docstring, das „Nachricht editieren"-Feature zu bedienen. Das war
+    falsch: alle Clients (Web/Windows/Android) kuerzen ueber die **WS-Nachricht**
+    `truncate_user_msg_index`, die `_truncate_history_to_user_index()` direkt aufruft. Der
+    HTTP-Endpunkt hatte nirgends einen Aufrufer und kuerzte ausserdem nur den sitzungslosen
+    Eimer, war fuer das Editieren in /chat also gar nicht brauchbar.
+  - **Der Helfer `_truncate_history_to_user_index()` BLEIBT** – er ist der Kern des WS-Pfades.
+    Wer eine erzwungene Komprimierung wieder braucht, muss den **Zielverlauf uebergeben**
+    (Sitzung bzw. History-Schluessel), nicht `_current_chat_history` lesen.
+  - Waechter in `tests/test_endpoint_rights.py`: beide Routen muessen abwesend bleiben,
+    `force_compress` darf nicht zurueckkommen, der WS-Pfad muss bestehen, und kein Frontend
+    darf die Pfade nennen.
+- **Oberflaeche seit 2026-08-05:** nur noch der Schwellwert, und der steht unter *Einstellungen →
+  KI & System → System-Einstellungen* (Feld `setting-compress-threshold`, Lesewert aus
+  `GET /api/settings` → `compress_threshold`). Der frühere Abschnitt *Logs & Debug → Kontext /
+  History* ist entfernt – Begruendung im eigenen Abschnitt weiter unten. `/compress` und
+  `/truncate` haben seither **keinen** Frontend-Aufrufer.
 - **Der Schwellwert ist bewusst GLOBAL** (Vorgabe 2026-07-27): `_compress_threshold` liegt am
   gemeinsamen Hauptagenten, nicht pro History-Schluessel. Die Oberflaeche sagt es jetzt auch
-  (`telemetry.ctx_threshold_hint`). Nur Admins duerfen ihn setzen – vorher hing `/threshold` an
+  (`profile.ctxthr_hint`). Nur Admins duerfen ihn setzen – vorher hing `/threshold` an
   `require_auth`, sodass JEDER angemeldete Benutzer per API die Einstellung aller aendern konnte,
-  obwohl das Feld nur unter *Einstellungen → Logs & Debug → Kontext* (Admin) erreichbar ist.
+  obwohl das Feld nur an einer Admin-Flaeche erreichbar ist.
   Die Admin-Schranke auf `/settings` ist rein clientseitig (`app.js`: `is_admin === false` →
   Weiterleitung aufs Portal) – die Route selbst ist ungeschuetzt. Serverseitige Rechte gehoeren
   deshalb IMMER an den jeweiligen API-Endpunkt, nie an die Seite.
@@ -1164,9 +1182,11 @@ Gemessen auf DEV, damit die Grenze nicht geschätzt ist:
 - **Token-Zaehler sind Agent-weit, nicht pro Benutzer:** `_session_input_tokens`/`_output` werden
   bei JEDEM Auftrag zurueckgesetzt und gehoeren zum zuletzt gelaufenen. `get_context_stats(...,
   include_session_tokens=False)` nullt sie, wenn der abgefragte Kontext nicht der laufende ist.
-- **`context.js`-Falle:** Der 5-Sekunden-Poll (`_render`) belegt das Schwellwert-Feld neu. Der
-  `_userEdited`-Merker wird beim Speichern zurueckgesetzt, deckte also eine danach begonnene
-  Eingabe nicht ab – deshalb zusaetzlich `document.activeElement !== inp`.
+- **`context.js` ist am 2026-08-05 GELOESCHT** (mit dem Abschnitt). Historisch, falls jemand ein
+  aehnliches Feld baut: der 5-Sekunden-Poll belegte das Schwellwert-Feld neu, und der
+  `_userEdited`-Merker wurde beim Speichern zurueckgesetzt – eine danach begonnene Eingabe war
+  damit nicht abgedeckt, deshalb brauchte es zusaetzlich `document.activeElement !== inp`. Das neue
+  Feld hat dieses Problem nicht: es wird nur beim Oeffnen der Einstellungen belegt, nicht getaktet.
 
 ## Erzeugte Dokumente (`/api/documents`) – drei Schranken (seit 2026-07-28)
 - **Lieferweg:** Erzeugt der Agent eine Datei (Office-Skill ODER Shell/python-pptx in `/tmp`),
@@ -2091,6 +2111,77 @@ der Admin-Meldung**, ohne Token 401.
   Schreibpfad **unverkürzt** wieder ausgelesen, alle vier granularen Clears mit belegter
   Selektivität, Verlauf leeren (201 → 0 inkl. Rumpfdateien) und aus der Sicherung
   wiederhergestellt. Dienst aktiv, `/settings` HTTP 200.
+
+## Audit-Log: Filter „wirkte nicht" – es war Chrome-Autofill (2026-08-05)
+**Gemeldet:** im Tool-Audit-Log stand `andreas.bender` im Benutzer-Feld, die Liste zeigte aber
+Einträge von `nexus\rene.pfeiffer`. **Der Filter war in Ordnung** – nachgewiesen auf DEV über
+`audit_log.read_log()` (200 Treffer, ausschließlich `nexus\andreas.bender`) UND über HTTP
+(`?user=andreas.bender` → 50/50 derselbe Benutzer, `?user=rene.pfeiffer` → 0). ECHT hat
+byte-identische `audit_log.py`/`audit.js` (md5 verglichen).
+- **Die Ursache steht im Screenshot:** das Benutzer-Feld hatte den Hintergrund `#E8F0FE`
+  (RGB 232,240,254 im Bild gemessen), das ist Chromes **Autofill**-Färbung; das Tool-Feld
+  daneben war normal. Chrome hielt `id="audit-filter-user"` mit dem Label „Benutzer" für ein
+  Anmeldefeld und trug den Login-Namen ein – **ohne** ein Laden auszulösen. Die Liste gehörte
+  weiter zum ungefilterten Abruf.
+- **Zwei Gegenmaßnahmen, die zweite ist die wichtigere:**
+  1. `autocomplete="off"` + sprechender `name` (`audit-log-user-filter`) an beiden Filterfeldern
+     – nimmt der Heuristik die Grundlage. Verlassen darf man sich darauf NICHT: Chrome ignoriert
+     `autocomplete="off"` in manchen Fällen bewusst.
+  2. **Der Zähler nennt jetzt immer den WIRKLICH angewandten Filter** („200 Einträge · Filter
+     Benutzer: x" bzw. „· ohne Filter"), und weicht der Feldinhalt davon ab, steht dort
+     „⚠ Filter geändert – ‚Anwenden' drücken". `_applied` wird **erst nach erfolgreicher
+     Antwort** gesetzt; bei Ladefehler bleibt der alte Filter stehen – **und der Hinweis muss im
+     Fehlerzweig ebenfalls neu gezeichnet werden** (das hat der Test gefunden: ohne den Aufruf
+     stand nach einem Fehlversuch wieder eine Anzeige da, die zum Feld nicht passt).
+  Merkregel wie beim Trenner „Neue Sitzung": **eine Anzeige darf keinen Zustand behaupten oder
+  suggerieren, den sie nicht kennt.** Der Filter war nie das Problem – die fehlende Aussage war es.
+- **Nebenbefund, mitbehoben: der Hinweistext behauptete eine Rotation, die es seit 2026-08-04
+  nicht mehr gibt** („max. 10 MB, danach automatische Rotation"). Genau die wurde damals aus
+  `audit_log.py` entfernt, weil eine Größen-Schranke die Aufbewahrungszusage aushebelt – der
+  UI-Text wurde nicht nachgezogen und versprach das Gegenteil der Modul-Doku. Jetzt: „Was
+  entfernt wird, entscheidet ausschließlich das Alter … keine Größen- oder Mengengrenze"
+  (DE+EN + HTML-Fallback). Ein Test prüft, dass „10 MB" nicht zurückkommt und
+  `audit_log.py` kein `_MAX_BYTES` hat.
+
+## „Kontext / History" aus dem Telemetrie-Reiter entfernt (2026-08-05)
+Der Abschnitt zeigte und bediente **nicht, was er behauptete** – auf Entscheidung des Nutzers
+ist er weg; geblieben ist die einzige echte Einstellung darin.
+- **Warum die Kacheln aussagelos waren:** `GET /api/context/stats` liefert ohne `session_id` den
+  **sitzungslosen** Kontext-Eimer des abfragenden Admins (`_hist_key(user)`) – nicht den eines
+  Chats; die Token-Kacheln sind **agent-weit** und werden bei jedem Auftrag zurückgesetzt, gehören
+  also zum zuletzt gelaufenen (ggf. fremden) Auftrag; der Füllstandsbalken maß damit einen leeren
+  Eimer gegen die globale Schwelle. Dieselbe Zahl zeigt die Kontext-Pille in /chat **sitzungs-
+  bezogen und richtig** (`?session_id=`).
+- **„Jetzt komprimieren" war der gefährlichste Knopf:** `POST /api/context/compress` wirkt auf
+  `_current_chat_history`, also auf den **zuletzt geladenen – möglicherweise fremden** Verlauf
+  (steht so im Docstring). Ein Admin hätte per LLM das Gespräch eines anderen Benutzers
+  zusammengefasst, ohne zu wissen, welches.
+- **Der Schwellwert steht jetzt unter *KI & System → System-Einstellungen*** (sechste
+  `.tuning-group`, `setting-compress-threshold`): er gilt **global für alle Benutzer** und ist
+  keine Diagnose. **Gespeichert wird weiter über `POST /api/context/threshold`** – nur der setzt
+  den Wert am laufenden Hauptagenten UND in `settings.json`; über `/api/settings` zu speichern
+  hätte den Agenten-Teil verdoppelt und einen Wert erzeugt, der erst nach einem Dienstneustart
+  wirkt. Gelesen wird er aus dem neuen Feld `compress_threshold` in `GET /api/settings`
+  (**aus `settings.json`, nicht vom Agenten** – der ist lazy und nach einem Neustart bis zum
+  ersten Auftrag `None`, das Feld zeigte sonst einen falschen Standardwert; derselbe Fallstrick
+  wie bei `/api/context/stats`).
+- **`frontend/js/context.js` ist gelöscht** (samt Script-Tag, `contextManager.stop()` in app.js und
+  allen `telemetry.ctx_*`-i18n-Keys). Es war der einzige 5-Sekunden-Poll im Telemetrie-Reiter.
+- **`/api/context/compress` und `/truncate` sind am selben Tag ganz entfernt** (Entscheidung des
+  Nutzers, nachdem sie ohne Aufrufer dastanden) – Begruendung und Waechter in der Kontext-API-
+  Tabelle oben.
+- **Verifiziert:** 73 UI-Prüfungen (`tests/test_audit_ctx_ui.js`, jsdom gegen die echten Dateien,
+  Teil 2 **mit app.js**): Autofill-Attribute, Zähler mit/ohne Filter, Warnung bei Abweichung,
+  echtes Filtern über URL und gerenderte Zeilen (der gemeldete Fall wörtlich), Ladefehler,
+  Sprachwechsel, Abwesenheit aller `ctx-*`-Elemente, Feld liegt in der Tuning-Gruppe, Vorbelegung
+  aus `/api/settings` (42), genau ein POST auf `/api/context/threshold` und **keiner** auf
+  `/api/settings`, Kappung 9999→200 und 1→4, 403 gilt nicht als Erfolg. Gegenprobe: der alte
+  Stand fällt in den ersten Prüfungen durch. Live auf DEV: Dienst aktiv, `/settings` HTTP 200,
+  Schwellwert 30 → 55 → 30 über HTTP gelesen/geschrieben (Testwert zurückgesetzt).
+- **FALLSTRICK im UI-Test:** `window.fetch` muss **vor** dem `eval` von app.js gesetzt sein –
+  app.js läuft als IIFE sofort und ruft `fetch`; ist es noch `undefined`, bricht die Funktion ab,
+  bevor sie `window._openSettingsModal` setzt, und der Test meldet „Modal-Öffner nicht
+  erreichbar". Man sucht den Fehler dann im Umbau.
 
 ## Instruktionen sind nicht mehr git-verfolgt (2026-08-04)
 `data/instructions/` steht in `.gitignore`; die Vorgabe-Fassungen liegen versioniert unter

@@ -3095,25 +3095,15 @@ KRITISCH – Autonomie-Regeln:
             "agent_state": self.state.value,
         }
 
-    async def force_compress(self) -> dict:
-        """Erzwingt sofortige History-Komprimierung (unabhängig vom Schwellwert)."""
-        h = self._current_chat_history
-        before = len(h)
-        if before < 4:
-            return {"before": before, "after": before, "skipped": True, "reason": "zu kurz"}
-        # Temporär Schwellwert auf 0 setzen, komprimieren, dann Ergebnis zurückschreiben
-        orig_threshold = self._compress_threshold
-        self._compress_threshold = 0
-        try:
-            from backend.llm import get_provider
-            compressed = await self._compress_history(h, "")
-            # History in-place ersetzen (da _current_chat_history eine Referenz ist,
-            # müssen wir den Inhalt der ursprünglichen Liste ersetzen)
-            h.clear()
-            h.extend(compressed)
-        finally:
-            self._compress_threshold = orig_threshold
-        return {"before": before, "after": len(h), "skipped": False}
+    # force_compress() ist am 2026-08-05 mit ihrem einzigen Aufrufer entfernt
+    # (POST /api/context/compress). Sie arbeitete auf `_current_chat_history`,
+    # also auf dem ZULETZT GELADENEN Verlauf des geteilten Hauptagenten – bei
+    # parallelen Nutzern der eines Fremden. Wer eine erzwungene Komprimierung
+    # wieder braucht, muss den Zielverlauf ausdruecklich uebergeben (Sitzung
+    # bzw. History-Schluessel), nicht das Attribut lesen. Die automatische
+    # Komprimierung im Agent-Loop (`_compress_history` gegen
+    # `_compress_threshold`) ist davon unberuehrt und trifft immer den Verlauf
+    # des laufenden Auftrags.
 
     def get_info(self) -> dict:
         """Agent-Info fuer Frontend."""

@@ -210,5 +210,22 @@ fi
 fi  # IS_ROOT (Teil 2)
 
 # 5. Starte das Backend
+#
+# --timeout-graceful-shutdown: OHNE diesen Wert wartet uvicorn beim Beenden
+# darauf, dass offene Verbindungen von selbst schliessen – und jeder geoeffnete
+# Browser-Tab (Portal, Chat, /settings, VNC) haelt einen WebSocket offen.
+# Gemessen auf DEV am 2026-08-05: Stop OHNE offene Verbindung 0,4 s, mit EINER
+# offenen WS-Verbindung 16,1 s. Weil systemd dem Dienst nur TimeoutStopSec Zeit
+# laesst, wurde er in 28 von 154 Stops per SIGKILL abgeraeumt – und damit BEVOR
+# der Shutdown-Hook lief (Anwesenheits-Buchhaltung, Sicherung der Lernnotizen
+# aus dem Journal). Im Journal stand dann "Failed with result 'timeout'", was
+# nach einem Dienstfehler aussieht und echte Fehler verdeckt.
+# Der Wert muss kleiner bleiben als TimeoutStopSec in der Unit (30 s), damit
+# nach dem Verbindungs-Teardown noch Zeit fuer die Shutdown-Hooks bleibt.
+# 5 s und nicht mehr: laenger zu warten bringt NICHTS, weil ein laufender
+# Agent-Auftrag mit dem Prozess ohnehin endet – Aufträge dauern Minuten, nicht
+# Sekunden. Ein groesserer Wert verlaengert nur jeden Deploy-Neustart.
 echo "Starte Backend (HTTPS)..."
-exec ./venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 443 --ssl-keyfile ./certs/server.key --ssl-certfile ./certs/server.crt
+exec ./venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 443 \
+    --ssl-keyfile ./certs/server.key --ssl-certfile ./certs/server.crt \
+    --timeout-graceful-shutdown 5

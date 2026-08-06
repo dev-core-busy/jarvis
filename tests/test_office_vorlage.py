@@ -281,6 +281,71 @@ if HAT_PPTX:
     import shutil
     shutil.rmtree(tmp, ignore_errors=True)
 
+# ═════════════════════════════════════════════════════════════════════════════
+print("\n=== 5. Upload ueber den Branding-Reiter ===")
+
+MAIN = (ROOT / "backend" / "main.py").read_text()
+BR_JS = (ROOT / "frontend" / "js" / "branding.js").read_text()
+SET_HTML = (ROOT / "frontend" / "settings.html").read_text()
+I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text()
+
+for route, methode in [("/api/branding/pptx-templates", "get"),
+                       ("/api/branding/pptx-template", "post"),
+                       ("/api/branding/pptx-template", "delete"),
+                       ("/api/branding/pptx-template/regenerate", "post")]:
+    marke = f'@app.{methode}("{route}")'
+    i = MAIN.find(marke)
+    pruefe(i > 0, f"{methode.upper()} {route} existiert")
+    if i > 0:
+        # Alle vier sind Admin-Sache: sie legen Dateien ab, die JEDE spaetere
+        # Praesentation bestimmen (Masterfolien = ausfuehrbares Aussehen).
+        pruefe("require_local_auth" in MAIN[i:i + 700],
+               f"{methode.upper()} {route} verlangt Admin (require_local_auth)")
+
+i_up = MAIN.find('@app.post("/api/branding/pptx-template")')
+fenster = MAIN[i_up:i_up + 2600]
+pruefe("_pptx_tpl_pruefen" in fenster, "Upload prueft die Datei vor dem Ablegen")
+pruefe("ppt/presentation.xml" in MAIN,
+       "Pruefung schaut in den ZIP-Inhalt (nicht nur auf die Endung)")
+pruefe("_PPTX_TPL_MAX_BYTES" in MAIN and "25 * 1024 * 1024" in MAIN, "Groessengrenze gesetzt")
+pruefe('re.sub(r"[^A-Za-z0-9_\\-. ]+"' in fenster,
+       "Dateiname wird entschaerft (kommt aus einem Datei-Dialog)")
+pruefe("Path(file.filename" in fenster and ".name" in fenster,
+       "nur der Basisname wird verwendet (keine Pfadanteile)")
+pruefe('ziel.with_suffix(".upload.tmp")' in fenster and "tmp.replace(ziel)" in fenster,
+       "erst danebenschreiben, dann umbenennen (keine halbe Vorlage bei Abbruch)")
+pruefe("potx" in MAIN and 'f"{rein[:60]}.pptx"' in fenster,
+       ".potx wird als .pptx abgelegt (der Skill sucht *.pptx)")
+i_del = MAIN.find('@app.delete("/api/branding/pptx-template")')
+pruefe("Path(str(name or \"\")).name" in MAIN[i_del:i_del + 900],
+       "Loeschen akzeptiert keinen Pfad")
+pruefe("status_code=404" in MAIN[i_del:i_del + 1600], "unbekannte Vorlage -> 404")
+i_reg = MAIN.find('@app.post("/api/branding/pptx-template/regenerate")')
+pruefe("v.erzeuge()" in MAIN[i_reg:i_reg + 800],
+       "Neuerzeugen ruft erzeuge() (nicht sicherstellen – das wuerde nichts tun)")
+pruefe("VORLAGEN_DIR" in MAIN and "data/branding" not in MAIN[i_up:i_up + 2000],
+       "Vorlagen landen in data/vorlagen, nicht bei den Logos")
+
+pruefe("uploadPptxTemplate" in BR_JS and "loadPptxTemplates" in BR_JS,
+       "branding.js kann hochladen und listen")
+pruefe("regeneratePptxTemplate" in BR_JS and "deletePptxTemplate" in BR_JS,
+       "…neu erzeugen und entfernen")
+pruefe("name.textContent = t.name" in BR_JS,
+       "Vorlagenname wird per textContent gesetzt (Fremdinhalt, kein innerHTML)")
+pruefe("this.loadPptxTemplates();" in BR_JS, "die Liste wird beim Oeffnen geladen")
+# Nach der DEFINITION suchen, nicht nach dem ersten Vorkommen (das ist
+# der Aufruf in renderPptxTemplates).
+i_delfn = BR_JS.find("deletePptxTemplate: function")
+pruefe(i_delfn > 0 and "window.confirm" in BR_JS[i_delfn:i_delfn + 700],
+       "Entfernen fragt nach")
+pruefe("br-pptx-file" in SET_HTML and "br-pptx-default" in SET_HTML
+       and "br-pptx-regen" in SET_HTML and "br-pptx-list" in SET_HTML,
+       "Markup im Branding-Reiter vorhanden")
+pruefe(".pptx,.potx" in SET_HTML, "Datei-Dialog filtert auf Vorlagen")
+for key in ("branding.pptx_heading", "branding.pptx_as_default", "branding.pptx_regen",
+            "branding.pptx_none", "branding.pptx_badge_default"):
+    pruefe(I18N.count(f"'{key}'") == 2, f"i18n {key} in DE und EN")
+
 print(f"\n{'=' * 62}\nErgebnis: {_ok}/{_ok + _fail} Pruefungen bestanden")
 if _fail:
     print(f"FEHLGESCHLAGEN: {_fail}")

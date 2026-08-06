@@ -5798,6 +5798,229 @@ async def delete_branding_portal_video(user: str = Depends(require_local_auth)):
     return JSONResponse({"success": True, "removed": removed})
 
 
+# ─── PowerPoint-Vorlagen (Branding-Reiter) ────────────────────────────
+# Die Vorlagen liegen NICHT unter data/branding, sondern in data/vorlagen –
+# dort sucht sie der Office-Skill (skills/office/vorlage.py). Der Ordner ist
+# bewusst getrennt von data/documents: dort gelten Aufbewahrungsfrist und
+# Eigentuemer-Bindung, eine Vorlage darf weder verfallen noch einem Benutzer
+# gehoeren.
+_PPTX_TPL_EXTS = {"pptx", "potx"}
+# 25 MB: eine Vorlage enthaelt Masterfolien und ggf. Hintergrundbilder, aber
+# keine Inhalte. Wer mehr hochlaedt, hat eine fertige Praesentation erwischt.
+_PPTX_TPL_MAX_BYTES = 25 * 1024 * 1024
+
+
+def _pptx_vorlagen_modul():
+    """Laedt das Vorlagen-Modul des Office-Skills (liegt ausserhalb von backend/)."""
+    import sys as _sys
+    root = str(Path(__file__).parent.parent)
+    if root not in _sys.path:
+        _sys.path.insert(0, root)
+    from skills.office import vorlage as _v
+    return _v
+
+
+def _pptx_tpl_pruefen(daten: bytes, name: str) -> tuple[bool, str, dict]:
+    """Prueft eine hochgeladene Vorlage. Rueckgabe (ok, fehler, infos).
+
+    Geprueft wird der INHALT, nicht die Endung: eine umbenannte PDF- oder
+    ZIP-Datei wuerde sonst als Vorlage abgelegt und der Agent scheiterte erst
+    Tage spaeter beim Erzeugen einer Praesentation – mit einer Meldung, die
+    niemand mit diesem Upload verbindet. Deshalb wird sie hier einmal
+    testweise geoeffnet."""
+    import io
+    import zipfile as _zip
+    if not daten:
+        return False, "Datei ist leer", {}
+    if len(daten) > _PPTX_TPL_MAX_BYTES:
+        return False, (f"Datei ist zu gross ({len(daten) // (1024 * 1024)} MB, "
+                       f"erlaubt {_PPTX_TPL_MAX_BYTES // (1024 * 1024)} MB)"), {}
+    try:
+        with _zip.ZipFile(io.BytesIO(daten)) as z:
+            namen = set(z.namelist())
+    except Exception:  # noqa: BLE001
+        return False, "Keine gueltige Office-Datei (kein ZIP-Container)", {}
+    if "ppt/presentation.xml" not in namen:
+        return False, "Keine PowerPoint-Datei (ppt/presentation.xml fehlt)", {}
+
+    infos = {}
+    try:
+        from pptx import Presentation as _P
+        prs = _P(io.BytesIO(daten))
+        layouts = [l.name for l in prs.slide_layouts]
+        if not layouts:
+            return False, "Die Vorlage enthaelt keine Folienlayouts", {}
+        breite, hoehe = prs.slide_width or 0, prs.slide_height or 0
+        infos = {
+            "layouts": layouts,
+            "layout_count": len(layouts),
+            "slides": len(prs.slides),
+            "width": breite, "height": hoehe,
+            "ratio": ("16:9" if hoehe and abs(breite / hoehe - 16 / 9) < 0.02 else
+                      ("4:3" if hoehe and abs(breite / hoehe - 4 / 3) < 0.02 else "andere")),
+        }
+    except Exception as e:  # noqa: BLE001
+        return False, f"Vorlage nicht lesbar ({e})", {}
+    return True, "", infos
+
+
+@app.get("/api/branding/pptx-templates")
+async def list_branding_pptx_templates(user: str = Depends(require_local_auth)):
+    """Listet die hinterlegten PowerPoint-Vorlagen (Admin).
+
+    Die Hausvorlage wird NICHT im Vorbeigehen erzeugt: dieser Endpunkt ist ein
+    Lesezugriff und wird beim Oeffnen des Reiters aufgerufen. Ob sie schon
+    existiert, sagt das Feld ``default_exists`` – erzeugt wird sie beim ersten
+    Praesentations-Auftrag oder ueber /regenerate."""
+    try:
+        v = _pptx_vorlagen_modul()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": f"Vorlagen-Modul nicht verfuegbar ({e})",
+                             "templates": []}, status_code=500)
+    eintraege = []
+    try:
+        for name in v.verfuegbare():
+            p = v.VORLAGEN_DIR / name
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            eintraege.append({
+                "name": name,
+                "size": st.st_size,
+                "mtime": int(st.st_mtime),
+                "is_default": name == v.STANDARD_NAME,
+            })
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": str(e), "templates": []}, status_code=500)
+    farben = {}
+    try:
+        farben = v.branding_farben()
+    except Exception:  # noqa: BLE001
+        pass
+    return JSONResponse({
+        "success": True,
+        "templates": eintraege,
+        "default_name": v.STANDARD_NAME,
+        "default_exists": any(e["is_default"] for e in eintraege),
+        "accent": farben.get("akzent", ""),
+        "max_bytes": _PPTX_TPL_MAX_BYTES,
+    })
+
+
+@app.post("/api/branding/pptx-template")
+async def upload_branding_pptx_template(file: UploadFile = File(...),
+                                        as_default: str = Form("false"),
+                                        user: str = Depends(require_local_auth)):
+    """Laedt eine PowerPoint-Vorlage hoch (Admin).
+
+    ``as_default=true`` legt sie als Hausvorlage (``standard.pptx``) ab – dann
+    benutzt der Agent sie fuer JEDE Praesentation. Sonst liegt sie unter ihrem
+    eigenen Namen und wird per ``template=`` gewaehlt.
+
+    ``.potx`` wird als ``.pptx`` gespeichert: es ist dasselbe Format, und der
+    Office-Skill sucht nach ``*.pptx``. Ohne diese Umbenennung waere eine
+    hochgeladene .potx unsichtbar – ein Fehler, den niemand erklaeren kann."""
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in _PPTX_TPL_EXTS:
+        return JSONResponse({"success": False,
+                             "error": f"Format .{ext} nicht erlaubt (nur .pptx oder .potx)"},
+                            status_code=400)
+    daten = await file.read()
+    ok, fehler, infos = _pptx_tpl_pruefen(daten, file.filename or "")
+    if not ok:
+        return JSONResponse({"success": False, "error": fehler}, status_code=400)
+
+    try:
+        v = _pptx_vorlagen_modul()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": f"Vorlagen-Modul nicht verfuegbar ({e})"},
+                            status_code=500)
+
+    default = str(as_default).lower() in ("1", "true", "yes", "on")
+    if default:
+        ziel_name = v.STANDARD_NAME
+    else:
+        # Nur der Basisname zaehlt und der wird entschaerft – der Name kommt aus
+        # einem Datei-Dialog und darf keine Pfadanteile ins Verzeichnis tragen.
+        rein = re.sub(r"[^A-Za-z0-9_\-. ]+", "", Path(file.filename or "vorlage").name)
+        rein = rein.rsplit(".", 1)[0].strip().replace(" ", "_") or "vorlage"
+        ziel_name = f"{rein[:60]}.pptx"
+        if ziel_name == v.STANDARD_NAME:
+            # Wer die Datei "standard.pptx" nennt, meint die Hausvorlage.
+            default = True
+
+    try:
+        v.VORLAGEN_DIR.mkdir(parents=True, exist_ok=True)
+        ziel = v.VORLAGEN_DIR / ziel_name
+        # Erst danebenschreiben, dann umbenennen: bricht der Vorgang ab, bleibt
+        # die alte (funktionierende) Vorlage stehen statt einer halben Datei.
+        tmp = ziel.with_suffix(".upload.tmp")
+        tmp.write_bytes(daten)
+        tmp.replace(ziel)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": f"Speichern fehlgeschlagen ({e})"},
+                            status_code=500)
+
+    hinweise = []
+    if infos.get("ratio") == "4:3":
+        hinweise.append("Die Vorlage ist im Format 4:3 – heute ueblich ist 16:9.")
+    if infos.get("slides"):
+        hinweise.append(f"Die Vorlage enthaelt {infos['slides']} Folie(n); "
+                        "der Agent haengt seine Folien dahinter an.")
+    return JSONResponse({"success": True, "name": ziel_name, "is_default": default,
+                         "layouts": infos.get("layouts", [])[:20],
+                         "layout_count": infos.get("layout_count", 0),
+                         "ratio": infos.get("ratio", ""), "hints": hinweise})
+
+
+@app.delete("/api/branding/pptx-template")
+async def delete_branding_pptx_template(name: str = "",
+                                        user: str = Depends(require_local_auth)):
+    """Entfernt eine hinterlegte PowerPoint-Vorlage (Admin).
+
+    Die Hausvorlage darf entfernt werden – sie wird beim naechsten
+    Praesentations-Auftrag aus den Branding-Farben neu erzeugt. Genau das ist
+    der Weg, eine geaenderte Markenfarbe zu uebernehmen."""
+    try:
+        v = _pptx_vorlagen_modul()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+    sauber = Path(str(name or "")).name
+    if not sauber.lower().endswith(".pptx"):
+        return JSONResponse({"success": False, "error": "Kein Vorlagenname"}, status_code=400)
+    ziel = v.VORLAGEN_DIR / sauber
+    if not ziel.exists():
+        # 404 statt 400: ob eine Datei existiert, ist die Antwort auf die Frage.
+        return JSONResponse({"success": False, "error": "Vorlage nicht gefunden"}, status_code=404)
+    try:
+        ziel.unlink()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": f"Loeschen fehlgeschlagen ({e})"},
+                            status_code=500)
+    return JSONResponse({"success": True, "removed": sauber})
+
+
+@app.post("/api/branding/pptx-template/regenerate")
+async def regenerate_branding_pptx_template(user: str = Depends(require_local_auth)):
+    """Erzeugt die Hausvorlage aus den AKTUELLEN Branding-Farben neu (Admin).
+
+    Notwendig, weil ``vorlage.sicherstellen()`` eine vorhandene Datei bewusst
+    NICHT ueberschreibt (sonst waere eine von Hand hinterlegte Firmenvorlage
+    beim naechsten Auftrag wieder weg). Wer die Markenfarbe aendert, braucht
+    also diesen Knopf – oder loescht die Vorlage."""
+    try:
+        v = _pptx_vorlagen_modul()
+        pfad = v.erzeuge()
+        farben = v.branding_farben()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": f"Erzeugen fehlgeschlagen ({e})"},
+                            status_code=500)
+    return JSONResponse({"success": True, "name": pfad.name,
+                         "accent": farben.get("akzent", ""),
+                         "size": pfad.stat().st_size if pfad.exists() else 0})
+
+
 # ─── Confluence (für den Confluence-Reiter; teilt sich Client mit dem Skill) ──
 
 def _confluence_client():

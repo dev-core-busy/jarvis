@@ -571,6 +571,10 @@
             if (vidInput) vidInput.addEventListener('change', function (ev) { BrandingAdmin.uploadPortalVideo(ev); });
             var vidDel = document.getElementById('br-portal-video-del');
             if (vidDel) vidDel.addEventListener('click', function () { BrandingAdmin.deletePortalVideo(); });
+            var tplInput = document.getElementById('br-pptx-file');
+            if (tplInput) tplInput.addEventListener('change', function (ev) { BrandingAdmin.uploadPptxTemplate(ev); });
+            var tplRegen = document.getElementById('br-pptx-regen');
+            if (tplRegen) tplRegen.addEventListener('click', function () { BrandingAdmin.regeneratePptxTemplate(); });
             // Live-Vorschau bei Farb-/Text-/Logo-Änderung
             ['br-accent', 'br-accent-hover', 'br-bg-primary', 'br-bg-secondary', 'br-text-primary',
              'br-bg-primary-light', 'br-bg-secondary-light', 'br-text-primary-light',
@@ -618,6 +622,10 @@
                     BrandingAdmin.refreshLogoPreview();
                 })
                 .catch(function () {});
+            // Vorlagen kommen aus einem anderen Endpunkt (sie liegen nicht in
+            // der Skill-Config) – unabhaengig laden, damit ein Fehler dort die
+            // Farbfelder nicht leer laesst.
+            this.loadPptxTemplates();
         },
         refreshLogoPreview: function () {
             fetch('/api/branding')
@@ -783,6 +791,148 @@
             }).then(function () {
                 BrandingAdmin.refreshLogoPreview();
             }).catch(function () {});
+        },
+
+        /* ── PowerPoint-Vorlagen ──────────────────────────────────────
+         * Die Dateien landen in data/vorlagen (dort sucht sie der
+         * Office-Skill), nicht in data/branding. Der Reiter ist nur der
+         * bequemste Ort dafuer: Farben, Logo und Vorlage gehoeren fuer den
+         * Administrator zusammen. */
+        loadPptxTemplates: function () {
+            var box = document.getElementById('br-pptx-list');
+            if (!box) return;
+            fetch('/api/branding/pptx-templates', {
+                headers: { 'Authorization': 'Bearer ' + token() }
+            }).then(function (r) { return r.json(); })
+              .then(function (d) { BrandingAdmin.renderPptxTemplates(d || {}); })
+              .catch(function () {
+                  box.textContent = (window.t ? window.t('branding.pptx_load_err')
+                                             : 'Vorlagen konnten nicht geladen werden.');
+              });
+        },
+        renderPptxTemplates: function (d) {
+            var box = document.getElementById('br-pptx-list');
+            if (!box) return;
+            box.textContent = '';
+            var liste = (d && d.templates) || [];
+            if (!liste.length) {
+                var leer = document.createElement('p');
+                leer.className = 'kb-hint';
+                leer.style.margin = '0';
+                leer.textContent = (window.t ? window.t('branding.pptx_none')
+                                             : 'Noch keine Vorlage hinterlegt – sie wird beim ersten Präsentations-Auftrag automatisch erzeugt.');
+                box.appendChild(leer);
+                return;
+            }
+            liste.forEach(function (t) {
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 0;'
+                    + 'border-bottom:1px solid var(--border);';
+                var name = document.createElement('span');
+                name.style.cssText = 'font-size:0.88rem;color:var(--text-primary);';
+                // textContent, nicht innerHTML: der Name kommt aus einem
+                // Datei-Upload und ist damit Fremdinhalt.
+                name.textContent = t.name;
+                row.appendChild(name);
+                if (t.is_default) {
+                    var b = document.createElement('span');
+                    b.style.cssText = 'font-size:0.72rem;font-weight:600;padding:2px 8px;'
+                        + 'border-radius:10px;background:rgba(var(--accent-rgb),.18);color:var(--accent);';
+                    b.textContent = (window.t ? window.t('branding.pptx_badge_default') : 'Hausvorlage');
+                    row.appendChild(b);
+                }
+                var meta = document.createElement('span');
+                meta.style.cssText = 'font-size:0.76rem;color:var(--text-muted);margin-left:auto;';
+                var kb = Math.max(1, Math.round((t.size || 0) / 1024));
+                var datum = t.mtime ? new Date(t.mtime * 1000).toLocaleDateString() : '';
+                meta.textContent = kb + ' KB' + (datum ? ' · ' + datum : '');
+                row.appendChild(meta);
+                var del = document.createElement('button');
+                del.type = 'button';
+                del.className = 'btn-secondary';
+                // flex:0 0 auto ist Pflicht: .btn-secondary hat width:100% und
+                // streckt sich im Flex-Container sonst ueber die ganze Zeile
+                // (im Screenshot gesehen) – die Meta-Angabe wird dann an das
+                // Abzeichen gedrueckt statt rechts zu stehen.
+                del.style.cssText = 'padding:3px 10px;font-size:0.78rem;flex:0 0 auto;width:auto;';
+                del.textContent = (window.t ? window.t('branding.remove') : 'Entfernen');
+                del.addEventListener('click', function () {
+                    BrandingAdmin.deletePptxTemplate(t.name, !!t.is_default);
+                });
+                row.appendChild(del);
+                box.appendChild(row);
+            });
+        },
+        uploadPptxTemplate: function (ev) {
+            var f = ev.target.files && ev.target.files[0];
+            if (!f) return;
+            var st = document.getElementById('br-status');
+            var chk = document.getElementById('br-pptx-default');
+            if (st) st.textContent = (window.t ? window.t('branding.pptx_uploading')
+                                               : 'Vorlage wird geprüft …');
+            var fd = new FormData();
+            fd.append('file', f);
+            fd.append('as_default', (chk && chk.checked) ? 'true' : 'false');
+            fetch('/api/branding/pptx-template', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token() },
+                body: fd
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                  if (d && d.success) {
+                      // Rueckmeldung mit Zahlen: eine Vorlage sieht man nicht,
+                      // Format und Layout-Anzahl sagen sofort, ob sie taugt.
+                      var t1 = '✓ ' + d.name + ' – ' + (d.layout_count || 0) + ' Layouts'
+                          + (d.ratio ? ', ' + d.ratio : '');
+                      if (d.hints && d.hints.length) t1 += ' · ' + d.hints.join(' ');
+                      if (st) st.textContent = t1;
+                      BrandingAdmin.loadPptxTemplates();
+                  } else if (st) {
+                      st.textContent = '✗ ' + ((d && d.error) || 'Upload fehlgeschlagen');
+                  }
+              }).catch(function () {
+                  if (st) st.textContent = '✗ Upload fehlgeschlagen';
+              })
+              .then(function () { try { ev.target.value = ''; } catch (e) {} });
+        },
+        deletePptxTemplate: function (name, istStandard) {
+            var frage = istStandard
+                ? (window.t ? window.t('branding.pptx_del_default_confirm')
+                            : 'Hausvorlage entfernen? Sie wird beim nächsten Präsentations-Auftrag aus den Branding-Farben neu erzeugt.')
+                : (window.t ? window.t('branding.pptx_del_confirm') : 'Vorlage entfernen?');
+            if (!window.confirm(frage)) return;
+            var st = document.getElementById('br-status');
+            fetch('/api/branding/pptx-template?name=' + encodeURIComponent(name), {
+                method: 'DELETE',
+                headers: { 'Authorization': 'Bearer ' + token() }
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                  if (st) {
+                      st.textContent = (d && d.success)
+                          ? '✓ ' + name + ' entfernt'
+                          : '✗ ' + ((d && d.error) || 'Entfernen fehlgeschlagen');
+                  }
+                  BrandingAdmin.loadPptxTemplates();
+              }).catch(function () { if (st) st.textContent = '✗ Entfernen fehlgeschlagen'; });
+        },
+        regeneratePptxTemplate: function () {
+            var st = document.getElementById('br-status');
+            if (!window.confirm(window.t ? window.t('branding.pptx_regen_confirm')
+                    : 'Hausvorlage aus den aktuellen Branding-Farben neu erzeugen? Eine hochgeladene Firmenvorlage wird dabei überschrieben.')) return;
+            if (st) st.textContent = (window.t ? window.t('branding.pptx_regenerating')
+                                               : 'Hausvorlage wird erzeugt …');
+            fetch('/api/branding/pptx-template/regenerate', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token() }
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                  if (st) {
+                      st.textContent = (d && d.success)
+                          ? '✓ ' + d.name + (d.accent ? ' (Akzent #' + d.accent + ')' : '')
+                          : '✗ ' + ((d && d.error) || 'Erzeugen fehlgeschlagen');
+                  }
+                  BrandingAdmin.loadPptxTemplates();
+              }).catch(function () { if (st) st.textContent = '✗ Erzeugen fehlgeschlagen'; });
         }
     };
 

@@ -2445,6 +2445,43 @@ Die naheliegende Lösung lag im eigenen Repo.
   LibreOffice → PDF → PNG (Titelfolie mit Logo, Kapiteltrenner, Aufzählung mit Unterebenen,
   Zwei-Spalten-Folie).
 
+### Vorlagen-Upload im Branding-Reiter (2026-08-06)
+Abschnitt *Einstellungen → Branding → PowerPoint-Vorlage*: hochladen, auflisten, entfernen,
+und **„Aus Branding-Farben neu erzeugen"**. Vier Endpunkte, alle `require_local_auth`:
+`GET/POST/DELETE /api/branding/pptx-template(s)` + `POST …/regenerate`.
+- **Der Reiter ist nur der Ort, nicht die Ablage:** die Dateien landen in `data/vorlagen`
+  (dort sucht der Office-Skill), NICHT in `data/branding` bei den Logos. Für den Administrator
+  gehören Farben, Logo und Vorlage aber zusammen – deshalb dieser Reiter.
+- **Der Knopf „neu erzeugen" ist der fehlende Baustein**, nicht Komfort: `sicherstellen()`
+  überschreibt eine vorhandene Vorlage bewusst NICHT (sonst wäre eine von Hand hinterlegte
+  Firmenvorlage beim nächsten Auftrag weg). Wer die Markenfarbe ändert, bekommt die neue Farbe
+  also erst über diesen Knopf – oder indem er die Vorlage entfernt. Beide Wege sind da, beide
+  fragen vorher nach.
+- **Geprüft wird der INHALT, nicht die Endung** (`_pptx_tpl_pruefen`): ZIP-Container,
+  `ppt/presentation.xml`, dann einmal testweise mit python-pptx öffnen und Layouts zählen. Eine
+  umbenannte PDF würde sonst abgelegt und der Agent scheiterte erst Tage später – mit einer
+  Meldung, die niemand mit diesem Upload verbindet. Die Antwort nennt **Layout-Anzahl und
+  Seitenverhältnis**: eine Vorlage sieht man nicht, diese zwei Zahlen sagen sofort, ob sie taugt
+  (bei 4:3 kommt ein Hinweis).
+- **`.potx` wird als `.pptx` gespeichert** – dasselbe Format, aber der Skill sucht `*.pptx`; ohne
+  die Umbenennung wäre eine hochgeladene .potx unsichtbar.
+- Dateiname: nur der Basisname, entschärft auf `[A-Za-z0-9_-. ]`, Leerzeichen zu `_`
+  („Nexus Design 2026.pptx" → `Nexus_Design_2026.pptx`). Wer die Datei `standard.pptx` nennt,
+  meint die Hausvorlage – das Kästchen wird dann automatisch gesetzt. Geschrieben wird über eine
+  `.upload.tmp` und `replace()`, damit ein Abbruch keine halbe Vorlage hinterlässt.
+- **`flex:0 0 auto` am Entfernen-Knopf ist keine Kosmetik:** `.btn-secondary` hat `width:100%`
+  und streckt sich im Flex-Container über die ganze Zeile – im Screenshot gesehen, die
+  Größenangabe wurde dabei an das Abzeichen gedrückt.
+- Der Vorlagenname wird per `textContent` gesetzt (Fremdinhalt aus einem Upload); ein Test
+  schiebt `<img src=x onerror=…>` durch die Render-Funktion.
+- **Verifiziert:** 47 Prüfungen in `tests/test_office_vorlage.py` (Teil 5: Rechte, Validierung,
+  Namensentschärfung, Traversal) + 28 UI-Prüfungen (`tests/test_branding_pptx_ui.js`, jsdom gegen
+  die echte `settings.html` mit `branding.js`). Live auf DEV über HTTP: ohne Token 4× 401, Upload
+  einer echten Vorlage („Nexus Design 2026.pptx" → 11 Layouts, 16:9), PDF-Inhalt und `.txt`
+  abgewiesen, Nutzung per `template=`, Löschen mit `../../.env` → 400, unbekannt → 404,
+  Neuerzeugen → `standard.pptx` mit Akzent `9B59B6`, Ablage gehört `jarvis:jarvis`. Optisch in
+  Dunkel und Hell abgenommen.
+
 ## „Abschluss ohne Antwort": Nachschlag + Freigabe der Oberflaeche (2026-08-06)
 **Der geprueefte Fall:** eine Anfrage in /chat endet mit „✅ Aufgabe abgeschlossen", der Benutzer
 sieht aber keine Antwort. Es gab bereits **vier** Wiederholungsebenen – und genau dieser Fall fiel

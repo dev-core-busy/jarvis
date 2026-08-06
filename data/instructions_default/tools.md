@@ -40,6 +40,11 @@
 - Schaubilder ohne Zahlen (Ablauf, Architektur, Zeitplan, Zustände, ER-Modell): ```mermaid-Codeblock ausgeben, den die Chat-UI zeichnet. Mermaid kann keine Achsen/Datenreihen.
 - Bei einem Diagramm-Auftrag NIEMALS Alternativen (ASCII/CSV/HTML) anbieten oder zurückfragen – direkt liefern.
 
+## Präsentationen
+- **Immer `office_create_powerpoint`** – es nutzt die Hausvorlage (16:9, echte Masterfolien, Farben und Schrift aus dem Branding). Nicht von Hand mit python-pptx bauen: damit gehen die Masterfolien verloren und das Ergebnis sieht nach Standard-Office aus.
+- Keine Farb-, Schrift- oder Größenangaben mitschicken. Inhaltlich steuern: `layout` je Folie (`inhalt`, `abschnitt` für Kapiteltrenner, `zwei` für zwei Spalten, `nurtitel`), `> ` für Unterpunkte, `notes` für Sprechernotizen.
+- Welche Layouts eine hinterlegte Vorlage anbietet, zeigt `office_template_info`. Eine eigene Firmenvorlage kann ein Administrator unter `data/vorlagen/` ablegen und per `template=` auswählen.
+
 ## spawn_agent (nur privilegierte lokale Benutzer – für Netzwerk-Benutzer gesperrt)
 - Für parallelisierbare Teilaufgaben: Sub-Agents spawnen
 - Sub-Agents sind vollständig autonom – kein Micromanagement

@@ -2365,6 +2365,78 @@ lehrreich, weil zwei naheliegende Verdaechtige falsch waren:
   HTML von aussen, und dann zaehlen, **wie oft** die Seite denselben Endpunkt aufruft.
   Ein einzelner Endpunkt mit 0,77 s sieht harmlos aus; neunmal in Serie sind es 7 s.
 
+## „Abschluss ohne Antwort": Nachschlag + Freigabe der Oberflaeche (2026-08-06)
+**Der geprueefte Fall:** eine Anfrage in /chat endet mit „✅ Aufgabe abgeschlossen", der Benutzer
+sieht aber keine Antwort. Es gab bereits **vier** Wiederholungsebenen – und genau dieser Fall fiel
+durch alle durch.
+
+| Ebene | Wo | Ausloeser |
+|---|---|---|
+| Transport | `llm.py::_retry_with_backoff` | 3× bei 429/503/502/ConnectError (1/2/4 s). Gilt fuer Gemini + OpenAI-kompatibel (OpenRouter erbt); **Anthropic** nutzt die SDK-eigenen Retries, `AnthropicSessionProvider` (claude.ai) hat keine. |
+| Agent-Loop | `agent.py`, Zweig `if not response.parts` | 0 Parts → EIN Aufruf mit Kurz-Prompt |
+| Agent-Loop | `agent.py::_try_final` | MAX_STEPS / Loop-Detector → zwei Stufen (mit Verlauf, dann Reset) |
+| Auftrag | `main.py`, `_run_main_agent_and_notify` | `AUTO_RETRY_MAX=2`, 2 s Pause, bei outcome `empty`/`error` – **nicht** bei `stopped`/`ok` |
+| halbautomatisch | `chat.js::_retryUserBubble` | ↻ an der eigenen Frage |
+
+- **Die Luecke war der Abschlusszweig** (`if not function_calls:`): er meldete den Abschluss, ohne
+  zu pruefen, ob ueberhaupt Text beim Benutzer ankam. `run_outcome` blieb `"ok"`, also griff der
+  automatische Neuversuch nicht – die Anfrage galt als erledigt. Drei Wege dorthin:
+  1. `parts` vorhanden, aber **ohne Text** – bei denkenden Modellen eine Antwort mit reinem
+     Thinking-Part (`if not response.parts` greift dann nicht),
+  2. Text besteht nur aus **Leerzeichen** (`if text.strip()` ueberspringt still),
+  3. der Anzeigetext ist nach `_clean_doc_refs`/`_expand_charts` **leer** (Antwort bestand nur aus
+     einem Dokumentpfad oder einem Chart-Marker ohne Spezifikation).
+- **Neu: `_answer_sent` + `_empty_finish`.** Kam keine Antwort an und wurde auch kein
+  Download-Chip ausgeliefert, laeuft der Lauf in den **vorhandenen `_try_final`-Pfad**.
+  - **Warum NICHT den ganzen Lauf wiederholen:** an dieser Stelle sind die Werkzeuge schon
+    gelaufen. Ein Lauf-Neuversuch fuehrt sie ein zweites Mal aus – Datei erzeugt, Ticket angelegt,
+    Nachricht gesendet. Der Nachschlag ist **ein** LLM-Aufruf OHNE Werkzeuge; ein Test haelt
+    fest, dass der letzte Aufruf `tools=False` hat.
+  - **Zwischentexte zaehlen NICHT als Antwort** (`intermediate=True`): „ich schaue kurz nach …"
+    neben einem Werkzeugaufruf ist ausdruecklich kein Endergebnis.
+  - **Ein ausgelieferter Chip zaehlt als Ergebnis** (`_delivered_docs`) – ein Lauf, der eine Datei
+    liefert, braucht keinen Textnachschlag.
+  - Eigene Meldung („Das Modell hat keine Antwort formuliert – frage die Antwort erneut ab …"):
+    „Maximale Schrittanzahl" waere hier falsch und „Endlosschleife erkannt" erst recht.
+- **Rollback im Final-Pfad nachgezogen:** der 0-Parts-Zweig rollte zurueck, der `_try_final`-Pfad
+  nicht. Ohne Rollback blieb die Frage samt Werkzeug-Turns **ohne Antwort** im Kontext – der
+  naechste Lauf (auch der automatische Neuversuch) beantwortet sie dann MIT, und die Frage steht
+  doppelt im Verlauf. Das ist dieselbe Regel wie am 2026-07-28: **entweder vollstaendig oder
+  unveraendert.**
+- **Frontend: `agentRunning` konnte dauerhaft haengen.** Der Wert wurde NUR von den
+  WS-Ereignissen `started`/`finished` gesetzt. Bei einem Verbindungsabbruch sendet das Backend
+  `finished` an den **toten** Socket (und `_send_status` verschluckt den Fehler), der Reconnect
+  erzeugt eine neue Verbindung, an die niemand mehr etwas schickt. Ergebnis: Senden **und**
+  Wiederholen liefen in „Bitte stoppe zuerst die laufende Aufgabe", und der Stop-Knopf half nicht,
+  weil seine Bestaetigung ueber denselben toten Socket gekommen waere – **nur Neuladen half.**
+  - `_releaseRun(grund)` gibt frei, sichert per `_persistBotAnswer()` den bereits gestreamten
+    Teiltext (er stand sichtbar im Fenster, fehlte aber nach dem naechsten Laden) und schreibt
+    einen **Hinweis mit dem Weg zur Wiederholung** (↻). Der Hinweis ist der wichtige Teil: ein
+    Fenster, das einfach aufhoert, sieht wie eine fertige Antwort aus, die es nicht gibt.
+  - Idempotent (`if (!agentRunning) return;`) – ein Reconnect im Ruhezustand darf nichts melden.
+  - **Stille-Wachhund** (`RUN_SILENCE_MS = 10 min`, Prueftakt 30 s): fuer den Fall, dass `finished`
+    ausbleibt, obwohl der Socket lebt. Bewusst grosszuegig – ein einzelner LLM-Aufruf kann
+    minutenlang schweigen (kein Streaming). Es ist eine **Notbremse, kein Zeitmesser**, und sie
+    sendet nichts neu: der Benutzer entscheidet per ↻.
+- **Bewusst NICHT geaendert:** Sub-Agent-Follow-Ups (`main.py`, `target.run_task(...)`) laufen
+  weiter ohne den aeusseren Neuversuch, und der MAX_STEPS-Neuversuch fuehrt Werkzeuge eines
+  gescheiterten Laufs erneut aus. Beides ist Bestand, kein Teil dieses Fixes.
+- **Verifiziert:** 46 Pruefungen (`tests/test_empty_answer.py` – Quelltext-Weichen plus echte
+  `run_task`-Laeufe mit Stub-Provider, auf DEV im venv) + 12 UI-Pruefungen
+  (`tests/test_chat_release_ui.js`, jsdom gegen die echte `chat.html` **mit chat.js**, WebSocket
+  als Attrappe). Gegenprobe: der alte Stand faellt in 5 der 12 UI-Pruefungen durch, mit der
+  woertlichen Meldung „Bitte stoppe zuerst die laufende Aufgabe."
+  - **FALLSTRICK im Backend-Test:** `run_task` setzt `self.provider = get_provider(...)` bei
+    JEDEM Lauf neu. Ein vorher zugewiesenes Stub-Attribut wird dabei ueberschrieben – die erste
+    Testfassung hat deshalb das **echte Produktionsmodell** befragt (in der Ausgabe an einer
+    echten Antwort und einem httpx-Aufruf zu sehen). Gepatcht wird `agent.get_provider`, und ein
+    Test prueft ausdruecklich, dass der Stub benutzt wurde.
+  - **FALLSTRICK im UI-Test:** `chat.js` verbindet erst NACH der Anmeldepruefung (`fetch
+    /api/me`) – ohne Wartezeit gibt es noch keinen Socket und der Test meldet einen Fehler, den
+    es nicht gibt. Dazu fehlen jsdom `matchMedia` und `requestAnimationFrame`; letzteres wird
+    **selbst gestellt statt `pretendToBeVisual`**, das sonst einen Dauerlauf startet und den
+    Node-Prozess offen haelt.
+
 ## Diagramme professionalisiert: Theme-Layer, `create_chart`, Mermaid (2026-08-06)
 Ausgangslage: Diagramme entstanden als ```chartjs-**Freitextblock** aus der Modellantwort.
 Das Modell bestimmte damit auch die Optik (grelle Defaultfarben, keine Achsentitel, `1000`

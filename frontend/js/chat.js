@@ -23,6 +23,16 @@
     let agentRunning = false;
     let currentBotBubble = null;   // Streaming-Ziel
     let lastDate = '';
+    // Wachhund gegen einen dauerhaft "laufenden" Zustand: agentRunning wird
+    // sonst NUR von den WS-Ereignissen started/finished gesetzt. Bleibt
+    // 'finished' aus (Verbindungsabbruch, Prozessende, verschluckte Ausnahme),
+    // waere die Oberflaeche fuer immer blockiert.
+    let _lastWsMsgAt = 0;
+    let _runWatchdog = null;
+    // Grosszuegig: ein einzelner LLM-Aufruf kann minutenlang schweigen (kein
+    // Streaming), waehrend Werkzeuge laufend Status senden. Die Frist ist eine
+    // NOTBREMSE, keine Zeitmessung – sie darf nie einen echten Lauf abwuergen.
+    const RUN_SILENCE_MS = 10 * 60 * 1000;
 
     // TTS-State
     let ttsEnabled = false;
@@ -491,6 +501,7 @@
         };
 
         ws.onmessage = (evt) => {
+            _lastWsMsgAt = Date.now();
             try {
                 const msg = JSON.parse(evt.data);
                 handleMessage(msg);
@@ -498,6 +509,13 @@
         };
 
         ws.onclose = () => {
+            // Der Lauf ist fuer dieses Fenster verloren: das Backend sendet
+            // 'finished' an den TOTEN Socket (und _send_status verschluckt den
+            // Fehler), ein Reconnect erzeugt eine NEUE Verbindung, an die
+            // niemand mehr etwas schickt. Ohne Freigabe blieb agentRunning
+            // dauerhaft true – damit war sowohl das Senden (sendMessage) als
+            // auch das Wiederholen (↻) blockiert und nur ein Neuladen half.
+            _releaseRun('conn');
             scheduleReconnect();
         };
 
@@ -905,6 +923,7 @@
         if (ev === 'started' && !isSub) {
             // Hauptagent: neuer Lauf -> Agent-Infos/Sub-Streams zuruecksetzen
             agentRunning = true;
+            _startRunWatchdog();
             _ttsBuf = '';
             stopBtn.classList.remove('hidden');
             currentBotBubble = null;
@@ -914,6 +933,7 @@
             if (agent.agent_id) _agentInfos[agent.agent_id] = { label: agent.label || 'Jarvis', state: 'running', is_sub_agent: false };
         } else if (ev === 'finished' && !isSub) {
             agentRunning = false;
+            _stopRunWatchdog();
             stopBtn.classList.add('hidden');
             _clearActivity();
             removeStreamingDots();
@@ -924,20 +944,7 @@
             if (toSpeak) speak(toSpeak);
             // Antwort-Routing: IMMER in die Sitzung schreiben, in der die Frage
             // gestellt wurde – nicht in den gerade geoeffneten Verlauf.
-            const _origin = _runSid;
-            _runSid = null;
-            const _isRemote = _origin && _origin !== _activeSid;
-            if (_lastBotResp) {
-                const entry = { role: 'bot', text: _lastBotResp, time: timeStr(), date: _currentDateStr(), stats: _lastStats, ts: Date.now() };
-                if (_isRemote) {
-                    _appendToSessionTranscript(_origin, entry);
-                } else {
-                    _chatHistory.push(entry);
-                    _saveHistory();
-                    _syncAppend(entry);
-                    _maybeRefreshTitle();   // Auto-Benennung nach der ersten Antwort in die Sidebar uebernehmen
-                }
-            }
+            const _isRemote = _persistBotAnswer();
             if (_lastBotCol && _lastBotResp && !_isRemote) {
                 _appendFeedbackRow(_lastBotCol, _lastUserMsg, _lastBotResp);
                 _lastBotCol = null;
@@ -1395,6 +1402,71 @@
         stats.textContent = _lastStats;
         currentBotBubble.parentElement.appendChild(stats);
         scrollToBottom();
+    }
+
+    /* Antwort in den Verlauf schreiben – IMMER in die Sitzung, in der die
+     * Frage gestellt wurde, nicht in den gerade geoeffneten Verlauf.
+     * Aus dem 'finished'-Handler herausgezogen, weil _releaseRun() dasselbe
+     * braucht: bei einem Verbindungsabbruch soll der bereits gestreamte Text
+     * nicht verloren gehen (er steht sichtbar im Fenster, wuerde beim naechsten
+     * Laden aber fehlen). Rueckgabe: true, wenn die Antwort in eine ANDERE
+     * Sitzung ging (dann keine Feedback-Zeile im aktuellen Fenster). */
+    function _persistBotAnswer() {
+        const _origin = _runSid;
+        _runSid = null;
+        const _isRemote = !!(_origin && _origin !== _activeSid);
+        if (_lastBotResp) {
+            const entry = { role: 'bot', text: _lastBotResp, time: timeStr(),
+                            date: _currentDateStr(), stats: _lastStats, ts: Date.now() };
+            if (_isRemote) {
+                _appendToSessionTranscript(_origin, entry);
+            } else {
+                _chatHistory.push(entry);
+                _saveHistory();
+                _syncAppend(entry);
+                _maybeRefreshTitle();   // Auto-Benennung nach der ersten Antwort in die Sidebar uebernehmen
+            }
+        }
+        return _isRemote;
+    }
+
+    /* Laufzustand freigeben, wenn kein 'finished' mehr zu erwarten ist.
+     * Zwei Ausloeser: Verbindungsabbruch ('conn') und Stille-Notbremse
+     * ('silence'). Der Hinweis ist der WICHTIGE Teil – ein Fenster, das
+     * einfach aufhoert, sieht wie eine fertige Antwort aus, die es nicht gibt.
+     * Idempotent: laeuft nichts, passiert nichts (ein Reconnect nach einem
+     * ruhigen Fenster darf keine Meldung erzeugen). */
+    function _releaseRun(grund) {
+        _stopRunWatchdog();
+        if (!agentRunning) return;
+        agentRunning = false;
+        try { stopBtn.classList.add('hidden'); } catch (e) { /* egal */ }
+        _clearActivity();
+        removeStreamingDots();
+        currentBotBubble = null;
+        _lastBotCol = null;
+        _ttsBuf = '';               // sonst spricht der naechste Lauf alten Text
+        _persistBotAnswer();        // bereits gestreamten Teiltext sichern
+        _lastBotResp = '';
+        const fallback = grund === 'conn'
+            ? '⚠️ Verbindung unterbrochen – eine Antwort kann verloren gegangen sein. Die Anfrage lässt sich mit ↻ erneut senden.'
+            : '⚠️ Seit 10 Minuten keine Rückmeldung vom Server – die Eingabe ist wieder frei. Die Anfrage lässt sich mit ↻ erneut senden.';
+        const key = grund === 'conn' ? 'chat.run_lost_conn' : 'chat.run_lost_silence';
+        addStatusLine(window.t ? (window.t(key) !== key ? window.t(key) : fallback) : fallback);
+        try { _renderAgentPanel(); } catch (e) { /* Panel ist optional */ }
+    }
+
+    function _startRunWatchdog() {
+        _lastWsMsgAt = Date.now();
+        if (_runWatchdog) return;
+        _runWatchdog = setInterval(function () {
+            if (!agentRunning) { _stopRunWatchdog(); return; }
+            if (Date.now() - _lastWsMsgAt > RUN_SILENCE_MS) _releaseRun('silence');
+        }, 30000);
+    }
+
+    function _stopRunWatchdog() {
+        if (_runWatchdog) { clearInterval(_runWatchdog); _runWatchdog = null; }
     }
 
     function addStatusLine(text) {

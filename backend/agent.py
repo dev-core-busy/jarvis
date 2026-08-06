@@ -1548,6 +1548,18 @@ KRITISCH – Autonomie-Regeln:
             # wenn der LLM seine Tool-Historie "vergisst" und Calls wiederholt).
             _recent_calls: list[str] = []
             _loop_break = False
+            # Ist beim Benutzer eine ENDGUELTIGE Antwort angekommen? Nur damit
+            # laesst sich der Fall "Lauf endet mit '✅ Aufgabe abgeschlossen',
+            # aber der Nutzer sieht nichts" erkennen. Zwischentexte neben
+            # Werkzeugaufrufen (intermediate) zaehlen NICHT – sie sind
+            # ausdruecklich kein Endergebnis ("ich schaue mal nach …").
+            _answer_sent = False
+            # Abschluss ohne Antwort -> unten dieselbe Nachbehandlung wie bei
+            # MAX_STEPS (finaler Aufruf OHNE Werkzeuge). Wichtig: KEIN
+            # Wiederholen des ganzen Laufs an dieser Stelle – die Werkzeuge
+            # sind schon gelaufen und wuerden ein zweites Mal ausgefuehrt
+            # (Datei erzeugt, Ticket angelegt, Nachricht gesendet …).
+            _empty_finish = False
             while steps < config.MAX_AGENT_STEPS:
                 # Stop prüfen (benutzerbezogener Scope)
                 if stop_scope.stopped:
@@ -1568,6 +1580,7 @@ KRITISCH – Autonomie-Regeln:
                         retry_text = " ".join(p.text for p in (retry_resp.parts or []) if p.text).strip()
                         if retry_text:
                             await self._send_status(ws, retry_text, highlight=True)
+                            _answer_sent = True
                             # Die gelieferte Antwort MUSS in den Verlauf – vorher endete
                             # dieser Zweig mit einem nackten break: der Nutzer sah eine
                             # Antwort, der Kontext kannte sie nicht, und der naechste
@@ -1610,6 +1623,8 @@ KRITISCH – Autonomie-Regeln:
                         _display = self._expand_charts(_display)
                         if _display:
                             await self._send_status(ws, _display, highlight=True, intermediate=is_intermediate)
+                            if not is_intermediate:
+                                _answer_sent = True
                         _conv_messages.append({"role": "assistant", "content": text.strip()})
                         # In der Antwort genannte Dokumente (auch /tmp-Pfade) als Chip ausliefern
                         await self._deliver_docs(ws, text, _delivered_docs, username, since=_task_start_time)
@@ -1622,6 +1637,24 @@ KRITISCH – Autonomie-Regeln:
                     # Element (= function_response). Ohne diese Pruefung stand die
                     # Frage doppelt im Kontext (nachgewiesen auf ECHT, 2026-07-28).
                     _ensure_user_msg()
+                    # ── Abschluss OHNE Antwort abfangen ───────────────────
+                    # Der Zweig hier meldete bisher bedingungslos "✅ Aufgabe
+                    # abgeschlossen". Es gibt aber drei Wege hierher, bei denen
+                    # der Benutzer NICHTS gesehen hat:
+                    #  1. parts vorhanden, aber ohne Text – bei denkenden
+                    #     Modellen eine Antwort mit reinem Thinking-Part
+                    #     (`if not response.parts` oben greift dann nicht),
+                    #  2. der Text besteht nur aus Leerzeichen (`text.strip()`),
+                    #  3. der Anzeigetext ist nach _clean_doc_refs/_expand_charts
+                    #     leer (Antwort bestand nur aus einem Dokumentpfad).
+                    # run_outcome blieb "ok", also griff auch der automatische
+                    # Neuversuch in main.py nicht: die Anfrage galt als erledigt.
+                    # Ein ausgelieferter Download-Chip zaehlt als Ergebnis – ein
+                    # Lauf, der eine Datei liefert, braucht keinen Nachschlag.
+                    if not _answer_sent and not _delivered_docs:
+                        _log("Abschluss ohne Antwort – finaler Aufruf ohne Werkzeuge folgt")
+                        _empty_finish = True
+                        break
                     if self.LLM_PROVIDER == "google" and hasattr(response, 'raw') and response.raw and response.raw.candidates:
                         chat_history.append(response.raw.candidates[0].content)
                     else:
@@ -1786,14 +1819,20 @@ KRITISCH – Autonomie-Regeln:
 
                 steps += 1
 
-            if (steps >= config.MAX_AGENT_STEPS or _loop_break) and not stop_scope.stopped:
-                # Max-Steps erreicht ODER Loop-Detector hat angeschlagen:
-                # einen finalen LLM-Call OHNE Tools erzwingen,
-                # damit der User mit dem bisherigen Kontext eine Antwort bekommt.
+            if (steps >= config.MAX_AGENT_STEPS or _loop_break or _empty_finish) and not stop_scope.stopped:
+                # Max-Steps erreicht, Loop-Detector angeschlagen ODER der Lauf
+                # endete ohne Antwort (_empty_finish): einen finalen LLM-Call
+                # OHNE Tools erzwingen, damit der User mit dem bisherigen
+                # Kontext eine Antwort bekommt.
                 # Mehrstufiger Fallback, weil ein simpler tools=[]-Call bei langer
                 # Tool-Historie oft leeren Text liefert (LLM erkennt das letzte
                 # Turn-Ende als function_response und antwortet nicht).
-                if not _loop_break:
+                if _empty_finish:
+                    # Eigene Meldung: "Maximale Schrittanzahl" waere hier falsch
+                    # und "Endlosschleife erkannt" erst recht.
+                    await self._send_status(
+                        ws, "⚠️ Das Modell hat keine Antwort formuliert – frage die Antwort erneut ab …")
+                elif not _loop_break:
                     await self._send_status(
                         ws,
                         f"⚠️ Maximale Schrittanzahl ({config.MAX_AGENT_STEPS}) erreicht – erzeuge finale Antwort ohne weitere Tools …"
@@ -1855,6 +1894,7 @@ KRITISCH – Autonomie-Regeln:
 
                 if _final_text:
                     await self._send_status(ws, self._expand_charts(_final_text), highlight=True)
+                    _answer_sent = True
                     # _user_msg nur anhaengen, wenn es noch nicht in der History steht
                     # (kann durch Z. 668 beim ersten Tool-Call bereits drin sein) –
                     # sonst entstehen doppelte user-Eintraege, was Anthropic strict ablehnt.
@@ -1875,6 +1915,14 @@ KRITISCH – Autonomie-Regeln:
                         )
                     else:
                         await self._send_status(ws, "⚠️ Keine Antwort vom LLM – automatischer Neuversuch folgt …")
+                    # Auch hier gilt die Regel "entweder vollstaendig oder
+                    # unveraendert" (siehe _rollback_history): der 0-Parts-Zweig
+                    # oben rollt zurueck, dieser Pfad tat es nicht. Ohne den
+                    # Rollback bliebe die Frage samt Werkzeug-Turns ohne Antwort
+                    # im Kontext stehen – der naechste Lauf (auch der
+                    # automatische Neuversuch) beantwortet sie dann MIT, und die
+                    # Frage steht doppelt im Verlauf.
+                    chat_history = self._rollback_history(chat_history, _hist_before_run)
 
             # LLM-Stats senden (Dauer + Token-Verbrauch)
             _task_duration_ms = int((time.time() - task_start_time) * 1000)

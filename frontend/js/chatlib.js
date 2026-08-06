@@ -86,6 +86,13 @@
             // spaeter von charts.js sicher (JSON.parse, kein eval) gerendert.
             if (/^(chartjs|jarvis-chart|chart)$/i.test(lang)) {
                 codeBlocks.push(`<div class="jarvis-chart" data-spec="${_toB64(code.trim())}"></div>`);
+            } else if (/^(mermaid|mmd)$/i.test(lang)) {
+                // ```mermaid -> Schaubild (Fluss-, Sequenz-, Gantt-, ER-Diagramm).
+                // Wie beim Chart wandert die QUELLE base64-kodiert ins
+                // data-Attribut; mermaid_blocks.js rendert sie mit
+                // securityLevel 'strict' zu SVG (kein HTML aus Modelltext).
+                // Kein Chart.js-Ersatz: Mermaid kann keine x/y-Daten.
+                codeBlocks.push(`<div class="jarvis-mermaid" data-src="${_toB64(code.trim())}"></div>`);
             } else {
                 codeBlocks.push(`<pre><code>${_E(code.trim())}</code></pre>`);
             }

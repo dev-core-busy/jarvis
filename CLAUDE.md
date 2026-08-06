@@ -2365,6 +2365,98 @@ lehrreich, weil zwei naheliegende Verdaechtige falsch waren:
   HTML von aussen, und dann zaehlen, **wie oft** die Seite denselben Endpunkt aufruft.
   Ein einzelner Endpunkt mit 0,77 s sieht harmlos aus; neunmal in Serie sind es 7 s.
 
+## Diagramme professionalisiert: Theme-Layer, `create_chart`, Mermaid (2026-08-06)
+Ausgangslage: Diagramme entstanden als ```chartjs-**Freitextblock** aus der Modellantwort.
+Das Modell bestimmte damit auch die Optik (grelle Defaultfarben, keine Achsentitel, `1000`
+statt `1.000`), und was daran kaputt war, merkte erst der Browser („Chart-Daten ungueltig") –
+das Modell erfuhr es nie. Umgesetzt wurden A1–A6 + A9 aus der Recherche; B (Bildgenerierung)
+ist auf Entscheidung des Nutzers **zurueckgestellt**, bis ein MoE-Modell dafuer bereitsteht.
+
+- **Die Optik liegt im Theme-Layer, nicht im Modell** (`charts.js::applyTheme`): Palette
+  (erste Farbe = `--accent`, also Branding-treu), Schrift, Gitter nur auf der WERT-Achse,
+  Legende nur bei mehr als einer Reihe, deckende Tooltips, lokalisierte Zahlen.
+  `fillDefaults()` setzt **nur fehlende** Werte – eine ausdrueckliche Angabe des Modells
+  gewinnt immer, auch `false`.
+  - **`null` gilt als „nicht gesetzt", und das ist der Kern:** `stripJsFunctions()` ersetzt die
+    von LLMs gelieferten Callbacks (`ticks.callback`) durch `null` – zu Recht, ausgefuehrter
+    Code aus einer Modellantwort waere eine Luecke. Wuerde `null` als Angabe gelten, koennte
+    der Theme-Layer den Formatter nicht setzen und im Diagramm stuende weiter `1000`.
+    **Zahlenformate sind clientseitig NUR hier moeglich.**
+  - Achsen-Ticks kompakt ab 10.000 („1,2 Mio"), Tooltip immer vollstaendig – eine schmale
+    Achse darf den Wert nicht unlesbar machen.
+  - `devicePixelRatio: 2` ist fuer den PNG-Export da (A6): der Export kopiert das Canvas in
+    seiner INTERNEN Auflösung, ohne die Zeile waere das Bild ~640 px breit.
+  - **Theme-/Sprachwechsel zeichnet neu** (`redrawAll` an `jarvis:themechange` und
+    `jarvis-lang-changed`): Farben und Formate stecken in der fertigen Chart-Instanz. Die
+    Original-Spec in `data-spec` bleibt unangetastet, es wird derselbe Weg erneut gegangen.
+- **`.jarvis-chart` stand in `chat.css` – und `sap.html` laedt das nicht**, bindet aber
+  `charts.js` ein. Dort hatte der Container also KEINE Regeln, und ein Chart.js-Canvas mit
+  `maintainAspectRatio:false` ohne Container-Hoehe rendert ins Nichts. Die Regeln stehen jetzt
+  in **`theme.css`** (dieselbe Begruendung wie bei `select option`, 2026-07-29), chat.css hat
+  nur einen Verweis. **Nicht zurueckkopieren.**
+- **`create_chart` (`backend/tools/chart.py`) ist der neue Regelweg** – zwei Gruende:
+  1. **Repair-Loop:** die Pruefung laeuft VOR dem Rendern, und die Meldung nennt die Zahlen
+     („Datenreihe 2 hat 5 Werte, es gibt aber 7 Kategorien … fehlende als null"). Das Modell
+     korrigiert im selben Lauf, statt einen kaputten Block auszugeben.
+  2. **`source={file,label_column,value_columns,aggregate,sort,top_n}`:** das Werkzeug liest
+     CSV/TSV/XLSX selbst, gruppiert und rechnet. Vorher musste das Modell jeden Wert
+     abschreiben (die Instruktionen warnten sogar davor, „ueber jeden Punkt einzeln
+     nachzudenken").
+  - **`parse_number` ist sicherheitsrelevant fuer die Richtigkeit:** `float("1.234")` ergibt
+    1.234 statt 1234 – ein stiller Faktor 1000 in jeder deutschen Tabelle. Regel bei
+    gemischten Trennzeichen: das RECHTESTE ist das Dezimaltrennzeichen. Erkennt zusaetzlich
+    Waehrung, Prozent, geschuetzte Leerzeichen und Buchhaltungsklammern `(1.234)` = negativ.
+  - **Rueckgabe ist ein MARKER `[[JARVIS_CHART:<token>]]`**, die Spezifikation bleibt im
+    Prozess (`_pending`, Deckel 60). `agent.py::_expand_charts` loest ihn erst im
+    ANZEIGETEXT auf – der LLM-Kontext (und der gespeicherte Verlauf) behaelt den kurzen
+    Marker. Damit stehen die Zahlen **nie** im Kontext. Gleiches Muster wie
+    `[[JARVIS_DELIVER:…]]`.
+  - **headless-Kanaele bekommen `strip_markers()`**, nicht die Expansion: ein ```chartjs-Block
+    ist in WhatsApp/Telegram blanker JSON-Text. Dort gilt weiter der matplotlib-PNG-Weg.
+  - **Die Pfadfreigabe fuer `source.file` sitzt im DISPATCH** (`agent.py`, Zweig
+    `create_chart` → `sandbox.authorize_fs("read", …)`), nicht nur im Werkzeug: sonst waere
+    `create_chart` die bequemste Umgehung des Pfad-Confinements und der Eigentuemer-Schranke
+    in `data/documents` (fremde Anhaenge!). Weich/hart wie bei `filesystem`: geratener Pfad =
+    weich, Secret-Ziel = Angriffsindiz.
+  - `create_chart` steht **nicht** in `_BLOCKED_TOOLS_FOR_LDAP`: es liest nur und schafft kein
+    Persistenz-Substrat.
+- **A2 – Plugins (MIT, als Vendor-UMD):** `chartjs-plugin-datalabels` wird **pro Diagramm**
+  zugeschaltet und nur, wenn die Labels lesbar bleiben (bar ≤30 Punkte/≤3 Reihen, pie ≤8
+  Segmente, line ≤8 Punkte/1 Reihe, scatter nie) – global registriert wuerde es in ein
+  Streudiagramm mit 500 Punkten schreiben. `chartjs-plugin-annotation` ist global registriert,
+  weil es ohne `options.plugins.annotation` nichts tut (→ `target_line`).
+  **Reihenfolge im HTML beachten:** die Plugin-UMDs greifen beim Laden auf `window.Chart`.
+- **A9 – Mermaid** (```mermaid / ```mmd → `mermaid_blocks.js`): **auf Anforderung geladen**,
+  die Bibliothek ist 2,7 MB; ein Chat ohne Schaubild zahlt nichts. Nicht als Chart-Ersatz –
+  Mermaid kennt keine Achsen. Auf `/userchat` ist **nur** Mermaid eingebunden (kein LLM-Chat,
+  aber ein getippter Block soll keinen leeren Rahmen hinterlassen); `support.html` bekam
+  Chart.js nach (es rendert ueber dasselbe `chatlib.js` und zeigte bisher leere Kaesten).
+- **Verifiziert:** 112 Backend-Pruefungen (`tests/test_create_chart.py`, ohne fastapi
+  lauffaehig, auf DEV im echten venv) + 115 UI-Pruefungen (`tests/test_chart_theme_ui.js`,
+  jsdom gegen die echten Dateien) = 227. Gegenprobe: der alte Stand setzt weder Farbe noch
+  Achsenformatter, hat keinen PNG-Knopf und kein `devicePixelRatio`. Live auf DEV: Werkzeug
+  registriert (69 Werkzeuge), Prompt-Pfad ersetzt, echter CSV-Lauf gruppiert korrekt
+  (1.200,50 + 300 = 1500,5), Dienst aktiv, `/settings|/chat|/sap` HTTP 200. Optisch geprueft
+  mit Chrome-Screenshots in Dunkel UND Hell (bar mit Werte-Labels/Ziellinie, line mit
+  Mio-Achse, doughnut mit Prozenten) sowie Mermaid mit der ECHTEN Bibliothek.
+
+### Zwei Fallstricke, die nur der echte Lauf zeigt
+- **In einer `.mplstyle`-Datei ist `#` das KOMMENTARZEICHEN.** `axes.edgecolor: #b8bfcc` ergibt
+  einen leeren Wert; matplotlib meldet „does not look like a color arg" **ueber logging, nicht
+  ueber `warnings`** – ein Test, der Warnungen zaehlt, sieht nichts, und der Stil laedt
+  scheinbar sauber mit Vorgabefarben. Fuenf Zeilen waren so wirkungslos (auf DEV gefunden).
+  Farben also **ohne** `#`. Ebenso kein `semibold`: DejaVu/Liberation haben es nicht →
+  „Failed to find font weight" pro Diagramm. Und keine Wunschschrift wie `Inter` (nicht auf
+  dem Server) – matplotlib warnt sonst pro Textelement, was im Chat wie ein Fehler aussieht.
+- **Mermaid: `htmlLabels: false` muss GLOBAL stehen**, nicht nur unter `flowchart` – im
+  Browser nachgemessen blieben sonst 2 `<foreignObject>` (die Kantenbeschriftungen). Und die
+  erste Fassung von `svgAusText()` entfernte `foreignObject` als Haertung – damit waren die
+  **Knotenbeschriftungen weg** (leere Kaesten mit Pfeilen, im Screenshot gesehen). Jetzt
+  bleibt das Element, entfernt werden `script/iframe/object/embed`, alle `on*`-Attribute und
+  `javascript:`/`data:`-Ziele. **Merkregel:** eine Haertung, die sichtbaren Inhalt loescht,
+  ist keine Haertung, sondern ein Fehler – und ein jsdom-Test mit Attrappe beweist ueber die
+  ECHTE Bibliothek nichts.
+
 ## Konventionen
 - **Git:** `git commit` und `git push` NUR auf ausdrückliches Kommando des Nutzers (`c+p`) –
   niemals aus eigenem Antrieb, auch nicht wenn eine Aufgabe fertig und getestet ist. Fertige
@@ -2533,6 +2625,11 @@ verdeckte aber echte Fehler im Journal.
   Helfer `_ingest()`: kopieren muss klappen, Quelle loeschen ist best-effort (Restdatei in tmpfs
   ist harmlos, wird protokolliert). Bei allen Datei-Uebernahmen aus Agent-Arbeitsverzeichnissen
   gilt: **Erfolg am Kopieren messen, nicht am Aufraeumen.**
+- **Farben in `.mplstyle` OHNE `#`** (dort ist es das Kommentarzeichen) und kein `semibold` –
+  siehe den Diagramm-Abschnitt. Die Fehlermeldung kommt ueber logging, nicht ueber `warnings`.
+- **Mermaid `htmlLabels: false` gehoert auf die OBERSTE Konfigurationsebene**, sonst bleiben
+  HTML-Beschriftungen; und `foreignObject` NICHT als Haertung entfernen – das loescht die
+  Knotenbeschriftungen.
 - **Neues Profil-Feld = ZWEI Stellen in config.py:** `create_profile()` (Anlegen) UND die
   Whitelist in `update_profile()`. Fehlt eine, wird das Feld still verworfen – genau so war
   `prompt_tool_calling` jahrelang wirkungslos, obwohl Frontend und agent.py es kannten.

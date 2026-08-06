@@ -7,8 +7,8 @@
          bleibt dadurch immer sichtbar. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>Jarvis Chat</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=8">
-    <link rel="stylesheet" href="/static/css/chat.css?v=42">
+    <link rel="stylesheet" href="/static/css/theme.css?v=9">
+    <link rel="stylesheet" href="/static/css/chat.css?v=43">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
@@ -325,9 +325,9 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=67"></script>
+<script src="/static/js/i18n.js?v=68"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
-<script src="/static/js/chatlib.js?v=13"></script>
+<script src="/static/js/chatlib.js?v=14"></script>
 <script src="/static/js/issues.js?v=6"></script>
 <script src="/static/js/branding.js?v=22"></script>
 <script src="/static/js/security_incidents.js?v=12"></script>
@@ -339,7 +339,13 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/chat.js?v=92"></script>
 <!-- Interaktive Charts (```chartjs) – Chart.js lokal gevendort (CSP: kein CDN) -->
 <script src="/static/js/vendor/chart.umd.min.js?v=1"></script>
-<script src="/static/js/charts.js?v=3"></script>
+<!-- Chart.js-Plugins (MIT). MUESSEN nach chart.umd.min.js kommen – ihre
+     UMD-Wrapper greifen beim Laden auf window.Chart zu. datalabels wird von
+     charts.js pro Diagramm zugeschaltet, annotation global registriert. -->
+<script src="/static/js/vendor/chartjs-plugin-datalabels.min.js?v=1"></script>
+<script src="/static/js/vendor/chartjs-plugin-annotation.min.js?v=1"></script>
+<script src="/static/js/charts.js?v=4"></script>
+<script src="/static/js/mermaid_blocks.js?v=1"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

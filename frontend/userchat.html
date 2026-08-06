@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Jarvis – Benutzer-Chat</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=8">
+    <link rel="stylesheet" href="/static/css/theme.css?v=9">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
-    <link rel="stylesheet" href="/static/css/chat.css?v=33">
+    <link rel="stylesheet" href="/static/css/chat.css?v=34">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=5">
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
     <link rel="manifest" href="/static/manifest.json">
@@ -907,14 +907,20 @@
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=93"></script>
+<script src="/static/js/i18n.js?v=94"></script>
 <script src="/static/js/issues.js?v=6"></script>
-<script src="/static/js/chatlib.js?v=11"></script>
+<script src="/static/js/chatlib.js?v=12"></script>
 <script src="/static/js/branding.js?v=22"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/security_incidents.js?v=12"></script>
 <script src="/static/js/sessions.js?v=4"></script>
 <script src="/static/js/userchat.js?v=39"></script>
+<!-- Nur Mermaid, KEIN Chart.js: /userchat ist Mensch-zu-Mensch, hier
+     entstehen keine LLM-Antworten mit Datenreihen. Der Renderer (chatlib.js)
+     erzeugt aber auch hier einen Platzhalter, wenn jemand einen
+     ```mermaid-Block tippt – ohne dieses Skript blieb ein leerer Rahmen
+     stehen. Die 2,7-MB-Bibliothek wird erst bei Bedarf geholt. -->
+<script src="/static/js/mermaid_blocks.js?v=1"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

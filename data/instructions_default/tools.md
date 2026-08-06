@@ -32,10 +32,13 @@
 - Suchmodus Auto bevorzugt (Vektor + TF-IDF Fallback)
 
 ## Diagramme/Charts
-- Für Diagramme aus Daten IMMER einen ```chartjs-Codeblock (reines JSON: type, data, options) ausgeben – die Chat-UI rendert ihn direkt inline. Funktioniert immer, auch ohne Shell.
-- Nur wenn ein herunterladbares PNG oder ein komplexer statistischer Plot gewünscht ist: matplotlib/seaborn via Shell nach /tmp (nur wenn 'shell' aktiv).
+- Für Diagramme aus Daten das Tool **create_chart** benutzen (nicht selbst eine Chart-Konfiguration schreiben) und die zurückgegebene Marker-Zeile `[[JARVIS_CHART:…]]` unverändert in einer eigenen Zeile ausgeben. Das Tool prüft die Angaben und gestaltet das Diagramm einheitlich.
+- **Liegen die Zahlen in einer Datei (CSV/XLSX)? Datei übergeben statt Werte abschreiben:** `source={'file':…,'label_column':…,'value_columns':[…],'aggregate':'sum'}`. Damit entfällt das Abtippen hunderter Werte komplett – und niemand vertippt sich.
+- Keine Farb-/Stilangaben mitschicken: Farben, Schrift, Gitter und Zahlenformat setzt das System (folgt Dark/Light und Markenfarbe). Inhaltlich nützlich sind `title`, `x_title`/`y_title` mit Einheit, `horizontal`, `stacked`, `target_line`.
+- Meldet das Tool `FEHLER_KORRIGIERBAR`, steht dort genau, was zu ändern ist – korrigieren und erneut aufrufen, nicht auf einen Codeblock ausweichen.
+- Herunterladbares PNG oder statistischer Spezialplot (Heatmap, Regression, Boxplot): matplotlib/seaborn via Shell nach /tmp (nur wenn 'shell' aktiv) und dabei **immer** mit dem Hausstil beginnen (`plt.style.use('<Pfad>/backend/plotstyles/jarvis.mplstyle')`) – der System-Prompt nennt den vollständigen Pfad.
+- Schaubilder ohne Zahlen (Ablauf, Architektur, Zeitplan, Zustände, ER-Modell): ```mermaid-Codeblock ausgeben, den die Chat-UI zeichnet. Mermaid kann keine Achsen/Datenreihen.
 - Bei einem Diagramm-Auftrag NIEMALS Alternativen (ASCII/CSV/HTML) anbieten oder zurückfragen – direkt liefern.
-- Bei SEHR VIELEN Datenpunkten (z.B. mehreren hundert): NICHT über jeden Punkt einzeln nachdenken, sondern die Werte direkt aus dem Tool-Ergebnis in die chartjs-Arrays übernehmen und den Block sofort ausgeben.
 
 ## spawn_agent (nur privilegierte lokale Benutzer – für Netzwerk-Benutzer gesperrt)
 - Für parallelisierbare Teilaufgaben: Sub-Agents spawnen

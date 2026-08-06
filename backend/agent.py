@@ -625,6 +625,29 @@ def _seed_instructions() -> None:
         print(f"[INSTRUCTIONS] Vorgaben nicht kopiert: {e}", flush=True)
 
 
+# Hausstil fuer matplotlib-PNGs (Regel 20 im System-Prompt). Der Pfad ist
+# installationsabhaengig (/opt/jarvis auf dem Server, Repo-Pfad lokal) und
+# wird deshalb erst beim Zusammenbauen des Prompts eingesetzt – ein
+# fest verdrahteter Pfad wuerde auf einer der beiden Seiten ins Leere zeigen.
+PLOTSTYLE_FILE = Path(__file__).resolve().parent / "plotstyles" / "jarvis.mplstyle"
+
+
+def _mit_plotstyle(prompt: str) -> str:
+    """Ersetzt den Platzhalter {MPLSTYLE} durch den Pfad der Stildatei.
+
+    Fehlt die Datei, wird 'default' eingesetzt: der vom Modell erzeugte
+    ``plt.style.use(...)``-Aufruf bleibt dann gueltig und das Diagramm
+    entsteht ungestylt. Ein Prompt, der einen nicht vorhandenen Pfad nennt,
+    haette stattdessen einen garantierten Fehlversuch produziert."""
+    if not prompt or "{MPLSTYLE}" not in prompt:
+        return prompt
+    try:
+        ziel = str(PLOTSTYLE_FILE) if PLOTSTYLE_FILE.exists() else "default"
+    except Exception:  # noqa: BLE001
+        ziel = "default"
+    return prompt.replace("{MPLSTYLE}", ziel)
+
+
 def load_instructions() -> str:
     """Laedt alle .md Dateien aus data/instructions/ als System-Prompt-Erweiterung."""
     _seed_instructions()
@@ -799,14 +822,25 @@ Regeln:
     - Schlaegt etwas doch fehl, melde den KONKRETEN Fehler (Ausgabe/Exit-Code) – erfinde keine pauschale "geht nicht"-Begruendung.
     - Ausnahmen (echte Grenzen, KEINE Erfindung): serverseitige Audio-WIEDERGABE (kein Audiogeraet, siehe 18) und – nur fuer eingeschraenkte Netzwerk-Benutzer – die im Zugriff gesperrten System-/Secret-Bereiche.
 
-20. INTERAKTIVE CHARTS IM CHAT – der bevorzugte Weg fuer Datenvisualisierung im Web-Chat:
-    - Fuer Diagramme aus Zahlen/Tabellen gib einen Codeblock mit der Sprache "chartjs" aus, dessen Inhalt eine GUELTIGE Chart.js-Konfiguration als reines JSON ist (Schluessel: type, data, options). Die Chat-UI rendert daraus direkt ein interaktives Diagramm.
-    - Beispiel (genau dieses Format):
-      ```chartjs
-      {"type":"bar","data":{"labels":["Q1","Q2","Q3","Q4"],"datasets":[{"label":"Umsatz (k€)","data":[120,190,70,145]}]},"options":{"plugins":{"title":{"display":true,"text":"Umsatz je Quartal"}}}}
+20. DIAGRAMME IM CHAT – benutze das Werkzeug create_chart, schreibe keine Konfiguration selbst:
+    - REGELFALL: create_chart(type=…, title=…, labels=[…], series=[{label,data}]) und die zurueckgegebene Marker-Zeile [[JARVIS_CHART:…]] UNVERAENDERT in einer eigenen Zeile der Antwort ausgeben. Daraus entsteht das interaktive Diagramm.
+    - LIEGEN DIE ZAHLEN IN EINER DATEI (CSV/XLSX, z.B. ein Anhang in /tmp)? Dann NICHT die Werte abschreiben, sondern die Datei uebergeben:
+      create_chart(type='bar', title='Umsatz je Region', source={'file':'/tmp/anhang_x_umsatz.xlsx','label_column':'Region','value_columns':['Umsatz'],'aggregate':'sum','sort':'value_desc','top_n':10})
+      Das Werkzeug liest, gruppiert und rechnet selbst – auch bei tausenden Zeilen, ohne dass eine Zahl durch dich hindurchlaeuft.
+    - GESTALTUNG NICHT MITSCHICKEN: Farben, Schriften, Gitter, Legende und Zahlenformate setzt das System einheitlich (folgt Dark/Light und der Markenfarbe). Nuetzlich sind nur die INHALTLICHEN Angaben: title, x_title/y_title (mit Einheit!), horizontal (lange Kategorienamen), stacked, target_line/target_label (Ziel-/Schwellenwert).
+    - MELDET das Werkzeug "FEHLER_KORRIGIERBAR", steht dort genau, was zu aendern ist – korrigiere es und rufe erneut auf, statt auf einen Codeblock auszuweichen.
+    - Ein ```chartjs-Codeblock von Hand ist nur noch der NOTNAGEL, wenn create_chart nicht verfuegbar ist. Dann reines JSON (type/data/options), KEINE JavaScript-Funktionen/Callbacks (werden aus Sicherheitsgruenden nicht ausgefuehrt).
+    - PNG statt interaktiv (Regel 16, matplotlib/seaborn via shell_execute): wenn der Nutzer ein Bild zum Herunterladen/Weiterleiten will, fuer statistische Spezialplots (Heatmap, Regression, Boxplot) und fuer Kanaele ohne Web-UI (WhatsApp/Telegram). IMMER mit dem Hausstil beginnen:
+      import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt; plt.style.use('{MPLSTYLE}')
+      Sehr grosse Werte vorher in Tsd./Mio umrechnen und die Einheit in den Achsentitel schreiben ('Umsatz in Mio €') – sonst steht ueber der Achse ein '×10^6', das der Betrachter selbst hochrechnen muss.
+    - SCHAUBILDER statt Zahlen (Ablauf, Architektur, Zeitplan, Zustaende, ER-Modell): einen Codeblock mit der Sprache "mermaid" ausgeben – die Chat-UI zeichnet ihn. Beispiel:
+      ```mermaid
+      flowchart LR
+        A[Antrag] --> B{Pruefung}
+        B -->|ok| C[Freigabe]
+        B -->|Mangel| A
       ```
-    - NUR reines JSON – KEINE JavaScript-Funktionen/Callbacks (werden aus Sicherheitsgruenden nicht ausgefuehrt). Erlaubte type-Werte: bar, line, pie, doughnut, radar, polarArea, bubble, scatter.
-    - WANN WAS: interaktive Web-Charts -> chartjs-Block (Standardfall im Chat). Ein gerendertes PNG via matplotlib/seaborn (Regel 16) nur, wenn der Nutzer ein Bild zum Herunterladen/Weiterleiten will, fuer statistische/komplexe Plots (z.B. Heatmap, Regression), oder fuer Kanaele ohne Web-UI (WhatsApp/Telegram zeigen den chartjs-Block sonst als Rohtext).
+      Mermaid kann KEINE Datenreihen/Achsen – Zahlen gehoeren in create_chart.
 
 AUTO-LEARNING – Lerne aus Erfahrung:
 - Wenn du fuer eine Aufgabe MEHRERE Versuche brauchst (z.B. verschiedene Tools oder Quellen probierst), speichere den ERFOLGREICHEN Weg:
@@ -914,6 +948,14 @@ KRITISCH – Autonomie-Regeln:
             self._tool_instances.append(WriteClipboardTool())
         except Exception as e:
             print(f"[AGENT {self.agent_id}] ClipboardTools nicht geladen: {e}", flush=True)
+
+        # Diagramme: geprueft + einheitlich gestaltet, Daten koennen aus einer
+        # Datei kommen (dann laufen die Zahlen nicht durch das Modell).
+        try:
+            from backend.tools.chart import CreateChartTool
+            self._tool_instances.append(CreateChartTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] CreateChartTool nicht geladen: {e}", flush=True)
 
         # Bildgenerierung (ueber das aktive LLM-Profil; kein Provider-Wechsel)
         try:
@@ -1223,6 +1265,7 @@ KRITISCH – Autonomie-Regeln:
 
         # System-Prompt zusammenbauen
         system_prompt = self.SUB_AGENT_PROMPT if self.is_sub_agent else self.SYSTEM_PROMPT
+        system_prompt = _mit_plotstyle(system_prompt)
 
         # Desktop-Kontext je nach Client-Typ setzen
         if client_type == "windows_desktop":
@@ -1325,14 +1368,15 @@ KRITISCH – Autonomie-Regeln:
                 "Allgemeinwissen, Berechnungen, Textverarbeitung. "
                 "Bei Anfragen auf gesperrte Ressourcen: Höflich ablehnen und erklären was nicht erlaubt ist. "
                 "DIAGRAMME/CHARTS/GRAFIKEN sind AUSDRÜCKLICH ERLAUBT und funktionieren OHNE Shell: "
-                "Wenn der Nutzer ein Diagramm/Chart/eine Grafik aus Daten will, gib IMMER SOFORT einen "
-                "```chartjs-Codeblock (reines JSON: type, data, options) aus – die Chat-UI rendert ihn "
-                "direkt inline als interaktives Diagramm. Hole die nötigen Daten mit den erlaubten Tools "
-                "(z.B. jira_org_profile liefert pro Ticket Anlagedatum/Dauer) und baue daraus den Block. "
+                "Wenn der Nutzer ein Diagramm/Chart/eine Grafik aus Daten will, rufe SOFORT das Tool "
+                "create_chart auf und gib die zurückgegebene Zeile [[JARVIS_CHART:…]] unverändert aus – "
+                "die Chat-UI rendert daraus ein interaktives Diagramm. Hole die nötigen Daten mit den "
+                "erlaubten Tools (z.B. jira_org_profile liefert pro Ticket Anlagedatum/Dauer); liegen sie "
+                "als CSV/XLSX-Datei vor, übergib die Datei per source= statt die Werte abzuschreiben. "
                 "STRENG VERBOTEN bei Diagramm-Anfragen: matplotlib/Shell verlangen; Alternativen wie "
                 "ASCII/CSV/HTML-Datei anbieten; zurückfragen welche Variante gewünscht ist; behaupten, du "
-                "könntest kein Diagramm erstellen oder es sei eine 'HTML-Datei zum Öffnen'. Einfach den "
-                "chartjs-Block ausgeben."
+                "könntest kein Diagramm erstellen oder es sei eine 'HTML-Datei zum Öffnen'. Einfach "
+                "create_chart aufrufen (Notnagel, falls es fehlt: ```chartjs-Block mit reinem JSON)."
             )
 
         # Benutzer-Instruktionen laden (data/instructions/*.md)
@@ -1559,6 +1603,11 @@ KRITISCH – Autonomie-Regeln:
                         # Dokument-Links/-Pfade aus dem Anzeigetext entfernen – der Download
                         # kommt ausschliesslich als verifizierter Chip via _deliver_docs.
                         _display = self._clean_doc_refs(text.strip()).strip()
+                        # Diagramm-Marker erst HIER zur Chart-Spezifikation
+                        # aufloesen: der Anzeigetext (und damit der gespeicherte
+                        # Verlauf) bekommt den Block, der LLM-Kontext behaelt den
+                        # kurzen Marker. So stehen die Zahlen nie im Kontext.
+                        _display = self._expand_charts(_display)
                         if _display:
                             await self._send_status(ws, _display, highlight=True, intermediate=is_intermediate)
                         _conv_messages.append({"role": "assistant", "content": text.strip()})
@@ -1805,7 +1854,7 @@ KRITISCH – Autonomie-Regeln:
                     )
 
                 if _final_text:
-                    await self._send_status(ws, _final_text, highlight=True)
+                    await self._send_status(ws, self._expand_charts(_final_text), highlight=True)
                     # _user_msg nur anhaengen, wenn es noch nicht in der History steht
                     # (kann durch Z. 668 beim ersten Tool-Call bereits drin sein) –
                     # sonst entstehen doppelte user-Eintraege, was Anthropic strict ablehnt.
@@ -2051,7 +2100,7 @@ KRITISCH – Autonomie-Regeln:
         )
 
         # System-Prompt zusammenbauen
-        system_prompt = self.SYSTEM_PROMPT
+        system_prompt = _mit_plotstyle(self.SYSTEM_PROMPT)
         instructions = load_instructions()
         if instructions:
             system_prompt += f"\n\n{instructions}"
@@ -2282,7 +2331,16 @@ KRITISCH – Autonomie-Regeln:
             except Exception:
                 pass
 
-        return "\n".join(collected_texts) if collected_texts else "Aufgabe ausgefuehrt (keine Textausgabe)."
+        _out = "\n".join(collected_texts) if collected_texts else "Aufgabe ausgefuehrt (keine Textausgabe)."
+        # Kanaele ohne Web-Oberflaeche (WhatsApp/Telegram/Cron/Notify): den
+        # Diagramm-Marker ENTFERNEN, nicht ausrollen – ein ```chartjs-Block
+        # waere dort blanker JSON-Text in der Nachricht.
+        try:
+            from backend.tools.chart import strip_markers
+            _out = strip_markers(_out)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT {self.agent_id}] Chart-Marker nicht entfernt: {e}", flush=True)
+        return _out
 
     # Tools, deren Ergebnisse innerhalb eines Task-Runs gecacht werden können
     _CACHEABLE_TOOLS = {"read_file", "screenshot", "read_clipboard"}
@@ -2385,6 +2443,24 @@ KRITISCH – Autonomie-Regeln:
                         # /home, '.' durch – vier Fehlversuche in einer Minute
                         # sperrten am 29.07.2026 auf ECHT ein Konto.
                         _viol_soft = not _sbx.fs_target_sensitive(str(args.get("path", "")))
+                elif name == "create_chart":
+                    # create_chart darf mit `source.file` eine Tabelle LESEN.
+                    # Damit ist es ein Datei-Leseweg und braucht dieselbe
+                    # Freigabe wie filesystem – sonst waere es die bequemste
+                    # Umgehung des Pfad-Confinements und der Eigentuemer-
+                    # Schranke in data/documents (fremde Anhaenge!).
+                    _src = args.get("source") if isinstance(args.get("source"), dict) else None
+                    _spath = str((_src or {}).get("file") or (_src or {}).get("path") or "")
+                    if _spath:
+                        _ok, _why = _sbx.authorize_fs("read", _spath)
+                        if not _ok:
+                            print(f"[AGENT] BLOCKED create_chart source={_spath!r} fuer '{_uname}': {_why}", flush=True)
+                            result = f"Zugriff verweigert: {_why}."
+                            _ldap_blocked = True
+                            _viol = ("fs-deny", f"create_chart {_spath}")
+                            # Gleiche Abwaegung wie bei filesystem: ein geratener
+                            # Pfad ist keine Attacke, ein Secret-/System-Ziel schon.
+                            _viol_soft = not _sbx.fs_target_sensitive(_spath)
                 elif name == "shell_execute":
                     _cmd = args.get("command", "")
                     # Heredoc-Koerper (z.B. eingebetteter Python-Code) NICHT als Shell-
@@ -2719,6 +2795,19 @@ KRITISCH – Autonomie-Regeln:
         except Exception as e:  # noqa: BLE001
             _log(f"Verlauf-Ruecksetzen fehlgeschlagen: {e}")
         return chat_history
+
+    def _expand_charts(self, text):
+        """Loest [[JARVIS_CHART:token]] im ANZEIGETEXT zum ```chartjs-Block auf.
+
+        Fail-safe: schlaegt das fehl, wird der Text unveraendert
+        weitergegeben – lieber ein sichtbarer Marker als eine verlorene
+        Antwort."""
+        try:
+            from backend.tools.chart import expand_markers
+            return expand_markers(text)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT {self.agent_id}] Chart-Marker nicht aufgeloest: {e}", flush=True)
+            return text
 
     def _clean_doc_refs(self, text):
         """Entfernt Dokument-Links/-Pfade aus dem ANZEIGE-Text des LLM.

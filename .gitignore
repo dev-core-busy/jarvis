@@ -108,3 +108,6 @@ Benutzerhandbuch/
 
 # Lokale Sitzungs-Startskripte (session.sh, session_main.sh, …) – Arbeitsumgebung des Entwicklers, nicht Teil des Projekts
 session*.sh
+# Erzeugte/hinterlegte PowerPoint-Vorlagen: pro Server gepflegt (Branding-Farben
+# bzw. echte Firmenvorlage) – gleiche Begruendung wie data/instructions/.
+data/vorlagen/

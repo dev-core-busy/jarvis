@@ -2365,6 +2365,86 @@ lehrreich, weil zwei naheliegende Verdaechtige falsch waren:
   HTML von aussen, und dann zaehlen, **wie oft** die Seite denselben Endpunkt aufruft.
   Ein einzelner Endpunkt mit 0,77 s sieht harmlos aus; neunmal in Serie sind es 7 s.
 
+## PowerPoint im Hausdesign: Vorlagen-Weg statt `Presentation()` (2026-08-06)
+**Der Anlass:** Frage, ob das GitHub-Projekt **Presenton** als Skill taugt. Antwort nach
+Durchsicht des geklonten Repos: **nein** – das Hauptrepo ist Apache-2.0, aber der PPTX-Exporter
+liegt NICHT darin. Er wird beim Docker-Build als vorkompiliertes Binary von
+`github.com/presenton/presenton-export/releases` geladen; jenes Repo hat **keinen Quellcode und
+keine Lizenz**. Dazu ein zweiter kompletter Stack (FastAPI + Next.js 16 + Chromium/Puppeteer,
+338 MB Repo), eigene LLM-Keys, eigene Farbdefinitionen in Template-JSON und Version 0.9.3-beta.
+Die naheliegende Lösung lag im eigenen Repo.
+
+- **`office_create_powerpoint` rief `Presentation()` OHNE Argument auf.** Damit galt das
+  eingebaute Standarddesign von python-pptx – und genau das ist der Grund, warum erzeugte Decks
+  „nicht wie eine Firmenpräsentation" aussahen: **4:3**, Calibri, Office-Blau, und die Layouts
+  wurden über den **Index** (`slide_layouts[0]`/`[1]`) angesprochen. Im ganzen Skill gab es null
+  Treffer für „Vorlage/template".
+- **Neu `skills/office/vorlage.py`:** erzeugt beim ersten Bedarf `data/vorlagen/standard.pptx`
+  mit 16:9, Markenfarbe aus dem Branding, dezentem Akzentbalken im Master und deutschen
+  Layoutnamen. Danach wird sie **nicht** neu erzeugt – die Datei darf von Hand durch eine echte
+  Firmenvorlage ersetzt werden (`template=` wählt sie aus, `office_template_info` listet
+  Layouts und Platzhalter).
+  - **Das THEME wird geändert, nicht die einzelne Folie** (`ppt/theme/theme1.xml` im ZIP):
+    `a:clrScheme` + `a:fontScheme`. Wer Farben pro Folie setzt, bekommt eine Datei, die beim
+    Bearbeiten auseinanderfällt – der Designer zeigt dann andere Farben als die Folien.
+    python-pptx hat für beides keine API; der Weg über interne Part-Objekte wäre versionsgebunden,
+    eine .pptx ist dagegen einfach ein ZIP.
+  - **`sysClr` muss ersetzt werden:** `dk1`/`lt1` stehen im Standardtemplate als
+    `windowText`/`window`. Wer nur `srgbClr`-Slots anfasst, ändert Akzente, aber Text- und
+    Hintergrundfarbe bleiben.
+  - **Schrift = Arial, bewusst ANDERS als bei matplotlib.** Beim mplstyle zählt, was auf dem
+    SERVER installiert ist (DejaVu/Liberation); eine .pptx wird auf einem **fremden** Rechner
+    geöffnet, dort gibt es kein Liberation Sans. Arial ist überall vorhanden und wird von
+    LibreOffice metrisch identisch abgebildet, der PDF-Export bleibt also maßhaltig.
+  - **Hintergrund und Textfarbe kommen NICHT aus dem Branding** – nur der Akzent (aus
+    `colors_light`, sonst `colors`). Das Chat-Theme ist dunkel, eine Präsentation muss hell sein.
+    Die Folgefarben `accent2..6` sind dieselbe Reihe wie in `charts.js` und `jarvis.mplstyle`:
+    ein Diagramm und die Folie darum sollen nicht verschieden aussehen.
+- **DIE ZWEI FEHLER, DIE ERST DER PDF-BLICK ZEIGTE** (LibreOffice → PDF → PNG angesehen):
+  1. **`prs.slide_width` zu setzen skaliert die Platzhalter NICHT.** Sie behalten ihre absoluten
+     4:3-Positionen; jede Aufzählung endete bei 71 % der Breite, rechts blieb ein leerer
+     Streifen. `_auf_breitbild_skalieren()` zieht sie mit.
+  2. **Dabei dürfen nur Formen mit EIGENEM `spPr/a:xfrm` angefasst werden.** Ein
+     Layout-Platzhalter ohne eigenes `xfrm` **erbt** vom Master. Die erste Fassung skalierte
+     erst den Master und dann den geerbten Wert erneut → 8229600 → 10972525 → **14630400** bei
+     12192000 Folienbreite, und `top` fiel auf **0**, weil python-pptx beim Anlegen des neuen
+     `xfrm` nur die gesetzte Achse kennt (im PDF klebten die Titel am oberen Rand). Beide Fälle
+     sind Regressionstests.
+- **`MasterShapes` kann keine Formen aufnehmen** (kein `add_shape`/`add_picture` – das gibt es
+  nur auf Folien). Der Akzentbalken wird deshalb als `<p:sp>`-XML in den Master-spTree gehängt.
+  Der übliche Umweg „Form auf einer Wegwerf-Folie erzeugen und verschieben" bräuchte danach das
+  Löschen dieser Folie (dafür hat python-pptx keine API) und bricht bei **Bildern** die
+  Beziehung zum Medien-Part – deshalb sitzt das **Logo auf der Titelfolie** (dort gibt es
+  `add_picture`), was im Corporate-Design ohnehin die Regel ist.
+- **Titel-Ausrichtung sitzt in `p:txStyles/p:titleStyle` im MASTER.** Sie am Layout-Platzhalter
+  zu setzen (`paragraphs[i].alignment`) wirkt NICHT – der Absatz auf der Folie erbt aus diesem
+  Stil, nicht aus dem Textkörper des Layouts. Inhaltsfolien sind jetzt linksbündig, die
+  Titelfolie bleibt zentriert (eigener `lstStyle` im Layout, der den Master überstimmt; das
+  `lstStyle` muss der Schema-Reihenfolge nach an Position 1 stehen: `bodyPr, lstStyle, p…`).
+- **Im Werkzeug wird NUR Text gesetzt** – keine Schriftgröße, keine Farbe. Das ist der ganze
+  Sinn des Vorlagen-Wegs. Dazu:
+  - **Layouts über NAMEN** (`_LAYOUT_ALIAS`, deutsch UND englisch, Teiltreffer erlaubt, dann
+    Rückfall-Index): `slide_layouts[1]` zeigt in einer Firmenvorlage irgendwohin.
+  - **Platzhalter über den TYP**, nicht über `placeholders[1]`: sonst landet Inhalt in der
+    Fußzeile. Datum/Fußzeile/Foliennummer werden nie befüllt.
+  - **Leere Platzhalter werden entfernt** – sonst zeigt PowerPoint „Klicken Sie, um Text
+    hinzuzufügen" und das PDF einen leeren Rahmen.
+  - Aufzählungsebenen über `> ` (bequem für das Modell), Sprechernotizen über `notes`,
+    Zwei-Spalten-Layout teilt die Aufzählung selbst (sonst bliebe die rechte Spalte leer).
+- **Fällt die Vorlage aus** (Rechte, fehlendes lxml), wird ohne sie weitergearbeitet und der
+  Grund an die Erfolgsmeldung gehängt – eine Präsentation im Standarddesign ist besser als eine
+  Fehlermeldung.
+- **`data/vorlagen/` steht in `.gitignore`** (pro Server gepflegt, wie `data/instructions/`).
+  **Beim Erzeugen auf dem Server auf den Eigentümer achten:** wer die Vorlage als root anlegt
+  (z. B. im Test), hinterlässt eine Datei, die der Dienstbenutzer nicht ersetzen kann – dieselbe
+  Falle wie am 2026-07-31. Auf DEV nachgeprüft: `runuser -u jarvis` erzeugt sie korrekt.
+- **Verifiziert:** 70 Prüfungen (`tests/test_office_vorlage.py`, auf DEV im venv; 16 davon laufen
+  auch ohne python-pptx) – Theme-Farben aus dem ZIP gelesen, Ränder symmetrisch, kein Platzhalter
+  breiter als die Folie, kein `top=0`, Layout-Auflösung inkl. englischer Fremdvorlage,
+  Aufzählungsebenen, Ende-zu-Ende mit vier Folien. Dazu die optische Abnahme über
+  LibreOffice → PDF → PNG (Titelfolie mit Logo, Kapiteltrenner, Aufzählung mit Unterebenen,
+  Zwei-Spalten-Folie).
+
 ## „Abschluss ohne Antwort": Nachschlag + Freigabe der Oberflaeche (2026-08-06)
 **Der geprueefte Fall:** eine Anfrage in /chat endet mit „✅ Aufgabe abgeschlossen", der Benutzer
 sieht aber keine Antwort. Es gab bereits **vier** Wiederholungsebenen – und genau dieser Fall fiel

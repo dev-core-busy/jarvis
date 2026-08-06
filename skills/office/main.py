@@ -260,6 +260,159 @@ class CreateExcelTool(BaseTool):
 # ─────────────────────────────────────────────────────────────────────────
 # PowerPoint
 # ─────────────────────────────────────────────────────────────────────────
+# Layout-Ansprache ueber NAMEN, nicht ueber den Index. Grund: `slide_layouts[1]`
+# ist nur im Standardtemplate von python-pptx „Titel und Inhalt"; in einer
+# echten Firmenvorlage zeigt derselbe Index irgendwohin (oft auf ein
+# Bild-Layout). Die Alias-Listen enthalten deutsche UND englische Namen, damit
+# sowohl die selbst erzeugte Vorlage als auch eine mitgebrachte .potx passt.
+_LAYOUT_ALIAS = {
+    "titel":     ["Titelfolie", "Title Slide", "Titeldia"],
+    "inhalt":    ["Titel und Inhalt", "Title and Content", "Titel und Inhaltsverzeichnis"],
+    "abschnitt": ["Abschnitt", "Section Header", "Abschnittsüberschrift"],
+    "zwei":      ["Zwei Inhalte", "Two Content", "Vergleich", "Comparison"],
+    "nurtitel":  ["Nur Titel", "Title Only"],
+    "leer":      ["Leer", "Blank"],
+    "bild":      ["Bild mit Beschriftung", "Picture with Caption"],
+}
+# Rueckfall-Indizes, falls die Vorlage keinen passenden Namen hat. Bewusst
+# konservativ: 0 = erstes (fast immer die Titelfolie), 1 = zweites.
+_LAYOUT_FALLBACK = {"titel": 0, "inhalt": 1, "abschnitt": 2, "zwei": 3,
+                    "nurtitel": 5, "leer": 6, "bild": 8}
+
+
+def _layout(prs, art: str):
+    """Sucht ein Layout nach Namen (Alias-Liste), sonst per Rueckfall-Index.
+
+    Der Vergleich ist gegen Gross-/Kleinschreibung und Zusaetze tolerant
+    ('Titel und Inhalt (intern)' passt auf 'Titel und Inhalt'), weil
+    Firmenvorlagen ihre Layouts gern durchnummerieren oder ergaenzen."""
+    layouts = list(prs.slide_layouts)
+    if not layouts:
+        return None
+    namen = [(l, (l.name or "").strip().lower()) for l in layouts]
+    for wunsch in _LAYOUT_ALIAS.get(art, []):
+        w = wunsch.lower()
+        for l, n in namen:
+            if n == w:
+                return l
+    for wunsch in _LAYOUT_ALIAS.get(art, []):
+        w = wunsch.lower()
+        for l, n in namen:
+            if w in n:
+                return l
+    idx = _LAYOUT_FALLBACK.get(art, 1)
+    return layouts[idx] if idx < len(layouts) else layouts[-1]
+
+
+def _titel_setzen(slide, text: str) -> bool:
+    """Schreibt den Folientitel in den Titel-Platzhalter (falls vorhanden)."""
+    try:
+        if slide.shapes.title is not None:
+            slide.shapes.title.text = str(text or "")
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
+def _text_platzhalter(slide):
+    """Alle Platzhalter, die Inhalt aufnehmen koennen – ohne den Titel.
+
+    Ausgewaehlt wird ueber den Platzhalter-TYP, nicht ueber `placeholders[1]`:
+    der Index 1 ist im Standardtemplate der Textkoerper, in einer Firmenvorlage
+    aber oft die Fusszeile oder eine Bildbox. Ein Datum-, Fusszeilen- oder
+    Foliennummern-Platzhalter darf niemals mit Inhalt befuellt werden."""
+    from pptx.enum.shapes import PP_PLACEHOLDER as PH
+    erlaubt = {PH.BODY, PH.OBJECT, PH.SUBTITLE, PH.VERTICAL_BODY,
+               PH.VERTICAL_OBJECT, PH.TABLE, PH.CHART}
+    raus = []
+    for ph in slide.placeholders:
+        try:
+            typ = ph.placeholder_format.type
+        except Exception:  # noqa: BLE001
+            continue
+        if typ in (PH.TITLE, PH.CENTER_TITLE, PH.VERTICAL_TITLE):
+            continue
+        if typ in erlaubt and ph.has_text_frame:
+            raus.append(ph)
+    return raus
+
+
+def _fuelle(platzhalter, bullets=None, text: str = "") -> bool:
+    """Befuellt einen Platzhalter mit Aufzaehlung oder Freitext.
+
+    Es wird NUR Text gesetzt – keine Schriftgroesse, keine Farbe, kein
+    Zeilenabstand. Das ist der ganze Sinn des Vorlagen-Wegs: diese Werte kommen
+    aus dem Layout, und wer sie hier ueberschreibt, erzeugt eine Datei, die
+    nach dem Wechsel des Designs falsch aussieht.
+
+    Ebenen: ein Eintrag 'a > b' oder ein Tupel ('b', 1) wird als Unterpunkt
+    gesetzt (paragraph.level)."""
+    tf = platzhalter.text_frame
+    eintraege = []
+    if bullets and isinstance(bullets, (list, tuple)):
+        for b in bullets:
+            if isinstance(b, dict):
+                eintraege.append((str(b.get("text", "")), int(b.get("level", 0) or 0)))
+            elif isinstance(b, (list, tuple)) and len(b) == 2:
+                eintraege.append((str(b[0]), int(b[1] or 0)))
+            else:
+                s = str(b)
+                # '> ' am Anfang = eine Ebene tiefer (bequeme Schreibweise fuer
+                # das Modell, das sonst verschachtelte Objekte bauen muesste).
+                tiefe = 0
+                while s.startswith(">"):
+                    tiefe += 1
+                    s = s[1:].lstrip()
+                eintraege.append((s, min(tiefe, 4)))
+    elif text:
+        eintraege = [(str(text), 0)]
+    if not eintraege:
+        return False
+    tf.text = eintraege[0][0]
+    if eintraege[0][1]:
+        tf.paragraphs[0].level = eintraege[0][1]
+    for inhalt, ebene in eintraege[1:]:
+        p = tf.add_paragraph()
+        p.text = inhalt
+        if ebene:
+            p.level = ebene
+    return True
+
+
+def _leere_platzhalter_entfernen(slide) -> None:
+    """Entfernt Platzhalter, die leer geblieben sind.
+
+    Ohne das zeigt PowerPoint auf der Folie den Hinweis „Klicken Sie, um Text
+    hinzuzufuegen" und der PDF-Export einen leeren Rahmen – beides sieht nach
+    unfertiger Arbeit aus. Titel-Platzhalter mit Text bleiben natuerlich."""
+    for ph in list(slide.placeholders):
+        try:
+            if ph.has_text_frame and not ph.text_frame.text.strip():
+                ph._element.getparent().remove(ph._element)
+        except Exception:  # noqa: BLE001
+            continue
+
+
+def _logo_auf_titelfolie(slide, prs) -> None:
+    """Setzt das Branding-Logo dezent unten links auf die Titelfolie.
+
+    Nur auf der Titelfolie – ein Logo auf jeder Folie ist im Corporate-Design
+    die Ausnahme. Unten links, damit es nicht mit Titel/Untertitel kollidiert;
+    die Hoehe ist fest, die Breite ergibt sich aus dem Seitenverhaeltnis."""
+    try:
+        from skills.office.vorlage import _logo_pfad
+        from pptx.util import Cm
+        logo = _logo_pfad()
+        if not logo:
+            return
+        bild = slide.shapes.add_picture(str(logo), Cm(0.9), Cm(0), height=Cm(1.2))
+        bild.top = prs.slide_height - bild.height - Cm(1.1)   # ueber dem Akzentbalken
+        bild.name = "Logo"
+    except Exception:  # noqa: BLE001
+        pass       # ein fehlendes/kaputtes Logo darf die Praesentation nicht kosten
+
+
 class CreatePowerPointTool(BaseTool):
     @property
     def name(self) -> str:
@@ -268,10 +421,17 @@ class CreatePowerPointTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Erstellt eine PowerPoint-Praesentation (.pptx). 'slides' ist eine Liste von "
-            "Folien-Objekten: { 'title': 'Folientitel', 'bullets': ['Punkt 1','Punkt 2'] } "
-            "oder { 'title': ..., 'content': 'Freitext' }. Optional 'title' fuer eine "
-            "Titelfolie am Anfang. Gibt eine Download-URL zurueck."
+            "Erstellt eine PowerPoint-Praesentation (.pptx) im HAUSDESIGN – 16:9, echte "
+            "Masterfolien, Layouts und Platzhalter, Farben und Schrift aus der Vorlage. "
+            "'slides' ist eine Liste von Folien-Objekten: "
+            "{ 'title': 'Folientitel', 'bullets': ['Punkt 1','Punkt 2'] } oder "
+            "{ 'title': ..., 'content': 'Freitext' }. Unterpunkte mit '> ' voranstellen "
+            "('> Detail'). Optional je Folie 'layout' ('inhalt' Standard, 'abschnitt' fuer "
+            "einen Kapiteltrenner, 'zwei' fuer zwei Spalten, 'nurtitel', 'leer') und "
+            "'notes' fuer Sprechernotizen. Optional 'title'/'subtitle' fuer eine Titelfolie. "
+            "KEINE Farb-, Schrift- oder Groessenangaben mitschicken – die kommen aus der "
+            "Vorlage; eigene Werte brechen das Design beim Bearbeiten. "
+            "Gibt eine Download-URL zurueck."
         )
 
     def parameters_schema(self) -> dict:
@@ -282,12 +442,13 @@ class CreatePowerPointTool(BaseTool):
                 "title": {"type": "STRING", "description": "Optionaler Titel fuer eine Titelfolie am Anfang."},
                 "subtitle": {"type": "STRING", "description": "Optionaler Untertitel der Titelfolie."},
                 "slides": {"type": "ARRAY", "items": {"type": "OBJECT"}, "description": "Liste der Inhaltsfolien (siehe Beschreibung)."},
+                "template": {"type": "STRING", "description": "Optionaler Vorlagen-Dateiname (leer = Hausvorlage). Verfuegbare zeigt office_template_info."},
             },
             "required": ["filename", "slides"],
         }
 
     async def execute(self, filename: str = "", title: str = "", subtitle: str = "",
-                       slides=None, **kwargs) -> str:
+                       slides=None, template: str = "", **kwargs) -> str:
         if not filename:
             return "Fehler: 'filename' ist Pflicht."
         try:
@@ -295,37 +456,131 @@ class CreatePowerPointTool(BaseTool):
         except Exception as e:
             return f"Fehler: python-pptx nicht verfuegbar ({e})."
 
-        prs = Presentation()
-        # Titelfolie
+        # Vorlage: 16:9, Branding-Farben, echte Masterfolien. Faellt das
+        # Erzeugen aus (Rechte, fehlendes lxml), wird OHNE Vorlage
+        # weitergearbeitet – eine Praesentation im Standarddesign ist besser
+        # als eine Fehlermeldung.
+        vorlage_hinweis = ""
+        try:
+            from skills.office import vorlage as _vorlage
+            prs = Presentation(str(_vorlage.loese_vorlage(template)))
+        except Exception as e:  # noqa: BLE001
+            prs = Presentation()
+            vorlage_hinweis = f" (Hinweis: Hausvorlage nicht nutzbar – {e})"
+
         if title:
-            slide = prs.slides.add_slide(prs.slide_layouts[0])
-            slide.shapes.title.text = title
-            if subtitle and len(slide.placeholders) > 1:
-                slide.placeholders[1].text = subtitle
+            slide = prs.slides.add_slide(_layout(prs, "titel"))
+            _titel_setzen(slide, title)
+            felder = _text_platzhalter(slide)
+            if subtitle and felder:
+                _fuelle(felder[0], text=subtitle)
+            _leere_platzhalter_entfernen(slide)
+            _logo_auf_titelfolie(slide, prs)
 
         for sl in (slides or []):
             if isinstance(sl, str):
                 sl = {"title": sl}
-            layout = prs.slide_layouts[1]  # Titel + Inhalt
-            slide = prs.slides.add_slide(layout)
-            slide.shapes.title.text = str(sl.get("title", ""))
-            body = slide.placeholders[1].text_frame if len(slide.placeholders) > 1 else None
-            if body is not None:
-                bullets = sl.get("bullets")
-                if bullets and isinstance(bullets, (list, tuple)):
-                    body.text = str(bullets[0])
-                    for b in bullets[1:]:
-                        p = body.add_paragraph()
-                        p.text = str(b)
-                elif sl.get("content"):
-                    body.text = str(sl.get("content"))
+            if not isinstance(sl, dict):
+                continue
+            art = str(sl.get("layout") or "").strip().lower()
+            if art not in _LAYOUT_ALIAS:
+                art = "inhalt"
+            slide = prs.slides.add_slide(_layout(prs, art))
+            _titel_setzen(slide, sl.get("title", ""))
+
+            felder = _text_platzhalter(slide)
+            bullets = sl.get("bullets")
+            inhalt = sl.get("content") or sl.get("text") or ""
+            if felder:
+                if art == "zwei" and len(felder) > 1 and isinstance(bullets, (list, tuple)) and len(bullets) > 1:
+                    # Zwei-Spalten-Layout: die Aufzaehlung in der Mitte teilen,
+                    # sonst bliebe die rechte Spalte leer (und wuerde entfernt).
+                    mitte = (len(bullets) + 1) // 2
+                    _fuelle(felder[0], bullets=list(bullets[:mitte]))
+                    _fuelle(felder[1], bullets=list(bullets[mitte:]))
+                else:
+                    _fuelle(felder[0], bullets=bullets, text=inhalt)
+            _leere_platzhalter_entfernen(slide)
+
+            notizen = sl.get("notes") or sl.get("notizen")
+            if notizen:
+                try:
+                    slide.notes_slide.notes_text_frame.text = str(notizen)
+                except Exception:  # noqa: BLE001
+                    pass
 
         disk, fname, dl = _new_path(filename, "pptx")
         try:
             prs.save(str(disk))
         except Exception as e:
             return f"Fehler beim Speichern: {e}"
-        return _ok(dl, fname, disk)
+        return _ok(dl, fname, disk, extra=vorlage_hinweis)
+
+
+class TemplateInfoTool(BaseTool):
+    """Zeigt, was eine Vorlage anbietet.
+
+    Ohne dieses Werkzeug muesste das Modell die Layout- und Platzhalternamen
+    einer mitgebrachten Firmenvorlage raten. Es liest nur – es erzeugt keine
+    Datei und veraendert keine Vorlage."""
+
+    @property
+    def name(self) -> str:
+        return "office_template_info"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Zeigt die verfuegbaren PowerPoint-Vorlagen und die Layouts der gewaehlten "
+            "Vorlage (Name, Platzhalter, Foliengroesse). Nuetzlich, wenn eine eigene "
+            "Firmenvorlage hinterlegt wurde und unklar ist, welche Layouts es gibt."
+        )
+
+    def parameters_schema(self) -> dict:
+        return {
+            "type": "OBJECT",
+            "properties": {
+                "template": {"type": "STRING", "description": "Vorlagen-Dateiname (leer = Hausvorlage)."},
+            },
+            "required": [],
+        }
+
+    async def execute(self, template: str = "", **kwargs) -> str:
+        try:
+            from pptx import Presentation
+            from skills.office import vorlage as _vorlage
+        except Exception as e:  # noqa: BLE001
+            return f"Fehler: python-pptx/Vorlagenmodul nicht verfuegbar ({e})."
+        try:
+            pfad = _vorlage.loese_vorlage(template)
+            prs = Presentation(str(pfad))
+        except Exception as e:  # noqa: BLE001
+            return f"Fehler: Vorlage nicht lesbar ({e})."
+
+        breite_cm = round(prs.slide_width / 360000, 1)
+        hoehe_cm = round(prs.slide_height / 360000, 1)
+        seiten = "16:9" if abs(prs.slide_width / prs.slide_height - 16 / 9) < 0.02 else (
+            "4:3" if abs(prs.slide_width / prs.slide_height - 4 / 3) < 0.02 else "andere")
+        zeilen = [
+            f"Vorlage: {pfad.name} ({breite_cm}×{hoehe_cm} cm, {seiten})",
+            f"Vorhandene Vorlagen: {', '.join(_vorlage.verfuegbare()) or '(keine)'}",
+            "",
+            "Layouts (Name → befuellbare Platzhalter):",
+        ]
+        for i, l in enumerate(prs.slide_layouts):
+            namen = []
+            for ph in l.placeholders:
+                try:
+                    namen.append(f"{ph.placeholder_format.type}".split(".")[-1].split(" ")[0])
+                except Exception:  # noqa: BLE001
+                    continue
+            zeilen.append(f"  [{i}] {l.name} → {', '.join(namen) or '(keine)'}")
+        zeilen += [
+            "",
+            "Kurznamen fuer 'layout' in office_create_powerpoint: "
+            + ", ".join(sorted(_LAYOUT_ALIAS.keys())),
+        ]
+        return "\n".join(zeilen)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -513,6 +768,7 @@ def get_tools():
         CreateWordTool(),
         CreateExcelTool(),
         CreatePowerPointTool(),
+        TemplateInfoTool(),
         ReadDocumentTool(),
         ExportPdfTool(),
     ]

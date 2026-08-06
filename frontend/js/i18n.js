@@ -1664,6 +1664,9 @@ const _I18N = {
         'chat.send':            'Senden',
         'chat.ctx_label':       'Kontext Speicher: {n} Einträge · {pct} %',
         'chat.session_continued': 'Sitzung fortgesetzt',
+        // Lauf ohne Abschlussmeldung freigegeben (chat.js::_releaseRun)
+        'chat.run_lost_conn':    '⚠️ Verbindung unterbrochen – eine Antwort kann verloren gegangen sein. Die Anfrage lässt sich mit ↻ erneut senden.',
+        'chat.run_lost_silence': '⚠️ Seit 10 Minuten keine Rückmeldung vom Server – die Eingabe ist wieder frei. Die Anfrage lässt sich mit ↻ erneut senden.',
         // Werkzeugleiste am Diagramm (charts.js)
         'chart.save_png':       'Als PNG speichern',
         'chat.ctx_session_hint':  'Dieser Kontext gehört zur Sitzung „{title}“ ({id}). Eine neue, leere Sitzung startet „+ Neuer Chat“.',
@@ -3590,6 +3593,8 @@ const _I18N = {
         'chat.send':            'Send',
         'chat.ctx_label':       'Context Memory: {n} entries · {pct} %',
         'chat.session_continued': 'session continued',
+        'chat.run_lost_conn':    '⚠️ Connection lost – a reply may have been lost. Use ↻ to send the request again.',
+        'chat.run_lost_silence': '⚠️ No response from the server for 10 minutes – input is unlocked again. Use ↻ to send the request again.',
         'chart.save_png':       'Save as PNG',
         'chat.ctx_session_hint':  'This context belongs to session "{title}" ({id}). "+ New chat" starts a fresh, empty one.',
         'chat.untitled_session':  'untitled',

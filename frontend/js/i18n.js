@@ -1664,6 +1664,8 @@ const _I18N = {
         'chat.send':            'Senden',
         'chat.ctx_label':       'Kontext Speicher: {n} Einträge · {pct} %',
         'chat.session_continued': 'Sitzung fortgesetzt',
+        // Werkzeugleiste am Diagramm (charts.js)
+        'chart.save_png':       'Als PNG speichern',
         'chat.ctx_session_hint':  'Dieser Kontext gehört zur Sitzung „{title}“ ({id}). Eine neue, leere Sitzung startet „+ Neuer Chat“.',
         'chat.untitled_session':  'ohne Titel',
         'chat.ctx_info':        'Kurzzeitgedächtnis dieses Chats: Anzahl der gemerkten Gesprächseinträge und Füllstand in % bis zur automatischen Komprimierung. Die KI nutzt diese Einträge als Kontext für ihre Antworten.',
@@ -3588,6 +3590,7 @@ const _I18N = {
         'chat.send':            'Send',
         'chat.ctx_label':       'Context Memory: {n} entries · {pct} %',
         'chat.session_continued': 'session continued',
+        'chart.save_png':       'Save as PNG',
         'chat.ctx_session_hint':  'This context belongs to session "{title}" ({id}). "+ New chat" starts a fresh, empty one.',
         'chat.untitled_session':  'untitled',
         'chat.ctx_info':        'Short-term memory of this chat: number of stored conversation entries and fill level in % until automatic compression. The AI uses these entries as context for its replies.',

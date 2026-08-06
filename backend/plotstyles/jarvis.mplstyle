@@ -1,0 +1,141 @@
+# Jarvis – Hausstil fuer matplotlib/seaborn-PNGs
+#
+# Benutzung (der System-Prompt gibt dem Modell genau diese Zeilen vor):
+#   import matplotlib; matplotlib.use('Agg')
+#   import matplotlib.pyplot as plt
+#   plt.style.use('/opt/jarvis/backend/plotstyles/jarvis.mplstyle')
+#
+# WARUM DIESE DATEI: Die matplotlib-Vorgaben stammen aus der MATLAB-Optik der
+# 2000er – grauer Rahmen auf allen vier Seiten, Gitter in beide Richtungen,
+# 100 dpi, 6.4x4.8 Zoll, DejaVu Sans in 10 pt. Ein Diagramm daraus sieht in
+# einem Bericht wie ein Zwischenergebnis aus. Die Einstellungen hier sind
+# genau die Handgriffe, die ein Mensch sonst jedes Mal einzeln macht.
+#
+# ZWEI EINSTELLUNGEN SIND WICHTIGER ALS DER REST:
+#  * figure.constrained_layout – rechnet die Raender NACH dem Zeichnen. Ohne
+#    das werden lange Achsenbeschriftungen und gedrehte Datumsangaben am
+#    Bildrand ABGESCHNITTEN; das ist der haeufigste Fehler in erzeugten
+#    Diagrammen, und er faellt erst beim Ansehen des PNG auf.
+#  * savefig.dpi 200 – die Vorgabe 100 dpi ergibt ein Bild, das in einer
+#    Praesentation sichtbar unscharf ist.
+#
+# SCHRIFT: bewusst eine Liste vorhandener Schriften, KEINE Wunschschrift.
+# matplotlib meldet fuer jede fehlende Familie eine Warnung PRO TEXTELEMENT
+# und faellt still auf DejaVu zurueck – bei 'Inter' (der Web-Schrift von
+# Jarvis, die auf dem Server nicht installiert ist) fuellt das die Ausgabe
+# mit Warnungen, die im Chat als Fehler gelesen werden. Auf dem Server
+# vorhanden: DejaVu Sans, Liberation Sans, Noto Sans (fc-list geprueft).
+#
+# FALLSTRICK FARBWERTE: In einer .mplstyle-Datei beginnt mit '#' ein KOMMENTAR.
+# Farben werden deshalb OHNE Doppelkreuz geschrieben ('b8bfcc', nicht
+# '#b8bfcc') – sonst liest matplotlib einen leeren Wert und meldet
+# "does not look like a color arg". Diese Meldung geht NICHT durch das
+# warnings-Modul: ein Test, der nur Warnungen zaehlt, sieht sie nicht, und der
+# Stil laedt scheinbar fehlerfrei mit Vorgabefarben. Nachgewiesen auf DEV am
+# 2026-08-06 – fuenf Farbzeilen waren dadurch wirkungslos.
+# Aus demselben Grund kein 'semibold' als Schriftgewicht: DejaVu/Liberation
+# haben es nicht, matplotlib meldet dann pro Diagramm
+# "Failed to find font weight semibold".
+#
+# FARBEN: 'accent'-Lila zuerst (Markenfarbe), danach klar unterscheidbare
+# Toene mittlerer Saettigung – dieselbe Reihe wie im Web-Theme
+# (frontend/js/charts.js), damit ein PNG und das interaktive Diagramm
+# derselben Antwort nicht verschieden aussehen. Der Farbverlauf ist auch bei
+# Rot-Gruen-Sehschwaeche unterscheidbar, weil sich die Helligkeiten
+# unterscheiden; bei mehr als vier Reihen zusaetzlich Marker verwenden.
+
+# ── Abbildung ───────────────────────────────────────────────────────────────
+figure.figsize:      8.0, 4.5
+figure.dpi:          110
+figure.facecolor:    white
+figure.constrained_layout.use: True
+figure.titlesize:    14
+figure.titleweight:  bold
+
+savefig.dpi:         200
+savefig.facecolor:   white
+savefig.bbox:        standard
+savefig.transparent: False
+
+# ── Schrift ─────────────────────────────────────────────────────────────────
+font.family:         sans-serif
+font.sans-serif:     DejaVu Sans, Liberation Sans, Noto Sans, Arial, sans-serif
+font.size:           10.5
+
+# ── Achsen: kein Kasten, nur zwei Linien ────────────────────────────────────
+axes.facecolor:      white
+axes.edgecolor:      b8bfcc
+axes.linewidth:      0.8
+axes.spines.top:     False
+axes.spines.right:   False
+axes.titlesize:      13
+axes.titleweight:    bold
+axes.titlelocation:  left
+axes.titlepad:       12
+axes.labelsize:      10.5
+axes.labelcolor:     333c4d
+axes.labelpad:       6
+axes.axisbelow:      True
+
+# Farbzyklus (identisch zur Web-Palette)
+axes.prop_cycle: cycler('color', ['9B59B6', '3b82f6', '10b981', 'f59e0b', 'ef4444', '06b6d4', '8b5cf6', 'ec4899', '84cc16', 'f97316'])
+
+# ── Gitter: nur waagerecht, dezent ──────────────────────────────────────────
+# Ein Gitter in beide Richtungen wirkt wie Millimeterpapier und konkurriert
+# mit den Daten. Wer ein x-Gitter braucht (Streudiagramm), schaltet es im
+# Skript zu: ax.grid(True, axis='x').
+axes.grid:           True
+axes.grid.axis:      y
+grid.color:          dfe3ea
+grid.linewidth:      0.7
+grid.alpha:          1.0
+
+# ── Ticks: nach aussen, kurz, ohne Rahmen ───────────────────────────────────
+xtick.color:         4a5568
+ytick.color:         4a5568
+xtick.labelsize:     9.5
+ytick.labelsize:     9.5
+xtick.direction:     out
+ytick.direction:     out
+xtick.major.size:    3.5
+ytick.major.size:    3.5
+xtick.major.width:   0.8
+ytick.major.width:   0.8
+xtick.minor.visible: False
+ytick.minor.visible: False
+
+# ── Linien / Marker / Balken ────────────────────────────────────────────────
+lines.linewidth:     2.0
+lines.markersize:    5.5
+lines.solid_capstyle: round
+patch.linewidth:     0
+patch.edgecolor:     white
+hatch.linewidth:     0.6
+errorbar.capsize:    3
+
+# ── Legende: keine Umrandung, waagerecht lesbar ─────────────────────────────
+legend.frameon:      False
+legend.fontsize:     9.5
+legend.handlelength: 1.4
+legend.handletextpad: 0.6
+legend.columnspacing: 1.4
+legend.borderaxespad: 0.4
+legend.labelspacing: 0.4
+
+# ── Sonstiges ───────────────────────────────────────────────────────────────
+# Achsenzahlen nicht in Exponentialform, solange es ohne geht: '25000' ist
+# lesbar, '2.5e4' laesst den Betrachter rechnen. Die Grenze liegt bei 10^7,
+# weil Geldbetraege in Euro regelmaessig im Millionenbereich liegen – mit der
+# matplotlib-Vorgabe (10^5) stand ueber der Achse ein '×10^6', das den
+# Betrachter jeden Wert selbst hochrechnen laesst (auf DEV im Probe-PNG
+# gesehen). Fuer noch groessere Zahlen ist die richtige Loesung, im Skript in
+# Tsd./Mio umzurechnen und die Einheit in den Achsentitel zu schreiben.
+axes.formatter.limits:      -5, 7
+axes.formatter.use_mathtext: True
+axes.formatter.useoffset:    False
+# Wirkt nur, wenn das Skript ein Locale setzt (locale.setlocale(LC_ALL,
+# 'de_DE.UTF-8')) – dann werden Achsenzahlen mit Tausenderpunkt geschrieben.
+# Ohne Locale bleibt es beim bisherigen Verhalten, also schadlos.
+axes.formatter.use_locale:   True
+date.autoformatter.day:      %d.%m.
+date.autoformatter.month:    %m/%Y

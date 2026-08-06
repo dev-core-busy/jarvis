@@ -113,3 +113,83 @@ select option:hover {
     background-color: var(--accent);
     color: #ffffff;   /* Text auf Akzentflaeche – gilt in beiden Themes */
 }
+
+/* ─── Diagramme im Chat (```chartjs / ```mermaid) ───────────────────────────
+   Steht hier und NICHT in chat.css – gleiche Begruendung wie bei den
+   Dropdowns oben: chat.css laedt nur chat.html und userchat.html, waehrend
+   charts.js auch von sap.html eingebunden wird. Dort hatte der Container
+   deshalb gar keine Regeln – ohne Hoehe rendert ein Chart.js-Canvas mit
+   maintainAspectRatio:false ins Nichts. */
+.jarvis-chart {
+    position: relative;
+    width: 100%;
+    max-width: 640px;
+    height: 340px;
+    margin: 12px 0;
+    padding: 12px 14px;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    border-radius: 12px;
+    box-sizing: border-box;
+}
+.jarvis-chart canvas { width: 100% !important; height: 100% !important; }
+.jarvis-chart-err {
+    height: auto;
+    color: var(--text-secondary, #f0a0a0);
+    font-size: 0.85rem;
+    font-style: italic;
+}
+
+/* Werkzeugleiste (PNG speichern). Liegt IM Container ueber dem Canvas, wird
+   erst beim Hovern sichtbar und ist deshalb deckend – halbtransparent
+   scheinen die Datenpunkte darunter durch. */
+.jarvis-chart-tools {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity var(--transition, .2s);
+    z-index: 2;
+}
+.jarvis-chart:hover .jarvis-chart-tools,
+.jarvis-chart-tools:focus-within { opacity: 1; }
+.jarvis-chart-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    cursor: pointer;
+    color: var(--text-secondary);
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border, rgba(var(--fg-rgb), 0.12));
+    border-radius: 6px;
+    transition: color var(--transition, .2s), border-color var(--transition, .2s);
+}
+.jarvis-chart-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Mermaid-Schaubilder (Fluss-, Sequenz-, Gantt-Diagramme). Kein festes
+   Hoehenmass: das SVG bringt seine eigenen Ausmasse mit. */
+.jarvis-mermaid {
+    position: relative;
+    margin: 12px 0;
+    padding: 12px 14px;
+    overflow-x: auto;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    border-radius: 12px;
+    box-sizing: border-box;
+}
+.jarvis-mermaid > svg { max-width: 100%; height: auto; display: block; }
+.jarvis-mermaid-err {
+    color: var(--text-secondary, #f0a0a0);
+    font-size: 0.85rem;
+    font-style: italic;
+    white-space: pre-wrap;
+}

@@ -2646,6 +2646,196 @@ ist auf Entscheidung des Nutzers **zurueckgestellt**, bis ein MoE-Modell dafuer 
   ist keine Haertung, sondern ein Fehler – und ein jsdom-Test mit Attrappe beweist ueber die
   ECHTE Bibliothek nichts.
 
+## Lizenzierung (2026-08-06)
+**Was es ist:** Updates und Funktionsumfang hängen an einem Lizenzschlüssel. Ausgestellt wird
+er ausschließlich im Werkzeug `license-manager/` (steht in `.gitignore`, enthält den privaten
+Signierschlüssel und die Kundendatenbank); geprüft wird in `backend/license.py`, durchgesetzt
+in `backend/license_enforce.py`. Eintragen unter *Einstellungen → KI & System →
+System-Einstellungen → Lizenz*.
+
+| | FREE (auch: kein Schlüssel) | BASIC | ENTERPRISE |
+|---|---|---|---|
+| Updates | keine | nur manuell | auch zeitgesteuert |
+| LLM-Profile | 1 | 1 | ∞ |
+| Aktive Skills | 5 | 5 | ∞ |
+| Benutzer (30 Tage) | 5 | 10 | ∞ |
+| Dateien in der Wissensdatenbank | 50 | 100 | ∞ |
+
+- **Format (v1):** `JARVIS-LIC-1.<nutzdaten>.<signatur>.<zertifikat>`, Ed25519 **zweistufig** –
+  der Root-Schlüssel signiert nur Ausgabe-Zertifikate, diese signieren Lizenzen und die
+  Statusdatei. Installationen kennen ausschließlich den Root-Public-Key
+  (`backend/license_root.pub`); ein kompromittierter Ausgabeschlüssel wird damit **ohne
+  Software-Update** rotierbar. Die Lizenz-UUID ist **v5** aus `firma|abteilung|mail|nr` – die
+  laufende Nummer ist nötig, weil dieselbe Abteilung für jede weitere Installation eine eigene
+  Lizenz braucht und v5 sonst dieselbe Kennung liefert.
+- **Die Kennung ist die dauerhafte Identität, Firma/Abteilung/Mail sind änderbar**
+  (2026-08-07). `token_pruefen` verlangt nur noch eine **wohlgeformte** UUID und rechnet sie
+  **nicht mehr** aus `firma|abteilung|mail|nr` nach. Zwei Gründe: die Probe schützte nichts
+  (wer die Nutzdaten ändert, bricht die Signatur; wer signieren kann, setzt die Kennung
+  passend mit – sie war eine Selbstprüfung des Werkzeugs am falschen Ort), und sie machte die
+  Stammdaten **unveränderlich** – eine Umfirmierung hätte Kennung, Statuseintrag und
+  Hardware-Bindung verschoben und den Kunden ohne sein Zutun auf FREE fallen lassen.
+  - `lizenzmanager.py stammdaten <uuid> --firma … --abteilung …` bzw. die Felder im Detail
+    der Maske. Live geprüft: **der Kunde muss nichts tun** – Stufe, Laufzeit und Bindung
+    kommen aus dem Statusdienst; ein neuer Schlüssel ist nur nötig, wenn dort auch der neue
+    Name erscheinen soll.
+  - **Der Kollisionsschutz wanderte ins Werkzeug** und ist jetzt nötig: nach einer Umbenennung
+    trägt eine Lizenz eine Kennung, die zu ihren heutigen Feldern nicht mehr passt. Würde
+    danach jemand eine Lizenz mit den ALTEN Angaben anlegen, entstünde dieselbe v5-Kennung
+    zweimal – in der Statusdatei kollidieren die Einträge und ein Widerruf träfe beide.
+    `anlegen()` zählt deshalb die laufende Nummer hoch, bis die Kennung frei ist.
+  - Ein Test hält fest, dass **`backend/license_root.pub` den Root-Schlüssel der Ausgabestelle
+    trägt** – wer `init --kraft` ausführt und die Datei vergisst, entwertet sonst unbemerkt
+    jede künftig ausgestellte Lizenz.
+- **`kanonisch()` ist die Signaturgrundlage und steht in BEIDEN Modulen identisch**
+  (sortierte Schlüssel, keine Leerzeichen, UTF-8 ohne Escapes). Wer daran etwas ändert,
+  entwertet jede ausgestellte Lizenz. Ein Test vergleicht beide Fassungen, wenn das Werkzeug
+  vorhanden ist.
+- **Ohne Bindung gilt FREE – das ist die Kernregel, nicht ein Detail.** Kundensysteme haben
+  **keinen Rückkanal** (kein GitHub-Token), können eine Aktivierung also nicht melden. Deshalb
+  bindet sich eine Installation beim ersten Start zwar lokal, maßgeblich ist aber der Eintrag
+  im Statusdienst: steht dort `hwid: null`, läuft das System als FREE. Der Kunde schickt die im
+  Panel angezeigte Kennung, sie wird eingetragen und veröffentlicht. Ohne diese Regel ließe
+  sich derselbe Schlüssel auf beliebig vielen Maschinen einsetzen.
+- **Hardware-Kennung `H1-<a>-<b>-<c>`:** `/etc/machine-id`, Root-FS-UUID und MAC der ersten
+  echten Netzwerkkarte, **einzeln gehasht** – die Kennung darf gefahrlos per Mail verschickt
+  werden. Vergleich mit **2 von 3** (positionsgenau): ein exakter Vergleich machte jeden
+  NIC-Tausch und jede VM-Migration zum Supportfall, ein einzelnes Merkmal wäre zu leicht
+  nachzustellen. Ein fehlendes Merkmal (`-`) zählt **nie** als Treffer, sonst erfüllte eine
+  Maschine ohne machine-id und ohne Netzwerkkarte jede Kennung.
+- **Statusdatei (öffentliches Repo, täglich geholt):** enthält **keine** Firmennamen,
+  Abteilungen oder Mailadressen, nur `sha256(uuid)[:32]` → Status/Art/Laufzeit/HWID. Sie ist
+  als Ganzes signiert (sonst genügte ein Fork plus manipulierte Namensauflösung, um jede Lizenz
+  auf ENTERPRISE zu heben) und trägt einen Zeitstempel: **ein älterer Stand wird abgelehnt** –
+  ein Widerruf lässt sich nicht durch Zurückspielen aufheben. Live nachgestellt.
+- **Zwei Karenzen, die man NICHT verwechseln darf:** `NETZ_KARENZ_TAGE = 14` überbrückt einen
+  unerreichbaren Statusdienst mit dem zuletzt bekannten Stand; `EINFUEHRUNG_KARENZ_TAGE = 30`
+  gilt für Systeme, die noch nie eine gültige Lizenz hatten – dort läuft **alles unverändert
+  weiter**, damit ein Update auf Bestandssystemen nicht über Nacht Skills abschaltet.
+  Während der Einführungs-Karenz sind die Grenzen die von ENTERPRISE.
+- **Fail-closed, aber nie totsperrend:** jeder Fehler (kaputtes Token, fehlende `cryptography`,
+  beschädigte Zustandsdatei, nie erfolgter Statusabruf) endet bei FREE, nie bei einem
+  gesperrten System. Ein internes Betriebssystem, das sich wegen einer Lizenzfrage abschaltet,
+  trifft im Zweifel den Falschen.
+- **Der lokale `jarvis` zählt nie gegen die Benutzergrenze und wird nie abgewiesen** – gleiche
+  Begründung wie bei der AD-Freigabe („leer = niemand"): eine Grenze, die den Betreiber aus
+  seinen eigenen Einstellungen aussperrt, verhindert genau das Eintragen des Schlüssels.
+  Ebenso `api` (kein Mensch). Die Prüfung sitzt **vor `record_login`**, sonst zählte der gerade
+  abgewiesene Benutzer sich selbst mit und die Grenze wäre nie erreicht.
+- **Nachführung fasst nur Skills und den Auto-Update-Auftrag an**, nicht Profile, Wissensdateien
+  oder Konten – beides ist umkehrbar und beides sind Handlungen des Systems, keine Kundendaten.
+  Abgeschaltet werden die **zuletzt aktivierten** Skills (`enabled_at`, neu in
+  `manager.py::enable_skill`; Bestand ohne Stempel gilt als älter und fliegt in umgekehrter
+  Listenreihenfolge). Ein bereits laufender Skill behält seinen Stempel – sonst machte ein
+  erneutes Einschalten aus einem alten Skill den jüngsten Kandidaten.
+- **Der Auto-Update-Cron-Job läuft AM Endpunkt vorbei** (Scheduler, nicht `/api/update/apply`).
+  Ohne das Abräumen in `anwenden()` liefe ein einmal eingerichtetes Auto-Update nach einer
+  Herabstufung einfach weiter und die Sperre am Endpunkt wäre eine Fassade.
+- **FALLSTRICK, live auf DEV gefunden: aktive Skills sind mehr, als in `settings.json` stehen.**
+  Die erste Fassung zählte nur `state.enabled` und kam auf **13**, während `/api/skills` **19**
+  meldete – sechs Skills liefen ohne Eintrag über ihren Manifest-Standard
+  (`state.get("enabled", skill_info.get("enabled", True))`). Auf einem frisch installierten
+  System hat **niemand** einen Eintrag, die Grenze wäre dort praktisch wirkungslos gewesen.
+  `aktive_skills()` fragt deshalb den SkillManager (`list_skills()`) und fällt nur im Notfall
+  auf die gespeicherten Zustände zurück. Genommen wird der **Verzeichnisname**
+  (`Path(s["path"]).name`) – der Anzeigename aus dem Manifest kann abweichen, und
+  `disable_skill` erwartet den Verzeichnisnamen.
+- **`_skill_manager()` importiert NICHT `backend.main`** (Zirkelimport + fastapi im Testlauf),
+  sondern greift auf `sys.modules["backend.main"]` zu, wenn es geladen ist – nur dessen Instanz
+  kennt den Agenten und lädt seine Werkzeuge nach.
+- **Die Update-ANZEIGE bleibt bewusst offen** (`GET /api/update/status`): sie ist der Hinweis,
+  dass es etwas gibt, nicht der Bezug. Gesperrt sind `apply` und die Auto-Update-Einstellung –
+  `"never"` bleibt immer erlaubt, sonst ließe sich ein bestehender Auftrag nach einer
+  Herabstufung nicht mehr abschalten.
+- **`zustand()` hängt an jeder Rechtefrage** (Login, Skill-Schalter, Update-Knopf) und ist
+  deshalb 30 s zwischengespeichert; `hwid()` kostet einen Unterprozess (`findmnt`) und wird
+  einmal je Prozesslauf ermittelt. Gemessen: 1 µs warm, 0,74 ms kalt. Der Speicher wird in
+  `_speichern()` verworfen – dem einzigen Ort, an dem sich der Zustand ändern kann.
+- **`data/license.json` ist 0640** und steht in `_APP_DENY_REL`, `PRIVATE_FILES` und
+  `SHELL_SECRET_PATHS`: sie enthält Firma, Abteilung, Mail und die Bindung – und ein
+  beschreibbarer Zustand wäre der bequemste Weg zu einer höheren Stufe.
+- **Alle `/api/license*`-Endpunkte sind `require_local_auth`.** Ein ungültiger Schlüssel
+  antwortet **400 mit Grund** (nicht 200 mit `ok:false`), damit der Fehlschlag auch im
+  Netzwerk-Reiter sichtbar ist. Das Admin-Banner hängt an `/api/me` (`license_banner`, nur für
+  Administratoren, nur bei echtem Anlass) – ein eigener Endpunkt auf jeder Seite wäre der
+  teuerste Weg, eine Warnung zu zeigen.
+- **Wer root hat, kann das alles patchen.** Bekannt und akzeptiert: das ist eine
+  Vertragskontrolle, kein Kopierschutz – erkennbar und nachweisbar, nicht unmöglich.
+- **Verifiziert:** 180 Prüfungen (`tests/test_license.py`, ohne fastapi lauffähig – `backend.config`
+  ist ein Stub, weil der echte Import die Live-`settings.json` zurückschreibt; das Token-Format
+  wird unabhängig vom Werkzeug nachgebaut) lokal, 175 auf DEV im echten venv. **Live auf DEV
+  über HTTP:** 401/403/200-Matrix, echte Lizenz eingetragen → ENTERPRISE, Herabstufung auf
+  BASIC → **8 von 13 Skills automatisch abgeschaltet** (Journal-Beleg), Auto-Update 403,
+  sechster Skill 403, zweites Profil 403, `"never"` weiterhin 200. Danach vollständig
+  zurückgebaut (settings.json md5-gleich, 13 Skills, 5 Profile, FREE + 30 Tage Karenz).
+  Panel optisch abgenommen in Dunkel und Hell.
+- **Beim Ausrollen auf ECHT:** dort ist kein Schlüssel hinterlegt → 30 Tage Karenz, in denen
+  nichts eingeschränkt wird. Wer die Karenz verstreichen lässt, verliert Updates und bekommt
+  die FREE-Grenzen (auf ECHT hieße das: Skills werden bis auf fünf abgeschaltet). Vorher eine
+  Lizenz ausstellen, die Hardware-Kennung eintragen und veröffentlichen.
+- **Bedienung ohne Vorwissen (2026-08-07):** `license-manager/start.sh` prüft Voraussetzungen,
+  warnt bei fehlenden Schlüsseln/Veröffentlichungs-Ordner/offener Passphrase-Datei, erkennt
+  eine laufende Instanz und öffnet den Browser. In der Maske selbst stehen: der Ablauf in
+  sechs Schritten (aufgeklappt; wer sie zuklappt, bekommt sie zugeklappt wieder –
+  localStorage), die Bedeutung der Lizenzarten als Tabelle und der
+  **Veröffentlichungsstand**.
+  - **Die Grenzen-Tabelle wird aus `backend/license.GRENZEN` GELESEN, nicht nachgebaut**
+    (`server.py::_grenzen`, Repo liegt neben dem Werkzeug). Eine abgetippte Zweitfassung
+    würde beim nächsten Grenzwert auseinanderlaufen und dem Bediener etwas anderes anzeigen,
+    als beim Kunden gilt. Ist das Repo nicht erreichbar, zeigt die Maske **gar keine** Tabelle
+    statt einer womöglich falschen.
+  - **`veroeffentlichungs_stand()` ist die wichtigste Anzeige für den Bediener:** jede
+    Änderung (Widerruf, Bindung, Stufe, Laufzeit) bleibt bis zum Veröffentlichen wirkungslos,
+    und das war von außen nicht erkennbar. Verglichen werden nur die `eintraege` – `stand` und
+    `sig` ändern sich bei jedem Bauen und würden sonst dauerhaft eine Abweichung melden.
+    Rein interne Felder (`auto_renew`, `notiz`) lösen korrekt **keine** offene Änderung aus
+    (live geprüft).
+  - Die rote Werkzeug-Warnung „This is a development server" wird **gezielt gefiltert** (nur
+    diese Zeile, Zugriffsprotokolle bleiben): hier ist ein Entwicklungsserver genau richtig,
+    für einen Bediener sieht die Meldung aber nach einem Fehler aus.
+- **Statusdienst steht (2026-08-07):** `dev-core-busy/jarvis-licenses` (öffentlich), abgerufen
+  über `https://raw.githubusercontent.com/dev-core-busy/jarvis-licenses/main/status.json`.
+  Der Root-Schlüssel wurde mit Passphrase neu erzeugt; `backend/license_root.pub` trägt den
+  neuen Wert. Live geprüft: HTTP 200 + ETag, Signatur gegen den hinterlegten Root-Schlüssel,
+  DEV läuft mit einer echten **ENTERPRISE**-Lizenz (bewusst nicht BASIC – dort würden 19 Skills
+  auf fünf reduziert).
+- **Maßgeblich für die Laufzeit ist der STATUSDIENST, nicht das Token** (Änderung 2026-08-07).
+  Nennt der Statuseintrag ein `gueltig_bis`, gilt dieses – es darf **verlängern und
+  verkürzen**. Begründung: beide Angaben tragen dieselbe Signatur derselben Ausgabestelle, die
+  aus dem Statusdienst ist nur die frischere, und der Rückspielschutz verhindert das Vorzeigen
+  eines alten Standes. **Damit braucht eine Verlängerung keinen neuen Schlüsseltext beim
+  Kunden mehr.**
+  - **Das Token-Datum bleibt die Offline-Grenze:** ohne (jemals) erreichbaren Statusdienst
+    entscheidet es weiter, und nach `NETZ_KARENZ_TAGE` ohne Kontakt endet ohnehin alles bei
+    FREE. Eine Verlängerung wirkt also **nur gegen frischen Nachweis** – ein bewusst offline
+    betriebenes System lässt sich nicht automatisch verlängern.
+  - **`"gueltig_bis" in eintrag` statt `.get(…)`:** ein leerer Wert heißt „unbegrenzt" und ist
+    eine Aussage, ein **fehlendes** Feld (älterer/fremder Statusgenerator) ist keine und fällt
+    aufs Token zurück. Über `.get()` wäre ein fehlendes Feld stillschweigend „unbegrenzt" –
+    aus einem unvollständigen Generator würde eine ewige Lizenz.
+  - Angezeigt wird immer das **maßgebliche** Datum, sonst stünde im Panel ein Ablauf, der
+    längst verschoben wurde.
+- **Automatische Verlängerung (`auto_renew`, im Werkzeug):** Flag je Lizenz + `renew_tage`,
+  Wartungslauf `lizenzmanager.py faellige-verlaengern [--vorlauf 14] [--trocken]` für den Cron.
+  Er verlängert **ab dem bisherigen Ablauf**, nicht ab heute – sonst verschenkte ein früher
+  Lauf Restlaufzeit und der Ablauftag wanderte mit jedem Durchlauf nach vorn. Er
+  **veröffentlicht anschließend selbst**; ohne das bliebe die Verlängerung in der lokalen
+  Datenbank stehen und die Installation liefe trotzdem ab.
+  **Vorgabe ist AUS**, bewusst: eine Lizenz, die sich selbst verlängert, ist faktisch
+  unbefristet – wer das will, stellt sie gleich unbefristet aus. Der Sinn des Flags ist ein
+  laufender, kündbarer Vertrag.
+- **Eigene Systeme unbefristet ausstellen, Kundenlizenzen befristet.** Die Maske belegt ein
+  Jahr vor – das passt zu einer Vertragslaufzeit, ist für DEV und ECHT aber ein Eigentor: eine
+  auslaufende Lizenz fällt ohne Zutun auf FREE und schaltet Skills bis auf fünf ab. DEV läuft
+  deshalb seit 2026-08-07 mit `gueltig_bis = ""` (unbegrenzt).
+- **Nach jedem Schlüsselwechsel: `lizenzmanager.py neu-signieren`.** `init --kraft` und
+  `issuer-rotieren` entwerten **alle** gespeicherten Token – sie tragen die Signatur eines
+  Schlüssels, den keine Installation mehr kennt, und werden mit „Signatur stimmt nicht"
+  abgelehnt (live gegengeprüft: „Zertifikat nicht vom Root-Schlüssel signiert" → nach dem
+  Neusignieren wieder gültig). Die Lizenzdaten und damit die UUID bleiben gleich, jeder Kunde
+  braucht aber den **neuen Schlüsseltext**, und die Statusdatei muss neu veröffentlicht werden
+  (sie trägt das alte Ausgabe-Zertifikat).
+
 ## Konventionen
 - **Git:** `git commit` und `git push` NUR auf ausdrückliches Kommando des Nutzers (`c+p`) –
   niemals aus eigenem Antrieb, auch nicht wenn eine Aufgabe fertig und getestet ist. Fertige

@@ -1157,6 +1157,12 @@
                     }
                 });
             }
+            // Lizenz-Panel (einmalig verdrahten). Eigener Endpunkt /api/license,
+            // NICHT /api/settings: der Schluessel wird beim Eintragen sofort
+            // geprueft (Signatur + Statusabruf beim Anbieter), das Ergebnis ist
+            // die Antwort. Ueber die Sammel-Einstellung gespeichert waere weder
+            // der Grund einer Ablehnung noch die neue Stufe sichtbar.
+            _initLicensePanel();
             // Vorhaltezeit erzeugter Dokumente (einmalig verdrahten).
             // Grenzen wie im Backend (config.py::_valid_retention): 0 oder 15..90.
             const _retNum = document.getElementById('setting-docs-retention');
@@ -1262,6 +1268,152 @@
         }
 
         // ── Profile laden ──
+        // ─── Lizenz ────────────────────────────────────────────────────────
+        // Zeigt Stufe, Bindung und Verbrauch; traegt den Schluessel ein.
+        // Bewusst KEIN Poll-Timer: der Zustand aendert sich taeglich, nicht
+        // sekuendlich – geladen wird beim Oeffnen der Einstellungen und nach
+        // jeder Aktion. (Genau der Poll war beim entfernten Kontext-Abschnitt
+        // das Problem: er hat laufende Eingaben ueberschrieben.)
+        function _licSet(id, text) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        }
+
+        function _licRender(d) {
+            const z = (d && d.lizenz) || {};
+            const v = (d && d.verbrauch) || {};
+            const box = document.getElementById('lic-status');
+            const T = (k, f) => (window.t ? window.t(k) : f) || f;
+            if (box) {
+                const art = z.art || 'FREE';
+                const teile = [T('license.level', 'Stufe') + ': ' + art];
+                if (z.firma) teile.push(z.firma + (z.abteilung ? ' / ' + z.abteilung : ''));
+                if (z.gueltig_bis) {
+                    teile.push(T('license.valid_until', 'gültig bis') + ' ' + z.gueltig_bis
+                        + (z.tage_bis_ablauf != null ? ' (' + z.tage_bis_ablauf + ' '
+                            + T('license.days', 'Tage') + ')' : ''));
+                } else if (z.gueltig) {
+                    teile.push(T('license.unlimited', 'unbegrenzt'));
+                }
+                if (z.grund) teile.push('⚠ ' + z.grund);
+                if (z.einfuehrung_karenz) {
+                    teile.push(T('license.grace', 'Grenzen greifen in')
+                        + ' ' + z.einfuehrung_rest_tage + ' ' + T('license.days', 'Tage'));
+                }
+                if (z.letzter_erfolg) {
+                    teile.push(T('license.last_check', 'zuletzt geprüft')
+                        + ': ' + String(z.letzter_erfolg).replace('T', ' ').slice(0, 16));
+                }
+                box.textContent = teile.join(' · ');
+                box.style.color = z.gueltig ? 'var(--success)'
+                    : (z.banner ? 'var(--danger)' : 'var(--text-secondary)');
+            }
+            const lim = document.getElementById('lic-limits');
+            if (lim) {
+                const zeile = (name, o) => name + ': ' + o.ist + '/'
+                    + (o.max == null ? '∞' : o.max);
+                const teile = [];
+                if (v.profile) teile.push(zeile(T('license.profiles', 'Profile'), v.profile));
+                if (v.skills) teile.push(zeile(T('license.skills', 'Skills'), v.skills));
+                if (v.benutzer) teile.push(zeile(T('license.users', 'Benutzer'), v.benutzer));
+                if (v.rag) teile.push(zeile(T('license.rag', 'Wissensdateien'), v.rag));
+                if (v.updates) teile.push(T('license.updates', 'Updates') + ': ' + v.updates);
+                lim.textContent = teile.join(' · ');
+                lim.style.display = teile.length ? 'block' : 'none';
+            }
+            _licSet('lic-hwid', z.hwid || '–');
+            const ta = document.getElementById('lic-token');
+            // Das Eingabefeld NICHT ueberschreiben, waehrend jemand darin tippt.
+            if (ta && document.activeElement !== ta && !z.hat_token) ta.value = '';
+        }
+
+        async function _licLoad() {
+            try {
+                const r = await fetch('/api/license', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!r.ok) return;
+                _licRender(await r.json());
+            } catch (e) { /* Panel bleibt auf dem letzten Stand */ }
+        }
+
+        function _initLicensePanel() {
+            const btnSave = document.getElementById('btn-lic-save');
+            if (btnSave && !btnSave._wired) {
+                btnSave._wired = true;
+                const st = () => document.getElementById('lic-save-status');
+                const melde = (text, ok) => {
+                    const s = st();
+                    if (!s) return;
+                    s.textContent = text;
+                    s.style.color = ok ? 'var(--success)' : 'var(--danger)';
+                    if (ok) setTimeout(() => { s.textContent = ''; }, 4000);
+                };
+                btnSave.addEventListener('click', async () => {
+                    const ta = document.getElementById('lic-token');
+                    const wert = (ta && ta.value || '').trim();
+                    if (!wert) return melde('✗', false);
+                    melde('…', true);
+                    try {
+                        const r = await fetch('/api/license', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ token: wert })
+                        });
+                        const d = await r.json().catch(() => null);
+                        if (d && d.lizenz) _licRender({ lizenz: d.lizenz });
+                        await _licLoad();
+                        if (!r.ok || !d || d.ok === false) {
+                            melde('✗ ' + ((d && d.error) || r.status), false);
+                        } else {
+                            melde('✓', true);
+                        }
+                    } catch (e) { melde('✗', false); }
+                });
+
+                const btnCheck = document.getElementById('btn-lic-check');
+                if (btnCheck) btnCheck.addEventListener('click', async () => {
+                    melde('…', true);
+                    try {
+                        const r = await fetch('/api/license/check', {
+                            method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        const d = await r.json().catch(() => null);
+                        if (!r.ok) throw new Error(r.status);
+                        if (d && d.lizenz) _licRender({ lizenz: d.lizenz });
+                        await _licLoad();
+                        melde('✓', true);
+                    } catch (e) { melde('✗', false); }
+                });
+
+                const btnClear = document.getElementById('btn-lic-clear');
+                if (btnClear) btnClear.addEventListener('click', async () => {
+                    const frage = window.t ? window.t('license.confirm_clear') : '';
+                    if (!confirm(frage || 'Lizenzschlüssel entfernen? Das System läuft danach mit den FREE-Grenzen.')) return;
+                    try {
+                        const r = await fetch('/api/license', {
+                            method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (!r.ok) throw new Error(r.status);
+                        const ta = document.getElementById('lic-token');
+                        if (ta) ta.value = '';
+                        await _licLoad();
+                        melde('✓', true);
+                    } catch (e) { melde('✗', false); }
+                });
+
+                const btnCopy = document.getElementById('btn-lic-copy-hwid');
+                if (btnCopy) btnCopy.addEventListener('click', () => {
+                    const el = document.getElementById('lic-hwid');
+                    const wert = el ? el.textContent.trim() : '';
+                    if (!wert || wert === '–') return;
+                    // clipboard.writeText braucht einen sicheren Kontext; das ist
+                    // hier immer HTTPS, ein Fehlschlag bleibt trotzdem still.
+                    try { navigator.clipboard.writeText(wert); } catch (e) { /* egal */ }
+                    melde('✓', true);
+                });
+            }
+            _licLoad();
+        }
+
         async function loadProfiles() {
             try {
                 const res = await fetch('/api/settings', {

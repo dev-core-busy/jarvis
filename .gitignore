@@ -111,3 +111,10 @@ session*.sh
 # Erzeugte/hinterlegte PowerPoint-Vorlagen: pro Server gepflegt (Branding-Farben
 # bzw. echte Firmenvorlage) – gleiche Begruendung wie data/instructions/.
 data/vorlagen/
+
+# Lizenz-Ausgabestelle: enthaelt den PRIVATEN Signierschluessel und die
+# Kundendatenbank (Firma, Ansprechpartner, Mail). Gehoert niemals ins Repo –
+# das Repo ist public, und mit dem Schluessel koennte jeder Lizenzen ausstellen.
+license-manager/
+# Lizenz-Zustand einer Installation (Schluessel, Bindung, letzter Statusabruf).
+data/license.json

@@ -2707,10 +2707,16 @@ async def license_set(request: Request, user: str = Depends(require_local_auth))
     if not token:
         return JSONResponse({"ok": False, "error": "Kein Schlüssel übergeben"},
                             status_code=400)
-    z = await asyncio.to_thread(_lic.setze_token, token, user)
-    # Ein ungueltiger Schluessel ist KEIN Serverfehler – die Oberflaeche zeigt
-    # den Grund an. 200 mit ok=false waere hier irrefuehrend, 400 macht den
-    # Fehlschlag im Netzwerk-Reiter sichtbar.
+    try:
+        z = await asyncio.to_thread(_lic.setze_token, token, user)
+    except ValueError as e:
+        # Unbrauchbarer Schluessel: der bisherige Zustand bleibt bestehen
+        # (setze_token hat nichts gespeichert). Genau so soll es sein – eine
+        # Fehleingabe darf keine laufende Lizenz zerstoeren.
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    # Ein gueltiger, aber noch nicht gebundener Schluessel ist KEIN Serverfehler –
+    # die Oberflaeche zeigt den Grund an. 200 mit ok=false waere hier
+    # irrefuehrend, 400 macht den Fehlschlag im Netzwerk-Reiter sichtbar.
     if not z.get("gueltig"):
         return JSONResponse({"ok": False, "error": z.get("grund", ""), "lizenz": z},
                             status_code=400)

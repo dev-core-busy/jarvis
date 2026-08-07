@@ -363,7 +363,23 @@ def token_pruefen(token: str) -> tuple[dict | None, str]:
     token = re.sub(r"\s+", "", token)
     teile = token.split(".")
     if len(teile) != 4 or teile[0] != TOKEN_PREFIX:
-        return None, "Lizenzschlüssel hat ein unbekanntes Format"
+        # Die Meldung muss sagen, WAS zu tun ist. "Unbekanntes Format" ist
+        # richtig und trotzdem nutzlos – die beiden Verwechslungen, die
+        # tatsaechlich vorkommen, werden deshalb einzeln benannt.
+        try:
+            uuid.UUID(token)
+            return None, ("Das ist die Lizenzkennung, nicht der Lizenzschlüssel. "
+                          "Der Schlüssel ist ein langer Text, der mit "
+                          "„JARVIS-LIC-1.“ beginnt – er steht beim Anbieter "
+                          "unter „Schlüssel anzeigen“.")
+        except Exception:
+            pass
+        if token.startswith(TOKEN_PREFIX):
+            return None, (f"Der Lizenzschlüssel ist unvollständig: erwartet werden "
+                          f"vier durch Punkt getrennte Teile, gefunden sind "
+                          f"{len(teile)}. Bitte den gesamten Text kopieren.")
+        return None, ("Das sieht nicht nach einem Lizenzschlüssel aus. Er beginnt "
+                      "mit „JARVIS-LIC-1.“ und ist mehrere hundert Zeichen lang.")
     try:
         nutzdaten = json.loads(_b64d(teile[1]).decode("utf-8"))
         zert = json.loads(_b64d(teile[3]).decode("utf-8"))
@@ -788,7 +804,21 @@ def auto_update_erlaubt() -> tuple[bool, str]:
 
 
 def setze_token(token: str, benutzer: str = "") -> dict:
-    """Neuen Lizenzschluessel eintragen. Prueft sofort (inkl. Netzabruf)."""
+    """Neuen Lizenzschluessel eintragen. Prueft sofort (inkl. Netzabruf).
+
+    Wirft `ValueError`, wenn der Schluessel unbrauchbar ist – und laesst den
+    bisherigen Zustand dann **unangetastet**. Das ist wichtig: sonst zerstoert
+    eine Fehleingabe (z.B. die Lizenzkennung statt des Schluessels) eine
+    laufende Lizenz samt Hardware-Bindung, und das System faellt bis zur
+    erneuten Eingabe auf FREE. Live aufgefallen am 2026-08-07.
+
+    Ein formal gueltiger Schluessel wird dagegen IMMER uebernommen, auch wenn
+    er im Statusdienst noch unbekannt ist – das ist der Normalzustand zwischen
+    Ausstellen und Binden.
+    """
+    nutzdaten, fehler = token_pruefen(token)
+    if not nutzdaten:
+        raise ValueError(fehler)
     with _lock:
         daten = _laden()
         alt = re.sub(r"\s+", "", daten.get("token") or "")

@@ -187,6 +187,17 @@ gleich((geprueft or {}).get("art"), "BASIC", "Art wird gelesen")
 pruefe(lic.token_pruefen("")[1] != "", "leeres Token wird abgelehnt")
 pruefe(lic.token_pruefen("irgendwas")[1] != "", "Unsinn wird abgelehnt")
 pruefe(lic.token_pruefen("JARVIS-LIC-1.a.b")[1] != "", "zu wenige Teile werden abgelehnt")
+
+# Die Fehlermeldung muss sagen, WAS zu tun ist – "unbekanntes Format" ist
+# richtig und trotzdem nutzlos. Gemeldeter Fall: jemand trägt die Lizenz-
+# KENNUNG statt des Schlüssels ein.
+meldung = lic.token_pruefen("aa1d5e35-ad32-57b6-a82f-c14f01b1abec")[1]
+pruefe("Lizenzkennung" in meldung and "JARVIS-LIC-1." in meldung,
+       "eingetragene UUID wird als solche erkannt und erklärt", meldung)
+meldung = lic.token_pruefen("JARVIS-LIC-1.abc")[1]
+pruefe("unvollständig" in meldung, "abgeschnittener Schlüssel wird benannt", meldung)
+meldung = lic.token_pruefen("hallo welt")[1]
+pruefe("JARVIS-LIC-1." in meldung, "sonst wird das erwartete Format genannt", meldung)
 pruefe(lic.token_pruefen("JARVIS-LIC-9." + tok.split(".", 1)[1])[1] != "",
        "fremdes Präfix wird abgelehnt")
 
@@ -770,6 +781,26 @@ Path(lic.STATE_FILE).write_text("{kaputt")
 lic._reset_fuer_tests(); lic._cache_leeren()
 z = lic.zustand()
 gleich(z["art"], "FREE", "beschädigte Zustandsdatei: FREE statt Absturz")
+
+# Eine FEHLEINGABE darf eine laufende Lizenz nicht zerstören (Fund 2026-08-07:
+# vorher wurde der Wert gespeichert, bevor er geprüft war – die Lizenzkennung
+# statt des Schlüssels eingetragen, und das System fiel samt Bindung auf FREE).
+zurueck()
+stand({"status": "active", "art": "ENTERPRISE", "gueltig_bis": tage(365), "hwid": H})
+lic.setze_token(tok, "tester")
+gleich(lic.zustand()["art"], "ENTERPRISE", "Ausgangslage: gültige Lizenz")
+for eingabe in ("aa1d5e35-ad32-57b6-a82f-c14f01b1abec", "", "JARVIS-LIC-1.kaputt",
+                token_bauen(nutzdaten(), issuer=fremd,
+                            zert=zert_bauen(issuer=fremd, root=fremd))):
+    try:
+        lic.setze_token(eingabe, "tester")
+        pruefe(False, f"Fehleingabe wird abgewiesen ({eingabe[:22]}…)")
+    except ValueError:
+        pruefe(True, f"Fehleingabe wird abgewiesen ({eingabe[:22] or 'leer'}…)")
+z = lic.zustand()
+gleich(z["art"], "ENTERPRISE", "die laufende Lizenz bleibt nach Fehleingaben bestehen")
+pruefe(z["gebunden"], "die Hardware-Bindung bleibt erhalten")
+gleich(lic._laden()["token"], tok, "der gespeicherte Schlüssel ist unverändert")
 
 # Schluesselwechsel verwirft die alte Bindung
 zurueck()

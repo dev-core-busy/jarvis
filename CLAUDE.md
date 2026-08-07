@@ -2773,6 +2773,21 @@ System-Einstellungen → Lizenz*.
   nichts eingeschränkt wird. Wer die Karenz verstreichen lässt, verliert Updates und bekommt
   die FREE-Grenzen (auf ECHT hieße das: Skills werden bis auf fünf abgeschaltet). Vorher eine
   Lizenz ausstellen, die Hardware-Kennung eintragen und veröffentlichen.
+- **Eine Fehleingabe darf keine laufende Lizenz zerstören** (Fund 2026-08-07, live bei einer
+  Gegenprobe aufgefallen). `setze_token()` speicherte den Wert, **bevor** er geprüft war: wer
+  versehentlich die Lizenzkennung statt des Schlüssels eintrug, verlor Token UND
+  Hardware-Bindung und fiel bis zur erneuten Eingabe auf FREE. Jetzt prüft `setze_token()`
+  zuerst und wirft `ValueError`, ohne etwas anzufassen; `POST /api/license` antwortet 400 mit
+  dem Grund. Ein formal gültiger, aber noch nicht gebundener Schlüssel wird weiterhin
+  übernommen – das ist der Normalzustand zwischen Ausstellen und Binden.
+- **Fehlermeldungen benennen die tatsächliche Verwechslung.** „Unbekanntes Format" ist richtig
+  und trotzdem nutzlos. Erkannt und einzeln erklärt werden: eingetragene **Kennung** statt
+  Schlüssel (der gemeldete Fall), abgeschnittener Schlüssel (Teilezahl genannt), sonstiger
+  Text (erwartetes Format genannt).
+- **In der Ausgabestelle war die Anzeige verkehrt herum:** die Liste zeigte prominent die
+  Kennung (die niemand braucht und die genau zu dieser Verwechslung führte), während der
+  Schlüssel hinter zwei Aufklapp-Ebenen lag. Jetzt Knopf „🔑 Schlüssel kopieren" direkt in der
+  Zeile, Kennung gekürzt und als „Kennung: …" beschriftet (vollständig im Tooltip).
 - **Bedienung ohne Vorwissen (2026-08-07):** `license-manager/start.sh` prüft Voraussetzungen,
   warnt bei fehlenden Schlüsseln/Veröffentlichungs-Ordner/offener Passphrase-Datei, erkennt
   eine laufende Instanz und öffnet den Browser. In der Maske selbst stehen: der Ablauf in

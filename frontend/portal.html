@@ -354,6 +354,10 @@
 <div class="pt-wrap">
     <div class="pt-hello"><span data-i18n="portal.welcome">Willkommen</span><span id="pt-name"></span></div>
     <div class="pt-sub brand-app-name-sub" data-i18n="portal.choose">Wähle einen Bereich:</div>
+    <!-- Lizenz-Warnung, nur für Administratoren und nur bei echtem Anlass
+         (Text kommt fertig aus /api/me). Deckende Fläche, weil sie über den
+         Karten liegt – halbtransparent würde der Kartentext durchscheinen. -->
+    <div id="pt-lic-banner" style="display:none;cursor:pointer;margin:0 0 16px;padding:10px 14px;border-radius:10px;border:1px solid var(--danger);background:var(--bg-secondary);color:var(--danger);font-size:0.88rem;"></div>
     <div class="pt-cards">
         <a class="pt-card" href="/chat">
             <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
@@ -518,7 +522,7 @@ sudo update-ca-certificates</code></pre>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=102"></script>
+<script src="/static/js/i18n.js?v=103"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=23"></script>
 <script src="/static/js/security_incidents.js?v=12"></script>
@@ -561,6 +565,21 @@ sudo update-ca-certificates</code></pre>
         if (d.permissions && d.permissions.sap) {
             var sapCard = document.getElementById('pt-card-sap');
             if (sapCard) sapCard.classList.remove('hidden');
+        }
+        // Lizenz-Warnung (nur Admin, nur wenn wirklich etwas zu melden ist:
+        // Widerruf, fremde Hardware, unbrauchbarer Schlüssel, ablaufende Frist).
+        // Ein Klick führt direkt in die Einstellungen – eine Warnung ohne Weg
+        // zur Abhilfe ist nur Lärm.
+        if (d.license_banner) {
+            var lb = document.getElementById('pt-lic-banner');
+            if (lb) {
+                lb.textContent = '⚠ ' + d.license_banner;
+                lb.style.display = '';
+                lb.addEventListener('click', function(){
+                    try { sessionStorage.setItem('jarvis_settings_return','/portal'); } catch(e){}
+                    window.location.href = '/settings';
+                });
+            }
         }
         if (d.is_admin) {
             var s = document.getElementById('pt-settings');

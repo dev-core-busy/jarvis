@@ -1336,6 +1336,32 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="security.unattended_desc">Spielt Debian-Sicherheitspatches automatisch ein (unattended-upgrades). Bewusst eng gefasst: nur die Sicherheits-Quelle – keine allgemeinen Versionssprünge unter dem laufenden Dienst, kein automatischer Neustart und kein automatisches Aufräumen von Paketen (Letzteres würde Abhängigkeiten des Agenten entfernen, etwa cmake/boost für die Gesichtserkennung, ffmpeg für die Sprachausgabe oder LibreOffice-Teile). Die tägliche Aktualisierung des Paketindex bleibt beim Ausschalten aktiv – ein veralteter Index lässt Paketinstallationen mit „404 Not Found“ scheitern.</small>
                                 </div>
 
+                                <!-- Lizenz. Steht hier, weil die Lizenz den Funktionsumfang des
+                                     ganzen Systems bestimmt (Updates, Profile, Skills, Benutzer,
+                                     Wissensdatenbank) – und weil dieser Reiter Administratoren
+                                     vorbehalten ist. Verdrahtung: app.js (_initLicensePanel). -->
+                                <div class="tuning-group">
+                                    <h4 class="tuning-group-title" data-i18n="license.section">Lizenz</h4>
+                                    <div id="lic-status" class="kb-hint" style="margin:0 0 8px;" data-i18n="license.loading">Lizenz wird geladen…</div>
+                                    <div id="lic-limits" style="display:none;font-size:0.8rem;color:var(--text-secondary);margin-bottom:8px;"></div>
+
+                                    <label style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;" data-i18n="license.hwid_label">Hardware-Kennung dieses Systems</label>
+                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                                        <code id="lic-hwid" style="flex:1;min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.8rem;word-break:break-all;">–</code>
+                                        <button class="btn-secondary btn-small" id="btn-lic-copy-hwid" type="button" style="flex:0 0 auto;padding:4px 12px;font-size:0.78rem;" data-i18n="license.copy">Kopieren</button>
+                                    </div>
+
+                                    <label style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;" data-i18n="license.key_label">Lizenzschlüssel</label>
+                                    <textarea id="lic-token" rows="3" spellcheck="false" autocomplete="off" placeholder="JARVIS-LIC-1.…" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.78rem;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;"></textarea>
+                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+                                        <button class="btn-secondary btn-small" id="btn-lic-save" type="button" style="flex:0 0 auto;padding:4px 12px;font-size:0.78rem;" data-i18n="license.save">Schlüssel eintragen</button>
+                                        <button class="btn-secondary btn-small" id="btn-lic-check" type="button" style="flex:0 0 auto;padding:4px 12px;font-size:0.78rem;" data-i18n="license.check">Jetzt prüfen</button>
+                                        <button class="btn-secondary btn-small" id="btn-lic-clear" type="button" style="flex:0 0 auto;padding:4px 12px;font-size:0.78rem;" data-i18n="license.clear">Entfernen</button>
+                                        <span id="lic-save-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
+                                    </div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="license.hint">Der Lizenzschlüssel wird vom Anbieter ausgestellt und ist an dieses System gebunden. Damit die gekaufte Stufe wirksam wird, muss die oben angezeigte Hardware-Kennung beim Anbieter hinterlegt sein – bis dahin läuft das System als FREE. Der Status (Gültigkeit, Widerruf, Stufenänderung) wird täglich beim Anbieter geprüft; ist der Prüfdienst vorübergehend nicht erreichbar, gilt der zuletzt bekannte Stand noch 14 Tage weiter. Ohne gültige Lizenz gelten die FREE-Grenzen: keine Software-Updates, ein LLM-Profil, fünf aktive Skills, fünf Benutzer und 50 Dateien in der Wissensdatenbank.</small>
+                                </div>
+
                             </div>
                         </div>
 
@@ -3627,7 +3653,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=149"></script>
+    <script src="/static/js/i18n.js?v=150"></script>
     <script src="/static/js/cron.js?v=19"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=4"></script>
@@ -3652,7 +3678,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/ldap_picker.js?v=8"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=4"></script>
-    <script src="/static/js/app.js?v=186"></script>
+    <script src="/static/js/app.js?v=187"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

@@ -124,6 +124,11 @@ _APP_DENY_REL = (
     # cron_list zeigt nur eigene Auftraege, ein direktes Lesen der Datei wuerde
     # diese Schranke aushebeln.
     "data/scheduled_jobs.json", "data/file_watchers.json", "data/security_state.json",
+    # Lizenz-Zustand: Firma, Abteilung, Ansprechpartner-Mail und die
+    # Hardware-Bindung. Geht einen Shell-Befehl in der Sandbox nichts an – und
+    # ein beschreibbarer Zustand waere der bequemste Weg, sich selbst eine
+    # hoehere Stufe zu geben.
+    "data/license.json",
 )
 
 
@@ -153,7 +158,7 @@ PRIVATE_MODE = 0o750
 # fremde Auftraege – ein `cat` in der Sandbox umgeht das und braucht nur
 # Leserechte, genau wie 2026-07-28 bei data/chats.
 PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
-                 "data/security_state.json")
+                 "data/security_state.json", "data/license.json")
 PRIVATE_FILE_MODE = 0o640
 
 
@@ -316,6 +321,7 @@ def strip_quoted(cmd: str) -> str:
 SHELL_SECRET_PATHS = re.compile(
     r'\.env\b|settings\.json\b|memory\.json\b|auth_state\.json\b|credentials\.json\b|'
     r'scheduled_jobs\.json\b|file_watchers\.json\b|security_state\.json\b|'
+    r'license\.json\b|license_root\.pub\b|'
     # data/chats: fremde Chat-Verlaeufe (in der Shell zusaetzlich per 0750 gesperrt)
     r'data/chats\b|'
     r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'

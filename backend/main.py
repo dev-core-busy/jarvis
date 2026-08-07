@@ -2306,6 +2306,21 @@ async def login(request: Request):
                 status_code=401,
             )
 
+    # Lizenzgrenze fuer die Zahl verschiedener Benutzer. Bewusst HIER, nach
+    # vollstaendiger Authentifizierung und VOR record_login: sonst zaehlt der
+    # gerade abgewiesene Benutzer sich selbst mit und die Grenze waere nie
+    # erreicht. Wer bereits im Zeitfenster gezaehlt wird, kommt immer durch –
+    # die Grenze begrenzt den Kreis, sie wirft niemanden mitten im Arbeitstag
+    # hinaus. Der lokale `jarvis` ist ausgenommen (Rueckweg in die Oberflaeche).
+    try:
+        from backend import license_enforce as _lic_enf
+        _lic_ok, _lic_grund = _lic_enf.darf_benutzer_anmelden(username)
+    except Exception:  # noqa: BLE001
+        _lic_ok, _lic_grund = True, ""
+    if not _lic_ok:
+        print(f"[Lizenz] Anmeldung abgewiesen (Benutzergrenze): {username}", flush=True)
+        return JSONResponse({"success": False, "error": _lic_grund}, status_code=403)
+
     token = generate_token(username)
     # Anwesenheits-Buchhaltung: ab hier ist die Anmeldung erfolgreich. Auch ein
     # gesperrter Account kommt bis hierher (er sieht danach nur den Sperrhinweis)
@@ -2582,7 +2597,16 @@ async def update_status(user: str = Depends(require_local_auth)):
 
 @app.post("/api/update/apply")
 async def update_apply(user: str = Depends(require_local_auth)):
-    """Führt git pull aus und startet den Service neu."""
+    """Führt git pull aus und startet den Service neu.
+
+    Lizenzpflichtig: FREE enthaelt keine Software-Updates. Die ANZEIGE
+    (/api/update/status) bleibt absichtlich offen – sie ist der Hinweis
+    darauf, dass es etwas gibt, nicht der Bezug selbst."""
+    from backend import license as _lic
+    erlaubt, grund = _lic.updates_erlaubt()
+    if not erlaubt:
+        return JSONResponse({"ok": False, "error": grund, "license": True},
+                            status_code=403)
     from backend.update_manager import apply_update, restart_service_delayed
     result = await asyncio.to_thread(apply_update)
     if result["ok"]:
@@ -2606,6 +2630,16 @@ async def update_settings_set(request: Request, user: str = Depends(require_loca
     VALID = {"never", "daily", "weekly"}
     if schedule not in VALID:
         return JSONResponse({"error": "Ungültiger Wert"}, status_code=400)
+
+    # Zeitgesteuerte Updates sind ENTERPRISE vorbehalten. "never" bleibt immer
+    # erlaubt – ein bestehender Auftrag muss auch mit kleinerer Lizenz wieder
+    # abschaltbar sein, sonst laeuft er weiter und die Sperre haette den
+    # gegenteiligen Effekt.
+    if schedule != "never":
+        from backend import license as _lic
+        erlaubt, grund = _lic.auto_update_erlaubt()
+        if not erlaubt:
+            return JSONResponse({"error": grund, "license": True}, status_code=403)
 
     config.save_setting("auto_update_schedule", schedule)
 
@@ -2644,6 +2678,86 @@ async def update_settings_set(request: Request, user: str = Depends(require_loca
         )
 
     return JSONResponse({"ok": True, "auto_update_schedule": schedule})
+
+
+# ─── Lizenz ────────────────────────────────────────────────────────────────
+# Alle Endpunkte sind Administratoren vorbehalten: der Schluessel traegt
+# Firma, Abteilung und Ansprechpartner-Mail, und das Eintragen aendert den
+# Funktionsumfang des gesamten Systems.
+
+@app.get("/api/license")
+async def license_status(user: str = Depends(require_local_auth)):
+    """Lizenzlage, Grenzen und aktueller Verbrauch."""
+    from backend import license as _lic
+    from backend import license_enforce
+    z = await asyncio.to_thread(_lic.zustand)
+    verbrauch = await asyncio.to_thread(license_enforce.uebersicht)
+    return JSONResponse({"ok": True, "lizenz": z, "verbrauch": verbrauch,
+                         "netz_karenz_tage": _lic.NETZ_KARENZ_TAGE,
+                         "einfuehrung_karenz_tage": _lic.EINFUEHRUNG_KARENZ_TAGE,
+                         "status_url": _lic.STATUS_URL})
+
+
+@app.post("/api/license")
+async def license_set(request: Request, user: str = Depends(require_local_auth)):
+    """Lizenzschluessel eintragen. Prueft sofort inkl. Statusabruf."""
+    from backend import license as _lic
+    body = await request.json()
+    token = (body.get("token") or "").strip()
+    if not token:
+        return JSONResponse({"ok": False, "error": "Kein Schlüssel übergeben"},
+                            status_code=400)
+    z = await asyncio.to_thread(_lic.setze_token, token, user)
+    # Ein ungueltiger Schluessel ist KEIN Serverfehler – die Oberflaeche zeigt
+    # den Grund an. 200 mit ok=false waere hier irrefuehrend, 400 macht den
+    # Fehlschlag im Netzwerk-Reiter sichtbar.
+    if not z.get("gueltig"):
+        return JSONResponse({"ok": False, "error": z.get("grund", ""), "lizenz": z},
+                            status_code=400)
+    return JSONResponse({"ok": True, "lizenz": z})
+
+
+@app.delete("/api/license")
+async def license_clear(user: str = Depends(require_local_auth)):
+    """Lizenzschluessel entfernen (System faellt auf FREE zurueck)."""
+    from backend import license as _lic
+    z = await asyncio.to_thread(_lic.entferne_token, user)
+    return JSONResponse({"ok": True, "lizenz": z})
+
+
+@app.post("/api/license/check")
+async def license_check(user: str = Depends(require_local_auth)):
+    """Statusdienst sofort abfragen (sonst taeglich)."""
+    from backend import license as _lic
+    z = await asyncio.to_thread(_lic.pruefen)
+    return JSONResponse({"ok": True, "lizenz": z})
+
+
+@app.on_event("startup")
+async def startup_license():
+    """Lizenz beim Start und danach taeglich pruefen.
+
+    Verzoegert, damit der Abruf nicht mit dem Dienststart konkurriert – und
+    weil ein Netzwerk unmittelbar nach dem Boot noch nicht stehen muss. Der
+    Prueflauf setzt anschliessend die Grenzen durch (license_enforce), das ist
+    der einzige Ort, an dem von sich aus etwas abgeschaltet wird.
+    """
+    from backend import license as _lic
+
+    async def _loop():
+        await asyncio.sleep(20)
+        while True:
+            try:
+                z = await asyncio.to_thread(_lic.pruefen)
+                print(f"[Lizenz] Stufe {z.get('art')}"
+                      + (f" – {z.get('grund')}" if z.get("grund") else ""), flush=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"[Lizenz] Prüflauf fehlgeschlagen: {e}", flush=True)
+            await asyncio.sleep(86400)
+    try:
+        asyncio.create_task(_loop())
+    except Exception as e:  # noqa: BLE001
+        print(f"[Lizenz] Startup-Fehler: {e}", flush=True)
 
 
 # ─── MCP Server Verwaltung ─────────────────────────────────────────────────
@@ -3306,14 +3420,39 @@ async def get_me(user: str = Depends(require_auth)):
     zusammen: eine Kachel, die auf eine 404-Seite fuehrt, ist schlimmer als
     keine Kachel. Die Datenendpunkte ``/api/sap/*`` pruefen weiterhin nur die
     Freigabe (``require_sap_access``), damit der Einstellungs-Reiter
-    unabhaengig vom Skill-Zustand bedienbar bleibt."""
+    unabhaengig vom Skill-Zustand bedienbar bleibt.
+
+    ``license_banner`` wird **nur fuer Administratoren** gefuellt und nur, wenn
+    wirklich etwas zu melden ist (Widerruf, fremde Hardware, unbrauchbarer
+    Schluessel, ablaufende Karenz). Es haengt hier und nicht an einem eigenen
+    Endpunkt, weil das Portal ``/api/me`` ohnehin abruft – ein zusaetzlicher
+    Roundtrip auf jeder Seite waere der teuerste Weg, eine Warnung zu zeigen.
+    Ein normaler Benutzer bekommt das Feld nie: er kann daran nichts aendern,
+    und die Meldung nennt Vertragsdaten."""
+    ist_admin = _is_admin_user(user)
+    banner = ""
+    if ist_admin:
+        try:
+            from backend import license as _lic
+            z = _lic.zustand()
+            banner = z.get("banner") or ""
+            if not banner and z.get("einfuehrung_karenz"):
+                banner = (f"Kein Lizenzschlüssel eingetragen – die Lizenzgrenzen "
+                          f"greifen in {z.get('einfuehrung_rest_tage')} Tagen.")
+            elif not banner and z.get("tage_bis_ablauf") is not None \
+                    and z["tage_bis_ablauf"] <= 30:
+                banner = (f"Lizenz läuft in {z['tage_bis_ablauf']} Tagen ab "
+                          f"({z.get('gueltig_bis')}).")
+        except Exception:  # noqa: BLE001
+            banner = ""
     return JSONResponse({
         "username": user,
-        "is_admin": _is_admin_user(user),
+        "is_admin": ist_admin,
         "permissions": {
             "sap": _user_may_use_sap(user) and _skill_active("sap"),
             "internet": _user_has_internet_access(user),
         },
+        "license_banner": banner,
     })
 
 
@@ -4493,7 +4632,11 @@ async def get_profiles(user: str = Depends(require_auth)):
 
 @app.post("/api/profiles")
 async def create_profile(request: Request, user: str = Depends(require_local_auth)):
-    """Erstellt ein neues Profil."""
+    """Erstellt ein neues Profil (Lizenzgrenze: FREE/BASIC nur eines)."""
+    from backend import license_enforce
+    ok, grund = license_enforce.darf_profil_anlegen()
+    if not ok:
+        return JSONResponse({"success": False, "error": grund}, status_code=403)
     body = await request.json()
     profile = config.create_profile(body)
     return JSONResponse({"success": True, "profile": profile})
@@ -5224,7 +5367,15 @@ async def get_skills(user: str = Depends(require_auth)):
 async def enable_skill(name: str, user: str = Depends(require_local_auth)):
     """Aktiviert einen Skill. Fehlen deklarierte Abhaengigkeiten, startet die
     Installation im Hintergrund (Fortschritt: GET /api/skills/{name}/install-status);
-    Antwort enthaelt dann installing=true."""
+    Antwort enthaelt dann installing=true.
+
+    Lizenzgrenze: FREE/BASIC erlauben fuenf gleichzeitig aktive Skills. Der
+    Torwaechter lehnt VOR der Installation ab – sonst wuerden Pakete
+    nachgeladen fuer einen Skill, der danach sofort wieder abgeschaltet wird."""
+    from backend import license_enforce
+    ok, grund = license_enforce.darf_skill_aktivieren(name)
+    if not ok:
+        return JSONResponse({"success": False, "error": grund}, status_code=403)
     sm = _get_skill_manager()
     result = await asyncio.to_thread(sm.enable_skill, name)
     if agent_instance:
@@ -9115,7 +9266,15 @@ async def upload_knowledge_files(
     """Dateien per Browser-Upload in einen Knowledge-Ordner hochladen.
 
     ``groups`` (optional): kommagetrennte Gruppen-IDs – hochgeladene Dateien
-    werden diesen Gruppen als logische Tags zugeordnet (Modell B)."""
+    werden diesen Gruppen als logische Tags zugeordnet (Modell B).
+
+    Lizenzgrenze wie bei /api/wissen/upload: der Bestand bleibt nutzbar, nur
+    das Hinzufuegen ist begrenzt."""
+    from backend import license_enforce
+    _lic_ok, _lic_grund = license_enforce.darf_wissen_hinzufuegen(len(files or []))
+    if not _lic_ok:
+        return JSONResponse({"ok": False, "error": _lic_grund, "license": True},
+                            status_code=403)
     from backend.tools.knowledge import (
         _get_folders, PROJECT_ROOT,
         EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,
@@ -9302,7 +9461,16 @@ async def wissen_upload(
     **Globale Wissens-Editoren** (``_may_edit_knowledge``) laden Archive voellig
     unbegrenzt hoch – keine Groessen-, Anzahl- oder Plattenplatz-Grenze. Fuer alle
     anderen gelten ``_ZIP_MAX_TOTAL_BYTES``, ``_ZIP_MAX_ENTRIES`` und
-    ``_ZIP_MIN_FREE_BYTES``."""
+    ``_ZIP_MIN_FREE_BYTES``.
+
+    Lizenzgrenze: FREE/BASIC begrenzen die Zahl der Dateien in der
+    Wissensdatenbank. Der Bestand bleibt dabei immer lesbar und durchsuchbar –
+    gesperrt ist ausschliesslich das Hinzufuegen."""
+    from backend import license_enforce
+    _lic_ok, _lic_grund = license_enforce.darf_wissen_hinzufuegen(len(files or []))
+    if not _lic_ok:
+        return JSONResponse({"ok": False, "error": _lic_grund, "license": True},
+                            status_code=403)
     from backend.tools.knowledge import (
         _get_folders, PROJECT_ROOT,
         EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,

@@ -1297,8 +1297,10 @@
                 }
                 if (z.grund) teile.push('⚠ ' + z.grund);
                 if (z.einfuehrung_karenz) {
-                    teile.push(T('license.grace', 'Grenzen greifen in')
-                        + ' ' + z.einfuehrung_rest_tage + ' ' + T('license.days', 'Tage'));
+                    // Platzhalter GLOBAL ersetzen – String.replace mit einem
+                    // String tauscht nur das erste Vorkommen (siehe sessions.hint).
+                    teile.push(T('license.grace', 'Grenzen greifen in {n} Tagen')
+                        .replace(/\{n\}/g, z.einfuehrung_rest_tage));
                 }
                 if (z.letzter_erfolg) {
                     teile.push(T('license.last_check', 'zuletzt geprüft')

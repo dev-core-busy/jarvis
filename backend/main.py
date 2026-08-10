@@ -65,7 +65,7 @@ from backend import documents as _documents
 from backend import attachments as _attachments
 
 # ─── App erstellen ────────────────────────────────────────────────────
-JARVIS_VERSION = "0.9.1"
+JARVIS_VERSION = "1.0.0"
 # Die eingebauten Doku-Endpunkte (/docs, /redoc, /openapi.json) werden deaktiviert
 # und weiter unten durch admin-geschuetzte Varianten ersetzt – so ist die komplette
 # API-Oberflaeche nicht mehr oeffentlich einsehbar.

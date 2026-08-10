@@ -2653,6 +2653,71 @@ ihn nicht – es kann ihn nur erfragen oder raten.
   Serverzeit `Montag, 10.08.2026 19:49 CEST`, und im Tool-Audit-Log steht fuer diesen Lauf
   **kein einziger Werkzeug-Aufruf** (also kein `date` per Shell).
 
+## Medien im Chat: „Bild kopieren" / Anhang per Rechtsklick (2026-08-10)
+Wunsch des Nutzers. Umgesetzt in `chatlib.js` (`mediaCtxItems`, `copyElementAsImage`,
+`installAttachmentDrag`) auf der vorhandenen Menue-Infrastruktur `setupBubbleContextMenu`;
+eingehaengt in `chat.js::_buildBubbleCtxItems`. Waechter: `tests/test_media_ctx_ui.js` (57).
+- **DIE BROWSER-GRENZE ZUERST:** `navigator.clipboard.write()` nimmt nur eine kleine, feste
+  MIME-Liste an (text/plain, text/html, image/png). **Eine .docx/.xlsx/.pdf laesst sich NICHT in
+  die Zwischenablage legen** – auch nicht als Blob mit korrektem Typ (`NotAllowedError: Type …
+  not supported`). Es gibt deshalb bewusst KEINEN Eintrag „Datei kopieren"; ein Test verbietet
+  ihn, damit niemand eine Zusage einbaut, die der Browser nicht halten kann.
+- **Bilder, Diagramme und Schaubilder** werden ueber ein Canvas nach **image/png** normalisiert
+  (`_alsPngBlob`): ein `<img>` kann webp/jpeg sein, ein `<svg>` ist gar kein Rasterbild. Beim
+  `<canvas>` selbst wird `toBlob` direkt benutzt – neu zeichnen kostete die doppelte Auflösung
+  (`devicePixelRatio: 2`, siehe charts.js). **Weisser Grund wird untergelegt:** PNG-Transparenz
+  faellt in Word/Outlook je nach Version schwarz, das Diagramm waere unlesbar.
+- **Der grosse Gewinn ist das `<canvas>`:** fuer ein Chart.js-Diagramm hat das BROWSER-Menue gar
+  kein „Bild kopieren". Fuer ein `<img>` ist der Eintrag Komfort, dort nicht.
+- **FALLSTRICK Klassennamen – und der Test hat den Fehler zuerst VERDECKT.** Diagramme liegen in
+  `.jarvis-chart` (Canvas), Schaubilder in `.jarvis-mermaid` (SVG) – **nicht** in `pre.mermaid`.
+  Die erste Fassung suchte `.mermaid svg`; eine CSS-Klasse matcht ganze Namen, `jarvis-mermaid`
+  wird davon NICHT getroffen. Gruen war der Test nur, weil er sein Markup selbst baute. Jetzt
+  laesst er die Platzhalter von `renderMarkdown()` erzeugen und setzt nur ein, was
+  charts.js/mermaid_blocks.js dort hineinschreiben. **Merkregel: ein UI-Test, der sein Markup
+  selbst schreibt, prueft seine eigene Annahme.**
+- **Dateien: drei Eintraege + ein vierter Weg.** Herunterladen, Link kopieren, Dateinamen
+  kopieren – und **Ziehen**: `installAttachmentDrag()` setzt beim `dragstart`
+  `DownloadURL` (`<mime>:<name>:<absolute URL>`), womit die Datei direkt in Explorer, Outlook
+  oder Teams gezogen werden kann. Das ist der EINZIGE Weg, eine Datei ohne Umweg ueber den
+  Download-Ordner weiterzugeben (Chromium/Edge; Firefox ignoriert es und faellt auf den Link
+  zurueck). **Ein delegierter Listener am `document`**, nicht Verdrahtung pro Chip: die Chips
+  entstehen an vier Stellen in chat.js und ebenso in support.js/userchat.js – eine fuenfte waere
+  still ausgefallen. Ein `<a href>` ist ohnehin von Natur aus ziehbar.
+- **Das Token bleibt im kopierten Link UND im DownloadURL.** `/api/documents/…` verlangt eine
+  Anmeldung (`require_auth_or_query`), ohne Token ist beides unbrauchbar. Das widerspricht NICHT
+  der Regel „Token nie in den gespeicherten Markdown": dort passiert es unbemerkt und dauerhaft,
+  hier kopiert der Benutzer bewusst – und der Menuepunkt sagt „(mit Sitzungstoken)".
+- **Der Dateiname kommt ohne Capability-Praefix** (`_dateiname` entfernt `<32-Hex>__`): der Hex-
+  Teil ist fuer den Benutzer Rauschen, und in einer Mail sieht er nach einem Fehler aus.
+- **SHIFT+Rechtsklick laesst das BROWSER-Menue durch.** Wer „Untersuchen", eine Erweiterung oder
+  „Bild in neuem Tab" braucht, kommt sonst nicht mehr daran – ein eigenes Menue darf den Weg
+  nicht endgueltig zumauern.
+- **`getItems` bekommt jetzt das Ereignis** (`setupBubbleContextMenu`, auch im Long-Press-Zweig
+  fuer Touch). Ohne das kann der Aufrufer nicht unterscheiden, ob auf ein Bild, einen Chip oder
+  auf Text geklickt wurde. Bestehende Aufrufer ignorieren das Argument einfach.
+- **Bei einem Medien-Treffer stehen dessen Aktionen GANZ OBEN**, darunter bleiben „Text kopieren"
+  und „Loeschen"; **„Bearbeiten" entfaellt** – ein Bild bearbeitet man nicht.
+- **Rueckmeldung ist Pflicht, nicht Kosmetik** (`.jv-media-toast`): in der Zwischenablage sieht
+  man nichts, und ein Fehlschlag (fehlende Berechtigung, unsicherer Kontext) waere voellig
+  unsichtbar. Die Fehlermeldung nennt die Alternative („Bild speichern"). DECKENDE Flaeche
+  (`var(--bg-secondary)`), `pointer-events: none`, z-index ueber dem Kontextmenue.
+- **Kein Emoji als Icon** – 🏷 wurde durch `⧉` ersetzt (gleiche Regel wie bei `.kb-hdr-btn`:
+  Emojis werden je nach System farbig gerendert und passen sich keinem Theme an). Im Screenshot
+  fiel es als monochromer Fallback-Strich auf.
+- **Der Chip-Tooltip verspricht das Kontextmenue NICHT** („Klick = herunterladen · Ziehen = in
+  Explorer/Outlook"): das Menue haengt an der Seite – `chat.js` bindet es ein, **`support.js`
+  nicht**, und `userchat.js` hat ein eigenes Anhang-Menue. Eine Zusage, die je Seite stimmt oder
+  nicht, ist schlimmer als keine.
+- **Verifiziert:** 57 Pruefungen in jsdom gegen die echten Dateien (Erkennung je Klickziel,
+  ClipboardItem traegt image/png, Fehlschlag sichtbar und ohne Ausnahme, absoluter Link mit
+  Token, DownloadURL-Format, SHIFT-Durchlass, i18n DE+EN, CSS-Regeln). Gegenprobe: der alte
+  Stand faellt sofort durch (`mediaCtxItems is not a function`). Optisch in Dunkel UND Hell
+  abgenommen (Chrome-Screenshot mit den echten CSS-Dateien) – dabei fiel das Emoji-Icon auf.
+  **Beobachtung, bewusst nicht geaendert:** `.jv-bubble-ctx-menu` traegt seit seiner Einfuehrung
+  harte Farben (`rgba(20,24,36,.96)`, `#e7eaf3`) und bleibt im Hell-Modus dunkel. Das betrifft
+  das ganze Bubble-Menue, nicht diese Ergaenzung.
+
 ## Login-Rechte verschwanden bei jedem Dienst-Neustart (Fix 2026-08-10)
 **Gemeldet als** „warum kann ich auf DEV nach einer Bildgenerierung kein LLM-Profil mehr
 auswaehlen?". Nicht die Bildgenerierung war die Ursache, sondern die **Neustarts danach** –

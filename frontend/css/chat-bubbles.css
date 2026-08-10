@@ -270,3 +270,39 @@
 }
 .chat-doc-dl:active { transform: scale(0.98); }
 .chat-doc-dl svg { flex-shrink: 0; opacity: .9; }
+
+/* ── Medien-Kontextmenue: kurze Rueckmeldung ─────────────────────────────────
+ * "Bild kopieren" ist ohne Rueckmeldung ein Klick ins Nichts – in der
+ * Zwischenablage sieht man nichts, und ein Fehlschlag (fehlende Berechtigung,
+ * unsicherer Kontext) waere voellig unsichtbar. DECKENDE Flaeche, weil der
+ * Hinweis ueber dem Chatverlauf liegt (gleiche Begruendung wie bei den Panels
+ * im Portal und der sticky Kopfzeile der Audit-Tabelle). */
+.jv-media-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 84px;
+    transform: translate(-50%, 12px);
+    z-index: 100000;                      /* ueber dem Kontextmenue (99999) */
+    max-width: min(520px, 92vw);
+    padding: 10px 16px;
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    border: 1px solid rgba(var(--fg-rgb), 0.18);
+    color: var(--text-primary);
+    font-size: 0.88rem;
+    line-height: 1.35;
+    box-shadow: 0 8px 24px rgba(var(--shadow-rgb), 0.35);
+    opacity: 0;
+    pointer-events: none;                 /* verdeckt nie einen Klick */
+    transition: opacity .18s ease, transform .18s ease;
+}
+.jv-media-toast.open { opacity: 1; transform: translate(-50%, 0); }
+.jv-media-toast.is-error {
+    border-color: rgba(var(--danger-rgb, 231, 76, 60), 0.6);
+}
+
+/* Datei-Chips lassen sich in Explorer/Outlook ziehen (DownloadURL). Der Zeiger
+ * bleibt bewusst `pointer`: der Chip ist ZUERST ein Download-Link (Klick), das
+ * Ziehen ist der Zusatz – ein `grab`-Zeiger wuerde das Klick-Angebot
+ * verschleiern. Der Hinweis steht im title-Attribut (chatlib.js::_chip). */
+.chat-doc-dl:active { cursor: grabbing; }

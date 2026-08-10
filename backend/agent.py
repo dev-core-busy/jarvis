@@ -783,14 +783,14 @@ Regeln:
 4. Arbeite Schritt fuer Schritt und erklaere kurz, was du tust.
 5. Nutze shell_execute fuer Kommandozeilen-Befehle. Wenn Code ausgefuehrt werden soll, nutze shell_execute DIREKT.
 6. Nutze desktop_* Tools um Programme auf dem LINUX-Desktop zu bedienen. Fuer den Windows-Desktop: windows_desktop Tool verwenden.
-7. Nutze filesystem_* Tools um Dateien zu lesen/schreiben.
+7. Dateien liest und schreibst du mit dem Werkzeug filesystem und dem Parameter action: filesystem(action='read'|'write'|'append'|'list'|'exists'|'delete', path=...). Es gibt KEINE Werkzeuge namens filesystem_read/filesystem_write – ein solcher Aufruf scheitert mit "Tool nicht gefunden".
 8. Mache Screenshots um den Desktop-Zustand zu pruefen (screenshot Tool fuer Linux, windows_desktop(action='screenshot') fuer Windows).
 9. Wenn eine Aufgabe erledigt ist, sage es klar und deutlich.
 10. Bei Fehlern: analysiere, versuche eine Alternative.
-11. Antworte immer auf Deutsch.
+11. ANTWORTSPRACHE: Antworte in der Sprache, in der der Benutzer schreibt. Wechselt er die Sprache, wechselst du mit. Die Sprache von System-Anweisungen, Wissensdokumenten und Werkzeug-Ergebnissen ist dafuer unerheblich – ein englisch gestellte Frage wird englisch beantwortet, auch wenn die Quellen deutsch sind.
 12. Nutze memory_manage um wichtige Fakten dauerhaft zu speichern. Pruefe zu Beginn den Memory.
 13. ABSOLUT VERBOTEN: Bevor du eine Webseite oder Suchmaschine oeffnest, MUSST du knowledge_search aufgerufen haben. Ohne vorherigen knowledge_search-Aufruf darf KEINE Webseite geoeffnet werden!
-14. ABSOLUT VERBOTEN: Lies NIEMALS .docx, .pdf, .xlsx, .pptx, .doc, .xls Dateien direkt mit filesystem_read – diese sind Binaerdateien und liefern unlesbaren Muell. Fuer Inhalte aus diesen Dateien ausschliesslich knowledge_search verwenden. Der Inhalt ist dort bereits korrekt geparst und durchsuchbar.
+14. ABSOLUT VERBOTEN: Lies NIEMALS .docx, .pdf, .xlsx, .pptx, .doc, .xls Dateien direkt mit filesystem(action='read') – diese sind Binaerdateien und liefern unlesbaren Muell. Fuer Inhalte aus diesen Dateien ausschliesslich knowledge_search verwenden. Der Inhalt ist dort bereits korrekt geparst und durchsuchbar.
 
 15. BILDER – IMMER inline anzeigen UND das richtige Tool strikt nach Verb waehlen:
     - GENERIEREN ("generiere/erstelle/erzeuge/male/zeichne ein Bild von ...") -> IMMER generate_image. NIEMALS stattdessen search_image aufrufen. Kann das aktive Profil nicht generieren: gibt es eine ROLLE fuer Bilder (Abschnitt SPEZIALISIERTE ROLLEN), delegiere dorthin – sonst gib die Meldung des Tools UNVERAENDERT aus. KEINE Web-Suche als Ersatz, kein eigenmaechtiger Profilwechsel.
@@ -872,14 +872,14 @@ Du fuehrst eine spezifische Teilaufgabe VOLLSTAENDIG AUTONOM aus.
 
 KRITISCH – Autonomie-Regeln:
 - Handle SOFORT und OHNE Rueckfragen. Frage NIEMALS den Benutzer um Erlaubnis.
-- Fuehre JEDES Tool (shell_execute, filesystem_write, etc.) SOFORT und DIREKT aus.
+- Fuehre JEDES Tool (shell_execute, filesystem, etc.) SOFORT und DIREKT aus.
 - Wenn Code ausgefuehrt werden soll: nutze shell_execute mit z.B. python3 -c '...' oder schreibe eine Datei und fuehre sie aus.
 - NIEMALS sagen "Ich kann das nicht ausfuehren" oder "Was moechtest du tun?" – fuehre es AUS.
 - NIEMALS den Benutzer fragen, ob du etwas tun darfst – TU ES EINFACH.
 - Nutze memory_manage um wichtige Fakten dauerhaft zu speichern oder abzurufen.
 - Pruefe den Memory (action='list') wenn du Kontext brauchst.
 - Arbeite effizient und melde das Endergebnis.
-- Antworte auf Deutsch.
+- Antworte in der Sprache der Aufgabenstellung.
 - Bei Fehlern: analysiere kurz und versuche eine Alternative.
 - Wenn die Aufgabe erledigt ist, sage es klar.
 """
@@ -1108,7 +1108,43 @@ KRITISCH – Autonomie-Regeln:
             return self._role_prompt
         if self.is_sub_agent:
             return self.SUB_AGENT_PROMPT
-        return self.SYSTEM_PROMPT + self._role_hinweis()
+        return (self.SYSTEM_PROMPT + self._fehlende_pflicht_tools()
+                + self._role_hinweis())
+
+    # Werkzeuge, auf denen der SYSTEM_PROMPT ausdruecklich BESTEHT, die aber aus
+    # SKILLS kommen und damit fehlen koennen. Ohne den Hinweis unten verlangt der
+    # Prompt etwas Unmoegliches: Punkt 13/14 machen `knowledge_search` zur
+    # Vorbedingung fuer jede Web-Recherche und verbieten das direkte Lesen von
+    # Office-Dateien "ausschliesslich" mit diesem Werkzeug. Ist der
+    # knowledge-Skill aus, kann das Modell die Bedingung NIE erfuellen – es
+    # verweigert dann entweder die Aufgabe oder ruft ein Werkzeug auf, das es
+    # nicht gibt ("Tool nicht gefunden"). Dieselbe Fehlerklasse wie
+    # `filesystem_read` und "immer auf Deutsch" (siehe CLAUDE.md, Waechter in
+    # tests/test_display_names.py).
+    _SKILL_PFLICHT_TOOLS = {
+        "knowledge_search": (
+            "Die WISSENSSUCHE ist auf diesem System nicht verfuegbar "
+            "(Skill nicht aktiv). Die Punkte zur Pflicht-Wissenssuche vor einer "
+            "Web-Recherche und zum Lesen von Office-Dateien entfallen deshalb: "
+            "recherchiere direkt bzw. sage klar, dass der Inhalt nicht "
+            "durchsuchbar ist. Rufe knowledge_search NICHT auf – es existiert hier nicht."
+        ),
+        "generate_image": (
+            "BILDGENERIERUNG ist auf diesem System nicht verfuegbar (Skill nicht "
+            "aktiv). Sage das bei Bildauftraegen klar und rufe generate_image nicht auf."
+        ),
+    }
+
+    def _fehlende_pflicht_tools(self) -> str:
+        """Klarstellung fuer Prompt-Regeln, deren Werkzeug gerade fehlt."""
+        try:
+            da = {getattr(t, "name", "") for t in self._tool_instances}
+        except Exception:  # noqa: BLE001
+            return ""
+        teile = [txt for name, txt in self._SKILL_PFLICHT_TOOLS.items() if name not in da]
+        if not teile:
+            return ""
+        return "\n\n## NICHT VERFUEGBAR AUF DIESEM SYSTEM\n" + "\n".join(f"- {t}" for t in teile)
 
     def _role_hinweis(self) -> str:
         """Rollen-Abschnitt fuer den System-Prompt (leer, wenn keine Rolle da ist).
@@ -1414,6 +1450,14 @@ KRITISCH – Autonomie-Regeln:
         # geteilte Hauptagent nach acht Delegationen dauerhaft gesperrt.
         self._delegations_used = 0
         self._fallback_used = set()
+        # Bild-Sammlung fuer DIESEN Lauf. Sie existierte bisher NUR im
+        # headless-Pfad (_run_headless) – im Chat war `current_task_images` None,
+        # `record_task_image()` schrieb also ins Leere. Damit hing die Anzeige
+        # eines Bildes ausschliesslich daran, dass das Modell die Markdown-
+        # Referenz aus dem Werkzeug-Ergebnis woertlich uebernimmt. Bei einer
+        # Delegation tat es das nicht ("hier ist das Bild" – ohne Bild).
+        from backend.tools.image_gen import current_task_images as _cti_run
+        _img_token_run = _cti_run.set([])
         # Ergebnis dieses Laufs fuer den Auto-Neuversuch am Aufrufort:
         #   ok      – Antwort geliefert
         #   empty   – LLM lieferte keine Antwort (0 Parts / Reset erfolglos)
@@ -1515,11 +1559,24 @@ KRITISCH – Autonomie-Regeln:
                 "verbleibende Unsicherheiten ausdrücklich."
             )
 
-        # Antwortsprache gemäß UI-Sprache des Nutzers
+        # Antwortsprache: die Sprache der NACHRICHT entscheidet; die UI-Sprache ist
+        # nur die Vorgabe fuer den Fall, dass sie sich nicht erkennen laesst (kurze
+        # Eingabe, reine Zahlen, ein Dateiname). Vorher stand hier "Always respond in
+        # English" und im Prompt darueber "Antworte immer auf Deutsch" – zwei
+        # Anweisungen, die sich widersprachen und beide die Sprache des Benutzers
+        # uebergingen.
         if lang == "en":
             system_prompt += (
-                "\n\nIMPORTANT – RESPONSE LANGUAGE: The user's interface is set to English. "
-                "Always respond in English, regardless of the language used in system instructions or tool results."
+                "\n\nRESPONSE LANGUAGE: The user's interface is set to English, so English "
+                "is the default. If the user writes in another language, reply in THAT "
+                "language – the language of system instructions, knowledge documents or "
+                "tool results is irrelevant."
+            )
+        else:
+            system_prompt += (
+                "\n\nANTWORTSPRACHE: Die Oberflaeche des Benutzers steht auf Deutsch, "
+                "Deutsch ist also die Vorgabe. Schreibt der Benutzer in einer anderen "
+                "Sprache, antworte in DIESER Sprache."
             )
 
         # LDAP-Benutzer: Eingeschränkter Systemprompt-Zusatz
@@ -1743,7 +1800,7 @@ KRITISCH – Autonomie-Regeln:
                     try:
                         retry_resp = await self.provider.generate_response(
                             model=self.current_model,
-                            system_prompt="Antworte kurz und hilfreich auf Deutsch.",
+                            system_prompt="Antworte kurz und hilfreich in der Sprache der Frage.",
                             contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_text)])],
                             tools=[],
                         )
@@ -1791,6 +1848,17 @@ KRITISCH – Autonomie-Regeln:
                         # Verlauf) bekommt den Block, der LLM-Kontext behaelt den
                         # kurzen Marker. So stehen die Zahlen nie im Kontext.
                         _display = self._expand_charts(_display)
+                        # Erzeugte Bilder deterministisch anhaengen. Ein Bild
+                        # erscheint im Chat NUR ueber die Markdown-Referenz
+                        # ![..](/api/generated/..) im Anzeigetext. Bisher hing das
+                        # daran, dass das Modell die Referenz aus dem
+                        # Werkzeug-Ergebnis WOERTLICH uebernimmt – bei einer
+                        # Delegation an eine Rolle sah der Orchestrator sie nur als
+                        # Zitat und formulierte neu ("hier ist das Bild" – ohne
+                        # Bild). Gleiche Ueberlegung wie bei _deliver_docs: der
+                        # Seitenkanal darf nicht vom Wohlwollen des Modells haengen.
+                        if not is_intermediate:
+                            _display = self._mit_bildern(_display)
                         if _display:
                             await self._send_status(ws, _display, highlight=True, intermediate=is_intermediate)
                             if not is_intermediate:
@@ -2064,7 +2132,7 @@ KRITISCH – Autonomie-Regeln:
                     _final_text = await _try_final(
                         "reset_only_task",
                         [_reset_user],
-                        "Du bist ein hilfreicher Assistent. Antworte vollständig und direkt auf Deutsch.",
+                        "Du bist ein hilfreicher Assistent. Antworte vollstaendig und direkt in der Sprache der Frage.",
                     )
 
                 if _final_text:
@@ -2245,6 +2313,11 @@ KRITISCH – Autonomie-Regeln:
             try:
                 _run_stop_scope.reset(_scope_token)
             except Exception:
+                pass
+            try:
+                self.last_task_images = list(_cti_run.get() or [])
+                _cti_run.reset(_img_token_run)
+            except Exception:  # noqa: BLE001
                 pass
             try:
                 _actor_cv.reset(_actor_token)
@@ -2511,7 +2584,7 @@ KRITISCH – Autonomie-Regeln:
                             f"{task_text}\n\n"
                             "(Antworte direkt aus deinem Wissen. Keine Tools verfügbar.)"
                         ))])],
-                        "Du bist ein hilfreicher Assistent. Antworte vollständig und direkt auf Deutsch.",
+                        "Du bist ein hilfreicher Assistent. Antworte vollstaendig und direkt in der Sprache der Frage.",
                     )
 
                 if _final_h_text:
@@ -3017,6 +3090,19 @@ KRITISCH – Autonomie-Regeln:
                 except Exception:  # noqa: BLE001
                     pass
 
+        # Bilder des Rollen-Laufs an den AUFRUFER weitergeben: `_run_headless`
+        # setzt `current_task_images` auf eine eigene Liste, die Bilder der Rolle
+        # landen also nicht im Lauf des Orchestrators. Ohne diese Uebergabe
+        # erscheint das Bild nie – der Orchestrator hat nur den Ergebnistext.
+        try:
+            from backend.tools.image_gen import current_task_images as _cti
+            eigene = _cti.get()
+            for b in (getattr(agent, "last_task_images", None) or []):
+                if eigene is not None and b not in eigene:
+                    eigene.append(b)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT {self.agent_id}] Bilder der Rolle nicht uebernommen: {e}", flush=True)
+
         ergebnis = (ergebnis or "").strip() or "(Die Rolle hat kein Ergebnis geliefert.)"
         if len(ergebnis) > self._DELEGATE_RESULT_MAX:
             voll = len(ergebnis)
@@ -3298,6 +3384,31 @@ KRITISCH – Autonomie-Regeln:
             return expand_markers(text)
         except Exception as e:  # noqa: BLE001
             print(f"[AGENT {self.agent_id}] Chart-Marker nicht aufgeloest: {e}", flush=True)
+            return text
+
+    def _mit_bildern(self, text: str) -> str:
+        """Haengt Referenzen auf in DIESEM Lauf erzeugte Bilder an, die im Text fehlen.
+
+        `current_task_images` wird von generate_image/search_image gefuellt (und
+        von einem Rollen-Lauf an den Aufrufer weitergegeben, siehe
+        `_delegate_to_role`). Fehlt die Referenz im Anzeigetext, sieht der
+        Benutzer eine Antwort ohne Bild – der haeufigste und aergerlichste Fall.
+        Fail-safe: bei einem Fehler bleibt der Text unveraendert.
+        """
+        try:
+            from backend.tools.image_gen import current_task_images
+            bilder = list(current_task_images.get() or [])
+            if not bilder:
+                return text
+            fehlend = [b for b in bilder if b.get("url") and b["url"] not in (text or "")]
+            if not fehlend:
+                return text
+            zeilen = [f"![{(b.get('prompt') or 'Bild')[:80]}]({b['url']})" for b in fehlend]
+            print(f"[AGENT {self.agent_id}] {len(fehlend)} Bild(er) nachgetragen – "
+                  f"die Antwort nannte sie nicht", flush=True)
+            return ((text or "").rstrip() + "\n\n" + "\n".join(zeilen)).strip()
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT {self.agent_id}] Bild-Nachtrag fehlgeschlagen: {e}", flush=True)
             return text
 
     def _clean_doc_refs(self, text):

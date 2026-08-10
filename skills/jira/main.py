@@ -493,16 +493,17 @@ class JiraOrgProfileTool(_Base):
 
 
 async def _jira_llm(system_prompt: str, user_text: str) -> str:
-    """Ein LLM-Aufruf über das aktive Profil (fuer die Map-Reduce-Analyse)."""
-    from backend.config import config
-    from backend.llm import get_provider
+    """Ein LLM-Aufruf fuer die Map-Reduce-Analyse.
+
+    Nutzt das Profil des laufenden Agenten (also auch das einer Rolle) und nur
+    als Rueckfall das global aktive – bis 2026-08-10 war es immer das globale.
+    """
+    from backend.llm import provider_fuer_lauf
     from google.genai import types
-    provider = get_provider(
-        config.LLM_PROVIDER, config.current_api_key, config.current_api_url,
-        auth_method=config.current_auth_method,
-        session_key=config.current_session_key, prompt_tool_calling=False)
+    # Profil des LAUFENDEN Agenten (Rolle/Benutzerwahl), global nur als Rueckfall.
+    provider, _modell = provider_fuer_lauf(prompt_tool_calling=False)
     resp = await provider.generate_response(
-        model=config.current_model, system_prompt=system_prompt,
+        model=_modell, system_prompt=system_prompt,
         contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_text)])],
         tools=[])
     return "".join(p.text for p in (resp.parts or []) if getattr(p, "text", None)).strip()

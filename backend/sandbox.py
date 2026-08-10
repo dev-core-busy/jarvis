@@ -129,6 +129,11 @@ _APP_DENY_REL = (
     # ein beschreibbarer Zustand waere der bequemste Weg, sich selbst eine
     # hoehere Stufe zu geben.
     "data/license.json",
+    # Rollen-Definitionen (backend/agent_roles.py): der dort gespeicherte Prompt
+    # geht in KUENFTIGE Laeufe – dasselbe Persistenz-Substrat wie
+    # data/instructions. Ein beschreibbarer Eintrag waere ein dauerhafter Kanal
+    # in den System-Prompt eines Rollen-Agenten.
+    "data/agent_roles.json",
 )
 
 
@@ -158,7 +163,8 @@ PRIVATE_MODE = 0o750
 # fremde Auftraege – ein `cat` in der Sandbox umgeht das und braucht nur
 # Leserechte, genau wie 2026-07-28 bei data/chats.
 PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
-                 "data/security_state.json", "data/license.json")
+                 "data/security_state.json", "data/license.json",
+                 "data/agent_roles.json")
 PRIVATE_FILE_MODE = 0o640
 
 
@@ -321,7 +327,7 @@ def strip_quoted(cmd: str) -> str:
 SHELL_SECRET_PATHS = re.compile(
     r'\.env\b|settings\.json\b|memory\.json\b|auth_state\.json\b|credentials\.json\b|'
     r'scheduled_jobs\.json\b|file_watchers\.json\b|security_state\.json\b|'
-    r'license\.json\b|license_root\.pub\b|'
+    r'license\.json\b|license_root\.pub\b|agent_roles\.json\b|'
     # data/chats: fremde Chat-Verlaeufe (in der Shell zusaetzlich per 0750 gesperrt)
     r'data/chats\b|'
     r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'

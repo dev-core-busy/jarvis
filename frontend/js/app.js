@@ -671,6 +671,12 @@
                         panel.style.display = '';
                         panel.classList.add('active');
                         if (window.SkillCfg) window.SkillCfg.onShow(target);
+                        // Der Orchestrator-Reiter zeigt die Rollen-Verwaltung
+                        // (kein manifest-generiertes Formular). onShow/_bind sind
+                        // idempotent, ein zweiter Klick laedt nur neu.
+                        if (target === 'agent_orchestrator' && window.AgentRoles) {
+                            window.AgentRoles.onShow();
+                        }
                     }
                 } else if (target === 'mcp' && tabMcp) {
                     tabMcp.style.display = '';

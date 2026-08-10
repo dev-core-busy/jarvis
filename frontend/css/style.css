@@ -7387,3 +7387,102 @@ select.input-field {
     border: 1px solid var(--border); padding: 3px 6px; text-align: left;
 }
 .skcfg-doc-body img { max-width: 100%; }
+
+/* ── Rollen-Verwaltung (Reiter „Orchestrator", frontend/js/agent_roles.js) ──
+   EIGENE Feld-Klassen statt `.input-group`: die ist ein HORIZONTALER Flex-
+   Container (`display:flex`) und `.input-group input` setzt `flex:1;
+   background:transparent; border:none`. Beides zusammen hat im Rollen-Formular
+   zwei Fehler erzeugt (gemeldet 2026-08-10): ein langes Label stand NEBEN dem
+   Feld und wurde abgeschnitten, und die Werkzeug-Kaestchen wurden von der
+   input-Regel unsichtbar gestreckt – anklicken ging nicht mehr.
+   Merkregel: `.input-group` ist fuer „Label links, Feld rechts" gebaut. Wer ein
+   Label UEBER dem Feld will oder Kaestchen im Container hat, braucht eigene
+   Klassen. */
+.role-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.role-field > label {
+    font-size: .78rem; color: var(--text-secondary); font-weight: 500;
+    /* Umbruch ausdruecklich erlauben – der Hinweistext im Label ist lang */
+    white-space: normal; overflow-wrap: break-word; line-height: 1.35;
+}
+.role-field input[type="text"],
+.role-field input[type="number"],
+.role-field select,
+.role-field textarea {
+    width: 100%; box-sizing: border-box;
+    background: var(--bg-glass); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 6px 8px;
+    color: var(--text-primary); font-family: inherit; font-size: .82rem;
+    transition: border-color var(--transition);
+}
+.role-field textarea { resize: vertical; min-height: 8.5rem; line-height: 1.4; }
+.role-field input:focus, .role-field select:focus, .role-field textarea:focus {
+    outline: none; border-color: var(--accent);
+}
+.role-grid { display: grid; gap: 10px; }
+.role-grid-2 { grid-template-columns: 1fr 1fr; }
+.role-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+@media (max-width: 720px) {
+    .role-grid-2, .role-grid-3 { grid-template-columns: 1fr; }
+}
+
+/* Werkzeug-Auswahl: die Kaestchen muessen ihre natuerliche Groesse behalten */
+.role-tools {
+    max-height: 190px; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px;
+}
+.role-tools label {
+    display: flex; gap: 6px; align-items: center; cursor: pointer;
+    font-size: .76rem; color: var(--text-primary); padding: 1px 2px; border-radius: 4px;
+}
+.role-tools label:hover { background: rgba(var(--fg-rgb), .06); }
+.role-tools input[type="checkbox"] {
+    flex: 0 0 auto; width: auto; min-width: 0; margin: 0;
+    appearance: auto; -webkit-appearance: checkbox;
+    accent-color: var(--accent); cursor: pointer;
+}
+
+/* EINE Box pro Rolle – Muster `.kb-section`: der UMGEBENDE Container traegt
+   Rahmen, Hintergrund und Radius, Kopfzeile und Formular liegen darin OHNE
+   eigenen Rahmen. Zwei Geschwister-Elemente optisch zu verkleben (Radien
+   abrunden, Kanten transparent setzen) funktioniert nicht zuverlaessig – dabei
+   bleiben Abstaende und Doppelkanten sichtbar, und ein Inline-Style am Formular
+   gewinnt gegen jede Klassen-Regel (zweimal so gemeldet, 2026-08-10). */
+.role-card {
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg-glass); margin-bottom: 6px; overflow: hidden;
+}
+.role-card.is-off { opacity: .55; }
+.role-card.is-editing { border-color: var(--accent); }
+
+/* Die Kopfzeile: nur Layout, KEIN eigener Rahmen/Hintergrund */
+.role-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; }
+.role-row-main { flex: 1; min-width: 0; }
+.role-row-head {
+    font-size: .85rem; font-weight: 600;
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.role-row-id { font-size: .72rem; opacity: .7; font-weight: 400; }
+.role-row-badge {
+    font-size: .68rem; padding: 1px 6px; border-radius: 8px; font-weight: 500;
+    background: color-mix(in srgb, var(--text-secondary) 20%, transparent);
+    color: var(--text-secondary);
+}
+.role-row-desc { font-size: .76rem; color: var(--text-secondary); margin-top: 2px; }
+.role-row-meta { font-size: .72rem; opacity: .7; margin-top: 3px; }
+.role-row-btns { display: flex; gap: 4px; flex: 0 0 auto; }
+
+/* Das Formular. Am Heimatplatz (unter der Liste) eine eigene Box; INNERHALB
+   einer Karte verliert es Rahmen und Rand und wird durch eine Trennlinie
+   abgesetzt – gesteuert ueber den Elternkontext, damit das JS keine Klassen
+   umschalten muss. */
+.role-edit-box {
+    margin-top: 14px; padding: 14px;
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--bg-glass);
+}
+.role-card > .role-edit-box {
+    margin: 0; border: none; border-radius: 0; background: transparent;
+    border-top: 1px solid var(--border);
+}
+

@@ -83,18 +83,16 @@ _SKILL_TEMPLATE = """
 # ─── LLM-Hilfsfunktionen ──────────────────────────────────────────────────────
 
 def _mk_provider():
-    """Gibt (provider, model) zurück – immer aktueller Provider aus Config."""
+    """Gibt (provider, model) zurueck – Profil des LAUFENDEN Agenten.
+
+    Vorher immer das global aktive Profil; damit war in einem Agentenlauf sowohl
+    das Profil einer Rolle als auch die benutzerbezogene Wahl wirkungslos
+    (siehe llm.provider_fuer_lauf).
+    """
     from backend import config as _cfg
-    from backend.llm import get_provider
-    provider = get_provider(
-        _cfg.LLM_PROVIDER,
-        _cfg.current_api_key,
-        _cfg.current_api_url,
-        auth_method=_cfg.current_auth_method,
-        session_key=_cfg.current_session_key,
-        prompt_tool_calling=_cfg.current_prompt_tool_calling,
-    )
-    return provider, (_cfg.current_model or "gemini-2.0-flash")
+    from backend.llm import provider_fuer_lauf
+    provider, modell = provider_fuer_lauf()
+    return provider, (modell or _cfg.current_model or "gemini-2.0-flash")
 
 
 def _mk_content(text: str):

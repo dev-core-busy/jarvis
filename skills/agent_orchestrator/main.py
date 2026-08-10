@@ -1,371 +1,194 @@
-"""Agent Orchestrator Skill – Koordiniert Sub-Agenten via Dateisystem.
+"""Agent Orchestrator – Delegation an spezialisierte Rollen-Agenten.
 
-Protokoll (aus references/communication-protocol.md):
-  agent-workspaces/<name>/
-    inbox/instructions.md   ← Aufgabe vom Orchestrator
-    inbox/<input-files>     ← Eingabedaten
-    outbox/<deliverables>   ← Ergebnisse des Sub-Agenten
-    workspace/              ← Privater Arbeitsbereich
-    status.json             ← Zustand: pending|running|completed|failed
+WAS DIESER SKILL BEREITSTELLT
+-----------------------------
+Ein Werkzeug: ``delegate(role, task)``. Der Hauptagent gibt damit eine
+Teilaufgabe an einen vom Administrator definierten Rollen-Agenten (eigener
+Prompt, eigener Werkzeugsatz, optional eigenes LLM-Profil), **wartet** auf das
+Ergebnis und arbeitet damit weiter. Verwaltet werden die Rollen unter
+*Einstellungen → Orchestrator*; die Registry liegt in ``backend/agent_roles.py``.
 
-Sub-Agenten-Typen: research, code, analysis, writer, review, integration
+WARUM DAS EIN SKILL IST
+-----------------------
+Ohne aktiven Skill liefert ``get_tools()`` nichts – dann gibt es kein
+``delegate``, keinen Rollen-Abschnitt im System-Prompt und keinen Rollen-Rückfall
+bei gescheiterten Werkzeugen (``agent.py`` prüft dafür, ob das Werkzeug im
+Kasten liegt, nicht den Skill-Namen). Der Agent verhält sich dann exakt wie
+vorher. Einschalten = mehr Funktion, Ausschalten = zurück auf Anfang.
+
+WAS HIER VORHER STAND (bis 2026-08-10)
+--------------------------------------
+Ein OpenClaw-Import mit vier Werkzeugen (``orchestrate_task``, ``agent_status``,
+``agent_collect``, ``agent_list``), die **Verzeichnisse anlegten und wieder
+einlasen** – ``agent-workspaces/<session>/<agent>/{inbox,outbox,status.json}``.
+Sie starteten keinen Agenten: der Hauptagent sollte jede „Sub-Agenten"-Rolle
+selbst nacheinander abarbeiten, das Feld ``depends_on`` wurde nirgends
+ausgewertet, und die sechs „Agent-Typen" waren sechs Beschreibungssätze ohne
+Wirkung auf Werkzeuge, Rechte oder Modell. Der Skill war nie aktiviert und
+hatte im ganzen Repo keinen Aufrufer. Das Protokoll ist durch echte Rollen
+ersetzt; wer die alte Dateiablage sucht, findet sie in der Git-Historie.
+
+MIGRATION: Ein früher angelegtes ``data/agent-workspaces/`` wird NICHT
+angetastet und NICHT gelöscht – es enthält möglicherweise Arbeitsergebnisse.
 """
-
-import json
-import re
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
 
 from backend.tools.base import BaseTool
 
-# Basis-Verzeichnis für alle Agent-Workspaces
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
-_DEFAULT_ROOT = _PROJECT_ROOT / "data" / "agent-workspaces"
 
-
-def _workspace_root() -> Path:
+# ─── Vorgabe-Rollen ──────────────────────────────────────────────────────────
+# Beim Laden des Skills gesät (also beim Einschalten bzw. beim ersten Start mit
+# aktivem Skill) und nur, wenn data/agent_roles.json noch nicht existiert – eine
+# bewusst gelöschte Rolle darf nicht bei jedem Neustart zurückkommen.
+def _saeen_still() -> None:
     try:
-        from backend.config import config
-        rel = config.get_skill_states().get("agent_orchestrator", {}).get("config", {}).get(
-            "workspace_root", "data/agent-workspaces"
-        )
-        return _PROJECT_ROOT / rel
-    except Exception:
-        return _DEFAULT_ROOT
+        from backend import agent_roles
+        agent_roles.saeen()
+    except Exception as e:  # noqa: BLE001
+        # Kein Grund, den Skill scheitern zu lassen: ohne Rollen wird `delegate`
+        # gar nicht angeboten (agent.py::_llm_tools filtert es dann heraus).
+        print(f"[Rollen] Vorgabe-Rollen nicht angelegt: {e}", flush=True)
 
 
-def _safe_name(name: str) -> str:
-    """Bereinigt einen Namen zu einem sicheren Verzeichnisnamen."""
-    return re.sub(r"[^\w\-]", "_", name.lower().strip())[:60]
+class DelegateTool(BaseTool):
+    """Übergibt eine Teilaufgabe an eine vom Administrator definierte Rolle.
 
+    WIE ES LÄUFT (Marker-Muster wie spawn_agent / create_chart)
+    -----------------------------------------------------------
+    Ein Werkzeug kann selbst keinen Agenten starten (der AgentManager lebt in
+    ``backend.main``, ein Import hier wäre ein Zirkel). Deshalb gibt ``execute()``
+    nur einen Marker zurück; ``agent.py`` erkennt ihn direkt nach dem
+    Werkzeug-Aufruf, führt den Rollen-Lauf SEQUENZIELL aus (``await``) und
+    ersetzt das Werkzeug-Ergebnis durch die Antwort der Rolle. Der Orchestrator
+    sieht also das Ergebnis, nicht den Marker – anders als bei ``spawn_agent``,
+    das nur "gestartet" meldet und das Ergebnis nie zurückgibt.
 
-def _read_status(workspace: Path) -> dict:
-    status_file = workspace / "status.json"
-    if status_file.exists():
+    WARUM DIE PRÜFUNG SCHON HIER PASSIERT
+    -------------------------------------
+    Unbekannte oder abgeschaltete Rolle = Fehlermeldung MIT der Liste der
+    verfügbaren Rollen, und es wird gar kein Lauf gestartet. Das Modell kann sich
+    im selben Schritt korrigieren (gleiche Überlegung wie beim Repair-Loop von
+    ``create_chart`` und bei "Anhang nicht gefunden", das die vorhandenen Namen
+    nennt).
+    """
+
+    @property
+    def name(self) -> str:
+        return "delegate"
+
+    @property
+    def description(self) -> str:
+        # Dynamisch: die Rollenliste wird bei JEDEM Provider-Aufruf neu gelesen
+        # (llm.py liest `t.description` pro Anfrage). Eine neu angelegte Rolle
+        # ist damit sofort bekannt, ohne Dienst-Neustart.
+        from backend import agent_roles
+
         try:
-            return json.loads(status_file.read_text())
-        except Exception:
-            pass
-    return {"state": "unknown"}
+            liste = agent_roles.werkzeug_beschreibung()
+        except Exception:  # noqa: BLE001
+            liste = ""
 
+        if not liste:
+            return (
+                "Uebergibt eine Teilaufgabe an einen spezialisierten Rollen-Agenten. "
+                "DERZEIT IST KEINE ROLLE EINGERICHTET – benutze dieses Werkzeug nicht, "
+                "sondern erledige die Aufgabe selbst."
+            )
 
-def _write_status(workspace: Path, state: str, **extra):
-    status = {"state": state, **extra}
-    if state == "running" and "started" not in status:
-        status["started"] = datetime.now(timezone.utc).isoformat()
-    (workspace / "status.json").write_text(json.dumps(status, indent=2, ensure_ascii=False))
-
-
-# ─── Tools ────────────────────────────────────────────────────────────
-
-AGENT_TYPES = {
-    "research":    "Recherchiert Informationen aus dem Web und Dokumenten.",
-    "code":        "Schreibt, testet und refaktorisiert Code.",
-    "analysis":    "Analysiert Daten, erkennt Muster, generiert Erkenntnisse.",
-    "writer":      "Erstellt Dokumente, Berichte und Inhalte.",
-    "review":      "Prüft Qualität, gibt Feedback, validiert Ergebnisse.",
-    "integration": "Führt Ausgaben mehrerer Agenten zusammen.",
-}
-
-
-class OrchestrateTaskTool(BaseTool):
-    """Erstellt Sub-Agenten-Workspaces für eine koordinierte Aufgabe."""
-
-    @property
-    def name(self) -> str:
-        return "orchestrate_task"
-
-    @property
-    def description(self) -> str:
         return (
-            "Zerlegt eine komplexe Aufgabe in Sub-Agenten und erstellt deren Workspaces. "
-            "Jeder Sub-Agent bekommt eine inbox/instructions.md und einen status.json. "
-            "Gibt eine Übersicht der erstellten Workspaces zurück. "
-            "Danach: Jeden Sub-Agenten-Workspace selbst bearbeiten (inbox lesen → "
-            "work → outbox befüllen → status=completed setzen). "
-            "Sub-Agenten-Typen: research, code, analysis, writer, review, integration."
+            "Uebergibt eine Teilaufgabe an einen spezialisierten Rollen-Agenten und "
+            "gibt DESSEN ERGEBNIS zurueck (du wartest darauf und arbeitest damit weiter).\n"
+            "Benutze eine Rolle, wenn sie fuer die Aufgabe eindeutig zustaendig ist – "
+            "sie hat einen eigenen Werkzeugsatz und oft ein besser geeignetes Modell. "
+            "Fuer alles andere arbeite selbst weiter; delegiere NICHT die ganze Anfrage "
+            "und nicht mehrfach dasselbe.\n"
+            "Formuliere im 'task' eine vollstaendige, fuer sich verstaendliche Anweisung: "
+            "die Rolle sieht das Gespraech NICHT, nur diesen Text.\n\n"
+            "Verfuegbare Rollen:\n" + liste
         )
 
     def parameters_schema(self) -> dict:
+        from backend import agent_roles
+
+        try:
+            ids = agent_roles.namen(nur_aktive=True)
+        except Exception:  # noqa: BLE001
+            ids = []
+        rolle_schema: dict = {
+            "type": "STRING",
+            "description": "Kennung der Rolle, z.B. 'analyst'",
+        }
+        # Als Enum, wenn Rollen da sind: das haelt das Modell davon ab, sich eine
+        # Rolle auszudenken. Bei leerer Liste KEIN leeres Enum – manche Provider
+        # lehnen das mit HTTP 400 ab.
+        if ids:
+            rolle_schema["enum"] = ids
         return {
-            "type": "object",
+            "type": "OBJECT",
             "properties": {
-                "session_name": {
-                    "type": "string",
-                    "description": "Name der Orchestrierungs-Session, z.B. 'marktanalyse-2024'",
-                },
-                "agents": {
-                    "type": "array",
-                    "description": "Liste der zu erstellenden Sub-Agenten",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name":         {"type": "string", "description": "Eindeutiger Name, z.B. 'web-recherche'"},
-                            "type":         {"type": "string", "description": "research|code|analysis|writer|review|integration"},
-                            "objective":    {"type": "string", "description": "Klares Ziel dieses Sub-Agenten"},
-                            "inputs":       {"type": "string", "description": "Welche Eingaben werden bereitgestellt (optional)"},
-                            "outputs":      {"type": "string", "description": "Erwartete Ausgaben in outbox/"},
-                            "depends_on":   {"type": "array", "items": {"type": "string"}, "description": "Abhängigkeiten (andere Agent-Namen)"},
-                        },
-                        "required": ["name", "type", "objective"],
-                    },
+                "role": rolle_schema,
+                "task": {
+                    "type": "STRING",
+                    "description": (
+                        "Die vollstaendige Teilaufgabe fuer die Rolle. Muss ohne "
+                        "Gespraechskontext verstaendlich sein (Dateipfade, Zahlen, "
+                        "Rahmenbedingungen mitgeben)."
+                    ),
                 },
             },
-            "required": ["session_name", "agents"],
+            "required": ["role", "task"],
         }
 
-    async def execute(self, **kwargs) -> str:
-        session_name = _safe_name(kwargs.get("session_name", "session"))
-        agents_spec  = kwargs.get("agents", [])
+    async def execute(self, role: str = "", task: str = "", **kwargs) -> str:
+        import json
 
-        if not agents_spec:
-            return "❌ Keine Agenten angegeben."
+        from backend import agent_roles
 
-        root = _workspace_root() / session_name
-        root.mkdir(parents=True, exist_ok=True)
+        # Fehlertolerant: Modelle benennen die Felder gern anders.
+        if not role:
+            role = kwargs.get("agent") or kwargs.get("name") or kwargs.get("rolle") or ""
+        if not task:
+            task = (kwargs.get("prompt") or kwargs.get("auftrag")
+                    or kwargs.get("instruction") or kwargs.get("aufgabe") or "")
 
-        created = []
-        for spec in agents_spec:
-            agent_name = _safe_name(spec.get("name", "agent"))
-            agent_type = spec.get("type", "research").lower()
-            objective  = spec.get("objective", "")
-            inputs_txt = spec.get("inputs", "")
-            outputs_txt = spec.get("outputs", "")
-            depends_on = spec.get("depends_on", [])
+        role = str(role).strip().lower()
+        task = str(task).strip()
 
-            workspace = root / agent_name
-            (workspace / "inbox").mkdir(parents=True, exist_ok=True)
-            (workspace / "outbox").mkdir(parents=True, exist_ok=True)
-            (workspace / "workspace").mkdir(parents=True, exist_ok=True)
+        try:
+            aktive = agent_roles.alle(nur_aktive=True)
+        except Exception as e:  # noqa: BLE001
+            return f"Fehler: Rollen sind nicht lesbar ({e})."
 
-            # instructions.md schreiben
-            instructions = f"""# Task: {spec.get('name', agent_name)}
+        if not aktive:
+            return ("Fehler: Es ist keine Rolle eingerichtet. Erledige die Aufgabe "
+                    "selbst (Rollen legt ein Administrator unter Einstellungen an).")
 
-## Objective
-{objective}
+        def _liste() -> str:
+            return ", ".join(f"'{r['id']}'" for r in aktive)
 
-## Agent Type
-{agent_type} – {AGENT_TYPES.get(agent_type, '')}
+        if not role:
+            return f"Fehler: 'role' fehlt. Verfuegbar: {_liste()}."
+        if not task:
+            return ("Fehler: 'task' fehlt – die Rolle sieht das Gespraech nicht und "
+                    "braucht eine vollstaendige Anweisung.")
 
-## Inputs Provided
-{inputs_txt or '(keine spezifischen Eingabedateien – nutze vorhandenes Wissen)'}
+        treffer = next((r for r in aktive if r["id"] == role), None)
+        if treffer is None:
+            # Abgeschaltete Rolle vom Tippfehler unterscheiden: sonst sucht der
+            # Administrator den Fehler in der Schreibweise.
+            alle_ids = {r["id"] for r in agent_roles.alle()}
+            if role in alle_ids:
+                return (f"Fehler: Die Rolle '{role}' ist abgeschaltet. "
+                        f"Verfuegbar: {_liste()}.")
+            return f"Fehler: Unbekannte Rolle '{role}'. Verfuegbar: {_liste()}."
 
-## Output Expectations
-{outputs_txt or f'Hauptergebnis in outbox/{agent_name}_result.md + outbox/summary.md'}
-
-## Constraints
-- Status in status.json pflegen: pending → running → completed/failed
-- Bei Fehler: outbox/error_report.md erstellen
-{f'- Abhängigkeiten abwarten: {", ".join(depends_on)}' if depends_on else ''}
-
-## Communication Protocol
-- Eingaben lesen aus: inbox/
-- Ergebnisse schreiben nach: outbox/
-- Zwischenergebnisse: workspace/
-- Status-Updates: status.json
-"""
-            (workspace / "inbox" / "instructions.md").write_text(instructions)
-
-            # Status initialisieren
-            _write_status(workspace, "pending",
-                          agent=agent_name,
-                          type=agent_type,
-                          depends_on=depends_on,
-                          created=datetime.now(timezone.utc).isoformat())
-
-            created.append(f"  • {agent_name} [{agent_type}]{' (wartet auf: ' + ', '.join(depends_on) + ')' if depends_on else ''}")
-
-        lines = [
-            f"✅ Session '{session_name}' erstellt mit {len(created)} Sub-Agent(en):",
-            *created,
-            "",
-            f"📁 Workspace: data/agent-workspaces/{session_name}/",
-            "",
-            "→ Nächste Schritte:",
-            "  1. agent_status() aufrufen um Übersicht zu sehen",
-            "  2. Jeden Agenten bearbeiten: inbox/instructions.md lesen,",
-            "     Arbeit ausführen, Ergebnisse in outbox/ schreiben,",
-            "     status=completed setzen",
-            "  3. agent_collect() zum Einsammeln der Ergebnisse",
-        ]
-        return "\n".join(lines)
-
-
-class AgentStatusTool(BaseTool):
-    """Zeigt Status aller Sub-Agenten einer Session."""
-
-    @property
-    def name(self) -> str:
-        return "agent_status"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Zeigt den aktuellen Status aller Sub-Agenten einer Orchestrierungs-Session "
-            "(pending/running/completed/failed). Gibt auch Fortschritt und Blockierungen aus."
-        )
-
-    def parameters_schema(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "session_name": {
-                    "type": "string",
-                    "description": "Name der Session (leer = alle Sessions anzeigen)",
-                },
-            },
-            "required": [],
-        }
-
-    async def execute(self, **kwargs) -> str:
-        session_name = _safe_name(kwargs.get("session_name", "")) if kwargs.get("session_name") else ""
-        root = _workspace_root()
-
-        if not root.exists():
-            return "Keine Agent-Workspaces vorhanden."
-
-        sessions = [root / session_name] if session_name else sorted(root.iterdir())
-        lines = []
-
-        for session_dir in sessions:
-            if not session_dir.is_dir():
-                continue
-            lines.append(f"\n📁 Session: {session_dir.name}")
-            agents = sorted(session_dir.iterdir())
-            if not agents:
-                lines.append("  (leer)")
-                continue
-
-            state_icons = {"pending": "⏸", "running": "🔄", "completed": "✅", "failed": "❌", "unknown": "❓"}
-            for agent_dir in agents:
-                if not agent_dir.is_dir():
-                    continue
-                status = _read_status(agent_dir)
-                state  = status.get("state", "unknown")
-                icon   = state_icons.get(state, "❓")
-                progress = status.get("progress", {})
-                prog_str = ""
-                if progress and "steps_completed" in progress:
-                    prog_str = f" ({progress['steps_completed']}/{progress.get('total_steps','?')} Schritte)"
-                outbox = list((agent_dir / "outbox").glob("*")) if (agent_dir / "outbox").exists() else []
-                out_str = f", {len(outbox)} Ausgabe(n)" if outbox else ""
-                lines.append(f"  {icon} {agent_dir.name}: {state}{prog_str}{out_str}")
-                if status.get("error"):
-                    lines.append(f"     ⚠️  {status['error']}")
-
-        return "\n".join(lines) if lines else "Keine Sessions gefunden."
-
-
-class AgentCollectTool(BaseTool):
-    """Sammelt alle Ergebnisse aus den outbox-Verzeichnissen einer Session."""
-
-    @property
-    def name(self) -> str:
-        return "agent_collect"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Sammelt und gibt alle Ergebnisse (outbox/summary.md und outbox/ Dateien) "
-            "aus abgeschlossenen Sub-Agenten einer Session zurück."
-        )
-
-    def parameters_schema(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "session_name": {
-                    "type": "string",
-                    "description": "Name der Session",
-                },
-                "agent_name": {
-                    "type": "string",
-                    "description": "Nur diesen Agenten lesen (leer = alle completed Agenten)",
-                },
-            },
-            "required": ["session_name"],
-        }
-
-    async def execute(self, **kwargs) -> str:
-        session_name = _safe_name(kwargs.get("session_name", ""))
-        agent_filter = _safe_name(kwargs.get("agent_name", "")) if kwargs.get("agent_name") else ""
-        session_dir  = _workspace_root() / session_name
-
-        if not session_dir.exists():
-            return f"❌ Session '{session_name}' nicht gefunden."
-
-        results = []
-        for agent_dir in sorted(session_dir.iterdir()):
-            if not agent_dir.is_dir():
-                continue
-            if agent_filter and agent_dir.name != agent_filter:
-                continue
-
-            status = _read_status(agent_dir)
-            if status.get("state") not in ("completed", "failed") and not agent_filter:
-                continue
-
-            outbox = agent_dir / "outbox"
-            results.append(f"\n─── {agent_dir.name} [{status.get('state','?')}] ───")
-
-            if not outbox.exists() or not list(outbox.iterdir()):
-                results.append("  (keine Ausgaben)")
-                continue
-
-            # Zuerst summary.md, dann andere Dateien
-            files = sorted(outbox.rglob("*"), key=lambda p: (p.name != "summary.md", p.name))
-            for f in files:
-                if not f.is_file():
-                    continue
-                rel = f.relative_to(outbox)
-                results.append(f"\n📄 outbox/{rel}:")
-                try:
-                    content = f.read_text(errors="replace")
-                    # Lange Dateien kürzen
-                    if len(content) > 2000:
-                        content = content[:2000] + "\n… [gekürzt]"
-                    results.append(content)
-                except Exception as e:
-                    results.append(f"  (Lesefehler: {e})")
-
-        return "\n".join(results) if results else "Keine abgeschlossenen Agenten gefunden."
-
-
-class AgentListTool(BaseTool):
-    """Listet alle vorhandenen Agent-Sessions auf."""
-
-    @property
-    def name(self) -> str:
-        return "agent_list"
-
-    @property
-    def description(self) -> str:
-        return "Listet alle vorhandenen Orchestrierungs-Sessions und ihre Sub-Agenten auf."
-
-    def parameters_schema(self) -> dict:
-        return {"type": "object", "properties": {}, "required": []}
-
-    async def execute(self, **kwargs) -> str:
-        root = _workspace_root()
-        if not root.exists() or not list(root.iterdir()):
-            return "Keine Agent-Sessions vorhanden. Mit orchestrate_task() eine neue Session starten."
-
-        lines = [f"📁 Agent-Workspaces ({root}):"]
-        for session in sorted(root.iterdir()):
-            if not session.is_dir():
-                continue
-            agents = [d for d in session.iterdir() if d.is_dir()]
-            states = [_read_status(a).get("state", "?") for a in agents]
-            done   = sum(1 for s in states if s == "completed")
-            lines.append(f"  • {session.name}: {len(agents)} Agent(en), {done} abgeschlossen")
-        return "\n".join(lines)
+        return json.dumps({
+            "_delegate": True,
+            "role": treffer["id"],
+            "task": task,
+        })
 
 
 def get_tools():
-    return [
-        OrchestrateTaskTool(),
-        AgentStatusTool(),
-        AgentCollectTool(),
-        AgentListTool(),
-    ]
+    """Wird beim Laden des aktivierten Skills gerufen – hier auch das Säen."""
+    _saeen_still()
+    return [DelegateTool()]

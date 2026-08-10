@@ -595,13 +595,42 @@ html = (ROOT / "frontend" / "settings.html").read_text(encoding="utf-8")
 js = (ROOT / "frontend" / "js" / "telemetry.js").read_text(encoding="utf-8")
 i18n = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
 
+# WARUM HIER NICHT MEHR `ctx-clear-btn` UND `context.js` STEHEN (Fix 2026-08-10):
+# Der Abschnitt "Kontext / History" wurde am 2026-08-05 aus dem Telemetrie-Reiter
+# entfernt und `frontend/js/context.js` dabei GELOESCHT (Commit 0b6a1cb). Dieser
+# Test las die Datei aber weiter – `read_text()` warf `FileNotFoundError`, und
+# zwar **bevor** irgendeine Pruefung lief: der komplette Waechter fuer
+# Aufbewahrung-nach-Alter, vollstaendige Prompts und die fuenf granularen Clears
+# war damit fuenf Tage lang stumm. Genau der Fall "ein Schutz, der still
+# ausfaellt, ist kein Schutz".
+#
+# Konsequenz fuer kuenftige Aenderungen: eine Datei, die dieser Test liest, ist
+# Teil seiner Voraussetzungen. Wer sie loescht, muss hier nachziehen – deshalb
+# steht die Abwesenheit jetzt ausdruecklich als Pruefung darunter, statt sie
+# stillschweigend zu unterlassen.
+_JS_MODULE = {}
+for _name in ("telemetry.js", "audit.js"):
+    _pfad = ROOT / "frontend" / "js" / _name
+    _JS_MODULE[_name] = _pfad.read_text(encoding="utf-8") if _pfad.exists() else ""
+    check(f"{_name} vorhanden", bool(_JS_MODULE[_name]))
+
 for bid in ("tele-tool-clear-btn", "tele-llm-clear-btn", "tele-errors-clear-btn",
             "tele-spans-clear-btn", "conv-log-clear-btn", "audit-clear-btn",
-            "ctx-clear-btn", "tele-retention-run"):
+            "tele-retention-run"):
     check(f"{bid} im Markup", f'id="{bid}"' in html)
     check(f"{bid} in telemetry.js oder eigenem Modul verdrahtet",
-          bid in js or bid in (ROOT / "frontend" / "js" / "audit.js").read_text(encoding="utf-8")
-          or bid in (ROOT / "frontend" / "js" / "context.js").read_text(encoding="utf-8"))
+          bid in js or any(bid in q for q in _JS_MODULE.values()))
+
+# Das Kontext-Panel ist BEWUSST weg – die Kacheln zeigten den sitzungslosen
+# Eimer des abfragenden Admins gegen die globale Schwelle, und "Jetzt
+# komprimieren" wirkte auf den zuletzt geladenen (moeglicherweise fremden)
+# Verlauf. Es darf nicht zurueckkommen.
+check("Kontext-Panel bleibt entfernt (kein ctx-clear-btn)",
+      'id="ctx-clear-btn"' not in html)
+check("context.js bleibt geloescht",
+      not (ROOT / "frontend" / "js" / "context.js").exists())
+check("der Schwellwert steht stattdessen in den System-Einstellungen",
+      'id="setting-compress-threshold"' in html)
 
 check("Leeren-Knoepfe stoppen die Klapp-Aktion (event.stopPropagation)",
       html.count('onclick="event.stopPropagation()"') >= 6)

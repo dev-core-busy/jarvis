@@ -923,7 +923,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 "<tool_call>\n"
                 "{\"name\": \"TOOL_NAME\", \"arguments\": {\"param\": \"wert\"}}\n"
                 "</tool_call>\n\n"
-                "Wenn du kein Tool benötigst, antworte normal auf Deutsch.\n\n"
+                "Wenn du kein Tool benoetigst, antworte normal – in der Sprache des Benutzers.\n\n"
                 "### Verfügbare Tools:\n"
             )
             for t in tools:

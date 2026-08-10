@@ -403,7 +403,11 @@ def get_conversations(limit: int = 50, ip_filter: str | None = None,
         for e in _iter_index_reversed():
             if ip_filter and e.get("client_ip") != ip_filter:
                 continue
-            if user_filter and e.get("username") != user_filter:
+            # Normalisiert vergleichen: die Oberflaeche zeigt (und liefert)
+            # Namen MIT Domaenen-Praefix, gespeichert ist je nach Tippform des
+            # Anmeldefelds mal so, mal ohne. Ein exakter Vergleich liefert dann
+            # eine leere Liste, obwohl der Name im Pulldown steht.
+            if user_filter and norm_user(e.get("username") or "") != norm_user(user_filter):
                 continue
             out.append(e)
             if len(out) >= limit:
@@ -558,3 +562,22 @@ def clear():
             _write_index([])
         except Exception:  # noqa: BLE001
             pass
+
+def norm_user(name: str) -> str:
+    """Benutzername auf den blossen Kontonamen reduzieren: ohne Domaenen-Praefix
+    (``DOMAIN\\user``), ohne UPN-Suffix (``user@domain``), klein.
+
+    WARUM DER FILTER DAS BRAUCHT: die Oberflaeche zeigt Namen MIT Praefix
+    (``nexus\\sven.sander``), gespeichert ist je nach Tippform des Anmeldefelds
+    mal so, mal ohne. Ein Vergleich auf dem Rohwert findet dann nichts – und
+    eine Filterzeile, die nichts findet, obwohl der Name daneben steht, ist
+    genau der Fehler, der am 2026-08-05 im Audit-Log Stunden gekostet hat
+    (dort war es Chrome-Autofill, hier waere es unsere eigene Anzeige).
+
+    Kanal-Kennungen (``wa:``/``tg:``/``api:``) bleiben unangetastet – sie tragen
+    keinen Domaenenanteil, und ein Zerlegen am Doppelpunkt wuerde sie ruinieren.
+    """
+    s = (name or "").strip()
+    if not s or ":" in s:
+        return s.lower()
+    return s.split("@")[0].split("\\")[-1].strip().lower()

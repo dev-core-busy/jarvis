@@ -220,6 +220,23 @@ def _iter_reversed(path: Path, chunk: int = _TAIL_CHUNK):
         return
 
 
+def _user_passt(filter_wert: str, gespeichert: str) -> bool:
+    """Trifft der Filter diesen Eintrag? Vergleicht ROH und normalisiert.
+
+    Roh (Substring) bleibt erhalten, damit Teileingaben wie "sander" weiter
+    funktionieren; zusaetzlich wird ohne Domaenen-Praefix verglichen, damit ein
+    aus der Anzeige kopiertes "nexus\\sven.sander" den Eintrag "sven.sander"
+    findet – und umgekehrt.
+    """
+    f = (filter_wert or "").strip().lower()
+    if not f:
+        return True
+    g = (gespeichert or "").lower()
+    if f in g:
+        return True
+    return norm_user(filter_wert) in norm_user(gespeichert) if norm_user(gespeichert) else False
+
+
 def read_log(limit: int = 500, user_filter: str = "", tool_filter: str = "") -> list[dict]:
     """Liest die letzten N Audit-Log-Einträge (neueste zuerst).
 
@@ -238,7 +255,7 @@ def read_log(limit: int = 500, user_filter: str = "", tool_filter: str = "") -> 
                     entry = json.loads(line)
                 except Exception:  # noqa: BLE001
                     continue
-                if user_filter and user_filter.lower() not in (entry.get("user") or "").lower():
+                if user_filter and not _user_passt(user_filter, entry.get("user") or ""):
                     continue
                 if tool_filter and tool_filter.lower() not in (entry.get("tool") or "").lower():
                     continue
@@ -246,3 +263,22 @@ def read_log(limit: int = 500, user_filter: str = "", tool_filter: str = "") -> 
                 if len(entries) >= limit:
                     return entries
     return entries
+
+def norm_user(name: str) -> str:
+    """Benutzername auf den blossen Kontonamen reduzieren: ohne Domaenen-Praefix
+    (``DOMAIN\\user``), ohne UPN-Suffix (``user@domain``), klein.
+
+    WARUM DER FILTER DAS BRAUCHT: die Oberflaeche zeigt Namen MIT Praefix
+    (``nexus\\sven.sander``), gespeichert ist je nach Tippform des Anmeldefelds
+    mal so, mal ohne. Ein Vergleich auf dem Rohwert findet dann nichts – und
+    eine Filterzeile, die nichts findet, obwohl der Name daneben steht, ist
+    genau der Fehler, der am 2026-08-05 im Audit-Log Stunden gekostet hat
+    (dort war es Chrome-Autofill, hier waere es unsere eigene Anzeige).
+
+    Kanal-Kennungen (``wa:``/``tg:``/``api:``) bleiben unangetastet – sie tragen
+    keinen Domaenenanteil, und ein Zerlegen am Doppelpunkt wuerde sie ruinieren.
+    """
+    s = (name or "").strip()
+    if not s or ":" in s:
+        return s.lower()
+    return s.split("@")[0].split("\\")[-1].strip().lower()

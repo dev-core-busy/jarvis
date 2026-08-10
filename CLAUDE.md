@@ -1653,6 +1653,67 @@ Gemessen auf DEV, damit die Grenze nicht geschätzt ist:
   geschrieben", obwohl geschrieben wurde – die Drosselung wird deshalb über den
   DATEIINHALT geprüft.
 
+## Benutzernamen: eine Anzeige, ein Vergleich (Fix 2026-08-10)
+**Gemeldet:** im LLM-Verlauf stand `sven.sander` statt `nexus\sven.sander`. Am 2026-08-02 war
+genau das behoben worden – aber **nur für `/api/sessions`**. Die Lehre stand schon damals hier
+(„Heilt sich beim nächsten Request" ist keine Lösung), war aber nicht durchgezogen.
+- **Aufbereitung beim AUSLESEN, an EINER Stelle:** `main.py::_mit_anzeigenamen()` schickt die
+  Felder `user|username|owner|by|author|last_reset_by|created_by|display` durch `_display_name()`.
+  Angewandt an: LLM-Verlauf (Liste, Rumpf, Filter-Liste), Tool-Audit-Log, Zugriffs-Verstöße,
+  gesperrte Konten, Broker-Audit, Telemetrie-Statistiken (`geleert von`), Cron-Besitzer,
+  Issue-Melder. Der **gespeicherte** Wert bleibt unverändert – er ist der Schlüssel (Filter,
+  Sperrlisten, `data/chats/<user>`), und Altbestand heilt so ohne Migration.
+- **`_display_name()` präfixt jetzt NICHTS, was kein Verzeichniskonto ist:** `wa:+49…`, `tg:…`,
+  `api:<quelle>`, `__unprivilegiert__`, `unknown` (der Doppelpunkt ist das Kennzeichen aller
+  Kanal-Präfixe). Vorher wäre `nexus\api:Vision-Kamera` entstanden.
+- **DIE WICHTIGERE HÄLFTE SIND DIE VERGLEICHE.** Eine Anzeige mit Präfix ist irreführend, wenn
+  darunter roh verglichen wird:
+  - **`security_guard`: Sperre und Verstoß-Zähler lagen unter dem ROHEN Namen.** Derselbe Mensch
+    hatte je Tippform einen eigenen Zähler – die Auto-Sperre (3 Verstöße/600 s) war durch
+    Wechseln zwischen `x` und `nexus\x` verzögerbar, und eine bestehende Sperre griff nur für
+    die Variante, unter der sie entstand. Zusätzlich hätte die Anzeige-Änderung das **Entsperren**
+    gebrochen (die Oberfläche sendet den angezeigten Namen). Jetzt `norm_user()` + `_finde_key()`
+    (exakt, sonst normalisiert); NEUE Sperren liegen unter dem normalisierten Namen, der
+    Altbestand wird beim Lesen mitgefunden und **nicht migriert** (eine Sperre umzuschreiben ist
+    eine Sicherheitsentscheidung).
+  - **`_cron_visible()` verglich roh** – ein Benutzer sah seinen EIGENEN Auftrag nicht mehr (404),
+    wenn er sich anders anmeldete als beim Anlegen; `PUT`/`DELETE`/`run` hängen an derselben
+    Prüfung.
+  - **Die Filter fanden nichts:** der Verlaufs-Filter verglich exakt, der Audit-Filter als
+    Substring. `conv_log.norm_user()` / `audit_log._user_passt()` vergleichen jetzt roh **und**
+    normalisiert – „nexus\sven.sander" findet „sven.sander" und umgekehrt, Teileingaben
+    funktionieren weiter. Live auf DEV: mit und ohne Präfix identische Trefferzahl (6/6, 12/12).
+- **Verifiziert:** 70 Prüfungen (`tests/test_display_names.py`, ohne fastapi lauffähig – die
+  Funktionen werden per Quelltext extrahiert, `backend.config` ist ein Stub). Live: LLM-Verlauf,
+  Audit-Log und Verstöße zeigen `nexus\…`, `jarvis` und `api:…` bleiben unangetastet.
+
+## Antwortsprache: die Sprache des Benutzers (Fix 2026-08-10)
+Der System-Prompt hatte in Punkt 11 „Antworte immer auf Deutsch." **und** – bei englischer
+UI-Sprache – „Always respond in English, regardless of …". Zwei Anweisungen, die sich
+widersprachen und beide die Sprache der konkreten Nachricht übergingen.
+- Jetzt: **die Sprache der Nachricht entscheidet**, die UI-Sprache ist nur die Vorgabe für den
+  Fall, dass sie sich nicht erkennen lässt (kurze Eingabe, Zahlen, ein Dateiname). Gilt ebenso
+  für `SUB_AGENT_PROMPT`, die drei Nachschlag-Prompts, den Prompt-Tool-Calling-Modus in `llm.py`
+  und die Support-Zusammenfassung.
+- **Bewusst weiter deutsch:** `learning.py` (Faktenextraktion), `cognitive_evolution`
+  (Reflexions-Instruktionen, Analysebericht). Das sind Systemartefakte eines deutschsprachigen
+  Projekts, keine Antworten an einen Benutzer.
+
+### Wächter gegen widersprüchliche Prompts (`tests/test_display_names.py`, Abschnitt 7)
+Diese Fehlerklasse ist im Projekt dreimal teuer geworden (WA_TASK_PROMPT versprach
+`cron_create`; Deutsch vs. Englisch; `filesystem_read`). Der Test prüft maschinell:
+- **kein erfundenes Werkzeug**: der Prompt nannte `filesystem_read`/`filesystem_write` – es gibt
+  nur `filesystem(action=…)`, ein solcher Aufruf endet mit „Tool nicht gefunden". Korrigiert, und
+  der Prompt warnt jetzt ausdrücklich vor den falschen Namen.
+- **kein gesperrtes Werkzeug im allgemeinen Teil** (gegen `_BLOCKED_TOOLS_FOR_LDAP` geprüft –
+  war in Ordnung).
+- **keine zwei widersprechenden Sprachvorgaben.**
+- **`systemctl` im WA-Prompt nur in der Negativliste** „WAS ÜBER WHATSAPP NICHT GEHT" (die
+  Korrektur vom 2026-07-29 bleibt damit festgeschrieben).
+  Die letzten zwei Prüfungen schlugen beim ersten Lauf **falsch** an – der Wächter fand den
+  eigenen Warnsatz und die Negativliste. Merkregel: bei solchen Prüfungen auf den AUFRUF prüfen
+  (`name(`), nicht auf das Wort, und Kommentar-/Negativ-Abschnitte ausnehmen.
+
 ## Skill-Zugangsdaten waren für jeden lesbar (Fix 2026-08-02)
 `GET /api/skills/{name}/config` hing an **`require_auth`** – jeder angemeldete Benutzer konnte
 damit die Zugangsdaten SÄMTLICHER Skills im Klartext abrufen: HANA-/RFC-Kennwort und

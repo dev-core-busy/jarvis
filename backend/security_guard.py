@@ -125,11 +125,50 @@ def _save(state: dict):
         print(f"[SecurityGuard] State speichern fehlgeschlagen: {e}", flush=True)
 
 
+def norm_user(name: str) -> str:
+    """Benutzername auf den blossen Kontonamen: ohne ``DOMAIN\\``, ohne
+    ``@domain``, klein. Kanal-Kennungen (``wa:``/``tg:``/``api:``) bleiben ganz.
+
+    WARUM DAS SICHERHEITSRELEVANT IST (Befund 2026-08-10): Sperren und der
+    Verstoss-Zaehler lagen unter dem ROHEN Namen. Derselbe Mensch, der sich
+    einmal als ``sven.sander`` und einmal als ``nexus\\sven.sander`` anmeldet,
+    hatte damit ZWEI getrennte Zaehler – die Auto-Sperre (drei Verstoesse in
+    600 s) war durch Wechseln der Tippform verzoegerbar, und eine bestehende
+    Sperre griff nur fuer die Variante, unter der sie entstanden ist.
+    Dieselbe Normalisierung nutzen `documents._norm` und `_norm_login` in
+    main.py schon lange – hier fehlte sie.
+    """
+    s = (name or "").strip()
+    if not s or ":" in s:
+        return s.lower()
+    return s.split("@")[0].split("\\")[-1].strip().lower()
+
+
+def _finde_key(store: dict, user: str) -> str | None:
+    """Vorhandenen Schluessel zu diesem Benutzer finden – exakt oder normalisiert.
+
+    Der ALTBESTAND steht unter der damaligen Tippform; er wird nicht migriert
+    (eine Sperre umzuschreiben ist eine Sicherheitsentscheidung), sondern beim
+    Lesen mitgefunden.
+    """
+    if not user:
+        return None
+    if user in store:
+        return user
+    n = norm_user(user)
+    if not n:
+        return None
+    for k in store:
+        if norm_user(k) == n:
+            return k
+    return None
+
+
 def is_blocked(user: str) -> bool:
     if not user:
         return False
     with _lock:
-        return user in _load().get("blocked", {})
+        return _finde_key(_load().get("blocked", {}), user) is not None
 
 
 def get_block(user: str):
@@ -137,7 +176,9 @@ def get_block(user: str):
     if not user:
         return None
     with _lock:
-        return _load().get("blocked", {}).get(user)
+        blk = _load().get("blocked", {})
+        k = _finde_key(blk, user)
+        return blk.get(k) if k else None
 
 
 def list_blocked() -> list:
@@ -180,9 +221,11 @@ def block(user: str, reason: str = "", by: str = "") -> bool:
     with _lock:
         state = _load()
         blk = state.setdefault("blocked", {})
-        if user in blk:
+        if _finde_key(blk, user) is not None:
             return False
-        blk[user] = {
+        # NEUE Sperren unter dem normalisierten Namen – dann greift sie
+        # unabhaengig davon, wie sich der Betroffene das naechste Mal anmeldet.
+        blk[norm_user(user) or user] = {
             "reason": (reason or "Von einem Administrator gesperrt")[:200],
             "method": "manuell",
             "channel": "admin",
@@ -205,10 +248,12 @@ def unblock(user: str) -> bool:
     """Hebt die Sperre auf. True, wenn der Benutzer gesperrt war."""
     with _lock:
         state = _load()
-        if user in state.get("blocked", {}):
-            state["blocked"].pop(user, None)
+        blk = state.get("blocked", {})
+        k = _finde_key(blk, user)
+        if k is not None:
+            blk.pop(k, None)
             _save(state)
-            print(f"[SecurityGuard] Account freigeschaltet: {user}", flush=True)
+            print(f"[SecurityGuard] Account freigeschaltet: {k}", flush=True)
             return True
     return False
 
@@ -225,10 +270,11 @@ def _record(user: str, channel: str, method: str, pattern: str, text: str) -> di
     with _lock:
         state = _load()
         blk = state.setdefault("blocked", {})
-        if user in blk:
-            blk[user].setdefault("incidents", []).append(incident)
+        _k = _finde_key(blk, user)
+        if _k is not None:
+            blk[_k].setdefault("incidents", []).append(incident)
         else:
-            blk[user] = {
+            blk[norm_user(user) or user] = {
                 "reason": pattern,
                 "method": method,
                 "channel": channel,
@@ -372,17 +418,21 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
     with _lock:
         state = _load()
         allv = state.setdefault("violations", {})
-        key = user or "?"
+        # EIN Zaehler je Mensch, unabhaengig von der Tippform des Anmeldefelds.
+        # Vorher konnte derselbe Benutzer zwei Toepfe fuellen und die Schwelle
+        # damit umgehen; ein vorhandener Alt-Eintrag wird weiterverwendet.
+        key = _finde_key(allv, user) or (norm_user(user) or user or "?")
         lst = allv.setdefault(key, [])
         lst.append(entry)
         allv[key] = lst[-100:]
         cfg = _autoblock_cfg()
-        if escalate and not exempt and user and cfg["enabled"] and user not in state.get("blocked", {}):
+        if (escalate and not exempt and user and cfg["enabled"]
+                and _finde_key(state.get("blocked", {}), user) is None):
             recent = [e for e in allv[key]
                       if ts - e["ts"] <= cfg["window"] and not e.get("soft")]
             if len(recent) >= cfg["count"]:
                 blk = state.setdefault("blocked", {})
-                blk[user] = {
+                blk[norm_user(user) or user] = {
                     "reason": f"policy:{kind}",
                     "method": "auto-block (policy)",
                     "channel": channel,
@@ -393,7 +443,7 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
         _save(state)
     tag = "AUTO-BLOCK" if blocked_now else ("GRENZE" if not escalate else "VERSTOSS")
     print(f"[SecurityGuard] {tag} ({kind}) [{channel}/{user}] {(detail or '')[:80]}", flush=True)
-    return {"blocked": blocked_now, "count": len(allv.get(user or "?", []))}
+    return {"blocked": blocked_now, "count": len(allv.get(key, []))}
 
 
 def list_recent_violations(limit: int = 100) -> list:

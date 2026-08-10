@@ -676,6 +676,13 @@ def _display_name(username: str) -> str:
         return u
     if u in ALLOWED_USERS or u.lower() in _NON_DOMAIN_USERS:
         return u
+    # Kanal- und Platzhalter-Kennungen sind KEINE Verzeichniskonten:
+    #   wa:+4915…  tg:12345  api:Vision-Kamera  __unprivilegiert__  unknown
+    # Ohne diese Schranke wuerde daraus "nexus\api:Vision-Kamera" – ein Name,
+    # den es nirgends gibt. Der Doppelpunkt ist das Kennzeichen aller
+    # Kanal-Praefixe (siehe reminders.py / actor_scope).
+    if ":" in u or u.startswith("__") or u.lower() in ("unknown", "-", "–"):
+        return u
     plain = _norm_login(u) or u
     try:
         dom = (config.get_setting("ad_domain", "") or "").strip()
@@ -683,6 +690,52 @@ def _display_name(username: str) -> str:
         dom = ""
     kurz = dom.split(".", 1)[0].strip() if dom else ""
     return f"{kurz}\\{plain}" if kurz else plain
+
+
+# Felder, die einen Benutzernamen tragen und ANGEZEIGT werden. Bewusst eine
+# Liste und kein "alles, was wie ein Name aussieht": ein falsch praefixierter
+# Wert waere schlimmer als ein fehlender Praefix.
+_NAMENSFELDER = ("user", "username", "owner", "by", "author", "last_reset_by",
+                 "created_by", "display")
+
+
+def _mit_anzeigenamen(daten, _tiefe: int = 0):
+    """Ergaenzt in Listen/Dicts den Domaenen-Praefix an allen Namensfeldern.
+
+    WARUM BEIM AUSLESEN und nicht beim Schreiben: die gespeicherten Daten sind
+    der SCHLUESSEL (Filter, Sperrlisten, Verzeichnisnamen unter data/chats) und
+    duerfen sich nicht aendern – und ein Altbestand, der nie mehr angefasst
+    wird, wuerde beim Schreiben nie geheilt. Genau diese Lehre stand nach dem
+    2026-08-02 schon in CLAUDE.md („Heilt sich beim naechsten Request" ist keine
+    Loesung), war aber nur in ``/api/sessions`` umgesetzt: im LLM-Verlauf, im
+    Tool-Audit-Log, bei den Zugriffs-Verstoessen, den gesperrten Konten, im
+    Broker-Audit, bei Cron-Besitzern und Issue-Meldern stand der Name weiter so,
+    wie ihn der Betroffene ins Anmeldefeld getippt hatte.
+
+    Fail-safe: bei einem Fehler bleiben die Daten unveraendert – eine Anzeige
+    ohne Praefix ist besser als ein 500er.
+    """
+    if _tiefe > 4:
+        return daten
+    try:
+        if isinstance(daten, list):
+            return [_mit_anzeigenamen(x, _tiefe + 1) for x in daten]
+        if isinstance(daten, dict):
+            out = {}
+            for k, v in daten.items():
+                if k in _NAMENSFELDER and isinstance(v, str):
+                    out[k] = _display_name(v)
+                elif isinstance(v, (list, dict)):
+                    out[k] = _mit_anzeigenamen(v, _tiefe + 1)
+                else:
+                    out[k] = v
+            return out
+        if isinstance(daten, str):
+            return _display_name(daten)
+        return daten
+    except Exception as e:  # noqa: BLE001
+        print(f"[Anzeige] Namensaufbereitung fehlgeschlagen: {e}", flush=True)
+        return daten
 
 
 def _note_activity(username: str, request: Request) -> None:
@@ -3067,7 +3120,7 @@ from backend.telemetry import tracer
 @app.get("/api/telemetry/stats")
 async def get_telemetry_stats(user: str = Depends(require_local_auth)):
     """Liefert aggregierte Telemetrie-Statistiken (nur Administratoren)."""
-    return JSONResponse(tracer.get_stats())
+    return JSONResponse(_mit_anzeigenamen(tracer.get_stats()))
 
 @app.get("/api/telemetry/spans")
 async def get_telemetry_spans(request: Request, user: str = Depends(require_local_auth)):
@@ -3156,7 +3209,8 @@ async def api_conv_log(request: Request, user: str = Depends(require_local_auth)
     limit = int(request.query_params.get("limit", "50"))
     ip = request.query_params.get("ip") or None
     username = request.query_params.get("user") or None
-    return JSONResponse(get_conversations(limit=limit, ip_filter=ip, user_filter=username))
+    return JSONResponse(_mit_anzeigenamen(
+        get_conversations(limit=limit, ip_filter=ip, user_filter=username)))
 
 @app.get("/api/conv_log/ips")
 async def api_conv_log_ips(user: str = Depends(require_local_auth)):
@@ -3165,8 +3219,11 @@ async def api_conv_log_ips(user: str = Depends(require_local_auth)):
 
 @app.get("/api/conv_log/users")
 async def api_conv_log_users(user: str = Depends(require_local_auth)):
-    """Liefert die Liste der bekannten Benutzer aus dem Konversations-Log."""
-    return JSONResponse(get_known_users())
+    """Liefert die Liste der bekannten Benutzer aus dem Konversations-Log.
+
+    Mit Domaenen-Praefix – sonst zeigt das Filter-Pulldown andere Namen als die
+    Liste darunter, und ein aus der Liste kopierter Name findet nichts."""
+    return JSONResponse(_mit_anzeigenamen(get_known_users()))
 
 @app.delete("/api/conv_log")
 async def api_conv_log_clear(user: str = Depends(require_local_auth)):
@@ -3184,7 +3241,7 @@ async def api_conv_log_body(conv_id: str, user: str = Depends(require_local_auth
     body = get_conv_body(conv_id)
     if body is None:
         return JSONResponse({"error": "Konversation nicht gefunden"}, status_code=404)
-    return JSONResponse(body)
+    return JSONResponse(_mit_anzeigenamen(body))
 
 
 @app.get("/api/context/stats")
@@ -3555,7 +3612,8 @@ async def security_my_block(request: Request):
 async def security_incidents_status(user: str = Depends(require_local_auth)):
     """Status der Sicherheitsschicht + Liste gesperrter Accounts (Admin)."""
     cfg = security_guard.get_config()
-    return JSONResponse({"ok": True, **cfg, "blocked": security_guard.list_blocked()})
+    return JSONResponse({"ok": True, **cfg,
+                         "blocked": _mit_anzeigenamen(security_guard.list_blocked())})
 
 
 @app.post("/api/security/incidents/config")
@@ -3620,7 +3678,8 @@ async def security_incidents_unblock(request: Request, user: str = Depends(requi
 @app.get("/api/security/violations")
 async def security_violations(user: str = Depends(require_local_auth)):
     """Letzte Richtlinien-Verstoesse (Sandbox-/Autorisierungs-Deny) – Admin."""
-    return JSONResponse({"violations": security_guard.list_recent_violations(150)})
+    return JSONResponse(_mit_anzeigenamen(
+        {"violations": security_guard.list_recent_violations(150)}))
 
 
 @app.get("/api/security/sandbox")
@@ -3910,7 +3969,8 @@ async def broker_audit(n: int = 100, user: str = Depends(require_local_auth)):
     if not res.get("ok"):
         return JSONResponse({"ok": False, "error": res.get("error", "Broker nicht erreichbar")},
                             status_code=502)
-    return JSONResponse({"ok": True, "entries": res.get("entries") or []})
+    return JSONResponse(_mit_anzeigenamen(
+        {"ok": True, "entries": res.get("entries") or []}))
 
 
 def _ldap_creds(body: dict, admin_user: str):
@@ -6110,7 +6170,16 @@ def _pptx_vorlagen_modul():
     root = str(Path(__file__).parent.parent)
     if root not in _sys.path:
         _sys.path.insert(0, root)
-    from skills.office import vorlage as _v
+    try:
+        from skills.office import vorlage as _v
+    except Exception as e:  # noqa: BLE001
+        # Der Skill kann deinstalliert sein (der Ordner ist dann weg) – die
+        # Aufrufer machten daraus einen 500er mit technischem Text. Klartext
+        # sagen, was fehlt und was zu tun ist.
+        raise RuntimeError(
+            "Der Office-Skill ist nicht installiert oder nicht ladbar – die "
+            "PowerPoint-Vorlage wird von ihm bereitgestellt. Unter Einstellungen "
+            f"→ Skills installieren/aktivieren. ({e})") from e
     return _v
 
 
@@ -6169,8 +6238,8 @@ async def list_branding_pptx_templates(user: str = Depends(require_local_auth)):
     try:
         v = _pptx_vorlagen_modul()
     except Exception as e:  # noqa: BLE001
-        return JSONResponse({"success": False, "error": f"Vorlagen-Modul nicht verfuegbar ({e})",
-                             "templates": []}, status_code=500)
+        return JSONResponse({"success": False, "error": str(e),
+                             "templates": []}, status_code=409)
     eintraege = []
     try:
         for name in v.verfuegbare():
@@ -6228,8 +6297,7 @@ async def upload_branding_pptx_template(file: UploadFile = File(...),
     try:
         v = _pptx_vorlagen_modul()
     except Exception as e:  # noqa: BLE001
-        return JSONResponse({"success": False, "error": f"Vorlagen-Modul nicht verfuegbar ({e})"},
-                            status_code=500)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=409)
 
     default = str(as_default).lower() in ("1", "true", "yes", "on")
     if default:
@@ -7290,7 +7358,7 @@ async def _support_ai_summary(query: str, blocks: list, system_prompt: str, line
                     "worum es in den Treffern geht und welche Themen/Vorgaenge relevant "
                     "sind. Beziehe dich konkret auf die gelisteten Inhalte. Es liegen "
                     "Treffer vor – behaupte NICHT, es gaebe keine Informationen. Antworte "
-                    "auf Deutsch in lesbarem Fliesstext (kein JSON)." % lines)
+                    "in der Sprache der Anfrage, in lesbarem Fliesstext (kein JSON)." % lines)
         sysp = ((system_prompt.strip() + "\n\n") if system_prompt.strip() else "") + base
         # Fuer die KI-Zusammenfassung wenn vorhanden den (gekappten) Volltext nutzen
         # – z.B. Confluence-Seiten liefern 'full_text' statt nur eines Snippets.
@@ -12916,7 +12984,16 @@ from backend.scheduler import cron_manager
 # Nicht-Admins sehen und aendern nur ihre eigenen Auftraege, und nur ein Admin
 # kann einem Auftrag Systemrechte geben (Uebernahme, siehe /claim).
 def _cron_visible(job: dict, user: str) -> bool:
-    return _is_admin_user(user) or (job.get("owner") or "") == user
+    """Darf `user` diesen Auftrag sehen? Admins alles, sonst nur eigene.
+
+    NORMALISIERT vergleichen: der Besitzer wurde beim Anlegen so gespeichert,
+    wie der Benutzer sich damals angemeldet hat. Ein roher Vergleich liess ihn
+    seinen EIGENEN Auftrag nicht mehr sehen (404), wenn er sich das naechste Mal
+    ohne Domaenen-Praefix anmeldete – und `run`/`PUT`/`DELETE` haengen an
+    derselben Pruefung.
+    """
+    return _is_admin_user(user) or (
+        _norm_login(job.get("owner") or "") == _norm_login(user) and bool(user))
 
 
 def _cron_owned_or_404(job_id: str, user: str) -> dict:
@@ -12951,7 +13028,9 @@ def _require_trigger_admin(user: str, body: dict, endpoint: str):
 async def cron_list(user: str = Depends(require_auth)):
     """Liefert die zeitgesteuerten Aufträge (Cron-Jobs). Nicht-Admins sehen nur eigene."""
     jobs = [j for j in cron_manager.list_jobs() if _cron_visible(j, user)]
-    return JSONResponse(jobs)
+    # Besitzer mit Domaenen-Praefix anzeigen (der gespeicherte Wert bleibt der
+    # Schluessel fuer die Rechtebindung – _mit_anzeigenamen wirkt nur auf die Kopie).
+    return JSONResponse(_mit_anzeigenamen(jobs))
 
 
 @app.post("/api/cron")
@@ -13132,7 +13211,7 @@ async def audit_log_list(request: Request, limit: int = 200, user: str = "", too
     """Liefert die Audit-Log-Einträge, optional gefiltert nach Benutzer oder Tool."""
     from backend.audit_log import read_log
     entries = read_log(limit=limit, user_filter=user, tool_filter=tool)
-    return JSONResponse(entries)
+    return JSONResponse(_mit_anzeigenamen(entries))
 
 
 @app.delete("/api/audit_log")
@@ -13253,7 +13332,7 @@ async def api_issues_list(request: Request, user: str = Depends(require_auth_or_
     issues = _issues_mod.list_issues(user, mine_only=mine, status=status, type_=type_)
     return JSONResponse({
         "ok": True,
-        "issues": issues,
+        "issues": _mit_anzeigenamen(issues),
         "current_user": user,
         "is_admin": _is_admin_user(user),
     })

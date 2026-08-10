@@ -2660,8 +2660,69 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <!-- ═══ Tab: Agent Orchestrator ═══ -->
                 <div id="settings-tab-agent_orchestrator" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
-                        <p class="kb-hint">Zerlegt Aufgaben in koordinierte Sub-Agenten (inbox/outbox). Im Workspace-Verzeichnis legt jeder Auftrag seine Arbeitsdateien ab.</p>
-                        <div id="skcfg-agent_orchestrator"></div>
+                        <p class="kb-hint" data-i18n="roles.hint">Eine Rolle ist ein Agent mit eigenem Auftrag, eigenem Werkzeugsatz und optional eigenem LLM-Profil. Der Hauptagent erkennt anhand der Beschreibung, welche Rolle für eine Teilaufgabe zuständig ist, übergibt sie, wartet auf das Ergebnis und arbeitet damit weiter. Eine Rolle kann nie mehr als der Benutzer, der sie beauftragt – ihr Werkzeugsatz wird mit dessen Rechten geschnitten.</p>
+                        <div id="roles-skill-warn" style="display:none;font-size:.8rem;color:var(--warning);margin-bottom:10px;"></div>
+                        <div id="roles-list"><div style="opacity:.6;font-size:.8rem;">Lädt…</div></div>
+                        <div style="display:flex;gap:8px;align-items:center;margin-top:12px;">
+                            <button class="btn-secondary btn-small" id="btn-role-new" style="flex:0 0 auto;padding:4px 10px;font-size:0.75rem;" data-i18n="roles.new">+ Rolle anlegen</button>
+                            <span id="roles-count" style="font-size:0.78rem;color:var(--text-secondary);"></span>
+                        </div>
+
+                        <!-- Formular. Wird von agent_roles.js unter die BEARBEITETE Zeile
+                             verschoben (und danach wieder hierher zurueckgeholt). -->
+                        <div id="role-edit" class="role-edit-box" style="display:none;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                                <strong id="role-edit-title" style="font-size:0.9rem;">Rolle</strong>
+                                <button class="btn-icon" id="btn-role-cancel" data-i18n-title="roles.cancel" data-i18n-aria="roles.cancel" title="Abbrechen" aria-label="Abbrechen">×</button>
+                            </div>
+                            <div class="role-grid role-grid-2">
+                                <div class="role-field">
+                                    <label data-i18n="roles.f_id">Kennung (unveränderlich)</label>
+                                    <input type="text" id="role-f-id" placeholder="image_builder" autocomplete="off">
+                                </div>
+                                <div class="role-field">
+                                    <label data-i18n="roles.f_name">Anzeigename</label>
+                                    <input type="text" id="role-f-name" placeholder="Bild-Erzeuger" autocomplete="off">
+                                </div>
+                            </div>
+                            <div class="role-field">
+                                <label data-i18n="roles.f_desc">Beschreibung – daran erkennt der Hauptagent die Zuständigkeit</label>
+                                <input type="text" id="role-f-desc" placeholder="Erzeugt Bilder …" autocomplete="off">
+                            </div>
+                            <div class="role-field">
+                                <label data-i18n="roles.f_prompt">Auftrag der Rolle (System-Prompt)</label>
+                                <textarea id="role-f-prompt" rows="10"></textarea>
+                            </div>
+                            <div class="role-field">
+                                <label data-i18n="roles.f_tools">Werkzeuge dieser Rolle</label>
+                                <div id="role-f-tools" class="role-tools"></div>
+                                <small style="opacity:.65;font-size:.72rem;display:block;margin-top:4px;" data-i18n="roles.f_tools_hint">Nur diese Werkzeuge stehen der Rolle zur Verfügung. Werkzeuge, die dem beauftragenden Benutzer verwehrt sind, entfallen zusätzlich.</small>
+                            </div>
+                            <div class="role-grid role-grid-3">
+                                <div class="role-field">
+                                    <label data-i18n="roles.f_profile">LLM-Profil</label>
+                                    <select id="role-f-profile"></select>
+                                </div>
+                                <div class="role-field">
+                                    <label data-i18n="roles.f_effort">Denktiefe</label>
+                                    <select id="role-f-effort"></select>
+                                </div>
+                                <div class="role-field">
+                                    <label data-i18n="roles.f_steps">Max. Schritte (0 = Vorgabe)</label>
+                                    <input type="number" id="role-f-steps" min="0" max="50" step="1" value="0">
+                                </div>
+                            </div>
+                            <small id="role-profile-note" style="display:none;font-size:.72rem;color:var(--warning);margin-bottom:8px;"></small>
+                            <label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;margin:6px 0 12px;">
+                                <input type="checkbox" id="role-f-enabled" checked>
+                                <span data-i18n="roles.f_enabled">Aktiv (nur aktive Rollen kann der Hauptagent beauftragen)</span>
+                            </label>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <button class="btn-primary btn-small" id="btn-role-save" style="flex:0 0 auto;padding:5px 12px;font-size:0.78rem;" data-i18n="roles.save">Speichern</button>
+                                <button class="btn-secondary btn-small" id="btn-role-cancel2" style="flex:0 0 auto;padding:5px 12px;font-size:0.78rem;" data-i18n="roles.cancel">Abbrechen</button>
+                                <span id="role-save-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -3678,7 +3739,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/ldap_picker.js?v=8"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=4"></script>
-    <script src="/static/js/app.js?v=188"></script>
+    <script src="/static/js/agent_roles.js?v=1"></script>
+    <script src="/static/js/app.js?v=189"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

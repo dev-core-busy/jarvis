@@ -793,7 +793,7 @@ Regeln:
 14. ABSOLUT VERBOTEN: Lies NIEMALS .docx, .pdf, .xlsx, .pptx, .doc, .xls Dateien direkt mit filesystem_read – diese sind Binaerdateien und liefern unlesbaren Muell. Fuer Inhalte aus diesen Dateien ausschliesslich knowledge_search verwenden. Der Inhalt ist dort bereits korrekt geparst und durchsuchbar.
 
 15. BILDER – IMMER inline anzeigen UND das richtige Tool strikt nach Verb waehlen:
-    - GENERIEREN ("generiere/erstelle/erzeuge/male/zeichne ein Bild von ...") -> IMMER generate_image. NIEMALS stattdessen search_image aufrufen. Kann das aktive Profil nicht generieren, gib die Meldung des Tools UNVERAENDERT aus – KEIN Ersatz, KEINE Web-Suche, kein anderes Profil.
+    - GENERIEREN ("generiere/erstelle/erzeuge/male/zeichne ein Bild von ...") -> IMMER generate_image. NIEMALS stattdessen search_image aufrufen. Kann das aktive Profil nicht generieren: gibt es eine ROLLE fuer Bilder (Abschnitt SPEZIALISIERTE ROLLEN), delegiere dorthin – sonst gib die Meldung des Tools UNVERAENDERT aus. KEINE Web-Suche als Ersatz, kein eigenmaechtiger Profilwechsel.
     - SUCHEN/ZEIGEN eines vorhandenen Bildes ("bitte ein Bild von ...", "such/finde ein Bild von ...", "zeig mir ein Bild von ...") -> IMMER search_image.
     OEFFNE NIEMALS einen Browser auf dem Desktop, um ein Bild zu zeigen (kein browser_control, kein desktop_*). Gib die vom Tool zurueckgegebene Markdown-Bildreferenz ![..](url) UNVERAENDERT in deiner Antwort aus.
 
@@ -923,78 +923,7 @@ KRITISCH – Autonomie-Regeln:
         # Tools aus SkillManager beziehen
         self._tool_instances = self.skill_manager.get_enabled_tools()
 
-        # spawn_agent Tool hinzufuegen (nur fuer Hauptagent)
-        if not is_sub_agent:
-            from backend.tools.subagent import SpawnAgentTool
-            self._tool_instances.append(SpawnAgentTool())
-
-        # Windows Desktop Tool (immer verfügbar; gibt Fehler wenn kein Client verbunden)
-        try:
-            from backend.tools.windows_desktop import WindowsDesktopTool
-            self._tool_instances.append(WindowsDesktopTool())
-        except Exception as e:
-            print(f"[AGENT {self.agent_id}] WindowsDesktopTool nicht geladen: {e}", flush=True)
-
-        # Android Desktop Tool (immer verfügbar; gibt Fehler wenn kein Client verbunden)
-        try:
-            from backend.tools.android_desktop import AndroidDesktopTool
-            self._tool_instances.append(AndroidDesktopTool())
-        except Exception as e:
-            print(f"[AGENT {self.agent_id}] AndroidDesktopTool nicht geladen: {e}", flush=True)
-
-        # Clipboard Tools (xclip-basiert)
-        try:
-            from backend.tools.clipboard import ReadClipboardTool, WriteClipboardTool
-            self._tool_instances.append(ReadClipboardTool())
-            self._tool_instances.append(WriteClipboardTool())
-        except Exception as e:
-            print(f"[AGENT {self.agent_id}] ClipboardTools nicht geladen: {e}", flush=True)
-
-        # Diagramme: geprueft + einheitlich gestaltet, Daten koennen aus einer
-        # Datei kommen (dann laufen die Zahlen nicht durch das Modell).
-        try:
-            from backend.tools.chart import CreateChartTool
-            self._tool_instances.append(CreateChartTool())
-        except Exception as e:
-            print(f"[AGENT {self.agent_id}] CreateChartTool nicht geladen: {e}", flush=True)
-
-        # Bildgenerierung (ueber das aktive LLM-Profil; kein Provider-Wechsel)
-        try:
-            from backend.tools.image_gen import GenerateImageTool
-            self._tool_instances.append(GenerateImageTool())
-        except Exception as e:
-            print(f"[AGENT {self.agent_id}] GenerateImageTool nicht geladen: {e}", flush=True)
-
-        # Bildsuche im Web (zeigt Bild inline im Chat, statt Browser zu oeffnen)
-        try:
-            from backend.tools.image_search import SearchImageTool
-            self._tool_instances.append(SearchImageTool())
-        except Exception as e:
-            print(f"[AGENT {self.agent_id}] SearchImageTool nicht geladen: {e}", flush=True)
-
-        # Screenshot-Diff / Wartelogik
-        try:
-            from backend.tools.screenshot import WaitForChangeTool
-            self._tool_instances.append(WaitForChangeTool())
-        except Exception as e:
-            print(f"[AGENT {self.agent_id}] WaitForChangeTool nicht geladen: {e}", flush=True)
-
-        # Reflection / Selbstverbesserungs-System
-        try:
-            from backend.tools.reflection import ReflectionTool
-            self._tool_instances.append(ReflectionTool())
-        except Exception as e:
-            print(f"[AGENT {self.agent_id}] ReflectionTool nicht geladen: {e}", flush=True)
-
-        # MCP-Tools laden (externe Tool-Server)
-        try:
-            from backend.mcp_client import mcp_manager
-            mcp_tools = mcp_manager.get_all_tools()
-            if mcp_tools:
-                self._tool_instances.extend(mcp_tools)
-                print(f"[AGENT {self.agent_id}] {len(mcp_tools)} MCP-Tools geladen", flush=True)
-        except Exception as e:
-            print(f"[AGENT {self.agent_id}] MCP-Tools konnten nicht geladen werden: {e}", flush=True)
+        self._attach_extra_tools()
 
         self.tools_map: dict[str, object] = {}
         for tool in self._tool_instances:
@@ -1006,6 +935,25 @@ KRITISCH – Autonomie-Regeln:
         # Task-Start via _resolve_profile_for_user() anhand des Benutzers gesetzt;
         # bis dahin gilt das globale aktive Profil.
         self._active_profile: dict | None = None
+
+        # ── Rollen-Agent (siehe backend/agent_roles.py) ──────────────────────
+        # Gesetzt nur, wenn DIESER Agent eine Rolle ausfuehrt. Ein leerer Wert
+        # bzw. None bedeutet ueberall "keine Rollen-Beschraenkung" – der normale
+        # Chat-Agent laeuft damit unveraendert wie bisher.
+        self._role_id: str = ""
+        self._role_label: str = ""
+        self._role_prompt: str = ""
+        # None = keine Whitelist. Eine leere MENGE ist etwas anderes: eine Rolle
+        # ohne Werkzeuge (reine Denk-/Textrolle) – deshalb nicht auf Falsyness
+        # pruefen, sondern auf `is None`.
+        self._role_tools: set[str] | None = None
+        self._role_profile_id: str = ""
+        self._role_max_steps: int = 0
+        # Delegationen des LAUFENDEN Auftrags (wird pro Lauf zurueckgesetzt).
+        self._delegations_used: int = 0
+        # Werkzeuge, die in DIESEM Lauf schon per Rollen-Rueckfall abgefangen
+        # wurden – verhindert Ping-Pong bei einem dauerhaft scheiternden Tool.
+        self._fallback_used: set = set()
 
         # Provider initialisieren
         self.provider = get_provider(
@@ -1090,8 +1038,118 @@ KRITISCH – Autonomie-Regeln:
         return TEMPERATURE_AUTO if v is None or v == "" else v
 
     def _resolve_profile_for_user(self):
-        """Setzt das effektive Profil anhand des aktuellen Benutzers (_current_username)."""
+        """Setzt das effektive Profil anhand des aktuellen Benutzers (_current_username).
+
+        Vorrang: ROLLE > Benutzerwahl > global. Die Rolle steht vorn, weil ihr
+        Profil der Grund fuer ihre Existenz sein kann (ein 'image_builder' ohne
+        Bildmodell ist nutzlos). Diese Aufloesung laeuft bei JEDEM Task-Start –
+        ohne den Rollen-Zweig hier wuerde die Wahl der Rolle Sekunden spaeter
+        wieder von der Benutzerwahl ueberschrieben.
+        """
+        if getattr(self, "_role_profile_id", ""):
+            for p in config.profiles:
+                if p.get("id") == self._role_profile_id:
+                    self._active_profile = p
+                    return
+            # Profil wurde geloescht: NICHT scheitern, sondern mit dem Profil des
+            # Aufrufers weiterlaufen und es sagen. Eine Rolle, die wegen einer
+            # verwaisten Referenz gar nicht mehr arbeitet, ist der schlechtere
+            # Ausgang – der Administrator sieht die Zeile im Journal.
+            print(f"[AGENT {self.agent_id}] Rolle '{self._role_id}': LLM-Profil "
+                  f"{self._role_profile_id} existiert nicht (mehr) – Profil des "
+                  f"Aufrufers wird verwendet", flush=True)
         self._active_profile = config.profile_for_user(getattr(self, "_current_username", ""))
+
+    # ── Rollen-Agent: Werkzeugsatz und System-Prompt ─────────────────────────
+    @property
+    def _llm_tools(self) -> list:
+        """Die Werkzeuge, die an das Modell gehen.
+
+        Zwei Filter, beide nur fuer Sonderfaelle:
+        1. Rollen-Whitelist (``_role_tools``) – der Zuschnitt der Rolle.
+        2. ``delegate`` fliegt heraus, solange keine aktive Rolle existiert:
+           ein Werkzeug ohne Ziel verleitet nur zu Fehlversuchen. Ob es
+           ueberhaupt vorhanden ist, entscheidet der Skill "Agent Orchestrator".
+
+        Ohne Rolle und mit vorhandenen Rollen bleibt die Liste unveraendert –
+        der bestehende Betrieb aendert sich nicht.
+        """
+        tools = self._tool_instances
+        allow = getattr(self, "_role_tools", None)
+        if allow is not None:
+            return [t for t in tools if t.name in allow]
+        if any(t.name == "delegate" for t in tools):
+            try:
+                from backend import agent_roles
+                if not agent_roles.namen(nur_aktive=True):
+                    return [t for t in tools if t.name != "delegate"]
+            except Exception:  # noqa: BLE001
+                return [t for t in tools if t.name != "delegate"]
+        return tools
+
+    def _delegation_moeglich(self) -> bool:
+        """Liegt ``delegate`` im Werkzeugkasten DIESES Agenten?
+
+        Das ist der robuste Test – NICHT "ist der Skill eingeschaltet". Der
+        Werkzeugkasten ist die Wahrheit: der Skill kann aus sein, das Werkzeug
+        kann einem Sub-/Rollen-Agenten entzogen worden sein, oder das Laden des
+        Skills ist gescheitert. In allen drei Faellen darf weder der
+        Rollen-Abschnitt im System-Prompt stehen noch der Rollen-Rueckfall
+        greifen – sonst verweist der Prompt auf ein Werkzeug, das es nicht gibt.
+        """
+        try:
+            return any(getattr(t, "name", "") == "delegate" for t in self._tool_instances)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _base_system_prompt(self) -> str:
+        """System-Prompt dieses Agenten: Rolle > Sub-Agent > Hauptagent."""
+        if getattr(self, "_role_prompt", ""):
+            return self._role_prompt
+        if self.is_sub_agent:
+            return self.SUB_AGENT_PROMPT
+        return self.SYSTEM_PROMPT + self._role_hinweis()
+
+    def _role_hinweis(self) -> str:
+        """Rollen-Abschnitt fuer den System-Prompt (leer, wenn keine Rolle da ist).
+
+        WARUM ZUSAETZLICH ZUR WERKZEUG-BESCHREIBUNG – gemessen, nicht vermutet:
+        Auf DEV (Qwen3.6-35B, 70 Werkzeuge, 23.347 Zeichen Werkzeug-
+        Beschreibungen) hat das Modell `delegate` in zwei echten Laeufen NICHT
+        gewaehlt – es antwortete stattdessen "Die Bildgenerierung ist auf diesem
+        System nicht verfuegbar", obwohl sowohl `generate_image` als auch die
+        Rolle `image_builder` vorhanden waren. Die Rollenliste steht deshalb an
+        BEIDEN Stellen, an denen das Modell hinschaut. Redundanz ist hier der
+        Zweck, nicht ein Versehen.
+
+        Der letzte Satz adressiert genau diese Antwort: eine Faehigkeit fuer
+        nicht vorhanden zu erklaeren, ohne die Rollen geprueft zu haben, ist der
+        beobachtete Fehler.
+        """
+        if not self._delegation_moeglich():
+            return ""
+        try:
+            from backend import agent_roles
+            liste = agent_roles.werkzeug_beschreibung()
+        except Exception:  # noqa: BLE001
+            return ""
+        if not liste:
+            return ""
+        return (
+            "\n\n## SPEZIALISIERTE ROLLEN – ZUERST PRUEFEN\n"
+            "Fuer bestimmte Aufgabenarten gibt es eigene Agenten mit eigenem "
+            "Werkzeugsatz und eigenem Modell. Ist eine Rolle zustaendig, rufe "
+            "`delegate(role, task)` auf, BEVOR du es selbst versuchst – du "
+            "bekommst deren Ergebnis zurueck und arbeitest damit weiter.\n"
+            f"{liste}\n"
+            "Erklaere NIEMALS eine Faehigkeit fuer nicht vorhanden, ohne vorher "
+            "geprueft zu haben, ob eine Rolle dafuer zustaendig ist."
+        )
+
+    def _max_steps(self) -> int:
+        """Schrittgrenze dieses Agenten (Rolle darf eine eigene setzen)."""
+        n = getattr(self, "_role_max_steps", 0)
+        return n if n and n > 0 else config.MAX_AGENT_STEPS
 
     # ── Auftraggeber-Bindung (Actor) ─────────────────────────────────────────
     # Die Rechte-Confinement im Dispatch haengt am Benutzer des LAUFENDEN Auftrags.
@@ -1156,18 +1214,125 @@ KRITISCH – Autonomie-Regeln:
                     except AttributeError:
                         pass
 
-    def reload_skills(self):
-        """Hot-Reload: Lädt Skills neu und aktualisiert die Tool-Liste."""
-        self.skill_manager.reload_all()
-        self._tool_instances = self.skill_manager.get_enabled_tools()
-        # MCP-Tools neu laden
+    def _attach_extra_tools(self) -> None:
+        """Haengt die NICHT aus Skills stammenden Werkzeuge an.
+
+        Aus __init__ herausgeloest, weil ``reload_skills()`` sie ebenfalls
+        braucht: dort wird ``_tool_instances`` durch die Skill-Werkzeuge
+        ERSETZT. Bis 2026-08-10 verlor der Agent bei jedem Skill-Ein/Aus
+        dadurch spawn_agent, create_chart, generate_image, search_image,
+        die Clipboard-, Desktop- und Reflection-Werkzeuge – bis zum
+        naechsten Dienst-Neustart. Aufgefallen erst, als `delegate` aus
+        einem Skill kam und der Zustand dadurch sichtbar wurde.
+        """
+        is_sub_agent = self.is_sub_agent
+        # spawn_agent Tool hinzufuegen (nur fuer Hauptagent)
+        if not is_sub_agent:
+            from backend.tools.subagent import SpawnAgentTool
+            self._tool_instances.append(SpawnAgentTool())
+        else:
+            # `delegate` kommt aus dem Skill "Agent Orchestrator" und damit ueber
+            # skill_manager.get_enabled_tools() – das liefert die Werkzeuge JEDES
+            # aktiven Skills an JEDEN Agenten, auch an Sub- und Rollen-Agenten.
+            # Deshalb wird es hier AKTIV entzogen: ein Rollen-Agent, der wieder
+            # delegieren kann, ist eine Endlosschleife (erste von zwei Schranken –
+            # die zweite ist _MAX_DELEGATIONS pro Lauf).
+            self._tool_instances = [t for t in self._tool_instances
+                                    if getattr(t, "name", "") != "delegate"]
+
+        # Windows Desktop Tool (immer verfügbar; gibt Fehler wenn kein Client verbunden)
+        try:
+            from backend.tools.windows_desktop import WindowsDesktopTool
+            self._tool_instances.append(WindowsDesktopTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] WindowsDesktopTool nicht geladen: {e}", flush=True)
+
+        # Android Desktop Tool (immer verfügbar; gibt Fehler wenn kein Client verbunden)
+        try:
+            from backend.tools.android_desktop import AndroidDesktopTool
+            self._tool_instances.append(AndroidDesktopTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] AndroidDesktopTool nicht geladen: {e}", flush=True)
+
+        # Clipboard Tools (xclip-basiert)
+        try:
+            from backend.tools.clipboard import ReadClipboardTool, WriteClipboardTool
+            self._tool_instances.append(ReadClipboardTool())
+            self._tool_instances.append(WriteClipboardTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] ClipboardTools nicht geladen: {e}", flush=True)
+
+        # Diagramme: geprueft + einheitlich gestaltet, Daten koennen aus einer
+        # Datei kommen (dann laufen die Zahlen nicht durch das Modell).
+        try:
+            from backend.tools.chart import CreateChartTool
+            self._tool_instances.append(CreateChartTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] CreateChartTool nicht geladen: {e}", flush=True)
+
+        # Bildgenerierung (ueber das aktive LLM-Profil; kein Provider-Wechsel)
+        try:
+            from backend.tools.image_gen import GenerateImageTool
+            self._tool_instances.append(GenerateImageTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] GenerateImageTool nicht geladen: {e}", flush=True)
+
+        # Bildsuche im Web (zeigt Bild inline im Chat, statt Browser zu oeffnen)
+        try:
+            from backend.tools.image_search import SearchImageTool
+            self._tool_instances.append(SearchImageTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] SearchImageTool nicht geladen: {e}", flush=True)
+
+        # Screenshot-Diff / Wartelogik
+        try:
+            from backend.tools.screenshot import WaitForChangeTool
+            self._tool_instances.append(WaitForChangeTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] WaitForChangeTool nicht geladen: {e}", flush=True)
+
+        # Reflection / Selbstverbesserungs-System
+        try:
+            from backend.tools.reflection import ReflectionTool
+            self._tool_instances.append(ReflectionTool())
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] ReflectionTool nicht geladen: {e}", flush=True)
+
+        # MCP-Tools laden (externe Tool-Server)
         try:
             from backend.mcp_client import mcp_manager
             mcp_tools = mcp_manager.get_all_tools()
             if mcp_tools:
                 self._tool_instances.extend(mcp_tools)
-        except Exception:
-            pass
+                print(f"[AGENT {self.agent_id}] {len(mcp_tools)} MCP-Tools geladen", flush=True)
+        except Exception as e:
+            print(f"[AGENT {self.agent_id}] MCP-Tools konnten nicht geladen werden: {e}", flush=True)
+
+
+
+    def reload_skills(self):
+        """Hot-Reload: Laedt Skills neu und aktualisiert die Werkzeug-Liste.
+
+        WICHTIG: `_attach_extra_tools()` MUSS danach laufen. Die Zeile
+        `_tool_instances = get_enabled_tools()` ersetzt die Liste vollstaendig –
+        ohne den erneuten Aufruf fehlen dem Agenten nach jedem Skill-Toggle
+        spawn_agent, create_chart, generate_image, search_image, Clipboard,
+        Desktop und reflection (Fehler bis 2026-08-10).
+        """
+        self.skill_manager.reload_all()
+        self._tool_instances = self.skill_manager.get_enabled_tools()
+        self._attach_extra_tools()
+        # Doppelte nach Namen entfernen (der erste gewinnt): MCP-Tools werden in
+        # _attach_extra_tools neu geladen, koennten aber schon in der Liste stehen.
+        _gesehen: set[str] = set()
+        _eindeutig = []
+        for t in self._tool_instances:
+            n = getattr(t, "name", "")
+            if n in _gesehen:
+                continue
+            _gesehen.add(n)
+            _eindeutig.append(t)
+        self._tool_instances = _eindeutig
         self.tools_map.clear()
         for tool in self._tool_instances:
             if tool.name in _EXTERNAL_WRITE_TOOLS:
@@ -1245,6 +1410,10 @@ KRITISCH – Autonomie-Regeln:
                   or self._current_username in _LOCAL_PRIVILEGED_USERS),
         ))
         self._tool_cache.clear()  # Cache für diesen Task-Run leeren
+        # Delegations-Deckel gilt PRO AUFTRAG. Ohne diesen Reset waere der
+        # geteilte Hauptagent nach acht Delegationen dauerhaft gesperrt.
+        self._delegations_used = 0
+        self._fallback_used = set()
         # Ergebnis dieses Laufs fuer den Auto-Neuversuch am Aufrufort:
         #   ok      – Antwort geliefert
         #   empty   – LLM lieferte keine Antwort (0 Parts / Reset erfolglos)
@@ -1265,7 +1434,7 @@ KRITISCH – Autonomie-Regeln:
         await self._send_status(ws, f"🚀 Starte Aufgabe: {task_text}")
 
         # System-Prompt zusammenbauen
-        system_prompt = self.SUB_AGENT_PROMPT if self.is_sub_agent else self.SYSTEM_PROMPT
+        system_prompt = self._base_system_prompt()
         system_prompt = _mit_plotstyle(system_prompt)
 
         # Desktop-Kontext je nach Client-Typ setzen
@@ -1521,7 +1690,7 @@ KRITISCH – Autonomie-Regeln:
                 model=self.current_model,
                 system_prompt=system_prompt,
                 contents=[*chat_history, _user_msg],
-                tools=self._tool_instances,
+                tools=self._llm_tools,
                 reasoning_effort=self.current_reasoning_effort,
                 temperature=self.current_temperature,
             ))
@@ -1561,7 +1730,7 @@ KRITISCH – Autonomie-Regeln:
             # sind schon gelaufen und wuerden ein zweites Mal ausgefuehrt
             # (Datei erzeugt, Ticket angelegt, Nachricht gesendet …).
             _empty_finish = False
-            while steps < config.MAX_AGENT_STEPS:
+            while steps < self._max_steps():
                 # Stop prüfen (benutzerbezogener Scope)
                 if stop_scope.stopped:
                     await self._send_status(ws, "⏹️ Anfrage gestoppt")
@@ -1745,6 +1914,11 @@ KRITISCH – Autonomie-Regeln:
                             _log(f"spawn JSON parse error: {e}")
                             pass
 
+                    # Delegation an eine Rolle: SEQUENZIELL, das Ergebnis ersetzt
+                    # das Werkzeug-Ergebnis und geht damit in den Kontext.
+                    result_str = await self._maybe_delegate(
+                        result_str, ws=ws, tool_name=tool_name, tool_args=tool_args)
+
                     await self._send_status(
                         ws, f"📋 Ergebnis: {result_str[:300]}{'...' if len(result_str) > 300 else ''}"
                     )
@@ -1804,7 +1978,7 @@ KRITISCH – Autonomie-Regeln:
                     model=self.current_model,
                     system_prompt=system_prompt,
                     contents=chat_history,
-                    tools=self._tool_instances,
+                    tools=self._llm_tools,
                     reasoning_effort=self.current_reasoning_effort,
                     temperature=self.current_temperature,
                 ))
@@ -1820,7 +1994,7 @@ KRITISCH – Autonomie-Regeln:
 
                 steps += 1
 
-            if (steps >= config.MAX_AGENT_STEPS or _loop_break or _empty_finish) and not stop_scope.stopped:
+            if (steps >= self._max_steps() or _loop_break or _empty_finish) and not stop_scope.stopped:
                 # Max-Steps erreicht, Loop-Detector angeschlagen ODER der Lauf
                 # endete ohne Antwort (_empty_finish): einen finalen LLM-Call
                 # OHNE Tools erzwingen, damit der User mit dem bisherigen
@@ -1836,7 +2010,7 @@ KRITISCH – Autonomie-Regeln:
                 elif not _loop_break:
                     await self._send_status(
                         ws,
-                        f"⚠️ Maximale Schrittanzahl ({config.MAX_AGENT_STEPS}) erreicht – erzeuge finale Antwort ohne weitere Tools …"
+                        f"⚠️ Maximale Schrittanzahl ({self._max_steps()}) erreicht – erzeuge finale Antwort ohne weitere Tools …"
                     )
 
                 async def _try_final(label: str, contents_, system_):
@@ -1998,7 +2172,7 @@ KRITISCH – Autonomie-Regeln:
                                 types.Content(role="user", parts=[types.Part.from_text(text=task_text)]),
                                 *chat_history,
                             ],
-                            tools=self._tool_instances
+                            tools=self._llm_tools
                         )
                         # Tool-Calls aus der Learning-Antwort ausfuehren (memory_manage)
                         if learn_response.parts:
@@ -2117,6 +2291,9 @@ KRITISCH – Autonomie-Regeln:
 
     async def _run_headless(self, task_text: str, reasoning_effort=None) -> str:
         self._current_reasoning_effort = reasoning_effort
+        # Delegations-Deckel pro Auftrag (siehe run_task)
+        self._delegations_used = 0
+        self._fallback_used = set()
         # Effektives LLM-Profil des (ggf. via _current_username gesetzten) Benutzers
         self._resolve_profile_for_user()
         self.state = AgentState.RUNNING
@@ -2149,7 +2326,7 @@ KRITISCH – Autonomie-Regeln:
         )
 
         # System-Prompt zusammenbauen
-        system_prompt = _mit_plotstyle(self.SYSTEM_PROMPT)
+        system_prompt = _mit_plotstyle(self._base_system_prompt())
         instructions = load_instructions()
         if instructions:
             system_prompt += f"\n\n{instructions}"
@@ -2178,7 +2355,7 @@ KRITISCH – Autonomie-Regeln:
                             parts=[types.Part.from_text(text=task_text)],
                         )
                     ],
-                    tools=self._tool_instances,
+                    tools=self._llm_tools,
                     reasoning_effort=self.current_reasoning_effort,
                     temperature=self.current_temperature,
                 )
@@ -2187,7 +2364,7 @@ KRITISCH – Autonomie-Regeln:
                 response = None
 
             steps = 0
-            while steps < config.MAX_AGENT_STEPS:
+            while steps < self._max_steps():
                 if self._stop_flag:
                     break
 
@@ -2213,6 +2390,14 @@ KRITISCH – Autonomie-Regeln:
                     tool_args = dict(fc.args) if fc.args else {}
                     result = await self._execute_tool(tool_name, tool_args)
                     result_str = str(result)[:5000]
+
+                    # Delegation auch in headless-Kanaelen (Cron/WhatsApp/Telegram):
+                    # dort gibt es kein WebSocket, der Rollen-Lauf braucht keins.
+                    # ACHTUNG: nach der 5000-Zeichen-Kappung, aber der Marker ist
+                    # kurz – und das Rollen-ERGEBNIS darf nicht auf 5000 Zeichen
+                    # beschnitten werden, dafuer gilt _DELEGATE_RESULT_MAX.
+                    result_str = await self._maybe_delegate(
+                        result_str, tool_name=tool_name, tool_args=tool_args)
 
                     # Screenshot-Bild erkennen (IMAGE_BASE64:pfad|base64data)
                     image_part = None
@@ -2270,7 +2455,7 @@ KRITISCH – Autonomie-Regeln:
                             ),
                             *chat_history,
                         ],
-                        tools=self._tool_instances,
+                        tools=self._llm_tools,
                         reasoning_effort=self.current_reasoning_effort,
                         temperature=self.current_temperature,
                     )
@@ -2283,7 +2468,7 @@ KRITISCH – Autonomie-Regeln:
             # Max-Steps in headless: finalen No-Tools-Call erzwingen, damit
             # collected_texts mindestens eine Antwort enthält. Mehrstufiger
             # Fallback wie in run_task: erst mit History+Instruktion, dann Reset.
-            if steps >= config.MAX_AGENT_STEPS and not self._stop_flag:
+            if steps >= self._max_steps() and not self._stop_flag:
                 async def _try_final_h(label: str, contents_, system_):
                     try:
                         _resp = await self.provider.generate_response(
@@ -2353,7 +2538,7 @@ KRITISCH – Autonomie-Regeln:
                                 types.Content(role="user", parts=[types.Part.from_text(text=task_text)]),
                                 *chat_history,
                             ],
-                            tools=self._tool_instances
+                            tools=self._llm_tools
                         )
                         if learn_response.parts:
                             for p in learn_response.parts:
@@ -2419,6 +2604,19 @@ KRITISCH – Autonomie-Regeln:
         tool = self.tools_map.get(name)
         if not tool:
             return f"Fehler: Tool '{name}' nicht gefunden"
+
+        # ── Rollen-Zuschnitt: HARTE Schranke, unabhaengig von der Deklaration ──
+        # Der Filter in _llm_tools bestimmt nur, was das Modell zu sehen bekommt.
+        # Modelle rufen aber gelegentlich Werkzeuge auf, die nicht deklariert
+        # waren (aus dem Prompt geraten, aus einem Beispiel uebernommen). Ohne
+        # diese Pruefung waere der Zuschnitt einer Rolle eine Bitte.
+        _allow = getattr(self, "_role_tools", None)
+        if _allow is not None and name not in _allow:
+            print(f"[AGENT {self.agent_id}] Rolle '{self._role_id}': Tool '{name}' "
+                  f"nicht im Rollenumfang", flush=True)
+            return (f"Zugriff verweigert: Das Werkzeug '{name}' gehoert nicht zum Umfang "
+                    f"der Rolle '{self._role_id}'. Verfuegbar: "
+                    f"{', '.join(sorted(_allow)) or '(keine)'}.")
 
         span = tracer.start_span(name, kind="tool", parent_id=self.agent_id)
         span.attributes["tool.name"] = name
@@ -2635,10 +2833,27 @@ KRITISCH – Autonomie-Regeln:
                 # und dann waeren fremde Dokumente wieder lesbar.
                 _u_token = _sbx_ctx.set_tool_user(
                     "" if _privileged else (_uname or _ANON_ACTOR))
+                # Das LLM-Profil DIESES Agenten fuer ALLE Werkzeuge, die selbst
+                # ein Modell aufrufen (generate_image, jira_org_analysis,
+                # reflection, evolution_*). Ohne das griffe dort immer das
+                # global aktive Profil – ein Rollen-Agent mit eigenem Bildmodell
+                # waere wirkungslos (auf DEV genau so gemessen), und auch die
+                # benutzerbezogene Profilwahl wirkte dort nie.
+                _p_token = None
+                try:
+                    from backend.llm import current_agent_profile as _cvp
+                    _p_token = _cvp.set(self._eff_profile or None)
+                except Exception:  # noqa: BLE001
+                    _cvp = None
                 try:
                     result = await tool.execute(**exec_args)
                 finally:
                     _sbx_ctx.reset_tool_user(_u_token)
+                    if _p_token is not None and _cvp is not None:
+                        try:
+                            _cvp.reset(_p_token)
+                        except Exception:  # noqa: BLE001
+                            pass
             _dur_ms = int((_time.monotonic() - _t0) * 1000)
             tracer.end_span(span, status="ok")
             # Ergebnis cachen wenn Tool cacheable ist
@@ -2688,6 +2903,233 @@ KRITISCH – Autonomie-Regeln:
             return f"Sub-Agent '{label}' gestartet (ID: {sub.agent_id})"
         except Exception as e:
             return f"Fehler beim Starten von Sub-Agent '{label}': {e}"
+
+    # ── Delegation an eine spezialisierte Rolle ──────────────────────────────
+    # Deckel pro Lauf. Zweite Schranke neben "eine Rolle hat kein delegate":
+    # ohne ihn kann ein Modell in einer Schleife dieselbe Rolle zwanzigmal rufen
+    # (jeder Lauf kostet einen vollen LLM-Dialog).
+    _MAX_DELEGATIONS = 8
+    # Ergebnis-Deckel. Das Ergebnis wird zur `function_response` und damit Teil
+    # des Orchestrator-Kontexts – ein 200-KB-Bericht sprengt sonst das
+    # Kontextfenster mitten im Gespraech. Der Wert ist bewusst hoch: ein zu
+    # kleiner Deckel hat bei CHUNK_OUTPUT_LIMIT dazu gefuehrt, dass das Modell
+    # auf einem Ausschnitt antwortet, der die Antwort nicht enthaelt.
+    _DELEGATE_RESULT_MAX = 12000
+
+    async def _delegate_to_role(self, role_id: str, task: str, ws=None) -> str:
+        """Fuehrt eine Rolle SEQUENZIELL aus und gibt deren Ergebnis zurueck.
+
+        Anders als `_handle_spawn` (fire-and-forget) wird hier gewartet: das
+        Ergebnis wird zum Werkzeug-Ergebnis des Orchestrators. Zwei Dinge, die
+        deshalb automatisch funktionieren und nicht nachgebaut werden duerfen:
+        - Der Stop-Knopf greift durch. `_await_or_stop` im Rollen-Agenten liest
+          `_run_stop_scope` aus dem ContextVar – und weil hier `await` statt
+          `create_task` steht, ist das der Scope DIESES Laufs.
+        - Die Actor-Bindung wird mitgefuehrt. Sie wird zusaetzlich ausdruecklich
+          uebergeben (fail-closed: `run_task_headless` ohne `actor=` ist
+          unprivilegiert).
+        """
+        from backend import agent_roles
+
+        rolle = agent_roles.holen(role_id)
+        if rolle is None or not rolle.get("enabled"):
+            verf = ", ".join(f"'{x}'" for x in agent_roles.namen(nur_aktive=True))
+            return (f"Fehler: Rolle '{role_id}' steht nicht zur Verfuegung. "
+                    f"Verfuegbar: {verf or '(keine)'}.")
+
+        if self._delegations_used >= self._MAX_DELEGATIONS:
+            return (f"Fehler: In diesem Auftrag wurden bereits "
+                    f"{self._MAX_DELEGATIONS} Rollen-Aufgaben vergeben (Obergrenze). "
+                    "Erledige den Rest selbst und beantworte die Aufgabe.")
+        self._delegations_used += 1
+
+        # ── Werkzeugsatz: die Formel aus agent_roles.effektive_werkzeuge ──────
+        # Rollen-Whitelist ∩ (eigene Werkzeuge − Sperrliste) − delegate.
+        # Die Sperrliste greift nur fuer unprivilegierte Auftraggeber – genau wie
+        # im Dispatch. Damit kann eine Delegation NIE mehr als der Aufrufer.
+        verfuegbar = {t.name for t in self._tool_instances}
+        gesperrt: set[str] = set()
+        if not self._actor_is_privileged():
+            gesperrt = set(_BLOCKED_TOOLS_FOR_LDAP)
+        erlaubt, fehlend = agent_roles.effektive_werkzeuge(rolle, verfuegbar, gesperrt)
+
+        if fehlend and not erlaubt:
+            # Kein einziges Werkzeug der Rolle ist da: das ist ein echter
+            # Konfigurationsfehler (Skill nicht aktiv) oder eine Rechtefrage.
+            # Ein Lauf ohne Handwerkszeug wuerde nur eine erfundene Antwort
+            # liefern – dieselbe Abwaegung wie "keine halbe Grafik".
+            return (f"Fehler: Die Rolle '{rolle['id']}' kann hier nicht arbeiten – "
+                    f"keines ihrer Werkzeuge ist verfuegbar ({', '.join(fehlend)}). "
+                    "Moeglicher Grund: der zugehoerige Skill ist nicht aktiv, oder die "
+                    "Werkzeuge stehen diesem Benutzer nicht zu.")
+
+        label = f"Rolle: {rolle['name']}"
+        agent = None
+        try:
+            from backend.main import agent_manager
+            if agent_manager is None:
+                return f"Fehler: Rolle '{rolle['id']}' konnte nicht gestartet werden (kein AgentManager)."
+            agent = agent_manager.spawn_role_agent(rolle, self, label=label)
+            agent._role_tools = erlaubt
+
+            hinweis = ""
+            if fehlend:
+                hinweis = ("\n\n(Hinweis: folgende Werkzeuge dieser Rolle sind hier nicht "
+                           "verfuegbar: " + ", ".join(fehlend) + " – arbeite ohne sie.)")
+
+            if ws is not None:
+                await self._send_status(
+                    ws, f"👥 {label} bearbeitet: {task[:120]}{'…' if len(task) > 120 else ''}")
+
+            print(f"[AGENT {self.agent_id}] delegiere an '{rolle['id']}' "
+                  f"(Werkzeuge: {len(erlaubt)}, Modell: {agent.current_model}): {task[:80]}",
+                  flush=True)
+
+            ergebnis = await agent.run_task_headless(
+                task + hinweis,
+                reasoning_effort=(rolle.get("reasoning_effort") or None),
+                actor={
+                    "user": self.actor_name(),
+                    "privileged": self._actor_is_privileged(),
+                    "internet": bool(getattr(self, "_current_user_internet", True)),
+                    "sap": bool(getattr(self, "_current_user_sap", False)),
+                },
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[AGENT {self.agent_id}] Delegation an '{role_id}' fehlgeschlagen: {e}", flush=True)
+            return f"Fehler bei der Rolle '{role_id}': {e}"
+        finally:
+            # Der Rollen-Agent ist kurzlebig: er darf nicht in der Sidebar und
+            # nicht im Manager zurueckbleiben (der Hauptagent ist GETEILT – eine
+            # Leiche pro Delegation waere ein Leck).
+            if agent is not None:
+                try:
+                    from backend.main import agent_manager as _am
+                    if _am is not None:
+                        _am.remove_agent(agent.agent_id)
+                        if ws is not None:
+                            await ws.send_json({
+                                "type": "agent_event",
+                                "event": "finished",
+                                "agent": agent.get_info(),
+                                "agents": _am.get_all_info(),
+                            })
+                except Exception:  # noqa: BLE001
+                    pass
+
+        ergebnis = (ergebnis or "").strip() or "(Die Rolle hat kein Ergebnis geliefert.)"
+        if len(ergebnis) > self._DELEGATE_RESULT_MAX:
+            voll = len(ergebnis)
+            ergebnis = (ergebnis[:self._DELEGATE_RESULT_MAX]
+                        + f"\n\n[gekuerzt: {voll} Zeichen insgesamt]")
+
+        if ws is not None:
+            await self._send_status(ws, f"✅ {label} fertig")
+        return f"Ergebnis der Rolle '{rolle['id']}':\n{ergebnis}"
+
+    async def _maybe_delegate(self, result_str: str, ws=None, tool_name: str = "",
+                              tool_args: dict | None = None) -> str:
+        """Loest den Delegations-Marker auf – und faengt gescheiterte Werkzeuge ab,
+        fuer die eine Rolle das bessere Modell hat.
+
+        Ein Rollen-Agent bekommt `delegate` gar nicht (Rekursionsschutz) – die
+        Pruefung auf `_role_id` ist der zweite Riegel, falls jemand das Werkzeug
+        aus einem Skill heraus benutzt.
+        """
+        if getattr(self, "_role_id", ""):
+            return result_str
+        if "_delegate" in result_str:
+            try:
+                daten = json.loads(result_str)
+                if isinstance(daten, dict) and daten.get("_delegate"):
+                    return await self._delegate_to_role(
+                        str(daten.get("role", "")), str(daten.get("task", "")), ws=ws)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return await self._role_fallback(result_str, tool_name, tool_args or {}, ws)
+
+    @staticmethod
+    def _looks_like_error(text: str) -> bool:
+        """Hat ein Werkzeug NICHT geliefert?
+
+        Basis ist die Heuristik der Werkzeug-Statistik, ergaenzt um
+        ``HINWEIS_AN_NUTZER`` – die projektinterne Konvention fuer "konnte nicht
+        liefern, sag es dem Benutzer" (7 Stellen in den Werkzeugen).
+        GEMESSEN auf DEV: ``generate_image`` meldet bei einem Textmodell
+        "HINWEIS_AN_NUTZER: Das aktuell aktive LLM-Profil kann keine Bilder
+        generieren." – darin kommt keines der Fehlerwoerter vor, der
+        Rollen-Rueckfall griff deshalb genau im wichtigsten Fall nicht.
+        """
+        t = (text or "")[:200].lower()
+        return any(m in t for m in ("fehler", "error", "❌", "traceback",
+                                   "exception", "not found", "failed",
+                                   "hinweis_an_nutzer"))
+
+    async def _role_fallback(self, result_str: str, tool_name: str,
+                             tool_args: dict, ws=None) -> str:
+        """Ein Werkzeug ist gescheitert – eine Rolle fuehrt es mit EIGENEM Modell.
+
+        WARUM ES DAS GIBT (gemessen auf DEV, 2026-08-10): Der Prompt-Hinweis
+        bringt das Modell dazu, Auswertungen an `analyst` zu geben. Bei
+        "Erzeuge ein Bild" ruft es aber `generate_image` selbst auf – und das
+        scheitert, weil das aktive Profil ein Textmodell ist (der dokumentierte
+        Grund, aus dem das Willkommens-Beispiel "Bild generieren" am 2026-08-04
+        entfernt wurde). Der Benutzer bekam die Fehlermeldung, obwohl eine Rolle
+        mit Bildmodell bereitstand.
+
+        Die Weiche ist deterministisch, nicht promptbasiert – und bewusst eng:
+        - nur bei einem GESCHEITERTEN Aufruf,
+        - nur wenn eine aktive Rolle dieses Werkzeug fuehrt UND ein EIGENES
+          LLM-Profil hat. Ohne eigenes Profil kaeme dasselbe Ergebnis heraus;
+          eine Delegation "ins Gleiche" waere verbrannte Zeit. Stattdessen wird
+          dem Modell (und damit dem Administrator) gesagt, was fehlt.
+        - hoechstens EINMAL je Werkzeug und Lauf (`_fallback_used`), und der
+          Versuch zaehlt gegen `_MAX_DELEGATIONS`.
+        """
+        if not tool_name or not self._looks_like_error(result_str):
+            return result_str
+        if not self._delegation_moeglich():
+            return result_str
+        try:
+            from backend import agent_roles
+            kandidaten = [r for r in agent_roles.alle(nur_aktive=True)
+                          if tool_name in (r.get("tools") or [])]
+        except Exception:  # noqa: BLE001
+            return result_str
+        if not kandidaten:
+            return result_str
+
+        mit_profil = [r for r in kandidaten if r.get("profile_id")]
+        if not mit_profil:
+            # Ehrlicher Hinweis statt einer Delegation, die nichts aendert.
+            namen = ", ".join(f"'{r['id']}'" for r in kandidaten)
+            return (result_str + f"\n\nHinweis: Fuer '{tool_name}' gibt es die Rolle(n) "
+                    f"{namen}, ihnen ist aber kein eigenes LLM-Profil zugewiesen – "
+                    "die Rolle wuerde am selben Modell scheitern. Ein Administrator "
+                    "kann das unter Einstellungen → KI & System → Spezialisierte "
+                    "Agenten (Rollen) nachtragen.")
+
+        if not hasattr(self, "_fallback_used") or self._fallback_used is None:
+            self._fallback_used = set()
+        if tool_name in self._fallback_used:
+            return result_str
+        self._fallback_used.add(tool_name)
+
+        rolle = mit_profil[0]
+        auftrag = ", ".join(f"{k}={v}" for k, v in (tool_args or {}).items()
+                            if not str(k).startswith("_"))[:1500]
+        print(f"[AGENT {self.agent_id}] '{tool_name}' gescheitert – Rollen-Rueckfall "
+              f"auf '{rolle['id']}' (eigenes Profil)", flush=True)
+        if ws is not None:
+            await self._send_status(
+                ws, f"↪️ '{tool_name}' ist mit diesem Modell nicht möglich – "
+                    f"übergebe an Rolle: {rolle['name']}")
+        ergebnis = await self._delegate_to_role(
+            rolle["id"],
+            f"Fuehre die folgende Aufgabe mit dem Werkzeug '{tool_name}' aus: {auftrag}",
+            ws=ws)
+        return (f"(Das Werkzeug '{tool_name}' ist mit dem aktiven Modell nicht moeglich; "
+                f"die Aufgabe wurde an die Rolle '{rolle['id']}' uebergeben.)\n{ergebnis}")
 
     async def _compress_history(self, chat_history: list, system_prompt: str) -> list:
         """Komprimiert lange Chat-Historien: Zusammenfassung der älteren Nachrichten."""
@@ -3252,6 +3694,9 @@ KRITISCH – Autonomie-Regeln:
             "is_sub_agent": self.is_sub_agent,
             "parent_id": self.parent_id,
             "created_at": self._created_at,
+            # Nur bei Rollen-Agenten gesetzt – die Sidebar kann sie damit von
+            # frei gespawnten Sub-Agenten unterscheiden.
+            "role_id": getattr(self, "_role_id", ""),
         }
 
 
@@ -3289,6 +3734,40 @@ class AgentManager:
             # Laufs (z.B. Cron-Job eines Domain-Nutzers) darf nicht ueber die
             # Namens-Heuristik wieder privilegiert werden.
             agent._current_actor_privileged = parent._actor_is_privileged()
+        self.agents[agent.agent_id] = agent
+        return agent
+
+    def spawn_role_agent(self, rolle: dict, parent: "JarvisAgent",
+                         label: str = "") -> "JarvisAgent":
+        """Erstellt einen kurzlebigen Agenten fuer EINE Rollen-Aufgabe.
+
+        Bewusst `is_sub_agent=True`: damit bekommt er kein `spawn_agent` und
+        kein `delegate` (Rekursionsschutz) und wird in der Sidebar als
+        Unter-Agent gezeigt. Der Werkzeug-Zuschnitt (`_role_tools`) wird vom
+        Aufrufer gesetzt – er kennt die Rechte des Auftraggebers.
+
+        Die Registrierung im Manager ist NICHT nur Anzeige: ohne sie greift
+        `stop_all()` (Dienst-Ende, Avatar-Abbruch) nicht auf den laufenden
+        Rollen-Agenten.
+        """
+        agent = JarvisAgent(
+            label=label or f"Rolle: {rolle.get('name') or rolle.get('id')}",
+            is_sub_agent=True,
+            parent_id=parent.agent_id if parent else None,
+        )
+        agent._role_id = str(rolle.get("id") or "")
+        agent._role_label = str(rolle.get("name") or "")
+        agent._role_prompt = str(rolle.get("prompt") or "")
+        agent._role_profile_id = str(rolle.get("profile_id") or "")
+        agent._role_max_steps = int(rolle.get("max_steps") or 0)
+        # Sicherheits-Kontext des Auftraggebers uebernehmen (gleiche Begruendung
+        # wie in spawn_sub_agent: der Standard waere "erlaubt").
+        if parent is not None:
+            agent._current_username = getattr(parent, "_current_username", "")
+            agent._current_actor_privileged = parent._actor_is_privileged()
+            agent._current_user_internet = getattr(parent, "_current_user_internet", True)
+            agent._current_user_sap = getattr(parent, "_current_user_sap", False)
+            agent._current_kb_groups = getattr(parent, "_current_kb_groups", None)
         self.agents[agent.agent_id] = agent
         return agent
 

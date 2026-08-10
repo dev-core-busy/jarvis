@@ -118,12 +118,11 @@ def _profile_provider(prof=None):
         )
         return provider, p.get("model", "")
     # Alt-Konfiguration ohne Profile
-    provider = get_provider(
-        config.LLM_PROVIDER, config.current_api_key, config.current_api_url,
-        auth_method=config.current_auth_method,
-        session_key=config.current_session_key, prompt_tool_calling=False,
-    )
-    return provider, config.current_model
+    # Kein Profil uebergeben: dann das des LAUFENDEN Agenten, sonst das global
+    # aktive (llm.provider_fuer_lauf). Ausserhalb eines Agentenlaufs – und dort
+    # liegen alle heutigen Aufrufer – ist das Verhalten unveraendert.
+    from backend.llm import provider_fuer_lauf
+    return provider_fuer_lauf(prompt_tool_calling=False)
 
 
 # ─── Abschnittsweise Extraktion ──────────────────────────────────────────────

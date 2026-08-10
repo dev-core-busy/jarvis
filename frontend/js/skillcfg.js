@@ -30,14 +30,16 @@
         telegram:           { container: 'skcfg-telegram' },
         browser_control:    { container: 'skcfg-browser_control' },
         claude_bridge:      { container: 'skcfg-claude_bridge' },
-        agent_orchestrator: { container: 'skcfg-agent_orchestrator' },
         agent_autonomy_kit: { container: 'skcfg-agent_autonomy_kit' },
         avatar:             { container: 'skcfg-avatar' },
         whatsapp:           { container: 'skcfg-whatsapp', exclude: ['debug_mode'] },
         knowledge:          { container: 'skcfg-knowledge', only: ['max_file_size_mb'] },
     };
 
-    // Skills mit eigenem Reiter: Knopf-ID → nur sichtbar wenn Skill aktiv
+    // Skills mit eigenem Reiter: Knopf-ID → nur sichtbar wenn Skill aktiv.
+    // agent_orchestrator steht hier, aber NICHT in TARGETS: sein Reiter zeigt die
+    // Rollen-Verwaltung (agent_roles.js), kein manifest-generiertes Formular.
+    // render() bricht bei fehlendem TARGETS-Eintrag sauber ab.
     const TAB_BUTTONS = {
         google:             'settings-tab-btn-google',
         telegram:           'settings-tab-btn-telegram',

@@ -150,7 +150,6 @@ async def _validate_with_llm(
     """
     try:
         from backend import config as _cfg
-        from backend.llm import get_provider
         try:
             from google.genai import types as _gt
             def _mk_content(text: str):
@@ -169,14 +168,10 @@ async def _validate_with_llm(
             def _mk_content(text: str):
                 return _Content(text)
 
-        provider = get_provider(
-            _cfg.LLM_PROVIDER,
-            _cfg.current_api_key,
-            _cfg.current_api_url,
-            auth_method=_cfg.current_auth_method,
-            session_key=_cfg.current_session_key,
-            prompt_tool_calling=_cfg.current_prompt_tool_calling,
-        )
+        # Profil des LAUFENDEN Agenten (Rolle/Benutzerwahl), global nur als
+        # Rueckfall – siehe llm.provider_fuer_lauf.
+        from backend.llm import provider_fuer_lauf
+        provider, _pf_model = provider_fuer_lauf()
 
         old_snip = (old_text[:1500] + "\n...[gekürzt]") if len(old_text) > 1500 else old_text
         new_snip = (new_text[:2000] + "\n...[gekürzt]") if len(new_text) > 2000 else new_text
@@ -211,7 +206,7 @@ async def _validate_with_llm(
             )
 
         response = await provider.generate_response(
-            model=_cfg.current_model or "gemini-2.0-flash",
+            model=_pf_model or _cfg.current_model or "gemini-2.0-flash",
             system_prompt=(
                 "Du bist ein präziser Sicherheits-Validator für KI-Selbstmodifikationen. "
                 "Antworte ausschließlich mit einem gültigen JSON-Objekt, ohne Markdown, ohne Erklärungen."

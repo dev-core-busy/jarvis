@@ -11,7 +11,7 @@ from pathlib import Path
 
 from backend.tools.base import BaseTool
 from backend.config import config
-from backend.llm import get_provider, ImageGenNotSupported
+from backend.llm import ImageGenNotSupported
 
 # Generierte Bilder liegen hier und werden ueber /api/generated/<name> ausgeliefert.
 _IMG_DIR = Path(__file__).parent.parent.parent / "data" / "generated_images"
@@ -22,12 +22,26 @@ _IMG_DIR = Path(__file__).parent.parent.parent / "data" / "generated_images"
 current_task_images: contextvars.ContextVar = contextvars.ContextVar(
     "current_task_images", default=None)
 
-
 def record_task_image(path, url: str) -> None:
-    """Merkt ein erzeugtes/gefundenes Bild fuer den aktuellen Task."""
+    """Merkt ein erzeugtes/gefundenes Bild fuer den aktuellen Task.
+
+    NICHT ENTFERNEN: ``backend/tools/image_search.py`` importiert diese Funktion
+    (``from backend.tools.image_gen import _IMG_DIR, record_task_image``). Beim
+    Umbau am 2026-08-10 fiel sie einem Block-Ersatz zum Opfer – Folge: das
+    Werkzeug ``search_image`` liess sich nicht mehr laden ("SearchImageTool nicht
+    geladen: cannot import name 'record_task_image'") und fehlte still im
+    Werkzeugkasten. Aufgefallen nur, weil eine Zaehlung der Werkzeuge es zeigte.
+    """
     lst = current_task_images.get()
     if lst is not None:
         lst.append({"path": str(path), "url": url})
+
+
+# Das LLM-Profil des LAUFENDEN Agenten liegt zentral in backend/llm.py (dort
+# steht auch die Begruendung). Der alte Name bleibt als Alias erhalten, damit
+# vorhandene Importe weiter funktionieren.
+from backend.llm import current_agent_profile as current_llm_profile  # noqa: E402
+from backend.llm import provider_fuer_lauf  # noqa: E402
 
 
 _IMG_MD_RE = re.compile(r"!\[[^\]]*\]\([^)]*?/api/generated/[0-9a-f]{32}\.[a-z]+\)")
@@ -75,18 +89,13 @@ class GenerateImageTool(BaseTool):
         if not prompt:
             return "Fehler: Es wurde keine Bildbeschreibung (prompt) angegeben."
 
-        # Provider aus dem AKTIVEN Profil bauen (kein Wechsel!)
-        provider = get_provider(
-            config.LLM_PROVIDER,
-            config.current_api_key,
-            config.current_api_url,
-            auth_method=config.current_auth_method,
-            session_key=config.current_session_key,
-            prompt_tool_calling=config.current_prompt_tool_calling,
-        )
+        # Provider aus dem Profil des LAUFENDEN Agenten bauen (kein Wechsel!):
+        # das ist bei einem Rollen-Agenten dessen eigenes Profil, sonst das
+        # benutzerbezogene bzw. global aktive.
+        provider, modell = provider_fuer_lauf(prompt_tool_calling=False)
 
         try:
-            data = await provider.generate_image(config.current_model, prompt)
+            data = await provider.generate_image(modell, prompt)
         except ImageGenNotSupported:
             return (
                 "HINWEIS_AN_NUTZER: Das aktuell aktive LLM-Profil kann keine Bilder generieren. "

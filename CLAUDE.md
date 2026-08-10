@@ -450,6 +450,229 @@ Passwort anmelden, obwohl kein einziger Eintrag gesetzt war. Auf Anweisung des N
   Bequemlichkeit:** es setzt die `<label>`-Aktivierungsweitergabe um – ein Test ohne echte
   Label-Semantik sieht den Doppel-Toggle NICHT. Der alte Stand fällt in genau diesen Punkten durch.
 
+## Spezialisierte Rollen-Agenten + `delegate` (2026-08-10)
+**Was es ist:** Ein Administrator legt benannte Rollen an (*Einstellungen → Orchestrator*, der Reiter
+des Skills). Jede Rolle hat einen eigenen System-Prompt, einen eigenen Werkzeug-Zuschnitt,
+optional ein eigenes LLM-Profil, eine eigene Denktiefe und Schrittgrenze. Der Hauptagent bekommt
+dadurch **ein** Werkzeug `delegate(role, task)`, gibt eine Teilaufgabe ab, **wartet**
+(sequenziell) und arbeitet mit dem Ergebnis weiter.
+Vorgabe-Rollen: `image_builder`, `analyst`, `writer`.
+
+- **Es haengt am Skill „Agent Orchestrator"** (`skills/agent_orchestrator/`, Version 2.0.0,
+  Vorgabe AUS). Ohne aktiven Skill liefert `get_tools()` nichts – dann gibt es kein `delegate`,
+  keinen Rollen-Abschnitt im System-Prompt und keinen Rollen-Rueckfall, und der Agent verhaelt
+  sich exakt wie vorher. Die Vorgabe-Rollen entstehen beim **Laden des Skills**, nicht beim
+  Backend-Start.
+  **Der Skill hiess vorher genauso, tat aber etwas anderes:** vier Werkzeuge
+  (`orchestrate_task`, `agent_status`, `agent_collect`, `agent_list`), die nur Verzeichnisse
+  unter `data/agent-workspaces/` anlegten und wieder einlasen – kein Agent wurde gestartet,
+  `depends_on` nirgends ausgewertet, die sechs „Agent-Typen" waren Beschreibungssaetze ohne
+  Wirkung. Nie aktiviert, kein Aufrufer im Repo. Vorhandene Verzeichnisse bleiben unangetastet.
+- **Aufteilung:** Werkzeug im Skill, Registry und Endpunkte im Backend
+  (`backend/agent_roles.py`, `/api/agent_roles`, alle `require_local_auth`) – dasselbe Muster
+  wie `sap_analyses.py` beim SAP-Skill: Skills koennen keine Routen registrieren. Die Rollen
+  bleiben deshalb **auch bei ausgeschaltetem Skill pflegbar**; die Oberflaeche sagt dann
+  ausdruecklich, dass sie wirkungslos sind (`roles.skill_off`).
+- **Reiter-Sichtbarkeit** ueber das vorhandene Muster `skillcfg.js::TAB_BUTTONS` +
+  `updateTabs()`. Der Skill steht dort, aber **NICHT in `TARGETS`**: sein Reiter zeigt die
+  Rollen-Verwaltung, kein manifest-generiertes Formular (`render()` bricht bei fehlendem
+  TARGETS-Eintrag sauber ab).
+- **Als Skill kostet die Funktion einen Skill-Slot** – FREE/BASIC erlauben fuenf aktive Skills.
+- **Oberflaeche (auf Wunsch 2026-08-10):** „Bearbeiten" klappt das Formular **direkt unter der
+  Zeile** auf (es gibt nur EINEN Container, der wandert – Muster und Fallstricke wie bei der
+  Extraktions-Vorschau in /wissen: Heimatplatz nur beim ersten Verschieben merken, vor dem
+  Neuaufbau der Liste heimholen, sonst raeumt `innerHTML=''` ihn mit ab). Aktiv/Inaktiv liegt
+  als Schalter (⏸/▶) **in der Zeile** statt nur im Formular – er sendet ausschliesslich
+  `{enabled: …}`, damit der Merge ueber `UPDATABLE_FIELDS` nicht den Formularstand schreibt.
+  Abgeschaltete Rollen sind per Deckkraft abgeschwaecht (keine harte Farbe: die waere in Hell
+  und Dunkel nie gleichzeitig richtig).
+- **FALLSTRICK `.input-group` – zwei gemeldete Fehler aus EINER falschen Klasse.** Die Klasse ist
+  ein **horizontaler** Flex-Container (`display:flex`), und `.input-group input` setzt
+  `flex:1; background:transparent; border:none`. Im Rollen-Formular hiess das: ein langes Label
+  stand NEBEN dem Feld und wurde abgeschnitten, und die Werkzeug-Kaestchen wurden von der
+  input-Regel unsichtbar gestreckt – **anklicken ging nicht mehr**. Das Formular hat jetzt eigene
+  Klassen (`.role-field`, `.role-grid-2|3`, `.role-tools`) in `style.css`.
+  Merkregel: `.input-group` ist fuer „Label links, Feld rechts" gebaut; wer ein Label UEBER dem
+  Feld will oder Kaestchen im Container hat, braucht eigene Klassen.
+- **„EINE Box" ist eine Frage der STRUKTUR, nicht der Kosmetik** – das hat zwei Anlaeufe
+  gekostet, beide falsch: (1) Radien abrunden und Kanten transparent setzen, (2) zusaetzlich die
+  Inline-Styles der Zeile ins CSS holen. Sichtbar blieb trotzdem ein Spalt, weil das Formular ein
+  GESCHWISTER der Zeile war und seinen eigenen Rahmen samt `margin-top` als **Inline-Style** im
+  HTML trug (Inline gewinnt gegen jede Klassen-Regel).
+  Richtig ist das im Projekt vorhandene Muster **`.kb-section`**: ein UMGEBENDER Container haelt
+  Rahmen, Hintergrund und Radius, Kopfzeile und Koerper liegen darin ohne eigenen Rahmen. Jetzt
+  `.role-card` > (`.role-row` + `#role-edit`), das Formular wird per `appendChild` **Kind der
+  Karte**; im Karten-Kontext verliert es ueber `.role-card > .role-edit-box` Rahmen und Rand und
+  wird nur durch eine Trennlinie abgesetzt. Kein Inline-Style mehr im JS
+  (`grep -c style.cssText agent_roles.js` = 0) und keiner am Formular im HTML.
+  **Merkregel:** Wenn zwei Elemente wie eines aussehen sollen, gehoert eines INS andere.
+- **Optisch abgenommen** in Dunkel UND Hell (Chrome-Screenshot einer statischen Vorschau, die das
+  ECHTE Markup aus `settings.html` mit `style.css`/`theme.css` und gemockter API rendert – die
+  Seite selbst braucht Anmeldung und Backend). Ohne diesen Blick waeren alle vier Punkte
+  unentdeckt geblieben: die jsdom-Tests waren gruen, weil jsdom kein Layout rechnet.
+
+- **Nicht zu verwechseln mit `spawn_agent`.** Das bleibt unverändert: fire-and-forget, gleicher
+  Prompt, gleicher voller Werkzeugkasten, **kein Rückkanal** (`_handle_spawn` meldet nur
+  „gestartet"). `delegate` ist das Gegenteil: Rolle, Zuschnitt, `await`, Ergebnis im Kontext.
+  Der Skill `agent_orchestrator` (OpenClaw-Import) legt dagegen **nur Verzeichnisse** an – er
+  startet keinen Agenten, wertet `depends_on` nicht aus und ist nirgends verdrahtet.
+- **DIE SICHERHEITSFORMEL steht in `agent_roles.effektive_werkzeuge()`:**
+  `Rollen-Whitelist ∩ (Werkzeuge des Aufrufers − Sperrliste) − delegate`. Eine Rolle kann nur
+  WEGNEHMEN. Kehrt jemand die Richtung um, ist „Rolle X darf Werkzeug Y" der bequemste Weg um
+  `_BLOCKED_TOOLS_FOR_LDAP` – eine dauerhafte Rechteerhöhung für jeden, der delegieren darf.
+  Der Actor (Benutzer, Privileg, Internet, SAP) wird 1:1 übergeben, alle Dispatch-Gates laufen im
+  Rollen-Lauf unverändert.
+- **`delegate` ist für Netzwerk-Benutzer NICHT gesperrt** (Entscheidung 2026-08-10) – anders als
+  `spawn_agent`, dessen Begründung („könnten Shell/FS ungefiltert nutzen") bei einem engen
+  Werkzeugsatz wegfällt. Gesperrt ist das **Anlegen** von Rollen (Admin), nicht das Benutzen –
+  dieselbe Trennung wie bei Cron seit 2026-07-29. Eine Rollen-Definition ist Persistenz-Substrat
+  wie `data/instructions/*.md`: der Prompt wirkt in künftigen Läufen, auch in dem eines Admins.
+- **`data/agent_roles.json`** ist 0640 und steht in `_APP_DENY_REL`, `PRIVATE_FILES` und
+  `SHELL_SECRET_PATHS`. `saeen()` legt die Vorgaben **nur an, wenn die Datei fehlt** – nicht pro
+  fehlender Rolle, sonst käme eine bewusst gelöschte Rolle bei jedem Start zurück (Lehre aus
+  `_seed_instructions`). `UPDATABLE_FIELDS` ist Pflicht: ohne Whitelist nimmt `PUT` beliebige
+  Felder (die Lücke von `scheduler.update_job` bis 2026-07-28); die **Kennung ist unveränderlich**.
+- **Zwei Schranken gegen Rekursion und Kosten:** ein Rollen-Agent ist `is_sub_agent=True` und
+  bekommt `delegate` **aktiv entzogen** – `skill_manager.get_enabled_tools()` liefert die
+  Werkzeuge jedes aktiven Skills an JEDEN Agenten, ein blosses „nicht hinzufuegen" genuegt bei
+  einem Skill-Werkzeug also nicht (`agent.py`, `else`-Zweig von `is_sub_agent`). Dazu
+  `_MAX_DELEGATIONS = 8` **pro Auftrag**
+  (Rücksetzung in `run_task` UND `_run_headless` – sonst wäre der geteilte Hauptagent nach acht
+  Delegationen dauerhaft gesperrt). Ergebnis-Deckel `_DELEGATE_RESULT_MAX = 12000` mit
+  ausgewiesener Kürzung: das Ergebnis wird zur `function_response` und zählt gegen den Kontext.
+- **Zwei Filter, zwei Ebenen:** `_llm_tools` bestimmt, was das Modell SIEHT (dort fliegt
+  `delegate` auch heraus, solange keine Rolle existiert – ein Werkzeug ohne Ziel verleitet zu
+  Fehlversuchen). Die **harte** Schranke sitzt in `_execute_tool` vor der Ausführung: Modelle
+  rufen auch nicht deklarierte Werkzeuge auf, ohne diese Prüfung wäre der Zuschnitt eine Bitte.
+  `_role_tools is None` = keine Beschränkung, **leere Menge = keine Werkzeuge** – nie auf
+  Falsyness prüfen.
+- **Profil-Vorrang: Rolle > Benutzerwahl > global**, umgesetzt in `_resolve_profile_for_user()`.
+  Diese Auflösung läuft bei JEDEM Task-Start; ohne den Rollen-Zweig dort würde die Wahl der Rolle
+  Sekunden später von der Benutzerwahl überschrieben. Ein gelöschtes Rollen-Profil lässt den Lauf
+  weiterlaufen (Profil des Aufrufers) und schreibt eine Journal-Zeile – eine Rolle, die wegen
+  einer verwaisten Referenz gar nicht arbeitet, ist der schlechtere Ausgang.
+
+- **FALLSTRICK Oberfläche: „KI & System" ist der VOREINGESTELLT aktive Reiter.** Die Rollen-Liste
+  hing zuerst nur im Reiter-Klick-Handler von `app.js` – auf diesen Reiter klickt aber niemand, er
+  ist beim Öffnen der Einstellungen schon aktiv. Ergebnis: der Abschnitt war da, die Liste blieb
+  auf „Lädt…". Genau dieselbe Falle wie am 2026-07-28 bei den Update-Knöpfen (die Warnung dazu
+  steht in `app.js` direkt daneben). `AgentRoles.onShow()` wird deshalb an BEIDEN Stellen gerufen
+  (Klick-Handler UND `openModal`), `onShow`/`_bind` sind idempotent.
+  **Ein UI-Test, der das Modul isoliert antreibt, findet das NICHT** – der Test hat deshalb einen
+  zweiten Teil, der `settings.html` mit dem echten `app.js` lädt und `_openSettingsModal()` ruft
+  (Gegenprobe: der alte Stand fällt dort in genau drei Prüfungen durch, mit „Lädt…" im Container).
+
+### Dass das Modell delegiert, ist NICHT selbstverständlich – drei Hebel, in dieser Reihenfolge
+Auf DEV gemessen (Qwen3.6-35B, 70 Werkzeuge, **23.347 Zeichen** Werkzeug-Beschreibungen +
+16.188 Zeichen System-Prompt): mit der Werkzeug-Beschreibung allein hat das Modell `delegate` in
+zwei echten Läufen **nicht** gewählt – es antwortete „Die Bildgenerierung ist auf diesem System
+nicht verfügbar", obwohl `generate_image` UND die Rolle `image_builder` vorhanden waren.
+1. **Rollenliste in der Werkzeug-Beschreibung** (`agent_roles.werkzeug_beschreibung()`, dynamisch
+   bei jedem Provider-Aufruf gelesen) + `enum` im Schema. Nötig, reicht aber nicht.
+2. **Derselbe Text zusätzlich im System-Prompt** (`_role_hinweis()`, leer ohne Rollen). Danach
+   delegierte der Lauf „lass den Analysten prüfen…" nachweislich an `analyst` (Audit-Log).
+   Redundanz ist hier der Zweck, nicht ein Versehen.
+3. **Deterministischer Rollen-Rückfall** (`_role_fallback`): scheitert ein Werkzeug UND führt eine
+   aktive Rolle genau dieses Werkzeug **mit eigenem Profil**, wird an sie übergeben – ohne Rolle
+   mit Profil kommt stattdessen ein Klartext-Hinweis, was der Administrator nachtragen muss (eine
+   Delegation „ins Gleiche" wäre verbrannte Zeit). Höchstens einmal je Werkzeug und Lauf
+   (`_fallback_used`), zählt gegen den Deckel.
+
+**Drei Fallstricke, die erst der echte Lauf gezeigt hat:**
+- **`_looks_like_error` musste `HINWEIS_AN_NUTZER` kennen.** `generate_image` meldet bei einem
+  Textmodell „HINWEIS_AN_NUTZER: Das aktuell aktive LLM-Profil kann keine Bilder generieren." –
+  darin kommt keines der Fehlerwörter (fehler/error/❌/failed) vor. Der Rückfall griff deshalb
+  genau im wichtigsten Fall nicht. Die Konvention gibt es an 7 Stellen in den Werkzeugen.
+- **Der System-Prompt widersprach dem Mechanismus.** Punkt 15 lautete „Kann das aktive Profil
+  nicht generieren, gib die Meldung des Tools UNVERAENDERT aus – KEIN Ersatz, KEINE Web-Suche,
+  kein anderes Profil." Das verbietet genau die Rolle mit eigenem Bildmodell. Jetzt mit
+  Rollen-Ausnahme; das Verbot der Web-Suche als Ersatz bleibt. Dieselbe Fehlerklasse wie beim
+  alten `WA_TASK_PROMPT` (2026-07-29).
+- **`generate_image` benutzte immer das GLOBAL aktive Profil** (`config.*`), nicht das des
+  laufenden Agenten. Damit war eine Rolle mit zugewiesenem Bildmodell wirkungslos – und die
+  benutzerbezogene Profilwahl (`config.profile_for_user`) wirkte dort **nie**. Jetzt über den
+  ContextVar `image_gen.current_llm_profile`, den `_execute_tool` pro Aufruf setzt und im
+  `finally` zurücknimmt (gleiches Muster wie `set_tool_user`); ohne gesetztes Profil gilt
+  unverändert das globale.
+- **Dahinter lag ein zweiter, älterer Fehler: die Google-Bildgenerierung war für JEDES Profil
+  tot.** `GeminiProvider.generate_image` hatte `imagen-3.0-generate-002/-001` **hart verdrahtet
+  und den Parameter `model` ignoriert**. Am 2026-08-10 am DEV-Konto gemessen: beide Namen
+  → `404 NOT_FOUND`; angeboten werden `imagen-4.0-generate-001|-fast|-ultra` (`predict`) und
+  sechs `gemini-*-image`-Modelle (`generateContent`, Bild als `inline_data`). Jetzt vier Stufen:
+  (1) das Modell des Profils, **wenn es selbst ein Bildmodell ist** (`imagen`/`-image` im Namen)
+  – ein Admin, der bewusst `gemini-3.1-flash-image` einträgt, wurde vorher nicht bedient,
+  (2) aktuelle Imagen-Modelle, (3) Gemini-Bildmodelle, (4) erst dann **einmal `models.list()`**
+  und ein Bildmodell des Kontos suchen. Modellnamen veralten – eine fest verdrahtete Liste ist
+  der Fehler, ein Fund aus der Liste des Kontos die Reparatur.
+  **Merkregel:** Wenn ein Provider-Werkzeug ein Modell benutzt, das NICHT aus dem Profil kommt,
+  ist der Modellname ein Ablaufdatum im Code.
+- **Derselbe Fehler lag an FÜNF Stellen – jetzt zentral in `llm.provider_fuer_lauf()`.**
+  Der ContextVar heißt `llm.current_agent_profile` (in `image_gen` bleibt `current_llm_profile` als
+  Alias), gesetzt von `_execute_tool` pro Werkzeug-Aufruf. Umgestellt:
+  | Stelle | Werkzeug | vorher |
+  |---|---|---|
+  | `tools/image_gen.py` | `generate_image` | globales Profil |
+  | `skills/jira/main.py::_jira_llm` | `jira_org_analysis` (Map-Reduce) | globales Profil |
+  | `tools/reflection.py` | `reflection` | globales Profil |
+  | `skills/cognitive_evolution/engine.py::_mk_provider` | `evolution_*` | globales Profil |
+  | `web_extractor.py::_profile_provider` (Rückfall) | Extraktor/Compactor | globales Profil |
+  Ohne gesetzten ContextVar gilt unverändert das globale Profil – Endpunkte und Hintergrundläufe
+  ändern ihr Verhalten also nicht.
+- **DIE AUSNAHME, die bleiben MUSS: `main.py::_sec_llm_classify`.** Der Jailbreak-Klassifikator der
+  Sicherheitsschicht prüft die Eingabe eines Benutzers. Hinge er am Profil dieses Benutzers (oder
+  einer Rolle), ließe sich die Prüfung über ein eigenes, zahmes Modell gezielt aushebeln. Er nutzt
+  weiter `config.*`; die Begründung steht an der Stelle selbst, und ein Test hält fest, dass dort
+  **kein** `provider_fuer_lauf` aufgerufen wird. Ebenfalls unangetastet: `main.py:5288`
+  (`_feedback_self_improve`) und die Endpunkte, die ein Profil schon als Parameter nehmen
+  (`main.py:7279/7338`, `avatar.py`).
+  **Merkregel:** Werkzeuge folgen dem Profil des Laufs, Sicherheitsprüfungen NICHT.
+
+### Zwei Altfehler, die erst der Skill sichtbar gemacht hat (beide behoben)
+1. **`reload_skills()` verlor die halbe Werkzeugkiste.** Die Methode setzte
+   `_tool_instances = skill_manager.get_enabled_tools()` – und damit waren nach JEDEM
+   Skill-Ein/Aus die im Konstruktor angehaengten Werkzeuge weg: `spawn_agent`,
+   `create_chart`, `generate_image`, `search_image`, Clipboard, Windows-/Android-Desktop,
+   `wait_for_screen_change`, `reflection`. Bis zum naechsten Dienst-Neustart. Der Block ist
+   jetzt `_attach_extra_tools()` und wird an BEIDEN Stellen gerufen (Konstruktor + Reload),
+   danach werden Doppelte nach Namen entfernt.
+2. **Der Skill-Toggle erreichte den Hauptagenten nie.** `enable`/`disable` riefen
+   `agent_instance.reload_skills()` – `agent_instance` ist aber ein EIGENER Agent nur fuer die
+   Skill-Verwaltung (`_get_skill_manager`). Die Chats laufen auf `agent_manager.main_agent`,
+   der von einem Toggle nichts erfuhr: Skill einschalten wirkte erst nach einem Dienst-Neustart.
+   Jetzt `_reload_agent_tools()` (main.py) fuer beide; **Sub-Agenten bewusst nicht** – ein
+   Werkzeug-Tausch mitten in deren Lauf waere eine Ueberraschung, und sie sind kurzlebig.
+   Nachgemessen auf DEV: 69 Werkzeuge → disable → 69 → enable → 69, keine Doppelten, alle
+   Kern-Werkzeuge da, `skill_active` folgt dem Schalter ohne Neustart.
+3. **Eigene Regression beim Umbau (gefunden durch Zaehlen, nicht durch Tests):** beim Umstellen
+   von `image_gen.py` auf `provider_fuer_lauf` fiel `record_task_image()` einem Block-Ersatz zum
+   Opfer. `image_search.py` importiert die Funktion – `search_image` liess sich seither nicht
+   laden und fehlte STILL im Werkzeugkasten (Journal: „SearchImageTool nicht geladen: cannot
+   import name 'record_task_image'"). Ein Quelltext-Test auf die neuen Zeilen sieht das nicht.
+   Der Test prueft jetzt, dass **jeder Name, den ein anderes Modul aus `image_gen` importiert**,
+   dort vorhanden bleibt – er liest die Import-Zeile von `image_search.py` und leitet die
+   Erwartung daraus ab, statt eine Liste zu pflegen.
+   **Merkregel:** Nach einem Umbau die WERKZEUG-ANZAHL vergleichen. Ein fehlendes Werkzeug
+   meldet sich nicht – es ist einfach nicht da.
+
+**Verifiziert:** 151 Backend-Prüfungen lokal / 170 auf DEV im venv, 123 UI-Prüfungen (`tests/test_agent_roles.py` – Registry,
+Formel, Whitelist, Deckel, Sandkasten-Schranke, echte `run_task`-Läufe mit Stub-Provider inkl.
+Rückkanal, Rollen-Prompt, Werkzeugsatz, Dispatch-Schranke) + 71 UI-Prüfungen in jsdom
+(`tests/test_agent_roles_ui.js`, echte `settings.html` – Label-Klick genau einmal, POST/PUT,
+XSS, Klartext-Fehler, Lizenz-Hinweis, wanderndes Formular, Zeilen-Schalter, Skill-Hinweis; Teil 2
+mit echtem `app.js` ueber den Reiter-Klick). Live auf DEV: 401 ohne Token, 400 mit Grund bei
+Validierungsfehlern, Rollen gesät mit `0640 jarvis:jarvis`, `delegate` liefert das Enum,
+Delegation an `analyst` im Audit-Log belegt, ContextVar erreicht nachweislich den
+Gemini-Provider.
+**Ende-zu-Ende belegt (nach dem Bildmodell-Fix, 2026-08-10):** Auftrag „Erzeuge ein Bild: ein
+Fachwerkhaus im Sonnenuntergang, Aquarellstil" über `POST /api/agent/task` (also
+**unprivilegiert**, der Netzwerk-Benutzer-Fall) → Rolle `image_builder` **ohne** Profil = ehrliche
+Absage; nach Zuweisung von *Google Gemini 3.5 flash* → Delegation und **fertiges Bild**
+(`/api/generated/…png`, 14,5 s). Testzustand danach zurückgesetzt (`profile_id` wieder leer).
+**Vorgabe-Rollen tragen bewusst KEIN `profile_id`** (eine fest verdrahtete UUID zeigt auf einem
+fremden System ins Nichts) – `image_builder` ist deshalb erst nach Zuweisung eines bildfähigen
+Profils sinnvoll. Achtung Lizenz: FREE/BASIC erlauben **ein** LLM-Profil, ein rollen-eigenes
+Modell setzt ENTERPRISE voraus; das Formular sagt es, statt in einen 403 zu laufen.
+
 ## Multi-Agent System
 - **AgentManager** in `agent.py`: Verwaltet Haupt- und Sub-Agents
   - `get_or_create_main()`: Erstellt/gibt Hauptagent zurueck

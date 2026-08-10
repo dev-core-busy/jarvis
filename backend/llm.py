@@ -1,6 +1,7 @@
 """Jarvis LLM Provider Abstraktionsschicht."""
 
 import asyncio
+import contextvars
 import json
 import re
 import httpx
@@ -395,12 +396,28 @@ class GeminiProvider(LLMProvider):
         der Google-Provider nutzt dafuer sein Bildmodell (Imagen). Schlaegt der Zugriff
         fehl (Key ohne Imagen-Freigabe), wird der Fehler nach oben gereicht.
         """
-        img_models = ["imagen-3.0-generate-002", "imagen-3.0-generate-001"]
+        # ── Kandidaten in dieser Reihenfolge ────────────────────────────────
+        # 1. Das Modell des PROFILS, wenn es selbst ein Bildmodell ist. Das war
+        #    bis 2026-08-10 gar nicht moeglich: der Parameter `model` wurde
+        #    ignoriert und es liefen ausschliesslich zwei fest verdrahtete
+        #    Imagen-3-Namen. Ein Administrator, der bewusst ein Profil mit
+        #    `gemini-3.1-flash-image` anlegt, wurde davon nicht bedient.
+        # 2. Aktuelle Imagen-Modelle (`predict`).
+        # 3. Gemini-Bildmodelle (`generateContent` mit Bild-Ausgabe).
+        # 4. Erst wenn alles scheitert: EINMAL die Modellliste des Kontos
+        #    abfragen und ein Bildmodell suchen – Namen und Generationen wechseln,
+        #    eine fest verdrahtete Liste veraltet zwangslaeufig.
+        #
+        # GEMESSEN am 2026-08-10 auf DEV: `imagen-3.0-generate-001/002` gibt es
+        # nicht mehr (404 NOT_FOUND) – die Bildgenerierung war damit fuer JEDES
+        # Google-Profil tot, unabhaengig vom Key. Das Konto bot stattdessen
+        # imagen-4.0-generate-001 und sechs gemini-*-image-Modelle an.
+        prof_modell = (model or "").strip()
+        ist_bildmodell = any(t in prof_modell.lower() for t in ("imagen", "-image"))
 
-        def _call(m):
+        def _via_imagen(m):
             resp = self.client.models.generate_images(
-                model=m,
-                prompt=prompt,
+                model=m, prompt=prompt,
                 config=types.GenerateImagesConfig(number_of_images=1),
             )
             imgs = getattr(resp, "generated_images", None) or []
@@ -408,12 +425,61 @@ class GeminiProvider(LLMProvider):
                 raise RuntimeError("Keine Bilddaten vom Modell erhalten")
             return imgs[0].image.image_bytes
 
+        def _via_gemini(m):
+            """Gemini-Bildmodelle liefern das Bild als inline_data in der Antwort."""
+            resp = self.client.models.generate_content(model=m, contents=prompt)
+            for cand in (getattr(resp, "candidates", None) or []):
+                for part in (getattr(getattr(cand, "content", None), "parts", None) or []):
+                    blob = getattr(part, "inline_data", None)
+                    if blob is not None and getattr(blob, "data", None):
+                        return blob.data
+            raise RuntimeError("Keine Bilddaten vom Modell erhalten")
+
+        def _weg(m):
+            return _via_imagen if "imagen" in m.lower() else _via_gemini
+
+        kandidaten: list[str] = []
+        if ist_bildmodell:
+            kandidaten.append(prof_modell)
+        kandidaten += [
+            "imagen-4.0-generate-001", "imagen-4.0-fast-generate-001",
+            "gemini-3.1-flash-image", "gemini-2.5-flash-image",
+            # Alt-Namen bleiben hinten: auf einem aelteren Konto koennen sie
+            # noch die einzigen sein.
+            "imagen-3.0-generate-002", "imagen-3.0-generate-001",
+        ]
+
         last_err = None
-        for m in img_models:
+        versucht: set[str] = set()
+        for m in kandidaten:
+            if not m or m in versucht:
+                continue
+            versucht.add(m)
             try:
-                return await asyncio.to_thread(_call, m)
+                return await asyncio.to_thread(_weg(m), m)
             except Exception as e:
                 last_err = e
+
+        # Rueckfall: was bietet dieses Konto ueberhaupt an?
+        try:
+            def _suche():
+                out = []
+                for mm in self.client.models.list():
+                    n = str(getattr(mm, "name", "")).replace("models/", "")
+                    if ("imagen" in n or "-image" in n) and "preview" not in n:
+                        out.append(n)
+                return out
+            gefunden = [n for n in await asyncio.to_thread(_suche) if n not in versucht]
+            print(f"[LLM] Gemini-Bildgenerierung: Kandidaten erschoepft, Konto bietet "
+                  f"{gefunden[:5]}", flush=True)
+            for m in gefunden[:3]:
+                try:
+                    return await asyncio.to_thread(_weg(m), m)
+                except Exception as e:
+                    last_err = e
+        except Exception as e:  # noqa: BLE001
+            print(f"[LLM] Gemini-Modellliste nicht abrufbar: {e}", flush=True)
+
         raise RuntimeError(f"Bildgenerierung fehlgeschlagen: {last_err}")
 
     def _thinking_config(self, effort: str | None):
@@ -1433,6 +1499,55 @@ class AnthropicSessionProvider(LLMProvider):
 # ═══════════════════════════════════════════════════════════════════
 #  Provider-Factory
 # ═══════════════════════════════════════════════════════════════════
+
+# ─── Profil des LAUFENDEN Agenten ────────────────────────────────────────────
+# WARUM ES DAS BRAUCHT (Befund 2026-08-10):
+# Mehrere Werkzeuge bauten ihren Provider direkt aus `config.*`, also aus dem
+# GLOBAL aktiven Profil. Damit war in einem Agentenlauf sowohl das Profil eines
+# Rollen-Agenten als auch die benutzerbezogene Wahl (`config.profile_for_user`)
+# wirkungslos – gemessen bei `generate_image`: eine Rolle mit zugewiesenem
+# Bildmodell bekam trotzdem die Absage des Textmodells.
+#
+# `agent.py::_execute_tool` setzt diesen ContextVar fuer die Dauer EINES
+# Werkzeug-Aufrufs (try/finally, gleiches Muster wie `sandbox.set_tool_user`).
+# Ist er nicht gesetzt, gilt unveraendert das globale Profil – Endpunkte und
+# Hintergrundlaeufe aendern ihr Verhalten also nicht.
+#
+# BEWUSSTE AUSNAHME: `main.py::_sec_llm_classify` (Jailbreak-Klassifikator der
+# Sicherheitsschicht) benutzt WEITER das globale Profil. Haenge er am Profil des
+# Benutzers, koennte dieser die Sicherheitspruefung ueber ein eigenes Profil
+# aushebeln. Wer hier "vereinheitlicht", oeffnet eine Luecke.
+current_agent_profile: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_agent_profile", default=None)
+
+
+def provider_fuer_lauf(prompt_tool_calling: bool | None = None):
+    """``(provider, model)`` aus dem Profil des laufenden Agenten – sonst global.
+
+    Der eine Weg fuer alle Werkzeuge, die selbst ein Modell aufrufen. Wer
+    stattdessen `config.current_*` liest, baut den Fehler von oben neu.
+    """
+    from backend.config import config
+    p = current_agent_profile.get()
+    if not isinstance(p, dict) or not p:
+        ptc = (config.current_prompt_tool_calling if prompt_tool_calling is None
+               else bool(prompt_tool_calling))
+        return (get_provider(config.LLM_PROVIDER, config.current_api_key,
+                             config.current_api_url,
+                             auth_method=config.current_auth_method,
+                             session_key=config.current_session_key,
+                             prompt_tool_calling=ptc),
+                config.current_model)
+    ptc = (bool(p.get("prompt_tool_calling")) if prompt_tool_calling is None
+           else bool(prompt_tool_calling))
+    return (get_provider(p.get("provider") or config.LLM_PROVIDER,
+                         clean_api_key(p.get("api_key") or ""),
+                         p.get("api_url") or config.current_api_url,
+                         auth_method=p.get("auth_method") or "api_key",
+                         session_key=clean_api_key(p.get("session_key") or ""),
+                         prompt_tool_calling=ptc),
+            p.get("model") or config.current_model)
+
 
 def get_provider(
     provider_name: str,

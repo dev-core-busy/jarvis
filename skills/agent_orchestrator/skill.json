@@ -1,59 +1,33 @@
 {
     "name": "Agent Orchestrator",
-    "description": "Zerlegt große Aufgaben in koordinierte Sub-Agenten (Research, Code, Analysis, Writer, Review, Integration) via Dateisystem-Protokoll (inbox/outbox/status.json).",
-    "version": "1.0.0",
-    "author": "aatmaan1 (via OpenClaw, Wrapper: Jarvis)",
+    "description": "Delegation an spezialisierte Rollen-Agenten: der Hauptagent gibt Teilaufgaben an Rollen mit eigenem Auftrag, eigenem Werkzeugsatz und optional eigenem LLM-Profil, wartet auf das Ergebnis und arbeitet damit weiter.",
+    "version": "2.0.0",
+    "author": "Jarvis",
     "module": "main",
     "tools": [
-        "orchestrate_task",
-        "agent_status",
-        "agent_collect",
-        "agent_list"
+        "delegate"
     ],
     "category": "automation",
     "icon": "brain",
-    "source": "openclaw",
     "system": false,
     "enabled": false,
-    "config_schema": {
-        "workspace_root": {
-            "type": "string",
-            "default": "data/agent-workspaces",
-            "label": "Workspace-Verzeichnis (relativ zu Jarvis)"
-        }
-    },
     "knowledge_docs": [],
     "dependencies": [],
-    "permissions": ["filesystem"],
+    "permissions": [],
     "help": {
-        "details": "Koordiniert mehrere spezialisierte Sub-Agenten für komplexe, mehrstufige Aufgaben. Jeder Sub-Agent bekommt eine eigene Arbeitsumgebung mit Aufgabenbeschreibung (inbox), Ergebnis-Ablage (outbox) und Statusverfolgung (status.json). Ermöglicht parallele oder sequentielle Verarbeitung mit Abhängigkeitsverwaltung.",
+        "details": "Aktiviert das Werkzeug 'delegate'. Der Hauptagent erkennt anhand der Rollen-Beschreibung, welche Rolle für eine Teilaufgabe zuständig ist, übergibt sie, wartet auf das Ergebnis und arbeitet damit weiter (sequenziell, nicht parallel). Rollen werden unter Einstellungen → Orchestrator angelegt: Auftrag (System-Prompt), Werkzeug-Auswahl, LLM-Profil, Denktiefe und Schrittgrenze je Rolle. Ohne aktiven Skill gibt es kein 'delegate' und der Agent verhält sich unverändert.",
         "tools": [
             {
-                "name": "orchestrate_task",
-                "label": "Aufgabe orchestrieren",
-                "desc": "Zerlegt eine komplexe Aufgabe in Sub-Agenten und erstellt für jeden eine Arbeitsumgebung (inbox/outbox/workspace/status.json). Agent-Typen: research (Recherche), code (Programmierung), analysis (Datenanalyse), writer (Texterstellung), review (Qualitätsprüfung), integration (Ergebnisse zusammenführen)."
-            },
-            {
-                "name": "agent_status",
-                "label": "Agenten-Status",
-                "desc": "Zeigt den aktuellen Status aller Sub-Agenten einer Session: ⏸ pending, 🔄 running, ✅ completed, ❌ failed. Gibt auch Fortschritt, Anzahl der Ausgabedateien und Fehlermeldungen aus."
-            },
-            {
-                "name": "agent_collect",
-                "label": "Ergebnisse einsammeln",
-                "desc": "Liest alle Ergebnisdateien (outbox/) aus abgeschlossenen Sub-Agenten einer Session ein und gibt sie gesammelt zurück. Optional: nur einen bestimmten Agenten auslesen."
-            },
-            {
-                "name": "agent_list",
-                "label": "Sessions auflisten",
-                "desc": "Listet alle vorhandenen Orchestrierungs-Sessions mit Anzahl der Agenten und Abschlussgrad auf."
+                "name": "delegate",
+                "label": "An Rolle übergeben",
+                "desc": "Übergibt eine Teilaufgabe an eine eingerichtete Rolle und gibt deren Ergebnis zurück. Die Rolle sieht nur den übergebenen Auftragstext, nicht das Gespräch. Beispiele: Bildaufträge an eine Rolle mit Bildmodell, Auswertungen an eine Rolle mit hoher Denktiefe, Dokumente an eine Rolle mit den Office-Werkzeugen."
             }
         ],
         "use_cases": [
-            "Analysiere die Verkaufszahlen aus Q4 und erstelle einen strukturierten Bericht mit Empfehlungen",
-            "Recherchiere aktuelle Python-Best-Practices, implementiere sie im Projekt und überprüfe das Ergebnis",
-            "Was ist der Status der laufenden Agent-Session 'marktanalyse-2024'?"
+            "Erzeuge ein Bild von einem Fachwerkhaus im Aquarellstil",
+            "Wertet die Verkaufszahlen aus Q4 aus und nennt die Auffälligkeiten mit Quellen",
+            "Erstelle daraus eine PowerPoint im Hausdesign"
         ],
-        "notes": "Die Workspaces liegen unter data/agent-workspaces/<session>/<agent>/. Jarvis bearbeitet jeden Sub-Agenten selbst: inbox lesen → Arbeit ausführen → outbox befüllen → status=completed setzen. Sicherheitsschicht: Sub-Agenten erben die Rechte des startenden Benutzers – für Netzwerk-/Domain-Benutzer gelten dieselben Sandbox-Beschränkungen (Datei-/Shell-Confinement, keine Secrets/Root) wie im Chat; keine Rechteausweitung über Sub-Agenten."
+        "notes": "SICHERHEIT: Eine Rolle kann NIE mehr als der Benutzer, der sie beauftragt – ihr Werkzeugsatz wird mit dessen Rechten geschnitten (Rollen-Whitelist ∩ verfügbare Werkzeuge − Sperrliste). Alle Sandbox-Schranken (Pfad-Confinement, Dokument-Eigentümer, Shell-Policy) gelten im Rollen-Lauf unverändert; der Auftraggeber wird 1:1 vererbt. Rollen ANLEGEN ist Administratoren vorbehalten (die Definition enthält einen System-Prompt und wirkt in künftigen Läufen), das BENUTZEN steht auch Netzwerk-Benutzern offen. Ein Rollen-Agent kann nicht selbst delegieren (Rekursionsschutz), höchstens 8 Delegationen je Auftrag. Bis Version 1.0.0 enthielt dieser Skill vier Werkzeuge, die nur Verzeichnisse unter data/agent-workspaces/ anlegten und keinen Agenten starteten – sie sind ersetzt; vorhandene Verzeichnisse bleiben unangetastet."
     }
 }

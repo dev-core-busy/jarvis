@@ -118,3 +118,8 @@ data/vorlagen/
 license-manager/
 # Lizenz-Zustand einer Installation (Schluessel, Bindung, letzter Statusabruf).
 data/license.json
+# Rollen-Definitionen der spezialisierten Agenten (Skill "Agent Orchestrator").
+# Pro Server gepflegt wie data/instructions/ – und der dort gespeicherte Prompt
+# wirkt in kuenftigen Laeufen. Vorgaben liegen versioniert in
+# skills/agent_orchestrator/main.py (VORGABE_ROLLEN in backend/agent_roles.py).
+data/agent_roles.json

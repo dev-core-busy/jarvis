@@ -134,6 +134,12 @@ _APP_DENY_REL = (
     # data/instructions. Ein beschreibbarer Eintrag waere ein dauerhafter Kanal
     # in den System-Prompt eines Rollen-Agenten.
     "data/agent_roles.json",
+    # Login-Caches (main.py::_load_ad_caches): Gruppen-DNs und die Rechte-Flags
+    # kb_editor/internet/**admin** aller kuerzlich angemeldeten Benutzer. Lesen
+    # verraet die AD-Struktur; SCHREIBEN waere mit `{"admin": true}` der
+    # bequemste Weg zu Administratorrechten – deshalb sensibel, nicht bloss
+    # "nicht im Arbeitsbereich".
+    "data/ad_cache.json",
 )
 
 
@@ -164,7 +170,7 @@ PRIVATE_MODE = 0o750
 # Leserechte, genau wie 2026-07-28 bei data/chats.
 PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/security_state.json", "data/license.json",
-                 "data/agent_roles.json")
+                 "data/agent_roles.json", "data/ad_cache.json")
 PRIVATE_FILE_MODE = 0o640
 
 
@@ -327,7 +333,7 @@ def strip_quoted(cmd: str) -> str:
 SHELL_SECRET_PATHS = re.compile(
     r'\.env\b|settings\.json\b|memory\.json\b|auth_state\.json\b|credentials\.json\b|'
     r'scheduled_jobs\.json\b|file_watchers\.json\b|security_state\.json\b|'
-    r'license\.json\b|license_root\.pub\b|agent_roles\.json\b|'
+    r'license\.json\b|license_root\.pub\b|agent_roles\.json\b|ad_cache\.json\b|'
     # data/chats: fremde Chat-Verlaeufe (in der Shell zusaetzlich per 0750 gesperrt)
     r'data/chats\b|'
     r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'

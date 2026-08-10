@@ -1236,6 +1236,119 @@ def _check_knowledge_edit_permission_with_conn(username: str, conn, base_dn: str
 _internet_access_cache: dict[str, bool] = {}
 _admin_access_cache: dict[str, bool] = {}
 
+# ─── Login-Caches ueberdauern einen Dienst-Neustart ──────────────────────────
+# WARUM (gefunden 2026-08-10): Die vier Caches oben (`_user_group_dns_cache`,
+# `_knowledge_editor_cache`, `_internet_access_cache`, `_admin_access_cache`)
+# werden AUSSCHLIESSLICH beim AD-Login gefuellt – die Tokens sind dagegen
+# zustandslose HMAC-Zeichenketten und ueberleben jeden Neustart. Nach einem
+# `systemctl restart` (Deploy, Auto-Update um 03:00) ist der Prozess neu, die
+# dicts sind leer, der Benutzer aber weiter angemeldet. Damit verliert er STILL
+# alle gruppenbasierten Rechte:
+#   * LLM-Profile mit `allowed_group` verschwinden aus dem Umschalter,
+#   * SAP-Zugriff per Gruppe (`_user_may_use_sap`) → 403 "nicht freigeschaltet",
+#   * gruppenspezifische Wissens-Editor-Rechte,
+#   * Internet-Zugriff → "Zugriff verweigert" bei curl/wget,
+#   * **Administrator-Status per AD-Gruppe** (`_is_admin_user` → `.get(plain,
+#     False)`) – der Betroffene wird von /settings aufs Portal umgeleitet.
+# Die Fehlermeldungen behaupten dabei eine fehlende Berechtigung, die es gibt.
+#
+# Selbstheilung ist da, aber langsam und BEDINGT: `_revalidate_ad_groups_once()`
+# fuellt die Caches nach – nur wenn ein Service-Konto (`ad_bind_user`)
+# konfiguriert ist, und der Loop schlaeft ZUERST (Standard 10 Minuten). Ohne
+# Service-Konto bleibt der Verlust bis zur Neuanmeldung.
+#
+# KEIN Sicherheitsrueckschritt: ohne Neustart haelt der In-Memory-Cache ein
+# entzogenes Recht genauso lange (bis Logout oder Revalidierung). Die Persistenz
+# macht den Neustart-Fall dem Normalfall gleich, statt ihn schlechter zu stellen.
+# Obergrenze ist `_AD_CACHE_TTL`; Login und Revalidierung ueberschreiben immer.
+_AD_CACHE_FILE = Path(__file__).parent.parent / "data" / "ad_cache.json"
+_AD_CACHE_TTL = 86400.0        # 24 h – gleiches Fenster wie `_ad_seen_users`
+_AD_CACHE_MIN_INTERVAL = 5.0   # Schreib-Drosselung (Login-Bursts)
+_ad_cache_last_write = 0.0
+
+
+def _load_ad_caches() -> None:
+    """Login-Caches beim Start aus data/ad_cache.json wiederherstellen.
+
+    Fail-safe: jeder Fehler laesst die Caches leer – dann gilt exakt das
+    Verhalten von vorher (Rechte erst nach Neuanmeldung/Revalidierung).
+    """
+    try:
+        if not _AD_CACHE_FILE.exists():
+            return
+        roh = json.loads(_AD_CACHE_FILE.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Login-Caches nicht lesbar ({e}) – starte leer", flush=True)
+        return
+    now = time.time()
+    n = 0
+    for plain, e in (roh.get("users") or {}).items():
+        if not isinstance(e, dict):
+            continue
+        # Eintrag OHNE Zeitstempel wird verworfen, nicht geraten: ein fehlendes
+        # Datum ist kein Beweis fuer Aktualitaet (gleiche Regel wie bei der
+        # Log-Aufbewahrung, nur hier fail-CLOSED – es geht um Rechte).
+        ts = e.get("ts")
+        if not isinstance(ts, (int, float)) or (now - ts) > _AD_CACHE_TTL:
+            continue
+        key = _norm_login(str(plain))
+        if not key:
+            continue
+        dns = e.get("group_dns")
+        if isinstance(dns, list):
+            _user_group_dns_cache[key] = [str(x) for x in dns]
+        for feld, ziel in (("kb_editor", _knowledge_editor_cache),
+                           ("internet", _internet_access_cache),
+                           ("admin", _admin_access_cache)):
+            if isinstance(e.get(feld), bool):
+                ziel[key] = e[feld]
+        # Aktivitaets-Zeitstempel mitnehmen, damit die Revalidierung den Benutzer
+        # auch ohne neuen Request wieder auf dem Schirm hat.
+        _ad_seen_users.setdefault(key, float(ts))
+        n += 1
+    if n:
+        print(f"[AUTH] Login-Caches wiederhergestellt: {n} Benutzer", flush=True)
+
+
+def _save_ad_caches(force: bool = False) -> None:
+    """Login-Caches auf Platte schreiben (atomar, gedrosselt).
+
+    Die Datei enthaelt Gruppen-DNs und Rechte-Flags. Sie ist 0640 und steht in
+    `sandbox._APP_DENY_REL` / `PRIVATE_FILES` / `SHELL_SECRET_PATHS`: waere sie
+    BESCHREIBBAR, waere `{"admin": true}` der bequemste Weg zu
+    Administratorrechten – die Leseschranke ist dabei der geringere Teil.
+    """
+    global _ad_cache_last_write
+    now = time.time()
+    if not force and (now - _ad_cache_last_write) < _AD_CACHE_MIN_INTERVAL:
+        return
+    _ad_cache_last_write = now
+    users: dict = {}
+    for key in set(_user_group_dns_cache) | set(_knowledge_editor_cache) \
+            | set(_internet_access_cache) | set(_admin_access_cache):
+        ts = _ad_seen_users.get(key, now)
+        if (now - ts) > _AD_CACHE_TTL:
+            continue
+        e: dict = {"ts": ts}
+        if key in _user_group_dns_cache:
+            e["group_dns"] = _user_group_dns_cache[key]
+        if key in _knowledge_editor_cache:
+            e["kb_editor"] = bool(_knowledge_editor_cache[key])
+        if key in _internet_access_cache:
+            e["internet"] = bool(_internet_access_cache[key])
+        if key in _admin_access_cache:
+            e["admin"] = bool(_admin_access_cache[key])
+        users[key] = e
+    try:
+        _AD_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _AD_CACHE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"users": users}, ensure_ascii=False),
+                       encoding="utf-8")
+        os.chmod(tmp, 0o640)
+        os.replace(tmp, _AD_CACHE_FILE)   # atomar: kein halber Stand bei Absturz
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Login-Caches nicht schreibbar: {e}", flush=True)
+
 
 def _check_internet_access_with_conn(username: str, conn, base_dn: str) -> bool:
     """Prüft ob ein AD-User Internet-Abfragen machen darf (nur beim Login – LDAP-Bind aktiv).
@@ -1454,17 +1567,33 @@ def _revalidate_ad_groups_once() -> dict:
             pass
     if res["revoked"]:
         _save_revocations()
+    if res["checked"]:
+        _save_ad_caches(force=True)   # aufgefrischte Rechte ueberdauern den Neustart
     return res
 
 
 async def _ad_revalidation_loop():
-    """Hintergrund-Task: periodische Nachpruefung der AD-Gruppen-Mitgliedschaft."""
+    """Hintergrund-Task: periodische Nachpruefung der AD-Gruppen-Mitgliedschaft.
+
+    ERSTER LAUF FRUEH, nicht erst nach dem Intervall: der Loop schlief bisher
+    zuerst, ein Neustart bedeutete also bis zu 10 Minuten mit leeren
+    Login-Caches (siehe `_load_ad_caches`). Die Persistenz deckt das ab, der
+    fruehe Lauf ist die zweite Halbhaelfte – er holt Gruppenaenderungen nach, die
+    waehrend der Ausfallzeit passiert sind.
+    """
+    erster = True
     while True:
         try:
             minutes = int(float(config.get_setting("ad_revalidate_minutes", 10) or 0))
         except Exception:  # noqa: BLE001
             minutes = 10
-        await asyncio.sleep(minutes * 60 if minutes > 0 else 300)
+        if erster:
+            # 45 s: der Start soll fertig sein (LDAP-Einstellungen gelesen,
+            # Caches geladen), aber der Blindflug kurz bleiben.
+            await asyncio.sleep(45)
+            erster = False
+        else:
+            await asyncio.sleep(minutes * 60 if minutes > 0 else 300)
         if minutes <= 0:
             continue  # deaktiviert – Intervall-Setting weiter beobachten
         if not (config.get_setting("ad_server", "") and config.get_setting("ad_domain", "")):
@@ -1477,6 +1606,20 @@ async def _ad_revalidation_loop():
                 print(f"[AUTH] Revalidierung uebersprungen: {r['skipped']}", flush=True)
         except Exception as e:  # noqa: BLE001
             print(f"[AUTH] Revalidierung Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
+async def startup_ad_caches():
+    """Login-Caches wiederherstellen – VOR dem ersten Request.
+
+    Synchron im Startup-Hook (die Datei ist klein) und nicht in einem Task:
+    ein Request, der eine Zehntelsekunde zu frueh kommt, saehe sonst leere
+    Caches und bekaeme eine falsche Absage – genau der Fehler, der behoben wird.
+    """
+    try:
+        _load_ad_caches()
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Login-Caches konnten nicht geladen werden: {e}", flush=True)
 
 
 @app.on_event("startup")
@@ -1581,6 +1724,13 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
                     conn, base_dn, username
                 )
                 conn.unbind()
+                # Auf Platte sichern, damit ein Dienst-Neustart die Rechte nicht
+                # verschluckt (siehe _load_ad_caches). `_ad_seen_users` traegt den
+                # Zeitstempel; er wird in _login_still_allowed pro Request gesetzt,
+                # beim ERSTEN Login aber noch nicht – deshalb hier setzen, sonst
+                # bekaeme der Eintrag `now` und ueberlebte spaeter zu lange.
+                _ad_seen_users[plain_key] = time.time()
+                _save_ad_caches(force=True)
                 if allowed:
                     # Erfolgreicher Login beweist die Berechtigung neu ->
                     # frueheren Widerruf aufheben (Registry sauber halten)
@@ -5209,13 +5359,40 @@ async def activate_profile(profile_id: str, user: str = Depends(require_local_au
 @app.get("/api/llm/profiles")
 async def llm_profiles_list(user: str = Depends(require_auth)):
     """Nur die Profile, die DIESER Benutzer nutzen darf, + aktives Profil.
-    (Pro-Profil-Berechtigung, Default alle.)"""
-    usable = [p for p in config.profiles if _may_use_profile(user, p)]
-    profs = [{"id": p["id"], "name": p.get("name", p["id"]),
-              "provider": p.get("provider", ""), "model": p.get("model", "")}
-             for p in usable]
-    return JSONResponse({"ok": True, "profiles": profs,
-                         "active_id": config.active_profile_id_for_user(user)})
+    (Pro-Profil-Berechtigung, Default alle.)
+
+    DAS AKTIVE PROFIL IST IMMER DABEI – auch ohne Umschalt-Berechtigung
+    (``locked: true``). Gemeldet 2026-08-10 als "nach einer Bildgenerierung kann
+    ich kein LLM-Profil mehr auswaehlen"; gemessen auf DEV lieferte dieser
+    Endpunkt ``profiles: []`` bei gesetztem ``active_id``. Ursache: alle Profile
+    dort sind auf AD-Benutzer/-Gruppen eingeschraenkt, und ``_may_use_profile``
+    kennt bewusst KEINEN Admin-Bypass. Die Berechtigung steuert aber nur das
+    UMSCHALTEN – benutzt wird das global aktive Profil trotzdem. Herausgekommen
+    ist eine Anzeige, die den eigenen Zustand verschweigt: der Umschalter war
+    leer (``profile_switcher.js`` versteckt sich bei 0 Profilen), obwohl der Chat
+    mit einem Profil lief. Dieselbe Klasse wie der Trenner "Neue Sitzung" und der
+    Audit-Filter: **eine Anzeige darf keinen Zustand behaupten, den sie nicht
+    kennt** – und "kein Profil" ist eine Behauptung.
+
+    Der NAME ist dabei nichts Neues: ``GET /api/llm/active-status`` gibt
+    ``profile_name`` seit jeher an jeden angemeldeten Benutzer heraus (die
+    Status-Pille zeigt ihn an). Zugangsdaten enthaelt die Antwort nicht.
+    ``POST /api/llm/profiles/{id}/activate`` prueft weiterhin
+    ``_may_use_profile`` – gezeigt wird mehr, erlaubt nicht.
+    """
+    aktiv_id = config.active_profile_id_for_user(user)
+    profs = []
+    for p in config.profiles:
+        darf = _may_use_profile(user, p)
+        if not darf and p.get("id") != aktiv_id:
+            continue
+        eintrag = {"id": p["id"], "name": p.get("name", p["id"]),
+                   "provider": p.get("provider", ""), "model": p.get("model", "")}
+        if not darf:
+            # Sichtbar, weil es laeuft – aber nicht waehlbar (activate → 403).
+            eintrag["locked"] = True
+        profs.append(eintrag)
+    return JSONResponse({"ok": True, "profiles": profs, "active_id": aktiv_id})
 
 
 @app.post("/api/llm/profiles/{profile_id}/activate")
@@ -12282,7 +12459,7 @@ ERINNERUNGEN per WhatsApp (nur EINMALIG und nur fuer freigegebene Nummern):
 - "Lösche die Erinnerung / den Cron-Job X" → cron_delete mit der Job-ID
 
 WICHTIG fuer Erinnerungen:
-- Das aktuelle Datum und die Uhrzeit per shell_execute ermitteln (date '+%d %m %Y %H:%M') bevor du den Cron-Ausdruck berechnest.
+- Datum, Uhrzeit und Wochentag stehen im Abschnitt JETZT deines System-Prompts – rechne den Cron-Ausdruck daraus. Ermittle sie NICHT ueber die Shell (kein `date`): das kostet einen zusaetzlichen Schritt und scheitert, sobald der shell-Skill nicht aktiv ist.
 - IMMER einmalig=True. Wiederkehrende Erinnerungen und ueberhaupt jeder zeitgesteuerte
   AUFTRAG (etwas tun statt nur erinnern) sind ueber WhatsApp nicht moeglich – das muss ein
   Administrator im Portal anlegen. Sag das dann klar und versuche es NICHT umformuliert erneut.
@@ -12658,8 +12835,24 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                             _work = None
                         _wo = (f"{_work.as_posix()} (per Shell lesbar) bzw. "
                                if _work else "")
+                        # Die genannten Werkzeuge kommen aus SKILLS und koennen fehlen
+                        # (office ist per Vorgabe aus, filesystem abschaltbar) – ein
+                        # Hinweis auf ein nicht vorhandenes Werkzeug endet in
+                        # "Tool nicht gefunden". Deshalb nur nennen, was da ist; ist
+                        # keins davon da, bleibt der /tmp-Pfad fuer die Shell.
+                        _lese_tools = []
+                        try:
+                            _vorh = {getattr(t, "name", "")
+                                     for t in getattr(agent_manager.main_agent, "_tool_instances", [])}
+                            if "office_read" in _vorh:
+                                _lese_tools.append("office_read")
+                            if "filesystem" in _vorh:
+                                _lese_tools.append("filesystem")
+                        except Exception:
+                            _lese_tools = ["office_read", "filesystem"]
+                        _via = (f" via {'/'.join(_lese_tools)}" if _lese_tools else "")
                         _note = (f"[Angehängte Datei '{_name}' liegt unter: {_wo}"
-                                 f"'{_dest.name}' via office_read/filesystem. "
+                                 f"'{_dest.name}'{_via}. "
                                  f"Fuer Shell-Skripte (pandas, openpyxl) IMMER den "
                                  f"/tmp-Pfad verwenden – data/documents ist fuer die "
                                  f"Shell gesperrt. "

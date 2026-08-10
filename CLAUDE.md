@@ -2564,6 +2564,159 @@ Das Pulldown braucht davon nichts (nur `id`/`name`/`color`/`count`).
     `settings.html`, Eintrag in `TARGETS`/`TAB_BUTTONS` (skillcfg.js), `SKILL_TABS`
     (skills.js) und `SKILLCFG_TABS` (app.js).
 
+## Skill-Audit: laeuft das Restsystem ohne den Skill? (2026-08-10)
+Auftrag des Nutzers: „pruefe alle moeglichen Skills darauf, ob das komplette Restsystem noch
+korrekt arbeitet, wenn der Skill deaktiviert oder deinstalliert ist". Waechter:
+`tests/test_skill_audit.py` (50 Pruefungen, ohne fastapi lauffaehig – die Klassenteile werden
+per `ast` aus `agent.py` extrahiert, `backend.config` ist ein Stub).
+
+- **`"system": true` SCHUETZT NUR GEGEN DAS LOESCHEN – das ist die Voraussetzung fuer alles
+  Weitere.** In `skills/manager.py` fragt ausschliesslich `uninstall_skill()` das Feld ab
+  (`DELETE /api/skills/{name}` → 400). `disable_skill`, `remove_skill` und `purge_skill` nehmen
+  **jeden** Namen an, die Endpunkte pruefen nichts, im Frontend gibt es nur ein `confirm()`.
+  Damit sind auch `shell`, `filesystem`, `knowledge`, `memory`, `screenshot`, `desktop`, `cron`
+  und `cognitive_evolution` abschaltbar. **Die Annahme „System-Skill = immer da" traegt keine
+  Zeile Code** – sie war der Grund, warum die Kopplungen unten jahrelang unauffaellig blieben.
+- **Der SYSTEM_PROMPT verlangte Werkzeuge aus ACHT Skills, abgedeckt war einer.** Am
+  Prompt-Literal gezaehlt: `shell_execute` 10x, `memory_manage` 9x, `knowledge_search` 8x,
+  `office_*` 5x, `filesystem` 3x, `screenshot` 2x (`browser_control` nur negativ – „kein
+  browser_control" – und damit harmlos). Fehlt das Werkzeug, ruft das Modell es trotzdem auf
+  („Tool nicht gefunden") oder verweigert die Aufgabe mit einer Begruendung, die niemand
+  nachvollziehen kann. **`office` ist per Vorgabe AUS** (`enabled: false`) – der Widerspruch
+  stand also auf JEDEM frisch installierten System, nicht in einem Sonderfall.
+- **`_SKILL_PFLICHT_TOOLS` ist jetzt vollstaendig**, und die Texte nennen den ERSATZWEG, nicht
+  nur die Abwesenheit: ohne `memory_manage` entfallen Punkt 3 und 12, ohne `filesystem` keine
+  Dateipfade, ohne `screenshot` entfaellt Punkt 8 fuer Linux.
+- **`_pflicht_hinweise(vorhanden)` statt eines starren dicts**, weil `office_*` und
+  `shell_execute` VONEINANDER abhaengen: Punkt 16 nennt zwei Wege zum Dokument. Faellt einer
+  weg, ist der andere die Antwort (`office` weg → python-docx/openpyxl/python-pptx via
+  `shell_execute`; `shell` weg → `create_chart` fuer Diagramme). **Fallen beide weg, kann gar
+  kein Dokument entstehen – und genau das muss der Agent SAGEN**, statt es zu versuchen. Ein
+  dict kann diese Fallunterscheidung nicht treffen.
+- **Kern-Zweige, die ein Skill-Werkzeug SELBST aufrufen, brauchen eine Bedingung:** das
+  Auto-Learning rief `_execute_tool("memory_manage", …)` in `run_task` UND `_run_headless`.
+  Ohne den Skill kostete das einen zusaetzlichen LLM-Aufruf und endete in „Tool nicht
+  gefunden". Jetzt `and "memory_manage" in self.tools_map` an **beiden** Stellen.
+- **Vorbild-Muster, das erhalten bleiben muss:** `jira`/`confluence` machen es richtig –
+  `if "confluence_search" in self.tools_map` baut den Prompt-Abschnitt nur, wenn das Werkzeug
+  im Kasten liegt. Der Anhang-Hinweis in `main.py` nennt seine Lese-Werkzeuge jetzt genauso
+  bedingt (`_lese_tools`), statt `office_read/filesystem` fest zu behaupten.
+- **Die drei Skill-Importe im Kern sind abgesichert** (`skills.office` in `main.py`,
+  `skills.vision.main` in `main.py`, `skills.telegram` in `reminders.py`) – nach einem Purge ist
+  der Ordner weg, ein ungeschuetzter Import waere ein 500er mit technischem Text.
+- **Merkregel:** Ein Prompt ist Code. Wer ein Werkzeug namentlich in einen Prompt schreibt,
+  bindet sich an dessen Existenz – und die haengt an einem Schalter, den ein Administrator
+  jederzeit umlegt. Entweder bedingt formulieren (`in self.tools_map`) oder eine Klarstellung
+  mit Ersatzweg hinterlegen.
+- **Nicht geaendert (bewusst):** die Sperr- und Policy-Listen (`_BLOCKED_TOOLS_FOR_LDAP`,
+  `_INTERNET_TOOLS`, `_CACHEABLE_TOOLS`, `learning.py`) nennen Skill-Werkzeuge ebenfalls – ein
+  nicht vorhandener Name in einer Sperrliste stoert nicht. Ebenso `backend/desktop_control.py`:
+  das ist ein Kern-Modul und NICHT das Werkzeug `desktop_control` aus dem Skill `desktop`; die
+  Namensgleichheit verleitet beim Grep zu Fehlschluessen.
+- **Verifiziert:** 50 Pruefungen lokal und auf DEV im echten venv; Gegenprobe gegen den alten
+  Stand bricht mit **Exit 2** ab (`_pflicht_hinweise` fehlt dort) – deshalb Exit 2 und nicht
+  1/0, sonst waere „konnte nicht laufen" von „bestanden" nicht zu unterscheiden. Live gegen das
+  ECHTE Modul auf DEV: 70 Werkzeuge, alles vorhanden → **leerer** Anhang (kein Rauschen im
+  Prompt), `office_*` entfernt → shell-Weg, beide entfernt → klare Absage; und ein echter
+  LLM-Aufruf mit office-losem Prompt schreibt tatsaechlich ein python-pptx-Skript, statt
+  `office_create_powerpoint` zu rufen. `settings.json` dabei md5-gleich (die Probe filtert die
+  Werkzeugliste nur im Speicher).
+
+## Der Agent kannte Datum und Uhrzeit nicht (Fix 2026-08-10)
+Beim Audit gefunden: der System-Prompt nannte den aktuellen Zeitpunkt an **keiner** Stelle
+(`grep` auf `datetime.now`, „Datum", „Uhrzeit" in `agent.py` → nichts). Ein Sprachmodell kennt
+ihn nicht – es kann ihn nur erfragen oder raten.
+- **Was das gekostet hat:** `WA_TASK_PROMPT` musste anweisen, das Datum „per shell_execute
+  ermitteln (`date '+%d %m %Y %H:%M'`)", nur um den Cron-Ausdruck einer Erinnerung zu rechnen –
+  ein Werkzeug-Schritt samt zweitem LLM-Aufruf fuer eine Information, die in den Prompt gehoert,
+  **und ohne den (abschaltbaren) shell-Skill ist jede Erinnerung damit unmoeglich**. Auf einer
+  erzeugten PowerPoint-Titelfolie stand `$(date +%d.%m.%Y)` woertlich (Vorfall gleicher Tag);
+  behoben wurde damals nur die NACHWIRKUNG in `vorlage._text_bereinigen()`. **Das hier ist die
+  Ursache.**
+- **`_zeit_hinweis()`** haengt einen Abschnitt `## JETZT` mit Wochentag, Datum, Uhrzeit und
+  Zeitzone an – in **allen drei** Zweigen von `_base_system_prompt()` (Rolle, Sub-Agent,
+  Hauptagent): das Datum ist eine Tatsache ueber die Welt, keine Verhaltensregel.
+- **Der Zeitpunkt wird pro AUFTRAG eingefroren, nicht pro Schritt.** `run_task`/`_run_headless`
+  bauen den System-Prompt genau einmal und verwenden ihn fuer alle Werkzeug-Schritte (ein Test
+  haelt das fest). Ein Wert, der sich mitten im Lauf aendert, wuerde das Prompt-Caching der
+  Anbieter bei jedem Schritt verwerfen – und „jetzt" soll waehrend eines Auftrags dasselbe
+  bedeuten.
+- **Der Abschnitt steht am ENDE des Prompts** (live gemessen: Zeichen 17.852 von 18.195, 98 %):
+  der lange, stabile Teil davor bleibt als Cache-Praefix unangetastet.
+- **Zeitzone aus der Systemeinstellung** (`datetime.now().astimezone()`), nicht fest
+  „Europe/Berlin" – ein Server kann anders stehen, und eine falsche Zone ist schlimmer als
+  keine Angabe. Faellt die Ermittlung aus, laeuft der Agent ohne Zeitangabe weiter wie vorher.
+- Der Text verbietet ausdruecklich beides: `date` per Shell zu rufen UND einen Platzhalter wie
+  `$(date)` in ein Ergebnis zu schreiben.
+- **Verifiziert live auf DEV** ueber `POST /api/agent/task` (echter Lauf, echtes Modell):
+  „Das aktuelle Datum ist Montag, der 10. August 2026, und die Uhrzeit ist 19:49 Uhr (CEST)." –
+  Serverzeit `Montag, 10.08.2026 19:49 CEST`, und im Tool-Audit-Log steht fuer diesen Lauf
+  **kein einziger Werkzeug-Aufruf** (also kein `date` per Shell).
+
+## Login-Rechte verschwanden bei jedem Dienst-Neustart (Fix 2026-08-10)
+**Gemeldet als** „warum kann ich auf DEV nach einer Bildgenerierung kein LLM-Profil mehr
+auswaehlen?". Nicht die Bildgenerierung war die Ursache, sondern die **Neustarts danach** –
+gemessen 22 an einem Tag im Deploy-Zyklus. Waechter: `tests/test_ad_cache.py` (39 Pruefungen).
+- **Vier Berechtigungs-Caches werden AUSSCHLIESSLICH beim AD-Login gefuellt, die Tokens sind
+  aber zustandslose HMAC-Zeichenketten und ueberleben jeden Neustart.** Nach `systemctl restart`
+  ist der Prozess neu, die dicts sind leer, der Benutzer bleibt angemeldet – und verliert still:
+  | Cache | Was ausfaellt |
+  |---|---|
+  | `_user_group_dns_cache` | LLM-Profile mit `allowed_group` (Umschalter!), SAP-Zugriff per Gruppe, gruppenspezifische Wissens-Editoren |
+  | `_admin_access_cache` | **Administrator-Status per AD-Gruppe** – `app.js` leitet bei `is_admin === false` vom Einstellungen-Reiter aufs Portal um |
+  | `_internet_access_cache` | Internet-Zugriff → „Zugriff verweigert" bei curl/wget |
+  | `_knowledge_editor_cache` | Wissens-Editor-Rechte |
+  Die Meldungen behaupten dabei eine fehlende Berechtigung, die es gibt.
+- **Selbstheilung war da, aber langsam und bedingt:** `_revalidate_ad_groups_once()` fuellt die
+  Caches nach – nur mit konfiguriertem Service-Konto (`ad_bind_user`), und der Loop **schlief
+  ZUERST** (Vorgabe 10 Minuten). Ohne Service-Konto blieb der Verlust bis zur Neuanmeldung.
+- **`_load_ad_caches()` / `_save_ad_caches()` + `data/ad_cache.json`.** Geladen **synchron im
+  Startup-Hook**, nicht als Task: ein Request eine Zehntelsekunde zu frueh saehe leere Caches
+  und bekaeme eine falsche Absage – genau der Fehler, der behoben wird.
+- **KEIN Sicherheitsrueckschritt:** ohne Neustart haelt der In-Memory-Cache ein entzogenes Recht
+  genauso lange (bis Logout oder Revalidierung). Die Persistenz stellt den Neustart-Fall dem
+  Normalfall gleich. Obergrenze `_AD_CACHE_TTL = 24 h` (gleiches Fenster wie `_ad_seen_users`),
+  Login und Revalidierung ueberschreiben immer.
+- **`data/ad_cache.json` ist 0640 und steht in `_APP_DENY_REL`, `PRIVATE_FILES` und
+  `SHELL_SECRET_PATHS`.** Lesen verraet die AD-Struktur (22 Gruppen-DNs je Benutzer), aber
+  **SCHREIBEN waere mit `{"admin": true}` der bequemste Weg zu Administratorrechten** – das ist
+  der eigentliche Grund fuer die Sperre.
+- **Fail-closed beim Laden:** Eintrag ohne `ts` wird **verworfen, nicht geraten** (ein fehlendes
+  Datum ist kein Altersbeweis); `admin: "ja"` und `internet: 1` werden NICHT als True uebernommen
+  (`isinstance(..., bool)`), `group_dns` muss eine Liste sein. Beschaedigte Datei → leere Caches
+  und das Verhalten von vorher, kein Startfehler. Schluessel ueber `_norm_login` normalisiert –
+  sonst haette derselbe Mensch je Tippform einen eigenen Eintrag.
+- **`_ad_seen_users` wird beim Login jetzt ausdruecklich gesetzt** (es wurde bisher erst pro
+  Request in `_login_still_allowed` gefuellt): ohne das bekaeme der frisch geschriebene Eintrag
+  beim naechsten Speichern `now` als Zeitstempel und ueberlebte zu lange.
+- **Erster Revalidierungslauf nach 45 s** statt nach dem Intervall – die zweite Haelfte des
+  Fixes: er holt Gruppenaenderungen nach, die waehrend der Ausfallzeit passiert sind.
+- **Verifiziert live auf DEV:** Journal `[AUTH] Login-Caches wiederhergestellt: 1 Benutzer`
+  direkt beim Start; `data/ad_cache.json` mit 22 Gruppen-DNs + admin/internet/kb_editor,
+  `-rw-r----- jarvis:jarvis`. Der frueher erste Revalidierungslauf schrieb sie 45 s nach dem
+  Start selbst. 39/39 lokal und im DEV-venv.
+
+### Das aktive LLM-Profil verschwand aus dem Umschalter
+Zweiter, unabhaengiger Fehler an derselben Meldung. `GET /api/llm/profiles` lieferte auf DEV
+`profiles: []` bei gesetztem `active_id` – `profile_switcher.js` versteckt sich bei 0 Profilen
+(`wrap.style.display = st.profiles.length ? '' : 'none'`), der Umschalter war also weg, obwohl
+der Chat mit einem Profil arbeitete.
+- **Ursache:** alle Profile auf DEV sind auf AD-Benutzer/-Gruppen eingeschraenkt, und
+  `_may_use_profile` kennt bewusst **keinen Admin-Bypass**. Die Berechtigung steuert aber nur das
+  **UMSCHALTEN** – benutzt wird das global aktive Profil trotzdem. Fuer den lokalen `jarvis`
+  (in keiner AD-Liste) blieb damit nichts uebrig.
+- **Das aktive Profil ist jetzt immer dabei** (`locked: true`), im Frontend mit 🔒 und
+  `disabled` am `<option>`; bedienbar ist das Feld erst ab **zwei waehlbaren** Profilen (ein
+  gesperrtes zaehlt nicht mit – sonst waere das Feld aktiv und jeder Wechselversuch scheiterte).
+  Neuer Tooltip `profile.pulldown_locked` (DE+EN).
+- **Gezeigt wird mehr, erlaubt nicht:** `POST /api/llm/profiles/{id}/activate` prueft weiterhin
+  `_may_use_profile`. Der NAME ist ohnehin nicht neu – `GET /api/llm/active-status` gibt
+  `profile_name` seit jeher an jeden angemeldeten Benutzer heraus (die Status-Pille zeigt ihn).
+  Zugangsdaten enthaelt die Antwort nicht (Test prueft das).
+- **Merkregel, zum dritten Mal in diesem Projekt:** eine Anzeige darf keinen Zustand behaupten,
+  den sie nicht kennt. „Kein Profil" ist eine Behauptung – wie der Trenner „Neue Sitzung" und
+  der Audit-Filter, der Chromes Autofill anzeigte.
+
 ## WhatsApp-Integration
 - **Bridge:** Node.js + Baileys v7, systemd `whatsapp-bridge.service`, Port 3001 (localhost)
   - Self-Chat: Erkennung via LID (Linked ID) + connectedNumber

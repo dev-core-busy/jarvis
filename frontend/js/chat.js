@@ -961,12 +961,35 @@
             const rid = agent.agent_id;
             setTimeout(() => {
                 if (_agentInfos[rid] && _agentInfos[rid].state !== 'paused') { delete _agentInfos[rid]; _renderAgentPanel(); }
-            }, 8000);
+            }, 5000);   // 5 s sichtbar bleiben: die Delegation soll man sehen
         }
         if (ev === 'paused' && isSub && _agentInfos[agent.agent_id]) _agentInfos[agent.agent_id].state = 'paused';
 
         // Gesamtliste aus dem Event uebernehmen (falls mitgeliefert)
         (msg.agents || []).forEach(a => { _agentInfos[a.agent_id] = { label: a.label, state: a.state, is_sub_agent: a.is_sub_agent }; });
+        // …UND Karten entfernen, die es im Backend nicht mehr gibt. Das forEach
+        // oben schreibt nur, es raeumt nicht ab: ein Sub-Agent, der beim Senden
+        // des Ereignisses schon aus dem AgentManager entfernt war, blieb dadurch
+        // dauerhaft in der Sidebar stehen (gemeldet 2026-08-10 fuer den
+        // Rollen-Agenten „Rolle: Bild-Erzeuger"). Die Liste des Backends ist die
+        // Wahrheit; ein pausierter Agent bleibt ausgenommen, er soll sichtbar
+        // bleiben, bis der Benutzer entscheidet.
+        if (Array.isArray(msg.agents) && msg.agents.length) {
+            const lebend = new Set(msg.agents.map(a => a.agent_id));
+            Object.keys(_agentInfos).forEach(id => {
+                const info = _agentInfos[id];
+                // NUR noch 'running' gemeldete Karten abraeumen. Ein Agent, der
+                // gerade auf 'idle' gesetzt wurde, gehoert dem Ausblende-Timer –
+                // sonst verschwindet die Karte im selben Moment, in dem sie
+                // „fertig" anzeigt, und man sieht die Delegation ueberhaupt nicht
+                // (genau so gemeldet 2026-08-10).
+                if (info && info.is_sub_agent && info.state === 'running'
+                        && !lebend.has(id)) {
+                    delete _agentInfos[id];
+                    if (_activeAgentId === id) _switchToAgent('_main');
+                }
+            });
+        }
 
         _renderAgentPanel();
     }

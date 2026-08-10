@@ -76,6 +76,16 @@ window.KbGroupFilter = (function () {
         } catch (e) { return []; }
     }
 
+    // Sprachwechsel: das Abzeichen ("alle"/"all") und die Popup-Texte werden nur
+    // beim Rendern gesetzt. applyLang() fasst sie nicht an, weil sie aus t()
+    // kommen – deshalb bei `jarvis-lang-changed` neu zeichnen.
+    var _neuzeichnen = [];
+    try {
+        window.addEventListener('jarvis-lang-changed', function () {
+            _neuzeichnen.forEach(function (fn) { try { fn(); } catch (e) {} });
+        });
+    } catch (e) { /* aeltere Umgebung ohne Ereignis: dann wie bisher */ }
+
     function mount(opts) {
         opts = opts || {};
         injectStyle();
@@ -117,7 +127,13 @@ window.KbGroupFilter = (function () {
         btn.className = 'kbgf-btn';
         btn.title = t('kbfilter.btn', 'Wissensgruppen');
         btn.setAttribute('aria-expanded', 'false');
-        btn.innerHTML = '<span class="kbgf-label">' + esc(t('kbfilter.btn', 'Wissensgruppen')) +
+        // data-i18n MUSS dran: das Label wird beim Mount EINMAL gesetzt, und
+        // applyLang() erreicht nur Elemente mit data-i18n. Ohne das Attribut
+        // blieb nach einem Sprachwechsel DE->EN "Wissensgruppen" stehen, bis die
+        // Seite neu geladen wurde (gemeldet 2026-08-10). Gleiche Falle wie beim
+        // SAP-Katalog, der deshalb auf `jarvis-lang-changed` hoert.
+        btn.innerHTML = '<span class="kbgf-label" data-i18n="kbfilter.btn">'
+            + esc(t('kbfilter.btn', 'Wissensgruppen')) +
             '</span><span class="kbgf-badge"></span><span class="kbgf-caret">▾</span>';
         var panel = document.createElement('div');
         panel.className = 'kbgf-panel ' + (direction === 'up' ? 'kbgf-up' : 'kbgf-down');
@@ -135,6 +151,10 @@ window.KbGroupFilter = (function () {
             if (on >= all.length) { badge.textContent = t('kbfilter.all', 'alle'); btn.classList.remove('kbgf-partial'); }
             else { badge.textContent = on + '/' + all.length; btn.classList.add('kbgf-partial'); }
         }
+        // Beim Sprachwechsel Abzeichen und Popup neu zeichnen (die Texte kommen
+        // aus t() und werden von applyLang() nicht erfasst).
+        _neuzeichnen.push(function () { renderBadge(); renderPanel(); });
+
         function renderPanel() {
             var all = entries();
             var rows = all.map(function (e) {

@@ -387,6 +387,32 @@ def loeschen(rid: str) -> bool:
         return True
 
 
+def _bildprofil_finden() -> str:
+    """Id eines Profils, das Bilder erzeugen kann – oder "".
+
+    WARUM AUTOMATISCH: die Rolle `image_builder` ist ohne Bildmodell wertlos (sie
+    erbt dann das Textprofil des Aufrufers und sagt nur ab). Eine fest verdrahtete
+    UUID im Code waere falsch, ein LEERES Feld ist es aber genauso – dann muss ein
+    Administrator es wissen und nachtragen, und bis dahin scheitert jeder
+    Bildauftrag mit einer korrekten, aber nutzlosen Meldung (auf DEV genau so
+    passiert). Deshalb wird zur LAUFZEIT ein passendes Profil gesucht:
+    Provider `google` kann Bilder (Imagen/Gemini-Image), ausserdem alles, dessen
+    Modellname auf ein Bildmodell hindeutet.
+    """
+    try:
+        from backend.config import config
+        for p in config.profiles:
+            m = (p.get("model") or "").lower()
+            if "imagen" in m or "-image" in m or "dall-e" in m or "flux" in m:
+                return p.get("id") or ""
+        for p in config.profiles:
+            if (p.get("provider") or "").lower() == "google":
+                return p.get("id") or ""
+    except Exception as e:  # noqa: BLE001
+        print(f"[Rollen] Bildprofil nicht ermittelbar: {e}", flush=True)
+    return ""
+
+
 def saeen() -> int:
     """Legt die Vorgabe-Rollen an – NUR wenn die Datei noch gar nicht existiert.
 
@@ -399,8 +425,15 @@ def saeen() -> int:
         if ROLES_FILE.exists():
             return 0
         d = _leer()
+        bild = _bildprofil_finden()
         for v in VORGABE_ROLLEN:
-            d["roles"].append(_normalisieren(v))
+            r = _normalisieren(v)
+            # image_builder bekommt gleich ein bildfaehiges Profil, sonst ist die
+            # Rolle beim ersten Bildauftrag wirkungslos.
+            if r["id"] == "image_builder" and not r["profile_id"] and bild:
+                r["profile_id"] = bild
+                print(f"[Rollen] image_builder: Bildprofil {bild} zugewiesen", flush=True)
+            d["roles"].append(r)
         _save(d)
         print(f"[Rollen] {len(d['roles'])} Vorgabe-Rollen angelegt ({ROLES_FILE})", flush=True)
         return len(d["roles"])

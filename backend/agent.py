@@ -3051,6 +3051,20 @@ KRITISCH – Autonomie-Regeln:
                            "verfuegbar: " + ", ".join(fehlend) + " – arbeite ohne sie.)")
 
             if ws is not None:
+                # Der Rollen-Lauf ist headless und sendet selbst KEINE
+                # agent_events – ohne dieses `spawned` taucht die Karte in der
+                # Sidebar nie auf (und mit dem Aufraeumen von chat.js verschwand
+                # sie sofort wieder). Der Lebenszyklus ist jetzt vollstaendig:
+                # spawned → laeuft → finished → kurz sichtbar → weg.
+                try:
+                    await ws.send_json({
+                        "type": "agent_event",
+                        "event": "spawned",
+                        "agent": agent.get_info(),
+                        "agents": agent_manager.get_all_info(),
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
                 await self._send_status(
                     ws, f"👥 {label} bearbeitet: {task[:120]}{'…' if len(task) > 120 else ''}")
 
@@ -3077,6 +3091,12 @@ KRITISCH – Autonomie-Regeln:
             # Leiche pro Delegation waere ein Leck).
             if agent is not None:
                 try:
+                    # ZUSTAND ZUERST: die Sidebar faerbt die Karte nach
+                    # `state` – bleibt er RUNNING, steht der Rollen-Agent mit
+                    # orangem Punkt dauerhaft in der Liste, obwohl der Lauf
+                    # fertig ist (gemeldet 2026-08-10). `run_sub_agent` macht
+                    # es genauso: erst IDLE, dann das finished-Ereignis.
+                    agent.state = AgentState.IDLE
                     from backend.main import agent_manager as _am
                     if _am is not None:
                         _am.remove_agent(agent.agent_id)

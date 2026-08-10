@@ -86,8 +86,19 @@ pruefe(R.saeen() == 0, "zweiter Lauf saet NICHT erneut (idempotent)")
 
 # Vorgabe-Rollen tragen KEINE Profil-UUID: eine fest verdrahtete zeigt auf einem
 # fremden System ins Nichts.
-pruefe(all(r["profile_id"] == "" for r in R.alle()),
-       "keine Vorgabe-Rolle hat eine fest verdrahtete Profil-UUID")
+# Im QUELLTEXT darf keine UUID stehen (auf einem fremden System zeigt sie ins
+# Nichts). Beim SAEEN darf `image_builder` dagegen ein zur Laufzeit gefundenes
+# Bildprofil bekommen – ohne eines ist die Rolle wertlos und sagt bei jedem
+# Bildauftrag nur ab (auf DEV genau so passiert, 2026-08-10).
+import re as _re
+_SRC_ROLES = (ROOT / "backend" / "agent_roles.py").read_text(encoding="utf-8")
+pruefe(not _re.search(r'"profile_id":\s*"[0-9a-f]{8}-', _SRC_ROLES),
+       "keine Vorgabe-Rolle hat eine fest verdrahtete Profil-UUID im Quelltext")
+pruefe(all(r["profile_id"] == "" for r in R.alle() if r["id"] != "image_builder"),
+       "analyst/writer erben das Profil des Aufrufers")
+pruefe("def _bildprofil_finden" in _SRC_ROLES
+       and "image_builder" in _SRC_ROLES.split("def saeen")[1],
+       "image_builder bekommt beim Saeen ein bildfaehiges Profil, falls vorhanden")
 pruefe(all(r["description"] for r in R.alle()),
        "jede Vorgabe-Rolle hat eine Beschreibung (Grundlage der Modell-Auswahl)")
 pruefe(all(R.DELEGATE_TOOL not in r["tools"] for r in R.alle()),
@@ -224,8 +235,19 @@ pruefe(stufen and stufen | {""} == set(R.EFFORT_STUFEN),
 
 # Modul haengt nicht an backend.config (das wuerde die Live-settings.json migrieren)
 SRC_R = (ROOT / "backend" / "agent_roles.py").read_text(encoding="utf-8")
-pruefe("import config" not in SRC_R and "from backend.config" not in SRC_R,
-       "agent_roles.py importiert NICHT backend.config (Testbarkeit ohne Nebenwirkung)")
+# Entscheidend ist die MODULEBENE: ein Import dort loest beim bloßen `import
+# backend.agent_roles` die Profil-Migration aus und schreibt die Live-
+# settings.json zurueck. Ein LAZY Import in einer Funktion (hier
+# `_bildprofil_finden`, das ein bildfaehiges Profil sucht) ist unschaedlich –
+# er laeuft nur, wenn die Funktion gerufen wird.
+_modulebene = [z for z in SRC_R.splitlines()
+               if z.startswith(("import ", "from ")) and "config" in z]
+pruefe(not _modulebene,
+       "agent_roles.py importiert backend.config NICHT auf Modulebene",
+       str(_modulebene))
+pruefe("from backend.config import config" in SRC_R
+       and SRC_R.count("    from backend.config") >= 1,
+       "…sondern nur lazy in der Funktion")
 
 shutil.rmtree(_tmp, ignore_errors=True)
 

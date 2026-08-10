@@ -2530,6 +2530,79 @@ Schriftschema `NEXUS-Font`).
   erzeugt (`accent1 B80F2E`, Eigentümer `jarvis:jarvis`), Dienst aktiv, `/settings` HTTP 200;
   Sicherung der alten Vorlage unter `/root/standard.pptx.bak-20260810`.
 
+### Vorfall 2026-08-10: 2586 Folien, keine Grafik, kein Hintergrund
+Ein Deck „Offene Tickets – Letzte 14 Tage" kam mit **2586 Folien und 2 MB** heraus; ab Folie 2
+enthielt **jede Folie genau ein Zeichen** (`[`, `{`, `'`, `t`, `i`, …). Dazu fehlte jedes
+Diagramm, obwohl der Inhalt aus Zahlen bestand, und die Folien waren weiße Flächen.
+
+- **Ursache – Toleranz auf der falschen Ebene.** Im Audit-Log auf ECHT steht der Aufruf wörtlich:
+  `"slides": "[{'title': 'Gesamtübersicht', …}]"` – ein **String** in Python-Schreibweise (also
+  nicht einmal gültiges JSON). `for sl in slides` läuft in Python über die **Zeichen** eines
+  Strings, und weil ein String-*Element* toleranterweise als `{"title": …}` galt
+  (`if isinstance(sl, str)` INNERHALB der Schleife), wurde aus jedem Zeichen eine Folie. Die
+  Prüfung saß am Element, nicht am Container.
+  **Merkregel: über einen String zu iterieren ist immer erlaubt und nie gemeint.** Wo ein
+  Werkzeug eine Liste erwartet, gehört die Typprüfung VOR die Schleife.
+- **`_slides_normalisieren()`** parst einen als Text übergebenen Foliensatz jetzt mit
+  `json.loads` **und** `ast.literal_eval` (letzteres für die Python-Schreibweise mit einfachen
+  Anführungszeichen; es führt keinen Code aus). Scheitert beides, gibt es einen **Fehler mit
+  Auszug** – niemals eine Folie je Zeichen. Der Inhalt des gemeldeten Aufrufs war brauchbar:
+  daraus werden jetzt 2 statt 2586 Folien.
+- **`MAX_FOLIEN = 60` als zweite Sicherung**, und der Deckel wird **im Ergebnis genannt**
+  („N weitere Folien wurden NICHT übernommen"). Ein stiller Schnitt wäre Datenverlust – der
+  Aufrufer hielte die gekürzte Datei für vollständig. (Beim ersten Anlauf hatte ich `zuviel`
+  berechnet und nie ausgegeben; der Test hat es gefangen.)
+- **Native PowerPoint-Diagramme** (`_diagramm_einfuegen`, Feld `chart` je Folie): Der Office-Skill
+  konnte **gar keine** Diagramme – deshalb landete „Blocker (6), High (45), Middle (233)…" als
+  Fließtext auf einer Folie. Jetzt `{'typ': 'saeulen|balken|linie|kreis', 'kategorien': […],
+  'werte': […]}`, mehrere Reihen über `reihen`. Nativ statt PNG, weil das Diagramm dann in
+  PowerPoint bearbeitbar bleibt und seine Farben **aus dem Theme** zieht – also automatisch aus
+  dem Hausdesign. Steht daneben Text, rückt das Diagramm in die rechte Spalte.
+  - **`_zahl()` ist Pflicht, nicht Komfort:** Modelle liefern Zahlen als formatierten Text.
+    `float("1.216")` ergibt 1.216 statt 1216 – ein stiller Faktor 1000 (dieselbe Falle wie in
+    `backend/tools/chart.py::parse_number`). Erkennt Tausenderpunkt, Dezimalkomma, `%`, `€` und
+    Buchhaltungsklammern.
+  - **FALLSTRICK Zahlenformat: OOXML-Formatcodes sind IMMER US-notiert** (Komma = Tausender,
+    Punkt = Dezimaltrenner); PowerPoint lokalisiert die Anzeige selbst. Das deutsche Muster
+    `#.##0` bedeutet dort *drei Nachkommastellen* – im PDF stand `923,000` statt `923`. Richtig
+    ist `#,##0`. **Nur im Rendering sichtbar**, nicht am XML.
+  - Fehlt Wesentliches (keine Kategorien, keine Zahlen), wird **kein** Diagramm eingefügt: eine
+    halbe Grafik ist schlechter als keine.
+- **Hintergrundmaterial aus der hinterlegten Firmenvorlage** (`design_bilder`,
+  `_hintergruende`). Das Repo ist öffentlich – NEXUS-Grafiken dürfen dort nicht hinein. Also
+  werden sie aus der `.potx/.pptx` gezogen, die ein Administrator über *Branding → PowerPoint-
+  Vorlage* hochlädt und die in `data/vorlagen` (gitignored) auf dem Server liegt.
+  - **Ausgewählt wird über die PIXELMASSE, nicht über den Dateinamen** (der heißt überall
+    `image<n>` und sagt nichts): Vollbild = größtes Bild im Folienformat 16:9, Zierband =
+    breitester Streifen ab 4:1. In der NEXUS-Vorlage sind das der Hexagon-Rahmen (4000×2250, mit
+    freier Mitte – deshalb als Textgrund brauchbar) und das Icon-Band (4000×591).
+  - **Nicht über die Dateigröße filtern** (erste Fassung: 8 KB): eine flächige Hintergrundgrafik
+    komprimiert sehr gut und fiele heraus, während ein detailreiches 384×384-Symbol darüber
+    liegt. Kriterium ist `BILD_MIN_BREITE = 1200`.
+  - **Vollbild nur auf Titel- und Abschnittsfolie**, Zierband unten auf den Inhaltslayouts. Ein
+    Vollbild hinter einer Aufzählung macht den Text unlesbar; das Band beginnt unterhalb von
+    `INHALT_Y + INHALT_H` und überdeckt deshalb nichts.
+  - **Bilder brauchen mehr als XML:** ein Part plus Beziehung (`r:embed`). `LayoutShapes` hat
+    kein `add_picture`, und der Umweg über eine Wegwerf-Folie bricht genau diese Beziehung –
+    deshalb `layout.part.get_or_add_image_part()`, das Part und Beziehung zusammen anlegt.
+    Eingehängt an Index 2, also **hinter** den Platzhaltern (ein Hintergrund über dem Text wäre
+    keiner). `_bildmasse()` liest die Maße aus dem PNG-/JPEG-Kopf – **ohne Pillow als harte
+    Abhängigkeit**.
+- **Nebenbefund: `$(date +%d.%m.%Y)` stand wörtlich auf der Titelfolie.** Das Modell rechnete mit
+  einer Shell; hier läuft keine. `_text_bereinigen()` ersetzt genau diesen Fall durch das heutige
+  Datum – andere `$()`-Ausdrücke bleiben unangetastet. Ein sichtbarer Platzhalter auf Folie 1 ist
+  der peinlichste Fehler in einer Präsentation.
+- **BEIM AUSROLLEN – der Grund, warum es beim Testen zuerst nicht wirkte:** `sicherstellen()`
+  überschreibt eine vorhandene `standard.pptx` NICHT. Nach dem Hinterlegen einer Firmenvorlage
+  muss die Standardvorlage **neu erzeugt** werden (*Branding → „Aus Branding-Farben neu
+  erzeugen"* oder Datei löschen), sonst bleibt sie ohne Hintergrund und man sucht den Fehler im
+  Code.
+- **Verifiziert:** 165 Prüfungen (`tests/test_office_vorlage.py`, Abschnitt 6 enthält den
+  gemeldeten Aufruf wörtlich aus dem Audit-Log) + optische Abnahme über LibreOffice → PDF:
+  Titelfolie mit Hexagon-Rahmen, Kapitelfolie mit Kasten auf Bild, Säulen- und Kreisdiagramm in
+  Hausfarben mit korrekten Beschriftungen. Die Bild-Tests bauen ihre eigene Mini-Firmenvorlage
+  (selbst erzeugte PNGs), laufen also auch ohne die echte `.potx`.
+
 ### Vorlagen-Upload im Branding-Reiter (2026-08-06)
 Abschnitt *Einstellungen → Branding → PowerPoint-Vorlage*: hochladen, auflisten, entfernen,
 und **„Aus Branding-Farben neu erzeugen"**. Vier Endpunkte, alle `require_local_auth`:

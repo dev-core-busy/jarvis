@@ -118,10 +118,13 @@ if HAT_PPTX:
     ab_layout = [l for l in prs.slide_layouts if l.name == "Abschnitt"][0]
     pruefe("Kapitelkasten" in [s.name for s in ab_layout.shapes],
            "Abschnittsfolie hat den farbigen Kasten der Firmenvorlage")
-    # Er muss VOR den Platzhaltern stehen, sonst deckt er den Titel zu.
+    # Er muss VOR den Platzhaltern stehen, sonst deckt er den Titel zu – aber
+    # HINTER einem etwaigen Hintergrundbild (das wird spaeter eingehaengt).
     ab_namen = [s.name for s in ab_layout.shapes]
-    pruefe(ab_namen.index("Kapitelkasten") == 0,
-           f"Kapitelkasten liegt hinter dem Text ({ab_namen[:2]})")
+    i_kasten = ab_namen.index("Kapitelkasten")
+    i_titel = next((i for i, n in enumerate(ab_namen) if n.startswith("Title")), 99)
+    pruefe(i_kasten < i_titel,
+           f"Kapitelkasten liegt hinter dem Text ({ab_namen[:3]})")
     tl_layout = [l for l in prs.slide_layouts if l.name == "Titelfolie"][0]
     pruefe("Akzentstrich" in [s.name for s in tl_layout.shapes],
            "Titelfolie hat den Akzentstrich (Ersatz fuer das Vollbild)")
@@ -416,6 +419,186 @@ pruefe(".pptx,.potx" in SET_HTML, "Datei-Dialog filtert auf Vorlagen")
 for key in ("branding.pptx_heading", "branding.pptx_as_default", "branding.pptx_regen",
             "branding.pptx_none", "branding.pptx_badge_default"):
     pruefe(I18N.count(f"'{key}'") == 2, f"i18n {key} in DE und EN")
+
+# ═════════════════════════════════════════════════════════════════════════════
+print("\n=== 6. Vorfall 2026-08-10: 2586 Folien, keine Grafik, kein Hintergrund ===")
+# Ein Modell schickte 'slides' als TEXT. Die Schleife lief ueber die ZEICHEN,
+# und weil ein String-Element als {"title": …} galt, wurde jedes Zeichen eine
+# Folie: 2586 Stueck, 2 MB. Dazu fehlten Diagramme (das Werkzeug konnte keine)
+# und jeder Hintergrund.
+
+if HAT_PPTX:
+    from skills.office.main import (_slides_normalisieren, _text_bereinigen,
+                                    _zahl, MAX_FOLIEN)
+
+    def _erzeugte_datei(antwort: str) -> Path:
+        """Pfad der Datei hinter dem Download-Link."""
+        m = re.search(r"/api/documents/([0-9a-f]{32}__[^)\s]+)", antwort)
+        return ROOT / "data" / "documents" / m.group(1) if m else None
+
+    # ── a) Der gemeldete Aufruf, woertlich aus dem Audit-Log von ECHT ────────
+    ECHT = ("[{'title': 'Gesamtübersicht', 'layout': 'inhalt', 'bullets': "
+            "['1.216 offene Tickets der letzten 14 Tage', 'Blocker (6), High (45)']}, "
+            "{'title': 'Prioritäten', 'bullets': ['High 45']}]")
+    folien, fehler = _slides_normalisieren(ECHT)
+    pruefe(fehler is None and len(folien) == 2,
+           f"Python-Schreibweise als Text -> 2 Folien (nicht 2586) [{len(folien)}]")
+    pruefe(all(isinstance(f, dict) for f in folien), "…und es sind echte Folien-Objekte")
+    pruefe(folien[0].get("title") == "Gesamtübersicht", "…Inhalt kommt korrekt an")
+
+    f2, e2 = _slides_normalisieren('[{"title": "A"}, {"title": "B"}]')
+    pruefe(e2 is None and len(f2) == 2, "gueltiges JSON als Text wird ebenfalls gelesen")
+
+    # Kein Parser der Welt macht daraus eine Liste -> FEHLER, nie Zeichen-Folien
+    for muell in ("das ist einfach nur text", "{kaputt", "[{'a': "):
+        fm, em = _slides_normalisieren(muell)
+        pruefe(em is not None and not fm,
+               f"unlesbares 'slides' -> Fehlermeldung statt Zeichen-Folien ({muell[:12]}…)")
+    fe, ee = _slides_normalisieren("")
+    pruefe(ee is not None, "leerer Text -> Fehler")
+    fn, en = _slides_normalisieren(None)
+    pruefe(en is not None, "fehlendes 'slides' -> Fehler")
+
+    # Was weiterhin funktionieren MUSS
+    fd, _ = _slides_normalisieren({"title": "Einzelfolie"})
+    pruefe(len(fd) == 1, "ein einzelnes dict ist eine Folie")
+    fl, _ = _slides_normalisieren([{"title": "X"}, "Kurzer Titel"])
+    pruefe(len(fl) == 2 and fl[1].get("title") == "Kurzer Titel",
+           "String-Element bleibt eine Folie mit Titel")
+    lang = "Zeile\nZeile2 mit viel mehr Text " * 5
+    fg, _ = _slides_normalisieren([lang])
+    pruefe(fg[0].get("content") == lang.strip(),
+           "mehrzeiliger String wird Fliesstext, nicht Titel")
+
+    # ── b) Deckel gegen ein Riesendeck ──────────────────────────────────────
+    viele = [{"title": f"F{i}"} for i in range(MAX_FOLIEN + 25)]
+    r_viel = asyncio.run(CreatePowerPointTool().execute(
+        filename="test_deckel", slides=viele))
+    p_viel = _erzeugte_datei(r_viel)
+    pruefe(len(Presentation(str(p_viel)).slides) == MAX_FOLIEN,
+           f"Folienzahl ist auf {MAX_FOLIEN} gedeckelt")
+    pruefe("25" in r_viel and ("nicht" in r_viel.lower() or "weitere" in r_viel.lower()),
+           "…und die weggelassenen Folien werden GENANNT (kein stiller Schnitt)")
+    p_viel.unlink()
+
+    # ── c) Unaufgeloeste Shell-Substitution ─────────────────────────────────
+    from datetime import date
+    heute = date.today().strftime("%d.%m.%Y")
+    pruefe(_text_bereinigen("Stand: $(date +%d.%m.%Y) | 1.216 Tickets")
+           == f"Stand: {heute} | 1.216 Tickets",
+           "$(date …) wird durch das heutige Datum ersetzt")
+    pruefe(_text_bereinigen("Kosten: 5 $(netto)") == "Kosten: 5 $(netto)",
+           "andere $()-Ausdruecke bleiben unangetastet")
+    pruefe(_text_bereinigen("") == "" and _text_bereinigen("normal") == "normal",
+           "Text ohne Substitution bleibt gleich")
+
+    # ── d) Zahlen aus Modelltext ────────────────────────────────────────────
+    for roh, erwartet in [("1.216", 1216.0), ("923", 923.0), ("76 %", 76.0),
+                          ("1.234,50", 1234.5), ("1,5", 1.5), ("(1.216)", -1216.0),
+                          (45, 45.0), ("", None), ("keine Zahl", None)]:
+        pruefe(_zahl(roh) == erwartet, f"_zahl({roh!r}) -> {_zahl(roh)}", f"erwartet {erwartet}")
+
+    # ── e) Diagramme ────────────────────────────────────────────────────────
+    r_ch = asyncio.run(CreatePowerPointTool().execute(
+        filename="test_chart", slides=[
+            {"title": "Saeulen", "chart": {"typ": "saeulen",
+             "kategorien": ["Blocker", "High", "Middle"], "werte": [6, 45, 233]}},
+            {"title": "Kreis", "chart": {"typ": "kreis",
+             "kategorien": ["A", "B"], "werte": ["923", "233"]}},
+            {"title": "Neben Text", "bullets": ["Punkt"], "chart": {"typ": "balken",
+             "kategorien": ["X"], "werte": [3]}},
+            {"title": "Kaputt", "chart": {"typ": "saeulen", "kategorien": []}},
+        ]))
+    p_ch = _erzeugte_datei(r_ch)
+    prs_ch = Presentation(str(p_ch))
+    charts = [[sh for sh in s.shapes if sh.has_chart] for s in prs_ch.slides]
+    pruefe(len(charts[0]) == 1 and len(charts[1]) == 1 and len(charts[2]) == 1,
+           "Diagramm wird eingefuegt (Saeulen, Kreis, Balken)")
+    pruefe(len(charts[3]) == 0, "Diagramm ohne Kategorien wird weggelassen (keine halbe Grafik)")
+    pruefe(charts[0][0].chart.plots[0].categories[0] == "Blocker", "Kategorien stimmen")
+    werte = list(charts[1][0].chart.plots[0].series[0].values)
+    pruefe(werte == [923.0, 233.0], f"Zahlen als Text werden gelesen ({werte})")
+    pruefe(charts[0][0].left == VO.RAND_LINKS and charts[0][0].top == VO.INHALT_Y,
+           "Diagramm sitzt im Satzspiegel")
+    pruefe(charts[2][0].left > VO.RAND_LINKS + 1000000,
+           "…und rueckt zur Seite, wenn daneben Text steht")
+    pruefe(charts[1][0].chart.has_legend, "Kreisdiagramm hat eine Legende")
+    pruefe(not charts[0][0].chart.has_legend,
+           "eine einzelne Reihe bekommt KEINE Legende (sie wiederholt nur den Titel)")
+    # OOXML-Zahlenformate sind US-notiert; '#.##0' ergab im PDF '923,000'.
+    xml_ch = charts[0][0].chart._chartSpace.xml
+    pruefe("#,##0" in xml_ch and "#.##0" not in xml_ch,
+           "Zahlenformat ist US-notiert (#,##0) – sonst steht 923,000 auf der Folie")
+    p_ch.unlink()
+
+    # ── f) Hintergrundmaterial aus einer Firmenvorlage ──────────────────────
+    # Eigene Mini-Vorlage, damit der Test ohne die echte .potx laeuft.
+    import struct, zlib as _zlib
+
+    def _png(breite, hoehe):
+        """Gueltiges PNG in der gewuenschten Groesse (mit Rauschen, damit es
+        ueber BILD_MIN_BYTES kommt – ein einfarbiges komprimiert zu stark)."""
+        zeilen = bytearray()
+        for y in range(hoehe):
+            zeilen.append(0)
+            zeilen.extend(bytes(((x * 7 + y * 13) % 251 for x in range(breite * 3))))
+        def block(typ, daten):
+            return (struct.pack(">I", len(daten)) + typ + daten
+                    + struct.pack(">I", _zlib.crc32(typ + daten) & 0xFFFFFFFF))
+        return (b"\x89PNG\r\n\x1a\n"
+                + block(b"IHDR", struct.pack(">IIBBBBB", breite, hoehe, 8, 2, 0, 0, 0))
+                + block(b"IDAT", _zlib.compress(bytes(zeilen), 6))
+                + block(b"IEND", b""))
+
+    # Realistische Masse: unter BILD_MIN_BREITE gilt ein Bild als Symbol.
+    voll_png, band_png = _png(1600, 900), _png(1600, 236)
+    klein_png = _png(384, 384)
+    pruefe(VO._bildmasse(voll_png) == (1600, 900), "PNG-Masse werden aus dem Kopf gelesen")
+    pruefe(VO._bildmasse(b"kein bild") is None, "Nicht-Bild liefert keine Masse")
+
+    import tempfile as _tf
+    tmp6 = Path(_tf.mkdtemp(prefix="jvorl6_"))   # eigenes Verzeichnis: das aus
+    fake = tmp6 / "firma_test.pptx"              # Abschnitt 2 ist schon abgeraeumt
+    fp = Presentation()
+    fs = fp.slides.add_slide(fp.slide_layouts[6])
+    from io import BytesIO
+    fs.shapes.add_picture(BytesIO(voll_png), 0, 0, width=914400)
+    fs.shapes.add_picture(BytesIO(band_png), 0, 914400, width=914400)
+    fs.shapes.add_picture(BytesIO(klein_png), 0, 1828800, width=914400)  # Symbol
+    fp.save(str(fake))
+
+    bilder = VO.design_bilder(fake)
+    pruefe(VO._bildmasse(bilder.get("vollbild", b"")) == (1600, 900),
+           "Vollbild wird ueber das Seitenverhaeltnis 16:9 erkannt")
+    pruefe(VO._bildmasse(bilder.get("band", b"")) == (1600, 236),
+           "Zierband wird ueber das breite Verhaeltnis erkannt")
+    pruefe(VO._bildmasse(bilder.get("vollbild", b"")) != (384, 384),
+           "ein Symbol wird NICHT als Hintergrund genommen")
+    pruefe(VO.design_bilder(tmp6 / "gibtsnicht.pptx") == {},
+           "fehlende Firmenvorlage -> keine Bilder, kein Fehler")
+
+    ziel_bg = tmp6 / "mit_bg.pptx"
+    VO.erzeuge(ziel_bg)
+    prs_bg = Presentation(str(ziel_bg))
+    VO._hintergruende(prs_bg, bilder)
+    def namen(lname):
+        return [s.name for s in
+                [l for l in prs_bg.slide_layouts if l.name == lname][0].shapes]
+    pruefe("Hintergrund" in namen("Titelfolie"), "Titelfolie bekommt das Vollbild")
+    pruefe("Hintergrund" in namen("Abschnitt"), "Abschnittsfolie bekommt das Vollbild")
+    pruefe("Zierband" in namen("Titel und Inhalt"), "Inhaltsfolie bekommt das Zierband")
+    pruefe("Hintergrund" not in namen("Titel und Inhalt"),
+           "…aber KEIN Vollbild hinter der Aufzaehlung (unlesbar)")
+    pruefe(namen("Titelfolie").index("Hintergrund") == 0,
+           "Hintergrund liegt ganz hinten (deckt den Text nicht zu)")
+    lay_i = [l for l in prs_bg.slide_layouts if l.name == "Titel und Inhalt"][0]
+    band_shape = [s for s in lay_i.shapes if s.name == "Zierband"][0]
+    inhalt_unten = VO.INHALT_Y + VO.INHALT_H
+    pruefe(band_shape.top >= inhalt_unten - 1000,
+           f"Zierband beginnt UNTER dem Inhaltsbereich ({band_shape.top} >= {inhalt_unten})")
+
+    import shutil as _sh
+    _sh.rmtree(tmp6, ignore_errors=True)
 
 print(f"\n{'=' * 62}\nErgebnis: {_ok}/{_ok + _fail} Pruefungen bestanden")
 if _fail:

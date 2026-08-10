@@ -2392,14 +2392,11 @@ Die naheliegende Lösung lag im eigenen Repo.
   - **`sysClr` muss ersetzt werden:** `dk1`/`lt1` stehen im Standardtemplate als
     `windowText`/`window`. Wer nur `srgbClr`-Slots anfasst, ändert Akzente, aber Text- und
     Hintergrundfarbe bleiben.
-  - **Schrift = Arial, bewusst ANDERS als bei matplotlib.** Beim mplstyle zählt, was auf dem
-    SERVER installiert ist (DejaVu/Liberation); eine .pptx wird auf einem **fremden** Rechner
-    geöffnet, dort gibt es kein Liberation Sans. Arial ist überall vorhanden und wird von
-    LibreOffice metrisch identisch abgebildet, der PDF-Export bleibt also maßhaltig.
   - **Hintergrund und Textfarbe kommen NICHT aus dem Branding** – nur der Akzent (aus
     `colors_light`, sonst `colors`). Das Chat-Theme ist dunkel, eine Präsentation muss hell sein.
-    Die Folgefarben `accent2..6` sind dieselbe Reihe wie in `charts.js` und `jarvis.mplstyle`:
-    ein Diagramm und die Folie darum sollen nicht verschieden aussehen.
+  - ⚠ Schrift und Folgefarben sind seit dem **2026-08-10** aus der Firmenvorlage übernommen –
+    siehe den eigenen Abschnitt unten. Die frühere Festlegung (Arial, Chart-Farbreihe aus
+    `charts.js`) gilt nicht mehr.
 - **DIE ZWEI FEHLER, DIE ERST DER PDF-BLICK ZEIGTE** (LibreOffice → PDF → PNG angesehen):
   1. **`prs.slide_width` zu setzen skaliert die Platzhalter NICHT.** Sie behalten ihre absoluten
      4:3-Positionen; jede Aufzählung endete bei 71 % der Breite, rechts blieb ein leerer
@@ -2410,17 +2407,19 @@ Die naheliegende Lösung lag im eigenen Repo.
      12192000 Folienbreite, und `top` fiel auf **0**, weil python-pptx beim Anlegen des neuen
      `xfrm` nur die gesetzte Achse kennt (im PDF klebten die Titel am oberen Rand). Beide Fälle
      sind Regressionstests.
-- **`MasterShapes` kann keine Formen aufnehmen** (kein `add_shape`/`add_picture` – das gibt es
-  nur auf Folien). Der Akzentbalken wird deshalb als `<p:sp>`-XML in den Master-spTree gehängt.
-  Der übliche Umweg „Form auf einer Wegwerf-Folie erzeugen und verschieben" bräuchte danach das
-  Löschen dieser Folie (dafür hat python-pptx keine API) und bricht bei **Bildern** die
-  Beziehung zum Medien-Part – deshalb sitzt das **Logo auf der Titelfolie** (dort gibt es
-  `add_picture`), was im Corporate-Design ohnehin die Regel ist.
+- **Weder `MasterShapes` noch `LayoutShapes` können Formen aufnehmen** (kein
+  `add_shape`/`add_picture` – das gibt es nur auf Folien). Flächen werden deshalb als
+  `<p:sp>`-XML in den spTree gehängt (`_rechteck`). Der übliche Umweg „Form auf einer
+  Wegwerf-Folie erzeugen und verschieben" bräuchte danach das Löschen dieser Folie (dafür hat
+  python-pptx keine API) und bricht bei **Bildern** die Beziehung zum Medien-Part – deshalb
+  sitzt das **Logo auf der Titelfolie** (dort gibt es `add_picture`), obwohl die Firmenvorlage
+  es im Master führt.
 - **Titel-Ausrichtung sitzt in `p:txStyles/p:titleStyle` im MASTER.** Sie am Layout-Platzhalter
   zu setzen (`paragraphs[i].alignment`) wirkt NICHT – der Absatz auf der Folie erbt aus diesem
-  Stil, nicht aus dem Textkörper des Layouts. Inhaltsfolien sind jetzt linksbündig, die
-  Titelfolie bleibt zentriert (eigener `lstStyle` im Layout, der den Master überstimmt; das
-  `lstStyle` muss der Schema-Reihenfolge nach an Position 1 stehen: `bodyPr, lstStyle, p…`).
+  Stil, nicht aus dem Textkörper des Layouts. Alles ist linksbündig, auch die Titelfolie
+  (so hält es die Firmenvorlage); stellenbezogene Werte kommen über einen `lstStyle` im
+  Layout-Platzhalter, der den Master überstimmt (`_ph_stil`). Das `lstStyle` muss der
+  Schema-Reihenfolge nach an Position 1 stehen: `bodyPr, lstStyle, p…`.
 - **Im Werkzeug wird NUR Text gesetzt** – keine Schriftgröße, keine Farbe. Das ist der ganze
   Sinn des Vorlagen-Wegs. Dazu:
   - **Layouts über NAMEN** (`_LAYOUT_ALIAS`, deutsch UND englisch, Teiltreffer erlaubt, dann
@@ -2444,6 +2443,92 @@ Die naheliegende Lösung lag im eigenen Repo.
   Aufzählungsebenen, Ende-zu-Ende mit vier Folien. Dazu die optische Abnahme über
   LibreOffice → PDF → PNG (Titelfolie mit Logo, Kapiteltrenner, Aufzählung mit Unterebenen,
   Zwei-Spalten-Folie).
+
+### Das Designprofil stammt aus der Firmenvorlage (2026-08-10)
+Die generierte Vorlage trug bis dahin ein **erfundenes** Design (Jarvis-Lila, Arial,
+Office-Satzspiegel). Grundlage ist jetzt `NEXUS_PowerPoint-Template_LAB_2025.potx`; alle Werte
+sind aus deren XML **ausgelesen, nicht geschätzt** (Theme `nexus`, Farbschema `NEXUS`,
+Schriftschema `NEXUS-Font`).
+
+| | Wert | Quelle im Original |
+|---|---|---|
+| Hausfarbe | `B80F2E` | `accent1`, zugleich `hlink` |
+| Folgefarben | `4F6792 · 1F2336 · E8ECF0 · 9C9D9F · BA4C61` | `accent2..6` |
+| Text / Grund | Schwarz auf Weiß | `dk1`/`lt1` (dort `sysClr`) |
+| Schrift | HelveticaNeue LT 75 Bold / 55 Roman | `majorFont`/`minorFont` |
+| Typo | Titel 32 pt fett · Text 18/14 pt · Titelfolie 48 pt · Kapitel 36 pt | `titleStyle`/`bodyStyle`, Layouts |
+| Satzspiegel | Rand 700679 EMU · Titel y=673096 · Inhalt y=1827356 | Layout „Standard" |
+| Kapitelkasten | 698500/4198652, 5553064×1865327 | Layout „Chapter red" |
+
+- **Übernommen wurde das GESTALTUNGSSYSTEM, nicht das Bildmaterial.** Die Originalvorlage bringt
+  17 Grafiken (Hexagon-Welt, Logos, Vollbilder) und 873 KB mit; die generierte bleibt bei ~28 KB,
+  ist prüfbar und **white-label-fähig** – ein konfigurierter Branding-Akzent schlägt weiter auf
+  `accent1` durch. Das war die ausdrückliche Wahl des Nutzers gegenüber „Original-.potx als
+  Firmenvorlage hinterlegen".
+- **Der größte Teil des Designs steckt in `_typografie`,** nicht in den Farben: die Office-Vorgabe
+  (Titel 44 pt zentriert, Text 28 pt mit runden Punkten) ist für 4:3 gemacht und füllt eine
+  16:9-Folie mit vier Stichworten. Zweitwichtigstes ist `_raster` – ohne es sitzen die Platzhalter
+  weiter an den Office-Positionen und das Deck ist trotz richtiger Farben sofort als Fremdkörper
+  zu erkennen. **Prägend ist der linke Rand:** Titel, Unterzeile und Inhalt beginnen auf
+  DERSELBEN Kante.
+- **Drei bewusste Abweichungen vom Original** (alle im Code begründet):
+  1. **Folgefarben ≠ `charts.js`/`jarvis.mplstyle`.** Die Web-Reihe (Blau/Grün/Orange…) ist für
+     Bildschirm-Diagramme gemacht; ein IN PowerPoint eingefügtes Diagramm zieht seine Farben aus
+     `accent2..6` und sähe damit auf der Folie fremd aus. **Innerhalb einer Präsentation gewinnt
+     das Hausdesign** – das kehrt die frühere Regel um.
+  2. **Aufzählungsebenen.** Das Original setzt Ebene 2 auf 14 pt ohne Zeichen und gibt erst ab
+     Ebene 3 das `+` – bei 18 pt auf Ebene 3 also GRÖSSER als Ebene 2. Eine Unterebene wäre von
+     der Hauptebene nicht zu unterscheiden, und der Agent nutzt Ebenen ständig (`> Unterpunkt`).
+     Jetzt: absteigende Reihe 18/16/14/12/12 pt, das `+` schon ab Ebene 2, gleicher Einrückschritt
+     (271463 EMU). Dazu `spcBef` vor Hauptpunkten (Original: 0) – ohne ihn beginnt der nächste
+     Hauptpunkt unmittelbar unter dem letzten Unterpunkt und die Gliederung ist nicht ablesbar.
+  3. **`INHALT_B` wird aus dem Rand GERECHNET** statt die 10822650 des Originals zu übernehmen:
+     bei deren Folienbreite bleibt rechts 0,09 cm weniger Rand – eine Rundung aus dem
+     4:3-Ursprung, kein Gestaltungswille.
+- **Der Akzentbalken im Master ist ERSATZLOS WEG.** Er war eine Jarvis-Erfindung; die
+  Firmenvorlage hat unten nichts. An seine Stelle treten die echten Elemente: **Kapitelkasten**
+  auf der Abschnittsfolie (weißer Titel auf Hausfarbe) und die Foliennummer rechts außen.
+- **Titelfolie: Kicker OBEN, großer Titel darunter** – das Gegenteil des Office-Layouts. Weil die
+  Originalvorlage die untere Hälfte mit einem Vollbild füllt und wir kein Bildmaterial haben,
+  steht dort ein **Akzentstrich** unter dem Titel (ein Sechstel der Satzbreite). Ohne ihn wirkte
+  die Folie im PDF-Test unfertig.
+- **DREI FEHLER, DIE ERST DER PDF-BLICK ZEIGTE** (LibreOffice → PDF → PNG, in Dunkel wie Hell):
+  1. **Der Zusatztext lief aus dem Kapitelkasten.** Erste Fassung setzte ihn UNTER den Kasten –
+     unter dem Kasten bleiben bis zum Folienrand nur 1,1 cm, eine 24-pt-Zeile brach um und stand
+     halb auf Rot, halb auf Weiß. Jetzt liegen Titel und Unterzeile BEIDE im Kasten (58/42
+     geteilt, Titel unten-, Unterzeile oben-bündig); der Abstand kommt über `bIns`, nicht über
+     eine kleinere Box – sonst wären beim Verschieben des Kastens zwei Werte zu pflegen.
+  2. **`algn` nur auf `lvl1pPr` zu setzen reicht nicht.** Der Untertitel der Office-Titelfolie
+     bringt einen eigenen `lstStyle` mit, in dem **lvl1 BIS lvl9** auf `ctr` stehen. Acht
+     zentrierte Ebenen blieben zurück und schlugen zu, sobald jemand im Kicker eine Unterebene
+     benutzt. `_ph_stil` setzt die Ausrichtung deshalb auf ALLE vorhandenen Ebenen – gefunden
+     hat das der Testlauf, nicht das Auge.
+  3. **Eine Fläche muss VOR die Platzhalter in den spTree** (Index 2, hinter `nvGrpSpPr` und
+     `grpSpPr`). Angehängt liegt sie über dem Text und deckt ihn zu.
+- **Das Logo sitzt jetzt oben rechts** (Position und Höhe aus dem Master der Firmenvorlage),
+  rechte Kante auf dem Satzspiegel – vorher unten links „über dem Akzentbalken", den es nicht
+  mehr gibt.
+- **FALLSTRICK PDF-EXPORT: HelveticaNeue LT ist auf dem Server NICHT installiert**
+  (`fc-match` liefert Noto Sans). Für Empfänger mit lizenzierter Schrift stimmt das Deck; der
+  serverseitige `office_to_pdf` setzt eine Ersatzschrift, Zeilenumbrüche können abweichen. Wer
+  maßhaltige PDFs vom Server braucht, hinterlegt eine metrisch kompatible Schrift (Nimbus Sans /
+  TeX Gyre Heros) oder stellt `SCHRIFT_TITEL`/`SCHRIFT_TEXT` auf `Arial`. Bewusste Entscheidung
+  des Nutzers zugunsten der CI-Treue.
+- **BEIM AUSROLLEN: eine vorhandene `standard.pptx` wird NICHT ersetzt.** `sicherstellen()`
+  überschreibt bewusst nicht (eine von Hand hinterlegte Firmenvorlage darf nicht verschwinden) –
+  ohne Zutun liefe der Server also weiter mit dem alten Design. Also *Branding → PowerPoint-
+  Vorlage → „Aus Branding-Farben neu erzeugen"* drücken oder die Datei löschen. **Als
+  Dienstbenutzer erzeugen** (`runuser -u jarvis`), sonst gehört sie root und das Backend kann sie
+  nicht mehr ersetzen – dieselbe Falle wie am 2026-07-31.
+- **Verifiziert:** 118 Prüfungen (`tests/test_office_vorlage.py`) lokal und auf DEV im echten
+  venv – Theme-Farben und beide Schriften aus dem ZIP gelesen, Typo-Stufen im Master,
+  `buNone` auf Ebene 1 und `+` ab Ebene 2, gemeinsame linke Kante über vier Layouts, gleich
+  breite Spalten, Text im Kapitelkasten, Kasten hinter dem Text, Kicker über dem Titel,
+  Foliennummer rechts unten. Gegenprobe: der alte Stand fällt in den ersten vier Prüfungen durch
+  und bricht dann ab. Dazu optische Abnahme über LibreOffice → PDF → PNG (Titelfolie,
+  Kapitelfolie, Aufzählung mit drei Ebenen, Zwei-Spalten- und Vergleichs-Layout). Auf DEV neu
+  erzeugt (`accent1 B80F2E`, Eigentümer `jarvis:jarvis`), Dienst aktiv, `/settings` HTTP 200;
+  Sicherung der alten Vorlage unter `/root/standard.pptx.bak-20260810`.
 
 ### Vorlagen-Upload im Branding-Reiter (2026-08-06)
 Abschnitt *Einstellungen → Branding → PowerPoint-Vorlage*: hochladen, auflisten, entfernen,
@@ -2788,6 +2873,80 @@ System-Einstellungen → Lizenz*.
   Kennung (die niemand braucht und die genau zu dieser Verwechslung führte), während der
   Schlüssel hinter zwei Aufklapp-Ebenen lag. Jetzt Knopf „🔑 Schlüssel kopieren" direkt in der
   Zeile, Kennung gekürzt und als „Kennung: …" beschriftet (vollständig im Tooltip).
+- **Die Ausgabestelle ist seit 2026-08-07 netzwerkfähig** (`bind_host`, Vorgabe `0.0.0.0`) und
+  hat deshalb **HTTPS + AD-Anmeldung** (`license-manager/auth.py`). Zwei Rollen: *ansehen*
+  (Liste, Schlüssel kopieren) und *verwalten* (ausstellen/ändern/widerrufen/veröffentlichen/
+  Einstellungen). Freigabe wie in Jarvis über **Benutzerliste ODER Gruppe** – gleichwertig
+  nebeneinander (der Fehler vom 2026-07-29 ist dort als Test festgehalten) – und **leer heißt
+  niemand**.
+  - **Der lokale Zugang (127.0.0.1) ist immer Verwalter.** Ohne diesen Notfallweg sperrt eine
+    falsche AD-Eingabe dauerhaft aus, und die Einstellungen liegen hinter genau dieser Tür.
+    Maßgeblich ist `request.remote_addr`; `X-Forwarded-For` wird **nicht** ausgewertet – die
+    Kopfzeile wäre fälschbar und der Notfallweg damit eine Hintertür.
+  - **Zertifikat** selbst ausgestellt (`cryptography`, kein openssl), SAN für localhost,
+    Rechnername und LAN-Adresse, DER-Download unter `/zertifikat` (**bewusst ohne Anmeldung** –
+    man braucht es, um der Seite überhaupt vertrauen zu können). Ein vorhandenes Zertifikat
+    wird nie automatisch ersetzt, sonst bricht bei jedem Start das im Browser hinterlegte
+    Vertrauen (dieselbe Regel wie `backend/security.py`).
+  - **`ldap3` ist optional**: fehlt es, startet die Ausgabestelle trotzdem und der lokale
+    Zugang funktioniert – nur die Anmeldung über das Netz nicht. Ein harter Abbruch hätte den
+    Betreiber ausgesperrt.
+  - **`backend.ldap_directory` wird wiederverwendet, `backend.config` aber NICHT importiert**
+    (`auth._ldap_shim`): dessen Import migriert Profile und schreibt die settings.json des Repos
+    zurück. Stattdessen ein Platzhalter-Modul mit den Werten des Werkzeugs.
+  - Design und Hell/Dunkel kommen aus dem Jarvis-Frontend (`/jarvis/css/theme.css`,
+    `js/theme.js`, Klasse `btn-theme-toggle`), ausgeliefert über eine **feste Dateiliste** –
+    der Ordner enthält die ganze Oberfläche, ein freier Zugriff wäre ein Traversal-Risiko.
+  - **Seitenaufbau wie im Jarvis-Portal** (2026-08-07): Startseite `/` mit drei Kacheln,
+    dazu `/lizenzen`, `/zugang` (nur Verwalter) und `/zertifikat` (Import-Anleitung mit
+    Reitern Windows/Linux/Browser, Vorbild `frontend/chat.html`). Gemeinsames über eine
+    Jinja-Basisvorlage (`templates/basis.html`) plus `static/lm.css` und `static/lm.js`;
+    das Haus-Symbol links oben führt von überall zurück. Die Download-Route heißt seither
+    **`/zertifikat.cer`** – `/zertifikat` ist die Hilfeseite.
+    **FALLSTRICK beim Aufteilen einer Einzelseite:** der herausgeschnittene Markup-Bereich
+    schleppte den kompletten Inline-`<script>`-Block mit, wodurch jede Funktion und jede
+    `const` doppelt vorlag (`Identifier … has already been declared`) – die Seite lud
+    kommentarlos gar nicht mehr. Danach war ein `<main>` verschachtelt und das Grid
+    dreispaltig. Beides fiel nur auf, weil die Vorschau die Seite wirklich ausführt: ein
+    Blick auf das Markup hätte es nicht gezeigt.
+  - **Dienstkonto + Picker (2026-08-07):** `ad_bind_user`/`ad_bind_password` erledigen die
+    Verzeichnis-Suche; für die **Anmeldung wird es nie benutzt** (dort bindet sich jeder
+    selbst, sonst wäre ein falsches Kennwort nicht mehr erkennbar). Das Kennwort steht in
+    `auth.GEHEIM` und geht nie an die Oberfläche – ein **leeres Feld heißt „unverändert"**,
+    zum Löschen gibt es einen eigenen Knopf; ohne diese Regel überschriebe jedes Speichern
+    das Kennwort mit einem Leerstring.
+  - **Auswahl wie in Jarvis** (`static/picker.js`): Suche mit Mehrfachauswahl, Gruppen-
+    Mitglieder auf Klick (nur DIREKTE – genau die prüft auch die Anmeldung), übernommene
+    Einträge als Marken mit ×. Die Lehre vom 2026-07-29 ist als Test festgeschrieben: im
+    `<label>` **nie selbst umschalten**, nur auf `change` hören, und der Mitglieder-Knopf
+    braucht `preventDefault()` **und** `stopPropagation()`.
+  - **FALLSTRICK Gruppen-DN:** `CN=DP-Lizenzen,OU=Gruppen,DC=nexus,DC=int` enthält Kommas.
+    Die Marken-Darstellung trennt Benutzerlisten an Kommas – bei Gruppenfeldern zerfiel eine
+    Gruppe dadurch in vier sinnlose Marken (im Screenshot gesehen). Gruppenfelder tragen
+    deshalb ausdrücklich **genau einen Wert** (`chipsInit(..., {einzeln:true})`).
+  - **„Neue Lizenz" und „Ausgestellte Lizenzen" sind Klapp-Container** im Jarvis-Muster
+    (`.kb-section` + `kb-section-header` + ▼/▶, Zustand je Container im localStorage —
+    `static/lm.js::klappInit`, übernommen aus `app.js::_collapseInit`). Die Klick-Ausnahme
+    für `button, input, label, a, select` ist Pflicht: ohne sie klappt jeder Knopf in der
+    Kopfzeile den Abschnitt zu. Der Zähler („(3)") wandert in die Kopfzeile, damit man im
+    zugeklappten Zustand sieht, ob sich das Aufklappen lohnt (gleiche Begründung wie bei den
+    Zugriffs-Verstößen am 2026-07-30). Die Container liegen **untereinander** wie in den
+    Jarvis-Einstellungen – die frühere Zweispaltigkeit machte das Formular schmal und die
+    Liste eng. Über die volle Breite stehen die Kundendaten (Firma/Abteilung/Ansprechpartner)
+    und die Vertragsdaten (Art/Laufzeit/Verlängerung) als je eine Dreier-Zeile; das
+    Kontrollkästchen bekommt dabei einen Rahmen, sonst „schwebt" es neben den Feldern.
+  - **Die Anleitung beschrieb nach dem Umbau das falsche Layout** („Formular links", „Liste
+    rechts") – sie ist jetzt selbst ein Container und nennt die Wege, wie sie sind. Zwei
+    Wächter halten das fest: die alten Ortsangaben dürfen nicht zurückkommen, und die
+    Anleitung muss sagen, woran man den Schlüssel erkennt (`JARVIS-LIC-1.`) – genau diese
+    Verwechslung mit der Kennung ist am 2026-08-07 real passiert. Beim Umbau von `<details>`
+    auf den Container blieb außerdem der alte `det.addEventListener('toggle')`-Code stehen
+    und warf `Cannot read properties of null`; die Seite lud dann gar nicht mehr.
+  - **Verifiziert:** 119 Prüfungen (`license-manager/tests_zugang.py`) über Flasks Test-Client,
+    also **ohne den Server zu starten** – das ist Vorgabe, die Ausgabestelle startet
+    ausschließlich der Betreiber. Der Test-Client kommt standardmäßig von 127.0.0.1 und wäre
+    damit immer der lokale Verwalter; die Fälle setzen deshalb ausdrücklich eine fremde Adresse.
+    Optische Abnahme über eine statisch gerenderte Vorschau in Dunkel und Hell.
 - **Bedienung ohne Vorwissen (2026-08-07):** `license-manager/start.sh` prüft Voraussetzungen,
   warnt bei fehlenden Schlüsseln/Veröffentlichungs-Ordner/offener Passphrase-Datei, erkennt
   eine laufende Instanz und öffnet den Browser. In der Maske selbst stehen: der Ablauf in

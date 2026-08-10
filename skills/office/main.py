@@ -394,6 +394,267 @@ def _leere_platzhalter_entfernen(slide) -> None:
             continue
 
 
+# Obergrenze fuer die Folienzahl. KEINE willkuerliche Zahl: ein Foliensatz, den
+# ein Mensch noch vortraegt, liegt darunter – und wer mehr braucht, will in
+# Wahrheit eine Tabelle. Der Deckel ist die zweite Sicherung hinter
+# `_slides_normalisieren`; er wird NIE still angewandt, sondern im Ergebnis
+# genannt (sonst haelt der Aufrufer die gekuerzte Datei fuer vollstaendig).
+MAX_FOLIEN = 60
+
+
+def _slides_normalisieren(slides):
+    """Bringt das 'slides'-Argument in eine Liste von Folien-Objekten.
+
+    WARUM DAS NOETIG IST – der Vorfall vom 2026-08-10: ein Modell schickte den
+    Foliensatz als TEXT (`"[{'title': …}, …]"`, Python-Schreibweise mit
+    einfachen Anfuehrungszeichen, also nicht einmal gueltiges JSON). Die
+    Schleife lief mit `for sl in slides` ueber die **Zeichen** dieses Strings,
+    und weil ein String-Element toleranterweise als `{"title": …}` galt, entstand
+    aus JEDEM Zeichen eine Folie: **2586 Folien**, 2 MB, unbrauchbar. Die
+    Toleranz sass also auf der falschen Ebene – sie fing das Element ab, nicht
+    den Container.
+
+    Ueber einen String zu iterieren ist in Python immer erlaubt und nie
+    gemeint. Deshalb wird hier zuerst der Container geprueft:
+      * String  -> als JSON und als Python-Literal parsen (``ast.literal_eval``
+        ist sicher, es fuehrt keinen Code aus). Scheitert beides, gibt es einen
+        **Fehler mit Auszug** – niemals eine Folie je Zeichen.
+      * dict    -> eine einzelne Folie.
+      * Liste   -> Elemente einzeln normalisieren.
+
+    Rueckgabe: ``(folien, fehler)``; ist ``fehler`` gesetzt, darf nichts
+    erzeugt werden."""
+    import ast
+    import json
+
+    def als_liste(wert, tiefe=0):
+        if isinstance(wert, str):
+            text = wert.strip()
+            if not text:
+                return None
+            if tiefe > 1:
+                return None          # kein endloses Aufdroeseln verschachtelter Texte
+            for parser in (json.loads, ast.literal_eval):
+                try:
+                    return als_liste(parser(text), tiefe + 1)
+                except Exception:  # noqa: BLE001
+                    continue
+            return None
+        if isinstance(wert, dict):
+            return [wert]
+        if isinstance(wert, (list, tuple)):
+            return list(wert)
+        return None
+
+    if slides is None:
+        return [], "Fehler: 'slides' fehlt."
+
+    roh = als_liste(slides)
+    if roh is None:
+        auszug = str(slides)[:120].replace("\n", " ")
+        return [], (
+            "Fehler: 'slides' konnte nicht gelesen werden. Erwartet wird eine LISTE "
+            "von Folien-Objekten, z.B. [{\"title\": \"…\", \"bullets\": [\"…\"]}] – "
+            "kein Text, der eine Liste beschreibt. "
+            f"Empfangen wurde {type(slides).__name__}: {auszug}…"
+        )
+
+    folien = []
+    verworfen = 0
+    for element in roh:
+        if isinstance(element, str):
+            text = element.strip()
+            # Ein Element kann seinerseits ein Objekt als Text sein.
+            innen = als_liste(text)
+            if innen and all(isinstance(e, dict) for e in innen):
+                folien.extend(innen)
+                continue
+            if not text:
+                continue
+            # Kurz und einzeilig ist eine Ueberschrift, alles andere Fliesstext.
+            folien.append({"title": text} if len(text) <= 80 and "\n" not in text
+                          else {"content": text})
+        elif isinstance(element, dict):
+            folien.append(element)
+        else:
+            verworfen += 1
+
+    if not folien:
+        return [], "Fehler: 'slides' enthaelt keine verwertbare Folie."
+    return folien, None
+
+
+_SHELL_SUBST = re.compile(r"\$\(\s*date[^)]*\)")
+
+
+def _text_bereinigen(text: str) -> str:
+    """Ersetzt eine unaufgeloeste Shell-Substitution durch das heutige Datum.
+
+    Im selben Vorfall stand auf der Titelfolie woertlich
+    ``Stand: $(date +%d.%m.%Y)`` – das Modell hatte damit gerechnet, dass eine
+    Shell den Ausdruck aufloest. Hier laeuft keine Shell. Ein sichtbarer
+    Platzhalter auf der ersten Folie ist der peinlichste Fehler in einer
+    Praesentation, und das Datum ist die einzige Absicht, die dahinterstecken
+    kann – deshalb wird genau dieser Fall (und nur er) eingesetzt."""
+    if not text or "$(" not in text:
+        return text
+    from datetime import date
+    return _SHELL_SUBST.sub(date.today().strftime("%d.%m.%Y"), text)
+
+
+# Diagrammtypen, deutsch UND englisch. Bewusst eine kleine Auswahl: es sind
+# genau die vier, die auf einer Folie funktionieren. Ein Streudiagramm mit 500
+# Punkten gehoert nicht in eine Praesentation.
+_CHART_TYPEN = {
+    "saeulen": "COLUMN_CLUSTERED", "säulen": "COLUMN_CLUSTERED",
+    "spalten": "COLUMN_CLUSTERED", "column": "COLUMN_CLUSTERED",
+    "bar": "COLUMN_CLUSTERED",          # gaengige Verwechslung: 'bar' meint meist Saeulen
+    "balken": "BAR_CLUSTERED", "barh": "BAR_CLUSTERED",
+    "linie": "LINE_MARKERS", "line": "LINE_MARKERS", "verlauf": "LINE_MARKERS",
+    "kreis": "PIE", "pie": "PIE", "torte": "PIE", "doughnut": "DOUGHNUT",
+    "ring": "DOUGHNUT",
+}
+
+
+def _zahl(wert):
+    """Wandelt einen Wert in eine Zahl – auch '1.216' und '76 %'.
+
+    Das Modell liefert Zahlen regelmaessig als formatierten Text. `float()`
+    macht aus '1.216' die Zahl 1.216 statt 1216 – ein stiller Faktor 1000
+    (dieselbe Falle wie in backend/tools/chart.py::parse_number)."""
+    if isinstance(wert, (int, float)):
+        return float(wert)
+    s = str(wert or "").strip().replace("%", "").replace("€", "").replace(" ", " ")
+    s = s.replace(" ", "")
+    if not s:
+        return None
+    neg = s.startswith("(") and s.endswith(")")
+    s = s.strip("()")
+    # Bei gemischten Trennzeichen ist das RECHTESTE das Dezimaltrennzeichen.
+    if "," in s and "." in s:
+        s = (s.replace(".", "").replace(",", ".") if s.rfind(",") > s.rfind(".")
+             else s.replace(",", ""))
+    elif "," in s:
+        s = s.replace(",", ".")
+    elif s.count(".") == 1 and len(s.split(".")[1]) == 3:
+        s = s.replace(".", "")          # '1.216' = Tausenderpunkt
+    try:
+        z = float(s)
+    except ValueError:
+        return None
+    return -z if neg else z
+
+
+def _diagramm_einfuegen(slide, prs, spec, neben_text: bool = False) -> bool:
+    """Legt ein NATIVES PowerPoint-Diagramm auf die Folie.
+
+    Nativ und nicht als Bild: das Diagramm bleibt in PowerPoint anklickbar und
+    bearbeitbar, sein Datenblatt liegt in der Datei, und die Reihenfarben kommen
+    aus dem THEME – also automatisch aus dem Hausdesign. Ein eingebettetes PNG
+    waere beim Zoomen unscharf und truege seine Farben fest eingebrannt.
+
+    ``spec``: {'typ': 'saeulen|balken|linie|kreis', 'kategorien': [...],
+    'werte': [...]} – oder mehrere Reihen ueber 'reihen':
+    [{'name': …, 'werte': [...]}, …]. Fehlt etwas Wesentliches, passiert
+    NICHTS und die Folie bleibt wie sie ist: eine halbe Grafik ist schlechter
+    als keine."""
+    try:
+        from pptx.chart.data import CategoryChartData
+        from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+        from skills.office import vorlage as _v
+    except Exception:  # noqa: BLE001
+        return False
+
+    if not isinstance(spec, dict):
+        return False
+    kategorien = spec.get("kategorien") or spec.get("categories") or spec.get("labels")
+    if not isinstance(kategorien, (list, tuple)) or not kategorien:
+        return False
+    kategorien = [str(k) for k in kategorien]
+
+    reihen = []
+    roh_reihen = spec.get("reihen") or spec.get("series")
+    if isinstance(roh_reihen, (list, tuple)) and roh_reihen:
+        for r in roh_reihen:
+            if isinstance(r, dict):
+                werte = r.get("werte") or r.get("values") or r.get("data")
+                reihen.append((str(r.get("name") or r.get("titel") or "Reihe"), werte))
+    else:
+        werte = spec.get("werte") or spec.get("values") or spec.get("data")
+        reihen.append((str(spec.get("name") or spec.get("titel") or spec.get("title") or "Wert"), werte))
+
+    daten = CategoryChartData()
+    daten.categories = kategorien
+    gueltig = 0
+    for name, werte in reihen:
+        if not isinstance(werte, (list, tuple)):
+            continue
+        zahlen = [_zahl(w) for w in werte]
+        # Auf die Kategorienzahl bringen: fehlende Werte als Luecke (None),
+        # ueberzaehlige abschneiden. Sonst lehnt python-pptx die Reihe ab und
+        # es entstuende gar kein Diagramm.
+        zahlen = (zahlen + [None] * len(kategorien))[:len(kategorien)]
+        if all(z is None for z in zahlen):
+            continue
+        daten.add_series(name, zahlen)
+        gueltig += 1
+    if not gueltig:
+        return False
+
+    typ_name = _CHART_TYPEN.get(str(spec.get("typ") or spec.get("type") or "").strip().lower(),
+                                "COLUMN_CLUSTERED")
+    try:
+        typ = getattr(XL_CHART_TYPE, typ_name)
+    except Exception:  # noqa: BLE001
+        typ = XL_CHART_TYPE.COLUMN_CLUSTERED
+
+    # Platz: der Inhaltsbereich des Satzspiegels. Steht daneben Text, nimmt das
+    # Diagramm die rechte Haelfte – sonst die volle Breite.
+    links, oben = _v.RAND_LINKS, _v.INHALT_Y
+    breite, hoehe = _v.INHALT_B, _v.INHALT_H
+    if neben_text:
+        spalte = (_v.INHALT_B - _v.SPALTEN_LUFT) // 2
+        links = _v.RAND_LINKS + spalte + _v.SPALTEN_LUFT
+        breite = spalte
+    try:
+        rahmen = slide.shapes.add_chart(typ, links, oben, breite, hoehe, daten)
+    except Exception:  # noqa: BLE001
+        return False
+
+    try:
+        diagramm = rahmen.chart
+        # Legende nur, wenn es mehr als eine Reihe gibt – bei einer einzigen
+        # wiederholt sie nur den Folientitel und kostet Flaeche.
+        diagramm.has_legend = gueltig > 1 or typ_name in ("PIE", "DOUGHNUT")
+        if diagramm.has_legend:
+            diagramm.legend.position = XL_LEGEND_POSITION.BOTTOM
+            diagramm.legend.include_in_layout = False
+        titel = spec.get("titel") or spec.get("title")
+        diagramm.has_title = bool(titel)
+        if titel:
+            diagramm.chart_title.text_frame.text = str(titel)
+        # Werte anschreiben, solange es lesbar bleibt. Bei einem Kreisdiagramm
+        # ist der Prozentwert die eigentliche Aussage.
+        punkte = len(kategorien) * max(gueltig, 1)
+        if typ_name in ("PIE", "DOUGHNUT") and len(kategorien) <= 8:
+            plot = diagramm.plots[0]
+            plot.has_data_labels = True
+            plot.data_labels.show_percentage = True
+            plot.data_labels.show_value = False
+        elif punkte <= 24:
+            plot = diagramm.plots[0]
+            plot.has_data_labels = True
+            # OOXML-Zahlenformate sind IMMER US-notiert: Komma = Tausender,
+            # Punkt = Dezimaltrenner. PowerPoint lokalisiert die Anzeige selbst.
+            # Das deutsche Muster '#.##0' bedeutet dort drei Nachkommastellen –
+            # aus 923 wurde im PDF-Test '923,000'.
+            plot.data_labels.number_format = "#,##0"
+            plot.data_labels.number_format_is_linked = False
+    except Exception:  # noqa: BLE001
+        pass       # ein Diagramm ohne Feinschliff ist besser als keines
+    return True
+
+
 def _logo_auf_titelfolie(slide, prs) -> None:
     """Setzt das Branding-Logo oben rechts auf die Titelfolie.
 
@@ -436,6 +697,13 @@ class CreatePowerPointTool(BaseTool):
             "'notes' fuer Sprechernotizen. Eine Titelfolie am Anfang entsteht ueber die "
             "Parameter 'title'/'subtitle' (nicht als Folien-Objekt); wer sie doch als Folie "
             "schickt, nimmt { 'layout': 'titel', 'title': ..., 'subtitle': ... }. "
+            "ZAHLEN GEHOEREN IN EIN DIAGRAMM, nicht in eine Aufzaehlung: je Folie "
+            "{ 'chart': { 'typ': 'saeulen|balken|linie|kreis', 'kategorien': [...], "
+            "'werte': [...] } } – mehrere Datenreihen ueber 'reihen': [{'name':…, "
+            "'werte':[...]}, …]. Das Diagramm ist in PowerPoint bearbeitbar und nimmt "
+            "seine Farben aus dem Hausdesign. Stehen daneben 'bullets', ruecken beide "
+            "nebeneinander. "
+            "'slides' MUSS eine echte Liste sein – KEIN Text, der eine Liste enthaelt. "
             "KEINE Farb-, Schrift- oder Groessenangaben mitschicken – die kommen aus der "
             "Vorlage; eigene Werte brechen das Design beim Bearbeiten. "
             "Gibt eine Download-URL zurueck."
@@ -448,7 +716,10 @@ class CreatePowerPointTool(BaseTool):
                 "filename": {"type": "STRING", "description": "Dateiname (ohne Pfad)."},
                 "title": {"type": "STRING", "description": "Optionaler Titel fuer eine Titelfolie am Anfang."},
                 "subtitle": {"type": "STRING", "description": "Optionaler Untertitel der Titelfolie."},
-                "slides": {"type": "ARRAY", "items": {"type": "OBJECT"}, "description": "Liste der Inhaltsfolien (siehe Beschreibung)."},
+                "slides": {"type": "ARRAY", "items": {"type": "OBJECT"},
+                           "description": "Liste der Inhaltsfolien als echtes Array von "
+                                          "Objekten (siehe Beschreibung) – nicht als Text. "
+                                          "Je Folie optional 'chart' fuer ein Diagramm."},
                 "template": {"type": "STRING", "description": "Optionaler Vorlagen-Dateiname (leer = Hausvorlage). Verfuegbare zeigt office_template_info."},
             },
             "required": ["filename", "slides"],
@@ -462,6 +733,16 @@ class CreatePowerPointTool(BaseTool):
             from pptx import Presentation
         except Exception as e:
             return f"Fehler: python-pptx nicht verfuegbar ({e})."
+
+        # VOR allem anderen: der Foliensatz muss eine Liste sein. Kommt er als
+        # Text, wuerde die Schleife unten ueber die Zeichen laufen.
+        slides, fehler = _slides_normalisieren(slides)
+        if fehler:
+            return fehler
+        zuviel = 0
+        if len(slides) > MAX_FOLIEN:
+            zuviel = len(slides) - MAX_FOLIEN
+            slides = slides[:MAX_FOLIEN]
 
         # Vorlage: 16:9, Branding-Farben, echte Masterfolien. Faellt das
         # Erzeugen aus (Rechte, fehlendes lxml), wird OHNE Vorlage
@@ -477,18 +758,14 @@ class CreatePowerPointTool(BaseTool):
 
         if title:
             slide = prs.slides.add_slide(_layout(prs, "titel"))
-            _titel_setzen(slide, title)
+            _titel_setzen(slide, _text_bereinigen(title))
             felder = _text_platzhalter(slide)
             if subtitle and felder:
-                _fuelle(felder[0], text=subtitle)
+                _fuelle(felder[0], text=_text_bereinigen(subtitle))
             _leere_platzhalter_entfernen(slide)
             _logo_auf_titelfolie(slide, prs)
 
-        for sl in (slides or []):
-            if isinstance(sl, str):
-                sl = {"title": sl}
-            if not isinstance(sl, dict):
-                continue
+        for sl in slides:
             art = str(sl.get("layout") or "").strip().lower()
             if art not in _LAYOUT_ALIAS:
                 art = "inhalt"
@@ -505,6 +782,9 @@ class CreatePowerPointTool(BaseTool):
             # Titelfolie bliebe ohne Kicker (beim Abnahmelauf auf ECHT genau so
             # passiert).
             inhalt = sl.get("content") or sl.get("text") or sl.get("subtitle") or ""
+            diagramm = sl.get("chart") or sl.get("diagramm")
+            hat_text = bool(bullets) or bool(inhalt)
+
             if felder:
                 if art == "zwei" and len(felder) > 1 and isinstance(bullets, (list, tuple)) and len(bullets) > 1:
                     # Zwei-Spalten-Layout: die Aufzaehlung in der Mitte teilen,
@@ -515,6 +795,9 @@ class CreatePowerPointTool(BaseTool):
                 else:
                     _fuelle(felder[0], bullets=bullets, text=inhalt)
             _leere_platzhalter_entfernen(slide)
+
+            if diagramm:
+                _diagramm_einfuegen(slide, prs, diagramm, neben_text=hat_text)
 
             notizen = sl.get("notes") or sl.get("notizen")
             if notizen:
@@ -528,6 +811,12 @@ class CreatePowerPointTool(BaseTool):
             prs.save(str(disk))
         except Exception as e:
             return f"Fehler beim Speichern: {e}"
+        # Ein Deckel, der nicht genannt wird, ist ein stiller Datenverlust: der
+        # Aufrufer haelt die gekuerzte Datei sonst fuer vollstaendig.
+        if zuviel:
+            vorlage_hinweis += (f" (Hinweis: {zuviel} weitere Folien wurden NICHT "
+                                f"uebernommen – hoechstens {MAX_FOLIEN} je Datei. "
+                                f"Fuer mehr Material eine Tabelle erzeugen.)")
         return _ok(dl, fname, disk, extra=vorlage_hinweis)
 
 

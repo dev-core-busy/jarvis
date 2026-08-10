@@ -530,6 +530,36 @@ def _setze(shape, links: int, oben: int, breite: int, hoehe: int) -> None:
         pass
 
 
+def _hintergruende(prs, bilder: dict) -> None:
+    """Legt Vollbild und Zierband aus der Firmenvorlage in die Layouts.
+
+    WARUM ES DAS GIBT: ohne Bildmaterial ist jede Folie eine weisse Flaeche mit
+    Text – fachlich richtig, aber neben einem von Hand gebauten Deck sofort als
+    Fremdkoerper erkennbar. Das war die Kritik am Ergebnis vom 2026-08-10
+    („Hintergrund fehlt").
+
+    Verteilt wird sparsam und nach der Vorlage:
+      * Vollbild auf TITELFOLIE und ABSCHNITT – dort ist viel freie Flaeche,
+        und der Hexagon-Rahmen der Firmenvorlage laesst die Mitte frei.
+      * Zierband unten auf den INHALTS-Layouts – ein Vollbild hinter einer
+        Aufzaehlung macht den Text unlesbar.
+    Der Inhaltsbereich endet bei INHALT_Y+INHALT_H (5660571); das Band beginnt
+    darunter und ueberdeckt deshalb keinen Text."""
+    voll = bilder.get("vollbild")
+    band = bilder.get("band")
+    band_h = HOEHE_16_9 - (INHALT_Y + INHALT_H)      # Streifen unter dem Satzspiegel
+    for layout in prs.slide_layouts:
+        name = (layout.name or "").strip().lower()
+        if voll and name in ("titelfolie", "title slide", "abschnitt", "section header"):
+            _bild_einfuegen(layout, voll, 0, 0, BREITE_16_9, HOEHE_16_9,
+                            "Hintergrund", 910)
+        elif band and name in ("titel und inhalt", "title and content",
+                               "zwei inhalte", "two content",
+                               "vergleich", "comparison", "nur titel", "title only"):
+            _bild_einfuegen(layout, band, 0, HOEHE_16_9 - band_h,
+                            BREITE_16_9, band_h, "Zierband", 911)
+
+
 def _raster(prs, farben: dict) -> None:
     """Legt den Satzspiegel der Firmenvorlage ueber die Layouts.
 
@@ -601,6 +631,156 @@ def _raster(prs, farben: dict) -> None:
                 else:
                     _setze(ph, x, INHALT_Y + kopf_h + luft, spalte,
                            INHALT_H - kopf_h - luft)
+
+
+# Bildmaterial aus einer hinterlegten Firmenvorlage
+# ─────────────────────────────────────────────────────────────────────────────
+# Die Grafiken der Firmenvorlage liegen NICHT im Repo – das ist oeffentlich.
+# Sie kommen aus der .potx/.pptx, die ein Administrator unter
+# *Branding → PowerPoint-Vorlage* hochlaedt; die landet in data/vorlagen
+# (gitignored) und bleibt damit auf dem Server.
+# Ausgesiebt wird ueber die PIXELMASSE, nicht ueber die Dateigroesse: eine
+# flaechige Hintergrundgrafik mit wenigen Farben komprimiert sehr gut und waere
+# ueber ein Byte-Limit fallengelassen worden, waehrend ein detailreiches
+# 384×384-Symbol es ueberschreitet. Die Bytegrenze bleibt nur als billiger
+# Vorfilter, damit fuer Icons gar nicht erst dekodiert wird.
+BILD_MIN_BYTES = 1500
+BILD_MIN_BREITE = 1200           # darunter ist es ein Symbol, kein Hintergrund
+SEITEN_TOLERANZ = 0.12           # 16:9 erkennen (1,778) trotz Beschnitt
+BAND_MIN_VERHAELTNIS = 4.0       # 4000×591 = 6,8 – ein Zierband, kein Bild
+
+
+def firmenvorlagen() -> list:
+    """Hinterlegte Fremdvorlagen (alles ausser der erzeugten Standardvorlage)."""
+    try:
+        treffer = [p for p in VORLAGEN_DIR.glob("*")
+                   if p.suffix.lower() in (".potx", ".pptx")
+                   and p.name != STANDARD_NAME
+                   and not p.name.startswith(".")
+                   and not p.name.endswith(".tmp.pptx")]
+    except Exception:  # noqa: BLE001
+        return []
+    # Groesste zuerst: die vollstaendigste Vorlage bringt das meiste Material.
+    return sorted(treffer, key=lambda p: p.stat().st_size, reverse=True)
+
+
+def _bildmasse(rohdaten: bytes):
+    """(breite, hoehe) eines Bildes – ohne Pillow als harte Abhaengigkeit.
+
+    Gelesen wird nur der Kopf: PNG hat die Masse in den ersten 24 Byte, JPEG in
+    einem SOF-Marker. Reicht voellig, um Vollbild von Zierband zu unterscheiden."""
+    try:
+        if rohdaten[:8] == b"\x89PNG\r\n\x1a\n":
+            import struct
+            b, h = struct.unpack(">II", rohdaten[16:24])
+            return int(b), int(h)
+        if rohdaten[:2] == b"\xff\xd8":
+            import struct
+            i = 2
+            while i < len(rohdaten) - 9:
+                if rohdaten[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = rohdaten[i + 1]
+                laenge = struct.unpack(">H", rohdaten[i + 2:i + 4])[0]
+                if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                    h, b = struct.unpack(">HH", rohdaten[i + 5:i + 9])
+                    return int(b), int(h)
+                i += 2 + laenge
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def design_bilder(quelle: Path = None) -> dict:
+    """Zieht Hintergrundbild und Zierband aus einer Firmenvorlage.
+
+    Ausgewaehlt wird ueber die MASSE, nicht ueber den Dateinamen: der heisst in
+    jeder Vorlage ``image<n>`` und sagt nichts.
+      * ``vollbild`` – groesstes Bild im Folienformat (16:9). In der
+        NEXUS-Vorlage ist das der Hexagon-Rahmen mit freier Mitte, also genau
+        ein Hintergrund fuer Text.
+      * ``band``     – breitester Streifen (Verhaeltnis ab 4:1), der in der
+        Vorlage unten auf Kapitel- und Abschlussfolien liegt.
+    Rueckgabe: {name: bytes}. Fehlt die Vorlage oder passt nichts, kommt ein
+    leeres dict – die Vorlage entsteht dann ohne Bilder wie bisher."""
+    quellen = [Path(quelle)] if quelle else firmenvorlagen()
+    raus = {}
+    for datei in quellen:
+        try:
+            with zipfile.ZipFile(datei) as z:
+                kandidaten = []
+                for eintrag in z.infolist():
+                    name = eintrag.filename.lower()
+                    if not name.startswith("ppt/media/"):
+                        continue
+                    if not name.endswith((".png", ".jpg", ".jpeg")):
+                        continue      # SVG/EMF: nicht ueberall darstellbar
+                    if eintrag.file_size < BILD_MIN_BYTES:
+                        continue
+                    daten = z.read(eintrag.filename)
+                    masse = _bildmasse(daten)
+                    if not masse or masse[1] == 0 or masse[0] < BILD_MIN_BREITE:
+                        continue
+                    kandidaten.append((masse[0] / masse[1], masse, daten, eintrag.filename))
+            if not kandidaten:
+                continue
+            ziel = BREITE_16_9 / float(HOEHE_16_9)
+            voll = [k for k in kandidaten if abs(k[0] - ziel) <= SEITEN_TOLERANZ]
+            band = [k for k in kandidaten if k[0] >= BAND_MIN_VERHAELTNIS]
+            if voll:
+                raus["vollbild"] = max(voll, key=lambda k: k[1][0] * k[1][1])[2]
+            if band:
+                raus["band"] = max(band, key=lambda k: k[1][0])[2]
+            if raus:
+                raus["quelle"] = datei.name
+                return raus
+        except Exception:  # noqa: BLE001
+            continue
+    return raus
+
+
+def _bild_einfuegen(layout, rohdaten: bytes, x: int, y: int,
+                    breite: int, hoehe: int, name: str, kennung: int) -> bool:
+    """Haengt ein Bild als ``<p:pic>`` in den spTree eines LAYOUTS.
+
+    ``LayoutShapes`` hat kein ``add_picture`` (das gibt es nur auf Folien), und
+    ein Bild braucht mehr als XML: es muss als eigener Part in die Datei und
+    ueber eine Beziehung (``r:embed``) verknuepft werden. Genau daran scheitert
+    der uebliche Umweg ueber eine Wegwerf-Folie – deshalb hier der direkte Weg
+    ueber ``part.get_or_add_image_part``, der Part und Beziehung zusammen
+    anlegt.
+
+    Eingefuegt wird an Index 2 (hinter nvGrpSpPr/grpSpPr), also HINTER allen
+    Platzhaltern – ein Hintergrund, der ueber dem Text liegt, waere keiner."""
+    from io import BytesIO
+    from lxml import etree
+
+    P = "http://schemas.openxmlformats.org/presentationml/2006/main"
+    A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    try:
+        _, rId = layout.part.get_or_add_image_part(BytesIO(rohdaten))
+    except Exception:  # noqa: BLE001
+        return False
+
+    xml = f"""<p:pic xmlns:p="{P}" xmlns:a="{A}" xmlns:r="{R}">
+  <p:nvPicPr>
+    <p:cNvPr id="{kennung}" name="{name}"/>
+    <p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>
+    <p:nvPr userDrawn="1"/>
+  </p:nvPicPr>
+  <p:blipFill><a:blip r:embed="{rId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>
+  <p:spPr>
+    <a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{breite}" cy="{hoehe}"/></a:xfrm>
+    <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+  </p:spPr>
+</p:pic>"""
+    try:
+        layout.shapes._spTree.insert(2, etree.fromstring(xml))
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _rechteck(layout, x: int, y: int, breite: int, hoehe: int,
@@ -790,6 +970,15 @@ def erzeuge(ziel: Path = None) -> Path:
     _typografie(prs, farben)
     _raster(prs, farben)
     _fusszeile(prs)
+    # Bildmaterial ZULETZT: es wird an Index 2 eingehaengt (hinter den
+    # Platzhaltern) und ist von Raster und Typografie unabhaengig. Fehlt eine
+    # Firmenvorlage, passiert hier schlicht nichts.
+    try:
+        bilder = design_bilder()
+        if bilder:
+            _hintergruende(prs, bilder)
+    except Exception:  # noqa: BLE001
+        pass       # ohne Hintergrund ist die Vorlage brauchbar, ohne Vorlage nicht
     # Das LOGO kommt NICHT in den Master, sondern beim Erzeugen auf die
     # Titelfolie (main.py). Zwei Gruende: MasterShapes kann keine Bilder
     # aufnehmen (die Medien-Beziehung haengt an der Folie, nicht am Master),

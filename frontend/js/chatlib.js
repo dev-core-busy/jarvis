@@ -159,7 +159,15 @@
             // Office-Download-Chips als Platzhalter extrahieren
             const _chip = (label, url) => {
                 const safe = (label || 'Datei').replace(/^[📥\s]+/, '').trim() || 'Datei';
-                return _hold(`<a href="${_withToken(url)}" download class="chat-doc-dl">${_DL_SVG}<span>${safe}</span></a>`);
+                // Der title nennt den Weg, den man dem Chip nicht ansieht: Ziehen
+                // (DownloadURL → Explorer/Outlook). Das Kontextmenue wird hier
+                // ABSICHTLICH NICHT versprochen – es haengt an der Seite
+                // (chat.js bindet es ein, /support nicht), und eine Zusage, die
+                // je Seite stimmt oder nicht, ist schlimmer als keine.
+                const tip = escapeHtml(_tt('media.chip_hint',
+                    'Klick = herunterladen · Ziehen = in Explorer/Outlook'));
+                return _hold(`<a href="${_withToken(url)}" download class="chat-doc-dl" title="${tip}">`
+                           + `${_DL_SVG}<span>${safe}</span></a>`);
             };
             // Markdown-Form [label](/api/documents/..)
             t = t.replace(/\[([^\]\n]*)\]\((\/api\/documents\/[A-Za-z0-9_\-]+\.(?:docx|xlsx|pptx|pdf))\)/g,
@@ -553,7 +561,14 @@
             // Edit-Mode aktiv? Dann kein Menue
             if (targetEl.classList.contains('editing') ||
                 targetEl.querySelector('.editing')) return;
-            const items = getItems();
+            // SHIFT laesst das BROWSER-Menue durch. Wer "Bild in neuem Tab",
+            // "Untersuchen" oder eine Erweiterung braucht, kommt sonst nicht mehr
+            // daran – ein eigenes Menue darf den Weg nicht endgueltig zumauern.
+            if (e.shiftKey) return;
+            // `getItems` bekommt das Ereignis: nur so laesst sich unterscheiden,
+            // ob auf ein Bild, ein Diagramm, einen Datei-Chip oder auf Text
+            // geklickt wurde. Bestehende Aufrufer ignorieren das Argument.
+            const items = getItems(e);
             if (!items || items.length === 0) return;
             e.preventDefault();
             e.stopPropagation();
@@ -567,7 +582,9 @@
             const t = e.touches[0];
             _touchStartXY = { x: t.clientX, y: t.clientY };
             _touchTimer = setTimeout(() => {
-                const items = getItems();
+                // Auch hier das Ereignis mitgeben: Long-Press auf ein Bild muss
+                // dieselben Eintraege liefern wie ein Rechtsklick darauf.
+                const items = getItems(e);
                 if (!items || items.length === 0) return;
                 _showCtxMenuAt(_touchStartXY.x, _touchStartXY.y, items);
                 // haptisches Feedback (falls vorhanden)
@@ -754,6 +771,279 @@
         } catch (_) { return false; }
     }
 
+    /* ═══════════════════════════════════════════════════════════════════ *
+     *  Medien im Chat: kopieren, speichern, herausziehen
+     *
+     *  WAS DER BROWSER ERLAUBT – und was nicht:
+     *  `navigator.clipboard.write()` nimmt nur eine kleine, feste Liste von
+     *  MIME-Typen an (text/plain, text/html, image/png; alles andere →
+     *  NotAllowedError "Type ... not supported"). **Eine .docx/.xlsx/.pdf laesst
+     *  sich also NICHT in die Zwischenablage legen**, auch nicht als Blob mit
+     *  korrektem Typ – das ist eine Browser-Grenze, kein fehlendes Feature.
+     *  Deshalb hier zwei getrennte Wege:
+     *    - BILDER (auch Diagramme und Mermaid-Schaubilder) → echtes
+     *      "Bild kopieren" als image/png. Beim <canvas> eines Chart.js-Diagramms
+     *      hat das Browser-Menue GAR KEIN "Bild kopieren" – dort ist der Gewinn
+     *      am groessten.
+     *    - DATEIEN → herunterladen, Link kopieren, oder per Drag&Drop
+     *      (`DownloadURL`) direkt in Explorer/Outlook ziehen. Das ist der einzige
+     *      Weg, eine Datei ohne Umweg ueber den Download-Ordner weiterzugeben.
+     * ═══════════════════════════════════════════════════════════════════ */
+
+    function _tt(key, fallback) {
+        try { return (global.t && global.t(key)) || fallback; } catch (_) { return fallback; }
+    }
+
+    // Kurze, unaufdringliche Rueckmeldung. Ohne sie ist "Bild kopieren" ein Klick
+    // ins Nichts: in der Zwischenablage sieht man nichts, und ein Fehlschlag
+    // (fehlende Berechtigung, unsicherer Kontext) waere voellig unsichtbar.
+    function _toast(text, fehler) {
+        try {
+            let el = document.getElementById('jv-media-toast');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'jv-media-toast';
+                el.className = 'jv-media-toast';
+                document.body.appendChild(el);
+            }
+            el.textContent = text;
+            el.classList.toggle('is-error', !!fehler);
+            el.classList.add('open');
+            clearTimeout(el._t);
+            el._t = setTimeout(() => el.classList.remove('open'), fehler ? 5000 : 1800);
+        } catch (_) {}
+    }
+
+    function _dateiname(url, fallback) {
+        try {
+            const p = (url || '').split('?')[0].split('#')[0].split('/').pop() || '';
+            // Capability-Dateien heissen "<32-Hex>__<Anzeigename>" – der Hex-Teil
+            // ist fuer den Benutzer Rauschen.
+            const m = p.match(/^[0-9a-f]{16,}__(.+)$/i);
+            return decodeURIComponent(m ? m[1] : p) || fallback;
+        } catch (_) { return fallback; }
+    }
+
+    const _MIME = {
+        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        pdf: 'application/pdf', csv: 'text/csv', txt: 'text/plain',
+        json: 'application/json', xml: 'application/xml', zip: 'application/zip',
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+        webp: 'image/webp', svg: 'image/svg+xml',
+    };
+
+    function _mimeFuer(name) {
+        const ext = (name || '').split('.').pop().toLowerCase();
+        return _MIME[ext] || 'application/octet-stream';
+    }
+
+    /* Ein beliebiges Element als PNG in die Zwischenablage.
+     * Unterstuetzt <img>, <canvas> (Chart.js) und <svg> (Mermaid).
+     *
+     * WARUM IMMER UEBER EIN CANVAS: die Zwischenablage nimmt zuverlaessig nur
+     * image/png. Ein Bild kann aber webp/jpeg/gif sein, und ein <svg> ist
+     * ueberhaupt kein Rasterbild. Der Umweg ueber ein Canvas normalisiert beides.
+     * Beim <canvas> selbst wird direkt `toBlob` benutzt – nicht neu zeichnen,
+     * das kostete Qualitaet (devicePixelRatio 2, siehe charts.js).
+     */
+    async function copyElementAsImage(el) {
+        if (!el) return false;
+        try {
+            const blob = await _alsPngBlob(el);
+            if (!blob) throw new Error('kein Bild');
+            if (!(global.ClipboardItem && navigator.clipboard && navigator.clipboard.write)) {
+                throw new Error('Zwischenablage fuer Bilder nicht verfuegbar');
+            }
+            await navigator.clipboard.write([new global.ClipboardItem({ 'image/png': blob })]);
+            _toast(_tt('media.copied_img', 'Bild in die Zwischenablage kopiert'));
+            return true;
+        } catch (e) {
+            // Klartext statt Stille: die haeufigsten Gruende sind fehlende
+            // Berechtigung und ein nicht-sicherer Kontext (http).
+            _toast(_tt('media.copy_img_failed',
+                       'Bild konnte nicht kopiert werden (Browser-Berechtigung?). '
+                     + 'Alternative: "Bild speichern".'), true);
+            console.warn('[Media] Bild kopieren fehlgeschlagen:', e);
+            return false;
+        }
+    }
+
+    function _alsPngBlob(el) {
+        return new Promise((resolve, reject) => {
+            const tag = (el.tagName || '').toLowerCase();
+            if (tag === 'canvas') {
+                if (el.toBlob) el.toBlob(b => b ? resolve(b) : reject(new Error('toBlob leer')), 'image/png');
+                else reject(new Error('canvas.toBlob fehlt'));
+                return;
+            }
+            const zeichnen = (quelle, w, h) => {
+                try {
+                    const c = document.createElement('canvas');
+                    c.width = Math.max(1, w); c.height = Math.max(1, h);
+                    const ctx = c.getContext('2d');
+                    // Weisser Grund: PNG-Transparenz wird in Word/Outlook je nach
+                    // Version schwarz gefuellt – ein unlesbares Diagramm.
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, c.width, c.height);
+                    ctx.drawImage(quelle, 0, 0, c.width, c.height);
+                    c.toBlob(b => b ? resolve(b) : reject(new Error('toBlob leer')), 'image/png');
+                } catch (err) { reject(err); }
+            };
+            if (tag === 'img') {
+                // Bereits geladen und same-origin → direkt zeichnen. Ein Bild von
+                // einem fremden Host wuerde das Canvas "verunreinigen" (toBlob
+                // wirft SecurityError) – dann bleibt nur "Bild speichern".
+                const w = el.naturalWidth || el.width, h = el.naturalHeight || el.height;
+                if (el.complete && w) return zeichnen(el, w, h);
+                const tmp = new Image();
+                tmp.crossOrigin = 'anonymous';
+                tmp.onload = () => zeichnen(tmp, tmp.naturalWidth, tmp.naturalHeight);
+                tmp.onerror = () => reject(new Error('Bild nicht ladbar'));
+                tmp.src = el.currentSrc || el.src;
+                return;
+            }
+            if (tag === 'svg') {
+                const xml = new XMLSerializer().serializeToString(el);
+                const r = el.getBoundingClientRect();
+                const img = new Image();
+                img.onload = () => zeichnen(img, r.width || 800, r.height || 600);
+                img.onerror = () => reject(new Error('SVG nicht ladbar'));
+                img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+                return;
+            }
+            reject(new Error('Elementtyp ' + tag + ' nicht unterstuetzt'));
+        });
+    }
+
+    async function _bildSpeichern(el, name) {
+        try {
+            const blob = await _alsPngBlob(el);
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = (name || 'bild') + '.png';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+        } catch (e) {
+            _toast(_tt('media.save_img_failed', 'Bild konnte nicht gespeichert werden'), true);
+        }
+    }
+
+    /* Absolute URL fuer die Zwischenablage.
+     * Das Sitzungstoken bleibt DRIN: `/api/documents/...` verlangt eine
+     * Anmeldung (require_auth_or_query), ohne Token ist der kopierte Link
+     * unbrauchbar. Der Benutzer kopiert bewusst; der Menuepunkt sagt es. Das
+     * unterscheidet sich von der Regel "Token nie in den gespeicherten
+     * Markdown" – dort passiert es unbemerkt und dauerhaft. */
+    function _absolut(url) {
+        try { return new URL(url, global.location.href).href; } catch (_) { return url || ''; }
+    }
+
+    /* Datei-Chips zum Herausziehen: `DownloadURL` ist der einzige Weg, eine
+     * Datei aus dem Browser in Explorer/Outlook/Teams zu bekommen (Chromium,
+     * Edge; Firefox ignoriert es und faellt auf den Link zurueck). Format:
+     * "<mime>:<dateiname>:<absolute URL>".
+     *
+     * EIN DELEGIERTER LISTENER statt Verdrahtung pro Chip: die Chips entstehen an
+     * vier Stellen in chat.js (Streaming, Wiederherstellen, Nachtragen) und
+     * ebenso in support.js/userchat.js – jede einzeln zu bedienen waere die
+     * Sorte Kopplung, die spaeter still ausfaellt, wenn eine fuenfte Stelle
+     * hinzukommt. Ein `<a href>` ist ohnehin von Natur aus ziehbar, es braucht
+     * also kein `draggable`-Attribut. */
+    let _dragInstalliert = false;
+    function installAttachmentDrag() {
+        if (_dragInstalliert || typeof document === 'undefined') return;
+        _dragInstalliert = true;
+        document.addEventListener('dragstart', (e) => {
+            const a = e.target && e.target.closest &&
+                      e.target.closest('a.chat-doc-dl, a[href*="/api/documents/"]');
+            if (!a || !e.dataTransfer) return;
+            try {
+                const url = _absolut(a.getAttribute('href') || '');
+                const name = _dateiname(url, (a.textContent || 'Datei').trim());
+                e.dataTransfer.setData('DownloadURL', _mimeFuer(name) + ':' + name + ':' + url);
+                e.dataTransfer.setData('text/uri-list', url);
+                e.dataTransfer.setData('text/plain', url);
+            } catch (_) { /* ohne DownloadURL bleibt das normale Link-Ziehen */ }
+        });
+    }
+    installAttachmentDrag();
+
+    /* Kontextmenue-Eintraege fuer das angeklickte Medium.
+     * Rueckgabe [] wenn nichts Passendes getroffen wurde – dann haengt der
+     * Aufrufer nur seine eigenen Eintraege (Text kopieren, Loeschen …) an. */
+    function mediaCtxItems(ev) {
+        const ziel = ev && (ev.target || (ev.touches && ev.touches[0] && ev.touches[0].target));
+        if (!ziel || !ziel.closest) return [];
+        const items = [];
+
+        // 1) Datei-Chip (Download) – der Fall "Anhang"
+        const chip = ziel.closest('a.chat-doc-dl, a[href*="/api/documents/"]');
+        if (chip) {
+            const url = _absolut(chip.getAttribute('href') || '');
+            const name = _dateiname(url, 'Datei');
+            items.push({
+                label: _tt('media.download', 'Datei herunterladen'), icon: '⤓',
+                onClick: () => { const a = document.createElement('a');
+                    a.href = chip.getAttribute('href'); a.download = name;
+                    document.body.appendChild(a); a.click(); a.remove(); },
+            });
+            items.push({
+                label: _tt('media.copy_link', 'Link kopieren (mit Sitzungstoken)'), icon: '⧉',
+                onClick: async () => {
+                    const ok = await copyTextToClipboard(url);
+                    _toast(ok ? _tt('media.copied_link', 'Link kopiert')
+                              : _tt('media.copy_failed', 'Kopieren fehlgeschlagen'), !ok);
+                },
+            });
+            items.push({
+                label: _tt('media.copy_name', 'Dateinamen kopieren'), icon: '⧉',
+                onClick: async () => {
+                    const ok = await copyTextToClipboard(name);
+                    _toast(ok ? _tt('media.copied_name', 'Dateiname kopiert')
+                              : _tt('media.copy_failed', 'Kopieren fehlgeschlagen'), !ok);
+                },
+            });
+            return items;
+        }
+
+        // 2) Bild, Diagramm (canvas) oder Schaubild (svg)
+        // ACHTUNG die Klassennamen: Diagramme liegen in `.jarvis-chart` (Canvas,
+        // charts.js), Schaubilder in `.jarvis-mermaid` (SVG, mermaid_blocks.js) –
+        // NICHT in `pre.mermaid`. Ein Selektor `.mermaid svg` trifft
+        // `jarvis-mermaid` NICHT (CSS-Klassen matchen ganze Namen).
+        let bild = ziel.closest('img.chat-img, .jarvis-chart canvas, .jarvis-mermaid svg');
+        if (!bild) {
+            // Klick NEBEN das Canvas (auf den Rahmen/die Werkzeugleiste) trifft
+            // den Container – bei einem Diagramm mit Knopfleiste der Normalfall.
+            const box = ziel.closest('.jarvis-chart, .jarvis-mermaid');
+            if (box) bild = box.querySelector('canvas, svg');
+        }
+        if (bild) {
+            const src = bild.tagName.toLowerCase() === 'img'
+                ? (bild.currentSrc || bild.getAttribute('src') || '') : '';
+            const name = src ? _dateiname(src, 'bild').replace(/\.[a-z0-9]+$/i, '')
+                             : (bild.tagName.toLowerCase() === 'canvas' ? 'diagramm' : 'schaubild');
+            items.push({
+                label: _tt('media.copy_img', 'Bild kopieren'), icon: '⧉',
+                onClick: () => copyElementAsImage(bild),
+            });
+            items.push({
+                label: _tt('media.save_img', 'Bild speichern'), icon: '⤓',
+                onClick: () => _bildSpeichern(bild, name),
+            });
+            if (src) {
+                items.push({
+                    label: _tt('media.open_img', 'Bild in neuem Tab öffnen'), icon: '↗',
+                    onClick: () => { try { global.open(_absolut(src), '_blank', 'noopener'); } catch (_) {} },
+                });
+            }
+            return items;
+        }
+        return [];
+    }
+
     /* ── Namespace exponieren ─────────────────────────────────── */
     global.JarvisChatLib = {
         escapeHtml: escapeHtml,
@@ -774,5 +1064,8 @@
         hideBubbleContextMenu: _hideCtxMenu,
         copyTextToClipboard: copyTextToClipboard,
         createSelectionController: createSelectionController,
+        mediaCtxItems: mediaCtxItems,
+        copyElementAsImage: copyElementAsImage,
+        installAttachmentDrag: installAttachmentDrag,
     };
 })(typeof window !== 'undefined' ? window : this);

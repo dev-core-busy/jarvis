@@ -1092,7 +1092,7 @@
 
         // ── Kontextmenue (Rechtsklick / Long-Press) ────────────────
         if (window.JarvisChatLib && window.JarvisChatLib.setupBubbleContextMenu) {
-            window.JarvisChatLib.setupBubbleContextMenu(row, () => _buildBubbleCtxItems(row, bubble, role));
+            window.JarvisChatLib.setupBubbleContextMenu(row, (ev) => _buildBubbleCtxItems(row, bubble, role, ev));
         }
 
         // Im Auswahlmodus neue Bubble direkt mit Checkbox versehen
@@ -1152,10 +1152,27 @@
     }
 
     // Kontextmenue-Items (Bearbeiten/Kopieren/Loeschen)
-    function _buildBubbleCtxItems(row, bubble, role) {
+    function _buildBubbleCtxItems(row, bubble, role, ev) {
         const items = [];
         const txt = (row.dataset && row.dataset.rawText) ||
                     (bubble && (bubble.textContent || '')) || '';
+        // Wurde auf ein Bild, ein Diagramm oder einen Datei-Chip geklickt, stehen
+        // dessen Aktionen GANZ OBEN – das ist dann die Absicht des Klicks. Die
+        // Bubble-Eintraege (Text kopieren, Loeschen) bleiben darunter erreichbar.
+        // Bei einem Treffer entfaellt "Bearbeiten": ein Bild bearbeitet man nicht.
+        const medien = window.JarvisChatLib?.mediaCtxItems?.(ev) || [];
+        if (medien.length) {
+            items.push(...medien);
+            items.push({
+                label: (window.t ? window.t('bubble.ctx.copy') : 'Text kopieren'), icon: '⧉',
+                onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
+            });
+            items.push({
+                label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: '×', danger: true,
+                onClick: () => _selCtl.startSelectionDelete(row),
+            });
+            return items;
+        }
         if (role === 'user') {
             items.push({
                 label: (window.t ? window.t('bubble.ctx.edit') : 'Bearbeiten'), icon: '✏',
@@ -1806,7 +1823,7 @@
         // Kontextmenue auch fuer restaurierte Bubbles aktivieren (vorher fehlte
         // dieser Hook, weshalb Rechtsklick im /chat-Popup nur Browser-Menue zeigte).
         if (window.JarvisChatLib && window.JarvisChatLib.setupBubbleContextMenu) {
-            window.JarvisChatLib.setupBubbleContextMenu(row, () => _buildBubbleCtxItems(row, bubble, entry.role));
+            window.JarvisChatLib.setupBubbleContextMenu(row, (ev) => _buildBubbleCtxItems(row, bubble, entry.role, ev));
         }
     }
 

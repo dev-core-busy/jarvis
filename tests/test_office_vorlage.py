@@ -50,8 +50,14 @@ M = (ROOT / "skills" / "office" / "main.py").read_text()
 pruefe("BREITE_16_9 = 12192000" in V, "Vorlage ist 16:9 (nicht das 4:3-Standardtemplate)")
 pruefe("eigene_geometrie" in V,
        "Skalierung fasst nur Formen mit EIGENEM xfrm an (sonst doppelt + top=0)")
-pruefe('"Arial"' in V, "Schrift ist Arial (auf Fremdrechnern vorhanden)")
+pruefe('SCHRIFT_TITEL = "HelveticaNeue LT 75 Bold"' in V
+       and 'SCHRIFT_TEXT = "HelveticaNeue LT 55 Roman"' in V,
+       "Schriften der Firmenvorlage (majorFont/minorFont getrennt)")
+pruefe("PDF-EXPORT" in V,
+       "die fehlende Serverschrift ist als Fallstrick dokumentiert")
 pruefe("colors_light" in V and "accent" in V, "Akzentfarbe kommt aus dem Branding")
+pruefe("_typografie" in V and "_raster" in V,
+       "Designprofil wirkt ueber Master-Textstile UND Satzspiegel")
 pruefe("VORLAGEN_DIR" in V and "vorlagen" in V and '"documents"' not in V,
        "Vorlagen liegen NICHT in data/documents (dort gilt Frist + Eigentuemer)")
 pruefe("titleStyle" in V,
@@ -109,8 +115,16 @@ if HAT_PPTX:
     namen = [l.name for l in prs.slide_layouts]
     pruefe("Titelfolie" in namen and "Titel und Inhalt" in namen,
            f"Layouts deutsch benannt ({namen[:3]})")
-    pruefe("Akzentbalken" in [s.name for s in prs.slide_masters[0].shapes],
-           "Akzentbalken liegt im Master (auf jeder Folie, nicht verschiebbar)")
+    ab_layout = [l for l in prs.slide_layouts if l.name == "Abschnitt"][0]
+    pruefe("Kapitelkasten" in [s.name for s in ab_layout.shapes],
+           "Abschnittsfolie hat den farbigen Kasten der Firmenvorlage")
+    # Er muss VOR den Platzhaltern stehen, sonst deckt er den Titel zu.
+    ab_namen = [s.name for s in ab_layout.shapes]
+    pruefe(ab_namen.index("Kapitelkasten") == 0,
+           f"Kapitelkasten liegt hinter dem Text ({ab_namen[:2]})")
+    tl_layout = [l for l in prs.slide_layouts if l.name == "Titelfolie"][0]
+    pruefe("Akzentstrich" in [s.name for s in tl_layout.shapes],
+           "Titelfolie hat den Akzentstrich (Ersatz fuer das Vollbild)")
 
     # ── REGRESSION 1: nichts ist breiter als die Folie ──────────────────────
     zu_breit = []
@@ -150,20 +164,36 @@ if HAT_PPTX:
     pruefe(slot("lt1") == "FFFFFF", f"heller Hintergrund ({slot('lt1')})")
     pruefe(slot("dk1") == VO.DUNKEL, f"dunkle Textfarbe ({slot('dk1')})")
     pruefe(slot("accent2") == VO.PALETTE[0],
-           "Folgefarben = dieselbe Reihe wie Diagramme (charts.js/mplstyle)")
+           "Folgefarben in der Reihenfolge der Firmenvorlage (accent2..6)")
+    pruefe(slot("hlink") == erwartet_akzent and slot("folHlink") == VO.FOL_HLINK,
+           "Hyperlinkfarben wie in der Firmenvorlage")
     pruefe("windowText" not in x and "sysClr" not in x.split("</a:clrScheme>")[0],
            "sysClr (windowText/window) wurde ersetzt – sonst blieben Text/Hintergrund alt")
-    pruefe(len(re.findall(r"<a:latin typeface=\"Arial\"", x)) >= 2,
-           "Arial fuer Ueberschrift UND Grundtext")
+    pruefe(f'<a:latin typeface="{VO.SCHRIFT_TITEL}"' in x,
+           "majorFont = Ueberschriftenschnitt der Firmenvorlage")
+    pruefe(f'<a:latin typeface="{VO.SCHRIFT_TEXT}"' in x,
+           "minorFont = Textschnitt der Firmenvorlage")
     pruefe("Calibri" not in x, "keine Calibri-Reste im Theme")
 
     # ── Titel-Ausrichtung ───────────────────────────────────────────────────
     mx = zipfile.ZipFile(str(ziel)).read("ppt/slideMasters/slideMaster1.xml").decode("utf-8")
     tstyle = mx.split("<p:titleStyle>")[1].split("</p:titleStyle>")[0] if "<p:titleStyle>" in mx else ""
     pruefe('algn="l"' in tstyle, "Master-Titelstil ist linksbuendig")
+    pruefe(f'sz="{VO.TYPO_TITEL}"' in tstyle and 'b="1"' in tstyle,
+           f"Titel {VO.TYPO_TITEL // 100} pt fett (nicht die Office-Vorgabe 44 pt)")
+    bstyle = mx.split("<p:bodyStyle>")[1].split("</p:bodyStyle>")[0] if "<p:bodyStyle>" in mx else ""
+    pruefe(f'sz="{VO.TYPO_BODY[0]}"' in bstyle and f'sz="{VO.TYPO_BODY[1]}"' in bstyle,
+           "Textstufen der Firmenvorlage im Master")
+    pruefe("<a:buNone/>" in bstyle.split("</a:lvl1pPr>")[0],
+           "Ebene 1 ohne Aufzaehlungszeichen (wie die Firmenvorlage)")
+    pruefe('char="+"' in bstyle, "Ebenen ab 2 mit dem '+' der Firmenvorlage")
+    # Die Titelfolie ist im Hausdesign LINKSBUENDIG – anders als im
+    # Office-Standard. Eine zentrierte Titelfolie waere hier ein Rueckfall.
     tl = [l for l in prs.slide_layouts if l.name == "Titelfolie"][0]
-    tl_xml = tl.element.xml
-    pruefe('algn="ctr"' in tl_xml, "Titelfolie bleibt zentriert (eigener lstStyle)")
+    pruefe('algn="ctr"' not in tl.element.xml, "Titelfolie ist linksbuendig")
+    tl_titel, tl_koerper, _ = VO._koerper_und_titel(tl)
+    pruefe(tl_koerper and tl_titel.top > tl_koerper[0].top,
+           "Titelfolie: Kicker steht UEBER dem Titel")
 
     # ── Abschnitt: Titel oben ───────────────────────────────────────────────
     ab = [l for l in prs.slide_layouts if l.name == "Abschnitt"][0]
@@ -174,6 +204,47 @@ if HAT_PPTX:
     b_top = next((v for k, v in phs.items() if "BODY" in k or "OBJECT" in k), None)
     pruefe(t_top is not None and b_top is not None and t_top < b_top,
            f"Abschnittsfolie: Titel steht ueber dem Zusatztext ({t_top} < {b_top})")
+
+    # ── Satzspiegel: alle Textkanten auf einer Linie ────────────────────────
+    kanten = {}
+    for lname in ("Titel und Inhalt", "Nur Titel", "Zwei Inhalte", "Vergleich"):
+        lay = [l for l in prs.slide_layouts if l.name == lname][0]
+        t, k, _ = VO._koerper_und_titel(lay)
+        if t is not None:
+            kanten.setdefault(lname, []).append(t.left)
+        if k:
+            kanten[lname].append(k[0].left)
+    schief = {n: v for n, v in kanten.items() if len(set(v)) > 1}
+    pruefe(not schief, "Titel und Inhalt beginnen auf derselben linken Kante", str(schief))
+    pruefe(all(v[0] == VO.RAND_LINKS for v in kanten.values()),
+           f"linke Kante ist der Satzspiegel der Firmenvorlage ({VO.RAND_LINKS})")
+
+    zwei = [l for l in prs.slide_layouts if l.name == "Zwei Inhalte"][0]
+    _, sp, _ = VO._koerper_und_titel(zwei)
+    pruefe(len(sp) >= 2 and sp[0].width == sp[1].width, "zwei gleich breite Spalten")
+    pruefe(len(sp) >= 2 and sp[1].left + sp[1].width == VO.RAND_LINKS + VO.INHALT_B,
+           "rechte Spalte endet am Satzspiegel")
+
+    # Der Kapitelkasten darf den Titel nicht ueberragen und der Zusatztext
+    # nicht aus ihm herauslaufen – genau das war im ersten PDF-Test der Fall.
+    ab2 = [l for l in prs.slide_layouts if l.name == "Abschnitt"][0]
+    kasten = [s for s in ab2.shapes if s.name == "Kapitelkasten"][0]
+    ab_t, ab_k, _ = VO._koerper_und_titel(ab2)
+    drin = []
+    for ph in ([ab_t] if ab_t is not None else []) + ab_k[:1]:
+        drin.append(ph.top >= kasten.top
+                    and ph.top + ph.height <= kasten.top + kasten.height + 1000
+                    and ph.left >= kasten.left
+                    and ph.left + ph.width <= kasten.left + kasten.width + 1000)
+    pruefe(drin and all(drin), "Titel und Unterzeile liegen IM Kapitelkasten")
+
+    # Foliennummer rechts unten (Firmenvorlage), nicht auf Office-Position
+    nummer = None
+    for ph in prs.slide_masters[0].placeholders:
+        if "SLIDE_NUMBER" in str(ph.placeholder_format.type):
+            nummer = ph
+    pruefe(nummer is not None and nummer.left == VO.NUM_X and nummer.top == VO.NUM_Y,
+           "Foliennummer sitzt rechts unten")
 
     # ── sicherstellen / loese_vorlage ───────────────────────────────────────
     vor = ziel.stat().st_mtime_ns

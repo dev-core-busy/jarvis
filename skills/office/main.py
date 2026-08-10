@@ -395,19 +395,24 @@ def _leere_platzhalter_entfernen(slide) -> None:
 
 
 def _logo_auf_titelfolie(slide, prs) -> None:
-    """Setzt das Branding-Logo dezent unten links auf die Titelfolie.
+    """Setzt das Branding-Logo oben rechts auf die Titelfolie.
 
-    Nur auf der Titelfolie – ein Logo auf jeder Folie ist im Corporate-Design
-    die Ausnahme. Unten links, damit es nicht mit Titel/Untertitel kollidiert;
-    die Hoehe ist fest, die Breite ergibt sich aus dem Seitenverhaeltnis."""
+    Position und Hoehe stammen aus der Firmenvorlage (dort sitzt das Logo im
+    Master, also auf jeder Folie). Hier steht es nur auf der TITELFOLIE, weil
+    ``MasterShapes`` in python-pptx keine Bilder aufnehmen kann – die
+    Medien-Beziehung haengt an der Folie, nicht am Master.
+
+    Die rechte Kante liegt auf dem Satzspiegel, damit Logo und Textblock
+    dieselbe Fluchtlinie haben; die Breite ergibt sich aus dem
+    Seitenverhaeltnis der Datei (ein festes Mass wuerde ein quadratisches Logo
+    verzerren)."""
     try:
-        from skills.office.vorlage import _logo_pfad
-        from pptx.util import Cm
+        from skills.office.vorlage import _logo_pfad, LOGO_Y, LOGO_H, LOGO_RECHTS
         logo = _logo_pfad()
         if not logo:
             return
-        bild = slide.shapes.add_picture(str(logo), Cm(0.9), Cm(0), height=Cm(1.2))
-        bild.top = prs.slide_height - bild.height - Cm(1.1)   # ueber dem Akzentbalken
+        bild = slide.shapes.add_picture(str(logo), 0, LOGO_Y, height=LOGO_H)
+        bild.left = max(0, LOGO_RECHTS - bild.width)
         bild.name = "Logo"
     except Exception:  # noqa: BLE001
         pass       # ein fehlendes/kaputtes Logo darf die Praesentation nicht kosten
@@ -428,7 +433,9 @@ class CreatePowerPointTool(BaseTool):
             "{ 'title': ..., 'content': 'Freitext' }. Unterpunkte mit '> ' voranstellen "
             "('> Detail'). Optional je Folie 'layout' ('inhalt' Standard, 'abschnitt' fuer "
             "einen Kapiteltrenner, 'zwei' fuer zwei Spalten, 'nurtitel', 'leer') und "
-            "'notes' fuer Sprechernotizen. Optional 'title'/'subtitle' fuer eine Titelfolie. "
+            "'notes' fuer Sprechernotizen. Eine Titelfolie am Anfang entsteht ueber die "
+            "Parameter 'title'/'subtitle' (nicht als Folien-Objekt); wer sie doch als Folie "
+            "schickt, nimmt { 'layout': 'titel', 'title': ..., 'subtitle': ... }. "
             "KEINE Farb-, Schrift- oder Groessenangaben mitschicken – die kommen aus der "
             "Vorlage; eigene Werte brechen das Design beim Bearbeiten. "
             "Gibt eine Download-URL zurueck."
@@ -490,7 +497,14 @@ class CreatePowerPointTool(BaseTool):
 
             felder = _text_platzhalter(slide)
             bullets = sl.get("bullets")
-            inhalt = sl.get("content") or sl.get("text") or ""
+            # 'subtitle' als Alias: die Werkzeugbeschreibung nennt es im selben
+            # Absatz wie die Folien-Felder (dort ist der TOP-LEVEL-Parameter
+            # gemeint), und ein Modell schickt es deshalb regelmaessig je Folie
+            # mit – bei 'layout: titel' ist das sogar die naheliegende
+            # Schreibweise. Ohne den Alias fiele der Text wortlos weg und die
+            # Titelfolie bliebe ohne Kicker (beim Abnahmelauf auf ECHT genau so
+            # passiert).
+            inhalt = sl.get("content") or sl.get("text") or sl.get("subtitle") or ""
             if felder:
                 if art == "zwei" and len(felder) > 1 and isinstance(bullets, (list, tuple)) and len(bullets) > 1:
                     # Zwei-Spalten-Layout: die Aufzaehlung in der Mitte teilen,

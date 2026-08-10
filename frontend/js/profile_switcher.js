@@ -58,11 +58,27 @@
 
         function renderOptions() {
             sel.innerHTML = st.profiles.map(function (p) {
-                return '<option value="' + esc(p.id) + '"' + (p.id === st.activeId ? ' selected' : '') + '>' + esc(p.name) + '</option>';
+                // `locked` = laeuft, ist aber fuer diesen Benutzer nicht waehlbar
+                // (Profil auf andere AD-Benutzer/-Gruppen eingeschraenkt). Es MUSS
+                // sichtbar sein, sonst zeigt der Umschalter nichts, obwohl der Chat
+                // mit diesem Profil arbeitet – der gemeldete Fehler vom 2026-08-10.
+                // `disabled` am <option>: sichtbar, auswaehlbar nur als aktueller
+                // Stand, ein Wechsel dorthin waere ohnehin 403.
+                return '<option value="' + esc(p.id) + '"'
+                    + (p.id === st.activeId ? ' selected' : '')
+                    + (p.locked && p.id !== st.activeId ? ' disabled' : '')
+                    + '>' + esc(p.name) + (p.locked ? ' 🔒' : '') + '</option>';
             }).join('');
             sel.value = st.activeId;
-            // Nur ein Profil -> keine Auswahl noetig
-            sel.disabled = st.profiles.length < 2;
+            // Bedienbar, sobald es mindestens zwei WAEHLBARE Profile gibt. Ein
+            // gesperrtes zaehlt nicht mit: sonst waere das Feld aktiv und jeder
+            // Wechselversuch scheiterte.
+            var waehlbar = st.profiles.filter(function (p) { return !p.locked; }).length;
+            sel.disabled = waehlbar < 2;
+            sel.title = (waehlbar < 1 && st.profiles.length)
+                ? tt('profile.pulldown_locked',
+                     'Dieses KI-Profil ist fuer deinen Benutzer nicht umschaltbar')
+                : tt('profile.pulldown_label', 'KI-Profil');
             wrap.style.display = st.profiles.length ? '' : 'none';
         }
         function activate(id) {

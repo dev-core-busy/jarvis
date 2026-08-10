@@ -1102,14 +1102,70 @@ KRITISCH – Autonomie-Regeln:
         except Exception:  # noqa: BLE001
             return False
 
+    @staticmethod
+    def _zeit_hinweis() -> str:
+        """Datum, Uhrzeit, Wochentag und Zeitzone des Laufs.
+
+        WARUM DAS FEHLTE UND WAS ES GEKOSTET HAT (Audit 2026-08-10): der
+        System-Prompt nannte den aktuellen Zeitpunkt an KEINER Stelle. Ein
+        Sprachmodell kennt ihn nicht – es kann ihn nur erfragen oder raten:
+        - `WA_TASK_PROMPT` musste deshalb anweisen, das Datum "per shell_execute
+          ermitteln (date '+%d %m %Y %H:%M')", nur um einen Cron-Ausdruck fuer
+          eine Erinnerung zu berechnen. Ohne den shell-Skill (abschaltbar!) ist
+          jede Erinnerung damit unmoeglich, und der Weg ist teuer: ein
+          Werkzeug-Schritt samt zweitem LLM-Aufruf fuer eine Information, die im
+          Prompt stehen kann.
+        - Auf einer erzeugten PowerPoint-Titelfolie stand `$(date +%d.%m.%Y)`
+          woertlich (Vorfall 2026-08-10). Behoben wurde damals die NACHWIRKUNG
+          (`vorlage._text_bereinigen` setzt das heutige Datum ein) – die Ursache
+          ist diese: das Modell rechnete mit einer Shell, weil es das Datum
+          anders nicht bekommt.
+
+        DER ZEITPUNKT WIRD PRO AUFTRAG EINGEFROREN, nicht pro Schritt:
+        `run_task`/`_run_headless` bauen den System-Prompt genau einmal und
+        verwenden ihn fuer alle Werkzeug-Schritte. Ein Wert, der sich mitten im
+        Lauf aendert, wuerde das Prompt-Caching der Anbieter bei jedem Schritt
+        verwerfen – und "jetzt" soll waehrend eines Auftrags dasselbe bedeuten.
+        Der Hinweis steht deshalb am ENDE des Prompts: der lange, stabile Teil
+        davor bleibt als Cache-Praefix unangetastet.
+
+        Zeitzone aus der Systemeinstellung (`astimezone()`), nicht fest
+        "Europe/Berlin" – ein Server kann anders stehen, und eine falsche Zone
+        ist schlimmer als keine Angabe.
+        """
+        try:
+            from datetime import datetime
+            jetzt = datetime.now().astimezone()
+            tage = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
+                    "Samstag", "Sonntag")
+            zone = jetzt.tzname() or ""
+            return (
+                "\n\n## JETZT\n"
+                f"Aktueller Zeitpunkt: {tage[jetzt.weekday()]}, "
+                f"{jetzt.strftime('%d.%m.%Y %H:%M')}"
+                + (f" ({zone}, Zeitzone des Servers)" if zone else "")
+                + ".\nRechne Angaben wie 'heute', 'morgen', 'naechsten Montag' oder "
+                "'in zwei Stunden' von diesem Zeitpunkt aus. Ermittle Datum oder "
+                "Uhrzeit NICHT ueber die Shell (kein `date`) und schreibe niemals "
+                "einen Platzhalter wie $(date) in ein Ergebnis – setze den Wert ein."
+            )
+        except Exception:  # noqa: BLE001
+            # Ohne Zeitangabe laeuft der Agent wie vorher weiter.
+            return ""
+
     def _base_system_prompt(self) -> str:
-        """System-Prompt dieses Agenten: Rolle > Sub-Agent > Hauptagent."""
+        """System-Prompt dieses Agenten: Rolle > Sub-Agent > Hauptagent.
+
+        Der Zeit-Hinweis gilt in ALLEN drei Zweigen: er ist eine Tatsache ueber
+        die Welt, keine Verhaltensregel – ein Rollen- oder Sub-Agent braucht das
+        Datum genauso (Erinnerungen, Fristen, Dateinamen, Folien-Kopfzeilen).
+        """
         if getattr(self, "_role_prompt", ""):
-            return self._role_prompt
+            return self._role_prompt + self._zeit_hinweis()
         if self.is_sub_agent:
-            return self.SUB_AGENT_PROMPT
+            return self.SUB_AGENT_PROMPT + self._zeit_hinweis()
         return (self.SYSTEM_PROMPT + self._fehlende_pflicht_tools()
-                + self._role_hinweis())
+                + self._role_hinweis() + self._zeit_hinweis())
 
     # Werkzeuge, auf denen der SYSTEM_PROMPT ausdruecklich BESTEHT, die aber aus
     # SKILLS kommen und damit fehlen koennen. Ohne den Hinweis unten verlangt der
@@ -1121,6 +1177,18 @@ KRITISCH – Autonomie-Regeln:
     # nicht gibt ("Tool nicht gefunden"). Dieselbe Fehlerklasse wie
     # `filesystem_read` und "immer auf Deutsch" (siehe CLAUDE.md, Waechter in
     # tests/test_display_names.py).
+    #
+    # WARUM DAS FUER **JEDEN** DIESER SKILLS GILT (Audit 2026-08-10): `"system":
+    # true` im Manifest schuetzt NUR gegen `DELETE /api/skills/{name}`
+    # (`manager.py::uninstall_skill`) – `disable`, `remove` und `purge` nehmen
+    # jeden Namen an. Also ist auch `shell`, `filesystem`, `knowledge`, `memory`
+    # und `screenshot` abschaltbar; die Annahme "System-Skill = immer da" ist
+    # falsch. `office` ist darueber hinaus per Vorgabe AUS (`enabled: false`) –
+    # auf einem frisch installierten System verlangt Punkt 16 damit sofort fuenf
+    # Werkzeuge, die es nicht gibt.
+    #
+    # Gemessen am Prompt-Literal: knowledge_search 8x, memory_manage 9x,
+    # shell_execute 10x, filesystem 3x, screenshot 2x, office_* 5x.
     _SKILL_PFLICHT_TOOLS = {
         "knowledge_search": (
             "Die WISSENSSUCHE ist auf diesem System nicht verfuegbar "
@@ -1133,7 +1201,69 @@ KRITISCH – Autonomie-Regeln:
             "BILDGENERIERUNG ist auf diesem System nicht verfuegbar (Skill nicht "
             "aktiv). Sage das bei Bildauftraegen klar und rufe generate_image nicht auf."
         ),
+        "memory_manage": (
+            "Der DAUERSPEICHER ist auf diesem System nicht verfuegbar (Skill nicht "
+            "aktiv). Punkt 3 und 12 entfallen: nichts merken, nichts nachschlagen, "
+            "memory_manage NICHT aufrufen. Was du wissen musst, steht im Gespraech."
+        ),
+        "filesystem": (
+            "DATEIZUGRIFF (filesystem) ist auf diesem System nicht verfuegbar "
+            "(Skill nicht aktiv). Lies und schreibe keine Dateien ueber dieses "
+            "Werkzeug und verweise den Benutzer nicht auf Dateipfade."
+        ),
+        "screenshot": (
+            "SCREENSHOTS des Linux-Desktops sind auf diesem System nicht "
+            "verfuegbar (Skill nicht aktiv). Punkt 8 entfaellt fuer Linux; sage "
+            "bei Bildschirm-Fragen klar, dass du den Desktop nicht sehen kannst."
+        ),
     }
+
+    def _pflicht_hinweise(self, vorhanden: set) -> list:
+        """Hinweise fuer fehlende Pflicht-Werkzeuge – Reihenfolge = Prompt-Reihenfolge.
+
+        Getrennt von `_SKILL_PFLICHT_TOOLS`, weil die Texte fuer `office_*` und
+        `shell_execute` VONEINANDER abhaengen: Punkt 16 nennt zwei Wege zum
+        Dokument (die office_*-Werkzeuge fuer Einfaches, python-docx/openpyxl/
+        python-pptx via shell_execute fuer Komplexes). Faellt einer weg, ist der
+        andere die Antwort – fallen beide weg, kann gar kein Dokument entstehen,
+        und genau das muss der Agent dem Benutzer SAGEN statt es zu versuchen.
+        Ein starres dict koennte diese Fallunterscheidung nicht treffen.
+        """
+        teile = [txt for name, txt in self._SKILL_PFLICHT_TOOLS.items()
+                 if name not in vorhanden]
+
+        office_da = any(n.startswith("office_") for n in vorhanden)
+        shell_da = "shell_execute" in vorhanden
+
+        if not shell_da:
+            teile.append(
+                "SHELL-BEFEHLE (shell_execute) sind auf diesem System nicht "
+                "verfuegbar (Skill nicht aktiv). Alle Punkte, die ein Skript, "
+                "python-pptx/python-docx/openpyxl, matplotlib/pandas oder eine "
+                "Datei in /tmp verlangen, entfallen – du kannst nichts ausfuehren. "
+                "Nutze fuer Diagramme create_chart. Behaupte nicht, ein Paket sei "
+                "nicht installiert: du kannst es nur nicht aufrufen."
+            )
+        if not office_da:
+            if shell_da:
+                teile.append(
+                    "Die OFFICE-WERKZEUGE (office_create_word/_excel/_powerpoint, "
+                    "office_read, office_to_pdf, office_template_info) sind auf "
+                    "diesem System nicht verfuegbar (Skill nicht aktiv). Erzeuge "
+                    "Dokumente deshalb IMMER ueber den in Punkt 16 beschriebenen "
+                    "Weg mit python-docx/openpyxl/python-pptx via shell_execute "
+                    "nach /tmp. Ein PDF-Export und die HAUSVORLAGE stehen dabei "
+                    "NICHT zur Verfuegung – sage das, statt es zu versprechen."
+                )
+            else:
+                teile.append(
+                    "Es koennen KEINE Dokumente erzeugt werden: weder die "
+                    "office_*-Werkzeuge noch shell_execute sind auf diesem System "
+                    "verfuegbar (beide Skills nicht aktiv). Sage das bei "
+                    "Dokument-Auftraegen klar und liefere den Inhalt stattdessen "
+                    "direkt im Chat (Text, Markdown-Tabelle, Codeblock)."
+                )
+        return teile
 
     def _fehlende_pflicht_tools(self) -> str:
         """Klarstellung fuer Prompt-Regeln, deren Werkzeug gerade fehlt."""
@@ -1141,7 +1271,10 @@ KRITISCH – Autonomie-Regeln:
             da = {getattr(t, "name", "") for t in self._tool_instances}
         except Exception:  # noqa: BLE001
             return ""
-        teile = [txt for name, txt in self._SKILL_PFLICHT_TOOLS.items() if name not in da]
+        try:
+            teile = self._pflicht_hinweise(da)
+        except Exception:  # noqa: BLE001
+            return ""
         if not teile:
             return ""
         return "\n\n## NICHT VERFUEGBAR AUF DIESEM SYSTEM\n" + "\n".join(f"- {t}" for t in teile)
@@ -2214,8 +2347,12 @@ KRITISCH – Autonomie-Regeln:
                     except Exception as learn_err:
                         _log(f"Background-Learning konnte nicht gestartet werden: {learn_err}")
 
-            # Auto-Learning: Bei mehrstufigen Aufgaben den Loesungsweg speichern
-            if steps >= 2 and self._tool_stats:
+            # Auto-Learning: Bei mehrstufigen Aufgaben den Loesungsweg speichern.
+            # `memory_manage` kommt aus dem Skill 'memory' und kann fehlen (auch
+            # System-Skills sind abschaltbar, siehe _SKILL_PFLICHT_TOOLS). Ohne
+            # das Werkzeug ist der ganze Zweig sinnlos: er kostet einen weiteren
+            # LLM-Aufruf und endet mit "Tool nicht gefunden".
+            if steps >= 2 and self._tool_stats and "memory_manage" in self.tools_map:
                 failed = [s for s in self._tool_stats if not s["success"]]
                 succeeded = [s for s in self._tool_stats if s["success"]]
                 if failed and succeeded:
@@ -2590,8 +2727,9 @@ KRITISCH – Autonomie-Regeln:
                 if _final_h_text:
                     collected_texts.append(_final_h_text)
 
-            # Auto-Learning (gleiche Logik wie in run_task)
-            if steps >= 2 and self._tool_stats:
+            # Auto-Learning (gleiche Logik wie in run_task, inkl. der Bedingung
+            # auf 'memory_manage' – ohne das Werkzeug ist der Zweig ein Leerlauf)
+            if steps >= 2 and self._tool_stats and "memory_manage" in self.tools_map:
                 failed = [s for s in self._tool_stats if not s["success"]]
                 succeeded = [s for s in self._tool_stats if s["success"]]
                 if failed and succeeded:

@@ -448,9 +448,14 @@ pruefe("profile_for_user" in fenster_p,
 pruefe("def _base_system_prompt" in AGENT and 'if getattr(self, "_role_prompt", "")' in AGENT,
        "der Rollen-Prompt ersetzt den System-Prompt")
 i_bp = AGENT.find("def _base_system_prompt")
-fenster_bp = AGENT[i_bp:i_bp + 400]
-pruefe("return self.SUB_AGENT_PROMPT" in fenster_bp and "self.SYSTEM_PROMPT" in fenster_bp,
+# Fenster grosszuegig: die Methode hat seit dem Skill-Audit (2026-08-10) einen
+# Docstring, und alle drei Zweige haengen zusaetzlich `_zeit_hinweis()` an –
+# deshalb wird auf den Namen geprueft, nicht auf `return self.X` woertlich.
+fenster_bp = AGENT[i_bp:i_bp + 1600]
+pruefe("self.SUB_AGENT_PROMPT" in fenster_bp and "self.SYSTEM_PROMPT" in fenster_bp,
        "ohne Rolle bleibt die alte Prompt-Weiche erhalten (Sub-Agent/Hauptagent)")
+pruefe(fenster_bp.count("_zeit_hinweis()") == 3,
+       "alle drei Zweige liefern den aktuellen Zeitpunkt mit")
 
 # ── Prompt-Hinweis und Rollen-Rueckfall (beide aus der DEV-Messung entstanden) ──
 pruefe("def _role_hinweis" in AGENT and "SPEZIALISIERTE ROLLEN" in AGENT,

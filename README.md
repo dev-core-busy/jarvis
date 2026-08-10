@@ -6,7 +6,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?logo=apache)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.9-orange)](https://github.com/dev-core-busy/jarvis/releases)
+[![Version](https://img.shields.io/badge/Version-1.0.0-orange)](https://github.com/dev-core-busy/jarvis/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey?logo=linux)](https://www.linux.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen)](https://github.com/dev-core-busy/jarvis/pulls)
 [![OpenClaw Compatible](https://img.shields.io/badge/OpenClaw-Compatible-6366f1)](https://github.com/dev-core-busy/jarvis#openclaw-skill-ecosystem)

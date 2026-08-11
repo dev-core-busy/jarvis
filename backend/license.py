@@ -97,12 +97,18 @@ ABRUF_TIMEOUT = 15
 #   skills    – gleichzeitig aktive Skills
 #   benutzer  – verschiedene Personen mit Anmeldung in den letzten 30 Tagen
 #   rag       – Dateien in der Wissensdatenbank
+#   standort_sync – Wissensordner von anderen Jarvis-Standorten spiegeln
+#                   (Einstellungen -> Wissen -> Pull-Synchronisation). Ein
+#                   Merkmal, kein Zaehler: Mehr-Standort-Betrieb ist die
+#                   ENTERPRISE-Eigenschaft. Gespiegelte Dateien zaehlen NICHT
+#                   gegen `rag` (siehe license_enforce.anzahl_rag) – sie sind am
+#                   abgebenden Standort schon lizenziert.
 GRENZEN = {
-    "FREE":       {"updates": "keine",   "auto_update": False,
+    "FREE":       {"updates": "keine",   "auto_update": False, "standort_sync": False,
                    "profile": 1, "skills": 5, "benutzer": 5,  "rag": 50},
-    "BASIC":      {"updates": "manuell", "auto_update": False,
+    "BASIC":      {"updates": "manuell", "auto_update": False, "standort_sync": False,
                    "profile": 1, "skills": 5, "benutzer": 10, "rag": 100},
-    "ENTERPRISE": {"updates": "alle",    "auto_update": True,
+    "ENTERPRISE": {"updates": "alle",    "auto_update": True,  "standort_sync": True,
                    "profile": None, "skills": None, "benutzer": None, "rag": None},
 }
 
@@ -800,6 +806,21 @@ def auto_update_erlaubt() -> tuple[bool, str]:
             return False, ("Software-Updates sind mit dieser Lizenz nicht enthalten.")
         return False, ("Automatische Updates sind der ENTERPRISE-Lizenz vorbehalten. "
                        "Manuelle Updates bleiben möglich.")
+    return True, ""
+
+
+def standort_sync_erlaubt() -> tuple[bool, str]:
+    """Darf dieser Server Wissensordner anderer Standorte spiegeln?
+
+    Waehrend der Einfuehrungs-Karenz gelten die ENTERPRISE-Grenzen, das Merkmal
+    ist dort also an – so schaltet ein Update auf einem Bestandssystem nichts
+    ueber Nacht ab.
+    """
+    z = zustand()
+    if not z["grenzen"].get("standort_sync"):
+        return False, ("Die Synchronisation mit anderen Standorten ist der "
+                       "ENTERPRISE-Lizenz vorbehalten. Bereits gespiegeltes Wissen "
+                       "bleibt lesbar und durchsuchbar.")
     return True, ""
 
 

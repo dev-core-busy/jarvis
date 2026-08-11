@@ -3156,6 +3156,49 @@ async def startup_attachment_cleanup():
 
 
 @app.on_event("startup")
+async def startup_knowledge_sync():
+    """Zeitplan der Pull-Synchronisation (Einstellungen → Wissen).
+
+    Eigener Takt statt eines Cron-Auftrags: das Intervall gehoert zum Standort
+    (der Administrator stellt es dort ein), es startet keinen Agentenlauf und
+    haengt damit auch nicht an der Admin-Sperre fuer zeitgesteuerte Auftraege.
+
+    Der Takt (`_TICK`) ist die PRUEFUNG, nicht das Intervall: faellig ist ein
+    Standort erst, wenn sein eigenes Intervall abgelaufen ist
+    (`knowledge_sync.faellige_standorte`). Es laeuft hoechstens ein Standort je
+    Durchgang – mehrere Spiegel gleichzeitig zu ziehen und danach mehrfach zu
+    indizieren waere teurer als eine Runde warten.
+
+    Verzoegerter erster Lauf: der Dienststart baut Wissens-Index und
+    BM25-Index vor; ein Sync mittendrin wuerde beides gegeneinander laufen
+    lassen (deshalb zusaetzlich das Lock in knowledge_sync).
+    """
+    from backend import knowledge_sync as _ks
+    _TICK = 120
+
+    async def _loop():
+        await asyncio.sleep(90)
+        while True:
+            try:
+                bericht = await asyncio.to_thread(_ks.automatik_lauf)
+                for pid in bericht.get("synced", []):
+                    b = bericht.get("report", {})
+                    if b.get("ok"):
+                        print(f"[KB-Sync] {pid}: +{b.get('added', 0)} neu, "
+                              f"{b.get('updated', 0)} aktualisiert, "
+                              f"{b.get('removed', 0)} entfernt", flush=True)
+                    else:
+                        print(f"[KB-Sync] {pid} fehlgeschlagen: {b.get('error')}", flush=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"[KB-Sync] Zeitplan-Lauf fehlgeschlagen: {e}", flush=True)
+            await asyncio.sleep(_TICK)
+    try:
+        asyncio.create_task(_loop())
+    except Exception as e:  # noqa: BLE001
+        print(f"[KB-Sync] Startup-Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_log_retention():
     """Diagnose-Logs altern lassen (Vorgabe 90 Tage).
 
@@ -8488,6 +8531,9 @@ async def delete_knowledge_file(request: Request, user: str = Depends(require_kn
     file_path = data.get("path", "").strip()
     if not file_path:
         return JSONResponse({"error": "Kein Dateipfad angegeben"}, status_code=400)
+    sperre = _kb_mirror_guard(file_path)
+    if sperre is not None:
+        return sperre
 
     # Sicherheitscheck: Datei muss in einem konfigurierten Knowledge-Ordner liegen
     resolved = (PROJECT_ROOT / file_path).resolve()
@@ -8548,6 +8594,10 @@ async def move_knowledge_files(request: Request, user: str = Depends(require_kno
     target_rel = _kb_norm_rel(data.get("target") or "")
     if not target_rel:
         return JSONResponse({"error": "Kein Zielordner angegeben"}, status_code=400)
+    # Spiegel: weder Ziel noch eine der Quellen (siehe _kb_move_folder).
+    sperre = _kb_mirror_guard(target_rel, *[str(x) for x in raw_paths if x])
+    if sperre is not None:
+        return sperre
 
     # Ein laufender Reindex wuerde gleichzeitig ueber dieselben Metadaten laufen.
     if get_index_progress().get("running"):
@@ -9063,6 +9113,41 @@ def _kb_safe_within_data(rel_path: str):
         return None
 
 
+# ─── Spiegel-Ordner sind schreibgeschuetzt ───────────────────────────────────
+# Ein per Pull-Synchronisation gespiegelter Ordner wird bei jedem Lauf auf den
+# Stand des abgebenden Standorts gebracht: entfernt geloeschte Dateien
+# verschwinden lokal, lokale Aenderungen werden ueberschrieben. Ohne diese Sperre
+# waere jede Bearbeitung hier eine Arbeit, die beim naechsten Lauf spurlos
+# verschwindet – der Fall, den das Projekt bei "Spiegel, aber lokal editierbar"
+# ausdruecklich vermeiden wollte.
+#
+# Die Sperre sitzt an JEDEM schreibenden Endpunkt der Wissensverwaltung, auch an
+# den /wissen-Varianten: der Spiegel-Ordner ist einer Wissensgruppe zugeordnet,
+# ihre Editoren kaemen sonst ueber das Portal daran.
+
+def _kb_mirror_guard(*rel_pfade) -> JSONResponse | None:
+    """409 mit Klartext, wenn einer der Pfade in einem Spiegel liegt; sonst None.
+
+    409 (Conflict), nicht 403: es fehlt kein Recht – der Ordner ist seiner Natur
+    nach fremdbestimmt. Die Meldung nennt den Standort, weil "schreibgeschuetzt"
+    allein fuer den Administrator nicht deutbar waere.
+    """
+    try:
+        from backend import knowledge_sync as ks
+        for rel in rel_pfade:
+            if not rel:
+                continue
+            grund = ks.schreibsperre(str(rel))
+            if grund:
+                return JSONResponse({"error": grund, "mirror": True}, status_code=409)
+    except Exception as e:  # noqa: BLE001
+        # Fail-open ist hier richtig: die Sperre schuetzt vor Arbeitsverlust, sie
+        # ist keine Sicherheitsgrenze. Ein Fehler im Modul darf die Wissens-
+        # verwaltung nicht lahmlegen.
+        print(f"[KB-Sync] Spiegel-Pruefung fehlgeschlagen: {e}", flush=True)
+    return None
+
+
 # ─── ZIP-Upload: Archiv unter Beibehaltung der Ordnerstruktur entpacken ───────
 # Grenzen gegen entartete Archive ("Zip-Bombe"): ein 50-KB-Archiv kann sich zu
 # vielen GB entpacken, daher wird die entpackte Gesamtgroesse und die Anzahl der
@@ -9245,6 +9330,17 @@ def _kb_move_folder(src_rel: str, dst_parent_rel: str):
         return None, f"Zielordner '{dst_parent}' ist kein Wissens-Ordner", 404
     if _kb_safe_within_data(src) is None or _kb_safe_within_data(dst_parent) is None:
         return None, "Ungültiger Pfad", 400
+    # Spiegel-Ordner: weder Quelle noch Ziel. Ein Verschieben HINEIN waere beim
+    # naechsten Lauf geloescht (der entfernte Stand gewinnt), ein Verschieben
+    # HERAUS wuerde der Sync sofort wieder herstellen.
+    try:
+        from backend import knowledge_sync as ks
+        for pfad in (src, dst_parent):
+            grund = ks.schreibsperre(pfad)
+            if grund:
+                return None, grund, 409
+    except Exception as e:  # noqa: BLE001
+        print(f"[KB-Sync] Spiegel-Pruefung beim Verschieben fehlgeschlagen: {e}", flush=True)
 
     # Ordner nicht in sich selbst oder einen eigenen Unterordner schieben
     if dst_parent == src or dst_parent.startswith(src + "/"):
@@ -9437,6 +9533,9 @@ async def create_knowledge_subfolder(request: Request, user: str = Depends(requi
         return JSONResponse({"error": err}, status_code=400)
     if _kb_safe_within_data(parent) is None:
         return JSONResponse({"error": "Ungültiger übergeordneter Ordner"}, status_code=400)
+    sperre = _kb_mirror_guard(parent)
+    if sperre is not None:
+        return sperre
     new_rel = f"{parent}/{name}"
     target = _kb_safe_within_data(new_rel)
     if target is None:
@@ -9472,6 +9571,9 @@ async def delete_knowledge_subfolder(request: Request, user: str = Depends(requi
                             status_code=400)
     if _kb_safe_within_data(rel) is None:
         return JSONResponse({"error": "Ungültiger Pfad"}, status_code=400)
+    sperre = _kb_mirror_guard(rel)
+    if sperre is not None:
+        return sperre
     # Index/Gruppen prefix-sauber bereinigen (gleiche Pfadform wie bei Indizierung)
     removed = purge_folder_index(PROJECT_ROOT / rel)
     deleted_dir = False
@@ -9514,6 +9616,9 @@ async def rename_knowledge_subfolder(request: Request, user: str = Depends(requi
     new_rel = f"{parent}/{new_name}"
     if _kb_safe_within_data(new_rel) is None:
         return JSONResponse({"error": "Ungültiger Ordnername"}, status_code=400)
+    sperre = _kb_mirror_guard(rel, new_rel)
+    if sperre is not None:
+        return sperre
     old_abs = PROJECT_ROOT / rel
     new_abs = PROJECT_ROOT / new_rel
     if new_abs.exists():
@@ -9623,6 +9728,12 @@ async def rename_knowledge_folder(request: Request, user: str = Depends(require_
                             status_code=400)
     if folder.name.lower() in _KB_RESERVED_DATA_DIRS:
         return JSONResponse({"error": f"'{rel}' ist ein geschützter Systemordner"}, status_code=400)
+    # Ein Spiegel-Ordner darf nicht umbenannt werden: der Standort-Eintrag zeigt
+    # auf diesen Pfad, nach dem Umbenennen liefe der naechste Lauf in einen
+    # leeren Ordner und legte alles erneut an (der alte blieb verwaist stehen).
+    sperre = _kb_mirror_guard(rel)
+    if sperre is not None:
+        return sperre
 
     err = _kb_validate_folder_name(new_name)
     if err:
@@ -9670,6 +9781,13 @@ async def delete_knowledge_folder(request: Request, user: str = Depends(require_
     if folder is None:
         return JSONResponse({"error": f"Ordner '{path_arg}' nicht konfiguriert"}, status_code=404)
 
+    # Ein Spiegel wird ueber seinen Standort-Eintrag entfernt (Wissen → Pull-
+    # Synchronisation): dort steht die Rueckfrage, ob die Kopie mitgeloescht wird,
+    # und nur dort verschwindet auch der Eintrag selbst.
+    sperre = _kb_mirror_guard(rel)
+    if sperre is not None:
+        return sperre
+
     # 1) Indiziertes Wissen entfernen (TF-IDF + FAISS + Gruppen-Zuordnungen)
     removed = purge_folder_index(folder)
 
@@ -9710,6 +9828,10 @@ async def assign_knowledge_folder_groups(request: Request, user: str = Depends(r
     if folder is None:
         return JSONResponse({"error": f"Ordner '{path_arg}' nicht konfiguriert"}, status_code=404)
 
+    sperre = _kb_mirror_guard(rel)
+    if sperre is not None:
+        return sperre
+
     group_ids = [g.strip() for g in (data.get("groups") or []) if str(g).strip()]
     known_gids = {g["id"] for g in kg.list_groups().get("groups", [])}
     bad = [g for g in group_ids if g not in known_gids]
@@ -9719,6 +9841,292 @@ async def assign_knowledge_folder_groups(request: Request, user: str = Depends(r
 
     result = kg.set_folder_groups(rel, group_ids)
     return JSONResponse({"ok": True, "path": rel, **result})
+
+
+# ─── Pull-Synchronisation zwischen Standorten ────────────────────────────────
+# Rollen und Regeln stehen im Modulkopf von backend/knowledge_sync.py. Hier nur
+# das, was die Endpunkte betrifft:
+#
+#   * Alle Verwaltungs-Endpunkte sind `require_local_auth` (Admin). Sie legen
+#     Freigaben an bzw. richten Spiegel ein – beides ist Persistenz-Substrat,
+#     dieselbe Trennung wie bei Cron seit 2026-07-29.
+#   * Die beiden Pull-Routen sind die EINZIGEN mit Token-Auth. Sie haben bewusst
+#     keine Dependency: eine Sitzung gibt es zwischen zwei Standorten nicht. Das
+#     Token bindet auf GENAU EINEN Ordner (Freigabe), nicht auf die API.
+#   * Ein unbekanntes/entzogenes Token bekommt 403 mit Klartext, ein Pfad
+#     ausserhalb der Freigabe 404 – nie 400 mit Begruendung: ob eine Datei
+#     existiert, ist selbst eine Information.
+
+def _sync_gate() -> JSONResponse | None:
+    """Lizenz-Schranke fuer alles, was Wissen holt. None = erlaubt."""
+    from backend import knowledge_sync as ks
+    ok, grund = ks.erlaubt()
+    if ok:
+        return None
+    return JSONResponse({"ok": False, "error": grund, "license": True}, status_code=403)
+
+
+def _pull_share(request: Request):
+    """Freigabe zum mitgeschickten Token – oder None."""
+    from backend import knowledge_sync as ks
+    token = (request.headers.get("X-Jarvis-Share-Token", "")
+             or request.query_params.get("token", ""))
+    return ks.share_by_token(token)
+
+
+@app.get("/api/knowledge/shares")
+async def kb_list_shares(user: str = Depends(require_local_auth)):
+    """Freigaben DIESER Instanz (Rolle Geber), inkl. Token und Abruf-Protokoll."""
+    from backend import knowledge_sync as ks
+    return JSONResponse({"shares": ks.list_shares(mit_token=True),
+                         "site_name": ks.site_name(),
+                         "token_prefix": ks.TOKEN_PREFIX})
+
+
+@app.post("/api/knowledge/shares")
+async def kb_create_share(request: Request, user: str = Depends(require_local_auth)):
+    """Gibt einen Wissensordner (samt Unterbaum) fuer andere Standorte frei.
+
+    Body: ``{"folder": "data/<ordner>[/<unterordner>]", "label": "..."}``
+    Rueckgabe enthaelt das Token – es wird dem anderen Standort uebergeben.
+    """
+    from backend import knowledge_sync as ks
+    data = await request.json()
+    try:
+        share = ks.create_share((data.get("folder") or "").strip(),
+                                data.get("label") or "", user)
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    return JSONResponse({"ok": True, "share": share})
+
+
+@app.patch("/api/knowledge/shares/{share_id}")
+async def kb_update_share(share_id: str, request: Request,
+                          user: str = Depends(require_local_auth)):
+    """Beschriftung aendern oder Freigabe pausieren (``enabled``).
+
+    Pausiert ist nicht widerrufen: das Token bleibt, Abrufe werden aber
+    abgewiesen – der Nehmer behaelt seine Kopie.
+    """
+    from backend import knowledge_sync as ks
+    data = await request.json()
+    share = ks.update_share(share_id, **{k: v for k, v in data.items()
+                                         if k in ks.SHARE_UPDATABLE})
+    if share is None:
+        return JSONResponse({"ok": False, "error": "Freigabe nicht gefunden"}, status_code=404)
+    return JSONResponse({"ok": True, "share": share})
+
+
+@app.post("/api/knowledge/shares/{share_id}/rotate")
+async def kb_rotate_share(share_id: str, user: str = Depends(require_local_auth)):
+    """Neues Token fuer eine bestehende Freigabe (bei Verdacht auf Abfluss).
+    Der Nehmer muss danach das neue Token eintragen."""
+    from backend import knowledge_sync as ks
+    share = ks.rotate_token(share_id)
+    if share is None:
+        return JSONResponse({"ok": False, "error": "Freigabe nicht gefunden"}, status_code=404)
+    return JSONResponse({"ok": True, "share": share})
+
+
+@app.delete("/api/knowledge/shares/{share_id}")
+async def kb_delete_share(share_id: str, user: str = Depends(require_local_auth)):
+    """Widerruft eine Freigabe. Die Kopie beim Nehmer bleibt liegen – ein
+    Widerruf hier kann dort nichts loeschen (und soll es nicht)."""
+    from backend import knowledge_sync as ks
+    if not ks.delete_share(share_id):
+        return JSONResponse({"ok": False, "error": "Freigabe nicht gefunden"}, status_code=404)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/knowledge/pull/manifest")
+async def kb_pull_manifest(request: Request):
+    """Dateiliste einer Freigabe (Token-Auth). Grundlage des inkrementellen
+    Abgleichs beim Nehmer."""
+    from backend import knowledge_sync as ks
+    share = _pull_share(request)
+    if share is None:
+        return JSONResponse({"error": "Token unbekannt, pausiert oder widerrufen."},
+                            status_code=403)
+    try:
+        manifest = await asyncio.to_thread(ks.build_manifest, share)
+    except FileNotFoundError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": f"Manifest fehlgeschlagen: {e}"}, status_code=500)
+    ks.record_pull(share["id"], request.headers.get("X-Jarvis-Site", ""),
+                   (request.client.host if request.client else ""),
+                   manifest["file_count"], manifest["total_bytes"], art="manifest")
+    return JSONResponse(manifest)
+
+
+@app.get("/api/knowledge/pull/file")
+async def kb_pull_file(request: Request, path: str = ""):
+    """Eine Datei aus einer Freigabe (Token-Auth)."""
+    from backend import knowledge_sync as ks
+    share = _pull_share(request)
+    if share is None:
+        return JSONResponse({"error": "Token unbekannt, pausiert oder widerrufen."},
+                            status_code=403)
+    ziel = ks.resolve_share_file(share, path)
+    if ziel is None:
+        return JSONResponse({"error": "Nicht gefunden."}, status_code=404)
+    return FileResponse(str(ziel), media_type="application/octet-stream",
+                        headers={"X-Content-Type-Options": "nosniff"})
+
+
+@app.get("/api/knowledge/sync")
+async def kb_sync_overview(user: str = Depends(require_local_auth)):
+    """Uebersicht der Rolle Nehmer: Standorte, eigener Standortname, Lizenzlage."""
+    from backend import knowledge_sync as ks
+    ok, grund = ks.erlaubt()
+    return JSONResponse({
+        "peers": ks.list_peers(),
+        "site_name": ks.site_name(),
+        "hostname": ks.rechnername(),
+        "license_ok": ok, "license_reason": grund,
+        "token_prefix": ks.TOKEN_PREFIX,
+        "units": list(ks.EINHEITEN.keys()),
+        "min_interval_seconds": ks.MIN_INTERVALL_SEK,
+        "status": ks.sync_status(),
+    })
+
+
+@app.post("/api/knowledge/sync/site")
+async def kb_sync_site_name(request: Request, user: str = Depends(require_local_auth)):
+    """Name DIESES Standorts. Er geht als Kennung an den Geber (der zeigt damit,
+    wer gezogen hat) und belegt den Zielordner vor."""
+    from backend import knowledge_sync as ks
+    data = await request.json()
+    return JSONResponse({"ok": True, "site_name": ks.set_site_name(data.get("site_name") or "")})
+
+
+@app.post("/api/knowledge/sync/probe")
+async def kb_sync_probe(request: Request, user: str = Depends(require_local_auth)):
+    """Standort testen, BEVOR er gespeichert wird.
+
+    Liefert den Zertifikats-Fingerabdruck (den der Administrator einmal
+    bestaetigt – danach ist er gebunden), den Namen des Gebers, Umfang der
+    Freigabe und einen Vorschlag fuer den lokalen Zielordner.
+    """
+    from backend import knowledge_sync as ks
+    gate = _sync_gate()
+    if gate is not None:
+        return gate
+    data = await request.json()
+    url, token = (data.get("url") or "").strip(), (data.get("token") or "").strip()
+    try:
+        zert = await asyncio.to_thread(ks.zertifikat_abfragen, url)
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": f"Standort nicht erreichbar: {e}"},
+                            status_code=400)
+
+    def _manifest():
+        import httpx
+        with httpx.Client(verify=ks._ssl_kontext(), timeout=ks.HTTP_TIMEOUT,
+                          follow_redirects=False) as c:
+            r = c.get(zert["url"] + "/api/knowledge/pull/manifest", headers={
+                "X-Jarvis-Share-Token": token, "X-Jarvis-Site": ks.site_name()})
+            return r.status_code, (r.json() if r.headers.get("content-type", "").startswith(
+                "application/json") else {})
+
+    try:
+        code, m = await asyncio.to_thread(_manifest)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": f"Abruf fehlgeschlagen: {e}",
+                             "fingerprint": zert["fingerprint"]}, status_code=400)
+    if code == 403:
+        return JSONResponse({"ok": False, "fingerprint": zert["fingerprint"],
+                             "error": "Das Token wird abgelehnt (unbekannt, pausiert oder widerrufen)."},
+                            status_code=400)
+    if code != 200 or m.get("schema") != "jarvis-kb-sync/v1":
+        return JSONResponse({"ok": False, "fingerprint": zert["fingerprint"],
+                             "error": f"Unerwartete Antwort (HTTP {code}). Ist die Adresse "
+                                      "wirklich ein Jarvis-Standort?"}, status_code=400)
+    return JSONResponse({
+        "ok": True, "url": zert["url"], "fingerprint": zert["fingerprint"],
+        "remote_site": m.get("site", ""), "remote_label": m.get("label", ""),
+        "folder_name": m.get("folder_name", ""),
+        "file_count": m.get("file_count", 0), "total_bytes": m.get("total_bytes", 0),
+        "suggest_folder": ks.ziel_vorschlag(m.get("site", "") or "standort",
+                                            m.get("folder_name", "") or "wissen"),
+    })
+
+
+@app.post("/api/knowledge/sync/peers")
+async def kb_sync_add_peer(request: Request, user: str = Depends(require_local_auth)):
+    """Standort anlegen (Rolle Nehmer)."""
+    from backend import knowledge_sync as ks
+    gate = _sync_gate()
+    if gate is not None:
+        return gate
+    d = await request.json()
+    try:
+        peer = ks.create_peer(
+            name=d.get("name") or "", url=d.get("url") or "", token=d.get("token") or "",
+            target_folder=d.get("target_folder") or "", group_id=d.get("group_id") or "",
+            fingerprint=d.get("fingerprint") or "", auto=bool(d.get("auto")),
+            interval=d.get("interval") or 24, unit=d.get("unit") or "hours",
+            remote={"site": d.get("remote_site"), "label": d.get("remote_label")})
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    return JSONResponse({"ok": True, "peer": peer})
+
+
+@app.patch("/api/knowledge/sync/peers/{peer_id}")
+async def kb_sync_update_peer(peer_id: str, request: Request,
+                              user: str = Depends(require_local_auth)):
+    """Standort aendern. ``target_folder`` ist NICHT aenderbar – ein Umzug des
+    Spiegels waere ein neuer Spiegel (und der alte bliebe verwaist liegen).
+    Leeres ``token`` heisst unveraendert."""
+    from backend import knowledge_sync as ks
+    d = await request.json()
+    try:
+        peer = ks.update_peer(peer_id, **{k: v for k, v in d.items()
+                                          if k in ks.PEER_UPDATABLE})
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    if peer is None:
+        return JSONResponse({"ok": False, "error": "Standort nicht gefunden"}, status_code=404)
+    return JSONResponse({"ok": True, "peer": peer})
+
+
+@app.delete("/api/knowledge/sync/peers/{peer_id}")
+async def kb_sync_delete_peer(peer_id: str, remove_data: int = 0,
+                              user: str = Depends(require_local_auth)):
+    """Standort entfernen. ``?remove_data=1`` entfernt zusaetzlich die lokale
+    Kopie samt Index; ohne das bleibt das Wissen nutzbar."""
+    from backend import knowledge_sync as ks
+    res = await asyncio.to_thread(ks.delete_peer, peer_id, bool(remove_data))
+    if not res.get("ok"):
+        return JSONResponse(res, status_code=404)
+    return JSONResponse(res)
+
+
+@app.post("/api/knowledge/sync/peers/{peer_id}/run")
+async def kb_sync_run(peer_id: str, user: str = Depends(require_local_auth)):
+    """Jetzt synchronisieren (blockierend bis zum Ergebnis, im Thread).
+
+    Bewusst KEIN Hintergrund-Auftrag mit Statusabfrage: der Administrator hat
+    gerade auf den Knopf gedrueckt und will das Ergebnis sehen. Der Fortschritt
+    ist waehrenddessen ueber ``GET /api/knowledge/sync/status`` sichtbar.
+    """
+    from backend import knowledge_sync as ks
+    gate = _sync_gate()
+    if gate is not None:
+        return gate
+    if ks.get_peer(peer_id) is None:
+        return JSONResponse({"ok": False, "error": "Standort nicht gefunden"}, status_code=404)
+    bericht = await asyncio.to_thread(ks.sync_peer, peer_id, "manuell")
+    return JSONResponse(bericht, status_code=200 if bericht.get("ok") else 400)
+
+
+@app.get("/api/knowledge/sync/status")
+async def kb_sync_status(user: str = Depends(require_local_auth)):
+    """Fortschritt laufender Synchronisationen (Anzeige waehrend eines Laufs)."""
+    from backend import knowledge_sync as ks
+    return JSONResponse(ks.sync_status())
 
 
 @app.post("/api/knowledge/upload")
@@ -9740,6 +10148,9 @@ async def upload_knowledge_files(
     if not _lic_ok:
         return JSONResponse({"ok": False, "error": _lic_grund, "license": True},
                             status_code=403)
+    _sperre = _kb_mirror_guard(folder)
+    if _sperre is not None:
+        return _sperre
     from backend.tools.knowledge import (
         _get_folders, PROJECT_ROOT,
         EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,
@@ -9936,6 +10347,9 @@ async def wissen_upload(
     if not _lic_ok:
         return JSONResponse({"ok": False, "error": _lic_grund, "license": True},
                             status_code=403)
+    _sperre = _kb_mirror_guard(folder)
+    if _sperre is not None:
+        return _sperre
     from backend.tools.knowledge import (
         _get_folders, PROJECT_ROOT,
         EXTENSIONS_TEXT, EXTENSIONS_PDF, EXTENSIONS_DOCX,
@@ -10276,6 +10690,9 @@ async def wissen_rename_subfolder(request: Request, user: str = Depends(require_
     new_rel = f"{parent}/{new_name}"
     if _kb_safe_within_data(new_rel) is None:
         return JSONResponse({"error": "Ungültiger Ordnername"}, status_code=400)
+    sperre = _kb_mirror_guard(rel, new_rel)
+    if sperre is not None:
+        return sperre
     old_abs = PROJECT_ROOT / rel
     new_abs = PROJECT_ROOT / new_rel
     if not old_abs.is_dir():
@@ -11174,17 +11591,55 @@ async def knowledge_extract_file_delete(request: Request, user: str = Depends(re
 
 @app.get("/api/knowledge/mounts")
 async def list_mounts(user: str = Depends(require_knowledge_editor)):
-    """Liefert die konfigurierten Netzwerk-Freigaben inkl. Mount-Status."""
+    """Liefert die konfigurierten Netzwerk-Freigaben inkl. Mount-Status.
+
+    ``Path.is_mount()`` STELLT EINE SYSTEMANFRAGE und blockiert bei einem toten
+    oder langsamen CIFS/NFS-Ziel bis zum Kernel-Timeout. In einem ``async def``
+    haengt daran der GANZE Event-Loop: auf DEV brauchte dieser Endpunkt 20,4 s,
+    und in dieser Zeit antwortete der Dienst niemandem – kein Chat, kein
+    WhatsApp, keine andere Seite (gefunden 2026-08-11 auf der Suche nach einer
+    Ordnerliste, die nicht mehr lud).
+
+    Deshalb: die Pruefung laeuft im Thread mit hartem Deckel. Laeuft sie ab, ist
+    der Zustand **unbekannt** – und wird auch so gemeldet, nicht als "inaktiv":
+    eine Freigabe, die gerade nicht antwortet, ist etwas anderes als eine
+    getrennte (dieselbe Regel wie bei `_safe_exists` in tools/knowledge.py, das
+    fuer genau dieses Problem existiert).
+    """
+    from backend.tools.knowledge import _bounded_call
     mounts = _get_mounts_config()
+
+    def _alle_zustaende():
+        """Zustand aller Freigaben, je Freigabe mit hartem Deckel.
+
+        ``_bounded_call`` (Daemon-Thread + ``join(timeout)``) statt
+        ``asyncio.wait_for(asyncio.to_thread(...))``: ein laufender
+        Executor-Auftrag laesst sich NICHT abbrechen – ``wait_for`` wartet dann
+        trotz Deckel bis zum Ende. Auf DEV gemessen: mit ``wait_for`` brauchte
+        der Endpunkt weiter 18 s (2 Freigaben à ~9 s), mit ``_bounded_call``
+        hoechstens 2 s je Freigabe.
+        """
+        aus = []
+        for i in range(len(mounts)):
+            mp = _mount_path(i)
+            wert = _bounded_call(lambda p=mp: p.is_mount(), 2.0, None)
+            aus.append((str(mp), wert))
+        return aus
+
+    # Der Deckel schuetzt vor dem Kernel-Timeout, das Auslagern in den Thread
+    # schuetzt den Event-Loop: ohne beides antwortet der Dienst waehrenddessen
+    # NIEMANDEM (auf DEV 20,4 s lang).
+    zustaende = await asyncio.to_thread(_alle_zustaende)
+
     result = []
-    for i, m in enumerate(mounts):
-        mp = _mount_path(i)
+    for m, (mountpoint, wert) in zip(mounts, zustaende):
         result.append({
             "type": m.get("type", "smb"),
             "source": m.get("source", ""),
-            "active": mp.is_mount(),
+            "active": bool(wert),
+            "unknown": wert is None,      # None = Deckel gerissen, Zustand unbekannt
             "auto_mount": m.get("auto_mount", True),
-            "mountpoint": str(mp),
+            "mountpoint": mountpoint,
         })
     return JSONResponse(result)
 

@@ -545,6 +545,7 @@
             _collapseInit([
                 { hdr: 'kb-sect-stats-hdr',  body: 'kb-sect-stats-body',  tog: 'kb-sect-stats-tog'  },
                 { hdr: 'kb-sect-folder-hdr', body: 'kb-sect-folder-body', tog: 'kb-sect-folder-tog' },
+                { hdr: 'kb-sect-sync-hdr',   body: 'kb-sect-sync-body',   tog: 'kb-sect-sync-tog'   },
                 { hdr: 'kb-sect-webdav-hdr', body: 'kb-sect-webdav-body', tog: 'kb-sect-webdav-tog' },
                 { hdr: 'kb-sect-net-hdr',    body: 'kb-sect-net-body',    tog: 'kb-sect-net-tog'    },
             ]);
@@ -658,6 +659,7 @@
                     _initKbCollapse();
                     if (window.knowledgeManager) window.knowledgeManager.init();
                     if (window.extractorManager) window.extractorManager.init();
+                    if (window.KnowledgeSync) window.KnowledgeSync.onShow();
                     if (window.SkillCfg) window.SkillCfg.render('knowledge');
                 } else if (target === 'google' && tabGoogle) {
                     tabGoogle.style.display = '';

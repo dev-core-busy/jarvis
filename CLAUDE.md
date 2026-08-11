@@ -1361,6 +1361,210 @@ Gemessen auf DEV, damit die Grenze nicht geschätzt ist:
   Wurzelordner zugeordnet ist: `POST`/`PUT /api/wissen/subfolders`, Prüfung über
   `_wissen_may_write_path()`. Wurzelordner bleiben der Admin-Fläche vorbehalten.
 
+## Pull-Synchronisation von Wissen zwischen Standorten (2026-08-11)
+**Was es ist:** Mehrere Jarvis-Instanzen in einem Netz. Ein Administrator an Standort 1 gibt
+einen Wissensordner frei; Standort 3 **holt** ihn (Einbahnstraße, read-sync) und hat ihn danach
+als lokale Kopie UND als RAG-Einträge. Code: `backend/knowledge_sync.py`,
+`frontend/js/knowledge_sync.js`, Container *Einstellungen → Wissen → Pull-Synchronisation*
+(zwischen „Ordner" und „WebDAV-Server"), Freigabe über das **fünfte Symbol 🔗** an jeder
+Ordnerzeile.
+- **Zwei Rollen, ein Modul** – jede Instanz kann beides gleichzeitig sein: `shares` (Geber)
+  und `peers` (Nehmer). Persistenz `data/knowledge_sync.json` (0640, in `_APP_DENY_REL`,
+  `PRIVATE_FILES`, `SHELL_SECRET_PATHS` – die Datei enthält die Token FREMDER Standorte im
+  Klartext, und ein beschreibbarer Zustand wäre der bequemste Weg, sich einen eigenen
+  „Standort" einzutragen und beliebige Dateien in einen Wissensordner zu spiegeln).
+- **Eine Freigabe = ein Ordner samt komplettem Unterbaum = EIN Token.** Ein Ordner mit zehn
+  Unterordnern braucht also ein Token, nicht elf. Mehrere Token entstehen nur, wenn ein Admin
+  bewusst mehrere getrennte Freigaben anlegt – und genau das ist der Widerrufsweg (eine
+  zurücknehmen, ohne die andere zu treffen). Token-Format `JARVIS-KBS-1.<share_id>.<secret>`:
+  die Kennung im Token erlaubt das Nachsehen ohne Durchprobieren, Vergleich per
+  `hmac.compare_digest`.
+- **Nur zwei Routen tragen Token-Auth**, `GET /api/knowledge/pull/manifest|file`. Sie haben
+  bewusst KEINE Dependency (zwischen zwei Standorten gibt es keine Sitzung) und liefern
+  ausschließlich Manifest und Dateibytes GENAU EINER Freigabe. Alles andere
+  (`/api/knowledge/shares*`, `/api/knowledge/sync*`) ist `require_local_auth`.
+- **DIE ZERTIFIKATS-BINDUNG SITZT IN DER TLS-SCHICHT, NICHT DANACH.** Erste Fassung las den
+  Fingerabdruck per `antwort.extensions["network_stream"]` und verglich ihn nach dem
+  Verbindungsaufbau – auf DEV lieferte das **nichts** (httpx gibt den Stream nur während eines
+  offenen `stream()`-Aufrufs heraus), womit JEDER Lauf mit „Zertifikat nicht lesbar" abbrach.
+  Und selbst wenn es ginge, wäre es eine Prüfung, nachdem das Token schon über die Leitung war.
+  Jetzt: das beim Einrichten bestätigte Zertifikat wird als einziger Vertrauensanker geladen
+  (`ssl.create_default_context(cadata=pem)`, `check_hostname=False`, `verify_mode` bleibt
+  CERT_REQUIRED). Damit gilt genau dieses Zertifikat.
+  - `check_hostname` aus ist unbedenklich, WEIL nicht „irgendein gültiges" Zertifikat
+    akzeptiert wird – Standorte werden über IP oder interne Namen angesprochen, die im
+    Zertifikat nicht stehen.
+  - **Ein neuer Fingerabdruck löscht das gebundene PEM** (`update_peer`): sonst verlangte die
+    TLS-Schicht weiter das alte und der Lauf scheiterte trotz bewusster Übernahme.
+    `_pem_sicherstellen()` holt das neue und übernimmt es NUR, wenn es zum eingetragenen
+    Fingerabdruck passt.
+  - `_zert_fehler_deuten()` macht aus `CERTIFICATE_VERIFY_FAILED` eine Meldung mit **erwartet
+    und gefunden** – der rohe OpenSSL-Text sagt niemandem, was zu tun ist.
+- **Der Spiegel ist schreibgesperrt** (`ist_spiegel`/`schreibsperre`, `main.py::_kb_mirror_guard`
+  an **11** Schreibpfaden, dazu `_kb_move_folder` und `web_extractor._ist_spiegel`). Antwort ist
+  **409, nicht 403**: es fehlt kein Recht, der Ordner ist seiner Natur nach fremdbestimmt. Die
+  Meldung nennt den Standort – „schreibgeschützt" allein ist für einen Admin, der gerade
+  hochladen will, nicht deutbar.
+  - **Der Spiegel wird NICHT als *Speicherordner* einer Wissensgruppe eingetragen**, nur die
+    einzelnen Dateien werden getaggt. `folders` einer Gruppe ist die Liste der ABLAGEZIELE:
+    stünde der Spiegel darin, bötte /wissen ihn als Upload-Ziel an und
+    `web_extractor._target_dir_for_groups` legte Extrakte dort ab – beides löscht der nächste
+    Lauf. Für den Gruppenfilter der Suche zählen ausschließlich die Zuordnungen je Datei.
+  - Ein bestehender Wissensordner kann NICHT Ziel werden (`_pruefe_ziel`): ein Spiegel löscht
+    lokal, was entfernt fehlt – auf einen gewachsenen Ordner gerichtet wäre der erste Lauf
+    Datenverlust. `target_folder` ist unveränderlich (ein Umzug wäre ein neuer Spiegel, der alte
+    bliebe verwaist).
+- **Inkrementell über Manifest + SHA-256.** Der Geber hasht nur, was sich seit dem letzten
+  Manifest geändert hat (`hash_cache`); der Nehmer vergleicht gegen das gespeicherte Manifest
+  **und die Platte** – eine von Hand gelöschte Datei wird sonst nie wiederhergestellt.
+  Geschrieben wird über eine Nebendatei + `os.replace`, **erst nach** Prüfsumme und
+  Größenvergleich: eine halbe Datei würde der Indexer als Wissen einlesen. Die mtime wird
+  übernommen, weil der inkrementelle Reindex sie vergleicht.
+- **Jeder Pfad aus dem Manifest ist Fremdeingabe** (`_sicheres_ziel`): kein `..`, kein absoluter
+  Pfad, keine Laufwerksangabe, Ergebnis muss unter der Wurzel auflösen, ein vorhandener Symlink
+  wird verworfen statt beschrieben. Auf der Geberseite dasselbe (`resolve_share_file`) plus
+  Endungs-Whitelist; Symlinks werden nie ausgeliefert (`lstat`, kein `os.walk`-Folgen).
+- **Index:** `force_reindex(incremental=True)` + `purge_file_index` für Löschungen. Ein voller
+  Neuaufbau für ein paar neue Dateien wäre auf ECHT ~13 min mit toter Suche.
+- **Automatik:** eigener Takt (`startup_knowledge_sync`, Prüfung alle 120 s, erster Lauf +90 s),
+  Intervall **frei pro Standort** (Zahl + Minuten/Stunden/Tage, Untergrenze 5 min). Kein
+  Cron-Auftrag: es ist kein Agentenlauf und soll nicht an der Admin-Sperre für zeitgesteuerte
+  Aufträge hängen. Höchstens EIN Standort je Durchgang, und ein Lock gegen parallelen Reindex.
+- **Lizenz: nur ENTERPRISE** (`license.standort_sync_erlaubt`, neue Grenze `standort_sync`).
+  **Gespiegelte Dateien zählen NICHT gegen `rag`** (`license_enforce.anzahl_rag` zieht
+  `knowledge_sync.gespiegelte_dateien()` ab) – sie sind am Geber lizenziert; würden sie zählen,
+  sperrte ein Pull von 300 fremden Dateien danach jeden eigenen Upload.
+- **Widerruf und Ausfall lassen die Kopie liegen** und melden den Grund im Klartext
+  („Freigabe entzogen oder Token ungültig"). Löschen ist zwei ausdrückliche Rückfragen
+  (`?remove_data=1`) – ein Konfigurationsschritt darf nicht nebenbei Wissen löschen.
+- **Der Geber sieht, WER geholt hat** (`record_pull`, Abruf-Protokoll im 🔗-Dialog): Zeitpunkt,
+  Standortname (aus `X-Jarvis-Site`), Adresse, Umfang. **Nur Manifest-Abrufe** werden
+  protokolliert – je Datei eine Zeile würde die Aussage „wer war das" in hunderten Zeilen
+  begraben.
+- **Was Wissensgruppen hier NICHT leisten:** sie sind in Jarvis keine Leseschranke (siehe
+  2026-08-04). Gespiegeltes Wissen von Standort 1 ist an Standort 3 damit für **alle** dortigen
+  Benutzer per Chat erreichbar. Wer das nicht will, spiegelt es nicht.
+- **Zwei Layout-Fehler, die erst der Screenshot zeigte** (jsdom rechnet kein Layout): die
+  Zustands-Pille wurde im senkrechten Flex-Container auf die ganze Breite gezogen und sah wie
+  ein Eingabefeld aus (`align-self: flex-start`), und `.kbsync-field .kb-input {width:100%}`
+  drückte den Kopier-Knopf unter das Token-Feld (jetzt `.kbsync-row .kb-input {flex:1 1 auto}`).
+  Dazu zwei Textfehler: „läuft…" las sich wie abgeschnitten, und der Fortschritt zeigte den
+  technischen Phasennamen `download` statt „lädt".
+### Zwei gemeldete Anzeigefehler (2026-08-11)
+1. **„Audit-Log anzeigen" (Sicherheit → Root-Freigaben) erschien Seiten weiter unten.**
+   `#sec-broker-audit` stand im Markup HINTER `#sec-broker-list` – und die Freigabeliste ist auf
+   einem gewachsenen System mehrere Bildschirmseiten lang. Der Kasten sitzt jetzt direkt unter der
+   Knopfzeile (Reihenfolge: Knöpfe → Betriebsart-Ergebnis → Audit → Liste); er scrollt intern
+   (`max-height: 260px`), schiebt die Liste also nicht weg. Dazu `_sichtbarScrollen()`: scrollt nur
+   die Differenz und **nie über die Oberkante** – `scrollIntoView` würde den gerade angeklickten
+   Knopf aus dem Bild reißen (gleiches Muster wie beim Fähigkeiten-Panel der LLM-Profile), und
+   gescrollt wird zweimal, weil der gefüllte Kasten höher ist als der Ladehinweis. Die
+   Knopfbeschriftung folgt dem Zustand (`security.broker_audit_hide`) – ein Umschalter mit
+   unveränderlichem Text sieht beim Zuklappen wie ein wirkungsloser Klick aus.
+   **Merkregel:** Ein Ergebnis gehört an den Knopf, der es auslöst – nicht an das Ende der Sektion.
+2. **Freigegebene Wissensordner sind jetzt an einem eigenen Zeichen erkennbar** (Wissen → Ordner):
+   Marke **⇄** in Akzentfarbe direkt hinter dem Ordnernamen. Vorher war der Zustand nur an der
+   Farbe des 🔗-Knopfes am rechten Rand zu sehen – beim Durchsehen einer langen Liste wird die
+   Knopfspalte überlesen, und Farbe allein ist ohnehin keine Information.
+   - Das **Ordner-Symbol bleibt unangetastet**: 📁/🗂️/⚠️ trägt schon eine Aussage (existiert /
+     hat Unterordner) und würde sie verlieren.
+   - **FALLSTRICK, den nur der Screenshot zeigte:** `.kb-folder-path` hat `flex: 1` und schiebt
+     alles Folgende an den rechten Rand – die Marke landete neben dem Aufklapp-Pfeil. Bei einer
+     freigegebenen Zeile übernimmt deshalb `.kb-folder-nameflex` das `flex: 1`, der Name wächst
+     darin nur so weit wie nötig (`min-width: 0` erhält die Ellipse langer Pfade). Nicht
+     freigegebene Zeilen behalten ihr Markup unverändert.
+   - **FALLSTRICK im Wächter:** die Prüfung „kein `scrollIntoView`" schlug am eigenen
+     Begründungs-Kommentar an. Auf den AUFRUF prüfen (`name(`) und im Kommentar keine Klammern
+     schreiben – dieselbe Falle wie beim Prompt-Wächter am 2026-08-10.
+
+### Vorfall: „Ordnerliste wird nicht mehr geladen" – und ein 20-s-Freeze dahinter (2026-08-11)
+**Gemeldet:** *Einstellungen → Wissen → Ordner* blieb auf „Lädt…". **Kein** Konsolenfehler,
+kein 500er, die Endpunkte antworteten einzeln in Millisekunden – deshalb war es aus den Logs
+nicht sichtbar. Gefunden mit einem echten Chrome über CDP (Token vorgesetzt, Reiter geklickt,
+`knowledgeManager`-Methoden instrumentiert): die Spur endete bei `->_loadShared` **ohne**
+`ok:_loadShared`. Ein Versprechen, das nie auflöst.
+- **Mein Fehler:** `fetchStats()` holte die Freigabeliste mit `await` **vor** dem Zeichnen –
+  begründet mit „zwei Renderdurchläufe würden springen". Die Abwägung war falsch. Jetzt: Ordner
+  **sofort** zeichnen, Marken per DOM nachtragen (`_markShared()`, idempotent, ohne Neuaufbau –
+  ein zweites `innerHTML` würde aufgeklappte Dateilisten verwerfen).
+  **Merkregel: eine Liste darf NIE auf eine zusätzliche, nur schmückende Anfrage warten.**
+  Ein Symbol, das 200 ms später erscheint, sieht niemand – eine Liste, die nie erscheint, jeder.
+- **Warum die Anfrage hing – der eigentliche Fund: `GET /api/knowledge/mounts` blockierte den
+  EVENT-LOOP 20,4 s.** `async def` + `Path.is_mount()` auf einem toten CIFS-Ziel
+  (`//…/knowledgebase_an_rag`, `exists()` → „Host is down"). In dieser Zeit antwortete der Dienst
+  **niemandem** – kein Chat, kein WhatsApp, keine andere Seite. Genau der Fallstrick, den
+  CLAUDE.md für die WhatsApp-Bridge beschreibt, nur an einer unerwarteten Stelle.
+  - Fix: Prüfung im Thread (`asyncio.to_thread`) **plus** hartem Deckel je Freigabe über
+    `tools.knowledge._bounded_call` (2 s). Gemessen: 20,4 s → **2,0 s**, und `/stats` parallel
+    dazu 0,14 s statt zu warten.
+  - **`asyncio.wait_for(asyncio.to_thread(...))` LÖST DAS NICHT.** Ein laufender
+    Executor-Auftrag lässt sich nicht abbrechen; `wait_for` wartet trotz Deckel bis zum Ende –
+    mit dieser Fassung brauchte der Endpunkt weiter 18 s (live nachgemessen). Nur ein
+    Daemon-Thread mit `join(timeout)` kehrt wirklich zurück; das ist genau, was `_bounded_call`
+    tut und warum es existiert.
+  - **„Unbekannt" wird als solches gemeldet** (`unknown: true`, eigene Farbe in der Anzeige):
+    eine Freigabe, die nicht antwortet, ist etwas anderes als eine getrennte. Dieselbe Regel wie
+    beim Trenner „Neue Sitzung" und beim Audit-Filter.
+  - Offen (bewusst): die 2 s bleiben, solange das Mount tot ist. Ein Zustands-Cache wie
+    `_avail_down_until` in `tools/knowledge.py` (30 s „tot") würde auch die wegnehmen.
+- **Cache-Buster hochgezählt** (`knowledge.js?v=92`, `knowledge_sync.js?v=2`): ohne das behält
+  der Browser des Melders genau die kaputte Fassung.
+- **Nebenbefund, mitbehoben:** der Aufruf nach dem Schließen des Freigabe-Dialogs zeigte auf
+  `knowledgeManager.loadStats` – **die Methode heißt `fetchStats`**. Mit `?.()` blieb der Fehler
+  still: die Marke erschien erst nach einem Neuladen. Jetzt `refreshShareMarks()`.
+  **Merkregel: `?.()` auf einen falschen Methodennamen ist ein unsichtbarer Fehler** – bei
+  optionalen Aufrufen den Namen gegen die Klasse prüfen (ein Test tut das jetzt).
+- **Verifiziert:** 14 neue UI-Prüfungen (Liste steht bei absichtlich verzögerter
+  Freigabe-Antwort, Marke wird nachgetragen, idempotent, verschwindet beim Widerruf, kein
+  `loadStats`, frische Cache-Buster) und der Browser-Nachweis: 0,7 s nach dem Reiter-Klick
+  5 Zeilen mit Marke, Spur vollständig (`ok:fetchStats`, `ok:init`).
+
+### ❓-Funktionsbeschreibung, druckbar (2026-08-11)
+Der Container hat ein ❓ in der Kopfzeile (Muster der übrigen Hilfe-Popups: statischer deutscher
+Text, `kb-learned-open-btn`). Der Dialog beschreibt den Vorgang vollständig in neun Abschnitten –
+Übersicht, Einrichten, was bei jedem Lauf geschieht, Automatik, Sicherheit, Mengen/Grenzen,
+Meldungen mit Abhilfe, was ausdrücklich NICHT passiert, Ablage für Administratoren – und lässt
+sich über den **PDF**-Knopf als PDF speichern (4 Seiten).
+- **Die Übersicht ist ein Inline-SVG**, kein Bild: nur so folgt sie den Theme-Variablen und lässt
+  sich für den Druck auf Schwarz/Weiß umstellen. Ein PNG wäre in einem der beiden Modi falsch und
+  im Ausdruck unscharf. `viewBox` + `min-width: 620px` im scrollenden Container, dazu `role` und
+  `aria-label`.
+- **In einer Zeichnung reicht `--text-muted`/`--text-secondary` nicht.** Auf der getönten
+  Kastenfläche waren die Unterzeilen im Screenshot praktisch unlesbar (in Dunkel schlimmer als in
+  Hell). Jetzt `--text-primary` mit abgestufter Deckkraft – Beschriftungen brauchen mehr Kontrast
+  als Fließtext.
+- **Der Druck läuft über EINE generische Regel**, nicht über eine sechste Kopie: `body.printing-doc
+  > *:not(.is-print-doc)` blendet alles außer dem Dialog aus. Voraussetzung ist, dass der Dialog
+  **direktes Kind von `body`** ist (ein Test hält das fest). Die vier vorhandenen Blöcke
+  (apidoc/secdoc/fwdoc/brkdoc) sind dieselbe Regel je Modal-Id und könnten darauf migrieren.
+- **DER ENTSCHEIDENDE FUND: `color-scheme: light` im Druck.** Das Test-PDF war rundherum schwarz,
+  obwohl `html` UND `body` nachweislich auf `#fff` standen (per `getComputedStyle` im
+  umgeschriebenen Media-Block gemessen). Ursache ist `color-scheme: dark` aus theme.css – die
+  Seitenfläche malt dann der **Browser** selbst, das ist kein CSS-Hintergrund. Ohne diese Zeile
+  druckt jeder Benutzer mit dunklem Thema und aktivierten „Hintergrundgrafiken" eine schwarze
+  Seite. Wer eine weitere Druckansicht baut, muss `color-scheme` mitsetzen.
+- **`printing-doc` MUSS im `afterprint` wieder weg** – auch wenn `window.print()` wirft. Bleibt die
+  Klasse stehen, ist der nächste Ausdruck (irgendeiner Seite) leer. Beide Fälle sind getestet.
+- **Escape schließt zuerst die Beschreibung**, dann den Freigabe-Dialog darunter (z-index 10002 über
+  10001) – dieselbe Reihenfolge-Regel wie beim AD-Picker mit Unter-Popup.
+- **FALLSTRICK im eigenen Test:** die Prüfung „knowledge_sync.js lädt nach knowledge.js" schlug
+  falsch an, weil die Doku `data/knowledge_sync.json` nennt und das `knowledge_sync.js` als Präfix
+  enthält. Bei Reihenfolge-Prüfungen auf das `<script src=…>`-Tag prüfen, nicht auf den Dateinamen.
+- **Der Kopf trägt `⇄` statt eines Emojis:** 🔄 fehlte in der Schrift des Testsystems und erschien
+  als grauer Kasten. Ein monochromes Textzeichen ist überall vorhanden und folgt dem Theme (gleiche
+  Begründung wie bei `.kb-hdr-btn`).
+
+- **Verifiziert:** 179 Backend-Prüfungen (`tests/test_knowledge_sync.py`, ohne fastapi lauffähig
+  – httpx wird durch einen Client ersetzt, der die beiden Pull-Routen DIREKT gegen
+  `build_manifest`/`resolve_share_file` bedient, damit der echte Sync-Code gegen echte Ordner
+  läuft) + 192 UI-Prüfungen in jsdom gegen die echten Dateien (inkl. Hilfe-Popup, Druckansicht, Audit-Log-Position, Ordner-Marke und dem Regressionstest der Ordnerliste). Die Druckansicht zusätzlich als echtes PDF geprüft (Chrome `--print-to-pdf`, 4 Seiten, weisse Seite, Grafik schwarz/weiss). **Live auf DEV im Selbst-Pull**
+  (der Server gibt frei und holt bei sich selbst, also echtes HTTPS und echte Bindung):
+  58/58 – 401/403-Matrix, Manifest, Traversal 404, Probe, erster Lauf 2 Dateien, zweiter Lauf 0,
+  Änderung ersetzt, Löschung entfernt lokal, Upload in den Spiegel 409, Sandbox kommt nicht an
+  die Zustandsdatei, Zertifikatswechsel bricht ab und läuft nach bewusster Übernahme wieder,
+  Widerruf lässt die Kopie stehen. Danach vollständig zurückgebaut (`settings.json` md5-gleich,
+  Index-Reste der Probe purged). Optisch in Dunkel UND Hell abgenommen.
+
 ## Kontext-API (/api/context/*) – Rechte und Wirkungsbereich (geklaert 2026-07-27)
 | Endpunkt | Auth | Wirkungsbereich |
 |---|---|---|

@@ -1049,6 +1049,319 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     </div>
 
     <!-- ═══ Wissens-Verdichtung – Funktionsbeschreibung (❓ im Knowledge-Tab) ═══ -->
+    <!-- Funktionsbeschreibung Pull-Synchronisation (druckbar, Muster wie die
+         uebrigen ?-Popups: statischer deutscher Text, `is-print-doc` schaltet die
+         gemeinsame Druckansicht frei). -->
+    <div id="kbsync-info-modal" class="modal is-print-doc" style="z-index:10002;"
+         onclick="if(event.target===this)window.KnowledgeSync.openInfo(false)">
+        <div class="modal-content glass" style="max-width:900px;">
+            <div class="modal-header">
+                <h2>⇄ <span data-i18n="kbsync.info_head">Pull-Synchronisation – Funktionsweise</span></h2>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button class="kb-learned-open-btn" id="kbsync-info-print"
+                            data-i18n-title="kbsync.info_print_title" title="Als PDF speichern (Druckdialog → Ziel „Als PDF speichern")"
+                            onclick="window.KnowledgeSync.drucken()">🖨 <span data-i18n="kbsync.info_print">PDF</span></button>
+                    <button class="btn-icon" id="kbsync-info-close" onclick="window.KnowledgeSync.openInfo(false)"
+                            data-i18n-aria="kbsync.close" aria-label="Schließen">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body kbsync-doc" style="overflow-y:auto;">
+
+                <p class="kbsync-doc-lead">Mehrere Jarvis-Standorte in einem Netz teilen Wissen, ohne es zu verschmelzen:
+                    ein Administrator am <b>abgebenden Standort</b> gibt einen Wissensordner frei, ein Administrator am
+                    <b>holenden Standort</b> spiegelt ihn. Die Verbindung ist eine <b>Einbahnstraße</b> – es wird nur
+                    gelesen, und alle Verbindungen gehen <b>vom holenden Standort aus</b> (Pull). Nach dem Lauf liegt das
+                    entfernte Wissen lokal als <b>Dateikopie</b> UND als <b>durchsuchbare RAG-Einträge</b> vor; der Agent
+                    nutzt es wie eigenes Wissen.</p>
+
+                <h3>1. Übersicht</h3>
+                <div class="kbsync-doc-fig">
+                    <svg viewBox="0 0 900 560" class="kbsync-svg" role="img"
+                         aria-label="Ablaufdiagramm: der holende Standort fordert ein Manifest an, vergleicht es und lädt nur die Differenz.">
+                        <!-- Geber -->
+                        <rect x="18" y="30" width="360" height="205" rx="12" class="s-box"/>
+                        <text x="34" y="56" class="s-h">Standort 1 · abgebend (Geber)</text>
+                        <rect x="34" y="70" width="328" height="62" rx="8" class="s-inner"/>
+                        <text x="48" y="90" class="s-t">Wissensordner</text>
+                        <text x="48" y="108" class="s-mono">data/knowledge/technik</text>
+                        <text x="48" y="124" class="s-s">samt allen Unterordnern</text>
+                        <rect x="34" y="144" width="328" height="74" rx="8" class="s-inner s-accent"/>
+                        <text x="48" y="164" class="s-t">🔗 Freigabe = 1 Ordner = 1 Token</text>
+                        <text x="48" y="182" class="s-mono">JARVIS-KBS-1.&lt;id&gt;.&lt;geheim&gt;</text>
+                        <text x="48" y="200" class="s-s">pausierbar · erneuerbar · widerrufbar</text>
+
+                        <!-- Nehmer -->
+                        <rect x="522" y="30" width="360" height="205" rx="12" class="s-box"/>
+                        <text x="538" y="56" class="s-h">Standort 3 · holend (Nehmer)</text>
+                        <rect x="538" y="70" width="328" height="62" rx="8" class="s-inner"/>
+                        <text x="552" y="90" class="s-t">Spiegel-Ordner (schreibgesperrt)</text>
+                        <text x="552" y="108" class="s-mono">data/standort1_technik</text>
+                        <text x="552" y="124" class="s-s">wird angelegt und als Wissensordner geführt</text>
+                        <rect x="538" y="144" width="328" height="74" rx="8" class="s-inner"/>
+                        <text x="552" y="164" class="s-t">Wissensgruppe + Vektor-Index</text>
+                        <text x="552" y="182" class="s-s">jede Datei wird der gewählten Gruppe</text>
+                        <text x="552" y="198" class="s-s">zugeordnet und inkrementell indiziert</text>
+
+                        <!-- Pfeile -->
+                        <defs>
+                            <marker id="kbs-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+                                    markerHeight="7" orient="auto-start-reverse">
+                                <path d="M0,0 L10,5 L0,10 z" class="s-arrhead"/>
+                            </marker>
+                        </defs>
+                        <line x1="518" y1="96" x2="382" y2="96" class="s-arr" marker-end="url(#kbs-arr)"/>
+                        <text x="450" y="88" class="s-lbl" text-anchor="middle">① Anfrage mit Token</text>
+                        <line x1="382" y1="132" x2="518" y2="132" class="s-arr" marker-end="url(#kbs-arr)"/>
+                        <text x="450" y="124" class="s-lbl" text-anchor="middle">② Dateiliste + SHA-256</text>
+                        <line x1="382" y1="186" x2="518" y2="186" class="s-arr" marker-end="url(#kbs-arr)"/>
+                        <text x="450" y="178" class="s-lbl" text-anchor="middle">③ nur die Differenz</text>
+                        <text x="450" y="256" class="s-lbl" text-anchor="middle">über HTTPS · Zertifikat gebunden</text>
+
+                        <!-- Hinweis Richtung -->
+                        <text x="450" y="282" class="s-note" text-anchor="middle">Der Geber sendet NIE von sich aus – er antwortet nur.
+                            Deshalb genügt am holenden Standort ein ausgehender Zugang.</text>
+
+                        <!-- Ablauf eines Laufs -->
+                        <text x="18" y="304" class="s-h">Ein Lauf, Schritt für Schritt</text>
+                        <g class="s-step">
+                            <rect x="18" y="318" width="128" height="58" rx="8" class="s-inner"/>
+                            <text x="82" y="342" class="s-t" text-anchor="middle">1 Dateiliste</text>
+                            <text x="82" y="360" class="s-s" text-anchor="middle">holen</text>
+                            <rect x="164" y="318" width="128" height="58" rx="8" class="s-inner"/>
+                            <text x="228" y="342" class="s-t" text-anchor="middle">2 Differenz</text>
+                            <text x="228" y="360" class="s-s" text-anchor="middle">gegen Platte</text>
+                            <rect x="310" y="318" width="128" height="58" rx="8" class="s-inner"/>
+                            <text x="374" y="342" class="s-t" text-anchor="middle">3 laden</text>
+                            <text x="374" y="360" class="s-s" text-anchor="middle">+ Prüfsumme</text>
+                            <rect x="456" y="318" width="128" height="58" rx="8" class="s-inner"/>
+                            <text x="520" y="342" class="s-t" text-anchor="middle">4 aufräumen</text>
+                            <text x="520" y="360" class="s-s" text-anchor="middle">entfernt gelöscht</text>
+                            <rect x="602" y="318" width="128" height="58" rx="8" class="s-inner"/>
+                            <text x="666" y="342" class="s-t" text-anchor="middle">5 zuordnen</text>
+                            <text x="666" y="360" class="s-s" text-anchor="middle">Wissensgruppe</text>
+                            <rect x="748" y="318" width="134" height="58" rx="8" class="s-inner s-accent"/>
+                            <text x="815" y="342" class="s-t" text-anchor="middle">6 indizieren</text>
+                            <text x="815" y="360" class="s-s" text-anchor="middle">inkrementell</text>
+                            <line x1="146" y1="347" x2="164" y2="347" class="s-arr" marker-end="url(#kbs-arr)"/>
+                            <line x1="292" y1="347" x2="310" y2="347" class="s-arr" marker-end="url(#kbs-arr)"/>
+                            <line x1="438" y1="347" x2="456" y2="347" class="s-arr" marker-end="url(#kbs-arr)"/>
+                            <line x1="584" y1="347" x2="602" y2="347" class="s-arr" marker-end="url(#kbs-arr)"/>
+                            <line x1="730" y1="347" x2="748" y2="347" class="s-arr" marker-end="url(#kbs-arr)"/>
+                        </g>
+
+                        <!-- Was der Spiegel bedeutet -->
+                        <text x="18" y="416" class="s-h">Was „der entfernte Stand gewinnt" bedeutet</text>
+                        <g>
+                            <rect x="18" y="430" width="278" height="52" rx="8" class="s-inner"/>
+                            <text x="32" y="450" class="s-t">am Geber geändert</text>
+                            <text x="32" y="470" class="s-s">→ lokale Fassung wird überschrieben</text>
+                            <rect x="311" y="430" width="278" height="52" rx="8" class="s-inner"/>
+                            <text x="325" y="450" class="s-t">am Geber gelöscht</text>
+                            <text x="325" y="470" class="s-s">→ lokal ebenfalls entfernt</text>
+                            <rect x="604" y="430" width="278" height="52" rx="8" class="s-inner"/>
+                            <text x="618" y="450" class="s-t">nur lokal angelegt</text>
+                            <text x="618" y="470" class="s-s">→ beim nächsten Lauf entfernt</text>
+                            <rect x="18" y="494" width="278" height="52" rx="8" class="s-inner"/>
+                            <text x="32" y="514" class="s-t">lokal versehentlich gelöscht</text>
+                            <text x="32" y="534" class="s-s">→ wird wiederhergestellt</text>
+                            <rect x="311" y="494" width="278" height="52" rx="8" class="s-inner"/>
+                            <text x="325" y="514" class="s-t">Freigabe entzogen</text>
+                            <text x="325" y="534" class="s-s">→ Kopie bleibt, Fehler wird gemeldet</text>
+                            <rect x="604" y="494" width="278" height="52" rx="8" class="s-inner"/>
+                            <text x="618" y="514" class="s-t">Standort nicht erreichbar</text>
+                            <text x="618" y="534" class="s-s">→ Kopie bleibt unverändert nutzbar</text>
+                        </g>
+                    </svg>
+                </div>
+
+                <h3>2. Einrichten</h3>
+                <p><b>Am abgebenden Standort</b> (Standort 1 oder 2), unter <i>Einstellungen → Wissen → Ordner</i>:</p>
+                <ol>
+                    <li>Beim gewünschten Ordner auf <b>🔗</b> klicken. Das Symbol steht an Wurzel- <i>und</i>
+                        Unterordnern – wer nur einen Teilbereich abgeben will, gibt den Unterordner frei.</li>
+                    <li>Beschriftung eintragen (sie erscheint beim Empfänger, damit er weiß, was er da holt) und
+                        <b>„Freigeben und Token erzeugen"</b> drücken.</li>
+                    <li>Token kopieren und dem Administrator des holenden Standorts übergeben – auf einem Weg, den man
+                        auch für ein Passwort benutzen würde.</li>
+                </ol>
+                <p><b>Am holenden Standort</b> (Standort 3), unter <i>Einstellungen → Wissen → Pull-Synchronisation</i>:</p>
+                <ol>
+                    <li><b>Name dieses Standorts</b> setzen (z.&nbsp;B. „Standort 3 – Zentrale“). Er wird bei jedem Abruf
+                        mitgeschickt; der Geber sieht damit, <i>wer</i> sein Wissen holt.</li>
+                    <li><b>+ Standort hinzufügen</b>, Adresse (<code>https://…</code>) und Token eintragen.</li>
+                    <li><b>Verbindung prüfen</b>. Das Ergebnis nennt den Geber, den Umfang der Freigabe und den
+                        <b>Fingerabdruck seines Zertifikats</b>. Diesen Fingerabdruck einmal bewusst ansehen – mit dem
+                        Speichern wird er verbindlich (siehe Abschnitt 5).</li>
+                    <li>Zielordner (wird unter <code>data/</code> angelegt), Wissensgruppe und – wenn gewünscht – das
+                        Intervall der Automatik setzen, dann <b>Standort speichern</b>.</li>
+                    <li>Mit <b>⟳</b> den ersten Lauf starten.</li>
+                </ol>
+
+                <h3>3. Was bei jedem Lauf geschieht</h3>
+                <ol>
+                    <li><b>Dateiliste holen.</b> Der Geber liefert für jede Datei Pfad, Größe, Änderungszeit und
+                        SHA-256-Prüfsumme. Er berechnet die Prüfsumme nur für Dateien neu, die sich seit dem letzten
+                        Abruf geändert haben – sonst wäre das Hashen der teuerste Teil des Verfahrens.</li>
+                    <li><b>Differenz bilden.</b> Verglichen wird gegen die Liste des letzten Laufs <b>und gegen die
+                        Platte</b>. Der Blick auf die Platte ist wichtig: eine lokal von Hand gelöschte Datei würde
+                        sonst nie wiederkommen.</li>
+                    <li><b>Dateien laden.</b> Jede Datei wird zunächst als Nebendatei geschrieben, dann gegen
+                        <b>Prüfsumme und Größe</b> geprüft und <b>erst danach</b> an ihren Platz gelegt. Bricht die
+                        Übertragung ab, bleibt die vorige Fassung stehen – eine halbe Datei würde sonst als Wissen
+                        indiziert. Die Änderungszeit des Gebers wird übernommen, weil die Indizierung sie vergleicht.</li>
+                    <li><b>Aufräumen.</b> Was am Geber fehlt, wird lokal entfernt – Datei für Datei auch aus dem
+                        Suchindex; leer gewordene Unterordner verschwinden mit.</li>
+                    <li><b>Zuordnen.</b> Jede gespiegelte Datei erhält die gewählte Wissensgruppe. Die Gruppen des
+                        Gebers werden <i>nicht</i> übernommen – sie gelten in seiner Installation.</li>
+                    <li><b>Indizieren.</b> Der Vektor-Index wird <b>inkrementell</b> ergänzt (nicht neu gebaut). Ein
+                        vollständiger Neuaufbau würde für ein paar neue Dateien die gesamte Wissensdatenbank neu
+                        einbetten und die Suche währenddessen leer laufen lassen.</li>
+                    <li><b>Ergebnis festhalten.</b> Neu / aktualisiert / entfernt, Dauer und – im Fehlerfall – der Grund
+                        stehen anschließend an der Standort-Karte. Auch ein Fehlschlag wird gespeichert: ein Standort,
+                        der seit Tagen nichts holt, muss das zeigen.</li>
+                </ol>
+
+                <h3>4. Automatik und Intervall</h3>
+                <ul>
+                    <li>Je Standort frei einstellbar: Zahl plus <i>Minuten / Stunden / Tage</i>. <b>Mindestabstand
+                        5&nbsp;Minuten</b> – Wissen ändert sich nicht schneller, und die Standortverbindung soll nicht
+                        zum Dauerläufer werden.</li>
+                    <li>Ohne Haken passiert nur, was jemand mit <b>⟳</b> auslöst.</li>
+                    <li><b>Pausiert</b> (⏸) heißt: keine Automatik, kein manueller Lauf – der Eintrag und die lokale
+                        Kopie bleiben unangetastet.</li>
+                    <li>Es läuft immer <b>höchstens ein Standort gleichzeitig</b>, und niemals parallel zu einem
+                        Neuaufbau des Wissens-Index.</li>
+                    <li>Der Zeitplan lebt im Dienst selbst – es ist <i>kein</i> zeitgesteuerter Auftrag und startet
+                        keinen Agenten. Es wird ausschließlich kopiert und indiziert.</li>
+                </ul>
+
+                <h3>5. Sicherheit</h3>
+                <ul>
+                    <li><b>Token je Freigabe.</b> Es erlaubt genau zwei Dinge: die Dateiliste <i>dieses</i> Ordners und
+                        seine Dateien zu lesen. Kein Zugang zur übrigen Schnittstelle, keine Anmeldung, kein Schreiben.
+                        Widerruf wirkt sofort und nur für diese eine Freigabe.</li>
+                    <li><b>Das Zertifikat ist gebunden.</b> Beim Einrichten wird das Zertifikat des Gebers übernommen;
+                        danach akzeptiert der holende Standort <i>genau dieses</i> und kein anderes. Wechselt es (neues
+                        Zertifikat – oder eine fremde Gegenstelle), bricht der Lauf ab und nennt <b>erwartet</b> und
+                        <b>gefunden</b>. Erst wenn ein Administrator „Verbindung prüfen“ drückt und den neuen
+                        Fingerabdruck übernimmt, läuft es weiter. Verbindungen sind ausschließlich
+                        <code>https</code> – ein Token darf nicht im Klartext über das Netz gehen.</li>
+                    <li><b>Jeder Pfad gilt als Fremdeingabe.</b> Beide Seiten prüfen unabhängig: keine
+                        Verzeichniswechsel (<code>..</code>), keine absoluten Pfade, keine Symlinks, nur indizierbare
+                        Dateitypen, und das Ergebnis muss nachweislich innerhalb des freigegebenen bzw. des
+                        Spiegel-Ordners liegen. Ein Ordner außerhalb der Wissensordner lässt sich gar nicht freigeben.</li>
+                    <li><b>Prüfsumme.</b> Weicht eine geladene Datei ab, wird sie verworfen, im Ergebnis gezählt und
+                        beim nächsten Lauf erneut versucht – die alte Fassung bleibt bis dahin stehen.</li>
+                    <li><b>Schreibsperre.</b> Im Spiegel-Ordner sind Upload, Unterordner, Umbenennen, Löschen und die
+                        Verwendung als Extraktor-Ziel gesperrt (mit Meldung, welcher Standort ihn bestimmt). Ohne diese
+                        Sperre wäre jede Arbeit darin beim nächsten Lauf spurlos verschwunden.</li>
+                    <li><b>Nur Administratoren</b> dürfen Freigaben anlegen und Standorte einrichten. Die Token liegen in
+                        <code>data/knowledge_sync.json</code> (Rechte 0640, für Shell-Befehle des Agenten gesperrt).</li>
+                    <li><b>Protokoll beim Geber.</b> Jeder Abruf wird mit Zeitpunkt, Standortname, Adresse und Umfang
+                        festgehalten und ist im 🔗-Dialog sichtbar.</li>
+                    <li><b>Wichtig zur Vertraulichkeit:</b> Wissensgruppen sind in Jarvis <b>keine Leseschranke</b>.
+                        Gespiegeltes Wissen ist am holenden Standort für <i>alle</i> dortigen Benutzer über den Chat
+                        erreichbar. Was das nicht sein soll, wird nicht gespiegelt.</li>
+                </ul>
+
+                <h3>6. Mengen und Grenzen</h3>
+                <table class="kbsync-doc-tab">
+                    <thead><tr><th>Was</th><th>Grenze</th><th>Warum</th></tr></thead>
+                    <tbody>
+                        <tr><td>Dateien je Lauf</td><td>5.000</td><td>Notbremse gegen einen versehentlich freigegebenen Riesenordner</td></tr>
+                        <tr><td>Datenmenge je Lauf</td><td>5&nbsp;GB</td><td>dito – wird gekürzt, steht die Zahl im Ergebnis</td></tr>
+                        <tr><td>Einzelne Datei</td><td>512&nbsp;MB</td><td>größere Dateien sind kein Wissensdokument</td></tr>
+                        <tr><td>Dateitypen</td><td>wie beim Upload</td><td>was nicht indiziert werden kann, muss nicht übertragen werden</td></tr>
+                        <tr><td>Intervall</td><td>ab 5&nbsp;Minuten</td><td>Schutz der Standortverbindung</td></tr>
+                        <tr><td>Abruf-Protokoll</td><td>letzte 50 Abrufe</td><td>je Freigabe, älteres fällt heraus</td></tr>
+                    </tbody>
+                </table>
+                <p class="kbsync-doc-note">Gekürzt wird nie stillschweigend: das Ergebnis nennt die Anzahl der nicht
+                    übertragenen Dateien. Eine Anzeige, die eine vollständige Übertragung suggeriert, wäre schlimmer als
+                    die Kürzung selbst.</p>
+
+                <h3>7. Meldungen und was zu tun ist</h3>
+                <table class="kbsync-doc-tab">
+                    <thead><tr><th>Meldung</th><th>Ursache</th><th>Abhilfe</th></tr></thead>
+                    <tbody>
+                        <tr><td>Freigabe entzogen oder Token ungültig</td>
+                            <td>Freigabe gelöscht, pausiert oder Token erneuert</td>
+                            <td>am abgebenden Standort prüfen; ggf. neues Token eintragen. Die lokale Kopie bleibt nutzbar.</td></tr>
+                        <tr><td>Das Zertifikat des Standorts hat sich geändert</td>
+                            <td>neues Zertifikat – oder eine andere Gegenstelle</td>
+                            <td>Herkunft klären, dann „Verbindung prüfen“ und den neuen Fingerabdruck übernehmen</td></tr>
+                        <tr><td>Standort nicht erreichbar</td>
+                            <td>Netz, Firewall, Dienst aus</td>
+                            <td>abwarten oder Adresse prüfen; es wird nichts gelöscht</td></tr>
+                        <tr><td>Der freigegebene Ordner existiert nicht mehr</td>
+                            <td>Ordner am Geber entfernt oder umbenannt</td>
+                            <td>Freigabe dort neu anlegen</td></tr>
+                        <tr><td>n Datei(en) übersprungen</td>
+                            <td>Prüfsumme wich ab oder Pfad war unzulässig</td>
+                            <td>nächster Lauf versucht es erneut; die Ergebnisliste nennt die Dateien</td></tr>
+                        <tr><td>Es läuft schon eine Synchronisation</td>
+                            <td>ein anderer Standort ist gerade dran</td>
+                            <td>kurz warten – bewusst nur ein Lauf gleichzeitig</td></tr>
+                        <tr><td>… ist der ENTERPRISE-Lizenz vorbehalten</td>
+                            <td>Mehr-Standort-Betrieb ist ein Lizenzmerkmal</td>
+                            <td>Lizenz eintragen. Bereits gespiegeltes Wissen bleibt lesbar.</td></tr>
+                        <tr><td>Der Ordner ist bereits ein Wissensordner</td>
+                            <td>Ziel zeigt auf gewachsenes Wissen</td>
+                            <td>neuen, leeren Ordnernamen wählen – ein Spiegel löscht, was am Geber fehlt</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>8. Was ausdrücklich nicht passiert</h3>
+                <ul>
+                    <li><b>Kein Push.</b> Der abgebende Standort schickt nichts und braucht keinen Zugang zum
+                        holenden.</li>
+                    <li><b>Keine Rückrichtung.</b> Lokale Änderungen wandern nie zurück. Wer sie behalten will,
+                        bearbeitet die Datei am Ursprungs-Standort.</li>
+                    <li><b>Keine Vektoren über die Leitung.</b> Übertragen werden Dateien; eingebettet wird lokal.
+                        So bleiben die Standorte unabhängig von Modellversionen.</li>
+                    <li><b>Kein Agentenlauf.</b> Die Synchronisation ist Kopieren und Indizieren – kein LLM beteiligt,
+                        kein Werkzeug, kein Prompt.</li>
+                    <li><b>Kein automatisches Löschen beim Aufräumen.</b> Wird ein Standort entfernt, bleibt die lokale
+                        Kopie erhalten, sofern man das Löschen nicht ausdrücklich bestätigt.</li>
+                    <li><b>Keine Lizenz-Doppelzählung.</b> Gespiegelte Dateien zählen nicht gegen die Obergrenze für
+                        Wissensdateien – sie sind am abgebenden Standort schon lizenziert.</li>
+                </ul>
+
+                <h3>9. Für Administratoren: wo was liegt</h3>
+                <table class="kbsync-doc-tab">
+                    <thead><tr><th>Gegenstand</th><th>Ort</th></tr></thead>
+                    <tbody>
+                        <tr><td>Freigaben, Standorte, Token, letzte Dateiliste</td><td><code>data/knowledge_sync.json</code> (0640)</td></tr>
+                        <tr><td>Spiegel-Ordner</td><td><code>data/&lt;zielordner&gt;</code>, zusätzlich als Wissensordner registriert</td></tr>
+                        <tr><td>Abruf (Token-Auth, die einzigen offenen Routen)</td><td><code>GET /api/knowledge/pull/manifest</code> · <code>/pull/file</code></td></tr>
+                        <tr><td>Verwaltung (nur Administratoren)</td><td><code>/api/knowledge/shares*</code> · <code>/api/knowledge/sync*</code></td></tr>
+                        <tr><td>Protokoll des Dienstes</td><td><code>journalctl -u jarvis.service</code>, Zeilen mit <code>[KB-Sync]</code></td></tr>
+                    </tbody>
+                </table>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Freigabe eines Wissensordners fuer andere Standorte (Rolle Geber) -->
+    <div id="kbsync-share-modal" class="modal" style="z-index:10001;"
+         onclick="if(event.target===this)window.KnowledgeSync.closeShare()">
+        <div class="modal-content glass" style="max-width:680px;">
+            <div class="modal-header">
+                <h2>🔗 <span data-i18n="kbsync.share_title">Ordner für andere Standorte freigeben</span></h2>
+                <button class="btn-icon" onclick="window.KnowledgeSync.closeShare()"
+                        data-i18n-aria="kbsync.close" aria-label="Schließen">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body" style="overflow-y:auto;">
+                <div id="kbsync-share-body"><div class="kb-loading" data-i18n="knowledge.loading">Lädt…</div></div>
+            </div>
+        </div>
+    </div>
+
     <div id="kb-compact-modal" class="modal" style="z-index:10001;" onclick="if(event.target===this)window.knowledgeManager.showCompactInfo(false)">
         <div class="modal-content glass">
             <div class="modal-header">
@@ -1784,6 +2097,100 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <!-- Skill-Konfiguration: Obergrenze pro Datei beim Indizieren -->
                                 <div style="margin-top:14px;max-width:320px;">
                                     <div id="skcfg-knowledge"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Pull-Synchronisation mit anderen Jarvis-Standorten -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-sync-hdr">
+                                <h3><span data-i18n="kbsync.section">Pull-Synchronisation</span>
+                                    <span class="kbsync-count" id="kbsync-count"></span>
+                                    <button class="kb-learned-open-btn" id="kbsync-info-btn" style="font-weight:700;margin-left:8px;"
+                                            data-i18n-title="kbsync.info_title" data-i18n-aria="kbsync.info_title"
+                                            title="Funktionsweise, Einrichtung und Sicherheit – druckbar"
+                                            onclick="event.stopPropagation();window.KnowledgeSync.openInfo(true)">❓</button></h3>
+                                <span class="sk-openclaw-toggle" id="kb-sect-sync-tog">▶</span>
+                            </div>
+                            <div id="kb-sect-sync-body" class="kb-collapse-body" style="display:none;">
+                                <p class="kb-hint" data-i18n="kbsync.hint">Holt Wissensordner, die ein Administrator an einem anderen Jarvis-Standort freigegeben hat. Einbahnstraße: der entfernte Stand überschreibt die lokale Kopie, der lokale Ordner ist deshalb schreibgeschützt.</p>
+
+                                <!-- Lizenz-Hinweis (nur wenn das Merkmal fehlt) -->
+                                <div class="kbsync-lic" id="kbsync-license" style="display:none;"></div>
+
+                                <!-- Name dieses Standorts -->
+                                <div class="kbsync-site">
+                                    <label for="kbsync-site-name" data-i18n="kbsync.site_label">Name dieses Standorts</label>
+                                    <input type="text" id="kbsync-site-name" class="kb-input" maxlength="80"
+                                           data-i18n-placeholder="kbsync.site_ph" placeholder="z.B. Standort 3" />
+                                    <button class="kb-btn-action" id="kbsync-site-save" data-i18n="kbsync.save">Speichern</button>
+                                    <span class="kb-hint kbsync-site-hint" data-i18n="kbsync.site_hint">Wird beim Abruf mitgeschickt – der abgebende Standort sieht damit, wer sein Wissen holt.</span>
+                                </div>
+
+                                <!-- Standort-Liste -->
+                                <div id="kbsync-peer-list" class="kbsync-list">
+                                    <div class="kb-loading" data-i18n="knowledge.loading">Lädt…</div>
+                                </div>
+
+                                <button class="kb-btn-action" id="kbsync-add-btn" data-i18n="kbsync.add_btn">+ Standort hinzufügen</button>
+
+                                <!-- Formular: erst pruefen, dann speichern -->
+                                <div id="kbsync-form" class="kbsync-form" style="display:none;">
+                                    <div class="kbsync-field">
+                                        <label for="kbsync-f-url" data-i18n="kbsync.f_url">Adresse des Standorts</label>
+                                        <input type="text" id="kbsync-f-url" class="kb-input" placeholder="https://…" />
+                                    </div>
+                                    <div class="kbsync-field">
+                                        <label for="kbsync-f-token" data-i18n="kbsync.f_token">Freigabe-Token</label>
+                                        <input type="text" id="kbsync-f-token" class="kb-input"
+                                               data-i18n-placeholder="kbsync.f_token_ph" placeholder="JARVIS-KBS-1.…" />
+                                        <span class="kb-hint" data-i18n="kbsync.f_token_hint">Wird am abgebenden Standort unter Wissen → Ordner → 🔗 Freigabe erzeugt.</span>
+                                    </div>
+                                    <div class="kbsync-row">
+                                        <button class="kb-btn-action" id="kbsync-probe-btn" data-i18n="kbsync.probe">Verbindung prüfen</button>
+                                        <button class="kb-hdr-btn" id="kbsync-form-cancel" data-i18n="kbsync.cancel">Abbrechen</button>
+                                    </div>
+                                    <div id="kbsync-probe-result" class="kbsync-probe" style="display:none;"></div>
+
+                                    <!-- Zweiter Schritt: erst nach erfolgreicher Pruefung -->
+                                    <div id="kbsync-step2" style="display:none;">
+                                        <div class="kbsync-grid2">
+                                            <div class="kbsync-field">
+                                                <label for="kbsync-f-name" data-i18n="kbsync.f_name">Bezeichnung</label>
+                                                <input type="text" id="kbsync-f-name" class="kb-input" maxlength="80" />
+                                            </div>
+                                            <div class="kbsync-field">
+                                                <label for="kbsync-f-folder" data-i18n="kbsync.f_folder">Lokaler Zielordner</label>
+                                                <input type="text" id="kbsync-f-folder" class="kb-input" />
+                                                <span class="kb-hint" data-i18n="kbsync.f_folder_hint">Wird unter data/ angelegt und wie ein Wissensordner behandelt. Muss neu sein – ein Spiegel löscht lokal, was am anderen Standort fehlt.</span>
+                                            </div>
+                                        </div>
+                                        <div class="kbsync-grid2">
+                                            <div class="kbsync-field">
+                                                <label for="kbsync-f-group" data-i18n="kbsync.f_group">Wissensgruppe</label>
+                                                <select id="kbsync-f-group" class="kb-input"></select>
+                                                <span class="kb-hint" data-i18n="kbsync.f_group_hint">Ohne Gruppe bleibt das Wissen „ungruppiert" – durchsuchbar, aber nicht filterbar.</span>
+                                            </div>
+                                            <div class="kbsync-field">
+                                                <label data-i18n="kbsync.f_auto">Automatisch synchronisieren</label>
+                                                <div class="kbsync-row">
+                                                    <label class="kbsync-check"><input type="checkbox" id="kbsync-f-auto" />
+                                                        <span data-i18n="kbsync.f_auto_on">aktiv, alle</span></label>
+                                                    <input type="number" id="kbsync-f-interval" class="kb-input kbsync-num" min="1" value="24" />
+                                                    <select id="kbsync-f-unit" class="kb-input kbsync-unit">
+                                                        <option value="minutes" data-i18n="kbsync.unit_minutes">Minuten</option>
+                                                        <option value="hours" selected data-i18n="kbsync.unit_hours">Stunden</option>
+                                                        <option value="days" data-i18n="kbsync.unit_days">Tage</option>
+                                                    </select>
+                                                </div>
+                                                <span class="kb-hint" data-i18n="kbsync.f_interval_hint">Mindestabstand 5 Minuten. Ohne Haken wird nur auf Knopfdruck geholt.</span>
+                                            </div>
+                                        </div>
+                                        <div class="kbsync-row">
+                                            <button class="kb-btn-action" id="kbsync-save-btn" data-i18n="kbsync.save_peer">Standort speichern</button>
+                                        </div>
+                                    </div>
+                                    <div id="kbsync-form-err" class="kbsync-err" style="display:none;"></div>
                                 </div>
                             </div>
                         </div>
@@ -3644,8 +4051,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <button type="button" id="sec-broker-audit-btn" class="sec-btn" data-i18n="security.broker_audit">Audit-Log anzeigen</button>
                                 </div>
                                 <div id="sec-broker-mode-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
-                                <div id="sec-broker-list" style="margin-top:8px;"></div>
+                                <!-- Audit-Log steht DIREKT unter seinem Knopf, NICHT hinter der
+                                     Freigabeliste: die Liste wird auf einem gewachsenen System
+                                     mehrere Bildschirmseiten lang, und das Ergebnis eines Klicks
+                                     erschien dann weit unterhalb des Sichtfensters (gemeldet
+                                     2026-08-11). Der Kasten scrollt intern (max-height), schiebt
+                                     die Liste also nicht weg. -->
                                 <div id="sec-broker-audit" style="display:none;margin-top:8px;"></div>
+                                <div id="sec-broker-list" style="margin-top:8px;"></div>
                             </div>
                         </div>
 
@@ -3730,7 +4143,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/skillcfg.js?v=5"></script>
     <script src="/static/js/google.js?v=12"></script>
     <script src="/static/js/whatsapp.js?v=16"></script>
-    <script src="/static/js/knowledge.js?v=90"></script>
+    <script src="/static/js/knowledge.js?v=92"></script>
+    <!-- knowledge_sync NACH knowledge.js: die Ordnerliste fragt beim Zeichnen
+         window.KnowledgeSync.sharedFolders() fuer den Zustand des 🔗-Symbols. -->
+    <script src="/static/js/knowledge_sync.js?v=2"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>

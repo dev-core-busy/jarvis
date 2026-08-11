@@ -3805,6 +3805,91 @@ verdeckte aber echte Fehler im Journal.
   benutzt, erzeugt eine Zeitbombe, die erst beim naechsten Commit auf dasselbe Verzeichnis
   hochgeht. Deploys gehoeren dem Dienstbenutzer (`install -o jarvis -g jarvis …`).
 
+## Erreichbare Ports und Paketfilter (2026-08-11)
+Gemessen (nicht aus dieser Doku abgelesen) von einem Rechner im Firmennetz. **Ueber
+Internet-Erreichbarkeit sagt das nichts** – die haengt an Firewall/NAT vor den Hosts.
+
+- **DER BEFUND, der alles andere erklaert:** die INPUT-Chain hatte `policy ACCEPT` und darunter
+  drei ACCEPT-Regeln (80, 443, 6080) – aber **keine abschliessende DROP-Regel**. Die drei Regeln
+  erlaubten also nur, was ohnehin erlaubt war: **offen war alles, was lauscht.**
+- **ECHT (191.100.130.62) – offen: 22, 80, 443, 111, 3128, 5900, 6080.** Darunter der schwere
+  Fall: **Port 5900 (x11vnc) nahm Verbindungen an und meldete im RFB-Handshake als einzigen
+  Security-Type `1` = None – kein Passwort.** Wer den Host im Netz erreicht, hat Maus und
+  Tastatur auf dem Desktop des `jarvis`-Benutzers; der Weg ueber 5900 ueberspringt genau die
+  Portal-Anmeldung, die noVNC (6080) davorlegt. `3128` ist Squid (verlangt Anmeldung, 407),
+  `111` rpcbind (lauscht, antwortet nicht, unnoetig). **Auf ECHT ist das noch NICHT behoben** –
+  dort gilt mein SSH-Key nicht.
+- **DEV (191.100.144.1) – vorher offen: 22, 80, 443, 3389** (xrdp; in der Doku nie erwaehnt,
+  laut Journal selten benutzt). Behoben:
+  - **`deploy/security/harden_vnc.sh`** ergaenzt `-localhost` an **allen** x11vnc-Aufrufen –
+    es waren **15** in `start_jarvis_root.sh`, `start_jarvis.sh`, `run.sh` und
+    `x11vnc.service`. Idempotent (`--pruefen` zeigt nur an). `-nopw` bleibt: websockify
+    muesste sonst ein Passwort kennen – vertretbar NUR, weil `-localhost` den Zugang auf den
+    Host selbst beschraenkt. Alle drei websockify-Starter verbinden nachweislich auf
+    `localhost:5900`, noVNC bricht dadurch nicht.
+  - **`deploy/security/firewall.sh`**: eigene Kette `JARVIS-IN` (Loopback, ESTABLISHED/RELATED,
+    ICMP, dann 22/80/443/6080/3389), Policy `INPUT DROP` + `FORWARD DROP`, IPv4 **und** IPv6.
+    Persistiert ueber `/etc/jarvis/firewall-v{4,6}.rules` + `jarvis-firewall.service`
+    (`WantedBy=sysinit.target`, `Before=network-pre.target` – der Filter steht, bevor Dienste
+    lauschen, und auch dann, wenn der Jarvis-Bootstrap scheitert).
+- **DIE REIHENFOLGE IST LEBENSWICHTIG:** wer `policy DROP` setzt, bevor SSH und
+  `ESTABLISHED,RELATED` erlaubt sind, sperrt sich ueber genau die Verbindung aus, mit der er
+  arbeitet. Deshalb kommt die Policy ZULETZT, und `--test` legt vorher einen Rueckfall-Timer
+  (`systemd-run --on-active`), der die gesicherten Regeln wiederherstellt. Der Beweis ist eine
+  **NEUE** SSH-Verbindung – die bestehende lebt von `ESTABLISHED` und beweist nichts.
+- **`ESTABLISHED,RELATED` ist kein Detail:** ohne diese Zeile bricht alles Ausgehende (DNS, apt,
+  git, die LLM-Anbieter). Nachgewiesen mit einem echten Agentenlauf ueber `POST /api/agent/task`
+  nach dem Umschalten. ICMP bleibt erlaubt – ein pauschales Verwerfen erzeugt haengende
+  Verbindungen ueber die kaputte MTU-Discovery, die niemand mit der Firewall verbindet.
+- **Tailscale bleibt unangetastet:** `ts-input`/`ts-forward` gehoeren dem Dienst und laufen VOR
+  der eigenen Kette (INPUT springt als erstes dorthin).
+- **NEBENBEFUND, der dabei aufgefallen ist: der Root-Broker lief seit dem 1.8. um 14:04 in einer
+  Neustart-Schleife** – `Unable to locate executable /opt/jarvis/start_jarvis_root.sh:
+  Permission denied`, Restart-Zaehler **163601**. Ein `scp`-Deploy hatte an diesem Tag das
+  **x-Bit** verloren (die Sicherung von damals zeigt `-rw-r--r--`). Damit war auf DEV zehn Tage
+  lang: kein Broker-Socket, keine Root-Ops – und **kein x11vnc/websockify**, weil der Broker sie
+  startet. Behoben mit `chmod +x`. **Merkregel: `scp` uebertraegt kein Ausfuehrungsrecht.** Nach
+  dem Kopieren eines Skripts nach `/opt/jarvis` immer `chmod +x` – oder `install -m 755`.
+- **FALLSTRICK `pgrep -f` / `pkill -f` trifft die eigene Pruefung.** Der websockify-Start haengt
+  an `! pgrep -f "websockify.*6080"`; wer parallel `pgrep -af websockify` laufen laesst (oder
+  einen SSH-Befehl mit diesen Woertern), erfuellt die Bedingung selbst und der Start wird
+  uebersprungen. Dasselbe Muster hat mit `pkill -f 'bash -x …'` die eigene SSH-Sitzung beendet.
+- **Verifiziert auf DEV:** von aussen offen genau 22, 80, 443, 3389, 6080; **5900 zu** und
+  x11vnc gebunden an `127.0.0.1`/`[::1]`; 631, 3001, 8080, 9081 zu. Dienste aktiv
+  (`jarvis`, `jarvis-broker`, `jarvis-firewall`), `/settings` 200, `noVNC /vnc.html` 200,
+  echter Agentenlauf erfolgreich, `iptables-restore --test` fuer v4 und v6 fehlerfrei, Unit-Test
+  laedt die Regeln wieder (Policy DROP, 5 Freigaben). Sicherungen in `/root/fw-backup/`.
+- **ECHT ist am 2026-08-11 ebenfalls umgestellt** (Zugang ueber ein Konto mit sudo-Recht). Dabei drei
+  Unterschiede zu DEV, die man kennen muss:
+  - **Auf ECHT gibt es kein `iptables`** – nur `nft`. `firewall.sh` erkennt das
+    (`_hat_iptables`) und legt dort die Tabelle **`inet jarvis_fw`** an (eigener input-Hook,
+    `policy drop`). Die vorhandene **`inet jarvis_egress`** (`backend/egress_guard.py`,
+    Ausgangssperre fuer den Sandbox-Benutzer) bleibt unangetastet: bei nft hat jede Tabelle
+    eigene Ketten, ein Paket passiert alle Hooks – die beiden stoeren sich nicht. **Bewusst EIN
+    Skript fuer beide Wege**, mit derselben Portliste als einziger Quelle; zwei Dateien waeren
+    Drift.
+  - **`nft -f` HAENGT AN, es ersetzt nicht.** Erster Anlauf: nach `--test` und `--anwenden` stand
+    **jede Regel zweimal** in der Tabelle (nachgemessen: `grep -c` = 2). Deshalb jetzt
+    `table inet jarvis_fw {}` + `delete table` in DERSELBEN Transaktion vor dem Anlegen – das
+    leere `table` davor macht das `delete` auch beim ersten Lauf fehlerfrei, und es entsteht kein
+    Zeitfenster ohne Filter. Idempotenz belegt: zweiter Lauf → weiter genau eine Regel.
+  - **`3389` wird nur freigegeben, wenn xrdp auf DEM Host laeuft** (auf ECHT gibt es ihn nicht) –
+    eine feste Freigabe waere dort ein offener Port fuer nichts.
+- **Was auf ECHT NICHT angefasst wurde, obwohl es lauscht:** `111` (rpcbind) und `3128`. Letzteres
+  ist **kein Squid, sondern ein SSH-Tunnel**: `ssh -N -L *:3128:127.0.0.1:3128
+  dcs@update.dc.nexus-lab.net`, seit Wochen als root – gedacht fuer apt-Updates, aber durch
+  `-L *:3128` (statt `127.0.0.1:3128`) **fuer jeden im Netz nutzbar**. Der Filter macht ihn von
+  aussen dicht, ohne den laufenden Prozess zu stoeren; ueber `127.0.0.1:3128` funktioniert er
+  weiter (nachgewiesen: HTTP 407 vom Squid, also erreicht). **Wer es an der Wurzel richten will,
+  aendert das `-L` – das ist eine Aenderung an fremder Handarbeit und wurde bewusst gelassen.**
+- **Verifiziert auf ECHT:** von aussen offen genau 22, 80, 443, 6080; **111, 3128, 5900 und 3389
+  zu**. x11vnc an `127.0.0.1`/`[::1]`, alle 14 Aufrufstellen mit `-localhost`, `/portal` 200,
+  `noVNC /vnc.html` 200, ausgehend GitHub 200 + DNS ok, `jarvis_egress` unveraendert, Persistenz
+  aktiv (`/etc/jarvis/firewall.nft`, `nft -c -f` fehlerfrei). Neue SSH-Verbindung waehrend des
+  Rueckfall-Timers geprueft. Sicherungen in `/root/fw-backup/`.
+  **Niemand war zum Umstellungszeitpunkt auf 5900/6080 verbunden** – vorher gemessen, damit der
+  x11vnc-Neustart keine laufende Sitzung trennt.
+
 ## Bekannte Fallstricke
 - **NIEMALS Write-Tool auf bestehende Dateien:** Das Write-Tool ueberschreibt Dateien vollstaendig – bei Fehlern entstehen 0-Byte-Dateien. Fuer bestehende Dateien (z.B. index.html, main.py, etc.) IMMER nur das Edit-Tool verwenden. Write nur fuer NEUE Dateien!
 - **Deadlock in wa_logger.py:** `clear_logs()` darf `log()` nur NACH Lock-Release aufrufen

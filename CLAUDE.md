@@ -4049,11 +4049,19 @@ Internet-Erreichbarkeit sagt das nichts** – die haengt an Firewall/NAT vor den
   der eigenen Kette (INPUT springt als erstes dorthin).
 - **NEBENBEFUND, der dabei aufgefallen ist: der Root-Broker lief seit dem 1.8. um 14:04 in einer
   Neustart-Schleife** – `Unable to locate executable /opt/jarvis/start_jarvis_root.sh:
-  Permission denied`, Restart-Zaehler **163601**. Ein `scp`-Deploy hatte an diesem Tag das
-  **x-Bit** verloren (die Sicherung von damals zeigt `-rw-r--r--`). Damit war auf DEV zehn Tage
-  lang: kein Broker-Socket, keine Root-Ops – und **kein x11vnc/websockify**, weil der Broker sie
-  startet. Behoben mit `chmod +x`. **Merkregel: `scp` uebertraegt kein Ausfuehrungsrecht.** Nach
-  dem Kopieren eines Skripts nach `/opt/jarvis` immer `chmod +x` – oder `install -m 755`.
+  Permission denied`, Restart-Zaehler **163601**. Damit war auf DEV zehn Tage lang: kein
+  Broker-Socket, keine Root-Ops – und **kein x11vnc/websockify**, weil der Broker sie startet.
+  Behoben mit `chmod +x`.
+  **⚠ DIE URSACHE WAR NICHT `scp` – das stand hier bis zum 2026-08-11 falsch.** Nachgemessen:
+  `git ls-files -s start_jarvis_root.sh` lieferte **100644**, waehrend `start_jarvis.sh` und
+  `run.sh` 100755 tragen. Die Datei war also **im Repo selbst nicht ausfuehrbar**; JEDER frische
+  Checkout und jedes `git checkout` dieser Datei legt sie mit 644 ab, und die Unit scheitert mit
+  `203/EXEC`. Genau das ist am 11.08. auch auf ECHT passiert (dort lief der Broker nur noch als
+  Altprozess und waere bei jedem Neustart tot gewesen). Behoben per
+  `git update-index --chmod=+x start_jarvis_root.sh`; Gegenprobe mit `git checkout-index`.
+  **Merkregel: bei `203/EXEC` zuerst den git-INDEX-Modus pruefen, nicht den Deploy-Weg.**
+  Dass `scp` kein Ausfuehrungsrecht uebertraegt, stimmt trotzdem – nach dem Kopieren eines
+  Skripts nach `/opt/jarvis` also weiter `chmod +x` bzw. `install -m 755`.
 - **FALLSTRICK `pgrep -f` / `pkill -f` trifft die eigene Pruefung.** Der websockify-Start haengt
   an `! pgrep -f "websockify.*6080"`; wer parallel `pgrep -af websockify` laufen laesst (oder
   einen SSH-Befehl mit diesen Woertern), erfuellt die Bedingung selbst und der Start wird
@@ -4079,18 +4087,71 @@ Internet-Erreichbarkeit sagt das nichts** – die haengt an Firewall/NAT vor den
     Zeitfenster ohne Filter. Idempotenz belegt: zweiter Lauf → weiter genau eine Regel.
   - **`3389` wird nur freigegeben, wenn xrdp auf DEM Host laeuft** (auf ECHT gibt es ihn nicht) –
     eine feste Freigabe waere dort ein offener Port fuer nichts.
-- **Was auf ECHT NICHT angefasst wurde, obwohl es lauscht:** `111` (rpcbind) und `3128`. Letzteres
-  ist **kein Squid, sondern ein SSH-Tunnel**: `ssh -N -L *:3128:127.0.0.1:3128
-  dcs@update.dc.nexus-lab.net`, seit Wochen als root – gedacht fuer apt-Updates, aber durch
-  `-L *:3128` (statt `127.0.0.1:3128`) **fuer jeden im Netz nutzbar**. Der Filter macht ihn von
-  aussen dicht, ohne den laufenden Prozess zu stoeren; ueber `127.0.0.1:3128` funktioniert er
-  weiter (nachgewiesen: HTTP 407 vom Squid, also erreicht). **Wer es an der Wurzel richten will,
-  aendert das `-L` – das ist eine Aenderung an fremder Handarbeit und wurde bewusst gelassen.**
+- **`111` (rpcbind) wurde nicht angefasst** – lauscht weiter lokal, ist von aussen zu.
+- **`3128` ist kein Squid, sondern ein SSH-Tunnel** – am 2026-08-11 abends **an der Wurzel
+  behoben** (vorher hier als „bewusst gelassen" vermerkt). Er lief als
+  `autossh_proxy.service` (`# MANAGED WITH prepare.sh`) mit `-L *:3128:127.0.0.1:3128`, war also
+  **fuer jeden im Netz nutzbar**; gedacht ist er fuer apt-Updates ueber
+  `dcs@update.dc.nexus-lab.net`.
+  - **Dass `*` nie beabsichtigt war, steht im erzeugenden Skript selbst:** `/root/prepare.sh`
+    setzt in Zeile 186/187 `http_proxy=http://127.0.0.1:3128`. Die weite Bindung war ein
+    Versehen, keine Anforderung.
+  - Geaendert an ZWEI Stellen – die Unit allein haette nicht gereicht: `prepare.sh` verwaltet
+    sie und haette sie beim naechsten Lauf zurueckgesetzt (Zeile 107 + der Abfragetext in
+    Zeile 88). **Merkregel: traegt eine Unit einen `MANAGED WITH …`-Kommentar, ist sie eine
+    Kopie – die Quelle mitaendern, sonst ist der Fix flüchtig.** Das Skript stammt aus einem
+    Provisioning („Customer"-Abfrage, `SSH_HOST`, `SSH_PORT=2424`) und liegt vermutlich
+    zentral vor; **dort ist es NICHT nachgezogen** und kommt auf weiteren Kundensystemen wieder.
+  - Verifiziert: `ss` zeigt nur noch `127.0.0.1:3128`, der Proxy erreicht sein Ziel weiter
+    (HTTP 407 vom Squid, ueber `127.0.0.1` **und** `localhost` – die IPv6-Sorge war
+    unbegruendet, curl faellt auf IPv4 zurueck), von einem anderen Host im Netz zu.
+    Sicherung: `/root/prepare.sh.bak-<zeitstempel>`.
+- **`iptables` gibt es auf ECHT nicht – das Startskript rief es trotzdem** (`start_jarvis_root.sh`
+  Schritt 2, Freischaltung von 443/80/6080 an der Tailscale-Kette `ts-input` vorbei): drei
+  `Kommando nicht gefunden`-Zeilen bei JEDEM Start, die im Journal wie ein Fehler aussahen.
+  Jetzt in `command -v iptables` gekapselt (auch in `start_jarvis.sh`); auf nft-only-Systemen
+  uebernimmt `jarvis_fw` die Freigabe. Auf DEV gegengeprueft, dass die drei iptables-Regeln
+  dort weiterhin gesetzt werden.
 - **Verifiziert auf ECHT:** von aussen offen genau 22, 80, 443, 6080; **111, 3128, 5900 und 3389
   zu**. x11vnc an `127.0.0.1`/`[::1]`, alle 14 Aufrufstellen mit `-localhost`, `/portal` 200,
   `noVNC /vnc.html` 200, ausgehend GitHub 200 + DNS ok, `jarvis_egress` unveraendert, Persistenz
   aktiv (`/etc/jarvis/firewall.nft`, `nft -c -f` fehlerfrei). Neue SSH-Verbindung waehrend des
   Rueckfall-Timers geprueft. Sicherungen in `/root/fw-backup/`.
+  **⚠ „alle 14 Aufrufstellen" war unvollstaendig – es sind 16.** Die zwei fehlenden stehen in
+  Python, siehe naechster Abschnitt.
+
+### Die Haertung hielt 2,5 Stunden – x11vnc wird auch aus PYTHON gestartet (Fix 2026-08-11)
+Am Abend desselben Tages lauschte 5900 auf ECHT wieder auf `0.0.0.0`. Der laufende Prozess war um
+**16:17** gestartet worden, also NACH der Haertung um 13:49 – er stammte nicht aus den Skripten.
+- **Ursache:** `backend/desktop_control.py` startet x11vnc an zwei Stellen (Zeile 21 =
+  Broker-Op `vnc_restart`, Zeile 138 = Bildschirm entsperren nach lightdm-Neustart) – beide ohne
+  `-localhost`. `harden_vnc.sh` kannte nur `start_jarvis*.sh`, `run.sh` und die Unit, also **keine
+  Python-Quelle**. Damit hob **jeder Klick auf „VNC neu starten" und jeder Session-Wechsel die
+  Haertung wieder auf**; auf DEV war sie nur deshalb noch intakt, weil dort niemand die Funktion
+  benutzt hatte.
+- **Merkregel: wer einen Prozess haertet, muss ALLE Startstellen erfassen** – auch die, die nicht
+  in einem Startskript stehen. Ein `grep` nur ueber `*.sh` findet sie nicht.
+- `harden_vnc.sh` deckt jetzt zusaetzlich `PY_DATEIEN` ab (Muster `["x11vnc", …]`, geprueft ueber
+  den mehrzeiligen Aufruf bis zur schliessenden Klammer, trifft bewusst NICHT
+  `["pkill", …, "x11vnc"]`). Gefunden werden damit **16** Stellen.
+- **Die 14 Shell-Stellen sind jetzt auch IM REPO gepatcht.** Vorher lieferte der Commit nur das
+  Werkzeug: ein frisch aufgesetzter Host band 5900 auf `0.0.0.0`, bis jemand das Skript ausfuehrt.
+  Das war unkritisch machbar, weil die per `sed` gepatchten Server-Dateien **byte-identisch** zum
+  Repo-Patch sind (md5 auf DEV und ECHT verglichen) – der naechste `stash → pull → pop` sieht auf
+  beiden Seiten dieselbe Aenderung und laeuft konfliktfrei. **Wer hier anders patcht als das
+  Skript, baut sich den Instruktionen-Konflikt vom 13.07. nach.**
+- **FALLSTRICK bei der eigenen Reparatur:** ein `python3 -c "from backend.desktop_control import …"`
+  als root legt root-eigene `.pyc` unter `backend/__pycache__/` an – genau die Zeitbombe vom
+  2026-07-31. Schritt 6b in `start_jarvis_root.sh` hat es beim naechsten Start selbst geradegezogen
+  („14 Datei(en) gehoeren nicht 'jarvis'"). Besser `PYTHONDONTWRITEBYTECODE=1` setzen.
+- **Verifiziert:** Regressionstest auf DEV und ECHT – `restart_vnc()` aufgerufen, danach bindet
+  5900 weiter auf `127.0.0.1`/`[::1]` (vorher waere `0.0.0.0` entstanden), RFB-Banner lokal
+  erreichbar, `/vnc.html` 200, `/portal` bzw. `/settings` 200. Von einem anderen Host im Netz
+  gemessen: 5900, 3128, 111 **zu**; 22, 443, 6080 offen. `jarvis-firewall.service` erstmals
+  ueber `systemctl start` getestet (lief seit dem Boot vom 17.07. nie): `active/exited`,
+  `Result=success`, Regeln **idempotent** (genau eine `dport`-Zeile, keine Verdopplung),
+  `jarvis_egress` unangetastet – abgesichert mit einem 120-s-Rueckfall-Timer, der danach
+  abgebrochen wurde.
   **Niemand war zum Umstellungszeitpunkt auf 5900/6080 verbunden** – vorher gemessen, damit der
   x11vnc-Neustart keine laufende Sitzung trennt.
 

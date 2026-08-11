@@ -64,10 +64,13 @@ if [ "$IS_ROOT" = "1" ]; then
 # ── Root-Startaufgaben (nur Alt-Betrieb; getrennt: start_jarvis_root.sh) ──
 
 # Jarvis-Ports vor Tailscale ts-input-DROP freischalten (443, 80, 6080)
-for PORT in 443 80 6080; do
-    iptables -C INPUT -p tcp --dport $PORT -j ACCEPT 2>/dev/null || \
-        iptables -I INPUT 1 -p tcp --dport $PORT -j ACCEPT
-done
+# Nur mit iptables – Begruendung siehe start_jarvis_root.sh (nft-only-Systeme).
+if command -v iptables >/dev/null 2>&1; then
+    for PORT in 443 80 6080; do
+        iptables -C INPUT -p tcp --dport $PORT -j ACCEPT 2>/dev/null || \
+            iptables -I INPUT 1 -p tcp --dport $PORT -j ACCEPT
+    done
+fi
 
 # Screensaver und DPMS deaktivieren (verhindert schwarzen Bildschirm bei VNC)
 xset s off -dpms 2>/dev/null || true
@@ -132,7 +135,7 @@ _vnc_upgrade_watcher() {
             sleep 4
             [ -S "/tmp/.X11-unix/X0" ] || continue
             pkill -x x11vnc 2>/dev/null; sleep 1
-            x11vnc -display :0 -auth guess -shared -forever -nopw -bg -quiet -rfbport 5900
+            x11vnc -localhost -display :0 -auth guess -shared -forever -nopw -bg -quiet -rfbport 5900
             sleep 2
             if pgrep -x x11vnc >/dev/null; then
                 pkill -x Xvfb 2>/dev/null   # leeres Fallback-Display aufraeumen
@@ -140,7 +143,7 @@ _vnc_upgrade_watcher() {
                 exit 0
             fi
             # :0 noch nicht bereit -> zurueck auf :10, weiter warten
-            x11vnc -display :10 -rfbport 5900 -shared -forever -nopw -bg -quiet
+            x11vnc -localhost -display :10 -rfbport 5900 -shared -forever -nopw -bg -quiet
         done
     ) &
     disown 2>/dev/null || true
@@ -151,11 +154,11 @@ if [ "$IS_ROOT" = "1" ] && ! pgrep -x "x11vnc" > /dev/null; then
     echo "Starte x11vnc für $DISPLAY..."
 
     if [ "$DISPLAY" == ":0" ]; then
-        x11vnc -display :0 -auth guess -shared -forever -nopw -bg -quiet -rfbport 5900
+        x11vnc -localhost -display :0 -auth guess -shared -forever -nopw -bg -quiet -rfbport 5900
     elif [ -n "$XAUTHORITY" ]; then
-        x11vnc -display "$DISPLAY" -auth "$XAUTHORITY" -shared -forever -nopw -bg -quiet -rfbport 5900
+        x11vnc -localhost -display "$DISPLAY" -auth "$XAUTHORITY" -shared -forever -nopw -bg -quiet -rfbport 5900
     else
-        x11vnc -display "$DISPLAY" -rfbport 5900 -shared -forever -nopw -bg -quiet
+        x11vnc -localhost -display "$DISPLAY" -rfbport 5900 -shared -forever -nopw -bg -quiet
     fi
 
     sleep 3
@@ -166,7 +169,7 @@ if [ "$IS_ROOT" = "1" ] && ! pgrep -x "x11vnc" > /dev/null; then
         Xvfb :10 -screen 0 1280x800x24 &
         sleep 2
         openbox --sm-disable &
-        x11vnc -display :10 -rfbport 5900 -shared -forever -nopw -bg -quiet
+        x11vnc -localhost -display :10 -rfbport 5900 -shared -forever -nopw -bg -quiet
         _vnc_upgrade_watcher
     elif [ "$DISPLAY" == ":10" ]; then
         # von vornherein auf Xvfb gelandet -> ebenfalls auf :0 lauern

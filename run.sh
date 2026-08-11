@@ -69,9 +69,9 @@ echo -e "${BLUE}🖥️  Erkanntes Display: ${XDISPLAY}${NC}"
 # x11vnc starten (falls nicht bereits aktiv)
 if ! pgrep -x "x11vnc" > /dev/null 2>&1; then
     echo -e "${BLUE}🖥️  Starte x11vnc auf Port ${VNC_PORT} (Display ${XDISPLAY})...${NC}"
-    x11vnc -display "$XDISPLAY" -auth guess -rfbport "$VNC_PORT" -shared -forever -nopw -bg -quiet 2>/dev/null || {
+    x11vnc -localhost -display "$XDISPLAY" -auth guess -rfbport "$VNC_PORT" -shared -forever -nopw -bg -quiet 2>/dev/null || {
         # Fallback: versuche ohne -auth guess
-        x11vnc -display "$XDISPLAY" -rfbport "$VNC_PORT" -shared -forever -nopw -bg -quiet 2>/dev/null || {
+        x11vnc -localhost -display "$XDISPLAY" -rfbport "$VNC_PORT" -shared -forever -nopw -bg -quiet 2>/dev/null || {
             echo -e "${YELLOW}⚠️  x11vnc konnte nicht gestartet werden.${NC}"
             echo -e "${YELLOW}   Tipp: Starte das Skript als der Benutzer, der am Desktop angemeldet ist.${NC}"
         }

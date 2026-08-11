@@ -512,12 +512,62 @@
                 });
         },
 
+        /* Scrollt einen gerade geoeffneten Kasten so weit sichtbar wie noetig.
+         *
+         * Bewusst NICHT `scrollIntoView`: das springt den Kasten mittig/oben ins Bild
+         * und reisst damit den Knopf aus dem Sichtfeld, auf den gerade geklickt
+         * wurde. Gescrollt wird deshalb nur die Differenz – und NIE ueber die
+         * Oberkante des Kastens hinaus (sonst beginnt man bei einem hohen Kasten
+         * mitten im Inhalt). Gleiches Muster wie beim Faehigkeiten-Panel der
+         * LLM-Profile; der Scroll-Container wird GESUCHT, weil der Dialog im
+         * Vollbild-Modus `overflow: visible` setzt und dann das Fenster scrollt. */
+        _sichtbarScrollen: function (el) {
+            if (!el) return;
+            var eltern = el.parentElement, scroller = null;
+            while (eltern && eltern !== document.body) {
+                var ov = getComputedStyle(eltern).overflowY;
+                if ((ov === 'auto' || ov === 'scroll') && eltern.scrollHeight > eltern.clientHeight) {
+                    scroller = eltern; break;
+                }
+                eltern = eltern.parentElement;
+            }
+            requestAnimationFrame(function () {
+                var r = el.getBoundingClientRect();
+                var oben, unten;
+                if (scroller) {
+                    var sr = scroller.getBoundingClientRect();
+                    oben = sr.top; unten = sr.bottom;
+                } else {
+                    oben = 0; unten = window.innerHeight || 0;
+                }
+                var delta = Math.min(r.bottom - unten, r.top - oben);   // nie ueber die Oberkante
+                if (delta <= 0) return;                                  // schon sichtbar
+                if (scroller) scroller.scrollBy({ top: delta, behavior: 'smooth' });
+                else window.scrollBy({ top: delta, behavior: 'smooth' });
+            });
+        },
+
+        /* Beschriftung des Knopfes folgt dem Zustand: ein Umschalter, dessen Text
+         * immer gleich bleibt, sieht beim Zuklappen wie ein wirkungsloser Klick aus. */
+        _auditBtnText: function (offen) {
+            var b = $('sec-broker-audit-btn');
+            if (!b) return;
+            b.textContent = offen ? T('security.broker_audit_hide', 'Audit-Log ausblenden')
+                                  : T('security.broker_audit', 'Audit-Log anzeigen');
+        },
+
         toggleBrokerAudit: function () {
             var box = $('sec-broker-audit');
             if (!box) return;
-            if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+            if (box.style.display !== 'none') {
+                box.style.display = 'none';
+                this._auditBtnText(false);
+                return;
+            }
             box.style.display = '';
+            this._auditBtnText(true);
             box.innerHTML = '<p class="kb-hint">' + esc(T('common.loading', 'Lade…')) + '</p>';
+            this._sichtbarScrollen(box);
             this._fetchAuditOnce(true)
                 .then(function (entries) {
                     if (!entries.length) {
@@ -527,6 +577,7 @@
                     box.innerHTML = '<div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px 10px;">'
                         + entries.slice().reverse().map(function (a) { return Mgr._auditLineHtml(a, true); }).join('')
                         + '</div>';
+                    Mgr._sichtbarScrollen(box);      // fertiger Kasten ist hoeher als der Ladehinweis
                 })
                 .catch(function () { box.innerHTML = '<p class="kb-hint">✗</p>'; });
         },

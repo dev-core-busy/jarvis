@@ -716,9 +716,83 @@ class JarvisKnowledgeManager {
             const compactStatus = compactResp && compactResp.ok ? await compactResp.json() : null;
 
             this._renderStats(stats, learnedStats, compactStatus);
+            // Ordner SOFORT zeichnen und die Freigabe-Marken danach nachtragen.
+            //
+            // Die erste Fassung holte die Freigaben VOR dem Zeichnen (`await`) –
+            // mit dem Argument, zwei Durchlaeufe wuerden springen. Das war die
+            // falsche Abwaegung und hat die Liste auf DEV komplett lahmgelegt:
+            // der Wissen-Reiter feuert beim Oeffnen mehrere Anfragen, und
+            // /api/knowledge/mounts brauchte dort 20 s (totes Netz-Mount). Die
+            // zusaetzliche Anfrage stand dahinter in der Warteschlange, also
+            // blieb die Ordnerliste auf „Lädt…" stehen.
+            // Merkregel: eine Liste darf NIE auf eine zusaetzliche, nur
+            // schmueckende Anfrage warten. Ein Symbol, das 200 ms spaeter
+            // erscheint, sieht niemand – eine Liste, die nie erscheint, jeder.
             this._renderFolders(stats.folders);
+            this._loadShared().then(() => this._markShared());
         } catch (e) {
             if (container) container.innerHTML = `<div class="kb-error">${window.t('knowledge.load_error').replace('{msg}', e.message)}</div>`;
+        }
+    }
+
+    /** Traegt die Freigabe-Marken in die BEREITS gezeichnete Liste nach.
+     *
+     * Per DOM statt Neuzeichnen: ein zweiter `innerHTML`-Durchlauf wuerde
+     * aufgeklappte Dateilisten und den Ladezustand von Unterordnern verwerfen.
+     * Idempotent – laeuft auch nach dem Schliessen des Freigabe-Dialogs. */
+    _markShared() {
+        const T = (k, d) => (window.t && window.t(k)) || d;
+        const titel = T('kbsync.share_mark_title',
+            'Für andere Standorte freigegeben – dieser Ordner wird nach außen gelesen');
+        const offen = T('kbsync.share_open_title', 'Freigabe für andere Standorte – aktiv');
+        const neu = T('kbsync.share_title', 'Ordner für andere Standorte freigeben');
+        document.querySelectorAll('#kb-folder-list .kb-folder-item[data-path]').forEach(row => {
+            const geteilt = this._sharedFolders && this._sharedFolders.has(row.dataset.path);
+            const btn = row.querySelector(':scope > .kb-folder-header > .kb-btn-share');
+            if (btn) {
+                btn.classList.toggle('is-shared', !!geteilt);
+                btn.title = geteilt ? offen : neu;
+            }
+            const pfad = row.querySelector(':scope > .kb-folder-header .kb-folder-path');
+            if (!pfad) return;
+            const vorhanden = row.querySelector(':scope > .kb-folder-header .kb-share-mark');
+            if (geteilt && !vorhanden) {
+                // Der Name traegt flex:1 – die Marke braucht den Namensbereich,
+                // sonst landet sie am rechten Rand (siehe _folderNodeHtml).
+                let wrap = pfad.parentElement;
+                if (!wrap.classList.contains('kb-folder-nameflex')) {
+                    wrap = document.createElement('span');
+                    wrap.className = 'kb-folder-nameflex';
+                    pfad.parentElement.insertBefore(wrap, pfad);
+                    wrap.appendChild(pfad);
+                }
+                const mark = document.createElement('span');
+                mark.className = 'kb-share-mark';
+                mark.title = titel;
+                mark.textContent = '⇄';
+                wrap.appendChild(mark);
+            } else if (!geteilt && vorhanden) {
+                vorhanden.remove();
+            }
+        });
+    }
+
+    /** Freigaben neu holen und die Marken auffrischen (nach dem Freigabe-Dialog). */
+    async refreshShareMarks() {
+        await this._loadShared();
+        this._markShared();
+    }
+
+    /** Freigegebene Ordner merken (fuer den Zustand des 🔗-Symbols). */
+    async _loadShared() {
+        try {
+            if (window.KnowledgeSync) {
+                const pfade = await window.KnowledgeSync.sharedFolders();
+                this._sharedFolders = new Set(pfade || []);
+            }
+        } catch (e) {
+            // Kein Symbol-Zustand ist besser als ein falscher.
+            this._sharedFolders = new Set();
         }
     }
 
@@ -1155,12 +1229,42 @@ class JarvisKnowledgeManager {
         const T = (k, d) => (window.t && window.t(k)) || d;
         const addSub = `<button class="kb-btn-remove kb-btn-addsub" title="${T('knowledge.subfolder_create_title', 'Unterordner erstellen')}"
                 onclick="event.stopPropagation();window.knowledgeManager.createSubfolder('${sp}')">➕</button>`;
+        // Ein freigegebener Ordner traegt ZUSAETZLICH eine Marke (⇄) direkt hinter
+        // dem Namen: der Blick geht beim Durchsehen einer langen Liste nach links
+        // auf Symbol und Name, nicht in die Knopfspalte am rechten Rand. Das
+        // Ordner-Symbol selbst bleibt unangetastet – es traegt schon eine Aussage
+        // (existiert / hat Unterordner) und wuerde die verlieren.
+        // ⇄ statt eines Emojis: monochrom, folgt dem Theme und ist dasselbe
+        // Zeichen wie im Kopf der Funktionsbeschreibung.
+        //
+        // Fuenftes Symbol: Freigabe fuer andere Jarvis-Standorte (Pull-Sync).
+        // Steht an WURZEL- UND Unterordnern – eine Freigabe umfasst immer den
+        // ganzen Unterbaum, wer nur einen Teilbereich abgeben will, gibt eben
+        // den Unterordner frei. Ist der Ordner bereits freigegeben, sagt es der
+        // Zustand am Symbol (`is-shared`), sonst waere nicht erkennbar, dass
+        // Wissen dieses Ordners nach draussen geht.
+        const geteilt = this._sharedFolders && this._sharedFolders.has(path);
+        const share = `<button class="kb-btn-remove kb-btn-share${geteilt ? ' is-shared' : ''}"
+                title="${geteilt ? T('kbsync.share_open_title', 'Freigabe für andere Standorte – aktiv')
+                                 : T('kbsync.share_title', 'Ordner für andere Standorte freigeben')}"
+                onclick="event.stopPropagation();window.KnowledgeSync&&window.KnowledgeSync.openShare('${sp}')">🔗</button>`;
+        // Der Name traegt `flex:1` und schiebt alles Folgende an den rechten Rand –
+        // die Marke landete dadurch neben dem Aufklapp-Pfeil statt hinter dem
+        // Namen (im Screenshot gesehen). Bei einem freigegebenen Ordner uebernimmt
+        // deshalb ein Namensbereich das flex:1, der Name selbst waechst darin nur
+        // so weit wie noetig. Nicht freigegebene Zeilen bleiben unveraendert.
+        const pfadSpan = `<span class="kb-folder-path" title="${this._escHtml(path)}">${this._escHtml(name)}</span>`;
+        const nameTeil = geteilt
+            ? `<span class="kb-folder-nameflex">${pfadSpan}<span class="kb-share-mark"
+                    title="${T('kbsync.share_mark_title',
+                        'Für andere Standorte freigegeben – dieser Ordner wird nach außen gelesen')}">⇄</span></span>`
+            : pfadSpan;
         const actions = isRoot
             ? `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.folder_edit_title', 'Bearbeiten')}"
-                    onclick="event.stopPropagation();window.knowledgeManager.editFolder('${sp}')">✏️</button>${addSub}<button class="kb-btn-remove" title="${T('knowledge.folder_remove_title', 'Ordner entfernen')}"
+                    onclick="event.stopPropagation();window.knowledgeManager.editFolder('${sp}')">✏️</button>${addSub}${share}<button class="kb-btn-remove" title="${T('knowledge.folder_remove_title', 'Ordner entfernen')}"
                     onclick="event.stopPropagation();window.knowledgeManager.removeFolder('${sp}')">✕</button>`
             : `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.subfolder_rename_title', 'Unterordner umbenennen')}"
-                    onclick="event.stopPropagation();window.knowledgeManager.renameSubfolder('${sp}')">✏️</button>${addSub}<button class="kb-btn-remove kb-btn-movesub" title="${T('knowledge.subfolder_move_title', 'Unterordner verschieben')}"
+                    onclick="event.stopPropagation();window.knowledgeManager.renameSubfolder('${sp}')">✏️</button>${addSub}${share}<button class="kb-btn-remove kb-btn-movesub" title="${T('knowledge.subfolder_move_title', 'Unterordner verschieben')}"
                     onclick="event.stopPropagation();window.knowledgeManager.moveSubfolder('${sp}')">📂</button><button class="kb-btn-remove" title="${T('knowledge.subfolder_remove_title', 'Unterordner löschen')}"
                     onclick="event.stopPropagation();window.knowledgeManager.deleteSubfolder('${sp}')">✕</button>`;
         return `
@@ -1169,7 +1273,7 @@ class JarvisKnowledgeManager {
                     <button class="kb-folder-toggle" title="${T('knowledge.folder_files_title', 'Dateien anzeigen')}"
                         onclick="window.knowledgeManager.toggleDir('${sp}', '${id}')">
                         <span class="kb-folder-icon">${icon}</span>
-                        <span class="kb-folder-path" title="${this._escHtml(path)}">${this._escHtml(name)}</span>
+                        ${nameTeil}
                         <span class="kb-folder-arrow" id="${id}-arr">▶</span>
                     </button>
                     ${actions}
@@ -2385,7 +2489,10 @@ class JarvisKnowledgeManager {
         list.innerHTML = mounts.map((m, i) => `
             <div class="kb-mount-item-wrap">
                 <div class="kb-mount-item">
-                    <span class="kb-mount-status ${m.active ? 'active' : 'inactive'}" title="${m.active ? window.t('knowledge.share_connected_title') : window.t('knowledge.share_disconnected_title')}"></span>
+                    <span class="kb-mount-status ${m.unknown ? 'unknown' : (m.active ? 'active' : 'inactive')}" title="${
+                        m.unknown ? window.t('knowledge.share_unknown_title')
+                                  : (m.active ? window.t('knowledge.share_connected_title')
+                                              : window.t('knowledge.share_disconnected_title'))}"></span>
                     <span class="kb-mount-type">${m.type}</span>
                     <span class="kb-mount-source" title="${m.source}">${m.source}</span>
                     <button class="btn-icon btn-small" title="${m.active ? window.t('knowledge.share_disconnect_title') : window.t('knowledge.share_connect_title')}"

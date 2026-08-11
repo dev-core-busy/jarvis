@@ -525,6 +525,21 @@ def update_pending(doc_id: str, data: dict) -> bool:
     return True
 
 
+def _ist_spiegel(rel_folder: str) -> bool:
+    """Ist der Ordner eine Kopie eines anderen Standorts?
+
+    Tiefenverteidigung: ein Spiegel steht normalerweise gar nicht in den
+    ``folders`` einer Gruppe (knowledge_sync._gruppen_zuordnen traegt ihn
+    ausdruecklich nicht ein). Wer ihn von Hand eintraegt, soll trotzdem keine
+    Extrakte darin ablegen – der naechste Sync-Lauf wuerde sie loeschen.
+    """
+    try:
+        from backend import knowledge_sync
+        return knowledge_sync.ist_spiegel(rel_folder)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _target_dir_for_groups(groups) -> Path:
     """Zielordner fuer ein freigegebenes Dokument.
 
@@ -549,7 +564,7 @@ def _target_dir_for_groups(groups) -> Path:
                 cand = Path(rel)
                 if not cand.is_absolute():
                     cand = _ROOT / rel
-                if str(cand) in configured:
+                if str(cand) in configured and not _ist_spiegel(rel):
                     return cand
     except Exception:
         pass

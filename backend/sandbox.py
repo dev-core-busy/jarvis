@@ -140,6 +140,13 @@ _APP_DENY_REL = (
     # bequemste Weg zu Administratorrechten – deshalb sensibel, nicht bloss
     # "nicht im Arbeitsbereich".
     "data/ad_cache.json",
+    # Standort-Synchronisation (backend/knowledge_sync.py): enthaelt die
+    # Freigabe-Token DIESER Instanz und die Token FREMDER Standorte im Klartext.
+    # Ein Token ist der vollstaendige Lesezugriff auf einen fremden Wissensordner
+    # – so sensibel wie eine Skill-Zugangsdatei. SCHREIBEN waere zusaetzlich der
+    # Weg, einen eigenen "Standort" einzutragen und damit beliebige Dateien in
+    # einen Wissensordner zu spiegeln.
+    "data/knowledge_sync.json",
 )
 
 
@@ -170,7 +177,8 @@ PRIVATE_MODE = 0o750
 # Leserechte, genau wie 2026-07-28 bei data/chats.
 PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/security_state.json", "data/license.json",
-                 "data/agent_roles.json", "data/ad_cache.json")
+                 "data/agent_roles.json", "data/ad_cache.json",
+                 "data/knowledge_sync.json")
 PRIVATE_FILE_MODE = 0o640
 
 
@@ -334,6 +342,7 @@ SHELL_SECRET_PATHS = re.compile(
     r'\.env\b|settings\.json\b|memory\.json\b|auth_state\.json\b|credentials\.json\b|'
     r'scheduled_jobs\.json\b|file_watchers\.json\b|security_state\.json\b|'
     r'license\.json\b|license_root\.pub\b|agent_roles\.json\b|ad_cache\.json\b|'
+    r'knowledge_sync\.json\b|'
     # data/chats: fremde Chat-Verlaeufe (in der Shell zusaetzlich per 0750 gesperrt)
     r'data/chats\b|'
     r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'

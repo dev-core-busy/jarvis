@@ -178,13 +178,27 @@ def _skill_abschalten(name: str) -> None:
 
 
 def anzahl_rag() -> int:
-    """Dateien in der Wissensdatenbank (nicht Chunks)."""
+    """Dateien in der Wissensdatenbank (nicht Chunks).
+
+    Von anderen Standorten GESPIEGELTE Dateien zaehlen NICHT mit: sie sind dort
+    schon lizenziert, und diese Installation haelt nur eine Kopie. Wuerden sie
+    mitzaehlen, wuerde ein Pull von 300 fremden Dateien die Grenze reissen und
+    danach jeden eigenen Upload sperren – die Kopie waere damit eine Strafe.
+
+    Grundlage ist der Stand des letzten Sync-Laufs (`gespiegelte_dateien`), kein
+    zweiter Verzeichnis-Durchlauf: diese Funktion haengt an jeder Upload-Pruefung.
+    """
     try:
         from backend.tools.knowledge import get_disk_file_count
-        n = get_disk_file_count()
-        return int(n or 0)
+        n = int(get_disk_file_count() or 0)
     except Exception:
         return 0
+    try:
+        from backend import knowledge_sync
+        n -= knowledge_sync.gespiegelte_dateien()
+    except Exception:  # noqa: BLE001
+        pass
+    return max(0, n)
 
 
 # ─── Torwaechter ───────────────────────────────────────────────────────────

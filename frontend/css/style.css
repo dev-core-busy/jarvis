@@ -7170,6 +7170,79 @@ select.input-field {
     /* html/body haben overflow:hidden + height:100% -> ohne Override druckt nur
        die erste (Viewport-)Seite. Fuer den Ausdruck aufheben. */
     html, body { height: auto !important; overflow: visible !important; }
+
+    /* ── GENERISCHE Druckansicht fuer Funktionsbeschreibungen ──────────────
+     * Ein Dialog mit der Klasse `is-print-doc` wird druckbar, sobald am body
+     * `printing-doc` haengt. Die Bloecke fuer apidoc/secdoc/fwdoc/brkdoc
+     * darunter sind dieselbe Regel je Modal-Id – wer eine neue Doku baut,
+     * nimmt bitte diese hier und legt keine sechste Kopie an.
+     * Voraussetzung: der Dialog ist ein DIREKTES Kind von body (sonst greift
+     * der :not()-Selektor nicht). */
+    /* Seite selbst weiss: aktiviert der Benutzer im Druckdialog
+     * „Hintergrundgrafiken", wuerde sonst der dunkle Theme-Hintergrund
+     * mitgedruckt – im Test-PDF als schwarzer Rand um den weissen Inhalt zu
+     * sehen (und auf Papier eine volle Seite Toner). */
+    /* `color-scheme: light` ist hier der WIRKSAME Teil: theme.css setzt global
+     * `dark`, und dann malt der BROWSER die Seitenflaeche dunkel – kein
+     * CSS-Hintergrund, sondern die Leinwand selbst. Im Test-PDF blieb die Seite
+     * deshalb schwarz, obwohl html UND body nachweislich auf #fff standen.
+     * Ohne diese Zeile druckt ein Benutzer mit dunklem Thema und aktivierten
+     * „Hintergrundgrafiken" eine schwarze Seite. */
+    body.printing-doc, html:has(body.printing-doc) {
+        color-scheme: light !important;
+        background: #fff !important; background-image: none !important;
+    }
+    body.printing-doc > *:not(.is-print-doc) { display: none !important; }
+    body.printing-doc .is-print-doc {
+        display: block !important; position: static !important; inset: auto !important;
+        background: #fff !important; backdrop-filter: none !important;
+        padding: 0 !important; opacity: 1 !important; overflow: visible !important;
+        z-index: auto !important;
+    }
+    body.printing-doc .is-print-doc .modal-content {
+        background: #fff !important; box-shadow: none !important; border: none !important;
+        border-radius: 0 !important;
+        width: 100% !important; max-width: none !important; max-height: none !important;
+        overflow: visible !important; display: block !important; animation: none !important;
+    }
+    body.printing-doc .is-print-doc .modal-header {
+        background: none !important; border-bottom: 1px solid #ccc !important; padding: 0 0 8px !important;
+    }
+    body.printing-doc .is-print-doc .modal-body {
+        overflow: visible !important; max-height: none !important; padding: 12px 0 0 !important;
+    }
+    body.printing-doc .is-print-doc,
+    body.printing-doc .is-print-doc * { color: #000 !important; }
+    body.printing-doc .is-print-doc h2 { background: none !important; -webkit-text-fill-color: #000 !important; }
+    body.printing-doc .is-print-doc pre,
+    body.printing-doc .is-print-doc code {
+        background: #f5f5f5 !important; border-color: #ccc !important;
+        white-space: pre-wrap !important; word-break: break-word !important;
+    }
+    body.printing-doc .is-print-doc th,
+    body.printing-doc .is-print-doc td,
+    body.printing-doc .is-print-doc tr { border-color: #ccc !important; }
+    /* Steuer-Knoepfe gehoeren nicht auf das Papier. */
+    body.printing-doc .is-print-doc .btn-icon,
+    body.printing-doc .is-print-doc .kb-learned-open-btn { display: none !important; }
+    /* Umbrueche: eine Ueberschrift darf nicht allein am Seitenende stehen, eine
+     * Tabellenzeile nicht mitten durchgeschnitten werden, und die Grafik nicht
+     * ueber zwei Seiten. */
+    body.printing-doc .is-print-doc h3 { page-break-after: avoid; break-after: avoid; }
+    body.printing-doc .is-print-doc table { page-break-inside: auto; }
+    body.printing-doc .is-print-doc tr,
+    body.printing-doc .is-print-doc li { page-break-inside: avoid; }
+    body.printing-doc .kbsync-doc-fig { page-break-inside: avoid; break-inside: avoid; }
+    /* Die Grafik lebt von Flaechen und Linien: im Ausdruck schwarz auf weiss,
+     * `print-color-adjust` verhindert, dass der Treiber sie "optimiert". */
+    body.printing-doc .kbsync-svg { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    body.printing-doc .kbsync-svg .s-box,
+    body.printing-doc .kbsync-svg .s-inner { fill: #fff !important; stroke: #444 !important; }
+    body.printing-doc .kbsync-svg .s-accent { fill: #f0f0f0 !important; stroke: #000 !important; }
+    body.printing-doc .kbsync-svg .s-arr,
+    body.printing-doc .kbsync-svg .s-arrhead { stroke: #000 !important; fill: #000 !important; }
+    body.printing-doc .kbsync-svg text { fill: #000 !important; }
+
     body.printing-apidoc > *:not(#support-api-modal) { display: none !important; }
     body.printing-apidoc #support-api-modal {
         display: block !important; position: static !important; inset: auto !important;
@@ -7634,3 +7707,250 @@ select.input-field {
     border-color: rgba(var(--accent-rgb), 0.55);
     box-shadow: inset 3px 0 0 0 var(--accent);
 }
+
+/* ─── Pull-Synchronisation zwischen Standorten (Einstellungen → Wissen) ─────
+ * Ausschliesslich Theme-Variablen: die Flaeche gibt es in Hell und Dunkel, und
+ * ein hart gesetztes Grau ist in genau einem der beiden Modi falsch.
+ * Zustaende tragen ihre Aussage doppelt (Farbe UND Text) – Farbe allein ist
+ * fuer Farbfehlsichtige keine Information. */
+.kbsync-count {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.kbsync-site {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 0.9rem;
+}
+
+.kbsync-site label {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.kbsync-site .kb-input { max-width: 220px; flex: 0 1 220px; }
+.kbsync-site-hint { flex: 1 1 100%; margin: 0; }
+
+.kbsync-list { display: flex; flex-direction: column; gap: 0.55rem; margin-bottom: 0.8rem; }
+
+/* Eine Karte je Standort – Rahmen und Flaeche wie .kb-section, damit sie sich
+ * in den Reiter einfuegt statt darin zu schwimmen. */
+.kbsync-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(var(--fg-rgb), 0.03);
+    padding: 0.6rem 0.75rem;
+}
+
+/* Pausiert wird abgeschwaecht, nicht umgefaerbt (gleiche Begruendung wie bei
+ * den Rollen-Karten): eine harte Farbe waere in Hell und Dunkel nie
+ * gleichzeitig richtig. */
+.kbsync-card.is-paused { opacity: 0.62; }
+
+.kbsync-hdr { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+.kbsync-spacer { flex: 1; }
+.kbsync-name { font-weight: 600; color: var(--text-primary); }
+.kbsync-url { font-size: 0.78rem; color: var(--text-muted); }
+
+.kbsync-meta {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 0.2rem;
+    word-break: break-word;
+}
+
+.kbsync-meta code {
+    background: rgba(var(--fg-rgb), 0.07);
+    padding: 0.05rem 0.3rem;
+    border-radius: 4px;
+}
+
+.kbsync-pill {
+    font-size: 0.72rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    white-space: nowrap;
+    /* In einem senkrechten Flex-Container (.kbsync-field) wuerde die Pille sonst
+     * auf die ganze Breite gezogen und saehe wie ein Eingabefeld aus. */
+    align-self: flex-start;
+}
+
+.kbsync-ok      { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
+.kbsync-running { color: var(--accent);  border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.kbsync-paused  { color: var(--text-muted); }
+.kbsync-error   { color: var(--danger);  border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+
+.kbsync-progress { font-size: 0.76rem; color: var(--accent); margin-top: 0.25rem; }
+.kbsync-cur { color: var(--text-muted); }
+
+.kbsync-err {
+    font-size: 0.78rem;
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+    margin-top: 0.35rem;
+    white-space: pre-line;
+}
+
+.kbsync-ok-msg {
+    font-size: 0.78rem;
+    color: var(--success);
+    margin-top: 0.35rem;
+}
+
+.kbsync-lic {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    background: rgba(var(--accent-rgb), 0.1);
+    border: 1px solid rgba(var(--accent-rgb), 0.28);
+    border-radius: 8px;
+    padding: 0.45rem 0.6rem;
+    margin-bottom: 0.7rem;
+}
+
+.kbsync-form {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(var(--fg-rgb), 0.03);
+    padding: 0.75rem;
+    margin-top: 0.6rem;
+}
+
+/* Label UEBER dem Feld: .input-group ist ein horizontaler Container und wuerde
+ * das Label neben das Feld quetschen (die Falle aus dem Rollen-Formular). */
+.kbsync-field { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.6rem; }
+.kbsync-field > label { font-size: 0.8rem; color: var(--text-secondary); }
+/* Nur das DIREKTE Feld nimmt die ganze Breite. Steht das Feld in einer
+ * .kbsync-row (z.B. Token + Kopier-Knopf), wuerde `width:100%` den Knopf in die
+ * naechste Zeile druecken – im Screenshot der Freigabe genau so passiert. */
+.kbsync-field > .kb-input { flex: 0 0 auto; width: 100%; }
+.kbsync-row .kb-input { width: auto; flex: 1 1 auto; min-width: 0; }
+.kbsync-field code { font-size: 0.8rem; color: var(--text-primary); }
+
+.kbsync-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.6rem; }
+.kbsync-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.kbsync-check { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--text-secondary); }
+.kbsync-num { max-width: 5rem; flex: 0 0 5rem; }
+.kbsync-unit { max-width: 8rem; flex: 0 0 8rem; }
+
+.kbsync-probe {
+    font-size: 0.8rem;
+    border-radius: 8px;
+    padding: 0.45rem 0.6rem;
+    margin: 0.4rem 0 0.6rem;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+}
+
+.kbsync-probe.is-good {
+    border-color: color-mix(in srgb, var(--success) 40%, transparent);
+    background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.kbsync-probe.is-bad {
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+/* Fingerabdruck: lang, technisch, muss umbrechen duerfen. */
+.kbsync-fp { font-family: ui-monospace, monospace; font-size: 0.72rem; color: var(--text-muted); word-break: break-all; }
+
+.kbsync-pulls { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.kbsync-pulls th {
+    text-align: left;
+    padding: 0.3rem 0.4rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+}
+.kbsync-pulls td { padding: 0.28rem 0.4rem; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+
+/* Das 🔗 an der Ordnerzeile: aktiv freigegeben wird durch Akzentfarbe UND
+ * Deckkraft hervorgehoben – das Symbol allein ist sonst nicht unterscheidbar. */
+.kb-btn-share { opacity: 0.5; }
+.kb-btn-share:hover { opacity: 1; color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
+.kb-btn-share.is-shared { opacity: 1; color: var(--accent); }
+
+/* ─── Funktionsbeschreibung Pull-Synchronisation (❓, druckbar) ───────────────
+ * Die Grafik ist INLINE-SVG, damit sie Theme-Variablen folgt und im Ausdruck
+ * auf Schwarz/Weiss umgestellt werden kann (siehe @media print). Ein PNG waere
+ * in einem der beiden Modi immer falsch und im Druck unscharf. */
+.kbsync-doc-lead { font-size: 0.9rem; color: var(--text-secondary); margin: 0 0 1rem; }
+.kbsync-doc h3 { margin: 1.4rem 0 0.5rem; font-size: 1rem; color: var(--text-primary); }
+.kbsync-doc p, .kbsync-doc li { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.55; }
+.kbsync-doc ol, .kbsync-doc ul { margin: 0.3rem 0 0.6rem 1.2rem; }
+.kbsync-doc li { margin-bottom: 0.3rem; }
+.kbsync-doc code { background: rgba(var(--fg-rgb), 0.07); padding: 0.05rem 0.3rem; border-radius: 4px; }
+.kbsync-doc-note { font-size: 0.82rem; color: var(--text-muted); }
+
+.kbsync-doc-fig {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.6rem;
+    background: rgba(var(--fg-rgb), 0.02);
+    margin: 0.5rem 0 0.8rem;
+    overflow-x: auto;
+}
+
+/* Mindestbreite, damit die Beschriftungen bei schmalem Fenster nicht
+ * uebereinanderfallen – der Container scrollt dann waagerecht. */
+.kbsync-svg { width: 100%; min-width: 620px; height: auto; display: block; }
+.kbsync-svg .s-box { fill: rgba(var(--fg-rgb), 0.03); stroke: var(--border); stroke-width: 1.5; }
+.kbsync-svg .s-inner { fill: rgba(var(--fg-rgb), 0.05); stroke: var(--border); stroke-width: 1; }
+.kbsync-svg .s-accent { fill: rgba(var(--accent-rgb), 0.14); stroke: rgba(var(--accent-rgb), 0.5); }
+.kbsync-svg .s-arr { stroke: var(--accent); stroke-width: 1.6; }
+.kbsync-svg .s-arrhead { fill: var(--accent); }
+.kbsync-svg .s-h { fill: var(--text-primary); font-size: 14px; font-weight: 600; }
+.kbsync-svg .s-t { fill: var(--text-primary); font-size: 12.5px; font-weight: 500; }
+/* In der Grafik NICHT --text-muted/--text-secondary: auf der getoenten
+ * Kastenflaeche ist der Kontrast dann zu gering (im Screenshot waren die
+ * Unterzeilen praktisch unlesbar, in Dunkel schlimmer als in Hell).
+ * Beschriftungen in einer Zeichnung brauchen mehr Kontrast als Fliesstext –
+ * deshalb die Grundfarbe mit Deckkraft abgestuft statt einer schwaecheren Farbe. */
+.kbsync-svg .s-s { fill: var(--text-primary); opacity: 0.78; font-size: 11px; }
+.kbsync-svg .s-lbl { fill: var(--text-primary); font-size: 11.5px; font-weight: 600; }
+.kbsync-svg .s-mono { fill: var(--text-primary); opacity: 0.85; font-size: 11.5px; font-family: ui-monospace, monospace; }
+.kbsync-svg .s-note { fill: var(--text-secondary); font-size: 11.5px; font-style: italic; }
+
+.kbsync-doc-tab { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 0.4rem 0 0.8rem; }
+.kbsync-doc-tab th {
+    text-align: left; padding: 0.35rem 0.45rem; color: var(--text-muted);
+    font-weight: 600; border-bottom: 1px solid var(--border);
+}
+.kbsync-doc-tab td {
+    padding: 0.32rem 0.45rem; border-bottom: 1px solid var(--border);
+    color: var(--text-secondary); vertical-align: top;
+}
+.kbsync-doc-tab td:first-child { color: var(--text-primary); }
+
+/* Marke fuer einen an andere Standorte freigegebenen Wissensordner (Wissen →
+ * Ordner). Sitzt hinter dem Ordnernamen, weil der Blick beim Durchsehen einer
+ * langen Liste dort ist – die Knopfspalte am rechten Rand wird ueberlesen.
+ * Akzentfarbe UND eigenes Zeichen: Farbe allein ist keine Information. */
+/* Namensbereich einer freigegebenen Zeile: uebernimmt das `flex:1` des Namens,
+ * damit die Marke DIREKT hinter dem Namen steht und nicht am rechten Rand neben
+ * dem Aufklapp-Pfeil landet. `min-width:0` haelt die Ellipse langer Pfade
+ * funktionsfaehig. */
+.kb-folder-nameflex { flex: 1; display: flex; align-items: center; min-width: 0; }
+.kb-folder-nameflex .kb-folder-path { flex: 0 1 auto; }
+
+.kb-share-mark {
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.95em;
+    margin-left: 0.35rem;
+    flex-shrink: 0;
+}
+
+/* Netzfreigabe, deren Zustand nicht ermittelbar war (Zeitueberschreitung beim
+ * is_mount-Aufruf). Bewusst eine EIGENE Farbe: „unbekannt" als „getrennt"
+ * darzustellen waere eine Behauptung, die die Anzeige nicht kennt. */
+.kb-mount-status.unknown { background: var(--warning); box-shadow: 0 0 6px var(--warning); }

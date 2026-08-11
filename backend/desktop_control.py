@@ -18,7 +18,7 @@ def restart_vnc() -> str:
     subprocess.run(["pkill", "-9", "x11vnc"], capture_output=True, timeout=5)
     time.sleep(2)
     result = subprocess.run(
-        ["x11vnc", "-display", ":0", "-auth", "guess",
+        ["x11vnc", "-localhost", "-display", ":0", "-auth", "guess",
          "-shared", "-forever", "-nopw", "-bg", "-rfbport", "5900"],
         capture_output=True, text=True, timeout=10
     )
@@ -135,8 +135,8 @@ def unlock_desktop_screen(target_user: str = "jarvis") -> None:
             # … und x11vnc an den NEUEN X-Server binden (der alte haengt am toten X).
             subprocess.run(["pkill", "-x", "x11vnc"], capture_output=True, timeout=5)
             time.sleep(1)
-            subprocess.run(["x11vnc", "-display", ":0", "-auth", "guess", "-shared",
-                            "-forever", "-nopw", "-bg", "-quiet", "-rfbport", "5900"],
+            subprocess.run(["x11vnc", "-localhost", "-display", ":0", "-auth", "guess",
+                            "-shared", "-forever", "-nopw", "-bg", "-quiet", "-rfbport", "5900"],
                            capture_output=True, timeout=15)
             print("[VNC] lightdm neu gestartet, Autologin ausgeloest, x11vnc neu gebunden.", flush=True)
         else:

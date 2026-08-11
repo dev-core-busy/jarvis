@@ -5258,6 +5258,83 @@ async def _list_llm_models(provider: str, api_url: str, api_key: str,
         return {"success": False, "error": scrub_secrets(e, raw_key, raw_session)}
 
 
+def _caps_key(body: dict) -> str:
+    """API-Key fuer die Faehigkeits-Abfrage: aus dem Formular ODER dem Profil.
+
+    `GET /api/profiles` maskiert Schluessel (`_mask_key`), das Formular schickt
+    also beim Bearbeiten eines gespeicherten Profils nur `sk-…***`. Damit waere
+    jede Abfrage 401. Ist ein `profile_id` dabei und der uebergebene Wert
+    maskiert (oder leer), wird der echte Schluessel aus der Konfiguration
+    genommen. Er verlaesst den Server dabei NICHT – er geht nur an den Anbieter.
+    """
+    key = (body.get("api_key") or "").strip()
+    pid = (body.get("profile_id") or "").strip()
+    if pid and (not key or "*" in key):
+        prof = next((p for p in config.profiles if p.get("id") == pid), None)
+        if prof:
+            return prof.get("api_key", "") or ""
+    return key
+
+
+def _caps_session(body: dict) -> str:
+    sk = (body.get("session_key") or "").strip()
+    pid = (body.get("profile_id") or "").strip()
+    if pid and (not sk or "*" in sk):
+        prof = next((p for p in config.profiles if p.get("id") == pid), None)
+        if prof:
+            return prof.get("session_key", "") or ""
+    return sk
+
+
+@app.post("/api/profiles/capabilities")
+async def profile_capabilities(request: Request, user: str = Depends(require_local_auth)):
+    """Faehigkeiten des eingestellten Modells – aus den Metadaten des Anbieters.
+
+    Antwort: `{ok, quelle, modell, anzeige_name, beschreibung, faehigkeiten:
+    {text, vision, tools, thinking, bild, embedding, audio}, grenzen, roh,
+    hinweise, jarvis}`. **`null` heisst "nicht ermittelbar", nicht "nein"** –
+    ein vLLM-Server verraet ueber Vision nichts, und eine Anzeige darf nichts
+    behaupten, was sie nicht abgefragt hat.
+
+    Kostet keine Tokens und aendert nichts. Admin-only wie die Geschwister
+    `/test` und `/models`: das Ziel kommt aus dem Request, der Endpunkt ist also
+    ein SSRF-Werkzeug (siehe Endpunkt-Durchsicht 2026-08-04).
+    """
+    from backend import model_caps
+    body = await request.json()
+    return JSONResponse(await model_caps.ermitteln(
+        provider=body.get("provider", ""),
+        api_url=body.get("api_url", ""),
+        api_key=_caps_key(body),
+        model=body.get("model", ""),
+        auth_method=body.get("auth_method", "api_key"),
+        session_key=_caps_session(body),
+    ))
+
+
+@app.post("/api/profiles/capabilities/probe")
+async def profile_capabilities_probe(request: Request, user: str = Depends(require_local_auth)):
+    """Echte Mini-Anfragen, wo die Metadaten schweigen (Vision, Werkzeuge).
+
+    NUR auf ausdruecklichen Knopfdruck: jede Probe ist ein echter Aufruf beim
+    Anbieter und kostet Tokens (wenige, aber sie kostet). Deshalb getrennt von
+    `/capabilities` und mit `max_tokens: 1`.
+    """
+    from backend import model_caps
+    body = await request.json()
+    welche = body.get("welche") or ["vision", "tools"]
+    welche = tuple(w for w in welche if w in model_caps.FRAGEN)[:4]
+    return JSONResponse(await model_caps.proben(
+        provider=body.get("provider", ""),
+        api_url=body.get("api_url", ""),
+        api_key=_caps_key(body),
+        model=body.get("model", ""),
+        auth_method=body.get("auth_method", "api_key"),
+        session_key=_caps_session(body),
+        welche=welche or ("vision", "tools"),
+    ))
+
+
 @app.post("/api/profiles/models")
 async def list_profile_models(request: Request, user: str = Depends(require_local_auth)):
     """Liefert verfuegbare Modelle fuer die aktuellen Formularwerte (Discover-Button)."""

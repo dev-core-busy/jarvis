@@ -2653,6 +2653,114 @@ ihn nicht – es kann ihn nur erfragen oder raten.
   Serverzeit `Montag, 10.08.2026 19:49 CEST`, und im Tool-Audit-Log steht fuer diesen Lauf
   **kein einziger Werkzeug-Aufruf** (also kein `date` per Shell).
 
+## Modell-Faehigkeiten im Profil-Formular (ⓘ, 2026-08-10)
+Frage des Nutzers: „welche Eigenschaften hat ein LLM? Bildgenerierung, TTS/STT usw." Umgesetzt
+als ⓘ neben dem 🔍 (*Einstellungen → KI & System → LLM-Profile*): `backend/model_caps.py`,
+`POST /api/profiles/capabilities` (+ `/probe`), `frontend/js/model_caps.js`. Waechter:
+`tests/test_model_caps.py` (83 Pruefungen, ohne fastapi lauffaehig).
+
+- **WIE VIEL DER ANBIETER HERGIBT – auf DEV GEMESSEN, nicht geschaetzt:**
+  | Quelle | liefert |
+  |---|---|
+  | Google `/v1beta/models` | `supportedGenerationMethods` (generateContent, embedContent, **predict**, bidiGenerateContent), `inputTokenLimit`/`outputTokenLimit`, **`thinking`** als echtes Feld, Anzeigename, Beschreibung |
+  | Ollama `/api/show` | **`capabilities: [completion, vision, tools, thinking]`** – genau die Frage; dazu `parameter_size` (31.3B), `quantization_level` (Q4_K_M), `context_length` (262.144) |
+  | vLLM `/v1/models` | **nur** `max_model_len` (200.000 bzw. 1.010.000) und `owned_by` – KEINE Faehigkeiten |
+  | OpenRouter `/v1/models` | `architecture.input_modalities`/`output_modalities`, `supported_parameters`, `context_length` |
+  | Anthropic `/v1/models` | nur `id`/`display_name` |
+- **DREI ZUSTAENDE, NICHT ZWEI: ✓ · ✕ · ?** `None` heisst „nicht ermittelbar" und wird als `?`
+  mit Erklaerung angezeigt. Bei vLLM ueber Vision „nein" zu schreiben waere eine Behauptung ueber
+  etwas, das nie abgefragt wurde – dieselbe Fehlerklasse wie der Trenner „Neue Sitzung", der
+  Audit-Filter und der leere Profil-Umschalter. Der Test prueft ausdruecklich, dass Ollamas
+  **leere** capability-Liste NICHT als „alles nein" durchgeht, sondern auf `/v1/models` zurueckfaellt.
+- **Zweite Stufe: die PROBE** (`/capabilities/probe`) – ein echter Aufruf mit `max_tokens: 1` und
+  einem 1×1-PNG. Nur so kommt man bei vLLM/Anthropic an Vision und Werkzeuge. **HTTP 400/422/415
+  = „kann er nicht", 401/404/5xx = weiterhin UNBEKANNT** (ein unerreichbarer Server sagt nichts
+  ueber das Modell). Gemessen: vLLM/Qwen **159 ms**, Gemini 1,9 s. Ergebnis: Qwen3.6-35B →
+  `vision: nein, tools: ja` – genau die Information, die die Metadaten verschweigen. Eigener
+  Knopf und keine Automatik, weil es Tokens kostet; ein `null` aus der Probe darf einen
+  vorhandenen Metadaten-Wert **nicht** ueberschreiben.
+- **TTS/STT haengen NICHT am Profil** – Sprachausgabe ist eine System-Einstellung
+  (`setting-tts-voice`), Spracherkennung laeuft lokal ueber faster-whisper. Das stand zunaechst
+  als Hinweis in JEDER Box; **auf Vorgabe des Nutzers (2026-08-11) entfernt**: ein Text mit
+  immer gleichem Wortlaut ist Rauschen und verdraengt die Aussagen, die sich unterscheiden. Ein
+  Test haelt fest, dass ein unauffaelliges Profil **gar keinen** Hinweis erzeugt.
+  `jarvis_hinweise()` trennt weiterhin **„was das Modell laut Anbieter kann"** von **„was Jarvis
+  davon nutzt"**: Bildgenerierung geht in Jarvis NUR mit einem
+  Google-Profil (`llm.GeminiProvider.generate_image`), fehlende Werkzeug-Aufrufe verweisen auf
+  den Behelf `prompt_tool_calling`, ein Denkmodus auf `reasoning_effort`.
+- **`_ist_bildmodell()` entscheidet am NAMEN, nicht an der Methode:** `predict` steht im
+  Google-Konto auch bei Embedding-Varianten. Dieselbe Namensregel benutzt
+  `llm.GeminiProvider.generate_image` – wer sie hier aendert, muss sie dort mitaendern.
+- **Der API-Key kommt notfalls aus dem Profil** (`_caps_key`): `GET /api/profiles` maskiert
+  Schluessel, und `app.js::openEditView` leert das Feld beim Bearbeiten sowieso – ohne diesen
+  Rueckgriff waere jede Abfrage 401. Dafuer setzt `openEditView` jetzt
+  `#profile-edit-view.dataset.profileId` (die Variable `editingProfileId` ist dort lokal und von
+  aussen nicht lesbar). Der Schluessel verlaesst den Server nicht; die Antwort enthaelt kein
+  Schluesselfeld (Test), Fehlertexte laufen durch `llm.scrub_secrets`.
+- **Beide Endpunkte sind `require_local_auth`** – das Ziel kommt aus dem Request, sie sind also
+  SSRF-Werkzeuge wie `/api/profiles/test` und `/models` (siehe Endpunkt-Durchsicht 2026-08-04).
+- **Kein Routen-Konflikt:** `POST /api/profiles/capabilities` steht nach `PUT/DELETE
+  /api/profiles/{profile_id}` – unkritisch, weil FastAPI nur innerhalb derselben **Methode** in
+  Registrierungsfolge prueft. Ein `POST /api/profiles/{…}` davor waere der Fehler; ein Test haelt
+  fest, dass keiner hinzukommt.
+- **Beim Screenshot aufgefallen** (jsdom rechnet kein Layout, und Text sieht man nur im Bild):
+  meine benutzersichtbaren Meldungen standen in ASCII-Umschreibung („Bildauftraege", „haengen",
+  „laeuft"). Die Konvention „ohne Umlaute" gilt fuer Code-KOMMENTARE, nicht fuer Texte, die ein
+  Administrator liest. Korrigiert; Docstrings bleiben ASCII.
+- **Der ⓘ sitzt in der PROFILZEILE, links vom Schloss** („Nutzung erlauben fuer") – auf Wunsch
+  des Nutzers verschoben (2026-08-11). Die Frage „was kann dieses Modell" stellt man beim
+  VERGLEICHEN der Profile, nicht beim Bearbeiten eines einzelnen; die Werte kommen deshalb aus
+  dem Profil-Objekt der Liste, nicht aus Formularfeldern. `stopPropagation()` ist Pflicht: ein
+  Klick auf die Karte aktiviert sonst das Profil.
+- **Das Panel haengt IM Container des jeweiligen Profils** (`karte.appendChild(box)`), plus
+  Markierung `is-caps` (Akzent-Rahmen und Balken: Farbe UND Form). `.profile-card` ist ein
+  horizontaler Flex-Container – das Panel braucht `flex-wrap` + volle Breite, sonst quetscht es
+  sich zwischen Text und Knoepfe.
+  **Dafuer musste `.profiles-list` seine Hoehenbegrenzung verlieren:** dort stand
+  `max-height: 340px; overflow-y: auto`. Ein Zwischenschritt, der das Panel deshalb UNTER die
+  Liste legte, war falsch – die zugehoerige Karte war dann weggescrollt und man las Merkmale
+  ohne Bezug (vom Nutzer gemeldet). **Auf Vorgabe des Nutzers hat die Liste jetzt gar keinen
+  eigenen Scrollbalken mehr** (28 Profile sollen alle sichtbar sein); gescrollt wird im Dialog.
+  **Merkregel: wenn ein Container ein Panel nicht fasst, ist der Container das Problem – nicht
+  der Ort des Panels.**
+- **Das Panel wird nach dem Oeffnen SICHTBAR GESCROLLT** (gemeldet 2026-08-11: „der geoeffnete
+  Container wird nicht gescrollt, so dass der Benutzer nicht direkt sieht, dass etwas geoeffnet
+  wurde"):
+  - **Der Scroll-Container wird GESUCHT, nicht angenommen** (`scrollElternteil`): normalerweise
+    `.modal-body`, im Vollbild-Modus des Dialogs aber setzt das CSS `overflow: visible !important`
+    – dann scrollt das FENSTER. Gleiches Muster wie `chatlib.js::__jarvisImgScroll`.
+  - **Kein `scrollTo(0, scrollHeight)`** – das springt ans Listenende und damit VOM Panel weg
+    (der Fehler der /wissen-Vorschau, 2026-07-28). Gescrollt wird nur so weit wie noetig und
+    **nie ueber die Oberkante des Panels hinaus**: bei einem Panel, das hoeher ist als das
+    Sichtfenster, wuerde man sonst mitten im Inhalt beginnen.
+  - **Gedeckelt an der Oberkante der KARTE**, nicht des Panels: sonst sieht man Merkmale, ohne
+    zu wissen, zu welchem Profil sie gehoeren.
+  - **ZWEIMAL**: nach dem Ladehinweis und nach dem fertigen Panel. Letzteres ist ein Vielfaches
+    hoeher und ragte sonst wieder hinaus. Gemessen im naechsten Frame
+    (`requestAnimationFrame`) – vorher steht die neue Hoehe nicht. `behavior: 'smooth'`, weil
+    die Bewegung selbst die Rueckmeldung ist. Ist alles schon sichtbar: kein Scrollen.
+- **„Genauer pruefen" steht in der TITELZEILE hinter dem Modellnamen** (Vorgabe des Nutzers) –
+  dort, wo man liest, worauf er sich bezieht; der Kostenhinweis liegt im `title`. Und **der
+  Punkt hinter einem geprobten Merkmal bekommt eine sichtbare Legende** („● durch echte
+  Testanfrage ermittelt"): ein Tooltip allein ist unsichtbar, ein unerklaertes Zeichen eine
+  Zumutung. Die Legende erscheint nur, wenn wirklich geprobt wurde.
+- **Hoechstens ZWEI Spalten** im Merkmal-Raster: `auto-fit` ergab im breiten Dialog drei, und
+  dann ist nicht mehr ablesbar, ob zeilen- oder spaltenweise gelesen wird.
+- **`heim()` raeumt auch die Markierung ab** – eine abgesetzte Karte ohne Panel behauptet einen
+  Zustand, den es nicht gibt. Aufgerufen von `renderProfileList()` VOR `innerHTML = ''`.
+- **FALLSTRICK beim Umbau, den nur das ZAEHLEN gefunden hat:** nach einem Block-Ersatz stand
+  `meldung()` **zweimal** im Modul (die zweite Definition ueberschrieb die erste – toter Code
+  ohne Symptom). Der Test prueft jetzt fuer jede Funktion `== 1`. Dieselbe Lehre wie bei
+  `record_task_image`: nach einem Umbau die Anzahl vergleichen.
+- **Verifiziert:** 102 Pruefungen lokal und im DEV-venv (`tests/test_model_caps.py`) + **34 in
+  jsdom** (`tests/test_model_caps_ui.js`) mit gestellter Geometrie, die die Scroll-Deltas exakt
+  nachrechnet (372 px im Normalfall, gedeckelt auf 548 px bei einem 940-px-Panel, 0 px wenn
+  bereits sichtbar, `window.scrollBy` ohne Scroll-Container). Gegenprobe: ohne den Fix wird
+  nachweislich nicht gescrollt. Live gegen alle vier Profil-Typen auf DEV:
+  Ollama → alle sieben Merkmale bekannt; vLLM → nur Text+Kontext, Rest `?` samt Probe-Angebot;
+  Gemini → Text/Denkmodus/Kontext 1.048.576, Vision `?`. Ohne Token 401, unbekannter Anbieter →
+  `ok:false` mit Grund. Optisch in Dunkel UND Hell abgenommen.
+
 ## Medien im Chat: „Bild kopieren" / Anhang per Rechtsklick (2026-08-10)
 Wunsch des Nutzers. Umgesetzt in `chatlib.js` (`mediaCtxItems`, `copyElementAsImage`,
 `installAttachmentDrag`) auf der vorhandenen Menue-Infrastruktur `setupBubbleContextMenu`;

@@ -1489,6 +1489,11 @@
 
         // ── Profilliste rendern ──
         function renderProfileList() {
+            // Das Faehigkeiten-Panel haengt nach einem Klick IN einer Karte.
+            // Ohne dieses Heimholen raeumt `innerHTML = ''` es mit ab und
+            // `#model-caps-box` ist danach fuer immer weg (gleiche Falle wie bei
+            // der Extraktions-Vorschau in /wissen und dem Rollen-Formular).
+            if (window.ModelCaps && window.ModelCaps.heim) window.ModelCaps.heim();
             profilesContainer.innerHTML = '';
             profiles.forEach(p => {
                 const card = document.createElement('div');
@@ -1502,6 +1507,7 @@
                         <span class="profile-detail">${PROVIDER_LABELS[p.provider] || p.provider} · ${escapeHtml(p.model)}${_profRestrictionSummary(p)}</span>
                     </div>
                     <div class="profile-actions">
+                        <button class="btn-icon btn-small btn-caps-profile mc-info-btn" data-id="${p.id}" title="${window.t('caps.btn_title')}" aria-label="${window.t('caps.btn_title')}">ⓘ</button>
                         <button class="btn-icon btn-small btn-perms-profile" data-id="${p.id}" title="${window.t('profile.perm_label')}">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                         </button>
@@ -1515,6 +1521,13 @@
                 `;
                 // Klick auf Info-Bereich = Profil aktivieren
                 card.querySelector('.profile-info').addEventListener('click', () => activateProfile(p.id));
+                // ⓘ = Faehigkeiten des Modells (model_caps.js). stopPropagation ist
+                // Pflicht: ein Klick auf die Karte AKTIVIERT sonst das Profil.
+                const capsBtn = card.querySelector('.btn-caps-profile');
+                if (capsBtn) capsBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (window.ModelCaps) window.ModelCaps.fuerProfil(p, card);
+                });
                 card.querySelector('.btn-perms-profile').addEventListener('click', (e) => {
                     e.stopPropagation();
                     editProfilePermissions(p.id);
@@ -1681,6 +1694,10 @@
         // ── Editor öffnen ──
         function openEditView(id) {
             editingProfileId = id || null;
+            // Fuer model_caps.js sichtbar machen: die Faehigkeits-Abfrage braucht
+            // die Id, um beim Backend den echten (unmaskierten) API-Key zu
+            // benutzen – das Formularfeld bleibt beim Bearbeiten absichtlich leer.
+            try { document.getElementById('profile-edit-view').dataset.profileId = id || ''; } catch (e) {}
             const profile = id ? profiles.find(p => p.id === id) : null;
 
             // Felder befüllen (zunächst mit maskierten Werten)

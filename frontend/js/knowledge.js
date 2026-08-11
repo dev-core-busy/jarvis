@@ -735,7 +735,7 @@ class JarvisKnowledgeManager {
         }
     }
 
-    /** Traegt die Freigabe-Marken in die BEREITS gezeichnete Liste nach.
+    /** Traegt die Freigabe- und Spiegel-Marken in die BEREITS gezeichnete Liste nach.
      *
      * Per DOM statt Neuzeichnen: ein zweiter `innerHTML`-Durchlauf wuerde
      * aufgeklappte Dateilisten und den Ladezustand von Unterordnern verwerfen.
@@ -747,34 +747,67 @@ class JarvisKnowledgeManager {
         const offen = T('kbsync.share_open_title', 'Freigabe für andere Standorte – aktiv');
         const neu = T('kbsync.share_title', 'Ordner für andere Standorte freigeben');
         document.querySelectorAll('#kb-folder-list .kb-folder-item[data-path]').forEach(row => {
+            const pfad = row.querySelector(':scope > .kb-folder-header .kb-folder-path');
+            if (!pfad) return;
+            const kopf = row.querySelector(':scope > .kb-folder-header');
             const geteilt = this._sharedFolders && this._sharedFolders.has(row.dataset.path);
-            const btn = row.querySelector(':scope > .kb-folder-header > .kb-btn-share');
+            const btn = kopf && kopf.querySelector(':scope > .kb-btn-share');
             if (btn) {
                 btn.classList.toggle('is-shared', !!geteilt);
                 btn.title = geteilt ? offen : neu;
             }
-            const pfad = row.querySelector(':scope > .kb-folder-header .kb-folder-path');
-            if (!pfad) return;
-            const vorhanden = row.querySelector(':scope > .kb-folder-header .kb-share-mark');
-            if (geteilt && !vorhanden) {
-                // Der Name traegt flex:1 – die Marke braucht den Namensbereich,
-                // sonst landet sie am rechten Rand (siehe _folderNodeHtml).
-                let wrap = pfad.parentElement;
-                if (!wrap.classList.contains('kb-folder-nameflex')) {
-                    wrap = document.createElement('span');
-                    wrap.className = 'kb-folder-nameflex';
-                    pfad.parentElement.insertBefore(wrap, pfad);
-                    wrap.appendChild(pfad);
-                }
-                const mark = document.createElement('span');
-                mark.className = 'kb-share-mark';
-                mark.title = titel;
-                mark.textContent = '⇄';
-                wrap.appendChild(mark);
-            } else if (!geteilt && vorhanden) {
-                vorhanden.remove();
-            }
+            // Spiegel ZUERST: die Reihenfolge der Marken muss unabhaengig davon
+            // sein, welche zuerst nachgetragen wurde – sonst stehen sie je nach
+            // Ladereihenfolge verschieden, und dasselbe System sieht auf zwei
+            // Rechnern anders aus.
+            const istSpiegel = this._mirrorFolders && this._mirrorFolders.has(row.dataset.path);
+            this._setzeMarke(row, pfad, 'kb-mirror-mark', '⇥', istSpiegel,
+                             this._spiegelTitel(row.dataset.path));
+            this._setzeMarke(row, pfad, 'kb-share-mark', '⇄', !!geteilt, titel);
         });
+    }
+
+    /** Titel der Spiegel-Marke – nennt den Standort, aus dem die Kopie stammt. */
+    _spiegelTitel(path) {
+        const T = (k, d) => (window.t && window.t(k)) || d;
+        const ort = (this._mirrorFolders && this._mirrorFolders.get(path)) || '';
+        if (ort) {
+            return T('kbsync.mirror_mark_title_named',
+                'Kopie von „{s}" – schreibgeschützt, wird bei jeder Synchronisation überschrieben')
+                .replace('{s}', ort);
+        }
+        return T('kbsync.mirror_mark_title',
+            'Kopie eines anderen Standorts – schreibgeschützt, wird bei jeder Synchronisation überschrieben');
+    }
+
+    /** Eine Marke hinter dem Ordnernamen setzen, auffrischen oder entfernen.
+     *
+     * Der Name traegt `flex:1` – eine Marke braucht deshalb den Namensbereich,
+     * sonst landet sie am rechten Rand neben dem Aufklapp-Pfeil (siehe
+     * `_folderNodeHtml`). Die Reihenfolge im Namensbereich ist fest: Spiegel vor
+     * Freigabe. Kommt die Spiegel-Marke NACH einer bestehenden Freigabe-Marke
+     * hinzu, wird sie deshalb davor einsortiert statt angehaengt. */
+    _setzeMarke(row, pfad, klasse, zeichen, an, titel) {
+        const vorhanden = row.querySelector(`:scope > .kb-folder-header .${klasse}`);
+        if (!an) {
+            if (vorhanden) vorhanden.remove();
+            return;
+        }
+        if (vorhanden) { vorhanden.title = titel; return; }   // Titel kann sich aendern
+        let wrap = pfad.parentElement;
+        if (!wrap.classList.contains('kb-folder-nameflex')) {
+            wrap = document.createElement('span');
+            wrap.className = 'kb-folder-nameflex';
+            pfad.parentElement.insertBefore(wrap, pfad);
+            wrap.appendChild(pfad);
+        }
+        const mark = document.createElement('span');
+        mark.className = klasse;
+        mark.title = titel;
+        mark.textContent = zeichen;
+        const nachfolger = klasse === 'kb-mirror-mark' ? wrap.querySelector('.kb-share-mark') : null;
+        if (nachfolger) wrap.insertBefore(mark, nachfolger);
+        else wrap.appendChild(mark);
     }
 
     /** Freigaben neu holen und die Marken auffrischen (nach dem Freigabe-Dialog). */
@@ -783,17 +816,27 @@ class JarvisKnowledgeManager {
         this._markShared();
     }
 
-    /** Freigegebene Ordner merken (fuer den Zustand des 🔗-Symbols). */
+    /** Freigegebene Ordner UND Spiegel-Ordner merken.
+     *
+     * Beides in EINEM Aufruf, damit `fetchStats()` nur ein `.then()` braucht und
+     * die Ordnerliste weiter sofort steht (siehe die Merkregel dort). Die zwei
+     * Anfragen laufen parallel und werden EINZELN abgesichert: faellt eine aus,
+     * soll die andere Marke trotzdem erscheinen.
+     *
+     * Fehlt eine Antwort, bleibt die Menge leer – kein Symbol-Zustand ist besser
+     * als ein falscher (ein Ordner, der grundlos als Spiegel gilt, sieht wie ein
+     * schreibgeschuetzter aus, obwohl man dort arbeiten darf). */
     async _loadShared() {
-        try {
-            if (window.KnowledgeSync) {
-                const pfade = await window.KnowledgeSync.sharedFolders();
-                this._sharedFolders = new Set(pfade || []);
-            }
-        } catch (e) {
-            // Kein Symbol-Zustand ist besser als ein falscher.
-            this._sharedFolders = new Set();
-        }
+        const KS = window.KnowledgeSync;
+        if (!KS) return;
+        const [geteilt, spiegel] = await Promise.all([
+            Promise.resolve().then(() => KS.sharedFolders()).catch(() => null),
+            Promise.resolve().then(() => KS.mirrorFolders && KS.mirrorFolders()).catch(() => null),
+        ]);
+        this._sharedFolders = new Set(geteilt || []);
+        // Map statt Set: der Standortname gehoert in den Titel der Marke.
+        this._mirrorFolders = new Map(
+            (spiegel || []).filter(m => m && m.folder).map(m => [m.folder, m.site || '']));
     }
 
     _renderStats(stats, learnedStats, compactStatus) {
@@ -1248,16 +1291,36 @@ class JarvisKnowledgeManager {
                 title="${geteilt ? T('kbsync.share_open_title', 'Freigabe für andere Standorte – aktiv')
                                  : T('kbsync.share_title', 'Ordner für andere Standorte freigeben')}"
                 onclick="event.stopPropagation();window.KnowledgeSync&&window.KnowledgeSync.openShare('${sp}')">🔗</button>`;
+        // Die GEGENRICHTUNG zur Freigabe: ein Spiegel-Ordner ist die Kopie eines
+        // fremden Standorts. Eigenes Zeichen ⇥ – bewusst aus derselben
+        // Zeichenfamilie wie ⇄ (monochrom, folgt dem Theme), aber unverwechselbar:
+        // EIN Pfeil, der auf einen Balken laeuft = Einbahnstrasse, kommt herein
+        // und endet hier. Dazu eine eigene Farbe (siehe style.css) – Farbe allein
+        // waere keine Information, zwei gleiche Zeichen in zwei Farben aber auch
+        // nicht unterscheidbar, wenn man nur eines davon sieht.
+        //
+        // Warum das ueberhaupt sichtbar sein MUSS: der Ordner ist
+        // schreibgeschuetzt (Upload, Umbenennen und Loeschen antworten mit 409)
+        // und sein Inhalt wird bei jeder Synchronisation ueberschrieben. Ohne
+        // Marke ist er von einem normalen Wissensordner nicht zu unterscheiden –
+        // man erfaehrt es erst, wenn ein Upload abgewiesen wird.
+        const spiegel = this._mirrorFolders && this._mirrorFolders.has(path);
+        const spiegelMark = spiegel
+            ? `<span class="kb-mirror-mark" title="${this._escHtml(this._spiegelTitel(path))}">⇥</span>`
+            : '';
         // Der Name traegt `flex:1` und schiebt alles Folgende an den rechten Rand –
         // die Marke landete dadurch neben dem Aufklapp-Pfeil statt hinter dem
-        // Namen (im Screenshot gesehen). Bei einem freigegebenen Ordner uebernimmt
+        // Namen (im Screenshot gesehen). Bei einem markierten Ordner uebernimmt
         // deshalb ein Namensbereich das flex:1, der Name selbst waechst darin nur
-        // so weit wie noetig. Nicht freigegebene Zeilen bleiben unveraendert.
+        // so weit wie noetig. Unmarkierte Zeilen bleiben unveraendert.
+        // Reihenfolge wie in `_setzeMarke`: Spiegel vor Freigabe.
         const pfadSpan = `<span class="kb-folder-path" title="${this._escHtml(path)}">${this._escHtml(name)}</span>`;
-        const nameTeil = geteilt
-            ? `<span class="kb-folder-nameflex">${pfadSpan}<span class="kb-share-mark"
-                    title="${T('kbsync.share_mark_title',
-                        'Für andere Standorte freigegeben – dieser Ordner wird nach außen gelesen')}">⇄</span></span>`
+        const shareMark = geteilt
+            ? `<span class="kb-share-mark" title="${T('kbsync.share_mark_title',
+                        'Für andere Standorte freigegeben – dieser Ordner wird nach außen gelesen')}">⇄</span>`
+            : '';
+        const nameTeil = (spiegel || geteilt)
+            ? `<span class="kb-folder-nameflex">${pfadSpan}${spiegelMark}${shareMark}</span>`
             : pfadSpan;
         const actions = isRoot
             ? `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.folder_edit_title', 'Bearbeiten')}"

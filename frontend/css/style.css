@@ -2580,8 +2580,11 @@ body.kbm-resizing { cursor: col-resize; user-select: none; }
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    max-height: 340px;
-    overflow-y: auto;
+    /* KEINE Hoehenbegrenzung und kein eigener Scrollbalken (Vorgabe des Nutzers
+     * 2026-08-11, bei 28 Profilen): alle Container sind sichtbar, gescrollt wird
+     * im Dialog. Zuvor stand hier `max-height: 340px; overflow-y: auto` – dadurch
+     * lag eine geoeffnete Faehigkeiten-Box in einem 340-px-Guckloch, waehrend die
+     * zugehoerige Karte weggescrollt war. */
     margin-bottom: 1rem;
     padding-right: 4px;
 }
@@ -7486,3 +7489,148 @@ select.input-field {
     border-top: 1px solid var(--border);
 }
 
+
+/* ── Modell-Fähigkeiten (model_caps.js) ──────────────────────────────────────
+ * Der ⓘ-Knopf neben dem 🔍 im Profil-Formular und das Ergebnis-Panel darunter.
+ * Panel ist ein normaler Block im Formularfluss (kein Overlay wie
+ * .model-discover-list): es enthält mehrere Zeilen Text und würde als Overlay
+ * die Felder darunter verdecken. */
+.mc-info-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.05rem;
+    line-height: 1;
+    padding: 0;
+    color: var(--text-primary);
+    opacity: 0.7;
+    transition: opacity .15s;
+}
+.mc-info-btn:hover { opacity: 1; }
+
+.model-caps-box {
+    margin-top: 8px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(var(--fg-rgb), 0.04);
+    border: 1px solid rgba(var(--fg-rgb), 0.14);
+    font-size: 0.86rem;
+    color: var(--text-primary);
+    line-height: 1.45;
+}
+/* Titelzeile: Modellname links, "Genauer prüfen" direkt dahinter (Vorgabe des
+ * Nutzers) – der Knopf bezieht sich auf dieses Modell und gehört deshalb neben
+ * seinen Namen, nicht ans Ende der Box. */
+.mc-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+.mc-desc  { opacity: 0.75; margin-bottom: 8px; }
+
+/* Zweispaltig ab genug Breite – bei sieben Zeilen sonst eine lange Liste */
+.mc-grid {
+    display: grid;
+    grid-template-columns: 1fr;      /* schmal: eine Spalte */
+    gap: 2px 18px;
+    margin: 6px 0;
+}
+/* Höchstens ZWEI Spalten – bei drei ist nicht mehr ablesbar, ob zeilen- oder
+ * spaltenweise gelesen wird (auto-fit hatte im breiten Dialog drei ergeben). */
+@media (min-width: 560px) {
+    .mc-grid { grid-template-columns: 1fr 1fr; }
+}
+.mc-row { display: flex; align-items: baseline; gap: 8px; }
+.mc-mark {
+    flex: 0 0 auto;
+    width: 1.1em;
+    text-align: center;
+    font-weight: 700;
+}
+/* Farbe UND Zeichen tragen die Aussage: Farbe allein ist für Farbfehlsichtige
+ * keine Information (gleiche Regel wie bei der Anwesenheits-Pille). */
+.mc-row.is-yes     .mc-mark { color: var(--success, #22c55e); }
+.mc-row.is-no      .mc-mark { color: var(--danger, #ef4444); }
+.mc-row.is-unknown .mc-mark { color: var(--text-primary); opacity: 0.5; }
+.mc-row.is-unknown .mc-label { opacity: 0.65; }
+.mc-probed { color: var(--accent); font-size: 0.7em; vertical-align: super; }
+
+.mc-limits {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(var(--fg-rgb), 0.12);
+    opacity: 0.85;
+}
+.mc-raw, .mc-src { margin-top: 4px; font-size: 0.8rem; opacity: 0.6; }
+.mc-raw code { font-size: 0.95em; word-break: break-word; }
+
+.mc-note, .mc-jarvis {
+    margin-top: 8px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: rgba(var(--fg-rgb), 0.05);
+    border-left: 3px solid rgba(var(--fg-rgb), 0.25);
+    font-size: 0.82rem;
+}
+.mc-note.is-warn, .mc-jarvis.is-warn {
+    border-left-color: var(--danger, #ef4444);
+    background: rgba(var(--danger-rgb, 239, 68, 68), 0.08);
+}
+.mc-jarvis.is-ok {
+    border-left-color: var(--success, #22c55e);
+    background: rgba(var(--success-rgb, 34, 197, 94), 0.08);
+}
+
+/* Status während der automatischen Nachmessung – steht in der Titelzeile hinter
+ * dem Modellnamen. Ohne ihn wären die nachträglich springenden Werte („?" wird
+ * zu ✓/✕) unerklärt. */
+.mc-probing {
+    flex: 0 0 auto;
+    font-size: 0.76rem;
+    font-weight: 400;
+    opacity: 0.7;
+    color: var(--accent);
+}
+
+/* Legende zum Punkt hinter einem Merkmal: ein unerklärtes Zeichen ist eine
+ * Zumutung, und ein Tooltip allein ist unsichtbar. */
+.mc-legend {
+    margin-top: 8px;
+    font-size: 0.78rem;
+    opacity: 0.7;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+/* ⓘ in der Profilzeile: derselbe Rahmen wie die Geschwister (.btn-icon), nur
+ * das Glyph statt eines SVG – deshalb Schriftgröße statt width/height. */
+.profile-card .btn-caps-profile {
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0;
+}
+
+/* Das Fähigkeiten-Panel liegt IM Container des jeweiligen Profils (die Box wird
+ * per appendChild Kind der .profile-card). Zwei Dinge sind dafür nötig:
+ *
+ * 1) .profile-card ist ein HORIZONTALER Flex-Container (Info links, Knöpfe
+ *    rechts). Ein drittes Kind würde sich dazwischenquetschen – deshalb
+ *    flex-wrap + volle Breite, damit es in einer eigenen Zeile darunter sitzt.
+ * 2) .profiles-list hat KEINE Höhenbegrenzung mehr (siehe dort) – die Karte
+ *    wächst also einfach mit, und gescrollt wird im Dialog. */
+.profile-card { flex-wrap: wrap; }
+.profile-card > .model-caps-box {
+    flex: 1 1 100%;
+    width: 100%;
+    margin-top: 10px;
+}
+/* Die Karte mit offenem Panel wird abgesetzt: Farbe UND Balken, damit es auch
+ * ohne Farbwahrnehmung auffällt. */
+.profile-card.is-caps {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: inset 3px 0 0 0 var(--accent);
+}

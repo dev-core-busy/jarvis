@@ -7950,6 +7950,24 @@ select.input-field {
     flex-shrink: 0;
 }
 
+/* Gegenstueck zur Freigabe-Marke: ein Spiegel-Ordner ist die KOPIE eines fremden
+ * Standorts und schreibgeschuetzt. Gleiche Groesse und Position wie ⇄, damit die
+ * Liste ruhig bleibt, aber eigenes Zeichen (⇥) UND eigene Farbe – die beiden
+ * Zustaende sind das Gegenteil voneinander (Wissen geht hinaus / Wissen kommt
+ * herein) und duerfen sich beim Ueberfliegen nicht verwechseln lassen.
+ * `--info` und nicht `--warning`: es ist kein Fehlerzustand. */
+.kb-mirror-mark {
+    color: var(--info);
+    font-weight: 700;
+    font-size: 0.95em;
+    margin-left: 0.35rem;
+    flex-shrink: 0;
+}
+/* Im Hell-Modus ist `--info` auf der fast weissen Zeile zu blass (gemessen 3.37:1
+ * gegen 5.25:1 im Dunkel-Modus). Abgedunkelt statt eine zweite Farbe zu erfinden:
+ * so bleibt es dieselbe Farbe der Palette und folgt einem Branding-Wechsel. */
+body.light .kb-mirror-mark { color: color-mix(in srgb, var(--info) 72%, #000); }
+
 /* Netzfreigabe, deren Zustand nicht ermittelbar war (Zeitueberschreitung beim
  * is_mount-Aufruf). Bewusst eine EIGENE Farbe: „unbekannt" als „getrennt"
  * darzustellen waere eine Behauptung, die die Anzeige nicht kennt. */

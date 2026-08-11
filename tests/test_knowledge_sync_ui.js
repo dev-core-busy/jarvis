@@ -743,9 +743,14 @@ pruefe(fehlend.length === 0, `alle ${benutzt.size} benutzten Texte liegen in DE 
     dom.window.close();
 }
 
-// CSS: keine harten Farben im neuen Block
+// CSS: keine harten Farben im neuen Block.
+// `color-mix(… , #000)` / `#fff` ist davon ausgenommen: das ist kein eigener
+// Farbton, sondern das uebliche Abdunkeln/Aufhellen einer Palettenfarbe (im
+// Projekt schon bei .kb-grp-chip und .kb-hdr-btn so benutzt). Geprueft wird
+// deshalb auf harte Farben AUSSERHALB von color-mix.
 const block = CSS.slice(CSS.indexOf('Pull-Synchronisation zwischen Standorten'));
-const hart = [...block.matchAll(/#[0-9a-fA-F]{3,8}\b|rgb\((?!var)/g)].map(m => m[0]);
+const ohneMix = block.replace(/color-mix\((?:[^()]|\([^()]*\))*\)/g, 'MIX');
+const hart = [...ohneMix.matchAll(/#[0-9a-fA-F]{3,8}\b|rgb\((?!var)/g)].map(m => m[0]);
 pruefe(hart.length === 0, 'neuer CSS-Block nutzt nur Theme-Variablen', hart.join(', '));
 pruefe(/\.kbsync-card\.is-paused\s*\{\s*opacity/.test(block),
     'pausiert wird abgeschwaecht statt umgefaerbt');
@@ -761,6 +766,200 @@ pruefe(/\.kbsync-row \.kb-input\s*\{[^}]*flex:\s*1 1 auto/s.test(block),
     'Feld in einer Zeile teilt sich den Platz mit dem Knopf');
 pruefe(/\.kbsync-field > \.kb-input/.test(block),
     'nur das direkte Feld nimmt die ganze Breite');
+
+
+// ── Teil 6: Spiegel-Marke (Gegenstueck zur Freigabe) ────────────────────────
+// GEMELDET 2026-08-11: „der Spiegel-Ordner ist noch nicht gekennzeichnet."
+// Ein Spiegel ist schreibgeschuetzt und wird bei jedem Lauf ueberschrieben – ohne
+// Marke ist er von einem normalen Wissensordner nicht zu unterscheiden, und man
+// erfaehrt es erst, wenn ein Upload mit 409 abgewiesen wird.
+abschnitt('Teil 6: Spiegel-Marke in der Ordnerliste');
+{
+    const { dom, w } = bauen();
+    w.eval(KNOW);
+    const km = w.knowledgeManager;
+
+    // ohne Zustand: keine Marke, kein Namensbereich
+    pruefe(!km._folderNodeHtml('data/spiegel_s1', true, true, false).includes('kb-mirror-mark'),
+        'ohne Spiegel-Zustand traegt der Ordner keine Marke');
+
+    km._mirrorFolders = new Map([['data/spiegel_s1', 'Standort 1 – Werk']]);
+    const sp = km._folderNodeHtml('data/spiegel_s1', true, true, false);
+    pruefe(sp.includes('kb-mirror-mark') && sp.includes('⇥'),
+        'ein Spiegel-Ordner traegt die Marke ⇥');
+    pruefe(!sp.includes('kb-share-mark'),
+        'und NICHT die Freigabe-Marke (das ist die Gegenrichtung)');
+    pruefe(sp.indexOf('kb-folder-path') < sp.indexOf('kb-mirror-mark')
+           && sp.indexOf('kb-mirror-mark') < sp.indexOf('kb-folder-arrow'),
+        'die Marke steht zwischen Name und Aufklapp-Pfeil');
+    pruefe(sp.includes('kb-folder-nameflex'),
+        'sie sitzt im Namensbereich (sonst landet sie am rechten Rand)');
+    pruefe(/kb-mirror-mark[^>]*title="[^"]*Standort 1 [^"]*Werk/.test(sp),
+        'der Titel nennt den Standort, aus dem die Kopie stammt');
+    // Der Standortname ist Fremdeingabe und landet in einem Attribut.
+    km._mirrorFolders = new Map([['data/boese', '"><img src=x onerror=alert(1)>']]);
+    const xss = km._folderNodeHtml('data/boese', true, true, false);
+    pruefe(!xss.includes('<img src=x'), 'der Standortname wird maskiert (kein XSS im Titel)');
+
+    // Ordner ohne Standortnamen: allgemeiner Titel statt eines leeren „von ,,""
+    km._mirrorFolders = new Map([['data/ohne', '']]);
+    const ohne = km._folderNodeHtml('data/ohne', true, true, false);
+    pruefe(/kb-mirror-mark[^>]*title="[^"]{20,}/.test(ohne) && !ohne.includes('von „"'),
+        'ohne Standortnamen steht ein allgemeiner Titel');
+
+    // BEIDE Marken an einem Ordner: gespiegeltes Wissen weitergeben.
+    km._mirrorFolders = new Map([['data/kette', 'Standort 1']]);
+    km._sharedFolders = new Set(['data/kette']);
+    const beides = km._folderNodeHtml('data/kette', true, true, false);
+    pruefe(beides.includes('kb-mirror-mark') && beides.includes('kb-share-mark'),
+        'beide Marken koennen an einem Ordner stehen');
+    pruefe(beides.indexOf('kb-mirror-mark') < beides.indexOf('kb-share-mark'),
+        'Reihenfolge fest: Spiegel vor Freigabe');
+    pruefe((beides.match(/kb-folder-nameflex/g) || []).length === 1,
+        'nur EIN Namensbereich (nicht je Marke einer)');
+    dom.window.close();
+}
+
+// Nachtragen per DOM – derselbe Weg wie bei der Freigabe-Marke.
+{
+    const { dom, w } = bauen();
+    const d = w.document;
+    const echtesFetch = w.fetch;
+    w.fetch = (u, o) => {
+        const s = String(u);
+        if (s.startsWith('/api/knowledge/shares')) {
+            return Promise.resolve({ ok: true, status: 200,
+                json: () => Promise.resolve({ shares: [] }) });
+        }
+        if (s.startsWith('/api/knowledge/sync')) {
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({
+                peers: [{ id: 'p1', name: 'Standort 1', target_folder: 'data/spiegel_s1' }] }) });
+        }
+        if (s.startsWith('/api/knowledge/stats')) {
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({
+                total_files: 2, indexed_files: 2, total_size_bytes: 10,
+                folders: [{ path: 'data/knowledge', exists: true, has_children: false },
+                          { path: 'data/spiegel_s1', exists: true, has_children: false }] }) });
+        }
+        return echtesFetch(u, o);
+    };
+    w.eval(KNOW);
+    const km = w.knowledgeManager;
+    await km.fetchStats();
+    await warten(); await warten();
+    const liste = d.getElementById('kb-folder-list');
+    pruefe(liste.querySelectorAll('.kb-folder-item').length === 2, 'die Liste steht');
+    pruefe(liste.querySelectorAll('.kb-mirror-mark').length === 1,
+        'genau ein Ordner wird als Spiegel markiert');
+    const zeile = liste.querySelector('.kb-folder-item[data-path="data/spiegel_s1"]');
+    pruefe(!!zeile.querySelector('.kb-folder-nameflex .kb-mirror-mark'),
+        'die Marke sitzt im Namensbereich');
+    pruefe(/Standort 1/.test(zeile.querySelector('.kb-mirror-mark').title),
+        'der Titel nennt den Standort');
+    pruefe(!liste.querySelector('.kb-folder-item[data-path="data/knowledge"] .kb-mirror-mark'),
+        'ein normaler Wissensordner bleibt unmarkiert');
+    // Idempotenz
+    km._markShared(); km._markShared();
+    pruefe(liste.querySelectorAll('.kb-mirror-mark').length === 1,
+        'mehrfaches Nachtragen erzeugt keine zweite Marke');
+    // Reihenfolge auch beim NACHTRAEGLICHEN Hinzufuegen: Freigabe war zuerst da
+    km._mirrorFolders = new Map();
+    km._sharedFolders = new Set(['data/spiegel_s1']);
+    km._markShared();
+    pruefe(!zeile.querySelector('.kb-mirror-mark') && !!zeile.querySelector('.kb-share-mark'),
+        'Spiegel entfernt, Freigabe gesetzt');
+    km._mirrorFolders = new Map([['data/spiegel_s1', 'Standort 1']]);
+    km._markShared();
+    const marken = [...zeile.querySelectorAll('.kb-mirror-mark, .kb-share-mark')]
+        .map(e => e.className);
+    pruefe(marken.join(',') === 'kb-mirror-mark,kb-share-mark',
+        'die spaeter gesetzte Spiegel-Marke wird VOR die Freigabe einsortiert', marken.join(','));
+    // Entfernen des Standorts nimmt die Marke wieder mit
+    km._mirrorFolders = new Map();
+    km._markShared();
+    pruefe(liste.querySelectorAll('.kb-mirror-mark').length === 0,
+        'nach dem Entfernen des Standorts verschwindet die Marke');
+    pruefe(liste.querySelectorAll('.kb-folder-item').length === 2,
+        'die Liste bleibt dabei unangetastet');
+    dom.window.close();
+}
+
+// Ein Ausfall der einen Anfrage darf die andere Marke nicht verhindern.
+{
+    const { dom, w } = bauen();
+    const d = w.document;
+    const echtesFetch = w.fetch;
+    w.fetch = (u, o) => {
+        const s = String(u);
+        if (s.startsWith('/api/knowledge/shares')) return Promise.reject(new Error('kaputt'));
+        if (s.startsWith('/api/knowledge/sync')) {
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({
+                peers: [{ id: 'p1', name: 'S1', target_folder: 'data/spiegel_s1' }] }) });
+        }
+        if (s.startsWith('/api/knowledge/stats')) {
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({
+                total_files: 1, indexed_files: 1, total_size_bytes: 10,
+                folders: [{ path: 'data/spiegel_s1', exists: true, has_children: false }] }) });
+        }
+        return echtesFetch(u, o);
+    };
+    w.eval(KNOW);
+    const km = w.knowledgeManager;
+    await km.fetchStats();
+    await warten(); await warten();
+    const liste = d.getElementById('kb-folder-list');
+    pruefe(liste.querySelectorAll('.kb-folder-item').length === 1,
+        'die Liste steht trotz Fehler in einer der Zusatzanfragen');
+    pruefe(liste.querySelectorAll('.kb-mirror-mark').length === 1,
+        'die Spiegel-Marke erscheint, obwohl /shares gescheitert ist');
+    pruefe(km._sharedFolders && km._sharedFolders.size === 0,
+        'die gescheiterte Anfrage hinterlaesst eine LEERE Menge, keinen Fehler');
+    dom.window.close();
+}
+
+// Verdrahtung, Zeichen, Farbe, Texte
+{
+    pruefe(/mirrorFolders\s*\(\)/.test(SYNC) && /mirrorFolders/.test(KNOW),
+        'knowledge.js holt die Spiegel-Ordner ueber KnowledgeSync.mirrorFolders');
+    pruefe(/target_folder/.test(SYNC), 'mirrorFolders liest target_folder der Standorte');
+    pruefe(!/this\._peers\s*=/.test(SYNC.slice(SYNC.indexOf('async mirrorFolders'))),
+        'mirrorFolders ueberschreibt den Zustand der Standort-Liste nicht');
+    for (const k of ['kbsync.mirror_mark_title', 'kbsync.mirror_mark_title_named']) {
+        pruefe((I18N.match(new RegExp("'" + k.replace(/\./g, '\\.') + "':", 'g')) || []).length === 2,
+            `${k} liegt in DE und EN vor`);
+    }
+    // Eigene Farbe UND eigenes Zeichen: Farbe allein ist keine Information,
+    // dasselbe Zeichen in zwei Farben ist einzeln gesehen nicht deutbar.
+    pruefe(/\.kb-mirror-mark\s*\{[^}]*var\(--info\)/s.test(CSS),
+        'die Spiegel-Marke nutzt eine eigene Theme-Variable');
+    // Der Hell-Modus darf abdunkeln, aber nur die Palettenfarbe – keinen eigenen
+    // Farbton erfinden, sonst folgt die Marke einem Branding-Wechsel nicht.
+    const hellRegel = (/body\.light \.kb-mirror-mark\s*\{([^}]*)\}/s.exec(CSS) || [])[1] || '';
+    pruefe(/var\(--info\)/.test(hellRegel),
+        'auch der Hell-Modus leitet die Farbe aus --info ab', hellRegel.trim());
+    pruefe(!/#[0-9a-fA-F]{3,8}/.test(hellRegel.replace(/color-mix\((?:[^()]|\([^()]*\))*\)/g, 'MIX')),
+        'keine harte Farbe ausserhalb des Abdunkelns');
+    const mBlock = /\.kb-mirror-mark\s*\{([^}]*)\}/s.exec(CSS)[1];
+    const sBlock = /\.kb-share-mark\s*\{([^}]*)\}/s.exec(CSS)[1];
+    for (const eig of ['font-size', 'margin-left', 'flex-shrink']) {
+        const hol = (b) => (new RegExp(eig + ':\\s*([^;]+)').exec(b) || [])[1];
+        pruefe(hol(mBlock) === hol(sBlock),
+            `${eig} ist identisch zur Freigabe-Marke (die Liste bleibt ruhig)`,
+            `${hol(mBlock)} / ${hol(sBlock)}`);
+    }
+    // Die Funktionsbeschreibung muss beide Marken erklaeren – sonst steht ein
+    // unerklaertes Zeichen in der Liste.
+    pruefe(/kb-mirror-mark[^>]*>⇥/.test(HTML) && /kb-share-mark[^>]*>⇄/.test(HTML),
+        'die Funktionsbeschreibung zeigt beide Marken');
+    pruefe(/⇥[\s\S]{0,400}schreibgesch/.test(HTML),
+        'und nennt beim Spiegel den Schreibschutz');
+    const v = /knowledge\.js\?v=(\d+)/.exec(HTML);
+    const vs = /knowledge_sync\.js\?v=(\d+)/.exec(HTML);
+    const vc = /style\.css\?v=(\d+)/.exec(HTML);
+    pruefe(v && Number(v[1]) >= 93, 'knowledge.js hat einen frischen Cache-Buster', v && v[1]);
+    pruefe(vs && Number(vs[1]) >= 3, 'knowledge_sync.js hat einen frischen Cache-Buster', vs && vs[1]);
+    pruefe(vc && Number(vc[1]) >= 155, 'style.css hat einen frischen Cache-Buster', vc && vc[1]);
+}
 
 console.log('\n' + '='.repeat(70));
 console.log(`Ergebnis: ${ok} ok, ${fail} fehlgeschlagen`);

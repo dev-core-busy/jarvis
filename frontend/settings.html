@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=9">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=154">
+    <link rel="stylesheet" href="/static/css/style.css?v=155">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=6">
 </head>
 
@@ -1198,6 +1198,19 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         Intervall der Automatik setzen, dann <b>Standort speichern</b>.</li>
                     <li>Mit <b>⟳</b> den ersten Lauf starten.</li>
                 </ol>
+
+                <p><b>Woran man die beiden Rollen in der Ordnerliste erkennt</b> (<i>Wissen →
+                    Ordner</i>): hinter dem Ordnernamen steht eine Marke.</p>
+                <ul>
+                    <li><b class="kb-share-mark">⇄</b> <b>freigegeben</b> – dieser Ordner wird von
+                        anderen Standorten gelesen. Er bleibt normal beschreibbar.</li>
+                    <li><b class="kb-mirror-mark">⇥</b> <b>Spiegel</b> – dieser Ordner ist die Kopie
+                        eines anderen Standorts (der Titel der Marke nennt ihn). Er ist
+                        <b>schreibgeschützt</b>, und sein Inhalt wird bei jedem Lauf überschrieben.</li>
+                </ul>
+                <p>Ein Pfeil, der auf einen Balken läuft, gegen zwei Pfeile: das Zeichen sagt die
+                    Richtung. Beide Marken können an <i>einem</i> Ordner stehen – dann wird
+                    gespiegeltes Wissen an einen dritten Standort weitergegeben.</p>
 
                 <h3>3. Was bei jedem Lauf geschieht</h3>
                 <ol>
@@ -4143,10 +4156,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/skillcfg.js?v=5"></script>
     <script src="/static/js/google.js?v=12"></script>
     <script src="/static/js/whatsapp.js?v=16"></script>
-    <script src="/static/js/knowledge.js?v=92"></script>
+    <script src="/static/js/knowledge.js?v=93"></script>
     <!-- knowledge_sync NACH knowledge.js: die Ordnerliste fragt beim Zeichnen
          window.KnowledgeSync.sharedFolders() fuer den Zustand des 🔗-Symbols. -->
-    <script src="/static/js/knowledge_sync.js?v=2"></script>
+    <script src="/static/js/knowledge_sync.js?v=3"></script>
     <script src="/static/js/mcp.js?v=3"></script>
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>

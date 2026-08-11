@@ -635,6 +635,24 @@
             this._shares = (r.data && r.data.shares) || [];
             return this._shares.filter(s => s.enabled).map(s => s.folder);
         },
+
+        /** Zielordner der eingerichteten Standorte – die Gegenrichtung zu
+         * `sharedFolders()`. Die Ordnerliste markiert sie als Spiegel.
+         *
+         * Liefert Pfad UND Standortnamen, weil die Marke sagen soll, WOHER die
+         * Kopie kommt: „schreibgeschuetzt" allein ist fuer einen Administrator,
+         * der gerade hochladen will, nicht deutbar – dieselbe Begruendung wie
+         * bei `knowledge_sync.schreibsperre()` im Backend.
+         *
+         * `this._peers` wird ABSICHTLICH nicht ueberschrieben: die Standort-Liste
+         * hat ihren eigenen Takt (`load()`), und ein Nebeneffekt von hier waere
+         * eine Kopplung, die beim naechsten Umbau niemand erwartet. */
+        async mirrorFolders() {
+            const r = await api('/api/knowledge/sync');
+            const peers = (r.data && r.data.peers) || [];
+            return peers.filter(p => p.target_folder)
+                        .map(p => ({ folder: p.target_folder, site: p.name || '' }));
+        },
     };
 
     window.KnowledgeSync = KnowledgeSync;

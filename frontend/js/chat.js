@@ -561,31 +561,27 @@
         }
     }
 
-    const _SUPPORTED = new Set([
-        'image/jpeg','image/jpg','image/png','image/gif','image/webp','image/bmp',
-        'audio/wav','audio/mp3','audio/mpeg','audio/ogg','audio/webm','audio/aac','audio/flac','audio/m4a','audio/x-m4a',
-        'video/mp4','video/webm','video/ogg','video/quicktime','video/x-msvideo','video/mpeg',
-        'application/pdf',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',      // xlsx
-        'application/vnd.ms-excel',                                               // xls
-        'application/vnd.oasis.opendocument.spreadsheet',                         // ods
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',// docx
-        'application/msword',                                                     // doc
-        'application/vnd.oasis.opendocument.text',                                // odt
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation', // pptx
-        'application/vnd.ms-powerpoint',                                          // ppt
-        'text/plain','text/markdown','text/csv','application/json',
-        'application/xml','text/xml',                                             // xml
-        'application/zip','application/x-zip-compressed',                         // zip
+    // Anhaenge: SPERRLISTE statt Zulassungsliste (Vorgabe 2026-08-12).
+    // Vorher standen hier ~20 erlaubte Endungen; alles andere wurde abgewiesen,
+    // und der Server tat dasselbe noch einmal - ein PDF wurde ausserdem nie als
+    // Datei abgelegt. Jetzt gilt: alles ausser Ausfuehrbarem. Die Liste MUSS mit
+    // _ANHANG_EXEC_EXT in backend/main.py uebereinstimmen; der Server prueft
+    // zusaetzlich die magischen Bytes, hier geht es nur um eine sofortige,
+    // verstaendliche Rueckmeldung ohne Upload.
+    const _EXEC_EXT = new Set([
+        'exe','com','msi','msp','dll','sys','drv','efi','ko','scr','cpl',
+        'bat','cmd','ps1','psm1','psd1','vbs','vbe','wsf','wsh','hta',
+        'js','jse','mjs','cjs','jar','class','apk','dex','reg','lnk','url',
+        'sh','bash','zsh','ksh','csh','fish','run','bin','elf','out',
+        'so','dylib','a','o','py','pyc','pyo','pyz','pyw','pl','pm',
+        'rb','php','phar','lua','tcl','awk','asp','aspx','jsp','cgi',
+        'app','deb','rpm','pkg','dmg','appimage','gadget','workflow',
     ]);
-    // Endungs-Fallback (Office-Dateien melden per Drag&Drop oft leeren MIME-Typ)
-    const _SUPPORTED_EXT = new Set([
-        'pdf','txt','md','rst','csv','json','xml','zip',
-        'docx','doc','odt','rtf','xlsx','xls','ods','pptx','ppt','odp',
-        'jpg','jpeg','png','gif','bmp','tif','tiff','webp',
-        'mp3','m4a','wav','ogg','aac','flac',
-        'mp4','mov','mkv','avi','webm','mpeg',
-    ]);
+    // 50 MB je Datei UND je Nachricht. Die Datei geht base64-kodiert ueber den
+    // WebSocket (Faktor 4/3), uvicorn laesst 100 MB je Nachricht zu - deshalb ist
+    // die SUMME ebenfalls gedeckelt: sonst reisst die Verbindung bei mehreren
+    // grossen Dateien ohne jede Meldung ab.
+    const _MAX_FILE_BYTES = 50 * 1024 * 1024;
 
     let _toastTimer = null;
     function showToast(msg) {
@@ -650,9 +646,20 @@
         for (const file of Array.from(files)) {
             const mime = (file.type || '').toLowerCase();
             const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
-            const okMime = _SUPPORTED.has(mime) || mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('video/');
-            if (!okMime && !_SUPPORTED_EXT.has(ext)) {
+            if (_EXEC_EXT.has(ext)) {
                 unsupported.push(ext ? '.'+ext.toUpperCase() : (mime||'?')); continue;
+            }
+            if (file.size > _MAX_FILE_BYTES) {
+                showToast(window.t('chat.file_too_big')
+                    .replace('{f}', file.name)
+                    .replace('{n}', Math.round(_MAX_FILE_BYTES / (1024*1024))));
+                continue;
+            }
+            const _summe = _pendingAttachments.reduce((a, x) => a + (x._bytes || 0), 0);
+            if (_summe + file.size > _MAX_FILE_BYTES) {
+                showToast(window.t('chat.attach_total_too_big')
+                    .replace('{n}', Math.round(_MAX_FILE_BYTES / (1024*1024))));
+                continue;
             }
             if (_pendingAttachments.length >= 5) { showToast(window.t('chat.max_files')); break; }
             let type = 'file';
@@ -668,7 +675,7 @@
                     r.onerror = rej;
                     r.readAsDataURL(file);
                 });
-                _pendingAttachments.push({ name: file.name, mime_type: mime, data: b64, type });
+                _pendingAttachments.push({ name: file.name, mime_type: mime, data: b64, type, _bytes: file.size });
             } catch(e) { showToast(window.t('chat.file_read_error').replace('{f}', file.name)); }
         }
         if (unsupported.length > 0) {

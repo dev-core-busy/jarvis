@@ -145,4 +145,4 @@ echo -e "${GREEN}🔑 Standard-Passwort: jarvis${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
 echo ""
 
-python -m uvicorn backend.main:app --host 0.0.0.0 --port "$SERVER_PORT" --ssl-keyfile ./certs/server.key --ssl-certfile ./certs/server.crt --reload
+python -m uvicorn backend.main:app --host 0.0.0.0 --port "$SERVER_PORT" --ssl-keyfile ./certs/server.key --ssl-certfile ./certs/server.crt --reload --ws-max-size 100000000

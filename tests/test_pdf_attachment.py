@@ -295,6 +295,59 @@ def main() -> int:
            bool(ws) and int(ws.group(1)) > 50 * 1024 * 1024 * 4 / 3,
            ws.group(1) if ws else "-")
 
+    abschnitt("9) Folgefragen finden den Anhang wieder")
+    # VORFALL 2026-08-12: PDF angehaengt, dann gefragt "in diesem Dokument
+    # befinden sich 54 Adressen" – Antwort: "konnte weder auf dem Server noch in
+    # Confluence gefunden werden ... Liegt das PDF lokal auf deinem Rechner?".
+    # Der /tmp-Pfad stand nur in der Nachricht MIT dem Upload.
+    u3 = {"os": os, "print": print, "_SESSION_ANHAENGE": {},
+          "_SESSION_ANHAENGE_MAX": 6, "_SESSION_ANHAENGE_SITZUNGEN": 200}
+    exec(hole_funktion("_anhang_merken"), u3)
+    exec(hole_funktion("_anhang_erinnerung"), u3)
+    merken, erinnern = u3["_anhang_merken"], u3["_anhang_erinnerung"]
+
+    pruefe("ohne Anhang keine Erinnerung", erinnern("sitzung-1") == "")
+    pruefe("ohne Sitzungskennung keine Erinnerung", erinnern("") == "")
+
+    lebt = Path("/tmp") / f"anhang_{'a' * 12}_probe.pdf"
+    lebt.write_bytes(b"%PDF-1.4")
+    merken("sitzung-1", "Einsender_KIM_Anbindung.pdf", "Einsender_KIM_Anbindung.pdf",
+           lebt.as_posix())
+    txt = erinnern("sitzung-1")
+    pruefe("Erinnerung nennt den Dateinamen", "Einsender_KIM_Anbindung.pdf" in txt, txt)
+    pruefe("Erinnerung nennt den /tmp-Pfad", lebt.as_posix() in txt, txt)
+    pruefe("Erinnerung nennt data/documents", "data/documents" in txt, txt)
+    pruefe("Erinnerung verbietet die Upload-Rueckfrage",
+           "Frag NICHT nach einem erneuten Upload" in txt, txt)
+    pruefe("Erinnerung ist kurz (< 450 Zeichen)", len(txt) < 450, str(len(txt)))
+
+    # Abgelaufene Arbeitskopie: der Pfad darf NICHT mehr genannt werden - sonst
+    # sucht das Modell eine Datei, die es nicht mehr gibt, und meldet erneut
+    # "nicht gefunden".
+    lebt.unlink()
+    txt2 = erinnern("sitzung-1")
+    pruefe("abgelaufene Arbeitskopie wird nicht mehr genannt", lebt.as_posix() not in txt2, txt2)
+    pruefe("Hinweis: abgelaufen und per Shell nicht lesbar",
+           "abgelaufen" in txt2 and "Shell NICHT lesbar" in txt2, txt2)
+    pruefe("die Ablage bleibt genannt", "data/documents" in txt2, txt2)
+
+    for i in range(9):
+        merken("sitzung-2", f"datei{i}.csv", f"datei{i}.csv", "")
+    pruefe("hoechstens 6 Anhaenge je Sitzung",
+           len(u3["_SESSION_ANHAENGE"]["sitzung-2"]) == 6,
+           str(len(u3["_SESSION_ANHAENGE"]["sitzung-2"])))
+    pruefe("die JUENGSTEN bleiben", "datei8.csv" in erinnern("sitzung-2")
+           and "datei0.csv" not in erinnern("sitzung-2"))
+    merken("sitzung-2", "datei8.csv", "datei8.csv", "")
+    pruefe("derselbe Name bleibt einmalig",
+           sum(1 for e in u3["_SESSION_ANHAENGE"]["sitzung-2"] if e["name"] == "datei8.csv") == 1)
+
+    pruefe("Erinnerung nur OHNE neuen Anhang", "if not _raw_attachments:" in quelle
+           and quelle.index("if not _raw_attachments:") < quelle.index("_anhang_erinnerung(chat_sid)"))
+    pruefe("beide Zweige merken den Anhang", quelle.count("_anhang_merken(chat_sid") == 2)
+    pruefe("chat_sid steht vor dem Anhang-Block",
+           quelle.index("chat_sid = ") < quelle.index("_raw_attachments = "))
+
     print(f"\n{ok} ok, {fehler} Fehler ({ok + fehler} Pruefungen)")
     return 1 if fehler else 0
 

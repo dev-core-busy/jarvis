@@ -550,6 +550,83 @@ def _anhang_ablegen(rohdaten: bytes, dateiname: str, benutzer: str):
     return ziel, arbeit
 
 
+# ── Anhaenge einer Chat-Sitzung MERKEN ────────────────────────────────
+# VORFALL 2026-08-12 (ECHT, nexus\andrea.ladd): Der Benutzer hat ein PDF
+# angehaengt und in der NAECHSTEN Nachricht gefragt "in diesem Dokument befinden
+# sich 54 Adressen, extrahiere alle". Antwort: "Die PDF-Datei konnte weder auf
+# dem Server noch in Confluence gefunden werden ... Liegt das PDF lokal auf
+# deinem Rechner?"
+#
+# Grund: der Hinweis mit dem /tmp-Pfad und dem Ablagenamen steht nur in der
+# Nachricht, in der hochgeladen wurde. Eine Folgefrage weiss danach, dass es
+# eine Datei GAB, aber nicht mehr wo - das Modell sucht dann ueber den blossen
+# Dateinamen und findet nichts. Deshalb wird die Liste je Sitzung gefuehrt und
+# jeder Folgefrage in EINER kurzen Zeile beigegeben.
+#
+# Bewusst nur im Speicher und klein: das ist eine Gedaechtnisstuetze, keine
+# Ablage. Ueberlebt einen Dienst-Neustart nicht - dann liegt die Datei aber
+# ohnehin noch in data/documents und der Benutzer kann sie erneut anhaengen.
+_SESSION_ANHAENGE: dict = {}
+_SESSION_ANHAENGE_MAX = 6          # je Sitzung; aeltere fallen heraus
+_SESSION_ANHAENGE_SITZUNGEN = 200  # insgesamt, gegen unbegrenztes Wachsen
+
+
+def _anhang_merken(sitzung: str, name: str, ablage: str, arbeitskopie: str) -> None:
+    """Vermerkt einen Anhang fuer Folgefragen derselben Sitzung."""
+    if not sitzung:
+        return
+    try:
+        liste = _SESSION_ANHAENGE.setdefault(sitzung, [])
+        liste[:] = [e for e in liste if e.get("name") != name]
+        liste.append({"name": name, "ablage": ablage or "", "tmp": arbeitskopie or ""})
+        del liste[:-_SESSION_ANHAENGE_MAX]
+        if len(_SESSION_ANHAENGE) > _SESSION_ANHAENGE_SITZUNGEN:
+            for k in list(_SESSION_ANHAENGE)[:-_SESSION_ANHAENGE_SITZUNGEN]:
+                _SESSION_ANHAENGE.pop(k, None)
+    except Exception as e:
+        print(f"[chat] Anhang-Merkliste: {e}", flush=True)
+
+
+def _anhang_erinnerung(sitzung: str) -> str:
+    """Kurze Zeile fuer eine Folgefrage: welche Dateien liegen wo?
+
+    Nennt den /tmp-Pfad nur, solange die Arbeitskopie WIRKLICH da ist – sie
+    verfaellt nach JARVIS_ATTACH_TTL_MIN (Vorgabe 30 min). Ein Hinweis auf eine
+    verschwundene Datei waere schlimmer als keiner: das Modell wuerde sie suchen
+    und wieder "nicht gefunden" melden."""
+    if not sitzung:
+        return ""
+    try:
+        liste = _SESSION_ANHAENGE.get(sitzung) or []
+        if not liste:
+            return ""
+        teile = []
+        for e in liste:
+            wo = []
+            tmp = e.get("tmp") or ""
+            if tmp and os.path.isfile(tmp):
+                wo.append(f"{tmp} (per Shell lesbar)")
+            if e.get("ablage"):
+                wo.append(f"'{e['ablage']}' in data/documents")
+            if not wo:
+                teile.append(f"{e['name']} (Arbeitskopie abgelaufen, Inhalt steht "
+                             f"weiter oben im Verlauf)")
+            elif not (tmp and os.path.isfile(tmp)):
+                # Ablage vorhanden, Arbeitskopie abgelaufen: data/documents ist
+                # 0750 und fuer die Shell GESPERRT - das muss dastehen, sonst
+                # versucht das Modell pandas/pdfplumber darauf und scheitert.
+                teile.append(f"{e['name']} → {' bzw. '.join(wo)} (per Shell NICHT "
+                             f"lesbar, Arbeitskopie abgelaufen – fuer Shell-Skripte "
+                             f"erneut anhaengen)")
+            else:
+                teile.append(f"{e['name']} → {' bzw. '.join(wo)}")
+        return ("[Fruehere Anhaenge DIESER Unterhaltung – der extrahierte Inhalt steht "
+                "bereits weiter oben im Verlauf, die Datei liegt hier: "
+                + "; ".join(teile) + ". Frag NICHT nach einem erneuten Upload.]")
+    except Exception:
+        return ""
+
+
 # Erlaubte Linux-Benutzer für Web-Login
 ALLOWED_USERS = {"jarvis"}
 
@@ -13488,6 +13565,9 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                         # ("hol mir die Tabelle auf Seite 30") haette zugreifen
                         # koennen - jeder Versuch endete in "nicht gefunden".
                         _dest, _work = _anhang_ablegen(_pdf_bytes, _name, _get_ws_username(ws))
+                        if _dest is not None:
+                            _anhang_merken(chat_sid, _name, _dest.name,
+                                           _work.as_posix() if _work else "")
 
                         if _pdf_text.strip():
                             _voll = len(_pdf_text)
@@ -13537,6 +13617,9 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                             _text_prepend.append(f"[Datei {_name}: {_grund}]")
                             continue
                         _dest, _work = _anhang_ablegen(_doc_bytes, _name, _get_ws_username(ws))
+                        if _dest is not None:
+                            _anhang_merken(chat_sid, _name, _dest.name,
+                                           _work.as_posix() if _work else "")
                         if _dest is None:
                             _text_prepend.append(
                                 f"[Datei {_name}: konnte auf dem Server nicht abgelegt werden]")
@@ -13591,6 +13674,15 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                         _text_prepend.append(f"[Datei {_name}: konnte nicht bereitgestellt werden – {_de}]")
             if _text_prepend:
                 task_text = "\n\n".join(_text_prepend) + "\n\n" + task_text
+
+        # Folgefrage OHNE neuen Anhang: kurz erinnern, WO die Dateien dieser
+        # Unterhaltung liegen. Ohne das sucht das Modell die Datei ueber den
+        # blossen Namen und meldet "nicht gefunden" (Vorfall 2026-08-12).
+        # Nur wenn nichts Neues mitkam - sonst stuende die Angabe doppelt da.
+        if not _raw_attachments:
+            _erinnerung = _anhang_erinnerung(chat_sid)
+            if _erinnerung:
+                task_text = _erinnerung + "\n\n" + task_text
 
         target_agent_id = msg.get("agent_id", "")
         ui_lang = msg.get("lang", "de")  # UI-Sprache des Nutzers (de/en)

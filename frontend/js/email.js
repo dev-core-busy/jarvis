@@ -63,8 +63,14 @@
     function ladeVerbindung() {
         return fetch('/api/skills/email/config', { headers: kopf() })
             .then(function (r) { return r.ok ? r.json() : {}; })
-            .then(function (c) {
-                c = c || {};
+            .then(function (antwort) {
+                // DIE ANTWORT IST VERSCHACHTELT: {config: {...}} – dasselbe Muster
+                // wie in skillcfg.js (`(cfgResp && cfgResp.config) || {}`). Eine
+                // Ebene zu hoch gelesen, war JEDES Feld `undefined`: das Laden
+                // leerte die Eingaben, und ein zweites "Speichern" schrieb die
+                // Leere dann wirklich fest – gemeldet als "die EWS-URL wird nicht
+                // gespeichert" (2026-08-12).
+                var c = (antwort && antwort.config) || {};
                 setzeWert('em-kanal', c.kanal || 'auto');
                 setzeWert('em-ews-url', c.ews_url);
                 // NICHT auf Falsyness pruefen: ein gespeichertes `false` muss als

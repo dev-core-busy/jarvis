@@ -189,6 +189,30 @@ def html_zu_text(html: str) -> str:
     return t.strip()
 
 
+def ews_url_normieren(wert: str) -> str:
+    """Macht aus einer Servereingabe eine vollstaendige EWS-Adresse.
+
+    Ein Administrator traegt erfahrungsgemaess den HOSTNAMEN ein
+    (``exchange.firma.de``) – exchangelib braucht aber die volle Adresse des
+    Endpunkts. Ohne diese Normierung scheitert die Verbindung mit einer Meldung
+    ueber ein ungueltiges Schema, und niemand verbindet das mit dem Eingabefeld.
+
+    Ergaenzt wird nur, was fehlt: Schema (https) und der Standardpfad
+    ``/EWS/Exchange.asmx``. Ein bereits vollstaendiger Pfad bleibt unangetastet –
+    manche Haeuser veroeffentlichen EWS hinter einem eigenen Pfad, und den darf
+    eine Bequemlichkeitsfunktion nicht ueberschreiben.
+    """
+    u = (wert or "").strip()
+    if not u:
+        return ""
+    if "://" not in u:
+        u = "https://" + u
+    ohne_schema = u.split("://", 1)[1]
+    if "/" not in ohne_schema.rstrip("/") or not ohne_schema.split("/", 1)[1].strip("/"):
+        u = u.rstrip("/") + "/EWS/Exchange.asmx"
+    return u
+
+
 def _adressliste(wert) -> list[str]:
     """Nimmt Liste, Komma-/Semikolontext oder None und liefert saubere Adressen."""
     if not wert:
@@ -364,8 +388,16 @@ class _Ews:
             creds = xl.Credentials(username=k.anmeldename(), password=k.passwort)
             zugriff = getattr(xl, "DELEGATE", "delegate")
 
-            if k.ews_url and not k.autodiscover:
-                kwargs = {"service_endpoint": k.ews_url, "credentials": creds}
+            # EINE EINGETRAGENE URL GEWINNT – auch wenn der Autodiscover-Haken
+            # gesetzt ist. Vorher galt `ews_url and not autodiscover`: wer den
+            # Server eintrug und den Haken stehen liess, dessen Eingabe wurde
+            # stillschweigend ignoriert (auf DEV genau so passiert, Eintrag
+            # "exchange.nexus-ag.de" bei autodiscover=true). Wer eine Adresse
+            # hinschreibt, meint sie; der Haken entscheidet nur noch, was ohne
+            # Eintrag geschieht.
+            if k.ews_url:
+                kwargs = {"service_endpoint": ews_url_normieren(k.ews_url),
+                          "credentials": creds}
                 auth = self._auth_typ(xl)
                 if auth is not None:
                     kwargs["auth_type"] = auth

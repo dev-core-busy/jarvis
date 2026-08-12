@@ -23,13 +23,13 @@
         "ews_url": {
             "type": "string",
             "label": "EWS-URL",
-            "description": "z.B. https://mail.firma.de/EWS/Exchange.asmx . Leer lassen, wenn Autodiscover benutzt werden soll.",
+            "description": "z.B. https://mail.firma.de/EWS/Exchange.asmx - der Hostname genuegt, Schema und Standardpfad /EWS/Exchange.asmx werden ergaenzt. EINE EINGETRAGENE ADRESSE WIRD IMMER BENUTZT, auch bei gesetztem Autodiscover-Haken. Leer lassen, wenn Autodiscover entscheiden soll.",
             "default": ""
         },
         "autodiscover": {
             "type": "boolean",
             "label": "Autodiscover benutzen",
-            "description": "Ermittelt die EWS-URL selbst ueber DNS/SCP. Bei internem Exchange meist erfolgreich; scheitert es, EWS-URL eintragen und diesen Haken entfernen.",
+            "description": "Ermittelt die EWS-URL selbst ueber DNS/SCP. Gilt nur, wenn KEINE EWS-URL eingetragen ist - eine eingetragene Adresse gewinnt immer.",
             "default": true
         },
         "auth_typ": {

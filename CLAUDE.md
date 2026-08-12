@@ -2165,6 +2165,35 @@ Admin freigeschaltet hat.
   Mengengrenze verdrängt hätte. Gelesen wird blockweise von hinten, **gefiltert WÄHREND des
   Lesens** (ein Nachfilter meldet „keine Einträge", obwohl weiter hinten welche liegen).
 
+**GEMELDET 2026-08-12: „die EWS-URL wird nicht gespeichert" – gespeichert WURDE sie.**
+Die Sicherung der `settings.json` belegte `"ews_url": "exchange.nexus-ag.de"`; geleert hat das
+Feld das **Laden**. `GET /api/skills/{name}/config` antwortet **verschachtelt** (`{config: {…}}`,
+so wie es `skillcfg.js` mit `(cfgResp && cfgResp.config) || {}` liest) – `email.js` griff eine
+Ebene zu hoch. Damit war beim Öffnen des Reiters JEDES Feld `undefined`, die Eingaben standen
+leer da, und ein zweites „Speichern" schrieb die Leere dann **wirklich** fest. Der Fehler ist
+also nicht kosmetisch: er zerstört Daten.
+- **Warum der UI-Test ihn nicht fand: der Mock war falsch.** Er lieferte die Config FLACH,
+  nicht in der echten Antwortform. **Ein Mock, der die echte Antwortform verfehlt, prüft
+  nichts** – er bestätigt nur die Annahme des Testautors. Nach dem Berichtigen des Mocks fiel
+  der Fehler sofort in zehn Prüfungen auf. Bei jedem Mock gegen einen eigenen Endpunkt gehört
+  die Form aus dem Endpunkt-Quelltext übernommen, nicht aus dem Gedächtnis.
+- **Zweiter Fund am selben Feld: eine eingetragene URL wurde ignoriert.** Die Weiche hiess
+  `if k.ews_url and not k.autodiscover` – wer den Server eintrug und den (per Vorgabe gesetzten)
+  Autodiscover-Haken stehen liess, dessen Eingabe verfiel stillschweigend. Jetzt gewinnt eine
+  eingetragene Adresse **immer**; der Haken entscheidet nur noch, was OHNE Eintrag geschieht.
+  Die Hinweistexte in `settings.html` und im Manifest sagten vorher das Gegenteil („Scheitert
+  es, den Haken entfernen und die URL eintragen") – dieselbe Fehlerklasse wie beim alten
+  `WA_TASK_PROMPT`: eine Oberfläche, die etwas anderes verspricht als der Code tut.
+- **`ews_url_normieren()`:** ein Administrator trägt den HOSTNAMEN ein (`exchange.nexus-ag.de`),
+  exchangelib braucht die volle Adresse. Ergänzt werden nur Schema (`https`) und der
+  Standardpfad `/EWS/Exchange.asmx`; **ein eigener Pfad bleibt unangetastet** (manche Häuser
+  veröffentlichen EWS hinter einem anderen Pfad, und eine Bequemlichkeitsfunktion darf ihn nicht
+  überschreiben). Welche Adresse tatsächlich benutzt wurde, zeigt der Verbindungstest.
+- **Live auf DEV mit dem gemeldeten Wert nachgewiesen:** `exchange.nexus-ag.de` gespeichert →
+  kommt aus dem GET zurück → wird trotz gesetztem Autodiscover-Haken zu
+  `https://exchange.nexus-ag.de/EWS/Exchange.asmx` aufgelöst. Gegenproben: alter Lesefehler →
+  10 FAIL, alte Weiche → 2 FAIL.
+
 **VIER LAYOUT-FEHLER, DIE ERST DER SCREENSHOT ZEIGTE** (jsdom rechnet kein Layout):
 1. **Klapp-Kopfzeilen mit dem Titel RECHTS.** `.kb-section-header` setzt
    `justify-content: space-between`; mit „Pfeil + Titel" als zwei Kindern schiebt das die beiden
@@ -2200,11 +2229,11 @@ Admin freigeschaltet hat.
     `flex:1`. Genau das hält ein Test fest, zusammen mit der Abwesenheit der Reiter-Präfixe.
   - Vorher/Nachher in Dunkel UND Hell abgenommen, inklusive der JS-erzeugten Formen.
 
-**Verifiziert:** 245 Backend-Prüfungen (`tests/test_email_rules.py`, ohne fastapi lauffähig –
+**Verifiziert:** 256 Backend-Prüfungen (`tests/test_email_rules.py`, ohne fastapi lauffähig –
 `backend.config` ist ein Stub, weil der echte Import die Live-`settings.json` zurückschreibt;
 Sandkasten-Wächter mit Exit 2) lokal **und auf DEV im echten venv**, dazu 185 UI-Prüfungen in jsdom
-gegen die echten Dateien (`tests/test_email_ui.js`, nur lokal – auf DEV ist jsdom nicht
-installiert). Gegenproben greifen: Bereichs-Schranke entfernt → 3 FAIL, Lauf privilegiert →
+gegen die echten Dateien (`tests/test_email_ui.js`, 202 Prüfungen, nur lokal – auf DEV ist
+jsdom nicht installiert). Gegenproben greifen: Bereichs-Schranke entfernt → 3 FAIL, Lauf privilegiert →
 2 FAIL, Rückfall bei Anmeldefehler → 1 FAIL, ⚡ zurückgeholt → 2 FAIL.
 **Live auf DEV:** 401 ohne Token · „leer = niemand" auch für den lokalen Admin · nach Freigabe
 `permissions.email: true` und `/email` 200 (vorher 404, weil der Skill aus war) · exchangelib 5.6.0

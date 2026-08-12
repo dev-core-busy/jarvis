@@ -504,12 +504,19 @@ function baueReiter(opt) {
                     body: o.body ? JSON.parse(o.body) : null });
         const gib = (d) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(d) });
         if (url === '/api/skills/email/config') {
-            return gib({ kanal: 'auto', ews_url: 'https://mail.firma.de/EWS/Exchange.asmx',
-                         autodiscover: false, auth_typ: 'ntlm', verify_ssl: false,
-                         imap_host: 'imap.firma.de', imap_port: 993, imap_ssl: true,
-                         smtp_host: 'smtp.firma.de', smtp_port: 587, smtp_starttls: true,
-                         ordner_eingang: 'INBOX', zeitlimit: 30, takt_sekunden: 60,
-                         bereiche: 'mail,wissen' });
+            // WICHTIG: der echte Endpunkt antwortet VERSCHACHTELT ({config: …}),
+            // siehe main.py::get_skill_config. Die erste Fassung dieses Mocks
+            // lieferte die Felder flach – deshalb fiel der Ladefehler im Modul
+            // (`c.ews_url` statt `c.config.ews_url`) hier NICHT auf, sondern erst
+            // dem Benutzer ("die EWS-URL wird nicht gespeichert", 2026-08-12).
+            // EIN MOCK, DER DIE ECHTE ANTWORTFORM VERFEHLT, PRUEFT NICHTS.
+            return gib({ config: {
+                kanal: 'auto', ews_url: 'https://mail.firma.de/EWS/Exchange.asmx',
+                autodiscover: false, auth_typ: 'ntlm', verify_ssl: false,
+                imap_host: 'imap.firma.de', imap_port: 993, imap_ssl: true,
+                smtp_host: 'smtp.firma.de', smtp_port: 587, smtp_starttls: true,
+                ordner_eingang: 'INBOX', zeitlimit: 30, takt_sekunden: 60,
+                bereiche: 'mail,wissen' } });
         }
         if (url === '/api/email/admin/overview') {
             return gib({ ok: true, skill_aktiv: true, bereiche: BEREICHE,
@@ -573,6 +580,49 @@ function baueReiter(opt) {
     pruefe(mailBox.checked && mailBox.disabled, "'mail' ist gesetzt und gesperrt");
     pruefe(w.document.getElementById('em-areas').textContent.indexOf('⚠') > -1,
         "der Bereich 'voll' ist als Warnung gekennzeichnet");
+}
+{
+    // REGRESSION 2026-08-12: gemeldet als "die EWS-URL wird nicht gespeichert".
+    // Gespeichert WURDE sie – aber `ladeVerbindung` las die Antwort eine Ebene
+    // zu hoch (`c.ews_url` statt `c.config.ews_url`), leerte damit jedes Feld,
+    // und ein zweites "Speichern" schrieb die Leere fest.
+    const { w, rufe } = baueReiter({});
+    w.EmailAdmin.onShow();
+    await warte(80);
+    pruefe(w.document.getElementById('em-ews-url').value !== '',
+        'die geladene EWS-URL steht im Feld (Antwort ist unter .config verschachtelt)');
+    pruefe(w.document.getElementById('em-imap-host').value === 'imap.firma.de',
+        'auch die uebrigen Textfelder werden belegt');
+    pruefe(w.document.getElementById('em-imap-port').value === '993',
+        'Zahlenfelder werden belegt');
+    // Und der Kreislauf: laden -> speichern -> es geht NICHT verloren
+    w.document.getElementById('em-save-conn').click();
+    await warte(60);
+    const gespeichert = rufe.filter(r => r.url === '/api/skills/email/config'
+        && r.methode === 'POST')[0];
+    pruefe(gespeichert.body.ews_url === 'https://mail.firma.de/EWS/Exchange.asmx',
+        'Laden und direktes Speichern verliert die URL nicht', 
+        String(gespeichert.body.ews_url));
+    pruefe(gespeichert.body.auth_typ === 'ntlm' && gespeichert.body.autodiscover === false,
+        'auch Auswahl und Haken bleiben erhalten');
+    pruefe(ADMIN_JS.indexOf('antwort.config') > -1 || /\(antwort && antwort\.config\)/.test(ADMIN_JS),
+        'das Modul liest ausdruecklich die verschachtelte Antwort');
+}
+{
+    // Die Hinweistexte duerfen nicht das Gegenteil des Verhaltens versprechen
+    // (dieselbe Fehlerklasse wie WA_TASK_PROMPT): eine eingetragene URL GEWINNT
+    // jetzt gegen den Autodiscover-Haken.
+    const panel2 = SET_HTML.slice(SET_HTML.indexOf('id="settings-tab-email"'),
+                                  SET_HTML.indexOf('Tab: Kundenverwaltung'));
+    pruefe(panel2.indexOf('den Haken entfernen und die URL eintragen') === -1,
+        'der alte, falsche Hinweis ist weg');
+    pruefe(panel2.indexOf('eingetragene Adresse wird immer benutzt') > -1,
+        'der Hinweis sagt, dass eine eingetragene URL gewinnt');
+    pruefe(panel2.indexOf('Hostname') > -1,
+        'und dass der Hostname genuegt');
+    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'skills/email/skill.json'), 'utf8'));
+    pruefe(manifest.config_schema.autodiscover.description.indexOf('gewinnt immer') > -1,
+        'auch das Manifest beschreibt den Vorrang richtig');
 }
 {
     // ZWEI KNOEPFE, ZWEI TEILMENGEN

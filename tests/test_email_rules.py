@@ -575,6 +575,39 @@ try:
 except mc.MailFehler:
     check(True, "unguelige Empfaengeradresse wird abgewiesen")
 
+# EWS-URL-Normierung: ein Administrator traegt den HOSTNAMEN ein (auf DEV genau
+# so passiert: "exchange.nexus-ag.de"), exchangelib braucht die volle Adresse.
+for ein, soll, label in (
+    ("exchange.nexus-ag.de", "https://exchange.nexus-ag.de/EWS/Exchange.asmx",
+     "bloszer Hostname wird zur vollen EWS-Adresse"),
+    ("https://exchange.nexus-ag.de", "https://exchange.nexus-ag.de/EWS/Exchange.asmx",
+     "fehlender Pfad wird ergaenzt"),
+    ("https://exchange.nexus-ag.de/", "https://exchange.nexus-ag.de/EWS/Exchange.asmx",
+     "abschliessender Schraegstrich stoert nicht"),
+    ("https://mail.firma.de/EWS/Exchange.asmx", "https://mail.firma.de/EWS/Exchange.asmx",
+     "vollstaendige Adresse bleibt unangetastet"),
+    ("https://firma.de/eigener/pfad/ews.asmx", "https://firma.de/eigener/pfad/ews.asmx",
+     "eigener Pfad wird NICHT ueberschrieben"),
+    ("mail.firma.de:444", "https://mail.firma.de:444/EWS/Exchange.asmx",
+     "Portangabe bleibt erhalten"),
+    ("http://alt.firma.de/EWS/Exchange.asmx", "http://alt.firma.de/EWS/Exchange.asmx",
+     "ausdrueckliches http bleibt http"),
+    ("", "", "leere Eingabe bleibt leer"),
+):
+    check(mc.ews_url_normieren(ein) == soll, label,
+          "%r -> %r" % (ein, mc.ews_url_normieren(ein)))
+
+# Eine eingetragene URL GEWINNT gegen den Autodiscover-Haken. Vorher galt
+# `ews_url and not autodiscover` – wer den Server eintrug und den Haken stehen
+# liess, dessen Eingabe wurde stillschweigend ignoriert.
+ews_quelle = (ROOT / "backend/mail_client.py").read_text()
+check("if k.ews_url:" in ews_quelle,
+      "die Weiche fragt nur noch, OB eine URL eingetragen ist")
+check("if k.ews_url and not k.autodiscover:" not in ews_quelle,
+      "die alte Weiche (URL nur ohne Autodiscover) ist weg")
+check("ews_url_normieren(k.ews_url)" in ews_quelle,
+      "die eingetragene URL wird vor der Benutzung normiert")
+
 check(mc.MailKonto(adresse="a@b.de", benutzer="NEXUS\\ab").anmeldename() == "NEXUS\\ab",
       "Anmeldename gewinnt gegen die Adresse")
 check(mc.MailKonto(adresse="a@b.de").anmeldename() == "a@b.de",

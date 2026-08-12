@@ -69,6 +69,11 @@ PROMPT_MAX = 8000
 # Arbeitsspeicher gegen Doppelverarbeitung – aeltere Mails werden ohnehin ueber
 # den Zeitstempel ausgeschlossen.
 MAX_GESEHEN = 500
+# Wie oft eine Nachricht nach einem FEHLGESCHLAGENEN Lauf erneut versucht wird,
+# bevor sie uebersprungen wird. Drei, weil ein technischer Ausfall (Netz, EWS,
+# abgelaufenes Kennwort) meist kurz ist – und weil eine Nachricht, die ein Modell
+# dreimal nicht bearbeiten konnte, es auch beim vierten Mal nicht wird.
+MAX_FEHLVERSUCHE = 3
 
 
 class RegelFehler(Exception):
@@ -453,9 +458,85 @@ def merke_lauf(regel_id: str, zeit: float | None = None) -> None:
     """
     z = _zustand()
     e = z.get(regel_id) or {"gesehen": [], "letzter_stempel": 0.0, "letzter_lauf": 0}
-    e["letzter_lauf"] = int(zeit or time.time())
+    # NICHT `int(zeit or time.time())`: eine ausdrueckliche 0 ist eine Eingabe
+    # ("nie gelaufen") und wurde damit stillschweigend zu "jetzt" – dieselbe
+    # Falsyness-Falle wie bei `config._valid_retention`. Beim Nachstellen eines
+    # faelligen Zustands (2026-08-12) hat sie genau das verhindert.
+    e["letzter_lauf"] = int(time.time() if zeit is None else zeit)
     z[regel_id] = e
     _zustand_speichern(z)
+
+
+def merke_fehlversuch(regel_id: str, schluessel: str) -> int:
+    """Zaehlt einen GESCHEITERTEN Versuch und gibt den neuen Stand zurueck.
+
+    WARUM ES DAS GIBT: bis 2026-08-12 wurde eine Nachricht auch nach einem
+    FEHLGESCHLAGENEN Lauf als verarbeitet vermerkt. Ein technischer Ausfall –
+    etwa der EWS-Fehler desselben Tages, ein Netzhaenger oder ein abgelaufenes
+    Kennwort – hat damit Post endgueltig verschluckt: die Regel hat sie nie
+    wieder angesehen, und niemand hat es gemerkt.
+
+    Die Gegenrichtung ist aber genauso falsch: ein dauerhaft scheiternder Lauf
+    wuerde dieselbe Nachricht in jedem Takt erneut durch ein Modell schicken.
+    Deshalb wird gezaehlt und nach ``MAX_FEHLVERSUCHE`` aufgegeben – mit einem
+    ausdruecklichen Protokolleintrag, damit „uebersprungen" nie stillschweigend
+    passiert.
+    """
+    if not schluessel:
+        return 0
+    z = _zustand()
+    e = z.get(regel_id) or {"gesehen": [], "letzter_stempel": 0.0, "letzter_lauf": 0}
+    versuche = dict(e.get("versuche") or {})
+    n = int(versuche.get(schluessel, 0)) + 1
+    versuche[schluessel] = n
+    # Nur die jüngsten Zaehler behalten: ohne Deckel waechst die Datei mit jeder
+    # je gescheiterten Nachricht (gleiche Begruendung wie MAX_GESEHEN).
+    if len(versuche) > MAX_GESEHEN:
+        versuche = dict(list(versuche.items())[-MAX_GESEHEN:])
+    e["versuche"] = versuche
+    z[regel_id] = e
+    _zustand_speichern(z)
+    return n
+
+
+def fehlversuche(regel_id: str, schluessel: str) -> int:
+    return int(((_zustand().get(regel_id) or {}).get("versuche") or {}).get(schluessel, 0))
+
+
+def vergiss_fehlversuche(regel_id: str, schluessel: str) -> None:
+    """Zaehler nach einem Erfolg loeschen – sonst zaehlt ein spaeterer Ausfall
+    auf einem alten Stand weiter und gibt zu frueh auf."""
+    z = _zustand()
+    e = z.get(regel_id)
+    if not e or not (e.get("versuche") or {}).get(schluessel):
+        return
+    versuche = dict(e["versuche"])
+    versuche.pop(schluessel, None)
+    e["versuche"] = versuche
+    z[regel_id] = e
+    _zustand_speichern(z)
+
+
+def wieder_vorlegen(regel_id: str, schluessel: str) -> bool:
+    """Eine Nachricht erneut zur Verarbeitung freigeben (Administrator-Eingriff).
+
+    Gedacht fuer den Fall, dass ein behobener technischer Fehler Nachrichten
+    zurueckgelassen hat. Entfernt den Verarbeitungsvermerk UND die Fehlzaehler.
+    """
+    z = _zustand()
+    e = z.get(regel_id)
+    if not e:
+        return False
+    gesehen = [g for g in (e.get("gesehen") or []) if g != schluessel]
+    weg = len(gesehen) != len(e.get("gesehen") or [])
+    e["gesehen"] = gesehen
+    versuche = dict(e.get("versuche") or {})
+    if versuche.pop(schluessel, None) is not None:
+        weg = True
+    e["versuche"] = versuche
+    z[regel_id] = e
+    _zustand_speichern(z)
+    return weg
 
 
 def zustand_entfernen(owner: str, regel_id: str) -> None:

@@ -2194,6 +2194,58 @@ also nicht kosmetisch: er zerstört Daten.
   `https://exchange.nexus-ag.de/EWS/Exchange.asmx` aufgelöst. Gegenproben: alter Lesefehler →
   10 FAIL, alte Weiche → 2 FAIL.
 
+**DREI FEHLER, DIE ERST DER BETRIEB AN EINEM ECHTEN EXCHANGE ZEIGTE (2026-08-12).**
+Gemeldet als „EWS does not support filtering on field 'id'" – jede Aktion einer Regel war
+blockiert (Antworten, Lesen, Verschieben). Alle drei hängen zusammen und sind je einzeln
+lehrreich:
+1. **`filter(id=…)` gibt es bei EWS nicht.** Daraus wird eine Restriction, und der Server lehnt
+   sie ab. Erlaubt sind nur GetItem-Wege: `account.fetch(ids=[(id, changekey)])` – **Tupel, keine
+   nackten Zeichenketten** (so der Docstring von `Account.fetch`) – und `folder.get(id=…)`, das
+   exchangelib gesondert behandelt (`QuerySet.get` erkennt genau `{id}` bzw. `{id, changekey}`).
+   Mein `fetch(ids=[msg_id])` scheiterte deshalb, und der **`except Exception: pass` darunter hat
+   den Grund verschluckt** – sichtbar wurde nur der Ordner-Rückfall. Die Meldung nannte damit
+   den zweiten Weg, während der erste der eigentlich gescheiterte war. Jetzt sammelt
+   `_suche_item` die Gründe und nennt sie; ein Test verbietet `filter(id=` im Code.
+   **Merkregel: ein verschluckter erster Fehlversuch verlegt die Diagnose auf den falschen Weg.**
+2. **Ein Fehlschlag hakte die Nachricht als „verarbeitet" ab.** Damit hat der technische Defekt
+   die Post **endgültig verschluckt** – 13 Nachrichten lagen fest, und die Regel sah sie nie
+   wieder an. Die Gegenrichtung ist genauso falsch (ein dauerhaft scheiternder Lauf schickt
+   dieselbe Nachricht in jedem Takt durch ein Modell), deshalb: `merke_fehlversuch()` zählt,
+   nach `MAX_FEHLVERSUCHE = 3` wird aufgegeben – **mit ausdrücklichem Vermerk im Ergebnis**
+   („Versuch 2 von 3 …" bzw. „Nach 3 Fehlversuchen …"). Ein Erfolg löscht den Zähler
+   (`vergiss_fehlversuche`), sonst gibt ein späterer Ausfall auf einem alten Stand zu früh auf.
+   `wieder_vorlegen()` ist der Administrator-Eingriff für Nachrichten, die ein behobener Fehler
+   zurückgelassen hat. **Merkregel: „verarbeitet" darf nur heissen, dass es geklappt hat.**
+3. **Die Zertifikatsprüfung blieb aus, sobald sie einmal aus war.** exchangelib wählt den
+   HTTP-Adapter über eine **prozessweite Klassenvariable** (`BaseProtocol.HTTP_ADAPTER_CLS`);
+   mein Code setzte sie nur auf `NoVerifyHTTPAdapter` und nie zurück. Ein Administrator, der
+   `verify_ssl` wieder einschaltet, hätte bis zum Dienstneustart weiter ungeprüft verbunden –
+   ein Schutz, der still ausfällt, ist kein Schutz. `_tls_adapter_setzen()` setzt sie jetzt in
+   **beide** Richtungen und protokolliert jeden Wechsel. Nebenbei: urllib3 warnt **pro Anfrage**
+   – ein einziger Lesevorgang erzeugte 22 Zeilen im Journal. Gedrosselt auf `filterwarnings
+   ("once")`, ausdrücklich **nicht** `"ignore"`: die Information bleibt, das Rauschen geht.
+   ⚠ Grenze: exchangelib hält Verbindungspools je Endpunkt, ein Umschalten wirkt auf NEU
+   aufgebaute Sitzungen.
+4. **Ein Lauf ohne Ergebnis galt als Erfolg.** `run_task_headless` wirft nicht, wenn das Modell
+   nichts zustande bringt – es gibt einen Hinweistext zurück. Genau bei der EINEN Nachricht, auf
+   die die Regel zutraf, lief Qwen3.6-35B in eine Reasoning-Schleife
+   (`finish_reason = length`, 8192 Token verbraucht); der Lauf wurde als `ok` verbucht, die
+   Nachricht abgehakt, und geantwortet hat niemand. `_kein_ergebnis()` erkennt das jetzt und
+   macht daraus einen Fehlschlag – womit die Wiederholung aus Punkt 2 greift.
+   - **Erkannt wird über KONSTANTEN, nicht über nachgetippte Prosa:** `llm.HINWEIS_UNVOLLSTAENDIG`
+     (dafür wurde das Literal in `llm.py` zu einer Konstante gemacht – es stand vorher nur an der
+     Fundstelle) und die projektweite Vorsilbe `HINWEIS_AN_NUTZER`. Ein Test hält fest, dass der
+     Text genau einmal existiert und der Runner ihn importiert.
+   - **Dazu ein EINMALIGER Neuversuch mit `reasoning_effort="low"`.** Eine Regel ist eine kurze,
+     klar umschriebene Aufgabe; das knappere Denkbudget lässt Platz für die eigentliche Arbeit
+     (Werkzeug-Aufruf + zwei Sätze). Bewusst **nicht** dauerhaft erzwungen – wer im Prompt eine
+     Abwägung verlangt, soll sie im ersten Anlauf bekommen.
+- **Live gegen ein echtes Exchange 2019 nachgewiesen:** die gemeldete Kennung löst auf
+  (`give-aways` von `mr.andreas.bender@gmail.com`), 437 Ordner gelesen, echte Regel-Läufe
+  bewerten Nachrichten und tun korrekt nichts, wenn der Absender nicht passt.
+- **FALLSTRICK bei der Diagnose:** ein als `jarvis` laufender Hilfsbefehl kann `/root` nicht
+  lesen – eine dort abgelegte Sicherung war für ihn unsichtbar (leere Liste statt Fehler).
+
 **VIER LAYOUT-FEHLER, DIE ERST DER SCREENSHOT ZEIGTE** (jsdom rechnet kein Layout):
 1. **Klapp-Kopfzeilen mit dem Titel RECHTS.** `.kb-section-header` setzt
    `justify-content: space-between`; mit „Pfeil + Titel" als zwei Kindern schiebt das die beiden
@@ -2229,7 +2281,7 @@ also nicht kosmetisch: er zerstört Daten.
     `flex:1`. Genau das hält ein Test fest, zusammen mit der Abwesenheit der Reiter-Präfixe.
   - Vorher/Nachher in Dunkel UND Hell abgenommen, inklusive der JS-erzeugten Formen.
 
-**Verifiziert:** 256 Backend-Prüfungen (`tests/test_email_rules.py`, ohne fastapi lauffähig –
+**Verifiziert:** 291 Backend-Prüfungen (`tests/test_email_rules.py`, ohne fastapi lauffähig –
 `backend.config` ist ein Stub, weil der echte Import die Live-`settings.json` zurückschreibt;
 Sandkasten-Wächter mit Exit 2) lokal **und auf DEV im echten venv**, dazu 185 UI-Prüfungen in jsdom
 gegen die echten Dateien (`tests/test_email_ui.js`, 202 Prüfungen, nur lokal – auf DEV ist

@@ -33,6 +33,142 @@ class MockFC:
         self.args = args
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL-SYNTAX IM ANTWORTTEXT BERGEN UND ENTFERNEN
+#
+# DER VORFALL (2026-08-12, ECHT): Ein Benutzer bekam als Antwort auf eine
+# PDF-Auswertung das Selbstgespraech des Modells samt Bruchstuecken der
+# Aufruf-Syntax:
+#
+#     … Ich werde den Text aus dem Prompt in eine Datei schreiben und dann parsen.
+#     </parameter>
+#     </function>
+#     </tool_call>
+#
+# Hergang: Qwen3.6 hinter vLLM, natives Tool-Calling (prompt_tool_calling=false).
+# Das Modell schreibt seine Aufrufe im Hermes-/Qwen-XML-Format. vLLM hat den
+# Aufruf NUR TEILWEISE geparst - der Aufruf selbst lief (die Datei wurde
+# geschrieben), die schliessenden Marken blieben im `content` zurueck. Unser
+# Agent hatte damit einen Text ohne Function-Call in der Hand und hat ihn als
+# ENDANTWORT ausgegeben.
+#
+# Diese Klasse von Fehlern ist bei selbst gehosteten Modellen der Normalfall,
+# nicht die Ausnahme: jeder Server-Neustart mit anderem --tool-call-parser, jede
+# Modell-Aktualisierung und jedes Abschneiden an max_tokens kann sie ausloesen.
+# Deshalb wird hier NICHT das Modell gebeten, es besser zu machen, sondern die
+# Antwort maschinell geradegezogen:
+#   1. vollstaendige Aufrufe im Text werden GEBORGEN und als echter Function-Call
+#      zurueckgegeben (der Agent fuehrt sie dann normal aus),
+#   2. alle uebrigen Marken werden ENTFERNT,
+#   3. bleibt danach kein sinnvoller Text uebrig, wird gar kein Textteil
+#      geliefert - der Agent behandelt das als "keine Antwort" und holt eine
+#      richtige Antwort nach (_empty_finish, seit 2026-08-06).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Marken, die niemals im Anzeigetext stehen duerfen. Bewusst breit: die Formate
+# unterscheiden sich je Modellfamilie (Hermes/Qwen, Llama, Mistral).
+_TOOL_MARKUP_RE = re.compile(
+    r"</?tool_call>|</?tool_response>|<\|tool_call\|>|<\|/?tool\|>"
+    r"|</?function(?:\s*=\s*[^>]*)?>|</?parameter(?:\s*=\s*[^>]*)?>"
+    r"|</?invoke(?:\s*name\s*=\s*[^>]*)?>|</?antml:\w+[^>]*>",
+    re.IGNORECASE)
+
+# Vollstaendiger Aufruf, JSON-Form:  <tool_call>{"name": …, "arguments": {…}}</tool_call>
+_TC_JSON_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
+# Vollstaendiger Aufruf, XML-Form:   <function=name><parameter=key>wert</parameter>…</function>
+_TC_XML_RE = re.compile(r"<function\s*=\s*([\w.\-]+)\s*>(.*?)</function>", re.DOTALL)
+_PARAM_RE = re.compile(r"<parameter\s*=\s*([\w.\-]+)\s*>(.*?)</parameter>", re.DOTALL)
+
+
+def _wert_deuten(rohtext: str):
+    """Parameterwert aus XML-Form: JSON, wenn moeglich – sonst Text.
+
+    ``true``/``42``/``{"a":1}`` sollen nicht als Zeichenkette beim Werkzeug
+    ankommen; ein Dateiinhalt mit Zeilenumbruechen aber unveraendert bleiben."""
+    t = rohtext.strip()
+    if t and (t[0] in "[{" or t in ("true", "false", "null")
+              or re.fullmatch(r"-?\d+(?:\.\d+)?", t)):
+        try:
+            return json.loads(t)
+        except Exception:
+            return rohtext
+    return rohtext
+
+
+def berge_tool_syntax(text: str):
+    """``(text_ohne_marken, [MockFC, …])``.
+
+    Findet vollstaendige Aufrufe im Text und entfernt jede uebrige Tool-Marke.
+    Wirft nichts: bei unerwarteter Form bleibt der Text erhalten, nur bereinigt –
+    eine Ausnahme hier wuerde eine sonst brauchbare Antwort vernichten."""
+    if not text or "<" not in text:
+        return text, []
+    calls = []
+    rest = text
+    try:
+        for m in _TC_JSON_RE.finditer(text):
+            try:
+                d = json.loads(m.group(1))
+            except Exception:
+                continue
+            name = d.get("name") or d.get("function") or d.get("tool")
+            if not name:
+                continue
+            args = d.get("arguments", d.get("args", d.get("parameters", {})))
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {"input": args}
+            calls.append(MockFC(name, args if isinstance(args, dict) else {}))
+            rest = rest.replace(m.group(0), "")
+
+        for m in _TC_XML_RE.finditer(rest):
+            name, rumpf = m.group(1), m.group(2)
+            args = {k: _wert_deuten(v) for k, v in _PARAM_RE.findall(rumpf)}
+            calls.append(MockFC(name, args))
+            rest = rest.replace(m.group(0), "")
+
+        rest = _TOOL_MARKUP_RE.sub("", rest)
+        # Ein einzelnes verwaistes "}" oder "{...}" aus einem halb geparsten
+        # Aufruf ist ebenfalls kein Antworttext.
+        rest = re.sub(r"^\s*[\{\}\[\]]+\s*$", "", rest, flags=re.MULTILINE)
+        rest = re.sub(r"\n{3,}", "\n\n", rest).strip()
+    except Exception:
+        return _TOOL_MARKUP_RE.sub("", text), calls
+    return rest, calls
+
+
+def ist_nur_selbstgespraech(text: str) -> bool:
+    """True, wenn der Text keine Antwort ist, sondern eine Absichtserklaerung.
+
+    Nach dem Bergen bleibt bei einem verstuemmelten Aufruf oft nur das
+    Selbstgespraech uebrig ("Ich werde jetzt …", "Lass mich …", "Aber warte -").
+    Als Endantwort ist das fuer den Benutzer wertlos; der Agent holt dann eine
+    echte Antwort nach. Absichtlich ENG gefasst - ein Text, der zusaetzlich ein
+    Ergebnis nennt, ist eine Antwort und wird nicht verworfen."""
+    if not text:
+        return True
+    t = text.strip()
+    if len(t) > 700:            # ausfuehrlicher Text ist im Zweifel eine Antwort
+        return False
+    muster = (
+        r"ich (werde|muss|kann|sollte|schreibe|erstelle|analysiere|pruefe|prüfe)\b",
+        r"lass (mich|uns)\b", r"aber warte\b", r"warte\b.*\bich\b",
+        r"jetzt (werde|schreibe|erstelle|rufe)\b", r"^(ok(ay)?|gut|alles klar)[.,: ]",
+        r"let me\b", r"i (will|need to|should)\b",
+    )
+    treffer = sum(1 for p in muster if re.search(p, t, re.IGNORECASE))
+    if not treffer:
+        return False
+    # Ein Ergebnis-Merkmal (Zahl mit Einheit, Aufzaehlung, Tabelle, Dateiname)
+    # spricht dafuer, dass doch etwas geliefert wird.
+    hat_ergebnis = re.search(r"^\s*[-*\d]\s|\|.*\||\b\d+\s*(Adressen|Zeilen|Eintraege|"
+                             r"Einträge|Treffer|Datensaetze|Datensätze)\b", t,
+                             re.IGNORECASE | re.MULTILINE)
+    return not hat_ergebnis
+
+
 class ImageGenNotSupported(Exception):
     """Wird geworfen, wenn das aktive Profil keine Bildgenerierung beherrscht."""
     def __init__(self, label: str = "Das aktive LLM-Profil"):
@@ -862,9 +998,19 @@ class OpenAICompatibleProvider(LLMProvider):
             choice = data["choices"][0]
             message = choice.get("message", {})
 
+            # Tool-Syntax im Text bergen/entfernen, BEVOR daraus ein Antwortteil
+            # wird (siehe berge_tool_syntax – Vorfall 2026-08-12). Der geborgene
+            # Aufruf wird unten wie ein nativer behandelt.
+            _geborgen = []
             if message.get("content"):
-                parts.append(LLMPart(text=message["content"]))
-            elif not message.get("tool_calls"):
+                _rein, _geborgen = berge_tool_syntax(str(message["content"]))
+                if _rein:
+                    parts.append(LLMPart(text=_rein))
+                elif not message.get("tool_calls") and not _geborgen:
+                    print("[LLM] Antwort bestand nur aus Tool-Syntax – kein "
+                          "Textteil geliefert, der Agent holt eine Antwort nach.",
+                          flush=True)
+            if not message.get("content") and not message.get("tool_calls"):
                 # content=null OHNE Tool-Call → je nach finish_reason unterscheiden.
                 _finish = (choice.get("finish_reason") or "").lower()
                 _reasoning = message.get("reasoning") or message.get("reasoning_content")
@@ -893,6 +1039,13 @@ class OpenAICompatibleProvider(LLMProvider):
                     except Exception:
                         args = {}
                     parts.append(LLMPart(function_call=MockFC(fn.get("name"), args)))
+            # Aus dem Text geborgene Aufrufe NUR nutzen, wenn der Server keine
+            # gemeldet hat: sonst wuerde ein Aufruf doppelt ausgefuehrt.
+            if _geborgen and not message.get("tool_calls"):
+                for fc in _geborgen:
+                    print(f"[LLM] Tool-Aufruf aus dem Antworttext geborgen: {fc.name}",
+                          flush=True)
+                    parts.append(LLMPart(function_call=fc))
 
         usage = None
         try:

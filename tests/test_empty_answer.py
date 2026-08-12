@@ -54,12 +54,23 @@ pruefe(AGENT.count("_answer_sent = True") >= 3,
        "Merker wird an ALLEN Ausgabestellen gesetzt (Kurz-Prompt, Endtext, Final-Aufruf)",
        f"{AGENT.count('_answer_sent = True')} Vorkommen")
 
-# Zwischentexte (intermediate) duerfen NICHT als Antwort zaehlen
-i_send = AGENT.find("await self._send_status(ws, _display, highlight=True, intermediate=is_intermediate)")
+# Zwischentexte (intermediate) duerfen NICHT als Antwort zaehlen.
+# Bewusst NICHT auf die woertliche Aufrufzeile pruefen: die hat sich am
+# 2026-08-12 geaendert (Selbstgespraech-Erkennung, intermediate=is_intermediate
+# or _nur_absicht) und der Test schlug an der Formatierung an, nicht am
+# Verhalten. Geprueft wird die ABSICHT.
+i_send = AGENT.find("await self._send_status(ws, _display, highlight=True")
 pruefe(i_send > 0, "Endtext-Ausgabe gefunden")
-fenster = AGENT[i_send:i_send + 260]
+fenster = AGENT[i_send:i_send + 400]
+pruefe("intermediate=is_intermediate" in fenster,
+       "die Ausgabe unterscheidet Zwischen- und Endtext")
 pruefe("if not is_intermediate" in fenster,
        "nur NICHT-Zwischentexte zaehlen als Antwort (intermediate ist kein Endergebnis)")
+# Seit 2026-08-12: ein reines Selbstgespraech ("Ich werde jetzt …") zaehlt
+# ebenfalls nicht als Antwort, sonst bleibt der Nachschlag aus und der Benutzer
+# sieht eine Absichtserklaerung als Endergebnis (Vorfall mit Tool-Syntax).
+pruefe("_nur_absicht" in fenster,
+       "ein Selbstgespraech zaehlt nicht als Antwort")
 
 # Die Weiche steht VOR der Erfolgsmeldung
 i_weiche = AGENT.find("if not _answer_sent and not _delivered_docs:")

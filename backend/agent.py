@@ -127,6 +127,19 @@ from fastapi import WebSocket
 
 from backend.config import config
 from backend.llm import get_provider
+
+
+def _ist_nur_selbstgespraech(text: str) -> bool:
+    """Absichtserklaerung statt Ergebnis? – Kapselung um llm.ist_nur_selbstgespraech.
+
+    Fehlertolerant: laesst sich die Pruefung nicht laden, gilt der Text als
+    Antwort. Ein zu Unrecht verworfenes Ergebnis waere schlimmer als ein
+    zusaetzlicher Nachschlag."""
+    try:
+        from backend.llm import ist_nur_selbstgespraech
+        return ist_nur_selbstgespraech(text)
+    except Exception:
+        return False
 from backend.skills.manager import SkillManager
 from backend.tools.memory import load_memory_context, load_selective_memory
 import backend.conv_log as conv_log
@@ -1973,6 +1986,15 @@ KRITISCH – Autonomie-Regeln:
                 is_intermediate = bool(function_calls)
                 for text in text_parts:
                     if text.strip():
+                        # Reste von Tool-Syntax NIEMALS anzeigen. Der Provider
+                        # bereinigt bereits (llm.berge_tool_syntax); das hier ist
+                        # die zweite Schicht fuer Provider ohne diese Behandlung
+                        # und fuer Text, der aus einem Werkzeug-Ergebnis stammt.
+                        # Vorfall 2026-08-12: der Benutzer bekam
+                        # "</parameter></function></tool_call>" als Antwort.
+                        text = self._ohne_tool_markup(text)
+                        if not text.strip():
+                            continue
                         # Dokument-Links/-Pfade aus dem Anzeigetext entfernen – der Download
                         # kommt ausschliesslich als verifizierter Chip via _deliver_docs.
                         _display = self._clean_doc_refs(text.strip()).strip()
@@ -1993,9 +2015,21 @@ KRITISCH – Autonomie-Regeln:
                         if not is_intermediate:
                             _display = self._mit_bildern(_display)
                         if _display:
-                            await self._send_status(ws, _display, highlight=True, intermediate=is_intermediate)
-                            if not is_intermediate:
+                            # Ein reines Selbstgespraech ("Ich werde jetzt …") ist
+                            # keine Antwort. Es wird zwar angezeigt (der Benutzer
+                            # sieht, dass gearbeitet wird), zaehlt aber NICHT als
+                            # geliefertes Ergebnis - dadurch greift unten der
+                            # Nachschlag (_empty_finish) und der Benutzer bekommt
+                            # am Ende ein echtes Ergebnis (Vorfall 2026-08-12).
+                            _nur_absicht = (not is_intermediate
+                                            and _ist_nur_selbstgespraech(_display))
+                            await self._send_status(ws, _display, highlight=True,
+                                                    intermediate=is_intermediate or _nur_absicht)
+                            if not is_intermediate and not _nur_absicht:
                                 _answer_sent = True
+                            elif _nur_absicht:
+                                _log("Antwort war nur eine Absichtserklaerung – "
+                                     "Nachschlag wird geholt.")
                         _conv_messages.append({"role": "assistant", "content": text.strip()})
                         # In der Antwort genannte Dokumente (auch /tmp-Pfade) als Chip ausliefern
                         await self._deliver_docs(ws, text, _delivered_docs, username, since=_task_start_time)
@@ -3568,6 +3602,20 @@ KRITISCH – Autonomie-Regeln:
         except Exception as e:  # noqa: BLE001
             print(f"[AGENT {self.agent_id}] Bild-Nachtrag fehlgeschlagen: {e}", flush=True)
             return text
+
+    def _ohne_tool_markup(self, text: str) -> str:
+        """Entfernt Reste von Tool-Aufruf-Syntax aus einem Anzeigetext.
+
+        Zweite Schicht hinter ``llm.berge_tool_syntax`` (dort passiert es fuer die
+        Antwort des Providers). Hier greift es zusaetzlich fuer Text, der einen
+        anderen Weg genommen hat. EINE Quelle fuer die Muster - Vorfall
+        2026-08-12, siehe llm.py."""
+        try:
+            from backend.llm import berge_tool_syntax
+            rein, _ = berge_tool_syntax(text or "")
+            return rein
+        except Exception:
+            return text or ""
 
     def _clean_doc_refs(self, text):
         """Entfernt Dokument-Links/-Pfade aus dem ANZEIGE-Text des LLM.

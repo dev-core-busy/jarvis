@@ -1,0 +1,886 @@
+#!/usr/bin/env node
+/**
+ * Oberflaeche des E-Mail-Skills.
+ *
+ * Geprueft wird gegen die ECHTEN Dateien (email.html, email_portal.js,
+ * settings.html, email.js, i18n.js, app.js, portal.html) – ein Test, der sein
+ * Markup selbst baut, prueft nur seine eigene Annahme (Lehre aus dem
+ * Medien-Kontextmenue, 2026-08-10).
+ *
+ * Teil 1  Benutzerseite /email: Berechtigungs-Weiche, Konto, Kennwort-Regel
+ * Teil 2  Regeln: Liste, wanderndes Formular, Bereichs-Auswahl, Zeilen-Schalter
+ * Teil 3  Protokoll
+ * Teil 4  Einstellungs-Reiter (email.js): zwei Knoepfe = zwei Teilmengen
+ * Teil 5  Verdrahtung und Texte (app.js, portal.html, i18n DE+EN, CSS)
+ *
+ *   node tests/test_email_ui.js
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+let ok = 0, fail = 0;
+const pruefe = (b, t, d) => {
+    if (b) { ok++; console.log('  ✓ ' + t); }
+    else { fail++; console.log('  ✗ ' + t + (d ? ' – ' + d : '')); }
+};
+const abschnitt = (t) => console.log('\n=== ' + t + ' ===');
+
+const ROOT = path.resolve(__dirname, '..');
+let JSDOM;
+try { JSDOM = require(process.env.JSDOM_PATH || '/tmp/node_modules/jsdom').JSDOM; }
+catch (e) { console.log('ABBRUCH: jsdom nicht installiert'); process.exit(2); }
+
+const MAIL_HTML = fs.readFileSync(path.join(ROOT, 'frontend/email.html'), 'utf8');
+const PORTAL_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/email_portal.js'), 'utf8');
+const SET_HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+const ADMIN_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/email.js'), 'utf8');
+const I18N = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+const APP = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
+const SKILLS = fs.readFileSync(path.join(ROOT, 'frontend/js/skills.js'), 'utf8');
+const PORTAL_HTML = fs.readFileSync(path.join(ROOT, 'frontend/portal.html'), 'utf8');
+const PICKER = fs.readFileSync(path.join(ROOT, 'frontend/js/ldap_picker.js'), 'utf8');
+
+const BEREICHE = [
+    { id: 'mail', name: 'E-Mail (Pflicht)', hinweis: 'Lesen, antworten…', freigegeben: true, pflicht: true },
+    { id: 'wissen', name: 'Wissensdatenbank (lesend)', hinweis: 'Fuer Antworten…', freigegeben: true, pflicht: false },
+    { id: 'fach', name: 'Interne Fachsysteme (lesend)', hinweis: 'Tickets…', freigegeben: false, pflicht: false },
+    { id: 'voll', name: 'Voller Werkzeugkasten', hinweis: 'ACHTUNG…', freigegeben: false, pflicht: false }
+];
+
+const KONTO = {
+    vorhanden: true, adresse: 'a.bender@nexus.int', benutzer: 'NEXUS\\a.bender',
+    kanal: '', aktiv: true, passwort_gesetzt: true, ordner_eingang: 'Posteingang',
+    ordner_entwuerfe: '', ordner_gesendet: '', letzter_erfolg: 1754990000,
+    letzter_fehler: ''
+};
+
+const REGELN = [
+    { id: 'r1', owner: 'a.bender', name: 'Rechnungen', enabled: true, ordner: 'INBOX',
+      prompt: 'Pruefe auf Rechnung', bereiche: ['mail', 'wissen'], intervall_min: 5,
+      max_je_lauf: 3, nur_ungelesen: true, markiere_gelesen: false,
+      von_filter: 'rechnung@', betreff_filter: '', letzter_lauf: 1754990500 },
+    { id: 'r2', owner: 'a.bender', name: '<img src=x onerror=alert(1)>', enabled: false,
+      ordner: 'Archiv', prompt: 'p', bereiche: ['mail'], intervall_min: 60,
+      max_je_lauf: 1, letzter_lauf: 0 }
+];
+
+/* ── Gemeinsame Umgebung fuer die Benutzerseite ──────────────────────────── */
+function bauePortal(opt) {
+    opt = opt || {};
+    const dom = new JSDOM(MAIL_HTML, { url: 'https://x/email', runScripts: 'outside-only' });
+    const w = dom.window;
+    w.localStorage.setItem('jarvis_token', 'T');
+    const rufe = [];
+    let regeln = JSON.parse(JSON.stringify(opt.regeln || REGELN));
+    let konto = JSON.parse(JSON.stringify(opt.konto || KONTO));
+
+    w.fetch = (url, o) => {
+        o = o || {};
+        const body = o.body ? JSON.parse(o.body) : null;
+        rufe.push({ url: String(url), methode: o.method || 'GET', body: body,
+                    kopf: (o.headers || {}) });
+        const gib = (d, status) => Promise.resolve({
+            ok: (status || 200) < 400, status: status || 200,
+            json: () => Promise.resolve(d)
+        });
+        if (url === '/api/me') {
+            return gib({ username: 'nexus\\a.bender', is_admin: false,
+                         permissions: { email: opt.darf === false ? false : true } });
+        }
+        if (url === '/api/email/status') {
+            return gib({ ok: true, konto: konto, bereiche: BEREICHE,
+                         server: { kanal: 'auto', ews: true, imap: true, smtp: true },
+                         kategorie: 'Jarvis', regeln: regeln.length,
+                         grenzen: { max_regeln: 50, min_intervall: 1, max_intervall: 1440,
+                                    max_je_lauf: 10, prompt_max: 8000 } });
+        }
+        if (url === '/api/email/rules' && (o.method || 'GET') === 'GET') {
+            return gib({ ok: true, regeln: regeln, bereiche: BEREICHE });
+        }
+        if (url === '/api/email/rules' && o.method === 'POST') {
+            if (opt.postFehler) return gib({ ok: false, error: opt.postFehler }, 400);
+            regeln = regeln.concat([Object.assign({ id: 'neu', owner: 'a.bender' }, body)]);
+            return gib({ ok: true, regel: regeln[regeln.length - 1] });
+        }
+        if (/\/api\/email\/rules\/[^/]+$/.test(url) && o.method === 'PUT') {
+            const id = url.split('/').pop();
+            regeln = regeln.map(r => r.id === id ? Object.assign({}, r, body) : r);
+            return gib({ ok: true, regel: regeln.filter(r => r.id === id)[0] });
+        }
+        if (/\/api\/email\/rules\/[^/]+$/.test(url) && o.method === 'DELETE') {
+            const id = url.split('/').pop();
+            regeln = regeln.filter(r => r.id !== id);
+            return gib({ ok: true });
+        }
+        if (/\/run$/.test(url)) {
+            return gib({ ok: true, bericht: { verarbeitet: 1, aktionen: [{ ergebnis: 'Entwurf gespeichert.' }] } });
+        }
+        if (url === '/api/email/account' && o.method === 'POST') {
+            if (opt.acctFehler) return gib({ ok: false, error: opt.acctFehler }, 400);
+            konto = Object.assign({}, konto, body, { passwort_gesetzt: true });
+            delete konto.passwort;
+            return gib({ ok: true, konto: konto });
+        }
+        if (url === '/api/email/account' && o.method === 'DELETE') {
+            return gib({ ok: true, entfernt: true });
+        }
+        if (url === '/api/email/test') {
+            if (opt.testFehler) return gib({ ok: false, error: opt.testFehler }, 400);
+            return gib({ ok: true, ergebnis: { kanal: 'ews', postfach: konto.adresse,
+                                               eingang_gesamt: 12, eingang_ungelesen: 3 } });
+        }
+        if (url === '/api/email/folders') {
+            return gib({ ok: true, ordner: [{ name: 'INBOX', pfad: 'INBOX' },
+                                            { name: 'Buchhaltung', pfad: 'Archiv/Buchhaltung' }] });
+        }
+        if (String(url).indexOf('/api/email/log') === 0) {
+            return gib({ ok: true, eintraege: opt.log || [
+                { ts: 1754990500, regel: 'Rechnungen', ok: true, mail_von: 'k@x.de',
+                  mail_betreff: 'Rechnung 1', ergebnis: 'Entwurf gespeichert.' },
+                { ts: 1754990000, regel: 'Rechnungen', ok: false, mail_von: 'b@x.de',
+                  mail_betreff: '<b>roh</b>', ergebnis: 'Fehlgeschlagen', testlauf: true }
+            ] });
+        }
+        return gib({ ok: true });
+    };
+    w.confirm = () => (opt.confirm === undefined ? true : opt.confirm);
+    w.eval(I18N);
+    w.eval(PORTAL_JS);
+    return { dom, w, rufe, hatRegeln: () => regeln, hatKonto: () => konto };
+}
+
+const warte = (ms) => new Promise(r => setTimeout(r, ms || 40));
+
+(async () => {
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('1. Benutzerseite: Berechtigung, Konto, Kennwort-Regel');
+/* ═══════════════════════════════════════════════════════════════════════ */
+{
+    const { w } = bauePortal({});
+    await warte(60);
+    pruefe(!w.document.getElementById('em-app').classList.contains('hidden'),
+        'Freigegebener Benutzer sieht den Bereich');
+    pruefe(w.document.getElementById('em-adresse').value === 'a.bender@nexus.int',
+        'Adresse wird vorbelegt');
+    pruefe(w.document.getElementById('em-benutzer').value === 'NEXUS\\a.bender',
+        'Anmeldename wird vorbelegt');
+    pruefe(w.document.getElementById('em-ord-eingang').value === 'Posteingang',
+        'Ordner-Vorgabe wird vorbelegt');
+    pruefe(w.document.getElementById('em-passwort').value === '',
+        'DAS KENNWORT WIRD NIE VORBELEGT');
+    pruefe(w.document.getElementById('em-pw-hint').textContent.indexOf('unver') > -1,
+        'der Hinweis sagt: leer lassen = unveraendert');
+    pruefe(w.document.getElementById('em-aktiv').checked === true,
+        'Aktiv-Haken folgt dem Konto');
+    const pill = w.document.getElementById('em-acct-pill');
+    pruefe(pill.classList.contains('is-ok') && pill.textContent.indexOf('@') > -1,
+        'Zustands-Pille zeigt das verbundene Postfach');
+}
+{
+    // Nicht freigegeben -> Weiterleitung, KEIN Inhalt.
+    // jsdom kann `location` nicht ersetzen; erkennbar ist die Navigation daran,
+    // dass die App versteckt bleibt (das Ziel deckt die Quelltext-Pruefung ab).
+    const { w } = bauePortal({ darf: false });
+    await warte(60);
+    pruefe(w.document.getElementById('em-app').classList.contains('hidden'),
+        'Nicht freigegebener Benutzer sieht den Bereich NICHT');
+    pruefe(PORTAL_JS.indexOf("window.location.replace('/portal')") > -1,
+        'und wird auf das Portal zurueckgeschickt');
+    pruefe(/permissions\s*&&\s*me\.permissions\.email/.test(PORTAL_JS)
+        || /me\.permissions\s*&&\s*me\.permissions\.email/.test(PORTAL_JS),
+        'die Weiche prueft permissions.email (fail-closed bei fehlendem Feld)');
+}
+{
+    // Leeres Kennwortfeld darf NICHT gesendet werden (sonst Kennwort geloescht)
+    const { w, rufe } = bauePortal({});
+    await warte(60);
+    w.document.getElementById('em-adresse').value = 'neu@nexus.int';
+    w.document.getElementById('em-save-acct').click();
+    await warte(60);
+    const post = rufe.filter(r => r.url === '/api/email/account' && r.methode === 'POST');
+    pruefe(post.length === 1, 'genau ein POST auf /api/email/account');
+    pruefe(post[0].body && !('passwort' in post[0].body),
+        'LEERES Kennwortfeld wird NICHT mitgesendet (sonst waere es geloescht)');
+    pruefe(post[0].body.adresse === 'neu@nexus.int', 'die geaenderte Adresse geht mit');
+}
+{
+    const { w, rufe } = bauePortal({});
+    await warte(60);
+    w.document.getElementById('em-passwort').value = '   ';
+    w.document.getElementById('em-save-acct').click();
+    await warte(60);
+    const post = rufe.filter(r => r.url === '/api/email/account' && r.methode === 'POST')[0];
+    pruefe(!('passwort' in post.body),
+        'ein Feld mit nur Leerzeichen zaehlt ebenfalls als unveraendert');
+}
+{
+    const { w, rufe } = bauePortal({});
+    await warte(60);
+    w.document.getElementById('em-passwort').value = 'NeuesKennwort';
+    w.document.getElementById('em-save-acct').click();
+    await warte(60);
+    const post = rufe.filter(r => r.url === '/api/email/account' && r.methode === 'POST')[0];
+    pruefe(post.body.passwort === 'NeuesKennwort', 'ein eingegebenes Kennwort geht mit');
+    pruefe(w.document.getElementById('em-passwort').value === '',
+        'nach dem Speichern ist das Feld wieder leer');
+}
+{
+    const { w, rufe } = bauePortal({});
+    await warte(60);
+    w.document.getElementById('em-test-acct').click();
+    await warte(60);
+    pruefe(rufe.some(r => r.url === '/api/email/test' && r.methode === 'POST'),
+        'Verbindungstest ruft /api/email/test');
+    const st = w.document.getElementById('em-acct-status').textContent;
+    pruefe(st.indexOf('ews') > -1, 'der benutzte Kanal wird genannt', st);
+    pruefe(w.document.getElementById('em-acct-result').innerHTML.indexOf('12') > -1,
+        'die Postfach-Zahlen erscheinen');
+}
+{
+    const { w } = bauePortal({ testFehler: 'Anmeldung abgelehnt – Kennwort pruefen.' });
+    await warte(60);
+    w.document.getElementById('em-test-acct').click();
+    await warte(60);
+    const st = w.document.getElementById('em-acct-status');
+    pruefe(st.textContent.indexOf('Anmeldung abgelehnt') > -1,
+        'ein Fehler wird im Klartext gezeigt, nicht verschluckt');
+    pruefe(st.style.color.indexOf('danger') > -1, 'und in der Fehlerfarbe');
+}
+{
+    const { w, rufe } = bauePortal({ confirm: false });
+    await warte(60);
+    w.document.getElementById('em-del-acct').click();
+    await warte(60);
+    pruefe(!rufe.some(r => r.methode === 'DELETE'),
+        'Abbruch der Rueckfrage loescht die Zugangsdaten NICHT');
+}
+{
+    const { w, rufe } = bauePortal({ confirm: true });
+    await warte(60);
+    w.document.getElementById('em-del-acct').click();
+    await warte(60);
+    pruefe(rufe.some(r => r.url === '/api/email/account' && r.methode === 'DELETE'),
+        'nach Bestaetigung wird geloescht');
+}
+{
+    const { w } = bauePortal({ konto: Object.assign({}, KONTO, { vorhanden: false, adresse: '', passwort_gesetzt: false }) });
+    await warte(60);
+    const pill = w.document.getElementById('em-acct-pill');
+    pruefe(pill.classList.contains('is-off'), 'ohne Postfach ist die Pille im Warnzustand');
+    pruefe(w.document.getElementById('em-pw-hint').textContent.indexOf('Noch kein') > -1,
+        'und der Hinweis sagt, dass kein Kennwort gespeichert ist');
+}
+{
+    const { w } = bauePortal({ konto: Object.assign({}, KONTO, { aktiv: false, letzter_fehler: 'LOGIN failed' }) });
+    await warte(60);
+    pruefe(w.document.getElementById('em-aktiv').checked === false,
+        'aktiv=false wird als false angezeigt (nicht ueber Falsyness geraten)');
+    pruefe(w.document.getElementById('em-acct-result').innerHTML.indexOf('LOGIN failed') > -1,
+        'der letzte Fehler steht am Konto');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('2. Regeln: Liste, wanderndes Formular, Bereichs-Auswahl');
+/* ═══════════════════════════════════════════════════════════════════════ */
+{
+    const { w } = bauePortal({});
+    await warte(80);
+    const karten = w.document.querySelectorAll('#em-rules .em-rule-card');
+    pruefe(karten.length === 2, 'beide Regeln werden gezeichnet', String(karten.length));
+    pruefe(karten[1].classList.contains('is-off'),
+        'die abgeschaltete Regel ist abgeschwaecht (Deckkraft, keine harte Farbe)');
+    pruefe(w.document.querySelector('#em-rules').innerHTML.indexOf('<img src=x') === -1,
+        'XSS im Regelnamen wird entschaerft');
+    pruefe(w.document.querySelector('#em-rules').textContent.indexOf('onerror') > -1,
+        'der Name erscheint als TEXT');
+    pruefe(karten[0].textContent.indexOf('INBOX') > -1
+        && karten[0].textContent.indexOf('5 min') > -1,
+        'Ordner und Intervall stehen in der Zeile');
+    pruefe(karten[0].textContent.indexOf('Wissensdatenbank') > -1,
+        'die Bereiche werden mit ihrem Anzeigenamen genannt');
+}
+{
+    // Bearbeiten: Formular wird KIND der Karte (eine Box, kein Spalt)
+    const { w } = bauePortal({});
+    await warte(80);
+    const karte = w.document.querySelector('.em-rule-card[data-rid="r1"]');
+    karte.querySelector('[data-act="edit"]').click();
+    await warte(40);
+    const box = w.document.getElementById('em-rule-edit');
+    pruefe(box.parentNode === karte, 'das Formular wird KIND der Regel-Karte');
+    pruefe(!box.classList.contains('hidden'), 'und ist sichtbar');
+    pruefe(w.document.getElementById('em-f-name').value === 'Rechnungen',
+        'die Werte der Regel werden vorbelegt');
+    pruefe(w.document.getElementById('em-f-prompt').value === 'Pruefe auf Rechnung',
+        'das Prompt ist editierbar vorbelegt');
+    pruefe(w.document.getElementById('em-f-von').value === 'rechnung@',
+        'der Absender-Filter wird vorbelegt');
+    pruefe(w.document.getElementById('em-f-unread').checked === true,
+        'nur_ungelesen wird vorbelegt');
+
+    // Nur FREIGEGEBENE Bereiche sind waehlbar
+    const kaesten = box.querySelectorAll('#em-f-areas input[type="checkbox"]');
+    const ids = Array.from(kaesten).map(c => c.value);
+    pruefe(ids.length === 2 && ids.indexOf('mail') > -1 && ids.indexOf('wissen') > -1,
+        'nur die freigegebenen Bereiche erscheinen');
+    pruefe(ids.indexOf('voll') === -1,
+        'ein NICHT freigegebener Bereich ist gar nicht waehlbar');
+    const mailBox = Array.from(kaesten).filter(c => c.value === 'mail')[0];
+    pruefe(mailBox.checked && mailBox.disabled,
+        "'mail' ist gesetzt und gesperrt (eine Regel ohne Mail koennte nichts tun)");
+
+    // Zweiter Klick auf denselben Knopf schliesst (Umschalter)
+    karte.querySelector('[data-act="edit"]').click();
+    await warte(40);
+    pruefe(w.document.getElementById('em-rule-edit').classList.contains('hidden'),
+        '"Bearbeiten" ist ein Umschalter');
+}
+{
+    // Speichern schickt genau ein PUT mit den Formularwerten
+    const { w, rufe } = bauePortal({});
+    await warte(80);
+    w.document.querySelector('.em-rule-card[data-rid="r1"] [data-act="edit"]').click();
+    await warte(40);
+    w.document.getElementById('em-f-name').value = 'Rechnungen neu';
+    w.document.getElementById('em-f-prompt').value = 'Neues Prompt';
+    w.document.getElementById('em-f-save').click();
+    await warte(80);
+    const put = rufe.filter(r => r.methode === 'PUT');
+    pruefe(put.length === 1 && put[0].url === '/api/email/rules/r1',
+        'genau ein PUT auf die eigene Regel');
+    pruefe(put[0].body.name === 'Rechnungen neu' && put[0].body.prompt === 'Neues Prompt',
+        'Name und Prompt gehen mit');
+    pruefe(!('owner' in put[0].body) && !('id' in put[0].body),
+        'owner/id werden NIE mitgesendet');
+    pruefe(w.document.getElementById('em-rule-edit').classList.contains('hidden'),
+        'nach dem Speichern ist das Formular zu');
+}
+{
+    // Neue Regel
+    const { w, rufe } = bauePortal({});
+    await warte(80);
+    w.document.getElementById('em-new-rule').click();
+    await warte(40);
+    pruefe(w.document.getElementById('em-f-name').value === '',
+        'das Formular fuer eine neue Regel ist leer');
+    pruefe(w.document.getElementById('em-f-intervall').value === '5',
+        'das Intervall ist mit der Vorgabe belegt');
+    w.document.getElementById('em-f-name').value = 'Neu';
+    w.document.getElementById('em-f-prompt').value = 'P';
+    w.document.getElementById('em-f-save').click();
+    await warte(80);
+    const post = rufe.filter(r => r.url === '/api/email/rules' && r.methode === 'POST');
+    pruefe(post.length === 1, 'genau ein POST fuer die neue Regel');
+    pruefe(post[0].body.bereiche.indexOf('mail') > -1,
+        "'mail' ist immer dabei");
+    pruefe(w.document.querySelectorAll('#em-rules .em-rule-card').length === 3,
+        'die Liste wird nach dem Anlegen neu gezeichnet');
+}
+{
+    // FALLSTRICK: liegt das Formular in der Liste, darf innerHTML='' es nicht
+    // mitloeschen. Nach einem Neuaufbau muss es noch existieren.
+    const { w } = bauePortal({});
+    await warte(80);
+    w.document.querySelector('.em-rule-card[data-rid="r1"] [data-act="edit"]').click();
+    await warte(40);
+    w.document.querySelector('.em-rule-card[data-rid="r2"] [data-act="toggle"]').click();
+    await warte(80);
+    pruefe(!!w.document.getElementById('em-rule-edit'),
+        'das Formular ueberlebt den Neuaufbau der Liste (nicht mitgeloescht)');
+    const karte = w.document.querySelector('.em-rule-card[data-rid="r1"]');
+    pruefe(w.document.getElementById('em-rule-edit').parentNode === karte,
+        'und sitzt wieder unter seiner Zeile');
+}
+{
+    // Zeilen-Schalter sendet AUSSCHLIESSLICH enabled
+    const { w, rufe } = bauePortal({});
+    await warte(80);
+    w.document.querySelector('.em-rule-card[data-rid="r1"] [data-act="toggle"]').click();
+    await warte(80);
+    const put = rufe.filter(r => r.methode === 'PUT')[0];
+    pruefe(Object.keys(put.body).length === 1 && put.body.enabled === false,
+        'der Schalter sendet NUR {enabled} (sonst schriebe er den Formularstand mit)');
+}
+{
+    const { w, rufe } = bauePortal({ confirm: false });
+    await warte(80);
+    w.document.querySelector('.em-rule-card[data-rid="r1"] [data-act="del"]').click();
+    await warte(60);
+    pruefe(!rufe.some(r => r.methode === 'DELETE'),
+        'Abbruch der Rueckfrage loescht die Regel NICHT');
+}
+{
+    const { w, rufe } = bauePortal({ confirm: true });
+    await warte(80);
+    w.document.querySelector('.em-rule-card[data-rid="r1"] [data-act="del"]').click();
+    await warte(80);
+    pruefe(rufe.some(r => r.url === '/api/email/rules/r1' && r.methode === 'DELETE'),
+        'nach Bestaetigung wird die Regel geloescht');
+    pruefe(w.document.querySelectorAll('#em-rules .em-rule-card').length === 1,
+        'und verschwindet aus der Liste');
+}
+{
+    // Testlauf
+    const { w, rufe } = bauePortal({});
+    await warte(80);
+    w.document.querySelector('.em-rule-card[data-rid="r1"] [data-act="run"]').click();
+    await warte(80);
+    pruefe(rufe.some(r => /\/api\/email\/rules\/r1\/run$/.test(r.url) && r.methode === 'POST'),
+        'der Testlauf ruft /run der eigenen Regel');
+    pruefe(w.document.getElementById('em-rules-status').textContent.indexOf('Entwurf') > -1,
+        'das Ergebnis des Laufs wird gezeigt');
+    pruefe(rufe.filter(r => String(r.url).indexOf('/api/email/log') === 0).length >= 2,
+        'nach dem Lauf wird das Protokoll nachgeladen');
+}
+{
+    const { w } = bauePortal({ postFehler: 'Die Regel braucht ein Prompt.' });
+    await warte(80);
+    w.document.getElementById('em-new-rule').click();
+    await warte(40);
+    w.document.getElementById('em-f-name').value = 'X';
+    w.document.getElementById('em-f-prompt').value = 'Y';
+    w.document.getElementById('em-f-save').click();
+    await warte(80);
+    pruefe(w.document.getElementById('em-f-status').textContent.indexOf('Prompt') > -1,
+        'ein Serverfehler erscheint am Formular im Klartext');
+    pruefe(!w.document.getElementById('em-rule-edit').classList.contains('hidden'),
+        'und das Formular bleibt offen (die Eingabe geht nicht verloren)');
+}
+{
+    // Ordnerliste ist nur Bequemlichkeit: das Formular steht auch ohne sie
+    const { w } = bauePortal({});
+    await warte(80);
+    w.document.getElementById('em-new-rule').click();
+    await warte(80);
+    pruefe(!!w.document.getElementById('em-f-ordner'),
+        'das Ordner-Feld ist ein Freitextfeld (kein Warten auf die Abfrage)');
+    const dl = w.document.getElementById('em-ordner-liste');
+    pruefe(dl && dl.querySelectorAll('option').length === 2,
+        'die Ordnerliste wird als Vorschlagsliste nachgetragen');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('3. Protokoll');
+/* ═══════════════════════════════════════════════════════════════════════ */
+{
+    const { w } = bauePortal({});
+    await warte(80);
+    const zeilen = w.document.querySelectorAll('#em-log .em-log-row');
+    pruefe(zeilen.length === 2, 'die Protokolleintraege werden gezeichnet');
+    pruefe(zeilen[1].classList.contains('is-bad'),
+        'ein fehlgeschlagener Lauf ist gekennzeichnet');
+    pruefe(zeilen[1].textContent.indexOf('Test') > -1,
+        'ein Testlauf traegt ein Abzeichen');
+    pruefe(w.document.getElementById('em-log').innerHTML.indexOf('<b>roh</b>') === -1,
+        'Betreffzeilen werden entschaerft (Fremdtext!)');
+    pruefe(w.document.getElementById('em-log-status').textContent.indexOf('2') > -1,
+        'die Anzahl wird genannt');
+}
+{
+    const { w, rufe } = bauePortal({ log: [] });
+    await warte(80);
+    pruefe(w.document.querySelector('#em-log .em-empty') !== null,
+        'ein leeres Protokoll sagt das im Klartext');
+    const vorher = rufe.length;
+    w.document.getElementById('em-log-reload').click();
+    await warte(60);
+    pruefe(rufe.length > vorher, 'der Aktualisieren-Knopf laedt neu');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('4. Einstellungs-Reiter: zwei Knoepfe, zwei Teilmengen');
+/* ═══════════════════════════════════════════════════════════════════════ */
+function baueReiter(opt) {
+    opt = opt || {};
+    const dom = new JSDOM(SET_HTML, { url: 'https://x/settings', runScripts: 'outside-only' });
+    const w = dom.window;
+    w.localStorage.setItem('jarvis_token', 'T');
+    const rufe = [];
+    w.fetch = (url, o) => {
+        o = o || {};
+        rufe.push({ url: String(url), methode: (o.method || 'GET'),
+                    body: o.body ? JSON.parse(o.body) : null });
+        const gib = (d) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(d) });
+        if (url === '/api/skills/email/config') {
+            return gib({ kanal: 'auto', ews_url: 'https://mail.firma.de/EWS/Exchange.asmx',
+                         autodiscover: false, auth_typ: 'ntlm', verify_ssl: false,
+                         imap_host: 'imap.firma.de', imap_port: 993, imap_ssl: true,
+                         smtp_host: 'smtp.firma.de', smtp_port: 587, smtp_starttls: true,
+                         ordner_eingang: 'INBOX', zeitlimit: 30, takt_sekunden: 60,
+                         bereiche: 'mail,wissen' });
+        }
+        if (url === '/api/email/admin/overview') {
+            return gib({ ok: true, skill_aktiv: true, bereiche: BEREICHE,
+                         freigegeben: ['mail', 'wissen'], kategorie: 'Jarvis',
+                         freigabe: { users: 'a.bender', group: '' },
+                         regeln_gesamt: 3,
+                         konten: opt.konten || [
+                             { benutzer: 'nexus\\a.bender', benutzer_norm: 'a.bender',
+                               adresse: 'a.bender@nexus.int', aktiv: true,
+                               passwort_gesetzt: true, letzter_erfolg: 1754990000,
+                               letzter_fehler: '', regeln: 3, regeln_aktiv: 2 },
+                             { benutzer: 'nexus\\<script>x</script>', benutzer_norm: 'boese',
+                               adresse: 'b@x.de', aktiv: false, passwort_gesetzt: false,
+                               letzter_erfolg: 0, letzter_fehler: 'LOGIN failed',
+                               regeln: 0, regeln_aktiv: 0 }
+                         ] });
+        }
+        if (url === '/api/email/admin/areas') {
+            return gib({ ok: true, bereiche: (o.body ? JSON.parse(o.body).bereiche : []) });
+        }
+        if (url === '/api/email/admin/explore') {
+            if (opt.expFehler) {
+                return Promise.resolve({ ok: false, status: 400,
+                    json: () => Promise.resolve({ ok: false, error: opt.expFehler }) });
+            }
+            return gib({ ok: true, benutzer: 'a.bender', ergebnis: {
+                kanal: 'ews',
+                test: { postfach: 'a.bender@nexus.int', server_version: 'Exchange 2019',
+                        ews_url: 'https://mail.firma.de/EWS/Exchange.asmx',
+                        eingang_gesamt: 42, eingang_ungelesen: 5 },
+                ordner: [{ name: 'INBOX', pfad: 'INBOX', anzahl: 42, ungelesen: 5 },
+                         { name: 'Buchhaltung', pfad: 'Archiv/Buchhaltung', anzahl: 7, ungelesen: 0 }],
+                nachrichten: [{ datum: '2026-08-12', von: 'k@x.de', betreff: '<b>x</b>' }]
+            } });
+        }
+        return gib({ ok: true });
+    };
+    w.eval(I18N);
+    w.eval(ADMIN_JS);
+    return { w, rufe };
+}
+{
+    const { w, rufe } = baueReiter({});
+    w.EmailAdmin.onShow();
+    await warte(80);
+    pruefe(w.document.getElementById('em-ews-url').value.indexOf('mail.firma.de') > -1,
+        'die Serverdaten werden geladen');
+    pruefe(w.document.getElementById('em-autodiscover').checked === false,
+        'autodiscover=false erscheint als false (nicht ueber Falsyness geraten)');
+    pruefe(w.document.getElementById('em-verify-ssl').checked === false,
+        'verify_ssl=false erscheint als false');
+    pruefe(w.document.getElementById('em-imap-ssl').checked === true,
+        'imap_ssl=true erscheint als true');
+    pruefe(w.document.getElementById('em-auth-typ').value === 'ntlm',
+        'das Anmeldeverfahren wird uebernommen');
+
+    // Bereichs-Kaesten
+    const kaesten = w.document.querySelectorAll('#em-areas input[type="checkbox"]');
+    pruefe(kaesten.length === BEREICHE.length, 'ALLE Bereiche erscheinen (auch die gesperrten)');
+    const mailBox = Array.from(kaesten).filter(c => c.value === 'mail')[0];
+    pruefe(mailBox.checked && mailBox.disabled, "'mail' ist gesetzt und gesperrt");
+    pruefe(w.document.getElementById('em-areas').textContent.indexOf('⚠') > -1,
+        "der Bereich 'voll' ist als Warnung gekennzeichnet");
+}
+{
+    // ZWEI KNOEPFE, ZWEI TEILMENGEN
+    const { w, rufe } = baueReiter({});
+    w.EmailAdmin.onShow();
+    await warte(80);
+    w.document.getElementById('em-save-conn').click();
+    await warte(60);
+    const conn = rufe.filter(r => r.url === '/api/skills/email/config' && r.methode === 'POST')[0];
+    pruefe(!!conn, 'Verbindung speichern ruft die Skill-Config');
+    pruefe(!('bereiche' in conn.body),
+        'der Verbindungs-Knopf sendet NIE bereiche (sonst ueberschriebe er die Freigabe)');
+    pruefe(conn.body.ews_url.indexOf('mail.firma.de') > -1, 'die Serverdaten gehen mit');
+    pruefe(typeof conn.body.autodiscover === 'boolean',
+        'Haken werden als echte Wahrheitswerte gesendet');
+    pruefe(typeof conn.body.imap_port === 'number', 'Ports werden als Zahl gesendet');
+}
+{
+    const { w, rufe } = baueReiter({});
+    w.EmailAdmin.onShow();
+    await warte(80);
+    Array.from(w.document.querySelectorAll('#em-areas input[type="checkbox"]'))
+        .filter(c => c.value === 'fach')[0].checked = true;
+    w.document.getElementById('em-save-areas').click();
+    await warte(60);
+    const areas = rufe.filter(r => r.url === '/api/email/admin/areas')[0];
+    pruefe(!!areas && areas.methode === 'POST', 'Freigabe speichern ruft den eigenen Endpunkt');
+    pruefe(Object.keys(areas.body).length === 1 && Array.isArray(areas.body.bereiche),
+        'der Freigabe-Knopf sendet NUR bereiche');
+    pruefe(areas.body.bereiche.indexOf('fach') > -1 && areas.body.bereiche.indexOf('mail') > -1,
+        'die Auswahl geht samt Pflicht-Bereich mit');
+    pruefe(!rufe.some(r => r.url === '/api/skills/email/config' && r.methode === 'POST'),
+        'und der Freigabe-Knopf schreibt KEINE Serverdaten');
+}
+{
+    const { w } = baueReiter({});
+    w.EmailAdmin.onShow();
+    await warte(80);
+    const tab = w.document.getElementById('em-accounts');
+    pruefe(tab.textContent.indexOf('a.bender@nexus.int') > -1, 'die Konten werden gelistet');
+    pruefe(tab.textContent.indexOf('2 / 3') > -1, 'aktive und gesamte Regelzahl erscheinen');
+    pruefe(tab.innerHTML.indexOf('<script>') === -1, 'XSS im Benutzernamen wird entschaerft');
+    pruefe(tab.textContent.indexOf('LOGIN failed') > -1, 'ein Konto-Fehler ist sichtbar');
+    pruefe(tab.textContent.indexOf('kein Kennwort') > -1,
+        'ein Konto ohne Kennwort ist erkennbar');
+    pruefe(w.document.getElementById('em-acc-count').textContent.indexOf('2') > -1,
+        'die Anzahl steht in der Kopfzeile (der Container kann zu sein)');
+    // Der Reiter darf keine Regel-Inhalte zeigen
+    pruefe(tab.textContent.indexOf('Pruefe auf Rechnung') === -1,
+        'der Reiter zeigt KEINE Regel-Prompts (die gehoeren dem Benutzer)');
+    const sel = w.document.getElementById('em-exp-user');
+    pruefe(sel.options.length === 2, 'der Explorer bietet die hinterlegten Konten an');
+    pruefe(sel.options[0].value === 'a.bender',
+        'und benutzt den normalisierten Namen als Wert');
+}
+{
+    const { w, rufe } = baueReiter({});
+    w.EmailAdmin.onShow();
+    await warte(80);
+    w.document.getElementById('em-explore').click();
+    await warte(80);
+    const exp = rufe.filter(r => r.url === '/api/email/admin/explore')[0];
+    pruefe(!!exp && exp.methode === 'POST', 'der Explorer ruft seinen Endpunkt');
+    pruefe(exp.body.benutzer === 'a.bender', 'mit dem gewaehlten Benutzer');
+    pruefe(!('passwort' in exp.body) && !('adresse' in exp.body),
+        'der Explorer sendet NIE Zugangsdaten (kein Anmelde-Werkzeug)');
+    const res = w.document.getElementById('em-exp-result');
+    pruefe(res.textContent.indexOf('Exchange 2019') > -1, 'die Serverangabe erscheint');
+    pruefe(res.textContent.indexOf('Archiv/Buchhaltung') > -1,
+        'der Ordnerbaum erscheint mit vollem Pfad');
+    pruefe(res.innerHTML.indexOf('<b>x</b>') === -1, 'Betreffzeilen werden entschaerft');
+    pruefe(w.document.getElementById('em-exp-status').textContent.indexOf('ews') > -1,
+        'der benutzte Kanal wird genannt');
+}
+{
+    const { w } = baueReiter({ expFehler: 'Fuer diesen Benutzer ist kein Postfach hinterlegt.' });
+    w.EmailAdmin.onShow();
+    await warte(80);
+    w.document.getElementById('em-explore').click();
+    await warte(80);
+    pruefe(w.document.getElementById('em-exp-status').textContent.indexOf('kein Postfach') > -1,
+        'ein Explorer-Fehler erscheint im Klartext');
+    pruefe(w.document.getElementById('em-explore').disabled === false,
+        'der Knopf wird danach wieder freigegeben');
+}
+{
+    const { w } = baueReiter({ konten: [] });
+    w.EmailAdmin.onShow();
+    await warte(80);
+    pruefe(w.document.getElementById('em-accounts').textContent.indexOf('Noch kein Postfach') > -1,
+        'ohne Konten steht ein erklaerender Text mit dem Weg zur Freigabe');
+    pruefe(w.document.getElementById('em-exp-user').options[0].value === '',
+        'der Explorer bietet dann kein Konto an');
+}
+{
+    // onShow ist idempotent (Reiter-Klick UND openModal rufen es)
+    const { w, rufe } = baueReiter({});
+    w.EmailAdmin.onShow();
+    await warte(60);
+    w.EmailAdmin.onShow();
+    await warte(60);
+    w.document.getElementById('em-save-areas').click();
+    await warte(60);
+    pruefe(rufe.filter(r => r.url === '/api/email/admin/areas').length === 1,
+        'onShow ist idempotent (kein doppelt gebundener Knopf)');
+}
+{
+    // Klapp-Container: PROJEKT-MUSTER (kb-collapse-header + h3 links, Pfeil
+    // rechts), verdrahtet ueber app.js::_collapseInit. Die erste Fassung hatte
+    // eine eigene Logik mit eigenem Markup – dabei stand der Titel RECHTS, weil
+    // `.kb-section-header` `justify-content: space-between` setzt (im Screenshot
+    // vom 2026-08-12 gesehen, jsdom rechnet kein Layout).
+    ['conn', 'areas', 'explore', 'accounts'].forEach(function (s) {
+        const hdr = SET_HTML.indexOf('id="em-sect-' + s + '-hdr"');
+        pruefe(hdr > -1, 'Kopfzeile em-sect-' + s + '-hdr existiert');
+        pruefe(SET_HTML.indexOf('id="em-sect-' + s + '-body"') > -1,
+            'Koerper em-sect-' + s + '-body existiert');
+        pruefe(SET_HTML.indexOf('id="em-sect-' + s + '-tog"') > -1,
+            'Umschalter em-sect-' + s + '-tog existiert');
+    });
+    const panel = SET_HTML.slice(SET_HTML.indexOf('id="settings-tab-email"'),
+                                 SET_HTML.indexOf('Tab: Kundenverwaltung'));
+    pruefe((panel.match(/kb-collapse-header/g) || []).length === 4,
+        'alle vier Container nutzen das Projekt-Muster kb-collapse-header');
+    pruefe(panel.indexOf('data-em-sect') === -1,
+        'die eigene Klapp-Verdrahtung ist verschwunden');
+    pruefe((panel.match(/<h3>/g) || []).length === 4,
+        'der Titel steht als <h3> zuerst (sonst schiebt space-between ihn nach rechts)');
+    pruefe(APP.indexOf('_initEmailCollapse') > -1 && APP.indexOf('window.initEmailCollapse') > -1,
+        'app.js registriert die vier Container bei _collapseInit');
+    pruefe(ADMIN_JS.indexOf('window.initEmailCollapse') > -1,
+        'email.js benutzt die zentrale Klapp-Logik statt einer eigenen');
+
+    // Kontrollkaestchen: Projekt-Muster + scoped CSS gegen .form-group label
+    pruefe((panel.match(/label class="checkbox-group"/g) || []).length === 4,
+        'Kontrollkaestchen nutzen .checkbox-group (Muster des SAP-Reiters)');
+    const CSS = fs.readFileSync(path.join(ROOT, 'frontend/css/style.css'), 'utf8');
+    // GLOBAL (Vorgabe des Nutzers 2026-08-12): `.form-group label.checkbox-group`
+    // ohne Reiter-Praefix. Der Wirkungsbereich bleibt der Konfliktfall –
+    // Kaestchen INNERHALB einer .form-group; ausserhalb war nie etwas kaputt.
+    pruefe(/(^|\n)\.form-group label\.checkbox-group \{/.test(CSS),
+        'die Regel gilt global fuer .form-group label.checkbox-group');
+    pruefe(CSS.indexOf('#settings-tab-email .form-group label.checkbox-group') === -1
+        && CSS.indexOf('#settings-tab-sap .form-group label.checkbox-group') === -1,
+        'die Reiter-Praefixe sind heraus (keine Doppelpflege)');
+    const regel = CSS.slice(CSS.indexOf('.form-group label.checkbox-group {'));
+    ['display: flex', 'text-transform: none', 'gap:'].forEach(function (teil) {
+        pruefe(regel.slice(0, 260).indexOf(teil) > -1, 'die Regel setzt ' + teil);
+    });
+    // Der SAP-Reiter war der Anlass fuer die Ausweitung: dort standen dieselben
+    // vier Kaestchen gross geschrieben und ohne Abstand.
+    const SAP_PANEL = SET_HTML.slice(SET_HTML.indexOf('id="settings-tab-sap"'),
+                                     SET_HTML.indexOf('Tab: E-Mail'));
+    pruefe((SAP_PANEL.match(/label class="checkbox-group"/g) || []).length === 4,
+        'im SAP-Reiter sind es genau die vier bekannten Kaestchen',
+        String((SAP_PANEL.match(/label class="checkbox-group"/g) || []).length));
+    // Inline gesetzte Werte muessen weiter gewinnen, sonst rutschen die
+    // Branding-Radios untereinander bzw. verlieren die Profil-Kaestchen ihr flex:1.
+    pruefe(SET_HTML.indexOf('style="display:inline-flex;gap:6px;margin-right:18px;"') > -1,
+        'die Branding-Radios behalten ihr Inline-display:inline-flex');
+    pruefe(regel.slice(0, 260).indexOf('!important') === -1,
+        'die Regel benutzt KEIN !important (sonst schluege sie die Inline-Styles)');
+    pruefe(CSS.indexOf('.em-area-grid') > -1 && panel.indexOf('class="em-area-grid"') > -1,
+        'die Bereichs-Kaesten haben eine eigene Klasse (.role-tools ist fuer kurze Namen)');
+    pruefe(panel.indexOf('class="role-tools"') === -1,
+        'und benutzen NICHT .role-tools (fuenf gequetschte Spalten)');
+
+    // btn-primary hat width:100% – in einer Flex-Zeile braucht es flex:0 0 auto
+    pruefe((panel.match(/id="em-save-conn"[^>]*flex:0 0 auto/) || []).length === 1,
+        '"Verbindung speichern" hat flex:0 0 auto (sonst ueber die ganze Breite)');
+    pruefe((panel.match(/id="em-save-areas"[^>]*flex:0 0 auto/) || []).length === 1,
+        '"Freigabe speichern" hat flex:0 0 auto');
+}
+{
+    // Keine Emoji-Icons: sie werden je nach System farbig gerendert und folgen
+    // keinem Theme (Regel aus .kb-hdr-btn; im Screenshot fielen ⚡ und 🗑 auf).
+    // Geprueft wird auf FARBIG voreingestellte Zeichen (Emoji_Presentation) –
+    // NICHT auf den ganzen Symbolbereich: ✓ ✎ ✕ ⚠ sind textuell voreingestellt
+    // und genau deshalb erlaubt. Die erste Fassung dieser Pruefung schlug an
+    // ihnen falsch an.
+    const zeilen = PORTAL_JS.split('\n').filter(z => z.trim().indexOf('//') !== 0);
+    const FARBIG = /[\u{1F000}-\u{1FAFF}]|[\u{2600}-\u{26FF}]\u{FE0F}|[⚡✅❌❗⭐⏰⏳⛔]/gu;
+    const farbig = zeilen.join('\n').match(FARBIG) || [];
+    pruefe(farbig.length === 0,
+        'keine farbig voreingestellten Emoji im ausgelieferten Markup', farbig.join(' '));
+    ['⏸', '▶', '⟳', '✎', '✕'].forEach(function (z) {
+        pruefe(PORTAL_JS.indexOf(z) > -1, 'monochromes Zeichen vorhanden: ' + z);
+    });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('5. Verdrahtung und Texte');
+/* ═══════════════════════════════════════════════════════════════════════ */
+{
+    pruefe(APP.indexOf('updateEmailTabVisibility') > -1,
+        'app.js kennt die Reiter-Sichtbarkeit');
+    pruefe((APP.match(/await updateEmailTabVisibility\(\)/g) || []).length === 1,
+        'openModal ruft sie auf ("KI & System" ist voreingestellt aktiv – der '
+        + 'Klick-Handler allein greift nie)');
+    pruefe(APP.indexOf("sec-sub-email") > -1,
+        'der Berechtigungsblock wird mit dem Skill ein-/ausgeblendet');
+    pruefe(APP.indexOf('window.EmailAdmin') > -1 && APP.indexOf('EmailAdmin.onShow') > -1,
+        'der Reiter-Klick startet EmailAdmin.onShow');
+    pruefe((SKILLS.match(/window\.updateEmailTabVisibility\(\)/g) || []).length === 3,
+        'alle drei Skill-Wechsel-Stellen rufen sie nach');
+    pruefe(/email:\s*'email'/.test(SKILLS), 'das Zahnrad des Skills fuehrt in den Reiter');
+    pruefe(APP.indexOf('settings-tab-email') > -1, 'das Panel ist in app.js registriert');
+
+    pruefe(SET_HTML.indexOf('id="settings-tab-btn-email"') > -1, 'der Reiter-Knopf existiert');
+    pruefe(/id="settings-tab-btn-email"[^>]*display:none/.test(SET_HTML),
+        'und startet versteckt (nur bei aktivem Skill sichtbar)');
+    pruefe(/id="sec-sub-email"[^>]*display:none/.test(SET_HTML),
+        'der Berechtigungsblock startet versteckt');
+    pruefe(SET_HTML.indexOf('js/email.js') > -1, 'email.js ist eingebunden');
+    pruefe(SET_HTML.indexOf('id="email-allowed-users"') > -1
+        && SET_HTML.indexOf('id="email-allowed-group"') > -1,
+        'die beiden Freigabefelder existieren');
+    pruefe(SET_HTML.indexOf('email_allowed_users:') > -1
+        && SET_HTML.indexOf('email_allowed_group:') > -1,
+        'sie werden beim Speichern mitgesendet');
+    pruefe(SET_HTML.indexOf('d.email_users') > -1 && SET_HTML.indexOf('d.email_group') > -1,
+        'und beim Laden vorbelegt');
+    pruefe(SET_HTML.indexOf("'email-allowed-users','email-allowed-group'") > -1,
+        'die Marken-Listen (Chips) werden fuer beide Felder neu aufgebaut');
+    pruefe(PICKER.indexOf("'email-allowed-users'") > -1
+        && PICKER.indexOf("'email-allowed-group'") > -1,
+        'beide Felder haengen am AD-Picker');
+    // Leer = niemand muss dort auch stehen
+    const block = SET_HTML.slice(SET_HTML.indexOf('id="sec-sub-email"'),
+                                 SET_HTML.indexOf('id="sec-sub-email"') + 3000);
+    pruefe(block.indexOf('niemand') > -1, 'der Block sagt "leer = niemand"');
+    pruefe(block.indexOf('unprivilegiert') > -1,
+        'und dass Regel-Laeufe unprivilegiert sind');
+
+    pruefe(PORTAL_HTML.indexOf('id="pt-card-email"') > -1, 'die Portal-Karte existiert');
+    pruefe(/class="pt-card hidden" id="pt-card-email"/.test(PORTAL_HTML),
+        'sie startet versteckt');
+    pruefe(PORTAL_HTML.indexOf('d.permissions.email') > -1,
+        'sie wird ueber permissions.email eingeblendet');
+
+    // role-grid: die Basisklasse ist Pflicht, sonst kein display:grid
+    const emailPanel = SET_HTML.slice(SET_HTML.indexOf('id="settings-tab-email"'),
+                                      SET_HTML.indexOf('Tab: Kundenverwaltung'));
+    pruefe(emailPanel.indexOf('class="role-grid-2"') === -1
+        && emailPanel.indexOf('class="role-grid-3"') === -1,
+        'role-grid-2/-3 werden nur MIT der Basisklasse role-grid benutzt');
+    pruefe(emailPanel.indexOf('class="role-grid role-grid-2"') > -1,
+        'die Basisklasse ist gesetzt (sonst fehlt display:grid)');
+    pruefe(emailPanel.indexOf('input-group') === -1,
+        '.input-group wird nicht benutzt (horizontaler Container, macht Kaestchen unklickbar)');
+}
+{
+    // i18n DE/EN deckungsgleich, keine harten Farben, kein Emoji-Icon
+    const deTeil = I18N.slice(0, I18N.indexOf('    en: {'));
+    const enTeil = I18N.slice(I18N.indexOf('    en: {'));
+    const deKeys = (deTeil.match(/'mail\.[a-z_0-9]+'/g) || []).sort();
+    const enKeys = (enTeil.match(/'mail\.[a-z_0-9]+'/g) || []).sort();
+    pruefe(deKeys.length > 40, 'es gibt reichlich mail.*-Texte', String(deKeys.length));
+    pruefe(deKeys.join() === enKeys.join(), 'alle mail.*-Texte gibt es in DE und EN');
+    pruefe(deTeil.indexOf("'portal.card_email'") > -1
+        && enTeil.indexOf("'portal.card_email'") > -1,
+        'die Kachel-Beschriftung gibt es in beiden Sprachen');
+
+    const css = MAIL_HTML.slice(MAIL_HTML.indexOf('<style>'), MAIL_HTML.indexOf('</style>'));
+    const hart = css.match(/#[0-9a-fA-F]{6}/g) || [];
+    // #fff ist als Schrift auf dem Akzent-Gradienten zulaessig (wie in sap.html)
+    const boese = hart.filter(h => h.toLowerCase() !== '#888899' && h.toLowerCase() !== '#777788');
+    pruefe(boese.length === 0,
+        'keine harten Farben ausser den uebernommenen Knopf-Grautoenen', boese.join());
+    pruefe(css.indexOf('var(--bg-secondary)') > -1 || css.indexOf('var(--bg-glass)') > -1,
+        'Flaechen kommen aus Theme-Variablen');
+    pruefe(css.indexOf('align-self: flex-start') > -1,
+        'die Zustands-Pille wird nicht auf die ganze Breite gezogen');
+    pruefe(MAIL_HTML.indexOf('id="btn-theme-toggle"') > -1,
+        'der Theme-Knopf traegt die Id, die der Avatar-Schalter erwartet');
+    pruefe(MAIL_HTML.indexOf('data-i18n="mail.portal_title"') > -1,
+        'der Seitentitel ist uebersetzbar');
+    // Alle i18n-Attribute zaehlen, nicht nur `data-i18n=` – Titel und
+    // Platzhalter sind genauso benutzersichtbarer Text.
+    pruefe((MAIL_HTML.match(/data-i18n[a-z-]*=/g) || []).length >= 28,
+        'die Seite ist durchgaengig uebersetzbar (inkl. Titel und Platzhalter)',
+        String((MAIL_HTML.match(/data-i18n[a-z-]*=/g) || []).length));
+    ['mail.portal_title', 'mail.acct_head', 'mail.rules_head', 'mail.log_head',
+     'mail.acct_test', 'mail.rules_new', 'mail.pw_ph'].forEach(function (k) {
+        pruefe(MAIL_HTML.indexOf(k) > -1, 'uebersetzbar: ' + k);
+    });
+
+    // Reihenfolge der Skripte: email_portal.js NACH i18n.js
+    const iP = MAIL_HTML.indexOf('src="/static/js/i18n.js');
+    const eP = MAIL_HTML.indexOf('src="/static/js/email_portal.js');
+    pruefe(iP > -1 && eP > iP, 'email_portal.js laedt nach i18n.js');
+    pruefe(MAIL_HTML.indexOf('js/sessions.js') > -1,
+        'sessions.js ist eingebunden (Abmelde-Signal)');
+    pruefe(PORTAL_JS.indexOf('JarvisSession') > -1,
+        'das Abmelde-Signal geht raus, bevor der Token verworfen wird');
+    const lo = PORTAL_JS.slice(PORTAL_JS.indexOf("em-logout-btn"));
+    pruefe(lo.indexOf('JarvisSession') < lo.indexOf('removeItem'),
+        'und zwar VOR dem Verwerfen des Tokens');
+
+    // Kein optionaler Aufruf auf einen falschen Methodennamen
+    const optAufrufe = (PORTAL_JS.match(/\w+\?\.\(\)/g) || []);
+    pruefe(optAufrufe.length === 0,
+        'keine ?.()-Aufrufe (ein falscher Methodenname waere unsichtbar)');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+console.log('\n' + '='.repeat(62));
+console.log('  ' + ok + ' OK, ' + fail + ' FAIL');
+console.log('='.repeat(62));
+process.exit(fail ? 1 : 0);
+})();

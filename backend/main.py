@@ -1144,6 +1144,47 @@ async def require_sap_access(request: Request, user: str = Depends(require_auth)
                "ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
+def _user_may_use_email(user: str) -> bool:
+    """Prädikat: Darf der Benutzer den E-Mail-Bereich (/email) nutzen?
+
+    Zuschnitt bewusst 1:1 wie ``_user_may_use_sap`` – gleiche Klasse von
+    Fähigkeit, gleiche Regeln:
+    - Erlaubt sind AUSSCHLIESSLICH Benutzer in ``email_allowed_users`` oder
+      Mitglieder von ``email_allowed_group``.
+    - Ist WEDER Liste NOCH Gruppe gesetzt, darf NIEMAND – ausdrücklich auch
+      keine lokalen Administratoren. "Leer = niemand" ist seit 2026-07-29 die
+      Regel für alle Freigabefelder.
+    - KEIN Admin-Bypass: ein Administrator hat hier nichts zu suchen, was er
+      nicht ausdrücklich für sich freigegeben hat. Der Bereich arbeitet mit
+      hinterlegten Postfach-Kennwörtern; ein stillschweigender Admin-Zugang
+      wäre der Weg, fremde Post zu lesen (das Postfach selbst ist zusätzlich
+      hart an den angemeldeten Benutzer gebunden, siehe skills/email/main.py).
+    """
+    u = (user or "").strip()
+    if not u:
+        return False
+    users_raw = config.get_setting("email_allowed_users", "").strip()
+    grp = config.get_setting("email_allowed_group", "").strip()
+    if not users_raw and not grp:
+        return False
+    plain = _norm_login(u)
+    if users_raw and plain in {_norm_login(x) for x in users_raw.split(",") if x.strip()}:
+        return True
+    if grp and _member_of_any_group(_user_group_dns_cache.get(plain, []), grp):
+        return True
+    return False
+
+
+async def require_email_access(request: Request, user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Prüft die E-Mail-Berechtigung (→ /api/email/*)."""
+    if _user_may_use_email(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein Zugriff auf den E-Mail-Bereich – nicht in der Benutzerliste/-Gruppe "
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
+               "E-Mail-Zugriff; ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
 def _is_kb_group_editor(user: str, group: dict) -> bool:
     """True, wenn der Benutzer als *gruppenspezifischer* Editor hinterlegt ist.
 
@@ -3393,6 +3434,49 @@ async def startup_knowledge_sync():
 
 
 @app.on_event("startup")
+async def startup_email_rules():
+    """Zeitplan der E-Mail-Regeln (Bereich /email).
+
+    Eigener Takt statt eines Cron-Auftrags – dieselbe Begruendung wie beim
+    Standort-Sync: das Intervall gehoert zur Regel, und der Skill soll nicht an
+    der Admin-Sperre fuer zeitgesteuerte Auftraege haengen (Regeln legen die
+    Benutzer selbst an, Entscheidung 2026-08-12).
+
+    Der Takt ist die PRUEFUNG, nicht das Intervall: faellig ist eine Regel erst,
+    wenn ihr eigenes Intervall abgelaufen ist (``mail_rules.faellige``). Es
+    laufen hoechstens ``MAX_LAEUFE_JE_DURCHGANG`` Regeln je Durchgang, und der
+    Agent hinter ``mail_runner`` ist durch eine Sperre serialisiert – zwei Laeufe
+    im selben Postfach koennten dieselbe Nachricht gleichzeitig verschieben.
+
+    Verzoegerter erster Lauf (120 s): der Dienststart baut Indizes vor und laedt
+    die Login-Caches. Ohne die Verzoegerung liefe die erste Regel womoeglich,
+    bevor ``_load_ad_caches`` die Rechte des Besitzers kennt – ``_rechte()``
+    faellt dann fail-closed auf "kein Internet, kein SAP" zurueck, und ein
+    Regel-Lauf haette stillschweigend weniger Werkzeuge als vorgesehen.
+    """
+    from backend import mail_accounts as _ma, mail_runner as _mr
+
+    async def _loop():
+        await asyncio.sleep(120)
+        while True:
+            takt = 60
+            try:
+                if _ma.skill_aktiv():
+                    try:
+                        takt = max(15, min(int(_ma.skill_config().get("takt_sekunden") or 60), 3600))
+                    except Exception:  # noqa: BLE001
+                        takt = 60
+                    await _mr.automatik_durchgang()
+            except Exception as e:  # noqa: BLE001
+                print(f"[Mail] Zeitplan-Lauf fehlgeschlagen: {e}", flush=True)
+            await asyncio.sleep(takt)
+    try:
+        asyncio.create_task(_loop())
+    except Exception as e:  # noqa: BLE001
+        print(f"[Mail] Startup-Fehler: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_log_retention():
     """Diagnose-Logs altern lassen (Vorgabe 90 Tage).
 
@@ -3900,6 +3984,10 @@ async def get_me(user: str = Depends(require_auth)):
         "is_admin": ist_admin,
         "permissions": {
             "sap": _user_may_use_sap(user) and _skill_active("sap"),
+            # Gleiche Logik wie bei sap: Freigabe UND aktiver Skill – die Kachel
+            # darf nicht auf eine 404-Seite fuehren. Die Datenendpunkte
+            # /api/email/* pruefen weiterhin nur die Freigabe.
+            "email": _user_may_use_email(user) and _skill_active("email"),
             "internet": _user_has_internet_access(user),
         },
         "license_banner": banner,
@@ -4764,6 +4852,10 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("sap_allowed_users", body["sap_allowed_users"])
     if "sap_allowed_group" in body:
         config.save_setting("sap_allowed_group", body["sap_allowed_group"])
+    if "email_allowed_users" in body:
+        config.save_setting("email_allowed_users", body["email_allowed_users"])
+    if "email_allowed_group" in body:
+        config.save_setting("email_allowed_group", body["email_allowed_group"])
     if "ad_bind_user" in body:
         _bu = (body["ad_bind_user"] or "").strip()
         config.save_setting("ad_bind_user", _bu)
@@ -4910,6 +5002,19 @@ async def get_ad_status(user: str = Depends(require_local_auth)):
             "group"     if config.get_setting("sap_allowed_group", "") else
             "users"     if config.get_setting("sap_allowed_users", "") else
             "none"      # nichts konfiguriert → nur lokale Admins
+        ),
+        "email_users": config.get_setting("email_allowed_users", ""),
+        "email_group": config.get_setting("email_allowed_group", ""),
+        # Beide Felder sind ODER-verknuepft (jeder Weg genuegt allein), deshalb
+        # gibt es den Modus `users_group` – ein Modus, der einen der beiden Werte
+        # verschweigt, ist genau die Anzeige, die den Login-Fehler vom
+        # 2026-07-29 unerklaerbar gemacht hat.
+        "email_mode": (
+            "users_group" if (config.get_setting("email_allowed_group", "")
+                              and config.get_setting("email_allowed_users", "")) else
+            "group"       if config.get_setting("email_allowed_group", "") else
+            "users"       if config.get_setting("email_allowed_users", "") else
+            "none"        # leer = niemand
         ),
         # Service-Konto für das Verzeichnis-Durchsuchen (Passwort nie ausliefern)
         "bind_user": config.get_setting("ad_bind_user", ""),
@@ -7333,6 +7438,470 @@ async def sap_stop(user: str = Depends(require_sap_access)):
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  E-Mail-Bereich (/email) – eigenes Postfach + Verarbeitungsregeln
+# ═══════════════════════════════════════════════════════════════════════════
+# ZWEI RECHTE-EBENEN, die man nicht verwechseln darf:
+#   * ``require_email_access``  – der BENUTZER-Bereich: eigenes Postfach, eigene
+#     Regeln, eigenes Protokoll. Jeder Endpunkt filtert zusaetzlich auf den
+#     angemeldeten Benutzer; es gibt keinen Weg zu fremden Konten oder Regeln.
+#   * ``require_local_auth``    – der ADMIN-Teil: Serverdaten, Bereichs-Freigabe,
+#     Exchange-Explorer gegen ein beliebiges hinterlegtes Postfach.
+# Der Explorer haengt bewusst am Admin: er zeigt Ordnernamen und Zaehler eines
+# Postfachs. Fuer das EIGENE Postfach hat der Benutzer denselben Blick ueber
+# ``/api/email/folders``.
+#
+# Kennwoerter gehen NIE hinaus – kein Endpunkt hier gibt eines zurueck, auch
+# nicht maskiert (``mail_accounts.konto_info`` liefert nur ``passwort_gesetzt``).
+
+def _email_skill_hinweis() -> dict | None:
+    """Einheitliche Absage, wenn der Skill aus ist (statt eines 500ers)."""
+    if _skill_active("email"):
+        return None
+    return {"ok": False, "skill_aktiv": False,
+            "error": "Der E-Mail-Skill ist nicht aktiv. Ein Administrator "
+                     "aktiviert ihn unter Einstellungen → Skills."}
+
+
+@app.get("/email", response_class=HTMLResponse)
+async def email_page():
+    """E-Mail-Bereich ausliefern – nur wenn der Skill aktiv ist.
+
+    Die Berechtigung wird hier NICHT geprueft: eine normale Navigation traegt
+    keinen Authorization-Header (der Token liegt im localStorage). Die Seite holt
+    als Erstes ``/api/me`` und schickt Unberechtigte aufs Portal. Unkritisch, weil
+    die Seite eine leere Huelle ist – jeder Datenabruf haengt an
+    ``require_email_access``."""
+    if not _skill_active("email"):
+        return HTMLResponse("<h1>404 – E-Mail-Bereich nicht aktiv</h1>", status_code=404)
+    f = FRONTEND_DIR / "email.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
+    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/api/email/status")
+async def email_status(user: str = Depends(require_email_access)):
+    """Zustand des Bereichs fuer die Oberflaeche: Konto, Server, Bereiche, Regelzahl."""
+    from backend import mail_accounts, mail_rules
+    cfg = mail_accounts.skill_config()
+    return JSONResponse({
+        "ok": True,
+        "skill_aktiv": _skill_active("email"),
+        "konto": mail_accounts.konto_info(user),
+        "server": {
+            # Nur, WAS konfiguriert ist – nicht die Zugangsdaten. Der Benutzer
+            # soll erkennen koennen, ob ueberhaupt ein Weg hinterlegt ist.
+            "kanal": cfg.get("kanal") or "auto",
+            "ews": bool((cfg.get("ews_url") or "").strip()) or bool(cfg.get("autodiscover", True)),
+            "imap": bool((cfg.get("imap_host") or "").strip()),
+            "smtp": bool((cfg.get("smtp_host") or "").strip()),
+        },
+        "bereiche": mail_rules.bereiche_katalog(),
+        "kategorie": mail_accounts.kategorie_name(),
+        "regeln": len(mail_rules.liste(user)),
+        "grenzen": {
+            "max_regeln": mail_rules.MAX_REGELN_JE_BENUTZER,
+            "min_intervall": mail_rules.MIN_INTERVALL_MIN,
+            "max_intervall": mail_rules.MAX_INTERVALL_MIN,
+            "max_je_lauf": mail_rules.MAX_JE_LAUF,
+            "prompt_max": mail_rules.PROMPT_MAX,
+        },
+    })
+
+
+@app.get("/api/email/account")
+async def email_account_get(user: str = Depends(require_email_access)):
+    """Eigenes Postfach-Konto – ohne Kennwort (nur ``passwort_gesetzt``)."""
+    from backend import mail_accounts
+    return JSONResponse({"ok": True, "konto": mail_accounts.konto_info(user)})
+
+
+@app.post("/api/email/account")
+async def email_account_set(request: Request, user: str = Depends(require_email_access)):
+    """Eigenes Postfach hinterlegen/aendern.
+
+    Der Benutzer kommt aus der Anmeldung, NIE aus dem Rumpf – sonst waere
+    ``{"user": "chef"}`` der Weg, ein fremdes Konto zu ueberschreiben.
+    Ein LEERES Kennwortfeld bedeutet "unveraendert" (siehe mail_accounts)."""
+    from backend import mail_accounts
+    from backend.mail_client import MailFehler
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    # KEIN Vorfiltern auf die Whitelist: der Rumpf geht unveraendert an
+    # ``speichern()``, und DIE Whitelist dort entscheidet. Ein Vorfilter hier
+    # haette ein unbekanntes Feld (z.B. ``imap_host``) still verworfen und
+    # trotzdem "gespeichert" gemeldet – der Aufrufer haette geglaubt, seine
+    # Eingabe sei uebernommen. Zwei Schichten mit unterschiedlicher Meinung sind
+    # genau das Muster, das in diesem Projekt schon mehrfach Stunden gekostet
+    # hat; jetzt gibt es EINE Stelle und einen Klartext-Fehler (HTTP 400).
+    try:
+        info = await asyncio.to_thread(mail_accounts.speichern, user, body or {})
+    except MailFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "konto": info})
+
+
+@app.delete("/api/email/account")
+async def email_account_del(user: str = Depends(require_email_access)):
+    """Eigenes Konto entfernen. Regeln bleiben stehen (sie laufen dann nicht).
+
+    Bewusst kein Kaskaden-Loeschen: die Regeln enthalten die Arbeit des
+    Benutzers (Prompts). Wer sein Kennwort zurueckzieht, will nicht zwangslaeufig
+    seine Regeln verlieren."""
+    from backend import mail_accounts
+    weg = await asyncio.to_thread(mail_accounts.loeschen, user)
+    return JSONResponse({"ok": True, "entfernt": bool(weg)})
+
+
+@app.post("/api/email/test")
+async def email_test(user: str = Depends(require_email_access)):
+    """Verbindung zum eigenen Postfach pruefen und den benutzten Kanal melden."""
+    from backend import mail_accounts
+    from backend.mail_client import MailClient, MailFehler, klartext
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+
+    def _tun():
+        konto = mail_accounts.konto_fuer(user)
+        c = MailClient(konto)
+        try:
+            return c.test()
+        finally:
+            c.schliessen()
+    try:
+        res = await asyncio.to_thread(_tun)
+    except MailFehler as f:
+        mail_accounts.merke_ergebnis(user, False, str(f))
+        return JSONResponse({"ok": False, "kategorie": f.kategorie,
+                             "error": klartext(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    mail_accounts.merke_ergebnis(user, True)
+    return JSONResponse({"ok": True, "ergebnis": res})
+
+
+@app.get("/api/email/folders")
+async def email_folders(user: str = Depends(require_email_access)):
+    """Ordner des EIGENEN Postfachs (fuer die Zielordner-Auswahl in den Regeln)."""
+    from backend import mail_accounts
+    from backend.mail_client import MailClient, MailFehler, klartext
+
+    def _tun():
+        c = MailClient(mail_accounts.konto_fuer(user))
+        try:
+            return c.ordner()
+        finally:
+            c.schliessen()
+    try:
+        ordner = await asyncio.to_thread(_tun)
+    except MailFehler as f:
+        return JSONResponse({"ok": False, "error": klartext(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "ordner": ordner})
+
+
+@app.get("/api/email/messages")
+async def email_messages(ordner: str = "", limit: int = 15,
+                         user: str = Depends(require_email_access)):
+    """Kopfdaten der letzten Nachrichten des EIGENEN Postfachs (Vorschau im Bereich)."""
+    from backend import mail_accounts
+    from backend.mail_client import MailClient, MailFehler, klartext
+    try:
+        limit = max(1, min(int(limit or 15), 50))
+    except (TypeError, ValueError):
+        limit = 15
+
+    def _tun():
+        c = MailClient(mail_accounts.konto_fuer(user))
+        try:
+            return [m.kurz(text_max=0) for m in c.liste(ordner=ordner, limit=limit)]
+        finally:
+            c.schliessen()
+    try:
+        mails = await asyncio.to_thread(_tun)
+    except MailFehler as f:
+        return JSONResponse({"ok": False, "error": klartext(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "nachrichten": mails})
+
+
+@app.get("/api/email/rules")
+async def email_rules_list(user: str = Depends(require_email_access)):
+    """NUR die eigenen Regeln. Fremde sind nicht sichtbar (kein 'verboten', sie
+    existieren fuer diesen Benutzer einfach nicht)."""
+    from backend import mail_rules
+    return JSONResponse({"ok": True, "regeln": mail_rules.liste(user),
+                         "bereiche": mail_rules.bereiche_katalog()})
+
+
+@app.post("/api/email/rules")
+async def email_rules_create(request: Request, user: str = Depends(require_email_access)):
+    """Neue Regel des angemeldeten Benutzers.
+
+    **Hier steht die Entscheidung vom 2026-08-12:** Regeln legt der BENUTZER an,
+    nicht ein Administrator. Deshalb ``require_email_access`` und nicht
+    ``require_local_auth``. Was das ausgleicht (und ohne das der Endpunkt eine
+    Rechteerhoehung waere): der Besitzer wird aus der Anmeldung gesetzt, der
+    spaetere Lauf ist immer unprivilegiert (``mail_runner._actor_fuer``), und die
+    Werkzeug-Bereiche sind auf das begrenzt, was ein Administrator freigegeben
+    hat (``mail_rules._pruefe``)."""
+    from backend import mail_rules
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        r = await asyncio.to_thread(mail_rules.anlegen, user, body or {})
+    except mail_rules.RegelFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "regel": r})
+
+
+@app.put("/api/email/rules/{regel_id}")
+async def email_rules_update(regel_id: str, request: Request,
+                             user: str = Depends(require_email_access)):
+    """Eigene Regel aendern. ``id``/``owner`` sind unveraenderlich (Whitelist)."""
+    from backend import mail_rules
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        r = await asyncio.to_thread(mail_rules.aendern, regel_id, body or {}, user)
+    except mail_rules.RegelFehler as e:
+        # "nicht gefunden" ist hier auch die Antwort auf eine FREMDE Regel –
+        # kein Existenz-Orakel (gleiche Regel wie bei cron_delete).
+        code = 404 if "nicht gefunden" in str(e).lower() else 400
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=code)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "regel": r})
+
+
+@app.delete("/api/email/rules/{regel_id}")
+async def email_rules_delete(regel_id: str, user: str = Depends(require_email_access)):
+    """Eigene Regel loeschen (samt Verarbeitungs-Zustand)."""
+    from backend import mail_rules
+    weg = await asyncio.to_thread(mail_rules.loeschen, regel_id, user)
+    if not weg:
+        return JSONResponse({"ok": False, "error": "Regel nicht gefunden."},
+                            status_code=404)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/email/rules/{regel_id}/run")
+async def email_rules_run(regel_id: str, user: str = Depends(require_email_access)):
+    """Eigene Regel jetzt ausfuehren (Testlauf auf der neuesten passenden Mail).
+
+    **Der Lauf nutzt die Rechte des BESITZERS, nicht des Aufrufers** – hier ist
+    beides derselbe Benutzer, weil fremde Regeln unsichtbar sind. Die Regel wird
+    ueber ``mail_rules.holen`` geladen und der Besitzer geprueft; ohne diese
+    Pruefung waere "fremde Regel starten" der bequemste Eskalationsweg (die
+    Lehre von ``POST /api/cron/{id}/run``).
+
+    Der Testlauf setzt KEINEN Verarbeitungsvermerk, damit man ein Prompt
+    mehrfach ausprobieren kann. Die Aktionen sind dabei ECHT: ein Trockenlauf,
+    der nur behauptet, was passieren wuerde, waere eine Zusage, die das Modell
+    nicht einhalten muss."""
+    from backend import mail_rules, mail_runner
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    r = mail_rules.holen(regel_id)
+    if not r or r.get("owner") != mail_rules.norm_user(user):
+        return JSONResponse({"ok": False, "error": "Regel nicht gefunden."},
+                            status_code=404)
+    try:
+        bericht = await mail_runner.regel_lauf(r, testlauf=True)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Testlauf fehlgeschlagen: %s" % e},
+                            status_code=500)
+    return JSONResponse({"ok": bool(bericht.get("ok")), "bericht": bericht})
+
+
+@app.post("/api/email/stop")
+async def email_stop(user: str = Depends(require_email_access)):
+    """Laufenden Regel-Lauf abbrechen (der Bereich kennt einen Lauf zur Zeit)."""
+    from backend import mail_runner
+    mail_runner.stop()
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/email/log")
+async def email_log(regel_id: str = "", limit: int = 50,
+                    user: str = Depends(require_email_access)):
+    """Eigenes Verarbeitungsprotokoll (neueste zuerst).
+
+    Gefiltert wird auf den angemeldeten Benutzer – WAEHREND des Lesens, nicht
+    danach (sonst meldet die Oberflaeche "keine Eintraege", obwohl weiter hinten
+    welche liegen)."""
+    from backend import mail_rules
+    try:
+        limit = max(1, min(int(limit or 50), 300))
+    except (TypeError, ValueError):
+        limit = 50
+    eintraege = await asyncio.to_thread(
+        mail_rules.protokoll_lesen, user, (regel_id or "").strip(), limit)
+    return JSONResponse({"ok": True, "eintraege": eintraege})
+
+
+# ─── E-Mail: Administrator-Teil (Reiter) ─────────────────────────────────────
+
+@app.get("/api/email/admin/overview")
+async def email_admin_overview(user: str = Depends(require_local_auth)):
+    """Uebersicht fuer den Reiter: Freigabe, Bereiche, Konten, Regeln je Benutzer.
+
+    Zeigt bewusst KEINE Regel-Prompts und keine Betreffzeilen – der Reiter ist
+    zum Einrichten da, nicht zum Mitlesen. Der Administrator sieht, WER ein
+    Postfach hinterlegt hat und WIE VIELE Regeln laufen; der Inhalt gehoert dem
+    Benutzer."""
+    from backend import mail_accounts, mail_rules
+    regeln = mail_rules.liste(None)
+    je_benutzer: dict[str, int] = {}
+    aktiv_je_benutzer: dict[str, int] = {}
+    for r in regeln:
+        o = r.get("owner") or "?"
+        je_benutzer[o] = je_benutzer.get(o, 0) + 1
+        if r.get("enabled"):
+            aktiv_je_benutzer[o] = aktiv_je_benutzer.get(o, 0) + 1
+    konten = []
+    for un in mail_accounts.alle_benutzer():
+        info = mail_accounts.konto_info(un)
+        konten.append({
+            # Anzeigename mit Domaenen-Praefix (nexus\...) – die Aufbereitung
+            # gehoert ans AUSLESEN, nicht ans Speichern (Lehre vom 2026-08-10:
+            # "heilt sich beim naechsten Request" hilft bei Altbestand nie).
+            "benutzer": _display_name(un),
+            "benutzer_norm": un,
+            "adresse": info.get("adresse", ""),
+            "aktiv": info.get("aktiv", True),
+            "passwort_gesetzt": info.get("passwort_gesetzt", False),
+            "letzter_erfolg": info.get("letzter_erfolg", 0),
+            "letzter_fehler": info.get("letzter_fehler", ""),
+            "regeln": je_benutzer.get(un, 0),
+            "regeln_aktiv": aktiv_je_benutzer.get(un, 0),
+        })
+    return JSONResponse({
+        "ok": True,
+        "skill_aktiv": _skill_active("email"),
+        "freigabe": {
+            "users": config.get_setting("email_allowed_users", ""),
+            "group": config.get_setting("email_allowed_group", ""),
+        },
+        "bereiche": mail_rules.bereiche_katalog(),
+        "freigegeben": mail_rules.freigegebene_bereiche(),
+        "kategorie": mail_accounts.kategorie_name(),
+        "konten": konten,
+        "regeln_gesamt": len(regeln),
+    })
+
+
+@app.post("/api/email/admin/explore")
+async def email_admin_explore(request: Request, user: str = Depends(require_local_auth)):
+    """Exchange-Explorer: Ordnerbaum (und optional Kopfdaten) eines Postfachs.
+
+    Body: ``{benutzer?, ordner?, limit?}``. Ohne ``benutzer`` wird das Postfach
+    des aufrufenden Administrators genommen.
+
+    **Es werden ausschliesslich SCHON HINTERLEGTE Konten geoeffnet** – der
+    Explorer nimmt keine Adresse samt Kennwort aus dem Request. Sonst waere der
+    Endpunkt ein Anmelde-Werkzeug gegen beliebige Postfaecher (und mit
+    ``verify_ssl=false`` gegen beliebige Server), also dasselbe SSRF-Muster wie
+    bei ``/api/profiles/test``. Dass ein Administrator die Ordner eines
+    hinterlegten Postfachs sehen kann, ist dagegen genau der Zweck: ohne
+    Ordnernamen kann er die Vorgabe-Ordner nicht einstellen."""
+    from backend import mail_accounts
+    from backend.mail_client import MailClient, MailFehler, klartext
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    ziel = (body.get("benutzer") or user or "").strip()
+    ordner = (body.get("ordner") or "").strip()
+    try:
+        limit = max(0, min(int(body.get("limit") or 0), 50))
+    except (TypeError, ValueError):
+        limit = 0
+
+    if not mail_accounts.hat_konto(ziel):
+        return JSONResponse({
+            "ok": False,
+            "error": "Fuer '%s' ist kein Postfach hinterlegt. Der Explorer arbeitet "
+                     "nur mit bereits hinterlegten Konten – Zugangsdaten hinterlegt "
+                     "jeder Benutzer selbst im E-Mail-Bereich." % ziel}, status_code=400)
+
+    def _tun():
+        c = MailClient(mail_accounts.konto_fuer(ziel))
+        try:
+            raus = {"kanal": "", "ordner": c.ordner(), "nachrichten": []}
+            if limit:
+                raus["nachrichten"] = [m.kurz(text_max=0)
+                                       for m in c.liste(ordner=ordner, limit=limit)]
+            raus["kanal"] = c.aktiver_kanal
+            raus["test"] = c.test()
+            return raus
+        finally:
+            c.schliessen()
+    try:
+        res = await asyncio.to_thread(_tun)
+    except MailFehler as f:
+        return JSONResponse({"ok": False, "kategorie": f.kategorie,
+                             "error": klartext(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "benutzer": ziel, "ergebnis": res})
+
+
+@app.post("/api/email/admin/areas")
+async def email_admin_areas(request: Request, user: str = Depends(require_local_auth)):
+    """Freigegebene Werkzeug-Bereiche fuer Regeln setzen.
+
+    Sendet AUSSCHLIESSLICH ``bereiche`` an die Skill-Config: der Server merged
+    (``update_skill_config``), und ein Knopf, der den ganzen Formularstand
+    mitschickt, ueberschriebe die Serverdaten des anderen Knopfes (dieselbe
+    Trennung wie bei den SAP-Sichtbarkeiten)."""
+    from backend import mail_rules
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    roh = body.get("bereiche")
+    if isinstance(roh, str):
+        roh = [t.strip() for t in roh.split(",")]
+    # Unbekannte Kennungen werden VERWORFEN, nicht geraten – sonst bliebe eine
+    # entfernte Bereichs-Kennung dauerhaft in der Konfiguration stehen.
+    gewaehlt = [b for b in (roh or []) if b in mail_rules.BEREICHE]
+    if "mail" not in gewaehlt:
+        gewaehlt.insert(0, "mail")
+    gewaehlt = [b for b in mail_rules.BEREICHE if b in gewaehlt]
+    try:
+        sm = _get_skill_manager()
+        sm.update_skill_config("email", {"bereiche": ",".join(gewaehlt)})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "bereiche": gewaehlt})
 
 
 # ─── Jira (Reiter: Ticketsuche) ──────────────────────────────────────

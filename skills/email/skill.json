@@ -1,0 +1,138 @@
+{
+    "name": "E-Mail",
+    "description": "Anbindung des firmeninternen Exchange (EWS, mit IMAP/SMTP als Rueckfall). Jeder berechtigte Benutzer hinterlegt sein eigenes Postfach und legt Regeln an, die eingehende Nachrichten automatisch verarbeiten: beantworten, als Entwurf ablegen, verschieben, weiterleiten oder loeschen.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": ["email_ordner", "email_liste", "email_lesen", "email_senden", "email_entwurf", "email_antworten", "email_weiterleiten", "email_verschieben", "email_loeschen", "email_kategorie"],
+    "category": "kommunikation",
+    "icon": "mail",
+    "system": false,
+    "enabled": false,
+    "dependencies": ["exchangelib"],
+    "data_dirs": [],
+    "config_schema": {
+        "kanal": {
+            "type": "enum",
+            "label": "Zugangsweg",
+            "description": "auto = EWS versuchen, bei einem Kanalfehler auf IMAP/SMTP ausweichen (empfohlen). ews/imap = nur dieser Weg. Bei einem ANMELDEFEHLER wird NIE gewechselt - ein zweiter Versuch mit falschem Kennwort zaehlt in der Domaenen-Sperrpolitik mit.",
+            "options": ["auto", "ews", "imap"],
+            "default": "auto",
+            "required": true
+        },
+        "ews_url": {
+            "type": "string",
+            "label": "EWS-URL",
+            "description": "z.B. https://mail.firma.de/EWS/Exchange.asmx . Leer lassen, wenn Autodiscover benutzt werden soll.",
+            "default": ""
+        },
+        "autodiscover": {
+            "type": "boolean",
+            "label": "Autodiscover benutzen",
+            "description": "Ermittelt die EWS-URL selbst ueber DNS/SCP. Bei internem Exchange meist erfolgreich; scheitert es, EWS-URL eintragen und diesen Haken entfernen.",
+            "default": true
+        },
+        "auth_typ": {
+            "type": "enum",
+            "label": "EWS-Anmeldeverfahren",
+            "description": "auto = exchangelib entscheidet. Bei internem Exchange 2013/2016/2019 ist NTLM der Regelfall, basic nur bei ausdruecklich freigegebener Basisauthentifizierung.",
+            "options": ["auto", "ntlm", "basic"],
+            "default": "auto"
+        },
+        "verify_ssl": {
+            "type": "boolean",
+            "label": "Serverzertifikat pruefen",
+            "description": "Nur abschalten, wenn der interne Exchange ein selbst ausgestelltes Zertifikat benutzt, das dem Server nicht bekannt ist.",
+            "default": true
+        },
+        "imap_host": {
+            "type": "string",
+            "label": "IMAP-Server (Rueckfall)",
+            "description": "z.B. mail.firma.de - wird nur benutzt, wenn EWS nicht zur Verfuegung steht.",
+            "default": ""
+        },
+        "imap_port": {
+            "type": "number",
+            "label": "IMAP-Port",
+            "description": "993 mit TLS, 143 ohne.",
+            "default": 993
+        },
+        "imap_ssl": {
+            "type": "boolean",
+            "label": "IMAP ueber TLS",
+            "default": true
+        },
+        "smtp_host": {
+            "type": "string",
+            "label": "SMTP-Server (Rueckfall)",
+            "description": "Fuer das Senden ueber den Rueckfall-Kanal. Ohne SMTP-Server kann ueber IMAP nur gelesen, verschoben und ein Entwurf abgelegt werden.",
+            "default": ""
+        },
+        "smtp_port": {
+            "type": "number",
+            "label": "SMTP-Port",
+            "description": "587 mit STARTTLS, 465 mit TLS, 25 ohne.",
+            "default": 587
+        },
+        "smtp_starttls": {
+            "type": "boolean",
+            "label": "SMTP mit STARTTLS",
+            "default": true
+        },
+        "ordner_eingang": {
+            "type": "string",
+            "label": "Posteingang",
+            "description": "Vorgabe fuer alle Benutzer. Leer = INBOX bzw. der Standardordner des Postfachs.",
+            "default": "INBOX"
+        },
+        "ordner_entwuerfe": {
+            "type": "string",
+            "label": "Entwuerfe-Ordner",
+            "description": "Nur fuer den IMAP-Rueckfall noetig (bei EWS wird der Standardordner benutzt). Je Sprache z.B. 'Drafts' oder 'Entwuerfe'.",
+            "default": ""
+        },
+        "ordner_gesendet": {
+            "type": "string",
+            "label": "Gesendet-Ordner",
+            "description": "Nur fuer den IMAP-Rueckfall: dorthin wird eine Kopie gesendeter Nachrichten gelegt. Leer = keine Kopie.",
+            "default": ""
+        },
+        "zeitlimit": {
+            "type": "number",
+            "label": "Zeitlimit je Netzaufruf (Sekunden)",
+            "default": 30
+        },
+        "bereiche": {
+            "type": "string",
+            "label": "Freigegebene Werkzeug-Bereiche fuer Regeln",
+            "description": "Kommagetrennt: mail, wissen, fach, dokumente, voll. 'mail' ist immer dabei. Der Benutzer kann je Regel NUR aus den hier freigegebenen Bereichen waehlen. Wird ueber die Kaestchen im Reiter gepflegt - 'voll' bedeutet: der Regel-Lauf bekommt den ganzen Werkzeugkasten des Benutzers.",
+            "default": "mail"
+        },
+        "takt_sekunden": {
+            "type": "number",
+            "label": "Pruefabstand des Zeitplans (Sekunden)",
+            "description": "Wie oft geprueft wird, OB eine Regel faellig ist. Das Intervall je Regel stellt der Benutzer selbst ein (mindestens 1 Minute).",
+            "default": 60
+        }
+    },
+    "knowledge_docs": [],
+    "permissions": ["network"],
+    "help": {
+        "details": "Bindet den firmeninternen Exchange an. Der Administrator hinterlegt hier EINMAL die Serverdaten (EWS-URL bzw. Autodiscover, optional IMAP/SMTP als Rueckfall) und gibt frei, welche Werkzeug-Bereiche eine Regel benutzen darf. Jeder freigegebene Benutzer hinterlegt danach im Bereich 'E-Mail' im Portal SEIN Postfach mit eigenem Kennwort (verschluesselt gespeichert, verlaesst den Server nie) und legt beliebig viele Regeln an. Jede Regel hat ein frei editierbares Prompt; trifft eine neue Nachricht ein, entscheidet das Modell anhand des Prompts, was zu tun ist. Der Regel-Lauf ist immer unprivilegiert und laeuft unter der Kennung des Regel-Besitzers. Verarbeitete Nachrichten werden in einer Zustandsdatei vermerkt UND im Postfach mit einer Kategorie markiert (der Name kommt aus dem Branding). Wer den Bereich betreten darf, wird unter Einstellungen -> Sicherheit -> Berechtigungen -> E-Mail-Zugriff festgelegt - ohne Eintrag darf niemand.",
+        "tools": [
+            {"name": "email_liste", "label": "Nachrichten auflisten", "desc": "Kopfdaten aus einem Ordner des eigenen Postfachs."},
+            {"name": "email_lesen", "label": "Nachricht lesen", "desc": "Volltext samt Anhangsnamen (HTML wird zu Text vereinfacht)."},
+            {"name": "email_antworten", "label": "Antworten", "desc": "Antwort senden oder als Entwurf ablegen, mit Gespraechsfaden."},
+            {"name": "email_weiterleiten", "label": "Weiterleiten", "desc": "Ueber EWS mit Originalanhaengen; ueber IMAP nur der Text (mit Hinweis)."},
+            {"name": "email_verschieben", "label": "Verschieben", "desc": "In einen vorhandenen Ordner des eigenen Postfachs."},
+            {"name": "email_entwurf", "label": "Entwurf speichern", "desc": "Neue Nachricht ablegen, ohne sie zu senden."}
+        ],
+        "use_cases": [
+            "Zeig mir die ungelesenen Nachrichten in meinem Posteingang",
+            "Lies die letzte Mail von Herrn Sander vor",
+            "Beantworte die Anfrage von heute Morgen mit einem Entwurf",
+            "Verschiebe alle Rechnungen in den Ordner Buchhaltung"
+        ],
+        "notes": "Das Postfach ist bei allen Werkzeugen KEIN Parameter - es ergibt sich aus dem angemeldeten Benutzer. Ein Modell kann also nicht in einem fremden Postfach arbeiten. Eingehende Nachrichten sind Fremdtext: die Regel-Laeufe erhalten einen ausdruecklichen Hinweis, dass Anweisungen im Mailtext Sachverhalt sind und nicht befolgt werden. Trotzdem gilt: der Bereich 'voll' gibt einer praeparierten E-Mail die groesste Angriffsflaeche - im Zweifel nur 'mail' und 'wissen' freigeben. exchangelib wird beim Aktivieren installiert; ohne das Paket laeuft nur der IMAP/SMTP-Rueckfall."
+    }
+}

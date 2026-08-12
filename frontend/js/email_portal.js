@@ -1,0 +1,640 @@
+/* ═══════════════════════════════════════════════════════════════════
+   E-Mail-Bereich (/email) – Benutzerseite
+   ───────────────────────────────────────────────────────────────────
+   Drei Dinge auf einer Seite:
+     1. Eigenes Postfach hinterlegen (Adresse, Anmeldename, Kennwort)
+     2. Regeln pflegen – jede mit frei editierbarem Prompt
+     3. Protokoll der Laeufe
+
+   Nicht zu verwechseln mit `email.js`: das ist der EINSTELLUNGS-Reiter, in
+   dem ein Administrator die Serverdaten und die Werkzeug-Freigabe pflegt.
+   Hier arbeitet der Benutzer nur an SEINEM Postfach und SEINEN Regeln.
+
+   Berechtigung: jeder Endpunkt haengt serverseitig an
+   `require_email_access`, und jeder filtert zusaetzlich auf den angemeldeten
+   Benutzer. Die Pruefung hier ist reine Benutzerfuehrung – wer nicht
+   freigegeben ist, soll aufs Portal zurueck statt auf einer Seite voller
+   403-Meldungen zu landen.
+
+   DAS KENNWORT WIRD NIE ANGEZEIGT. Der Server liefert nur
+   `passwort_gesetzt`; ein leeres Feld heisst beim Speichern
+   "unveraendert" (sonst wuerde jedes Speichern der uebrigen Felder das
+   Kennwort loeschen).
+   ═══════════════════════════════════════════════════════════════════ */
+(function () {
+    'use strict';
+
+    // Gleiche Schluesselkette wie sap_portal.js/support.js – wer ueber /chat
+    // angemeldet ist, soll sich hier nicht erneut anmelden muessen.
+    var TOKEN_KEYS = ['jarvis_token', 'jarvis_chat_token', 'jarvis_uc_token'];
+
+    var _status = null;      // /api/email/status
+    var _regeln = [];
+    var _bereiche = [];
+    var _ordner = null;      // erst auf Bedarf geladen
+    var _editId = null;      // welche Regel ist offen ('neu' = neue Regel)
+    var _editHeim = null;    // Heimatplatz des wandernden Formulars
+
+    function $(id) { return document.getElementById(id); }
+    function T(key, fallback) {
+        var s = window.t ? window.t(key) : null;
+        return (s && s !== key) ? s : fallback;
+    }
+    function token() {
+        for (var i = 0; i < TOKEN_KEYS.length; i++) {
+            var v = localStorage.getItem(TOKEN_KEYS[i]);
+            if (v) return v;
+        }
+        return '';
+    }
+    function kopf(extra) {
+        return Object.assign({ 'Authorization': 'Bearer ' + token() }, extra || {});
+    }
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
+    function toPortal() { window.location.replace('/portal'); }
+    function melde(id, text, art) {
+        var e = $(id);
+        if (!e) return;
+        e.textContent = text || '';
+        e.style.color = art === 'ok' ? 'var(--success)'
+            : art === 'fehler' ? 'var(--danger)' : 'var(--text-muted)';
+    }
+    function zeit(ts) {
+        if (!ts) return '–';
+        try { return new Date(ts * 1000).toLocaleString(); } catch (e) { return '–'; }
+    }
+    function hole(url, opt) {
+        return fetch(url, Object.assign({ headers: kopf() }, opt || {}))
+            .then(function (r) {
+                return r.json().catch(function () { return {}; })
+                    .then(function (d) {
+                        if (!r.ok || d.ok === false) {
+                            throw new Error(d.error || ('HTTP ' + r.status));
+                        }
+                        return d;
+                    });
+            });
+    }
+    function sende(url, methode, daten) {
+        return hole(url, {
+            method: methode,
+            headers: kopf({ 'Content-Type': 'application/json' }),
+            body: daten === undefined ? undefined : JSON.stringify(daten)
+        });
+    }
+
+    /* ── Start ─────────────────────────────────────────────────────────── */
+    function init() {
+        if (!token()) { window.location.replace('/'); return; }
+        fetch('/api/me', { headers: kopf() })
+            .then(function (r) {
+                if (r.status === 401) { window.location.replace('/'); return null; }
+                return r.ok ? r.json() : null;
+            })
+            .then(function (me) {
+                if (!me) { toPortal(); return; }
+                // Fail-closed: fehlt das Feld (aelteres Backend), gilt "nicht
+                // freigegeben" – lieber zurueck aufs Portal als eine Seite, auf
+                // der jeder Knopf 403 liefert.
+                if (!(me.permissions && me.permissions.email)) { toPortal(); return; }
+                zeigeApp();
+            })
+            .catch(function () { toPortal(); });
+    }
+
+    function zeigeApp() {
+        $('em-app').classList.remove('hidden');
+        binde();
+        ladeStatus();
+        ladeRegeln();
+        ladeLog();
+        if (window.refreshBranding) { try { window.refreshBranding(); } catch (e) {} }
+    }
+
+    /* ── Postfach ──────────────────────────────────────────────────────── */
+    function ladeStatus() {
+        return hole('/api/email/status')
+            .then(function (d) {
+                _status = d;
+                _bereiche = d.bereiche || [];
+                zeigeKonto(d.konto || {});
+                zeigeServerHinweis(d);
+            })
+            .catch(function (e) {
+                melde('em-acct-status', e.message, 'fehler');
+            });
+    }
+
+    function zeigeKonto(k) {
+        var setz = function (id, wert) { var e = $(id); if (e) e.value = wert == null ? '' : wert; };
+        setz('em-adresse', k.adresse);
+        setz('em-benutzer', k.benutzer);
+        setz('em-kanal-user', k.kanal || '');
+        setz('em-ord-eingang', k.ordner_eingang);
+        setz('em-ord-entwuerfe', k.ordner_entwuerfe);
+        setz('em-ord-gesendet', k.ordner_gesendet);
+        var akt = $('em-aktiv');
+        // NICHT auf Falsyness pruefen: ein gespeichertes `false` muss als false
+        // erscheinen, ein FEHLENDES Feld dagegen als Vorgabe true.
+        if (akt) akt.checked = (k.aktiv === undefined ? true : !!k.aktiv);
+        var pw = $('em-passwort');
+        if (pw) pw.value = '';   // Kennwort wird nie vorbelegt
+        melde('em-pw-hint', k.passwort_gesetzt
+            ? T('mail.pw_set', '✓ Kennwort gespeichert (leer lassen = unverändert)')
+            : T('mail.pw_unset', 'Noch kein Kennwort gespeichert.'));
+
+        var pill = $('em-acct-pill');
+        if (pill) {
+            if (!k.vorhanden) {
+                pill.textContent = T('mail.pill_none', 'kein Postfach');
+                pill.className = 'em-pill is-off';
+            } else if (!k.aktiv) {
+                pill.textContent = T('mail.pill_off', 'inaktiv');
+                pill.className = 'em-pill is-off';
+            } else if (k.letzter_fehler) {
+                pill.textContent = T('mail.pill_error', 'Fehler');
+                pill.className = 'em-pill is-off';
+            } else {
+                pill.textContent = k.adresse || T('mail.pill_ok', 'verbunden');
+                pill.className = 'em-pill is-ok';
+            }
+        }
+        var box = $('em-acct-result');
+        if (box) {
+            var h = '';
+            if (k.letzter_erfolg) {
+                h += '<div class="em-hint">' + T('mail.last_ok', 'Zuletzt erfolgreich:')
+                    + ' ' + esc(zeit(k.letzter_erfolg)) + '</div>';
+            }
+            if (k.letzter_fehler) {
+                h += '<div class="em-hint" style="color:var(--danger);">'
+                    + T('mail.last_err', 'Letzter Fehler:') + ' ' + esc(k.letzter_fehler) + '</div>';
+            }
+            box.innerHTML = h;
+        }
+    }
+
+    function zeigeServerHinweis(d) {
+        var s = d.server || {};
+        var wege = [];
+        if (s.ews) wege.push('EWS');
+        if (s.imap) wege.push('IMAP');
+        if (s.smtp) wege.push('SMTP');
+        if (!wege.length) {
+            melde('em-acct-status', T('mail.no_server',
+                'Es ist noch kein Mailserver hinterlegt – bitte an den Administrator wenden.'),
+                'fehler');
+        }
+    }
+
+    function speichereKonto() {
+        var daten = {
+            adresse: (($('em-adresse') || {}).value || '').trim(),
+            benutzer: (($('em-benutzer') || {}).value || '').trim(),
+            kanal: ($('em-kanal-user') || {}).value || '',
+            aktiv: !!(($('em-aktiv') || {}).checked),
+            ordner_eingang: (($('em-ord-eingang') || {}).value || '').trim(),
+            ordner_entwuerfe: (($('em-ord-entwuerfe') || {}).value || '').trim(),
+            ordner_gesendet: (($('em-ord-gesendet') || {}).value || '').trim()
+        };
+        var pw = (($('em-passwort') || {}).value || '');
+        // Nur senden, wenn wirklich etwas eingegeben wurde – ein leeres Feld
+        // bedeutet "unveraendert", nicht "loeschen".
+        if (pw.trim()) daten.passwort = pw;
+        melde('em-acct-status', T('common.saving', 'Speichere…'));
+        return sende('/api/email/account', 'POST', daten)
+            .then(function (d) {
+                melde('em-acct-status', T('mail.acct_saved', '✓ Postfach gespeichert.'), 'ok');
+                zeigeKonto(d.konto || {});
+                _ordner = null;    // Ordnerliste kann sich geaendert haben
+            })
+            .catch(function (e) { melde('em-acct-status', e.message, 'fehler'); });
+    }
+
+    function testeKonto() {
+        var b = $('em-test-acct');
+        if (b) b.disabled = true;
+        melde('em-acct-status', T('mail.testing', 'Verbinde… (kann bis zu einer halben Minute dauern)'));
+        return sende('/api/email/test', 'POST')
+            .then(function (d) {
+                var r = d.ergebnis || {};
+                melde('em-acct-status', T('mail.test_ok', '✓ Verbindung steht') + ' ('
+                    + esc(r.kanal || '?') + ')', 'ok');
+                var box = $('em-acct-result');
+                if (box) {
+                    var h = '<div class="em-hint"><b>' + esc(r.postfach || '') + '</b>';
+                    if (r.server_version) h += ' · ' + esc(r.server_version);
+                    if (r.eingang_gesamt >= 0) {
+                        h += '<br>' + T('mail.inbox_count', 'Posteingang:') + ' '
+                            + r.eingang_gesamt + ' / ' + r.eingang_ungelesen + ' '
+                            + T('mail.unread', 'ungelesen');
+                    }
+                    box.innerHTML = h + '</div>';
+                }
+                ladeStatus();
+            })
+            .catch(function (e) { melde('em-acct-status', e.message, 'fehler'); })
+            .finally(function () { if (b) b.disabled = false; });
+    }
+
+    function loescheKonto() {
+        if (!window.confirm(T('mail.acct_del_confirm',
+            'Zugangsdaten wirklich entfernen? Deine Regeln bleiben erhalten, laufen aber nicht mehr.'))) {
+            return Promise.resolve();
+        }
+        return sende('/api/email/account', 'DELETE')
+            .then(function () {
+                melde('em-acct-status', T('mail.acct_deleted', 'Zugangsdaten entfernt.'), 'ok');
+                ladeStatus();
+            })
+            .catch(function (e) { melde('em-acct-status', e.message, 'fehler'); });
+    }
+
+    /* ── Regeln ────────────────────────────────────────────────────────── */
+    function ladeRegeln() {
+        return hole('/api/email/rules')
+            .then(function (d) {
+                _regeln = d.regeln || [];
+                if (d.bereiche) _bereiche = d.bereiche;
+                zeichneRegeln();
+            })
+            .catch(function (e) { melde('em-rules-status', e.message, 'fehler'); });
+    }
+
+    function heimHolen() {
+        // FALLSTRICK: liegt das Formular in der Liste, wuerde innerHTML='' es
+        // MITLOESCHEN (danach liefert getElementById null). Deshalb VOR dem
+        // Neuaufbau heimholen – gleiches Muster wie bei der Extraktions-Vorschau
+        // in /wissen und dem Rollen-Formular.
+        var box = $('em-rule-edit');
+        if (!box) return;
+        if (!_editHeim) return;          // noch nie verschoben
+        if (box.parentNode !== _editHeim) _editHeim.appendChild(box);
+    }
+
+    function zeichneRegeln() {
+        heimHolen();
+        var box = $('em-rules');
+        if (!box) return;
+        if (!_regeln.length) {
+            box.innerHTML = '<div class="em-empty">'
+                + T('mail.rules_empty', 'Noch keine Regel. Mit „+ Neue Regel" anfangen – '
+                    + 'zum Beispiel: „Wenn eine Rechnung eingeht, verschiebe sie in den Ordner '
+                    + 'Buchhaltung und antworte dem Absender mit einer kurzen Bestätigung."')
+                + '</div>';
+            if (_editId === 'neu') oeffneFormular(null, null);
+            return;
+        }
+        var h = '';
+        _regeln.forEach(function (r) {
+            var bereiche = (r.bereiche || []).map(function (b) {
+                var t = _bereiche.filter(function (x) { return x.id === b; })[0];
+                return t ? t.name : b;
+            }).join(', ');
+            h += '<div class="em-rule-card' + (r.enabled ? '' : ' is-off') + '" data-rid="'
+                + esc(r.id) + '">'
+                + '<div class="em-rule-row">'
+                + '<div class="em-rule-main">'
+                + '<div class="em-rule-name">' + esc(r.name)
+                + (r.enabled ? '' : '<span class="em-badge">' + T('mail.disabled', 'aus') + '</span>')
+                + '</div>'
+                + '<div class="em-rule-meta">' + esc(r.ordner || 'INBOX') + ' · '
+                + T('mail.every', 'alle') + ' ' + (r.intervall_min || 5) + ' min · '
+                + esc(bereiche)
+                + (r.letzter_lauf ? ' · ' + T('mail.last_run', 'zuletzt') + ' '
+                    + esc(zeit(r.letzter_lauf)) : '')
+                + '</div></div>'
+                + '<div class="em-rule-acts">'
+                + '<button class="em-icon-btn" data-act="toggle" title="'
+                + (r.enabled ? T('mail.pause', 'Regel anhalten') : T('mail.resume', 'Regel aktivieren'))
+                + '">' + (r.enabled ? '⏸' : '▶') + '</button>'
+                // Monochrome TEXTZEICHEN, keine Emojis: 🗑/⚡ werden je nach System
+                // farbig gerendert und folgen keinem Theme (dieselbe Regel wie bei
+                // .kb-hdr-btn und dem ⧉-Fund im Medien-Kontextmenue).
+                + '<button class="em-icon-btn" data-act="run" title="'
+                + T('mail.testrun', 'Jetzt testen (neueste passende Nachricht)') + '">⟳</button>'
+                + '<button class="em-icon-btn" data-act="edit" title="'
+                + T('common.edit', 'Bearbeiten') + '">✎</button>'
+                + '<button class="em-icon-btn is-danger" data-act="del" title="'
+                + T('common.delete', 'Löschen') + '">✕</button>'
+                + '</div></div></div>';
+        });
+        box.innerHTML = h;
+
+        box.querySelectorAll('.em-icon-btn').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var karte = b.closest('.em-rule-card');
+                var rid = karte && karte.dataset.rid;
+                var r = _regeln.filter(function (x) { return x.id === rid; })[0];
+                if (!r) return;
+                var act = b.dataset.act;
+                if (act === 'toggle') return schalte(r);
+                if (act === 'run') return testlauf(r, b);
+                if (act === 'edit') return (_editId === r.id)
+                    ? schliesseFormular() : oeffneFormular(r, karte);
+                if (act === 'del') return loescheRegel(r);
+            });
+        });
+
+        // Ein offenes Formular wieder unter seine Zeile setzen
+        if (_editId && _editId !== 'neu') {
+            var karte = box.querySelector('.em-rule-card[data-rid="' + _editId + '"]');
+            var r = _regeln.filter(function (x) { return x.id === _editId; })[0];
+            if (karte && r) oeffneFormular(r, karte);
+        } else if (_editId === 'neu') {
+            oeffneFormular(null, null);
+        }
+    }
+
+    function schalte(r) {
+        // Sendet AUSSCHLIESSLICH `enabled` – sonst schriebe der Schalter den
+        // Formularstand mit (der Merge laeuft ueber die Feld-Whitelist).
+        return sende('/api/email/rules/' + encodeURIComponent(r.id), 'PUT',
+            { enabled: !r.enabled })
+            .then(ladeRegeln)
+            .catch(function (e) { melde('em-rules-status', e.message, 'fehler'); });
+    }
+
+    function loescheRegel(r) {
+        if (!window.confirm(T('mail.rule_del_confirm', 'Regel „%s" wirklich löschen?')
+            .replace('%s', r.name))) return Promise.resolve();
+        return sende('/api/email/rules/' + encodeURIComponent(r.id), 'DELETE')
+            .then(function () {
+                if (_editId === r.id) { _editId = null; }
+                melde('em-rules-status', T('mail.rule_deleted', 'Regel gelöscht.'), 'ok');
+                return ladeRegeln();
+            })
+            .catch(function (e) { melde('em-rules-status', e.message, 'fehler'); });
+    }
+
+    function testlauf(r, knopf) {
+        if (knopf) knopf.disabled = true;
+        melde('em-rules-status', T('mail.testrun_wait',
+            'Testlauf läuft – das Modell arbeitet wirklich (kann Minuten dauern).'));
+        return sende('/api/email/rules/' + encodeURIComponent(r.id) + '/run', 'POST')
+            .then(function (d) {
+                var b = d.bericht || {};
+                if (b.fehler) {
+                    melde('em-rules-status', b.fehler, 'fehler');
+                } else if (!b.verarbeitet) {
+                    melde('em-rules-status', T('mail.testrun_none',
+                        'Keine passende, noch unverarbeitete Nachricht gefunden.'));
+                } else {
+                    var a = (b.aktionen || [])[0] || {};
+                    melde('em-rules-status', '✓ ' + (a.ergebnis || T('mail.testrun_ok', 'Lauf beendet.')), 'ok');
+                }
+                return ladeLog();
+            })
+            .catch(function (e) { melde('em-rules-status', e.message, 'fehler'); })
+            .finally(function () { if (knopf) knopf.disabled = false; });
+    }
+
+    /* ── Regel-Formular (wandert, aber es gibt nur EINES) ──────────────── */
+    function oeffneFormular(r, karte) {
+        var box = $('em-rule-edit');
+        if (!box) return;
+        // Heimatplatz NUR beim ersten Verschieben merken – ein erneutes Auslesen
+        // wuerde die verschobene Position als "Heimat" festschreiben.
+        if (!_editHeim) _editHeim = box.parentNode;
+        _editId = r ? r.id : 'neu';
+
+        var neu = !r;
+        r = r || { name: '', prompt: '', ordner: 'INBOX', bereiche: ['mail'],
+                   intervall_min: 5, max_je_lauf: 3, nur_ungelesen: true,
+                   markiere_gelesen: false, von_filter: '', betreff_filter: '',
+                   enabled: true };
+
+        var g = (_status && _status.grenzen) || {};
+        box.className = 'em-edit-box';
+        box.innerHTML =
+            '<div class="em-grid" style="margin-top:14px;">'
+            + '<div class="em-field"><label>' + T('mail.f_name', 'Name der Regel') + '</label>'
+            + '<input type="text" id="em-f-name" maxlength="120"></div>'
+            + '<div class="em-field"><label>' + T('mail.f_folder', 'Ordner') + '</label>'
+            + '<input type="text" id="em-f-ordner" list="em-ordner-liste" placeholder="INBOX">'
+            + '<datalist id="em-ordner-liste"></datalist></div>'
+            + '</div>'
+            + '<div class="em-field" style="margin-top:12px;">'
+            + '<label>' + T('mail.f_prompt', 'Prompt – was soll mit der Nachricht geschehen?') + '</label>'
+            + '<textarea id="em-f-prompt" maxlength="' + (g.prompt_max || 8000) + '" placeholder="'
+            + esc(T('mail.f_prompt_ph',
+                'Beispiel: Prüfe, ob es sich um eine Rechnung handelt. Wenn ja, verschiebe die '
+                + 'Nachricht in den Ordner Buchhaltung und antworte dem Absender mit einer kurzen '
+                + 'Eingangsbestätigung. Wenn Angaben fehlen, speichere stattdessen einen Entwurf.'))
+            + '"></textarea>'
+            + '<span class="em-hint">' + T('mail.f_prompt_hint',
+                'Das Modell wählt die Aktion selbst. Schreib klar, was zutreffen muss und was dann '
+                + 'passieren soll – und was im Zweifel NICHT passieren darf.') + '</span></div>'
+            + '<div class="em-field" style="margin-top:12px;">'
+            + '<label>' + T('mail.f_areas', 'Werkzeuge, die diese Regel benutzen darf') + '</label>'
+            + '<div class="em-tools" id="em-f-areas"></div></div>'
+            + '<div class="em-grid em-grid-3" style="margin-top:12px;">'
+            + '<div class="em-field"><label>' + T('mail.f_interval', 'Prüfen alle … Minuten') + '</label>'
+            + '<input type="number" id="em-f-intervall" min="' + (g.min_intervall || 1)
+            + '" max="' + (g.max_intervall || 1440) + '"></div>'
+            + '<div class="em-field"><label>' + T('mail.f_max', 'Nachrichten je Durchgang') + '</label>'
+            + '<input type="number" id="em-f-max" min="1" max="' + (g.max_je_lauf || 10) + '"></div>'
+            + '<div class="em-field"><label>' + T('mail.f_from', 'Nur von (optional)') + '</label>'
+            + '<input type="text" id="em-f-von" placeholder="rechnung@, @lieferant.de"></div>'
+            + '</div>'
+            + '<div class="em-grid" style="margin-top:12px;">'
+            + '<div class="em-field"><label>' + T('mail.f_subject', 'Nur Betreff enthält (optional)') + '</label>'
+            + '<input type="text" id="em-f-betreff" placeholder="Rechnung, Invoice"></div>'
+            + '<div class="em-field" style="justify-content:flex-end;gap:8px;">'
+            + '<label><input type="checkbox" id="em-f-unread" style="width:auto;margin-right:8px;">'
+            + T('mail.f_unread', 'nur ungelesene Nachrichten') + '</label>'
+            + '<label><input type="checkbox" id="em-f-read" style="width:auto;margin-right:8px;">'
+            + T('mail.f_read', 'nach Bearbeitung als gelesen markieren') + '</label>'
+            + '</div></div>'
+            + '<div class="em-row">'
+            + '<button class="em-btn em-btn-primary" id="em-f-save">'
+            + (neu ? T('mail.f_create', 'Regel anlegen') : T('common.save', 'Speichern')) + '</button>'
+            + '<button class="em-btn" id="em-f-cancel">' + T('common.cancel', 'Abbrechen') + '</button>'
+            + '<span class="em-status" id="em-f-status"></span>'
+            + '</div>';
+        box.classList.remove('hidden');
+
+        // Werte setzen (nach dem Aufbau, damit die Felder existieren)
+        $('em-f-name').value = r.name || '';
+        $('em-f-ordner').value = r.ordner || 'INBOX';
+        $('em-f-prompt').value = r.prompt || '';
+        $('em-f-intervall').value = r.intervall_min || 5;
+        $('em-f-max').value = r.max_je_lauf || 3;
+        $('em-f-von').value = r.von_filter || '';
+        $('em-f-betreff').value = r.betreff_filter || '';
+        $('em-f-unread').checked = (r.nur_ungelesen === undefined ? true : !!r.nur_ungelesen);
+        $('em-f-read').checked = !!r.markiere_gelesen;
+        zeichneBereichsWahl(r.bereiche || ['mail']);
+        fuelleOrdner();
+
+        $('em-f-save').addEventListener('click', function () { speichereRegel(neu ? null : _editId); });
+        $('em-f-cancel').addEventListener('click', schliesseFormular);
+
+        // Formular wird KIND der Karte – zwei Elemente, die wie eines aussehen
+        // sollen, muessen ineinander liegen (sonst bleibt ein Spalt sichtbar).
+        if (karte) karte.appendChild(box);
+        else if (_editHeim) _editHeim.appendChild(box);
+    }
+
+    function zeichneBereichsWahl(gewaehlt) {
+        var box = $('em-f-areas');
+        if (!box) return;
+        box.innerHTML = '';
+        var frei = _bereiche.filter(function (b) { return b.freigegeben; });
+        if (!frei.length) {
+            box.innerHTML = '<span class="em-hint">' + T('mail.no_areas',
+                'Der Administrator hat noch keine Werkzeuge freigegeben.') + '</span>';
+            return;
+        }
+        frei.forEach(function (b) {
+            var lab = document.createElement('label');
+            if (b.pflicht) lab.className = 'is-locked';
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.value = b.id;
+            cb.checked = b.pflicht || gewaehlt.indexOf(b.id) >= 0;
+            if (b.pflicht) cb.disabled = true;
+            lab.appendChild(cb);
+            var t = document.createElement('span');
+            t.innerHTML = '<b>' + esc(b.name) + (b.id === 'voll' ? ' ⚠' : '') + '</b><br>'
+                + '<span class="em-hint">' + esc(b.hinweis || '') + '</span>';
+            lab.appendChild(t);
+            box.appendChild(lab);
+        });
+    }
+
+    function fuelleOrdner() {
+        var dl = $('em-ordner-liste');
+        if (!dl) return;
+        var mal = function () {
+            dl.innerHTML = '';
+            (_ordner || []).forEach(function (o) {
+                var op = document.createElement('option');
+                op.value = o.pfad || o.name;
+                dl.appendChild(op);
+            });
+        };
+        if (_ordner) { mal(); return; }
+        // Nur EINMAL laden, und die Liste ist reine Bequemlichkeit: das Formular
+        // steht auch ohne sie (Freitextfeld). Eine Maske, die auf eine
+        // schmueckende Abfrage wartet, ist der Fehler vom 2026-08-11.
+        hole('/api/email/folders')
+            .then(function (d) { _ordner = d.ordner || []; mal(); })
+            .catch(function () { _ordner = []; });
+    }
+
+    function speichereRegel(id) {
+        var bereiche = [];
+        document.querySelectorAll('#em-f-areas input[type="checkbox"]').forEach(function (cb) {
+            if (cb.checked) bereiche.push(cb.value);
+        });
+        var daten = {
+            name: ($('em-f-name') || {}).value || '',
+            ordner: (($('em-f-ordner') || {}).value || '').trim() || 'INBOX',
+            prompt: ($('em-f-prompt') || {}).value || '',
+            bereiche: bereiche,
+            intervall_min: parseInt(($('em-f-intervall') || {}).value, 10),
+            max_je_lauf: parseInt(($('em-f-max') || {}).value, 10),
+            von_filter: (($('em-f-von') || {}).value || '').trim(),
+            betreff_filter: (($('em-f-betreff') || {}).value || '').trim(),
+            nur_ungelesen: !!(($('em-f-unread') || {}).checked),
+            markiere_gelesen: !!(($('em-f-read') || {}).checked)
+        };
+        if (isNaN(daten.intervall_min)) delete daten.intervall_min;
+        if (isNaN(daten.max_je_lauf)) delete daten.max_je_lauf;
+
+        melde('em-f-status', T('common.saving', 'Speichere…'));
+        var p = id
+            ? sende('/api/email/rules/' + encodeURIComponent(id), 'PUT', daten)
+            : sende('/api/email/rules', 'POST', daten);
+        return p.then(function (d) {
+            // Formular AUFRAEUMEN, nicht nur die Kennung vergessen: `ladeRegeln`
+            // holt den Container zwar heim, leert ihn aber nicht – ohne
+            // schliesseFormular() blieb das gefuellte Formular unter der Liste
+            // stehen (vom UI-Test gefunden).
+            schliesseFormular();
+            melde('em-rules-status', T('mail.rule_saved', '✓ Regel gespeichert.'), 'ok');
+            return ladeRegeln();
+        }).catch(function (e) { melde('em-f-status', e.message, 'fehler'); });
+    }
+
+    function schliesseFormular() {
+        _editId = null;
+        var box = $('em-rule-edit');
+        if (!box) return;
+        heimHolen();
+        box.innerHTML = '';
+        box.className = 'hidden';
+    }
+
+    /* ── Protokoll ─────────────────────────────────────────────────────── */
+    function ladeLog() {
+        return hole('/api/email/log?limit=60')
+            .then(function (d) { zeichneLog(d.eintraege || []); })
+            .catch(function (e) { melde('em-log-status', e.message, 'fehler'); });
+    }
+
+    function zeichneLog(eintraege) {
+        var box = $('em-log');
+        if (!box) return;
+        melde('em-log-status', eintraege.length
+            ? (eintraege.length + ' ' + T('mail.log_entries', 'Einträge'))
+            : '');
+        if (!eintraege.length) {
+            box.innerHTML = '<div class="em-empty">'
+                + T('mail.log_empty', 'Noch keine Läufe. Sobald eine Regel eine Nachricht '
+                    + 'bearbeitet, steht hier, was sie getan hat.') + '</div>';
+            return;
+        }
+        var h = '<div class="em-scroll">';
+        eintraege.forEach(function (e) {
+            h += '<div class="em-log-row' + (e.ok === false ? ' is-bad' : '') + '">'
+                + '<div class="em-log-head">'
+                + '<b>' + esc(e.regel || '?') + '</b>'
+                + (e.testlauf ? '<span class="em-badge">' + T('mail.test', 'Test') + '</span>' : '')
+                + '<span class="em-log-time">' + esc(zeit(e.ts)) + '</span>'
+                + '</div>';
+            if (e.mail_betreff || e.mail_von) {
+                h += '<div class="em-log-time">' + esc(e.mail_von || '?') + ' — '
+                    + esc(e.mail_betreff || '(kein Betreff)') + '</div>';
+            }
+            h += '<div class="em-log-res">' + esc(e.ergebnis || '') + '</div></div>';
+        });
+        box.innerHTML = h + '</div>';
+    }
+
+    /* ── Bindung ───────────────────────────────────────────────────────── */
+    function binde() {
+        var b;
+        if ((b = $('em-save-acct'))) b.addEventListener('click', speichereKonto);
+        if ((b = $('em-test-acct'))) b.addEventListener('click', testeKonto);
+        if ((b = $('em-del-acct'))) b.addEventListener('click', loescheKonto);
+        if ((b = $('em-log-reload'))) b.addEventListener('click', ladeLog);
+        if ((b = $('em-new-rule'))) b.addEventListener('click', function () {
+            if (_editId === 'neu') { schliesseFormular(); return; }
+            _editId = 'neu';
+            oeffneFormular(null, null);
+        });
+        if ((b = $('em-portal-btn'))) b.addEventListener('click', function () {
+            window.location.href = '/portal';
+        });
+        if ((b = $('em-logout-btn'))) b.addEventListener('click', function () {
+            // Signal MUSS raus, bevor der Token verworfen wird (sonst ist die
+            // Abmeldung nicht mehr authentifizierbar); keepalive, weil die Seite
+            // unmittelbar danach wegnavigiert.
+            var p = (window.JarvisSession ? window.JarvisSession.logout() : Promise.resolve());
+            TOKEN_KEYS.forEach(function (k) { localStorage.removeItem(k); });
+            p.catch(function () {}).then(function () { window.location.replace('/'); });
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();

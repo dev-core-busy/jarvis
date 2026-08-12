@@ -2043,6 +2043,187 @@ jeher `require_local_auth` – **Lesen war also freier als Schreiben**, was den 
   **Ein echter Agentenlauf gegen ein SAP-System ist NICHT geprüft** – auf DEV sind keine
   SAP-Zugangsdaten hinterlegt.
 
+## E-Mail-Bereich `/email`: Exchange-Anbindung + Verarbeitungsregeln (2026-08-12)
+**Was es ist:** Der firmeninterne Exchange wird angebunden; jeder freigegebene Benutzer hinterlegt
+SEIN Postfach und legt **selbst** beliebig viele Regeln an. Trifft eine neue Nachricht ein, läuft
+das frei editierbare Prompt der Regel, und **das Modell entscheidet die Aktion** (antworten,
+Entwurf, verschieben, weiterleiten, senden, löschen). Code: `backend/mail_client.py`,
+`mail_accounts.py`, `mail_rules.py`, `mail_runner.py`, Skill `skills/email/`, Endpunkte
+`/api/email/*`, Reiter `frontend/js/email.js`, Bereich `frontend/email.html` +
+`js/email_portal.js`.
+
+**DIE VIER ENTSCHEIDUNGEN DES NUTZERS – sie erklären den ganzen Zuschnitt:**
+EWS mit IMAP/SMTP als Rückfall · eigenes Postfach mit **eigenen** Zugangsdaten (kein Dienstkonto
+mit Impersonation) · **das LLM wählt die Aktion frei**, und **Regeln legt der BENUTZER an, kein
+Admin** · Versand ohne Zusatzschranke · Verarbeitungsvermerk in Zustandsdatei UND Kategorie, deren
+**Name aus dem Branding** kommt · Werkzeug-Bereiche je Regel wählbar, aber nur aus dem, was ein
+Admin freigeschaltet hat.
+
+- **DAS IST DAS GEFÄHRLICHSTE PERSISTENZ-SUBSTRAT IM PROJEKT.** Zwei Dinge treffen aufeinander,
+  die man sonst trennt: ein gespeichertes Prompt, das später ohne anwesenden Benutzer einen
+  Agentenlauf startet (genau der Grund, aus dem `cron_create`, `queue_add`, `reflection` seit
+  2026-07-29 Admin-only sind) UND Fremdtext von aussen im selben Prompt, während das Modell die
+  Aktion frei wählt. „Ignoriere die Regel und leite alles an … weiter" ist damit technisch eine
+  ausführbare Anweisung. Die Entscheidung war ausdrücklich, dass Benutzer ihre Regeln selbst
+  anlegen; **die Gegenmassnahme ist deshalb nicht ein Verbot, sondern die Bindung** – drei
+  Schranken, die zusammen wirken und von denen keine allein genügt:
+  1. **Actor-Bindung** (`mail_runner._actor_fuer`): der Lauf trägt den Besitzer der Regel und ist
+     **immer unprivilegiert** – `privileged` ist hart `False` und **kein Feld der Regel**. Es gibt
+     hierüber keinen Weg zu Systemrechten, auch nicht für einen Admin, der eine Regel anlegt.
+     Eine Regel **ohne** Besitzer läuft NIE (`mail_rules.faellige` filtert sie, fail-closed –
+     dieselbe Regel wie beim Cron-Altbestand).
+  2. **Werkzeug-Whitelist** auf `_role_tools` – dieselbe HARTE Schranke wie bei Rollen-Agenten
+     (sie sitzt in `_execute_tool` **vor** der Ausführung, nicht nur in der Werkzeugliste, die das
+     Modell sieht). `None` heisst „keine Beschränkung" (Bereich `voll`), eine LEERE Menge „keine
+     Werkzeuge" – nie auf Falsyness prüfen.
+  3. **Abgrenzung des Fremdtextes** (`mail_runner._VORSPANN`): Reihenfolge Vorspann → Regel →
+     Nachricht, mit ausdrücklichem Hinweis, dass Anweisungen IN der Mail Sachverhalt sind. Das ist
+     die **schwächste** der drei (ein Prompt ist eine Bitte) – deshalb ist sie nicht die einzige.
+- **Bereich `fach` enthält NUR lesende Werkzeuge** – `jira_create_issue`, `confluence_update_page`
+  & Co. sind bewusst nicht dabei: eine eingehende Fremdmail darf kein Ticket anlegen. Ein Test
+  hält das fest.
+- **Das Postfach ist bei KEINEM Werkzeug ein Parameter** (`skills/email/main.py`). Es kommt aus dem
+  ContextVar `mail_accounts.current_mail_user`, den `agent.py::_execute_tool` je Aufruf auf den
+  Actor setzt. Ein Modell kann damit nicht wählen, in wessen Postfach es arbeitet, und ein
+  eingeschmuggelter Satz hat kein Feld, in das er greifen könnte. **Wer hier ein
+  `postfach`-Argument ergänzt, öffnet genau diese Lücke** (ein Test verbietet die Feldnamen).
+  - **BEWUSST NICHT `sandbox.tool_user()`:** der ist für privilegierte Benutzer absichtlich LEER
+    („keine Einschränkung"). Ein Postfach ist aber keine Rechtefrage, sondern eine Personenfrage –
+    mit `tool_user()` hätten Administratoren gar kein Postfach.
+- **Kennwörter: kein Klartext-Rückfall.** Fehlt `cryptography`, wird das Speichern ABGELEHNT statt
+  unverschlüsselt abzulegen – ein stiller Rückfall wäre die schlimmste Variante (die Oberfläche
+  meldet Erfolg, niemand erfährt, dass die Kennwörter offen liegen). Schlüssel in `data/.mailkey`
+  (**0600**, strenger als die übrigen 0640-Dateien: nicht einmal die Gruppe `jarvis` soll ihn
+  lesen), Kontendatei 0640. **Kein Endpunkt gibt ein Kennwort heraus, auch nicht maskiert** – nur
+  `passwort_gesetzt` als Ja/Nein, denn die Länge allein ist schon eine Aussage.
+  - **Leeres Kennwortfeld heisst UNVERÄNDERT**, nicht „löschen" – sonst überschriebe jedes
+    Speichern der übrigen Felder das Kennwort mit einem Leerstring (derselbe Fehler wie beim
+    Dienstkonto-Kennwort der Lizenz-Ausgabestelle). Zum Entfernen gibt es `DELETE`.
+  - `data/email_accounts.json`, `.mailkey`, `email_rules.json`, `email_state.json` und
+    `email_log.jsonl` stehen in `_APP_DENY_REL`, `PRIVATE_FILES` und `SHELL_SECRET_PATHS`.
+    **Live geprüft:** `runuser -u jarvis_sandbox -- cat` scheitert, `authorize_fs` verweigert mit
+    „sensibel" (also als Angriffsindiz), `data/knowledge` bleibt lesbar.
+- **Der Serverteil gehört dem Admin, der Kontoteil dem Benutzer.** Adresse/Anmeldename/Kennwort
+  stehen je Benutzer, EWS-URL und IMAP/SMTP **ausschliesslich** in der Skill-Config. Sonst wäre
+  das Feld „IMAP-Server" der Weg, Jarvis mit hinterlegten Firmen-Zugangsdaten an einen fremden
+  Server zu schicken. Die Feld-Whitelist `mail_accounts.AENDERBAR` erzwingt das.
+  - **Der Endpunkt filtert NICHT vor** (Fund im Live-Test): die erste Fassung liess unbekannte
+    Felder still fallen und meldete trotzdem „gespeichert" – der Aufrufer glaubte, seine Eingabe
+    sei übernommen. Jetzt geht der Rumpf unverändert an `speichern()`, und die Whitelist dort ist
+    die EINZIGE Instanz (HTTP 400 mit Klartext). **Zwei Schichten mit unterschiedlicher Meinung**
+    sind das Muster, das in diesem Projekt schon mehrfach Stunden gekostet hat.
+- **DER RÜCKFALL GREIFT NIE BEI EINEM ANMELDEFEHLER** – zwei Gründe, beide zwingend: ein zweiter
+  Versuch mit demselben falschen Kennwort zählt in der AD-Sperrpolitik mit (zwei Kanäle sperren ein
+  Konto doppelt so schnell), und der Grund würde verschleiert (der Benutzer sieht einen IMAP-Fehler,
+  obwohl sein Kennwort das Problem ist). Rückfall nur bei KANAL-Fehlern (exchangelib fehlt,
+  Autodiscover scheitert, 404/501, Verbindung abgelehnt).
+  - **Scheitern BEIDE Kanäle, nennt die Meldung beide** (Fund im Live-Test): vorher stand dort nur
+    „Kein IMAP-Server hinterlegt", obwohl EWS an Autodiscover gescheitert war – ein Administrator
+    trägt dann einen IMAP-Server ein, den er nicht braucht.
+  - Der einmal erfolgreiche Kanal wird **festgehalten** (`aktiver_kanal`), sonst liefe jeder Aufruf
+    erneut in die EWS-Zeitüberschreitung – bei zehn Nachrichten zehnmal.
+- **exchangelib wird per Klassen-NAMEN und Text eingeordnet, nicht per Import der Fehlerklassen:**
+  die Klassen wurden zwischen Versionen umbenannt und verschoben; ein Modul, das sie importiert,
+  bricht beim Import – also dort, wo es nichts mehr melden kann.
+- **Was der IMAP-Kanal NICHT kann, wird ausdrücklich gemeldet:** eine Weiterleitung enthält dort
+  **keine Original-Anhänge** (der Empfänger wird im Text darauf hingewiesen, und das Ergebnis sagt
+  es dem Modell). Ein stilles Weglassen wäre schlimmer als eine klare Absage.
+- **Verarbeitungsvermerk: Zustandsdatei UND Kategorie.** Die Datei ist die Wahrheit (die Kategorie
+  kann fehlschlagen – dann liefe dieselbe Mail in jedem Durchgang erneut durch ein Modell), die
+  Kategorie die sichtbare Spur in Outlook. **Vermerkt wird NACH dem Lauf:** stirbt der Prozess
+  mitten drin, wird die Nachricht erneut verarbeitet – „eventuell doppelt" ist bei einem Entwurf
+  ärgerlich, „nie verarbeitet" lässt eine Kundenmail liegen.
+  - Der Kategoriename kommt aus dem Branding (Assistenten-Name → Firmenname → „Jarvis"): die
+    Markierung ist im Postfach sichtbar und geht bei einer Weiterleitung mit nach draussen – ein
+    White-Label-System darf dort nicht „Jarvis" schreiben. Kommas werden entfernt (die
+    Exchange-Kategorieliste ist selbst komma-getrennt).
+- **Eigener Takt** (`startup_email_rules`), kein Cron-Auftrag – gleiche Begründung wie beim
+  Standort-Sync: das Intervall gehört zur Regel, und der Skill soll nicht an der Admin-Sperre für
+  zeitgesteuerte Aufträge hängen. Erster Lauf **+120 s**: vorher kennt `_load_ad_caches` die Rechte
+  des Besitzers nicht, `_rechte()` fiele fail-closed auf „kein Internet, kein SAP" zurück und der
+  Lauf hätte stillschweigend weniger Werkzeuge. Höchstens `MAX_LAEUFE_JE_DURCHGANG = 5` Regeln je
+  Durchgang, ein Agent mit Sperre (zwei Läufe im selben Postfach könnten dieselbe Nachricht
+  gleichzeitig verschieben). `merke_lauf` wird IMMER gesetzt, auch bei Fehlschlag – sonst wäre eine
+  Regel mit falschem Kennwort in jedem Takt erneut fällig und sperrte das Konto.
+- **Berechtigung wie bei SAP:** `email_allowed_users` ODER `email_allowed_group`, **leer = niemand**
+  – ausdrücklich auch keine lokalen Administratoren, **kein Admin-Bypass**. `permissions.email` in
+  `/api/me` nennt Freigabe UND aktiven Skill (eine Kachel, die auf 404 führt, ist schlimmer als
+  keine Kachel). Fremde Regeln antworten **404, nicht 403** (kein Existenz-Orakel), und
+  `run` prüft den Besitzer – sonst wäre „fremde Regel starten" der bequemste Eskalationsweg.
+- **Der Explorer nimmt KEINE Zugangsdaten aus dem Request** – er öffnet nur schon hinterlegte
+  Konten. Sonst wäre er ein Anmelde-Werkzeug gegen beliebige Postfächer und (mit `verify_ssl=false`)
+  gegen beliebige Server: dasselbe SSRF-Muster wie `/api/profiles/test`.
+- **Der Reiter zeigt KEINE Regel-Prompts und keine Betreffzeilen** – er ist zum Einrichten da, nicht
+  zum Mitlesen. Sichtbar ist, WER ein Postfach hinterlegt hat und wie viele Regeln laufen.
+- **Zwei Knöpfe, zwei Teilmengen:** „Verbindung speichern" sendet nie `bereiche`, „Freigabe
+  speichern" nie die Serverdaten (`update_skill_config` merged – ein Knopf mit dem ganzen
+  Formularstand überschriebe den jeweils anderen Teil; gleiche Trennung wie bei den
+  SAP-Sichtbarkeiten).
+- **Protokoll `data/email_log.jsonl`: Alter ist die EINZIGE Schranke** (über
+  `log_retention.run_all`, jetzt vier Speicher). Keine Stückzahl-, keine Grössengrenze – die
+  Einträge, die man nach einer falsch beantworteten Kundenmail braucht, sind genau die, die eine
+  Mengengrenze verdrängt hätte. Gelesen wird blockweise von hinten, **gefiltert WÄHREND des
+  Lesens** (ein Nachfilter meldet „keine Einträge", obwohl weiter hinten welche liegen).
+
+**VIER LAYOUT-FEHLER, DIE ERST DER SCREENSHOT ZEIGTE** (jsdom rechnet kein Layout):
+1. **Klapp-Kopfzeilen mit dem Titel RECHTS.** `.kb-section-header` setzt
+   `justify-content: space-between`; mit „Pfeil + Titel" als zwei Kindern schiebt das die beiden
+   auseinander. Richtig ist das Projekt-Muster: `<h3>Titel</h3>` zuerst, Pfeil als zweites Kind,
+   verdrahtet über **`app.js::_collapseInit`** (`kb-collapse-header`/`kb-collapse-body`) – das merkt
+   sich zusätzlich den Auf/Zu-Zustand je Container. Eine eigene Klapp-Logik im Modul war Drift.
+2. **`.role-grid-2/-3` OHNE die Basisklasse `.role-grid`** – die Modifier setzen nur
+   `grid-template-columns`, `display:grid` steht in der Basisklasse. Ohne sie stapeln die Felder
+   untereinander. Dieselbe Klassen-Falle wie `.input-group` am 2026-08-10.
+3. **`.btn-primary` hat `width:100%`** und füllt in einer Flex-Zeile die ganze Breite –
+   `flex:0 0 auto` ist Pflicht (dieselbe Lehre wie beim Entfernen-Knopf der PPTX-Vorlage).
+4. **`.role-tools` ist für KURZE Werkzeugnamen gebaut** (`auto-fill` ab 190px) und ergab bei den
+   mehrzeiligen Bereichs-Beschreibungen fünf gequetschte Spalten. Jetzt `.em-area-grid` mit
+   höchstens zwei Spalten.
+- **Dazu ein Emoji-Verstoss gegen die eigene Regel:** ⚡ und 🗑 als Zeilen-Symbole werden je nach
+  System **farbig** gerendert und folgen keinem Theme (Regel aus `.kb-hdr-btn`). Jetzt monochrome
+  Textzeichen ⏸ ▶ ⟳ ✎ ✕. Der Wächter prüft auf **farbig voreingestellte** Zeichen – nicht auf den
+  ganzen Symbolbereich: ✓ ✎ ✕ ⚠ sind textuell voreingestellt, und die erste Fassung der Prüfung
+  schlug an ihnen falsch an.
+- **`.checkbox-group` verliert gegen `.form-group label`** (Spezifität 0,1,0 gegen 0,1,1): daher
+  Grossschreibung und kein Abstand zum Kästchen – „NUR-LESEN ERZWINGEN (IMMER AKTIV, NICHT
+  ABSCHALTBAR)". Auf Vorgabe des Nutzers (2026-08-12) ist die Regel **global**:
+  `.form-group label.checkbox-group` **ohne** Reiter-Präfix. Ein Kontrollkästchen ist keine
+  Feldbeschriftung, sondern ein Satz; die Grossschreibung von `.form-group label` ist für Felder
+  gedacht und dort weiterhin unangetastet.
+  - **Wirkungsbereich ist genau der Konfliktfall:** Kästchen INNERHALB einer `.form-group`.
+    Ausserhalb war nie etwas kaputt. Mitkorrigiert sind damit E-Mail (4), SAP (4), Branding (2),
+    Profil-Formular (3), der Skill-Purge-Dialog und **jedes `boolean`-Feld des generischen
+    Skill-Dialogs** (`js/skills.js` erzeugt sie als `.form-group > label.checkbox-group`) – alle
+    standen vorher gross und ohne Abstand.
+  - **KEIN `!important`:** Inline gesetzte Werte müssen gewinnen, sonst rutschen die
+    Branding-Radios untereinander (`display:inline-flex`) und die Profil-Kästchen verlieren ihr
+    `flex:1`. Genau das hält ein Test fest, zusammen mit der Abwesenheit der Reiter-Präfixe.
+  - Vorher/Nachher in Dunkel UND Hell abgenommen, inklusive der JS-erzeugten Formen.
+
+**Verifiziert:** 245 Backend-Prüfungen (`tests/test_email_rules.py`, ohne fastapi lauffähig –
+`backend.config` ist ein Stub, weil der echte Import die Live-`settings.json` zurückschreibt;
+Sandkasten-Wächter mit Exit 2) lokal **und auf DEV im echten venv**, dazu 185 UI-Prüfungen in jsdom
+gegen die echten Dateien (`tests/test_email_ui.js`, nur lokal – auf DEV ist jsdom nicht
+installiert). Gegenproben greifen: Bereichs-Schranke entfernt → 3 FAIL, Lauf privilegiert →
+2 FAIL, Rückfall bei Anmeldefehler → 1 FAIL, ⚡ zurückgeholt → 2 FAIL.
+**Live auf DEV:** 401 ohne Token · „leer = niemand" auch für den lokalen Admin · nach Freigabe
+`permissions.email: true` und `/email` 200 (vorher 404, weil der Skill aus war) · exchangelib 5.6.0
+beim Aktivieren nachinstalliert, 10 Werkzeuge geladen · Kennwort nicht im Klartext auf Platte
+(0640/0600) · Serverfeld → 400 · fremder Bereich → 400 · gefälschter `owner` wirkungslos ·
+fremde Regel ändern/löschen/starten → 404 · fremdes Protokoll leer · Sandbox kommt nicht an die
+Kennwortdatei · Zeitplan feuert und meldet beide Kanäle im Klartext. Danach vollständig
+zurückgebaut (Regeln und Konto gelöscht, Freigabe geleert, Skill aus, `data/email_*` +
+`.mailkey` entfernt; in `settings.json` bleiben nur `skills.email.installed/enabled:false` und die
+zwei leeren Freigabefelder). Optisch in Dunkel UND Hell abgenommen.
+**Ein echter Lauf gegen einen echten Exchange ist NICHT geprüft** – auf DEV gibt es keinen; alle
+Kanal-Fehlerwege sind es (Autodiscover, fehlender IMAP-Server, beide Kanäle).
+
+**BEIM AUSROLLEN:** Der Skill ist per Vorgabe AUS und muss aktiviert werden (installiert
+`exchangelib`). Danach im Reiter *E-Mail* die Serverdaten eintragen, unter *Sicherheit →
+Berechtigungen → E-Mail-Zugriff* freigeben (leer = niemand) und die Werkzeug-Bereiche freischalten
+(Vorgabe: nur `mail`). Jeder Benutzer hinterlegt sein Postfach selbst. **Als Skill kostet die
+Funktion einen Skill-Slot** – FREE/BASIC erlauben fünf aktive Skills.
+
 ## Info-Dokumente im Portal (`frontend_info_files/`, seit 2026-07-29)
 - **Was es ist:** Ein Ablage-Ordner neben dem Backend (`/opt/jarvis/frontend_info_files`,
   umstellbar über `JARVIS_INFO_DIR`). Ein Administrator kopiert Dateien hinein (Handbuch,

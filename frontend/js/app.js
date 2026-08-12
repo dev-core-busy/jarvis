@@ -584,6 +584,21 @@
             ]);
         }
 
+        // ── E-Mail-Tab Collapse ────────────────────────────────────────────
+        // Bewusst ueber _collapseInit und nicht mit eigener Klapp-Logik im
+        // Modul: die Funktion hier merkt sich den Auf-/Zu-Zustand je Container
+        // im localStorage und nimmt Klicks auf Knoepfe/Felder in der Kopfzeile
+        // aus. Eine zweite Umsetzung waere Drift.
+        function _initEmailCollapse() {
+            _collapseInit([
+                { hdr: 'em-sect-conn-hdr',     body: 'em-sect-conn-body',     tog: 'em-sect-conn-tog'     },
+                { hdr: 'em-sect-areas-hdr',    body: 'em-sect-areas-body',    tog: 'em-sect-areas-tog'    },
+                { hdr: 'em-sect-explore-hdr',  body: 'em-sect-explore-body',  tog: 'em-sect-explore-tog'  },
+                { hdr: 'em-sect-accounts-hdr', body: 'em-sect-accounts-body', tog: 'em-sect-accounts-tog' },
+            ]);
+        }
+        window.initEmailCollapse = _initEmailCollapse;
+
         // ── Vision-Tab Collapse ────────────────────────────────────────────
         function _initVisionCollapse() {
             _collapseInit([
@@ -617,7 +632,8 @@
         const SKILLCFG_TABS = ['telegram', 'browser_control', 'claude_bridge',
                                'agent_orchestrator', 'agent_autonomy_kit', 'avatar'];
         const tabsSkillCfg = SKILLCFG_TABS.map(n => document.getElementById('settings-tab-' + n));
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
+        const tabEmail   = document.getElementById('settings-tab-email');
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabEmail, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -706,6 +722,10 @@
                     tabSap.style.display = '';
                     tabSap.classList.add('active');
                     if (window.SapManager) window.SapManager.onShow();
+                } else if (target === 'email' && tabEmail) {
+                    tabEmail.style.display = '';
+                    tabEmail.classList.add('active');
+                    if (window.EmailAdmin) window.EmailAdmin.onShow();
                 } else if (target === 'kundenverwaltung' && tabKundenverwaltung) {
                     tabKundenverwaltung.style.display = '';
                     tabKundenverwaltung.classList.add('active');
@@ -918,6 +938,34 @@
             }
         }
 
+        // ── E-Mail-Tab: nur sichtbar wenn 'email'-Skill aktiviert ──
+        // Gleiches Muster wie beim SAP-Reiter, inklusive des Berechtigungsblocks
+        // in Sicherheit → Berechtigungen: ohne aktiven Skill waere die Freigabe
+        // eine Freigabe fuer nichts (dieselbe Begruendung wie bei sec-sub-sap
+        // und dem Erinnerungs-Abschnitt).
+        const emailTabBtn = document.getElementById('settings-tab-btn-email');
+        window.updateEmailTabVisibility = async function updateEmailTabVisibility() {
+            const emailSecSub = document.getElementById('sec-sub-email');
+            if (!emailTabBtn && !emailSecSub) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'email')
+                    : null;
+                const isEnabled = !!(sp && sp.enabled);
+                if (emailTabBtn) emailTabBtn.style.display = isEnabled ? '' : 'none';
+                if (emailSecSub) emailSecSub.style.display = isEnabled ? '' : 'none';
+                if (!isEnabled && tabEmail && tabEmail.classList.contains('active')) {
+                    settingsTabs.forEach(t => t.classList.remove('active'));
+                    if (settingsTabs[0]) settingsTabs[0].classList.add('active');
+                    allSettingsTabs.forEach(t => { if (t) { t.style.display = 'none'; t.classList.remove('active'); } });
+                    if (tabProfiles) { tabProfiles.style.display = ''; tabProfiles.classList.add('active'); }
+                }
+            } catch (e) {
+                // Fehler ignorieren – Reiter bleibt versteckt
+            }
+        }
+
         // ── „Erinnerungen per Messenger" (Sicherheit): nur sichtbar, wenn ueberhaupt
         //    ein Messenger-Kanal aktiv ist. Ohne WhatsApp/Telegram kann niemand eine
         //    Erinnerung setzen (es gibt keinen Absender 'wa:'/'tg:'), der Abschnitt
@@ -1069,6 +1117,7 @@
             await updateConfluenceTabVisibility();
             await updateJiraTabVisibility();
             await updateSapTabVisibility();
+            await updateEmailTabVisibility();
             await updateKundenverwaltungTabVisibility();
             await updateSupportTabVisibility();
             await updateReminderSectionVisibility();

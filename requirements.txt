@@ -22,6 +22,20 @@ openpyxl>=3.1.0
 python-pptx>=0.6.23
 edge-tts>=7.2.7        # TTS im Chat: Stimmen-Liste (/api/tts/voices) + Sprachsynthese; ohne edge-tts nur eine "Standard"-Stimme
 wsgidav>=4.3.0
+# ── Am 2026-08-12 nachgetragen: bis dahin NICHT deklariert, obwohl im Backend
+# direkt importiert. Sie waren nur als Beigabe anderer Pakete vorhanden und
+# haetten bei jeder venv-Bereinigung verschwinden koennen – genau so ist der
+# PDF-Anhang auf ECHT gestorben (pypdf, siehe tests/test_pdf_attachment.py).
+# BEWUSST OHNE Versionsangabe: die Pakete sind auf allen Servern vorhanden, eine
+# Untergrenze koennte dort ein ungewolltes Upgrade ausloesen. Es geht um das
+# VORHANDENSEIN, nicht um eine Version.
+requests               # jira_client, sap_client, google_auth, web_extractor, ibs
+httpx                  # knowledge_sync (Standort-Sync), model_caps, file_watcher, web_extractor
+cryptography           # backend/license.py: Ed25519-Pruefung der Lizenz
+starlette              # direkt genutzt in main.py (kommt sonst nur ueber fastapi)
+# NICHT deklariert, mit Absicht: torch. Es kommt mit sentence-transformers, und
+# ein eigener Eintrag hier wuerde die CUDA-Variante zurueckholen, die am
+# 2026-07-19 auf ECHT bewusst gegen torch+cpu getauscht wurde (~4,6 GB).
 # face-recognition + opencv gehoeren zum Vision-Skill und werden bei dessen
 # Aktivierung installiert (skills/vision/skill.json → dependencies)
 faiss-cpu>=1.7.4

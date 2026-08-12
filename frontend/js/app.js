@@ -639,6 +639,7 @@
                     // waeren die Knoepfe unverdrahtet und der Status leer, solange
                     // der Sicherheits-Reiter nicht geoeffnet wurde.
                     if (window.SecurityIncidents) window.SecurityIncidents.onShowUnattended();
+                    if (window.agentKeysOnShow) window.agentKeysOnShow();
                 } else if (target === 'instructions' && tabInstructions) {
                     tabInstructions.style.display = '';
                     tabInstructions.classList.add('active');
@@ -1084,6 +1085,10 @@
             // ("Klick macht nichts", 2026-07-28). Deshalb auch hier aufrufen;
             // onShowUnattended/_bind sind idempotent.
             if (window.SecurityIncidents) window.SecurityIncidents.onShowUnattended();
+            // Aus demselben Grund die Agent-API-Keys: ist ihr Abschnitt gemerkt
+            // aufgeklappt, fiel nie ein Klick auf die Kopfzeile und die Liste blieb
+            // auf "Laedt…" (2026-08-12 auf ECHT gemeldet).
+            if (window.agentKeysOnShow) window.agentKeysOnShow();
             // LLM-Timeout speichern (einmalig verdrahten)
             const _btnTm = document.getElementById('btn-save-llm-timeout');
             if (_btnTm && !_btnTm._wired) {
@@ -2201,6 +2206,24 @@
             let _loaded = false;
             function loadOnce() { if (_loaded) return; _loaded = true; load(); }
             if (hdr) hdr.addEventListener('click', () => setTimeout(loadOnce, 50));
+
+            // WICHTIG: Der Klick-Hook allein genuegt NICHT. _collapseInit stellt den
+            // gemerkten Auf/Zu-Zustand wieder her (localStorage je Container) – wer
+            // den Abschnitt einmal aufgeklappt hat, findet ihn beim naechsten Oeffnen
+            // der Einstellungen BEREITS offen und klickt die Kopfzeile nie an. Die
+            // Liste blieb dann dauerhaft auf "Laedt…" stehen (auf ECHT gemeldet
+            // 2026-08-12, obwohl ein Key 'kundenverwaltung' vorhanden war).
+            // Dieselbe Falle wie bei den Update-Knoepfen (2026-07-28) und der
+            // Rollen-Liste (2026-08-10) – deshalb hier derselbe onShow-Weg.
+            // MUSS nach _initProfilesCollapse() laufen, sonst ist der Zustand des
+            // Koerpers noch nicht angewandt. Idempotent ueber _loaded.
+            window.agentKeysOnShow = function () {
+                const body = document.getElementById('prof-sect-api-body');
+                // Zugeklappt: nicht laden – dann uebernimmt der Klick-Hook. Ein
+                // Abruf fuer einen unsichtbaren Abschnitt waere verschenkt.
+                if (!body || body.style.display === 'none') return;
+                loadOnce();
+            };
 
             listEl.addEventListener('click', e => {
                 const row = e.target.closest('[data-id]'); if (!row) return;

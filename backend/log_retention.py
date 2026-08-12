@@ -82,7 +82,8 @@ def run_all() -> dict:
 
     for name, fn in (("conv_log", _prune_conv_log),
                      ("telemetry_errors", _prune_telemetry_errors),
-                     ("audit_log", _prune_audit_log)):
+                     ("audit_log", _prune_audit_log),
+                     ("email_log", _prune_email_log)):
         try:
             removed[name] = int(fn(cut) or 0)
         except Exception as e:  # noqa: BLE001
@@ -128,3 +129,16 @@ def _prune_telemetry_errors(cut: float) -> int:
 def _prune_audit_log(cut: float) -> int:
     from backend import audit_log
     return audit_log.prune_older_than(cut)
+
+
+def _prune_email_log(cut: float) -> int:
+    """Protokoll der E-Mail-Regeln (data/email_log.jsonl).
+
+    Gehoert hierher und nicht in einen eigenen Zeitplan: es ist derselbe
+    Diagnosespeicher-Typ wie die uebrigen drei, und es soll dieselbe Frist
+    gelten. Auch hier gibt es AUSDRUECKLICH keine Stueckzahl- oder
+    Groessengrenze – die Eintraege, die man nach einer falsch beantworteten
+    Kundenmail braucht, sind genau die, die eine Mengengrenze verdraengt haette.
+    """
+    from backend import mail_rules
+    return mail_rules.protokoll_kuerzen(cut)

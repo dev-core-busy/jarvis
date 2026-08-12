@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Mail</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=9">
+    <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
+    <link rel="stylesheet" href="/static/css/avatar.css?v=8">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+        /* ═══════════════════════════════════════════════════════════════
+           E-Mail-Bereich (/email)
+           ───────────────────────────────────────────────────────────────
+           Titelleiste bewusst identisch zu /sap und /support (.topbar,
+           .topbar-left/-right, .btn-theme, .lang-toggle) – wer zwischen den
+           Bereichen wechselt, findet die Knoepfe am selben Platz.
+
+           Praefix `em-` fuer alles hier. Achtung: derselbe Praefix wird im
+           EINSTELLUNGS-Reiter (frontend/js/email.js) benutzt – das ist
+           unkritisch, weil die beiden Seiten nie zusammen geladen werden
+           (anders als bei sap-/sp-, wo Reiter und Bereich dieselbe
+           settings.html teilen koennten).
+
+           Farben ausschliesslich ueber Theme-Variablen – kein hartes Violett
+           oder Weiss, sonst bricht das Branding und der Hell-Modus.
+           ═══════════════════════════════════════════════════════════════ */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); min-height: 100vh; }
+        .hidden { display: none !important; }
+
+        /* ── Titelleiste ── */
+        .topbar { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 16px; border-bottom: 1px solid var(--border);
+            background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 30; }
+        .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .topbar-right { display: flex; align-items: center; gap: 4px; }
+        .topbar-avatar { width: 32px; height: 32px; border-radius: 50%;
+            background: var(--gradient); display: flex; align-items: center;
+            justify-content: center; font-size: 14px; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+
+        /* Zustands-Pille: sagt auf einen Blick, ob ein Postfach angebunden ist.
+           `align-self: flex-start` ist Pflicht – im senkrechten Flex-Container
+           wuerde sie sonst auf die ganze Breite gezogen und saehe wie ein
+           Eingabefeld aus (Fehler vom 2026-08-11 beim Standort-Sync). */
+        .em-pill { display: inline-flex; align-items: center; gap: 6px;
+            align-self: flex-start;
+            padding: 3px 10px; border-radius: 12px; font-size: .74rem; font-weight: 600;
+            background: rgba(var(--fg-rgb), .06); border: 1px solid var(--border);
+            color: var(--text-secondary); white-space: nowrap; }
+        .em-pill.is-ok { color: var(--success);
+            border-color: color-mix(in srgb, var(--success) 45%, transparent);
+            background: color-mix(in srgb, var(--success) 12%, transparent); }
+        .em-pill.is-off { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+        .em-pill:empty { display: none; }
+
+        .btn-theme { background: none; border: none; color: #888899;
+            padding: 4px 8px; border-radius: 8px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: color .2s, background .2s; }
+        .btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
+        .btn-theme svg { width: 20px; height: 20px; }
+        body.light .btn-theme { color: #777788; }
+
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), .05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), .1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: .72rem; font-weight: 700; letter-spacing: .04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: var(--font-body);
+            transition: background .15s, color .15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
+
+        .em-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+            font-size: .85rem; display: inline-flex; align-items: center; gap: 6px;
+            font-family: var(--font-body); white-space: nowrap; }
+        .em-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .em-btn:disabled { opacity: .5; cursor: default; }
+        .em-btn-primary { background: var(--gradient); border: none; color: #fff; font-weight: 600; }
+        .em-btn-primary:hover { filter: brightness(1.08); color: #fff; }
+        .em-btn-danger { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+        .em-btn-danger:hover { border-color: var(--danger); color: var(--danger);
+            background: color-mix(in srgb, var(--danger) 10%, transparent); }
+
+        /* ── Inhalt ── */
+        .em-wrap { max-width: 1080px; margin: 0 auto; padding: 20px 16px 60px; }
+        .em-card { background: var(--bg-glass); border: 1px solid var(--border);
+            border-radius: var(--radius-md); padding: 16px 18px; margin-bottom: 16px; }
+        .em-card h2 { font-size: 1.02rem; font-weight: 600; margin-bottom: 4px; }
+        .em-hint { color: var(--text-muted); font-size: .82rem; line-height: 1.55; }
+        .em-sep { height: 1px; background: var(--border); margin: 14px 0; }
+
+        .em-grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+        .em-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+        @media (max-width: 760px) { .em-grid, .em-grid-3 { grid-template-columns: 1fr; } }
+        .em-field { display: flex; flex-direction: column; gap: 4px; }
+        .em-field label { font-size: .78rem; font-weight: 600; color: var(--text-secondary); }
+        .em-field input, .em-field select, .em-field textarea {
+            width: 100%; padding: .5rem .6rem; border-radius: 8px;
+            border: 1px solid var(--border); background: rgba(var(--fg-rgb), .04);
+            color: var(--text-primary); font-family: inherit; font-size: .85rem; }
+        .em-field textarea { resize: vertical; min-height: 8rem; line-height: 1.5; }
+        .em-field input:focus, .em-field select:focus, .em-field textarea:focus {
+            outline: none; border-color: var(--accent); }
+        .em-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+        .em-status { font-size: .8rem; color: var(--text-muted); }
+
+        /* Regel-Liste: EINE Karte je Regel, das Formular wird KIND der Karte
+           (Muster .role-card aus den Rollen-Agenten). Wenn zwei Elemente wie
+           eines aussehen sollen, gehoert eines INS andere – sonst bleibt ein
+           Spalt sichtbar, egal wie die Radien gesetzt sind. */
+        .em-rule-card { border: 1px solid var(--border); border-radius: var(--radius-md);
+            background: rgba(var(--fg-rgb), .02); margin-bottom: 10px; overflow: hidden; }
+        .em-rule-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
+        .em-rule-main { flex: 1 1 auto; min-width: 0; }
+        .em-rule-name { font-weight: 600; font-size: .92rem; }
+        .em-rule-meta { font-size: .76rem; color: var(--text-muted); margin-top: 2px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .em-rule-card.is-off { opacity: .55; }   /* Deckkraft, keine harte Farbe */
+        .em-rule-acts { display: flex; gap: 4px; flex: 0 0 auto; }
+        .em-icon-btn { background: none; border: 1px solid var(--border);
+            color: var(--text-secondary); width: 30px; height: 30px; border-radius: 8px;
+            cursor: pointer; display: inline-flex; align-items: center;
+            justify-content: center; font-size: .9rem; }
+        .em-icon-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .em-icon-btn.is-danger:hover { border-color: var(--danger); color: var(--danger);
+            background: color-mix(in srgb, var(--danger) 10%, transparent); }
+        .em-edit-box { padding: 0 14px 14px; border-top: 1px solid var(--border); }
+        .em-badge { display: inline-block; padding: 1px 7px; border-radius: 10px;
+            font-size: .7rem; font-weight: 600; background: rgba(var(--fg-rgb), .08);
+            color: var(--text-secondary); margin-left: 6px; }
+
+        .em-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        @media (max-width: 760px) { .em-tools { grid-template-columns: 1fr; } }
+        .em-tools label { display: flex; gap: 8px; align-items: flex-start;
+            padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px;
+            font-size: .8rem; cursor: pointer; }
+        .em-tools label:hover { background: rgba(var(--fg-rgb), .06); }
+        .em-tools input[type="checkbox"] { width: auto; margin-top: 2px; flex: 0 0 auto; }
+        .em-tools label.is-locked { opacity: .6; cursor: default; }
+
+        .em-scroll { max-height: 320px; overflow-y: auto; padding-right: 6px;
+            border-bottom: 1px solid var(--border); }
+        .em-log-row { padding: 8px 0; border-bottom: 1px solid rgba(var(--fg-rgb), .06);
+            font-size: .82rem; }
+        .em-log-row:last-child { border-bottom: none; }
+        .em-log-head { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+        .em-log-time { color: var(--text-muted); font-size: .74rem; white-space: nowrap; }
+        .em-log-res { color: var(--text-secondary); margin-top: 3px; line-height: 1.5;
+            white-space: pre-wrap; word-break: break-word; }
+        .em-log-row.is-bad .em-log-res { color: var(--danger); }
+        .em-empty { padding: 22px 14px; text-align: center; color: var(--text-muted);
+            font-size: .86rem; line-height: 1.6; }
+        code { font-size: .82em; padding: 1px 4px; border-radius: 4px;
+            background: rgba(var(--fg-rgb), .08); }
+    </style>
+</head>
+<body>
+<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+
+<div id="em-app" class="hidden">
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-avatar">J</div>
+            <span class="topbar-title"><span class="brand-app-name">Jarvis</span>
+                <span data-i18n="mail.portal_title">E-Mail</span></span>
+            <span class="em-pill" id="em-acct-pill"></span>
+        </div>
+        <div class="topbar-right">
+            <div class="lang-toggle" id="em-lang-toggle">
+                <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang && window.setLang('en')" title="English">EN</button>
+            </div>
+            <button class="btn-theme" id="em-portal-btn" title="Zum Portal" data-i18n-title="nav.home">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </button>
+            <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="btn-theme" id="em-logout-btn" title="Abmelden" data-i18n-title="chat.logout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <div class="em-wrap">
+        <!-- ═══ Mein Postfach ═══ -->
+        <div class="em-card">
+            <h2 data-i18n="mail.acct_head">Mein Postfach</h2>
+            <p class="em-hint" data-i18n="mail.acct_hint">Hier hinterlegst du dein eigenes Exchange-Postfach. Das Kennwort wird verschlüsselt gespeichert und von keiner Schnittstelle wieder herausgegeben – auch nicht an Administratoren. Lass das Feld leer, um es unverändert zu lassen.</p>
+            <div class="em-sep"></div>
+            <div class="em-grid">
+                <div class="em-field">
+                    <label data-i18n="mail.acct_address">E-Mail-Adresse</label>
+                    <input type="email" id="em-adresse" placeholder="vorname.nachname@firma.de" autocomplete="off">
+                </div>
+                <div class="em-field">
+                    <label data-i18n="mail.acct_login">Anmeldename <span class="em-hint">(falls abweichend)</span></label>
+                    <input type="text" id="em-benutzer" placeholder="FIRMA\vorname.nachname" autocomplete="off">
+                </div>
+                <div class="em-field">
+                    <label data-i18n="mail.acct_password">Kennwort</label>
+                    <input type="password" id="em-passwort" placeholder="leer = unverändert" data-i18n-placeholder="mail.pw_ph" autocomplete="new-password">
+                    <span class="em-hint" id="em-pw-hint"></span>
+                </div>
+                <div class="em-field">
+                    <label data-i18n="mail.acct_channel">Zugangsweg</label>
+                    <select id="em-kanal-user">
+                        <option value="" data-i18n="mail.acct_channel_default">Vorgabe des Administrators</option>
+                        <option value="auto">auto (EWS, sonst IMAP)</option>
+                        <option value="ews">nur EWS</option>
+                        <option value="imap">nur IMAP/SMTP</option>
+                    </select>
+                </div>
+            </div>
+            <div class="em-grid em-grid-3" style="margin-top:12px;">
+                <div class="em-field">
+                    <label data-i18n="mail.acct_inbox">Posteingang</label>
+                    <input type="text" id="em-ord-eingang" placeholder="INBOX">
+                </div>
+                <div class="em-field">
+                    <label data-i18n="mail.acct_drafts">Entwürfe</label>
+                    <input type="text" id="em-ord-entwuerfe" placeholder="Vorgabe" data-i18n-placeholder="mail.default_ph">
+                </div>
+                <div class="em-field">
+                    <label data-i18n="mail.acct_sent">Gesendet</label>
+                    <input type="text" id="em-ord-gesendet" placeholder="Vorgabe" data-i18n-placeholder="mail.default_ph">
+                </div>
+            </div>
+            <div class="em-field" style="margin-top:12px;">
+                <label><input type="checkbox" id="em-aktiv" style="width:auto;margin-right:8px;">
+                    <span data-i18n="mail.acct_active">Postfach aktiv (Regeln dürfen darauf arbeiten)</span></label>
+            </div>
+            <div class="em-row">
+                <button class="em-btn em-btn-primary" id="em-save-acct" data-i18n="common.save">Speichern</button>
+                <button class="em-btn" id="em-test-acct" data-i18n="mail.acct_test">Verbindung testen</button>
+                <button class="em-btn em-btn-danger" id="em-del-acct" data-i18n="mail.acct_delete">Zugangsdaten entfernen</button>
+                <span class="em-status" id="em-acct-status"></span>
+            </div>
+            <div id="em-acct-result" style="margin-top:10px;"></div>
+        </div>
+
+        <!-- ═══ Regeln ═══ -->
+        <div class="em-card">
+            <h2 data-i18n="mail.rules_head">Regeln für eingehende E-Mails</h2>
+            <p class="em-hint" data-i18n="mail.rules_hint">Jede Regel beobachtet einen Ordner deines Postfachs. Trifft eine neue Nachricht ein, entscheidet ein Sprachmodell anhand deines Prompts, was zu tun ist: antworten, Entwurf speichern, verschieben, weiterleiten oder löschen. Verarbeitete Nachrichten werden mit einer Kategorie markiert, damit du es im Postfach siehst.</p>
+            <p class="em-hint" style="margin-top:8px;"><b data-i18n="mail.rules_warn_title">Wichtig:</b> <span data-i18n="mail.rules_warn">Der Text einer eingehenden E-Mail kommt von außen. Der Agent wird ausdrücklich angewiesen, Anweisungen darin nicht zu befolgen – gib einer Regel trotzdem nur die Werkzeuge, die sie wirklich braucht, und prüfe das Protokoll unten regelmäßig.</span></p>
+            <div class="em-sep"></div>
+            <div class="em-row" style="margin-top:0;">
+                <button class="em-btn em-btn-primary" id="em-new-rule" data-i18n="mail.rules_new">+ Neue Regel</button>
+                <span class="em-status" id="em-rules-status"></span>
+            </div>
+            <div id="em-rules" style="margin-top:12px;"></div>
+            <!-- EIN Formular-Container, der wandert (Muster der Rollen-Agenten
+                 und der Extraktions-Vorschau in /wissen). Zwei Container haetten
+                 zwei Wege zum Speichern bedeutet. -->
+            <div id="em-rule-edit" class="hidden"></div>
+        </div>
+
+        <!-- ═══ Protokoll ═══ -->
+        <div class="em-card">
+            <h2 data-i18n="mail.log_head">Protokoll</h2>
+            <p class="em-hint" data-i18n="mail.log_hint">Was die Regeln getan haben – neueste zuerst. Nur deine eigenen Läufe.</p>
+            <div class="em-sep"></div>
+            <div class="em-row" style="margin-top:0;">
+                <button class="em-btn" id="em-log-reload" data-i18n="common.refresh">Aktualisieren</button>
+                <span class="em-status" id="em-log-status"></span>
+            </div>
+            <div id="em-log" style="margin-top:12px;"></div>
+        </div>
+    </div>
+</div>
+
+<script src="/static/js/i18n.js?v=41"></script>
+<script src="/static/js/theme.js?v=2"></script>
+<script src="/static/js/branding.js?v=23"></script>
+<script src="/static/js/sessions.js?v=6"></script>
+<script src="/static/js/email_portal.js?v=1"></script>
+<!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
+     Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der
+     Theme-Knopf oben diese Id tragen. -->
+<script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/clippy/clippy.min.js"></script>
+<script src="/static/js/avatar.js?v=13"></script>
+</body>
+</html>

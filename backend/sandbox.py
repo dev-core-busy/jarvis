@@ -147,6 +147,18 @@ _APP_DENY_REL = (
     # Weg, einen eigenen "Standort" einzutragen und damit beliebige Dateien in
     # einen Wissensordner zu spiegeln.
     "data/knowledge_sync.json",
+    # E-Mail-Skill (backend/mail_accounts.py, mail_rules.py). Drei Gruende, jeder
+    # allein ausreichend:
+    #  - `email_accounts.json` + `.mailkey` sind zusammen das KLARTEXT-Kennwort
+    #    jedes hinterlegten Postfachs. Der Schluessel ohne die Datei ist nutzlos
+    #    und umgekehrt – also muessen BEIDE zu sein.
+    #  - `email_rules.json` enthaelt die Prompts aller Benutzer. SCHREIBEN waere
+    #    der Weg, einem fremden Benutzer eine Regel unterzuschieben, die spaeter
+    #    unter SEINER Kennung laeuft und aus SEINEM Postfach sendet – dasselbe
+    #    Persistenz-Substrat wie data/instructions, nur mit Briefkasten.
+    #  - `email_log.jsonl` enthaelt Absender und Betreffzeilen fremder Post.
+    "data/email_accounts.json", "data/.mailkey",
+    "data/email_rules.json", "data/email_state.json", "data/email_log.jsonl",
 )
 
 
@@ -178,8 +190,17 @@ PRIVATE_MODE = 0o750
 PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/security_state.json", "data/license.json",
                  "data/agent_roles.json", "data/ad_cache.json",
-                 "data/knowledge_sync.json")
+                 "data/knowledge_sync.json",
+                 "data/email_accounts.json", "data/email_rules.json",
+                 "data/email_state.json", "data/email_log.jsonl")
 PRIVATE_FILE_MODE = 0o640
+
+# Die Schluesseldatei des E-Mail-Skills ist strenger als 0640: sie entschluesselt
+# die Postfach-Kennwoerter. 0600 heisst, dass nicht einmal die Gruppe `jarvis`
+# sie lesen kann – ein zusaetzlicher Riegel, falls jemand einen weiteren Dienst
+# in diese Gruppe aufnimmt.
+PRIVATE_FILES_STRENG = ("data/.mailkey",)
+PRIVATE_FILE_MODE_STRENG = 0o600
 
 
 def harden_data_dirs() -> list[str]:
@@ -210,6 +231,18 @@ def harden_data_dirs() -> list[str]:
                 continue
             f.chmod(PRIVATE_FILE_MODE)
             geaendert.append(f"{rel}: {oct(ist)} -> {oct(PRIVATE_FILE_MODE)}")
+        except Exception as e:  # noqa: BLE001
+            geaendert.append(f"{rel}: FEHLER {e}")
+    for rel in PRIVATE_FILES_STRENG:
+        f = PROJECT_ROOT / rel
+        try:
+            if not f.is_file():
+                continue
+            ist = f.stat().st_mode & 0o777
+            if ist == PRIVATE_FILE_MODE_STRENG:
+                continue
+            f.chmod(PRIVATE_FILE_MODE_STRENG)
+            geaendert.append(f"{rel}: {oct(ist)} -> {oct(PRIVATE_FILE_MODE_STRENG)}")
         except Exception as e:  # noqa: BLE001
             geaendert.append(f"{rel}: FEHLER {e}")
     return geaendert
@@ -343,6 +376,10 @@ SHELL_SECRET_PATHS = re.compile(
     r'scheduled_jobs\.json\b|file_watchers\.json\b|security_state\.json\b|'
     r'license\.json\b|license_root\.pub\b|agent_roles\.json\b|ad_cache\.json\b|'
     r'knowledge_sync\.json\b|'
+    # E-Mail-Skill: Postfach-Kennwoerter (email_accounts.json + .mailkey ergeben
+    # zusammen den Klartext), fremde Regel-Prompts, fremde Absender/Betreffe.
+    r'email_accounts\.json\b|\.mailkey\b|email_rules\.json\b|'
+    r'email_state\.json\b|email_log\.jsonl\b|'
     # data/chats: fremde Chat-Verlaeufe (in der Shell zusaetzlich per 0750 gesperrt)
     r'data/chats\b|'
     r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'

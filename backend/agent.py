@@ -3090,6 +3090,19 @@ KRITISCH – Autonomie-Regeln:
                     _p_token = _cvp.set(self._eff_profile or None)
                 except Exception:  # noqa: BLE001
                     _cvp = None
+                # Postfach-Inhaber fuer die email_*-Werkzeuge (E-Mail-Skill).
+                # BEWUSST NICHT ueber set_tool_user: der ist fuer privilegierte
+                # Benutzer absichtlich LEER ("keine Einschraenkung"). Ein
+                # Postfach ist aber keine Rechtefrage, sondern eine
+                # Personenfrage – mit tool_user() haetten Administratoren gar
+                # kein Postfach. Deshalb hier IMMER der Actor-Name; ohne Namen
+                # bleibt er leer und die Werkzeuge sagen das im Klartext.
+                _m_token = _mcv = None
+                try:
+                    from backend.mail_accounts import current_mail_user as _mcv
+                    _m_token = _mcv.set(_uname or "")
+                except Exception:  # noqa: BLE001
+                    _mcv = None
                 try:
                     result = await tool.execute(**exec_args)
                 finally:
@@ -3097,6 +3110,11 @@ KRITISCH – Autonomie-Regeln:
                     if _p_token is not None and _cvp is not None:
                         try:
                             _cvp.reset(_p_token)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if _m_token is not None and _mcv is not None:
+                        try:
+                            _mcv.reset(_m_token)
                         except Exception:  # noqa: BLE001
                             pass
             _dur_ms = int((_time.monotonic() - _t0) * 1000)

@@ -7512,6 +7512,52 @@ select.input-field {
     font-size: .76rem; color: var(--text-primary); padding: 1px 2px; border-radius: 4px;
 }
 .role-tools label:hover { background: rgba(var(--fg-rgb), .06); }
+
+/* ── E-Mail-Reiter: Freigabe der Werkzeug-Bereiche ─────────────────────────
+   NICHT .role-tools benutzen: das ist fuer KURZE Werkzeugnamen gebaut
+   (auto-fill ab 190px) und ergibt bei den mehrzeiligen Bereichs-Beschreibungen
+   fuenf gequetschte Spalten - im Screenshot vom 2026-08-12 gesehen. Hier
+   hoechstens zwei Spalten, damit die Erklaerung lesbar bleibt. */
+.em-area-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (max-width: 900px) { .em-area-grid { grid-template-columns: 1fr; } }
+.em-area-grid label {
+    display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
+    padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: .82rem; color: var(--text-primary); line-height: 1.45;
+    /* Die Grossschreibung von .form-group label darf hier NICHT greifen -
+       das sind Saetze, keine Feldbeschriftungen. */
+    text-transform: none; letter-spacing: normal; font-weight: 400;
+    margin: 0;
+}
+.em-area-grid label:hover { background: rgba(var(--fg-rgb), .06); }
+.em-area-grid label.is-locked { opacity: .7; cursor: default; }
+/* Kontrollkaestchen in Formulargruppen lesbar machen (global, Vorgabe des
+   Nutzers 2026-08-12).
+   DAS PROBLEM: `.form-group label` (Spezifitaet 0,1,1) schlaegt
+   `.checkbox-group` (0,1,0) und erzwingt `display:block` +
+   `text-transform:uppercase`. Ergebnis waren Beschriftungen wie
+   "NUR-LESEN ERZWINGEN (IMMER AKTIV, NICHT ABSCHALTBAR)" und ein Kaestchen ohne
+   Abstand zum Text – ein Kontrollkaestchen ist keine Feldbeschriftung, sondern
+   ein Satz.
+   WIRKUNGSBEREICH: nur Kaestchen INNERHALB einer `.form-group` – genau der
+   Konfliktfall. Ausserhalb war nie etwas kaputt. Betroffen sind damit
+   settings.html (E-Mail 4, SAP 4, Branding 2, Profil-Formular 3), der
+   Purge-Dialog und JEDES `boolean`-Feld des generischen Skill-Dialogs
+   (js/skills.js) – alle waren vorher gross geschrieben und ohne Abstand.
+   Inline gesetzte Werte gewinnen weiter: die Branding-Radios bleiben durch ihr
+   `display:inline-flex` nebeneinander, die Profil-Kaestchen behalten ihr
+   `flex:1`. Vorher/Nachher in Dunkel UND Hell abgenommen. */
+.form-group label.checkbox-group {
+    display: flex; align-items: center; gap: .6rem;
+    text-transform: none; letter-spacing: normal;
+    font-size: .88rem; font-weight: 500; color: var(--text-primary);
+}
+
+.em-area-grid input[type="checkbox"] {
+    flex: 0 0 auto; width: 16px; height: 16px; min-width: 0; margin: 2px 0 0;
+    appearance: auto; -webkit-appearance: checkbox;
+    accent-color: var(--accent); cursor: pointer;
+}
 .role-tools input[type="checkbox"] {
     flex: 0 0 auto; width: auto; min-width: 0; margin: 0;
     appearance: auto; -webkit-appearance: checkbox;

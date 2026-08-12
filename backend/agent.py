@@ -3584,13 +3584,17 @@ KRITISCH – Autonomie-Regeln:
         # wird separat als Chat-Anhang ausgeliefert).
         text = re.sub(r"\[\[JARVIS_DELIVER:[^\]]*\]\]", "", text)
         # Markdown-Link auf Dokument-URL/-Pfad -> nur Label behalten
+        _EXT_RE = self._liefer_ext_re()
         text = re.sub(
-            r"\[([^\]\n]*)\]\((?:/api/documents/[^)\n]+|[^)\n]*\.(?:docx|xlsx|pptx|pdf))\)",
+            r"\[([^\]\n]*)\]\((?:/api/documents/[^)\n]+|[^)\n]*\.(?:" + _EXT_RE + r"))\)",
             r"\1", text)
         # Nackte lokale Dokumentpfade entfernen – EINE Regex mit optionalem fuehrenden
         # Slash, damit sowohl /tmp/x.pptx als auch data/documents/x.pptx VOLLSTAENDIG
         # (inkl. Slash/Prefix) verschwinden und keine Fragmente ('/', 'data') bleiben.
-        text = re.sub(r"/?(?:[\w.\-]+/)+[\w.\-]+\.(?:docx|xlsx|pptx|pdf)", "", text)
+        # WICHTIG: dieselbe Liste wie bei der Auslieferung. Waere sie hier enger,
+        # blieben genau die Pfade stehen, zu denen es keinen Chip gibt - also die,
+        # an die der Benutzer nicht herankommt (der gemeldete Fall vom 12.08.).
+        text = re.sub(r"/?(?:[\w.\-]+/)+[\w.\-]+\.(?:" + _EXT_RE + ")", "", text)
         # Bilder: vom LLM genannte LOKALE Bild-Verweise entfernen – sie werden separat
         # als Chat-Anhang inline ausgeliefert (_deliver_docs). Externe http(s)-Bild-URLs
         # bleiben unangetastet.
@@ -3610,6 +3614,41 @@ KRITISCH – Autonomie-Regeln:
         text = re.sub(r"\b(unter|in|nach|als|hier|datei)\s*([.,;:])", r"\2", text, flags=re.IGNORECASE)
         text = re.sub(r"[ \t]{2,}", " ", text)
         return text
+
+    # ── Ergebnisdateien: EINE Liste fuer Auslieferung UND Textbereinigung ──
+    # Bis 2026-08-12 stand in _deliver_docs (b)/(c) und in _clean_doc_refs jeweils
+    # dieselbe ENGE Liste "docx|xlsx|pptx|pdf". Folge: ein per Shell erzeugtes CSV
+    # wurde WEDER als Download-Chip ausgeliefert NOCH aus dem Anzeigetext
+    # entfernt – der Benutzer las "Das Ergebnis liegt unter
+    # /tmp/KIM_Adressen_2026.csv" und hatte keine Moeglichkeit, an die Datei zu
+    # kommen (auf ECHT gemeldet, /tmp gehoert dem Sandbox-Benutzer und ist von
+    # aussen unerreichbar). Fuer alle anderen Typen verlangte der System-Prompt
+    # den Marker [[JARVIS_DELIVER:…]] – auf dessen Ausgabe darf man sich NICHT
+    # verlassen, denn genau dann fehlt dem Benutzer das Ergebnis.
+    #
+    # SKRIPTE UND PROGRAMME STEHEN BEWUSST NICHT DRIN: der Agent legt seine
+    # Zwischenschritte als .py/.sh in /tmp ab (auf ECHT lagen 12 Dateien
+    # extract_v4.py … extract_v17.py). Die als Download anzubieten waere Rauschen
+    # und wuerde das eigentliche Ergebnis zwischen Chips begraben.
+    _LIEFER_EXT = (
+        # Dokumente
+        "docx", "doc", "xlsx", "xls", "pptx", "ppt", "pdf",
+        "odt", "ods", "odp", "rtf",
+        # Daten und Text
+        "csv", "tsv", "txt", "md", "json", "xml", "html", "htm",
+        "yaml", "yml", "ics", "vcf", "sql", "parquet",
+        # Archive
+        "zip", "7z", "tar", "gz", "tgz", "bz2", "xz",
+        # Bilder (werden inline gezeigt)
+        "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg",
+        # Medien
+        "mp3", "wav", "ogg", "m4a", "flac", "mp4", "webm", "mov",
+    )
+
+    @classmethod
+    def _liefer_ext_re(cls) -> str:
+        """Endungen als Regex-Alternative – EINE Quelle fuer alle Stellen."""
+        return "|".join(re.escape(e) for e in cls._LIEFER_EXT)
 
     # Wie weit VOR dem Laufbeginn eine Datei geaendert sein darf, um noch als
     # "in diesem Lauf entstanden" zu gelten. Deckt die Anhaenge ab, die der
@@ -3702,8 +3741,26 @@ KRITISCH – Autonomie-Regeln:
             md = f"![{name}]({url})" if ext in _IMG_EXT else f"[📥 {name} herunterladen]({url})"
             await self._send_status(ws, md, highlight=True)
 
+        # Secret-Sperre fuer ALLE Zweige. Stand bis 2026-08-12 nur im
+        # Marker-Zweig (m) – solange die Endungsliste nur docx/xlsx/pptx/pdf
+        # umfasste, war das unauffaellig. Mit der breiten Liste (csv/json/txt/…)
+        # waere ohne diese Sperre eine im Text genannte "settings.json" aus dem
+        # Projektverzeichnis ausliefer-faehig geworden.
+        _DENY_EXT = {"env", "key", "pem", "crt", "cer", "p12", "pfx", "jks", "keystore"}
+        _DENY_NAME = ("id_rsa", "id_ed25519", "id_dsa", ".env", "settings.json",
+                      "credentials", "ad_cache.json", "license.json",
+                      "knowledge_sync.json", "agent_roles.json", "security_state.json",
+                      "scheduled_jobs.json", "file_watchers.json", ".owners.json")
+
+        def _ist_geheim(pfad) -> bool:
+            low = pfad.name.lower()
+            if pfad.suffix.lower().lstrip(".") in _DENY_EXT:
+                return True
+            return any(low == d or low.startswith(d) for d in _DENY_NAME)
+
         # (a) Fertige Capability-URLs (Dedup per physischem Pfad)
-        for m in re.finditer(r"/api/documents/[0-9a-f]{32}__[A-Za-z0-9_\-]+\.(?:docx|xlsx|pptx|pdf|png|jpe?g|gif|webp|bmp|svg)", text):
+        _EXT_RE = self._liefer_ext_re()
+        for m in re.finditer(r"/api/documents/[0-9a-f]{32}__[A-Za-z0-9_\-]+\.(?:" + _EXT_RE + ")", text):
             url = m.group(0)
             cap = docs_dir / url.split("/api/documents/")[1]
             try:
@@ -3723,8 +3780,6 @@ KRITISCH – Autonomie-Regeln:
         # den der Agent bewusst zur Auslieferung markiert. Sicherheit: nur aus
         # agent-schreibbaren Verzeichnissen (/tmp, data/documents) und niemals
         # offensichtliche Secrets (schuetzt vor Prompt-Injection-Exfiltration).
-        _DENY_EXT = {"env", "key", "pem", "crt", "cer", "p12", "pfx", "jks", "keystore"}
-        _DENY_NAME = ("id_rsa", "id_ed25519", "id_dsa", ".env", "settings.json", "credentials")
         for mk in re.finditer(r"\[\[JARVIS_DELIVER:\s*([^\]|]+?)\s*(?:\|\s*([^\]]+?)\s*)?\]\]", text):
             raw = mk.group(1).strip()
             disp_name = (mk.group(2) or "").strip()
@@ -3741,9 +3796,8 @@ KRITISCH – Autonomie-Regeln:
                     or rp == _tmp_root or _tmp_root in rp.parents):
                 _log(f"Liefer-Marker abgelehnt (Ort): {raw}")
                 continue
-            low = rp.name.lower()
             ext = rp.suffix.lower().lstrip(".")
-            if ext in _DENY_EXT or any(low == d or low.startswith(d) for d in _DENY_NAME):
+            if _ist_geheim(rp):
                 _log(f"Liefer-Marker abgelehnt (Secret): {rp.name}")
                 continue
             if key in delivered:
@@ -3766,7 +3820,7 @@ KRITISCH – Autonomie-Regeln:
             await _emit(f"{base}.{safe_ext}", f"/api/documents/{fname}")
 
         # (b) Lokale Dateipfade zu AGENT-ERZEUGTEN Dokumenten -> nach data/documents/ ziehen
-        for m in re.finditer(r"(?:/[\w.\-]+)+\.(?:docx|xlsx|pptx|pdf|png|jpe?g|gif|webp|bmp|svg)|data/documents/[\w.\-]+\.(?:docx|xlsx|pptx|pdf|png|jpe?g|gif|webp|bmp|svg)", text):
+        for m in re.finditer(r"(?:/[\w.\-]+)+\.(?:" + _EXT_RE + r")|data/documents/[\w.\-]+\.(?:" + _EXT_RE + ")", text):
             raw = m.group(0)
             p = _Path(raw) if raw.startswith("/") else (proj / raw)
             try:
@@ -3781,6 +3835,9 @@ KRITISCH – Autonomie-Regeln:
             # wie /mnt/...). Sonst wuerde shutil.move die Quelle zerstoeren/fehlschlagen.
             if not (rp == _docs_root or _docs_root in rp.parents
                     or rp == _tmp_root or _tmp_root in rp.parents):
+                continue
+            if _ist_geheim(rp):
+                _log(f"Pfad-Treffer abgelehnt (Secret): {rp.name}")
                 continue
             if key in delivered:
                 continue
@@ -3815,8 +3872,13 @@ KRITISCH – Autonomie-Regeln:
         # werden vom LLM nur mit Namen genannt. In bekannten, agent-schreibbaren
         # Verzeichnissen suchen und als Download ausliefern (KOPIEREN, nicht moven –
         # koennte die hochgeladene Eingabedatei sein).
-        _search_dirs = [docs_dir, proj, _Path.cwd(), _tmp_root]
-        for m in re.finditer(r"(?<![\w./\\-])([\w.\-]+\.(?:docx|xlsx|pptx|pdf))\b", text):
+        # NUR agent-schreibbare Orte. proj und cwd sind hier bis 2026-08-12
+        # mitgesucht worden; mit der breiten Endungsliste waere damit jede im Text
+        # genannte Projektdatei (settings.json, *.md, *.txt) ein Liefer-Kandidat.
+        # Ergebnisse entstehen ohnehin nur in /tmp (shell.py setzt cwd=/tmp) oder
+        # in data/documents (Office-Werkzeuge).
+        _search_dirs = [docs_dir, _tmp_root]
+        for m in re.finditer(r"(?<![\w./\\-])([\w.\-]+\.(?:" + _EXT_RE + r"))\b", text):
             raw = m.group(1)
             if "/" in raw or "\\" in raw:
                 continue  # Pfade sind in (b) abgedeckt
@@ -3834,11 +3896,13 @@ KRITISCH – Autonomie-Regeln:
             key = str(found)
             if key in delivered:
                 continue
-            # Nur agent-schreibbare Orte (kein read-only Quell-Share)
-            _proj_root = proj.resolve()
+            # Nur agent-schreibbare Orte (kein read-only Quell-Share, NICHT das
+            # Projektverzeichnis – dort liegen die Zustandsdateien).
             if not (found == _docs_root or _docs_root in found.parents
-                    or found == _tmp_root or _tmp_root in found.parents
-                    or _proj_root in found.parents or found == _proj_root):
+                    or found == _tmp_root or _tmp_root in found.parents):
+                continue
+            if _ist_geheim(found):
+                _log(f"Namens-Treffer abgelehnt (Secret): {found.name}")
                 continue
             # Schon eine Capability-Datei? -> via (a) erledigt
             if found.parent == docs_dir and re.fullmatch(r"[0-9a-f]{32}__.+", found.name):

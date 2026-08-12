@@ -433,6 +433,123 @@ def _get_client_type(ws) -> str:
 def _get_ws_username(ws) -> str:
     return _ws_usernames.get(id(ws), "")
 
+
+# ─── Chat-Anhaenge: Ablage und Ausfuehrbarkeits-Sperre ────────────────
+# Bis 2026-08-12 nahm der Anhang-Block eine ZULASSUNGSLISTE von 20 Endungen an;
+# alles andere fiel wortlos heraus (fuer den Benutzer nicht von "Dokument wird
+# nicht gefunden" zu unterscheiden), und ein PDF wurde ueberhaupt nicht als
+# Datei abgelegt. Auf Vorgabe des Betreibers gilt jetzt: abgelegt wird alles,
+# was NICHT ausfuehrbar ist.
+
+# Endungen, die Programmcode tragen. Der Agent kann Shell-Befehle ausfuehren –
+# eine hochgeladene .sh/.py/.exe im Arbeitsverzeichnis waere eine Einladung,
+# fremden Code laufen zu lassen (der Sandbox-Benutzer begrenzt den Schaden,
+# beseitigt ihn aber nicht). Container wie .zip/.iso bleiben erlaubt: sie werden
+# nicht ausgefuehrt, und ZIP ist ein etablierter Weg, Unterlagen zu buendeln.
+_ANHANG_EXEC_EXT = {
+    "exe", "com", "msi", "msp", "dll", "sys", "drv", "efi", "ko", "scr", "cpl",
+    "bat", "cmd", "ps1", "psm1", "psd1", "vbs", "vbe", "wsf", "wsh", "hta",
+    "js", "jse", "mjs", "cjs", "jar", "class", "apk", "dex", "reg", "lnk", "url",
+    "sh", "bash", "zsh", "ksh", "csh", "fish", "run", "bin", "elf", "out",
+    "so", "dylib", "a", "o", "py", "pyc", "pyo", "pyz", "pyw", "pl", "pm",
+    "rb", "php", "phar", "lua", "tcl", "awk", "asp", "aspx", "jsp", "cgi",
+    "app", "deb", "rpm", "pkg", "dmg", "appimage", "gadget", "workflow",
+}
+_ANHANG_EXEC_MIME = {
+    "application/x-msdownload", "application/x-msdos-program", "application/x-dosexec",
+    "application/vnd.microsoft.portable-executable", "application/x-executable",
+    "application/x-sharedlib", "application/x-mach-binary", "application/x-elf",
+    "application/x-sh", "application/x-shellscript", "application/x-csh",
+    "application/x-bat", "application/x-powershell", "application/javascript",
+    "text/javascript", "application/x-python-code", "text/x-python",
+    "text/x-shellscript", "application/java-archive", "application/vnd.android.package-archive",
+    "application/x-apple-diskimage", "application/x-debian-package", "application/x-rpm",
+}
+# Magische Bytes. NOETIG, weil die Endung Fremdeingabe ist: eine umbenannte
+# .exe als "bericht.dat" kaeme sonst durch. Nur eindeutige Signaturen.
+_ANHANG_EXEC_MAGIC = (
+    (b"MZ",            "Windows-Programm (PE)"),
+    (b"\x7fELF",       "Linux-Programm (ELF)"),
+    (b"#!",            "Skript mit Shebang"),
+    (b"\xca\xfe\xba\xbe", "macOS-Programm (Mach-O)"),
+    (b"\xcf\xfa\xed\xfe", "macOS-Programm (Mach-O)"),
+    (b"\xce\xfa\xed\xfe", "macOS-Programm (Mach-O)"),
+    (b"\xfe\xed\xfa\xce", "macOS-Programm (Mach-O)"),
+    (b"\xfe\xed\xfa\xcf", "macOS-Programm (Mach-O)"),
+    (b"dey\n",         "Android-Bytecode (DEX)"),
+    (b"dex\n",         "Android-Bytecode (DEX)"),
+)
+
+
+def _anhang_ausfuehrbar(endung: str, mime: str, rohdaten: bytes) -> str:
+    """Gibt einen Klartext-Grund zurueck, wenn der Anhang ausfuehrbar ist – sonst
+    einen Leerstring. Fail-closed nur bei eindeutigen Merkmalen: eine zu breite
+    Erkennung wuerde harmlose Unterlagen abweisen, und der Benutzer koennte den
+    Grund nicht nachvollziehen."""
+    e = (endung or "").lower().lstrip(".")
+    if e in _ANHANG_EXEC_EXT:
+        return f"ausfuehrbare Dateien werden nicht angenommen (.{e})"
+    if (mime or "").lower() in _ANHANG_EXEC_MIME:
+        return f"ausfuehrbare Dateien werden nicht angenommen ({mime})"
+    kopf = rohdaten[:8] if rohdaten else b""
+    for signatur, bezeichnung in _ANHANG_EXEC_MAGIC:
+        if kopf.startswith(signatur):
+            return (f"der Inhalt ist ein {bezeichnung}, unabhaengig von der Endung "
+                    f"– ausfuehrbare Dateien werden nicht angenommen")
+    return ""
+
+
+def _anhang_ablegen(rohdaten: bytes, dateiname: str, benutzer: str):
+    """Legt einen Anhang ab und gibt ``(dauerhaft, arbeitskopie)`` zurueck.
+
+    Zwei Orte, beide gebraucht:
+
+    * ``data/documents`` – dauerhaft, MIT Eigentuemer-Vermerk. Ohne den waere der
+      eigene Anhang fuer den Hochladenden selbst nicht mehr auffindbar (die
+      Eigentuemer-Schranke in ``sandbox.py`` ist fail-closed).
+    * ``/tmp/anhang_<12 Hex>_<name>`` – Arbeitskopie fuer die Shell.
+      ``data/documents`` ist 0750 und fuer den Sandbox-Benutzer gesperrt; ohne
+      diese Kopie waere "analysiere die angehaengte Tabelle" mit pandas/openpyxl
+      fuer Netzwerk-Benutzer tot. Zufaelliges Praefix, weil /tmp von allen
+      Sandbox-Laeufen geteilt wird – der Name ist damit nicht erratbar. Die
+      Kopie verfaellt nach ``JARVIS_ATTACH_TTL_MIN`` (Vorgabe 30 min,
+      ``backend/attachments.py``).
+
+    Scheitert die dauerhafte Ablage, wird ``(None, None)`` gemeldet – der
+    Aufrufer laesst den Pfad-Hinweis dann weg, statt auf eine Datei zu zeigen,
+    die es nicht gibt."""
+    import uuid as _uuidatt
+    try:
+        docs_dir = Path(__file__).parent.parent / "data" / "documents"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        sicher = "".join(c if (c.isalnum() or c in "._-") else "_"
+                         for c in os.path.basename(dateiname)).strip("_") or "datei"
+        ziel = docs_dir / sicher
+        if ziel.exists():
+            stamm, suffix = os.path.splitext(sicher)
+            ziel = docs_dir / f"{stamm}_{_uuidatt.uuid4().hex[:8]}{suffix}"
+        ziel.write_bytes(rohdaten)
+    except Exception as e:
+        print(f"[chat] Anhang konnte nicht abgelegt werden ({dateiname}): {e}", flush=True)
+        return None, None
+
+    try:
+        _documents.register_upload(ziel.name, benutzer)
+    except Exception as e:
+        print(f"[chat] Anhang-Eigentuemer nicht vermerkt: {e}", flush=True)
+
+    arbeit = None
+    try:
+        arbeit = Path("/tmp") / f"anhang_{_uuidatt.uuid4().hex[:12]}_{sicher}"
+        arbeit.write_bytes(rohdaten)
+        # 0644 – ausdruecklich OHNE Ausfuehrungsrecht.
+        os.chmod(arbeit, 0o644)
+    except Exception as e:
+        print(f"[chat] Arbeitskopie fehlgeschlagen: {e}", flush=True)
+        arbeit = None
+    return ziel, arbeit
+
+
 # Erlaubte Linux-Benutzer für Web-Login
 ALLOWED_USERS = {"jarvis"}
 
@@ -13241,6 +13358,25 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         _ALLOWED_IMG_MIME  = {"image/jpeg","image/jpg","image/png","image/gif","image/webp","image/bmp"}
         _ALLOWED_AUD_MIME  = {"audio/wav","audio/mp3","audio/mpeg","audio/ogg","audio/webm","audio/aac","audio/flac","audio/m4a","audio/x-m4a"}
         _ALLOWED_VID_MIME  = {"video/mp4","video/webm","video/ogg","video/quicktime","video/x-msvideo","video/mpeg"}
+        # ── Groessengrenze fuer Anhaenge ──────────────────────────────────────
+        # 50 MB je Datei (Vorgabe des Betreibers 2026-08-12). Ankommen tut die
+        # Datei base64-kodiert, also mit Faktor 4/3 – die Pruefung laeuft auf der
+        # KODIERTEN Laenge, weil erst danach dekodiert wird.
+        #
+        # ACHTUNG, DIE GRENZE HAENGT NICHT NUR HIER: uvicorn deckelt eine
+        # WebSocket-Nachricht per Vorgabe auf 16 MB. Bis 2026-08-12 stand hier
+        # 20 bzw. 30 MB – beides LAG DARUEBER und war damit unerreichbar: die
+        # Verbindung brach vorher ab, ohne Meldung. Deshalb setzen
+        # start_jarvis.sh/run.sh jetzt --ws-max-size. Wer diese Zahl erhoeht,
+        # muss dort mit.
+        _ATTACH_MAX_BYTES = 50 * 1024 * 1024
+        _ATTACH_MAX_B64   = int(_ATTACH_MAX_BYTES * 4 / 3) + 4096
+        # Deckel fuer PDF-Text IM PROMPT. Nicht MAX_EXTRACT_CHARS (4 Mio) aus der
+        # Wissensdatenbank: das ist eine Indizierungs-Grenze: 4 Mio Zeichen sind
+        # rund 1,2 Mio Token und sprengen jedes Kontextfenster. 120.000 Zeichen
+        # sind ~35.000 Token und entsprechen etwa dem, was der fruehere
+        # 50-Seiten-Deckel lieferte. Eine Kuerzung wird AUSGEWIESEN.
+        _PDF_PROMPT_MAX_CHARS = 120_000
         image_attachments  = []
         _text_prepend      = []   # Transkripte + PDF-Texte die dem task_text vorangestellt werden
 
@@ -13276,95 +13412,135 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                     except Exception as _ae:
                         print(f"[attach] Transkription fehlgeschlagen ({_name}): {_ae}", flush=True)
                 elif _mime == "application/pdf":
-                    if len(_data) > 20_000_000:    # max ~15 MB binary
+                    _ext_pdf = os.path.splitext(_name)[1].lower().lstrip(".")
+                    if len(_data) > _ATTACH_MAX_B64:
+                        # SICHTBAR melden statt still ueberspringen: ein wortlos
+                        # verworfener Anhang sieht fuer den Benutzer aus wie
+                        # "das Dokument wird nicht gefunden".
+                        _text_prepend.append(
+                            f"[PDF {_name}: zu gross zum Verarbeiten – hoechstens {_ATTACH_MAX_BYTES // (1024*1024)} MB. "
+                            f"Bitte die relevanten Seiten einzeln anhaengen.]")
                         continue
                     try:
                         await ws.send_json({"type": "status", "message": f"📄 Lese PDF {_name} (ggf. OCR)…"})
                         _pdf_bytes = _b64att.b64decode(_data)
+
                         def _extract_pdf_text(pdf_bytes: bytes) -> str:
-                            import pypdf, io
-                            reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
-                            pages = []
-                            for i, page in enumerate(reader.pages[:50]):  # max 50 Seiten
-                                text = page.extract_text() or ""
-                                if text.strip():
-                                    pages.append(f"[Seite {i+1}]\n{text.strip()}")
-                            combined = "\n\n".join(pages)
-                            # OCR-Fallback bei gescannten/bildbasierten PDFs (kein/zu wenig Text-Layer)
-                            if len(combined.strip()) < 80:
+                            """Text aus einem PDF-Anhang – ueber den Extraktor der
+                            Wissensdatenbank.
+
+                            FRUEHER pypdf, UND DAS WAR DER FEHLER (gemeldet
+                            2026-08-12 als "Dokument wird nicht gefunden"): pypdf
+                            stand in KEINER requirements.txt und fehlte in den
+                            venvs. Die Funktion scheiterte deshalb schon an ihrer
+                            ersten Zeile, dem Import – und weil der OCR-Rueckfall
+                            IN derselben Funktion darunter stand, wurde auch der
+                            nie erreicht, obwohl pdf2image, pytesseract und
+                            tesseract vorhanden sind. Der Benutzer bekam nur
+                            "Konnte nicht gelesen werden".
+
+                            pdfplumber ist dagegen deklariert, installiert und
+                            traegt die Speicher-Vorsichtsmassnahmen aus dem
+                            OOM-Vorfall vom 2026-08-01 (130-MB-PDF mit 9000
+                            Seiten: Spitze 306 MB statt 6000 MB). Zwei PDF-Leser
+                            im selben Projekt waeren ohnehin einer zu viel."""
+                            from backend.tools import knowledge as _kb
+                            import tempfile as _tfatt
+                            _text = ""
+                            _tmp = None
+                            try:
+                                # Der Extraktor arbeitet auf einer DATEI und
+                                # entscheidet ueber die Endung – deshalb ".pdf".
+                                with _tfatt.NamedTemporaryFile(suffix=".pdf", delete=False) as _fh:
+                                    _fh.write(pdf_bytes)
+                                    _tmp = Path(_fh.name)
+                                _text = _kb._extract_text(_tmp, len(pdf_bytes)) or ""
+                            finally:
+                                # Kein Rueckstand: anders als die Arbeitskopie
+                                # unten wird diese Datei nicht gebraucht.
+                                if _tmp is not None:
+                                    try:
+                                        _tmp.unlink()
+                                    except OSError:
+                                        pass
+                            # Gescannte PDFs haben keinen Text-Layer.
+                            if len(_text.strip()) < 80:
                                 try:
-                                    from backend.tools.knowledge import _ocr_pdf_bytes
-                                    ocr = _ocr_pdf_bytes(pdf_bytes)
-                                    if len(ocr.strip()) > len(combined.strip()):
-                                        return ocr
+                                    _ocr = _kb._ocr_pdf_bytes(pdf_bytes)
+                                    if len(_ocr.strip()) > len(_text.strip()):
+                                        return _ocr
                                 except Exception as _oe:
                                     print(f"[attach] PDF-OCR-Fallback fehlgeschlagen: {_oe}", flush=True)
-                            return combined
+                            return _text
+
+                        # Ein umbenanntes Programm kann jeden MIME-Typ behaupten -
+                        # deshalb greift die Sperre auch hier (Magie-Bytes).
+                        _grund = _anhang_ausfuehrbar(_ext_pdf, _mime, _pdf_bytes)
+                        if _grund:
+                            _text_prepend.append(f"[Datei {_name}: {_grund}]")
+                            continue
+
                         _pdf_text = await asyncio.to_thread(_extract_pdf_text, _pdf_bytes)
+
+                        # DIE DATEI WIRD ZUSAETZLICH ABGELEGT (Vorgabe 2026-08-12).
+                        # Bis dahin gab es beim PDF NUR den extrahierten Text im
+                        # Prompt: es existierte keine Datei, auf die eine Nachfrage
+                        # ("hol mir die Tabelle auf Seite 30") haette zugreifen
+                        # koennen - jeder Versuch endete in "nicht gefunden".
+                        _dest, _work = _anhang_ablegen(_pdf_bytes, _name, _get_ws_username(ws))
+
                         if _pdf_text.strip():
-                            _text_prepend.append(f"[PDF-Inhalt von {_name}]:\n{_pdf_text}")
+                            _voll = len(_pdf_text)
+                            _kuerzung = ""
+                            if _voll > _PDF_PROMPT_MAX_CHARS:
+                                _pdf_text = _pdf_text[:_PDF_PROMPT_MAX_CHARS]
+                                _kuerzung = (f"\n\n[… gekuerzt: von {_voll} Zeichen wurden die "
+                                             f"ersten {_PDF_PROMPT_MAX_CHARS} uebernommen. "
+                                             f"Fuer den Rest die betreffenden Seiten einzeln anhaengen.]")
+                            _text_prepend.append(f"[PDF-Inhalt von {_name}]:\n{_pdf_text}{_kuerzung}")
                         else:
                             _text_prepend.append(f"[PDF {_name}: Kein Text gefunden – auch OCR lieferte nichts (evtl. leeres/unleserliches PDF)]")
+                        if _dest is not None:
+                            _wo_pdf = (f"{_work.as_posix()} (per Shell lesbar) bzw. "
+                                       if _work else "")
+                            _text_prepend.append(
+                                f"[Die Datei liegt zusaetzlich unter: {_wo_pdf}'{_dest.name}'. "
+                                f"Der Text oben ist bereits extrahiert – die Datei brauchst du "
+                                f"nur fuer Seiten/Tabellen/Bilder, die darin nicht stehen "
+                                f"(z. B. pdfplumber per Shell). Fuer Shell-Skripte IMMER den "
+                                f"/tmp-Pfad verwenden, data/documents ist fuer die Shell gesperrt.]")
                     except Exception as _pe:
                         print(f"[attach] PDF-Extraktion fehlgeschlagen ({_name}): {_pe}", flush=True)
                         _text_prepend.append(f"[PDF {_name}: Konnte nicht gelesen werden – {_pe}]")
                 else:
-                    # Office-/Text-/CSV-/sonstige Dokumente (xlsx/docx/pptx/csv/txt/…):
+                    # Alles Uebrige (Office, Text, CSV, ZIP, beliebige Unterlagen):
                     # Datei nach data/documents/ speichern, damit der Agent sie mit den
-                    # passenden Tools (office_read, Shell/pandas) lesen UND ein bearbeitetes
-                    # Ergebnis als Download liefern kann. Frueher wurden diese Anhaenge
-                    # komplett verworfen ("keine Tabelle angehaengt").
+                    # passenden Werkzeugen lesen UND ein bearbeitetes Ergebnis als
+                    # Download liefern kann.
+                    #
+                    # SPERRLISTE statt Zulassungsliste (Vorgabe 2026-08-12): hier
+                    # standen 20 erlaubte Endungen, alles andere fiel WORTLOS heraus -
+                    # fuer den Benutzer nicht von "das Dokument wird nicht gefunden"
+                    # zu unterscheiden. Abgewiesen wird jetzt nur Ausfuehrbares, und
+                    # das mit Begruendung (_anhang_ausfuehrbar).
                     _ext = os.path.splitext(_name)[1].lower().lstrip(".")
-                    _DOC_EXT = {"xlsx","xls","ods","csv","tsv","docx","doc","odt","rtf",
-                                "pptx","ppt","odp","txt","md","json","xml","html","htm","log","zip"}
-                    _is_doc = (_ext in _DOC_EXT or "officedocument" in _mime
-                               or "opendocument" in _mime
-                               or _mime in {"text/csv","text/plain","application/json",
-                                            "text/markdown","text/xml","application/xml",
-                                            "application/zip","application/x-zip-compressed"})
-                    if not _is_doc:
-                        continue
-                    if len(_data) > 30_000_000:    # ~22 MB binary
-                        _text_prepend.append(f"[Datei {_name}: zu gross zum Verarbeiten]")
+                    if len(_data) > _ATTACH_MAX_B64:
+                        _text_prepend.append(f"[Datei {_name}: zu gross zum Verarbeiten – hoechstens "
+                                             f"{_ATTACH_MAX_BYTES // (1024*1024)} MB]")
                         continue
                     try:
-                        import uuid as _uuidatt
                         _doc_bytes = _b64att.b64decode(_data)
-                        _docs_dir = Path(__file__).parent.parent / "data" / "documents"
-                        _docs_dir.mkdir(parents=True, exist_ok=True)
-                        _safe = "".join(c if (c.isalnum() or c in "._-") else "_"
-                                        for c in os.path.basename(_name)).strip("_") or "datei"
-                        _dest = _docs_dir / _safe
-                        if _dest.exists():
-                            _stem, _sfx = os.path.splitext(_safe)
-                            _dest = _docs_dir / f"{_stem}_{_uuidatt.uuid4().hex[:8]}{_sfx}"
-                        _dest.write_bytes(_doc_bytes)
-                        # Eigentuemer vermerken: data/documents unterliegt seit
-                        # 2026-07-28 der Eigentuemer-Schranke (backend/sandbox.py).
-                        # Ohne Eintrag waere der eigene Anhang fuer den
-                        # Hochladenden selbst nicht mehr auffindbar.
-                        try:
-                            _documents.register_upload(_dest.name, _get_ws_username(ws))
-                        except Exception as _e_reg:
-                            print(f"[chat] Anhang-Eigentuemer nicht vermerkt: {_e_reg}", flush=True)
-                        # ARBEITSKOPIE in /tmp. data/documents ist seit 2026-07-28
-                        # 0750 (sandbox.harden_data_dirs) – die Shell von
-                        # Domain-Nutzern laeuft als jarvis_sandbox und kommt dort
-                        # NICHT mehr hinein. Ohne diese Kopie waere "analysiere die
-                        # angehaengte Tabelle" fuer Netzwerk-Benutzer tot, sobald
-                        # pandas/openpyxl per Shell laufen. Zufaelliges Praefix, weil
-                        # /tmp von allen Sandbox-Laeufen geteilt wird: der Name ist
-                        # damit nicht erratbar. 0644 ist hier vertretbar, /tmp ist der
-                        # Arbeitsbereich und die Datei ist fluechtig.
-                        _work = None
-                        try:
-                            _wdir = Path("/tmp")
-                            _work = _wdir / f"anhang_{_uuidatt.uuid4().hex[:12]}_{_safe}"
-                            _work.write_bytes(_doc_bytes)
-                            os.chmod(_work, 0o644)
-                        except Exception as _e_work:
-                            print(f"[chat] Arbeitskopie fehlgeschlagen: {_e_work}", flush=True)
-                            _work = None
+                        # Ausfuehrbares wird abgewiesen - und zwar MIT Begruendung,
+                        # nicht wortlos uebersprungen wie bis 2026-08-12.
+                        _grund = _anhang_ausfuehrbar(_ext, _mime, _doc_bytes)
+                        if _grund:
+                            _text_prepend.append(f"[Datei {_name}: {_grund}]")
+                            continue
+                        _dest, _work = _anhang_ablegen(_doc_bytes, _name, _get_ws_username(ws))
+                        if _dest is None:
+                            _text_prepend.append(
+                                f"[Datei {_name}: konnte auf dem Server nicht abgelegt werden]")
+                            continue
                         _wo = (f"{_work.as_posix()} (per Shell lesbar) bzw. "
                                if _work else "")
                         # Die genannten Werkzeuge kommen aus SKILLS und koennen fehlen
@@ -14468,4 +14644,7 @@ if __name__ == "__main__":
         ssl_keyfile=str(cert_dir / "server.key"),
         ssl_certfile=str(cert_dir / "server.crt"),
         reload=True,
+        # Muss zu _ATTACH_MAX_BYTES passen, sonst bricht die WebSocket-
+        # Verbindung bei einem grossen Anhang ab (Vorgabe waere 16 MB).
+        ws_max_size=100_000_000,
     )

@@ -214,6 +214,11 @@ fi  # IS_ROOT (Teil 2)
 
 # 5. Starte das Backend
 #
+# --ws-max-size: uvicorn deckelt eine WebSocket-Nachricht per Vorgabe auf 16 MB.
+# Chat-Anhaenge kommen ueber genau diesen Weg und base64-kodiert an (Faktor 4/3),
+# ein 50-MB-Anhang braucht also ~67 MB. Ohne diesen Wert bricht die VERBINDUNG ab,
+# bevor der Server die Datei sieht - ohne Meldung an den Benutzer. Die Zahl muss
+# ueber _ATTACH_MAX_BYTES in backend/main.py liegen.
 # --timeout-graceful-shutdown: OHNE diesen Wert wartet uvicorn beim Beenden
 # darauf, dass offene Verbindungen von selbst schliessen – und jeder geoeffnete
 # Browser-Tab (Portal, Chat, /settings, VNC) haelt einen WebSocket offen.
@@ -231,4 +236,5 @@ fi  # IS_ROOT (Teil 2)
 echo "Starte Backend (HTTPS)..."
 exec ./venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 443 \
     --ssl-keyfile ./certs/server.key --ssl-certfile ./certs/server.crt \
-    --timeout-graceful-shutdown 5
+    --timeout-graceful-shutdown 5 \
+    --ws-max-size 100000000

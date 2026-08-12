@@ -285,6 +285,21 @@ LEGACY_TEMPERATURE = 0.2
 # Interner Default der Provider-Hilfsmethoden: None = Feld weglassen.
 DEFAULT_TEMPERATURE = None
 
+# Meldung, wenn die Generierung mitten im Reasoning abgeschnitten wurde
+# (``finish_reason == "length"``, bei Reasoning-Modellen wie Qwen3 oft eine
+# Denk-Schleife). ALS KONSTANTE, nicht als Literal an der Fundstelle: Aufrufer
+# muessen diesen Fall ERKENNEN koennen. Der E-Mail-Regel-Lauf zaehlt ihn als
+# Fehlschlag (sonst gilt "keine Antwort" als Erfolg und die Nachricht ist
+# abgehakt, ohne bearbeitet zu sein – am 2026-08-12 genau so passiert). Wer den
+# Text aendert, muss `mail_runner._kein_ergebnis()` mitnehmen; ein Test haelt
+# fest, dass beide dieselbe Konstante benutzen.
+HINWEIS_UNVOLLSTAENDIG = (
+    "⚠️ Das Modell konnte die Antwort nicht abschließen "
+    "(max_tokens erreicht – vermutlich eine Reasoning-Schleife, "
+    "weil die nötigen Daten/Tools nicht verfügbar waren). "
+    "Bitte die Anfrage konkretisieren oder ein anderes Modell/Profil wählen."
+)
+
 
 def clean_api_key(key) -> str:
     """Normalisiert einen API-Key/Session-Key fuer die Verwendung in einem HTTP-Header.
@@ -1019,12 +1034,7 @@ class OpenAICompatibleProvider(LLMProvider):
                     # erreicht – bei Reasoning-Modellen wie Qwen3 oft eine
                     # Denk-Schleife). NIEMALS das rohe Reasoning an den Nutzer
                     # dumpen; stattdessen klare Kurzmeldung.
-                    parts.append(LLMPart(text=(
-                        "⚠️ Das Modell konnte die Antwort nicht abschließen "
-                        "(max_tokens erreicht – vermutlich eine Reasoning-Schleife, "
-                        "weil die nötigen Daten/Tools nicht verfügbar waren). "
-                        "Bitte die Anfrage konkretisieren oder ein anderes Modell/Profil wählen."
-                    )))
+                    parts.append(LLMPart(text=HINWEIS_UNVOLLSTAENDIG))
                 elif _reasoning:
                     # Sauber beendet (stop), aber Text nur im 'reasoning'-Feld –
                     # dann ist das die eigentliche Antwort. Als Fallback nutzen,

@@ -273,6 +273,12 @@ async def regel_lauf(regel: dict, testlauf: bool = False,
             t0 = time.time()
             try:
                 ergebnis = await _lauf_fuer_nachricht(regel, n, konto, werkzeuge, actor)
+                # Ein Lauf, der formal endet aber nichts liefert, ist KEIN Erfolg.
+                # Sonst wird die Nachricht abgehakt, obwohl nichts geschehen ist.
+                if _kein_ergebnis(ergebnis):
+                    ok = False
+                    print("[Mail] Regel '%s': kein Ergebnis fuer Nachricht von %s"
+                          % (regel.get("name"), n.von), flush=True)
             except Exception as e:  # noqa: BLE001
                 ok, ergebnis = False, "Regel-Lauf fehlgeschlagen: %s" % e
                 print("[Mail] Regel '%s' fehlgeschlagen: %s"
@@ -282,10 +288,31 @@ async def regel_lauf(regel: dict, testlauf: bool = False,
             # die Nachricht erneut verarbeitet. Das ist die bewusste Wahl –
             # "eventuell doppelt" ist bei einem Entwurf/einer Antwort aergerlich,
             # "nie verarbeitet" laesst eine Kundenmail liegen.
+            #
+            # UND EIN FEHLSCHLAG HAKT SIE NICHT AB. Bis 2026-08-12 wurde auch
+            # nach einem gescheiterten Lauf vermerkt; ein technischer Ausfall
+            # (der EWS-Fehler desselben Tages) hat damit Post endgueltig
+            # verschluckt – die Regel sah sie nie wieder an. Jetzt: bis
+            # MAX_FEHLVERSUCHE erneut versuchen, danach ausdruecklich aufgeben.
             if not testlauf:
-                mail_rules.merke_verarbeitet(regel["id"], n.schluessel, n.zeitstempel)
                 if ok:
+                    mail_rules.vergiss_fehlversuche(regel["id"], n.schluessel)
+                    mail_rules.merke_verarbeitet(regel["id"], n.schluessel, n.zeitstempel)
                     await _markieren(client, n, kategorie, regel)
+                else:
+                    versuch = mail_rules.merke_fehlversuch(regel["id"], n.schluessel)
+                    if versuch >= mail_rules.MAX_FEHLVERSUCHE:
+                        mail_rules.merke_verarbeitet(regel["id"], n.schluessel, n.zeitstempel)
+                        aufgegeben = (
+                            " Nach %d Fehlversuchen wird diese Nachricht nicht mehr "
+                            "erneut verarbeitet." % versuch)
+                        ergebnis += aufgegeben
+                        print("[Mail] Regel '%s': Nachricht von %s nach %d Fehlversuchen "
+                              "uebersprungen" % (regel.get("name"), n.von, versuch), flush=True)
+                    else:
+                        ergebnis += (" Versuch %d von %d – die Nachricht bleibt offen und "
+                                     "wird beim naechsten Durchgang erneut versucht."
+                                     % (versuch, mail_rules.MAX_FEHLVERSUCHE))
 
             bericht["verarbeitet" if ok else "uebersprungen"] += 1
             bericht["ok"] = bericht["ok"] and ok
@@ -326,6 +353,33 @@ async def _markieren(client: MailClient, n, kategorie: str, regel: dict) -> None
             print("[Mail] Lesemarkierung nicht gesetzt: %s" % e, flush=True)
 
 
+def _kein_ergebnis(antwort: str) -> bool:
+    """True, wenn der Lauf formal endete, aber KEIN Ergebnis geliefert hat.
+
+    Warum das noetig ist: ``run_task_headless`` wirft nicht, wenn das Modell
+    nichts zustande bringt – es gibt einen Hinweistext zurueck. Ohne diese
+    Pruefung galt der Lauf als Erfolg, die Nachricht wurde abgehakt und nie
+    wieder angesehen, obwohl gar nichts geschehen ist (am 2026-08-12 bei der
+    einen Nachricht, auf die die Regel wirklich zutraf: Reasoning-Schleife,
+    ``finish_reason = length``).
+
+    Die Marker sind KONSTANTEN bzw. Konventionen des Projekts, keine
+    nachgetippten Prosa-Schnipsel: ``llm.HINWEIS_UNVOLLSTAENDIG`` und die an
+    sieben Stellen benutzte Vorsilbe ``HINWEIS_AN_NUTZER`` (dieselbe Klasse, die
+    ``agent._looks_like_error`` fuer den Rollen-Rueckfall kennen muss).
+    """
+    t = (antwort or "").strip()
+    if not t:
+        return True
+    try:
+        from backend.llm import HINWEIS_UNVOLLSTAENDIG
+        if HINWEIS_UNVOLLSTAENDIG[:60] in t:
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return "HINWEIS_AN_NUTZER" in t
+
+
 async def _lauf_fuer_nachricht(regel: dict, n, konto, werkzeuge, actor: dict) -> str:
     """Ein Agentenlauf fuer genau eine Nachricht."""
     global _agent
@@ -361,7 +415,23 @@ async def _lauf_fuer_nachricht(regel: dict, n, konto, werkzeuge, actor: dict) ->
         # laeuft (zwei Tore, beide fail-closed – wie bei der Erinnerungs-Ausnahme).
         marke = mail_accounts.current_mail_user.set(actor.get("user") or "")
         try:
-            return await _agent.run_task_headless(auftrag, actor=actor)
+            antwort = await _agent.run_task_headless(auftrag, actor=actor)
+            if _kein_ergebnis(antwort):
+                # EINMALIGER Neuversuch mit knapper Denktiefe. Beobachtet am
+                # 2026-08-12 mit Qwen3.6-35B: das Modell verbrauchte die 8192
+                # Token im Reasoning und lieferte nichts. Eine Regel ist eine
+                # kurze, klar umschriebene Aufgabe – 'low' laesst das Budget fuer
+                # die eigentliche Arbeit (Werkzeug-Aufruf + zwei Saetze).
+                # Bewusst NICHT dauerhaft erzwungen: wer im Prompt eine Abwaegung
+                # verlangt, soll sie im ersten Anlauf bekommen.
+                print("[Mail] Regel '%s': erster Anlauf ohne Ergebnis – "
+                      "Neuversuch mit reasoning_effort=low" % regel.get("name"), flush=True)
+                zweite = await _agent.run_task_headless(
+                    auftrag, actor=actor, reasoning_effort="low")
+                if not _kein_ergebnis(zweite):
+                    return zweite
+                return (zweite or antwort)
+            return antwort
         finally:
             try:
                 mail_accounts.current_mail_user.reset(marke)

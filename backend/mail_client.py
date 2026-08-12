@@ -189,6 +189,49 @@ def html_zu_text(html: str) -> str:
     return t.strip()
 
 
+def _tls_adapter_setzen(verify: bool) -> None:
+    """Zertifikatspruefung fuer EWS ein- oder ausschalten.
+
+    **IN BEIDE RICHTUNGEN, und das ist der Punkt.** exchangelib waehlt den
+    HTTP-Adapter ueber eine **prozessweite Klassenvariable**
+    (``BaseProtocol.HTTP_ADAPTER_CLS``). Die erste Fassung setzte sie nur auf
+    ``NoVerifyHTTPAdapter``, wenn die Pruefung abgeschaltet war – und nie
+    zurueck. Damit blieb die Pruefung nach EINEM Lauf ohne Verifikation fuer den
+    ganzen Prozess aus, auch wenn der Administrator sie danach wieder
+    einschaltete: ein Schutz, der still ausfaellt, ist kein Schutz.
+
+    Selbstsignierte interne Zertifikate sind bei On-Prem-Exchange der Normalfall;
+    abgeschaltet wird nur auf ausdrueckliche Einstellung des Administrators (die
+    Einstellung ist ohnehin serverweit, nicht pro Benutzer).
+
+    ⚠ GRENZE: exchangelib haelt Verbindungspools je Endpunkt. Ein Umschalten
+    wirkt auf NEU aufgebaute Sitzungen; fuer die bestehenden kann ein
+    Dienstneustart noetig sein. Deshalb wird jeder Wechsel protokolliert – sonst
+    sucht man den Unterschied zwischen Einstellung und Verhalten im Code.
+    """
+    try:
+        import requests.adapters  # noqa: PLC0415
+        from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return
+    ziel = requests.adapters.HTTPAdapter if verify else NoVerifyHTTPAdapter
+    if BaseProtocol.HTTP_ADAPTER_CLS is not ziel:
+        BaseProtocol.HTTP_ADAPTER_CLS = ziel
+        print("[Mail] TLS-Zertifikatspruefung fuer EWS: %s"
+              % ("aktiv" if verify else "ABGESCHALTET (Einstellung des Administrators)"),
+              flush=True)
+    if not verify:
+        # urllib3 warnt pro ANFRAGE – ein einziger Lesevorgang erzeugte 22 Zeilen
+        # im Journal und begraebt die Meldungen, auf die es ankommt. "once" statt
+        # "ignore": die Information bleibt (einmal je Prozess), das Rauschen geht.
+        try:
+            import warnings  # noqa: PLC0415
+            from urllib3.exceptions import InsecureRequestWarning  # noqa: PLC0415
+            warnings.filterwarnings("once", category=InsecureRequestWarning)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def ews_url_normieren(wert: str) -> str:
     """Macht aus einer Servereingabe eine vollstaendige EWS-Adresse.
 
@@ -375,15 +418,7 @@ class _Ews:
         xl = self._lib()
         k = self.konto
         try:
-            if not k.verify_ssl:
-                # Selbstsignierte interne Zertifikate sind bei On-Prem-Exchange
-                # der Normalfall. Die Pruefung wird NUR abgeschaltet, wenn der
-                # Administrator das ausdruecklich eingestellt hat.
-                try:
-                    from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter  # noqa: PLC0415
-                    BaseProtocol.HTTP_ADAPTER_CLS = NoVerifyHTTPAdapter
-                except Exception:  # noqa: BLE001
-                    pass
+            _tls_adapter_setzen(bool(k.verify_ssl))
 
             creds = xl.Credentials(username=k.anmeldename(), password=k.passwort)
             zugriff = getattr(xl, "DELEGATE", "delegate")
@@ -539,21 +574,51 @@ class _Ews:
         Folge-Aktion sie danach im alten Ordner nicht mehr faende.
         """
         acc = self._konto()
+        gruende: list[str] = []
+
+        # WEG 1: GetItem ueber die Kennung. `fetch()` erwartet
+        # **(id, changekey)-TUPEL** oder Item-Objekte – KEINE nackten
+        # Zeichenketten (so steht es im Docstring von Account.fetch, exchangelib
+        # 5.6). Mit `ids=[msg_id]` schlug der Aufruf fehl, und weil der Fehler
+        # hier mit `except Exception: pass` verschluckt wurde, war der Grund
+        # unsichtbar. Der Changekey darf None sein.
         try:
-            treffer = list(acc.fetch(ids=[msg_id]))
-            if treffer and not isinstance(treffer[0], Exception):
-                return treffer[0]
-        except Exception:  # noqa: BLE001
-            pass
-        # Rueckfall: ueber die Ordner suchen (aeltere exchangelib ohne fetch(ids=))
-        try:
-            for f in (acc.inbox, acc.drafts, acc.sent, acc.trash):
-                if f is None:
+            for m in acc.fetch(ids=[(msg_id, None)]):
+                # fetch() liefert Ausnahmen IN der Ergebnisfolge, nicht als
+                # Wurf – ein `isinstance`-Test allein und dann stilles
+                # Weiterlaufen verliert die Begruendung.
+                if isinstance(m, Exception):
+                    gruende.append("fetch: %s" % m)
                     continue
-                for m in f.filter(id=msg_id):
-                    return m
+                return m
         except Exception as e:  # noqa: BLE001
-            raise _einordnen(e, "ews") from e
+            gruende.append("fetch: %s" % e)
+
+        # WEG 2: `get(id=…)` je Standardordner. exchangelib erlaubt GENAU diese
+        # Form (QuerySet.get ist auf {id} bzw. {id, changekey} gesondert
+        # behandelt) und macht daraus ebenfalls ein GetItem.
+        #
+        # NIEMALS `filter(id=…)`: daraus wird eine Restriction, und EWS lehnt sie
+        # ab – "EWS does not support filtering on field 'id'". Genau das hat am
+        # 2026-08-12 im Betrieb JEDE Aktion einer Regel blockiert (Antworten,
+        # Lesen, Verschieben), und die Meldung nannte den Ordner-Rueckfall,
+        # nicht den eigentlich gescheiterten ersten Weg.
+        for f in (acc.inbox, acc.drafts, acc.sent, acc.trash,
+                  getattr(acc, "junk", None), getattr(acc, "archive_msg_folder_root", None)):
+            if f is None:
+                continue
+            try:
+                return f.get(id=msg_id)
+            except Exception as e:  # noqa: BLE001
+                name = getattr(f, "name", "?")
+                if type(e).__name__ != "DoesNotExist":
+                    gruende.append("%s: %s" % (name, e))
+
+        if gruende:
+            raise MailFehler(
+                "Nachricht %s konnte nicht geoeffnet werden. Versuche: %s"
+                % (msg_id[:40] + ("…" if len(msg_id) > 40 else ""), " | ".join(gruende[:3])),
+                "fehler", "ews")
         raise MailFehler("Nachricht %s nicht gefunden." % msg_id, "nicht_da", "ews")
 
     def lesen(self, msg_id: str, ordner: str = "") -> MailNachricht:

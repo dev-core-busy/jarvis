@@ -364,6 +364,12 @@ mr.merke_lauf(rid)
 check(mr.faellige() == [], "nach einem Lauf nicht mehr faellig (Intervall)")
 mr.merke_lauf(rid, time.time() - 6 * 60)
 check(len(mr.faellige()) == 1, "nach Ablauf des Intervalls wieder faellig")
+# Eine ausdrueckliche 0 heisst "nie gelaufen" und darf NICHT zu "jetzt" werden
+# (Falsyness-Falle: `int(zeit or time.time())`).
+mr.merke_lauf(rid, 0)
+check(mr.zustand_regel(rid)["letzter_lauf"] == 0,
+      "merke_lauf(id, 0) setzt wirklich 0, nicht die aktuelle Zeit")
+check(len(mr.faellige()) == 1, "und die Regel ist damit faellig")
 
 mr.aendern(rid, {"enabled": False}, owner="a.bender")
 check(mr.faellige() == [], "abgeschaltete Regel laeuft nicht")
@@ -399,6 +405,75 @@ check(rid not in json.loads(mr.ZUSTAND_DATEI.read_text()),
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Ein Lauf OHNE Ergebnis ist kein Erfolg (sonst wird die Nachricht abgehakt,
+# obwohl nichts geschehen ist – am 2026-08-12 genau bei der einen Nachricht,
+# auf die die Regel zutraf: Reasoning-Schleife, finish_reason=length).
+import importlib
+_mrun = importlib.import_module("backend.mail_runner")
+check(_mrun._kein_ergebnis("") is True, "leere Antwort = kein Ergebnis")
+check(_mrun._kein_ergebnis("   ") is True, "nur Leerzeichen = kein Ergebnis")
+check(_mrun._kein_ergebnis("Entwurf gespeichert.") is False,
+      "eine echte Antwort ist ein Ergebnis")
+check(_mrun._kein_ergebnis("HINWEIS_AN_NUTZER: geht nicht") is True,
+      "die HINWEIS_AN_NUTZER-Konvention zaehlt als kein Ergebnis")
+try:
+    from backend.llm import HINWEIS_UNVOLLSTAENDIG
+    check(_mrun._kein_ergebnis(HINWEIS_UNVOLLSTAENDIG) is True,
+          "die Reasoning-Schleifen-Meldung zaehlt als kein Ergebnis")
+    # EINE Quelle fuer den Text – kein nachgetipptes Literal
+    llm_q = (ROOT / "backend/llm.py").read_text()
+    check(llm_q.count("Das Modell konnte die Antwort nicht abschließen") == 1,
+          "der Hinweistext steht genau EINMAL in llm.py (als Konstante)")
+    check("parts.append(LLMPart(text=HINWEIS_UNVOLLSTAENDIG))" in llm_q,
+          "die Fundstelle benutzt die Konstante")
+    run_q = (ROOT / "backend/mail_runner.py").read_text()
+    check("from backend.llm import HINWEIS_UNVOLLSTAENDIG" in run_q,
+          "der Runner importiert dieselbe Konstante (kein Prosa-Vergleich)")
+except ImportError:
+    check(True, "llm-Konstante uebersprungen (Import nicht moeglich)")
+_l = (ROOT / "backend/mail_runner.py").read_text()
+check('reasoning_effort="low"' in _l,
+      "bei einem Nicht-Ergebnis wird EINMAL mit knapper Denktiefe wiederholt")
+_ll = _l[_l.index("ergebnis = await _lauf_fuer_nachricht"):]
+check("_kein_ergebnis(ergebnis)" in _ll[:600],
+      "das Ergebnis wird nach dem Lauf geprueft")
+
+# ── Fehlversuche: ein Fehlschlag haakt die Nachricht NICHT ab ───────────────
+regel_f = mr.anlegen("a.bender", {"name": "Fehler", "prompt": "p"})
+fid = regel_f["id"]
+check(mr.fehlversuche(fid, "<f1@x>") == 0, "unbekannte Nachricht hat 0 Fehlversuche")
+check(mr.merke_fehlversuch(fid, "<f1@x>") == 1, "erster Fehlversuch wird gezaehlt")
+check(mr.merke_fehlversuch(fid, "<f1@x>") == 2, "zweiter Fehlversuch wird gezaehlt")
+check(mr.schon_verarbeitet(fid, "<f1@x>") is False,
+      "nach Fehlversuchen gilt die Nachricht NICHT als verarbeitet "
+      "(sonst verschluckt ein technischer Ausfall Post endgueltig)")
+check(mr.merke_fehlversuch(fid, "<f1@x>") == mr.MAX_FEHLVERSUCHE,
+      "der Deckel ist erreichbar")
+mr.vergiss_fehlversuche(fid, "<f1@x>")
+check(mr.fehlversuche(fid, "<f1@x>") == 0,
+      "ein Erfolg loescht den Zaehler (sonst gibt ein spaeterer Ausfall zu frueh auf)")
+check(mr.merke_fehlversuch(fid, "") == 0, "leerer Schluessel wird nicht gezaehlt")
+# Wieder-Vorlegen (Administrator-Eingriff nach behobenem Fehler)
+mr.merke_verarbeitet(fid, "<f2@x>", 100.0)
+mr.merke_fehlversuch(fid, "<f2@x>")
+check(mr.schon_verarbeitet(fid, "<f2@x>") is True, "Vorbedingung: gilt als verarbeitet")
+check(mr.wieder_vorlegen(fid, "<f2@x>") is True, "wieder_vorlegen meldet Erfolg")
+check(mr.schon_verarbeitet(fid, "<f2@x>") is False and mr.fehlversuche(fid, "<f2@x>") == 0,
+      "wieder_vorlegen entfernt Vermerk UND Zaehler")
+check(mr.wieder_vorlegen(fid, "<gibtsnicht@x>") is False,
+      "wieder_vorlegen meldet ehrlich, wenn nichts zu tun war")
+# Der Runner muss beide Zweige unterscheiden
+runner_q = (ROOT / "backend/mail_runner.py").read_text()
+_lauf = runner_q[runner_q.index("if not testlauf:"):]
+_lauf = _lauf[:_lauf.index("bericht[")]
+check("if ok:" in _lauf and "merke_fehlversuch" in _lauf,
+      "der Runner trennt Erfolg und Fehlschlag")
+check("MAX_FEHLVERSUCHE" in _lauf,
+      "und gibt erst nach dem Deckel auf")
+check("Versuch %d von %d" in _lauf,
+      "der Zwischenstand steht im Ergebnistext (nichts passiert stillschweigend)")
+mr.loeschen(fid)
+
 section("5. Protokoll: Filter beim Lesen, Alterung, keine Mengengrenze")
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -596,6 +671,59 @@ for ein, soll, label in (
 ):
     check(mc.ews_url_normieren(ein) == soll, label,
           "%r -> %r" % (ein, mc.ews_url_normieren(ein)))
+
+# TLS-Adapter: exchangelib waehlt ihn ueber eine PROZESSWEITE Klassenvariable.
+# Wird sie nur in EINE Richtung gesetzt, bleibt die Zertifikatspruefung nach
+# einem Lauf ohne Verifikation fuer den ganzen Prozess aus – auch wenn der
+# Administrator sie wieder einschaltet.
+check(hasattr(mc, "_tls_adapter_setzen"), "es gibt eine Stelle fuer den TLS-Adapter")
+_tls = (ROOT / "backend/mail_client.py").read_text()
+_tlsfn = _tls[_tls.index("def _tls_adapter_setzen"):]
+_tlsfn = _tlsfn[:_tlsfn.index("def ews_url_normieren")]
+check("requests.adapters.HTTPAdapter if verify else NoVerifyHTTPAdapter" in _tlsfn,
+      "der Adapter wird in BEIDE Richtungen gesetzt")
+check("_tls_adapter_setzen(bool(k.verify_ssl))" in _tls,
+      "die Verbindung setzt ihn bei JEDEM Aufbau")
+check('warnings.filterwarnings("once"' in _tlsfn,
+      "die urllib3-Warnung wird auf einmal je Prozess gedrosselt, nicht unterdrueckt")
+# Auf den AUFRUF pruefen, nicht auf das Wort – und Kommentare ausnehmen: die
+# erste Fassung schlug an der eigenen Begruendung an ('"once" statt "ignore"').
+# Dieselbe Falle wie beim Prompt-Waechter am 2026-08-10.
+_tls_code = "\n".join(z for z in _tlsfn.splitlines() if not z.strip().startswith("#"))
+check('filterwarnings("ignore"' not in _tls_code
+      and "disable_warnings" not in _tls_code,
+      "sie wird NICHT ganz verschluckt (die Information bleibt)")
+# Umschalten wirklich pruefen (ohne Exchange, nur die Klassenvariable)
+try:
+    from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
+    import requests.adapters
+    mc._tls_adapter_setzen(False)
+    aus = BaseProtocol.HTTP_ADAPTER_CLS is NoVerifyHTTPAdapter
+    mc._tls_adapter_setzen(True)
+    an = BaseProtocol.HTTP_ADAPTER_CLS is requests.adapters.HTTPAdapter
+    check(aus and an, "Abschalten UND Wiedereinschalten wirken",
+          "aus=%s an=%s" % (aus, an))
+except ImportError:
+    check(True, "Umschalt-Probe uebersprungen (exchangelib nicht installiert)")
+
+# EWS-Item-Aufloesung: NIEMALS filter(id=...) – EWS macht daraus eine
+# Restriction und lehnt sie ab ("EWS does not support filtering on field 'id'").
+# Das hat am 2026-08-12 im Betrieb JEDE Regel-Aktion blockiert.
+ews_quelle = (ROOT / "backend/mail_client.py").read_text()
+_ohne_kommentare = "\n".join(
+    z for z in ews_quelle.splitlines() if not z.strip().startswith("#"))
+check("filter(id=" not in _ohne_kommentare,
+      "kein filter(id=...) im Code (EWS kann nicht auf die Kennung filtern)")
+check("fetch(ids=[(msg_id, None)])" in _ohne_kommentare,
+      "fetch() bekommt ein (id, changekey)-TUPEL, keine nackte Zeichenkette")
+check(".get(id=msg_id)" in _ohne_kommentare,
+      "der Rueckfall benutzt get(id=...) – die einzige erlaubte Form")
+_such = ews_quelle[ews_quelle.index("def _suche_item"):]
+_such = _such[:_such.index("def lesen")]
+check("except Exception:  # noqa: BLE001\n            pass" not in _such,
+      "der erste Fehlversuch wird NICHT mehr stillschweigend verschluckt")
+check("gruende" in _such and "Versuche:" in _such,
+      "die Fehlermeldung nennt die gescheiterten Versuche")
 
 # Eine eingetragene URL GEWINNT gegen den Autodiscover-Haken. Vorher galt
 # `ews_url and not autodiscover` – wer den Server eintrug und den Haken stehen

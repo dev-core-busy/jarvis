@@ -31,6 +31,7 @@
     var _status = null;      // /api/email/status
     var _regeln = [];
     var _bereiche = [];
+    var _bereicheLang = '';  // in welcher Sprache der Katalog geholt wurde
     var _ordner = null;      // erst auf Bedarf geladen
     var _editId = null;      // welche Regel ist offen ('neu' = neue Regel)
     var _editHeim = null;    // Heimatplatz des wandernden Formulars
@@ -40,6 +41,7 @@
         var s = window.t ? window.t(key) : null;
         return (s && s !== key) ? s : fallback;
     }
+    function sprache() { return (window._lang === 'en') ? 'en' : 'de'; }
     function token() {
         for (var i = 0; i < TOKEN_KEYS.length; i++) {
             var v = localStorage.getItem(TOKEN_KEYS[i]);
@@ -117,10 +119,11 @@
 
     /* ── Postfach ──────────────────────────────────────────────────────── */
     function ladeStatus() {
-        return hole('/api/email/status')
+        return hole('/api/email/status?lang=' + sprache())
             .then(function (d) {
                 _status = d;
                 _bereiche = d.bereiche || [];
+                _bereicheLang = sprache();
                 zeigeKonto(d.konto || {});
                 zeigeServerHinweis(d);
             })
@@ -256,10 +259,10 @@
 
     /* ── Regeln ────────────────────────────────────────────────────────── */
     function ladeRegeln() {
-        return hole('/api/email/rules')
+        return hole('/api/email/rules?lang=' + sprache())
             .then(function (d) {
                 _regeln = d.regeln || [];
-                if (d.bereiche) _bereiche = d.bereiche;
+                if (d.bereiche) { _bereiche = d.bereiche; _bereicheLang = sprache(); }
                 zeichneRegeln();
             })
             .catch(function (e) { melde('em-rules-status', e.message, 'fehler'); });
@@ -562,6 +565,30 @@
         }).catch(function (e) { melde('em-f-status', e.message, 'fehler'); });
     }
 
+    // Der Sprachwechsel baut das Formular neu auf (die Beschriftungen entstehen
+    // beim Oeffnen aus T()). Ohne diese beiden Helfer waere ein Klick auf DE/EN
+    // mitten im Tippen Datenverlust – deshalb Stand sichern und zuruecklegen.
+    var FORM_FELDER = ['em-f-name', 'em-f-ordner', 'em-f-prompt', 'em-f-intervall',
+                       'em-f-max', 'em-f-von', 'em-f-betreff'];
+    function formularStand() {
+        if (!_editId || !$('em-f-name')) return null;
+        var s = { id: _editId, werte: {}, haken: {}, bereiche: [] };
+        FORM_FELDER.forEach(function (f) { s.werte[f] = ($(f) || {}).value || ''; });
+        ['em-f-unread', 'em-f-read'].forEach(function (f) {
+            s.haken[f] = !!(($(f) || {}).checked);
+        });
+        document.querySelectorAll('#em-f-areas input[type="checkbox"]').forEach(function (cb) {
+            if (cb.checked) s.bereiche.push(cb.value);
+        });
+        return s;
+    }
+    function formularStandSetzen(s) {
+        if (!s || _editId !== s.id || !$('em-f-name')) return;
+        FORM_FELDER.forEach(function (f) { if ($(f)) $(f).value = s.werte[f]; });
+        Object.keys(s.haken).forEach(function (f) { if ($(f)) $(f).checked = s.haken[f]; });
+        zeichneBereichsWahl(s.bereiche);
+    }
+
     function schliesseFormular() {
         _editId = null;
         var box = $('em-rule-edit');
@@ -600,7 +627,7 @@
                 + '</div>';
             if (e.mail_betreff || e.mail_von) {
                 h += '<div class="em-log-time">' + esc(e.mail_von || '?') + ' — '
-                    + esc(e.mail_betreff || '(kein Betreff)') + '</div>';
+                    + esc(e.mail_betreff || T('mail.log_nosubject', '(kein Betreff)')) + '</div>';
             }
             h += '<div class="em-log-res">' + esc(e.ergebnis || '') + '</div></div>';
         });
@@ -621,6 +648,20 @@
         });
         if ((b = $('em-portal-btn'))) b.addEventListener('click', function () {
             window.location.href = '/portal';
+        });
+        // Sprachwechsel: Bereichsnamen und -hinweise kommen UEBERSETZT vom
+        // Server (sie stehen dort neben der Werkzeugliste, damit Text und
+        // Wirkung nicht auseinanderlaufen) – applyLang() erreicht sie deshalb
+        // nicht, ebenso wenig die per T() zusammengesetzten Zeilen der Liste.
+        // Der Vergleich mit `_bereicheLang` verhindert einen zweiten Abruf beim
+        // Seitenaufbau, wo applyLang() dasselbe Ereignis feuert (Muster aus
+        // sap_portal.js).
+        window.addEventListener('jarvis-lang-changed', function () {
+            if (_bereicheLang === sprache()) return;
+            var offen = formularStand();
+            ladeStatus();
+            ladeRegeln().then(function () { formularStandSetzen(offen); });
+            ladeLog();
         });
         if ((b = $('em-logout-btn'))) b.addEventListener('click', function () {
             // Signal MUSS raus, bevor der Token verworfen wird (sonst ist die

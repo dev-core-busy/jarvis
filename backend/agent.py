@@ -1073,6 +1073,24 @@ KRITISCH – Autonomie-Regeln:
                   f"Aufrufers wird verwendet", flush=True)
         self._active_profile = config.profile_for_user(getattr(self, "_current_username", ""))
 
+    def _werkzeug_nutzbar(self, name: str) -> bool:
+        """Ist das Werkzeug in DIESEM Lauf wirklich aufrufbar?
+
+        `name in self.tools_map` genuegt NICHT: `tools_map` ist der volle
+        Werkzeugkasten, waehrend ein Rollen- oder E-Mail-Regel-Lauf auf
+        ``_role_tools`` beschraenkt ist – der Dispatch weist den Aufruf dann ab.
+        Gemessen am 2026-08-13 in einem echten Regel-Lauf: der Auto-Learning-
+        Zweig feuerte, kostete einen kompletten LLM-Aufruf und endete mit
+        „Tool 'memory_manage' nicht im Rollenumfang".
+
+        `_role_tools is None` heisst „keine Beschraenkung", eine LEERE Menge
+        „keine Werkzeuge" – nie auf Falsyness pruefen.
+        """
+        if name not in self.tools_map:
+            return False
+        allow = getattr(self, "_role_tools", None)
+        return True if allow is None else name in allow
+
     # ── Rollen-Agent: Werkzeugsatz und System-Prompt ─────────────────────────
     @property
     def _llm_tools(self) -> list:
@@ -2383,10 +2401,11 @@ KRITISCH – Autonomie-Regeln:
 
             # Auto-Learning: Bei mehrstufigen Aufgaben den Loesungsweg speichern.
             # `memory_manage` kommt aus dem Skill 'memory' und kann fehlen (auch
-            # System-Skills sind abschaltbar, siehe _SKILL_PFLICHT_TOOLS). Ohne
-            # das Werkzeug ist der ganze Zweig sinnlos: er kostet einen weiteren
-            # LLM-Aufruf und endet mit "Tool nicht gefunden".
-            if steps >= 2 and self._tool_stats and "memory_manage" in self.tools_map:
+            # System-Skills sind abschaltbar, siehe _SKILL_PFLICHT_TOOLS) ODER
+            # ausserhalb des Zuschnitts dieses Laufs liegen (Rolle, E-Mail-Regel).
+            # Ohne das Werkzeug ist der ganze Zweig sinnlos: er kostet einen
+            # weiteren LLM-Aufruf und endet mit "Tool nicht gefunden".
+            if steps >= 2 and self._tool_stats and self._werkzeug_nutzbar("memory_manage"):
                 failed = [s for s in self._tool_stats if not s["success"]]
                 succeeded = [s for s in self._tool_stats if s["success"]]
                 if failed and succeeded:
@@ -2762,8 +2781,11 @@ KRITISCH – Autonomie-Regeln:
                     collected_texts.append(_final_h_text)
 
             # Auto-Learning (gleiche Logik wie in run_task, inkl. der Bedingung
-            # auf 'memory_manage' – ohne das Werkzeug ist der Zweig ein Leerlauf)
-            if steps >= 2 and self._tool_stats and "memory_manage" in self.tools_map:
+            # auf 'memory_manage' – ohne das Werkzeug ist der Zweig ein Leerlauf.
+            # HIER faellt das besonders ins Gewicht: E-Mail-Regeln laufen
+            # headless MIT Werkzeug-Whitelist, der Zweig feuerte also bei jedem
+            # Regel-Lauf mit zwei Schritten ins Leere.)
+            if steps >= 2 and self._tool_stats and self._werkzeug_nutzbar("memory_manage"):
                 failed = [s for s in self._tool_stats if not s["success"]]
                 succeeded = [s for s in self._tool_stats if s["success"]]
                 if failed and succeeded:

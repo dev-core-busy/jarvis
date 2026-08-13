@@ -7484,8 +7484,14 @@ async def email_page():
 
 
 @app.get("/api/email/status")
-async def email_status(user: str = Depends(require_email_access)):
-    """Zustand des Bereichs fuer die Oberflaeche: Konto, Server, Bereiche, Regelzahl."""
+async def email_status(lang: str = "de", user: str = Depends(require_email_access)):
+    """Zustand des Bereichs fuer die Oberflaeche: Konto, Server, Bereiche, Regelzahl.
+
+    ``lang`` uebersetzt den BEREICHSKATALOG. Er kommt vom Server (Name und
+    Hinweis stehen neben der Werkzeugliste, damit beides nicht auseinanderlaeuft
+    – gleiche Begruendung wie beim SAP-Analysekatalog), und ``applyLang()``
+    erreicht ihn deshalb nicht: die Oberflaeche holt ihn bei ``jarvis-lang-changed``
+    neu."""
     from backend import mail_accounts, mail_rules
     cfg = mail_accounts.skill_config()
     return JSONResponse({
@@ -7500,7 +7506,7 @@ async def email_status(user: str = Depends(require_email_access)):
             "imap": bool((cfg.get("imap_host") or "").strip()),
             "smtp": bool((cfg.get("smtp_host") or "").strip()),
         },
-        "bereiche": mail_rules.bereiche_katalog(),
+        "bereiche": mail_rules.bereiche_katalog(lang),
         "kategorie": mail_accounts.kategorie_name(),
         "regeln": len(mail_rules.liste(user)),
         "grenzen": {
@@ -7640,12 +7646,15 @@ async def email_messages(ordner: str = "", limit: int = 15,
 
 
 @app.get("/api/email/rules")
-async def email_rules_list(user: str = Depends(require_email_access)):
+async def email_rules_list(lang: str = "de",
+                           user: str = Depends(require_email_access)):
     """NUR die eigenen Regeln. Fremde sind nicht sichtbar (kein 'verboten', sie
-    existieren fuer diesen Benutzer einfach nicht)."""
+    existieren fuer diesen Benutzer einfach nicht).
+
+    ``lang`` uebersetzt den Bereichskatalog – siehe ``email_status``."""
     from backend import mail_rules
     return JSONResponse({"ok": True, "regeln": mail_rules.liste(user),
-                         "bereiche": mail_rules.bereiche_katalog()})
+                         "bereiche": mail_rules.bereiche_katalog(lang)})
 
 
 @app.post("/api/email/rules")
@@ -7767,7 +7776,8 @@ async def email_log(regel_id: str = "", limit: int = 50,
 # ─── E-Mail: Administrator-Teil (Reiter) ─────────────────────────────────────
 
 @app.get("/api/email/admin/overview")
-async def email_admin_overview(user: str = Depends(require_local_auth)):
+async def email_admin_overview(lang: str = "de",
+                               user: str = Depends(require_local_auth)):
     """Uebersicht fuer den Reiter: Freigabe, Bereiche, Konten, Regeln je Benutzer.
 
     Zeigt bewusst KEINE Regel-Prompts und keine Betreffzeilen – der Reiter ist
@@ -7807,7 +7817,7 @@ async def email_admin_overview(user: str = Depends(require_local_auth)):
             "users": config.get_setting("email_allowed_users", ""),
             "group": config.get_setting("email_allowed_group", ""),
         },
-        "bereiche": mail_rules.bereiche_katalog(),
+        "bereiche": mail_rules.bereiche_katalog(lang),
         "freigegeben": mail_rules.freigegebene_bereiche(),
         "kategorie": mail_accounts.kategorie_name(),
         "konten": konten,

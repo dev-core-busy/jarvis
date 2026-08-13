@@ -603,16 +603,24 @@ class _Ews:
         # 2026-08-12 im Betrieb JEDE Aktion einer Regel blockiert (Antworten,
         # Lesen, Verschieben), und die Meldung nannte den Ordner-Rueckfall,
         # nicht den eigentlich gescheiterten ersten Weg.
-        for f in (acc.inbox, acc.drafts, acc.sent, acc.trash,
-                  getattr(acc, "junk", None), getattr(acc, "archive_msg_folder_root", None)):
+        # FALLSTRICK: die Standardordner sind PROPERTIES, die beim Zugriff eine
+        # Ausnahme werfen koennen, wenn der Server sie nicht kennt
+        # ("Could not find distinguished folder 'archiveroot'" – auf DEV genau so
+        # passiert). `getattr(..., None)` faengt das NICHT, es faengt nur
+        # AttributeError. Deshalb wird jeder Ordner einzeln und geschuetzt geholt.
+        for name in ("inbox", "drafts", "sent", "trash", "junk",
+                     "archive_msg_folder_root"):
+            try:
+                f = getattr(acc, name, None)
+            except Exception:  # noqa: BLE001
+                continue
             if f is None:
                 continue
             try:
                 return f.get(id=msg_id)
             except Exception as e:  # noqa: BLE001
-                name = getattr(f, "name", "?")
                 if type(e).__name__ != "DoesNotExist":
-                    gruende.append("%s: %s" % (name, e))
+                    gruende.append("%s: %s" % (getattr(f, "name", name), e))
 
         if gruende:
             raise MailFehler(

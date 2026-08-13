@@ -135,8 +135,15 @@ def main() -> int:
            "import pypdf" not in quelle and "from pypdf" not in quelle)
     src = hole_funktion("_extract_pdf_text")
     pruefe("der Extraktor nutzt den Leser der Wissensdatenbank",
-           "_extract_text" in src and "knowledge" in src)
-    pruefe("OCR-Rueckfall ist weiterhin vorgesehen", "_ocr_pdf_bytes" in src)
+           "pdf_text_mit_bericht" in src and "knowledge" in src)
+    # Seit 2026-08-13 liegt der OCR-Rueckfall IN knowledge.py (zusammen mit der
+    # Qualitaetspruefung), nicht mehr im Anhang-Zweig von main.py. Geprueft wird
+    # deshalb dort - die Zusage "es gibt einen OCR-Rueckfall" gilt unveraendert.
+    kq = (ROOT / "backend" / "tools" / "knowledge.py").read_text(encoding="utf-8")
+    pruefe("OCR-Rueckfall ist weiterhin vorgesehen",
+           "_ocr_pdf_bytes" in kq and "def pdf_text_mit_bericht" in kq)
+    pruefe("der Anhang-Zweig reicht den Qualitaetshinweis weiter",
+           "qualitaets_hinweis" in src)
     pruefe("Temporaerdatei wird wieder entfernt", "unlink" in src)
     pruefe("Deckel fuer den Prompt ist gesetzt", "_PDF_PROMPT_MAX_CHARS" in quelle)
     # Der Indizierungs-Deckel der Wissensdatenbank (4 Mio Zeichen) waere als
@@ -159,7 +166,12 @@ def main() -> int:
     abschnitt("3) Der echte Extraktor – OHNE pypdf (Zustand auf ECHT)")
     umgebung = {"Path": Path, "print": print}
     exec(src, umgebung)
-    extrahiere = umgebung["_extract_pdf_text"]
+    _roh_extrahiere = umgebung["_extract_pdf_text"]
+
+    def extrahiere(b):
+        # Seit der Qualitaetspruefung (2026-08-13) liefert die Funktion
+        # (Text, Hinweis) - der Hinweis geht als Vorspann in den Prompt.
+        return _roh_extrahiere(b)[0]
 
     vorher = set(glob.glob(os.path.join("/tmp", "tmp*.pdf")))
 

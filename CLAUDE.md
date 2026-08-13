@@ -2514,6 +2514,77 @@ Berechtigungen → E-Mail-Zugriff* freigeben (leer = niemand) und die Werkzeug-B
 (Vorgabe: nur `mail`). Jeder Benutzer hinterlegt sein Postfach selbst. **Als Skill kostet die
 Funktion einen Skill-Slot** – FREE/BASIC erlauben fünf aktive Skills.
 
+## PDF-Textqualität: beschädigte Textebene erkennen und OCR entscheiden lassen (2026-08-13)
+**Der Vorfall (2026-08-12, ECHT):** `Einsender_KIM_Anbindung_compressed.pdf` (8,9 MB, 54 Seiten)
+lieferte über pdfplumber **80.586 Zeichen** – die alte Schwelle „unter 80 Zeichen → OCR" greift
+damit **nie**. Der Text war trotzdem teils unbrauchbar, weil die Zeichentabelle (cmap) der
+eingebetteten Schriften beschädigt ist: `Datum: OL.O7.2026` statt `01.07.2026`, `Lauerstr.'14`,
+`ftir` statt „für", `ngirrrsf#s$` als Logo-Zeile. Das Modell hat daraufhin **17
+Extraktionsskripte** gebaut und die 54 Adressen trotzdem nicht saubergekriegt.
+Code: `backend/tools/knowledge.py` (`pdf_text_verdacht`, `text_guete`, `_ocr_gewinnt`,
+`pdf_qualitaet_sichern`, `qualitaets_hinweis`, `pdf_text_mit_bericht`) + Anhang-Zweig in
+`main.py`. Test: `tests/test_pdf_qualitaet.py` (52) + `tests/test_pdf_attachment.py` (60).
+
+- **DIE NAHELIEGENDEN KENNZAHLEN SEHEN DEN SCHADEN NICHT** – auf ECHT gemessen, nicht vermutet.
+  Stoppwortanteil, Vokalanteil und Sonderzeichenquote sind bei der kaputten Fassung so gut wie
+  bei der OCR-Fassung, teils **besser** (Stoppwortanteil 12,9 % gegen 11,4 %, Fremdzeichen
+  0,0 % gegen 0,111 %). Der Schaden besteht aus **Zeichen-Substitutionen**, und die erzeugen
+  weiterhin aussprechbare Wörter. Auch die Wörterbuchquote trennt kaum (59,7 → 61,7 %).
+  Wer hier eine Entropie- oder Wortlistenprüfung baut, misst am Problem vorbei.
+- **DESHALB ZWEI STUFEN, und die zweite ist die Entscheidung:**
+  1. **Vorfilter** (Millisekunden, reine Regex) stellt nur einen *Verdacht* fest und darf
+     großzügig sein – ein Fehlalarm kostet nur die Stichprobe.
+  2. **OCR-Stichprobe auf zwei Seiten + Vergleich beider Fassungen.** Erst wenn OCR messbar
+     mehr liefert, wird das Dokument neu gelesen. **Das ist selbstkorrigierend** – es misst,
+     statt zu raten.
+- **WARUM DER VORFILTER ALLEIN NICHT REICHT (der teuerste Fund):** an **753 echten
+  Fachdokumenten** gemessen schlug eine erste, breitere Fassung bei **ICD-10-Codes** (`O61.0`),
+  **PPR-Pflegekategorien** (`A4S1`) und **GUIDs** (`43B3B851`) an – alles völlig korrekter Text,
+  den OCR **zeichengleich** liefert. In einer Klinikumgebung wäre das ein Dauerfehlalarm mit
+  je zwei Sekunden je Seite. Konsequenz für die Regex: **kein führendes O vor Ziffern**
+  (das ist ICD-10) und **S/B nicht als Verwechslung** – `_TQ_INNEN` verlangt den Buchstaben
+  **zwischen zwei Ziffern** (`2O26` trifft, `O61.0` nicht). Die drei Fälle stehen wörtlich im
+  Test.
+- **Messwerte (ECHT):** Vorfilter → Verdacht bei **29 von 753** (3,9 %). Stichprobe →
+  gemeldetes PDF Strukturtreffer **21 → 37**, Wortquote 58,6 → 61,4 ⇒ **OCR**; gesunde
+  Verdachtsfälle Strukturtreffer gleich, Wortquote **76,5 → 59,2** ⇒ **Textebene bleibt**.
+  Kosten: Stichprobe 3,8–7,0 s, volles OCR rund **1,9 s je Seite**.
+- **Gemessen wird, was man am Ende braucht** (`text_guete`): Strukturtreffer (Mail, Telefon,
+  PLZ, Datum, IBAN) + Wortquote gegen `/usr/share/dict/ngerman`. **Bewusst NICHT die
+  Schadensmuster des Vorfilters** – mit demselben Maßstab zu messen, der den Verdacht
+  ausgelöst hat, wäre ein Zirkelschluss.
+- **`_ocr_gewinnt` ist fail-closed:** eine deutlich schlechtere Wortquote **widerlegt** auch
+  mehr Strukturtreffer (verrauschtes OCR erzeugt Zahlenfolgen, die wie Telefonnummern
+  aussehen). Ohne Wortliste zählt allein die Struktur. Die Wortliste ist **optional** – fehlt
+  sie, läuft die Prüfung strenger weiter statt auszufallen.
+- **SEITENWEISE Mischung, damit NIE Inhalt verloren geht.** Der OCR-Deckel liegt bei 30 Seiten
+  (≈60 s); bei 54 Seiten behalten die restlichen 24 die Textebene. **Deshalb muss die
+  Seitenliste lückenlos sein** (`seiten.append(t or "")`): die alte Liste übersprang leere
+  Seiten, damit läge der OCR-Text von Seite 7 auf Seite 5. Genau dafür gibt es einen Test.
+  Was nicht geprüft wurde, steht **im Hinweis** – kein stiller Schnitt.
+- **Der Bericht ist Teil des Ergebnisses, nicht Beiwerk.** `pdf_text_mit_bericht()` liefert
+  `(Text, Bericht)`, `main.py` stellt `qualitaets_hinweis()` **vor** den Inhalt. Hinterher
+  gelesen käme er zu spät – das Modell hat den Inhalt dann schon ausgewertet.
+  **Eine ContextVar scheidet aus:** `asyncio.to_thread` übergibt eine **Kopie** des Kontextes,
+  ein `set()` im Thread ist im Aufrufer nicht sichtbar. Deshalb der Rückgabewert.
+- **Der Hinweis nennt ausdrücklich auch die Schwäche der Texterkennung.** Am echten PDF
+  gemessen liefert OCR deutlich mehr brauchbare Adressen, aber **eigene** Lesefehler
+  (`auftrag@ibsvS.de` statt `ibsv3`, `1ab@` statt `lab@`). „Wurde per OCR gelesen" allein
+  suggeriert einen sauberen Text, und das Modell übernimmt solche Adressen dann ungeprüft.
+- **Abschaltbar und einstellbar:** `JARVIS_PDF_QS=0` schaltet ganz ab (dann gilt wieder nur
+  der alte Rückfall für Scans), dazu `JARVIS_PDF_QS_PROBE`, `_MAX_SEITEN`, `_STRUKTUR_PLUS`,
+  `_WORT_PLUS`. Der alte Zweig „unter 80 Zeichen → OCR" **bleibt** – er deckt echte Scans ab.
+- **Kosten beim Reindex:** rund 3,9 % der Dokumente laufen in die Stichprobe (~5 s je Stück),
+  bei 900 PDFs also etwa 3 Minuten mehr. Ein Dokument mit echtem Schaden kostet bis zu 60 s.
+  Vertretbar – schlechter Text erzeugt sonst dauerhaft schlechte Chunks im Index.
+- **Verifiziert:** 112 Prüfungen (52 + 60) lokal und auf DEV im echten venv, Dienst aktiv,
+  `/settings` HTTP 200. **Am echten PDF auf ECHT belegt** (rein lesend, kein Deploy dort):
+  28 von 54 Seiten ersetzt, Seite 1 danach `Lauerstr. 14` / `01.07.2026` / `nexus |lab` statt
+  der Verstümmelungen, 66,9 s. Gegenprobe: acht gesunde Dokumente laufen in 0,1–2,3 s **ohne**
+  OCR durch; ein Verdachtsfall (`IBSAnleitung.pdf`) wurde von der Stichprobe korrekt
+  abgelehnt (Wortquote 79,8 → 74,9).
+- **Auf ECHT noch NICHT ausgerollt.**
+
 ## Info-Dokumente im Portal (`frontend_info_files/`, seit 2026-07-29)
 - **Was es ist:** Ein Ablage-Ordner neben dem Backend (`/opt/jarvis/frontend_info_files`,
   umstellbar über `JARVIS_INFO_DIR`). Ein Administrator kopiert Dateien hinein (Handbuch,

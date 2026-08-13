@@ -706,38 +706,375 @@ def _ocr_image(filepath: Path) -> str | None:
         return None
 
 
+def _ocr_sprachen() -> str | None:
+    """Verfuegbare Tesseract-Sprachen auf deu/eng eingegrenzt."""
+    try:
+        import pytesseract
+        avail = set(pytesseract.get_languages(config=""))
+        return "+".join([l for l in ("deu", "eng") if l in avail]) or None
+    except Exception:
+        return "deu+eng"
+
+
+def _ocr_pdf_seiten(pdf_bytes: bytes, erste: int = 1, letzte: int = 20) -> dict[int, str]:
+    """OCR einzelner Seiten – Rueckgabe {Seitennummer (1-basiert): Text}.
+
+    SEITENWEISE und nicht als ein Fliesstext, weil der Aufrufer die Fassungen
+    Seite fuer Seite gegeneinander stellen muss: bei einem PDF mit 54 Seiten und
+    einem OCR-Deckel von 30 duerfen die restlichen 24 Seiten nicht verloren
+    gehen. Ein zusammengefuegter String liesse sich dafuer nicht mehr zerlegen.
+    """
+    try:
+        from pdf2image import convert_from_bytes
+        import pytesseract
+    except ImportError:
+        _log.warning("pdf2image/pytesseract fehlt – PDF-OCR deaktiviert")
+        return {}
+    if letzte < erste:
+        return {}
+    try:
+        images = convert_from_bytes(pdf_bytes, dpi=200, first_page=erste, last_page=letzte)
+    except Exception as e:
+        _log.warning("PDF->Bild fehlgeschlagen: %s", e)
+        return {}
+    lang = _ocr_sprachen()
+    aus: dict[int, str] = {}
+    for versatz, img in enumerate(images):
+        try:
+            t = pytesseract.image_to_string(img, lang=lang) if lang else pytesseract.image_to_string(img)
+            t = (t or "").strip()
+            if t:
+                aus[erste + versatz] = t
+        except Exception:
+            continue
+    return aus
+
+
 def _ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 20) -> str:
     """OCR-Fallback fuer gescannte/bildbasierte PDFs (ohne Text-Layer).
 
     Rendert die Seiten via pdf2image/poppler zu Bildern und liest sie per
     Tesseract (deu+eng). Gibt erkannten Text zurueck oder '' wenn nicht moeglich.
     """
+    seiten = _ocr_pdf_seiten(pdf_bytes, 1, max_pages)
+    return "\n\n".join(f"[Seite {nr} (OCR)]\n{t}" for nr, t in sorted(seiten.items()))
+
+
+# ===========================================================================
+# Textqualitaet: erkennt eine BESCHAEDIGTE Textebene und laesst OCR entscheiden
+# ===========================================================================
+# ANLASS (Vorfall 2026-08-12 auf ECHT): ein 54-seitiges Anschreiben-PDF lieferte
+# ueber pdfplumber 80.586 Zeichen - die alte Schwelle "weniger als 80 Zeichen ->
+# OCR" greift also NIE. Der Text war aber teils unbrauchbar, weil die
+# Zeichentabelle (cmap) der eingebetteten Schriften beschaedigt ist:
+#   "Datum: OL.O7.2026" statt "01.07.2026"   (Buchstabe O statt Ziffer 0)
+#   "Lauerstr.'14"      statt "Lauerstr. 14"
+#   "ftir"              statt "fuer"
+#   "ngirrrsf#s$"       als Logo-Zeile
+# Das Modell hat daraufhin 17 Extraktionsskripte gebaut und die Adressen
+# trotzdem nicht saubergekriegt.
+#
+# WAS AN DIESEM PROBLEM UEBERRASCHT (auf ECHT gemessen, nicht geschaetzt):
+# die naheliegenden Kennzahlen sehen den Schaden NICHT. Stoppwortanteil,
+# Vokalanteil und Sonderzeichenquote sind bei der kaputten Fassung so gut wie
+# bei der OCR-Fassung - teils sogar besser (Stoppwortanteil 12,9 % gegen 11,4 %).
+# Der Schaden besteht aus ZEICHEN-SUBSTITUTIONEN, und die erzeugen weiterhin
+# aussprechbare Woerter. Wer hier eine Wortlisten- oder Entropiepruefung baut,
+# misst am Problem vorbei.
+#
+# DESHALB ZWEI STUFEN, und die zweite ist die eigentliche Entscheidung:
+#   1. Vorfilter (Millisekunden, reine Regex) - er stellt nur einen VERDACHT
+#      fest und darf grosszuegig sein, weil ein Fehlalarm nur die Stichprobe
+#      kostet.
+#   2. OCR-STICHPROBE auf zwei Seiten + Vergleich beider Fassungen. Erst wenn
+#      OCR messbar mehr liefert, wird das ganze Dokument neu gelesen.
+#
+# WARUM NICHT DER VORFILTER ALLEIN: er ist nachweislich fragil. An 753 echten
+# Fachdokumenten gemessen schlug eine erste, breitere Fassung bei ICD-10-Codes
+# ("O61.0"), PPR-Pflegekategorien ("A4S1") und GUIDs ("43B3B851") an - alles
+# voellig korrekter Text, den OCR zeichengleich liefert. In einer Klinik-
+# umgebung waere das ein Dauerfehlalarm. Die Stichprobe faengt genau das ab:
+# sie stellt fest, dass OCR nichts gewinnt, und der Textlayer bleibt stehen.
+#
+# MESSWERTE (ECHT, 753 Fachdokumente + das gemeldete PDF):
+#   Vorfilter:   Verdacht bei 29 von 753 (3,9 %)
+#   Stichprobe:  gemeldetes PDF  Strukturtreffer 21 -> 37, Wortquote 58,6 -> 61,4  => OCR
+#                gesunde Faelle  Strukturtreffer gleich, Wortquote 76,5 -> 59,2    => Textebene
+#   Kosten:      Stichprobe 3,8-7,0 s, volles OCR rund 1,9 s je Seite
+
+def _qs_zahl(name: str, vorgabe: int | float, klein, gross):
+    """Stellschraube aus der Umgebung, auf einen sinnvollen Bereich begrenzt."""
     try:
-        from pdf2image import convert_from_bytes
-        import pytesseract
-    except ImportError:
-        _log.warning("pdf2image/pytesseract fehlt – PDF-OCR-Fallback deaktiviert")
-        return ""
-    try:
-        images = convert_from_bytes(pdf_bytes, dpi=200, first_page=1, last_page=max_pages)
-    except Exception as e:
-        _log.warning("PDF->Bild fehlgeschlagen: %s", e)
-        return ""
-    try:
-        avail = set(pytesseract.get_languages(config=""))
-        lang = "+".join([l for l in ("deu", "eng") if l in avail]) or None
-    except Exception:
-        lang = "deu+eng"
-    out = []
-    for idx, img in enumerate(images, 1):
-        try:
-            t = pytesseract.image_to_string(img, lang=lang) if lang else pytesseract.image_to_string(img)
-            t = (t or "").strip()
-            if t:
-                out.append(f"[Seite {idx} (OCR)]\n{t}")
-        except Exception:
+        w = type(vorgabe)(os.environ.get(name, vorgabe))
+    except (TypeError, ValueError):
+        return vorgabe
+    return max(klein, min(gross, w))
+
+
+# 0 schaltet die Pruefung ganz ab (dann bleibt es beim alten Verhalten:
+# OCR nur, wenn praktisch kein Text da ist).
+_PDF_QS_AKTIV = os.environ.get("JARVIS_PDF_QS", "1").strip().lower() not in ("0", "aus", "off", "false")
+# Unterhalb dieser Laenge ist jede Quote Zufall.
+_PDF_QS_MIN_ZEICHEN = 200
+# Seiten fuer die Stichprobe. Zwei reichten im Feldtest zur klaren Trennung;
+# jede weitere kostet rund zwei Sekunden.
+_PDF_QS_PROBE_SEITEN = _qs_zahl("JARVIS_PDF_QS_PROBE", 2, 1, 10)
+# Obergrenze fuer das anschliessende volle OCR. Rund 1,9 s je Seite - der Wert
+# ist eine Zeitentscheidung, keine technische Grenze. Was darueber liegt, bleibt
+# bei der Textebene und wird im Ergebnis AUSGEWIESEN (kein stiller Verlust).
+_PDF_QS_MAX_SEITEN = _qs_zahl("JARVIS_PDF_QS_MAX_SEITEN", 30, 1, 400)
+# Wieviele Strukturtreffer muss OCR mindestens zusaetzlich finden.
+_PDF_QS_STRUKTUR_PLUS = _qs_zahl("JARVIS_PDF_QS_STRUKTUR_PLUS", 2, 1, 100)
+# Um wieviele Prozentpunkte muss die Wortquote steigen.
+_PDF_QS_WORT_PLUS = _qs_zahl("JARVIS_PDF_QS_WORT_PLUS", 4.0, 0.5, 50.0)
+
+# Verstuemmeltes Datum: mindestens ein O/I/l in einem sonst gueltigen Datum.
+_TQ_DATUM = re.compile(
+    r"\b(?=[^\s]*[OIl])[0-9OIl]{1,2}[.,][0-9OIl]{1,2}[.,](?:19|20)[0-9OIl]{2}\b")
+# Buchstabe ZWISCHEN zwei Ziffern. Die Einklammerung ist entscheidend: ein
+# fuehrendes O vor Ziffern waere ein ICD-10-Code (O61.0), kein Schaden.
+# S und B sind bewusst NICHT dabei - "A4S1" und "43B3B851" sind echte Kennungen.
+_TQ_INNEN = re.compile(r"\d[OIl]\d")
+# Apostroph zwischen Wort/Punkt und Ziffer: "Lauerstr.'14"
+_TQ_KLEB = re.compile(r"[A-Za-zÄÖÜäöüß.]['`´]\d")
+_TQ_VOKAL = re.compile(r"[aeiouäöüyAEIOUÄÖÜY]")
+
+# Strukturdaten - der Massstab im Vergleich. Bewusst genau die Angaben, wegen
+# derer man ein solches Dokument ueberhaupt auswertet.
+_TQ_MAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b")
+_TQ_TEL = re.compile(r"(?:\+\d{2}[\s./-]?|\b0)\d{2,5}[\s./-]?\d{3,}")
+_TQ_PLZ = re.compile(r"\b\d{5}\b")
+_TQ_DAT_OK = re.compile(r"\b\d{1,2}\.\d{1,2}\.(?:19|20)\d{2}\b")
+_TQ_IBAN = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,28}\b")
+_TQ_WORT = re.compile(r"[A-Za-zÄÖÜäöüß]{4,}")
+
+# Wortlisten des Systems. OPTIONAL - fehlt sie, entscheidet allein die Zahl der
+# Strukturtreffer (dann strenger, siehe _ocr_gewinnt).
+_WORTLISTEN = ("/usr/share/dict/ngerman", "/usr/share/hunspell/de_DE.dic",
+               "/usr/share/dict/german", "/usr/share/myspell/de_DE.dic")
+_wortliste_cache: set[str] | None = None
+
+
+def _wortliste() -> set[str]:
+    """Deutsche Wortliste, einmal geladen. Leer, wenn keine vorhanden ist."""
+    global _wortliste_cache
+    if _wortliste_cache is not None:
+        return _wortliste_cache
+    _wortliste_cache = set()
+    for p in _WORTLISTEN:
+        f = Path(p)
+        if not f.exists():
             continue
-    return "\n\n".join(out)
+        try:
+            woerter = set()
+            for z in f.read_text(encoding="utf-8", errors="ignore").split("\n"):
+                # hunspell haengt Flags mit "/" an: "Haus/N"
+                w = z.split("/")[0].strip().lower()
+                if len(w) >= 4:
+                    woerter.add(w)
+            if len(woerter) > 5000:
+                _wortliste_cache = woerter
+                _log.info("Wortliste geladen: %s (%d Eintraege)", p, len(woerter))
+                break
+        except Exception as e:
+            _log.debug("Wortliste %s nicht lesbar: %s", p, e)
+    if not _wortliste_cache:
+        _log.info("Keine Wortliste gefunden – PDF-Qualitaetspruefung nutzt nur Strukturdaten")
+    return _wortliste_cache
+
+
+def pdf_text_verdacht(text: str) -> dict:
+    """Stufe 1: Sieht die Textebene beschaedigt aus? Rueckgabe = Verdachtsgruende.
+
+    Leeres dict heisst "kein Verdacht". Die Funktion entscheidet NICHTS - sie
+    sagt nur, ob sich die Stichprobe lohnt.
+    """
+    if not text or len(text) < _PDF_QS_MIN_ZEICHEN:
+        return {}
+    kilo = len(text) / 1000
+    gruende: dict[str, float] = {}
+
+    n = len(_TQ_DATUM.findall(text))
+    if n:
+        gruende["datum_verstuemmelt"] = n
+
+    n = len(_TQ_INNEN.findall(text))
+    if n / kilo >= 0.15:
+        gruende["ziffer_buchstabe_je_1k"] = round(n / kilo, 3)
+
+    n = len(_TQ_KLEB.findall(text))
+    if n / kilo >= 0.10:
+        gruende["apostroph_vor_zahl_je_1k"] = round(n / kilo, 3)
+
+    # Zeilen ohne jeden Vokal, aber mit Buchstaben UND Sonderzeichen: das ist
+    # das Bild einer Logo- oder Symbolschrift ohne brauchbare Zeichentabelle.
+    muell = 0
+    for z in text.split("\n"):
+        z = z.strip()
+        if not 6 <= len(z) <= 40 or _TQ_VOKAL.search(z):
+            continue
+        if sum(c.isalpha() for c in z) >= 4 and any(
+                not c.isalnum() and not c.isspace() for c in z):
+            muell += 1
+    if muell:
+        gruende["muellzeilen"] = muell
+    return gruende
+
+
+def text_guete(text: str) -> dict:
+    """Wie brauchbar ist dieser Text? Strukturtreffer + Wortquote in Prozent.
+
+    Absichtlich KEINE Bewertung der Schadensmuster aus ``pdf_text_verdacht``:
+    mit demselben Massstab zu messen, der den Verdacht ausgeloest hat, waere ein
+    Zirkelschluss. Gezaehlt wird, was am Ende gebraucht wird.
+    """
+    if not text or not text.strip():
+        return {"struktur": 0, "wortquote": 0.0}
+    struktur = (len(_TQ_MAIL.findall(text)) + len(_TQ_TEL.findall(text))
+                + len(_TQ_PLZ.findall(text)) + len(_TQ_DAT_OK.findall(text))
+                + len(_TQ_IBAN.findall(text)))
+    liste = _wortliste()
+    woerter = [w.lower() for w in _TQ_WORT.findall(text)]
+    quote = (100 * sum(1 for w in woerter if w in liste) / len(woerter)
+             if woerter and liste else 0.0)
+    return {"struktur": struktur, "wortquote": round(quote, 1)}
+
+
+def _ocr_gewinnt(alt: dict, neu: dict, hat_wortliste: bool) -> bool:
+    """Ist die OCR-Fassung messbar besser als die Textebene?
+
+    Fail-closed: im Zweifel bleibt die Textebene. Ein unnoetiger OCR-Lauf kostet
+    Minuten, und eine schlechtere Fassung zu uebernehmen waere Verschlimmbesserung
+    - auf gesunden Dokumenten faellt die Wortquote durch OCR nachweislich
+    (76,5 % -> 59,2 % im Feldtest).
+    """
+    mehr_struktur = (neu["struktur"] >= alt["struktur"] + _PDF_QS_STRUKTUR_PLUS
+                     and neu["struktur"] > alt["struktur"] * 1.25)
+    if not hat_wortliste:
+        # Ohne Wortliste ist die Zahl der Strukturtreffer der einzige Massstab.
+        return mehr_struktur
+    bessere_woerter = neu["wortquote"] > alt["wortquote"] + _PDF_QS_WORT_PLUS
+    # Eine deutlich SCHLECHTERE Wortquote widerlegt auch mehr Strukturtreffer:
+    # verrauschtes OCR erzeugt Zahlenfolgen, die wie Telefonnummern aussehen.
+    if neu["wortquote"] + _PDF_QS_WORT_PLUS < alt["wortquote"]:
+        return False
+    return mehr_struktur or bessere_woerter
+
+
+def pdf_qualitaet_sichern(pdf_bytes: bytes, seiten: list[str]) -> tuple[list[str], dict]:
+    """Prueft die Textebene und ersetzt sie SEITENWEISE durch OCR, wo es besser ist.
+
+    ``seiten`` ist der Text je Seite aus pdfplumber (Index 0 = Seite 1).
+    Rueckgabe: (Seiten nach der Pruefung, Bericht).
+
+    Der Bericht ist kein Beiwerk - er geht in den Hinweis an das Modell und ins
+    Journal. Ohne ihn waere von aussen nicht erkennbar, ob eine Antwort auf der
+    Textebene oder auf OCR beruht, und der naechste Fehlerbericht begaenne wieder
+    bei null.
+    """
+    beginn = time.time()
+    bericht = {"geprueft": False, "verdacht": {}, "ocr": False, "seiten_ocr": 0,
+               "seiten_gesamt": len(seiten), "grund": ""}
+    if not _PDF_QS_AKTIV or not seiten:
+        bericht["grund"] = "abgeschaltet" if not _PDF_QS_AKTIV else "keine Seiten"
+        return seiten, bericht
+
+    voll = "\n\n".join(s for s in seiten if s)
+    bericht["geprueft"] = True
+    verdacht = pdf_text_verdacht(voll)
+    bericht["verdacht"] = verdacht
+    if not verdacht:
+        bericht["grund"] = "Textebene unauffaellig"
+        return seiten, bericht
+
+    # --- Stufe 2: Stichprobe auf den textreichsten Seiten --------------------
+    # Die textreichsten, weil eine fast leere Seite in beiden Fassungen gleich
+    # aussieht und nichts entscheidet.
+    kandidaten = sorted(range(len(seiten)), key=lambda i: -len(seiten[i]))
+    probe = sorted(i for i in kandidaten[:_PDF_QS_PROBE_SEITEN] if seiten[i].strip())
+    if not probe:
+        bericht["grund"] = "keine Seite mit Text fuer die Stichprobe"
+        return seiten, bericht
+
+    alt = {"struktur": 0, "wortquote": 0.0}
+    neu = {"struktur": 0, "wortquote": 0.0}
+    getroffen = 0
+    for i in probe:
+        ocr = _ocr_pdf_seiten(pdf_bytes, i + 1, i + 1).get(i + 1, "")
+        if not ocr:
+            continue
+        getroffen += 1
+        a, b = text_guete(seiten[i]), text_guete(ocr)
+        alt["struktur"] += a["struktur"]; alt["wortquote"] += a["wortquote"]
+        neu["struktur"] += b["struktur"]; neu["wortquote"] += b["wortquote"]
+    if not getroffen:
+        # Kein OCR moeglich (Pakete fehlen, poppler kaputt) - das ist KEIN
+        # Qualitaetsurteil, also bleibt alles wie es ist.
+        bericht["grund"] = "OCR nicht verfuegbar"
+        return seiten, bericht
+    alt["wortquote"] = round(alt["wortquote"] / getroffen, 1)
+    neu["wortquote"] = round(neu["wortquote"] / getroffen, 1)
+    bericht["probe"] = {"seiten": [i + 1 for i in probe], "textebene": alt, "ocr": neu}
+
+    if not _ocr_gewinnt(alt, neu, bool(_wortliste())):
+        bericht["grund"] = ("Stichprobe: OCR bringt nichts "
+                            f"(Struktur {alt['struktur']}->{neu['struktur']}, "
+                            f"Wortquote {alt['wortquote']}->{neu['wortquote']})")
+        return seiten, bericht
+
+    # --- Stufe 3: volles OCR, seitenweise gemischt --------------------------
+    grenze = min(len(seiten), _PDF_QS_MAX_SEITEN)
+    ocr_seiten = _ocr_pdf_seiten(pdf_bytes, 1, grenze)
+    ergebnis = list(seiten)
+    ersetzt = 0
+    for nr, txt in ocr_seiten.items():
+        i = nr - 1
+        if not (0 <= i < len(ergebnis)):
+            continue
+        # Auch hier je Seite pruefen: in einem Dokument koennen sich saubere und
+        # beschaedigte Schriften mischen, und eine Seite zu verschlechtern waere
+        # genau der Fehler, den diese Funktion verhindern soll.
+        if _ocr_gewinnt(text_guete(ergebnis[i]), text_guete(txt), bool(_wortliste())) \
+                or len(ergebnis[i].strip()) < 40:
+            ergebnis[i] = txt
+            ersetzt += 1
+    bericht["ocr"] = ersetzt > 0
+    bericht["seiten_ocr"] = ersetzt
+    bericht["dauer_s"] = round(time.time() - beginn, 1)
+    bericht["grund"] = (f"OCR angewandt auf {ersetzt} von {len(seiten)} Seiten"
+                        if ersetzt else "OCR brachte seitenweise doch keinen Gewinn")
+    if len(seiten) > grenze:
+        bericht["nicht_geprueft_ab"] = grenze + 1
+    # Die Dauer gehoert ins Journal: rund zwei Sekunden je Seite sind der Preis
+    # dieser Funktion, und wer eine langsame Antwort untersucht, soll sie hier
+    # finden statt sie zu suchen.
+    _log.info("PDF-Qualitaet: %s in %.1fs | Verdacht %s",
+              bericht["grund"], bericht["dauer_s"], verdacht)
+    return ergebnis, bericht
+
+
+def qualitaets_hinweis(bericht: dict) -> str:
+    """Ein Satz fuer das Modell – oder nichts, wenn es nichts zu sagen gibt.
+
+    Der Hinweis nennt AUSDRUECKLICH auch die Schwaeche der Texterkennung. Am
+    gemeldeten PDF gemessen liefert OCR zwar deutlich mehr brauchbare Adressen,
+    aber eigene Lesefehler ("auftrag@ibsvS.de" statt "ibsv3", "1ab@" statt
+    "lab@"). Wer nur meldet "wurde per OCR gelesen", suggeriert einen sauberen
+    Text – und das Modell uebernimmt solche Adressen dann ungeprueft.
+    """
+    if not bericht.get("ocr"):
+        return ""
+    t = (f"[Hinweis zur Textqualitaet: Die Textebene dieses PDFs ist beschaedigt "
+         f"(Zeichenfehler wie 'O' statt '0'). {bericht['seiten_ocr']} von "
+         f"{bericht['seiten_gesamt']} Seiten wurden deshalb per Texterkennung neu "
+         f"gelesen – das ist deutlich besser, kann aber eigene Lesefehler "
+         f"enthalten (Ziffern und E-Mail-Adressen).")
+    ab = bericht.get("nicht_geprueft_ab")
+    if ab:
+        t += (f" Ab Seite {ab} stammt der Text weiterhin aus der beschaedigten "
+              f"Textebene.")
+    return t + (" Zahlen und Adressen vor der Weitergabe am Original pruefen "
+                "und Unsicherheiten benennen, statt sie zu glaetten.]")
 
 
 # Obergrenze fuer extrahierten Text pro Datei. Ein einzelnes grosses
@@ -816,63 +1153,7 @@ def _extract_text_raw(filepath: Path, max_bytes: int) -> str | None:
             return None
 
     if suffix in EXTENSIONS_PDF:
-        try:
-            import gc
-            import pdfplumber
-            texts = []
-            total = 0
-            with pdfplumber.open(str(filepath)) as pdf:
-                # ueber den INDEX laufen, nicht ueber `for p in pdf.pages`:
-                # nur so laesst sich der Platz in der Liste danach freigeben.
-                seitenzahl = len(pdf.pages)
-                for i in range(seitenzahl):
-                    p = pdf.pages[i]
-                    t = p.extract_text()
-                    # DREI Freigaben, und alle drei werden gebraucht:
-                    #   flush_cache() – leert den Layout-Cache der Seite
-                    #   close()       – gibt den pdfminer-Layoutbaum frei
-                    #   _pages[i]     – die Seiten-INSTANZ selbst; pdfplumber
-                    #                   haelt jede erzeugte Seite dauerhaft in
-                    #                   dieser Liste fest.
-                    # Der dritte Punkt ist der entscheidende und war bis
-                    # 2026-08-01 nicht da. Nachgemessen an einem 130-MB-PDF
-                    # (KBV-Bewertungsmassstab, ~9000 Seiten) auf ECHT:
-                    #   nur flush_cache()          -> Spitze 6000 MB
-                    #   zusaetzlich close+_pages   -> Spitze  306 MB
-                    # bei identischem Text (4.000.122 Zeichen) und gleicher
-                    # Dauer (251 s gegen 243 s). Faktor 20 – der Unterschied
-                    # zwischen "laeuft" und "OOM-Kill" auf dieser VM.
-                    try:
-                        p.flush_cache()
-                        p.close()
-                    except Exception:
-                        pass
-                    try:
-                        pdf._pages[i] = None      # privat, deshalb abgesichert
-                    except Exception:
-                        pass
-                    if t:
-                        texts.append(t)
-                        total += len(t) + 2
-                        if total >= MAX_EXTRACT_CHARS:
-                            _log.warning(f"PDF-Extraktion bei {MAX_EXTRACT_CHARS} Zeichen "
-                                         f"gestoppt (grosses Dokument): {filepath.name}")
-                            break
-                    # Der Zyklen-Sammler laeuft sonst erst spaet; bei tausenden
-                    # Seiten haelt das die Spitze unnoetig hoch.
-                    if i and i % 200 == 0:
-                        gc.collect()
-            combined = "\n\n".join(texts)
-            # OCR-Fallback bei gescannten/bildbasierten PDFs (kein/zu wenig Text-Layer)
-            if len(combined.strip()) < 80:
-                ocr = _ocr_pdf_bytes(filepath.read_bytes())
-                if len(ocr.strip()) > len(combined.strip()):
-                    return ocr or None
-            return combined or None
-        except ImportError:
-            return None
-        except Exception:
-            return None
+        return pdf_text_mit_bericht(filepath)[0]
 
     if suffix in EXTENSIONS_DOCX:
         try:
@@ -884,6 +1165,108 @@ def _extract_text_raw(filepath: Path, max_bytes: int) -> str | None:
             return None
         except Exception:
             return None
+
+    return _extract_text_rest(filepath, max_bytes)
+
+
+def pdf_text_mit_bericht(filepath: Path) -> tuple[str | None, dict]:
+    """PDF-Text samt Qualitaetsbericht.
+
+    Eigene Funktion, weil der Aufrufer im Chat den Bericht BRAUCHT (er wird dem
+    Modell als Hinweis mitgegeben). Ueber eine ContextVar ginge das nicht:
+    ``asyncio.to_thread`` uebergibt eine KOPIE des Kontextes, ein ``set()`` im
+    Thread ist im Aufrufer nicht sichtbar.
+    """
+    bericht: dict = {"geprueft": False, "verdacht": {}, "ocr": False,
+                     "seiten_ocr": 0, "seiten_gesamt": 0, "grund": ""}
+    try:
+        import gc
+        import pdfplumber
+        texts = []          # nur Seiten MIT Text – fuer die Ausgabe
+        seiten = []         # ALLE Seiten, Index 0 = Seite 1 – fuer die Pruefung
+        total = 0
+        with pdfplumber.open(str(filepath)) as pdf:
+            # ueber den INDEX laufen, nicht ueber `for p in pdf.pages`:
+            # nur so laesst sich der Platz in der Liste danach freigeben.
+            seitenzahl = len(pdf.pages)
+            for i in range(seitenzahl):
+                p = pdf.pages[i]
+                t = p.extract_text()
+                # DREI Freigaben, und alle drei werden gebraucht:
+                #   flush_cache() – leert den Layout-Cache der Seite
+                #   close()       – gibt den pdfminer-Layoutbaum frei
+                #   _pages[i]     – die Seiten-INSTANZ selbst; pdfplumber
+                #                   haelt jede erzeugte Seite dauerhaft in
+                #                   dieser Liste fest.
+                # Der dritte Punkt ist der entscheidende und war bis
+                # 2026-08-01 nicht da. Nachgemessen an einem 130-MB-PDF
+                # (KBV-Bewertungsmassstab, ~9000 Seiten) auf ECHT:
+                #   nur flush_cache()          -> Spitze 6000 MB
+                #   zusaetzlich close+_pages   -> Spitze  306 MB
+                # bei identischem Text (4.000.122 Zeichen) und gleicher
+                # Dauer (251 s gegen 243 s). Faktor 20 – der Unterschied
+                # zwischen "laeuft" und "OOM-Kill" auf dieser VM.
+                try:
+                    p.flush_cache()
+                    p.close()
+                except Exception:
+                    pass
+                try:
+                    pdf._pages[i] = None      # privat, deshalb abgesichert
+                except Exception:
+                    pass
+                # LUECKENLOS mitfuehren: die Qualitaetspruefung ersetzt
+                # Seiten einzeln und braucht dafuer Index == Seitennummer-1.
+                # Wuerden leere Seiten uebersprungen, landete der OCR-Text
+                # von Seite 7 auf Seite 5.
+                seiten.append(t or "")
+                if t:
+                    texts.append(t)
+                    total += len(t) + 2
+                    if total >= MAX_EXTRACT_CHARS:
+                        _log.warning(f"PDF-Extraktion bei {MAX_EXTRACT_CHARS} Zeichen "
+                                     f"gestoppt (grosses Dokument): {filepath.name}")
+                        break
+                # Der Zyklen-Sammler laeuft sonst erst spaet; bei tausenden
+                # Seiten haelt das die Spitze unnoetig hoch.
+                if i and i % 200 == 0:
+                    gc.collect()
+        combined = "\n\n".join(texts)
+        bericht["seiten_gesamt"] = len(seiten)
+        # OCR-Fallback bei gescannten/bildbasierten PDFs (kein/zu wenig Text-Layer)
+        if len(combined.strip()) < 80:
+            ocr = _ocr_pdf_bytes(filepath.read_bytes())
+            if len(ocr.strip()) > len(combined.strip()):
+                bericht.update({"geprueft": True, "ocr": True,
+                                "seiten_ocr": len(seiten),
+                                "grund": "kein Text-Layer – vollstaendig per OCR gelesen"})
+                return (ocr or None), bericht
+            return (combined or None), bericht
+        # Text ist da – aber ist er auch BRAUCHBAR? Die Schwelle oben greift
+        # nur bei gescannten Seiten; eine beschaedigte Zeichentabelle liefert
+        # reichlich Text und trotzdem Unsinn (siehe Vorfall 2026-08-12).
+        try:
+            geprueft, bericht = pdf_qualitaet_sichern(filepath.read_bytes(), seiten)
+            if bericht.get("ocr"):
+                return ("\n\n".join(s for s in geprueft if s) or None), bericht
+        except Exception as e:
+            # Eine gescheiterte Qualitaetspruefung darf die Extraktion nicht
+            # mitreissen – der Text von vorhin ist immer noch besser als nichts.
+            _log.warning("PDF-Qualitaetspruefung fehlgeschlagen (%s): %s",
+                         filepath.name, e)
+            bericht["grund"] = f"Pruefung fehlgeschlagen: {e}"
+        return (combined or None), bericht
+    except ImportError:
+        bericht["grund"] = "pdfplumber fehlt"
+        return None, bericht
+    except Exception as e:
+        bericht["grund"] = f"Extraktion fehlgeschlagen: {e}"
+        return None, bericht
+
+
+def _extract_text_rest(filepath: Path, max_bytes: int) -> str | None:
+    """Alle uebrigen Formate (XLSX/PPTX/Bild/Audio/Video)."""
+    suffix = filepath.suffix.lower()
 
     if suffix in EXTENSIONS_XLSX:
         try:

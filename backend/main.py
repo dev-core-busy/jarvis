@@ -14135,12 +14135,27 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                             f"Bitte die relevanten Seiten einzeln anhaengen.]")
                         continue
                     try:
-                        await ws.send_json({"type": "status", "message": f"📄 Lese PDF {_name} (ggf. OCR)…"})
+                        # Die Meldung nennt die Texterkennung, WEIL sie lange
+                        # dauern kann (rund zwei Sekunden je Seite). Sie laeuft
+                        # in einem Thread, aus dem sich kein Zwischenstand
+                        # senden laesst – ohne diesen Satz sieht ein Lauf von
+                        # ueber einer Minute wie ein Haenger aus.
+                        await ws.send_json({"type": "status", "message":
+                            f"📄 Lese PDF {_name} – bei beschaedigtem Text mit "
+                            f"Texterkennung, das kann etwas dauern…"})
                         _pdf_bytes = _b64att.b64decode(_data)
 
-                        def _extract_pdf_text(pdf_bytes: bytes) -> str:
+                        def _extract_pdf_text(pdf_bytes: bytes) -> tuple[str, str]:
                             """Text aus einem PDF-Anhang – ueber den Extraktor der
-                            Wissensdatenbank.
+                            Wissensdatenbank. Rueckgabe: (Text, Qualitaetshinweis).
+
+                            DER HINWEIS IST TEIL DES ERGEBNISSES, kein Beiwerk:
+                            wurde die beschaedigte Textebene per Texterkennung
+                            ersetzt, muss das Modell das wissen – und wenn nur ein
+                            TEIL der Seiten ersetzt wurde, erst recht (der Rest
+                            enthaelt dann weiter Zeichenfehler). Frueher stand
+                            davon nichts im Prompt, und niemand konnte einer
+                            Antwort ansehen, worauf sie beruht.
 
                             FRUEHER pypdf, UND DAS WAR DER FEHLER (gemeldet
                             2026-08-12 als "Dokument wird nicht gefunden"): pypdf
@@ -14160,6 +14175,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                             from backend.tools import knowledge as _kb
                             import tempfile as _tfatt
                             _text = ""
+                            _bericht = {}
                             _tmp = None
                             try:
                                 # Der Extraktor arbeitet auf einer DATEI und
@@ -14167,7 +14183,12 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                                 with _tfatt.NamedTemporaryFile(suffix=".pdf", delete=False) as _fh:
                                     _fh.write(pdf_bytes)
                                     _tmp = Path(_fh.name)
-                                _text = _kb._extract_text(_tmp, len(pdf_bytes)) or ""
+                                # Diese Funktion prueft die Textebene auf
+                                # Zeichenfehler und liest beschaedigte Seiten
+                                # per OCR neu – der Rueckfall "kein Text-Layer"
+                                # steckt ebenfalls darin.
+                                _roh, _bericht = _kb.pdf_text_mit_bericht(_tmp)
+                                _text = _roh or ""
                             finally:
                                 # Kein Rueckstand: anders als die Arbeitskopie
                                 # unten wird diese Datei nicht gebraucht.
@@ -14176,15 +14197,13 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                                         _tmp.unlink()
                                     except OSError:
                                         pass
-                            # Gescannte PDFs haben keinen Text-Layer.
-                            if len(_text.strip()) < 80:
-                                try:
-                                    _ocr = _kb._ocr_pdf_bytes(pdf_bytes)
-                                    if len(_ocr.strip()) > len(_text.strip()):
-                                        return _ocr
-                                except Exception as _oe:
-                                    print(f"[attach] PDF-OCR-Fallback fehlgeschlagen: {_oe}", flush=True)
-                            return _text
+                            try:
+                                _hinweis = _kb.qualitaets_hinweis(_bericht)
+                            except Exception:
+                                _hinweis = ""
+                            if _bericht.get("grund"):
+                                print(f"[attach] PDF-Qualitaet: {_bericht['grund']}", flush=True)
+                            return _text, _hinweis
 
                         # Ein umbenanntes Programm kann jeden MIME-Typ behaupten -
                         # deshalb greift die Sperre auch hier (Magie-Bytes).
@@ -14193,7 +14212,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                             _text_prepend.append(f"[Datei {_name}: {_grund}]")
                             continue
 
-                        _pdf_text = await asyncio.to_thread(_extract_pdf_text, _pdf_bytes)
+                        _pdf_text, _pdf_hinweis = await asyncio.to_thread(_extract_pdf_text, _pdf_bytes)
 
                         # DIE DATEI WIRD ZUSAETZLICH ABGELEGT (Vorgabe 2026-08-12).
                         # Bis dahin gab es beim PDF NUR den extrahierten Text im
@@ -14213,7 +14232,13 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                                 _kuerzung = (f"\n\n[… gekuerzt: von {_voll} Zeichen wurden die "
                                              f"ersten {_PDF_PROMPT_MAX_CHARS} uebernommen. "
                                              f"Fuer den Rest die betreffenden Seiten einzeln anhaengen.]")
-                            _text_prepend.append(f"[PDF-Inhalt von {_name}]:\n{_pdf_text}{_kuerzung}")
+                            # Der Hinweis steht VOR dem Inhalt: er sagt, wie der
+                            # Text zustande kam. Hinterher gelesen kaeme er zu
+                            # spaet – das Modell hat den Inhalt dann schon
+                            # ausgewertet.
+                            _vorspann = f"{_pdf_hinweis}\n" if _pdf_hinweis else ""
+                            _text_prepend.append(
+                                f"[PDF-Inhalt von {_name}]:\n{_vorspann}{_pdf_text}{_kuerzung}")
                         else:
                             _text_prepend.append(f"[PDF {_name}: Kein Text gefunden – auch OCR lieferte nichts (evtl. leeres/unleserliches PDF)]")
                         if _dest is not None:

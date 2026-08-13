@@ -1843,6 +1843,56 @@ sich über den **PDF**-Knopf als PDF speichern (4 Seiten).
   35 s, letzte Handlung vor 20.916 s (5,8 h) → online **und** 5,8 h untätig. Das ist
   gewollt und steht so im Hinweistext; genau dieser Hinweis war durch den
   Platzhalter-Fehler oben halb unlesbar.
+### „Untätig seit 2 Std." trotz F5 und Klick (Fix 2026-08-13)
+**Gemeldet:** Ein Benutzer lädt das Portal neu, klickt den Info-Ordner an – und steht weiter
+mit „untätig seit 2 Std. 37 Min." in der Liste. Auf DEV nachgemessen: der Testbenutzer lag bei
+**63.228 s** (17,5 h), obwohl die Seite benutzt wurde.
+- **Ursache war die Faustregel selbst:** `_note_activity` wertete **nur POST/PUT/PATCH/DELETE**
+  als Handlung. F5 (`/api/me`), Ordner öffnen (`/api/info_files`), Verlauf aufschlagen, Dokument
+  laden – alles GETs. Damit maß „untätig seit" die Zeit seit der letzten **schreibenden**
+  Anfrage, behauptete aber Untätigkeit des Menschen. Dieselbe Fehlerklasse wie der Trenner
+  „Neue Sitzung", der Audit-Filter und der leere Profil-Umschalter: **eine Anzeige behauptet
+  einen Zustand, den sie nicht kennt** – und zwar den, der einen Vorgesetzten interessiert.
+- **GET einfach mitzuzählen verbietet sich** und ist der Grund, aus dem die Regel so entstand:
+  die Oberflächen fragen ständig Zustände ab (LLM-Status 30 s, CPU 3 s, Ungelesen-Zähler,
+  Fortschritte, die Anwesenheitsliste selbst). Dann wäre jeder offene Tab dauerhaft „aktiv".
+- **Gemessen wird jetzt, was die Anzeige behauptet:** `frontend/js/activity.js` meldet über
+  `POST /api/activity`, was ein **Mensch** getan hat – Seitenaufbau, Klick (`pointerdown`),
+  Tastendruck, Tab zurückgeholt. Höchstens **einmal je Minute** (`note_action` schreibt sofort
+  auf Platte); der Seitenaufbau meldet **ohne** Drosselung, denn das ist der gemeldete F5-Fall.
+  Automatische Abrufe können das nicht auslösen – sie kommen ohne Klick.
+- **DIE RICHTUNG IST DER KERN DER ENTSCHEIDUNG.** Die Alternative wäre eine Poll-Sperrliste im
+  Backend gewesen (GET zählt, außer die ~20 Poll-Pfade). Bei einem vergessenen Eintrag meldet
+  die **zu viel** und die Anzeige ist unbrauchbar – und ein neuer Poll kommt mit jedem Feature.
+  Fehlt umgekehrt `activity.js` auf einer Seite, meldet sie **zu wenig**: die Seite verhält sich
+  wie vorher, veraendernde Anfragen zählen weiter. Fail-safe gehört in diese Richtung.
+- **Bewusst NICHT gemeldet:** Mausbewegung und Scrollen. Eine verschobene Maus ist keine
+  Handlung, und „untätig" soll etwas aussagen.
+- **Die Seitenkennung ist eine WHITELIST** (`_ACTIVITY_PAGES`), kein Freitext: der Wert wird zur
+  Beschriftung in einer Administratoren-Ansicht. Live geprüft – `{"page": "<img src=x
+  onerror=…>"}` ergibt „Aktion".
+- **`/api/activity` steht in `_ACTION_IGNORE`**, weil der Endpunkt die Handlung selbst festhält
+  (mit der Seitenbeschriftung statt eines nichtssagenden „Aktion"). Ohne den Eintrag schriebe
+  die Buchhaltung zweimal auf Platte.
+- **Nach 401/403 stellt der Client die Meldungen ein** – weiter zu klopfen füllte nur Journal
+  und Verstoßzähler. Ein Netzfehler setzt dagegen nur die Drosselung zurück (nächster Klick
+  versucht es erneut).
+- **Verifiziert:** 32 UI-Prüfungen in jsdom gegen die echte Datei (`tests/test_activity_ui.js`:
+  Seitenaufbau meldet genau einmal, Drosselung, Maus/Scroll melden nicht, ohne Token still,
+  401/403, Netzfehler, Seitenkennung je Bereich, Einbindung in allen zehn Seiten, Endpunkt-
+  Verdrahtung) + 118/118 im Bestand (`test_user_sessions.py`). Gegenprobe: Drosselung entfernt
+  → 3 FAIL. **Live auf DEV:** ohne Token 401, Meldung setzt `idle_seconds` 63.228 → 0 mit Label
+  „Portal", gefälschte Kennung → „Aktion", leerer Rumpf 200, ein GET-Poll lässt die Untätigkeit
+  weiter wachsen. **Im echten Chrome über CDP** (Token vorgesetzt): `activity.js` wird geladen,
+  genau **ein** `POST /api/activity` beim Seitenaufbau, Ordner-Klick ohne Konsolenfehler,
+  danach serverseitig `idle_seconds = 31` mit Label „Portal".
+- **FALLSTRICK bei der Diagnose (zum zweiten Mal):** `pkill -f "remote-debugging-port=9222"`
+  bzw. `pgrep -f cdpprof` trifft die **eigene** Kommandozeile und beendet die Shell (Exit 144).
+  Chrome über `pkill -x chrome` beenden.
+- **Merkregel:** Wenn eine Anzeige eine Aussage über einen MENSCHEN macht, darf sie nicht aus
+  einem Nebenprodukt des Protokolls abgeleitet werden. Entweder man misst die Handlung, oder
+  man beschriftet die Anzeige nach dem, was man wirklich hat.
+
 - **Die Pille trägt die Aussage doppelt** (Farbe UND Text „online"/„offline") – Farbe
   allein ist für Farbfehlsichtige keine Information. Panel **deckend**
   (`var(--bg-secondary)`), gleiche Begründung wie beim Dokumente-Panel.

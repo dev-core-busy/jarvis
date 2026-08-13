@@ -91,16 +91,23 @@ MAIL_WERKZEUGE = (
     "email_loeschen", "email_ordner", "email_kategorie",
 )
 
+# ACHTUNG: `de`/`en`/`hinweis_*` sind BENUTZERSICHTBARE Texte und stehen
+# deshalb mit echten Umlauten hier. Die ASCII-Konvention des Projekts gilt fuer
+# Code-Kommentare und Docstrings, NICHT fuer Oberflaechentexte – "Fuer fachlich
+# richtige Antworten" stand am 2026-08-13 so in der Regel-Maske (dieselbe
+# Verwechslung wie bei den Modell-Faehigkeiten am 2026-08-10).
 BEREICHE: dict[str, dict] = {
     "mail": {
         "de": "E-Mail (Pflicht)", "en": "Email (required)",
         "tools": list(MAIL_WERKZEUGE),
-        "hinweis_de": "Lesen, antworten, Entwurf, verschieben, weiterleiten, loeschen im eigenen Postfach.",
+        "hinweis_de": "Lesen, antworten, Entwurf, verschieben, weiterleiten, löschen im eigenen Postfach.",
+        "hinweis_en": "Read, reply, draft, move, forward and delete inside your own mailbox.",
     },
     "wissen": {
         "de": "Wissensdatenbank (lesend)", "en": "Knowledge base (read)",
         "tools": ["knowledge_search"],
-        "hinweis_de": "Fuer fachlich richtige Antworten aus den eigenen Unterlagen.",
+        "hinweis_de": "Für fachlich richtige Antworten aus den eigenen Unterlagen.",
+        "hinweis_en": "For factually correct answers based on your own documents.",
     },
     "fach": {
         "de": "Interne Fachsysteme (lesend)", "en": "Internal systems (read)",
@@ -113,21 +120,26 @@ BEREICHE: dict[str, dict] = {
                   "confluence_list_spaces", "kv_tickets_by_buzzwords",
                   "sap_odata_query", "sap_sql_query", "sap_list_tables",
                   "sap_describe_table"],
-        "hinweis_de": "Tickets, Confluence, Kundenvorgaenge und SAP nur LESEND – "
+        "hinweis_de": "Tickets, Confluence, Kundenvorgänge und SAP nur LESEND – "
                       "und nur, soweit der Regel-Besitzer selbst berechtigt ist.",
+        "hinweis_en": "Tickets, Confluence, customer records and SAP READ-ONLY – "
+                      "and only as far as the rule owner is authorised.",
     },
     "dokumente": {
         "de": "Dokumente erzeugen/lesen", "en": "Documents",
         "tools": ["office_read", "office_create_word", "office_create_excel",
                   "office_create_powerpoint", "office_to_pdf", "create_chart"],
-        "hinweis_de": "Fuer Antworten mit Anlage (z.B. eine Auswertung als Tabelle).",
+        "hinweis_de": "Für Antworten mit Anlage (z.B. eine Auswertung als Tabelle).",
+        "hinweis_en": "For replies with an attachment (e.g. an analysis as a table).",
     },
     "voll": {
         "de": "Voller Werkzeugkasten", "en": "Full toolset",
         "tools": [],   # leere Liste + Sonderfall in werkzeuge_fuer() = keine Schranke
         "hinweis_de": "ACHTUNG: der Regel-Lauf bekommt alles, was ein Chat-Lauf dieses "
-                      "Benutzers hat. Eine praeparierte E-Mail hat damit die groesste "
-                      "Angriffsflaeche.",
+                      "Benutzers hat. Eine präparierte E-Mail hat damit die größte "
+                      "Angriffsfläche.",
+        "hinweis_en": "CAUTION: the rule run gets everything a chat run of this user "
+                      "gets. A crafted email therefore has the largest attack surface.",
     },
 }
 

@@ -22,6 +22,7 @@
 
     var _gebunden = false;
     var _bereiche = [];        // Katalog vom Server
+    var _bereicheLang = '';    // in welcher Sprache er geholt wurde
     var _konten = [];
 
     function token() { return localStorage.getItem('jarvis_token') || ''; }
@@ -29,6 +30,12 @@
         return Object.assign({ 'Authorization': 'Bearer ' + token() }, extra || {});
     }
     function $(id) { return document.getElementById(id); }
+    // Wie in email_portal.js: der Schluessel gewinnt, der deutsche Text im Code
+    // ist nur der Rueckfall (und zugleich die lesbare Vorlage fuer i18n.js).
+    function T(key, fallback) {
+        var s = window.t ? window.t(key) : null;
+        return (s && s !== key) ? s : fallback;
+    }
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
@@ -90,7 +97,7 @@
                 setzeWert('em-zeitlimit', c.zeitlimit == null ? 30 : c.zeitlimit);
                 setzeWert('em-takt', c.takt_sekunden == null ? 60 : c.takt_sekunden);
             })
-            .catch(function () { melde('em-conn-status', 'Konfiguration nicht lesbar.', 'fehler'); });
+            .catch(function () { melde('em-conn-status', T('mailadm.m_cfg_unreadable', 'Konfiguration nicht lesbar.'), 'fehler'); });
     }
 
     function zahl(id, vorgabe) {
@@ -119,16 +126,16 @@
             takt_sekunden: zahl('em-takt', 60)
         };
         // `bereiche` ist hier BEWUSST nicht dabei – siehe Modulkopf.
-        melde('em-conn-status', 'Speichere…');
+        melde('em-conn-status', T('common.saving', 'Speichere…'));
         return fetch('/api/skills/email/config', {
             method: 'POST',
             headers: kopf({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(daten)
         }).then(function (r) {
             if (!r.ok) throw new Error('HTTP ' + r.status);
-            melde('em-conn-status', '✓ Verbindung gespeichert.', 'ok');
+            melde('em-conn-status', T('mailadm.m_conn_saved', '✓ Verbindung gespeichert.'), 'ok');
         }).catch(function (e) {
-            melde('em-conn-status', 'Fehler: ' + e.message, 'fehler');
+            melde('em-conn-status', T('common.error', 'Fehler') + ': ' + e.message, 'fehler');
         });
     }
 
@@ -165,7 +172,7 @@
         document.querySelectorAll('#em-areas input[type="checkbox"]').forEach(function (cb) {
             if (cb.checked) gewaehlt.push(cb.value);
         });
-        melde('em-areas-status', 'Speichere…');
+        melde('em-areas-status', T('common.saving', 'Speichere…'));
         return fetch('/api/email/admin/areas', {
             method: 'POST',
             headers: kopf({ 'Content-Type': 'application/json' }),
@@ -173,16 +180,21 @@
         }).then(function (r) { return r.json().then(function (d) { return { r: r, d: d }; }); })
             .then(function (x) {
                 if (!x.r.ok || !x.d.ok) throw new Error(x.d.error || ('HTTP ' + x.r.status));
-                melde('em-areas-status', '✓ Freigegeben: ' + (x.d.bereiche || []).join(', '), 'ok');
+                melde('em-areas-status', T('mailadm.m_areas_saved', '✓ Freigegeben:') + ' ' + (x.d.bereiche || []).join(', '), 'ok');
                 return ladeUebersicht();
             }).catch(function (e) {
-                melde('em-areas-status', 'Fehler: ' + e.message, 'fehler');
+                melde('em-areas-status', T('common.error', 'Fehler') + ': ' + e.message, 'fehler');
             });
     }
 
     /* ── Uebersicht / Konten ───────────────────────────────────────────── */
     function ladeUebersicht() {
-        return fetch('/api/email/admin/overview', { headers: kopf() })
+        // Sprache mitgeben: Name und Hinweis der Bereiche kommen uebersetzt vom
+        // Server (sie stehen dort neben der Werkzeugliste, damit Text und
+        // Wirkung nicht auseinanderlaufen) – applyLang() erreicht sie nicht.
+        var lg = (window._lang === 'en') ? 'en' : 'de';
+        _bereicheLang = lg;
+        return fetch('/api/email/admin/overview?lang=' + lg, { headers: kopf() })
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (!d || !d.ok) throw new Error((d && d.error) || 'Abruf fehlgeschlagen');
@@ -204,22 +216,26 @@
         var zaehler = $('em-acc-count');
         if (!box) return;
         if (zaehler) {
-            zaehler.textContent = '(' + _konten.length + ' Postfach/Postfächer, '
-                + (d.regeln_gesamt || 0) + ' Regeln)';
+            zaehler.textContent = '(' + T('mailadm.cnt', '{m} Postfach/Postfächer, {r} Regeln')
+                .replace('{m}', _konten.length).replace('{r}', d.regeln_gesamt || 0) + ')';
         }
         if (!_konten.length) {
-            box.innerHTML = '<p class="kb-hint">Noch kein Postfach angebunden. Freigegebene '
-                + 'Benutzer hinterlegen ihr Postfach selbst im Bereich <b>E-Mail</b> '
-                + '(Kachel im Portal). Freigabe: Sicherheit → Berechtigungen → E-Mail-Zugriff.</p>';
+            box.innerHTML = '<p class="kb-hint">' + T('mailadm.acc_empty',
+                'Noch kein Postfach angebunden. Freigegebene Benutzer hinterlegen ihr '
+                + 'Postfach selbst im Bereich <b>E-Mail</b> (Kachel im Portal). '
+                + 'Freigabe: Sicherheit → Berechtigungen → E-Mail-Zugriff.') + '</p>';
             return;
         }
         var h = '<table class="audit-table" style="width:100%;"><thead><tr>'
-            + '<th>Benutzer</th><th>Adresse</th><th>Regeln</th><th>Zuletzt erfolgreich</th>'
-            + '<th>Letzter Fehler</th></tr></thead><tbody>';
+            + '<th>' + T('mailadm.th_user', 'Benutzer') + '</th>'
+            + '<th>' + T('mailadm.th_address', 'Adresse') + '</th>'
+            + '<th>' + T('mailadm.th_rules', 'Regeln') + '</th>'
+            + '<th>' + T('mailadm.th_lastok', 'Zuletzt erfolgreich') + '</th>'
+            + '<th>' + T('mailadm.th_lasterr', 'Letzter Fehler') + '</th></tr></thead><tbody>';
         _konten.forEach(function (k) {
             h += '<tr>'
-                + '<td>' + esc(k.benutzer) + (k.aktiv ? '' : ' <span class="kb-hint">(inaktiv)</span>') + '</td>'
-                + '<td>' + esc(k.adresse) + (k.passwort_gesetzt ? '' : ' <span class="kb-hint">(kein Kennwort)</span>') + '</td>'
+                + '<td>' + esc(k.benutzer) + (k.aktiv ? '' : ' <span class="kb-hint">(' + T('mailadm.inactive', 'inaktiv') + ')</span>') + '</td>'
+                + '<td>' + esc(k.adresse) + (k.passwort_gesetzt ? '' : ' <span class="kb-hint">(' + T('mailadm.nopw', 'kein Kennwort') + ')</span>') + '</td>'
                 + '<td>' + (k.regeln_aktiv || 0) + ' / ' + (k.regeln || 0) + '</td>'
                 + '<td>' + esc(zeit(k.letzter_erfolg)) + '</td>'
                 + '<td>' + (k.letzter_fehler
@@ -239,7 +255,7 @@
         if (!_konten.length) {
             var o = document.createElement('option');
             o.value = '';
-            o.textContent = '(kein Postfach hinterlegt)';
+            o.textContent = '(' + T('mailadm.exp_none', 'kein Postfach hinterlegt') + ')';
             sel.appendChild(o);
             return;
         }
@@ -255,13 +271,13 @@
     function erkunde() {
         var user = ($('em-exp-user') || {}).value || '';
         if (!user) {
-            melde('em-exp-status', 'Es ist kein Postfach hinterlegt, das untersucht werden könnte.', 'fehler');
+            melde('em-exp-status', T('mailadm.m_no_mailbox', 'Es ist kein Postfach hinterlegt, das untersucht werden könnte.'), 'fehler');
             return Promise.resolve();
         }
         var limit = parseInt(($('em-exp-limit') || {}).value || '0', 10) || 0;
         var knopf = $('em-explore');
         if (knopf) knopf.disabled = true;
-        melde('em-exp-status', 'Verbinde… (kann bis zu einer halben Minute dauern)');
+        melde('em-exp-status', T('mail.testing', 'Verbinde… (kann bis zu einer halben Minute dauern)'));
         var box = $('em-exp-result');
         if (box) box.innerHTML = '';
         return fetch('/api/email/admin/explore', {
@@ -271,11 +287,12 @@
         }).then(function (r) { return r.json().then(function (d) { return { r: r, d: d }; }); })
             .then(function (x) {
                 if (!x.r.ok || !x.d.ok) throw new Error((x.d && x.d.error) || ('HTTP ' + x.r.status));
-                melde('em-exp-status', '✓ Verbindung steht (Kanal: '
+                melde('em-exp-status', T('mail.test_ok', '✓ Verbindung steht')
+                    + ' (' + T('mailadm.channel', 'Zugangsweg') + ': '
                     + esc((x.d.ergebnis || {}).kanal || '?') + ')', 'ok');
                 zeichneExplorer(x.d.ergebnis || {});
             }).catch(function (e) {
-                melde('em-exp-status', 'Fehler: ' + e.message, 'fehler');
+                melde('em-exp-status', T('common.error', 'Fehler') + ': ' + e.message, 'fehler');
             }).finally(function () {
                 if (knopf) knopf.disabled = false;
             });
@@ -287,26 +304,32 @@
         var t = res.test || {};
         var h = '<div style="padding:10px 12px;border:1px solid rgba(var(--fg-rgb),0.09);'
             + 'border-radius:10px;background:rgba(var(--fg-rgb),0.02);margin-bottom:10px;">'
-            + '<b>Postfach:</b> ' + esc(t.postfach || '?') + ' &nbsp;·&nbsp; '
-            + '<b>Kanal:</b> ' + esc(res.kanal || t.kanal || '?');
-        if (t.server_version) h += ' &nbsp;·&nbsp; <b>Server:</b> ' + esc(t.server_version);
+            + '<b>' + T('mailadm.exp_user', 'Postfach (Benutzer)') + ':</b> '
+            + esc(t.postfach || '?') + ' &nbsp;·&nbsp; '
+            + '<b>' + T('mailadm.channel', 'Zugangsweg') + ':</b> '
+            + esc(res.kanal || t.kanal || '?');
+        if (t.server_version) h += ' &nbsp;·&nbsp; <b>' + T('mailadm.exp_server', 'Server')
+            + ':</b> ' + esc(t.server_version);
         if (t.ews_url) h += '<br><b>EWS:</b> <code>' + esc(t.ews_url) + '</code>';
         if (t.imap_host) h += '<br><b>IMAP:</b> <code>' + esc(t.imap_host) + '</code>';
         if (t.eingang_gesamt >= 0) {
-            h += '<br><b>Posteingang:</b> ' + t.eingang_gesamt + ' Nachrichten, '
-                + t.eingang_ungelesen + ' ungelesen';
+            h += '<br><b>' + T('mail.acct_inbox', 'Posteingang') + ':</b> '
+                + T('mailadm.exp_counts', '{g} Nachrichten, {u} ungelesen')
+                    .replace('{g}', t.eingang_gesamt).replace('{u}', t.eingang_ungelesen);
         }
         h += '</div>';
 
         var ordner = res.ordner || [];
-        h += '<h4 style="margin:12px 0 6px;">Ordner (' + ordner.length + ')</h4>';
+        h += '<h4 style="margin:12px 0 6px;">' + T('mailadm.exp_folders', 'Ordner')
+            + ' (' + ordner.length + ')</h4>';
         if (!ordner.length) {
-            h += '<p class="kb-hint">Keine Ordner gemeldet.</p>';
+            h += '<p class="kb-hint">' + T('mailadm.exp_nofolders', 'Keine Ordner gemeldet.') + '</p>';
         } else {
             h += '<div class="sec-scrollbox" style="max-height:240px;">';
             ordner.forEach(function (o) {
                 var z = o.anzahl >= 0
-                    ? ' <span class="kb-hint">(' + o.anzahl + ' / ' + o.ungelesen + ' ungelesen)</span>'
+                    ? ' <span class="kb-hint">(' + o.anzahl + ' / ' + o.ungelesen + ' '
+                        + T('mail.unread', 'ungelesen') + ')</span>'
                     : '';
                 h += '<div style="padding:3px 0;"><code>' + esc(o.pfad || o.name) + '</code>' + z + '</div>';
             });
@@ -315,12 +338,15 @@
 
         var mails = res.nachrichten || [];
         if (mails.length) {
-            h += '<h4 style="margin:12px 0 6px;">Neueste Nachrichten (' + mails.length + ')</h4>'
+            h += '<h4 style="margin:12px 0 6px;">' + T('mailadm.exp_newest', 'Neueste Nachrichten')
+                + ' (' + mails.length + ')</h4>'
                 + '<table class="audit-table" style="width:100%;"><thead><tr>'
-                + '<th>Datum</th><th>Von</th><th>Betreff</th></tr></thead><tbody>';
+                + '<th>' + T('mailadm.th_date', 'Datum') + '</th>'
+                + '<th>' + T('mailadm.th_from', 'Von') + '</th>'
+                + '<th>' + T('mailadm.th_subject', 'Betreff') + '</th></tr></thead><tbody>';
             mails.forEach(function (m) {
                 h += '<tr><td>' + esc(m.datum || '?') + '</td><td>' + esc(m.von || '?')
-                    + '</td><td>' + esc(m.betreff || '(kein Betreff)') + '</td></tr>';
+                    + '</td><td>' + esc(m.betreff || T('mail.log_nosubject', '(kein Betreff)')) + '</td></tr>';
             });
             h += '</tbody></table>';
         }
@@ -336,6 +362,13 @@
         if ((b = $('em-save-conn'))) b.addEventListener('click', speichereVerbindung);
         if ((b = $('em-save-areas'))) b.addEventListener('click', speichereBereiche);
         if ((b = $('em-explore'))) b.addEventListener('click', erkunde);
+        // Der Bereichskatalog ist Server-Text; bei DE/EN neu holen. Der
+        // Vergleich verhindert einen zweiten Abruf beim Seitenaufbau, wo
+        // applyLang() dasselbe Ereignis feuert.
+        window.addEventListener('jarvis-lang-changed', function () {
+            var lg = (window._lang === 'en') ? 'en' : 'de';
+            if (_bereicheLang && _bereicheLang !== lg) ladeUebersicht();
+        });
     }
 
     window.EmailAdmin = {

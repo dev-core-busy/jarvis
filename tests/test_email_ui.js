@@ -41,12 +41,23 @@ const SKILLS = fs.readFileSync(path.join(ROOT, 'frontend/js/skills.js'), 'utf8')
 const PORTAL_HTML = fs.readFileSync(path.join(ROOT, 'frontend/portal.html'), 'utf8');
 const PICKER = fs.readFileSync(path.join(ROOT, 'frontend/js/ldap_picker.js'), 'utf8');
 
+// Der Bereichskatalog kommt UEBERSETZT vom Server (Name und Hinweis stehen dort
+// neben der Werkzeugliste, damit Text und Wirkung nicht auseinanderlaufen). Die
+// Attrappe bildet deshalb BEIDE Sprachen ab – eine Attrappe, die nur Deutsch
+// kennt, koennte den gemeldeten Fehler gar nicht zeigen.
 const BEREICHE = [
     { id: 'mail', name: 'E-Mail (Pflicht)', hinweis: 'Lesen, antworten…', freigegeben: true, pflicht: true },
-    { id: 'wissen', name: 'Wissensdatenbank (lesend)', hinweis: 'Fuer Antworten…', freigegeben: true, pflicht: false },
+    { id: 'wissen', name: 'Wissensdatenbank (lesend)', hinweis: 'Für Antworten…', freigegeben: true, pflicht: false },
     { id: 'fach', name: 'Interne Fachsysteme (lesend)', hinweis: 'Tickets…', freigegeben: false, pflicht: false },
     { id: 'voll', name: 'Voller Werkzeugkasten', hinweis: 'ACHTUNG…', freigegeben: false, pflicht: false }
 ];
+const BEREICHE_EN = [
+    { id: 'mail', name: 'Email (required)', hinweis: 'Read, reply…', freigegeben: true, pflicht: true },
+    { id: 'wissen', name: 'Knowledge base (read)', hinweis: 'For answers…', freigegeben: true, pflicht: false },
+    { id: 'fach', name: 'Internal systems (read)', hinweis: 'Tickets…', freigegeben: false, pflicht: false },
+    { id: 'voll', name: 'Full toolset', hinweis: 'CAUTION…', freigegeben: false, pflicht: false }
+];
+const katalog = (url) => (/[?&]lang=en\b/.test(String(url)) ? BEREICHE_EN : BEREICHE);
 
 const KONTO = {
     vorhanden: true, adresse: 'a.bender@nexus.int', benutzer: 'NEXUS\\a.bender',
@@ -80,25 +91,31 @@ function bauePortal(opt) {
         const body = o.body ? JSON.parse(o.body) : null;
         rufe.push({ url: String(url), methode: o.method || 'GET', body: body,
                     kopf: (o.headers || {}) });
+        // FALLSTRICK: geroutet wird ueber den PFAD, nicht ueber die ganze URL.
+        // Ein Mock mit `url === '/api/email/status'` verfehlt jeden Aufruf mit
+        // Abfrageteil (seit 2026-08-13 haengt dort `?lang=`) – und ein Mock,
+        // der die echte Anfrageform verfehlt, prueft nichts (dieselbe Lehre wie
+        // bei der verschachtelten Config-Antwort).
+        const pfad = String(url).split('?')[0];
         const gib = (d, status) => Promise.resolve({
             ok: (status || 200) < 400, status: status || 200,
             json: () => Promise.resolve(d)
         });
-        if (url === '/api/me') {
+        if (pfad === '/api/me') {
             return gib({ username: 'nexus\\a.bender', is_admin: false,
                          permissions: { email: opt.darf === false ? false : true } });
         }
-        if (url === '/api/email/status') {
-            return gib({ ok: true, konto: konto, bereiche: BEREICHE,
+        if (pfad === '/api/email/status') {
+            return gib({ ok: true, konto: konto, bereiche: katalog(url),
                          server: { kanal: 'auto', ews: true, imap: true, smtp: true },
                          kategorie: 'Jarvis', regeln: regeln.length,
                          grenzen: { max_regeln: 50, min_intervall: 1, max_intervall: 1440,
                                     max_je_lauf: 10, prompt_max: 8000 } });
         }
-        if (url === '/api/email/rules' && (o.method || 'GET') === 'GET') {
-            return gib({ ok: true, regeln: regeln, bereiche: BEREICHE });
+        if (pfad === '/api/email/rules' && (o.method || 'GET') === 'GET') {
+            return gib({ ok: true, regeln: regeln, bereiche: katalog(url) });
         }
-        if (url === '/api/email/rules' && o.method === 'POST') {
+        if (pfad === '/api/email/rules' && o.method === 'POST') {
             if (opt.postFehler) return gib({ ok: false, error: opt.postFehler }, 400);
             regeln = regeln.concat([Object.assign({ id: 'neu', owner: 'a.bender' }, body)]);
             return gib({ ok: true, regel: regeln[regeln.length - 1] });
@@ -116,21 +133,21 @@ function bauePortal(opt) {
         if (/\/run$/.test(url)) {
             return gib({ ok: true, bericht: { verarbeitet: 1, aktionen: [{ ergebnis: 'Entwurf gespeichert.' }] } });
         }
-        if (url === '/api/email/account' && o.method === 'POST') {
+        if (pfad === '/api/email/account' && o.method === 'POST') {
             if (opt.acctFehler) return gib({ ok: false, error: opt.acctFehler }, 400);
             konto = Object.assign({}, konto, body, { passwort_gesetzt: true });
             delete konto.passwort;
             return gib({ ok: true, konto: konto });
         }
-        if (url === '/api/email/account' && o.method === 'DELETE') {
+        if (pfad === '/api/email/account' && o.method === 'DELETE') {
             return gib({ ok: true, entfernt: true });
         }
-        if (url === '/api/email/test') {
+        if (pfad === '/api/email/test') {
             if (opt.testFehler) return gib({ ok: false, error: opt.testFehler }, 400);
             return gib({ ok: true, ergebnis: { kanal: 'ews', postfach: konto.adresse,
                                                eingang_gesamt: 12, eingang_ungelesen: 3 } });
         }
-        if (url === '/api/email/folders') {
+        if (pfad === '/api/email/folders') {
             return gib({ ok: true, ordner: [{ name: 'INBOX', pfad: 'INBOX' },
                                             { name: 'Buchhaltung', pfad: 'Archiv/Buchhaltung' }] });
         }
@@ -502,8 +519,9 @@ function baueReiter(opt) {
         o = o || {};
         rufe.push({ url: String(url), methode: (o.method || 'GET'),
                     body: o.body ? JSON.parse(o.body) : null });
+        const pfad = String(url).split('?')[0];   // siehe Mock oben: Abfrageteil abtrennen
         const gib = (d) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(d) });
-        if (url === '/api/skills/email/config') {
+        if (pfad === '/api/skills/email/config') {
             // WICHTIG: der echte Endpunkt antwortet VERSCHACHTELT ({config: …}),
             // siehe main.py::get_skill_config. Die erste Fassung dieses Mocks
             // lieferte die Felder flach – deshalb fiel der Ladefehler im Modul
@@ -518,8 +536,8 @@ function baueReiter(opt) {
                 ordner_eingang: 'INBOX', zeitlimit: 30, takt_sekunden: 60,
                 bereiche: 'mail,wissen' } });
         }
-        if (url === '/api/email/admin/overview') {
-            return gib({ ok: true, skill_aktiv: true, bereiche: BEREICHE,
+        if (pfad === '/api/email/admin/overview') {
+            return gib({ ok: true, skill_aktiv: true, bereiche: katalog(url),
                          freigegeben: ['mail', 'wissen'], kategorie: 'Jarvis',
                          freigabe: { users: 'a.bender', group: '' },
                          regeln_gesamt: 3,
@@ -534,10 +552,10 @@ function baueReiter(opt) {
                                regeln: 0, regeln_aktiv: 0 }
                          ] });
         }
-        if (url === '/api/email/admin/areas') {
+        if (pfad === '/api/email/admin/areas') {
             return gib({ ok: true, bereiche: (o.body ? JSON.parse(o.body).bereiche : []) });
         }
-        if (url === '/api/email/admin/explore') {
+        if (pfad === '/api/email/admin/explore') {
             if (opt.expFehler) {
                 return Promise.resolve({ ok: false, status: 400,
                     json: () => Promise.resolve({ ok: false, error: opt.expFehler }) });
@@ -749,8 +767,14 @@ function baueReiter(opt) {
         'alle vier Container nutzen das Projekt-Muster kb-collapse-header');
     pruefe(panel.indexOf('data-em-sect') === -1,
         'die eigene Klapp-Verdrahtung ist verschwunden');
-    pruefe((panel.match(/<h3>/g) || []).length === 4,
-        'der Titel steht als <h3> zuerst (sonst schiebt space-between ihn nach rechts)');
+    // Geprueft wird die POSITION, nicht der Wortlaut des Tags: seit der
+    // Uebersetzung traegt jedes <h3> ein data-i18n-Attribut, und ein Test auf
+    // '<h3>' schlaegt dann an der eigenen Verbesserung an.
+    const kopfzeilen = [...panel.matchAll(/kb-collapse-header[^>]*>\s*<(\w+)/g)]
+        .map(m => m[1]);
+    pruefe(kopfzeilen.length === 4 && kopfzeilen.every(t => t === 'h3'),
+        'der Titel steht als <h3> zuerst (sonst schiebt space-between ihn nach rechts)',
+        JSON.stringify(kopfzeilen));
     pruefe(APP.indexOf('_initEmailCollapse') > -1 && APP.indexOf('window.initEmailCollapse') > -1,
         'app.js registriert die vier Container bei _collapseInit');
     pruefe(ADMIN_JS.indexOf('window.initEmailCollapse') > -1,
@@ -926,6 +950,195 @@ abschnitt('5. Verdrahtung und Texte');
     const optAufrufe = (PORTAL_JS.match(/\w+\?\.\(\)/g) || []);
     pruefe(optAufrufe.length === 0,
         'keine ?.()-Aufrufe (ein falscher Methodenname waere unsichtbar)');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('6. Sprachwechsel: der Bereichskatalog kommt vom Server');
+/* ═══════════════════════════════════════════════════════════════════════ */
+// Gemeldet 2026-08-13: die Werkzeug-Bereiche standen auch bei englischer
+// Oberflaeche auf Deutsch. Name und Hinweis kommen vom Server, applyLang()
+// erreicht sie also nicht – sie muessen NEU GEHOLT werden (Muster aus
+// sap_portal.js).
+{
+    const { w, rufe } = bauePortal({});
+    await warte(60);
+    pruefe(rufe.some(r => r.url.indexOf('/api/email/status?lang=de') === 0),
+        'beim Aufbau wird die Sprache mitgesendet');
+    pruefe(rufe.some(r => r.url.indexOf('/api/email/rules?lang=de') === 0),
+        'auch beim Abruf der Regeln');
+
+    // Formular oeffnen und Bereichs-Hinweise pruefen
+    w.document.getElementById('em-new-rule').dispatchEvent(new w.Event('click'));
+    await warte(40);
+    const hinweisText = () => w.document.getElementById('em-f-areas').textContent;
+    pruefe(hinweisText().indexOf('Für Antworten') > -1,
+        'die Bereichs-Hinweise stehen auf Deutsch – MIT Umlaut, nicht "Fuer"');
+    pruefe(hinweisText().indexOf('Fuer') === -1,
+        'keine ASCII-Umschrift in einem benutzersichtbaren Text');
+
+    // Eingaben machen, dann umschalten
+    w.document.getElementById('em-f-name').value = 'Halbfertig';
+    w.document.getElementById('em-f-prompt').value = 'Text im Tippen';
+    const wissenBox = w.document.querySelectorAll('#em-f-areas input[type=checkbox]')[1];
+    wissenBox.checked = true;
+    const vorher = rufe.length;
+
+    w._lang = 'en';
+    w.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'en' } }));
+    await warte(80);
+
+    pruefe(rufe.slice(vorher).some(r => r.url.indexOf('lang=en') > -1),
+        'der Katalog wird in der neuen Sprache nachgeholt');
+    pruefe(w.document.getElementById('em-f-areas').textContent.indexOf('Knowledge base') > -1,
+        'die Bereichsnamen stehen danach auf Englisch');
+    pruefe(w.document.getElementById('em-f-name').value === 'Halbfertig'
+        && w.document.getElementById('em-f-prompt').value === 'Text im Tippen',
+        'ein Sprachwechsel mitten im Tippen verwirft die Eingaben NICHT');
+    const nachher = w.document.querySelectorAll('#em-f-areas input[type=checkbox]');
+    pruefe(nachher[1] && nachher[1].checked === true,
+        'und auch die angehakten Bereiche bleiben stehen');
+
+    // Zweites Ereignis OHNE Sprachwechsel darf nichts nachladen (applyLang
+    // feuert es auch beim Seitenaufbau).
+    const vor2 = rufe.length;
+    w.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'en' } }));
+    await warte(60);
+    pruefe(rufe.length === vor2,
+        'gleiche Sprache = kein zweiter Abruf');
+}
+{
+    // Die Regel-Liste nennt die Bereiche ebenfalls – auch sie muss folgen.
+    const { w } = bauePortal({});
+    await warte(60);
+    pruefe(w.document.getElementById('em-rules').textContent.indexOf('Wissensdatenbank') > -1,
+        'die Regelzeile nennt die Bereiche auf Deutsch');
+    w._lang = 'en';
+    w.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'en' } }));
+    await warte(80);
+    pruefe(w.document.getElementById('em-rules').textContent.indexOf('Knowledge base') > -1,
+        'und nach dem Wechsel auf Englisch');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('7. Einstellungs-Reiter: durchgaengig uebersetzbar');
+/* ═══════════════════════════════════════════════════════════════════════ */
+// Der Reiter war bis 2026-08-13 fest deutsch. Geprueft wird beides: das
+// Markup traegt Schluessel, UND die per JS erzeugten Texte laufen ueber T().
+{
+    const emailTab = SET_HTML.slice(SET_HTML.indexOf('id="settings-tab-email"'),
+                                    SET_HTML.indexOf('id="settings-tab-kundenverwaltung"'));
+    // Jeder sichtbare Text steckt in einem Element mit data-i18n(-html) –
+    // geprueft ueber die Elemente, nicht ueber Textschnipsel: verschachtelte
+    // <b>/<code> gehoeren zum uebersetzten Elterntext.
+    const dom = new JSDOM('<div>' + emailTab + '</div>');
+    const wurzel = dom.window.document.querySelector('div');
+    let ohne = [];
+    // Geprueft wird der EIGENE Text eines Elements (direkte Textknoten), nicht
+    // sein textContent: ein <label> um ein <span data-i18n> hat selbst keinen
+    // Text – wer textContent nimmt, meldet dort einen Fehler, den es nicht gibt
+    // (erste Fassung dieses Tests genau so danebengegriffen).
+    wurzel.querySelectorAll('*').forEach(el => {
+        const eigen = [...el.childNodes]
+            .filter(k => k.nodeType === 3).map(k => k.textContent).join('').trim();
+        if (!eigen) return;
+        if (el.closest('[data-i18n], [data-i18n-html]')) return;   // selbst oder Elternteil
+        if (/^[▼▶(){}\[\]·–—&;\s]+$/.test(eigen)) return;           // reine Zeichen
+        ohne.push(eigen.slice(0, 40));
+    });
+    pruefe(ohne.length === 0, 'kein sichtbarer Text ohne i18n-Schluessel im Reiter',
+        JSON.stringify(ohne.slice(0, 6)));
+    const keys = (emailTab.match(/data-i18n[a-z-]*="(mailadm\.[a-z0-9_]+)"/g) || []).length;
+    pruefe(keys >= 45, 'der Reiter ist durchgaengig verschluesselt (' + keys + ' Stellen)');
+    pruefe(emailTab.indexOf('data-i18n-placeholder="mailadm.f_sent_ph"') > -1,
+        'auch der Platzhalter „leer = keine Kopie" ist uebersetzbar');
+    pruefe(SET_HTML.indexOf('data-i18n="settings.tab.email"') > -1,
+        'die Reiter-Beschriftung selbst ebenfalls');
+    dom.window.close();
+
+    // Alle im Markup benutzten Schluessel muessen in BEIDEN Sprachen stehen
+    const benutzt = [...emailTab.matchAll(/data-i18n[a-z-]*="(mailadm\.[a-z0-9_]+)"/g)]
+        .map(m => m[1]);
+    const deTeil = I18N.slice(0, I18N.indexOf('    en: {'));
+    const enTeil = I18N.slice(I18N.indexOf('    en: {'));
+    const fehltDe = benutzt.filter(k => deTeil.indexOf("'" + k + "'") < 0);
+    const fehltEn = benutzt.filter(k => enTeil.indexOf("'" + k + "'") < 0);
+    pruefe(fehltDe.length === 0, 'alle Markup-Schluessel gibt es auf Deutsch', JSON.stringify(fehltDe));
+    pruefe(fehltEn.length === 0, 'alle Markup-Schluessel gibt es auf Englisch', JSON.stringify(fehltEn));
+
+    // Und die Schluessel aus email.js ebenso
+    const jsKeys = [...ADMIN_JS.matchAll(/T\('([a-z][a-z._0-9]*)'/g)].map(m => m[1]);
+    pruefe(jsKeys.length >= 20, 'email.js benutzt T() flaechendeckend (' + jsKeys.length + ')');
+    const jsFehlt = jsKeys.filter(k => deTeil.indexOf("'" + k + "'") < 0
+                                    || enTeil.indexOf("'" + k + "'") < 0);
+    pruefe(jsFehlt.length === 0, 'jeder Schluessel aus email.js ist zweisprachig',
+        JSON.stringify([...new Set(jsFehlt)]));
+    // Kein Wortlaut mehr DIREKT an melde() – als Rueckfall in T(...) ist er
+    // erwuenscht (er ist zugleich die lesbare Vorlage fuer i18n.js), deshalb
+    // wird auf das ARGUMENT geprueft, nicht auf das Vorkommen des Textes.
+    const direkt = [...ADMIN_JS.matchAll(/melde\([^,]+,\s*'([^']{3,})'/g)].map(m => m[1]);
+    pruefe(direkt.length === 0, 'kein fester Text direkt an melde()',
+        JSON.stringify(direkt.slice(0, 5)));
+}
+{
+    // ECHTER Sprachwechsel auf dem Markup: applyLang() setzt bei
+    // `data-i18n-html` das innerHTML. Fehlt die Auszeichnung in der
+    // Uebersetzung, verschwindet der eingebettete <span class="kb-hint"> oder
+    // das <code> – ein Schaden, den ein reiner Schluessel-Abgleich NICHT sieht.
+    const dom = new JSDOM('<!doctype html><html><body>'
+        + SET_HTML.slice(SET_HTML.indexOf('<div id="settings-tab-email"'),
+                         SET_HTML.indexOf('id="settings-tab-kundenverwaltung"'))
+        + '</body></html>', { url: 'https://x/settings', runScripts: 'outside-only' });
+    const w = dom.window;
+    w.eval(I18N);
+    ['de', 'en'].forEach(lg => {
+        w._lang = lg;
+        w.applyLang();
+        const d = w.document;
+        pruefe((d.getElementById('em-ordner-entwuerfe') || {}).placeholder !== undefined,
+            '[' + lg + '] Markup steht');
+        const drafts = d.querySelector('[data-i18n-html="mailadm.f_drafts"]');
+        pruefe(drafts && drafts.querySelector('span.kb-hint'),
+            '[' + lg + '] die eingebettete Klammer-Auszeichnung ueberlebt applyLang');
+        const url = d.querySelector('[data-i18n-html="mailadm.ews_url_hint"]');
+        pruefe(url && url.querySelectorAll('code').length === 2,
+            '[' + lg + '] beide <code>-Auszeichnungen im EWS-Hinweis bleiben');
+        const intro = d.querySelector('[data-i18n-html="mailadm.intro"]');
+        pruefe(intro && intro.querySelectorAll('b').length >= 3 && intro.textContent.length > 120,
+            '[' + lg + '] der Einleitungstext bleibt vollstaendig und ausgezeichnet');
+        const knopf = d.getElementById('em-save-conn');
+        pruefe(knopf && knopf.textContent.trim().length > 3,
+            '[' + lg + '] der Speichern-Knopf ist beschriftet: "'
+            + (knopf ? knopf.textContent.trim() : '') + '"');
+        const ph = d.getElementById('em-ordner-gesendet');
+        pruefe(ph && ph.placeholder.length > 3,
+            '[' + lg + '] der Platzhalter ist gesetzt: "' + (ph ? ph.placeholder : '') + '"');
+    });
+    // Und die Sprachen unterscheiden sich wirklich
+    w._lang = 'de'; w.applyLang();
+    const deTxt = w.document.getElementById('em-save-conn').textContent;
+    w._lang = 'en'; w.applyLang();
+    const enTxt = w.document.getElementById('em-save-conn').textContent;
+    pruefe(deTxt !== enTxt, 'DE und EN liefern verschiedene Texte ("' + deTxt + '" / "' + enTxt + '")');
+    w.close();
+}
+{
+    // Der Reiter zeichnet nach einem Sprachwechsel neu (Servertexte!)
+    const { w, rufe } = baueReiter({});
+    w.EmailAdmin.onShow();
+    await warte(60);
+    pruefe(rufe.some(r => r.url.indexOf('lang=de') > -1),
+        'der Reiter holt die Uebersicht mit Sprache');
+    pruefe(w.document.getElementById('em-areas').textContent.indexOf('Wissensdatenbank') > -1,
+        'Bereichsnamen auf Deutsch');
+    const vorher = rufe.length;
+    w._lang = 'en';
+    w.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'en' } }));
+    await warte(80);
+    pruefe(rufe.length > vorher && rufe[rufe.length - 1].url.indexOf('lang=en') > -1,
+        'und holt sie bei DE/EN neu');
+    pruefe(w.document.getElementById('em-areas').textContent.indexOf('Knowledge base') > -1,
+        'danach auf Englisch');
+    w.close();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */

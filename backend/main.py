@@ -824,7 +824,27 @@ _ACTION_LABELS = [
 ]
 
 # Veraendernde Anfragen, die KEINE Benutzerhandlung sind (technisches Rauschen).
-_ACTION_IGNORE = ("/api/logout", "/api/verify-token", "/api/telemetry")
+# ``/api/activity`` steht hier, weil der Endpunkt die Handlung SELBST festhaelt –
+# mit der Beschriftung der Seite statt eines nichtssagenden "Aktion". Ohne den
+# Eintrag schriebe die Buchhaltung zweimal (einmal hier, einmal dort).
+_ACTION_IGNORE = ("/api/logout", "/api/verify-token", "/api/telemetry", "/api/activity")
+
+# Seiten, von denen ``POST /api/activity`` eine Aktivitaetsmeldung schicken darf.
+# WHITELIST und kein Freitext: der Wert wird zur Beschriftung in der
+# Anwesenheitsliste (einer Administratoren-Ansicht) – ein Client duerfte dort
+# nicht beliebigen Text hineinschreiben.
+_ACTIVITY_PAGES = {
+    "portal": "Portal",
+    "chat": "Chat",
+    "wissen": "Wissen",
+    "support": "Support",
+    "userchat": "Benutzer-Chat",
+    "settings": "Einstellungen",
+    "sap": "SAP",
+    "email": "E-Mail",
+    "api": "API-Doku",
+    "supportagent": "Support-Agent",
+}
 
 
 def _action_label(path: str) -> str:
@@ -2839,6 +2859,43 @@ async def force_logout(username: str, request: Request,
         return JSONResponse({"ok": True, "user": plain})
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/activity")
+async def note_frontend_activity(request: Request, user: str = Depends(require_auth)):
+    """Eine echte Benutzer-Handlung melden (Seitenaufbau, Klick, Tastendruck).
+
+    Gegenstueck zu ``frontend/js/activity.js`` – dort steht die ausfuehrliche
+    Begruendung. Kurz: die Anwesenheitsliste zeigt "untaetig seit …", und dieser
+    Wert kam bis 2026-08-13 ausschliesslich aus veraendernden HTTP-Anfragen
+    (``_note_activity``: POST/PUT/PATCH/DELETE). Wer die Seite neu laedt, den
+    Info-Ordner oeffnet oder einen Verlauf aufschlaegt, erzeugt aber nur GETs –
+    und stand deshalb trotz sichtbarer Arbeit stundenlang als "untaetig" da.
+
+    Die naheliegende Gegenmassnahme (GET mitzaehlen) verbietet sich: die
+    Oberflaechen fragen staendig Zustaende ab (LLM-Status 30 s, CPU 3 s,
+    Fortschritte, die Liste selbst). Dann waere jeder offene Tab dauerhaft
+    "aktiv" und die Anzeige wertlos. Deshalb meldet der Client ausdruecklich,
+    was ein MENSCH getan hat.
+
+    Body ``{"page": "<kennung>"}`` – nur bekannte Kennungen (``_ACTIVITY_PAGES``)
+    werden zur Beschriftung; alles andere ergibt das neutrale "Aktion". Der
+    Endpunkt haengt an ``require_auth`` und steht in ``_ACTION_IGNORE``, damit
+    die Buchhaltung nicht doppelt schreibt.
+    """
+    label = "Aktion"
+    try:
+        rumpf = await request.json()
+        if isinstance(rumpf, dict):
+            label = _ACTIVITY_PAGES.get(str(rumpf.get("page") or "").lower(), "Aktion")
+    except Exception:  # noqa: BLE001 – ein leerer/kaputter Rumpf ist kein Fehler
+        pass
+    try:
+        ip = request.client.host if request.client else ""
+        _user_sessions.note_action(user, label, ip, display=_display_name(user))
+    except Exception as e:  # noqa: BLE001 – Buchhaltung darf keine Anfrage kippen
+        print(f"[Anwesenheit] Aktivitaetsmeldung fehlgeschlagen: {e}", flush=True)
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/sessions")

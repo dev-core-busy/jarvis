@@ -742,12 +742,26 @@ body.light .model-discover-item:hover { background-color: #eef0f4 !important; }
     background: rgba(var(--fg-rgb), 0.08);
     color: var(--text-muted);
 }
+/* Server ist fuer Netzwerk-Benutzer freigegeben: hervorgehoben, weil das die
+   weitreichendere Einstellung ist. Die Marke traegt ihre Aussage zusaetzlich im
+   Text – Farbe allein ist keine Information. */
+.mcp-badge-warn {
+    background: color-mix(in srgb, var(--warning, #f59e0b) 18%, transparent);
+    color: var(--warning, #f59e0b);
+}
 .mcp-toggle {
     display: flex; align-items: center; gap: 0.3rem;
     font-size: 0.8rem; color: var(--text-secondary);
     cursor: pointer;
 }
 .mcp-toggle input { cursor: pointer; }
+/* Eigene Zeile unter dem Status – nicht in die Kopfzeile, dort steht schon der
+   Aktiv-Schalter und die beiden waeren nicht auseinanderzuhalten. */
+.mcp-net-toggle {
+    margin-top: 0.4rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--border-color);
+}
 .mcp-btn-sm {
     background: transparent;
     border: 1px solid var(--border-color);

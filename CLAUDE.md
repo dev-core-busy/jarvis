@@ -3368,6 +3368,158 @@ per `ast` aus `agent.py` extrahiert, `backend.config` ist ein Stub).
   `office_create_powerpoint` zu rufen. `settings.json` dabei md5-gleich (die Probe filtert die
   Werkzeugliste nur im Speicher).
 
+## MCP-Werkzeuge liefen an drei Schranken vorbei (Fix 2026-08-14)
+**Der Anlass war eine Architekturfrage** („waere der Weg ueber einen MCP-Server statt direktem
+Jira/Confluence-Zugriff sinnvoll?"). Antwort dort: **nein fuer Jira/Confluence, ja fuer Systeme
+OHNE eigenen Skill** – Begruendung im Memory `decision-jira-confluence-kein-mcp`. Bei der
+Bewertung fiel der eigentliche Befund an: der vorhandene MCP-Client war **unabhaengig von dieser
+Entscheidung** eine Umgehung.
+
+- **Was offen stand:** `agent.py::_attach_extra_tools` haengt `mcp_manager.get_all_tools()` in
+  denselben Werkzeugkasten wie Skill-Werkzeuge. Diese Werkzeuge stammen aber aus **fremdem Code**
+  und arbeiten mit den Zugangsdaten des **Servers**. Sie liefen vorbei an:
+  | Schranke | Folge |
+  |---|---|
+  | Internet-Gate (`_INTERNET_TOOLS` / `requires_internet`) | ein Benutzer OHNE Internet-Freigabe erreichte ueber einen MCP-Server genau das, was ihm `curl` verweigert |
+  | `_BLOCKED_TOOLS_FOR_LDAP` | jeder Domain-Benutzer durfte jedes MCP-Werkzeug aufrufen |
+  | Actor-/Eigentuemer-Bezug | „fremde Zugangsdaten als Vollmacht" – eines der vier Fehlermuster der Endpunkt-Durchsicht vom 2026-08-04 |
+  **Gehalten hat nur die Rollen-Whitelist** (`agent_roles.effektive_werkzeuge`), weil sie eine
+  Whitelist ist und `mcp_*` dort nicht steht. Eine Whitelist erwischt neue Werkzeug-Quellen von
+  selbst, eine Sperrliste nie – das ist der Grund, aus dem sie die einzige war, die nicht ausfiel.
+- **Zwei Marker am Werkzeug, ausgewertet im Dispatch** (`McpRemoteTool`):
+  - `requires_internet = True` – **pauschal, nicht je Server konfigurierbar.** Auch ein
+    stdio-Server ist ein Prozess, den ein Administrator konfiguriert hat, um an Daten von
+    woanders zu kommen. Der Haken `getattr(tool, "requires_internet", False)` existierte im
+    Dispatch schon lange und wurde von **keinem** Werkzeug gesetzt – hier ist sein erster Nutzer.
+  - `ist_mcp = True` + `erlaubt_netzwerk_benutzer` (aus der Server-Config). Neuer Dispatch-Zweig
+    in der `not _privileged`-Kette, **nach** der `_BLOCKED_TOOLS_FOR_LDAP`-Pruefung, damit ein
+    Werkzeug aus beiden Gruppen die spezifischere Meldung behaelt.
+- **`_ist_mcp_tool(tool, name)` prueft ODER-verknuepft** Attribut **und** Namens-Praefix: der
+  Praefix traegt auch dann, wenn das Werkzeug-Objekt fehlt oder untergeschoben wurde. Bewusst
+  `startswith`, **kein Teilstring** – sonst traefe die Sperre willkuerliche Namen wie
+  `dump_mcp_state`.
+- **Freigabe je Server, Vorgabe AUS** (`allow_network_users`, *Einstellungen → MCP*). Die
+  Normalisierung ist ueberall `is True`, nicht `bool()`: ein `"ja"`/`1` aus einer handgeschriebenen
+  settings.json ist keine bewusste Admin-Entscheidung. Neues Feld = **ZWEI Stellen** in config.py
+  (`add_mcp_server` UND die Whitelist von `update_mcp_server`) – die Regel, an der
+  `prompt_tool_calling` jahrelang wirkungslos war.
+- **Der Verstoss ist WEICH** (`_viol_soft = True`): welches Werkzeug aufgerufen wird, entscheidet
+  das MODELL. Dieselbe Lehre wie bei `spawn_agent` und `cron_create` – auf ECHT standen fuenf
+  `blocked-tool`-Verstoesse in fuenf Konten, kein einziger vom Benutzer angefordert.
+- **FALLSTRICK, ohne den die Freigabe erst nach Dienst-Neustart wirkt:** `erlaubt_netzwerk_benutzer`
+  wird beim **Bau** des Werkzeugs aus der Server-Config gelesen. Die fuenf MCP-Endpunkte rufen
+  deshalb jetzt `_reload_agent_tools()` – **das fehlte bisher komplett**, ein nach dem Agent-Start
+  verbundener Server tauchte im Werkzeugkasten ueberhaupt nicht auf und ein getrennter hinterliess
+  tote Werkzeug-Objekte. Exakt die Falle vom 2026-08-10 („Skill eingeschaltet, Werkzeug trotzdem
+  nicht vorhanden"), nur an einer zweiten Stelle.
+- **Nebenbefund, mitbehoben: `mcp.js` schrieb Fremdtext roh ins `innerHTML`.** Servername,
+  Werkzeugnamen und -beschreibungen kommen aus `list_tools` des MCP-Servers, also aus fremdem
+  Code – und landeten ungeprueft in der **Administratoren**-Oberflaeche, wo das Sitzungstoken im
+  localStorage liegt. Jetzt `_esc()` an allen fuenf Stellen.
+- **DER SCHWERSTE FUND kam erst beim Test mit einem echten Server (gleicher Tag, behoben):
+  jeder stdio-MCP-Server bekam SAEMTLICHE Zugangsdaten des Dienstes.** `_connect_stdio` uebergab
+  `env = {**os.environ, **env_vars}`. Am Referenzserver gemessen – dessen Werkzeug `get-env` gibt
+  die eigene Umgebung aus –: **50 Variablen, darunter `AGENT_API_KEY` (43 Zeichen),
+  `GEMINI_API_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET` und `JARVIS_PASSWORD`.** Mit dem `AGENT_API_KEY`
+  haette der Fremdprozess eigene Agentenauftraege starten koennen. Bei `npx -y <paket>` wird
+  dieser Code bei **jedem Start frisch aus dem Netz** geladen.
+  - Jetzt `_ENV_WEITERGEBEN` – eine **Whitelist** mit PATH, HOME, Locale, TZ, TMPDIR und den
+    Proxy-Variablen; was nicht darin steht, kommt nicht durch. Nachgemessen: **30 Variablen,
+    kein einziger Schluessel**, npx laeuft unveraendert.
+  - **PATH und HOME sind Pflicht:** ohne PATH wird `npx`/`python3` nicht gefunden, ohne HOME sucht
+    npm seinen Cache in `/root` und scheitert mit `EACCES` (auf DEV genau so passiert).
+  - Was ein Server darueber hinaus braucht, traegt der Administrator ins Feld `env` der
+    Server-Konfiguration ein – **dafuer war das Feld immer gedacht**, es war nur wirkungslos,
+    solange ohnehin alles durchgereicht wurde.
+  - Der Test prueft zusaetzlich, dass **kein schluessel-artiger Name** (KEY/TOKEN/SECRET/PASSW)
+    in die Whitelist geraet – auch keiner, der spaeter dazukommt.
+- **stdio-Server laufen isoliert – ueber `bwrap`, NICHT ueber den Root-Broker** (2026-08-14).
+  Der naheliegende Weg `sandbox_exec` passt nicht: die Op fuehrt EINEN Befehl aus und gibt
+  stdout/stderr zurueck, ein stdio-MCP-Server ist das Gegenteil (langlebiger Prozess mit
+  bidirektionalen Pipes). Ueber den Broker hiesse das FD-Passing per SCM_RIGHTS, einen eigenen
+  Transport und einen Broker-Neustart auf jedem Server – und `jarvis_sandbox` (Shell `nologin`,
+  Home existiert nicht) haette keinen beschreibbaren npm-Cache.
+  `bwrap` erreicht dasselbe Ziel **ohne jede Rechteerhoehung** (unprivilegierte User-Namespaces):
+  der Prozess behaelt die uid des Dienstes, aber `/opt` und `/home` existieren in seinem
+  Namespace **nicht**. Eingeblendet wird nur lesbar, was ein Programm zum Laufen braucht
+  (`/usr`, `/bin`, `/lib`, `/etc`), dazu `--tmpfs` fuer `/tmp` und HOME.
+  - **`--unshare-pid` leistet das, was OS-Rechte nie koennten:** der Server sieht die uebrigen
+    Prozesse des Dienstes nicht und kann ihnen keine Signale senden. Auf DEV gemessen: **288
+    sichtbare Prozesse ohne, 4 mit Isolation**; `kill -0` auf den Dienst → „No such process".
+    Das ist genau der Punkt, den der Abschnitt „Isolation der Domain-Benutzer" als *von keiner
+    Variante geloest* fuehrt – fuer MCP-Server ist er damit geloest.
+  - **Vorgabe AN** (`sandbox`, im Formular vorbelegt). Die Normalisierung ist `is not False`,
+    **nicht** `is True`: ein Altbestand-Server ohne das Feld waere sonst ploetzlich ungeschuetzt.
+  - **FAIL-CLOSED:** fehlt `bwrap`, wird der Server **nicht** still ungeschuetzt gestartet,
+    sondern verbindet gar nicht – mit Klartext-Grund im Status (inkl. `apt install bubblewrap`
+    und dem Hinweis, dass `sandbox: false` die bewusste Ausnahme ist). Ein Schutz, der beim
+    Fehlen einer Voraussetzung lautlos ausfaellt, ist kein Schutz.
+  - `sandbox_paths` blendet zusaetzliche Pfade ein – **nur lesbar** und nur, wenn sie absolut
+    sind und existieren (ein relativer Pfad landet im Namespace an einer voellig anderen Stelle).
+  - **FALLSTRICK, der beim ersten Live-Lauf zuschlug: `bwrap_verfuegbar()` muss mit GENAU dem
+    Aufruf pruefen, den `_bwrap_wrappen` spaeter baut.** Die erste Fassung band nur `/usr` ein –
+    schon `/bin/true` scheiterte damit an der fehlenden libc, und die Funktion meldete auf einem
+    voellig gesunden System `False`. Die fail-closed-Logik funktionierte dabei einwandfrei (kein
+    Start, Klartext im Status) – der Fehler lag in der vereinfachten Probe.
+- **Streamable HTTP wird unterstuetzt** (2026-08-14). `sse_client` ist der seit 2025-03-26
+  **deprecated** Transport; das installierte `mcp` 1.25.0 bringt `streamable_http.py` mit, es
+  wurde nur nicht benutzt. Jetzt drei Werte fuer `transport`:
+  | Wert | Verhalten |
+  |---|---|
+  | `streamable_http` | nur der aktuelle Standard (`/mcp`) |
+  | `sse` | nur der alte Transport |
+  | `http` | erst Streamable HTTP, bei Misserfolg SSE |
+  Der Rueckfall bei `http` ist bewusst: bis zum 2026-08-14 lief dieser Wert **faelschlich** auf
+  SSE – so funktionieren bestehende Konfigurationen weiter UND Server, die nur noch `/mcp`
+  anbieten. Vor dem Rueckfall wird der ExitStack geschlossen, sonst haengt ein halb offener
+  Transport daran.
+  - **`streamablehttp_client` liefert ein DREIER-Tupel** (der dritte Wert ist eine Funktion fuer
+    die Session-Id). Wer wie beim SSE-Transport zwei Werte auspackt, bekommt einen ValueError,
+    der nach einem Serverfehler aussieht.
+  - Nicht geloest: der offizielle `example-server.modelcontextprotocol.io` verlangt **OAuth mit
+    PKCE** – das kann der Client weiterhin nicht.
+- **Bewusst NICHT gebaut (bleibt offen):** MCP-Server fallen aus dem Skill-Lifecycle
+  (`system_packages`/`purge`), aus der Lizenz-Skill-Slot-Zaehlung und aus dem Skill-Audit heraus –
+  sie sind keine Skills.
+
+### Zum Nachstellen: der offizielle Test-Server
+`@modelcontextprotocol/server-everything` (MIT, kein API-Key) ist ausdruecklich als Test-Server
+fuer Client-Bauer gedacht und liefert 13 Werkzeuge, u.a. `echo`, `get-sum`, `get-env`,
+`get-tiny-image`. Konfiguration in *Einstellungen → MCP*: Transport `stdio`, Befehl `npx`,
+Argumente `-y` / `@modelcontextprotocol/server-everything` / `stdio`, und **`env: {"HOME":
+"/home/jarvis"}`** (seit dem Whitelist-Fix nicht mehr noetig, HOME steht darin – schadet aber
+nicht).
+- **`get-sum` taugt NICHT als Nachweis** – das Modell kann selbst addieren, aus einer richtigen
+  Antwort folgt nicht, dass MCP benutzt wurde. Genommen wird ein Wert, den niemand erraten kann
+  (`echo` mit einer Losung), und geprueft wird im **Tool-Audit-Log**: ein Agentenlauf ohne
+  Audit-Zeile existiert nicht.
+- **FALLSTRICK npx:** ohne `-y` fragt es interaktiv nach und der Verbindungsaufbau laeuft in den
+  Timeout. Und der Subprozess erbt das Arbeitsverzeichnis – laeuft er in `/root`, scheitert er als
+  `jarvis` mit `EACCES: spawn sh`.
+- **Live in /chat belegt (2026-08-14, echter WebSocket wie im Browser, echtes Modell):**
+  Domain-Benutzer → „Zugriff verweigert: Werkzeuge dieses MCP-Servers sind fuer Netzwerk-Benutzer
+  nicht freigeschaltet", Eintrag im Verstoss-Protokoll mit `soft: True`; Administrator → `Echo:
+  Kastanie-7719`; nach der Freigabe ueber die Oberflaechen-API laeuft derselbe Domain-Benutzer
+  **ohne Dienst-Neustart** durch (der Beleg fuer `_reload_agent_tools()`). Alle vier Laeufe stehen
+  im Tool-Audit-Log. Danach vollstaendig zurueckgebaut: Server geloescht, Internet-Freigabe auf den
+  Ausgangswert, `settings.json` feldgleich zur Sicherung, kein Serverprozess uebrig.
+- **FALLSTRICK bei der Testvorbereitung:** das Internet-Gate greift **auch fuer lokale
+  Administratoren** – `_user_has_internet_access` kennt keinen Admin-Bypass („leer = niemand",
+  dieselbe Regel wie beim Login). Der erste Chat-Lauf als `jarvis` endete deshalb an genau der
+  Schranke, die dieser Fix eingezogen hat. Wer MCP nutzen will, braucht eine Internet-Freigabe.
+- **Verifiziert:** 114 Pruefungen (`tests/test_mcp_gates.py`, ohne fastapi/mcp lauffaehig –
+  `McpRemoteTool` und `_ist_mcp_tool` werden per Quelltext geladen, `backend.config` wird
+  ausdruecklich **nicht** importiert und der Test bricht mit **Exit 2** ab, wenn es doch geladen
+  ist: der echte Import migriert Profile und schriebe die Live-`settings.json` zurueck) lokal und
+  auf DEV im echten venv. Gegenproben greifen: Marker entfernt → 2 FAIL, `is True` durch `bool()`
+  ersetzt → 4 FAIL, ein `_reload_agent_tools()` entfernt → 1 FAIL, ein `_esc()` entfernt → 2 FAIL;
+  gegen den Stand vor dem Fix bricht der Test mit Exit 2 ab.
+- **Live auf DEV mit einem ECHTEN stdio-MCP-Server** (FastMCP, Werkzeug `ping`): 17/17 –
+  verbunden und entdeckt, Marker am echten Werkzeug, **Positivkontrolle** (der direkte Aufruf
+  liefert `pong: hallo`, ohne sie waere „abgewiesen" kein Beweis), Netzwerk-Benutzer abgewiesen
+  ohne Ausfuehrung, Administrator laeuft durch, nach Freigabe uebernimmt das **Internet-Gate**,
+  mit beidem laeuft es. `settings.json` dabei md5-gleich (die Server-Config lag nur im Speicher).
+
 ## Der Agent kannte Datum und Uhrzeit nicht (Fix 2026-08-10)
 Beim Audit gefunden: der System-Prompt nannte den aktuellen Zeitpunkt an **keiner** Stelle
 (`grep` auf `datetime.now`, „Datum", „Uhrzeit" in `agent.py` → nichts). Ein Sprachmodell kennt

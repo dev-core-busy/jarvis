@@ -541,6 +541,20 @@ class Config:
             "args": data.get("args", []),
             "url": data.get("url", ""),
             "env": data.get("env", {}),
+            # Duerfen Netzwerk-/Domain-Benutzer die Werkzeuge dieses Servers
+            # aufrufen? Vorgabe AUS (fail-closed): der Server arbeitet mit SEINEN
+            # hinterlegten Zugangsdaten, die Rechte des Anfragenden im Zielsystem
+            # spielen dabei keine Rolle. Nur ein ausdrueckliches True zaehlt –
+            # ein "ja"/1 aus einer handgeschriebenen settings.json ist keine
+            # bewusste Admin-Entscheidung.
+            "allow_network_users": data.get("allow_network_users") is True,
+            # stdio-Server in einem Namespace ohne Sicht auf /opt und /home
+            # starten (bwrap). Vorgabe AN – abschalten ist die bewusste Ausnahme,
+            # deshalb `is not False` und nicht `is True`.
+            "sandbox": data.get("sandbox") is not False,
+            # Zusaetzliche, NUR LESBARE Pfade fuer den isolierten Prozess
+            # (z.B. das Datenverzeichnis eines Dateisystem-Servers).
+            "sandbox_paths": list(data.get("sandbox_paths") or []),
         }
         self._mcp_servers.append(server)
         self._save_to_file()
@@ -550,9 +564,17 @@ class Config:
         """Aktualisiert einen MCP-Server."""
         for srv in self._mcp_servers:
             if srv["id"] == server_id:
+                # ACHTUNG: neues Feld = ZWEI Stellen (add_mcp_server UND diese
+                # Whitelist). Fehlt eines, wird der Wert still verworfen.
                 for key in ["name", "enabled", "transport", "command", "args", "url", "env"]:
                     if key in data:
                         srv[key] = data[key]
+                if "allow_network_users" in data:
+                    srv["allow_network_users"] = data["allow_network_users"] is True
+                if "sandbox" in data:
+                    srv["sandbox"] = data["sandbox"] is not False
+                if "sandbox_paths" in data:
+                    srv["sandbox_paths"] = list(data["sandbox_paths"] or [])
                 self._save_to_file()
                 return srv
         return None

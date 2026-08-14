@@ -213,6 +213,23 @@ _BLOCKED_TOOLS_FOR_LDAP = {
     # 'write_file' – dieses Tool existiert nicht, die Sperre lief also ins Leere.
 }
 
+# MCP-Werkzeug-Praefix. `McpRemoteTool.name` baut sich als
+# f"mcp_{server}_{tool}" – der Praefix ist die einzige Eigenschaft, die auch dann
+# noch traegt, wenn das Werkzeug-Objekt fehlt oder ausgetauscht wurde.
+_MCP_TOOL_PREFIX = "mcp_"
+
+
+def _ist_mcp_tool(tool, name: str) -> bool:
+    """True, wenn dieser Aufruf an einen MCP-Server geht.
+
+    Zwei Kennzeichen, ODER-verknuepft und damit fail-closed: das Attribut am
+    Werkzeug (der genaue Weg) UND der Namens-Praefix (der Weg, der auch bei einem
+    fehlenden oder untergeschobenen Werkzeug-Objekt greift). Ein Skill-Werkzeug,
+    das sich freiwillig 'mcp_...' nennt, wird dadurch mitbehandelt – das ist
+    gewollt, denn sein Name behauptet genau diese Herkunft.
+    """
+    return bool(getattr(tool, "ist_mcp", False)) or name.startswith(_MCP_TOOL_PREFIX)
+
 
 def _reminder_exempt(tool_name: str, user: str) -> bool:
     """True, wenn 'cron_create' fuer diesen Absender ausnahmsweise erlaubt ist.
@@ -2941,6 +2958,24 @@ KRITISCH – Autonomie-Regeln:
                     # angefordert (die Anfragen waren normale Arbeitsauftraege).
                     # Dieselbe Begruendung wie bei cron_create (2026-07-29): der
                     # Versuch steht im Journal, als Verstoss gilt er nicht.
+                    _viol_soft = True
+                elif _ist_mcp_tool(tool, name) and not getattr(tool, "erlaubt_netzwerk_benutzer", False):
+                    # MCP-Werkzeuge stammen aus FREMDEM Code und arbeiten mit den
+                    # Zugangsdaten des SERVERS – die Rechte des anfragenden
+                    # Benutzers im Zielsystem spielen keine Rolle ("fremde
+                    # Zugangsdaten als Vollmacht", eines der vier Fehlermuster der
+                    # Endpunkt-Durchsicht vom 2026-08-04). Freigabe deshalb je
+                    # Server und ausdruecklich (Einstellungen -> MCP), Vorgabe AUS.
+                    print(f"[AGENT] BLOCKED MCP-Tool '{name}' fuer Domain-User '{_uname}' "
+                          f"(Server nicht fuer Netzwerk-Benutzer freigegeben)", flush=True)
+                    result = ("Zugriff verweigert: Werkzeuge dieses MCP-Servers sind fuer "
+                              "Netzwerk-Benutzer nicht freigeschaltet. Ein Administrator kann den "
+                              "Server unter Einstellungen -> MCP dafuer freigeben.")
+                    _ldap_blocked = True
+                    _viol = ("blocked-tool", name)
+                    # Weich, gleiche Begruendung wie bei _BLOCKED_TOOLS_FOR_LDAP: welches
+                    # Werkzeug aufgerufen wird, entscheidet das MODELL – der Benutzer kann
+                    # den Versuch weder vorhersehen noch vermeiden.
                     _viol_soft = True
                 elif name == "filesystem":
                     # Pfad-Confinement: Schreiben nur /tmp+data/documents, Lesen nur

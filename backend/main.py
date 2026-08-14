@@ -3590,6 +3590,11 @@ async def add_mcp_server(request: Request, user: str = Depends(require_local_aut
     server = config.add_mcp_server(data)
     if data.get("enabled", True):
         await mcp_manager.connect_server(server["id"])
+    # Ohne diesen Aufruf erfaehrt der laufende Hauptagent von dem Server NICHTS –
+    # seine Werkzeugliste entsteht in `_attach_extra_tools` und wuerde erst beim
+    # naechsten Dienst-Neustart neu gebaut. Gleiche Falle wie beim Skill-Toggle
+    # (2026-08-10): Server verbunden, Werkzeuge trotzdem nicht vorhanden.
+    _reload_agent_tools()
     return JSONResponse(server)
 
 @app.put("/api/mcp/servers/{server_id}")
@@ -3599,11 +3604,15 @@ async def update_mcp_server(server_id: str, request: Request, user: str = Depend
     result = config.update_mcp_server(server_id, data)
     if not result:
         return JSONResponse({"detail": "Server nicht gefunden"}, status_code=404)
-    # Neu verbinden wenn aktiviert
+    # Neu verbinden wenn aktiviert. Der Neuaufbau ist hier PFLICHT und nicht nur
+    # Aufraeumen: `McpRemoteTool.erlaubt_netzwerk_benutzer` wird beim Bau des
+    # Werkzeugs aus der Server-Config gelesen – ohne Reconnect traegt ein
+    # bestehendes Werkzeug weiter die alte Freigabe.
     if result.get("enabled"):
         await mcp_manager.connect_server(server_id)
     else:
         await mcp_manager.disconnect_server(server_id)
+    _reload_agent_tools()
     return JSONResponse(result)
 
 @app.delete("/api/mcp/servers/{server_id}")
@@ -3611,6 +3620,7 @@ async def remove_mcp_server(server_id: str, user: str = Depends(require_local_au
     """Löscht einen MCP-Server und trennt zuvor dessen Verbindung."""
     await mcp_manager.disconnect_server(server_id)
     if config.remove_mcp_server(server_id):
+        _reload_agent_tools()   # sonst behaelt der Agent tote Werkzeug-Objekte
         return JSONResponse({"ok": True})
     return JSONResponse({"detail": "Server nicht gefunden"}, status_code=404)
 
@@ -3624,12 +3634,14 @@ async def toggle_mcp_server(server_id: str, request: Request, user: str = Depend
         await mcp_manager.connect_server(server_id)
     else:
         await mcp_manager.disconnect_server(server_id)
+    _reload_agent_tools()
     return JSONResponse({"ok": True, "enabled": enabled})
 
 @app.post("/api/mcp/servers/{server_id}/reconnect")
 async def reconnect_mcp_server(server_id: str, user: str = Depends(require_local_auth)):
     """Stellt die Verbindung zu einem MCP-Server neu her."""
     success = await mcp_manager.connect_server(server_id)
+    _reload_agent_tools()
     return JSONResponse({"ok": success})
 
 

@@ -30,6 +30,7 @@ Postfach wuerden sich beim Verschieben derselben Nachricht in die Quere kommen.
 from __future__ import annotations
 
 import asyncio
+import functools
 import re
 import secrets
 import time
@@ -282,11 +283,17 @@ async def regel_lauf(regel: dict, testlauf: bool = False,
         bericht.update(ok=False, fehler="Regel ohne Besitzer – wird nicht ausgefuehrt.")
         return bericht
 
+    # Ein Testlauf ist eine HANDLUNG DES BENUTZERS und darf den Aussetzer
+    # uebergehen (ein Klick = ein Anmeldeversuch). Der Takt darf es nicht -
+    # genau seine Wiederholung sperrt sonst das Domaenenkonto.
+    manuell = bool(testlauf or nur_eine)
     try:
-        konto = await asyncio.to_thread(mail_accounts.konto_fuer, owner)
+        konto = await asyncio.to_thread(
+            functools.partial(mail_accounts.konto_fuer, owner,
+                              trotz_aussetzer=manuell))
     except MailFehler as f:
         bericht.update(ok=False, fehler=klartext(f))
-        mail_accounts.merke_ergebnis(owner, False, str(f))
+        mail_accounts.merke_ergebnis(owner, False, str(f), f.kategorie)
         return bericht
 
     kategorie = mail_accounts.kategorie_name()
@@ -297,7 +304,7 @@ async def regel_lauf(regel: dict, testlauf: bool = False,
                 _neue_nachrichten, client, regel, kategorie)
         except MailFehler as f:
             bericht.update(ok=False, fehler=klartext(f))
-            mail_accounts.merke_ergebnis(owner, False, str(f))
+            mail_accounts.merke_ergebnis(owner, False, str(f), f.kategorie)
             mail_rules.protokoll_schreiben({
                 "owner": owner, "regel_id": regel.get("id"),
                 "regel": regel.get("name"), "ergebnis": klartext(f), "ok": False})
@@ -313,69 +320,150 @@ async def regel_lauf(regel: dict, testlauf: bool = False,
         actor = _actor_fuer(regel)
 
         for n in nachrichten:
-            ergebnis, ok = "", True
-            t0 = time.time()
-            try:
-                ergebnis = await _lauf_fuer_nachricht(regel, n, konto, werkzeuge, actor)
-                # Ein Lauf, der formal endet aber nichts liefert, ist KEIN Erfolg.
-                # Sonst wird die Nachricht abgehakt, obwohl nichts geschehen ist.
-                if _kein_ergebnis(ergebnis):
-                    ok = False
-                    print("[Mail] Regel '%s': kein Ergebnis fuer Nachricht von %s"
-                          % (regel.get("name"), n.von), flush=True)
-            except Exception as e:  # noqa: BLE001
-                ok, ergebnis = False, "Regel-Lauf fehlgeschlagen: %s" % e
-                print("[Mail] Regel '%s' fehlgeschlagen: %s"
-                      % (regel.get("name"), e), flush=True)
+            await _verarbeite_eine(client, regel, n, konto, werkzeuge, actor,
+                                   kategorie, testlauf, bericht)
+    finally:
+        try:
+            client.schliessen()
+        except Exception:  # noqa: BLE001
+            pass
+    return bericht
 
-            # Vermerken NACH dem Lauf: stirbt der Prozess mitten im Lauf, wird
-            # die Nachricht erneut verarbeitet. Das ist die bewusste Wahl –
-            # "eventuell doppelt" ist bei einem Entwurf/einer Antwort aergerlich,
-            # "nie verarbeitet" laesst eine Kundenmail liegen.
-            #
-            # UND EIN FEHLSCHLAG HAKT SIE NICHT AB. Bis 2026-08-12 wurde auch
-            # nach einem gescheiterten Lauf vermerkt; ein technischer Ausfall
-            # (der EWS-Fehler desselben Tages) hat damit Post endgueltig
-            # verschluckt – die Regel sah sie nie wieder an. Jetzt: bis
-            # MAX_FEHLVERSUCHE erneut versuchen, danach ausdruecklich aufgeben.
-            if not testlauf:
-                if ok:
-                    mail_rules.vergiss_fehlversuche(regel["id"], n.schluessel)
-                    mail_rules.merke_verarbeitet(regel["id"], n.schluessel, n.zeitstempel)
-                    await _markieren(client, n, kategorie, regel)
-                else:
-                    versuch = mail_rules.merke_fehlversuch(regel["id"], n.schluessel)
-                    if versuch >= mail_rules.MAX_FEHLVERSUCHE:
-                        mail_rules.merke_verarbeitet(regel["id"], n.schluessel, n.zeitstempel)
-                        aufgegeben = (
-                            " Nach %d Fehlversuchen wird diese Nachricht nicht mehr "
-                            "erneut verarbeitet." % versuch)
-                        ergebnis += aufgegeben
-                        print("[Mail] Regel '%s': Nachricht von %s nach %d Fehlversuchen "
-                              "uebersprungen" % (regel.get("name"), n.von, versuch), flush=True)
-                    else:
-                        ergebnis += (" Versuch %d von %d – die Nachricht bleibt offen und "
-                                     "wird beim naechsten Durchgang erneut versucht."
-                                     % (versuch, mail_rules.MAX_FEHLVERSUCHE))
 
-            # ZULETZT und AUSNAHMSLOS: der Lesestatus ist eine Zusage an den
-            # Benutzer und wird deshalb auch nach einem Testlauf und nach einem
-            # Fehlschlag wiederhergestellt – die Antwort (und damit Exchanges
-            # eigene Lesemarkierung) kann laengst heraus sein.
-            await _lesestatus_wahren(client, n, regel)
+async def _verarbeite_eine(client: MailClient, regel: dict, n, konto, werkzeuge,
+                           actor: dict, kategorie: str, testlauf: bool,
+                           bericht: dict) -> None:
+    """Verarbeitet GENAU EINE Nachricht und schreibt Buchhaltung + Protokoll.
 
-            bericht["verarbeitet" if ok else "uebersprungen"] += 1
-            bericht["ok"] = bericht["ok"] and ok
-            bericht["aktionen"].append({
-                "betreff": n.betreff, "von": n.von, "ergebnis": ergebnis[:500], "ok": ok})
+    Herausgeloest aus ``regel_lauf``, damit der Weg "verarbeite DIESE Nachricht"
+    (``nachricht_lauf``, benutzt vom Outlook-Add-in) exakt dieselbe Buchhaltung
+    bekommt. Eine zweite Fassung waere genau das Drift-Muster, das in diesem
+    Projekt schon mehrfach Stunden gekostet hat – die Regeln fuer Vermerk,
+    Fehlversuche und Lesestatus stehen hier EINMAL.
+    """
+    owner = (regel.get("owner") or "").strip()
+    ergebnis, ok = "", True
+    t0 = time.time()
+    try:
+        ergebnis = await _lauf_fuer_nachricht(regel, n, konto, werkzeuge, actor)
+        # Ein Lauf, der formal endet aber nichts liefert, ist KEIN Erfolg.
+        # Sonst wird die Nachricht abgehakt, obwohl nichts geschehen ist.
+        if _kein_ergebnis(ergebnis):
+            ok = False
+            print("[Mail] Regel '%s': kein Ergebnis fuer Nachricht von %s"
+                  % (regel.get("name"), n.von), flush=True)
+    except Exception as e:  # noqa: BLE001
+        ok, ergebnis = False, "Regel-Lauf fehlgeschlagen: %s" % e
+        print("[Mail] Regel '%s' fehlgeschlagen: %s"
+              % (regel.get("name"), e), flush=True)
+
+    # Vermerken NACH dem Lauf: stirbt der Prozess mitten im Lauf, wird
+    # die Nachricht erneut verarbeitet. Das ist die bewusste Wahl –
+    # "eventuell doppelt" ist bei einem Entwurf/einer Antwort aergerlich,
+    # "nie verarbeitet" laesst eine Kundenmail liegen.
+    #
+    # UND EIN FEHLSCHLAG HAKT SIE NICHT AB. Bis 2026-08-12 wurde auch
+    # nach einem gescheiterten Lauf vermerkt; ein technischer Ausfall
+    # (der EWS-Fehler desselben Tages) hat damit Post endgueltig
+    # verschluckt – die Regel sah sie nie wieder an. Jetzt: bis
+    # MAX_FEHLVERSUCHE erneut versuchen, danach ausdruecklich aufgeben.
+    if not testlauf:
+        if ok:
+            mail_rules.vergiss_fehlversuche(regel["id"], n.schluessel)
+            mail_rules.merke_verarbeitet(regel["id"], n.schluessel, n.zeitstempel)
+            await _markieren(client, n, kategorie, regel)
+        else:
+            versuch = mail_rules.merke_fehlversuch(regel["id"], n.schluessel)
+            if versuch >= mail_rules.MAX_FEHLVERSUCHE:
+                mail_rules.merke_verarbeitet(regel["id"], n.schluessel, n.zeitstempel)
+                aufgegeben = (
+                    " Nach %d Fehlversuchen wird diese Nachricht nicht mehr "
+                    "erneut verarbeitet." % versuch)
+                ergebnis += aufgegeben
+                print("[Mail] Regel '%s': Nachricht von %s nach %d Fehlversuchen "
+                      "uebersprungen" % (regel.get("name"), n.von, versuch), flush=True)
+            else:
+                ergebnis += (" Versuch %d von %d – die Nachricht bleibt offen und "
+                             "wird beim naechsten Durchgang erneut versucht."
+                             % (versuch, mail_rules.MAX_FEHLVERSUCHE))
+
+    # ZULETZT und AUSNAHMSLOS: der Lesestatus ist eine Zusage an den
+    # Benutzer und wird deshalb auch nach einem Testlauf und nach einem
+    # Fehlschlag wiederhergestellt – die Antwort (und damit Exchanges
+    # eigene Lesemarkierung) kann laengst heraus sein.
+    await _lesestatus_wahren(client, n, regel)
+
+    bericht["verarbeitet" if ok else "uebersprungen"] += 1
+    bericht["ok"] = bericht["ok"] and ok
+    bericht["aktionen"].append({
+        "betreff": n.betreff, "von": n.von, "ergebnis": ergebnis[:500], "ok": ok})
+    mail_rules.protokoll_schreiben({
+        "owner": owner, "regel_id": regel.get("id"), "regel": regel.get("name"),
+        "mail_von": n.von, "mail_betreff": n.betreff, "mail_datum": n.datum,
+        "ergebnis": ergebnis[:2000], "ok": ok, "testlauf": bool(testlauf),
+        "dauer_s": round(time.time() - t0, 1),
+    })
+    if ergebnis:
+        mail_rules.ergebnis_merken(regel["id"], ergebnis)
+
+
+async def nachricht_lauf(regel: dict, msg_id: str, ordner: str = "",
+                         testlauf: bool = False) -> dict:
+    """Fuehrt eine Regel auf GENAU DER angegebenen Nachricht aus (Outlook-Add-in).
+
+    Unterschied zu ``regel_lauf``: die Nachricht wird nicht gesucht, sondern
+    benannt – der Benutzer hat sie in Outlook markiert. Deshalb gelten die
+    Auswahl-Filter der Regel hier **nicht**: wer im Postfach auf "mit dieser
+    Regel verarbeiten" drueckt, meint diese Nachricht, auch wenn sie schon
+    gelesen ist oder der Absender nicht zum Filter passt. Was NICHT entfaellt,
+    ist die Bindung: die Nachricht wird aus dem Postfach des REGEL-BESITZERS
+    geladen (``mail_accounts.konto_fuer``), niemals aus einem fremden – die
+    Kennung aus dem Rumpf waere sonst der Weg in ein anderes Postfach.
+
+    Der Verarbeitungsvermerk wird gesetzt (``testlauf=False``): eine bewusst
+    angestossene Verarbeitung IST eine Verarbeitung, und die Automatik soll
+    dieselbe Nachricht danach nicht ein zweites Mal beantworten.
+    """
+    owner = (regel.get("owner") or "").strip()
+    bericht = {"regel_id": regel.get("id"), "regel": regel.get("name"),
+               "owner": owner, "verarbeitet": 0, "uebersprungen": 0,
+               "ok": True, "fehler": "", "aktionen": []}
+    if not owner:
+        bericht.update(ok=False, fehler="Regel ohne Besitzer – wird nicht ausgefuehrt.")
+        return bericht
+    if not (msg_id or "").strip():
+        bericht.update(ok=False, fehler="Keine Nachrichten-Kennung uebergeben.")
+        return bericht
+
+    # Dieser Weg wird IMMER vom Benutzer ausgeloest (Add-in: "diese Mail jetzt
+    # verarbeiten"), laeuft also nicht im Takt – Aussetzer wird uebergangen.
+    try:
+        konto = await asyncio.to_thread(
+            functools.partial(mail_accounts.konto_fuer, owner,
+                              trotz_aussetzer=True))
+    except MailFehler as f:
+        bericht.update(ok=False, fehler=klartext(f))
+        mail_accounts.merke_ergebnis(owner, False, str(f), f.kategorie)
+        return bericht
+
+    kategorie = mail_accounts.kategorie_name()
+    client = MailClient(konto)
+    try:
+        try:
+            n = await asyncio.to_thread(client.lesen, msg_id, ordner or "")
+        except MailFehler as f:
+            bericht.update(ok=False, fehler=klartext(f))
+            mail_accounts.merke_ergebnis(owner, False, str(f), f.kategorie)
             mail_rules.protokoll_schreiben({
-                "owner": owner, "regel_id": regel.get("id"), "regel": regel.get("name"),
-                "mail_von": n.von, "mail_betreff": n.betreff, "mail_datum": n.datum,
-                "ergebnis": ergebnis[:2000], "ok": ok, "testlauf": bool(testlauf),
-                "dauer_s": round(time.time() - t0, 1),
-            })
-            if ergebnis:
-                mail_rules.ergebnis_merken(regel["id"], ergebnis)
+                "owner": owner, "regel_id": regel.get("id"),
+                "regel": regel.get("name"), "ergebnis": klartext(f), "ok": False})
+            return bericht
+        mail_accounts.merke_ergebnis(owner, True)
+
+        werkzeuge = mail_rules.werkzeuge_fuer(regel.get("bereiche") or ["mail"])
+        actor = _actor_fuer(regel)
+        await _verarbeite_eine(client, regel, n, konto, werkzeuge, actor,
+                               kategorie, testlauf, bericht)
     finally:
         try:
             client.schliessen()

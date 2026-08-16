@@ -7534,6 +7534,65 @@ def _email_skill_hinweis() -> dict | None:
                      "aktiviert ihn unter Einstellungen → Skills."}
 
 
+@app.get("/addin/manifest.xml")
+async def addin_manifest(request: Request):
+    """XML-Manifest des Outlook-Add-ins, passend zu DIESEM Server erzeugt.
+
+    **Bewusst ohne Anmeldung**, aus zwei Gruenden: beim Sideloading kann ein
+    Administrator statt einer Datei eine URL angeben – die holt dann der
+    Exchange-Server bzw. Outlook, und zwar ohne Sitzung und ohne Kopfzeile. Und
+    der Inhalt ist keine Auskunft: URLs dieses Servers (den man kennt, wenn man
+    die Adresse aufruft) plus der Anzeigename aus dem Branding, den
+    ``GET /api/branding`` ohnehin ohne Anmeldung herausgibt.
+
+    **Nicht an den Skill-Zustand gekoppelt** – anders als ``/email``, das 404
+    liefert. Ein einmal installiertes Add-in soll nach einem Skill-Neustart
+    nicht "kaputt" aussehen; das Aufgabenfenster sagt im Klartext, wenn der
+    Bereich nicht aktiv ist.
+    """
+    from backend import addin
+    basis = addin.basis_url(request)
+    if not basis:
+        return JSONResponse({"ok": False, "error": "Basis-URL nicht ermittelbar."},
+                            status_code=500)
+    if addin.ist_lokale_basis(basis):
+        # Fail-closed: ein Manifest mit "localhost" laesst sich klaglos
+        # installieren und das Aufgabenfenster bleibt danach leer – ein Fehler,
+        # den niemand mit diesem Abruf in Verbindung bringt.
+        return JSONResponse(
+            {"ok": False,
+             "error": "Dieses Manifest wurde ueber '%s' abgerufen und wuerde auf "
+                      "jedem Arbeitsplatz ins Leere zeigen. Rufe die Adresse auf, "
+                      "unter der die Arbeitsplaetze den Server erreichen – oder "
+                      "setze JARVIS_ADDIN_BASE (bzw. die Einstellung "
+                      "'addin_base_url') auf diese Adresse." % basis},
+            status_code=400)
+    return Response(
+        content=addin.manifest(basis),
+        media_type="application/xml",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            # Damit der Browser des Administrators die Datei ablegt, statt sie
+            # anzuzeigen – hochgeladen wird sie als Datei.
+            "Content-Disposition": 'attachment; filename="jarvis-outlook-addin.xml"',
+        })
+
+
+@app.get("/addin/taskpane.html", response_class=HTMLResponse)
+async def addin_taskpane():
+    """Aufgabenfenster des Outlook-Add-ins.
+
+    Wie ``/email`` eine leere Huelle ohne Rechtepruefung: eine Navigation aus
+    Outlook traegt keinen Authorization-Kopf. Angemeldet wird im Fenster selbst,
+    und jeder Datenabruf haengt serverseitig an ``require_email_access``.
+    """
+    f = FRONTEND_DIR / "addin" / "taskpane.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Add-in nicht installiert</h1>", status_code=404)
+    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
 @app.get("/email", response_class=HTMLResponse)
 async def email_page():
     """E-Mail-Bereich ausliefern – nur wenn der Skill aktiv ist.
@@ -7649,7 +7708,11 @@ async def email_test(user: str = Depends(require_email_access)):
         return JSONResponse(hinweis, status_code=400)
 
     def _tun():
-        konto = mail_accounts.konto_fuer(user)
+        # trotz_aussetzer: Der Verbindungstest ist der Rueckweg aus dem
+        # Aussetzer. Wuerde er selbst blockiert, gaebe es keinen - und der
+        # Aussetzer soll die WIEDERHOLUNG im Takt stoppen, nicht den Menschen,
+        # der den Fehler gerade behebt.
+        konto = mail_accounts.konto_fuer(user, trotz_aussetzer=True)
         c = MailClient(konto)
         try:
             return c.test()
@@ -7658,7 +7721,7 @@ async def email_test(user: str = Depends(require_email_access)):
     try:
         res = await asyncio.to_thread(_tun)
     except MailFehler as f:
-        mail_accounts.merke_ergebnis(user, False, str(f))
+        mail_accounts.merke_ergebnis(user, False, str(f), f.kategorie)
         return JSONResponse({"ok": False, "kategorie": f.kategorie,
                              "error": klartext(f)}, status_code=400)
     except Exception as e:  # noqa: BLE001
@@ -7674,7 +7737,7 @@ async def email_folders(user: str = Depends(require_email_access)):
     from backend.mail_client import MailClient, MailFehler, klartext
 
     def _tun():
-        c = MailClient(mail_accounts.konto_fuer(user))
+        c = MailClient(mail_accounts.konto_fuer(user, trotz_aussetzer=True))
         try:
             return c.ordner()
         finally:
@@ -7700,7 +7763,7 @@ async def email_messages(ordner: str = "", limit: int = 15,
         limit = 15
 
     def _tun():
-        c = MailClient(mail_accounts.konto_fuer(user))
+        c = MailClient(mail_accounts.konto_fuer(user, trotz_aussetzer=True))
         try:
             return [m.kurz(text_max=0) for m in c.liste(ordner=ordner, limit=limit)]
         finally:
@@ -7816,6 +7879,58 @@ async def email_rules_run(regel_id: str, user: str = Depends(require_email_acces
     return JSONResponse({"ok": bool(bericht.get("ok")), "bericht": bericht})
 
 
+@app.post("/api/email/rules/{regel_id}/run_message")
+async def email_rules_run_message(regel_id: str, request: Request,
+                                  user: str = Depends(require_email_access)):
+    """Eigene Regel auf GENAU DER uebergebenen Nachricht ausfuehren.
+
+    Das ist der Weg des Outlook-Add-ins ("diese Mail mit Regel X verarbeiten").
+    Der Unterschied zu ``/run`` ist die Nachrichtenwahl, NICHT die Rechtelage:
+
+    * Die Regel muss dem angemeldeten Benutzer gehoeren – sonst 404 (kein
+      Existenz-Orakel, gleiche Regel wie bei ``cron_delete``).
+    * Die Nachricht wird aus dem Postfach des REGEL-BESITZERS geladen. Die
+      Kennung aus dem Rumpf waehlt die Nachricht, **nicht das Postfach** –
+      sonst waere ``{"msg_id": "..."}`` der Weg in ein fremdes Postfach.
+    * Der Lauf ist wie jeder Regel-Lauf unprivilegiert und auf die Werkzeuge
+      der Regel beschraenkt (``mail_runner._actor_fuer``).
+
+    Die Auswahl-Filter der Regel (nur ungelesen, Absender, Betreff) gelten hier
+    bewusst nicht: der Benutzer hat die Nachricht in Outlook markiert und meint
+    genau diese. Der Verarbeitungsvermerk wird gesetzt, damit die Automatik sie
+    nicht ein zweites Mal beantwortet.
+    """
+    from backend import mail_rules, mail_runner
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    msg_id = str((body or {}).get("msg_id") or "").strip()
+    if not msg_id:
+        return JSONResponse({"ok": False, "error": "Es fehlt die Nachrichten-Kennung "
+                                                   "(msg_id)."}, status_code=400)
+    ordner = str((body or {}).get("ordner") or "").strip()
+    r = mail_rules.holen(regel_id)
+    if not r or r.get("owner") != mail_rules.norm_user(user):
+        return JSONResponse({"ok": False, "error": "Regel nicht gefunden."},
+                            status_code=404)
+    if not r.get("enabled", True):
+        # Eine abgeschaltete Regel von Hand anzustossen ist widerspruechlich –
+        # und der Benutzer wuerde das Ergebnis der Automatik zuschreiben.
+        return JSONResponse({"ok": False, "error": "Diese Regel ist abgeschaltet. "
+                                                   "Schalte sie ein, um sie zu benutzen."},
+                            status_code=400)
+    try:
+        bericht = await mail_runner.nachricht_lauf(r, msg_id, ordner)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Lauf fehlgeschlagen: %s" % e},
+                            status_code=500)
+    return JSONResponse({"ok": bool(bericht.get("ok")), "bericht": bericht})
+
+
 @app.post("/api/email/stop")
 async def email_stop(user: str = Depends(require_email_access)):
     """Laufenden Regel-Lauf abbrechen (der Bereich kennt einen Lauf zur Zeit)."""
@@ -7876,6 +7991,13 @@ async def email_admin_overview(lang: str = "de",
             "passwort_gesetzt": info.get("passwort_gesetzt", False),
             "letzter_erfolg": info.get("letzter_erfolg", 0),
             "letzter_fehler": info.get("letzter_fehler", ""),
+            # Ausgesetzte Postfaecher gehoeren in die Administrator-Uebersicht:
+            # ohne dieses Feld beantwortet sie die naheliegendste Frage nicht –
+            # "warum feuern die Regeln von Benutzer X nicht mehr?". Der letzte
+            # Fehlertext allein sagt es nicht, denn er steht auch bei einem
+            # einmaligen Aussetzer dort, der laengst behoben ist.
+            "ausgesetzt": info.get("ausgesetzt", False),
+            "ausgesetzt_seit": info.get("ausgesetzt_seit", 0),
             "regeln": je_benutzer.get(un, 0),
             "regeln_aktiv": aktiv_je_benutzer.get(un, 0),
         })
@@ -7932,7 +8054,7 @@ async def email_admin_explore(request: Request, user: str = Depends(require_loca
                      "jeder Benutzer selbst im E-Mail-Bereich." % ziel}, status_code=400)
 
     def _tun():
-        c = MailClient(mail_accounts.konto_fuer(ziel))
+        c = MailClient(mail_accounts.konto_fuer(ziel, trotz_aussetzer=True))
         try:
             raus = {"kanal": "", "ordner": c.ordner(), "nachrichten": []}
             if limit:

@@ -244,7 +244,18 @@ exec(_hol(r'_BWRAP = .*?(?=\ndef bwrap_verfuegbar)', MCP_SRC, "_BWRAP-Block"), _
 exec(_hol(r'def _bwrap_wrappen.*?(?=\n\n# ─)', MCP_SRC, "_bwrap_wrappen"), _bw)
 cmd, bargs = _bw["_bwrap_wrappen"]("npx", ["-y", "paket", "stdio"], [])
 z = " ".join(bargs)
-check(cmd.endswith("bwrap"), "Aufruf laeuft ueber bwrap")
+check(cmd.endswith("bwrap") or cmd.endswith("setpriv"),
+      "Aufruf laeuft ueber bwrap (ggf. hinter setpriv)")
+check("bwrap" in z or cmd.endswith("bwrap"), "bwrap ist im Aufruf enthalten")
+# Ambient-Capabilities muessen VOR bwrap fallen: die Unit gibt dem Backend
+# CAP_NET_BIND_SERVICE (Port 443), das wird vererbt, und bwrap verweigert dann
+# den Dienst ("Unexpected capabilities but not setuid"). Im Dienst war die
+# Isolation dadurch tot, in jeder Handprobe funktionierte sie.
+if cmd.endswith("setpriv"):
+    check("--ambient-caps=-all" in z, "Ambient-Capabilities werden abgelegt")
+    check("--inh-caps=-all" in z, "vererbbare Capabilities werden abgelegt")
+    check(z.index("--ambient-caps=-all") < z.index("bwrap"),
+          "setpriv laeuft VOR bwrap")
 check("--ro-bind /usr /usr" in z, "/usr nur lesbar eingeblendet")
 # Der Kern: das Dienst-Verzeichnis existiert im Namespace NICHT.
 check("/opt" not in z, "/opt wird NICHT eingeblendet (Dienst + data/ + .env)")

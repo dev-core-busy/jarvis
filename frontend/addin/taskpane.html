@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Mail</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=9">
+    <link rel="icon" href="/static/addin/icon-32.png" type="image/png">
+    <!--
+        ═══════════════════════════════════════════════════════════════════
+        Outlook-Add-in – Aufgabenfenster
+        ───────────────────────────────────────────────────────────────────
+        Bildet den Bereich /email in einem Aufgabenfenster ab und ergaenzt das,
+        wofuer es ein Add-in ueberhaupt braucht: die gerade markierte Nachricht
+        mit einer Regel verarbeiten.
+
+        DAS FENSTER IST SCHMAL (regulaer 320 px). Deshalb Reiter statt
+        untereinanderliegender Karten und durchgehend EINE Spalte – ein
+        zweispaltiges Raster wie in /email waere hier unbedienbar.
+
+        Praefix `ad-` fuer alles hier, damit nichts mit `em-` (/email) oder
+        `sp-` (/sap) kollidiert.
+
+        Farben ausschliesslich ueber die Theme-Variablen aus theme.css – ein
+        hartes Weiss oder Violett braeche Branding und Hell-Modus. Office
+        liefert KEINE Theme-Information an das Fenster, deshalb folgt es dem
+        gespeicherten Jarvis-Theme (localStorage) wie die uebrigen Seiten.
+        ═══════════════════════════════════════════════════════════════════
+    -->
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; }
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); font-size: 13px; overflow-x: hidden; }
+        .hidden { display: none !important; }
+
+        /* ── Kopf ── */
+        .ad-top { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+            border-bottom: 1px solid var(--border); background: var(--bg-glass);
+            position: sticky; top: 0; z-index: 20; }
+        .ad-logo { width: 24px; height: 24px; border-radius: 6px; flex: 0 0 auto; }
+        .ad-title { font-weight: 600; font-size: 13px; flex: 1 1 auto; min-width: 0;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ad-iconbtn { background: none; border: none; color: var(--text-secondary);
+            cursor: pointer; padding: 4px; border-radius: 6px; line-height: 1;
+            font-size: 12px; font-weight: 700; font-family: inherit; flex: 0 0 auto;
+            display: inline-flex; align-items: center; justify-content: center; }
+        .ad-iconbtn svg { width: 16px; height: 16px; }
+        .ad-iconbtn:hover { background: rgba(var(--accent-rgb), .14); color: var(--accent); }
+
+        /* Zustands-Pille. `align-self` ist Pflicht: im senkrechten Flex-Container
+           wuerde sie sonst ueber die ganze Breite gezogen und saehe wie ein
+           Eingabefeld aus (Fehler vom 2026-08-11 beim Standort-Sync). */
+        .ad-pill { display: inline-flex; align-items: center; gap: 5px;
+            align-self: flex-start; padding: 2px 8px; border-radius: 11px;
+            font-size: 11px; font-weight: 600; white-space: nowrap;
+            background: rgba(var(--fg-rgb), .06); border: 1px solid var(--border);
+            color: var(--text-secondary); }
+        .ad-pill.is-ok { color: var(--success);
+            border-color: color-mix(in srgb, var(--success) 45%, transparent);
+            background: color-mix(in srgb, var(--success) 12%, transparent); }
+        .ad-pill.is-off { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+        .ad-pill:empty { display: none; }
+
+        /* ── Reiter ── */
+        .ad-tabs { display: flex; border-bottom: 1px solid var(--border);
+            position: sticky; top: 41px; z-index: 19; background: var(--bg-primary); }
+        .ad-tab { flex: 1 1 0; background: none; border: none; cursor: pointer;
+            padding: 8px 2px; font-size: 11.5px; font-weight: 600;
+            color: var(--text-muted); font-family: inherit;
+            border-bottom: 2px solid transparent; white-space: nowrap; }
+        .ad-tab:hover { color: var(--text-primary); }
+        .ad-tab.is-active { color: var(--accent); border-bottom-color: var(--accent); }
+
+        .ad-body { padding: 12px 10px 40px; }
+        .ad-sec { margin-bottom: 14px; }
+        .ad-h { font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
+        .ad-hint { color: var(--text-muted); font-size: 11.5px; line-height: 1.5; }
+        .ad-sep { height: 1px; background: var(--border); margin: 10px 0; }
+
+        /* ── Formularteile ── */
+        .ad-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 9px; }
+        .ad-field > label { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
+        .ad-field input[type=text], .ad-field input[type=email], .ad-field input[type=password],
+        .ad-field input[type=number], .ad-field select, .ad-field textarea {
+            width: 100%; padding: 6px 8px; border-radius: 7px; font-size: 12.5px;
+            border: 1px solid var(--border); background: rgba(var(--fg-rgb), .04);
+            color: var(--text-primary); font-family: inherit; }
+        .ad-field textarea { resize: vertical; min-height: 7.5rem; line-height: 1.5; }
+        .ad-field input:focus, .ad-field select:focus, .ad-field textarea:focus {
+            outline: none; border-color: var(--accent); }
+        /* Kontrollkaestchen sind ein Satz, keine Feldbeschriftung – deshalb
+           nicht grossgeschrieben und mit Abstand zum Kaestchen (Vorgabe
+           2026-08-12 fuer .checkbox-group). */
+        .ad-check { display: flex; align-items: flex-start; gap: 7px;
+            font-size: 12px; font-weight: 400; color: var(--text-primary);
+            text-transform: none; cursor: pointer; line-height: 1.45; }
+        .ad-check input { width: auto; flex: 0 0 auto; margin-top: 2px; }
+
+        .ad-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            padding: 6px 10px; border-radius: 7px; cursor: pointer; font-size: 12px;
+            font-family: inherit; white-space: nowrap; flex: 0 0 auto; }
+        .ad-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text-primary); }
+        .ad-btn:disabled { opacity: .5; cursor: default; }
+        .ad-btn-primary { background: var(--gradient); border: none; color: #fff; font-weight: 600; }
+        .ad-btn-primary:hover:not(:disabled) { filter: brightness(1.08); color: #fff; }
+        .ad-btn-danger { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+        .ad-btn-danger:hover:not(:disabled) { border-color: var(--danger); color: var(--danger);
+            background: color-mix(in srgb, var(--danger) 10%, transparent); }
+        .ad-btn-block { display: block; width: 100%; text-align: center; }
+        .ad-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+        .ad-status { font-size: 11.5px; color: var(--text-muted); line-height: 1.45;
+            word-break: break-word; }
+
+        /* ── Regel-Karten ── */
+        .ad-card { border: 1px solid var(--border); border-radius: 9px;
+            background: rgba(var(--fg-rgb), .02); margin-bottom: 8px; overflow: hidden; }
+        .ad-card.is-off { opacity: .55; }   /* Deckkraft, keine harte Farbe */
+        /* Zwei Zeilen statt einer: bei 320 px Fensterbreite nehmen vier Knoepfe
+           rund ein Drittel weg, und Name wie Kennzahlen enden in einer Ellipse
+           ("Support-Anfragen beantwor…"). Der Name bekommt deshalb die volle
+           Breite, die Knoepfe stehen darunter rechts. */
+        .ad-card-row { display: flex; align-items: center; gap: 6px 8px;
+            padding: 8px 10px; flex-wrap: wrap; }
+        .ad-card-main { flex: 1 1 100%; min-width: 0; }
+        .ad-card-name { font-weight: 600; font-size: 12.5px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ad-card-meta { font-size: 11px; color: var(--text-muted); margin-top: 1px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ad-card-acts { display: flex; gap: 4px; flex: 0 0 auto; margin-left: auto; }
+        /* Monochrome Textzeichen statt Emoji: Emoji werden je nach System
+           farbig gerendert und folgen keinem Theme (Regel aus .kb-hdr-btn). */
+        .ad-mini { background: none; border: 1px solid var(--border);
+            color: var(--text-secondary); width: 26px; height: 26px; border-radius: 7px;
+            cursor: pointer; display: inline-flex; align-items: center;
+            justify-content: center; font-size: 12px; line-height: 1; padding: 0; }
+        .ad-mini:hover { border-color: var(--accent); color: var(--text-primary); }
+        .ad-mini.is-danger:hover { border-color: var(--danger); color: var(--danger); }
+        /* Das Formular wird KIND der Karte – wenn zwei Elemente wie eines
+           aussehen sollen, gehoert eines INS andere (Muster .role-card). */
+        .ad-edit { padding: 0 10px 10px; border-top: 1px solid var(--border); }
+        .ad-badge { display: inline-block; padding: 0 6px; border-radius: 9px;
+            font-size: 10.5px; font-weight: 600; background: rgba(var(--fg-rgb), .08);
+            color: var(--text-secondary); margin-left: 4px; }
+
+        .ad-tools label { display: flex; gap: 7px; align-items: flex-start;
+            padding: 6px 8px; border: 1px solid var(--border); border-radius: 7px;
+            font-size: 11.5px; cursor: pointer; margin-bottom: 4px; line-height: 1.45; }
+        .ad-tools label:hover { background: rgba(var(--fg-rgb), .06); }
+        .ad-tools input { width: auto; flex: 0 0 auto; margin-top: 2px; }
+        .ad-tools label.is-locked { opacity: .6; cursor: default; }
+
+        .ad-log { padding: 7px 0; border-bottom: 1px solid rgba(var(--fg-rgb), .07);
+            font-size: 11.5px; }
+        .ad-log:last-child { border-bottom: none; }
+        .ad-log-time { color: var(--text-muted); font-size: 10.5px; }
+        .ad-log-res { color: var(--text-secondary); margin-top: 2px; line-height: 1.5;
+            white-space: pre-wrap; word-break: break-word; }
+        .ad-log.is-bad .ad-log-res { color: var(--danger); }
+        .ad-empty { padding: 16px 8px; text-align: center; color: var(--text-muted);
+            font-size: 12px; line-height: 1.55; }
+
+        /* Kasten fuer die markierte Nachricht – deckende Flaeche, weil er die
+           wichtigste Aussage des Fensters traegt. */
+        .ad-msg { border: 1px solid var(--border); border-radius: 9px;
+            background: var(--bg-secondary); padding: 9px 10px; }
+        .ad-msg-sub { font-weight: 600; font-size: 12.5px; line-height: 1.4;
+            word-break: break-word; }
+        .ad-msg-from { font-size: 11.5px; color: var(--text-muted); margin-top: 2px;
+            word-break: break-word; }
+        .ad-warn { border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+            background: color-mix(in srgb, var(--danger) 8%, transparent);
+            color: var(--text-primary); border-radius: 8px; padding: 8px 10px;
+            font-size: 11.5px; line-height: 1.55; }
+        code { font-size: .9em; padding: 0 3px; border-radius: 3px;
+            background: rgba(var(--fg-rgb), .08); word-break: break-all; }
+        a { color: var(--accent); }
+    </style>
+</head>
+<body>
+<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+
+<!-- ═══ Anmeldung ═══ -->
+<div id="ad-login" class="hidden">
+    <div class="ad-top">
+        <img class="ad-logo" src="/static/addin/icon-32.png" alt="">
+        <span class="ad-title" id="ad-login-title">Jarvis E-Mail</span>
+    </div>
+    <div class="ad-body">
+        <p class="ad-hint" id="ad-login-hint"></p>
+        <div class="ad-sep"></div>
+        <div class="ad-field">
+            <label data-i18n="login.username">Benutzername</label>
+            <input type="text" id="ad-user" autocomplete="username" autocapitalize="none" spellcheck="false">
+        </div>
+        <div class="ad-field">
+            <label data-i18n="login.password">Passwort</label>
+            <input type="password" id="ad-pass" autocomplete="current-password">
+        </div>
+        <div class="ad-field hidden" id="ad-totp-wrap">
+            <label>Code (2FA)</label>
+            <input type="text" id="ad-totp" inputmode="numeric" autocomplete="one-time-code">
+        </div>
+        <button class="ad-btn ad-btn-primary ad-btn-block" id="ad-do-login"
+                data-i18n="login.submit">Anmelden</button>
+        <p class="ad-status" id="ad-login-status" style="margin-top:8px;"></p>
+    </div>
+</div>
+
+<!-- ═══ Anwendung ═══ -->
+<div id="ad-app" class="hidden">
+    <div class="ad-top">
+        <img class="ad-logo" src="/static/addin/icon-32.png" alt="">
+        <span class="ad-title" id="ad-brand">Jarvis E-Mail</span>
+        <!-- Sinnbilder als SVG, nicht als Textzeichen: '◐' und '⏻' werden je
+             nach Schrift als Kaestchen oder als winziger Punkt gerendert (im
+             Screenshot gesehen). Dieselben Pfade wie in email.html/portal.html,
+             damit die Knoepfe ueberall gleich aussehen. -->
+        <button class="ad-iconbtn" id="ad-lang" title="DE/EN">DE</button>
+        <button class="ad-iconbtn" id="ad-theme" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+        <button class="ad-iconbtn" id="ad-logout" title="Abmelden" data-i18n-title="chat.logout">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+    </div>
+    <div class="ad-tabs">
+        <button class="ad-tab is-active" data-tab="mail" data-i18n="addin.tab_mail">Nachricht</button>
+        <button class="ad-tab" data-tab="rules" data-i18n="addin.tab_rules">Regeln</button>
+        <button class="ad-tab" data-tab="acct" data-i18n="addin.tab_acct">Postfach</button>
+        <button class="ad-tab" data-tab="log" data-i18n="addin.tab_log">Protokoll</button>
+    </div>
+    <div class="ad-body">
+        <div id="ad-global" class="ad-sec"></div>
+
+        <!-- ── Reiter: markierte Nachricht ── -->
+        <div class="ad-pane" data-pane="mail">
+            <div id="ad-msg-box"></div>
+        </div>
+
+        <!-- ── Reiter: Regeln ── -->
+        <div class="ad-pane hidden" data-pane="rules">
+            <p class="ad-hint" data-i18n="addin.rules_hint">Jede Regel beobachtet einen Ordner. Trifft eine neue Nachricht ein, entscheidet das Sprachmodell anhand deines Prompts, was zu tun ist.</p>
+            <button class="ad-btn ad-btn-primary ad-btn-block" id="ad-new-rule"
+                    style="margin-top:8px;" data-i18n="mail.rules_new">+ Neue Regel</button>
+            <p class="ad-status" id="ad-rules-status" style="margin-top:6px;"></p>
+            <div id="ad-rules" style="margin-top:8px;"></div>
+            <!-- EIN wandernder Formular-Container (Muster der Rollen-Agenten):
+                 zwei Container haetten zwei Wege zum Speichern bedeutet. -->
+            <div id="ad-rule-edit" class="hidden"></div>
+        </div>
+
+        <!-- ── Reiter: Postfach ── -->
+        <div class="ad-pane hidden" data-pane="acct">
+            <p class="ad-hint" data-i18n="mail.acct_hint">Hier hinterlegst du dein eigenes Exchange-Postfach. Das Kennwort wird verschlüsselt gespeichert und von keiner Schnittstelle wieder herausgegeben – auch nicht an Administratoren. Lass das Feld leer, um es unverändert zu lassen.</p>
+            <div class="ad-sep"></div>
+            <div class="ad-field">
+                <label data-i18n="mail.acct_address">E-Mail-Adresse</label>
+                <input type="email" id="ad-adresse" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="ad-field">
+                <label data-i18n="mail.acct_login">Anmeldename</label>
+                <input type="text" id="ad-benutzer" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="ad-field">
+                <label data-i18n="mail.acct_password">Kennwort</label>
+                <input type="password" id="ad-passwort" autocomplete="new-password"
+                       data-i18n-placeholder="mail.pw_ph" placeholder="leer = unverändert">
+                <span class="ad-hint" id="ad-pw-hint"></span>
+            </div>
+            <div class="ad-field">
+                <label data-i18n="mail.acct_channel">Zugangsweg</label>
+                <select id="ad-kanal">
+                    <option value="" data-i18n="mail.acct_channel_default">Vorgabe des Administrators</option>
+                    <option value="auto" data-i18n="mail.acct_channel_auto">auto (EWS, sonst IMAP)</option>
+                    <option value="ews" data-i18n="mail.acct_channel_ews">nur EWS</option>
+                    <option value="imap" data-i18n="mail.acct_channel_imap">nur IMAP/SMTP</option>
+                </select>
+            </div>
+            <div class="ad-field">
+                <label data-i18n="mail.acct_inbox">Posteingang</label>
+                <input type="text" id="ad-ord-eingang" placeholder="INBOX">
+            </div>
+            <div class="ad-field">
+                <label data-i18n="mail.acct_drafts">Entwürfe</label>
+                <input type="text" id="ad-ord-entwuerfe" data-i18n-placeholder="mail.default_ph" placeholder="Vorgabe">
+            </div>
+            <div class="ad-field">
+                <label data-i18n="mail.acct_sent">Gesendet</label>
+                <input type="text" id="ad-ord-gesendet" data-i18n-placeholder="mail.default_ph" placeholder="Vorgabe">
+            </div>
+            <label class="ad-check"><input type="checkbox" id="ad-aktiv">
+                <span data-i18n="mail.acct_active">Postfach aktiv (Regeln dürfen darauf arbeiten)</span></label>
+            <div class="ad-row">
+                <button class="ad-btn ad-btn-primary" id="ad-save-acct" data-i18n="common.save">Speichern</button>
+                <button class="ad-btn" id="ad-test-acct" data-i18n="mail.acct_test">Verbindung testen</button>
+            </div>
+            <div class="ad-row">
+                <button class="ad-btn ad-btn-danger" id="ad-del-acct" data-i18n="mail.acct_delete">Zugangsdaten entfernen</button>
+            </div>
+            <p class="ad-status" id="ad-acct-status" style="margin-top:8px;"></p>
+        </div>
+
+        <!-- ── Reiter: Protokoll ── -->
+        <div class="ad-pane hidden" data-pane="log">
+            <p class="ad-hint" data-i18n="mail.log_hint">Was die Regeln getan haben – neueste zuerst. Nur deine eigenen Läufe.</p>
+            <button class="ad-btn ad-btn-block" id="ad-log-reload" style="margin-top:8px;"
+                    data-i18n="common.refresh">Aktualisieren</button>
+            <p class="ad-status" id="ad-log-status" style="margin-top:6px;"></p>
+            <div id="ad-log" style="margin-top:8px;"></div>
+        </div>
+    </div>
+</div>
+
+<!--
+    Office.js kommt vom Microsoft-Netz – das ist die von Microsoft vorgegebene
+    Einbindung. Faellt sie aus (Arbeitsplatz ohne Internet), bleibt das Fenster
+    NUTZBAR: `addin.js` wartet mit Zeitgrenze auf Office und schaltet dann in
+    den Verwaltungsbetrieb ohne Nachrichtenbezug. Ein Fenster, das ohne CDN
+    komplett weiss bleibt, waere der schlechtere Ausgang.
+    `async` IST PFLICHT, NICHT `defer`. Ein `defer`-Skript wird zwar spaeter
+    ausgefuehrt, aber `DOMContentLoaded` WARTET darauf – und `addin.js` startet
+    an genau diesem Ereignis. Mit `defer` blieb das Fenster deshalb weiss,
+    solange die Anfrage lief: blockiert eine Firewall das Microsoft-Netz
+    (der Fall, den dieser Kommentar als behandelt beschreibt), sind das 30–75 s
+    TCP-Zeitueberschreitung, und die 4-Sekunden-Grenze in `officeErmitteln`
+    kam nie zum Zug. `async` blockiert `DOMContentLoaded` nicht.
+-->
+<script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script src="/static/js/i18n.js?v=45"></script>
+<script src="/static/js/theme.js?v=2"></script>
+<script src="/static/addin/addin.js?v=2"></script>
+</body>
+</html>

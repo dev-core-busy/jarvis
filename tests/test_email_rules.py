@@ -1162,20 +1162,40 @@ check(("gelesen", "AAA", True) not in st.gerufen,
 # Der Ort des Aufrufs ist die halbe Miete: er muss AUSSERHALB von
 # `if not testlauf:` stehen (sonst laesst ein Testlauf die Mail gelesen zurueck)
 # und NACH `_markieren` (das setzt bei aktivem Haken die Gegenrichtung).
-lauf = runner_src[runner_src.index("async def regel_lauf"):
-                  runner_src.index("async def _markieren")]
+# Seit dem Outlook-Add-in steht die Verarbeitung EINER Nachricht in
+# `_verarbeite_eine` – gemeinsam benutzt von `regel_lauf` (Zeitplan) und
+# `nachricht_lauf` (Add-in: "diese Nachricht jetzt"). Geprueft wird deshalb
+# dort; dass beide Wege sie benutzen, prueft der Block darunter. Eine zweite
+# Fassung der Buchhaltung waere genau die Drift, die diese Pruefung verhindert.
+lauf = runner_src[runner_src.index("async def _verarbeite_eine"):
+                  runner_src.index("async def nachricht_lauf")]
 _da = "_lesestatus_wahren(client, n, regel)" in lauf
-check(_da, "regel_lauf ruft _lesestatus_wahren")
+check(_da, "die Nachrichten-Verarbeitung ruft _lesestatus_wahren")
 # Fehlt der Aufruf, wuerden die beiden Folgepruefungen mit einer Ausnahme
 # abbrechen – dann faende man statt einer Fehlerliste einen Traceback, und der
 # Sandkasten bliebe stehen. Also ausdruecklich als FAIL werten.
 check(_da and lauf.index("_lesestatus_wahren(client, n, regel)")
       > lauf.index("_markieren(client, n, kategorie, regel)"),
       "der Lesestatus wird ZULETZT hergestellt")
+# Geprueft wird die ABSICHT, nicht eine feste Einrueckungszahl: der Aufruf darf
+# nicht INNERHALB von `if not testlauf:` liegen (sonst laesst ein Testlauf oder
+# ein Fehlschlag die Mail gelesen zurueck). Ausgedrueckt als Verschachtelung –
+# eine feste Zahl bricht bei jedem Umbau, ohne dass etwas kaputt waere.
 _zeilen = [z for z in lauf.split("\n") if "_lesestatus_wahren(client" in z]
-check(bool(_zeilen) and len(_zeilen[0]) - len(_zeilen[0].lstrip()) == 12,
-      "der Aufruf steht in der Nachrichten-Schleife, nicht im Zweig 'if not testlauf'",
-      f"Einrueckung {len(_zeilen[0]) - len(_zeilen[0].lstrip()) if _zeilen else '-'}")
+_if = [z for z in lauf.split("\n") if z.strip() == "if not testlauf:"]
+_ein_call = (len(_zeilen[0]) - len(_zeilen[0].lstrip())) if _zeilen else -1
+_ein_if = (len(_if[0]) - len(_if[0].lstrip())) if _if else -1
+check(bool(_zeilen) and bool(_if) and _ein_call <= _ein_if,
+      "der Aufruf steht NICHT im Zweig 'if not testlauf' (gilt auch fuer Testlauf "
+      "und Fehlschlag)",
+      f"Aufruf {_ein_call}, if {_ein_if}")
+# Beide Wege teilen sich diese Buchhaltung – sonst haette der Add-in-Weg eine
+# eigene, die beim naechsten Fix hier nicht mitgezogen wird.
+for _fn in ("regel_lauf", "nachricht_lauf"):
+    _blk = runner_src[runner_src.index("async def %s(" % _fn):]
+    _blk = _blk[:_blk.index("\nasync def ", 10)]
+    check("await _verarbeite_eine(" in _blk,
+          f"{_fn} benutzt die gemeinsame Nachrichten-Verarbeitung")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1261,6 +1281,140 @@ for _k in ("mail.acct_channel_auto", "mail.acct_channel_ews", "mail.acct_channel
     check(_k in html_mail and _k in i18n, f"'{_k}' ist verdrahtet und uebersetzt")
 check("mail.log_nosubject" in portal_js and "mail.log_nosubject" in i18n,
       "'(kein Betreff)' im Protokoll ist uebersetzbar")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+section("14. Aussetzer nach wiederholten Anmeldefehlern")
+# ═══════════════════════════════════════════════════════════════════════════
+# Vorfall 2026-08-16: eine Regel meldet sich alle 5 Minuten an. Ist das Kennwort
+# falsch oder das Domaenenkonto gesperrt, erzeugt jeder Lauf einen weiteren
+# abgelehnten Logon - die Domaene sperrt nach drei Fehlversuchen. Damit haelt
+# eine vergessene Regel das Konto dauerhaft gesperrt, auch fuer Windows.
+
+AUS = "nexus\\aussetzer.test"
+ma.speichern(AUS, {"adresse": "aussetzer@firma.de", "passwort": "geheim1", "aktiv": True})
+
+check(ma.konto_info(AUS)["anmeldefehler"] == 0, "frisches Konto: kein Fehlversuch gezaehlt")
+check(ma.konto_info(AUS)["ausgesetzt"] is False, "frisches Konto ist nicht ausgesetzt")
+
+# Andere Fehlerarten zaehlen NICHT - sonst setzt jede Netzstoerung das Postfach aus.
+for _art in ("netz", "kanal", "nicht_da", "grenze"):
+    ma.merke_ergebnis(AUS, False, "Server nicht erreichbar", _art)
+check(ma.konto_info(AUS)["anmeldefehler"] == 0,
+      "netz/kanal/nicht_da/grenze zaehlen NICHT gegen den Aussetzer")
+check(ma.konto_info(AUS)["ausgesetzt"] is False,
+      "vier Nicht-Anmeldefehler setzen das Postfach nicht aus")
+
+# Fehlende Kategorie zaehlt ebenfalls nicht: ein neuer Aufrufer soll das
+# Postfach nicht versehentlich aussetzen.
+ma.merke_ergebnis(AUS, False, "irgendein Fehler")
+check(ma.konto_info(AUS)["anmeldefehler"] == 0,
+      "merke_ergebnis ohne 'art' zaehlt nichts (fail-safe fuer neue Aufrufer)")
+
+ma.merke_ergebnis(AUS, False, "Invalid credentials", "auth")
+check(ma.konto_info(AUS)["anmeldefehler"] == 1, "erster Anmeldefehler wird gezaehlt")
+check(ma.konto_info(AUS)["ausgesetzt"] is False, "ein Anmeldefehler setzt noch nicht aus")
+ma.merke_ergebnis(AUS, False, "Invalid credentials", "auth")
+check(ma.konto_info(AUS)["ausgesetzt"] is False, "zwei Anmeldefehler setzen noch nicht aus")
+ma.merke_ergebnis(AUS, False, "Invalid credentials for https://exchange/EWS", "auth")
+_i = ma.konto_info(AUS)
+check(_i["anmeldefehler"] == 3 and _i["ausgesetzt"] is True,
+      "beim DRITTEN Anmeldefehler wird die Automatik ausgesetzt")
+check(_i["ausgesetzt_seit"] > 0, "Zeitpunkt des Aussetzens ist vermerkt")
+check("Invalid credentials" in _i["ausgesetzt_grund"],
+      "der Grund ist gespeichert (sonst ist der Zustand nicht erklaerbar)")
+
+# Der Aussetzer greift GENAU DORT, wo die Wiederholung entsteht.
+try:
+    ma.konto_fuer(AUS)
+    check(False, "konto_fuer verweigert bei ausgesetztem Postfach")
+except mc.MailFehler as _f:
+    check("ausgesetzt" in str(_f) and "Verbindung testen" in str(_f),
+          "konto_fuer verweigert und nennt den Rueckweg")
+_k = ma.konto_fuer(AUS, trotz_aussetzer=True)
+check(_k.adresse == "aussetzer@firma.de",
+      "trotz_aussetzer=True liefert das Konto (Verbindungstest/Testlauf)")
+
+# Rueckweg 1: erfolgreiche Anmeldung
+ma.merke_ergebnis(AUS, True)
+_i = ma.konto_info(AUS)
+check(_i["ausgesetzt"] is False and _i["anmeldefehler"] == 0,
+      "eine erfolgreiche Anmeldung hebt den Aussetzer auf und nullt den Zaehler")
+check(ma.konto_fuer(AUS).adresse == "aussetzer@firma.de",
+      "danach laeuft die Automatik ohne Zutun weiter")
+
+# Rueckweg 2: neues Kennwort. Ein LEERES Kennwortfeld heisst "unveraendert" und
+# darf den Aussetzer NICHT aufheben - sonst hebt jedes Speichern der Ordnernamen
+# die Bremse auf, ohne dass sich an der Ursache etwas geaendert hat.
+for _ in range(3):
+    ma.merke_ergebnis(AUS, False, "Invalid credentials", "auth")
+check(ma.konto_info(AUS)["ausgesetzt"] is True, "erneut ausgesetzt (Vorbereitung)")
+ma.speichern(AUS, {"ordner_eingang": "Posteingang"})
+check(ma.konto_info(AUS)["ausgesetzt"] is True,
+      "Speichern OHNE Kennwort laesst den Aussetzer stehen")
+ma.speichern(AUS, {"passwort": "   "})
+check(ma.konto_info(AUS)["ausgesetzt"] is True,
+      "ein Kennwort aus Leerzeichen gilt als 'unveraendert' und hebt nichts auf")
+ma.speichern(AUS, {"passwort": "neues_geheim"})
+_i = ma.konto_info(AUS)
+check(_i["ausgesetzt"] is False and _i["anmeldefehler"] == 0,
+      "ein NEUES Kennwort hebt den Aussetzer auf")
+
+# Schwelle ist eine FUNKTION, kein beim Import eingefrorener Wert.
+_alt = os.environ.get("JARVIS_MAIL_MAX_AUTHFEHLER")
+os.environ["JARVIS_MAIL_MAX_AUTHFEHLER"] = "0"
+check(ma.max_anmeldefehler() == 0, "0 in der Umgebung schaltet den Aussetzer ab")
+for _ in range(6):
+    ma.merke_ergebnis(AUS, False, "Invalid credentials", "auth")
+check(ma.konto_info(AUS)["ausgesetzt"] is False,
+      "bei abgeschaltetem Aussetzer wird trotz sechs Fehlern nicht ausgesetzt")
+os.environ["JARVIS_MAIL_MAX_AUTHFEHLER"] = "2"
+check(ma.max_anmeldefehler() == 2, "Schwelle aus der Umgebung wirkt ohne Neustart")
+os.environ["JARVIS_MAIL_MAX_AUTHFEHLER"] = "quatsch"
+check(ma.max_anmeldefehler() == ma.MAX_ANMELDEFEHLER,
+      "unbrauchbarer Wert faellt auf die Vorgabe zurueck")
+if _alt is None:
+    os.environ.pop("JARVIS_MAIL_MAX_AUTHFEHLER", None)
+else:
+    os.environ["JARVIS_MAIL_MAX_AUTHFEHLER"] = _alt
+
+# ── Verdrahtung im Runner und in den Endpunkten ─────────────────────────────
+_runner_src = (ROOT / "backend/mail_runner.py").read_text()
+check(_runner_src.count("merke_ergebnis(owner, False, str(f), f.kategorie)") >= 4,
+      "der Runner reicht die Fehlerkategorie durch (sonst zaehlt nichts)")
+check("trotz_aussetzer=manuell" in _runner_src,
+      "regel_lauf: Testlauf uebergeht den Aussetzer, der Takt nicht")
+check("manuell = bool(testlauf or nur_eine)" in _runner_src,
+      "'manuell' ist genau der vom Benutzer ausgeloeste Fall")
+_i_auto = _runner_src.index("async def automatik_durchgang")
+check("trotz_aussetzer=True" not in _runner_src[_i_auto:],
+      "der automatische Durchgang uebergeht den Aussetzer NIRGENDS")
+
+_main_src = (ROOT / "backend/main.py").read_text()
+check("konto_fuer(user, trotz_aussetzer=True)" in _main_src,
+      "der Verbindungstest ist der Rueckweg und wird nicht selbst blockiert")
+check(_main_src.count("mail_accounts.konto_fuer(") ==
+      _main_src.count("trotz_aussetzer=True"),
+      "alle Endpunkt-Aufrufe sind vom Benutzer ausgeloest und ausdruecklich markiert")
+check("merke_ergebnis(user, False, str(f), f.kategorie)" in _main_src,
+      "auch der Verbindungstest meldet die Kategorie")
+
+# ── Oberflaeche ─────────────────────────────────────────────────────────────
+_portal = (ROOT / "frontend/js/email_portal.js").read_text()
+_html = (ROOT / "frontend/email.html").read_text()
+_i18n = (ROOT / "frontend/js/i18n.js").read_text()
+check("k.ausgesetzt" in _portal, "die Oberflaeche wertet den Zustand aus")
+check(_portal.index("k.ausgesetzt") < _portal.index("k.letzter_fehler"),
+      "'ausgesetzt' wird VOR 'Fehler' geprueft (sonst gewinnt die unspezifische Pille)")
+check("em-paused" in _portal and ".em-paused" in _html,
+      "der Hinweis hat eine eigene Klasse mit Regel")
+check("var(--bg-secondary)" in _html.split(".em-paused")[1][:400],
+      "der Hinweis hat eine DECKENDE Flaeche (Lesbarkeit in Hell und Dunkel)")
+for _k in ("mail.pill_paused", "mail.paused_head", "mail.paused_text"):
+    check(_portal.count(_k) == 1, f"'{_k}' wird in der Oberflaeche benutzt")
+    check(_i18n.count("'%s':" % _k) == 2, f"'{_k}' ist in DE UND EN uebersetzt")
+check("Verbindung testen" in _i18n.split("mail.paused_text")[1][:400],
+      "der deutsche Text nennt den Weg zurueck")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

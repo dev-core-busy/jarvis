@@ -2339,6 +2339,57 @@ Auf Nachfrage empirisch geprüft: vier Angriffsmuster als Mailtext, gegen das ec
   ECHTEN Schlussmarke an. Geprüft werden muss die **Eigenschaft** (Marke ohne Kennung), nicht ein
   Teilstring – dritter Fall dieser Art in diesem Projekt.
 
+### Aussetzer nach wiederholten Anmeldefehlern (2026-08-16)
+**Der Vorfall:** Beim Erstellen der Handbuch-Screenshots wurde `nexus\andreas.bender` in der
+Domäne gesperrt (drei Fehlversuche über `/api/login`). Danach war zu sehen, was das für die
+E-Mail-Regeln bedeutet: die Regel „Antwort Test" meldete sich **im 5-Minuten-Takt weiter am
+Exchange an** – 16:28:49, 16:33:49, 16:38:50, 16:43:50, jeder Lauf ein weiterer abgelehnter
+Logon und ein roter Protokolleintrag. Hier ging es gut aus (das gespeicherte Kennwort war
+richtig, die Sperre lief nach 30 min ab). **Wäre das gespeicherte Kennwort dauerhaft falsch,
+hielte eine einzige vergessene Regel das Domänenkonto endlos gesperrt** – auch für Windows, und
+niemand sieht den Zusammenhang zwischen „ich komme nicht mehr an meinen Rechner" und einer
+Postfachregel. Gemessen: nexus.int sperrt nach **3** Fehlversuchen für **30 Minuten**
+(Diagnosecodes und Vorgehen in der Memory `ad-login-sperre`).
+- **Der Aussetzer sitzt am KONTO, nicht an der Regel** (`mail_accounts.py`): das Problem sind die
+  Zugangsdaten, und drei Regeln desselben Benutzers würden sonst dreimal getrennt zählen und
+  weiterhämmern. Nach `MAX_ANMELDEFEHLER = 3` aufeinanderfolgenden Anmeldefehlern verweigert
+  `konto_fuer()` die Herausgabe des Kontos – **dort**, wo jeder Verbindungsaufbau durchmuss.
+- **GEZÄHLT WIRD NUR `MailFehler.kategorie == "auth"`.** Ein unerreichbarer Server, ein Zeitlimit
+  oder ein Zertifikatsfehler sind keine Fehlversuche im Sinne der Sperrpolitik; wer sie mitzählt,
+  setzt das Postfach bei jeder Netzstörung aus. Deshalb reicht der Runner die Kategorie jetzt
+  durch (`merke_ergebnis(owner, False, str(f), f.kategorie)`, vier Stellen).
+- **`merke_ergebnis()` ohne `art` zählt NICHTS.** Fail-safe in die richtige Richtung: ein neuer
+  Aufrufer soll ein Postfach nicht versehentlich aussetzen, sondern den Anmeldefehler bewusst
+  melden müssen. Ein Test hält das fest.
+- **NICHT über das Feld `aktiv`.** Das ist die Absicht des Benutzers und darf nicht stillschweigend
+  umgeschrieben werden – sonst steht nach dem Beheben der Ursache ein Haken aus, den niemand
+  gesetzt hat. Eigener Zustand (`ausgesetzt`, `ausgesetzt_seit`, `ausgesetzt_grund`), damit die
+  Oberfläche den **Grund** nennen kann.
+- **`trotz_aussetzer=True` ist die Ausnahme für die HANDLUNG DES MENSCHEN** – Verbindungstest,
+  Ordnerliste, Nachrichtenvorschau, Regel-Testlauf, Add-in („diese Mail jetzt verarbeiten") und
+  der Admin-Explorer. Begründung: ein Klick ist EIN Anmeldeversuch, gefährlich ist die Regel, die
+  es alle fünf Minuten wieder tut. **Ohne diese Ausnahme wäre der Verbindungstest nach dem
+  Aussetzen selbst tot und es gäbe keinen Rückweg.** Die Vorgabe ist fail-closed: wer den
+  Parameter nicht setzt, wird gesperrt – ein Test prüft, dass `automatik_durchgang` ihn nirgends
+  setzt.
+- **Zwei Rückwege, beide ohne Administrator:** eine erfolgreiche Anmeldung hebt den Aussetzer auf
+  (`merke_ergebnis(..., True)`), und ein **neu gesetztes** Kennwort ebenfalls. Ein LEERES
+  Kennwortfeld heisst weiterhin „unverändert" und hebt **nichts** auf – sonst löste jedes
+  Speichern der Ordnernamen die Bremse, ohne dass sich an der Ursache etwas geändert hat.
+- **`max_anmeldefehler()` ist eine FUNKTION** (`JARVIS_MAIL_MAX_AUTHFEHLER`, `0` = aus, Deckel 50)
+  – gleiche Begründung wie `documents.retention_days()`: ein beim Import gelesener Wert wäre bis
+  zum Dienstneustart eingefroren.
+- **Oberfläche:** eigene Pillen-Stufe „ausgesetzt" **vor** der Prüfung auf `letzter_fehler` (sonst
+  gewinnt die unspezifische Fehler-Pille) und ein Hinweiskasten `.em-paused` ganz oben im
+  Postfach-Abschnitt, der den Weg zurück nennt. **Deckende Fläche** (`var(--bg-secondary)`),
+  gleiche Lehre wie bei den Panels: was über Karteninhalt liegt, darf nicht durchscheinen.
+- **Verifiziert:** 431 Prüfungen (`tests/test_email_rules.py`, Abschnitt 14). Gegenprobe: zählt man
+  jede Fehlerart mit und lässt die Kategorie im Runner weg, fallen **9** davon durch. Live auf DEV
+  gegen das ECHTE Modul mit einem Wegwerf-Konto: Netzfehler zählt nicht, drei Anmeldefehler setzen
+  aus, `konto_fuer` verweigert mit Klartext, `trotz_aussetzer=True` liefert weiter, Erfolg hebt
+  auf – danach `email_accounts.json` **und** `settings.json` md5-gleich. Optisch in Dunkel UND
+  Hell abgenommen (echte Seite, echtes CSS), keine Konsolenfehler.
+
 ### Zwei gemeldete Fehler in der Regel-Maske (2026-08-13)
 1. **„nach Bearbeitung als gelesen markieren" war AUS – die Nachricht stand trotzdem als
    gelesen im Eingang.** Das setzt nicht Jarvis, sondern **Exchange selbst**: wer über EWS auf
@@ -2513,6 +2564,160 @@ Abschnitt oben: Lesestatus, Injektionsschutz, Positivkontrolle); die Kanal-Fehle
 Berechtigungen → E-Mail-Zugriff* freigeben (leer = niemand) und die Werkzeug-Bereiche freischalten
 (Vorgabe: nur `mail`). Jeder Benutzer hinterlegt sein Postfach selbst. **Als Skill kostet die
 Funktion einen Skill-Slot** – FREE/BASIC erlauben fünf aktive Skills.
+
+## Outlook-Add-in: /email im Aufgabenfenster (2026-08-16)
+**Was es ist:** Ein Office-**Web**-Add-in (Office.js), das den Bereich `/email` in ein
+Aufgabenfenster in Outlook holt – Postfach, Regeln, Protokoll – und das ergänzt, wofür es ein
+Add-in überhaupt braucht: **die markierte Nachricht sofort mit einer Regel verarbeiten**.
+Code: `backend/addin.py`, Routen `/addin/manifest.xml` + `/addin/taskpane.html`, Endpunkt
+`POST /api/email/rules/{id}/run_message`, `frontend/addin/`. Anleitung: `docs/outlook-addin.md`.
+
+- **DIE RANDBEDINGUNG, DIE MAN ZUERST KENNEN MUSS – sie liegt bei Microsoft, nicht bei uns:**
+  das **neue** Outlook für Windows unterstützt **keine On-Premises-Exchange-Konten** (auch keine
+  Hybrid-/Sovereign-Konten). Es kann ein Postfach auf dem hauseigenen Exchange 2019 gar nicht
+  erst öffnen, ganz unabhängig von Add-ins. Tragfähig sind hier **klassisches Outlook**
+  (M365/Office 2021+) und **Outlook im Web** des eigenen Exchange; beide sind vom Manifest
+  abgedeckt, ebenso das neue Outlook für den Tag, an dem Microsoft on-prem unterstützt.
+  Belegt an der Quelle (2026-08), nicht aus dem Gedächtnis – die Links stehen in der Anleitung.
+- **VSTO/COM war nie eine Option:** das neue Outlook unterstützt beides nicht mehr, Microsoft
+  verlangt die Migration auf Web-Add-ins. Ein Web-Add-in läuft zusätzlich auf Mac und im Web.
+- **XML-Manifest, NICHT das unified JSON manifest.** Letzteres setzt eine Bereitstellung über
+  Microsoft 365 voraus; ein Exchange im Haus kennt nur XML, und darüber läuft das Sideloading.
+  Aus demselben Grund `Mailbox 1.3` als Anforderung – ein höherer Satz wäre dort **nicht
+  installierbar**. `contextless` (Aufgabenfenster ohne markierte Nachricht) bräuchte 1.14 und
+  scheidet damit aus.
+- **Das Manifest wird ERZEUGT, nicht als Datei gepflegt.** Jede URL darin muss auf *diesen*
+  Server zeigen; eine Repo-Datei müsste pro Server von Hand angepasst werden – das Drift-Muster,
+  das zuletzt bei der Landing-Page teuer war. Der Administrator lädt `/addin/manifest.xml` und
+  hat eine fertige Datei. `JARVIS_ADDIN_BASE` überschreibt die aus der Anfrage abgeleitete
+  Adresse (Rückwärtsproxy); **das Schema wird hart auf https gesetzt** – Office lädt nichts über
+  http, und ein solches Manifest scheitert *stillschweigend*.
+- **Ein Abruf über `localhost` wird mit 400 ABGELEHNT** (`ist_lokale_basis`), nicht nur beworben:
+  ein Manifest mit `https://localhost/…` lässt sich klaglos installieren, und das Aufgabenfenster
+  bleibt danach **leer** – der Arbeitsplatz hat unter diesem Namen keinen Jarvis. Diesen Fehler
+  bringt niemand mit dem Abruf in Verbindung; er entsteht genau dann, wenn ein Administrator
+  direkt auf dem Server oder durch einen SSH-Tunnel testet (mir selbst im Live-Test passiert).
+  Die Meldung nennt den Ausweg (`JARVIS_ADDIN_BASE`). `localhost.firma.de` ist **kein** lokaler
+  Name – geprüft wird der Host exakt, nicht per Präfix.
+- **Die Kennung ist UUIDv5 aus der Basis-URL**: auf demselben Server über alle Aktualisierungen
+  stabil (eine wechselnde Kennung gälte als *neues* Add-in), zwei Instanzen am selben Exchange
+  kollidieren trotzdem nicht. Ändert sich die Serveradresse, ist es folgerichtig ein neues
+  Add-in und muss einmal neu installiert werden.
+- **FALLSTRICK, beim Bauen aufgefallen: `xml.sax.saxutils.escape` maskiert KEIN
+  Anführungszeichen.** Der Anzeigename kommt aus dem Branding (Fremdeingabe eines Admins); ein
+  `Nex"us` hat das `DefaultValue="…"` zerlegt und ein unlesbares Manifest erzeugt. Jetzt EINE
+  Maskierungsfunktion `addin.x()` für Text *und* Attribute (`&quot;` ist in beidem gültig) –
+  zwei Konventionen nebeneinander waren genau die Fehlerquelle.
+- **`Permissions` ist `ReadItem`, und das ist Absicht:** das Fenster liest Kennung, Betreff und
+  Absender. **Jede Änderung am Postfach macht der Server** mit den Zugangsdaten des Benutzers.
+  Ein höheres Recht hier wäre ein Recht, das niemand braucht.
+- **Die Verarbeitung EINER Nachricht steht jetzt EINMAL** (`mail_runner._verarbeite_eine`),
+  benutzt von `regel_lauf` (Zeitplan) **und** `nachricht_lauf` (Add-in). Eine zweite Fassung der
+  Buchhaltung (Vermerk, Fehlversuche, Lesestatus, Protokoll) wäre in drei Wochen auseinander
+  gelaufen. Der bestehende Test, der den Ort von `_lesestatus_wahren` über die **Einrückung 12**
+  festschrieb, prüft jetzt die **Absicht** – nicht im Zweig `if not testlauf` – plus, dass beide
+  Wege die gemeinsame Funktion benutzen. Eine feste Zahl bricht bei jedem Umbau, ohne dass etwas
+  kaputt wäre.
+- **`run_message`: die Kennung wählt die NACHRICHT, nicht das Postfach.** Geladen wird immer aus
+  dem Postfach des Regel-Besitzers (`konto_fuer(owner)`); ein `msg_id` aus dem Rumpf wäre sonst
+  der Weg in ein fremdes Postfach. Fremde Regel → **404**, abgeschaltete Regel → 400. Die
+  Auswahl-Filter der Regel gelten hier bewusst **nicht** (der Benutzer hat die Nachricht von Hand
+  markiert), der Verarbeitungsvermerk wird aber gesetzt – sonst beantwortet die Automatik sie ein
+  zweites Mal.
+- **Manifest und Aufgabenfenster hängen an KEINER Anmeldung** – wie `/email` leere Hüllen. Beim
+  Sideloading kann eine URL angegeben werden, die dann der Exchange-Server ohne Sitzung holt.
+  Der Inhalt ist keine Auskunft (URLs dieses Servers + Branding-Name, den `/api/branding` ohnehin
+  offen herausgibt). **Nicht an den Skill-Zustand gekoppelt**, anders als `/email` mit seinem
+  404: ein installiertes Add-in soll nach einem Skill-Neustart nicht kaputt aussehen, das Fenster
+  sagt im Klartext, was fehlt.
+- **Eigene Anmeldung im Fenster** (`POST /api/login`, gleiche Token-Kette wie die übrigen Seiten,
+  inkl. 2FA). Ein SSO über Office/Entra scheidet aus: das setzt eine Anwendungsregistrierung in
+  Microsoft 365 voraus, die ein Exchange im Haus nicht hat.
+- **`office.js` darf fehlen.** Die Bibliothek kommt aus dem Netz von Microsoft; ohne Internet am
+  Arbeitsplatz bleibt das Fenster in vollem Umfang benutzbar (Regeln, Postfach, Protokoll), nur
+  der Nachrichtenbezug entfällt – mit Klartext-Hinweis nach `OFFICE_WARTE_MS = 4000`. Ein Fenster,
+  das wortlos weiß bleibt, wäre der schlechtere Ausgang.
+- **Der Nachrichtenbezug hängt am EWS-Kanal:** `item.itemId` ist eine EWS-Kennung. Bei einem
+  IMAP-Postfach entfällt der Knopf mit einer Erklärung, statt in eine technische Fehlermeldung zu
+  laufen. Maßgeblich ist der **wirksame** Kanal (Wahl des Benutzers, sonst Vorgabe des
+  Administrators) – wer nur das Benutzerfeld prüft, hält ein reines IMAP-Haus für EWS-fähig.
+- **Zwei Layout-Fehler, die erst der Screenshot zeigte** (jsdom rechnet kein Layout): `◐` und `⏻`
+  als Textzeichen wurden als winziger Punkt gerendert – jetzt dieselben SVG wie in
+  `email.html`/`portal.html`. Und bei 320 px Fensterbreite fraßen vier Knöpfe in einer Zeile die
+  Namensspalte („Support-Anfragen beantwor…"); die Regel-Karte ist jetzt zweizeilig.
+- **Auffindbar für NORMALE Benutzer, nicht nur in der Doku** (ergänzt auf Nachfrage): Abschnitt
+  *Outlook-Add-in* in `/email` – zwischen Postfach und Regeln, mit Download-Knopf und
+  aufklappbarer Anleitung. Bewusst dort und nicht am Seitenende: wer gerade sein Postfach
+  hinterlegt hat, ist der Adressat. **Keine Admin-Rechte nötig** – der Manifest-Endpunkt hängt
+  an keiner Anmeldung, und /email steht jedem E-Mail-Berechtigten offen.
+- **DER FEHLER, DEN NUR DER DOM-ABZUG ZEIGTE – `var b` in `email_portal.js::binde()`:** die
+  Funktion weist dieselbe Variable mehrfach zu (`if ((b = $('…'))) b.addEventListener(…)`). Alle
+  bestehenden Bindungen übergeben **benannte** Funktionen und benutzen `b` nicht; meine
+  Inline-Closure tat es – und sah beim Klick den **zuletzt** zugewiesenen Wert. Ergebnis: der
+  Klick auf „Anleitung anzeigen" beschriftete den **Abmelde-Knopf oben rechts** mit „Anleitung
+  ausblenden" und ersetzte dessen SVG. Im Markup ist davon nichts zu sehen, im Screenshot nur
+  bei genauem Hinsehen; gefunden hat es `--dump-dom`. **Merkregel: eine Inline-Closure in einer
+  Funktion mit geteilter `var` braucht eine eigene Variable.** Ein Wächter prüft, dass der
+  Handler `b.` nicht anfasst.
+- **Ein `<a>` mit Knopf-Klasse ist unterstrichen.** `.em-btn` bekam `text-decoration: none` –
+  der Download ist ein Link (der Endpunkt liefert `Content-Disposition`, es braucht kein JS).
+- **Die Schritte tragen `data-i18n-html`, nicht `data-i18n`**: sie enthalten `<code>` und `<b>`,
+  und `applyLang()` setzt bei `data-i18n` den **textContent** – das Markup wäre beim ersten
+  Sprachwechsel weg (Lehre vom E-Mail-Reiter, 2026-08-13). Im Browser gegengeprüft: nach
+  `setLang('en')` sind Auszeichnung UND englischer Text da, und der Umschalter behält seinen
+  Zustand (er merkt ihn sich über `dataset.i18n`, statt ihn aus der Beschriftung zurückzulesen).
+### Vier Funde aus dem Code-Review, die den Betrieb betroffen hätten
+1. **`defer` auf `office.js` blockiert `DOMContentLoaded` – `async` ist Pflicht.** Ein
+   defer-Skript läuft zwar später, aber `DOMContentLoaded` **wartet darauf**, und `addin.js`
+   startet an genau diesem Ereignis. Blockiert eine Firewall das Microsoft-Netz (der Fall, den
+   der Kommentar daneben als behandelt beschrieb), blieb das Fenster für die volle
+   TCP-Zeitgrenze **weiß** – und die 4-Sekunden-Grenze in `officeErmitteln` kam nie zum Zug.
+   Merkregel: **wer eine Zeitgrenze gegen ein hängendes Skript baut, muss zuerst prüfen, ob sein
+   eigener Code überhaupt startet.** Mit `async` lädt die Bibliothek nebenläufig und kann
+   deshalb NACH der Prüfung eintreffen – `officeErmitteln` wartet jetzt darauf (100-ms-Takt bis
+   zur Grenze), statt einmal nachzusehen.
+2. **Der Token braucht einen Rückfall im Arbeitsspeicher.** Das Aufgabenfenster läuft in Outlook
+   im Web in einem **iframe**, und dort ist Speicher fremder Herkunft je nach Browsereinstellung
+   gesperrt (strenge Cookie-Regeln, privates Fenster, Safari-ITP). `localStorage.setItem`
+   scheiterte still, `start()` fand keinen Token und zeigte wieder die Anmeldung: eine
+   **Endlosschleife mit richtigem Kennwort und ohne Fehlermeldung**. Jetzt `_tokenRam` als
+   Rückfall plus Hinweis `addin.no_storage` – die Anmeldung gilt dann bis zum Schließen.
+3. **Der Aussetzer wurde im Add-in verschwiegen.** Nach mehreren fehlgeschlagenen Anmeldungen
+   hält die Automatik an (damit das Domänenkonto nicht gesperrt wird); `/email` zeigt Pille und
+   Kasten, das Fenster zeigte **nichts** – wer nur in Outlook arbeitet (die Zielgruppe!), sähe
+   seine Regeln stillschweigend aufhören. Ergänzt, ebenso `ausgesetzt` in
+   `/api/email/admin/overview`: ohne das Feld beantwortet die Admin-Übersicht die naheliegendste
+   Frage nicht.
+4. **`--` ist in einem XML-Kommentar verboten**, und es gibt keine Entity dafür. Eine
+   Umlaut-Domäne heißt im Punycode genau so (`xn--mller-kva`): das Manifest war unlesbar,
+   Exchange meldete nur „Das Manifest ist ungültig". Für den Kommentar wird die Adresse
+   entschärft, in den **Attributen** steht sie unverändert. Reproduziert und als Test festgehalten.
+
+### Farb-Fallbacks: die Ausnahme, die bleiben muss
+Beim Aufräumen der `var(--x, #hex)`-Fallbacks (Projektregel „nur CSS-Variablen") habe ich sie
+auch im **Konto-gesperrt-Bildschirm** von `chat.html`/`userchat.html` entfernt – falsch, und der
+Review hat es gefangen. Der Block ist ausdrücklich als *„Sicherheitsschicht, CSS-unabhängig"*
+markiert und komplett inline gestaltet, damit er auch ohne `theme.css` funktioniert. **Ohne
+`theme.css` gemessen:** mit Fallback heller Text auf dunklem Kasten, ohne Fallback **schwarzer
+Text auf transparentem Kasten** – auf dem hart gesetzten dunklen Overlay unlesbar, genau dann,
+wenn der Benutzer die Sperrbegründung und das Vorfallsprotokoll am dringendsten braucht.
+Wiederhergestellt, mit einem Kommentar im Markup, der das begründet. **Merkregel: eine
+Konvention prüft man am Zweck der Stelle, nicht an ihrer Form** – und ein Kommentar, der eine
+Absicht behauptet, ist ein Grund zum Messen, nicht zum Aufräumen. Die 31 übrigen Fallbacks
+(normale `.uc-*`-Regeln) bleiben entfernt.
+
+- **Verifiziert:** 149 Prüfungen (`tests/test_outlook_addin.py`, ohne fastapi lauffähig,
+  `backend.config` als Stub mit Exit-2-Schranke) + die 390 des E-Mail-Bestands, lokal **und auf
+  DEV im echten venv**. Gegenproben greifen: Maskierung zurückgedreht → Manifest unlesbar,
+  Besitzerprüfung entfernt → 1 FAIL, eigene Buchhaltung in `nachricht_lauf` → je 1 FAIL in beiden
+  Testdateien. **Manifest von Microsofts eigenem Werkzeug abgenommen**
+  (`npx office-addin-manifest validate` → „The manifest is valid.", keine Warnungen).
+  **Live auf DEV:** 20/20 – Manifest 200 als XML-Datei, gültig, alle 8 URLs https auf denselben
+  Host, `Permissions=ReadItem`, Fenster/Logik/fünf Symbole/i18n je 200, `run_message` ohne Token
+  401. Optisch in Dunkel UND Hell abgenommen (alle vier Reiter, Regel-Formular, Anmeldung).
+- **NOCH NICHT geprüft, weil es einen echten Client braucht:** die Installation in Outlook selbst
+  (Sideload, Menüband-Knopf, ein echter Lauf über „Jetzt verarbeiten"). Das ist der Schritt, der
+  am Arbeitsplatz zu machen ist – die Anleitung führt ihn Schritt für Schritt.
 
 ## PDF-Textqualität: beschädigte Textebene erkennen und OCR entscheiden lassen (2026-08-13)
 **Der Vorfall (2026-08-12, ECHT):** `Einsender_KIM_Anbindung_compressed.pdf` (8,9 MB, 54 Seiten)
@@ -3461,6 +3666,20 @@ Entscheidung** eine Umgehung.
     schon `/bin/true` scheiterte damit an der fehlenden libc, und die Funktion meldete auf einem
     voellig gesunden System `False`. Die fail-closed-Logik funktionierte dabei einwandfrei (kein
     Start, Klartext im Status) – der Fehler lag in der vereinfachten Probe.
+  - **DER WICHTIGERE FALLSTRICK – `AmbientCapabilities` und bwrap schliessen sich aus.** Die Unit
+    gibt dem Backend `AmbientCapabilities=CAP_NET_BIND_SERVICE` (Port 443 als unprivilegierter
+    Benutzer). Ambient-Capabilities werden an **jeden** Kindprozess vererbt, und bwrap bricht dann
+    ab: `bwrap: Unexpected capabilities but not setuid, old file caps config?`. Ergebnis: die
+    Isolation war **ausgerechnet im Dienst tot**, waehrend jede Handprobe (per `runuser`, dort
+    ohne ambient caps) einwandfrei lief – der Server verband gar nicht erst, mit der
+    fail-closed-Meldung „bwrap ist nicht verfuegbar", obwohl bwrap installiert und benutzbar war.
+    Fix: der Aufruf laeuft hinter **`setpriv --inh-caps=-all --ambient-caps=-all`**
+    (util-linux, ueberall vorhanden). In einem MCP-Server hat `CAP_NET_BIND_SERVICE` ohnehin
+    nichts zu suchen, deshalb wird immer abgelegt und nicht erst bei Bedarf.
+    **Merkregel: eine Sandbox muss im DIENST geprueft werden, nicht in einer Handprobe** – dessen
+    Umgebung (Capabilities, systemd-Beschraenkungen, Arbeitsverzeichnis) ist eine andere.
+    Nachstellen laesst sich das mit `systemd-run -p AmbientCapabilities=CAP_NET_BIND_SERVICE
+    --uid=jarvis`.
 - **Streamable HTTP wird unterstuetzt** (2026-08-14). `sse_client` ist der seit 2025-03-26
   **deprecated** Transport; das installierte `mcp` 1.25.0 bringt `streamable_http.py` mit, es
   wurde nur nicht benutzt. Jetzt drei Werte fuer `transport`:
@@ -3507,7 +3726,7 @@ nicht).
   Administratoren** – `_user_has_internet_access` kennt keinen Admin-Bypass („leer = niemand",
   dieselbe Regel wie beim Login). Der erste Chat-Lauf als `jarvis` endete deshalb an genau der
   Schranke, die dieser Fix eingezogen hat. Wer MCP nutzen will, braucht eine Internet-Freigabe.
-- **Verifiziert:** 114 Pruefungen (`tests/test_mcp_gates.py`, ohne fastapi/mcp lauffaehig –
+- **Verifiziert:** 118 Pruefungen (`tests/test_mcp_gates.py`, ohne fastapi/mcp lauffaehig –
   `McpRemoteTool` und `_ist_mcp_tool` werden per Quelltext geladen, `backend.config` wird
   ausdruecklich **nicht** importiert und der Test bricht mit **Exit 2** ab, wenn es doch geladen
   ist: der echte Import migriert Profile und schriebe die Live-`settings.json` zurueck) lokal und

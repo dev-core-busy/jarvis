@@ -171,12 +171,49 @@ AENDERBAR = ("adresse", "benutzer", "passwort", "kanal", "aktiv",
              "ordner_eingang", "ordner_entwuerfe", "ordner_gesendet")
 
 
+# ── Aussetzer nach wiederholten Anmeldefehlern ──────────────────────────────
+#
+# WARUM ES DAS GIBT (Vorfall 2026-08-16): eine Regel meldet sich im eingestellten
+# Takt am Postfach an – Vorgabe alle 5 Minuten. Ist das Kennwort falsch oder das
+# Domaenenkonto gesperrt, erzeugt JEDER Lauf einen weiteren abgelehnten Logon.
+# Die Domaene zaehlt die mit: gemessen sperrt nexus.int nach DREI Fehlversuchen
+# fuer 30 Minuten. Damit haelt eine einzige vergessene Regel das Konto dauerhaft
+# gesperrt – auch fuer Windows, und niemand sieht den Zusammenhang zwischen
+# "ich komme nicht mehr an meinen Rechner" und einer Postfachregel.
+#
+# Deshalb: nach MAX_ANMELDEFEHLER aufeinanderfolgenden Anmeldefehlern wird die
+# AUTOMATIK des Postfachs ausgesetzt. Bewusst NICHT ueber das Feld ``aktiv`` –
+# das ist die Absicht des Benutzers und darf nicht stillschweigend umgeschrieben
+# werden; ein eigener Zustand laesst sich zurueckziehen, ohne die Einstellung zu
+# verlieren, und die Oberflaeche kann den Grund nennen.
+#
+# GEZAEHLT WIRD NUR KATEGORIE "auth". Ein unerreichbarer Server, ein Zeitlimit
+# oder ein Zertifikatsfehler sind keine Fehlversuche im Sinne der Sperrpolitik –
+# wer die mitzaehlt, setzt das Postfach bei jeder Netzstoerung aus.
+MAX_ANMELDEFEHLER = 3
+
+
+def max_anmeldefehler() -> int:
+    """Schwelle als FUNKTION, nicht als beim Import eingefrorener Wert.
+
+    Gleiche Begruendung wie ``documents.retention_days()``: ueber die Umgebung
+    gesetzt soll der Wert ohne Dienstneustart gelten. ``0`` schaltet den
+    Aussetzer ab (dann gilt wieder das Verhalten vor 2026-08-16)."""
+    try:
+        n = int(os.environ.get("JARVIS_MAIL_MAX_AUTHFEHLER", MAX_ANMELDEFEHLER))
+    except (TypeError, ValueError):
+        return MAX_ANMELDEFEHLER
+    return max(0, min(n, 50))
+
+
 def _leer(benutzer_norm: str) -> dict:
     return {"benutzer_norm": benutzer_norm, "adresse": "", "benutzer": "",
             "pw_enc": "", "kanal": "", "aktiv": True,
             "ordner_eingang": "", "ordner_entwuerfe": "", "ordner_gesendet": "",
             "angelegt": int(time.time()), "geaendert": 0,
-            "letzter_erfolg": 0, "letzter_fehler": ""}
+            "letzter_erfolg": 0, "letzter_fehler": "",
+            "anmeldefehler": 0, "ausgesetzt": False, "ausgesetzt_seit": 0,
+            "ausgesetzt_grund": ""}
 
 
 def hat_konto(user: str) -> bool:
@@ -204,6 +241,11 @@ def konto_info(user: str) -> dict:
         "ordner_gesendet": k.get("ordner_gesendet", ""),
         "letzter_erfolg": int(k.get("letzter_erfolg", 0) or 0),
         "letzter_fehler": k.get("letzter_fehler", ""),
+        "anmeldefehler": int(k.get("anmeldefehler", 0) or 0),
+        "max_anmeldefehler": max_anmeldefehler(),
+        "ausgesetzt": bool(k.get("ausgesetzt")),
+        "ausgesetzt_seit": int(k.get("ausgesetzt_seit", 0) or 0),
+        "ausgesetzt_grund": k.get("ausgesetzt_grund", ""),
     }
 
 
@@ -247,6 +289,15 @@ def speichern(user: str, felder: dict) -> dict:
         pw = str(felder.get("passwort") or "")
         if pw.strip():
             k["pw_enc"] = verschluesseln(pw)
+            # NEUES Kennwort = neuer Anlauf. Ohne dieses Zuruecksetzen bliebe das
+            # Postfach nach dem Beheben der Ursache ausgesetzt, und der Benutzer
+            # haette keinen erkennbaren Weg zurueck. Nur bei einem WIRKLICH
+            # gesetzten Kennwort – ein leeres Feld heisst "unveraendert" und darf
+            # den Aussetzer nicht aufheben.
+            k["anmeldefehler"] = 0
+            k["ausgesetzt"] = False
+            k["ausgesetzt_seit"] = 0
+            k["ausgesetzt_grund"] = ""
 
     k["geaendert"] = int(time.time())
     alle[un] = k
@@ -264,11 +315,17 @@ def loeschen(user: str) -> bool:
     return True
 
 
-def merke_ergebnis(user: str, ok: bool, fehler: str = "") -> None:
+def merke_ergebnis(user: str, ok: bool, fehler: str = "", art: str = "") -> None:
     """Letzten Zustand am Konto vermerken (fuer die Oberflaeche).
 
     Bewusst nur Zeitpunkt + Fehlertext: WER wann was gemacht hat, steht im
     Regel-Protokoll (mail_rules), nicht hier.
+
+    ``art`` ist die Kategorie des Fehlers (``MailFehler.kategorie``). Nur
+    ``"auth"`` zaehlt gegen den Aussetzer – siehe Begruendung bei
+    ``MAX_ANMELDEFEHLER``. Wer den Parameter weglaesst, zaehlt NICHTS mit; das
+    ist Absicht: ein neuer Aufrufer soll das Postfach nicht versehentlich
+    aussetzen, sondern es bewusst melden muessen.
     """
     un = norm_user(user)
     alle = _laden()
@@ -278,8 +335,29 @@ def merke_ergebnis(user: str, ok: bool, fehler: str = "") -> None:
     if ok:
         k["letzter_erfolg"] = int(time.time())
         k["letzter_fehler"] = ""
+        # Ein Erfolg loest den Aussetzer auf. Das ist der eigentliche Rueckweg:
+        # der Benutzer traegt sein Kennwort neu ein und drueckt "Verbindung
+        # testen" – klappt es, laeuft die Automatik ohne weiteren Handgriff.
+        k["anmeldefehler"] = 0
+        if k.get("ausgesetzt"):
+            k["ausgesetzt"] = False
+            k["ausgesetzt_seit"] = 0
+            k["ausgesetzt_grund"] = ""
+            print("[Mail] Aussetzer fuer '%s' aufgehoben (Anmeldung wieder erfolgreich)"
+                  % un, flush=True)
     else:
         k["letzter_fehler"] = (fehler or "")[:500]
+        if art == "auth":
+            k["anmeldefehler"] = int(k.get("anmeldefehler", 0) or 0) + 1
+            grenze = max_anmeldefehler()
+            if grenze and k["anmeldefehler"] >= grenze and not k.get("ausgesetzt"):
+                k["ausgesetzt"] = True
+                k["ausgesetzt_seit"] = int(time.time())
+                k["ausgesetzt_grund"] = (fehler or "")[:500]
+                print("[Mail] Postfach '%s' nach %d Anmeldefehlern ausgesetzt – "
+                      "die Automatik meldet sich nicht mehr an, damit das "
+                      "Domaenenkonto nicht gesperrt wird." % (un, k["anmeldefehler"]),
+                      flush=True)
     alle[un] = k
     try:
         _speichern(alle)
@@ -332,8 +410,17 @@ def _bool(wert, vorgabe: bool) -> bool:
     return str(wert).strip().lower() in ("1", "true", "ja", "yes", "on")
 
 
-def konto_fuer(user: str) -> MailKonto:
+def konto_fuer(user: str, trotz_aussetzer: bool = False) -> MailKonto:
     """Baut das vollstaendige ``MailKonto``: Serverteil (Skill) + Benutzerteil.
+
+    ``trotz_aussetzer=True`` uebergeht den Aussetzer und ist den vom BENUTZER
+    ausgeloesten Wegen vorbehalten (Verbindungstest, Ordnerliste, Testlauf).
+    Begruendung: der Aussetzer soll die WIEDERHOLUNG im Takt stoppen, nicht den
+    Menschen aussperren, der den Fehler gerade behebt – ohne diese Ausnahme
+    waere der Verbindungstest nach dem Aussetzen tot und es gaebe keinen
+    Rueckweg ausser dem Speichern des Kennworts. Ein Klick ist EIN Versuch;
+    gefaehrlich ist nur die Regel, die es alle fuenf Minuten wieder tut.
+    Die Vorgabe ist fail-closed: wer den Parameter nicht setzt, wird gesperrt.
 
     Reihenfolge ist Absicht: der Benutzer kann NUR seinen Anmeldenamen, seine
     Adresse, seine Ordnernamen und die Kanalwahl beeinflussen. Serveradressen
@@ -351,6 +438,13 @@ def konto_fuer(user: str) -> MailKonto:
         raise MailFehler("Fuer dieses Postfach ist kein Kennwort hinterlegt.", "eingabe")
     if not bool(k.get("aktiv", True)):
         raise MailFehler("Das Postfach ist im E-Mail-Bereich auf inaktiv gestellt.", "eingabe")
+    if k.get("ausgesetzt") and not trotz_aussetzer:
+        raise MailFehler(
+            "Die Automatik fuer dieses Postfach ist nach %d fehlgeschlagenen "
+            "Anmeldungen ausgesetzt, damit das Domaenenkonto nicht gesperrt wird. "
+            "Kennwort im E-Mail-Bereich pruefen und 'Verbindung testen' druecken – "
+            "gelingt die Anmeldung, laeuft die Automatik von selbst weiter."
+            % int(k.get("anmeldefehler", 0) or 0), "eingabe")
 
     c = skill_config()
     return MailKonto(

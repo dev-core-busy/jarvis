@@ -49,6 +49,20 @@ _ENV_WEITERGEBEN = (
 # keine Signale senden.
 _BWRAP = "/usr/bin/bwrap"
 
+# `setpriv` legt vererbte Capabilities ab, BEVOR bwrap startet.
+#
+# WARUM DAS NOETIG IST (auf DEV im laufenden Dienst gefunden, 2026-08-14): die
+# Unit gibt dem Backend `AmbientCapabilities=CAP_NET_BIND_SERVICE`, damit es als
+# unprivilegierter Benutzer an Port 443 darf. Ambient-Capabilities werden an
+# JEDEN Kindprozess vererbt – und bwrap bricht dann mit
+# „Unexpected capabilities but not setuid, old file caps config?" ab. Die
+# Isolation waere also ausgerechnet im Dienst tot gewesen, obwohl sie in jeder
+# Handprobe (dort ohne ambient caps) funktionierte.
+#
+# In einem MCP-Server hat CAP_NET_BIND_SERVICE ohnehin nichts zu suchen, deshalb
+# wird immer abgelegt und nicht erst bei Bedarf.
+_SETPRIV = "/usr/bin/setpriv"
+
 # Nur lesbar eingeblendet – alles, was ein Programm zum Laufen braucht.
 # /opt und /home stehen BEWUSST NICHT hier: dort liegen Dienst und Daten.
 _BWRAP_RO = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc")
@@ -114,6 +128,8 @@ def _bwrap_wrappen(cmd: str, args: list, extra_ro: list) -> tuple:
         "--",
         cmd, *[str(a) for a in args],
     ]
+    if os.path.exists(_SETPRIV):
+        return _SETPRIV, ["--inh-caps=-all", "--ambient-caps=-all", "--", _BWRAP, *bargs]
     return _BWRAP, bargs
 
 

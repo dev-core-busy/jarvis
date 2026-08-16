@@ -158,6 +158,12 @@
             } else if (!k.aktiv) {
                 pill.textContent = T('mail.pill_off', 'inaktiv');
                 pill.className = 'em-pill is-off';
+            } else if (k.ausgesetzt) {
+                // Eigene Stufe zwischen "inaktiv" und "Fehler": nicht der
+                // Benutzer hat abgeschaltet, und es ist auch nicht irgendein
+                // Fehler - die Automatik haelt sich bewusst zurueck.
+                pill.textContent = T('mail.pill_paused', 'ausgesetzt');
+                pill.className = 'em-pill is-off';
             } else if (k.letzter_fehler) {
                 pill.textContent = T('mail.pill_error', 'Fehler');
                 pill.className = 'em-pill is-off';
@@ -169,6 +175,20 @@
         var box = $('em-acct-result');
         if (box) {
             var h = '';
+            // Der Aussetzer steht GANZ OBEN und nennt den Weg zurueck. Ein
+            // Zustand, den der Benutzer nicht selbst gesetzt hat, muss erklaert
+            // werden - sonst sucht er den Fehler in seiner Regel.
+            if (k.ausgesetzt) {
+                h += '<div class="em-paused"><b>'
+                    + T('mail.paused_head', 'Automatik ausgesetzt') + '</b><br>'
+                    + T('mail.paused_text',
+                        'Die Anmeldung am Postfach ist mehrfach hintereinander '
+                        + 'fehlgeschlagen. Damit dein Domänenkonto nicht gesperrt wird, '
+                        + 'melden sich die Regeln nicht mehr an. Trag dein Kennwort neu '
+                        + 'ein und drücke „Verbindung testen“ – gelingt die Anmeldung, '
+                        + 'läuft alles von selbst weiter.')
+                    + '</div>';
+            }
             if (k.letzter_erfolg) {
                 h += '<div class="em-hint">' + T('mail.last_ok', 'Zuletzt erfolgreich:')
                     + ' ' + esc(zeit(k.letzter_erfolg)) + '</div>';
@@ -634,13 +654,91 @@
         box.innerHTML = h + '</div>';
     }
 
+    /* ── Einklappbare Karten ───────────────────────────────────────────── */
+    var KLAPP_KEY = 'jarvis_email_zu';   // Liste der ZUGEKLAPPTEN Karten
+
+    function klappZustand() {
+        try {
+            var v = JSON.parse(localStorage.getItem(KLAPP_KEY) || '[]');
+            return Array.isArray(v) ? v : [];
+        } catch (e) { return []; }
+    }
+    function klappMerken(liste) {
+        try { localStorage.setItem(KLAPP_KEY, JSON.stringify(liste)); } catch (e) { }
+    }
+    function klappInit() {
+        // Gespeichert werden die ZUGEKLAPPTEN – so ist die Vorgabe fuer einen
+        // neuen Benutzer "alles offen" (verhaltensgleich zu vorher), und eine
+        // spaeter ergaenzte Karte ist automatisch offen statt still versteckt.
+        var zu = klappZustand();
+        document.querySelectorAll('.em-card[data-klapp]').forEach(function (karte) {
+            var id = karte.getAttribute('data-klapp');
+            var kopf = karte.querySelector('.em-card-head');
+            if (!kopf) return;
+            setzeKlapp(karte, zu.indexOf(id) >= 0);
+            kopf.addEventListener('click', function (ev) {
+                // OHNE DIESE AUSNAHME klappt jeder Knopf in der Kopfzeile die
+                // Karte zu. Heute steht dort nichts ausser dem Titel – wer
+                // spaeter einen Knopf ergaenzt (z.B. "Aktualisieren"), waere
+                // sonst ratlos. Gleiche Regel wie in lm.js::klappInit.
+                if (ev.target.closest('button, input, label, a, select, textarea')) return;
+                umschalten(karte);
+            });
+            // Mit der Tastatur bedienbar: das Element ist ein role="button",
+            // also muessen Enter und Leertaste wirken.
+            kopf.addEventListener('keydown', function (ev) {
+                if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
+                    ev.preventDefault();
+                    umschalten(karte);
+                }
+            });
+        });
+    }
+    function setzeKlapp(karte, zu) {
+        karte.classList.toggle('is-zu', !!zu);
+        var kopf = karte.querySelector('.em-card-head');
+        if (kopf) kopf.setAttribute('aria-expanded', zu ? 'false' : 'true');
+    }
+    function umschalten(karte) {
+        var id = karte.getAttribute('data-klapp');
+        var zu = !karte.classList.contains('is-zu');
+        setzeKlapp(karte, zu);
+        var liste = klappZustand().filter(function (x) { return x !== id; });
+        if (zu) liste.push(id);
+        klappMerken(liste);
+    }
+
     /* ── Bindung ───────────────────────────────────────────────────────── */
     function binde() {
         var b;
+        klappInit();
         if ((b = $('em-save-acct'))) b.addEventListener('click', speichereKonto);
         if ((b = $('em-test-acct'))) b.addEventListener('click', testeKonto);
         if ((b = $('em-del-acct'))) b.addEventListener('click', loescheKonto);
         if ((b = $('em-log-reload'))) b.addEventListener('click', ladeLog);
+        // Anleitung zum Outlook-Add-in auf-/zuklappen. Die Beschriftung folgt
+        // dem Zustand – ein Umschalter mit unveraenderlichem Text sieht beim
+        // Zuklappen wie ein wirkungsloser Klick aus (Lehre vom Audit-Log-Knopf).
+        //
+        // ACHTUNG, hier lag ein Fehler: `var b` wird in dieser Funktion
+        // MEHRFACH zugewiesen. Eine Closure ueber `b` sieht beim Klick den
+        // ZULETZT zugewiesenen Wert – der Handler beschriftete dadurch den
+        // Abmelde-Knopf oben rechts mit "Anleitung ausblenden" (im DOM-Abzug
+        // gefunden, im Markup unsichtbar). Die uebrigen Bindungen hier
+        // uebergeben benannte Funktionen und benutzen `b` nicht; wer eine
+        // Inline-Funktion ergaenzt, braucht eine EIGENE Variable.
+        var hilfeKnopf = $('em-addin-help');
+        if (hilfeKnopf) hilfeKnopf.addEventListener('click', function () {
+            var box = $('em-addin-steps');
+            if (!box) return;
+            var zu = box.classList.toggle('hidden');
+            hilfeKnopf.textContent = zu ? T('mail.addin_howto', 'Anleitung anzeigen')
+                : T('mail.addin_howto_hide', 'Anleitung ausblenden');
+            // Damit der Knopf nach einem Sprachwechsel den richtigen Text
+            // bekommt, merkt sich das Element seinen Zustand statt ihn aus der
+            // Beschriftung zurueckzulesen.
+            hilfeKnopf.dataset.i18n = zu ? 'mail.addin_howto' : 'mail.addin_howto_hide';
+        });
         if ((b = $('em-new-rule'))) b.addEventListener('click', function () {
             if (_editId === 'neu') { schliesseFormular(); return; }
             _editId = 'neu';

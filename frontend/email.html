@@ -60,6 +60,17 @@
             background: color-mix(in srgb, var(--danger) 12%, transparent); }
         .em-pill:empty { display: none; }
 
+        /* Hinweis "Automatik ausgesetzt". DECKENDE Flaeche statt eines
+           halbtransparenten Kastens: er liegt ueber der Kartenflaeche und muss
+           in Hell wie Dunkel lesbar sein (gleiche Lehre wie bei den Panels und
+           der Audit-Kopfzeile). Farbe UND Text tragen die Aussage - Farbe
+           allein ist fuer Farbfehlsichtige keine Information. */
+        .em-paused { margin-bottom: 10px; padding: 10px 12px; border-radius: 8px;
+            font-size: .85rem; line-height: 1.45;
+            color: var(--text-primary); background: var(--bg-secondary);
+            border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent);
+            border-left-width: 4px; }
+
         .btn-theme { background: none; border: none; color: #888899;
             padding: 4px 8px; border-radius: 8px; cursor: pointer;
             display: flex; align-items: center; justify-content: center;
@@ -77,10 +88,13 @@
         .lang-toggle-btn:hover { color: var(--text-primary); }
         .lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
 
+        /* `text-decoration: none` ist Pflicht, seit der Add-in-Download ein
+           <a> mit dieser Klasse ist: Links sind von Haus aus unterstrichen,
+           und ein unterstrichener Knopf sieht aus wie ein Textlink im Knopf. */
         .em-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
             height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
             font-size: .85rem; display: inline-flex; align-items: center; gap: 6px;
-            font-family: var(--font-body); white-space: nowrap; }
+            font-family: var(--font-body); white-space: nowrap; text-decoration: none; }
         .em-btn:hover { border-color: var(--accent); color: var(--text-primary); }
         .em-btn:disabled { opacity: .5; cursor: default; }
         .em-btn-primary { background: var(--gradient); border: none; color: #fff; font-weight: 600; }
@@ -95,6 +109,26 @@
         .em-card { background: var(--bg-glass); border: 1px solid var(--border);
             border-radius: var(--radius-md); padding: 16px 18px; margin-bottom: 16px; }
         .em-card h2 { font-size: 1.02rem; font-weight: 600; margin-bottom: 4px; }
+
+        /* ── Einklappbare Karten ──
+           Muster wie `.kb-section` in den Einstellungen: die Kopfzeile ist der
+           Schalter, der Zustand wird je Karte gemerkt (localStorage).
+           REIHENFOLGE IST PFLICHT: Titel zuerst, Pfeil als zweites Kind – bei
+           `space-between` schoebe die umgekehrte Reihenfolge den Titel an den
+           rechten Rand (Fehler vom 2026-08-13 im Add-in-Fenster). */
+        .em-card-head { display: flex; align-items: center; justify-content: space-between;
+            gap: 10px; cursor: pointer; user-select: none; }
+        .em-card-head:hover h2 { color: var(--accent); }
+        .em-card-head:focus-visible { outline: 2px solid var(--accent);
+            outline-offset: 3px; border-radius: 6px; }
+        .em-card-head h2 { margin-bottom: 0; }
+        .em-caret { color: var(--text-muted); font-size: .8rem; flex: 0 0 auto;
+            transition: transform .15s; }
+        .em-card.is-zu .em-caret { transform: rotate(-90deg); }
+        .em-card.is-zu .em-card-body { display: none; }
+        /* Der Abstand zwischen Kopfzeile und Inhalt gehoert an den Koerper –
+           an der Kopfzeile bliebe er im zugeklappten Zustand stehen. */
+        .em-card-body { padding-top: 4px; }
         .em-hint { color: var(--text-muted); font-size: .82rem; line-height: 1.55; }
         .em-sep { height: 1px; background: var(--border); margin: 14px 0; }
 
@@ -193,97 +227,146 @@
 
     <div class="em-wrap">
         <!-- ═══ Mein Postfach ═══ -->
-        <div class="em-card">
-            <h2 data-i18n="mail.acct_head">Mein Postfach</h2>
-            <p class="em-hint" data-i18n="mail.acct_hint">Hier hinterlegst du dein eigenes Exchange-Postfach. Das Kennwort wird verschlüsselt gespeichert und von keiner Schnittstelle wieder herausgegeben – auch nicht an Administratoren. Lass das Feld leer, um es unverändert zu lassen.</p>
-            <div class="em-sep"></div>
-            <div class="em-grid">
-                <div class="em-field">
-                    <label data-i18n="mail.acct_address">E-Mail-Adresse</label>
-                    <input type="email" id="em-adresse" placeholder="vorname.nachname@firma.de" autocomplete="off">
+        <div class="em-card" data-klapp="acct">
+            <div class="em-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="mail.acct_head">Mein Postfach</h2>
+                <span class="em-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="em-card-body">
+                <p class="em-hint" data-i18n="mail.acct_hint">Hier hinterlegst du dein eigenes Exchange-Postfach. Das Kennwort wird verschlüsselt gespeichert und von keiner Schnittstelle wieder herausgegeben – auch nicht an Administratoren. Lass das Feld leer, um es unverändert zu lassen.</p>
+                <div class="em-sep"></div>
+                <div class="em-grid">
+                    <div class="em-field">
+                        <label data-i18n="mail.acct_address">E-Mail-Adresse</label>
+                        <input type="email" id="em-adresse" placeholder="vorname.nachname@firma.de" autocomplete="off">
+                    </div>
+                    <div class="em-field">
+                        <label data-i18n="mail.acct_login">Anmeldename <span class="em-hint">(falls abweichend)</span></label>
+                        <input type="text" id="em-benutzer" placeholder="FIRMA\vorname.nachname" autocomplete="off">
+                    </div>
+                    <div class="em-field">
+                        <label data-i18n="mail.acct_password">Kennwort</label>
+                        <input type="password" id="em-passwort" placeholder="leer = unverändert" data-i18n-placeholder="mail.pw_ph" autocomplete="new-password">
+                        <span class="em-hint" id="em-pw-hint"></span>
+                    </div>
+                    <div class="em-field">
+                        <label data-i18n="mail.acct_channel">Zugangsweg</label>
+                        <select id="em-kanal-user">
+                            <option value="" data-i18n="mail.acct_channel_default">Vorgabe des Administrators</option>
+                            <option value="auto" data-i18n="mail.acct_channel_auto">auto (EWS, sonst IMAP)</option>
+                            <option value="ews" data-i18n="mail.acct_channel_ews">nur EWS</option>
+                            <option value="imap" data-i18n="mail.acct_channel_imap">nur IMAP/SMTP</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="em-field">
-                    <label data-i18n="mail.acct_login">Anmeldename <span class="em-hint">(falls abweichend)</span></label>
-                    <input type="text" id="em-benutzer" placeholder="FIRMA\vorname.nachname" autocomplete="off">
+                <div class="em-grid em-grid-3" style="margin-top:12px;">
+                    <div class="em-field">
+                        <label data-i18n="mail.acct_inbox">Posteingang</label>
+                        <input type="text" id="em-ord-eingang" placeholder="INBOX">
+                    </div>
+                    <div class="em-field">
+                        <label data-i18n="mail.acct_drafts">Entwürfe</label>
+                        <input type="text" id="em-ord-entwuerfe" placeholder="Vorgabe" data-i18n-placeholder="mail.default_ph">
+                    </div>
+                    <div class="em-field">
+                        <label data-i18n="mail.acct_sent">Gesendet</label>
+                        <input type="text" id="em-ord-gesendet" placeholder="Vorgabe" data-i18n-placeholder="mail.default_ph">
+                    </div>
                 </div>
-                <div class="em-field">
-                    <label data-i18n="mail.acct_password">Kennwort</label>
-                    <input type="password" id="em-passwort" placeholder="leer = unverändert" data-i18n-placeholder="mail.pw_ph" autocomplete="new-password">
-                    <span class="em-hint" id="em-pw-hint"></span>
+                <div class="em-field" style="margin-top:12px;">
+                    <label><input type="checkbox" id="em-aktiv" style="width:auto;margin-right:8px;">
+                        <span data-i18n="mail.acct_active">Postfach aktiv (Regeln dürfen darauf arbeiten)</span></label>
                 </div>
-                <div class="em-field">
-                    <label data-i18n="mail.acct_channel">Zugangsweg</label>
-                    <select id="em-kanal-user">
-                        <option value="" data-i18n="mail.acct_channel_default">Vorgabe des Administrators</option>
-                        <option value="auto" data-i18n="mail.acct_channel_auto">auto (EWS, sonst IMAP)</option>
-                        <option value="ews" data-i18n="mail.acct_channel_ews">nur EWS</option>
-                        <option value="imap" data-i18n="mail.acct_channel_imap">nur IMAP/SMTP</option>
-                    </select>
+                <div class="em-row">
+                    <button class="em-btn em-btn-primary" id="em-save-acct" data-i18n="common.save">Speichern</button>
+                    <button class="em-btn" id="em-test-acct" data-i18n="mail.acct_test">Verbindung testen</button>
+                    <button class="em-btn em-btn-danger" id="em-del-acct" data-i18n="mail.acct_delete">Zugangsdaten entfernen</button>
+                    <span class="em-status" id="em-acct-status"></span>
+                </div>
+                <div id="em-acct-result" style="margin-top:10px;"></div>
+            </div>
+        </div>
+
+        <!-- ═══ Outlook-Add-in ═══
+             Steht bewusst HIER (nach dem Postfach, vor den Regeln): wer gerade
+             sein Postfach hinterlegt hat, ist genau der, den das Add-in
+             interessiert. Am Seitenende liest es niemand.
+             Der Abschnitt ist fuer JEDEN sichtbar, der /email betreten darf –
+             das Manifest herunterzuladen und in Outlook zu installieren ist
+             keine Administrator-Aufgabe (die Anleitung sagt, wann doch). -->
+        <div class="em-card" data-klapp="addin">
+            <div class="em-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="mail.addin_head">Outlook-Add-in</h2>
+                <span class="em-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="em-card-body">
+                <p class="em-hint" data-i18n="mail.addin_hint">Du kannst diese Seite auch direkt in Outlook öffnen – als Aufgabenfenster. Dort verwaltest du Postfach und Regeln wie hier und kannst zusätzlich die gerade markierte E-Mail sofort von einer Regel verarbeiten lassen.</p>
+                <div class="em-sep"></div>
+                <div class="em-row" style="margin-top:0;">
+                    <!-- Einfacher Link: der Endpunkt liefert die Datei mit
+                         Content-Disposition, es braucht kein JavaScript. -->
+                    <a class="em-btn em-btn-primary" id="em-addin-dl" href="/addin/manifest.xml"
+                       data-i18n="mail.addin_download">Add-in-Datei herunterladen</a>
+                    <button class="em-btn" id="em-addin-help" data-i18n="mail.addin_howto">Anleitung anzeigen</button>
+                </div>
+                <div id="em-addin-steps" class="hidden" style="margin-top:12px;">
+                    <ol class="em-hint" style="padding-left:18px; line-height:1.75;">
+                        <li data-i18n-html="mail.addin_s1">Auf „Add-in-Datei herunterladen" klicken – es wird eine Datei <code>jarvis-outlook-addin.xml</code> gespeichert.</li>
+                        <li data-i18n-html="mail.addin_s2">Outlook im Web öffnen → Einstellungen → <b>Add-Ins verwalten</b> → <b>Benutzerdefiniertes Add-In hinzufügen</b> → <b>Aus Datei hinzufügen…</b> und die gespeicherte Datei wählen.</li>
+                        <li data-i18n-html="mail.addin_s3">Fertig: In Outlook erscheint beim Lesen einer E-Mail im Menüband ein Knopf, der das Fenster öffnet. Das Add-in hängt am Postfach – es steht danach auch im Outlook auf deinem Rechner zur Verfügung.</li>
+                    </ol>
+                    <p class="em-hint" style="margin-top:10px;"><b data-i18n="mail.addin_note_title">Gut zu wissen:</b>
+                        <span data-i18n-html="mail.addin_note">Das Add-in läuft im klassischen Outlook für Windows und in Outlook im Web. Das „neue Outlook" für Windows unterstützt Postfächer auf einem Exchange im eigenen Haus derzeit generell nicht – dort lässt sich das Konto gar nicht erst einrichten. Bleibt das Fenster in Outlook leer, fehlt auf dem Rechner das Zertifikat dieses Servers; dann hilft die IT-Abteilung weiter.</span></p>
                 </div>
             </div>
-            <div class="em-grid em-grid-3" style="margin-top:12px;">
-                <div class="em-field">
-                    <label data-i18n="mail.acct_inbox">Posteingang</label>
-                    <input type="text" id="em-ord-eingang" placeholder="INBOX">
-                </div>
-                <div class="em-field">
-                    <label data-i18n="mail.acct_drafts">Entwürfe</label>
-                    <input type="text" id="em-ord-entwuerfe" placeholder="Vorgabe" data-i18n-placeholder="mail.default_ph">
-                </div>
-                <div class="em-field">
-                    <label data-i18n="mail.acct_sent">Gesendet</label>
-                    <input type="text" id="em-ord-gesendet" placeholder="Vorgabe" data-i18n-placeholder="mail.default_ph">
-                </div>
-            </div>
-            <div class="em-field" style="margin-top:12px;">
-                <label><input type="checkbox" id="em-aktiv" style="width:auto;margin-right:8px;">
-                    <span data-i18n="mail.acct_active">Postfach aktiv (Regeln dürfen darauf arbeiten)</span></label>
-            </div>
-            <div class="em-row">
-                <button class="em-btn em-btn-primary" id="em-save-acct" data-i18n="common.save">Speichern</button>
-                <button class="em-btn" id="em-test-acct" data-i18n="mail.acct_test">Verbindung testen</button>
-                <button class="em-btn em-btn-danger" id="em-del-acct" data-i18n="mail.acct_delete">Zugangsdaten entfernen</button>
-                <span class="em-status" id="em-acct-status"></span>
-            </div>
-            <div id="em-acct-result" style="margin-top:10px;"></div>
         </div>
 
         <!-- ═══ Regeln ═══ -->
-        <div class="em-card">
-            <h2 data-i18n="mail.rules_head">Regeln für eingehende E-Mails</h2>
-            <p class="em-hint" data-i18n="mail.rules_hint">Jede Regel beobachtet einen Ordner deines Postfachs. Trifft eine neue Nachricht ein, entscheidet ein Sprachmodell anhand deines Prompts, was zu tun ist: antworten, Entwurf speichern, verschieben, weiterleiten oder löschen. Verarbeitete Nachrichten werden mit einer Kategorie markiert, damit du es im Postfach siehst.</p>
-            <p class="em-hint" style="margin-top:8px;"><b data-i18n="mail.rules_warn_title">Wichtig:</b> <span data-i18n="mail.rules_warn">Der Text einer eingehenden E-Mail kommt von außen. Der Agent wird ausdrücklich angewiesen, Anweisungen darin nicht zu befolgen – gib einer Regel trotzdem nur die Werkzeuge, die sie wirklich braucht, und prüfe das Protokoll unten regelmäßig.</span></p>
-            <div class="em-sep"></div>
-            <div class="em-row" style="margin-top:0;">
-                <button class="em-btn em-btn-primary" id="em-new-rule" data-i18n="mail.rules_new">+ Neue Regel</button>
-                <span class="em-status" id="em-rules-status"></span>
+        <div class="em-card" data-klapp="rules">
+            <div class="em-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="mail.rules_head">Regeln für eingehende E-Mails</h2>
+                <span class="em-caret" aria-hidden="true">&#9662;</span>
             </div>
-            <div id="em-rules" style="margin-top:12px;"></div>
-            <!-- EIN Formular-Container, der wandert (Muster der Rollen-Agenten
-                 und der Extraktions-Vorschau in /wissen). Zwei Container haetten
-                 zwei Wege zum Speichern bedeutet. -->
-            <div id="em-rule-edit" class="hidden"></div>
+            <div class="em-card-body">
+                <p class="em-hint" data-i18n="mail.rules_hint">Jede Regel beobachtet einen Ordner deines Postfachs. Trifft eine neue Nachricht ein, entscheidet ein Sprachmodell anhand deines Prompts, was zu tun ist: antworten, Entwurf speichern, verschieben, weiterleiten oder löschen. Verarbeitete Nachrichten werden mit einer Kategorie markiert, damit du es im Postfach siehst.</p>
+                <p class="em-hint" style="margin-top:8px;"><b data-i18n="mail.rules_warn_title">Wichtig:</b> <span data-i18n="mail.rules_warn">Der Text einer eingehenden E-Mail kommt von außen. Der Agent wird ausdrücklich angewiesen, Anweisungen darin nicht zu befolgen – gib einer Regel trotzdem nur die Werkzeuge, die sie wirklich braucht, und prüfe das Protokoll unten regelmäßig.</span></p>
+                <div class="em-sep"></div>
+                <div class="em-row" style="margin-top:0;">
+                    <button class="em-btn em-btn-primary" id="em-new-rule" data-i18n="mail.rules_new">+ Neue Regel</button>
+                    <span class="em-status" id="em-rules-status"></span>
+                </div>
+                <div id="em-rules" style="margin-top:12px;"></div>
+                <!-- EIN Formular-Container, der wandert (Muster der Rollen-Agenten
+                     und der Extraktions-Vorschau in /wissen). Zwei Container haetten
+                     zwei Wege zum Speichern bedeutet. -->
+                <div id="em-rule-edit" class="hidden"></div>
+            </div>
         </div>
 
         <!-- ═══ Protokoll ═══ -->
-        <div class="em-card">
-            <h2 data-i18n="mail.log_head">Protokoll</h2>
-            <p class="em-hint" data-i18n="mail.log_hint">Was die Regeln getan haben – neueste zuerst. Nur deine eigenen Läufe.</p>
-            <div class="em-sep"></div>
-            <div class="em-row" style="margin-top:0;">
-                <button class="em-btn" id="em-log-reload" data-i18n="common.refresh">Aktualisieren</button>
-                <span class="em-status" id="em-log-status"></span>
+        <div class="em-card" data-klapp="log">
+            <div class="em-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="mail.log_head">Protokoll</h2>
+                <span class="em-caret" aria-hidden="true">&#9662;</span>
             </div>
-            <div id="em-log" style="margin-top:12px;"></div>
+            <div class="em-card-body">
+                <p class="em-hint" data-i18n="mail.log_hint">Was die Regeln getan haben – neueste zuerst. Nur deine eigenen Läufe.</p>
+                <div class="em-sep"></div>
+                <div class="em-row" style="margin-top:0;">
+                    <button class="em-btn" id="em-log-reload" data-i18n="common.refresh">Aktualisieren</button>
+                    <span class="em-status" id="em-log-status"></span>
+                </div>
+                <div id="em-log" style="margin-top:12px;"></div>
+            </div>
         </div>
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=43"></script>
+<script src="/static/js/i18n.js?v=45"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=23"></script>
 <script src="/static/js/sessions.js?v=6"></script>
-<script src="/static/js/email_portal.js?v=2"></script>
+<script src="/static/js/email_portal.js?v=5"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der
      Theme-Knopf oben diese Id tragen. -->

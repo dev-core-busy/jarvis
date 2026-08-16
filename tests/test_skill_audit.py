@@ -362,8 +362,15 @@ _treffer = re.findall(r"if steps >= 2 and self\._tool_stats([^\n:]*)",
                       AGENT_SRC)
 pruefe(len(_treffer) == 2, "beide Auto-Learning-Zweige gefunden (run_task + headless)",
        str(_treffer))
-pruefe(all('"memory_manage" in self.tools_map' in t for t in _treffer),
-       "beide sind an das Vorhandensein von memory_manage gebunden")
+# Geprueft wird `_werkzeug_nutzbar`, NICHT mehr `in self.tools_map`: seit dem
+# 2026-08-13 ist das die richtige Frage, weil sie zusaetzlich den Zuschnitt
+# eines Rollen- oder E-Mail-Regel-Laufs beruecksichtigt (`_role_tools`). Der
+# alte Ausdruck war die schwaechere Bedingung – der Zweig feuerte in einem
+# Regel-Lauf trotzdem und endete in "Tool nicht im Rollenumfang". Ein Test, der
+# die ueberholte Fassung festschreibt, bleibt dauerhaft rot und wird irgendwann
+# ignoriert.
+pruefe(all('self._werkzeug_nutzbar("memory_manage")' in t for t in _treffer),
+       "beide sind an die Nutzbarkeit von memory_manage gebunden (inkl. Zuschnitt)")
 
 # Anhang-Hinweis nennt nur vorhandene Lese-Werkzeuge
 _anh = MAIN_SRC[MAIN_SRC.index("Angehängte Datei") - 2000:

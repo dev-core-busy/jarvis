@@ -139,3 +139,12 @@ data/addin_links.json
 data/ad_cache.json
 data/knowledge_sync.json
 data/agent_roles.json
+
+# Android-Signaturschluessel. Bis 2026-08-17 lag android/jarvis-release.jks samt
+# Kennwort ("***ENTFERNT***" in build.gradle.kts) im OEFFENTLICHEN Repo - wer beides
+# hat, kann APKs signieren, die Android als Update der echten App akzeptiert.
+# Der Schluessel wurde getauscht; der neue darf NIE eingecheckt werden.
+*.jks
+*.keystore
+android/keystore.properties
+keystore.properties

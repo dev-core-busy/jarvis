@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -20,19 +22,46 @@ android {
 
     }
 
+    // Signatur-Zugangsdaten kommen aus android/keystore.properties (gitignored)
+    // oder aus der Umgebung. NIE hier im Klartext: bis 2026-08-17 standen
+    // Keystore UND Kennwort im OEFFENTLICHEN Repo - der Schluessel war damit
+    // verbrannt und musste getauscht werden.
+    val ksProps = Properties().apply {
+        val f = rootProject.file("keystore.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    fun ks(name: String, env: String): String? =
+        (ksProps.getProperty(name) ?: System.getenv(env))?.takeIf { it.isNotBlank() }
+
+    val ksFile = ks("storeFile", "JARVIS_ANDROID_KEYSTORE") ?: "jarvis-release-neu.jks"
+    val ksPass = ks("storePassword", "JARVIS_ANDROID_STOREPASS")
+    val ksAlias = ks("keyAlias", "JARVIS_ANDROID_KEYALIAS") ?: "jarvis"
+    val ksKeyPass = ks("keyPassword", "JARVIS_ANDROID_KEYPASS") ?: ksPass
+    // Nur wenn Datei UND Kennwort vorhanden sind, gibt es eine Release-Signatur.
+    // Fehlt etwas, bleibt der Build moeglich (debug-signiert) statt mit einem
+    // Gradle-Fehler abzubrechen, den niemand deuten kann.
+    val signierbar = ksPass != null && rootProject.file(ksFile).exists()
+
     signingConfigs {
-        create("release") {
-            storeFile = file("../jarvis-release.jks")
-            storePassword = "***ENTFERNT***"
-            keyAlias = "jarvis"
-            keyPassword = "***ENTFERNT***"
+        if (signierbar) {
+            create("release") {
+                storeFile = rootProject.file(ksFile)
+                storePassword = ksPass
+                keyAlias = ksAlias
+                keyPassword = ksKeyPass
+            }
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            if (signierbar) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                logger.warn("[jarvis] Keine Release-Signatur: android/keystore.properties " +
+                        "fehlt oder ist unvollstaendig - das APK wird NICHT release-signiert.")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

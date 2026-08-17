@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -322,7 +323,56 @@ def _pruefe(felder: dict, bestehend: dict | None = None) -> dict:
         if feld in felder or not bestehend:
             r[feld] = str(felder.get(feld) or "").strip()[:200]
 
+    # ── Bedingung im Prompt, aber kein Filterfeld? Dann ablehnen. ──────────
+    # VORFALL 2026-08-17: Eine Regel lautete "wenn eine Nachricht von
+    # mr.andreas.bender@* kommt, antworten mit 'hat geklappert'" – das Feld
+    # "Nur von Absender" blieb LEER. Damit lief fuer jede eingehende Nachricht
+    # ein Modell, das die Bedingung selbst pruefen sollte; es hat sich geirrt und
+    # zwei echte Mails gingen an fremde Empfaenger.
+    #
+    # Ein Prompt ist eine Bitte, ein Feld ist eine Schranke. Wer eine
+    # Absender-Bedingung formuliert, muss sie ins Feld schreiben – sonst gibt es
+    # keine Regel. Geprueft wird nur, wenn Prompt oder Filter in DIESEM Aufruf
+    # gesetzt werden: ein reines {"enabled": false} muss immer durchgehen, sonst
+    # liesse sich eine Altbestand-Regel nicht mehr abschalten.
+    if ("prompt" in felder or "von_filter" in felder or not bestehend) \
+            and not (r.get("von_filter") or "").strip():
+        gefunden = absender_im_prompt(r.get("prompt") or "")
+        if gefunden:
+            raise RegelFehler(
+                "Im Prompt steht eine Absender-Bedingung (%s), aber das Feld "
+                "„Nur von Absender\" ist leer. Im Prompt ist eine Bedingung nur "
+                "eine Bitte an das Sprachmodell – es kann sie falsch bewerten und "
+                "dann an Fremde antworten (genau das ist am 17.08.2026 passiert). "
+                "Bitte %s in das Feld „Nur von Absender\" eintragen; im Prompt "
+                "steht dann nur noch, WAS geschehen soll."
+                % (", ".join(gefunden), gefunden[0]))
+
     return r
+
+
+# Erkennt eine Absender-Bedingung im Prompt: ein Konditional-Signal, danach
+# "von"/"absender" und eine Adresse bzw. Domain. BEWUSST ENG gehalten – eine
+# Adresse im Prompt allein ("nenne unsere Hotline support@firma.de") ist keine
+# Bedingung und darf das Speichern nicht blockieren.
+_ABS_BEDINGUNG = re.compile(
+    r"(?:wenn|falls|sofern|nur|ausschliesslich|ausschließlich|bei)\b[^.\n]{0,80}?"
+    r"(?:von|absender|from)\b[^.\n]{0,80}?"
+    r"(?P<adr>[A-Za-z0-9._%+\-]*@[A-Za-z0-9.\-*]+|@[A-Za-z0-9.\-*]+)",
+    re.I)
+_ABS_BEDINGUNG2 = re.compile(
+    r"absender\s*(?:ist|=|:)\s*(?P<adr>[A-Za-z0-9._%+\-]*@[A-Za-z0-9.\-*]+)", re.I)
+
+
+def absender_im_prompt(prompt: str) -> list[str]:
+    """Adressen/Domains, die im Prompt als BEDINGUNG auftauchen (kann leer sein)."""
+    out = []
+    for muster in (_ABS_BEDINGUNG, _ABS_BEDINGUNG2):
+        for m in muster.finditer(prompt or ""):
+            a = (m.group("adr") or "").strip().rstrip(".,;:)")
+            if a and a not in out:
+                out.append(a)
+    return out[:3]
 
 
 # ── CRUD ────────────────────────────────────────────────────────────────────
@@ -570,12 +620,17 @@ def ergebnis_merken(regel_id: str, ergebnis: str) -> None:
             return
 
 
+# Regeln, deren fehlender Filter schon gemeldet wurde (nur Journal-Hygiene).
+_gemeldet_ohne_filter: set = set()
+
+
 def faellige(jetzt: float | None = None) -> list[dict]:
     """Regeln, die jetzt an der Reihe sind.
 
-    Fail-closed an zwei Stellen: eine Regel ohne Besitzer laeuft NIE (ihr
-    Actor waere nicht bestimmbar – dieselbe Regel wie bei Cron-Altbestand), und
-    eine ausgeschaltete Regel ebenso nicht.
+    Fail-closed an DREI Stellen: eine Regel ohne Besitzer laeuft NIE (ihr
+    Actor waere nicht bestimmbar – dieselbe Regel wie bei Cron-Altbestand), eine
+    ausgeschaltete ebenso nicht, und seit 2026-08-17 auch keine, deren
+    Absender-Bedingung nur im Prompt steht (siehe ``absender_im_prompt``).
     """
     t = float(jetzt or time.time())
     z = _zustand()
@@ -587,6 +642,22 @@ def faellige(jetzt: float | None = None) -> list[dict]:
             print("[Mail] Regel '%s' ohne Besitzer – wird nicht ausgefuehrt."
                   % r.get("id"), flush=True)
             continue
+        # ALTBESTAND: beim Speichern wird das jetzt abgelehnt, aber bestehende
+        # Regeln wurden vor dem 17.08. ohne diese Pruefung angelegt. Sie liefen
+        # dann mit einer Bedingung, die nur eine Bitte an das Modell ist – genau
+        # der Vorfall. Fail-closed: nicht ausfuehren, Grund EINMAL nennen (nicht
+        # in jedem Takt, sonst flutet es das Journal).
+        if not (r.get("von_filter") or "").strip():
+            treffer = absender_im_prompt(r.get("prompt") or "")
+            if treffer:
+                if r.get("id") not in _gemeldet_ohne_filter:
+                    _gemeldet_ohne_filter.add(r.get("id"))
+                    print("[Mail] Regel '%s' (%s) laeuft NICHT: die Absender-Bedingung "
+                          "(%s) steht nur im Prompt, das Feld 'Nur von Absender' ist "
+                          "leer. Im Prompt ist sie nur eine Bitte an das Modell – "
+                          "bitte im Feld eintragen." % (r.get("name"), r.get("id"),
+                                                        ", ".join(treffer)), flush=True)
+                continue
         e = z.get(r.get("id")) or {}
         letzter = float(e.get("letzter_lauf") or 0)
         if t - letzter < max(MIN_INTERVALL_MIN, int(r.get("intervall_min") or

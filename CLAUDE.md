@@ -10,8 +10,16 @@ Autonomer KI-Agent auf einem Linux-Server (Debian 13) mit Web-Frontend, Desktop-
   - HINWEIS: Auf dem Server wird NICHT committet → der Git-HEAD dort bleibt alt und ist KEIN Versionsindikator. Massgeblich ist der Datei-Inhalt (md5-Vergleich), nicht `git rev-parse`.
 - **Landing-Page:** `jarvis-ai.info` ist ein SEPARATER Host (89.110.149.134, nginx) – NICHT der App-Server.
   - Quelle der Wahrheit ist die live deployte Datei; Repo-Kopie `docs/landing-page/index.html` driftet und muss manuell nachgezogen werden.
-  - Deploy via `windows-app-go/build.sh` – per **keyless SSH** (`jarvis@jarvis-ai.info`, Key `~/.ssh/id_rsa`, Docroot `/var/www/vhosts/jarvis-ai.info/www`), KEIN Secret im Repo (FTP/FTPS wurde abgelöst, da FTP-ALG in manchen Netzen das AUTH-Kommando kapert).
-  - Drift-sicher patchen: Live-Datei per `scp` laden, gezielt ändern, zurückspielen (statt Repo-Kopie zu überschreiben) – so wie build.sh es für den Versionsstring macht.
+  - Deploy via `windows-app-go/build.sh` – per **FTPS** (explizites TLS, Port 21, Benutzer `jarvis`, Docroot `/var/www/vhosts/jarvis-ai.info/www`); die Übertragung steckt in `windows-app-go/deploy_ftps.py`. **KEIN Secret im Repo:** Zugangsdaten über `JARVIS_FTPS_USER`/`JARVIS_FTPS_PASS` oder die gitignorete `windows-app-go/.ftps_credentials`. Zertifikat ist selbstsigniert → `CERT_NONE` (im GUI-Client ist das die manuelle Bestätigung).
+  - **Der SSH-Weg ist TOT** (nachgemessen 2026-08-17): der Abo-Benutzer läuft in eine defekte chroot-Umgebung – Shell **und** `sftp-server` scheitern mit Exit 255, während Auth und PAM sauber durchlaufen. Reparatur bräuchte Root beim Hoster (`plesk repair fs`, besser dauerhaft `Subsystem sftp internal-sftp`, das keine Binaries im Jail braucht).
+  - **⚠ NETZWEG, nicht Server:** In den Firmennetzen (Arbeitsplatz UND DEV – gemeinsamer Ausgang `87.129.55.114`) fängt ein **FTP-ALG** das Kommando `AUTH TLS` ab (`502 … contact your network administrator`). TLS kommt dann gar nicht erst zustande – **ein Zertifikat hilft dagegen NICHT**. Aus einem Netz ohne ALG (Tethering/VPN/Homeoffice) läuft der Deploy durch; `deploy_ftps.py` erkennt den Fall und bricht mit Klartext-Hinweis ab (Exit 2). **Merkregel:** Ein FTP-ALG ist ein **Proxy** – dass die Session nach dem 502 weiterlebt und `SYST`/`QUIT` funktionieren, ist sein Kennzeichen, kein Gegenbeweis. Und ein Messpunkt beweist nur dann einen eigenen Netzweg, wenn seine **externe** IP geprüft wurde (`curl ifconfig.me`).
+  - **✔ GELÖST am 2026-08-17 – SFTP auf PORT 8023** (`mod_sftp` von ProFTPD, vom Nutzer
+    freigeschaltet; Docroot dort relativ: `www/`). Damit ist der Deploy in Minuten durch, ohne
+    ALG-Thema und ohne Zertifikatsfrage – **das ist der bevorzugte Weg**, die beiden Absätze
+    darüber beschreiben Port 21/22 und bleiben nur als Begründung stehen. **`sshpass` + `sftp`
+    scheitert dort** (BatchMode + Prompt von mod_sftp) → `paramiko` benutzen; das fertige Rezept
+    steht in der Memory `landing-page-deploy-defekt`. Kennwörter NIE ins Repo.
+  - Drift-sicher patchen: Live-Datei laden, gezielt ändern, zurückspielen (statt Repo-Kopie zu überschreiben) – so wie build.sh es für den Versionsstring macht.
 - **Desktop-User:** `jarvis` (autologin via lightdm), Web-Login: `jarvis/jarvis`
 - **Services:** `systemctl restart jarvis.service` + `systemctl restart whatsapp-bridge.service`
 - **Git-Remote:** lokaler Clone nutzt SSH (`git@github.com:dev-core-busy/jarvis.git`) – kein Token mehr in `.git/config` (Stand 2026-06-16). Repo ist public; Server ziehen token-los per HTTPS.
@@ -92,7 +100,7 @@ skills/             – 18 Skills, u.a.:
   example_skill/   – Template fuer neue Skills
 android/           – Android-App (Kotlin/Jetpack Compose, signiert via .jks)
 windows-app-go/    – Nativer Windows-Client (Go, Tray, lokale STT, Avatar, WS-Client)
-docs/landing-page/ – Statische Landing-Page fuer jarvis-ai.info (SSH-Deploy via build.sh, keyless)
+docs/landing-page/ – Statische Landing-Page fuer jarvis-ai.info (FTPS-Deploy via build.sh + deploy_ftps.py)
 services/
   whatsapp-bridge/index.js – Baileys Bridge mit Express API
 data/

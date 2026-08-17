@@ -919,12 +919,20 @@ class OpenAICompatibleProvider(LLMProvider):
         if tools:
             openai_tools = []
             for t in tools:
+                # Die Werkzeuge deklarieren ihr Schema im Gemini-Stil ("OBJECT",
+                # "STRING"); JSON-Schema verlangt Kleinschreibung. vLLM und
+                # llama.cpp validieren das nicht und nehmen beides an – ein
+                # streng validierender Server (LM Studio: Express/Zod) lehnt den
+                # ganzen Request mit 400 ab, und zwar einmal je Werkzeug:
+                # "invalid_union_discriminator … Expected 'object'".
+                # Der Anthropic-Zweig normalisiert seit jeher, dieser nicht.
+                raw_schema = t.parameters_schema() if hasattr(t, "parameters_schema") else t.parameters
                 openai_tools.append({
                     "type": "function",
                     "function": {
                         "name": t.name,
                         "description": t.description,
-                        "parameters": t.parameters_schema() if hasattr(t, "parameters_schema") else t.parameters,
+                        "parameters": _normalize_schema(raw_schema),
                     },
                 })
             payload["tools"] = openai_tools
@@ -961,12 +969,18 @@ class OpenAICompatibleProvider(LLMProvider):
                 print(f"[LLM] {self.base_url}: 400 bei nativem Tool-Calling "
                       f"({err_detail}) → Fallback auf Prompt-Modus", flush=True)
                 return await self._generate_prompt_mode(model, system_prompt, contents, tools, reasoning_effort, temperature)
-            if "context length" in _d or "maximum context" in _d or "input_tokens" in _d or "max_model_len" in _d:
+            # "context size" / "exceed_context_size" ist die Schreibweise von
+            # LM Studio; ohne sie laeuft genau dieser Fall in die rohe
+            # HTTP-400-Meldung unten und der Grund ist nicht ablesbar.
+            if ("context length" in _d or "maximum context" in _d or "input_tokens" in _d
+                    or "max_model_len" in _d or "context size" in _d
+                    or "exceed_context_size" in _d):
                 raise ValueError(
                     "Das gewählte Modell hat ein zu kleines Kontextfenster für den "
                     "Jarvis-Agenten (System-Prompt + Tools passen nicht hinein). "
                     f"Server-Meldung: {err_detail}. "
-                    "Abhilfe: vLLM-Server mit größerem --max-model-len starten oder ein "
+                    "Abhilfe: vLLM-Server mit größerem --max-model-len starten, in "
+                    "LM Studio die Kontextlänge des geladenen Modells erhöhen oder ein "
                     "Modell/Profil mit mehr Kontext verwenden."
                 )
             raise ValueError(f"HTTP {resp.status_code} von {self.base_url}: {err_detail}")
@@ -1155,12 +1169,18 @@ class OpenAICompatibleProvider(LLMProvider):
                 return await self._generate_prompt_mode(model, system_prompt, contents, tools, None, temperature)
             # Kontextfenster zu klein (z.B. vLLM --max-model-len 8192): klare, handlungs-
             # bezogene Meldung statt rohem httpx-Fehler.
-            if "context length" in _d or "maximum context" in _d or "input_tokens" in _d or "max_model_len" in _d:
+            # "context size" / "exceed_context_size" ist die Schreibweise von
+            # LM Studio; ohne sie laeuft genau dieser Fall in die rohe
+            # HTTP-400-Meldung unten und der Grund ist nicht ablesbar.
+            if ("context length" in _d or "maximum context" in _d or "input_tokens" in _d
+                    or "max_model_len" in _d or "context size" in _d
+                    or "exceed_context_size" in _d):
                 raise ValueError(
                     "Das gewählte Modell hat ein zu kleines Kontextfenster für den "
                     "Jarvis-Agenten (System-Prompt + Tools passen nicht hinein). "
                     f"Server-Meldung: {err_detail}. "
-                    "Abhilfe: vLLM-Server mit größerem --max-model-len starten oder ein "
+                    "Abhilfe: vLLM-Server mit größerem --max-model-len starten, in "
+                    "LM Studio die Kontextlänge des geladenen Modells erhöhen oder ein "
                     "Modell/Profil mit mehr Kontext verwenden."
                 )
             raise ValueError(f"HTTP {resp.status_code} von {self.base_url}: {err_detail}")

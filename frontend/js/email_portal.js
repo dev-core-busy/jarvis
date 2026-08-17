@@ -711,9 +711,28 @@
     }
 
     /* ── Bindung ───────────────────────────────────────────────────────── */
+    /* Feld-Erklaerungen (ⓘ). EIN delegierter Listener am Dokument statt einer
+       Bindung je Knopf: so wirkt jedes spaeter ergaenzte ⓘ automatisch, auch in
+       Bereichen, die erst nachtraeglich gezeichnet werden. Der Knopf traegt
+       `data-help` mit der Id des Erklaerkastens. */
+    function infoInit() {
+        if (document._emInfoBound) return;
+        document._emInfoBound = true;
+        document.addEventListener('click', function (e) {
+            var knopf = e.target && e.target.closest && e.target.closest('.em-info');
+            if (!knopf) return;
+            e.preventDefault();
+            var kasten = document.getElementById(knopf.getAttribute('data-help') || '');
+            if (!kasten) return;
+            var offen = kasten.classList.toggle('is-open');
+            knopf.setAttribute('aria-expanded', offen ? 'true' : 'false');
+        });
+    }
+
     function binde() {
         var b;
         klappInit();
+        infoInit();
         if ((b = $('em-save-acct'))) b.addEventListener('click', speichereKonto);
         if ((b = $('em-test-acct'))) b.addEventListener('click', testeKonto);
         if ((b = $('em-del-acct'))) b.addEventListener('click', loescheKonto);

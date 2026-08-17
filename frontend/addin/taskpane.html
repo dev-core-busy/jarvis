@@ -110,6 +110,22 @@
             text-transform: none; cursor: pointer; line-height: 1.45; }
         .ad-check input { width: auto; flex: 0 0 auto; margin-top: 2px; }
 
+        /* Feld-Erklaerung (ⓘ) – aufklappender Text statt schwebendem Popup:
+           bei 320 px Fensterbreite wuerde ein positioniertes Popup abgeschnitten
+           oder das Feld verdecken. Gleiche Bauart wie in /email.
+           `background: none` ist PFLICHT: ohne die Regel zeichnet der Browser
+           den UA-Default und aus dem dezenten Zeichen wird ein grauer Kasten
+           (im Screenshot gesehen, 2026-08-17). */
+        .ad-info { background: none; border: none; cursor: pointer; padding: 0 0 0 4px;
+            color: var(--text-muted); font-size: 12px; line-height: 1;
+            font-family: inherit; vertical-align: baseline; }
+        .ad-info:hover, .ad-info[aria-expanded="true"] { color: var(--accent); }
+        .ad-help { display: none; margin-top: 3px; padding: 7px 9px; border-radius: 7px;
+            font-size: 11.5px; line-height: 1.5; color: var(--text-secondary);
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-left: 3px solid var(--accent); }
+        .ad-help.is-open { display: block; }
+
         .ad-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
             padding: 6px 10px; border-radius: 7px; cursor: pointer; font-size: 12px;
             font-family: inherit; white-space: nowrap; flex: 0 0 auto; }
@@ -282,8 +298,10 @@
                 <input type="email" id="ad-adresse" autocomplete="off" spellcheck="false">
             </div>
             <div class="ad-field">
-                <label data-i18n="mail.acct_login">Anmeldename</label>
+                <label><span data-i18n="mail.acct_login">Anmeldename</span> <button type="button" class="ad-info" data-help="ad-help-login" aria-expanded="false"
+                        data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
                 <input type="text" id="ad-benutzer" autocomplete="off" spellcheck="false">
+                <div class="ad-help" id="ad-help-login" data-i18n="mail.help_login">Nur ausfüllen, wenn du dich am Exchange anders anmeldest als mit deiner E-Mail-Adresse – meist in der Form FIRMA\vorname.nachname.</div>
             </div>
             <div class="ad-field">
                 <label data-i18n="mail.acct_password">Kennwort</label>
@@ -292,31 +310,37 @@
                 <span class="ad-hint" id="ad-pw-hint"></span>
             </div>
             <div class="ad-field">
-                <label data-i18n="mail.acct_channel">Zugangsweg</label>
+                <label><span data-i18n="mail.acct_channel">Zugangsweg</span> <button type="button" class="ad-info" data-help="ad-help-channel" aria-expanded="false"
+                        data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
                 <select id="ad-kanal">
                     <option value="" data-i18n="mail.acct_channel_default">Vorgabe des Administrators</option>
                     <option value="auto" data-i18n="mail.acct_channel_auto">auto (EWS, sonst IMAP)</option>
                     <option value="ews" data-i18n="mail.acct_channel_ews">nur EWS</option>
                     <option value="imap" data-i18n="mail.acct_channel_imap">nur IMAP/SMTP</option>
                 </select>
+                <div class="ad-help" id="ad-help-channel" data-i18n="mail.help_channel">Wie Jarvis dein Postfach erreicht. „Vorgabe des Administrators" ist der Normalfall.</div>
             </div>
             <div class="ad-field">
-                <label data-i18n="mail.acct_inbox">Posteingang</label>
+                <label><span data-i18n="mail.acct_inbox">Posteingang</span> <button type="button" class="ad-info" data-help="ad-help-folders" aria-expanded="false"
+                        data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
                 <input type="text" id="ad-ord-eingang" placeholder="INBOX">
             </div>
             <div class="ad-field">
                 <label data-i18n="mail.acct_drafts">Entwürfe</label>
-                <input type="text" id="ad-ord-entwuerfe" data-i18n-placeholder="mail.default_ph" placeholder="Vorgabe">
+                <input type="text" id="ad-ord-entwuerfe" data-i18n-placeholder="mail.default_ph" placeholder="Standardordner">
             </div>
             <div class="ad-field">
                 <label data-i18n="mail.acct_sent">Gesendet</label>
-                <input type="text" id="ad-ord-gesendet" data-i18n-placeholder="mail.default_ph" placeholder="Vorgabe">
+                <input type="text" id="ad-ord-gesendet" data-i18n-placeholder="mail.default_ph" placeholder="Standardordner">
+                <div class="ad-help" id="ad-help-folders" data-i18n="mail.help_folders">Nur ausfüllen, wenn deine Ordner anders heißen als üblich. Bleibt ein Feld leer, benutzt Jarvis den Standardordner deines Postfachs.</div>
             </div>
             <div class="ad-field">
-                <label data-i18n="mail.acct_guide">Ständige Vorgabe für Antworten (optional)</label>
+                <label><span data-i18n="mail.acct_guide">Ständige Vorgabe für Antworten (optional)</span> <button type="button" class="ad-info" data-help="ad-help-guide" aria-expanded="false"
+                        data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
                 <textarea id="ad-vorgabe" rows="4" data-i18n-placeholder="mail.acct_guide_ph"
                           placeholder="z. B. Signatur, Anrede-Form, was nie zugesagt werden darf"></textarea>
                 <span class="ad-hint" data-i18n="mail.acct_guide_hint">Gilt für vorgeschlagene Antworten UND für alle deine Regeln. Bei Widerspruch geht die Regel vor.</span>
+                <div class="ad-help" id="ad-help-guide" data-i18n="mail.help_guide">Gilt für jede Antwort, die für dich formuliert wird – auch für deine Regeln.</div>
             </div>
             <label class="ad-check"><input type="checkbox" id="ad-aktiv">
                 <span data-i18n="mail.acct_active">Postfach aktiv (Regeln dürfen darauf arbeiten)</span></label>

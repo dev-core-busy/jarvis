@@ -286,7 +286,11 @@ pruefe(len(addin_keys) >= 15, "eigene addin.*-Schluessel angelegt (%d)" % len(ad
 abschnitt("8. Aufgabenfenster – Gestaltung und Verhalten")
 # Harte Farben brechen Branding und Hell-Modus. Erlaubt ist #fff auf dem
 # Verlauf-Knopf (wie in /email) – geprueft wird auf alles ANDERE.
-farben = [f for f in re.findall(r"#[0-9a-fA-F]{3,6}\b", TASKPANE)
+# HTML-ENTITIES AUSNEHMEN: `&#9432;` (das ⓘ-Zeichen) sah fuer den rohen Regex
+# aus wie die Hexfarbe #9432. Ein Waechter, der Text ohne Kontext durchsucht,
+# findet Dinge, die keine sind – hier gemessen am eigenen Fehlalarm.
+_ohne_entities = re.sub(r"&#\d+;", "", TASKPANE)
+farben = [f for f in re.findall(r"#[0-9a-fA-F]{3,6}\b", _ohne_entities)
           if f.lower() not in ("#fff", "#ffffff")]
 pruefe(not farben, "keine harten Farben ausser #fff – gefunden: %s" % farben)
 pruefe("var(--text-primary)" in TASKPANE and "var(--border)" in TASKPANE,
@@ -453,9 +457,13 @@ pruefe(sorted(karten) == ["acct", "addin", "log", "rules"],
 pruefe(EMAILHTML.count('class="em-card-head"') == 4
        and EMAILHTML.count('class="em-card-body"') == 4,
        "jede Karte hat Kopfzeile und Koerper")
-pruefe(EMAILHTML.count('aria-expanded="true"') == 4 and 'role="button"' in EMAILHTML
-       and 'tabindex="0"' in EMAILHTML,
-       "die Kopfzeile ist als Schalter ausgezeichnet und fokussierbar")
+# Im MARKUP zaehlen, nicht im <style>-Block: seit den Feld-Erklaerungen gibt es
+# die CSS-Regel `.em-info[aria-expanded="true"]`, und die zaehlte mit.
+_markup = re.sub(r"<style>.*?</style>", "", EMAILHTML, flags=re.S)
+pruefe(_markup.count('aria-expanded="true"') == 4 and 'role="button"' in _markup
+       and 'tabindex="0"' in _markup,
+       "die Kopfzeile ist als Schalter ausgezeichnet und fokussierbar (%d)"
+       % _markup.count('aria-expanded="true"'))
 
 # REIHENFOLGE: Titel zuerst, Pfeil als zweites Kind. Bei `space-between` schoebe
 # die umgekehrte Reihenfolge den Titel an den rechten Rand – genau der Fehler,

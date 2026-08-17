@@ -451,7 +451,25 @@
         ladeRegeln();
     }
 
+    /* Feld-Erklaerungen (ⓘ) – EIN delegierter Listener statt Bindung je Knopf,
+       damit auch nachtraeglich gezeichnete Bereiche mitmachen. Gleiche Bauart
+       wie in email_portal.js. */
+    function infoInit() {
+        if (document._adInfoBound) return;
+        document._adInfoBound = true;
+        document.addEventListener('click', function (e) {
+            var knopf = e.target && e.target.closest && e.target.closest('.ad-info');
+            if (!knopf) return;
+            e.preventDefault();
+            var kasten = document.getElementById(knopf.getAttribute('data-help') || '');
+            if (!kasten) return;
+            var offen = kasten.classList.toggle('is-open');
+            knopf.setAttribute('aria-expanded', offen ? 'true' : 'false');
+        });
+    }
+
     function binde() {
+        infoInit();
         if (binde._fertig) return;
         binde._fertig = true;
         document.querySelectorAll('.ad-tab').forEach(function (b) {

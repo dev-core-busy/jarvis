@@ -547,6 +547,83 @@ for _m in _marken:
     pruefe(" ".join(_kern.lower().split()) in _vorspann,
            "der Vorspann erklaert den Abschnitt '%s'" % _kern)
 
+# ═══ 10. Feld-Erklaerungen (ⓘ) ══════════════════════════════════════════════
+# GEMELDET 2026-08-17: "ein Benutzer kann mit 'Vorgabe' bei 'Entwuerfe' und
+# 'Gesendet' genau NICHTS anfangen". Dazu kam eine Wortkollision, die ich selbst
+# erzeugt hatte: das neue Feld hiess ebenfalls "Vorgabe", direkt darunter.
+abschnitt("10. Feld-Erklaerungen")
+EMHTML = (ROOT / "frontend" / "email.html").read_text(encoding="utf-8")
+EMJS = (ROOT / "frontend" / "js" / "email_portal.js").read_text(encoding="utf-8")
+TP = (ROOT / "frontend" / "addin" / "taskpane.html").read_text(encoding="utf-8")
+
+# Die Wortkollision ist aufgeloest: der Platzhalter sagt, was leer bedeutet,
+# und das neue Feld heisst nicht mehr wie er.
+pruefe("'mail.default_ph':              'Standardordner'" in I18N,
+       "der Ordner-Platzhalter heisst nicht mehr nur 'Vorgabe'")
+pruefe('placeholder="Vorgabe"' not in EMHTML and 'placeholder="Vorgabe"' not in TP,
+       "auch der HTML-Rueckfall ist nachgezogen (er steht ohne i18n da)")
+pruefe("Stil und Signatur" in I18N,
+       "das neue Feld heisst nicht mehr 'Vorgabe' (Kollision mit den Ordnern)")
+# Kein technischer Fachbegriff in der Oberflaeche: die Zielgruppe sind
+# Sachbearbeiter, keine Entwickler.
+for wort in ("PrePrompt", "Pre-Prompt", "Prompt-Vorlage"):
+    pruefe(wort not in EMHTML and wort not in TP,
+           "kein Fachbegriff '%s' in der Oberflaeche" % wort)
+
+# Knopf und Kasten muessen PAARWEISE existieren – ein ⓘ ohne Kasten tut nichts,
+# ein Kasten ohne ⓘ ist unerreichbar.
+for datei, name, kls in ((EMHTML, "/email", "em"), (TP, "Add-in", "ad")):
+    _b = re.findall(r'data-help="([a-z-]+)"', datei)
+    _k = re.findall(r'class="%s-help" id="([a-z-]+)"' % kls, datei)
+    pruefe(len(_b) >= 4, "%s: mindestens vier Erklaerungen (%d)" % (name, len(_b)))
+    pruefe(sorted(_b) == sorted(_k),
+           "%s: jeder Knopf hat seinen Kasten (%s / %s)" % (name, sorted(_b), sorted(_k)))
+    pruefe(datei.count('aria-expanded="false"') >= len(_b),
+           "%s: jeder Knopf meldet seinen Zustand (aria-expanded)" % name)
+    # DIE CSS-REGEL MUSS DA SEIN: der Markup-Test allein war gruen, waehrend im
+    # Add-in die Regel fehlte – der Browser zeichnete den UA-Default und aus dem
+    # dezenten Zeichen wurde ein grauer Kasten (nur im Screenshot zu sehen).
+    pruefe(".%s-info {" % kls in datei and "background: none" in
+           datei.split(".%s-info {" % kls, 1)[1][:200],
+           "%s: das ⓘ ist gestaltet (ohne background:none ein grauer UA-Knopf)" % name)
+    pruefe(".%s-help.is-open" % kls in datei,
+           "%s: der Erklaerkasten hat seine Aufklapp-Regel" % name)
+
+# EIN delegierter Listener statt Bindung je Knopf – sonst wirkt ein spaeter
+# ergaenztes ⓘ nicht, und in nachtraeglich gezeichneten Bereichen nie.
+for js, name in ((EMJS, "email_portal.js"), (ADDINJS, "addin.js")):
+    pruefe("infoInit" in js, "%s: Erklaerungen sind verdrahtet" % name)
+    pruefe("closest('.%s-info')" % ("em" if "email_portal" in name else "ad") in js,
+           "%s: delegierter Listener (wirkt auch fuer spaeter ergaenzte Knoepfe)" % name)
+    pruefe("_emInfoBound" in js or "_adInfoBound" in js,
+           "%s: Mehrfachbindung ausgeschlossen" % name)
+
+# ZWEI LAYOUT-/RENDER-FALLEN, beide erst im echten Browser aufgefallen:
+for datei, name, kls in ((EMHTML, "/email", "em"), (TP, "Add-in", "ad")):
+    # (1) `.em-field`/`.ad-field` sind SENKRECHTE Flex-Container. Ein Knopf als
+    #     Geschwister des Labels wird eigenes Flex-Kind und landet in einer
+    #     eigenen Zeile unter dem Feld – im Screenshot gesehen. Er gehoert INS
+    #     Label. (Klassen-Falle wie bei .input-group und .role-field.)
+    pruefe(not re.search(r"</label>\s*<button[^>]*%s-info" % kls, datei),
+           "%s: kein ⓘ ausserhalb seines Labels (sonst eigene Zeile)" % name)
+    # (2) `applyLang()` setzt bei `data-i18n` den textContent – ein Knopf IM
+    #     Label waere damit beim ersten Sprachwechsel geloescht. Gemessen: der
+    #     Knopf war im Browser nicht mehr auffindbar. Der Text gehoert in ein
+    #     eigenes <span>, das Label selbst traegt kein data-i18n.
+    pruefe(not re.search(r'<label data-i18n="[^"]+">[^<]*<button[^>]*%s-info' % kls, datei),
+           "%s: kein ⓘ in einem Label mit eigenem data-i18n (applyLang loescht ihn)" % name)
+
+# Der Klick auf ein ⓘ INNERHALB eines <label> mit Checkbox darf den Haken nicht
+# umschalten (Lehre vom AD-Picker 2026-07-29). Im Browser gemessen: mit
+# preventDefault bleibt der Haken stehen.
+for js, name in ((EMJS, "email_portal.js"), (ADDINJS, "addin.js")):
+    pruefe("preventDefault()" in js.split("infoInit", 1)[1][:900],
+           "%s: der ⓘ-Handler unterdrueckt die Label-Aktivierung" % name)
+
+for k in ("mail.help", "mail.help_login", "mail.help_channel", "mail.help_folders",
+          "mail.help_guide", "mail.help_active"):
+    pruefe(I18N.count("'%s'" % k) == 2, "%s in DE und EN" % k)
+
 # ═══ Ergebnis ═══════════════════════════════════════════════════════════════
 import shutil  # noqa: E402
 shutil.rmtree(_SAND, ignore_errors=True)

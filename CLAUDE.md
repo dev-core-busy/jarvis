@@ -5230,6 +5230,54 @@ System-Einstellungen → Lizenz*.
   braucht aber den **neuen Schlüsseltext**, und die Statusdatei muss neu veröffentlicht werden
   (sie trägt das alte Ausgabe-Zertifikat).
 
+## Vorfall 2026-08-17: Signaturschluessel im oeffentlichen Repo (behoben)
+`android/jarvis-release.jks` lag seit Commit `40a2c23` (07.04.2026) im **oeffentlichen** Repo –
+und das Kennwort stand daneben in `android/app/build.gradle.kts` (`"jarvis2024"`, mit `keytool`
+verifiziert). Wer beides hat, kann APKs signieren, die Android als **Update der echten App**
+akzeptiert. Gefunden bei der Frage, ob die Kennwortdateien des E-Mail-/SAP-Skills je eingecheckt
+wurden (die waren sauber: 0 Commits ueber alle Refs).
+- **Behoben in drei Schritten, in dieser Reihenfolge:** (1) neuer Keystore (RSA 4096,
+  SHA256 `F5:28:B7:84:…`) ausserhalb des Repos, (2) `build.gradle.kts` liest die Zugangsdaten aus
+  `android/keystore.properties` (gitignored) oder `JARVIS_ANDROID_*`, (3) alter Blob **und** das
+  Kennwort per `git-filter-repo` aus der GANZEN Historie getilgt, Force-Push, im frischen Klon
+  von GitHub gegengeprueft (0 Treffer).
+- **Die Reihenfolge ist der Punkt:** ein Historie-Rewrite allein hilft nicht – das Repo ist
+  oeffentlich, Klone und Forks existieren. Wirksam ist der SCHLUESSELTAUSCH, das Aufraeumen ist
+  die Kosmetik danach.
+- **⚠ ALLE COMMIT-HASHES vor dem 17.08.2026 haben sich geaendert.** Hash-Angaben in aelteren
+  Notizen/Memories (`6f0a181`, `e55fd31`, `1a51f14`, …) zeigen ins Leere. DEV und ECHT wurden mit
+  `git fetch` + `git reset --soft origin/master` auf die neue Historie gesetzt (Dateien
+  unangetastet) – **ohne diesen Schritt scheitert der naechste Update-Pull** an der Divergenz
+  (nachgemessen: `git merge-base --is-ancestor` meldete DIVERGIERT).
+- **⚠ FOLGE FUER INSTALLATIONEN:** ein Signaturwechsel ist kein Update. Sideload-Nutzer muessen
+  deinstallieren und neu installieren; ueber Play Store laeuft es ueber App Signing.
+- **Der neue Keystore ist NICHT im Repo und NICHT auf den Servern** – er liegt nur im lokalen
+  Arbeitsverzeichnis (`android/jarvis-release-neu.jks` + `keystore.properties`, 0600). Wer ihn
+  verliert, kann keine Updates mehr signieren. Sichern.
+
+## Vorfall 2026-08-17: die Antwort-Vorgabe hob die Regel-Bedingung auf
+**Gemeldet vom Nutzer, und der Vorwurf trifft zu.** Im Postfach stand unter *Stil und Signatur*
+`"immer auf bayrisch und in Reimform antworten"`, die Regel lautete *"wenn eine Nachricht von
+`mr.andreas.bender@*` kommt, antworten mit 'hat geklappert'"*. Die Automatik hat daraufhin
+**zwei echte Mails an Fremde** verschickt (16:22 `theben_ab2@ibsv3.de`, 17:24
+`theben_fn2@ibsv3.de`), beide auf bayrisch – obwohl die Absender-Bedingung nicht zutraf.
+Belege: `data/email_log.jsonl` + `data/logs/audit.jsonl` auf ECHT (15 echte Versands seit
+13.08., davon 13 an das eigene Testkonto).
+- **Ursache 1 – die Vorgabe steht VOR der Regel im selben Anweisungsblock.** Der Wortlaut
+  "immer … **antworten**" ist grammatisch eine Handlungsanweisung, keine Stilangabe; das Modell
+  hat daraus "antworte immer" gelesen. Ein Feld, das *Stil und Signatur* heisst, darf
+  strukturell nicht ueber das **Ob** einer Aktion entscheiden.
+- **Ursache 2, die schwerere:** die Ausloese-Bedingung einer Regel ("nur von Absender X") liegt
+  ausschliesslich im **Prompt**. Ein Prompt ist eine Bitte. Bei einer Regel, die senden darf,
+  gehoert der Absender-Filter in ein **Feld, das der Runner prueft, BEVOR das Modell laeuft** –
+  dieselbe Trennung, die im Projekt fuer Werkzeug-Zuschnitte gilt (`_role_tools` sitzt in
+  `_execute_tool`, nicht in der Werkzeugliste, die das Modell sieht).
+- **Merkregel:** Was eine Aktion AUSLOEST, darf nie im Prompt stehen, wenn die Aktion nach
+  draussen wirkt. Freitextfelder duerfen den Stil bestimmen, nie die Bedingung.
+- **Noch NICHT gebaut** (Fix steht aus): Absender-Filter als geprueftes Feld; Vorgabe in einen
+  der Regel NACHgeordneten Abschnitt, der ausdruecklich nur Ton/Signatur setzt und keine Aktion
+  ausloesen darf.
+
 ## Konventionen
 - **Git:** `git commit` und `git push` NUR auf ausdrückliches Kommando des Nutzers (`c+p`) –
   niemals aus eigenem Antrieb, auch nicht wenn eine Aufgabe fertig und getestet ist. Fertige

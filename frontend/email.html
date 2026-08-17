@@ -287,40 +287,6 @@
             </div>
         </div>
 
-        <!-- ═══ Outlook-Add-in ═══
-             Steht bewusst HIER (nach dem Postfach, vor den Regeln): wer gerade
-             sein Postfach hinterlegt hat, ist genau der, den das Add-in
-             interessiert. Am Seitenende liest es niemand.
-             Der Abschnitt ist fuer JEDEN sichtbar, der /email betreten darf –
-             das Manifest herunterzuladen und in Outlook zu installieren ist
-             keine Administrator-Aufgabe (die Anleitung sagt, wann doch). -->
-        <div class="em-card" data-klapp="addin">
-            <div class="em-card-head" role="button" tabindex="0" aria-expanded="true">
-                <h2 data-i18n="mail.addin_head">Outlook-Add-in</h2>
-                <span class="em-caret" aria-hidden="true">&#9662;</span>
-            </div>
-            <div class="em-card-body">
-                <p class="em-hint" data-i18n="mail.addin_hint">Du kannst diese Seite auch direkt in Outlook öffnen – als Aufgabenfenster. Dort verwaltest du Postfach und Regeln wie hier und kannst zusätzlich die gerade markierte E-Mail sofort von einer Regel verarbeiten lassen.</p>
-                <div class="em-sep"></div>
-                <div class="em-row" style="margin-top:0;">
-                    <!-- Einfacher Link: der Endpunkt liefert die Datei mit
-                         Content-Disposition, es braucht kein JavaScript. -->
-                    <a class="em-btn em-btn-primary" id="em-addin-dl" href="/addin/manifest.xml"
-                       data-i18n="mail.addin_download">Add-in-Datei herunterladen</a>
-                    <button class="em-btn" id="em-addin-help" data-i18n="mail.addin_howto">Anleitung anzeigen</button>
-                </div>
-                <div id="em-addin-steps" class="hidden" style="margin-top:12px;">
-                    <ol class="em-hint" style="padding-left:18px; line-height:1.75;">
-                        <li data-i18n-html="mail.addin_s1">Auf „Add-in-Datei herunterladen" klicken – es wird eine Datei <code>jarvis-outlook-addin.xml</code> gespeichert.</li>
-                        <li data-i18n-html="mail.addin_s2">Outlook im Web öffnen → Einstellungen → <b>Add-Ins verwalten</b> → <b>Benutzerdefiniertes Add-In hinzufügen</b> → <b>Aus Datei hinzufügen…</b> und die gespeicherte Datei wählen.</li>
-                        <li data-i18n-html="mail.addin_s3">Fertig: In Outlook erscheint beim Lesen einer E-Mail im Menüband ein Knopf, der das Fenster öffnet. Das Add-in hängt am Postfach – es steht danach auch im Outlook auf deinem Rechner zur Verfügung.</li>
-                    </ol>
-                    <p class="em-hint" style="margin-top:10px;"><b data-i18n="mail.addin_note_title">Gut zu wissen:</b>
-                        <span data-i18n-html="mail.addin_note">Das Add-in läuft im klassischen Outlook für Windows und in Outlook im Web. Das „neue Outlook" für Windows unterstützt Postfächer auf einem Exchange im eigenen Haus derzeit generell nicht – dort lässt sich das Konto gar nicht erst einrichten. Bleibt das Fenster in Outlook leer, fehlt auf dem Rechner das Zertifikat dieses Servers; dann hilft die IT-Abteilung weiter.</span></p>
-                </div>
-            </div>
-        </div>
-
         <!-- ═══ Regeln ═══ -->
         <div class="em-card" data-klapp="rules">
             <div class="em-card-head" role="button" tabindex="0" aria-expanded="true">
@@ -357,6 +323,40 @@
                     <span class="em-status" id="em-log-status"></span>
                 </div>
                 <div id="em-log" style="margin-top:12px;"></div>
+            </div>
+        </div>
+
+        <!-- ═══ Outlook-Add-in ═══
+             Steht an vierter und letzter Stelle (Vorgabe 2026-08-17): Postfach,
+             Regeln und Protokoll sind die taegliche Arbeit, die Installation des
+             Add-ins ist ein einmaliger Schritt.
+             Der Abschnitt ist fuer JEDEN sichtbar, der /email betreten darf –
+             das Manifest herunterzuladen und in Outlook zu installieren ist
+             keine Administrator-Aufgabe (die Anleitung sagt, wann doch). -->
+        <div class="em-card" data-klapp="addin">
+            <div class="em-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="mail.addin_head">Outlook-Add-in</h2>
+                <span class="em-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="em-card-body">
+                <p class="em-hint" data-i18n="mail.addin_hint">Du kannst diese Seite auch direkt in Outlook öffnen – als Aufgabenfenster. Dort verwaltest du Postfach und Regeln wie hier und kannst zusätzlich die gerade markierte E-Mail sofort von einer Regel verarbeiten lassen.</p>
+                <div class="em-sep"></div>
+                <div class="em-row" style="margin-top:0;">
+                    <!-- Einfacher Link: der Endpunkt liefert die Datei mit
+                         Content-Disposition, es braucht kein JavaScript. -->
+                    <a class="em-btn em-btn-primary" id="em-addin-dl" href="/addin/manifest.xml"
+                       data-i18n="mail.addin_download">Add-in-Datei herunterladen</a>
+                    <button class="em-btn" id="em-addin-help" data-i18n="mail.addin_howto">Anleitung anzeigen</button>
+                </div>
+                <div id="em-addin-steps" class="hidden" style="margin-top:12px;">
+                    <ol class="em-hint" style="padding-left:18px; line-height:1.75;">
+                        <li data-i18n-html="mail.addin_s1">Auf „Add-in-Datei herunterladen" klicken – es wird eine Datei <code>jarvis-outlook-addin.xml</code> gespeichert.</li>
+                        <li data-i18n-html="mail.addin_s2">Outlook im Web öffnen → Einstellungen → <b>Add-Ins verwalten</b> → <b>Benutzerdefiniertes Add-In hinzufügen</b> → <b>Aus Datei hinzufügen…</b> und die gespeicherte Datei wählen.</li>
+                        <li data-i18n-html="mail.addin_s3">Fertig: In Outlook erscheint beim Lesen einer E-Mail im Menüband ein Knopf, der das Fenster öffnet. Das Add-in hängt am Postfach – es steht danach auch im Outlook auf deinem Rechner zur Verfügung.</li>
+                    </ol>
+                    <p class="em-hint" style="margin-top:10px;"><b data-i18n="mail.addin_note_title">Gut zu wissen:</b>
+                        <span data-i18n-html="mail.addin_note">Das Add-in läuft im klassischen Outlook für Windows und in Outlook im Web. Das „neue Outlook" für Windows unterstützt Postfächer auf einem Exchange im eigenen Haus derzeit generell nicht – dort lässt sich das Konto gar nicht erst einrichten. Bleibt das Fenster in Outlook leer, fehlt auf dem Rechner das Zertifikat dieses Servers; dann hilft die IT-Abteilung weiter.</span></p>
+                </div>
             </div>
         </div>
     </div>

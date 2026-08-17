@@ -379,8 +379,11 @@ pruefe('href="/addin/manifest.xml"' in EMAILHTML,
        "der Manifest-Download ist in /email verlinkt")
 pruefe("em-addin-help" in EMAILHTML and "em-addin-steps" in EMAILHTML,
        "eine Anleitung steht daneben")
-pruefe(EMAILHTML.index("em-addin-dl") < EMAILHTML.index('id="em-rules"'),
-       "der Abschnitt steht VOR den Regeln (nicht am Seitenende, wo ihn niemand liest)")
+# Vorgabe 2026-08-17: der Abschnitt steht an vierter und letzter Stelle –
+# Postfach, Regeln und Protokoll sind die taegliche Arbeit, die Installation
+# des Add-ins ist ein einmaliger Schritt.
+pruefe(EMAILHTML.index('data-klapp="addin"') > EMAILHTML.index('data-klapp="log"'),
+       "der Abschnitt steht an vierter Stelle (nach dem Protokoll)")
 pruefe("require_local_auth" not in MAIN.split('@app.get("/addin/manifest.xml")', 1)[1]
        .split("@app.", 1)[0],
        "der Download verlangt keine Administrator-Rechte")

@@ -69,7 +69,7 @@ def x(wert) -> str:
 # Projektversion. Outlook laedt ein geaendertes Manifest nur dann neu, wenn
 # diese Zahl steigt; wer am Manifest oder an den Aufgabenfenster-Dateien etwas
 # aendert, das ein installiertes Add-in erreichen soll, muss sie erhoehen.
-ADDIN_VERSION = "1.0.0.0"
+ADDIN_VERSION = "1.1.0.0"
 
 # Anforderungssatz. 1.3 ist die hoechste Stufe, die auf einem Exchange im Haus
 # durchweg verfuegbar ist; alles darueber (z.B. 1.14 fuer ein Aufgabenfenster
@@ -161,6 +161,31 @@ def anzeigename() -> str:
     return (name or "Jarvis")[:40]
 
 
+def dateiname() -> str:
+    """Dateiname des Manifests fuer den Download – folgt dem Branding.
+
+    Der Administrator legt die Datei ab und waehlt sie beim Sideloading wieder
+    aus; auf einem White-Label-System hat sie deshalb den Namen des Hauses zu
+    tragen und nicht "jarvis" (gemeldet 2026-08-17).
+
+    Entschaerft auf ``[A-Za-z0-9_-]`` und klein: der Wert kommt aus dem
+    Branding-Formular, geht in einen ``Content-Disposition``-Kopf und darf dort
+    weder ein Anfuehrungszeichen noch einen Zeilenumbruch einschleusen. Bleibt
+    nach dem Entschaerfen nichts uebrig (z.B. ein rein kyrillischer Name), gilt
+    ``jarvis`` – ein Dateiname ohne Stamm waere schlechter als ein generischer.
+    """
+    roh = anzeigename().lower()
+    sauber = "".join(c if (c.isascii() and (c.isalnum() or c in "-_")) else "-"
+                     for c in roh)
+    sauber = "-".join(t for t in sauber.split("-") if t)[:40]
+    return "%s-outlook-addin.xml" % (sauber or "jarvis")
+
+
+# Groessen, die das Manifest anfordert. 16/32/80 stehen im Menueband, 64/128
+# in der Add-in-Verwaltung.
+ICON_GROESSEN = (16, 32, 64, 80, 128)
+
+
 def manifest(basis: str) -> str:
     """Vollstaendiges XML-Manifest fuer diese Basis-URL.
 
@@ -206,8 +231,8 @@ def manifest(basis: str) -> str:
   <DefaultLocale>de-DE</DefaultLocale>
   <DisplayName DefaultValue="%(titel)s"/>
   <Description DefaultValue="%(desc)s"/>
-  <IconUrl DefaultValue="%(basis)s/static/addin/icon-64.png"/>
-  <HighResolutionIconUrl DefaultValue="%(basis)s/static/addin/icon-128.png"/>
+  <IconUrl DefaultValue="%(basis)s/addin/icon-64.png"/>
+  <HighResolutionIconUrl DefaultValue="%(basis)s/addin/icon-128.png"/>
   <SupportUrl DefaultValue="%(basis)s/email"/>
   <AppDomains>
     <AppDomain>%(basis)s</AppDomain>
@@ -277,9 +302,9 @@ def manifest(basis: str) -> str:
     </Hosts>
     <Resources>
       <bt:Images>
-        <bt:Image id="ico16" DefaultValue="%(basis)s/static/addin/icon-16.png"/>
-        <bt:Image id="ico32" DefaultValue="%(basis)s/static/addin/icon-32.png"/>
-        <bt:Image id="ico80" DefaultValue="%(basis)s/static/addin/icon-80.png"/>
+        <bt:Image id="ico16" DefaultValue="%(basis)s/addin/icon-16.png"/>
+        <bt:Image id="ico32" DefaultValue="%(basis)s/addin/icon-32.png"/>
+        <bt:Image id="ico80" DefaultValue="%(basis)s/addin/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
         <bt:Url id="tpUrl" DefaultValue="%(tp)s"/>

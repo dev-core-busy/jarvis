@@ -7,15 +7,25 @@
 
    DREI DINGE, DIE HIER ANDERS SIND ALS IN /email:
 
-   1. **Eigene Anmeldung.** Eine Navigation aus Outlook traegt keinen
-      Authorization-Kopf, und es gibt keine Sitzung, in die man
-      hineinlaufen koennte. Das Fenster meldet sich deshalb selbst an
-      (`POST /api/login`) und legt den Token im localStorage ab – dieselbe
-      Schluesselkette wie die uebrigen Seiten, damit ein bereits an /chat
-      angemeldeter Benutzer sich nicht erneut anmelden muss.
+   1. **Anmeldung ohne Kennwort – EINMAL angelernt.** Eine Navigation aus
+      Outlook traegt keinen Authorization-Kopf, und es gibt keine Sitzung,
+      in die man hineinlaufen koennte. Seit 2026-08-17 holt das Fenster
+      deshalb ein **Exchange-Identity-Token** (`getUserIdentityTokenAsync`)
+      und schickt es an `POST /api/addin/sso`; der Server prueft die
+      Signatur des Exchange und weiss damit, welches Postfach dranhaengt.
+      **Das Token nennt keine Mailadresse** – die Zuordnung zum Jarvis-Konto
+      entsteht bei der ERSTEN Anmeldung: dort wird das Token mitgeschickt
+      (`addin_token` an `POST /api/login`) und die Verknuepfung gespeichert.
+      Ab dann meldet sich das Fenster von selbst an.
       **Ein SSO ueber Office/Entra scheidet aus**: das setzt eine
       Anwendungsregistrierung in Microsoft 365 voraus, und ein Exchange im
-      Haus hat die nicht.
+      Haus hat die nicht. Fuer Exchange **on-premises** sind die
+      Identity-Token dagegen ausdruecklich weiter unterstuetzt (fuer
+      Exchange Online hat Microsoft sie abgeschaltet) – deshalb genau dieser
+      Weg und kein anderer.
+      Der Token liegt weiterhin im localStorage, gleiche Schluesselkette wie
+      die uebrigen Seiten: wer schon an /chat angemeldet ist, kommt ohne
+      alles herein.
 
    2. **Office.js darf fehlen.** Die Bibliothek kommt aus dem Netz von
       Microsoft. Ist sie nicht erreichbar (Arbeitsplatz ohne Internet),
@@ -51,6 +61,10 @@
     var _editHeim = null;    // Heimatplatz des wandernden Formulars
     var _office = null;      // { betreff, von, id, internetId } oder null
     var _officeGrund = '';   // warum kein Kontext
+    var _idToken = '';       // Exchange-Identity-Token (fuer die Anmeldung)
+    var _ssoGrund = '';      // warum SSO nicht griff – nur zur Anzeige
+    var _ssoProbiert = false; // Endlosschleife-Bremse: hoechstens EIN
+                              // kennwortloser Versuch je Fensterlauf
     var _tab = 'mail';
     var _laeuft = false;
 
@@ -120,10 +134,17 @@
         return fetch(url, Object.assign({ headers: kopf() }, opt || {}))
             .then(function (r) {
                 if (r.status === 401) {
-                    // Abgelaufen: zurueck zur Anmeldung statt einer Seite
-                    // voller technischer Meldungen.
+                    // Abgelaufen. ZUERST die kennwortlose Anmeldung erneut
+                    // versuchen – ist das Postfach verknuepft, merkt der
+                    // Benutzer vom Ablauf nichts. Erst wenn das scheitert,
+                    // kommt die Anmeldemaske (statt einer Seite voller
+                    // technischer Meldungen).
                     tokenLoeschen();
-                    zeigeLogin(T('addin.session_over', 'Die Anmeldung ist abgelaufen. Bitte erneut anmelden.'));
+                    ssoVersuch().then(function (ok) {
+                        if (ok && token()) { zeigeApp(); return; }
+                        zeigeLogin(T('addin.session_over',
+                            'Die Anmeldung ist abgelaufen. Bitte erneut anmelden.'));
+                    });
                     throw new Error('401');
                 }
                 return r.json().catch(function () { return {}; })
@@ -148,7 +169,24 @@
         $('ad-app').classList.add('hidden');
         $('ad-login').classList.remove('hidden');
         $('ad-login-hint').textContent = hinweis ||
-            T('addin.login_hint', 'Melde dich mit deinem Jarvis-Zugang an – denselben Daten wie im Browser.');
+            // Bewusst OHNE Produktnamen: der Text wird per textContent gesetzt,
+            // branding.js kaeme also nicht mehr heran (es brandet nur Markup,
+            // das beim Anwenden schon dasteht). Ein markenneutraler Satz ist
+            // hier ausserdem der praezisere.
+            T('addin.login_hint', 'Melde dich mit deinem gewohnten Zugang an – denselben Daten wie im Browser.');
+        // Anbindungs-Zustand ausweisen. Ohne diese Zeile ist von aussen nicht
+        // zu unterscheiden, ob office.js geladen wurde – und genau das ist die
+        // erste Frage, wenn sich das Fenster in Outlook seltsam verhaelt.
+        // Der SSO-Grund hat VORRANG: er erklaert, warum hier ueberhaupt noch
+        // eine Anmeldung steht.
+        if (_ssoGrund) {
+            melde('ad-login-office', _ssoGrund);
+        } else if (_office) {
+            melde('ad-login-office',
+                T('addin.office_ok', 'Mit Outlook verbunden.'), 'ok');
+        } else {
+            melde('ad-login-office', _officeGrund || '');
+        }
         var u = $('ad-user');
         if (u && !u.value) { try { u.focus(); } catch (e) { } }
     }
@@ -164,7 +202,17 @@
         knopf.disabled = true;
         melde('ad-login-status', T('login.connecting', 'Verbinde…'));
         var rumpf = { username: u, password: p };
-        if (totp) rumpf.totp = totp;
+        // FELDNAME IST `totp_code` – so liest ihn `/api/login`, und so senden
+        // ihn app.js, chat.js, userchat.js und wissen.js. Das Fenster schickte
+        // `totp` und damit ins Leere: der Server sah keinen Code, antwortete
+        // erneut `requires_totp` – eine Anmeldeschleife, aus der niemand
+        // herauskam (gefunden 2026-08-17 beim Bau der kennwortlosen Anmeldung).
+        if (totp) rumpf.totp_code = totp;
+        // DIE ERSTANMELDUNG IST DIE ANLERNPHASE: das Exchange-Token geht mit,
+        // der Server verknuepft das Postfach mit diesem Konto, und ab dem
+        // naechsten Start entfaellt die Anmeldung. Ohne Token laeuft alles
+        // unveraendert weiter – dann bleibt es eben bei der Anmeldung.
+        if (_idToken) rumpf.addin_token = _idToken;
         fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -239,36 +287,139 @@
 
             function lesen() {
                 clearTimeout(uhr);
-                try {
-                    var mb = Office.context && Office.context.mailbox;
-                    var item = mb && mb.item;
-                    if (!item) {
+                var mb = null;
+                try { mb = Office.context && Office.context.mailbox; } catch (e) { mb = null; }
+                // Das Identity-Token ist die Grundlage der kennwortlosen
+                // Anmeldung und wird deshalb IMMER geholt – auch wenn gerade
+                // keine Nachricht markiert ist. Es haengt am Postfach, nicht
+                // an der Nachricht. Eigene Zeitgrenze: die aeussere ist oben
+                // schon abgeraeumt, ein haengender Aufruf duerfte das Fenster
+                // sonst dauerhaft blockieren.
+                idTokenHolen(mb).then(function () {
+                    try {
+                        var item = mb && mb.item;
+                        if (!item) {
+                            ende(null, T('addin.no_message',
+                                'Es ist keine Nachricht geöffnet. Markiere eine E-Mail, um sie hier verarbeiten zu lassen.'));
+                            return;
+                        }
+                        ende({
+                            // itemId ist die EWS-Kennung – genau die, mit der der
+                            // Server die Nachricht wiederfindet.
+                            id: item.itemId || '',
+                            internetId: item.internetMessageId || '',
+                            betreff: item.subject || '',
+                            von: (item.from && (item.from.emailAddress || item.from.displayName)) || ''
+                        }, '');
+                    } catch (e) {
                         ende(null, T('addin.no_message',
                             'Es ist keine Nachricht geöffnet. Markiere eine E-Mail, um sie hier verarbeiten zu lassen.'));
-                        return;
                     }
-                    ende({
-                        // itemId ist die EWS-Kennung – genau die, mit der der
-                        // Server die Nachricht wiederfindet.
-                        id: item.itemId || '',
-                        internetId: item.internetMessageId || '',
-                        betreff: item.subject || '',
-                        von: (item.from && (item.from.emailAddress || item.from.displayName)) || ''
-                    }, '');
-                } catch (e) {
-                    ende(null, T('addin.no_message',
-                        'Es ist keine Nachricht geöffnet. Markiere eine E-Mail, um sie hier verarbeiten zu lassen.'));
-                }
+                });
             }
         });
     }
 
+    /* Exchange-Identity-Token holen. Loest IMMER auf – ohne Token laeuft das
+       Fenster mit der gewohnten Anmeldung weiter, und `_ssoGrund` sagt, warum.
+
+       `getUserIdentityTokenAsync` gibt es erst ab Mailbox 1.3 und NICHT in
+       Exchange Online (dort hat Microsoft die Token abgeschaltet); beides
+       faengt der Zweig unten ab, statt eine Ausnahme bis in den Startlauf
+       durchschlagen zu lassen. Eigene Zeitgrenze, weil die aeussere zu diesem
+       Zeitpunkt schon abgeraeumt ist. */
+    function idTokenHolen(mb) {
+        return new Promise(function (fertig) {
+            var fertigGemeldet = false;
+            function ende(grund) {
+                if (fertigGemeldet) return;
+                fertigGemeldet = true;
+                _ssoGrund = grund || '';
+                fertig();
+            }
+            setTimeout(function () {
+                ende(T('addin.sso_timeout',
+                    'Der Exchange hat kein Anmelde-Token geliefert (Zeitüberschreitung).'));
+            }, 3000);
+            try {
+                if (!mb || typeof mb.getUserIdentityTokenAsync !== 'function') {
+                    ende(T('addin.sso_unsupported',
+                        'Dieses Postfach liefert kein Anmelde-Token (nur Exchange im eigenen Haus kann das).'));
+                    return;
+                }
+                mb.getUserIdentityTokenAsync(function (r) {
+                    if (r && r.status === 'succeeded' && r.value) {
+                        _idToken = String(r.value);
+                        ende('');
+                    } else {
+                        ende((r && r.error && r.error.message) ||
+                            T('addin.sso_failed', 'Der Exchange hat kein Anmelde-Token ausgestellt.'));
+                    }
+                });
+            } catch (e) {
+                ende(String((e && e.message) || e));
+            }
+        });
+    }
+
+    /* Kennwortlose Anmeldung versuchen. Liefert true, wenn ein Token kam.
+       Ein Fehlschlag ist der NORMALFALL beim ersten Start (das Postfach ist
+       noch keinem Konto zugeordnet) – deshalb keine Fehlermeldung, sondern
+       ein Hinweis auf dem Anmeldebildschirm. */
+    function ssoVersuch() {
+        if (!_idToken) return Promise.resolve(false);
+        return fetch('/api/addin/sso', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: _idToken })
+        })
+            .then(function (r) { return r.json().catch(function () { return {}; }); })
+            .then(function (d) {
+                if (d && d.ok && d.token) {
+                    tokenSetzen(d.token);
+                    return true;
+                }
+                // `unbekannt` heisst: einmal anmelden, danach geht es von selbst.
+                _ssoGrund = (d && d.unbekannt)
+                    ? T('addin.sso_first', 'Einmalige Anmeldung – danach meldet sich das Fenster von selbst an.')
+                    : ((d && d.error) || '');
+                return false;
+            })
+            .catch(function () { return false; });
+    }
+
     /* ── Start ────────────────────────────────────────────────────────── */
     function start() {
-        if (!token()) { zeigeLogin(''); return; }
+        // Ohne Sitzung zuerst die kennwortlose Anmeldung versuchen. Sie greift
+        // ab dem zweiten Start – beim ersten fehlt die Verknuepfung, und dann
+        // steht der Grund auf dem Anmeldebildschirm.
+        if (!token()) {
+            ssoVersuch().then(function (ok) {
+                // `token()` wird MITGEPRUEFT: liesse sich der Token weder im
+                // Speicher noch im localStorage ablegen, riefe `start()` sich
+                // sonst endlos selbst auf.
+                if (ok && token()) start(); else zeigeLogin('');
+            });
+            return;
+        }
         fetch('/api/me', { headers: kopf() })
             .then(function (r) {
-                if (r.status === 401) { tokenLoeschen(); zeigeLogin(''); return null; }
+                if (r.status === 401) {
+                    // Abgelaufenes Token (haeufig: es stammt aus /chat und ist
+                    // aelter). Auch hier zuerst kennwortlos versuchen – aber
+                    // GENAU EINMAL, sonst koennten sich start() und der
+                    // SSO-Versuch gegenseitig aufrufen.
+                    tokenLoeschen();
+                    if (!_ssoProbiert) {
+                        _ssoProbiert = true;
+                        ssoVersuch().then(function (ok) {
+                            if (ok && token()) start(); else zeigeLogin('');
+                        });
+                    } else {
+                        zeigeLogin('');
+                    }
+                    return null;
+                }
                 return r.ok ? r.json() : null;
             })
             .then(function (me) {
@@ -315,11 +466,16 @@
             zeigeLogin('');
         });
         $('ad-theme').addEventListener('click', function () {
-            if (window.toggleTheme) { window.toggleTheme(); return; }
-            document.body.classList.toggle('light');
+            var hell = !document.body.classList.contains('light');
+            // `theme.js` exportiert `applyTheme`, NICHT `toggleTheme` – die
+            // frueher geprueefte Funktion gab es nie, also lief immer der
+            // Rueckfall. Der schaltet zwar die Klasse, feuert aber KEIN
+            // `jarvis:themechange`; seit branding.js hier eingebunden ist,
+            // waeren damit die Hell-Farben der Marke nicht nachgezogen worden.
+            if (window.applyTheme) window.applyTheme(hell);
+            else document.body.classList.toggle('light', hell);
             try {
-                localStorage.setItem('jarvis_theme',
-                    document.body.classList.contains('light') ? 'light' : 'dark');
+                localStorage.setItem('jarvis_theme', hell ? 'light' : 'dark');
             } catch (e) { }
         });
         $('ad-lang').addEventListener('click', function () {

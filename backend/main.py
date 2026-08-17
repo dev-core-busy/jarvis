@@ -2798,6 +2798,29 @@ async def login(request: Request):
                              "account_blocked": True,
                              "block_reason": _block.get("reason", ""),
                              "block_incidents": _block.get("incidents", [])})
+    # Outlook-Add-in: EINMALIGE Verknuepfung des Postfachs mit diesem Konto.
+    # Das Aufgabenfenster schickt sein Exchange-Identity-Token mit; ab dem
+    # naechsten Start meldet es sich damit ohne Kennwort an.
+    #
+    # Bewusst HIER und nicht in einem eigenen "Verknuepfen"-Endpunkt: die
+    # Verknuepfung darf nur nach einer vollstaendigen Anmeldung entstehen –
+    # Kennwort, 2FA, AD-Freigabe, Lizenzgrenze sind zu diesem Zeitpunkt alle
+    # bestanden. Ein eigener Endpunkt muesste dieselben Pruefungen noch einmal
+    # fuehren, und genau solche Zweitfassungen laufen erfahrungsgemaess
+    # auseinander. Ein Fehlschlag beim Verknuepfen kippt die Anmeldung NICHT –
+    # der Benutzer ist dann angemeldet, nur eben ohne SSO beim naechsten Mal.
+    _addin_tok = str(body.get("addin_token") or "").strip()
+    if _addin_tok:
+        try:
+            from backend import addin as _addin_mod, addin_sso as _sso
+            _erw = "%s/addin/taskpane.html" % _addin_mod.basis_url(request)
+            _info = _sso.pruefe_token(_addin_tok, _erw)
+            _sso.verknuepfe(_info["kennung"], username)
+            print("[Add-in] Postfach mit '%s' verknuepft (kennwortlose Anmeldung "
+                  "ab jetzt moeglich)" % username, flush=True)
+        except Exception as e:  # noqa: BLE001
+            print("[Add-in] Verknuepfung nicht moeglich: %s" % e, flush=True)
+
     # Desktop-Session im Hintergrund wechseln (nur im Nicht-Docker-Modus)
     if not _DOCKER_MODE:
         asyncio.get_event_loop().run_in_executor(None, switch_desktop_session, username)
@@ -7573,9 +7596,196 @@ async def addin_manifest(request: Request):
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
             # Damit der Browser des Administrators die Datei ablegt, statt sie
-            # anzuzeigen – hochgeladen wird sie als Datei.
-            "Content-Disposition": 'attachment; filename="jarvis-outlook-addin.xml"',
+            # anzuzeigen – hochgeladen wird sie als Datei. Der Stamm folgt dem
+            # Branding (``addin.dateiname()`` entschaerft ihn auf ASCII, es kann
+            # also nichts in den Kopf eingeschleust werden).
+            "Content-Disposition": 'attachment; filename="%s"' % addin.dateiname(),
         })
+
+
+@app.post("/api/addin/sso")
+async def addin_sso(request: Request):
+    """Kennwortlose Anmeldung des Aufgabenfensters ueber ein Exchange-Token.
+
+    **Bewusst ohne Dependency** – das ist ein Anmeldeweg, es gibt hier noch
+    keine Sitzung. Die Pruefungen sind deshalb dieselben wie in ``/api/login``,
+    in derselben Reihenfolge: Ratenbegrenzung → Token → Verknuepfung →
+    Login-Freigabe → Lizenzgrenze → Anwesenheit → Kontosperre.
+
+    Die kryptografische Arbeit macht ``addin_sso.pruefe_token``; hier steht die
+    Rechtelage. Diese Trennung ist Absicht (siehe Modulkopf dort).
+
+    **Antwortet 200 mit ``unbekannt: true``, wenn das Postfach noch keinem Konto
+    zugeordnet ist** – das ist kein Fehler, sondern der Normalfall beim ersten
+    Start. Das Fenster zeigt dann die Anmeldung und schickt das Token dort mit.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return JSONResponse({"ok": False, "error": "Zu viele Versuche. Bitte warte 5 Minuten."},
+                            status_code=429)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    token_roh = str((body or {}).get("token") or "").strip()
+    if not token_roh:
+        return JSONResponse({"ok": False, "error": "Kein Token uebergeben."}, status_code=400)
+
+    from backend import addin as _addin_mod, addin_sso as _sso
+    erwartet = "%s/addin/taskpane.html" % _addin_mod.basis_url(request)
+    try:
+        info = _sso.pruefe_token(token_roh, erwartet)
+    except _sso.SsoFehler as e:
+        # KEIN Fehlversuch fuer die Ratenbegrenzung: ein abgelaufenes Token oder
+        # eine fehlende EWS-Adresse ist ein Konfigurations-, kein Angriffsindiz –
+        # und der Benutzer koennte es nicht abstellen. Der Grund geht im Klartext
+        # zurueck, sonst sucht ihn niemand an der richtigen Stelle.
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=401)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Token nicht pruefbar: %s" % e},
+                            status_code=401)
+
+    username = _sso.benutzer_fuer(info["kennung"])
+    if not username:
+        return JSONResponse({"ok": False, "unbekannt": True,
+                             "error": "Dieses Postfach ist noch mit keinem Konto "
+                                      "verknuepft. Einmal anmelden – danach geht es "
+                                      "von selbst."})
+
+    # Ab hier gilt genau, was auch fuer eine Anmeldung mit Kennwort gilt.
+    if not _login_still_allowed(username):
+        print("[Add-in] SSO abgewiesen (keine Anmeldeberechtigung): %s" % username, flush=True)
+        return JSONResponse({"ok": False, "error": "Keine Anmeldeberechtigung"},
+                            status_code=403)
+
+    # 2FA: wer einen zweiten Faktor eingeschaltet hat, bekommt KEIN SSO. Das
+    # Exchange-Token stammt vom selben Arbeitsplatz und ist damit kein zweiter
+    # Faktor – es stillschweigend als solchen zu behandeln, wuerde eine bewusst
+    # eingeschaltete Schutzmassnahme aushebeln.
+    try:
+        _st = _get_user_auth_state(username)
+        if _st.get("totp_enabled") and _st.get("totp_secret"):
+            return JSONResponse(
+                {"ok": False, "zwei_faktor": True,
+                 "error": "Fuer dieses Konto ist eine Zwei-Faktor-Anmeldung "
+                          "eingeschaltet. Bitte melde dich hier mit Kennwort und "
+                          "Code an."}, status_code=403)
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        from backend import license_enforce as _lic_enf
+        _lic_ok, _lic_grund = _lic_enf.darf_benutzer_anmelden(username)
+    except Exception:  # noqa: BLE001
+        _lic_ok, _lic_grund = True, ""
+    if not _lic_ok:
+        return JSONResponse({"ok": False, "error": _lic_grund}, status_code=403)
+
+    token = generate_token(username)
+    try:
+        _user_sessions.record_login(username, client_ip, display=_display_name(username))
+    except Exception:  # noqa: BLE001
+        pass
+    _sso.merke_nutzung(info["kennung"])
+
+    _block = security_guard.get_block(username)
+    if _block:
+        return JSONResponse({"ok": True, "token": token, "username": username,
+                             "is_admin": False, "account_blocked": True,
+                             "block_reason": _block.get("reason", ""),
+                             "block_incidents": _block.get("incidents", [])})
+    print("[Add-in] Kennwortlose Anmeldung: %s (%s)" % (username, client_ip), flush=True)
+    return JSONResponse({"ok": True, "token": token, "username": username,
+                         "is_admin": _is_admin_user(username)})
+
+
+@app.get("/api/addin/links")
+async def addin_links(user: str = Depends(require_local_auth)):
+    """Verknuepfte Postfaecher auflisten (Administratoren).
+
+    Zeigt WER kennwortlos aus Outlook hereinkommt – ohne die Postfach-Kennungen
+    selbst, die nur gehasht gespeichert sind.
+    """
+    from backend import addin_sso as _sso
+    eintraege = _sso.verknuepfungen()
+    for e in eintraege:
+        e["user"] = _display_name(e.get("user", ""))
+    return JSONResponse({"ok": True, "links": eintraege,
+                         "hosts": sorted(_sso.erlaubte_hosts())})
+
+
+@app.delete("/api/addin/links/{username}")
+async def addin_link_loesen(username: str, admin: str = Depends(require_local_auth)):
+    """Verknuepfung eines Kontos aufheben.
+
+    Gebraucht, wenn ein Postfach den Besitzer wechselt: ohne diesen Weg meldete
+    sich der neue Inhaber weiterhin als der alte Benutzer an.
+    """
+    from backend import addin_sso as _sso
+    n = _sso.loese(username)
+    print("[Add-in] %d Verknuepfung(en) von '%s' geloest (durch %s)"
+          % (n, username, admin), flush=True)
+    return JSONResponse({"ok": True, "entfernt": n})
+
+
+@app.get("/addin/icon-{groesse}.png")
+async def addin_icon(groesse: int):
+    """Menueband-Symbol des Add-ins – folgt dem Branding.
+
+    Das Symbol steht neben dem Namen im Menueband JEDES Arbeitsplatzes. Bis zum
+    2026-08-17 zeigte das Manifest fest auf die Jarvis-Zeichen unter
+    ``/static/addin/`` – die Beschriftung trug also die Marke, das Bild daneben
+    nicht (gemeldet mit Screenshot).
+
+    Reihenfolge: rundes Branding-Logo (Dunkel-Variante, wie in der Kopfzeile der
+    Oberflaechen) → skaliert auf die angeforderte Kantenlaenge → sonst das
+    eingebaute Zeichen. **Fail-safe in diese Richtung**: ein Symbol, das nicht
+    geliefert wird, laesst Outlook den Knopf ohne Bild zeichnen; das eingebaute
+    Zeichen ist der bessere Ausgang als ein Loch.
+
+    Kein SVG: Office rendert im Menueband Rastergrafik, und Pillow kann SVG
+    ohnehin nicht lesen – ein hochgeladenes SVG-Logo faellt deshalb bewusst auf
+    das eingebaute Zeichen zurueck, statt einen Fehler zu erzeugen.
+
+    Ohne Anmeldung, wie das Manifest selbst: die Bilder holt der Client (bzw.
+    der Exchange-Server) ohne Sitzung, und ``/api/branding/logo`` gibt dasselbe
+    Logo ohnehin offen heraus.
+    """
+    from backend import addin as _addin
+    if groesse not in _addin.ICON_GROESSEN:
+        return JSONResponse({"error": "Groesse nicht vorgesehen"}, status_code=404)
+
+    fallback = FRONTEND_DIR / "addin" / f"icon-{groesse}.png"
+
+    def _eingebaut():
+        if fallback.exists():
+            return FileResponse(str(fallback), media_type="image/png")
+        return JSONResponse({"error": "kein Symbol"}, status_code=404)
+
+    enabled, _cfg = _branding_state()
+    logo = _branding_logo_path("dark") if enabled else None
+    if not logo or logo.suffix.lower() == ".svg":
+        return _eingebaut()
+    try:
+        from PIL import Image  # noqa: PLC0415
+        import io  # noqa: PLC0415
+        with Image.open(str(logo)) as quelle:
+            bild = quelle.convert("RGBA")
+            # `thumbnail` haelt das Seitenverhaeltnis; das Ergebnis wird
+            # anschliessend in ein QUADRAT zentriert. Ein verzerrtes Logo im
+            # Menueband faellt sofort auf, ein nicht-quadratisches Symbol
+            # wuerde von Office selbst gestaucht.
+            bild.thumbnail((groesse, groesse), Image.LANCZOS)
+            flaeche = Image.new("RGBA", (groesse, groesse), (0, 0, 0, 0))
+            flaeche.paste(bild,
+                          ((groesse - bild.width) // 2, (groesse - bild.height) // 2))
+            puffer = io.BytesIO()
+            flaeche.save(puffer, format="PNG")
+    except Exception as e:  # noqa: BLE001
+        print(f"[Add-in] Branding-Symbol {groesse}px nicht erzeugbar: {e}")
+        return _eingebaut()
+    return Response(content=puffer.getvalue(), media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=300"})
 
 
 @app.get("/addin/taskpane.html", response_class=HTMLResponse)

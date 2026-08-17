@@ -73,6 +73,23 @@
 html[data-lang="en"] .i18n-de { display: none !important; }
 html:not([data-lang="en"]) .i18n-en { display: none !important; }
 
+/* ─── Der Akzent-Verlauf muss AUF BODY neu berechnet werden ──────────────
+   `--gradient` steht oben in `:root` (= <html>) und verweist auf `var(--accent)`.
+   Eine Custom Property wird aber auf dem Element BERECHNET, auf dem sie
+   deklariert ist – der fertige Verlauf wird danach nur noch weitervererbt.
+   branding.js setzt die Markenfarbe per Inline-Style auf <body>, also EINE
+   Ebene darunter: der Verlauf blieb dadurch Jarvis-Violett, obwohl der
+   Kommentar an der Deklaration ausdruecklich "damit Branding automatisch
+   greift" verspricht. Aufgefallen am Outlook-Aufgabenfenster (gemeldet
+   2026-08-17): Logo und Markenname standen rot da, der Anmelden-Knopf daneben
+   violett – betroffen war aber JEDE Seite mit `var(--gradient)` (13 Stellen).
+   Diese Zeile deklariert dieselbe Formel noch einmal auf <body>; dort ist die
+   Markenfarbe gesetzt und wird eingerechnet. OHNE Branding kommt exakt derselbe
+   Verlauf heraus wie vorher (`--accent` ist dann der geerbte Vorgabewert). */
+body {
+    --gradient: linear-gradient(135deg, var(--accent), var(--accent-dark));
+}
+
 /* ─── Hell-Theme: kippt nur die Basis-Variablen, alles andere folgt ─── */
 body.light {
     color-scheme: light;

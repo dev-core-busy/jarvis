@@ -2719,6 +2719,112 @@ Absicht behauptet, ist ein Grund zum Messen, nicht zum Aufräumen. Die 31 übrig
   (Sideload, Menüband-Knopf, ein echter Lauf über „Jetzt verarbeiten"). Das ist der Schritt, der
   am Arbeitsplatz zu machen ist – die Anleitung führt ihn Schritt für Schritt.
 
+### Add-in kennwortlos + Branding im Fenster (Nacharbeit 2026-08-17)
+Zwei Meldungen aus dem echten Betrieb, beide mit Screenshot: **(a)** das Add-in trug den
+Markennamen nur im Menüband, das Fenster darunter „Jarvis E-Mail" mit Jarvis-Zeichen;
+**(b)** das Fenster verlangte bei jedem Start Benutzer und Kennwort – *„warum überhaupt? ich
+bin in Outlook als Domänenbenutzer angemeldet und in Jarvis auch"* – und die Eingabe war am
+Arbeitsplatz nicht möglich.
+
+**(a) Branding an DREI Stellen, nicht an einer.** Der Anzeigename war korrekt (er kommt aus
+`kategorie_name()`), Fenster, Symbol und Dateiname nicht:
+- `taskpane.html` bindet jetzt `branding.js` ein und benutzt dieselben Haken wie alle anderen
+  Seiten (`.topbar-avatar` für das Logo, `.brand-app-name` für den Namen). Die Texte in
+  `addin.js` wurden **markenneutral** formuliert statt gebrandet: sie werden per `textContent`
+  gesetzt, und dorthin kommt `branding.js` nicht mehr.
+- Menüband-Symbole über den neuen Endpunkt **`/addin/icon-<n>.png`** statt direkt aus `/static`:
+  er skaliert das Branding-Logo mit Pillow auf die angeforderte Kantenlänge und zentriert es
+  quadratisch. **Fail-safe in Richtung „eingebautes Zeichen"** – ein SVG-Logo (Pillow kann kein
+  SVG), ein kaputtes Bild oder ein fehlendes Branding liefern das alte Symbol, nie ein Loch.
+  `ADDIN_VERSION` musste mit: Outlook lädt ein geändertes Manifest nur bei gestiegener Version,
+  sonst behalten installierte Add-ins die alten `/static`-URLs.
+- Der Download heißt jetzt `<marke>-outlook-addin.xml` (`addin.dateiname()`, entschärft auf
+  ASCII – der Wert geht in einen `Content-Disposition`-Kopf).
+
+**DER EIGENTLICHE FUND STECKTE IM THEME – und betraf JEDE Seite, nicht das Add-in:**
+`--gradient` steht in `:root` und verweist auf `var(--accent)`. **Eine Custom Property wird auf
+dem Element BERECHNET, auf dem sie deklariert ist**; der fertige Verlauf wird danach nur noch
+weitervererbt. `branding.js` setzt die Markenfarbe per Inline-Style auf `<body>` – eine Ebene
+darunter, also zu spät. Alle Primärknöpfe blieben Jarvis-violett, obwohl der Kommentar an der
+Deklaration ausdrücklich „Akzentbasiert, damit Branding automatisch greift" versprach. Wieder
+die Fehlerklasse *„eine Zusage, die der Code nicht hält"*. Fix: dieselbe Formel **zusätzlich auf
+`body`** deklarieren (theme.css) – ohne Branding kommt exakt derselbe Verlauf heraus wie vorher.
+Betroffen waren 13 Stellen auf neun Seiten; auf ECHT hat der Nutzer es an `/email` gemeldet.
+**Isoliert im Browser gemessen** (Testseite gegen das echte theme.css, `--accent` auf `body`):
+`var(--gradient)` violett, `linear-gradient(…, var(--accent), …)` am Element rot – erst das
+belegt die Ursache, ein Blick ins CSS hätte sie nicht gezeigt.
+
+**(b) Kennwortlose Anmeldung über das Exchange-Identity-Token** (`backend/addin_sso.py`,
+`POST /api/addin/sso`). Microsoft hat diese Token für Exchange **Online** abgeschaltet, **für
+on-premises sind sie ausdrücklich weiter unterstützt** – also genau unser Fall (Doku-Stand
+2026-07 geprüft, nicht aus dem Gedächtnis). Ein SSO über Office/Entra scheidet weiter aus.
+- **Das Token nennt keine Mailadresse**, nur `msexchuid` + `amurl`. Die Zuordnung zum
+  Jarvis-Konto entsteht deshalb bei der **ersten** Anmeldung: das Token geht an
+  `POST /api/login` mit (`addin_token`), die Verknüpfung landet in `data/addin_links.json`.
+  **Bewusst am regulären Login und nicht an einem eigenen „Verknüpfen"-Endpunkt:** dort sind
+  Kennwort, 2FA, AD-Freigabe und Lizenzgrenze zu diesem Zeitpunkt alle bestanden. Eine zweite
+  Fassung dieser Prüfungen wäre genau die Abkürzung, die später als Lücke auffällt. Ein
+  Fehlschlag beim Verknüpfen kippt die Anmeldung nicht.
+- **DER VERTRAUENSANKER IST DIE HINTERLEGTE EWS-ADRESSE.** Ohne ihn könnte sich jemand ein
+  formal einwandfrei signiertes Token von einem *beliebigen* Exchange ausstellen lassen. Der
+  `amurl`-Host muss zur Konfiguration passen; **ist keine hinterlegt, gibt es kein SSO**
+  (fail-closed). Live belegt: ein Token mit `amurl` auf `boese.example` wird mit Klartext
+  abgewiesen und nennt die hinterlegte Adresse.
+- Geprüft werden Signatur (RS256 gegen das Zertifikat aus dem Metadaten-Dokument), Herkunft,
+  `aud` (= die Adresse **unseres** Aufgabenfensters), Laufzeit und `ExIdTok.V1`. `alg` wird hart
+  auf RS256 geprüft – `none` ist die klassische JWT-Umgehung. **Unbekanntes `x5t` bricht NICHT
+  ab**: den Beweis liefert die Signatur, `x5t` ist nur die Auswahlhilfe; ein Abbruch würde nach
+  jedem Zertifikatstausch jede Anmeldung scheitern lassen, ohne dass etwas unsicher wäre.
+- **Der SSO-Endpunkt führt dieselben Schranken wie `/api/login`** und in derselben Reihenfolge:
+  Ratenbegrenzung → Token → Verknüpfung → `_login_still_allowed` → Lizenzgrenze → `record_login`
+  → Kontosperre. Ein Test prüft jede einzelne namentlich nach; fehlt eine, ist SSO der bequemste
+  Weg daran vorbei.
+- **Konten mit 2FA bekommen KEIN SSO.** Das Exchange-Token stammt vom selben Arbeitsplatz und ist
+  kein zweiter Faktor – es stillschweigend als solchen zu behandeln, höbe eine bewusst
+  eingeschaltete Schutzmaßnahme auf.
+- `data/addin_links.json` ist 0640 und steht in `_APP_DENY_REL`, `PRIVATE_FILES` und
+  `SHELL_SECRET_PATHS`: **wer sie beschreiben kann, trägt sein Postfach auf einen fremden – gern
+  administrativen – Benutzer ein und meldet sich als dieser an.** Das ist die direkteste
+  Rechteerhöhung im ganzen Verzeichnis. Gespeichert wird nur der SHA-256 aus `msexchuid|amurl`,
+  nie die Rohwerte. `DELETE /api/addin/links/<benutzer>` (Admin) löst die Verknüpfung, wenn ein
+  Postfach den Besitzer wechselt – ohne diesen Weg meldete sich der neue Inhaber als der alte an.
+
+**ZWEI FUNDE NEBENBEI, beide hätten den Betrieb betroffen:**
+1. **Der 2FA-Code ging ins Leere.** Das Fenster sendete `totp`, `/api/login` liest `totp_code`
+   (so senden es app.js, chat.js, userchat.js und wissen.js). Der Server sah keinen Code und
+   antwortete erneut `requires_totp` – **eine Anmeldeschleife, aus der niemand herauskam.** Das
+   ist eine plausible Erklärung für den zweiten Teil der Meldung; ein Test vergleicht den
+   Feldnamen jetzt gegen `app.js` als Quelle.
+2. **Der Anbindungs-Zustand stand erst HINTER der Anmeldung** (`ad-global`). `office.js` kommt
+   aus dem Netz von Microsoft, und eine Firewall davor ist die häufigste Ursache dafür, dass sich
+   ein Aufgabenfenster merkwürdig verhält – ausgerechnet derjenige, der an der Anmeldung
+   hängenbleibt, konnte die Aussage also nicht lesen. Jetzt steht sie im Anmeldeblock
+   (`ad-login-office`), und der SSO-Grund hat Vorrang: er erklärt, warum dort überhaupt noch
+   eine Anmeldung steht.
+
+**FALLSTRICK im eigenen Wächter (zum wiederholten Mal):** die Prüfung „kein Produktname in den
+Texten von `addin.js`" schlug an **meinem eigenen Begründungs-Kommentar** an, der den
+Produktnamen nennt. Geprüft werden muss der Oberflächentext – Block- und Zeilenkommentare vorher
+entfernen. Gegenprobe eingebaut: mit der Marke in einem echten `T(...)`-Rückfall schlägt der
+Wächter weiterhin an.
+
+- **Verifiziert:** 192 Prüfungen (`tests/test_outlook_addin.py`) + **69** neue
+  (`tests/test_addin_sso.py` – die Token werden mit einem echten RSA-Schlüssel und einem selbst
+  ausgestellten X.509-Zertifikat **wirklich signiert**; eine gefälschte Signaturprüfung im Test
+  hätte genau den Punkt nicht geprüft, auf dem alles ruht) + 431 E-Mail + 239 UI + 120
+  Endpunkt-Rechte. Gezielte Gegenproben greifen: `amurl`-Prüfung ausgebaut → fremder Exchange
+  wird akzeptiert; `alg`-Prüfung ausgebaut → `alg=none` fällt erst der Signatur zum Opfer
+  (Tiefenverteidigung, im Test sichtbar); falscher 2FA-Feldname zurück → 1 FAIL.
+  **Live auf DEV:** ohne Token 400, Müll-Token 401 mit Klartext, gefälschtes Token vom fremden
+  Exchange 401 mit Nennung der hinterlegten Adresse, beide Admin-Endpunkte 401,
+  `runuser -u jarvis_sandbox -- cat data/addin_links.json` → „Keine Berechtigung". Branding-Weg
+  mit eingeschaltetem Skill gemessen (Manifest `Nexus DP E-Mail`, Download
+  `nexus-dp-outlook-addin.xml`, Symbole aus dem Logo statt der eingebauten), danach
+  `settings.json` **md5-gleich** zurückgestellt. Optisch in Dunkel UND Hell abgenommen.
+- **NOCH NICHT geprüft, weil es einen echten Client braucht:** ein Lauf in Outlook selbst –
+  also ob `getUserIdentityTokenAsync` dort ein Token liefert und die Erstanmeldung durchgeht.
+  Genau das ist der nächste Schritt am Arbeitsplatz.
+
 ## PDF-Textqualität: beschädigte Textebene erkennen und OCR entscheiden lassen (2026-08-13)
 **Der Vorfall (2026-08-12, ECHT):** `Einsender_KIM_Anbindung_compressed.pdf` (8,9 MB, 54 Seiten)
 lieferte über pdfplumber **80.586 Zeichen** – die alte Schwelle „unter 80 Zeichen → OCR" greift

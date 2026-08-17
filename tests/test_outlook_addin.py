@@ -114,8 +114,14 @@ pruefe(all(u.startswith("https://") for u in urls),
 pruefe(all(u.startswith(BASIS) for u in urls),
        "ALLE URLs zeigen auf die uebergebene Basis (kein fremder Host)")
 pruefe("%s/addin/taskpane.html" % BASIS in xml_text, "SourceLocation zeigt aufs Fenster")
-pruefe("/static/addin/icon-16.png" in xml_text and "/static/addin/icon-80.png" in xml_text,
+# Die Symbole kommen ueber den EIGENEN Endpunkt, nicht aus /static: nur der
+# kann das Branding-Logo einsetzen (Vorgabe 2026-08-17). Zeigte das Manifest
+# weiter auf /static, traege der Knopf im Menueband die Marke im Text und das
+# Jarvis-Zeichen daneben.
+pruefe("/addin/icon-16.png" in xml_text and "/addin/icon-80.png" in xml_text,
        "Menueband-Symbole in 16/32/80 vorhanden")
+pruefe("/static/addin/icon-" not in xml_text,
+       "kein Symbol mehr direkt aus /static (sonst am Branding vorbei)")
 for grosse in (16, 32, 64, 80, 128):
     pruefe((ROOT / "frontend" / "addin" / ("icon-%d.png" % grosse)).exists(),
            "Symboldatei icon-%d.png liegt im Repo" % grosse)
@@ -477,6 +483,143 @@ pruefe("zu.indexOf(id) >= 0" in _ki,
 m_js2 = re.search(r"email_portal\.js\?v=(\d+)", EMAILHTML)
 pruefe(bool(m_js2) and int(m_js2.group(1)) >= 5,
        "Cache-Buster erneut erhoeht (%s)" % (m_js2 and m_js2.group(1)))
+
+# ═══ 11. Branding: Marke im Fenster UND am Symbol ══════════════════════════
+# GEMELDET 2026-08-17 (mit Screenshot): das Menueband trug korrekt "Nexerius
+# E-Mail", das Aufgabenfenster darunter aber "Jarvis E-Mail" und ein
+# Jarvis-Zeichen. Der Name war also nur an EINER von drei Stellen gebrandet.
+abschnitt("11. Branding im Fenster und am Symbol")
+
+# ── Aufgabenfenster ──
+pruefe("branding.js" in TASKPANE,
+       "branding.js ist eingebunden (setzt Farben, Name und Logo)")
+pruefe(TASKPANE.count('class="brand-app-name"') == 2,
+       "beide Kopfzeilen (Anmeldung + Anwendung) tragen den Branding-Haken")
+pruefe(TASKPANE.count('class="ad-logo topbar-avatar"') == 2,
+       "beide Marken-Kreise tragen den Avatar-Haken von branding.js")
+# Der Selektor muss zu dem passen, den branding.js wirklich bedient – eine
+# selbst erfundene Klasse waere ein Haken ins Leere.
+BRANDJS = (ROOT / "frontend" / "js" / "branding.js").read_text(encoding="utf-8")
+# Auf die DEFINITION prüfen, nicht auf das erste Vorkommen: die Variable wird
+# oben schon benutzt (resetBranding), dort steht die Liste nicht.
+_avsel = re.search(r"AVATAR_SELECTOR\s*=\s*((?:'[^']*'\s*\+?\s*)+)", BRANDJS)
+pruefe(bool(_avsel) and "topbar-avatar" in _avsel.group(1),
+       "'topbar-avatar' steht wirklich im AVATAR_SELECTOR von branding.js")
+pruefe(".brand-app-name" in BRANDJS,
+       "'brand-app-name' wird von branding.js wirklich ersetzt")
+pruefe("Jarvis E-Mail" not in TASKPANE,
+       "kein fester Produktname mehr als Fenstertitel")
+# Der Hinweis wird per textContent gesetzt – branding.js kaeme nicht mehr heran.
+# GEPRUEFT WIRD DER OBERFLAECHENTEXT, NICHT DIE DATEI: die Begruendung, warum
+# hier kein Produktname stehen darf, nennt den Produktnamen selbst. Dieselbe
+# Falle wie beim Prompt-Waechter (2026-08-10) und beim Ordner-Marken-Test
+# (2026-08-11) – ein Test, der Kommentare mitliest, schlaegt an der eigenen
+# Erklaerung an.
+def _ohne_kommentare(js: str) -> str:
+    ohne_block = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
+    return "\n".join(z for z in ohne_block.splitlines()
+                     if not z.lstrip().startswith("//"))
+
+
+pruefe("Jarvis" not in _ohne_kommentare(ADDINJS),
+       "keine Marke in den TEXTEN von addin.js (textContent ist fuer branding.js unerreichbar)")
+for _spr in ("addin.login_hint", ):
+    pruefe(I18N.count("'%s'" % _spr) == 2, "%s in DE und EN vorhanden" % _spr)
+pruefe("Jarvis-Zugang" not in I18N and "your Jarvis account" not in I18N,
+       "der Anmeldehinweis nennt kein Produkt mehr")
+
+# theme.js exportiert applyTheme, NICHT toggleTheme – die frueher geprueefte
+# Funktion gab es nie. Ohne applyTheme feuert kein 'jarvis:themechange', und
+# branding.js zoege die Hell-Farben der Marke nicht nach.
+THEMEJS = (ROOT / "frontend" / "js" / "theme.js").read_text(encoding="utf-8")
+pruefe("window.applyTheme" in THEMEJS, "theme.js exportiert applyTheme")
+pruefe("window.toggleTheme" not in THEMEJS, "theme.js hat KEIN toggleTheme")
+pruefe("window.applyTheme" in ADDINJS and "window.toggleTheme" not in ADDINJS,
+       "der Umschalter im Fenster ruft applyTheme (feuert jarvis:themechange)")
+
+# ── Dateiname des Downloads ──
+_stub.config.marke = "Nexerius"
+pruefe(addin.dateiname() == "nexerius-outlook-addin.xml",
+       "der Download-Name folgt der Marke (%s)" % addin.dateiname())
+_stub.config.marke = 'Nex"us AG / Ö'
+_n = addin.dateiname()
+pruefe('"' not in _n and "\n" not in _n and "\r" not in _n and ";" not in _n,
+       "nichts, was den Content-Disposition-Kopf zerlegen koennte (%s)" % _n)
+pruefe(_n.endswith("-outlook-addin.xml") and _n.isascii(), "reines ASCII (%s)" % _n)
+pruefe("--" not in _n and not _n.startswith("-"), "keine leeren Namensteile (%s)" % _n)
+_stub.config.marke = "Ф Ы"          # nach dem Entschaerfen bleibt nichts uebrig
+pruefe(addin.dateiname() == "jarvis-outlook-addin.xml",
+       "Rueckfall auf einen generischen Stamm statt eines Namens ohne Stamm")
+_stub.config.marke = ""
+pruefe("filename=\"%s\"" % "jarvis-outlook-addin.xml" not in MAIN,
+       "der Endpunkt hat den Namen nicht mehr fest verdrahtet")
+pruefe("addin.dateiname()" in MAIN, "der Endpunkt fragt den Branding-Namen ab")
+
+# ── Symbol-Endpunkt ──
+_ico = MAIN.split('@app.get("/addin/icon-{groesse}.png")', 1)
+pruefe(len(_ico) == 2, "Endpunkt /addin/icon-{groesse}.png existiert")
+_ico = _ico[1].split("@app.", 1)[0]
+pruefe("Depends(" not in _ico,
+       "ohne Anmeldung – die Symbole holt der Client bzw. Exchange ohne Sitzung")
+pruefe("ICON_GROESSEN" in _ico and "status_code=404" in _ico,
+       "nur die vorgesehenen Groessen, sonst 404")
+# JEDE im Manifest angeforderte Groesse muss der Endpunkt auch bedienen –
+# sonst zeichnet Outlook den Knopf ohne Bild. Die Liste wird aus dem Manifest
+# GELESEN, nicht danebengeschrieben: eine gepflegte Zweitliste liefe beim
+# naechsten Groessen-Wechsel auseinander.
+_verlangt = sorted({int(m) for m in re.findall(r"/addin/icon-(\d+)\.png", xml_text)})
+pruefe(bool(_verlangt), "das Manifest fordert Symbole an (%s)" % _verlangt)
+pruefe(all(g in addin.ICON_GROESSEN for g in _verlangt),
+       "der Endpunkt bedient jede angeforderte Groesse (%s / %s)"
+       % (_verlangt, list(addin.ICON_GROESSEN)))
+for _g in _verlangt:
+    pruefe((ROOT / "frontend" / "addin" / ("icon-%d.png" % _g)).exists(),
+           "eingebautes Rueckfall-Zeichen fuer %dpx vorhanden" % _g)
+pruefe('_branding_logo_path("dark")' in _ico,
+       "es wird das runde Logo genommen – dasselbe wie in den Kopfzeilen")
+pruefe('".svg"' in _ico,
+       "ein SVG-Logo faellt bewusst auf das eingebaute Zeichen zurueck (Pillow kann kein SVG)")
+pruefe("_eingebaut()" in _ico and _ico.count("_eingebaut()") >= 3,
+       "fail-safe: jeder Fehlerweg endet beim eingebauten Zeichen, nicht in einem Loch")
+pruefe("except Exception" in _ico, "ein kaputtes Logo kippt den Endpunkt nicht")
+
+# ── Der Akzent-Verlauf muss der Marke folgen ──
+# `--gradient` steht in `:root` und verweist auf `var(--accent)`. Eine Custom
+# Property wird auf dem Element BERECHNET, auf dem sie deklariert ist; der
+# fertige Verlauf wird danach nur weitervererbt. branding.js setzt die
+# Markenfarbe aber per Inline-Style auf <body> – eine Ebene darunter. Der
+# Anmelden-Knopf blieb deshalb Jarvis-Violett neben rotem Logo und rotem
+# Markennamen (im Screenshot gesehen; jsdom rechnet kein CSS und sieht das nie).
+THEMECSS = (ROOT / "frontend" / "css" / "theme.css").read_text(encoding="utf-8")
+_body_regeln = re.findall(r"(?m)^body\s*\{(.*?)^\}", THEMECSS, re.S)
+pruefe(any("--gradient" in b for b in _body_regeln),
+       "theme.css deklariert --gradient auch auf <body> (sonst greift Branding nie)")
+pruefe("body.style" in BRANDJS or "document.body" in BRANDJS,
+       "branding.js setzt die Farben tatsaechlich auf <body> – Grundlage der Regel oben")
+# Der Cache-Buster muss mitziehen, sonst behaelt jeder Browser die alte Datei.
+_tv = {int(m) for m in re.findall(r"theme\.css\?v=(\d+)", TASKPANE + EMAILHTML)}
+pruefe(_tv and min(_tv) >= 10, "theme.css-Cache-Buster erhoeht (%s)" % sorted(_tv))
+
+# Outlook laedt ein geaendertes Manifest nur bei GESTIEGENER Version neu – ohne
+# das behielten installierte Add-ins die alten /static-Symbol-URLs.
+pruefe(addin.ADDIN_VERSION != "1.0.0.0",
+       "ADDIN_VERSION erhoeht (%s), sonst zieht Outlook die neuen Symbole nie" % addin.ADDIN_VERSION)
+
+# ═══ 12. Anbindungs-Zustand schon auf dem Anmeldebildschirm ════════════════
+# office.js kommt aus dem Netz von Microsoft. Ein Firmennetz, das den Zugang
+# sperrt, ist die haeufigste Ursache dafuer, dass sich ein Aufgabenfenster
+# merkwuerdig verhaelt – und die Aussage stand bisher NUR hinter der Anmeldung
+# (ad-global). Genau derjenige, der an der Anmeldung haengenbleibt, konnte sie
+# also nicht lesen.
+abschnitt("12. Anbindungs-Zustand vor der Anmeldung")
+pruefe('id="ad-login-office"' in TASKPANE, "Platz fuer den Zustand im Anmeldeblock")
+_zl = ADDINJS.split("function zeigeLogin", 1)
+pruefe(len(_zl) == 2, "zeigeLogin existiert")
+_zl = _zl[1].split("\n    function ", 1)[0]
+pruefe("ad-login-office" in _zl, "zeigeLogin setzt den Zustand")
+pruefe("_officeGrund" in _zl and "_office" in _zl,
+       "beide Faelle: verbunden UND der Grund, warum nicht")
+pruefe(I18N.count("'addin.office_ok'") == 2, "addin.office_ok in DE und EN")
 
 # ═══ Ergebnis ═══════════════════════════════════════════════════════════════
 print("\n%s  %d bestanden, %d fehlgeschlagen" %

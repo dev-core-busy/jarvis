@@ -88,6 +88,23 @@
         .lang-toggle-btn:hover { color: var(--text-primary); }
         .lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
 
+        /* ── Feld-Erklaerung (ⓘ) ──
+           Bewusst ein AUFKLAPPENDER Text unter dem Feld und kein schwebendes
+           Popup: derselbe Baustein wird im 320 px breiten Add-in-Fenster
+           gebraucht, wo ein positioniertes Popup entweder abgeschnitten wird
+           oder das Feld verdeckt. Ein `title`-Attribut scheidet aus – es ist
+           auf Touch unerreichbar und im Outlook-WebView unzuverlaessig.
+           Monochromes Textzeichen statt Emoji (Regel aus .kb-hdr-btn). */
+        .em-info { background: none; border: none; cursor: pointer; padding: 0 0 0 5px;
+            color: var(--text-muted); font-size: .9rem; line-height: 1;
+            font-family: var(--font-body); vertical-align: baseline; }
+        .em-info:hover, .em-info[aria-expanded="true"] { color: var(--accent); }
+        .em-help { display: none; margin-top: 4px; padding: 8px 10px;
+            border-radius: 8px; font-size: .8rem; line-height: 1.5;
+            color: var(--text-secondary); background: var(--bg-secondary);
+            border: 1px solid var(--border); border-left: 3px solid var(--accent); }
+        .em-help.is-open { display: block; }
+
         /* `text-decoration: none` ist Pflicht, seit der Add-in-Download ein
            <a> mit dieser Klasse ist: Links sind von Haus aus unterstrichen,
            und ein unterstrichener Knopf sieht aus wie ein Textlink im Knopf. */
@@ -241,8 +258,10 @@
                         <input type="email" id="em-adresse" placeholder="vorname.nachname@firma.de" autocomplete="off">
                     </div>
                     <div class="em-field">
-                        <label data-i18n="mail.acct_login">Anmeldename <span class="em-hint">(falls abweichend)</span></label>
+                        <label><span data-i18n="mail.acct_login">Anmeldename (falls abweichend)</span> <button type="button" class="em-info" data-help="em-help-login" aria-expanded="false"
+                                data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
                         <input type="text" id="em-benutzer" placeholder="FIRMA\vorname.nachname" autocomplete="off">
+                        <div class="em-help" id="em-help-login" data-i18n="mail.help_login">Nur ausfüllen, wenn du dich am Exchange anders anmeldest als mit deiner E-Mail-Adresse – meist in der Form FIRMA\vorname.nachname. Sind Adresse und Anmeldename gleich, lass das Feld leer.</div>
                     </div>
                     <div class="em-field">
                         <label data-i18n="mail.acct_password">Kennwort</label>
@@ -250,38 +269,46 @@
                         <span class="em-hint" id="em-pw-hint"></span>
                     </div>
                     <div class="em-field">
-                        <label data-i18n="mail.acct_channel">Zugangsweg</label>
+                        <label><span data-i18n="mail.acct_channel">Zugangsweg</span> <button type="button" class="em-info" data-help="em-help-channel" aria-expanded="false"
+                                data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
                         <select id="em-kanal-user">
                             <option value="" data-i18n="mail.acct_channel_default">Vorgabe des Administrators</option>
                             <option value="auto" data-i18n="mail.acct_channel_auto">auto (EWS, sonst IMAP)</option>
                             <option value="ews" data-i18n="mail.acct_channel_ews">nur EWS</option>
                             <option value="imap" data-i18n="mail.acct_channel_imap">nur IMAP/SMTP</option>
                         </select>
+                        <div class="em-help" id="em-help-channel" data-i18n="mail.help_channel">Wie Jarvis dein Postfach erreicht. „Vorgabe des Administrators" ist der Normalfall.</div>
                     </div>
                 </div>
                 <div class="em-grid em-grid-3" style="margin-top:12px;">
                     <div class="em-field">
-                        <label data-i18n="mail.acct_inbox">Posteingang</label>
+                        <label><span data-i18n="mail.acct_inbox">Posteingang</span> <button type="button" class="em-info" data-help="em-help-folders" aria-expanded="false"
+                                data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
                         <input type="text" id="em-ord-eingang" placeholder="INBOX">
                     </div>
                     <div class="em-field">
                         <label data-i18n="mail.acct_drafts">Entwürfe</label>
-                        <input type="text" id="em-ord-entwuerfe" placeholder="Vorgabe" data-i18n-placeholder="mail.default_ph">
+                        <input type="text" id="em-ord-entwuerfe" placeholder="Standardordner" data-i18n-placeholder="mail.default_ph">
                     </div>
                     <div class="em-field">
                         <label data-i18n="mail.acct_sent">Gesendet</label>
-                        <input type="text" id="em-ord-gesendet" placeholder="Vorgabe" data-i18n-placeholder="mail.default_ph">
+                        <input type="text" id="em-ord-gesendet" placeholder="Standardordner" data-i18n-placeholder="mail.default_ph">
                     </div>
                 </div>
+                <div class="em-help" id="em-help-folders" data-i18n="mail.help_folders">Nur ausfüllen, wenn deine Ordner anders heißen als üblich. Bleibt ein Feld leer, benutzt Jarvis den Standardordner deines Postfachs.</div>
                 <div class="em-field" style="margin-top:12px;">
-                    <label data-i18n="mail.acct_guide">Ständige Vorgabe für Antworten (optional)</label>
+                    <label><span data-i18n="mail.acct_guide">Stil und Signatur für Antworten (optional)</span> <button type="button" class="em-info" data-help="em-help-guide" aria-expanded="false"
+                            data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
                     <textarea id="em-vorgabe" rows="4" placeholder="z. B. Signatur, Anrede-Form, was nie zugesagt werden darf" data-i18n-placeholder="mail.acct_guide_ph"></textarea>
                     <span class="em-hint" data-i18n="mail.acct_guide_hint">Gilt für vorgeschlagene Antworten UND für alle deine Regeln. Bei Widerspruch geht die Regel vor.</span>
+                    <div class="em-help" id="em-help-guide" data-i18n="mail.help_guide">Gilt für jede Antwort, die für dich formuliert wird.</div>
                 </div>
                 <div class="em-field" style="margin-top:12px;">
                     <label><input type="checkbox" id="em-aktiv" style="width:auto;margin-right:8px;">
-                        <span data-i18n="mail.acct_active">Postfach aktiv (Regeln dürfen darauf arbeiten)</span></label>
+                        <span data-i18n="mail.acct_active">Postfach aktiv (Regeln dürfen darauf arbeiten)</span> <button type="button" class="em-info" data-help="em-help-active" aria-expanded="false"
+                            data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
                 </div>
+                <div class="em-help" id="em-help-active" data-i18n="mail.help_active">Nimm den Haken heraus, um alle deine Regeln vorübergehend anzuhalten.</div>
                 <div class="em-row">
                     <button class="em-btn em-btn-primary" id="em-save-acct" data-i18n="common.save">Speichern</button>
                     <button class="em-btn" id="em-test-acct" data-i18n="mail.acct_test">Verbindung testen</button>

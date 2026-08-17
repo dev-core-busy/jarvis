@@ -2939,6 +2939,45 @@ eine Formel (`+ len(_VORSPANN) + 1500`), und die eigentliche Aussage („der Fre
 gekürzt") steht in einer eigenen Prüfung. **Eine willkürliche Zahl in einem Test ist eine
 Zeitbombe** – sie meldet später einen Fehler, den es nicht gibt.
 
+#### Feld-Erklärungen (ⓘ) im Postfach-Formular
+Gemeldet am selben Tag: *„ein Benutzer kann mit ‚Vorgabe' bei ‚Entwürfe' und ‚Gesendet' genau
+NICHTS anfangen"* – dazu die Frage, ob „(PrePrompt)" und ein Info-Popup helfen.
+- **Die Wortkollision war mein Fehler:** der Platzhalter der Ordnerfelder hieß „Vorgabe"
+  (= *leer, dann nimmt Jarvis den Standardordner*), und ich hatte direkt darunter ein Feld
+  „Ständige **Vorgabe** für Antworten" gesetzt. Zwei Bedeutungen, ein Wort, untereinander.
+  Jetzt: Platzhalter **„Standardordner"**, Feld **„Stil und Signatur für Antworten"**.
+  **Wichtig: der HTML-Rückfall musste mit** – er steht ohne i18n im Markup und wäre sonst der
+  sichtbare Text, bis `applyLang()` läuft.
+- **Kein „(PrePrompt)"** (bewusst abgelehnt): die Zielgruppe sind Sachbearbeiter, keine
+  Entwickler. Eine Beschriftung, die selbst sagt, was hineingehört, schlägt jeden Fachbegriff;
+  ein Test verbietet die Wörter jetzt in der Oberfläche.
+- **ⓘ als AUFKLAPPENDER Text, nicht als schwebendes Popup.** Derselbe Baustein wird im 320 px
+  breiten Add-in-Fenster gebraucht, wo ein positioniertes Popup abgeschnitten würde oder das
+  Feld verdeckt. `title`-Attribute scheiden aus (auf Touch unerreichbar, im Outlook-WebView
+  unzuverlässig). **EIN delegierter Listener** am Dokument statt Bindung je Knopf – so wirkt
+  jedes später ergänzte ⓘ automatisch, auch in nachträglich gezeichneten Bereichen.
+
+**DREI FEHLER, DIE ALLE ERST DER ECHTE BROWSER ZEIGTE** (der Markup-Test war jedes Mal grün):
+1. **Die ⓘ landeten UNTER dem Label in eigener Zeile.** `.em-field`/`.ad-field` sind
+   *senkrechte* Flex-Container – ein Knopf als Geschwister des Labels wird eigenes Flex-Kind.
+   Er gehört INS Label. Dieselbe Klassen-Falle wie bei `.input-group` (2026-08-10) und
+   `.role-grid`.
+2. **Im Label verschwand der Knopf dann ganz.** Die Labels tragen `data-i18n`, und
+   `applyLang()` setzt den **textContent** – der Button wurde beim ersten Durchlauf gelöscht
+   (im Browser gemessen: `querySelector` fand ihn nicht mehr). Lösung: der Text kommt in ein
+   eigenes `<span data-i18n=…>`, das Label selbst trägt keines. Dieselbe Lehre wie beim
+   E-Mail-Reiter (2026-08-13), dort mit `data-i18n-html` gelöst.
+3. **Im Add-in fehlte die CSS-Regel** – mein erster Patch war vor dem Schreiben an einer
+   Assertion abgebrochen, beim zweiten Anlauf habe ich nur das Markup gesetzt. Ohne
+   `background: none` zeichnet der Browser den UA-Default: aus dem dezenten Zeichen wird ein
+   grauer Kasten. **Der Test prüft jetzt die Regel, nicht nur das Markup** – Markup-Paare
+   allein sagen nichts über das Aussehen.
+
+**GEMESSEN statt angenommen:** das ⓘ am Aktiv-Haken sitzt in einem `<label>` MIT Checkbox –
+die Falle vom AD-Picker (2026-07-29). Im Browser geprüft: mit `preventDefault()` im delegierten
+Listener bleibt der Haken stehen und nur der Kasten klappt auf. `stopPropagation()` ist dort
+wirkungslos (das Event ist beim Dokument längst angekommen) und deshalb bewusst nicht gesetzt.
+
 **FALLSTRICK bei der eigenen Live-Messung:** die erste Prüfung „steht die Vorgabe vor der Regel?"
 suchte den Wortlaut `(die Regel)` – den nennt der **Vorspann** schon in seiner Erklärung, also
 schlug die Messung fehl, obwohl die Reihenfolge stimmte. Gemessen wird an den

@@ -1,6 +1,6 @@
 # Jarvis AI Desktop Agent
 
-> Autonomous open-source AI desktop agent for Linux with multi-LLM support, desktop control via VNC, WhatsApp integration, and extensible skill system.
+> Autonomous open-source AI desktop agent for Linux with multi-LLM support, desktop control via VNC, WhatsApp and Exchange email integration, and an extensible skill system.
 
 ## Overview
 
@@ -12,7 +12,13 @@ Jarvis is a self-hosted AI agent that runs on any Linux server. It provides a fu
 - **Multi-LLM Support**: Google Gemini, Anthropic Claude, OpenRouter (300+ models), any OpenAI-compatible API, local models via Ollama/LM Studio
 - **Multi-Agent Orchestration**: Main agent can spawn autonomous sub-agents for parallel task execution
 - **RAG Knowledge Base**: Document search (PDF, DOCX, TXT, Excel, PPTX) with TF-IDF and ChromaDB vector database (automatic scaling with sentence-transformer embeddings)
-- **MCP Integration**: Model Context Protocol support for external tool servers via stdio or HTTP/SSE transport
+- **MCP Integration**: Model Context Protocol support for external tool servers via stdio, Streamable HTTP or SSE. Third-party servers can run in a namespace sandbox with no access to the service directory or its credentials; access for network users is released per server
+- **Exchange Email Rules**: Each user connects their own mailbox (EWS, IMAP/SMTP fallback) and writes their own rules in plain words; the model chooses the action (reply, draft, move, forward, delete). Per-rule tool scopes, always unprivileged, incoming mail text treated as information rather than instruction
+- **Outlook Add-in**: The email area as an Outlook task pane – process the selected message with a rule, or generate a reply preview that is only sent on demand (the suggestion run has no tools). Passwordless sign-in via the Exchange identity token after first use
+- **Read-only SAP Analyses**: 24 management analyses in six categories (P&L, balance sheet, working capital, aging, backlog, inventory, IFRS 8/9, consolidation, segregation of duties, VAT/Intrastat, ESG). Read-only is enforced: OData GET only, SQL SELECT only, RFC whitelist. Includes BI connection details and an AI-free query console
+- **Knowledge Mirroring Between Sites**: One instance shares a knowledge folder, another pulls it one-way – incremental via SHA-256 manifest, pinned to the certificate confirmed at setup, mirror write-protected locally
+- **Specialised Role Agents**: Named roles with their own system prompt, tool subset, LLM profile and thinking depth; the main agent delegates a subtask and waits for the result. A role can only narrow permissions, never widen them
+- **Charts & Diagrams**: Interactive charts rendered in the chat from CSV/Excel files (grouping, sorting, European number formats, PNG export); validation happens before drawing so the model can correct itself. Mermaid diagrams for flows and structures
 - **WhatsApp Integration**: Bidirectional messaging via Baileys, voice transcription with faster-whisper
 - **OpenClaw Skill Marketplace**: Import community skills from ClawHub, auto-convert to native Jarvis tools
 - **Face Recognition**: Real-time face detection and recognition using dlib/face_recognition with configurable actions

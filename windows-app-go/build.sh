@@ -19,25 +19,35 @@ go build -ldflags="-H windowsgui -s -w -X main.AppVersion=$VERSION" -o jarvis.ex
 
 echo "Fertig: $(ls -lh jarvis.exe)  [Build $VERSION]"
 
-# ── Deploy auf jarvis-ai.info via SSH/SCP ─────────────────────────────────────
-# FTP/FTPS ist ueber manche Netze unbrauchbar (FTP-ALG kapert das AUTH-Kommando);
-# Deploy laeuft daher per SSH mit Public-Key (keyless) – kein Secret im Repo.
-# Ueberschreibbar via JARVIS_SSH_HOST / JARVIS_SSH_KEY / JARVIS_DOCROOT.
-SSH_HOST="${JARVIS_SSH_HOST:-jarvis@jarvis-ai.info}"
-SSH_KEY="${JARVIS_SSH_KEY:-$HOME/.ssh/id_rsa}"
+# ── Deploy auf jarvis-ai.info via FTPS ────────────────────────────────────────
+# Der SSH-Weg ist TOT: der Abo-Benutzer laeuft in eine defekte chroot-Umgebung,
+# Shell UND sftp-server scheitern mit Exit 255 (nachgemessen 2026-08-17).
+# FTPS ist am Server korrekt aktiviert und funktioniert.
+#
+# ⚠ NETZWEG: In den Firmennetzen faengt ein FTP-ALG das Kommando 'AUTH TLS' ab
+#   ("502 ... contact your network administrator"). Dann bricht der Deploy mit
+#   einem Klartext-Hinweis ab. Aus einem Netz OHNE ALG (Handy-Tethering, VPN,
+#   Homeoffice) laeuft er durch. Das ist KEIN Zertifikatsproblem – TLS kommt
+#   gar nicht erst zustande.
+#
+# Zugangsdaten NIE hier eintragen (Repo ist oeffentlich!): entweder
+# JARVIS_FTPS_USER/JARVIS_FTPS_PASS als Umgebungsvariablen, oder die Datei
+# windows-app-go/.ftps_credentials (gitignored). Details: deploy_ftps.py
 DOCROOT="${JARVIS_DOCROOT:-/var/www/vhosts/jarvis-ai.info/www}"
-SSH=(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20)
-SCP=(scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20)
+FTPS=("$(dirname "$0")/deploy_ftps.py")
 
-echo "Deploying $VERSION auf $SSH_HOST:$DOCROOT ..."
+echo "Deploying $VERSION nach $DOCROOT (FTPS) ..."
+
+# Vorabpruefung: einmal anmelden. Scheitert es (z.B. ALG), bricht der Deploy
+# hier ab – BEVOR halb hochgeladene Dateien einen inkonsistenten Stand erzeugen.
+python3 "${FTPS[@]}" check
 
 # EXE hochladen
-"${SCP[@]}" jarvis.exe "$SSH_HOST:$DOCROOT/downloads/jarvis.exe"
-echo "EXE hochgeladen"
+python3 "${FTPS[@]}" put jarvis.exe "downloads/jarvis.exe"
 
 # version_windows.json aktualisieren (PFAD: /downloads/ – UpdateChecker liest von dort)
 printf '%s' "{\"versionCode\":$NUM,\"versionName\":\"$VERSION\",\"downloadUrl\":\"https://jarvis-ai.info/downloads/jarvis.exe\"}" \
-  | "${SSH[@]}" "$SSH_HOST" "cat > '$DOCROOT/downloads/version_windows.json'"
+  | python3 "${FTPS[@]}" putstr "downloads/version_windows.json"
 echo "version_windows.json aktualisiert"
 
 # Verify version_windows.json (HTTPS)
@@ -48,12 +58,14 @@ else
   echo "✓ version_windows.json verifiziert: versionCode=$NUM"
 fi
 
-# index.html: Versionsstring im Download-Button aktualisieren (drift-sicher: live laden, patchen, zurueck)
+# index.html: Versionsstring im Download-Button aktualisieren
+# DRIFT-SICHER: die LIVE-Datei laden, gezielt patchen, zurueckspielen. Niemals die
+# Repo-Kopie hochladen – docs/landing-page/index.html driftet (siehe CLAUDE.md).
 TMPHTML=$(mktemp)
-"${SCP[@]}" "$SSH_HOST:$DOCROOT/index.html" "$TMPHTML"
+python3 "${FTPS[@]}" get "index.html" "$TMPHTML"
 # Pattern: "Portable EXE · v0.XXX" (mit v-Präfix wie in der Landing Page)
 sed -i "s/Portable EXE · v[0-9]\+\.[0-9]\+/Portable EXE · v$VERSION/g" "$TMPHTML"
-"${SCP[@]}" "$TMPHTML" "$SSH_HOST:$DOCROOT/index.html"
+python3 "${FTPS[@]}" put "$TMPHTML" "index.html"
 rm "$TMPHTML"
 
 # Verify index.html

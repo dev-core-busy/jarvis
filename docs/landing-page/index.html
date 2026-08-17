@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/png" href="favicon.png">
     <title>Jarvis – Autonomer KI Desktop-Agent | Open Source AI Agent für Linux</title>
-    <meta name="description" content="Jarvis ist ein autonomer Open-Source KI-Agent für Linux – Desktop-Steuerung via VNC, Multi-LLM (Gemini, Claude, Ollama), WhatsApp-Integration, RAG-Wissensdatenbank und das OpenClaw Skill-Ökosystem. Selbst gehostet und datenschutzfreundlich: OCR, Sprachtranskription, Embeddings und Gesichtserkennung laufen lokal; mit lokalem Modell bleibt alles offline.">
-    <meta name="keywords" content="AI Agent, KI Agent, autonomous agent, desktop automation, LLM, Gemini, Claude, Anthropic, OpenAI, Ollama, RAG, WhatsApp Bot, Python, FastAPI, Linux, self-hosted, open source, VNC, multi-agent, skill system, chatbot, voice assistant, Apache-2.0, jarvis">
+    <meta name="description" content="Jarvis ist ein autonomer Open-Source KI-Agent für Linux – Desktop-Steuerung via VNC, Multi-LLM (Gemini, Claude, Ollama), WhatsApp-Integration, E-Mail-Regeln für Exchange samt Outlook-Add-in, RAG-Wissensdatenbank und das OpenClaw Skill-Ökosystem. Selbst gehostet und datenschutzfreundlich: OCR, Sprachtranskription, Embeddings und Gesichtserkennung laufen lokal; mit lokalem Modell bleibt alles offline.">
+    <meta name="keywords" content="AI Agent, KI Agent, autonomous agent, desktop automation, LLM, Gemini, Claude, Anthropic, OpenAI, Ollama, RAG, WhatsApp Bot, Python, FastAPI, Linux, self-hosted, open source, VNC, multi-agent, skill system, chatbot, voice assistant, Apache-2.0, jarvis, Exchange, Outlook add-in, email automation, SAP analysis, charts">
     <meta name="author" content="Andreas Bender">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://jarvis-ai.info/">
@@ -15,7 +15,7 @@
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://jarvis-ai.info/">
     <meta property="og:title" content="Jarvis – Autonomous AI Desktop Agent">
-    <meta property="og:description" content="Open-source autonomous AI agent for Linux. Controls desktop via VNC, supports Gemini/Claude/Ollama, WhatsApp integration, RAG knowledge base, extensible via OpenClaw skills.">
+    <meta property="og:description" content="Open-source autonomous AI agent for Linux. Controls desktop via VNC, supports Gemini/Claude/Ollama, WhatsApp integration, Exchange email rules with an Outlook add-in, RAG knowledge base, extensible via OpenClaw skills.">
     <meta property="og:image" content="https://jarvis-ai.info/img/split_view.png">
     <meta property="og:image:width" content="1920">
     <meta property="og:image:height" content="1080">
@@ -66,6 +66,12 @@
         "Face recognition with dlib",
         "Browser automation via CDP",
         "Real-time telemetry and tracing",
+        "Exchange email rules with per-user mailboxes and LLM-chosen actions",
+        "Outlook add-in with reply preview and passwordless sign-in",
+        "Read-only SAP analyses (24 templates, OData GET / SQL SELECT only)",
+        "Knowledge mirroring between sites (one-way pull, certificate-pinned)",
+        "Specialised role agents with delegate() and tool narrowing",
+        "Interactive charts from CSV/Excel plus Mermaid diagrams",
         "Security layer with sandbox isolation, jailbreak/prompt-injection/base64 detection, role-based confinement and automatic account locking"
       ]
     }
@@ -500,7 +506,6 @@
         </p>
         <div class="features-grid">
             <div class="feature-card spotlight reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">🛡️</div>
                 <div class="feature-title t-de">Sicherheitsschicht – Sandbox &amp; Angriffsschutz</div>
                 <div class="feature-title t-en">Security Layer – Sandbox &amp; Attack Protection</div>
@@ -509,6 +514,53 @@
             </div>
             <div class="feature-card reveal">
                 <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
+                <div class="feature-icon">✉️</div>
+                <div class="feature-title t-de">E-Mail-Regeln (Exchange)</div>
+                <div class="feature-title t-en">Email Rules (Exchange)</div>
+                <div class="feature-desc t-de">Jeder Benutzer hinterlegt <strong>sein eigenes Postfach</strong> (Exchange per EWS, IMAP/SMTP als Rückfall) und legt <strong>selbst</strong> beliebig viele Regeln an – als Anweisung in eigenen Worten. Trifft eine Nachricht ein, <strong>entscheidet das Modell die Aktion</strong>: antworten, Entwurf speichern, verschieben, weiterleiten oder löschen. Je Regel wird der Werkzeug-Umfang zugeschnitten, und ein Regel-Lauf ist <strong>immer unprivilegiert</strong> – Systemrechte gibt es über diesen Weg nicht. Der Text einer eingehenden Mail gilt ausdrücklich als Sachverhalt, nicht als Anweisung (Injektionsschutz mit Echtheitskennung je Lauf). Kennwörter werden verschlüsselt gespeichert und von keiner Schnittstelle herausgegeben; nach mehreren Anmeldefehlern hält die Automatik von selbst an, damit kein Domänenkonto gesperrt wird.</div>
+                <div class="feature-desc t-en">Every user connects <strong>their own mailbox</strong> (Exchange via EWS, IMAP/SMTP as fallback) and creates <strong>their own</strong> rules – written as an instruction in plain words. When a message arrives, <strong>the model chooses the action</strong>: reply, save a draft, move, forward or delete. Each rule gets its own tool scope, and a rule run is <strong>always unprivileged</strong> – it grants no system rights. The text of an incoming mail is explicitly treated as information, never as an instruction (injection protection with a per-run authenticity marker). Passwords are stored encrypted and never handed out by any endpoint; after repeated sign-in failures the automation pauses itself so no domain account gets locked out.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
+                <div class="feature-icon">🧩</div>
+                <div class="feature-title t-de">Outlook-Add-in</div>
+                <div class="feature-title t-en">Outlook Add-in</div>
+                <div class="feature-desc t-de">Dieselbe Oberfläche als <strong>Aufgabenfenster direkt in Outlook</strong>: Postfach, Regeln und Protokoll – dazu das, wofür es ein Add-in braucht. Die <strong>gerade markierte Nachricht</strong> lässt sich sofort von einer Regel verarbeiten, und <strong>„Antwort vorschlagen“</strong> formuliert eine Antwort in ein bearbeitbares Feld: gesendet wird erst auf Knopfdruck. Der Vorschlags-Lauf hat <strong>bewusst keine Werkzeuge</strong> – er kann nichts senden oder verschieben, und beim Senden läuft kein Sprachmodell mehr. Nach der ersten Anmeldung geht es <strong>ohne Kennwort</strong> weiter (signiertes Token des eigenen Exchange). Jeder Benutzer installiert es selbst, ohne Administrator-Rechte.</div>
+                <div class="feature-desc t-en">The same interface as a <strong>task pane inside Outlook</strong>: mailbox, rules and log – plus what an add-in is actually for. The <strong>currently selected message</strong> can be processed by a rule right away, and <strong>“Suggest a reply”</strong> drafts an answer into an editable field: nothing is sent until you press the button. The suggestion run <strong>deliberately has no tools</strong> – it cannot send or move anything, and sending runs no language model at all. After the first sign-in it continues <strong>without a password</strong> (a signed token from your own Exchange). Each user installs it themselves, no administrator rights needed.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
+                <div class="feature-icon">🧾</div>
+                <div class="feature-title t-de">SAP-Analysen (nur lesend)</div>
+                <div class="feature-title t-en">SAP Analyses (read-only)</div>
+                <div class="feature-desc t-de">Ein eigener Bereich für die Geschäftsleitung: Vorlage wählen, der Agent wertet aus. <strong>24 Auswertungen in sechs Kategorien</strong> – von GuV, Bilanz, Working Capital, Debitoren-Aging, Auftragsbestand und Beständen bis zu Segmentberichterstattung (IFRS 8), erwarteten Kreditverlusten (IFRS 9), Konzernkonsolidierung, Funktionstrennung, Umsatzsteuer/Intrastat und ESG. <strong>Nur-Lesen ist erzwungen</strong>, nicht versprochen: OData ausschließlich GET, SQL ausschließlich SELECT, RFC über eine Whitelist. Dazu fertige Verbindungsangaben für BI-Werkzeuge und eine <strong>Abfrage-Konsole ohne KI</strong>. Der Verlauf speichert die Frage – nie das Ergebnis.</div>
+                <div class="feature-desc t-en">A dedicated area for management: pick a template, the agent does the analysis. <strong>24 analyses across six categories</strong> – from P&amp;L, balance sheet, working capital, receivables aging, order backlog and inventory to segment reporting (IFRS 8), expected credit losses (IFRS 9), group consolidation, segregation of duties, VAT/Intrastat and ESG. <strong>Read-only is enforced</strong>, not merely promised: OData GET only, SQL SELECT only, RFC via a whitelist. Plus ready-made connection details for BI tools and a <strong>query console without AI</strong>. The history stores the question – never the result.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
+                <div class="feature-icon">🗺️</div>
+                <div class="feature-title t-de">Wissen zwischen Standorten spiegeln</div>
+                <div class="feature-title t-en">Mirror Knowledge Across Sites</div>
+                <div class="feature-desc t-de">Mehrere Jarvis-Instanzen in einem Netz: Ein Standort <strong>gibt einen Wissensordner frei</strong>, ein anderer <strong>holt</strong> ihn – eine Einbahnstraße, kein Zwei-Wege-Abgleich. Übertragen wird inkrementell über ein Manifest mit <strong>SHA-256-Prüfsummen</strong>; geschrieben wird erst, wenn Prüfsumme und Größe stimmen. Vertraut wird <strong>genau dem beim Einrichten bestätigten Zertifikat</strong>, und der Spiegel ist lokal <strong>schreibgeschützt</strong>, damit ihn niemand versehentlich verändert. Der gebende Standort sieht im Protokoll, wer wann geholt hat; ein Widerruf lässt die Kopie stehen und sagt den Grund im Klartext.</div>
+                <div class="feature-desc t-en">Several Jarvis instances in one network: one site <strong>shares a knowledge folder</strong>, another <strong>pulls</strong> it – one-way, not a two-way sync. Transfer is incremental via a manifest with <strong>SHA-256 checksums</strong>; files are written only once checksum and size match. Trust is pinned to <strong>exactly the certificate confirmed during setup</strong>, and the mirror is <strong>write-protected</strong> locally so nobody changes it by accident. The sharing site sees in its log who pulled and when; revoking access leaves the copy in place and states the reason in plain words.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
+                <div class="feature-icon">🧰</div>
+                <div class="feature-title t-de">Spezialisierte Rollen-Agenten</div>
+                <div class="feature-title t-en">Specialised Role Agents</div>
+                <div class="feature-desc t-de">Ein Administrator legt <strong>benannte Rollen</strong> an – jede mit eigenem System-Prompt, eigenem Werkzeug-Zuschnitt, optional eigenem LLM-Profil, eigener Denktiefe und Schrittgrenze. Der Hauptagent gibt eine Teilaufgabe per <strong><code>delegate</code></strong> ab, <strong>wartet auf das Ergebnis</strong> und arbeitet damit weiter – anders als ein losgeschickter Sub-Agent ohne Rückkanal. Die Sicherheitsregel ist knapp: eine Rolle kann Rechte nur <strong>wegnehmen, nie hinzufügen</strong>. So bekommt ein Bildmodell die Bildaufträge und ein Analyse-Profil die Zahlen, ohne dass jemand mehr darf als vorher.</div>
+                <div class="feature-desc t-en">An administrator defines <strong>named roles</strong> – each with its own system prompt, its own tool selection, optionally its own LLM profile, thinking depth and step limit. The main agent hands a subtask over via <strong><code>delegate</code></strong>, <strong>waits for the result</strong> and continues with it – unlike a fire-and-forget sub-agent with no return channel. The security rule is short: a role can only <strong>remove permissions, never add them</strong>. That way an image model gets the image jobs and an analysis profile gets the numbers, without anyone gaining more rights than before.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
+                <div class="feature-icon">📈</div>
+                <div class="feature-title t-de">Diagramme &amp; Schaubilder</div>
+                <div class="feature-title t-en">Charts &amp; Diagrams</div>
+                <div class="feature-desc t-de">Diagramme entstehen nicht als Bild, sondern <strong>interaktiv im Chat</strong> – mit Werten am Balken, lesbaren Achsen („1,2 Mio“ statt 1200000) und PNG-Export per Rechtsklick. Das Werkzeug <strong>liest CSV- und Excel-Dateien selbst</strong>, gruppiert, sortiert und rechnet – niemand muss Zahlen abschreiben, und deutsche Zahlenformate werden korrekt gelesen (kein stiller Faktor 1000). Stimmen Datenreihen und Kategorien nicht zusammen, sagt das Werkzeug es dem Modell <strong>vor dem Zeichnen</strong>, sodass es im selben Lauf korrigiert. Für Abläufe und Strukturen gibt es zusätzlich Mermaid-Schaubilder; die Farben kommen aus deinem Branding.</div>
+                <div class="feature-desc t-en">Charts are not flat images but <strong>interactive in the chat</strong> – with value labels, readable axes (“1.2M” instead of 1200000) and PNG export via right-click. The tool <strong>reads CSV and Excel files itself</strong>, groups, sorts and aggregates – nobody has to retype numbers, and European number formats are parsed correctly (no silent factor of 1000). If data series and categories do not match up, the tool says so <strong>before drawing</strong>, so the model fixes it within the same run. For flows and structures there are Mermaid diagrams as well; colours come from your branding.</div>
+            </div>
+            <div class="feature-card reveal">
                 <div class="feature-icon">📎</div>
                 <div class="feature-title t-de">Avatar-Assistent</div>
                 <div class="feature-title t-en">Avatar Assistant</div>
@@ -516,7 +568,6 @@
                 <div class="feature-desc t-en">A talking assistant figure on the portal, chat, support and knowledge pages – with its own input line for <strong>text and speech</strong>. Answers come either from the full agent or <strong>exclusively from configured sources</strong> (custom answers, Confluence pages, knowledge base), so nothing gets invented. The figure is <strong>interchangeable</strong>: company logo, neutral placeholder or your own sprite set – including a step-by-step guide with ready-made AI prompts. Size, corner and mute are set by each user.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">🧪</div>
                 <div class="feature-title t-de">Informationsextraktor mit Freigabe</div>
                 <div class="feature-title t-en">Knowledge Extractor with Approval</div>
@@ -524,7 +575,6 @@
                 <div class="feature-desc t-en">From a <strong>file, web address or Confluence page</strong>, the AI distils a summary, key facts and <strong>question-answer pairs</strong>. The result does not enter the knowledge base unchecked: it becomes a <strong>draft reviewed by a human</strong> – title, summary, facts and every single question can be corrected, deselected or discarded. Only approval commits the knowledge, together with its knowledge-group assignment.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">👥</div>
                 <div class="feature-title t-de">Anwesenheit &amp; Sitzungsverwaltung</div>
                 <div class="feature-title t-en">Presence &amp; Session Management</div>
@@ -532,7 +582,6 @@
                 <div class="feature-desc t-en">In the portal, administrators see at a glance <strong>who is signed in and who was</strong> – a green pill for online, grey for offline, plus last sign-in and sign-out. <strong>Presence and real activity are deliberately separated</strong>: an open browser tab is not work, so the list also shows what was actually done last and how long someone has been idle. A menu allows <strong>signing a user out or blocking them</strong>.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">📁</div>
                 <div class="feature-title t-de">Info-Dokumente im Portal</div>
                 <div class="feature-title t-en">Info Documents in the Portal</div>
@@ -540,7 +589,6 @@
                 <div class="feature-desc t-en">A drop folder for everything everyone should know: <strong>manuals, fact sheets, forms</strong> – and plain <strong>web links</strong>. An administrator drops the files in; a folder icon appears in the portal's top right. PDFs, images and text open directly in the browser, everything else downloads. The icon only shows up when something is actually there.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">⏰</div>
                 <div class="feature-title t-de">Erinnerungen per Messenger</div>
                 <div class="feature-title t-en">Reminders via Messenger</div>
@@ -600,15 +648,15 @@
                 <div class="feature-icon">📚</div>
                 <div class="feature-title t-de">Wissensdatenbank (RAG)</div>
                 <div class="feature-title t-en">Knowledge Base (RAG)</div>
-                <div class="feature-desc t-de">Eigene Dokumente (PDF, DOCX, TXT, Excel, PPTX, Bilder per OCR) durchsuchen – TF-IDF für kleine Bestände, automatischer Wechsel auf ChromaDB-Vektordatenbank bei wachsenden Datenmengen. Bilder werden per Tesseract-OCR gelesen und vom LLM aufbereitet. RAG direkt auf deinen Daten, keine Cloud, kein Datenleck.</div>
-                <div class="feature-desc t-en">Search your own documents (PDF, DOCX, TXT, Excel, PPTX, images via OCR) – TF-IDF for small collections, automatic switch to ChromaDB vector database as data grows. Images are read via Tesseract OCR and refined by the LLM. RAG directly on your data, no cloud, no data leak.</div>
+                <div class="feature-desc t-de">Eigene Dokumente (PDF, DOCX, TXT, Excel, PPTX, Bilder per OCR) durchsuchen – TF-IDF für kleine Bestände, automatischer Wechsel auf ChromaDB-Vektordatenbank bei wachsenden Datenmengen. Bilder werden per Tesseract-OCR gelesen und vom LLM aufbereitet. Bei PDFs mit <strong>beschädigter Textebene</strong> – typisch bei nachträglich verkleinerten Scans, wo aus <code>01.07.</code> ein <code>OL.O7.</code> wird – erkennt Jarvis das und liest die betroffenen Seiten per Texterkennung neu; entschieden wird über eine Stichprobe, nicht geraten. RAG direkt auf deinen Daten, keine Cloud, kein Datenleck.</div>
+                <div class="feature-desc t-en">Search your own documents (PDF, DOCX, TXT, Excel, PPTX, images via OCR) – TF-IDF for small collections, automatic switch to ChromaDB vector database as data grows. Images are read via Tesseract OCR and refined by the LLM. For PDFs with a <strong>damaged text layer</strong> – typical for downsized scans, where <code>01/07</code> turns into <code>OL/O7</code> – Jarvis detects it and re-reads the affected pages via OCR; the decision is made from a sample comparison, not guessed. RAG directly on your data, no cloud, no data leak.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">📄</div>
                 <div class="feature-title t-de">Office-Dokumente erstellen</div>
                 <div class="feature-title t-en">Office Document Generation</div>
-                <div class="feature-desc t-de">Jarvis erstellt Word-, Excel- und PowerPoint-Dateien direkt im Chat – inklusive PDF-Export. Auch komplexe Inhalte wie Diagramme werden generiert; die fertige Datei kommt als Ein-Klick-Download zurück, nicht als bloßer Pfad.</div>
-                <div class="feature-desc t-en">Jarvis creates Word, Excel and PowerPoint files directly in the chat – including PDF export. Even complex content like diagrams is generated; the finished file comes back as a one-click download, not just a path.</div>
+                <div class="feature-desc t-de">Jarvis erstellt Word-, Excel- und PowerPoint-Dateien direkt im Chat – inklusive PDF-Export. Auch komplexe Inhalte wie Diagramme werden generiert; die fertige Datei kommt als Ein-Klick-Download zurück, nicht als bloßer Pfad. Präsentationen entstehen im <strong>Hausdesign</strong>: Farben, Schriften, Satzspiegel und Layouts kann Jarvis aus einer <strong>hochgeladenen Firmenvorlage</strong> übernehmen, statt im Office-Standard auszuliefern.</div>
+                <div class="feature-desc t-en">Jarvis creates Word, Excel and PowerPoint files directly in the chat – including PDF export. Even complex content like diagrams is generated; the finished file comes back as a one-click download, not just a path. Presentations are produced in your <strong>corporate design</strong>: Jarvis can take colours, fonts, margins and layouts from an <strong>uploaded company template</strong> instead of shipping the Office default.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🔗</div>
@@ -656,8 +704,8 @@
                 <div class="feature-icon">🔌</div>
                 <div class="feature-title t-de">MCP-Anbindung</div>
                 <div class="feature-title t-en">MCP Integration</div>
-                <div class="feature-desc t-de">Externe Tool-Server per Model Context Protocol (MCP) anbinden – stdio oder HTTP/SSE. Hunderte verfügbare MCP-Server für Dateisysteme, Datenbanken, APIs und mehr, direkt als Agent-Tools nutzbar.</div>
-                <div class="feature-desc t-en">Connect external tool servers via Model Context Protocol (MCP) – stdio or HTTP/SSE. Hundreds of available MCP servers for filesystems, databases, APIs and more, usable directly as agent tools.</div>
+                <div class="feature-desc t-de">Externe Tool-Server per Model Context Protocol (MCP) anbinden – stdio, <strong>Streamable HTTP</strong> oder SSE. Hunderte verfügbare MCP-Server für Dateisysteme, Datenbanken und APIs, direkt als Agent-Tools nutzbar. Weil ein MCP-Server <strong>fremder Code</strong> ist, läuft er auf Wunsch in einer <strong>Namespace-Sandbox</strong> und sieht das Verzeichnis des Dienstes nicht – weder Konfiguration noch Zugangsdaten; die Zugangsdaten des Systems werden ihm ohnehin nicht übergeben. Ob Netzwerk-Benutzer seine Werkzeuge benutzen dürfen, entscheidet ein Administrator <strong>je Server</strong>.</div>
+                <div class="feature-desc t-en">Connect external tool servers via Model Context Protocol (MCP) – stdio, <strong>Streamable HTTP</strong> or SSE. Hundreds of available MCP servers for filesystems, databases and APIs, usable directly as agent tools. Because an MCP server is <strong>third-party code</strong>, it can run in a <strong>namespace sandbox</strong> where it cannot see the service directory – neither configuration nor credentials; the system's own secrets are never passed to it anyway. Whether network users may use its tools is decided by an administrator <strong>per server</strong>.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">📊</div>

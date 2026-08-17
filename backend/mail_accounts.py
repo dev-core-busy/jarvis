@@ -168,7 +168,13 @@ def _speichern(alle: dict) -> None:
 # nimmt ein PUT beliebige Felder – dieselbe Luecke, die ``scheduler.update_job``
 # bis 2026-07-28 hatte (dort liess sich ``owner_privileged`` setzen).
 AENDERBAR = ("adresse", "benutzer", "passwort", "kanal", "aktiv",
-             "ordner_eingang", "ordner_entwuerfe", "ordner_gesendet")
+             "ordner_eingang", "ordner_entwuerfe", "ordner_gesendet",
+             "antwort_vorgabe")
+
+# Deckel fuer die persoenliche Antwort-Vorgabe. Sie geht in JEDEN Auftrag ein
+# (Vorschlag und Regel-Lauf) und kostet dort Kontext – ein Roman waere kein
+# Gewinn, sondern verdraengte die eigentliche Nachricht.
+VORGABE_MAX = 2000
 
 
 # ── Aussetzer nach wiederholten Anmeldefehlern ──────────────────────────────
@@ -221,6 +227,24 @@ def hat_konto(user: str) -> bool:
     return bool(k and (k.get("adresse") or "").strip() and (k.get("pw_enc") or "").strip())
 
 
+def antwort_vorgabe(user: str) -> str:
+    """Persoenliche Vorgabe fuer formulierte Antworten (Signatur, Ton, Tabus).
+
+    **Bewusst NICHT Teil von ``MailKonto``**: dort stehen ausschliesslich
+    Verbindungs- und Postfachdaten, die an ``MailClient`` gehen. Eine
+    Prompt-Vorgabe hat in einem Verbindungsobjekt nichts verloren – sie wird
+    dort gelesen, wo der Auftrag gebaut wird.
+
+    Fail-safe leer: kann die Datei nicht gelesen werden, laeuft alles wie
+    vorher, nur ohne Vorgabe.
+    """
+    try:
+        k = _laden().get(norm_user(user)) or {}
+        return str(k.get("antwort_vorgabe") or "").strip()[:VORGABE_MAX]
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def konto_info(user: str) -> dict:
     """Fuer die Oberflaeche – OHNE Kennwort, auch nicht maskiert.
 
@@ -239,6 +263,7 @@ def konto_info(user: str) -> dict:
         "ordner_eingang": k.get("ordner_eingang", ""),
         "ordner_entwuerfe": k.get("ordner_entwuerfe", ""),
         "ordner_gesendet": k.get("ordner_gesendet", ""),
+        "antwort_vorgabe": k.get("antwort_vorgabe", ""),
         "letzter_erfolg": int(k.get("letzter_erfolg", 0) or 0),
         "letzter_fehler": k.get("letzter_fehler", ""),
         "anmeldefehler": int(k.get("anmeldefehler", 0) or 0),
@@ -285,6 +310,12 @@ def speichern(user: str, felder: dict) -> dict:
         k["kanal"] = kan
     if "aktiv" in felder:
         k["aktiv"] = bool(felder.get("aktiv"))
+    if "antwort_vorgabe" in felder:
+        # Anders als das Kennwort heisst LEER hier wirklich "keine Vorgabe":
+        # es ist ein sichtbares Feld, der Benutzer sieht seinen Text und kann
+        # ihn bewusst loeschen. Beim Kennwort ist das umgekehrt, weil es
+        # nie angezeigt wird (siehe Docstring oben).
+        k["antwort_vorgabe"] = str(felder.get("antwort_vorgabe") or "").strip()[:VORGABE_MAX]
     if "passwort" in felder:
         pw = str(felder.get("passwort") or "")
         if pw.strip():

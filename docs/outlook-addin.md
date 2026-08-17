@@ -196,6 +196,14 @@ Optional: ein **Hinweis** („freundlich absagen", „Termin bestätigen") und d
 werden soll. Beides ist freiwillig; der Weg funktioniert auch, wenn noch gar
 keine Regel angelegt ist.
 
+**Ständige Vorgabe** (Reiter *Postfach*, auch in `/email`): was sich nie ändert –
+Signatur, Sie/Du, „keine Preise oder Termine zusagen", gewünschte Länge – gehört
+nicht in das Hinweis-Feld, das man pro Mail neu tippt. Die Vorgabe gilt für
+**vorgeschlagene Antworten UND für alle eigenen Regeln**, damit die Signatur nicht
+an zwei Stellen gepflegt werden muss. Reihenfolge im Auftrag: Vorgabe → Regel →
+Hinweis; bei Widerspruch gewinnt das Speziellere. Ein leeres Feld heißt hier
+wirklich „keine Vorgabe" (anders als beim Kennwort, das man nie sieht).
+
 > **Der Lauf hinter dem Vorschlag hat KEINE Werkzeuge.** Er kann nichts senden,
 > nichts weiterleiten, nichts verschieben – er formuliert nur Text. Eine
 > Prompt-Injektion in der eingegangenen Mail kann hier also nichts auslösen; sie

@@ -140,6 +140,7 @@
         setz('em-ord-eingang', k.ordner_eingang);
         setz('em-ord-entwuerfe', k.ordner_entwuerfe);
         setz('em-ord-gesendet', k.ordner_gesendet);
+        setz('em-vorgabe', k.antwort_vorgabe);
         var akt = $('em-aktiv');
         // NICHT auf Falsyness pruefen: ein gespeichertes `false` muss als false
         // erscheinen, ein FEHLENDES Feld dagegen als Vorgabe true.
@@ -222,7 +223,8 @@
             aktiv: !!(($('em-aktiv') || {}).checked),
             ordner_eingang: (($('em-ord-eingang') || {}).value || '').trim(),
             ordner_entwuerfe: (($('em-ord-entwuerfe') || {}).value || '').trim(),
-            ordner_gesendet: (($('em-ord-gesendet') || {}).value || '').trim()
+            ordner_gesendet: (($('em-ord-gesendet') || {}).value || '').trim(),
+            antwort_vorgabe: (($('em-vorgabe') || {}).value || '').trim()
         };
         var pw = (($('em-passwort') || {}).value || '');
         // Nur senden, wenn wirklich etwas eingegeben wurde – ein leeres Feld

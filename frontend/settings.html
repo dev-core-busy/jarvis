@@ -2845,10 +2845,34 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- Persoenliche Zugaenge: Server-Freigabeliste.
+                             Steht bewusst im Verbindungs-Block und wird mit dem
+                             Knopf "Speichern" darunter mitgesendet – es ist
+                             Serverkonfiguration, keine Analyse-Einstellung. -->
+                        <div class="form-group" style="margin-top:18px;">
+                            <label for="sap-allowed-hosts">Freigegebene Server für persönliche Zugänge</label>
+                            <textarea id="sap-allowed-hosts" class="config-input" rows="2"
+                                      placeholder="s4.firma.de, hana.firma.de – leer = niemand"
+                                      style="width:100%;box-sizing:border-box;"></textarea>
+                            <span class="kb-hint">Benutzer können im Bereich <b>/sap</b> unter „Mein SAP-Zugang" ihre
+                                <b>eigenen</b> SAP-Zugangsdaten hinterlegen; dann gilt der oben konfigurierte Zugang nur
+                                noch als gemeinsamer Lesezugang (Rückfall). Hier steht, auf welche Server ein eigener
+                                Zugang zeigen darf – komma- oder zeilengetrennt, ein Eintrag deckt auch Unterdomänen ab
+                                (<code>firma.de</code> erlaubt <code>s4.firma.de</code>).
+                                <b>Leer = niemand.</b> Der oben eingetragene Server ist immer erlaubt.</span>
+                        </div>
+
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
                             <button class="btn-primary" id="sap-save" type="button" data-i18n="common.save">Speichern</button>
                             <button class="btn-secondary" id="sap-test" type="button" data-i18n="profile.test">Verbindung testen</button>
                             <span id="sap-status" style="font-size:0.9em;"></span>
+                        </div>
+
+                        <!-- Wer hat einen eigenen Zugang hinterlegt? Fuer den Admin die
+                             Antwort auf "warum sieht dieser Benutzer andere Zahlen". -->
+                        <div class="form-group" style="margin-top:18px;">
+                            <label>Persönliche SAP-Zugänge</label>
+                            <div id="sap-accounts-list" class="kb-hint">Lädt…</div>
                         </div>
 
                         <!-- Datenzugriff: OData -->
@@ -4349,7 +4373,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=160"></script>
+    <script src="/static/js/i18n.js?v=161"></script>
     <script src="/static/js/cron.js?v=19"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=4"></script>
@@ -4367,7 +4391,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/vision.js?v=30"></script>
     <script src="/static/js/confluence.js?v=7"></script>
     <script src="/static/js/jira.js?v=7"></script>
-    <script src="/static/js/sap.js?v=2"></script>
+    <script src="/static/js/sap.js?v=3"></script>
     <script src="/static/js/email.js?v=4"></script>
     <script src="/static/js/kundenverwaltung.js?v=6"></script>
     <script src="/static/js/support_admin.js?v=11"></script>

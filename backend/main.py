@@ -7182,28 +7182,78 @@ async def confluence_page_api(id: str = "", title: str = "", space: str = "",
 
 # ─── SAP (Reiter: Read-Only-Zugriff) ─────────────────────────────────
 
-def _sap_client():
-    from backend.sap_client import SapClient
-    return SapClient()
+def _sap_client(user: str = ""):
+    """SAP-Client fuer DIESEN Benutzer.
+
+    Seit 2026-08-17 gilt der persoenliche Zugang mit Vorrang
+    (``sap_accounts.aufloesen``), der in den Einstellungen hinterlegte Zugang ist
+    der gemeinsame Lesezugang als Rueckfall. **Der Benutzer muss uebergeben
+    werden** – ohne ihn kommt der Sammelzugang, und der Endpunkt liest dann mit
+    fremden SAP-Berechtigungen."""
+    try:
+        from backend import sap_accounts
+        return sap_accounts.aufloesen(user or "")["client"]
+    except Exception as e:  # noqa: BLE001
+        # Fail-safe wie vor 2026-08-17: lieber der Sammelzugang als ein 500er.
+        print(f"[SAP] Zugang nicht aufloesbar ({e}) – Sammelzugang", flush=True)
+        from backend.sap_client import SapClient
+        return SapClient()
+
+
+def _sap_zugang(user: str = "", trotz_aussetzer: bool = False) -> dict:
+    """Wie ``_sap_client``, aber mit Quelle und Hinweis (fuer die Anzeige)."""
+    try:
+        from backend import sap_accounts
+        return sap_accounts.aufloesen(user or "", trotz_aussetzer=trotz_aussetzer)
+    except Exception as e:  # noqa: BLE001
+        print(f"[SAP] Zugang nicht aufloesbar ({e}) – Sammelzugang", flush=True)
+        from backend.sap_client import SapClient
+        return {"client": SapClient(), "quelle": "sammel", "hinweis": "",
+                "benutzer": "", "ausgesetzt": False}
 
 
 @app.get("/api/sap/test")
 async def sap_test(user: str = Depends(require_sap_access)):
-    """Prueft die gespeicherte SAP-Verbindung (fuer den Reiter)."""
+    """Prueft die SAP-Verbindung DIESES Benutzers (Reiter und /sap-Bereich).
+
+    Getestet wird der Zugang, der auch beim Auswerten gilt – persoenlich mit
+    Vorrang. ``trotz_aussetzer=True``, weil dies eine Handlung des Menschen ist:
+    ohne die Ausnahme testete der Knopf nach einem Aussetzer den Sammelzugang,
+    meldete "ok" und der Aussetzer liesse sich nie aufloesen."""
     from backend.sap_client import SapError
-    c = _sap_client()
+    z = _sap_zugang(user, trotz_aussetzer=True)
+    c = z["client"]
+    quelle = z.get("quelle") or "sammel"
     if not c.configured:
         return JSONResponse({"ok": False, "configured": False,
-                             "type": c.connection_type,
+                             "type": c.connection_type, "quelle": quelle,
+                             "hinweis": z.get("hinweis") or "",
                              "error": "Nicht konfiguriert (Zugangsdaten fehlen)."})
     try:
         res = await asyncio.to_thread(c.test)
-        return JSONResponse({"ok": True, "configured": True,
-                             "type": res.get("type"), "product": c.product,
-                             "detail": res.get("detail")})
     except SapError as e:
+        # Ein Anmeldefehler zaehlt gegen den Aussetzer – aber nur, wenn wirklich
+        # der persoenliche Zugang getestet wurde (sonst rechnete man dem
+        # Benutzer einen Fehler des Sammelzugangs an).
+        if quelle == "persoenlich":
+            try:
+                from backend import sap_accounts
+                sap_accounts.melde_fehler(user, e)
+            except Exception:  # noqa: BLE001
+                pass
         return JSONResponse({"ok": False, "configured": True, "status": e.status,
-                             "type": c.connection_type, "error": str(e)})
+                             "type": c.connection_type, "quelle": quelle,
+                             "error": str(e)})
+    if quelle == "persoenlich":
+        try:
+            from backend import sap_accounts
+            sap_accounts.merke_ergebnis(user, True)
+        except Exception:  # noqa: BLE001
+            pass
+    return JSONResponse({"ok": True, "configured": True,
+                         "type": res.get("type"), "product": c.product,
+                         "quelle": quelle, "hinweis": z.get("hinweis") or "",
+                         "detail": res.get("detail")})
 
 
 @app.get("/api/sap/odata/query")
@@ -7213,7 +7263,7 @@ async def sap_odata_query_api(entity_set: str, service: str = "", select: str = 
                               user: str = Depends(require_sap_access)):
     """Lesende OData-Abfrage fuer den Reiter (nur GET)."""
     from backend.sap_client import SapError
-    c = _sap_client()
+    c = _sap_client(user)
     if not c.odata.configured:
         return JSONResponse({"ok": False, "error": "OData nicht konfiguriert."}, status_code=400)
     try:
@@ -7236,7 +7286,7 @@ async def sap_odata_query_api(entity_set: str, service: str = "", select: str = 
 async def sap_odata_entity_sets_api(service: str = "", user: str = Depends(require_sap_access)):
     """EntitySets eines OData-Service (aus $metadata) – fuer den Reiter."""
     from backend.sap_client import SapError
-    c = _sap_client()
+    c = _sap_client(user)
     if not c.odata.configured:
         return JSONResponse({"ok": False, "error": "OData nicht konfiguriert."}, status_code=400)
     try:
@@ -7250,7 +7300,7 @@ async def sap_odata_entity_sets_api(service: str = "", user: str = Depends(requi
 async def sap_sql_api(request: Request, user: str = Depends(require_sap_access)):
     """Lesende SQL-Abfrage gegen HANA fuer den Reiter (nur SELECT/WITH)."""
     from backend.sap_client import SapError
-    c = _sap_client()
+    c = _sap_client(user)
     if not c.hana.configured:
         return JSONResponse({"ok": False, "error": "HANA nicht konfiguriert."}, status_code=400)
     try:
@@ -7279,7 +7329,7 @@ async def sap_tables_api(schema: str = "", limit: int = 200,
                          user: str = Depends(require_sap_access)):
     """Tabellen/Views eines HANA-Schemas – fuer den Reiter."""
     from backend.sap_client import SapError
-    c = _sap_client()
+    c = _sap_client(user)
     if not c.hana.configured:
         return JSONResponse({"ok": False, "error": "HANA nicht konfiguriert."}, status_code=400)
     try:
@@ -7297,7 +7347,7 @@ async def sap_tables_api(schema: str = "", limit: int = 200,
 async def sap_reporting_endpoints_api(user: str = Depends(require_sap_access)):
     """Verbindungshinweise fuer BI-/Reporting-Tools – fuer den Reiter."""
     from backend.sap_client import reporting_endpoints
-    c = _sap_client()
+    c = _sap_client(user)
     eps = await asyncio.to_thread(reporting_endpoints, c)
     return JSONResponse({"ok": True, "endpoints": eps})
 
@@ -7337,7 +7387,17 @@ async def sap_portal_status(user: str = Depends(require_sap_access)):
     Bewusst OHNE Verbindungstest – der kostet je nach Netz Sekunden und die
     Seite soll sofort stehen. Den Test loest der Benutzer per Knopf aus
     (``/api/sap/test``)."""
-    c = _sap_client()
+    z = _sap_zugang(user)
+    c = z["client"]
+    # Getrennt ausgewiesen, weil die Oberflaeche BEIDES braucht: welcher Zugang
+    # gerade gilt (Pille) und ob ueberhaupt ein gemeinsamer Lesezugang existiert
+    # (dann ist ein eigener Zugang optional, sonst Pflicht).
+    sammel = False
+    try:
+        from backend.sap_client import SapClient
+        sammel = bool(SapClient().configured)
+    except Exception:  # noqa: BLE001
+        pass
     return JSONResponse({
         "ok": True,
         "configured": bool(c.configured),
@@ -7346,8 +7406,96 @@ async def sap_portal_status(user: str = Depends(require_sap_access)):
         "odata": bool(c.odata.configured),
         "hana": bool(c.hana.configured),
         "rfc": bool(c.rfc.configured),
+        "quelle": z.get("quelle") or "sammel",
+        "hinweis": z.get("hinweis") or "",
+        "sammel_vorhanden": sammel,
         "is_admin": _is_admin_user(user),
     })
+
+
+# ── Persoenlicher SAP-Zugang (Klappabschnitt "Mein SAP-Zugang" in /sap) ──────
+# Alle drei Endpunkte haengen an ``require_sap_access`` – dieselbe Schranke wie
+# der uebrige Bereich. Wer /sap betreten darf, darf auch seinen eigenen Zugang
+# pflegen; ein Administrator OHNE SAP-Freigabe kann das nicht (``
+# _user_may_use_sap`` kennt bewusst keinen Admin-Bypass) und pflegt stattdessen
+# den gemeinsamen Lesezugang unter Einstellungen → SAP.
+
+@app.get("/api/sap/account")
+async def sap_account_get(user: str = Depends(require_sap_access)):
+    """Eigener SAP-Zugang – OHNE Kennwoerter (nur ``*_gesetzt``-Flags)."""
+    from backend import sap_accounts
+    try:
+        return JSONResponse({"ok": True, "account": sap_accounts.zugang_info(user)})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/sap/account")
+async def sap_account_set(request: Request, user: str = Depends(require_sap_access)):
+    """Eigenen SAP-Zugang anlegen/aendern.
+
+    Der Rumpf geht UNVERAENDERT an ``sap_accounts.speichern`` – die Feld-Whitelist
+    dort ist die einzige Instanz. Wuerde der Endpunkt vorfiltern, verschwaende ein
+    unbekanntes Feld stillschweigend und die Antwort meldete trotzdem Erfolg
+    (genau der Fehler, der am 2026-08-12 beim Postfach behoben wurde)."""
+    from backend import sap_accounts
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        info = sap_accounts.speichern(user, body)
+    except sap_accounts.SapKontoFehler as e:
+        code = 400 if getattr(e, "kategorie", "eingabe") == "eingabe" else 500
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=code)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "account": info})
+
+
+@app.get("/api/sap/admin/accounts")
+async def sap_admin_accounts(user: str = Depends(require_local_auth)):
+    """Wer hat einen eigenen SAP-Zugang hinterlegt? (Reiter *Einstellungen → SAP*)
+
+    Fuer den Administrator die Antwort auf "warum sieht dieser Benutzer andere
+    Zahlen als ich". **Ohne Zugangsdaten und ohne Serveradressen** – wer welchen
+    SAP-Benutzer verwendet, ist dessen Sache; sichtbar ist nur, DASS es einen
+    eigenen Zugang gibt, welcher Kanal und ob er gerade ausgesetzt ist."""
+    from backend import sap_accounts
+    out = []
+    try:
+        for un in sap_accounts.alle_benutzer():
+            i = sap_accounts.zugang_info(un)
+            out.append({
+                "user": _display_name(un),
+                "connection_type": i.get("connection_type") or "",
+                "aktiv": bool(i.get("aktiv")),
+                "vorhanden": bool(i.get("vorhanden")),
+                "ausgesetzt": bool(i.get("ausgesetzt")),
+                "anmeldefehler": int(i.get("anmeldefehler") or 0),
+                "letzter_erfolg": int(i.get("letzter_erfolg") or 0),
+                "letzter_fehler": i.get("letzter_fehler") or "",
+                "host_ok": bool(i.get("host_ok")),
+            })
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "accounts": out,
+                         "erlaubte_hosts": sap_accounts.hosts_erlaubt(),
+                         "implizit": sap_accounts.hosts_implizit()})
+
+
+@app.delete("/api/sap/account")
+async def sap_account_del(user: str = Depends(require_sap_access)):
+    """Eigenen SAP-Zugang entfernen – danach gilt wieder der Sammelzugang."""
+    from backend import sap_accounts
+    try:
+        weg = sap_accounts.loeschen(user)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "removed": bool(weg),
+                         "account": sap_accounts.zugang_info(user)})
 
 
 def _sap_hidden_analyses() -> list:
@@ -7479,12 +7627,16 @@ async def sap_ask(request: Request, user: str = Depends(require_sap_access)):
                                                    "oder eine Frage eingeben."},
                             status_code=400)
 
-    c = _sap_client()
+    z = _sap_zugang(user)
+    c = z["client"]
     if not c.configured:
         return JSONResponse({"ok": False, "configured": False,
-                             "error": "SAP ist nicht konfiguriert. Zugangsdaten "
-                                      "hinterlegt ein Administrator unter "
-                                      "Einstellungen → SAP."}, status_code=400)
+                             "error": "SAP ist nicht konfiguriert. Entweder "
+                                      "hinterlegt ein Administrator einen "
+                                      "gemeinsamen Lesezugang unter Einstellungen "
+                                      "→ SAP, oder du traegst deinen eigenen "
+                                      "SAP-Zugang unter 'Mein SAP-Zugang' ein."},
+                            status_code=400)
 
     # Sicherheitsschicht wie im Chat/Avatar: der Freitext geht in einen
     # Agentenlauf, also gilt hier dieselbe Jailbreak-Pruefung.
@@ -7517,8 +7669,14 @@ async def sap_ask(request: Request, user: str = Depends(require_sap_access)):
             return JSONResponse({"ok": False, "error": f"Analyse fehlgeschlagen: {e}"},
                                 status_code=500)
 
+    # Mit WELCHEM Zugang gelesen wurde, gehoert in den Ergebniskopf – nicht in den
+    # Antworttext (der wird kopiert und weitergegeben). Faellt der Lauf auf den
+    # Sammelzugang zurueck, sind die Zahlen mit fremden – in der Regel weiteren –
+    # SAP-Berechtigungen geholt; das darf nicht unbemerkt bleiben.
     return JSONResponse({"ok": True, "answer": answer or "",
-                         "analysis_id": analysis_id, "bi_tool": bi_tool})
+                         "analysis_id": analysis_id, "bi_tool": bi_tool,
+                         "quelle": z.get("quelle") or "sammel",
+                         "hinweis": z.get("hinweis") or ""})
 
 
 @app.post("/api/sap/stop")

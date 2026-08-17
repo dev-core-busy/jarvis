@@ -58,6 +58,7 @@
             this._bind();
             this.loadConfig();
             this.loadVisibility();
+            this.loadAccounts();
         },
 
         _bind: function () {
@@ -128,6 +129,8 @@
                     if ($('sap-rfc-user')) $('sap-rfc-user').value = c.rfc_user || '';
                     if ($('sap-rfc-pass')) $('sap-rfc-pass').value = c.rfc_password || '';
                     if ($('sap-rfc-lang')) $('sap-rfc-lang').value = c.rfc_lang || 'EN';
+                    // Freigegebene Server fuer persoenliche Zugaenge (leer = niemand)
+                    if ($('sap-allowed-hosts')) $('sap-allowed-hosts').value = c.allowed_hosts || '';
                     self._applyType(c.connection_type || 'odata');
                 })
                 .catch(function () {});
@@ -161,7 +164,12 @@
                 rfc_client: val('sap-rfc-client'),
                 rfc_user: val('sap-rfc-user'),
                 rfc_password: ($('sap-rfc-pass') ? $('sap-rfc-pass').value : ''),
-                rfc_lang: val('sap-rfc-lang') || 'EN'
+                rfc_lang: val('sap-rfc-lang') || 'EN',
+                // Gehoert zum Verbindungs-Knopf (Serverkonfiguration). Der
+                // Sichtbarkeits-Knopf sendet es NICHT mit – sonst ueberschriebe
+                // ein Klick dort den jeweils anderen Teil (gleiche Trennung wie
+                // bei hidden_analyses).
+                allowed_hosts: ($('sap-allowed-hosts') ? $('sap-allowed-hosts').value.trim() : '')
             };
         },
 
@@ -172,8 +180,47 @@
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(this._collect())
             }).then(function (r) { return r.json(); })
-              .then(function () { status('✓ ' + (window.t ? window.t('confluence.saved') : 'Gespeichert'), 'ok'); })
+              .then(function () {
+                  status('✓ ' + (window.t ? window.t('confluence.saved') : 'Gespeichert'), 'ok');
+                  // Die Freigabeliste entscheidet, ob vorhandene persoenliche
+                  // Zugaenge noch gelten – deshalb die Liste neu zeichnen.
+                  Manager.loadAccounts();
+              })
               .catch(function () { status('✗ Fehler beim Speichern', 'error'); });
+        },
+
+        // ── Persoenliche SAP-Zugaenge (nur Anzeige) ─────────────────────
+        loadAccounts: function () {
+            var box = $('sap-accounts-list'); if (!box) return;
+            fetch('/api/sap/admin/accounts', { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    if (!d || !d.ok) { box.textContent = 'Nicht abrufbar.'; return; }
+                    var hosts = (d.erlaubte_hosts || []);
+                    var kopf = hosts.length
+                        ? 'Freigegebene Server: ' + hosts.map(esc).join(', ')
+                        : '⚠ Kein Server freigegeben – niemand kann einen eigenen Zugang hinterlegen.';
+                    var list = (d.accounts || []);
+                    // kopf ist bereits sicher: die Hostnamen wurden oben durch esc()
+                    // geschickt, der Rest ist statischer Text. Ein zweites esc()
+                    // wuerde die Entities doppelt maskieren.
+                    if (!list.length) {
+                        box.innerHTML = kopf
+                            + '<br>Kein Benutzer hat einen eigenen SAP-Zugang hinterlegt – alle Auswertungen '
+                            + 'laufen über den gemeinsamen Lesezugang.';
+                        return;
+                    }
+                    var html = kopf + '<br>' + list.length + ' Benutzer mit eigenem Zugang:<ul style="margin:6px 0 0 18px;">';
+                    list.forEach(function (a) {
+                        var mark = a.ausgesetzt ? ' – <span style="color:var(--danger);">ausgesetzt nach '
+                                + a.anmeldefehler + ' Anmeldefehlern</span>'
+                            : (!a.aktiv ? ' – inaktiv'
+                            : (!a.host_ok ? ' – <span style="color:var(--danger);">Server nicht mehr freigegeben</span>' : ''));
+                        html += '<li>' + esc(a.user) + ' (' + esc(a.connection_type || '?') + ')' + mark + '</li>';
+                    });
+                    box.innerHTML = html + '</ul>';
+                })
+                .catch(function () { box.textContent = 'Nicht abrufbar.'; });
         },
 
         test: function () {

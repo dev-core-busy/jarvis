@@ -145,6 +145,12 @@
             "type": "string",
             "label": "RFC Sprache",
             "default": "EN"
+        },
+        "allowed_hosts": {
+            "type": "string",
+            "label": "Freigegebene SAP-Server (fuer persoenliche Zugaenge)",
+            "description": "Server, auf die Benutzer ihren EIGENEN SAP-Zugang richten duerfen (Bereich /sap, Abschnitt 'Mein SAP-Zugang'). Komma- oder zeilengetrennt; ein Eintrag deckt auch Unterdomaenen ab (firma.de erlaubt s4.firma.de). LEER = NIEMAND. Der in diesem Reiter konfigurierte Server ist immer erlaubt. Ohne diese Liste koennte jeder SAP-Freigegebene Jarvis an eine beliebige Adresse schicken.",
+            "default": ""
         }
     },
     "knowledge_docs": [],

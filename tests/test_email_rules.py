@@ -1398,9 +1398,15 @@ check("trotz_aussetzer=True" not in _runner_src[_i_auto:],
 _main_src = (ROOT / "backend/main.py").read_text()
 check("konto_fuer(user, trotz_aussetzer=True)" in _main_src,
       "der Verbindungstest ist der Rueckweg und wird nicht selbst blockiert")
-check(_main_src.count("mail_accounts.konto_fuer(") ==
-      _main_src.count("trotz_aussetzer=True"),
-      "alle Endpunkt-Aufrufe sind vom Benutzer ausgeloest und ausdruecklich markiert")
+# Geprueft wird die AUSSAGE ("jeder konto_fuer-Aufruf in main.py traegt
+# trotz_aussetzer=True"), nicht ein globaler Zaehler: `trotz_aussetzer=True` steht
+# seit 2026-08-17 auch im SAP-Weg (_sap_zugang), und ein Zaehlvergleich waere
+# damit eine Zeitbombe, die einen Fehler meldet, den es nicht gibt.
+_kf_ohne = [m.start() for m in re.finditer(r"mail_accounts\.konto_fuer\(", _main_src)
+            if "trotz_aussetzer=True" not in _main_src[m.start():m.start() + 120]]
+check(not _kf_ohne,
+      "alle Endpunkt-Aufrufe sind vom Benutzer ausgeloest und ausdruecklich markiert",
+      str(len(_kf_ohne)) + " Aufruf(e) ohne trotz_aussetzer=True")
 check("merke_ergebnis(user, False, str(f), f.kategorie)" in _main_src,
       "auch der Verbindungstest meldet die Kategorie")
 

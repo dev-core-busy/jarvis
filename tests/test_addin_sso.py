@@ -459,6 +459,94 @@ for k in ("addin.reply_head", "addin.reply_make", "addin.reply_send",
           "addin.reply_draft", "addin.reply_safe", "addin.run_head"):
     pruefe(I18N.count("'%s'" % k) == 2, "%s in DE und EN" % k)
 
+# ═══ 9. Persoenliche Antwort-Vorgabe ════════════════════════════════════════
+# Wunsch des Nutzers 2026-08-17: Signatur, Anrede-Form und Tabus gehoeren nicht
+# in ein Feld, das man pro Mail neu tippt. Gilt fuer BEIDE Wege (Vorschlag und
+# Regel-Lauf), damit die Signatur nicht doppelt gepflegt werden muss.
+abschnitt("9. Persoenliche Antwort-Vorgabe")
+ACC = (ROOT / "backend" / "mail_accounts.py").read_text(encoding="utf-8")
+EMAILHTML2 = (ROOT / "frontend" / "email.html").read_text(encoding="utf-8")
+PORTALJS2 = (ROOT / "frontend" / "js" / "email_portal.js").read_text(encoding="utf-8")
+TASKPANE2 = (ROOT / "frontend" / "addin" / "taskpane.html").read_text(encoding="utf-8")
+
+pruefe('"antwort_vorgabe"' in ACC.split("AENDERBAR = (", 1)[1].split(")", 1)[0],
+       "das Feld steht in der Whitelist AENDERBAR (sonst wird es still verworfen)")
+pruefe("VORGABE_MAX" in ACC, "die Laenge ist gedeckelt (der Text geht in JEDEN Auftrag)")
+pruefe("def antwort_vorgabe(" in ACC, "eigene Lesefunktion vorhanden")
+# Bewusst NICHT in MailKonto: dort stehen Verbindungsdaten fuer MailClient.
+# MailKonto steht in mail_client.py, NICHT in mail_accounts.py. Die erste
+# Fassung dieser Pruefung las die falsche Datei, fand die Klasse nicht und war
+# damit trivial wahr – zweite leere Pruefung an einem Tag. Bei "X darf in Y
+# nicht vorkommen" immer belegen, dass Y ueberhaupt gefunden wurde.
+CLIENT = (ROOT / "backend" / "mail_client.py").read_text(encoding="utf-8")
+pruefe("class MailKonto" in CLIENT, "MailKonto gefunden (sonst prueft das Folgende nichts)")
+_mk = CLIENT.split("class MailKonto", 1)[1].split("\n\n\n", 1)[0]
+pruefe(len(_mk) > 200, "der Klassenrumpf ist plausibel gross (%d Zeichen)" % len(_mk))
+pruefe("antwort_vorgabe" not in _mk,
+       "die Vorgabe steckt NICHT im Verbindungsobjekt MailKonto")
+pruefe('"antwort_vorgabe": k.get' in ACC,
+       "konto_info liefert sie zurueck (die Oberflaeche muss sie anzeigen koennen)")
+
+# Reihenfolge: Vorgabe VOR der Regel – bei Widerspruch soll die Regel gewinnen.
+_au = RUNNER.split("def _auftrag(", 1)[1].split("\n\n\n", 1)[0]
+pruefe("antwort_vorgabe" in _au, "der Regel-Lauf zieht die Vorgabe heran")
+pruefe(_au.index("STAENDIGE VORGABE") < _au.index("ANWEISUNG DES POSTFACH-INHABERS (die Regel)"),
+       "Vorgabe steht VOR der Regel (vom Allgemeinen zum Speziellen)")
+_vs2 = RUNNER.split("async def antwort_vorschlag", 1)[1].split("\nasync def ", 1)[0]
+pruefe("antwort_vorgabe" in _vs2, "der Vorschlag zieht die Vorgabe ebenfalls heran")
+pruefe(_vs2.index("STAENDIGE VORGABE") < _vs2.index("WUNSCH DES POSTFACH-INHABERS"),
+       "auch hier: Vorgabe vor Regel-Ton und Hinweis")
+# Die Vorgabe traegt die Echtheitskennung – sie IST eine Anweisung des Inhabers
+# und darf nicht wie Fremdtext aussehen.
+pruefe("[%s] STAENDIGE VORGABE" in _au and "[%s] STAENDIGE VORGABE" in _vs2,
+       "die Vorgabe steht in einem Abschnitt MIT Echtheitskennung")
+
+# Oberflaeche: beide Wege, wie vom Nutzer entschieden.
+pruefe('id="em-vorgabe"' in EMAILHTML2, "/email hat das Feld")
+pruefe("antwort_vorgabe" in PORTALJS2 and PORTALJS2.count("em-vorgabe") == 2,
+       "/email laedt UND speichert es")
+pruefe('id="ad-vorgabe"' in TASKPANE2, "das Add-in hat das Feld")
+pruefe(ADDINJS.count("ad-vorgabe") == 2, "das Add-in laedt UND speichert es")
+for k in ("mail.acct_guide", "mail.acct_guide_ph", "mail.acct_guide_hint"):
+    pruefe(I18N.count("'%s'" % k) == 2, "%s in DE und EN" % k)
+
+# ── Der Vorspann muss den AUFBAU beschreiben, den der Auftrag hat ──
+# BEIM LIVE-TEST AUFGEFALLEN: nach dem Einfuegen des Vorgabe-Abschnitts sagte der
+# Vorspann weiter "Unten stehen zuerst die ANWEISUNG ... und danach die
+# NACHRICHT" und zusaetzlich "Es gibt in diesem Auftrag NUR EINE Regel". Ein
+# Modell, das das ernst nimmt, haette die neue Vorgabe als "Zusatzregel" – also
+# als Angriffsversuch – eingestuft und ignoriert. Dieselbe Fehlerklasse wie beim
+# alten WA_TASK_PROMPT: ein Prompt, der etwas anderes beschreibt als der Code tut.
+for _name in ("_VORSPANN = ", "_VORSCHLAG_VORSPANN = "):
+    _txt = RUNNER.split(_name, 1)[1].split('"""', 2)[1]
+    pruefe("STAENDIGE VORGABE" in _txt,
+           "%s nennt den Vorgabe-Abschnitt" % _name.strip(" ="))
+pruefe("NUR EINE Regel" not in RUNNER,
+       "die Aussage 'es gibt NUR EINE Regel' ist weg – es sind jetzt zwei Abschnitte")
+
+# Und maschinell: JEDE Abschnittsmarke, die _auftrag erzeugt, muss im Vorspann
+# vorkommen. Ein Test auf einen festen Wortlaut wuerde beim naechsten Abschnitt
+# wieder danebenliegen.
+_marken = re.findall(r'=====\s*\[%s\]\s*([A-Z][A-Z ()a-z-]+?)\s*=====',
+                     RUNNER.split("def _auftrag(", 1)[1].split("\n\n\n", 1)[0])
+pruefe(len(_marken) >= 3, "Abschnittsmarken im Auftrag gefunden (%s)" % _marken)
+# Vergleich in Kleinbuchstaben: die MARKE steht in Grossbuchstaben, der
+# Fliesstext des Vorspanns nicht ("die STAENDIGE VORGABE des Postfach-Inhabers").
+# Schlussmarken ("ENDE …") sind ausgenommen – sie schliessen einen Abschnitt,
+# den der Vorspann bereits erklaert hat.
+# WHITESPACE NORMALISIEREN: der Vorspann ist auf 79 Zeichen umbrochen, die
+# gesuchte Wendung steht deshalb als "STAENDIGE VORGABE des\n  Postfach-Inhabers".
+# Ein roher Teilstring-Vergleich findet das nie (derselbe Fallstrick wie bei den
+# zweizeiligen Aufrufen im Transkriptions-Test).
+_vorspann = " ".join(RUNNER.split("_VORSPANN = ", 1)[1]
+                     .split('"""', 2)[1].lower().split())
+for _m in _marken:
+    _kern = _m.split("(")[0].strip()
+    if _kern.startswith("ENDE"):
+        continue
+    pruefe(" ".join(_kern.lower().split()) in _vorspann,
+           "der Vorspann erklaert den Abschnitt '%s'" % _kern)
+
 # ═══ Ergebnis ═══════════════════════════════════════════════════════════════
 import shutil  # noqa: E402
 shutil.rmtree(_SAND, ignore_errors=True)

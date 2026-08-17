@@ -1130,6 +1130,7 @@
         $('ad-ord-eingang').value = k.ordner_eingang || '';
         $('ad-ord-entwuerfe').value = k.ordner_entwuerfe || '';
         $('ad-ord-gesendet').value = k.ordner_gesendet || '';
+        $('ad-vorgabe').value = k.antwort_vorgabe || '';
         $('ad-aktiv').checked = k.aktiv !== false;
         $('ad-pw-hint').textContent = k.passwort_gesetzt
             ? T('mail.pw_set', 'Ein Kennwort ist hinterlegt.')
@@ -1144,6 +1145,7 @@
             ordner_eingang: ($('ad-ord-eingang').value || '').trim(),
             ordner_entwuerfe: ($('ad-ord-entwuerfe').value || '').trim(),
             ordner_gesendet: ($('ad-ord-gesendet').value || '').trim(),
+            antwort_vorgabe: ($('ad-vorgabe').value || '').trim(),
             aktiv: !!$('ad-aktiv').checked
         };
         // LEERES Kennwortfeld heisst "unveraendert" – wird es mitgesendet,

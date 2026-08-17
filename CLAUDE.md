@@ -844,6 +844,44 @@ abschliessendes Leerzeichen tragen; httpx/h11 prüfen das und werfen
   Ende-zu-Ende über `_probe_llm_connection`). Gegenprobe: der alte Stand liefert genau die
   gemeldete Meldung samt Key.
 
+## Werkzeug-Schemata: `OBJECT` statt `object` (Fix 2026-08-17)
+**Gemeldet:** auf ECHT lieferte das Profil `qwen/qwen3.8-27b` (`http://191.100.144.3:9081/v1`)
+in JEDEM /chat einen Fehler 400 – und zwar **einen je Werkzeug** (82 Stück):
+`"code": "invalid_union_discriminator", "path": [0,"function","parameters","type"],
+"message": "Invalid discriminator value. Expected 'object'"`.
+- **Ursache:** die Werkzeuge deklarieren ihr Schema im **Gemini-Stil** (`"type": "OBJECT"`,
+  `"STRING"` – 82 Fundstellen in `backend/tools/` und `skills/`), JSON-Schema verlangt
+  Kleinschreibung. `llm.py::_normalize_schema()` gibt es seit Langem, angewandt wurde es aber
+  **nur im Anthropic-Zweig**; der OpenAI-kompatible Pfad reichte `t.parameters_schema()` roh
+  weiter. Jetzt an beiden Stellen.
+- **Warum es jahrelang niemandem auffiel:** vLLM und llama.cpp **validieren Werkzeug-Schemata
+  nicht** und nehmen `OBJECT` klaglos an – live gegengeprüft, derselbe Request gegen das vLLM
+  der übrigen Profile (`191.100.130.61:9081`) liefert HTTP 200. Der beanstandende Server ist ein
+  **LM Studio** (`X-Powered-By: Express`, Zod-Fehlercodes), der streng prüft. **Der Fehler hängt
+  am SERVER, nicht am Modell** – er trifft jedes künftige Profil auf einem solchen Endpunkt.
+  Merkregel: ein toleranter Server ist kein Nachweis für ein korrektes Schema.
+- **`_normalize_schema` senkt NUR `type`** und geht rekursiv über `properties` und `items`.
+  Ein naives `.lower()` über alles würde **enum-Werte** zerstören (`["AN","AUS"]`) – dafür gibt
+  es einen Test. `anyOf`/`oneOf`/`$defs` kommen in den Schemata dieses Projekts nicht vor.
+- **Zweiter, unabhängiger Befund am selben Profil:** das Modell ist in LM Studio mit nur
+  **8192 Token Kontext** geladen. Gemessen: die 82 Werkzeuge **allein** sind 10.327 Token, mit
+  System-Prompt und Instruktionen 23.708. Nach dem Schema-Fix folgt dort also sofort
+  `exceed_context_size_error` – das ist **serverseitig** zu lösen (Kontextlänge des geladenen
+  Modells erhöhen), nicht in Jarvis.
+  Die vorhandene Klartext-Meldung für zu kleine Kontextfenster traf die LM-Studio-Schreibweise
+  nicht (dort steht `exceeds the available context size`, nicht `context length`) – Muster
+  ergänzt, sonst läuft genau dieser Fall in die rohe HTTP-400-Meldung, aus der niemand den
+  Grund ablesen kann.
+- **Verifiziert:** 37 Prüfungen (`tests/test_llm_tool_schema.py`, ohne fastapi lauffähig,
+  `backend.config` als Stub mit Exit-2-Schranke; der Payload wird über einen echten
+  `_generate_native`-Lauf mit Attrappen-Client eingefangen, nicht per Quelltext geraten) lokal
+  und auf DEV im echten venv. Gegenprobe: der alte Stand fällt in 12 davon durch.
+  **Live belegt:** A/B-Probe mit dem echten Provider-Code gegen den echten LM-Studio-Server –
+  Schema roh = der gemeldete 400er, Schema normalisiert = Antwort. Auf DEV zusätzlich ein
+  echter Agentenlauf über `POST /api/agent/task` gegen das aktive vLLM-Profil mit
+  Werkzeugnutzung (`shell_execute` im Audit-Log) – keine Regression, `settings.json` md5-gleich.
+- **Auf ECHT noch NICHT ausgerollt.**
+
 ## Profil-Formular: Abbrechen-× oben rechts (2026-07-30)
 `#profile-edit-view` hatte nur den `Abbrechen`-Knopf **am Ende** des Formulars – bei elf Feldern
 liegt der ausserhalb des Sichtfensters, Abbrechen ging also nur nach Scrollen. Jetzt sitzt oben
@@ -2846,6 +2884,73 @@ Entwurf**. Code: `mail_runner.antwort_vorschlag()` / `antwort_senden()`, Endpunk
    entfernen) vor der Prüfung. **Dritter Fall dieser Art im Projekt** (Prompt-Wächter 2026-08-10,
    Ordner-Marke 2026-08-11, hier). Merkregel: ein Wächter, der seine eigene Begründung liest,
    prüft nichts – und das fällt nur bei einer echten Gegenprobe auf.
+
+### Ständige Antwort-Vorgabe je Benutzer (2026-08-17)
+Auf die Frage „macht ein anpassbarer Pre-Prompt Sinn?" – ja, und zwar aus einem klaren Grund:
+das Hinweis-Feld der Vorschau ist **pro Mail und flüchtig**. Was sich nie ändert (Signatur,
+Sie/Du, „keine Preise zusagen", Länge), müsste man sonst jedes Mal tippen oder eine Pseudo-Regel
+anlegen und als „Ton" wählen – ein Missbrauch des Regel-Konzepts, denn eine Regel ist ein
+*zeitgesteuerter Auslöser* mit Ordner, Intervall und Ein/Aus-Schalter.
+Umgesetzt als Feld `antwort_vorgabe` im Postfach-Datensatz (`mail_accounts`), Formular in
+`/email` UND im Add-in (Vorgabe des Nutzers: beide).
+
+- **Vorbild ist `/sap`**, nicht etwas Neues: dort gibt es „persönliche Anweisungen" je Benutzer,
+  die `build_task()` an den Auftrag hängt. **Bewusst NICHT `data/instructions/*.md`** – das
+  fließt in JEDEN Agentenlauf (auch Chat und Admin) und ist für Domain-Benutzer genau deshalb
+  gesperrt.
+- **Gilt für Vorschau UND Regel-Läufe** (Entscheidung des Nutzers). Sonst müsste die Signatur
+  in jeder Regel einzeln stehen und liefe auseinander. Nebenwirkung, die man kennen muss und die
+  das Formular deshalb ausspricht: eine ungeschickte Formulierung ändert auch das Verhalten der
+  Automatik. Keine Rechteänderung – der Regel-Prompt daneben ist ohnehin frei editierbar.
+- **Reihenfolge Vorgabe → Regel → Hinweis**, vom Allgemeinen zum Speziellen: „antworte auf
+  Englisch" in einer Regel schlägt „immer Deutsch" in der Vorgabe.
+- **Sicherheitlich unkritisch, obwohl es nach Persistenz-Substrat aussieht:** in der Vorschau
+  gibt es keine Werkzeuge, der Text kann nichts auslösen; jeder schreibt nur für sich. Die
+  Vorgabe steht in einem Abschnitt **mit** Echtheitskennung – sie IST eine Anweisung des
+  Inhabers und darf nicht wie Fremdtext aussehen.
+- **`VORGABE_MAX = 2000`**, weil der Text in JEDEN Auftrag eingeht und dort Kontext kostet.
+  Leeres Feld heißt hier wirklich „löschen" – anders als beim Kennwort, das nie angezeigt wird.
+- Die Vorgabe steckt **nicht** in `MailKonto`: dort stehen Verbindungsdaten für `MailClient`,
+  ein Prompt hat in einem Verbindungsobjekt nichts verloren. Gelesen wird sie über
+  `mail_accounts.antwort_vorgabe(user)`, dort wo der Auftrag gebaut wird.
+
+**DER FUND, DEN ERST DER LIVE-TEST ZEIGTE: der Vorspann beschrieb den Aufbau falsch.** Er sagte
+weiter „Unten stehen zuerst die ANWEISUNG … und danach die NACHRICHT" und zusätzlich **„Es gibt
+in diesem Auftrag NUR EINE Regel"**. Mit dem neuen Abschnitt gibt es zwei Anweisungs-Abschnitte –
+ein Modell, das den Vorspann ernst nimmt, hätte die eigene Vorgabe als „Zusatzregel" und damit
+als **Angriffsversuch** eingestuft und ignoriert. Dieselbe Fehlerklasse wie beim alten
+`WA_TASK_PROMPT`. Beide Vorspänne nachgezogen; ein Wächter liest jetzt die Abschnittsmarken aus
+`_auftrag()` und verlangt, dass der Vorspann **jede** davon erklärt – eine Prüfung auf festen
+Wortlaut läge beim nächsten Abschnitt wieder daneben.
+
+**DREI LEERE PRÜFUNGEN an einem Tag – alle drei sahen grün aus:**
+1. `"_role_tools = set()" in _vs` fand seinen Treffer im **Docstring** (Abschnitt oben).
+2. „die Vorgabe steckt nicht in `MailKonto`" las `mail_accounts.py` – die Klasse steht aber in
+   `mail_client.py`, wurde nicht gefunden, und die Prüfung war trivial wahr. **Bei „X darf in Y
+   nicht vorkommen" immer zuerst belegen, dass Y überhaupt gefunden wurde.**
+3. Der Marken-Abgleich verglich roh gegen den Vorspann – der ist auf 79 Zeichen umbrochen, die
+   gesuchte Wendung steht dort als `STAENDIGE VORGABE des\n  Postfach-Inhabers`. Ohne
+   Whitespace-Normalisierung findet das nie etwas (Fallstrick der zweizeiligen Aufrufe aus dem
+   Transkriptions-Test).
+
+**Nebenbefund, mitbehoben:** ein Bestandstest schrieb `len(auftrag) < TEXT_MAX + 3000` fest und
+kippte, weil der Vorspann um zwei Sätze wuchs – gekürzt wurde völlig korrekt. Die Zahl ist jetzt
+eine Formel (`+ len(_VORSPANN) + 1500`), und die eigentliche Aussage („der Fremdtext wird
+gekürzt") steht in einer eigenen Prüfung. **Eine willkürliche Zahl in einem Test ist eine
+Zeitbombe** – sie meldet später einen Fehler, den es nicht gibt.
+
+**FALLSTRICK bei der eigenen Live-Messung:** die erste Prüfung „steht die Vorgabe vor der Regel?"
+suchte den Wortlaut `(die Regel)` – den nennt der **Vorspann** schon in seiner Erklärung, also
+schlug die Messung fehl, obwohl die Reihenfolge stimmte. Gemessen wird an den
+**Abschnittsmarken**, nicht am Fließtext.
+
+- **Verifiziert:** 137 Prüfungen (`tests/test_addin_sso.py`) + 432 + 192 + 239 + 120.
+  Gegenproben greifen: Whitelist-Eintrag entfernt → 1 FAIL; Vorspann verschweigt den Abschnitt →
+  2 FAIL. **Live auf DEV gegen das echte Modul:** Feld gespeichert und gelesen, Deckel bei 2000,
+  leeres Feld löscht die Vorgabe **ohne** das Kennwort anzutasten, Serverfeld weiterhin abgelehnt,
+  Abschnitte im echten Auftrag in der Reihenfolge *Vorgabe → Regel → Nachricht*, und **ohne**
+  Vorgabe entsteht kein leerer Abschnitt. `email_accounts.json` danach md5-gleich. Optisch
+  abgenommen in beiden Oberflächen (Add-in dunkel, /email hell).
 
 **FALLSTRICK bei der optischen Abnahme:** der zweite CDP-Lauf im SELBEN Browser registrierte
 `Page.addScriptToEvaluateOnNewDocument` ein zweites Mal; der Nachrichten-Kontext war dann weg und

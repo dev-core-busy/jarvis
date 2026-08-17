@@ -777,8 +777,13 @@ check(auftrag.index("SICHERHEIT") < auftrag.index("EINGEGANGENE NACHRICHT"),
 
 lang = mc.MailNachricht(id="B", schluessel="<b>", text="y" * (mrun.TEXT_MAX + 5000))
 a2 = mrun._auftrag(regel, lang, "a@b.de")
-check("Text gekuerzt" in a2 and len(a2) < mrun.TEXT_MAX + 3000,
-      "sehr langer Mailtext wird gekuerzt und die Kuerzung ausgewiesen")
+# Der Rahmen ist im Wesentlichen der Vorspann – deshalb eine FORMEL statt einer
+# festen Zahl: die frueheren "+3000" waren willkuerlich und kippten, sobald der
+# Vorspann um zwei Saetze wuchs (2026-08-17, Vorgabe-Abschnitt). Geprueft wird
+# die Aussage "der Fremdtext wird gekuerzt", nicht die Laenge des Prompts.
+check("Text gekuerzt" in a2, "sehr langer Mailtext wird gekuerzt und die Kuerzung ausgewiesen")
+check(len(a2) < mrun.TEXT_MAX + len(mrun._VORSPANN) + 1500,
+      "der Auftrag bleibt beim gekuerzten Text plus Rahmen (%d Zeichen)" % len(a2))
 
 # ── Injektionsschutz: Echtheitskennung + entschaerfte Marken ────────────────
 # GEMESSEN am 2026-08-12 gegen das echte Modell: von vier Angriffsmustern kam

@@ -130,8 +130,9 @@ Benutzerdefinierte App → Manifestdatei hochladen*.
 ## 5. Bedienung
 
 Im Menüband einer geöffneten E-Mail erscheint die Gruppe mit dem Knopf
-**„&lt;Marke&gt; E-Mail"**. Beim ersten Öffnen meldet man sich mit seinem
-Jarvis-Zugang an – denselben Daten wie im Browser. Danach vier Reiter:
+**„&lt;Marke&gt; E-Mail"**. **Beim ersten Öffnen meldet man sich einmal an** –
+denselben Daten wie im Browser. Ab dann meldet sich das Fenster von selbst an
+(siehe Abschnitt 5.1). Danach vier Reiter:
 
 | Reiter | Inhalt |
 |---|---|
@@ -146,6 +147,41 @@ deshalb die Rückfrage davor. Die Auswahl-Filter der Regel (nur ungelesen,
 Absender, Betreff) gelten hier bewusst **nicht**: die Nachricht wurde von Hand
 gewählt. Die Nachricht gilt danach als verarbeitet, damit die Automatik sie nicht
 ein zweites Mal beantwortet.
+
+### 5.1 Anmeldung ohne Kennwort (einmal anlernen)
+
+Ab der zweiten Benutzung kommt keine Anmeldemaske mehr. Dahinter steht der Weg,
+den Microsoft für **Exchange im eigenen Haus** vorsieht:
+
+1. Outlook stellt dem Fenster ein vom **Exchange signiertes Token** aus
+   (`getUserIdentityTokenAsync`).
+2. Das Fenster schickt es an `POST /api/addin/sso`.
+3. Der Server prüft die Signatur gegen das Zertifikat des Exchange und weiß
+   damit, **welches Postfach** dranhängt.
+
+**Warum trotzdem einmal Kennwort?** Das Token nennt kein Konto und keine
+Mailadresse – nur eine undurchsichtige Postfach-Kennung. Die Zuordnung zum
+Jarvis-Konto entsteht bei der ersten Anmeldung: das Token geht dort mit, und
+die Verknüpfung wird gespeichert (`data/addin_links.json`).
+
+> **Für Exchange Online gibt es das nicht.** Microsoft hat diese Token dort
+> abgeschaltet; **für Exchange on-premises sind sie ausdrücklich weiter
+> unterstützt**. Liegen die Postfächer in der Cloud, bleibt es bei der
+> Anmeldung im Fenster.
+
+**Voraussetzung:** Unter *Einstellungen → E-Mail* muss die **EWS-Adresse**
+hinterlegt sein. Sie ist der Vertrauensanker – der Server nimmt nur Token an,
+deren Metadaten-Adresse auf genau diesen Exchange zeigt. Ohne Eintrag gibt es
+keine kennwortlose Anmeldung (und der Grund steht im Fenster).
+
+**Zwei-Faktor-Konten sind ausgenommen.** Wer 2FA eingeschaltet hat, meldet sich
+im Fenster weiterhin mit Kennwort und Code an: das Exchange-Token stammt vom
+selben Arbeitsplatz und ist deshalb kein zweiter Faktor.
+
+**Postfach wechselt den Besitzer?** *Einstellungen* → `DELETE
+/api/addin/links/<benutzer>` löst die Verknüpfung; die Übersicht liefert
+`GET /api/addin/links` (beides nur für Administratoren). Ohne das meldete sich
+der neue Inhaber weiterhin als der alte Benutzer an.
 
 ### Was das Add-in **nicht** kann
 
@@ -172,6 +208,16 @@ ein zweites Mal beantwortet.
   Werkzeuge der Regel beschränkt. Über diesen Weg gibt es keine Systemrechte.
 * Das Kennwort des Postfachs wird nie angezeigt und von keiner Schnittstelle
   herausgegeben – nur „gesetzt: ja/nein".
+* Die kennwortlose Anmeldung führt **dieselben Schranken wie `/api/login`**:
+  Ratenbegrenzung, AD-Freigabe (auch nachträglich entzogene), Kontosperre,
+  Lizenz-Benutzergrenze, Anwesenheits-Buchhaltung. Sie ist kein Nebeneingang.
+* Ein Token wird nur angenommen, wenn **Signatur**, **Herkunft** (der
+  konfigurierte Exchange), **Zielgruppe** (die Adresse dieses Aufgabenfensters)
+  und **Laufzeit** stimmen. Fehlt die EWS-Adresse in der Konfiguration, ist die
+  kennwortlose Anmeldung aus – nicht „irgendein Exchange".
+* `data/addin_links.json` ordnet Postfächer den Konten zu und ist deshalb
+  0640 und in allen Sandbox-Sperrlisten: wer sie beschreiben könnte, meldete
+  sich als beliebiger Benutzer an.
 
 Es bleibt die Eigenschaft des E-Mail-Bereichs, dass der Text einer eingehenden
 Nachricht **Fremdeingabe im Prompt** ist. Das Add-in ändert daran nichts, weder
@@ -207,6 +253,8 @@ als ein neues und muss einmal neu installiert werden (das alte vorher entfernen)
 | „Dein Konto ist für den E-Mail-Bereich nicht freigeschaltet" | *Einstellungen → Sicherheit → Berechtigungen → E-Mail-Zugriff*. **Leer heißt niemand** – auch Administratoren müssen eingetragen sein. |
 | „Der E-Mail-Skill ist abgeschaltet" | *Einstellungen → Skills* → E-Mail einschalten (installiert `exchangelib` nach). |
 | Kein Knopf „Jetzt verarbeiten" | Entweder kein Postfach hinterlegt, keine aktive Regel, oder das Postfach läuft über IMAP (Hinweis steht im Fenster). |
+| Es kommt weiterhin jedes Mal die Anmeldemaske | Steht im Fenster ein Grund? Meist fehlt die **EWS-Adresse** (*Einstellungen → E-Mail*), oder das Konto hat **2FA** eingeschaltet (dann ist das so gewollt). Bei „Token stammt von einem anderen Exchange-Server" stimmt die hinterlegte Adresse nicht mit der überein, die Outlook benutzt. |
+| „Das Token wurde für eine andere Adresse ausgestellt" | Das Add-in ist unter einer anderen Serveradresse installiert, als der Server jetzt benutzt. Manifest neu holen – oder `JARVIS_ADDIN_BASE` auf die Adresse setzen, unter der die Arbeitsplätze den Server erreichen. |
 | Add-in debuggen | Klassisches Outlook: Rechtsklick im Fenster → *Debuggen*. Neues Outlook: `olk.exe --devtools`. Outlook im Web: die Entwicklerwerkzeuge des Browsers. |
 
 ---
@@ -215,10 +263,12 @@ als ein neues und muss einmal neu installiert werden (das alte vorher entfernen)
 
 | Datei | Zweck |
 |---|---|
-| `backend/addin.py` | erzeugt das Manifest passend zum Server |
+| `backend/addin.py` | erzeugt das Manifest passend zum Server, Dateiname und Symbole folgen dem Branding |
+| `backend/addin_sso.py` | prüft die Exchange-Identity-Token, verwaltet die Verknüpfung Postfach ↔ Konto |
 | `backend/main.py` | Routen `/addin/manifest.xml`, `/addin/taskpane.html`, Endpunkt `POST /api/email/rules/{id}/run_message` |
 | `backend/mail_runner.py` | `nachricht_lauf()` – eine benannte Nachricht verarbeiten, mit derselben Buchhaltung wie der Zeitplan |
 | `frontend/addin/taskpane.html` | Aufgabenfenster (Markup und Gestaltung) |
 | `frontend/addin/addin.js` | Anmeldung, Outlook-Kontext, Regeln, Postfach, Protokoll |
-| `frontend/addin/icon-*.png` | Symbole für Menüband und Katalog |
-| `tests/test_outlook_addin.py` | Wächter (93 Prüfungen) |
+| `frontend/addin/icon-*.png` → `/addin/icon-<n>.png` | Symbole; ohne Branding-Logo die eingebauten |
+| `tests/test_outlook_addin.py` | Wächter Manifest/Fenster (192 Prüfungen) |
+| `tests/test_addin_sso.py` | Wächter kennwortlose Anmeldung (69 Prüfungen, echte Signaturen) |

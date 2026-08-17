@@ -159,6 +159,12 @@ _APP_DENY_REL = (
     #  - `email_log.jsonl` enthaelt Absender und Betreffzeilen fremder Post.
     "data/email_accounts.json", "data/.mailkey",
     "data/email_rules.json", "data/email_state.json", "data/email_log.jsonl",
+    # Outlook-Add-in (backend/addin_sso.py): ordnet Exchange-Postfaecher den
+    # Jarvis-Konten zu und ist damit die Grundlage der kennwortlosen Anmeldung.
+    # SCHREIBEN heisst hier: das eigene Postfach auf einen fremden – gern einen
+    # administrativen – Benutzer eintragen und sich anschliessend als dieser
+    # anmelden. Das ist die direkteste Rechteerhoehung im ganzen Verzeichnis.
+    "data/addin_links.json",
 )
 
 
@@ -192,7 +198,8 @@ PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/agent_roles.json", "data/ad_cache.json",
                  "data/knowledge_sync.json",
                  "data/email_accounts.json", "data/email_rules.json",
-                 "data/email_state.json", "data/email_log.jsonl")
+                 "data/email_state.json", "data/email_log.jsonl",
+                 "data/addin_links.json")
 PRIVATE_FILE_MODE = 0o640
 
 # Die Schluesseldatei des E-Mail-Skills ist strenger als 0640: sie entschluesselt
@@ -380,6 +387,9 @@ SHELL_SECRET_PATHS = re.compile(
     # zusammen den Klartext), fremde Regel-Prompts, fremde Absender/Betreffe.
     r'email_accounts\.json\b|\.mailkey\b|email_rules\.json\b|'
     r'email_state\.json\b|email_log\.jsonl\b|'
+    # Outlook-Add-in: Postfach → Jarvis-Konto. Beschreibbar waere das die
+    # kuerzeste Rechteerhoehung im Verzeichnis (siehe _APP_DENY_REL).
+    r'addin_links\.json\b|'
     # data/chats: fremde Chat-Verlaeufe (in der Shell zusaetzlich per 0750 gesperrt)
     r'data/chats\b|'
     r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'

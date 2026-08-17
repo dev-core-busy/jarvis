@@ -13,6 +13,7 @@ zurueck; der Test bricht mit **Exit 2** ab, wenn es doch geladen ist.
 
 import base64
 import json
+import re
 import sys
 import time
 import types
@@ -331,8 +332,7 @@ pruefe("addin_token" in ADDINJS, "die Erstanmeldung schickt das Token mit")
 # `totp_code`. Mit eingeschalteter Zwei-Faktor-Anmeldung war das eine
 # Endlosschleife – der Server fragte den Code immer wieder an.
 pruefe("totp_code" in ADDINJS, "der 2FA-Code geht unter dem Feldnamen totp_code raus")
-import re as _re  # noqa: E402
-pruefe(not _re.search(r"rumpf\.totp\s*=", ADDINJS),
+pruefe(not re.search(r"rumpf\.totp\s*=", ADDINJS),
        "kein Rueckfall auf den falschen Feldnamen `totp`")
 APP = (ROOT / "frontend" / "js" / "app.js").read_text(encoding="utf-8")
 pruefe("totp_code" in APP, "derselbe Feldname wie in app.js – Gegenprobe an der Quelle")
@@ -351,6 +351,112 @@ pruefe(all("ssoVersuch" in z for z in _z401),
 pruefe("_ssoProbiert" in ADDINJS, "Endlosschleife-Bremse vorhanden")
 I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
 for k in ("addin.sso_first", "addin.sso_timeout", "addin.sso_unsupported", "addin.sso_failed"):
+    pruefe(I18N.count("'%s'" % k) == 2, "%s in DE und EN" % k)
+
+# ═══ 8. Antwort-Vorschau (erst ansehen, dann senden) ════════════════════════
+abschnitt("8. Antwort-Vorschau")
+RUNNER = (ROOT / "backend" / "mail_runner.py").read_text(encoding="utf-8")
+
+# DIE ZENTRALE ZUSAGE: der Vorschlags-Lauf hat KEINE Werkzeuge. Damit kann eine
+# Prompt-Injektion in der eingegangenen Mail nichts ausloesen – sie kann nur den
+# Vorschlagstext beeinflussen, und den liest ein Mensch vor dem Senden.
+def _nur_code(py: str) -> str:
+    """Docstrings und Kommentare aus einem Python-Ausschnitt entfernen.
+
+    NOETIG, NICHT KOSMETIK: die Pruefung "_role_tools = set() steht im Code"
+    war zuerst gruen, obwohl der Code auf `None` stand – der Treffer kam aus dem
+    DOCSTRING, der die Zusage erklaert. Ein Waechter, der seine eigene
+    Begruendung liest, prueft nichts (dieselbe Falle wie beim Prompt-Waechter
+    2026-08-10 und beim Marken-Test 2026-08-11).
+    """
+    ohne = re.sub(r'"""(?:.|\n)*?"""', "", py)
+    return "\n".join(z.split("#", 1)[0] for z in ohne.splitlines())
+
+
+_vs = RUNNER.split("async def antwort_vorschlag", 1)
+pruefe(len(_vs) == 2, "antwort_vorschlag existiert")
+_vs_roh = _vs[1].split("\nasync def ", 1)[0].split("\ndef ", 1)[0]
+_vs = _nur_code(_vs_roh)
+pruefe("_role_tools = set()" in _vs,
+       "der Lauf bekommt die LEERE Werkzeugmenge (= keine Werkzeuge)")
+pruefe("_role_tools = None" not in _vs.split("finally", 1)[0],
+       "vor dem Lauf wird NICHT auf 'keine Beschraenkung' gesetzt")
+for verboten in ("email_senden", "email_antworten", "email_weiterleiten",
+                 "email_verschieben", "email_loeschen"):
+    pruefe(verboten not in _vs, "kein Sendewerkzeug im Vorschlags-Lauf: %s" % verboten)
+pruefe("_injektion_pruefen" in _vs,
+       "Injektionsmuster werden auch hier protokolliert")
+pruefe("_fremdtext_entschaerfen" in _vs,
+       "Fremdtext wird entschaerft (Abschnittsmarken)")
+pruefe("secrets.token_hex" in _vs, "Echtheitskennung je Lauf")
+pruefe("trotz_aussetzer=True" in _vs,
+       "eine Handlung des Menschen laeuft trotz Aussetzer (wie Verbindungstest)")
+
+# Senden: KEIN Sprachmodell, und der Empfaenger kommt aus der NACHRICHT.
+_snd = RUNNER.split("async def antwort_senden", 1)
+pruefe(len(_snd) == 2, "antwort_senden existiert")
+_snd = _nur_code(_snd[1].split("\n# ──", 1)[0])
+pruefe("run_task_headless" not in _snd and "JarvisAgent" not in _snd,
+       "beim Senden laeuft KEIN Sprachmodell")
+pruefe("c.antworten" in _snd,
+       "gesendet wird ueber antworten() – der Empfaenger ergibt sich aus der Nachricht")
+# Geprueft wird die SIGNATUR: gaebe es einen Empfaenger-Parameter, waere dieser
+# Endpunkt ein Versandweg an beliebige Adressen. Dass die Rueckgabe den Absender
+# der beantworteten Mail NENNT, ist Anzeige und kein Eingabefeld – deshalb auf
+# den Parameter pruefen, nicht auf den Teilstring "an".
+_sig = RUNNER.split("async def antwort_senden(", 1)[1].split(")", 1)[0]
+pruefe(not any(w in _sig for w in ("an:", "an=", "empfaenger", "to:", "to=")),
+       "kein Empfaenger-Parameter in antwort_senden (%s)" % " ".join(_sig.split()))
+pruefe("protokoll_schreiben" in _snd, "der Versand steht im Protokoll")
+pruefe("VORSCHLAG_MAX" in _snd, "die Textlaenge ist gedeckelt")
+
+# Aufbereitung: Codeblock und Betreffzeile duerfen nicht in die Mail.
+import importlib  # noqa: E402
+_mr = None
+try:
+    _mr = importlib.import_module("backend.mail_runner")
+except Exception as _e:  # noqa: BLE001
+    print("  (mail_runner nicht importierbar: %s – Quelltext-Pruefungen greifen weiter)" % _e)
+if _mr is not None:
+    f = _mr._vorschlag_saeubern
+    pruefe(f("```\nHallo Welt\n```") == "Hallo Welt", "umschliessender Codeblock faellt weg")
+    pruefe(f("Betreff: Re: Test\n\nHallo") == "Hallo", "fuehrende Betreffzeile faellt weg")
+    pruefe(f("Subject: X\nBetreff: Y\n\nText") == "Text", "auch mehrere/englische Betreffzeilen")
+    pruefe(f("Hallo,\n\nBetreff: steht mitten drin\n\nGruss").count("Betreff:") == 1,
+           "eine Betreffzeile MITTEN im Text bleibt stehen (kein Datenverlust)")
+    pruefe(f("  Hallo  ") == "Hallo", "Rand-Leerraum weg")
+    pruefe(f("") == "", "leer bleibt leer")
+    pruefe(len(f("x" * 40000)) <= _mr.VORSCHLAG_MAX, "Deckel greift")
+
+# Endpunkte
+_pv = MAIN.split('@app.post("/api/email/reply/preview")', 1)
+pruefe(len(_pv) == 2, "Endpunkt /api/email/reply/preview existiert")
+_pv = _pv[1].split("@app.", 1)[0]
+pruefe("require_email_access" in _pv, "Vorschau haengt an der E-Mail-Freigabe")
+pruefe('owner") == mail_rules.norm_user(user)' in _pv,
+       "eine FREMDE Regel wird nicht als Ton-Vorgabe uebernommen")
+_sd = MAIN.split('@app.post("/api/email/reply/send")', 1)
+pruefe(len(_sd) == 2, "Endpunkt /api/email/reply/send existiert")
+_sd = _sd[1].split("@app.", 1)[0]
+pruefe("require_email_access" in _sd, "Senden haengt an der E-Mail-Freigabe")
+pruefe('body or {}).get("an"' not in _sd and '"empfaenger"' not in _sd,
+       "der Empfaenger kommt NICHT aus dem Rumpf")
+
+# Aufgabenfenster
+pruefe("/api/email/reply/preview" in ADDINJS and "/api/email/reply/send" in ADDINJS,
+       "beide Endpunkte sind verdrahtet")
+pruefe("ad-reply-text" in ADDINJS, "der Vorschlag ist bearbeitbar (textarea)")
+_zn = ADDINJS.split("function zeichneNachricht", 1)[1].split("\n    function ", 1)[0]
+pruefe(_zn.index("addin.reply_head") < _zn.index("addin.run_head"),
+       "die Antwort steht VOR dem Regel-Block")
+pruefe("aktive.length" in _zn and _zn.index("addin.reply_head") < _zn.index("no_rules"),
+       "der Antwort-Weg haengt NICHT an einer vorhandenen Regel")
+pruefe("_vorschlag.text = ta.value" in ADDINJS,
+       "der bearbeitete Text wird gespiegelt (Neuzeichnen darf ihn nicht verlieren)")
+pruefe("ladeProtokoll" not in ADDINJS,
+       "kein Aufruf einer Funktion, die es nicht gibt (die heisst ladeLog)")
+for k in ("addin.reply_head", "addin.reply_make", "addin.reply_send",
+          "addin.reply_draft", "addin.reply_safe", "addin.run_head"):
     pruefe(I18N.count("'%s'" % k) == 2, "%s in DE und EN" % k)
 
 # ═══ Ergebnis ═══════════════════════════════════════════════════════════════

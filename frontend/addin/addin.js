@@ -65,6 +65,8 @@
     var _ssoGrund = '';      // warum SSO nicht griff – nur zur Anzeige
     var _ssoProbiert = false; // Endlosschleife-Bremse: hoechstens EIN
                               // kennwortloser Versuch je Fensterlauf
+    var _vorschlag = null;   // {text, an, betreff} – Antwort-Vorschlag,
+                             // solange er nicht gesendet/verworfen ist
     var _tab = 'mail';
     var _laeuft = false;
 
@@ -622,25 +624,158 @@
         }
 
         var aktive = _regeln.filter(function (r) { return r.enabled !== false; });
+
+        // ── Antwort vorschlagen ──
+        // Steht VOR dem Regel-Block und haengt bewusst NICHT an einer Regel:
+        // eine Antwort zu entwerfen ist der haeufigste Wunsch, und wer noch
+        // keine Regel angelegt hat, soll ihn trotzdem haben.
+        teile.push('<div class="ad-sep"></div>');
+        teile.push('<div class="ad-h">' + esc(T('addin.reply_head', 'Antwort vorschlagen')) + '</div>');
+        if (_vorschlag) {
+            teile.push('<p class="ad-hint">' + esc(T('addin.reply_check',
+                'Prüfe den Text – du kannst ihn hier ändern. Gesendet wird erst auf Knopfdruck.')) + '</p>');
+            teile.push('<div class="ad-field" style="margin-top:8px;">' +
+                '<label>' + esc(T('addin.reply_to', 'An')) + ': ' + esc(_vorschlag.an || '') + '</label>' +
+                '<textarea id="ad-reply-text" rows="10"></textarea></div>');
+            teile.push('<div class="ad-row" style="margin-top:0;">' +
+                '<button class="ad-btn ad-btn-primary" id="ad-reply-send">' +
+                esc(T('addin.reply_send', 'Senden')) + '</button>' +
+                '<button class="ad-btn" id="ad-reply-draft">' +
+                esc(T('addin.reply_draft', 'Als Entwurf')) + '</button>' +
+                '<button class="ad-btn" id="ad-reply-new">' +
+                esc(T('addin.reply_again', 'Neu formulieren')) + '</button>' +
+                '<button class="ad-btn ad-btn-danger" id="ad-reply-drop">' +
+                esc(T('addin.reply_drop', 'Verwerfen')) + '</button></div>');
+        } else {
+            teile.push('<div class="ad-field" style="margin-top:8px;">' +
+                '<label>' + esc(T('addin.reply_hint_label', 'Hinweis (optional)')) + '</label>' +
+                '<input type="text" id="ad-reply-hint" placeholder="' +
+                esc(T('addin.reply_hint_ph', 'z. B. freundlich absagen, Termin bestätigen')) +
+                '"></div>');
+            if (aktive.length) {
+                teile.push('<div class="ad-field">' +
+                    '<label>' + esc(T('addin.reply_tone', 'Ton einer Regel übernehmen (optional)')) + '</label>' +
+                    '<select id="ad-reply-rule"><option value="">' +
+                    esc(T('addin.reply_tone_none', '– ohne –')) + '</option>' +
+                    aktive.map(function (r) {
+                        return '<option value="' + esc(r.id) + '">' + esc(r.name) + '</option>';
+                    }).join('') + '</select></div>');
+            }
+            teile.push('<button class="ad-btn ad-btn-primary ad-btn-block" id="ad-reply-make">' +
+                esc(T('addin.reply_make', 'Antwort vorschlagen')) + '</button>');
+            teile.push('<p class="ad-hint" style="margin-top:6px;">' + esc(T('addin.reply_safe',
+                'Es wird nichts gesendet – du siehst den Text zuerst.')) + '</p>');
+        }
+        teile.push('<p class="ad-status" id="ad-reply-status" style="margin-top:8px;"></p>');
+
+        // ── Regel auf diese Nachricht anwenden ──
+        teile.push('<div class="ad-sep"></div>');
+        teile.push('<div class="ad-h">' + esc(T('addin.run_head', 'Mit einer Regel verarbeiten')) + '</div>');
         if (!aktive.length) {
             teile.push('<div class="ad-empty">' + esc(T('addin.no_rules',
                 'Du hast noch keine aktive Regel. Lege im Reiter „Regeln" eine an.')) + '</div>');
-            box.innerHTML = teile.join('');
+        } else {
+            teile.push('<div class="ad-field" style="margin-top:8px;">' +
+                '<label>' + esc(T('addin.choose_rule', 'Mit dieser Regel verarbeiten')) + '</label>' +
+                '<select id="ad-run-rule">' + aktive.map(function (r) {
+                    return '<option value="' + esc(r.id) + '">' + esc(r.name) + '</option>';
+                }).join('') + '</select></div>');
+            teile.push('<button class="ad-btn ad-btn-block" id="ad-run-msg">' +
+                esc(T('addin.run_now', 'Jetzt verarbeiten')) + '</button>');
+            teile.push('<p class="ad-hint" style="margin-top:6px;">' + esc(T('addin.run_hint',
+                'Die Regel wird auf genau dieser Nachricht ausgeführt – die Aktionen sind echt (sie kann also tatsächlich antworten).')) + '</p>');
+            teile.push('<p class="ad-status" id="ad-run-status" style="margin-top:8px;"></p>');
+            teile.push('<div id="ad-run-result"></div>');
+        }
+
+        box.innerHTML = teile.join('');
+        if ($('ad-run-msg')) $('ad-run-msg').addEventListener('click', verarbeiteNachricht);
+        if ($('ad-reply-make')) $('ad-reply-make').addEventListener('click', antwortVorschlagen);
+        if ($('ad-reply-text')) {
+            // Der bearbeitete Text wird SOFORT gespiegelt. `zeichneNachricht()`
+            // baut den Reiter bei jedem Statusladen und bei jedem Sprachwechsel
+            // neu auf – ohne die Spiegelung waere eine halb getippte Antwort
+            // dabei weg (gleiche Lehre wie beim Regel-Formular).
+            var ta = $('ad-reply-text');
+            ta.value = _vorschlag.text || '';
+            ta.addEventListener('input', function () {
+                if (_vorschlag) _vorschlag.text = ta.value;
+            });
+            $('ad-reply-send').addEventListener('click', function () { antwortSenden(false); });
+            $('ad-reply-draft').addEventListener('click', function () { antwortSenden(true); });
+            $('ad-reply-new').addEventListener('click', function () {
+                _vorschlag = null; zeichneNachricht();
+            });
+            $('ad-reply-drop').addEventListener('click', function () {
+                _vorschlag = null; zeichneNachricht();
+            });
+        }
+    }
+
+    /* Antwort formulieren lassen. Der Lauf dahinter hat KEINE Werkzeuge – es
+       kann also nichts gesendet oder verschoben werden, egal was in der
+       eingegangenen Mail steht. Gesendet wird erst mit `antwortSenden`. */
+    function antwortVorschlagen() {
+        if (_laeuft || !_office || !_office.id) return;
+        _laeuft = true;
+        var knopf = $('ad-reply-make');
+        if (knopf) knopf.disabled = true;
+        melde('ad-reply-status', T('addin.reply_working', 'Formuliere eine Antwort…'));
+        sende('/api/email/reply/preview', 'POST', {
+            msg_id: _office.id,
+            ordner: '',
+            hinweis: (($('ad-reply-hint') || {}).value || '').trim(),
+            regel_id: (($('ad-reply-rule') || {}).value || '')
+        })
+            .then(function (d) {
+                _vorschlag = { text: d.text || '', an: d.an || '', betreff: d.betreff || '' };
+                zeichneNachricht();
+                melde('ad-reply-status', '');
+            })
+            .catch(function (e) {
+                if (String(e.message) !== '401') melde('ad-reply-status', e.message, 'fehler');
+            })
+            .then(function () {
+                _laeuft = false;
+                if ($('ad-reply-make')) $('ad-reply-make').disabled = false;
+            });
+    }
+
+    /* Den freigegebenen Text abschicken. Der EMPFAENGER kommt serverseitig aus
+       der beantworteten Nachricht – hier geht nur der Text hinaus. */
+    function antwortSenden(entwurf) {
+        if (_laeuft || !_vorschlag || !_office || !_office.id) return;
+        var text = ($('ad-reply-text') || {}).value || _vorschlag.text || '';
+        if (!text.trim()) {
+            melde('ad-reply-status', T('addin.reply_empty', 'Der Text ist leer.'), 'fehler');
             return;
         }
-        teile.push('<div class="ad-field" style="margin-top:10px;">' +
-            '<label>' + esc(T('addin.choose_rule', 'Mit dieser Regel verarbeiten')) + '</label>' +
-            '<select id="ad-run-rule">' + aktive.map(function (r) {
-                return '<option value="' + esc(r.id) + '">' + esc(r.name) + '</option>';
-            }).join('') + '</select></div>');
-        teile.push('<button class="ad-btn ad-btn-primary ad-btn-block" id="ad-run-msg">' +
-            esc(T('addin.run_now', 'Jetzt verarbeiten')) + '</button>');
-        teile.push('<p class="ad-hint" style="margin-top:6px;">' + esc(T('addin.run_hint',
-            'Die Regel wird auf genau dieser Nachricht ausgeführt – die Aktionen sind echt (sie kann also tatsächlich antworten).')) + '</p>');
-        teile.push('<p class="ad-status" id="ad-run-status" style="margin-top:8px;"></p>');
-        teile.push('<div id="ad-run-result"></div>');
-        box.innerHTML = teile.join('');
-        $('ad-run-msg').addEventListener('click', verarbeiteNachricht);
+        _laeuft = true;
+        ['ad-reply-send', 'ad-reply-draft'].forEach(function (id) {
+            if ($(id)) $(id).disabled = true;
+        });
+        melde('ad-reply-status', entwurf
+            ? T('addin.reply_saving', 'Speichere Entwurf…')
+            : T('addin.reply_sending', 'Sende…'));
+        sende('/api/email/reply/send', 'POST', {
+            msg_id: _office.id, ordner: '', text: text, entwurf: !!entwurf
+        })
+            .then(function (d) {
+                _vorschlag = null;
+                zeichneNachricht();
+                melde('ad-reply-status', d.ergebnis ||
+                    T('addin.reply_done', 'Antwort gesendet.'), 'ok');
+                ladeLog();   // Funktionsname gegen die Datei geprueft
+            })
+            .catch(function (e) {
+                if (String(e.message) !== '401') melde('ad-reply-status', e.message, 'fehler');
+            })
+            .then(function () {
+                _laeuft = false;
+                ['ad-reply-send', 'ad-reply-draft'].forEach(function (id) {
+                    if ($(id)) $(id).disabled = false;
+                });
+            });
     }
 
     function verarbeiteNachricht() {

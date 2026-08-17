@@ -8141,6 +8141,96 @@ async def email_rules_run_message(regel_id: str, request: Request,
     return JSONResponse({"ok": bool(bericht.get("ok")), "bericht": bericht})
 
 
+@app.post("/api/email/reply/preview")
+async def email_reply_preview(request: Request,
+                              user: str = Depends(require_email_access)):
+    """Antwort auf eine Nachricht formulieren – **ohne sie zu senden**.
+
+    Der Weg des Outlook-Add-ins: erst ansehen, gegebenenfalls aendern, dann
+    ueber ``/api/email/reply/send`` abschicken.
+
+    **Der Lauf dahinter hat KEINE Werkzeuge** (siehe
+    ``mail_runner.antwort_vorschlag``). Eine Prompt-Injektion in der
+    eingegangenen Mail kann hier also nichts ausloesen; sie kann hoechstens den
+    Vorschlagstext beeinflussen, und den liest ein Mensch, bevor er sendet.
+
+    Die Nachricht wird aus dem Postfach des ANGEMELDETEN Benutzers geladen. Die
+    Kennung im Rumpf waehlt die Nachricht, **nicht das Postfach**.
+
+    ``regel_id`` ist optional und dient nur als Ton-Vorgabe (der Prompt der
+    eigenen Regel); eine fremde Regel wird ignoriert, nicht abgelehnt – sie
+    beeinflusst hier nur die Formulierung.
+    """
+    from backend import mail_client, mail_rules, mail_runner
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    msg_id = str((body or {}).get("msg_id") or "").strip()
+    if not msg_id:
+        return JSONResponse({"ok": False, "error": "Es fehlt die Nachrichten-Kennung "
+                                                   "(msg_id)."}, status_code=400)
+    ordner = str((body or {}).get("ordner") or "").strip()
+    hinw = str((body or {}).get("hinweis") or "").strip()[:500]
+    regel = None
+    rid = str((body or {}).get("regel_id") or "").strip()
+    if rid:
+        r = mail_rules.holen(rid)
+        if r and r.get("owner") == mail_rules.norm_user(user):
+            regel = r
+    try:
+        daten = await mail_runner.antwort_vorschlag(user, msg_id, ordner, regel, hinw)
+    except mail_client.MailFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Vorschlag fehlgeschlagen: %s" % e},
+                            status_code=500)
+    return JSONResponse({"ok": True, **daten})
+
+
+@app.post("/api/email/reply/send")
+async def email_reply_send(request: Request,
+                           user: str = Depends(require_email_access)):
+    """Den freigegebenen Antworttext abschicken.
+
+    **Hier laeuft kein Sprachmodell** – der Text kommt aus dem Fenster und
+    wurde vom Benutzer gesehen (und ggf. geaendert). Der Empfaenger ergibt sich
+    aus der beantworteten Nachricht, nicht aus dem Rumpf: sonst waere dieser
+    Endpunkt ein Versandweg an beliebige Adressen.
+
+    ``entwurf: true`` speichert statt zu senden – der zurueckhaltende Weg, wenn
+    jemand die Antwort lieber noch in Outlook selbst ansehen moechte.
+    """
+    from backend import mail_client, mail_runner
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    msg_id = str((body or {}).get("msg_id") or "").strip()
+    text = str((body or {}).get("text") or "")
+    if not msg_id or not text.strip():
+        return JSONResponse({"ok": False, "error": "Es fehlen Nachrichten-Kennung oder "
+                                                   "Text."}, status_code=400)
+    try:
+        daten = await mail_runner.antwort_senden(
+            user, msg_id, text,
+            ordner=str((body or {}).get("ordner") or "").strip(),
+            allen=bool((body or {}).get("allen")),
+            entwurf=bool((body or {}).get("entwurf")))
+    except mail_client.MailFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Senden fehlgeschlagen: %s" % e},
+                            status_code=500)
+    return JSONResponse({"ok": True, **daten})
+
+
 @app.post("/api/email/stop")
 async def email_stop(user: str = Depends(require_email_access)):
     """Laufenden Regel-Lauf abbrechen (der Bereich kennt einen Lauf zur Zeit)."""

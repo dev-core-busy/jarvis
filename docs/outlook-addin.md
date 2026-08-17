@@ -136,7 +136,7 @@ denselben Daten wie im Browser. Ab dann meldet sich das Fenster von selbst an
 
 | Reiter | Inhalt |
 |---|---|
-| **Nachricht** | Betreff und Absender der markierten Mail, Auswahl einer aktiven Regel, **Jetzt verarbeiten** |
+| **Nachricht** | Betreff und Absender der markierten Mail, **Antwort vorschlagen** (Abschnitt 5.2), Auswahl einer aktiven Regel, **Jetzt verarbeiten** |
 | **Regeln** | Regeln anlegen, ändern, pausieren, Testlauf, löschen – vollständig wie in `/email` |
 | **Postfach** | eigene Zugangsdaten, Ordner, Verbindungstest |
 | **Protokoll** | die letzten Läufe mit Ergebnis |
@@ -183,6 +183,30 @@ selben Arbeitsplatz und ist deshalb kein zweiter Faktor.
 `GET /api/addin/links` (beides nur für Administratoren). Ohne das meldete sich
 der neue Inhaber weiterhin als der alte Benutzer an.
 
+### 5.2 Antwort vorschlagen – erst ansehen, dann senden
+
+Im Reiter **Nachricht** steht über dem Regel-Block der Knopf **„Antwort
+vorschlagen"**. Er formuliert eine Antwort auf die markierte Mail und zeigt sie
+in einem bearbeitbaren Feld. Gesendet wird erst mit **„Senden"** – oder mit
+**„Als Entwurf"**, wenn die Antwort noch in Outlook durchgesehen werden soll.
+**„Neu formulieren"** verwirft den Vorschlag und fragt erneut.
+
+Optional: ein **Hinweis** („freundlich absagen", „Termin bestätigen") und der
+**Ton einer eigenen Regel** – deren Prompt beschreibt ja bereits, wie geantwortet
+werden soll. Beides ist freiwillig; der Weg funktioniert auch, wenn noch gar
+keine Regel angelegt ist.
+
+> **Der Lauf hinter dem Vorschlag hat KEINE Werkzeuge.** Er kann nichts senden,
+> nichts weiterleiten, nichts verschieben – er formuliert nur Text. Eine
+> Prompt-Injektion in der eingegangenen Mail kann hier also nichts auslösen; sie
+> könnte höchstens den Vorschlagstext beeinflussen, und den liest ein Mensch,
+> bevor er ihn abschickt. Damit ist dieser Weg deutlich enger abgesichert als
+> „Jetzt verarbeiten", wo das Modell die Aktion selbst wählt.
+
+Beim Senden läuft **kein Sprachmodell mehr**: der Text geht so hinaus, wie er im
+Feld steht. Der Empfänger ergibt sich aus der beantworteten Nachricht und kann
+nicht überschrieben werden. Jeder Versand steht im **Protokoll**.
+
 ### Was das Add-in **nicht** kann
 
 * **Postfächer über IMAP**: die Kennung, die Outlook liefert, ist eine
@@ -208,6 +232,9 @@ der neue Inhaber weiterhin als der alte Benutzer an.
   Werkzeuge der Regel beschränkt. Über diesen Weg gibt es keine Systemrechte.
 * Das Kennwort des Postfachs wird nie angezeigt und von keiner Schnittstelle
   herausgegeben – nur „gesetzt: ja/nein".
+* Der **Antwort-Vorschlag** läuft ohne jedes Werkzeug und kann deshalb nichts
+  auslösen; der **Versand** läuft ohne Sprachmodell und geht ausschließlich an
+  den Absender der beantworteten Nachricht.
 * Die kennwortlose Anmeldung führt **dieselben Schranken wie `/api/login`**:
   Ratenbegrenzung, AD-Freigabe (auch nachträglich entzogene), Kontosperre,
   Lizenz-Benutzergrenze, Anwesenheits-Buchhaltung. Sie ist kein Nebeneingang.
@@ -267,8 +294,9 @@ als ein neues und muss einmal neu installiert werden (das alte vorher entfernen)
 | `backend/addin_sso.py` | prüft die Exchange-Identity-Token, verwaltet die Verknüpfung Postfach ↔ Konto |
 | `backend/main.py` | Routen `/addin/manifest.xml`, `/addin/taskpane.html`, Endpunkt `POST /api/email/rules/{id}/run_message` |
 | `backend/mail_runner.py` | `nachricht_lauf()` – eine benannte Nachricht verarbeiten, mit derselben Buchhaltung wie der Zeitplan |
+| `backend/mail_runner.py` | `antwort_vorschlag()` / `antwort_senden()` – Vorschau ohne Werkzeuge, Versand ohne Sprachmodell |
 | `frontend/addin/taskpane.html` | Aufgabenfenster (Markup und Gestaltung) |
 | `frontend/addin/addin.js` | Anmeldung, Outlook-Kontext, Regeln, Postfach, Protokoll |
 | `frontend/addin/icon-*.png` → `/addin/icon-<n>.png` | Symbole; ohne Branding-Logo die eingebauten |
 | `tests/test_outlook_addin.py` | Wächter Manifest/Fenster (192 Prüfungen) |
-| `tests/test_addin_sso.py` | Wächter kennwortlose Anmeldung (69 Prüfungen, echte Signaturen) |
+| `tests/test_addin_sso.py` | Wächter kennwortlose Anmeldung + Antwort-Vorschau (112 Prüfungen, echte Signaturen) |

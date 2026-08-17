@@ -123,3 +123,19 @@ data/license.json
 # wirkt in kuenftigen Laeufen. Vorgaben liegen versioniert in
 # skills/agent_orchestrator/main.py (VORGABE_ROLLEN in backend/agent_roles.py).
 data/agent_roles.json
+
+# Zugangsdaten von Benutzern: Kennwortdateien + die zugehoerigen Schluessel.
+# Sie tauchen sonst als untracked auf und koennen bei einem `git add -A`
+# im OEFFENTLICHEN Repo landen (nachgestellt: alle vier standen in
+# `git status`). Der Schluessel ohne die Datei ist nutzlos und umgekehrt –
+# also muessen BEIDE ignoriert sein.
+data/email_accounts.json
+data/.mailkey
+data/sap_accounts.json
+data/.sapkey
+data/email_rules.json
+data/email_state.json
+data/addin_links.json
+data/ad_cache.json
+data/knowledge_sync.json
+data/agent_roles.json

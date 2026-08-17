@@ -3160,6 +3160,18 @@ KRITISCH – Autonomie-Regeln:
                     _m_token = _mcv.set(_uname or "")
                 except Exception:  # noqa: BLE001
                     _mcv = None
+                # Persoenlicher SAP-Zugang fuer die sap_*-Werkzeuge (seit
+                # 2026-08-17). Gleiche Begruendung wie beim Postfach: es ist eine
+                # Personen-, keine Rechtefrage – und der Benutzer darf NIEMALS
+                # als Werkzeug-Argument kommen, sonst koennte das Modell waehlen,
+                # mit wessen SAP-Zugangsdaten es arbeitet. Ohne hinterlegten
+                # Zugang faellt die Aufloesung auf den Sammelzugang zurueck.
+                _s_token = _scv = None
+                try:
+                    from backend.sap_accounts import current_sap_user as _scv
+                    _s_token = _scv.set(_uname or "")
+                except Exception:  # noqa: BLE001
+                    _scv = None
                 try:
                     result = await tool.execute(**exec_args)
                 finally:
@@ -3172,6 +3184,11 @@ KRITISCH – Autonomie-Regeln:
                     if _m_token is not None and _mcv is not None:
                         try:
                             _mcv.reset(_m_token)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if _s_token is not None and _scv is not None:
+                        try:
+                            _scv.reset(_s_token)
                         except Exception:  # noqa: BLE001
                             pass
             _dur_ms = int((_time.monotonic() - _t0) * 1000)

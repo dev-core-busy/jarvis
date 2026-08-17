@@ -215,6 +215,44 @@
         .sp-sect-hint { font-size: .82rem; color: var(--text-muted);
             line-height: 1.5; margin-bottom: 12px; }
 
+        /* ── Mein SAP-Zugang ──
+           Die Pille traegt die Aussage DOPPELT (Farbe und Text) – Farbe allein
+           ist fuer Farbfehlsichtige keine Information (gleiche Regel wie bei der
+           Anwesenheitsliste). Sie sitzt im summary-Flex und darf nicht wachsen. */
+        .sp-acc-pill { flex: 0 0 auto; margin-left: auto; font-size: .74rem;
+            font-weight: 600; padding: 2px 9px; border-radius: 999px;
+            border: 1px solid var(--border); color: var(--text-secondary);
+            background: rgba(var(--fg-rgb), .05); }
+        .sp-acc-pill:empty { display: none; }
+        .sp-acc-pill.is-own { color: var(--success);
+            border-color: color-mix(in srgb, var(--success) 45%, transparent);
+            background: color-mix(in srgb, var(--success) 12%, transparent); }
+        .sp-acc-pill.is-warn { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+        /* DECKENDE Flaeche: der Kasten liegt ueber Karteninhalt, halbtransparent
+           schiene der Text darunter durch (Lehre von den Panels). */
+        .sp-acc-note { display: none; background: var(--bg-secondary);
+            border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+            border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 12px;
+            font-size: .84rem; line-height: 1.5; color: var(--text-primary); }
+        .sp-acc-note.is-on { display: block; }
+        /* FALLSTRICK: `.sp-row` setzt `display: flex` und ueberstimmt damit das
+           UA-Stylesheet fuer [hidden] – ohne diese Regel bleibt eine per
+           `hidden` verborgene Zeile sichtbar (im Screenshot aufgefallen: das
+           Token-Feld stand neben Benutzer/Kennwort). Gleiche Klassen-Falle wie
+           bei `.input-group` und `.role-grid`. */
+        .sp-row[hidden] { display: none; }
+        .sp-acc-group { display: none; }
+        .sp-acc-group.is-on { display: block; }
+        .sp-acc-group .sp-row { margin-bottom: 12px; }
+        .sp-acc-aktiv { flex: 0 0 240px; }
+        /* Eigene Klasse statt einer Feldbeschriftung: ein Kontrollkaestchen ist
+           ein Satz, keine Beschriftung – und .sp-label ist gross/gesperrt. */
+        .sp-acc-check { display: flex; align-items: center; gap: 8px;
+            font-size: .86rem; color: var(--text-primary); padding-top: 7px; }
+        .sp-acc-check input { flex: 0 0 auto; }
+
         .sp-ep { border: 1px solid var(--border); border-radius: var(--radius-md);
             padding: 11px 13px; margin-bottom: 9px; background: rgba(var(--fg-rgb), .03); }
         .sp-ep-name { font-weight: 600; font-size: .9rem; }
@@ -368,6 +406,162 @@
             <div class="sp-result-body" id="sp-result-body"></div>
         </div>
 
+        <!-- ── Mein SAP-Zugang (persoenliche Zugangsdaten) ──
+             Steht bewusst VOR der BI-Anbindung: wer die Seite zum ersten Mal
+             oeffnet und noch keinen eigenen Zugang hat, soll ihn hier finden.
+             Wer /sap betreten darf, darf ihn pflegen – die Berechtigungsfrage
+             ist damit dieselbe wie fuer den ganzen Bereich. -->
+        <details class="sp-sect" id="sp-sect-account">
+            <summary>
+                <span data-i18n="sap.acc_section">Mein SAP-Zugang</span>
+                <span class="sp-acc-pill" id="sp-acc-pill"></span>
+            </summary>
+            <div class="sp-sect-body">
+                <p class="sp-sect-hint" data-i18n="sap.acc_hint">Hinterlege hier deine eigenen SAP-Zugangsdaten – dann laufen Auswertungen, Chat-Abfragen und die Abfrage-Konsole mit deinen SAP-Berechtigungen. Ohne eigenen Zugang gilt der gemeinsame Lesezugang, den ein Administrator hinterlegt hat.</p>
+
+                <div class="sp-acc-note" id="sp-acc-note"></div>
+
+                <div class="sp-row">
+                    <div class="sp-field">
+                        <label class="sp-label" for="sp-acc-type" data-i18n="sap.acc_type">Zugangsart</label>
+                        <select id="sp-acc-type" class="sp-select">
+                            <option value="" data-i18n="sap.acc_type_none">— kein eigener Zugang —</option>
+                            <option value="odata">OData (S/4HANA, Gateway, BW/4HANA)</option>
+                            <option value="hana">HANA SQL (HANA, HANA Cloud, Datasphere)</option>
+                            <option value="rfc">RFC (ECC / NetWeaver)</option>
+                        </select>
+                    </div>
+                    <div class="sp-field sp-acc-aktiv">
+                        <label class="sp-label" data-i18n="sap.acc_active">Verwenden</label>
+                        <label class="sp-acc-check"><input type="checkbox" id="sp-acc-aktiv" checked>
+                            <span data-i18n="sap.acc_active_lbl">Eigenen Zugang verwenden</span></label>
+                    </div>
+                </div>
+
+                <!-- OData -->
+                <div class="sp-acc-group" id="sp-acc-g-odata" hidden>
+                    <div class="sp-row">
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-od-url" data-i18n="sap.acc_odata_url">Basis-URL</label>
+                            <input class="sp-input" id="sp-acc-od-url" type="text" autocomplete="off"
+                                   placeholder="https://s4.firma.de:44300/sap/opu/odata">
+                        </div>
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-od-service" data-i18n="sap.acc_odata_service">Standard-Service (optional)</label>
+                            <input class="sp-input" id="sp-acc-od-service" type="text" autocomplete="off"
+                                   placeholder="sap/API_SALES_ORDER_SRV">
+                        </div>
+                    </div>
+                    <div class="sp-row">
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-od-auth" data-i18n="sap.acc_authkind">Anmeldeart</label>
+                            <select id="sp-acc-od-auth" class="sp-select">
+                                <option value="basic" data-i18n="sap.acc_auth_basic">Benutzer und Kennwort</option>
+                                <option value="bearer" data-i18n="sap.acc_auth_bearer">Token (Bearer)</option>
+                            </select>
+                        </div>
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-od-client" data-i18n="sap.acc_mandant">Mandant (optional)</label>
+                            <input class="sp-input" id="sp-acc-od-client" type="text" autocomplete="off" placeholder="100">
+                        </div>
+                    </div>
+                    <!-- Benutzer/Kennwort und Token schliessen sich aus: sichtbar ist
+                         nur, was zur gewaehlten Anmeldeart gehoert. Beides gleichzeitig
+                         zu zeigen laedt dazu ein, das falsche Feld zu fuellen. -->
+                    <div class="sp-row" id="sp-acc-od-basic">
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-od-user" data-i18n="sap.acc_user">SAP-Benutzer</label>
+                            <input class="sp-input" id="sp-acc-od-user" type="text" autocomplete="off">
+                        </div>
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-od-pass" data-i18n="sap.acc_pass">Kennwort</label>
+                            <input class="sp-input" id="sp-acc-od-pass" type="password" autocomplete="new-password"
+                                   data-i18n-placeholder="sap.acc_pass_ph" placeholder="leer = unverändert">
+                        </div>
+                    </div>
+                    <div class="sp-row" id="sp-acc-od-bearer" hidden>
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-od-token" data-i18n="sap.acc_token">Token</label>
+                            <input class="sp-input" id="sp-acc-od-token" type="password" autocomplete="new-password"
+                                   data-i18n-placeholder="sap.acc_pass_ph" placeholder="leer = unverändert">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- HANA -->
+                <div class="sp-acc-group" id="sp-acc-g-hana" hidden>
+                    <div class="sp-row">
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-hana-host" data-i18n="sap.acc_hana_host">Host</label>
+                            <input class="sp-input" id="sp-acc-hana-host" type="text" autocomplete="off"
+                                   placeholder="hana.firma.de">
+                        </div>
+                        <div class="sp-field" style="flex:0 0 120px;">
+                            <label class="sp-label" for="sp-acc-hana-port" data-i18n="sap.acc_hana_port">Port</label>
+                            <input class="sp-input" id="sp-acc-hana-port" type="number" min="1" max="65535" value="443">
+                        </div>
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-hana-schema" data-i18n="sap.acc_hana_schema">Schema (optional)</label>
+                            <input class="sp-input" id="sp-acc-hana-schema" type="text" autocomplete="off" placeholder="SAPHANADB">
+                        </div>
+                    </div>
+                    <div class="sp-row">
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-hana-user" data-i18n="sap.acc_user">SAP-Benutzer</label>
+                            <input class="sp-input" id="sp-acc-hana-user" type="text" autocomplete="off">
+                        </div>
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-hana-pass" data-i18n="sap.acc_pass">Kennwort</label>
+                            <input class="sp-input" id="sp-acc-hana-pass" type="password" autocomplete="new-password"
+                                   data-i18n-placeholder="sap.acc_pass_ph" placeholder="leer = unverändert">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RFC -->
+                <div class="sp-acc-group" id="sp-acc-g-rfc" hidden>
+                    <div class="sp-row">
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-rfc-host" data-i18n="sap.acc_rfc_host">Anwendungsserver</label>
+                            <input class="sp-input" id="sp-acc-rfc-host" type="text" autocomplete="off"
+                                   placeholder="ecc.firma.de">
+                        </div>
+                        <div class="sp-field" style="flex:0 0 110px;">
+                            <label class="sp-label" for="sp-acc-rfc-sysnr" data-i18n="sap.acc_rfc_sysnr">Systemnr.</label>
+                            <input class="sp-input" id="sp-acc-rfc-sysnr" type="text" autocomplete="off" placeholder="00">
+                        </div>
+                        <div class="sp-field" style="flex:0 0 110px;">
+                            <label class="sp-label" for="sp-acc-rfc-client" data-i18n="sap.acc_mandant">Mandant</label>
+                            <input class="sp-input" id="sp-acc-rfc-client" type="text" autocomplete="off" placeholder="100">
+                        </div>
+                        <div class="sp-field" style="flex:0 0 110px;">
+                            <label class="sp-label" for="sp-acc-rfc-lang" data-i18n="sap.acc_rfc_lang">Sprache</label>
+                            <input class="sp-input" id="sp-acc-rfc-lang" type="text" autocomplete="off" placeholder="DE">
+                        </div>
+                    </div>
+                    <div class="sp-row">
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-rfc-user" data-i18n="sap.acc_user">SAP-Benutzer</label>
+                            <input class="sp-input" id="sp-acc-rfc-user" type="text" autocomplete="off">
+                        </div>
+                        <div class="sp-field">
+                            <label class="sp-label" for="sp-acc-rfc-pass" data-i18n="sap.acc_pass">Kennwort</label>
+                            <input class="sp-input" id="sp-acc-rfc-pass" type="password" autocomplete="new-password"
+                                   data-i18n-placeholder="sap.acc_pass_ph" placeholder="leer = unverändert">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sp-actions">
+                    <button class="sp-btn" id="sp-acc-save" type="button" data-i18n="common.save">Speichern</button>
+                    <button class="sp-hist-btn" id="sp-acc-test" type="button" data-i18n="profile.test">Verbindung testen</button>
+                    <button class="sp-hist-btn" id="sp-acc-del" type="button" data-i18n="sap.acc_remove">Eigenen Zugang entfernen</button>
+                    <span class="sp-note" id="sp-acc-status"></span>
+                </div>
+                <p class="sp-sect-hint" id="sp-acc-hosts"></p>
+            </div>
+        </details>
+
         <!-- ── BI-Anbindung ── -->
         <details class="sp-sect" id="sp-sect-bi">
             <summary><span data-i18n="sap.section_bi">Anbindung an das BI-Werkzeug</span></summary>
@@ -425,7 +619,7 @@
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=103"></script>
+<script src="/static/js/i18n.js?v=104"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=23"></script>
 <script src="/static/js/issues.js?v=6"></script>
@@ -437,7 +631,7 @@
 <script src="/static/js/vendor/chartjs-plugin-annotation.min.js?v=1"></script>
 <script src="/static/js/charts.js?v=4"></script>
 <script src="/static/js/mermaid_blocks.js?v=1"></script>
-<script src="/static/js/sap_portal.js?v=2"></script>
+<script src="/static/js/sap_portal.js?v=4"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR
      #btn-theme-toggle – deshalb muss der Theme-Knopf diese Id tragen. -->

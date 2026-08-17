@@ -2131,6 +2131,110 @@ jeher `require_local_auth` – **Lesen war also freier als Schreiben**, was den 
   **Ein echter Agentenlauf gegen ein SAP-System ist NICHT geprüft** – auf DEV sind keine
   SAP-Zugangsdaten hinterlegt.
 
+### Persönlicher SAP-Zugang je Benutzer (2026-08-17)
+**Was sich ändert:** Der in *Einstellungen → SAP* hinterlegte Zugang ist ab jetzt der
+**Read-Only-Sammelbenutzer** und nur noch der **Rückfall**. Wer im Bereich `/sap` unter *Mein
+SAP-Zugang* eigene Zugangsdaten hinterlegt, arbeitet damit – in `/sap`, bei den
+`sap_*`-Werkzeugen im Chat, in BI-Anbindung/Abfrage-Konsole und in zeitversetzten Läufen
+(Cron, E-Mail-Regeln; über die Actor-Bindung). Code: `backend/sap_accounts.py`,
+`GET/POST/DELETE /api/sap/account` + `GET /api/sap/admin/accounts`, Abschnitt in
+`frontend/sap.html`/`js/sap_portal.js`, Freigabeliste im Reiter (`js/sap.js`).
+
+- **Das ist ein Sicherheitsgewinn, nicht nur Komfort:** vorher erbten ALLE SAP-Freigegebenen
+  die Berechtigungen EINES Server-Zugangs – „fremde Zugangsdaten als Vollmacht", eines der vier
+  Muster aus der Endpunkt-Durchsicht vom 2026-08-04. Mit eigenem SAP-Benutzer sieht jeder genau
+  die Daten, für die er im Zielsystem berechtigt ist.
+- **DER BENUTZERBEZUG KOMMT AUS EINEM CONTEXTVAR, NIE AUS EINEM WERKZEUG-ARGUMENT**
+  (`sap_accounts.current_sap_user`, gesetzt in `agent.py::_execute_tool` mit `try/finally`).
+  Sonst könnte das Modell – oder ein per Prompt-Injektion eingeschmuggelter Satz – wählen, mit
+  wessen Zugangsdaten es arbeitet. Ein Test lehnt Feldnamen wie `benutzer`/`zugang` in den
+  Werkzeug-Schemata ab. Bewusst NICHT `sandbox.tool_user()`: der ist für privilegierte Benutzer
+  absichtlich leer, dann hätten Administratoren gar keinen eigenen Zugang (gleiche Begründung
+  wie bei `mail_accounts.current_mail_user`).
+- **ES GAB ZWEI KONSTRUKTIONSSTELLEN, und beide mussten umgestellt werden:**
+  `main.py::_sap_client(user)` für die `/api/sap/*`-Endpunkte und `skills/sap/main.py` für die
+  Werkzeuge. Wäre nur eine umgestellt, liefen `/sap` und der Chat mit verschiedenen Zugängen
+  und dieselbe Frage lieferte unterschiedliche Zahlen. Ein Test verbietet ein `_sap_client()`
+  **ohne** Benutzer.
+- **Im Skill ist `execute` jetzt ZENTRAL in `_Base`**, die Werkzeuge implementieren `_run`.
+  Damit stehen Auflösung, Hinweis und Fehler-Vermerk an einer Stelle und gelten automatisch
+  auch für künftige SAP-Werkzeuge. Der Vermerk des Anmeldefehlers sitzt in `_fmt_err`, **weil
+  alle Werkzeuge ihre `SapError` selbst fangen** – eine Zählung in `execute` würde nie erreicht.
+- **Der Benutzer darf die SERVERADRESSE setzen** (Vorgabe des Nutzers) – anders als beim
+  E-Mail-Skill. Nötig, weil der Fall „der Administrator hat gar nichts konfiguriert" sonst nicht
+  lösbar wäre. Der Preis ist eine SSRF-Fläche, deshalb die **Host-Freigabeliste**
+  (`allowed_hosts` in der Skill-Config): **leer = niemand** (konsistent zu allen übrigen
+  Freigabefeldern seit 2026-07-29), der bereits konfigurierte Server des Administrators gilt
+  **implizit** (sonst müsste er ihn doppelt eintragen und niemand könnte auch nur Anmeldedaten
+  fürs Haussystem hinterlegen). Ein Eintrag deckt Unterdomänen ab; geprüft wird beim **Speichern**
+  (400 mit Klartext) UND bei **jeder Benutzung** – die Liste kann sich nachträglich ändern.
+  - **FALLSTRICK, den der Test fand:** `*.firma.de` muss VOR der Host-Ermittlung entsternt
+    werden, sonst bleibt `*.firma.de` als Hostname stehen und trifft nie.
+- **Was der Benutzer NICHT setzen darf:** `verify_ssl`/`hana_ssl_validate` und `read_only`.
+  Freier Host PLUS abgeschaltete Zertifikatsprüfung wäre eine Einladung zum
+  Man-in-the-Middle; read-only ist ohnehin hart im `sap_client` erzwungen. Die Feldliste
+  `AENDERBAR` ist die **einzige** Instanz – der Endpunkt filtert ausdrücklich nicht vor (zwei
+  Schichten mit unterschiedlicher Meinung sind das Muster, das hier schon Stunden gekostet hat).
+- **Kennwörter:** Fernet, eigene Schlüsseldatei `data/.sapkey` (**0600**, in
+  `PRIVATE_FILES_STRENG`), `data/sap_accounts.json` 0640; beide in `_APP_DENY_REL`,
+  `PRIVATE_FILES` und `SHELL_SECRET_PATHS`. **Kein Klartext-Rückfall** (fehlt `cryptography`,
+  wird das Speichern abgelehnt), **kein Endpunkt gibt ein Kennwort heraus** – nur `*_gesetzt`.
+  **Leeres Kennwortfeld heisst UNVERÄNDERT**, zum Entfernen gibt es `DELETE`.
+- **Bei Fehlschlag Rückfall auf den Sammelzugang MIT HINWEIS** (Entscheidung des Nutzers; meine
+  Empfehlung war die Absage). **Die Konsequenz muss man kennen:** der Sammelbenutzer ist in der
+  Regel breiter berechtigt, ein Anmeldefehler ist damit der Weg zu MEHR Daten. Deshalb ist der
+  Hinweis dreifach sichtbar: Pille im Abschnitt, Kopfzeile über dem Ergebnis (`/api/sap/ask`
+  liefert `quelle` + `hinweis`) und `HINWEIS_AN_NUTZER` im Werkzeug-Ergebnis. Der Hinweis geht
+  **nicht** in den Antworttext – der wird kopiert und weitergegeben.
+- **Aussetzer nach 3 Anmeldefehlern** (`JARVIS_SAP_MAX_AUTHFEHLER`, `0` = aus) – Muster
+  `mail_accounts` nach dem Vorfall vom 2026-08-16, hier gegen `login/fails_to_user_lock`.
+  **Gezählt wird nur ein Anmeldefehler** (`ist_anmeldefehler`: 401/403 sowie die HANA-/RFC-Texte;
+  Netz-, Zeit- und Zertifikatsfehler NICHT – wer die mitzählt, setzt den Zugang bei jeder
+  Netzstörung aus). `merke_ergebnis` ohne `anmeldefehler=True` zählt **nichts** (fail-safe).
+  **Der Aussetzer IST zugleich die Rückfall-Schwelle:** ab ihm laufen die Abfragen über den
+  Sammelzugang, statt fehlzuschlagen. Rückweg: Erfolg oder ein NEUES Kennwort (leeres Feld
+  hebt nichts auf). `aufloesen(..., trotz_aussetzer=True)` ist dem **Verbindungstest**
+  vorbehalten – ohne diese Ausnahme prüfte der Knopf den Sammelzugang, meldete „ok" und der
+  Aussetzer liesse sich nie auflösen.
+- **Genau EIN Zugang je Benutzer** (kein Umschalter Produktiv/Test).
+- **Ausdrücklich VERWORFEN (gleicher Tag): zeitgesteuerte SAP-Auswertungen.** Erwogen und
+  abgesagt – zeitversetzte Auslöser legt weiter nur ein Administrator an (Entscheidung
+  2026-07-29 bleibt unangetastet). Nicht zu verwechseln damit, dass der persönliche Zugang in
+  einem zeitversetzten Lauf GILT: solche Läufe entstehen durch einen Admin-Auftrag oder durch
+  eine E-Mail-Regel, die der Benutzer selbst anlegen darf.
+- **Folge des UI-Ortes, die man kennen muss:** der Abschnitt liegt in `/sap`, und dort kommt nur
+  hinein, wer die SAP-Freigabe hat. Ein **Administrator ohne SAP-Freigabe** kann deshalb keinen
+  eigenen Zugang hinterlegen (`_user_may_use_sap` kennt bewusst keinen Admin-Bypass) – er pflegt
+  den Sammelzugang. Der Reiter zeigt ihm dafür, WER einen eigenen Zugang hat
+  (`/api/sap/admin/accounts`, **ohne** Zugangsdaten und ohne Serveradressen).
+- **FALLSTRICK, den nur der Screenshot zeigte:** `.sp-row` setzt `display: flex` und
+  **überstimmt das `hidden`-Attribut** – das Token-Feld stand neben Benutzer/Kennwort, obwohl es
+  verborgen sein sollte. Fix: `.sp-row[hidden] { display: none; }`. Gleiche Klassen-Falle wie
+  `.input-group` (2026-08-10) und `.role-grid`.
+- **Verifiziert:** 115 Prüfungen (`tests/test_sap_accounts.py`, ohne fastapi lauffähig,
+  `backend.config` als Stub mit Sandkasten-Wächter/Exit 2) lokal und auf DEV im echten venv,
+  dazu 432 E-Mail-, 120 Endpunkt-Rechte-, 66 SAP-Katalog- und 87 SAP-UI-Prüfungen unverändert
+  grün. Gegenproben greifen: Host-Schranke ausgebaut → 6 FAIL, jede Fehlerart gezählt → 5 FAIL,
+  `verify_ssl` setzbar → 3 FAIL.
+  **Live auf DEV:** 401 ohne Token · Admin ohne SAP-Freigabe **403** an allen Konto-Endpunkten ·
+  leere Freigabeliste → 400 mit Klartext · fremder Host → 400 mit Nennung des Hosts ·
+  Unterdomäne → 200 · Kennwort **nicht** im Klartext auf Platte (0640/0600) · `runuser -u
+  jarvis_sandbox -- cat` scheitert an beiden Dateien, `authorize_fs` verweigert als „sensibel",
+  `data/knowledge` bleibt lesbar · Netzfehler zählt **nicht** · drei echte 401 (HTTP-Attrappe)
+  setzen aus, danach zeigen Status **und** `reporting-endpoints` den Sammel-Host · neues Kennwort
+  hebt auf. **Ende-zu-Ende im echten venv:** ContextVar gesetzt → Werkzeug nutzt den persönlichen
+  Host, zählt drei Anmeldefehler, fällt auf den Sammelzugang zurück und nennt es im Ergebnis;
+  nach `reset()` gilt wieder der Sammelzugang. Danach vollständig zurückgebaut
+  (`settings.json` inhaltlich gleich zur Sicherung, `data/sap_accounts.json` + `.sapkey`
+  entfernt). Optisch in Dunkel UND Hell abgenommen.
+- **Ein Lauf gegen ein ECHTES SAP-System ist weiterhin nicht geprüft** – auf DEV gibt es keines.
+  Ungeprüft bleibt damit, ob HANA- und RFC-Anmeldefehler die erwarteten Texte liefern
+  (`ist_anmeldefehler` ist für sie textbasiert).
+- **Auf ECHT noch NICHT ausgerollt.** Beim Ausrollen: im Reiter *SAP* die Freigabeliste füllen
+  (leer = niemand, der Haus-Server ist implizit erlaubt), dann können Benutzer ihren eigenen
+  Zugang hinterlegen. Ohne Freigabeliste ändert sich für niemanden etwas – alles läuft wie
+  bisher über den Sammelzugang.
+
 ## E-Mail-Bereich `/email`: Exchange-Anbindung + Verarbeitungsregeln (2026-08-12)
 **Was es ist:** Der firmeninterne Exchange wird angebunden; jeder freigegebene Benutzer hinterlegt
 SEIN Postfach und legt **selbst** beliebig viele Regeln an. Trifft eine neue Nachricht ein, läuft

@@ -9,12 +9,20 @@ blockieren). Read-Only ist im Client hart durchgesetzt (siehe sap_client).
 """
 
 import asyncio
+import contextvars
 
 from backend.tools.base import BaseTool
 from backend.sap_client import SapClient, SapError, reporting_endpoints
 
+# Der fuer DIESEN Werkzeug-Aufruf aufgeloeste Zugang (siehe _Base.execute).
+# ContextVar und nicht Objekt-Attribut: die Werkzeug-Instanzen sind geteilt
+# (tools_map), zwei parallele Laeufe wuerden sich sonst den Zugang des jeweils
+# anderen unterschieben – dieselbe Lehre wie bei der Actor-Bindung (2026-07-28).
+_AKTUELL: contextvars.ContextVar = contextvars.ContextVar("jarvis_sap_akt", default=None)
+
 
 def _client() -> SapClient:
+    """Sammelzugang (Administrator-Konfiguration) – Rueckfall ohne Kontext."""
     return SapClient()
 
 
@@ -23,13 +31,50 @@ async def _to_thread(fn, *a, **kw):
 
 
 def _fmt_err(e: SapError) -> str:
+    """Fehlermeldung fuer das Modell – und der Ort, an dem ein Anmeldefehler
+    am persoenlichen Zugang VERMERKT wird.
+
+    Der Vermerk gehoert hierher, weil alle Werkzeuge ihre ``SapError`` selbst
+    fangen: eine Zaehlung im Rahmen von ``_Base.execute`` wuerde nie erreicht.
+    Nach ``sap_accounts.max_anmeldefehler()`` Fehlversuchen wird der Zugang
+    ausgesetzt und die Abfragen laufen wieder ueber den Sammelzugang – das
+    schuetzt den SAP-Benutzer vor der Sperre durch ``login/fails_to_user_lock``.
+    """
+    zusatz = ""
+    try:
+        from backend import sap_accounts as _sa  # noqa: PLC0415
+        akt = _AKTUELL.get() or {}
+        if akt.get("quelle") == _sa.QUELLE_PERSOENLICH and _sa.ist_anmeldefehler(e):
+            _sa.melde_fehler(akt.get("benutzer") or "", e)
+            zusatz = ("\nHINWEIS_AN_NUTZER: Die Anmeldung mit dem persoenlichen "
+                      "SAP-Zugang ist fehlgeschlagen. Nach %d Fehlversuchen wird er "
+                      "ausgesetzt und die Abfragen laufen wieder ueber den "
+                      "gemeinsamen Lesezugang." % _sa.max_anmeldefehler())
+        elif akt.get("quelle") == _sa.QUELLE_PERSOENLICH:
+            _sa.merke_ergebnis(akt.get("benutzer") or "", False, str(e))
+    except Exception:  # noqa: BLE001
+        pass
     if e.status in (401, 403):
-        return "❌ Authentifizierung fehlgeschlagen (HTTP %s). Benutzer/Passwort/Token pruefen." % e.status
+        return ("❌ Authentifizierung fehlgeschlagen (HTTP %s). Benutzer/Passwort/Token "
+                "pruefen.%s" % (e.status, zusatz))
     if e.status == 404:
         return "❌ Nicht gefunden (HTTP 404). URL/Service/EntitySet pruefen."
     if e.status:
-        return "❌ SAP-Fehler (Status %s): %s" % (e.status, e)
-    return "❌ %s" % e
+        return "❌ SAP-Fehler (Status %s): %s%s" % (e.status, e, zusatz)
+    return "❌ %s%s" % (e, zusatz)
+
+
+def _mit_hinweis(ergebnis, akt: dict):
+    """Haengt den Zugangs-Hinweis an das Werkzeug-Ergebnis.
+
+    **Der Hinweis ist nicht Kosmetik.** Faellt ein Lauf auf den Sammelzugang
+    zurueck, holt er die Daten mit FREMDEN – in der Regel weiteren –
+    SAP-Berechtigungen. Ohne diesen Satz saehe der Benutzer Zahlen, von denen er
+    annimmt, sie stammten aus seinem eigenen Zugang."""
+    hinweis = (akt or {}).get("hinweis") or ""
+    if not hinweis or not isinstance(ergebnis, str):
+        return ergebnis
+    return "%s\n\nHINWEIS_AN_NUTZER: %s" % (ergebnis, hinweis)
 
 
 def _table(columns: list, rows: list, limit: int = 50) -> str:
@@ -49,15 +94,55 @@ def _table(columns: list, rows: list, limit: int = 50) -> str:
 
 
 class _Base(BaseTool):
-    """Gemeinsame Hilfen fuer alle SAP-Tools."""
+    """Gemeinsame Hilfen fuer alle SAP-Tools.
+
+    ``execute`` ist hier ZENTRAL implementiert und loest den Zugang des laufenden
+    Benutzers auf (persoenlicher Zugang mit Vorrang, sonst Sammelzugang); die
+    Werkzeuge selbst implementieren ``_run``. Der Umweg ist Absicht: Aufloesung,
+    Hinweis und Fehler-Vermerk stehen damit an EINER Stelle und gelten
+    automatisch auch fuer kuenftige SAP-Werkzeuge. Wer stattdessen ``execute``
+    ueberschreibt, umgeht sie – deshalb der Name ``_run``.
+    """
+
+    async def execute(self, **kwargs):
+        from backend import sap_accounts as sa  # noqa: PLC0415
+        try:
+            akt = sa.aufloesen()          # Benutzer kommt aus dem ContextVar
+        except Exception as e:            # noqa: BLE001
+            # Fail-safe: laesst sich der persoenliche Zugang nicht aufloesen,
+            # laeuft es wie vor 2026-08-17 ueber den Sammelzugang weiter.
+            print("[SAP] Zugang nicht aufloesbar (%s) – Sammelzugang" % e, flush=True)
+            akt = {"client": _client(), "quelle": sa.QUELLE_SAMMEL,
+                   "hinweis": "", "benutzer": ""}
+        tok = _AKTUELL.set(akt)
+        try:
+            res = await self._run(**kwargs)
+            if isinstance(res, str) and not res.startswith("❌") \
+                    and akt.get("quelle") == sa.QUELLE_PERSOENLICH:
+                # Erfolg hebt einen laufenden Fehlerzaehler auf – das ist der
+                # Rueckweg aus dem Aussetzer ohne jeden Handgriff.
+                try:
+                    sa.merke_ergebnis(akt.get("benutzer") or "", True)
+                except Exception:  # noqa: BLE001
+                    pass
+        finally:
+            _AKTUELL.reset(tok)
+        return _mit_hinweis(res, akt)
+
+    async def _run(self, **kwargs):        # von den Werkzeugen implementiert
+        raise NotImplementedError
 
     def _guard(self) -> SapClient | None:
-        c = _client()
+        """Der aufgeloeste Client dieses Aufrufs (None = nichts konfiguriert)."""
+        akt = _AKTUELL.get() or {}
+        c = akt.get("client") or _client()
         return c if c.configured else None
 
     def _not_configured(self) -> str:
-        return ("SAP ist nicht konfiguriert. Bitte im SAP-Reiter (Einstellungen) "
-                "Verbindungstyp und Zugangsdaten eintragen.")
+        return ("SAP ist nicht konfiguriert. Entweder hinterlegt ein Administrator "
+                "einen gemeinsamen Lesezugang unter Einstellungen → SAP, oder der "
+                "Benutzer traegt seinen eigenen SAP-Zugang im SAP-Bereich unter "
+                "'Mein SAP-Zugang' ein.")
 
 
 class SapTestConnectionTool(_Base):
@@ -72,7 +157,7 @@ class SapTestConnectionTool(_Base):
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {}, "required": []}
 
-    async def execute(self, **kwargs):
+    async def _run(self, **kwargs):
         c = self._guard()
         if not c:
             return self._not_configured()
@@ -81,7 +166,16 @@ class SapTestConnectionTool(_Base):
         except SapError as e:
             return _fmt_err(e)
         prod = (" – " + c.product) if c.product else ""
-        return "✅ Verbindung OK [%s]%s: %s" % (res.get("type"), prod, res.get("detail"))
+        # Welcher Zugang benutzt wurde, gehoert HIER ausdruecklich ins Ergebnis:
+        # "Verbindung OK" allein sagt nicht, mit WESSEN Berechtigungen gelesen
+        # wird – und genau das ist die Frage, die dieses Werkzeug beantworten soll.
+        try:
+            from backend import sap_accounts as _sa  # noqa: PLC0415
+            zugang = " · %s" % _sa.quelle_text((_AKTUELL.get() or {}).get("quelle") or "")
+        except Exception:  # noqa: BLE001
+            zugang = ""
+        return "✅ Verbindung OK [%s]%s%s: %s" % (res.get("type"), prod, zugang,
+                                                 res.get("detail"))
 
 
 class SapOdataServicesTool(_Base):
@@ -98,7 +192,7 @@ class SapOdataServicesTool(_Base):
             "limit": {"type": "INTEGER", "description": "Max. Anzahl (Standard 100)."}},
             "required": []}
 
-    async def execute(self, **kwargs):
+    async def _run(self, **kwargs):
         c = self._guard()
         if not c:
             return self._not_configured()
@@ -131,7 +225,7 @@ class SapOdataEntitySetsTool(_Base):
             "service": {"type": "STRING", "description": "Service-Pfad (optional, sonst Standard-Service)."}},
             "required": []}
 
-    async def execute(self, **kwargs):
+    async def _run(self, **kwargs):
         c = self._guard()
         if not c:
             return self._not_configured()
@@ -166,7 +260,7 @@ class SapOdataQueryTool(_Base):
             "expand": {"type": "STRING", "description": "$expand (Navigationseigenschaften)."},
         }, "required": ["entity_set"]}
 
-    async def execute(self, **kwargs):
+    async def _run(self, **kwargs):
         c = self._guard()
         if not c:
             return self._not_configured()
@@ -209,7 +303,7 @@ class SapSqlQueryTool(_Base):
             "max_rows": {"type": "INTEGER", "description": "Max. Zeilen (Standard 200, max 10000)."},
         }, "required": ["sql"]}
 
-    async def execute(self, **kwargs):
+    async def _run(self, **kwargs):
         c = self._guard()
         if not c:
             return self._not_configured()
@@ -245,7 +339,7 @@ class SapListTablesTool(_Base):
             "limit": {"type": "INTEGER", "description": "Max. Anzahl (Standard 200)."},
         }, "required": []}
 
-    async def execute(self, **kwargs):
+    async def _run(self, **kwargs):
         c = self._guard()
         if not c:
             return self._not_configured()
@@ -277,7 +371,7 @@ class SapDescribeTableTool(_Base):
             "schema": {"type": "STRING", "description": "Schema (optional)."},
         }, "required": ["table"]}
 
-    async def execute(self, **kwargs):
+    async def _run(self, **kwargs):
         c = self._guard()
         if not c:
             return self._not_configured()
@@ -311,7 +405,7 @@ class SapRfcReadTableTool(_Base):
             "max_rows": {"type": "INTEGER", "description": "Max. Zeilen (Standard 100)."},
         }, "required": ["table"]}
 
-    async def execute(self, **kwargs):
+    async def _run(self, **kwargs):
         c = self._guard()
         if not c:
             return self._not_configured()
@@ -347,12 +441,16 @@ class SapReportingEndpointsTool(_Base):
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {}, "required": []}
 
-    async def execute(self, **kwargs):
-        c = _client()
+    async def _run(self, **kwargs):
+        # Der AUFGELOESTE Client, nicht der Sammelzugang: die Verbindungsangaben
+        # sollen zu dem Zugang passen, mit dem der Benutzer auch liest – sonst
+        # baut er sein BI-Werkzeug auf ein anderes System als seine Auswertung.
+        c = (_AKTUELL.get() or {}).get("client") or _client()
         eps = reporting_endpoints(c)
         if not eps:
             return ("Keine Schnittstelle konfiguriert. Bitte im SAP-Reiter OData-, HANA- "
-                    "oder RFC-Zugangsdaten hinterlegen.")
+                    "oder RFC-Zugangsdaten hinterlegen – oder einen eigenen SAP-Zugang "
+                    "im SAP-Bereich unter 'Mein SAP-Zugang'.")
         out = ["Reporting-/BI-Anbindungen fuer dieses SAP-System:"]
         for e in eps:
             out.append("\n▶ %s\n  Endpunkt: %s" % (e["interface"], e.get("url") or "?"))

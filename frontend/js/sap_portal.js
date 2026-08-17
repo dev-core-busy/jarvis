@@ -94,6 +94,7 @@
         loadStatus();
         loadCatalog();
         loadEndpoints();
+        loadAccount();
         renderHistory();
         startLlmStatus();
         if (window.refreshBranding) { try { window.refreshBranding(); } catch (e) {} }
@@ -127,13 +128,16 @@
                 _status = d;
                 var el = $('sp-conn'); if (!el) return;
                 if (!d) { el.textContent = ''; return; }
+                accRenderState();
                 if (!d.configured) {
                     el.className = 'sp-conn is-off';
                     el.textContent = T('sap.not_configured', 'SAP nicht konfiguriert');
-                    el.title = T('sap.not_configured_hint',
-                        'Zugangsdaten hinterlegt ein Administrator unter Einstellungen → SAP.');
-                    note(T('sap.not_configured_hint',
-                        'Zugangsdaten hinterlegt ein Administrator unter Einstellungen → SAP.'), 'error');
+                    el.title = T('sap.not_configured_hint2',
+                        'Entweder hinterlegt ein Administrator einen gemeinsamen Lesezugang, '
+                        + 'oder du trägst unter „Mein SAP-Zugang" deine eigenen Zugangsdaten ein.');
+                    note(T('sap.not_configured_hint2',
+                        'Entweder hinterlegt ein Administrator einen gemeinsamen Lesezugang, '
+                        + 'oder du trägst unter „Mein SAP-Zugang" deine eigenen Zugangsdaten ein.'), 'error');
                     return;
                 }
                 var names = { odata: 'OData', hana: 'HANA SQL', rfc: 'RFC' };
@@ -326,7 +330,7 @@
             .then(function (d) {
                 if (!d) throw new Error(T('sap.failed', 'Analyse fehlgeschlagen.'));
                 if (!d.ok) throw new Error(d.error || T('sap.failed', 'Analyse fehlgeschlagen.'));
-                renderAnswer(d.answer || '', a ? a.title : T('sap.free_question_short', 'Freie Frage'));
+                renderAnswer(d.answer || '', a ? a.title : T('sap.free_question_short', 'Freie Frage'), d);
                 pushHistory(a, q, tool);
                 note('');
             })
@@ -361,13 +365,25 @@
     }
 
     var _lastAnswer = '';
-    function renderAnswer(text, title) {
+    function renderAnswer(text, title, meta) {
         _lastAnswer = text;
         var html;
         if (window.JarvisChatLib && window.JarvisChatLib.renderMarkdown) {
             html = window.JarvisChatLib.renderMarkdown(text);
         } else {
             html = '<pre>' + esc(text) + '</pre>';
+        }
+        // MIT WELCHEM ZUGANG gelesen wurde, steht ueber dem Ergebnis – nicht im
+        // Antworttext (der wird kopiert und weitergegeben). Faellt der Lauf auf
+        // den Sammelzugang zurueck, sind die Zahlen mit fremden, in der Regel
+        // weiteren SAP-Berechtigungen geholt; das darf nicht unbemerkt bleiben.
+        if (meta && meta.quelle) {
+            var eigen = (meta.quelle === 'persoenlich');
+            var kopf = eigen ? T('sap.res_own', 'Gelesen mit deinem persönlichen SAP-Zugang.')
+                             : T('sap.res_shared', 'Gelesen mit dem gemeinsamen Lesezugang.');
+            html = '<div class="sp-acc-note' + (meta.hinweis ? ' is-on' : '')
+                + '" style="' + (meta.hinweis ? '' : 'display:block;border-color:var(--border);') + '">'
+                + esc(kopf) + (meta.hinweis ? ' ' + esc(meta.hinweis) : '') + '</div>' + html;
         }
         showResult(html, title);
         // ```chartjs-Bloecke zu echten Diagrammen machen. charts.js beobachtet
@@ -544,6 +560,225 @@
 
     // ── Verdrahtung ─────────────────────────────────────────────────
     var _bound = false;
+
+    // ── Mein SAP-Zugang (persoenliche Zugangsdaten) ─────────────────
+    // Seit 2026-08-17: ein hinterlegter eigener Zugang hat VORRANG, der in den
+    // Einstellungen gepflegte Zugang ist der gemeinsame Lesezugang (Rueckfall).
+    // Kennwoerter kommen nie zurueck – der Server liefert nur `*_gesetzt`, und
+    // ein leeres Feld heisst beim Speichern "unveraendert".
+    var _account = null;
+
+    function accNote(msg, kind) {
+        var el = $('sp-acc-status'); if (!el) return;
+        el.textContent = msg || '';
+        el.className = 'sp-note' + (kind === 'error' ? ' is-error' : kind === 'ok' ? ' is-ok' : '');
+    }
+
+    function accApplyType(t) {
+        ['odata', 'hana', 'rfc'].forEach(function (k) {
+            var g = $('sp-acc-g-' + k);
+            if (!g) return;
+            var an = (k === t);
+            g.classList.toggle('is-on', an);
+            g.hidden = !an;
+        });
+        accApplyAuth();
+    }
+
+    // Benutzer/Kennwort ODER Token – nie beides. Sonst fuellt jemand das Feld,
+    // das seine Anmeldeart gar nicht benutzt, und sucht den Fehler beim Server.
+    function accApplyAuth() {
+        var art = $('sp-acc-od-auth') ? $('sp-acc-od-auth').value : 'basic';
+        var b = $('sp-acc-od-basic'), t = $('sp-acc-od-bearer');
+        if (b) b.hidden = (art === 'bearer');
+        if (t) t.hidden = (art !== 'bearer');
+    }
+
+    // Pille + Hinweiskasten. Die Aussage steckt in Farbe UND Text – Farbe allein
+    // ist keine Information.
+    function accRenderState() {
+        var pill = $('sp-acc-pill');
+        var note = $('sp-acc-note');
+        var quelle = (_status && _status.quelle) || 'sammel';
+        var hinweis = (_status && _status.hinweis) || '';
+        if (pill) {
+            if (quelle === 'persoenlich') {
+                pill.className = 'sp-acc-pill is-own';
+                pill.textContent = T('sap.acc_pill_own', 'eigener Zugang');
+            } else if (hinweis) {
+                pill.className = 'sp-acc-pill is-warn';
+                pill.textContent = T('sap.acc_pill_fallback', 'gemeinsamer Lesezugang (Rückfall)');
+            } else {
+                pill.className = 'sp-acc-pill';
+                pill.textContent = T('sap.acc_pill_shared', 'gemeinsamer Lesezugang');
+            }
+        }
+        if (note) {
+            note.textContent = hinweis;
+            note.classList.toggle('is-on', !!hinweis);
+        }
+    }
+
+    function accRenderHosts() {
+        var el = $('sp-acc-hosts'); if (!el || !_account) return;
+        var hosts = _account.erlaubte_hosts || [];
+        if (!hosts.length) {
+            el.textContent = T('sap.acc_hosts_none',
+                'Es ist kein Server freigegeben – ein eigener Zugang ist derzeit nicht möglich. '
+                + 'Ein Administrator gibt Server unter Einstellungen → SAP frei.');
+            return;
+        }
+        el.textContent = T('sap.acc_hosts', 'Freigegebene Server:') + ' ' + hosts.join(', ');
+    }
+
+    function loadAccount() {
+        fetch('/api/sap/account', { headers: authHeaders() })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.ok || !d.account) return;
+                var a = _account = d.account;
+                if ($('sp-acc-type')) $('sp-acc-type').value = a.connection_type || '';
+                if ($('sp-acc-aktiv')) $('sp-acc-aktiv').checked = a.aktiv !== false;
+                // OData
+                if ($('sp-acc-od-url')) $('sp-acc-od-url').value = a.odata_base_url || '';
+                if ($('sp-acc-od-service')) $('sp-acc-od-service').value = a.odata_service || '';
+                if ($('sp-acc-od-auth')) $('sp-acc-od-auth').value = a.auth_kind || 'basic';
+                if ($('sp-acc-od-client')) $('sp-acc-od-client').value = a.sap_client || '';
+                if ($('sp-acc-od-user')) $('sp-acc-od-user').value = a.username || '';
+                // HANA
+                if ($('sp-acc-hana-host')) $('sp-acc-hana-host').value = a.hana_host || '';
+                if ($('sp-acc-hana-port')) $('sp-acc-hana-port').value = a.hana_port || 443;
+                if ($('sp-acc-hana-user')) $('sp-acc-hana-user').value = a.hana_user || '';
+                if ($('sp-acc-hana-schema')) $('sp-acc-hana-schema').value = a.hana_schema || '';
+                // RFC
+                if ($('sp-acc-rfc-host')) $('sp-acc-rfc-host').value = a.rfc_ashost || '';
+                if ($('sp-acc-rfc-sysnr')) $('sp-acc-rfc-sysnr').value = a.rfc_sysnr || '';
+                if ($('sp-acc-rfc-client')) $('sp-acc-rfc-client').value = a.rfc_client || '';
+                if ($('sp-acc-rfc-lang')) $('sp-acc-rfc-lang').value = a.rfc_lang || '';
+                if ($('sp-acc-rfc-user')) $('sp-acc-rfc-user').value = a.rfc_user || '';
+                // Kennwortfelder bleiben LEER (der Server gibt sie nie heraus);
+                // der Platzhalter sagt, dass leer "unveraendert" bedeutet.
+                accApplyType(a.connection_type || '');
+                accRenderHosts();
+                accRenderState();
+                if (a.ausgesetzt) {
+                    accNote(T('sap.acc_suspended', 'Ausgesetzt nach fehlgeschlagenen Anmeldungen – '
+                        + 'Kennwort prüfen und „Verbindung testen" drücken.'), 'error');
+                } else if (a.letzter_fehler) {
+                    accNote(a.letzter_fehler, 'error');
+                }
+            })
+            .catch(function () {});
+    }
+
+    function accCollect() {
+        var t = $('sp-acc-type') ? $('sp-acc-type').value : '';
+        var v = function (id) { var e = $(id); return e ? e.value.trim() : ''; };
+        var raw = function (id) { var e = $(id); return e ? e.value : ''; };
+        // Es werden immer alle Felder gesendet: der Server hat die Whitelist, und
+        // ein Kanalwechsel soll die alten Werte nicht heimlich stehen lassen.
+        return {
+            connection_type: t,
+            aktiv: $('sp-acc-aktiv') ? $('sp-acc-aktiv').checked : true,
+            odata_base_url: v('sp-acc-od-url'),
+            odata_service: v('sp-acc-od-service'),
+            auth_kind: ($('sp-acc-od-auth') ? $('sp-acc-od-auth').value : 'basic'),
+            sap_client: v('sp-acc-od-client'),
+            username: v('sp-acc-od-user'),
+            password: raw('sp-acc-od-pass'),
+            bearer_token: raw('sp-acc-od-token'),
+            hana_host: v('sp-acc-hana-host'),
+            hana_port: Number(v('sp-acc-hana-port') || 443),
+            hana_user: v('sp-acc-hana-user'),
+            hana_password: raw('sp-acc-hana-pass'),
+            hana_schema: v('sp-acc-hana-schema'),
+            rfc_ashost: v('sp-acc-rfc-host'),
+            rfc_sysnr: v('sp-acc-rfc-sysnr'),
+            rfc_client: v('sp-acc-rfc-client'),
+            rfc_user: v('sp-acc-rfc-user'),
+            rfc_password: raw('sp-acc-rfc-pass'),
+            rfc_lang: v('sp-acc-rfc-lang')
+        };
+    }
+
+    function accClearSecrets() {
+        ['sp-acc-od-pass', 'sp-acc-od-token', 'sp-acc-hana-pass', 'sp-acc-rfc-pass']
+            .forEach(function (id) { var e = $(id); if (e) e.value = ''; });
+    }
+
+    function saveAccount() {
+        var t = $('sp-acc-type') ? $('sp-acc-type').value : '';
+        if (!t) {
+            // Kein leerer Datensatz: sonst laegen Kennwoerter gespeichert da, die
+            // nie benutzt werden. Wer keinen eigenen Zugang will, entfernt ihn.
+            accNote(T('sap.acc_need_type',
+                'Bitte eine Zugangsart wählen – oder „Eigenen Zugang entfernen" drücken.'), 'error');
+            return;
+        }
+        accNote(T('sap.acc_saving', 'Speichere…'));
+        fetch('/api/sap/account', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(accCollect())
+        })
+            .then(function (r) {
+                return r.json().catch(function () { return null; }).then(function (d) {
+                    return { ok: r.ok, d: d };
+                });
+            })
+            .then(function (res) {
+                if (!res.ok || !res.d || !res.d.ok) {
+                    accNote((res.d && res.d.error) || T('sap.acc_save_failed', 'Speichern fehlgeschlagen.'), 'error');
+                    return;
+                }
+                accClearSecrets();
+                accNote('✓ ' + T('sap.acc_saved', 'Gespeichert.'), 'ok');
+                loadAccount();
+                loadStatus();      // Pille und Verbindungsanzeige folgen sofort
+            })
+            .catch(function () {
+                accNote(T('sap.acc_save_failed', 'Speichern fehlgeschlagen.'), 'error');
+            });
+    }
+
+    function testAccount() {
+        accNote(T('sap.acc_testing', 'Teste Verbindung…'));
+        fetch('/api/sap/test', { headers: authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d && d.ok) {
+                    var q = (d.quelle === 'persoenlich')
+                        ? T('sap.acc_pill_own', 'eigener Zugang')
+                        : T('sap.acc_pill_shared', 'gemeinsamer Lesezugang');
+                    accNote('✅ ' + q + ' – ' + (d.detail || 'OK'), 'ok');
+                } else if (d && d.configured === false) {
+                    accNote(T('sap.acc_not_configured', 'Kein Zugang konfiguriert.'), 'error');
+                } else {
+                    accNote('❌ ' + ((d && d.error) || T('sap.failed', 'Fehlgeschlagen.')), 'error');
+                }
+                loadAccount();
+                loadStatus();
+            })
+            .catch(function () { accNote('❌ ' + T('sap.failed', 'Fehlgeschlagen.'), 'error'); });
+    }
+
+    function delAccount() {
+        if (!window.confirm(T('sap.acc_del_confirm',
+            'Eigenen SAP-Zugang entfernen? Danach laufen Auswertungen wieder über den '
+            + 'gemeinsamen Lesezugang.'))) return;
+        fetch('/api/sap/account', { method: 'DELETE', headers: authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function () {
+                accClearSecrets();
+                if ($('sp-acc-type')) $('sp-acc-type').value = '';
+                accApplyType('');
+                accNote(T('sap.acc_removed', 'Eigener Zugang entfernt.'), 'ok');
+                loadAccount();
+                loadStatus();
+            })
+            .catch(function () { accNote('❌ ' + T('sap.failed', 'Fehlgeschlagen.'), 'error'); });
+    }
+
     function bind() {
         if (_bound) return; _bound = true;
 
@@ -563,6 +798,14 @@
                 navigator.clipboard.writeText(_lastAnswer).then(done);
             }
         });
+
+        var accT = $('sp-acc-type');
+        if (accT) accT.addEventListener('change', function () { accApplyType(accT.value); accNote(''); });
+        var accA = $('sp-acc-od-auth');
+        if (accA) accA.addEventListener('change', accApplyAuth);
+        var accS = $('sp-acc-save'); if (accS) accS.addEventListener('click', saveAccount);
+        var accP = $('sp-acc-test'); if (accP) accP.addEventListener('click', testAccount);
+        var accD = $('sp-acc-del'); if (accD) accD.addEventListener('click', delAccount);
 
         $('sp-instr-btn').addEventListener('click', openInstructions);
         $('sp-instr-close').addEventListener('click', function () { $('sp-instr-overlay').classList.add('hidden'); });

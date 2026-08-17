@@ -159,6 +159,13 @@ _APP_DENY_REL = (
     #  - `email_log.jsonl` enthaelt Absender und Betreffzeilen fremder Post.
     "data/email_accounts.json", "data/.mailkey",
     "data/email_rules.json", "data/email_state.json", "data/email_log.jsonl",
+    # Persoenliche SAP-Zugaenge (backend/sap_accounts.py): `sap_accounts.json` +
+    # `.sapkey` sind zusammen das KLARTEXT-Kennwort jedes hinterlegten
+    # SAP-Benutzers – der Schluessel ohne die Datei ist nutzlos und umgekehrt,
+    # also muessen BEIDE zu sein. SCHREIBEN waere zusaetzlich der Weg, einem
+    # fremden Benutzer einen Zugang auf einen fremden Server unterzuschieben
+    # (die Host-Freigabeliste prueft nur der Endpunkt, nicht das Dateisystem).
+    "data/sap_accounts.json", "data/.sapkey",
     # Outlook-Add-in (backend/addin_sso.py): ordnet Exchange-Postfaecher den
     # Jarvis-Konten zu und ist damit die Grundlage der kennwortlosen Anmeldung.
     # SCHREIBEN heisst hier: das eigene Postfach auf einen fremden – gern einen
@@ -199,14 +206,14 @@ PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/knowledge_sync.json",
                  "data/email_accounts.json", "data/email_rules.json",
                  "data/email_state.json", "data/email_log.jsonl",
-                 "data/addin_links.json")
+                 "data/addin_links.json", "data/sap_accounts.json")
 PRIVATE_FILE_MODE = 0o640
 
-# Die Schluesseldatei des E-Mail-Skills ist strenger als 0640: sie entschluesselt
-# die Postfach-Kennwoerter. 0600 heisst, dass nicht einmal die Gruppe `jarvis`
-# sie lesen kann – ein zusaetzlicher Riegel, falls jemand einen weiteren Dienst
-# in diese Gruppe aufnimmt.
-PRIVATE_FILES_STRENG = ("data/.mailkey",)
+# Die Schluesseldateien der E-Mail-/SAP-Zugangsdaten sind strenger als 0640: sie
+# entschluesseln die Kennwoerter. 0600 heisst, dass nicht einmal die Gruppe
+# `jarvis` sie lesen kann – ein zusaetzlicher Riegel, falls jemand einen weiteren
+# Dienst in diese Gruppe aufnimmt.
+PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey")
 PRIVATE_FILE_MODE_STRENG = 0o600
 
 
@@ -390,6 +397,9 @@ SHELL_SECRET_PATHS = re.compile(
     # Outlook-Add-in: Postfach → Jarvis-Konto. Beschreibbar waere das die
     # kuerzeste Rechteerhoehung im Verzeichnis (siehe _APP_DENY_REL).
     r'addin_links\.json\b|'
+    # Persoenliche SAP-Zugaenge: sap_accounts.json + .sapkey ergeben zusammen die
+    # Klartext-Kennwoerter der SAP-Benutzer.
+    r'sap_accounts\.json\b|\.sapkey\b|'
     # data/chats: fremde Chat-Verlaeufe (in der Shell zusaetzlich per 0750 gesperrt)
     r'data/chats\b|'
     r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'

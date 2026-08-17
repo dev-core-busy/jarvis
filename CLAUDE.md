@@ -2802,6 +2802,64 @@ on-premises sind sie ausdrücklich weiter unterstützt** – also genau unser Fa
    (`ad-login-office`), und der SSO-Grund hat Vorrang: er erklärt, warum dort überhaupt noch
    eine Anmeldung steht.
 
+### Antwort-Vorschau im Add-in: erst ansehen, dann senden (2026-08-17)
+Wunsch des Nutzers, unmittelbar nachdem die kennwortlose Anmeldung im echten Outlook lief.
+Reiter *Nachricht* → **„Antwort vorschlagen"** → bearbeitbarer Text → **Senden** bzw. **Als
+Entwurf**. Code: `mail_runner.antwort_vorschlag()` / `antwort_senden()`, Endpunkte
+`POST /api/email/reply/preview|send`, UI in `addin.js::zeichneNachricht`.
+
+- **DER VORSCHLAGS-LAUF HAT KEINE WERKZEUGE** (`_role_tools = set()` – die leere Menge heisst
+  ausdrücklich „keine", nie auf Falsyness prüfen). Das ist der Kern, nicht ein Detail: eine
+  Prompt-Injektion in der eingegangenen Mail kann hier **nichts auslösen** – kein Senden, kein
+  Weiterleiten, kein Verschieben. Sie könnte höchstens den Vorschlagstext beeinflussen, und den
+  liest ein Mensch, bevor er ihn abschickt. Damit ist dieser Weg **enger abgesichert als ein
+  Regel-Lauf**, bei dem das Modell die Aktion frei wählt. Wer hier je ein Werkzeug ergänzt, hebt
+  genau diese Zusage auf.
+- **Beim SENDEN läuft kein Sprachmodell.** Der Text kommt aus dem Fenster, der Benutzer hat ihn
+  gesehen und konnte ihn ändern. Dieselbe Trennung wie bei den Erinnerungen (`reminders.py`):
+  liefe der freigegebene Text noch einmal durch ein Modell, wäre er wieder eine ausführbare
+  Anweisung.
+- **Der Empfänger ergibt sich aus der NACHRICHT**, nicht aus dem Rumpf des Aufrufs – sonst wäre
+  der Endpunkt ein Versandweg an beliebige Adressen (die Regel aus der Erinnerungs-Ausnahme).
+  Ein Test prüft die **Signatur** von `antwort_senden`, nicht einen Teilstring: dass die Rückgabe
+  den Absender NENNT, ist Anzeige und kein Eingabefeld.
+- **Der Weg hängt NICHT an einer Regel.** Eine Regel kann optional den Ton vorgeben (ihr Prompt),
+  eine fremde wird dabei ignoriert statt abgelehnt. Der Antwort-Block steht deshalb VOR dem
+  Regel-Block, und der frühere `return` bei „keine aktive Regel" musste weg – sonst wäre der
+  häufigste Wunsch ausgerechnet für neue Benutzer unerreichbar gewesen.
+- `_vorschlag_saeubern()` entfernt einen umschliessenden Markdown-Codeblock und eine FÜHRENDE
+  Betreffzeile – beides landet sonst sichtbar im Postfach des Empfängers. **Mehr nicht:** eine
+  „Betreff:"-Zeile mitten im Text bleibt stehen, wer hier grosszügig aufräumt, löscht Inhalt.
+- Der bearbeitete Text wird bei jedem Tastendruck nach `_vorschlag.text` gespiegelt:
+  `zeichneNachricht()` baut den Reiter bei jedem Statusladen und bei jedem Sprachwechsel neu auf
+  – ohne die Spiegelung wäre eine halb getippte Antwort dabei weg (Lehre vom Regel-Formular).
+
+**ZWEI EIGENE FEHLER, beide gefunden statt geraten:**
+1. **`ladeProtokoll()` gibt es nicht – die Funktion heisst `ladeLog()`.** Anders als bei einem
+   `?.()`-Aufruf (2026-08-11) wäre das ein ReferenceError gewesen, der den `.then`-Zweig kippt:
+   die Erfolgsmeldung nach dem Senden wäre ausgeblieben. Gefunden mit einem Abgleich „jede
+   aufgerufene `lade*`/`zeichne*`-Funktion muss auch definiert sein" – dieser Abgleich lohnt nach
+   jedem Umbau, er kostet drei Zeilen.
+2. **Eine Testprüfung war WERTLOS und sah grün aus.** `"_role_tools = set()" in _vs` fand seinen
+   Treffer im **Docstring**, der die Zusage erklärt – der Code stand in der Gegenprobe längst auf
+   `None`, und der Test blieb trotzdem grün. Jetzt `_nur_code()` (Docstrings und Kommentare
+   entfernen) vor der Prüfung. **Dritter Fall dieser Art im Projekt** (Prompt-Wächter 2026-08-10,
+   Ordner-Marke 2026-08-11, hier). Merkregel: ein Wächter, der seine eigene Begründung liest,
+   prüft nichts – und das fällt nur bei einer echten Gegenprobe auf.
+
+**FALLSTRICK bei der optischen Abnahme:** der zweite CDP-Lauf im SELBEN Browser registrierte
+`Page.addScriptToEvaluateOnNewDocument` ein zweites Mal; der Nachrichten-Kontext war dann weg und
+das Fenster zeigte „keine Nachricht geöffnet" – das sah wie ein Codefehler aus und war keiner.
+Für jeden Durchgang einen frischen Browser starten.
+
+- **Verifiziert:** 112 Prüfungen (`tests/test_addin_sso.py`, Abschnitt 8) + 192 + 431 + 239 + 120.
+  Gegenproben greifen: leere Werkzeugmenge durch `None` ersetzt → 2 FAIL; ein LLM-Import im
+  Sendeweg → 1 FAIL. Live auf DEV: beide Endpunkte ohne Token 401. Optisch abgenommen in Dunkel
+  UND Hell mit gemocktem Office.js (echte Datei, echtes CSS): Vorschlag erscheint, Text ist
+  bearbeitbar, vier Knöpfe, der Antwort-Block steht auch ohne aktive Regel da.
+- **Noch nicht geprüft:** ein echter Lauf gegen ein Postfach (auf DEV ist kein Mailserver
+  hinterlegt) – also die Textqualität des Vorschlags und der tatsächliche Versand.
+
 **FALLSTRICK im eigenen Wächter (zum wiederholten Mal):** die Prüfung „kein Produktname in den
 Texten von `addin.js`" schlug an **meinem eigenen Begründungs-Kommentar** an, der den
 Produktnamen nennt. Geprüft werden muss der Oberflächentext – Block- und Zeilenkommentare vorher

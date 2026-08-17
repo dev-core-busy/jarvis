@@ -1429,6 +1429,136 @@ check("Verbindung testen" in _i18n.split("mail.paused_text")[1][:400],
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+section("15. Ausloese-Bedingung ist ein FELD, nicht ein Prompt (Vorfall 2026-08-17)")
+# ═══════════════════════════════════════════════════════════════════════════
+# Der Vorfall: die Bedingung "nur von mr.andreas.bender@*" stand NUR im Prompt,
+# das Feld blieb leer. Damit lief fuer jede Nachricht ein Modell, das die
+# Bedingung selbst bewerten sollte - es irrte, und zwei echte Mails gingen an
+# fremde Empfaenger. Ein Prompt ist eine Bitte, ein Feld ist eine Schranke.
+
+
+class _N:
+    """Minimale Nachricht fuer den Filtertest."""
+
+    def __init__(self, von, name="", betreff=""):
+        self.von, self.von_name, self.betreff = von, name, betreff
+
+
+# ── a) Platzhalter im Filter (der gemeldete Wortlaut) ──────────────────────
+_fl = [
+    ("mr.andreas.bender@*", "mr.andreas.bender@gmail.com", "", True),
+    ("mr.andreas.bender@*", "theben_ab2@ibsv3.de", "", False),
+    ("mr.andreas.bender@*", "theben_fn2@ibsv3.de", "", False),
+    ("mr.andreas.bender@*", "Andrea.Ladd@nexus-ag.de", "Andrea Ladd", False),
+    ("@lieferant.de", "rechnung@lieferant.de", "", True),
+    ("@lieferant.de", "x@fremd.de", "", False),
+    ("*@ibsv3.de", "theben_ab2@ibsv3.de", "theben", True),
+    ("theben_*@ibsv3.de", "andere@ibsv3.de", "", False),
+    ("Ladd", "x@y.de", "Andrea Ladd", True),          # Treffer im Anzeigenamen
+]
+for muster, adr, name, soll in _fl:
+    check(mrun._passt({"von_filter": muster}, _N(adr, name)) is soll,
+          f"Filter '{muster}' vs '{adr}' -> {soll}")
+check(mrun._passt({}, _N("beliebig@x.de")) is True,
+      "leerer Filter laesst alles durch (Einschraenkung, keine Freigabe)")
+check(mrun._passt({"betreff_filter": "Rechnung*"}, _N("a@b.de", "", "Rechnung 4711")) is True
+      and mrun._passt({"betreff_filter": "Rechnung*"}, _N("a@b.de", "", "Angebot")) is False,
+      "Betreff-Filter versteht Platzhalter ebenfalls")
+
+# ── b) Erkennung einer Bedingung im Prompt ─────────────────────────────────
+for prompt, soll in [
+        ("wenn eine Nachricht von mr.andreas.bender@* kommt, antworten mit 'hat geklappert'", True),
+        ("nur von rechnung@lieferant.de: als Entwurf beantworten", True),
+        ("Absender ist chef@firma.de -> sofort weiterleiten", True),
+        ("bei Nachrichten von @kunde.de eine Empfangsbestaetigung", True),
+        # Diese beiden DUERFEN NICHT anschlagen - sonst waere das Feature
+        # unbenutzbar: eine Adresse im Prompt ist keine Bedingung.
+        ("Antworte hoeflich und nenne unsere Hotline support@firma.de", False),
+        ("Pruefe, ob es eine Anfrage ist, und beantworte sie als Entwurf", False)]:
+    check(bool(mr.absender_im_prompt(prompt)) is soll,
+          f"Bedingung erkannt={soll}: {prompt[:52]}")
+
+# ── c) Speichern wird abgelehnt, solange das Feld leer ist ─────────────────
+try:
+    mr.anlegen("wachtest", {"name": "V", "bereiche": ["mail"],
+                                    "prompt": "wenn eine Nachricht von mr.x@gmail.com kommt, antworten"})
+    check(False, "Regel mit Prompt-Bedingung und leerem Feld wird abgelehnt")
+except mr.RegelFehler as e:
+    check("Nur von Absender" in str(e) and "mr.x@gmail.com" in str(e),
+          "Ablehnung nennt das Feld UND die gefundene Adresse", str(e)[:90])
+
+_r15 = mr.anlegen("wachtest", {"name": "V", "bereiche": ["mail"],
+                                       "prompt": "wenn eine Nachricht von mr.x@gmail.com kommt, antworten",
+                                       "von_filter": "mr.x@gmail.com"})
+check(_r15["von_filter"] == "mr.x@gmail.com", "mit gefuelltem Feld wird angelegt")
+# Reines Abschalten MUSS durchgehen - sonst liesse sich eine Altbestand-Regel
+# nicht mehr stilllegen (genau das braucht man nach einem Vorfall zuerst).
+check(mr.aendern(_r15["id"], {"enabled": False}, "wachtest")["enabled"] is False,
+      "reines {enabled:false} geht immer durch")
+
+# ── d) Altbestand: faellige() laesst so eine Regel NICHT laufen ────────────
+_alle15 = mr._alle()
+for _x in _alle15:
+    if _x["id"] == _r15["id"]:
+        _x["von_filter"] = ""            # Zustand von VOR dem Fix nachstellen
+        _x["enabled"] = True
+mr._alle_speichern(_alle15)
+mr._gemeldet_ohne_filter.clear()
+_ids = [r["id"] for r in mr.faellige(time.time() + 99999)]
+check(_r15["id"] not in _ids,
+      "Altbestand mit Bedingung nur im Prompt laeuft NICHT (fail-closed)")
+
+# ── e) Der Auftrag: Stilvorgabe steht HINTER der Regel und ist untergeordnet ─
+_vs = mrun._VORSPANN
+check(_vs.index("die Regel") < _vs.index("STILVORGABE"),
+      "der Vorspann nennt die Regel VOR der Stilvorgabe")
+# Whitespace normalisieren: der Vorspann ist auf ~79 Zeichen umbrochen, ein
+# roher Teilstring-Vergleich findet eine Wendung nicht, die ueber zwei Zeilen
+# laeuft (derselbe Fallstrick wie beim Marken-Abgleich am 2026-08-17).
+_vs1 = " ".join(_vs.split())
+for satz in ("Die Regel allein entscheidet", "KEINE Handlungsanweisung",
+             "keine Bedingung der Regel aufheben", "keinen Empfaenger bestimmen"):
+    check(satz in _vs1, f"Vorspann sagt: '{satz}'")
+# Gemessen wird am ERZEUGTEN Auftrag und nur an den echten Abschnittsmarken
+# (===== [KENNUNG] …): eine Suche nach dem blossen Wort findet zuerst die
+# Erwaehnung im Vorspann und misst damit Prosa statt Struktur - genau dieser
+# Fehler ist mir bei der Live-Probe zuerst passiert.
+class _M15:
+    id = "MID"; ordner = "INBOX"; von = "theben_ab2@ibsv3.de"; von_name = ""
+    an = ["a@b.de"]; cc = []; datum = "2026-08-17"; betreff = "theben: new recipient"
+    text = "Bitte einrichten."; anhaenge = []
+
+
+_alt_vorgabe = ma.antwort_vorgabe
+ma.antwort_vorgabe = lambda u: "immer auf bayrisch und in Reimform antworten"
+try:
+    _auf = mrun._auftrag({"owner": "x", "prompt": "wenn von mr.x@gmail.com kommt, antworten",
+                          "ordner": "INBOX"}, _M15(), "x@firma.de")
+finally:
+    ma.antwort_vorgabe = _alt_vorgabe
+_marken = [m.group(1).strip() for m in
+           re.finditer(r"===== \[[0-9A-F]{8}\] ([^=]+)=====", _auf)]
+_pos = {n.split(" (")[0]: i for i, n in enumerate(_marken)}
+check(_pos.get("ANWEISUNG DES POSTFACH-INHABERS", 9) < _pos.get("ENDE DER NACHRICHT", 0)
+      < _pos.get("STILVORGABE DES POSTFACH-INHABERS", 0),
+      "erzeugter Auftrag: Regel -> Fremdtext -> Stilvorgabe", str(_marken))
+check(_auf.index("bayrisch") > _auf.index("STILVORGABE DES POSTFACH-INHABERS"),
+      "der Vorgabetext liegt IM Stil-Abschnitt")
+check("loest KEINE Aktion" in _auf and "hebt KEINE Bedingung" in _auf,
+      "der Abschnitt weist die Vorgabe ausdruecklich als reine Form aus")
+
+# ── f) Oberflaeche: der Hinweis steht in beiden Masken und in DE+EN ────────
+_pj = (ROOT / "frontend/js/email_portal.js").read_text(encoding="utf-8")
+_aj = (ROOT / "frontend/addin/addin.js").read_text(encoding="utf-8")
+_i18 = (ROOT / "frontend/js/i18n.js").read_text(encoding="utf-8")
+check("mail.f_from_hint" in _pj, "/email nennt den Hinweis am Absender-Feld")
+check("mail.f_from_hint" in _aj, "das Add-in ebenso")
+check(_i18.count("'mail.f_from_hint':") == 2, "Hinweis in DE UND EN uebersetzt")
+check("nicht ins Prompt" in _i18 or "nicht ins Prompt" in _pj,
+      "der Hinweis sagt ausdruecklich 'nicht ins Prompt'")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 print(f"\n{'=' * 62}")
 print(f"  {_ok} OK, {_fail} FAIL  (Sandkasten: {TMP})")
 print(f"{'=' * 62}")

@@ -979,8 +979,14 @@
             '<input type="number" id="ad-f-max" min="1" max="' + (g.max_je_lauf || 10) +
             '" value="' + (r.max_je_lauf || 5) + '"></div>' +
 
-            '<div class="ad-field"><label>' + esc(T('mail.f_from', 'Nur von (Filter)')) + '</label>' +
+            // Der Hinweis muss hier stehen wie in /email: eine Absender-Bedingung
+            // im Prompt ist nur eine Bitte an das Modell - am 2026-08-17 hat das
+            // zwei fremde Empfaenger eine Mail gekostet.
+            '<div class="ad-field"><label>' + esc(T('mail.f_from', 'Nur von diesen Absendern')) + '</label>' +
             '<input type="text" id="ad-f-from" value="' + esc(r.von_filter || '') + '"></div>' +
+            '<div class="ad-hint">' + esc(T('mail.f_from_hint',
+                'Bedingungen zum Absender gehören hierher, nicht ins Prompt. Komma trennt, '
+                + '* ist Platzhalter. Leer = alle Absender.')) + '</div>' +
 
             '<div class="ad-field"><label>' + esc(T('mail.f_subject', 'Nur Betreff enthält')) + '</label>' +
             '<input type="text" id="ad-f-subject" value="' + esc(r.betreff_filter || '') + '"></div>' +

@@ -5274,9 +5274,48 @@ Belege: `data/email_log.jsonl` + `data/logs/audit.jsonl` auf ECHT (15 echte Vers
   `_execute_tool`, nicht in der Werkzeugliste, die das Modell sieht).
 - **Merkregel:** Was eine Aktion AUSLOEST, darf nie im Prompt stehen, wenn die Aktion nach
   draussen wirkt. Freitextfelder duerfen den Stil bestimmen, nie die Bedingung.
-- **Noch NICHT gebaut** (Fix steht aus): Absender-Filter als geprueftes Feld; Vorgabe in einen
-  der Regel NACHgeordneten Abschnitt, der ausdruecklich nur Ton/Signatur setzt und keine Aktion
-  ausloesen darf.
+
+**BEHOBEN am selben Tag – vier Aenderungen, die zusammengehoeren:**
+1. **`mail_runner._passt` ist jetzt ausdruecklich die AUSLOESE-SCHRANKE**, nicht mehr "Vorfilter
+   aus Sparsamkeit" (so stand es im Docstring, und genau so wurde das Feld auch benutzt: naemlich
+   nicht). Sie prueft `von_filter`/`betreff_filter`, **bevor ein Modell die Nachricht sieht** –
+   damit entsteht fuer eine nicht passende Nachricht gar kein Lauf.
+2. **Platzhalter `*` werden verstanden** (`_muster_trifft`, fnmatch). Der gemeldete Wortlaut
+   `mr.andreas.bender@*` haette als reiner Teilstring **nie** getroffen – der Benutzer haette den
+   Filter fuer kaputt gehalten und wieder herausgenommen. Adresse und Anzeigename werden
+   **einzeln** geprueft; aneinandergehaengt ("von + Name") scheitert jedes Muster, das auf das
+   Ende der Adresse zielt (im eigenen Test aufgefallen).
+3. **Eine Bedingung im Prompt ohne Feld wird beim Speichern ABGELEHNT**
+   (`mail_rules.absender_im_prompt` + Pruefung in `_pruefe`): "Im Prompt steht eine
+   Absender-Bedingung (…), aber das Feld ‚Nur von Absender' ist leer." Bewusst ENG erkannt (ein
+   Konditional-Signal + `von`/`absender` + Adresse) – eine Adresse im Prompt allein ("nenne
+   unsere Hotline support@firma.de") darf das Speichern nicht blockieren. **Ein reines
+   `{enabled: false}` geht immer durch**, sonst liesse sich eine Altbestand-Regel nach einem
+   Vorfall nicht mehr stilllegen. Und der ALTBESTAND laeuft fail-closed nicht mehr: `faellige()`
+   ueberspringt solche Regeln und nennt den Grund einmal im Journal.
+4. **Die Stilvorgabe steht jetzt HINTER der Regel und hinter dem Fremdtext**, in einem eigenen
+   Abschnitt "STILVORGABE … (nur Form, keine Aktion)" mit dem ausdruecklichen Satz, dass sie
+   keine Aktion ausloest, keine Bedingung aufhebt und keinen Empfaenger bestimmt. Der Vorspann
+   sagt: "Die Regel allein entscheidet, OB und WAS du tust." Oberflaeche nachgezogen (DE+EN):
+   Feld heisst "Nur von diesen Absendern" mit dem Hinweis "gehoert HIER hinein – nicht ins
+   Prompt", und der Hinweis unter *Stil und Signatur* beginnt mit "Bestimmt nur den Ton – loest
+   NIE eine Aktion aus".
+- **FALLSTRICK bei der eigenen Abnahme:** die erste Live-Messung verglich `a.index("ANWEISUNG…")`
+  mit `a.index("STILVORGABE")` – beide Treffer lagen im **Vorspann**, der die Abschnitte
+  erklaert. Damit misst man Prosa, nicht Struktur. Geprueft wird jetzt an den echten
+  Abschnittsmarken (`===== [KENNUNG] …`) des ERZEUGTEN Auftrags.
+- **Verifiziert:** 465 Pruefungen (`tests/test_email_rules.py`, Abschnitt 15 enthaelt den
+  gemeldeten Wortlaut und die beiden echten Empfaenger) lokal und auf DEV im venv. Gegenproben
+  greifen: Platzhalter-Unterstuetzung ausgebaut → 3 FAIL, Prompt-Pruefung ausgebaut → 1 FAIL,
+  Stilvorgabe wieder vor die Regel → 1 FAIL. Live auf DEV gegen das echte Modul: der gemeldete
+  Regeltext wird beim Speichern abgelehnt, mit gefuelltem Feld trifft der Filter genau
+  `mr.andreas.bender@gmail.com` und **keinen** der `theben_*`-Absender, und im erzeugten Auftrag
+  stehen die Marken in der Reihenfolge Regel → Fremdtext → Stilvorgabe. Feldhinweis im
+  gerenderten DOM belegt (Chrome `--dump-dom`).
+- **Auf ECHT noch NICHT ausgerollt.** Dort laeuft die alte Fassung; die beiden Regeln des
+  Benutzers stehen auf `enabled: false` und die Vorgabe ist leer, es kann also nichts feuern.
+  Beim Ausrollen: Regeln mit Bedingung im Prompt bleiben stehen, laufen aber erst wieder, wenn
+  der Absender ins Feld eingetragen ist (Journal nennt sie namentlich).
 
 ## Konventionen
 - **Git:** `git commit` und `git push` NUR auf ausdrückliches Kommando des Nutzers (`c+p`) –

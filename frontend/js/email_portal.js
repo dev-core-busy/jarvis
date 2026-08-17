@@ -463,12 +463,21 @@
             + '" max="' + (g.max_intervall || 1440) + '"></div>'
             + '<div class="em-field"><label>' + T('mail.f_max', 'Nachrichten je Durchgang') + '</label>'
             + '<input type="number" id="em-f-max" min="1" max="' + (g.max_je_lauf || 10) + '"></div>'
-            + '<div class="em-field"><label>' + T('mail.f_from', 'Nur von (optional)') + '</label>'
-            + '<input type="text" id="em-f-von" placeholder="rechnung@, @lieferant.de"></div>'
+            + '<div class="em-field"><label>' + T('mail.f_from', 'Nur von diesen Absendern') + '</label>'
+            + '<input type="text" id="em-f-von" placeholder="rechnung@, @lieferant.de, name@*"></div>'
             + '</div>'
+            // Der Hinweis ist nicht Kosmetik: am 2026-08-17 stand eine
+            // Absender-Bedingung NUR im Prompt, das Feld war leer - die Regel
+            // hat daraufhin zwei fremde Empfaenger angeschrieben.
+            + '<span class="em-hint">' + T('mail.f_from_hint',
+                'WICHTIG: Wenn die Regel nur bei bestimmten Absendern gelten soll, gehört das '
+                + 'hier hinein – nicht ins Prompt. Nur dieses Feld wird geprüft, bevor ein '
+                + 'Sprachmodell die Nachricht überhaupt sieht; im Prompt ist eine Bedingung nur '
+                + 'eine Bitte, die falsch bewertet werden kann. Mehrere durch Komma, '
+                + '* als Platzhalter. Leer = alle Absender.') + '</span>'
             + '<div class="em-grid" style="margin-top:12px;">'
             + '<div class="em-field"><label>' + T('mail.f_subject', 'Nur Betreff enthält (optional)') + '</label>'
-            + '<input type="text" id="em-f-betreff" placeholder="Rechnung, Invoice"></div>'
+            + '<input type="text" id="em-f-betreff" placeholder="Rechnung, Invoice, AW:*"></div>'
             + '<div class="em-field" style="justify-content:flex-end;gap:8px;">'
             + '<label><input type="checkbox" id="em-f-unread" style="width:auto;margin-right:8px;">'
             + T('mail.f_unread', 'nur ungelesene Nachrichten') + '</label>'

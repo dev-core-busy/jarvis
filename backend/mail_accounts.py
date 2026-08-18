@@ -32,6 +32,7 @@ import contextvars
 import json
 import os
 import re
+import secrets
 import time
 from pathlib import Path
 
@@ -140,7 +141,16 @@ def _laden() -> dict:
         if not KONTEN_DATEI.exists():
             return {}
         d = json.loads(KONTEN_DATEI.read_text(encoding="utf-8"))
-        return d if isinstance(d, dict) else {}
+        if not isinstance(d, dict):
+            return {}
+        if _migrieren(d):
+            try:
+                _speichern(d)
+            except Exception as e:  # noqa: BLE001
+                # Nur fuer diesen Lauf migriert – der naechste versucht es
+                # erneut. Ein Schreibfehler (Rechte) darf das Lesen nicht kippen.
+                print("[Mail] Stil-Migration nicht gespeichert: %s" % e, flush=True)
+        return d
     except Exception as e:  # noqa: BLE001
         # Eine beschaedigte Datei darf den Dienst nicht kippen; sie wird aber
         # AUCH NICHT ueberschrieben (das waere Datenverlust ohne Not) – der
@@ -171,10 +181,29 @@ AENDERBAR = ("adresse", "benutzer", "passwort", "kanal", "aktiv",
              "ordner_eingang", "ordner_entwuerfe", "ordner_gesendet",
              "antwort_vorgabe")
 
-# Deckel fuer die persoenliche Antwort-Vorgabe. Sie geht in JEDEN Auftrag ein
-# (Vorschlag und Regel-Lauf) und kostet dort Kontext – ein Roman waere kein
-# Gewinn, sondern verdraengte die eigentliche Nachricht.
+# Deckel fuer den Text EINES Stils. Er geht in JEDEN Auftrag ein, der ihn
+# benutzt (Vorschlag und Regel-Lauf), und kostet dort Kontext – ein Roman waere
+# kein Gewinn, sondern verdraengte die eigentliche Nachricht.
 VORGABE_MAX = 2000
+
+# Mehrere benannte Stile je Postfach (2026-08-18). Bis dahin gab es genau EINEN
+# Text ("Stil und Signatur fuer Antworten"); wer je nach Empfaenger foermlich
+# oder locker schreibt, musste ihn vor jeder Antwort umschreiben.
+#
+# Ein Stil bestimmt weiterhin AUSSCHLIESSLICH die FORM eines Textes. Er loest
+# nichts aus – die Lehre aus dem Vorfall 2026-08-17 gilt unveraendert und wird
+# durch die Auswahl nicht aufgeweicht: gewaehlt wird nur, WELCHE Form gilt.
+MAX_STILE = 12
+STIL_NAME_MAX = 60
+# Ausdrueckliche Wahl "kein Stil" – unterscheidbar von "nichts gewaehlt"
+# (leer = Standardstil bzw. Erkennung aus dem Regel-Prompt).
+STIL_KEINER = "-"
+# Kuerzere Namen werden im Regel-Prompt NICHT gesucht: "AG" oder "Du" treffen
+# in jedem zweiten Satz und wuerden einen Stil erzwingen, den niemand meinte.
+STIL_PROMPT_MIN = 3
+# Anfuehrungszeichen, die um einen Stilnamen stehen duerfen (deutsche und
+# englische Formen, gerade und typografische).
+_ANFUEHRUNG = "\"'\u201e\u201c\u201d\u00ab\u00bb\u2018\u2019"
 
 
 # ── Aussetzer nach wiederholten Anmeldefehlern ──────────────────────────────
@@ -216,6 +245,7 @@ def _leer(benutzer_norm: str) -> dict:
     return {"benutzer_norm": benutzer_norm, "adresse": "", "benutzer": "",
             "pw_enc": "", "kanal": "", "aktiv": True,
             "ordner_eingang": "", "ordner_entwuerfe": "", "ordner_gesendet": "",
+            "stile": [], "antwort_vorgabe": "",
             "angelegt": int(time.time()), "geaendert": 0,
             "letzter_erfolg": 0, "letzter_fehler": "",
             "anmeldefehler": 0, "ausgesetzt": False, "ausgesetzt_seit": 0,
@@ -227,22 +257,292 @@ def hat_konto(user: str) -> bool:
     return bool(k and (k.get("adresse") or "").strip() and (k.get("pw_enc") or "").strip())
 
 
-def antwort_vorgabe(user: str) -> str:
-    """Persoenliche Vorgabe fuer formulierte Antworten (Signatur, Ton, Tabus).
+# ── Antwort-Stile ("Stil und Signatur") ─────────────────────────────────────
+#
+# **Bewusst NICHT Teil von ``MailKonto``**: dort stehen ausschliesslich
+# Verbindungs- und Postfachdaten, die an ``MailClient`` gehen. Eine
+# Prompt-Vorgabe hat in einem Verbindungsobjekt nichts verloren – sie wird dort
+# gelesen, wo der Auftrag gebaut wird (``mail_runner``).
+#
+# Ein Stil: ``{"id", "name", "text", "standard"}``. Genau EINER kann
+# ``standard`` sein; er gilt, wenn nichts gewaehlt wurde. Keiner ist auch
+# erlaubt – dann laeuft eine Regel ohne Stil, und das ist eine gueltige Wahl.
 
-    **Bewusst NICHT Teil von ``MailKonto``**: dort stehen ausschliesslich
-    Verbindungs- und Postfachdaten, die an ``MailClient`` gehen. Eine
-    Prompt-Vorgabe hat in einem Verbindungsobjekt nichts verloren – sie wird
-    dort gelesen, wo der Auftrag gebaut wird.
 
-    Fail-safe leer: kann die Datei nicht gelesen werden, laeuft alles wie
-    vorher, nur ohne Vorgabe.
+def _stil_id() -> str:
+    return secrets.token_hex(4)
+
+
+def _stil_norm(roh) -> dict | None:
+    """Ein Eintrag aus der Datei – oder ``None``, wenn er unbrauchbar ist.
+
+    Wird beim LESEN angewandt: eine von Hand verbogene Datei soll die
+    Oberflaeche nicht kippen, sondern nur den kaputten Eintrag verlieren.
     """
+    if not isinstance(roh, dict):
+        return None
+    sid = str(roh.get("id") or "").strip()[:32]
+    name = str(roh.get("name") or "").strip()[:STIL_NAME_MAX]
+    if not sid or not name:
+        return None
+    return {"id": sid, "name": name,
+            "text": str(roh.get("text") or "").strip()[:VORGABE_MAX],
+            "standard": bool(roh.get("standard"))}
+
+
+def _stile_von(k: dict) -> list[dict]:
+    out, gesehen = [], set()
+    for roh in (k.get("stile") or []):
+        e = _stil_norm(roh)
+        if not e or e["id"] in gesehen:
+            continue
+        gesehen.add(e["id"])
+        out.append(e)
+        if len(out) >= MAX_STILE:
+            break
+    # Genau EIN Standard. Zwei waeren nicht aufloesbar; der erste gewinnt.
+    schon = False
+    for e in out:
+        if e["standard"] and not schon:
+            schon = True
+        else:
+            e["standard"] = False
+    return out
+
+
+def _migrieren(alle: dict) -> bool:
+    """Einzel-Vorgabe → Stilliste. Rueckgabe: wurde etwas geaendert?
+
+    Laeuft beim Lesen und schreibt EINMALIG zurueck (Muster ``config._load_v2``).
+    Beruehrt nur Konten, die noch keine Stile haben – ein zweiter Lauf aendert
+    nichts, sonst schriebe jeder Start die Datei neu.
+
+    Das alte Feld ``antwort_vorgabe`` bleibt als **Spiegel** des Standardstils
+    stehen (siehe ``_spiegel_setzen``). Es wird nirgends mehr gelesen ausser
+    hier; es steht nur da, damit ein Rueckfall auf eine aeltere Programmfassung
+    die Vorgabe nicht verliert.
+    """
+    geaendert = False
+    for k in alle.values():
+        if not isinstance(k, dict):
+            continue
+        if k.get("stile"):
+            continue
+        alt = str(k.get("antwort_vorgabe") or "").strip()
+        if not alt:
+            continue
+        k["stile"] = [{"id": _stil_id(), "name": "Standard",
+                       "text": alt[:VORGABE_MAX], "standard": True}]
+        geaendert = True
+    return geaendert
+
+
+def _spiegel_setzen(k: dict) -> None:
+    """Haelt ``antwort_vorgabe`` auf dem Text des Standardstils.
+
+    Redundanz mit Ansage: MASSGEBLICH ist ``stile``. Der Spiegel wird nur von
+    ``_migrieren`` gelesen (also wenn gar keine Stile da sind) und existiert
+    ausschliesslich fuer den Fall, dass jemand eine aeltere Programmfassung
+    zurueckspielt.
+    """
+    std = [e for e in _stile_von(k) if e["standard"]]
+    k["antwort_vorgabe"] = std[0]["text"] if std else ""
+
+
+def stile(user: str) -> list[dict]:
+    """Alle Stile des Benutzers. Fail-safe leer."""
     try:
-        k = _laden().get(norm_user(user)) or {}
-        return str(k.get("antwort_vorgabe") or "").strip()[:VORGABE_MAX]
+        return _stile_von(_laden().get(norm_user(user)) or {})
     except Exception:  # noqa: BLE001
+        return []
+
+
+def _stile_schreiben(un: str, liste: list[dict]) -> list[dict]:
+    alle = _laden()
+    k = alle.get(un) or _leer(un)
+    k["benutzer_norm"] = un
+    k["stile"] = liste
+    _spiegel_setzen(k)
+    k["geaendert"] = int(time.time())
+    alle[un] = k
+    _speichern(alle)
+    return _stile_von(k)
+
+
+def stil_anlegen(user: str, name: str, text: str = "",
+                 standard: bool | None = None) -> list[dict]:
+    """Neuen Stil anlegen. Rueckgabe = die vollstaendige Liste.
+
+    Der ERSTE Stil wird automatisch Standard: ohne ihn haette eine Regel ohne
+    Auswahl gar keinen Stil, und der Benutzer haette gerade einen angelegt.
+    """
+    un = norm_user(user)
+    if not un:
+        raise MailFehler("Kein Benutzer – der Stil kann nicht zugeordnet werden.", "eingabe")
+    nm = str(name or "").strip()
+    if not nm:
+        raise MailFehler("Der Stil braucht einen Namen.", "eingabe")
+    if len(nm) > STIL_NAME_MAX:
+        raise MailFehler("Der Name ist zu lang (max. %d Zeichen)." % STIL_NAME_MAX, "eingabe")
+    liste = stile(user)
+    if len(liste) >= MAX_STILE:
+        raise MailFehler("Es sind hoechstens %d Stile moeglich (vorhanden: %d)."
+                         % (MAX_STILE, len(liste)), "eingabe")
+    if any(e["name"].lower() == nm.lower() for e in liste):
+        # Der Name ist die sprachliche Kennung im Regel-Prompt – zwei gleiche
+        # waeren dort nicht aufloesbar.
+        raise MailFehler("Es gibt bereits einen Stil mit dem Namen '%s'." % nm, "eingabe")
+    eintrag = {"id": _stil_id(), "name": nm,
+               "text": str(text or "").strip()[:VORGABE_MAX],
+               "standard": bool(standard) if standard is not None else (not liste)}
+    liste.append(eintrag)
+    if eintrag["standard"]:
+        for e in liste:
+            e["standard"] = (e["id"] == eintrag["id"])
+    return _stile_schreiben(un, liste)
+
+
+def stil_aendern(user: str, stil_id: str, felder: dict) -> list[dict]:
+    """Name/Text/Standard eines Stils aendern. Unbekannte Kennung → Fehler."""
+    un = norm_user(user)
+    liste = stile(user)
+    treffer = [e for e in liste if e["id"] == str(stil_id or "").strip()]
+    if not treffer:
+        raise MailFehler("Stil nicht gefunden.", "eingabe")
+    e = treffer[0]
+    if "name" in (felder or {}):
+        nm = str(felder.get("name") or "").strip()
+        if not nm:
+            raise MailFehler("Der Stil braucht einen Namen.", "eingabe")
+        if len(nm) > STIL_NAME_MAX:
+            raise MailFehler("Der Name ist zu lang (max. %d Zeichen)." % STIL_NAME_MAX, "eingabe")
+        if any(a["name"].lower() == nm.lower() and a["id"] != e["id"] for a in liste):
+            raise MailFehler("Es gibt bereits einen Stil mit dem Namen '%s'." % nm, "eingabe")
+        e["name"] = nm
+    if "text" in (felder or {}):
+        # LEER heisst hier wirklich "kein Text" – anders als beim Kennwort, das
+        # nie angezeigt wird. Der Benutzer sieht seinen Text und kann ihn
+        # bewusst loeschen.
+        e["text"] = str(felder.get("text") or "").strip()[:VORGABE_MAX]
+    if "standard" in (felder or {}):
+        if felder.get("standard"):
+            for a in liste:
+                a["standard"] = (a["id"] == e["id"])
+        else:
+            e["standard"] = False
+    return _stile_schreiben(un, liste)
+
+
+def stil_loeschen(user: str, stil_id: str) -> list[dict]:
+    """Stil entfernen. **Es rueckt KEINER nach.**
+
+    Ein automatisch nachrueckender Standard wuerde bedeuten, dass Regeln ohne
+    eigene Wahl ploetzlich in einem Ton antworten, den niemand dafuer bestimmt
+    hat. Regeln, die genau diesen Stil gewaehlt hatten, fallen auf den Standard
+    zurueck – ``stil_fuer`` vermerkt das im Klartext.
+    """
+    un = norm_user(user)
+    liste = stile(user)
+    rest = [e for e in liste if e["id"] != str(stil_id or "").strip()]
+    if len(rest) == len(liste):
+        raise MailFehler("Stil nicht gefunden.", "eingabe")
+    return _stile_schreiben(un, rest)
+
+
+def stil_aus_prompt(prompt: str, liste: list[dict] | None = None,
+                    user: str = "") -> str:
+    """Kennung des Stils, den ein Regel-PROMPT sprachlich nennt (oder "").
+
+    **Aufgeloest wird deterministisch, BEVOR ein Modell laeuft** – und
+    ausschliesslich aus dem Regel-Prompt, nie aus der eingegangenen Nachricht.
+    Duerfte das Modell den Stil selbst waehlen, waere ein "[[Stil: X]]" im
+    Fremdtext ein Hebel; ein Angreifer koennte sich die Form der Antwort
+    aussuchen. Die Form ist zwar harmloser als eine Aktion, aber es gibt keinen
+    Grund, diese Tuer aufzumachen.
+
+    Erkannt wird ein Hinweiswort (Stil/Ton/Signatur/Vorlage/style/tone) gefolgt
+    vom NAMEN eines vorhandenen Stils, in Anfuehrungszeichen oder ohne. Bei
+    mehreren Treffern gewinnt der frueheste, bei gleicher Stelle der laengste
+    Name (er ist der spezifischere).
+    """
+    text = str(prompt or "")
+    if not text.strip():
         return ""
+    eintraege = liste if liste is not None else stile(user)
+    treffer = []
+    for e in eintraege:
+        nm = e.get("name") or ""
+        if len(nm) < STIL_PROMPT_MIN:
+            continue
+        anf = "[" + re.escape(_ANFUEHRUNG) + "]?"
+        muster = re.compile(
+            r"(?:stilvorgabe|stil|tonfall|ton|signatur|vorlage|style|tone)\b"
+            r"[^\w\n]{0,12}(?:vorgabe|von|des|der|:|=)?[^\w\n]{0,12}"
+            + anf + re.escape(nm) + anf,
+            re.IGNORECASE)
+        m = muster.search(text)
+        if m:
+            treffer.append((m.start(), -len(nm), e["id"]))
+    if not treffer:
+        return ""
+    treffer.sort()
+    return treffer[0][2]
+
+
+def stil_fuer(user: str, stil_id: str = "", prompt: str = "") -> dict:
+    """Der Stil, der fuer DIESEN Lauf gilt.
+
+    Reihenfolge – die Bedeutung steckt in ihr:
+      1. ``stil_id`` ausdruecklich gewaehlt (Pulldown / Regelfeld) → dieser.
+         ``STIL_KEINER`` heisst "ausdruecklich ohne Stil".
+      2. gewaehlte Kennung gibt es nicht mehr (Stil geloescht) → Standardstil,
+         mit ``hinweis``. Der Lauf laeuft weiter: eine Regel, die wegen einer
+         verwaisten Referenz gar nichts tut, ist der schlechtere Ausgang
+         (gleiche Abwaegung wie beim geloeschten Rollen-Profil, 2026-08-10).
+      3. nichts gewaehlt → im Regel-Prompt sprachlich genannter Stil.
+      4. sonst → Standardstil (kann fehlen; dann gilt kein Stil).
+
+    Rueckgabe ist IMMER ein dict: ``{"id","name","text","quelle","hinweis"}``.
+    """
+    leer = {"id": "", "name": "", "text": "", "quelle": "", "hinweis": ""}
+    try:
+        liste = stile(user)
+    except Exception:  # noqa: BLE001
+        return leer
+    if not liste:
+        return leer
+    std = ([e for e in liste if e["standard"]] or [None])[0]
+    wahl = str(stil_id or "").strip()
+
+    if wahl == STIL_KEINER:
+        return dict(leer, quelle="keiner")
+    if wahl:
+        for e in liste:
+            if e["id"] == wahl:
+                return dict(e, quelle="feld", hinweis="")
+        if std:
+            return dict(std, quelle="standard",
+                        hinweis="Der gewaehlte Stil gibt es nicht mehr – es gilt "
+                                "der Standardstil '%s'." % std["name"])
+        return dict(leer, hinweis="Der gewaehlte Stil gibt es nicht mehr, und es "
+                                  "ist kein Standardstil gesetzt.")
+
+    aus_prompt = stil_aus_prompt(prompt, liste)
+    if aus_prompt:
+        for e in liste:
+            if e["id"] == aus_prompt:
+                return dict(e, quelle="prompt", hinweis="")
+    return dict(std, quelle="standard", hinweis="") if std else leer
+
+
+def antwort_vorgabe(user: str) -> str:
+    """Text des STANDARD-Stils.
+
+    Bleibt als Name erhalten, weil er das ist, was ein Aufrufer ohne eigene
+    Stilwahl meint. Wer die Wahl treffen kann, benutzt ``stil_fuer``.
+    """
+    e = stil_fuer(user)
+    return e.get("text") or ""
 
 
 def konto_info(user: str) -> dict:
@@ -263,7 +563,14 @@ def konto_info(user: str) -> dict:
         "ordner_eingang": k.get("ordner_eingang", ""),
         "ordner_entwuerfe": k.get("ordner_entwuerfe", ""),
         "ordner_gesendet": k.get("ordner_gesendet", ""),
-        "antwort_vorgabe": k.get("antwort_vorgabe", ""),
+        # Die Stile SIND die Vorgabe (seit 2026-08-18). ``antwort_vorgabe``
+        # bleibt als abgeleiteter Wert (Text des Standardstils) in der Antwort:
+        # ein Client, der noch das alte Einzelfeld kennt, zeigt damit weiter
+        # etwas Sinnvolles an, statt ein leeres Feld.
+        "stile": _stile_von(k),
+        "max_stile": MAX_STILE,
+        "antwort_vorgabe": ([e["text"] for e in _stile_von(k) if e["standard"]]
+                            or [""])[0],
         "letzter_erfolg": int(k.get("letzter_erfolg", 0) or 0),
         "letzter_fehler": k.get("letzter_fehler", ""),
         "anmeldefehler": int(k.get("anmeldefehler", 0) or 0),
@@ -311,11 +618,26 @@ def speichern(user: str, felder: dict) -> dict:
     if "aktiv" in felder:
         k["aktiv"] = bool(felder.get("aktiv"))
     if "antwort_vorgabe" in felder:
-        # Anders als das Kennwort heisst LEER hier wirklich "keine Vorgabe":
-        # es ist ein sichtbares Feld, der Benutzer sieht seinen Text und kann
-        # ihn bewusst loeschen. Beim Kennwort ist das umgekehrt, weil es
-        # nie angezeigt wird (siehe Docstring oben).
-        k["antwort_vorgabe"] = str(felder.get("antwort_vorgabe") or "").strip()[:VORGABE_MAX]
+        # ALTER WEG, seit 2026-08-18 nur noch fuer Clients, die die Stilliste
+        # nicht kennen (ein im Browser zwischengespeichertes Add-in sendet das
+        # Feld weiter). Er schreibt den Text des STANDARDSTILS.
+        #
+        # **Ein LEERER Wert wird hier ignoriert** – anders als frueher. Grund:
+        # ein alter Client sendet das Feld bei JEDEM Speichern mit, und wenn er
+        # es nicht anzeigen kann, sendet er es leer. Wuerde das loeschen, waere
+        # ein Klick auf "Ordner speichern" der Verlust aller Stiltexte. Zum
+        # Entfernen gibt es den Stil-Endpunkt.
+        _alt = str(felder.get("antwort_vorgabe") or "").strip()[:VORGABE_MAX]
+        if _alt:
+            _liste = _stile_von(k)
+            _std = [e for e in _liste if e["standard"]]
+            if _std:
+                _std[0]["text"] = _alt
+            elif len(_liste) < MAX_STILE:
+                _liste.append({"id": _stil_id(), "name": "Standard",
+                               "text": _alt, "standard": True})
+            k["stile"] = _liste
+            _spiegel_setzen(k)
     if "passwort" in felder:
         pw = str(felder.get("passwort") or "")
         if pw.strip():

@@ -49,7 +49,7 @@ import secrets
 import time
 from pathlib import Path
 
-from backend.mail_accounts import norm_user, skill_config
+from backend.mail_accounts import STIL_KEINER, norm_user, skill_config
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -242,14 +242,15 @@ def _alle_speichern(regeln: list[dict]) -> None:
 # fehlte ``scheduler.update_job`` bis 2026-07-28.
 AENDERBAR = ("name", "enabled", "ordner", "prompt", "bereiche", "intervall_min",
              "nur_ungelesen", "von_filter", "betreff_filter", "max_je_lauf",
-             "markiere_gelesen")
+             "markiere_gelesen", "stil")
 
 
 def _neue_id() -> str:
     return secrets.token_hex(6)
 
 
-def _pruefe(felder: dict, bestehend: dict | None = None) -> dict:
+def _pruefe(felder: dict, bestehend: dict | None = None,
+            owner: str = "") -> dict:
     """Validiert und normalisiert Regelfelder. Wirft ``RegelFehler``."""
     r = dict(bestehend or {})
 
@@ -323,6 +324,37 @@ def _pruefe(felder: dict, bestehend: dict | None = None) -> dict:
         if feld in felder or not bestehend:
             r[feld] = str(felder.get(feld) or "").strip()[:200]
 
+    # ── Stil fuer formulierte Antworten ───────────────────────────────────
+    # Die AUSDRUECKLICHE Wahl. Sie schlaegt eine sprachliche Nennung im Prompt
+    # (``mail_accounts.stil_fuer``), weil sie eindeutig ist. Leer heisst "nichts
+    # gewaehlt" – dann greift die Nennung im Prompt und sonst der Standardstil;
+    # ``STIL_KEINER`` heisst ausdruecklich "ohne Stil".
+    #
+    # Ein Stil bestimmt NUR die Form. Er kann keine Aktion ausloesen und keine
+    # Bedingung dieser Regel aufheben – das haelt der Vorspann in
+    # ``mail_runner._VORSPANN`` fest (Lehre aus dem Vorfall 2026-08-17).
+    if "stil" in felder or not bestehend:
+        sid = str(felder.get("stil") or "").strip()[:32]
+        if sid and sid != STIL_KEINER and not re.fullmatch(r"[A-Za-z0-9_-]+", sid):
+            raise RegelFehler("Ungueltige Stil-Kennung.")
+        if sid and sid != STIL_KEINER and (owner or r.get("owner")):
+            # Existenz gegen die Stile des BESITZERS pruefen – ein Verweis ins
+            # Leere waere sonst erst Wochen spaeter im Protokoll zu sehen.
+            # Fail-open bei Lesefehlern: eine unlesbare Kontendatei darf das
+            # Speichern einer Regel nicht blockieren.
+            try:
+                from backend import mail_accounts as _ma
+                bekannt = [e["id"] for e in _ma.stile(owner or r.get("owner"))]
+                if bekannt and sid not in bekannt:
+                    raise RegelFehler(
+                        "Diesen Antwort-Stil gibt es nicht (mehr). Waehle einen "
+                        "vorhandenen Stil oder lege ihn unter „Postfach\" an.")
+            except RegelFehler:
+                raise
+            except Exception:  # noqa: BLE001
+                pass
+        r["stil"] = sid
+
     # ── Bedingung im Prompt, aber kein Filterfeld? Dann ablehnen. ──────────
     # VORFALL 2026-08-17: Eine Regel lautete "wenn eine Nachricht von
     # mr.andreas.bender@* kommt, antworten mit 'hat geklappert'" – das Feld
@@ -395,7 +427,7 @@ def anlegen(owner: str, felder: dict) -> dict:
         # wie MAX_OPEN=20 bei den Messenger-Erinnerungen.
         raise RegelFehler("Es sind hoechstens %d Regeln je Benutzer moeglich "
                           "(vorhanden: %d)." % (MAX_REGELN_JE_BENUTZER, len(eigene)))
-    r = _pruefe(felder, None)
+    r = _pruefe(felder, None, owner=un)
     r["id"] = _neue_id()
     r["owner"] = un
     r["angelegt"] = int(time.time())
@@ -442,7 +474,7 @@ def aendern(regel_id: str, felder: dict, owner: str | None = None) -> dict:
         if unbekannt:
             raise RegelFehler("Diese Felder lassen sich nicht aendern: %s"
                               % ", ".join(sorted(unbekannt)))
-        neu = _pruefe(felder, r)
+        neu = _pruefe(felder, r, owner=r.get("owner") or "")
         neu["id"] = r["id"]              # unveraenderlich
         neu["owner"] = r["owner"]        # unveraenderlich
         neu["geaendert"] = int(time.time())

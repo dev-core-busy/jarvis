@@ -8011,6 +8011,9 @@ async def email_status(lang: str = "de", user: str = Depends(require_email_acces
             "max_intervall": mail_rules.MAX_INTERVALL_MIN,
             "max_je_lauf": mail_rules.MAX_JE_LAUF,
             "prompt_max": mail_rules.PROMPT_MAX,
+            "max_stile": mail_accounts.MAX_STILE,
+            "stil_name_max": mail_accounts.STIL_NAME_MAX,
+            "stil_text_max": mail_accounts.VORGABE_MAX,
         },
     })
 
@@ -8064,6 +8067,86 @@ async def email_account_del(user: str = Depends(require_email_access)):
     from backend import mail_accounts
     weg = await asyncio.to_thread(mail_accounts.loeschen, user)
     return JSONResponse({"ok": True, "entfernt": bool(weg)})
+
+
+@app.get("/api/email/styles")
+async def email_styles_get(user: str = Depends(require_email_access)):
+    """Eigene Antwort-Stile (Name + Text + Standard-Markierung).
+
+    Eigene Endpunkte statt eines Feldes am Postfach-Formular: die Liste wird
+    Eintrag fuer Eintrag gepflegt, und ein Formular, das sie als Ganzes sendet,
+    wuerde bei zwei offenen Fenstern den jeweils anderen Stand ueberschreiben.
+    Aus demselben Grund steht ``stile`` NICHT in ``mail_accounts.AENDERBAR`` –
+    ein Klick auf "Postfach speichern" kann die Stile nicht anfassen.
+    """
+    from backend import mail_accounts
+    return JSONResponse({"ok": True, "stile": mail_accounts.stile(user),
+                         "max_stile": mail_accounts.MAX_STILE,
+                         "name_max": mail_accounts.STIL_NAME_MAX,
+                         "text_max": mail_accounts.VORGABE_MAX})
+
+
+@app.post("/api/email/styles")
+async def email_styles_add(request: Request, user: str = Depends(require_email_access)):
+    """Neuen Antwort-Stil anlegen. Der erste wird automatisch der Standard."""
+    from backend import mail_accounts
+    from backend.mail_client import MailFehler
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        liste = await asyncio.to_thread(
+            mail_accounts.stil_anlegen, user,
+            str((body or {}).get("name") or ""), str((body or {}).get("text") or ""),
+            bool((body or {}).get("standard")) if "standard" in (body or {}) else None)
+    except MailFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return JSONResponse({"ok": True, "stile": liste})
+
+
+@app.put("/api/email/styles/{stil_id}")
+async def email_styles_set(stil_id: str, request: Request,
+                           user: str = Depends(require_email_access)):
+    """Stil aendern. Nur die eigenen – die Kennung wird gegen das eigene
+    Postfach aufgeloest, ein fremder Stil ist damit gar nicht erreichbar."""
+    from backend import mail_accounts
+    from backend.mail_client import MailFehler
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    erlaubt = {k: v for k, v in (body or {}).items() if k in ("name", "text", "standard")}
+    if not erlaubt:
+        return JSONResponse({"ok": False, "error": "Es wurde nichts zum Aendern "
+                                                   "uebergeben."}, status_code=400)
+    try:
+        liste = await asyncio.to_thread(mail_accounts.stil_aendern, user, stil_id, erlaubt)
+    except MailFehler as f:
+        # "nicht gefunden" ist eine Eingabefrage, kein Rechtefall: die Kennung
+        # wird ohnehin nur in der eigenen Liste gesucht.
+        code = 404 if "nicht gefunden" in str(f).lower() else 400
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=code)
+    return JSONResponse({"ok": True, "stile": liste})
+
+
+@app.delete("/api/email/styles/{stil_id}")
+async def email_styles_del(stil_id: str, user: str = Depends(require_email_access)):
+    """Stil entfernen. Regeln, die ihn gewaehlt hatten, fallen auf den
+    Standardstil zurueck (mit Vermerk im Journal) – es rueckt keiner nach."""
+    from backend import mail_accounts
+    from backend.mail_client import MailFehler
+    try:
+        liste = await asyncio.to_thread(mail_accounts.stil_loeschen, user, stil_id)
+    except MailFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=404)
+    return JSONResponse({"ok": True, "stile": liste})
 
 
 @app.post("/api/email/test")
@@ -8333,6 +8416,9 @@ async def email_reply_preview(request: Request,
                                                    "(msg_id)."}, status_code=400)
     ordner = str((body or {}).get("ordner") or "").strip()
     hinw = str((body or {}).get("hinweis") or "").strip()[:500]
+    # Gewaehlter Antwort-Stil (Pulldown). Leer = Stil der gewaehlten Regel bzw.
+    # Standardstil; "-" = ausdruecklich ohne Stil.
+    stil_id = str((body or {}).get("stil") or "").strip()[:32]
     regel = None
     rid = str((body or {}).get("regel_id") or "").strip()
     if rid:
@@ -8340,7 +8426,8 @@ async def email_reply_preview(request: Request,
         if r and r.get("owner") == mail_rules.norm_user(user):
             regel = r
     try:
-        daten = await mail_runner.antwort_vorschlag(user, msg_id, ordner, regel, hinw)
+        daten = await mail_runner.antwort_vorschlag(user, msg_id, ordner, regel,
+                                                    hinw, stil_id)
     except mail_client.MailFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
     except Exception as e:  # noqa: BLE001

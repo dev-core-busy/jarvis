@@ -2998,6 +2998,11 @@ Entwurf**. Code: `mail_runner.antwort_vorschlag()` / `antwort_senden()`, Endpunk
    prüft nichts – und das fällt nur bei einer echten Gegenprobe auf.
 
 ### Ständige Antwort-Vorgabe je Benutzer (2026-08-17)
+> **Seit dem 2026-08-18 ist daraus eine LISTE benannter Stile geworden** – siehe den
+> Abschnitt „Mehrere benannte Antwort-Stile" weiter unten. Der Rest dieses Abschnitts
+> gilt unverändert (Begründung, Reihenfolge, Deckel); nur ist das Einzelfeld jetzt der
+> Standard-Stil, und `antwort_vorgabe()` liefert dessen Text.
+
 Auf die Frage „macht ein anpassbarer Pre-Prompt Sinn?" – ja, und zwar aus einem klaren Grund:
 das Hinweis-Feld der Vorschau ist **pro Mail und flüchtig**. Was sich nie ändert (Signatur,
 Sie/Du, „keine Preise zusagen", Länge), müsste man sonst jedes Mal tippen oder eine Pseudo-Regel
@@ -3050,6 +3055,83 @@ kippte, weil der Vorspann um zwei Sätze wuchs – gekürzt wurde völlig korrek
 eine Formel (`+ len(_VORSPANN) + 1500`), und die eigentliche Aussage („der Fremdtext wird
 gekürzt") steht in einer eigenen Prüfung. **Eine willkürliche Zahl in einem Test ist eine
 Zeitbombe** – sie meldet später einen Fehler, den es nicht gibt.
+
+### Mehrere benannte Antwort-Stile (2026-08-18)
+**Wunsch des Nutzers:** nicht EINE „Stil und Signatur"-Vorgabe, sondern mehrere, die beim
+Beantworten auswählbar sind – als Pulldown im Outlook-Add-in oder sprachlich in einer Regel
+anweisbar. Verwaltet werden sie weiterhin unter *Postfach*. Code: `mail_accounts.py`
+(`stile`, `stil_anlegen|aendern|loeschen`, `stil_aus_prompt`, `stil_fuer`), Feld `stil` an der
+Regel (`mail_rules`), Auflösung in `mail_runner._auftrag` und `antwort_vorschlag`, Endpunkte
+`GET/POST /api/email/styles` + `PUT/DELETE /api/email/styles/{id}`, Oberflächen in
+`frontend/js/email_portal.js` und `frontend/addin/addin.js`.
+
+- **DREI WEGE, EINE REIHENFOLGE:** ausdrückliche Auswahl (Pulldown in der Vorschau bzw. Feld an
+  der Regel) → sprachliche Nennung im Regel-**Prompt** („Antworte im Stil ‚Förmlich'") →
+  Standardstil. `STIL_KEINER = "-"` ist die ausdrückliche Wahl „ohne Stil" und muss von „nichts
+  gewählt" (leer) unterscheidbar bleiben – sonst gäbe es keinen Weg, den Standard für eine
+  einzelne Regel abzuschalten.
+- **DIE AUFLÖSUNG IST DETERMINISTISCH UND PASSIERT VOR DEM MODELL.** Der Stilname wird
+  ausschließlich im Regelfeld und im Regel-Prompt gesucht, **nie** im Nachrichtentext. Dürfte
+  das Modell den Stil selbst wählen, wäre ein „[[Stil: X]]" im Fremdtext ein Hebel auf die Form
+  der Antwort. Die Form ist harmloser als eine Aktion – ein Grund, diese Tür aufzumachen, ist
+  das trotzdem nicht. Ein Test schiebt genau dieses Muster als Betreff UND Rumpf durch und
+  verlangt, dass der Standardstil gilt.
+- **Die Lehre vom 2026-08-17 bleibt unangetastet:** ein Stil bestimmt NUR die Form. Er steht im
+  Auftrag weiterhin HINTER Regel und Fremdtext, der Vorspann weist ihn ausdrücklich als
+  untergeordnet aus. Die Auswahl ändert daran nichts – gewählt wird nur, WELCHE Form gilt.
+- **Der NAME steht nicht in der Abschnittsmarke, sondern als erste Zeile im Abschnitt**
+  („Gewaehlter Stil: „…""). Erste Fassung hängte ihn an die Marke; damit wandert eine
+  Zeichenkette, die Struktur ist (der bestehende Test liest die Marken und fiel prompt darüber).
+  `_markensicher()` entfernt zusätzlich `=`, `[`, `]` und Zeilenumbrüche aus dem Namen – er
+  kommt aus einem Freitextfeld.
+- **Eigene Endpunkte statt eines Feldes am Postfach-Formular** (`stile` steht NICHT in
+  `mail_accounts.AENDERBAR`): die Liste wird Eintrag für Eintrag gepflegt, und ein Formular, das
+  sie als Ganzes sendet, überschriebe bei zwei offenen Fenstern den jeweils anderen Stand –
+  dieselbe Vermischung wie bei den SAP-Sichtbarkeiten. Der Knopf „Postfach speichern" kann die
+  Stile damit nicht anfassen (ein UI-Test prüft den Rumpf des POST).
+- **Migration ohne Datenverlust:** `_migrieren()` macht aus einer vorhandenen `antwort_vorgabe`
+  einen Stil „Standard" und schreibt **einmalig** zurück (Muster `config._load_v2`; ein zweiter
+  Lauf ändert nichts, sonst schriebe jeder Start die Datei). Das alte Feld bleibt als **Spiegel**
+  des Standardstils stehen und wird nur noch von der Migration gelesen – ausschließlich für den
+  Fall, dass jemand eine ältere Programmfassung zurückspielt. Maßgeblich ist `stile`.
+- **`antwort_vorgabe` bleibt in `AENDERBAR`, aber ein LEERER Wert wird ignoriert.** Ein im
+  Browser zwischengespeichertes Add-in sendet das Feld bei jedem Speichern mit; könnte es leeren,
+  wäre ein Klick auf „Ordner speichern" der Verlust aller Stiltexte. Zum Entfernen gibt es den
+  Stil-Endpunkt.
+- **Beim Löschen rückt KEINER nach.** Ein automatisch nachrückender Standard hieße, dass Regeln
+  ohne eigene Wahl plötzlich in einem Ton antworten, den niemand dafür bestimmt hat. Regeln mit
+  verwaister Kennung fallen auf den Standard zurück **mit Vermerk** (`hinweis`, im Journal und im
+  Add-in sichtbar) – ein Lauf, der wegen einer verwaisten Referenz gar nichts tut, ist der
+  schlechtere Ausgang (gleiche Abwägung wie beim gelöschten Rollen-Profil).
+- **Namen unter `STIL_PROMPT_MIN = 3` werden im Prompt nicht gesucht:** „AG" oder „Du" träfen in
+  jedem zweiten Satz und erzwängen einen Stil, den niemand meinte. Der Name wird mit `re.escape`
+  maskiert (ein Stil „Preis(e) + Termine" sprengte das Muster sonst).
+- **DER FEHLER, DEN NUR jsdom ZEIGTE: `</p>` statt `</div>`** am Ende des neuen Hilfe-Kastens –
+  in BEIDEN Masken. Der Parser schachtelte die halbe Sektion in den `.em-help`-Container, und
+  `applyLang()` setzt dort den **textContent**: beim ersten Sprachlauf war die komplette
+  Stil-Verwaltung aus dem DOM verschwunden. Im Markup ist davon nichts zu sehen, und ein
+  Quelltext-Test prüft es nicht. **Merkregel: nach jedem Markup-Einschub die Eltern-Kette der
+  neuen Elemente messen** (`getElementById(x).parentNode`), nicht nur die Anwesenheit.
+- **★ ist für den Emoji-Wächter ein Emoji** (U+2605 liegt in der Range `☀-⛿`, die
+  `tests/test_outlook_addin.py` sperrt). Standard-Marke und -Knopf tragen deshalb `●`/`○`.
+- **VORBEFUND, dabei mitbehoben:** `tests/test_addin_sso.py`, Abschnitt 9 war **seit dem
+  2026-08-17 rot** – er prüfte weiter „STAENDIGE VORGABE steht VOR der Regel" und brach mit
+  einem `ValueError` ab (der Vorfall-Fix hatte Reihenfolge und Abschnittsnamen geändert, der Test
+  wurde nicht nachgezogen). Mit `git stash` gegengeprüft. Der Abschnitt prüft jetzt die
+  Reihenfolge an den echten Marken statt am Fließtext.
+- **Verifiziert:** 113 neue Prüfungen (`tests/test_mail_styles.py`, ohne fastapi lauffähig,
+  `backend.config` als Stub, Sandkasten-Wächter mit Exit 2) + 465 (`test_email_rules.py`) + 190
+  (`test_addin_sso.py`) + 192 (`test_outlook_addin.py`) + 120 (Endpunkt-Rechte), lokal **und auf
+  DEV im echten venv**. 18 neue UI-Prüfungen in jsdom gegen die echten Dateien
+  (`tests/test_email_ui.js`, jetzt 257). Gegenproben greifen: Feld-Vorrang entfernt → 7 FAIL,
+  Prompt-Erkennung ausgebaut → 10 FAIL, `stile` in `AENDERBAR` → 3 FAIL.
+  **Live auf DEV:** alle vier Stil-Endpunkte ohne Token 401, Dienst aktiv, `/settings` und
+  `/email` HTTP 200, `data/email_accounts.json` unangetastet. Optisch abgenommen in Dunkel UND
+  Hell (echtes Markup, echtes CSS, gemockte API): /email mit Liste, eingebettetem Formular und
+  Pulldown im Regel-Formular; Add-in mit Stil-Pulldown in der Antwort-Vorschau und der
+  Verwaltung im Postfach-Reiter.
+- **Noch NICHT geprüft:** ein echter Lauf gegen ein Postfach (auf DEV ist keiner hinterlegt) –
+  also ob das Modell dem gewählten Stil tatsächlich folgt. **Auf ECHT noch nicht ausgerollt.**
 
 #### Feld-Erklärungen (ⓘ) im Postfach-Formular
 Gemeldet am selben Tag: *„ein Benutzer kann mit ‚Vorgabe' bei ‚Entwürfe' und ‚Gesendet' genau

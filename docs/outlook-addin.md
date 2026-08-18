@@ -191,18 +191,41 @@ in einem bearbeitbaren Feld. Gesendet wird erst mit **„Senden"** – oder mit
 **„Als Entwurf"**, wenn die Antwort noch in Outlook durchgesehen werden soll.
 **„Neu formulieren"** verwirft den Vorschlag und fragt erneut.
 
-Optional: ein **Hinweis** („freundlich absagen", „Termin bestätigen") und der
-**Ton einer eigenen Regel** – deren Prompt beschreibt ja bereits, wie geantwortet
-werden soll. Beides ist freiwillig; der Weg funktioniert auch, wenn noch gar
-keine Regel angelegt ist.
+Optional: ein **Stil** (siehe unten), ein **Hinweis** („freundlich absagen",
+„Termin bestätigen") und der **Ton einer eigenen Regel** – deren Prompt beschreibt
+ja bereits, wie geantwortet werden soll. Alles drei ist freiwillig; der Weg
+funktioniert auch, wenn noch gar keine Regel angelegt ist.
 
-**Ständige Vorgabe** (Reiter *Postfach*, auch in `/email`): was sich nie ändert –
-Signatur, Sie/Du, „keine Preise oder Termine zusagen", gewünschte Länge – gehört
-nicht in das Hinweis-Feld, das man pro Mail neu tippt. Die Vorgabe gilt für
-**vorgeschlagene Antworten UND für alle eigenen Regeln**, damit die Signatur nicht
-an zwei Stellen gepflegt werden muss. Reihenfolge im Auftrag: Vorgabe → Regel →
-Hinweis; bei Widerspruch gewinnt das Speziellere. Ein leeres Feld heißt hier
-wirklich „keine Vorgabe" (anders als beim Kennwort, das man nie sieht).
+### Stile für Antworten
+
+Was sich nie ändert – Signatur, Sie/Du, „keine Preise oder Termine zusagen",
+gewünschte Länge – gehört nicht in das Hinweis-Feld, das man pro Mail neu tippt.
+Dafür gibt es **benannte Stile** (Reiter *Postfach*, ebenso in `/email`): so viele,
+wie gebraucht werden – etwa „Förmlich", „Locker", „Kurz & knapp". Einer davon ist
+der **Standard** (Marke ●); er gilt überall dort, wo nichts anderes gewählt ist.
+
+Gewählt wird ein Stil auf drei Wegen:
+
+| Weg | Wo | Gilt für |
+|---|---|---|
+| **Pulldown** | Reiter *Nachricht*, über „Antwort vorschlagen" | genau diese Antwort |
+| **Feld an der Regel** | „Stil für Antworten dieser Regel" | jeden Lauf dieser Regel |
+| **im Regel-Prompt genannt** | z. B. „Antworte im Stil ‚Förmlich'" | jeden Lauf dieser Regel |
+
+Bei mehreren Angaben gewinnt die ausdrückliche Auswahl (Pulldown bzw. Feld) gegen
+die Nennung im Prompt; ohne alles gilt der Standard. Der Name wird **aufgelöst,
+bevor das Sprachmodell läuft** – eine Stil-Nennung im Text der eingegangenen Mail
+bewirkt deshalb nichts.
+
+> **Ein Stil bestimmt ausschließlich die Form** (Sprache, Anrede, Ton, Signatur).
+> Er löst keine Aktion aus und hebt keine Bedingung einer Regel auf. Ob überhaupt
+> geantwortet wird, entscheidet allein die Regel – am 17.08.2026 hat eine als
+> „immer antworten" formulierte Vorgabe genau das einmal überstimmt; seitdem steht
+> die Stilvorgabe im Auftrag hinter der Regel und ist ausdrücklich untergeordnet.
+
+Reihenfolge im Auftrag der Vorschau: Stil → Regel-Ton → Hinweis; bei Widerspruch
+gewinnt das Speziellere. Ein leeres Textfeld heißt hier wirklich „kein Text"
+(anders als beim Kennwort, das man nie sieht).
 
 > **Der Lauf hinter dem Vorschlag hat KEINE Werkzeuge.** Er kann nichts senden,
 > nichts weiterleiten, nichts verschieben – er formuliert nur Text. Eine

@@ -65,6 +65,12 @@
     var _ssoGrund = '';      // warum SSO nicht griff – nur zur Anzeige
     var _ssoProbiert = false; // Endlosschleife-Bremse: hoechstens EIN
                               // kennwortloser Versuch je Fensterlauf
+    var _stile = [];         // benannte Antwort-Stile des Postfachs
+    var _stilEdit = null;    // welcher Stil ist offen ('neu' = neuer Stil)
+    var _stilWahl = '';      // im Nachrichten-Reiter gewaehlter Stil. Muss
+                             // ausserhalb liegen: `zeichneNachricht()` baut
+                             // den Reiter bei jedem Statuslauf und bei jedem
+                             // Sprachwechsel neu auf.
     var _vorschlag = null;   // {text, an, betreff} – Antwort-Vorschlag,
                              // solange er nicht gesendet/verworfen ist
     var _tab = 'mail';
@@ -518,6 +524,13 @@
         $('ad-save-acct').addEventListener('click', speichereKonto);
         $('ad-test-acct').addEventListener('click', testeKonto);
         $('ad-del-acct').addEventListener('click', loescheKonto);
+        // Eigene Variable/benannte Funktion: eine Inline-Closure ueber eine
+        // geteilte `var` sieht beim Klick den zuletzt zugewiesenen Wert
+        // (der Fehler, der den Abmelde-Knopf umbeschriftet hat).
+        var stilNeu = $('ad-stil-neu');
+        if (stilNeu) stilNeu.addEventListener('click', function () {
+            oeffneStilFormular(null, null);
+        });
         $('ad-lang').textContent = sprache().toUpperCase();
     }
 
@@ -651,7 +664,15 @@
         teile.push('<div class="ad-h">' + esc(T('addin.reply_head', 'Antwort vorschlagen')) + '</div>');
         if (_vorschlag) {
             teile.push('<p class="ad-hint">' + esc(T('addin.reply_check',
-                'Prüfe den Text – du kannst ihn hier ändern. Gesendet wird erst auf Knopfdruck.')) + '</p>');
+                'Prüfe den Text – du kannst ihn hier ändern. Gesendet wird erst auf Knopfdruck.')) +
+                // Welcher Stil GEWIRKT hat, nicht welcher gewaehlt wurde: eine
+                // Anzeige darf keinen Zustand behaupten, den sie nicht kennt.
+                (_vorschlag.stil ? ' · ' + esc(T('mail.style_used', 'Stil')) + ': ' +
+                    esc(_vorschlag.stil) : '') + '</p>');
+            if (_vorschlag.stil_hinweis) {
+                teile.push('<div class="ad-warn" style="margin-top:6px;">' +
+                    esc(_vorschlag.stil_hinweis) + '</div>');
+            }
             teile.push('<div class="ad-field" style="margin-top:8px;">' +
                 '<label>' + esc(T('addin.reply_to', 'An')) + ': ' + esc(_vorschlag.an || '') + '</label>' +
                 '<textarea id="ad-reply-text" rows="10"></textarea></div>');
@@ -670,6 +691,11 @@
                 '<input type="text" id="ad-reply-hint" placeholder="' +
                 esc(T('addin.reply_hint_ph', 'z. B. freundlich absagen, Termin bestätigen')) +
                 '"></div>');
+            if (_stile.length) {
+                teile.push('<div class="ad-field">' +
+                    '<label>' + esc(T('mail.style_pick', 'Stil')) + '</label>' +
+                    '<select id="ad-reply-stil">' + stilOptionen(_stilWahl) + '</select></div>');
+            }
             if (aktive.length) {
                 teile.push('<div class="ad-field">' +
                     '<label>' + esc(T('addin.reply_tone', 'Ton einer Regel übernehmen (optional)')) + '</label>' +
@@ -709,6 +735,11 @@
         box.innerHTML = teile.join('');
         if ($('ad-run-msg')) $('ad-run-msg').addEventListener('click', verarbeiteNachricht);
         if ($('ad-reply-make')) $('ad-reply-make').addEventListener('click', antwortVorschlagen);
+        if ($('ad-reply-stil')) {
+            $('ad-reply-stil').addEventListener('change', function () {
+                _stilWahl = this.value;
+            });
+        }
         if ($('ad-reply-text')) {
             // Der bearbeitete Text wird SOFORT gespiegelt. `zeichneNachricht()`
             // baut den Reiter bei jedem Statusladen und bei jedem Sprachwechsel
@@ -743,10 +774,12 @@
             msg_id: _office.id,
             ordner: '',
             hinweis: (($('ad-reply-hint') || {}).value || '').trim(),
-            regel_id: (($('ad-reply-rule') || {}).value || '')
+            regel_id: (($('ad-reply-rule') || {}).value || ''),
+            stil: (($('ad-reply-stil') || {}).value || '')
         })
             .then(function (d) {
-                _vorschlag = { text: d.text || '', an: d.an || '', betreff: d.betreff || '' };
+                _vorschlag = { text: d.text || '', an: d.an || '', betreff: d.betreff || '',
+                               stil: d.stil || '', stil_hinweis: d.stil_hinweis || '' };
                 zeichneNachricht();
                 melde('ad-reply-status', '');
             })
@@ -1000,6 +1033,13 @@
             esc(T('mail.f_read', 'Nach Bearbeitung als gelesen markieren')) + '</span></label>' +
 
             '<div class="ad-field" style="margin-top:10px;"><label>' +
+            esc(T('mail.f_style', 'Stil für Antworten dieser Regel')) + '</label>' +
+            '<select id="ad-f-stil">' + stilOptionen(r.stil || '') + '</select>' +
+            '<span class="ad-hint">' + esc(T('mail.f_style_hint_short',
+                'Ohne Auswahl gilt der Standard-Stil oder der, den du im Prompt beim Namen nennst.')) +
+            '</span></div>' +
+
+            '<div class="ad-field" style="margin-top:10px;"><label>' +
             esc(T('mail.f_areas', 'Werkzeug-Bereiche')) + '</label>' +
             bereichsWahl(r.bereiche || ['mail']) + '</div>' +
 
@@ -1028,7 +1068,7 @@
     /* Sprachwechsel baut das Formular neu auf – ohne Sicherung waere ein
        Klick auf DE/EN mitten im Tippen Datenverlust. */
     var FORM_FELDER = ['ad-f-name', 'ad-f-prompt', 'ad-f-folder', 'ad-f-interval',
-        'ad-f-max', 'ad-f-from', 'ad-f-subject'];
+        'ad-f-max', 'ad-f-from', 'ad-f-subject', 'ad-f-stil'];
     function formularStand() {
         if (!_editId || !$('ad-f-name')) return null;
         var s = { id: _editId, werte: {}, haken: {}, bereiche: [] };
@@ -1065,6 +1105,7 @@
             max_je_lauf: parseInt($('ad-f-max').value, 10) || 5,
             von_filter: ($('ad-f-from').value || '').trim(),
             betreff_filter: ($('ad-f-subject').value || '').trim(),
+            stil: (($('ad-f-stil') || {}).value || ''),
             nur_ungelesen: !!$('ad-f-unread').checked,
             markiere_gelesen: !!$('ad-f-read').checked,
             bereiche: b
@@ -1140,10 +1181,184 @@
             .then(function () { _laeuft = false; });
     }
 
+    /* ── Antwort-Stile ────────────────────────────────────────────────── */
+    /* Eigene Endpunkte (/api/email/styles): jeder Knopf hier speichert sofort.
+       Der Knopf "Speichern" des Postfachs fasst die Stile NICHT an – zwei
+       Wege, die dieselbe Liste schreiben, wuerden sich gegenseitig
+       ueberschreiben. */
+    function zeichneStile() {
+        var box = $('ad-stile');
+        if (!box) return;
+        stilFormularHeim();
+        if (!_stile.length) {
+            box.innerHTML = '<div class="ad-empty">' + esc(T('mail.styles_none',
+                'Noch kein Stil angelegt. Ohne Stil wird neutral geantwortet.')) + '</div>';
+            return;
+        }
+        box.innerHTML = _stile.map(function (e) {
+            return '<div class="ad-card' + (e.standard ? ' is-std' : '') +
+                '" data-stil="' + esc(e.id) + '"><div class="ad-card-row">' +
+                '<div class="ad-card-main"><div class="ad-card-name">' + esc(e.name) +
+                (e.standard ? '<span class="ad-badge">\u25CF ' +
+                    esc(T('mail.style_default', 'Standard')) + '</span>' : '') + '</div>' +
+                '<div class="ad-card-meta">' +
+                esc((e.text || '').replace(/\s+/g, ' ').slice(0, 70) ||
+                    T('mail.style_empty', '(kein Text hinterlegt)')) + '</div></div>' +
+                '<div class="ad-card-acts">' +
+                (e.standard ? '' : '<button class="ad-mini" data-act="std" title="' +
+                    esc(T('mail.style_make_default', 'Als Standard setzen')) + '">\u25CB</button>') +
+                '<button class="ad-mini" data-act="edit" title="' +
+                esc(T('common.edit', 'Bearbeiten')) + '">\u270E</button>' +
+                '<button class="ad-mini is-danger" data-act="del" title="' +
+                esc(T('common.delete', 'Löschen')) + '">\u2715</button>' +
+                '</div></div></div>';
+        }).join('');
+        box.querySelectorAll('.ad-mini').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var karte = b.closest('.ad-card');
+                var id = karte.getAttribute('data-stil');
+                var act = b.getAttribute('data-act');
+                if (act === 'edit') oeffneStilFormular(id, karte);
+                else if (act === 'del') loescheStil(id);
+                else if (act === 'std') setzeStandard(id);
+            });
+        });
+        if (_stilEdit && _stilEdit !== 'neu') {
+            var k = box.querySelector('.ad-card[data-stil="' + _stilEdit + '"]');
+            if (k) k.appendChild($('ad-stil-edit'));
+        }
+    }
+
+    var _stilHeim = null;
+    function stilFormularHeim() {
+        var f = $('ad-stil-edit');
+        if (!f) return;
+        if (!_stilHeim) _stilHeim = f.parentNode;
+        if (f.parentNode !== _stilHeim) _stilHeim.appendChild(f);
+    }
+
+    function schliesseStilFormular() {
+        _stilEdit = null;
+        var f = $('ad-stil-edit');
+        if (!f) return;
+        stilFormularHeim();
+        f.innerHTML = '';
+        f.className = 'hidden';
+    }
+
+    function oeffneStilFormular(id, karte) {
+        var f = $('ad-stil-edit');
+        if (!f) return;
+        if (_stilEdit === (id || 'neu')) { schliesseStilFormular(); return; }
+        if (!_stilHeim) _stilHeim = f.parentNode;
+        _stilEdit = id || 'neu';
+        var e = id ? (_stile.filter(function (x) { return x.id === id; })[0] || {}) : {};
+        var g = (_status && _status.grenzen) || {};
+        f.className = id ? 'ad-edit' : '';
+        f.innerHTML =
+            '<div class="ad-field" style="margin-top:8px;"><label>' +
+            esc(T('mail.style_name', 'Name des Stils')) + '</label>' +
+            '<input type="text" id="ad-s-name" maxlength="' + (g.stil_name_max || 60) +
+            '" value="' + esc(e.name || '') + '" placeholder="' +
+            esc(T('mail.style_name_ph', 'z. B. Förmlich')) + '"></div>' +
+            '<div class="ad-field"><label>' + esc(T('mail.style_text', 'Stil und Signatur')) +
+            '</label><textarea id="ad-s-text" maxlength="' + (g.stil_text_max || 2000) +
+            '" placeholder="' + esc(T('mail.acct_guide_ph',
+                'z. B. Signatur, Anrede-Form, was nie zugesagt werden darf')) + '">' +
+            esc(e.text || '') + '</textarea>' +
+            '<span class="ad-hint">' + esc(T('mail.acct_guide_hint',
+                'Bestimmt nur den Ton – löst NIE eine Aktion aus.')) + '</span></div>' +
+            '<label class="ad-check"><input type="checkbox" id="ad-s-std"' +
+            ((e.standard || (!id && !_stile.length)) ? ' checked' : '') + '><span>' +
+            esc(T('mail.style_is_default', 'Als Standard verwenden, wenn nichts gewählt ist')) +
+            '</span></label>' +
+            '<div class="ad-row"><button class="ad-btn ad-btn-primary" id="ad-s-save">' +
+            esc(id ? T('common.save', 'Speichern') : T('mail.style_create', 'Stil anlegen')) +
+            '</button><button class="ad-btn" id="ad-s-cancel">' +
+            esc(T('common.cancel', 'Abbrechen')) + '</button></div>' +
+            '<p class="ad-status" id="ad-s-status" style="margin-top:6px;"></p>';
+        $('ad-s-save').addEventListener('click', function () { speichereStil(id); });
+        $('ad-s-cancel').addEventListener('click', schliesseStilFormular);
+        if (karte) karte.appendChild(f); else stilFormularHeim();
+        try { f.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e2) { }
+    }
+
+    function speichereStil(id) {
+        var d = {
+            name: (($('ad-s-name') || {}).value || '').trim(),
+            text: (($('ad-s-text') || {}).value || ''),
+            standard: !!(($('ad-s-std') || {}).checked)
+        };
+        melde('ad-s-status', T('common.saving', 'Speichert…'));
+        var p = id ? sende('/api/email/styles/' + encodeURIComponent(id), 'PUT', d)
+            : sende('/api/email/styles', 'POST', d);
+        p.then(function (a) {
+            _stile = a.stile || [];
+            schliesseStilFormular();
+            zeichneStile();
+            zeichneNachricht();      // die Stil-Auswahl dort haengt daran
+            melde('ad-stil-status', T('mail.style_saved', 'Stil gespeichert.'), 'ok');
+        }).catch(function (e) {
+            if (String(e.message) !== '401') melde('ad-s-status', e.message, 'fehler');
+        });
+    }
+
+    function setzeStandard(id) {
+        sende('/api/email/styles/' + encodeURIComponent(id), 'PUT', { standard: true })
+            .then(function (a) {
+                _stile = a.stile || [];
+                zeichneStile();
+                zeichneNachricht();
+            })
+            .catch(function (e) {
+                if (String(e.message) !== '401') melde('ad-stil-status', e.message, 'fehler');
+            });
+    }
+
+    function loescheStil(id) {
+        var e = _stile.filter(function (x) { return x.id === id; })[0] || {};
+        if (!window.confirm(T('mail.style_del_confirm',
+            'Diesen Stil wirklich löschen? Regeln, die ihn benutzen, antworten danach im Standard-Stil.')
+            + '\n\n' + (e.name || ''))) return;
+        sende('/api/email/styles/' + encodeURIComponent(id), 'DELETE')
+            .then(function (a) {
+                _stile = a.stile || [];
+                if (_stilEdit === id) schliesseStilFormular();
+                zeichneStile();
+                zeichneNachricht();
+                melde('ad-stil-status', T('mail.style_deleted', 'Stil entfernt.'), 'ok');
+            })
+            .catch(function (e2) {
+                if (String(e2.message) !== '401') melde('ad-stil-status', e2.message, 'fehler');
+            });
+    }
+
+    /* Optionen fuer ein Stil-Pulldown. Leer = Standard bzw. der im Prompt einer
+       Regel genannte Stil, "-" = ausdruecklich ohne Stil. */
+    function stilOptionen(gewaehlt) {
+        var std = _stile.filter(function (e) { return e.standard; })[0];
+        // Der Stilname wird EINZELN maskiert – nicht erst die fertige
+        // Zeichenkette: so ist am Ausdruck selbst zu sehen, dass der Fremdteil
+        // durch esc() geht (und der Waechter in tests/ erkennt es ebenso).
+        var h = '<option value="">' + (std
+            ? esc(T('mail.style_opt_default', 'Standard')) + ' \u2013 ' + esc(std.name)
+            : esc(T('mail.style_opt_none', 'kein Stil'))) + '</option>';
+        h += _stile.map(function (e) {
+            return '<option value="' + esc(e.id) + '"' +
+                (gewaehlt === e.id ? ' selected' : '') + '>' + esc(e.name) + '</option>';
+        }).join('');
+        return h + '<option value="-"' + (gewaehlt === '-' ? ' selected' : '') + '>' +
+            esc(T('mail.style_opt_off', '– ohne Stil –')) + '</option>';
+    }
+
     /* ── Reiter: Postfach ─────────────────────────────────────────────── */
     function fuelleKonto() {
         if (!$('ad-adresse')) return;
         var k = _konto || {};
+        // Die Stilliste wird gezeichnet, nicht in ein Eingabefeld geschrieben –
+        // sie darf deshalb auch aktualisiert werden, waehrend jemand tippt.
+        _stile = k.stile || [];
+        zeichneStile();
         // Nur belegen, wenn der Benutzer nicht gerade tippt – sonst
         // ueberschriebe ein Statuslauf die Eingabe.
         if (document.activeElement && document.activeElement.closest &&
@@ -1154,7 +1369,6 @@
         $('ad-ord-eingang').value = k.ordner_eingang || '';
         $('ad-ord-entwuerfe').value = k.ordner_entwuerfe || '';
         $('ad-ord-gesendet').value = k.ordner_gesendet || '';
-        $('ad-vorgabe').value = k.antwort_vorgabe || '';
         $('ad-aktiv').checked = k.aktiv !== false;
         $('ad-pw-hint').textContent = k.passwort_gesetzt
             ? T('mail.pw_set', 'Ein Kennwort ist hinterlegt.')
@@ -1169,7 +1383,7 @@
             ordner_eingang: ($('ad-ord-eingang').value || '').trim(),
             ordner_entwuerfe: ($('ad-ord-entwuerfe').value || '').trim(),
             ordner_gesendet: ($('ad-ord-gesendet').value || '').trim(),
-            antwort_vorgabe: ($('ad-vorgabe').value || '').trim(),
+            // KEIN `antwort_vorgabe`: die Stile haengen an eigenen Endpunkten.
             aktiv: !!$('ad-aktiv').checked
         };
         // LEERES Kennwortfeld heisst "unveraendert" – wird es mitgesendet,

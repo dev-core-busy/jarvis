@@ -66,10 +66,22 @@ def x(wert) -> str:
     return _escape(str(wert), {'"': "&quot;", "'": "&apos;"})
 
 # Eigener Zaehler, ausschliesslich fuer das Add-in-Manifest – NICHT die
-# Projektversion. Outlook laedt ein geaendertes Manifest nur dann neu, wenn
-# diese Zahl steigt; wer am Manifest oder an den Aufgabenfenster-Dateien etwas
-# aendert, das ein installiertes Add-in erreichen soll, muss sie erhoehen.
-ADDIN_VERSION = "1.1.0.0"
+# Projektversion.
+#
+# ZU ERHOEHEN IST SIE NUR BEI AENDERUNGEN AM MANIFEST SELBST (Knoepfe,
+# Berechtigungen, Anforderungssatz, URLs). Aenderungen an den
+# Aufgabenfenster-Dateien brauchen sie NICHT: die liegen auf diesem Server,
+# werden mit ``no-store`` ausgeliefert und erreichen jedes installierte Add-in
+# beim naechsten Oeffnen. Der Kommentar behauptete bis zum 2026-08-18 das
+# Gegenteil und haette zu Manifest-Ausrollungen ohne jeden Anlass gefuehrt.
+#
+# Outlook uebernimmt ein geaendertes Manifest ausschliesslich bei HOEHERER
+# Zahl – und **nur, wenn es neu installiert wird**: fuer Add-ins aus Datei oder
+# URL gibt es keine automatische Aktualisierung (``New-App -Url`` holt das
+# Manifest einmalig beim Installieren, ein ``Update-App`` existiert nicht).
+# Genau deshalb steht die Zahl unten auch in der Taskpane-URL: nur so kann das
+# Fenster merken, dass es aus einem veralteten Manifest geladen wurde.
+ADDIN_VERSION = "1.2.0.0"
 
 # Anforderungssatz. 1.3 ist die hoechste Stufe, die auf einem Exchange im Haus
 # durchweg verfuegbar ist; alles darueber (z.B. 1.14 fuer ein Aufgabenfenster
@@ -204,7 +216,21 @@ def manifest(basis: str) -> str:
         "Postfach hinterlegen, das Protokoll einsehen und die gerade "
         "geoeffnete Nachricht mit einer Regel verarbeiten."
     )
-    tp = "%s/addin/taskpane.html" % basis
+    # DIE MANIFEST-VERSION GEHT ALS ABFRAGEPARAMETER MIT. Office.js hat keine
+    # Schnittstelle, mit der ein Fenster die Version seines EIGENEN Manifests
+    # lesen koennte – dieser Umweg ist der einzige Weg dorthin. Das Fenster
+    # vergleicht den Wert mit ``GET /api/addin/version`` und weist ein
+    # veraltetes Manifest aus, statt monatelang stillschweigend mit einem zu
+    # laufen (siehe ``versionPruefen()`` in addin.js).
+    #
+    # Fehlt der Parameter, ist das ebenfalls eine Aussage: das Manifest ist
+    # aelter als diese Pruefung.
+    #
+    # Ein Abfrageteil in ``SourceLocation`` ist zulaessig – Office haengt dort
+    # selbst welche an (``_host_Info`` und weitere). **Kaeme je ein ZWEITER
+    # Parameter dazu, muss das ``&`` als ``&amp;`` in das XML**, sonst ist die
+    # Datei unlesbar und Exchange meldet nur "Das Manifest ist ungueltig".
+    tp = "%s/addin/taskpane.html?mv=%s" % (basis, ADDIN_VERSION)
     # XML VERBIETET "--" INNERHALB EINES KOMMENTARS – und ``x()`` kann das nicht
     # maskieren, weil es dafuer keine Entity gibt. Eine Umlaut-Domaene ist im
     # Punycode genau so geschrieben (``xn--mller-kva``), ebenso jeder Host mit

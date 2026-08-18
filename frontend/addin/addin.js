@@ -61,6 +61,12 @@
     var _editHeim = null;    // Heimatplatz des wandernden Formulars
     var _office = null;      // { betreff, von, id, internetId } oder null
     var _officeGrund = '';   // warum kein Kontext
+    var _updServer = '';     // Manifest-Version des Servers, sobald bekannt
+    var _officeDa = false;   // Office.context.mailbox war erreichbar. NICHT
+                             // dasselbe wie `_office`: das ist null, sobald
+                             // keine Nachricht markiert ist – wir liefen dann
+                             // trotzdem in Outlook. Genau diese Unterscheidung
+                             // braucht `versionPruefen()`.
     var _idToken = '';       // Exchange-Identity-Token (fuer die Anmeldung)
     var _ssoGrund = '';      // warum SSO nicht griff – nur zur Anzeige
     var _ssoProbiert = false; // Endlosschleife-Bremse: hoechstens EIN
@@ -297,6 +303,7 @@
                 clearTimeout(uhr);
                 var mb = null;
                 try { mb = Office.context && Office.context.mailbox; } catch (e) { mb = null; }
+                _officeDa = !!mb;
                 // Das Identity-Token ist die Grundlage der kennwortlosen
                 // Anmeldung und wird deshalb IMMER geholt – auch wenn gerade
                 // keine Nachricht markiert ist. Es haengt am Postfach, nicht
@@ -394,6 +401,104 @@
                 return false;
             })
             .catch(function () { return false; });
+    }
+
+    /* ── Veraltetes Manifest ausweisen ────────────────────────────────
+       DAS IST DER EINE TEIL, DER SICH NICHT VON SELBST AKTUALISIERT.
+       Aufgabenfenster, Logik und CSS liegen auf dem Server, werden mit
+       `no-store` ausgeliefert und erreichen jedes installierte Add-in beim
+       naechsten Oeffnen. Das MANIFEST dagegen (Menueband, Berechtigungen,
+       Anforderungssatz, URLs) wird von Microsoft bei einer Installation aus
+       Datei oder URL NIE aktualisiert – automatische Updates gibt es nur fuer
+       Add-ins aus dem Store. `New-App -Url` holt das Manifest einmalig beim
+       Installieren, ein `Update-App` gibt es nicht.
+
+       Office.js hat keine Schnittstelle, mit der ein Fenster die Version
+       seines EIGENEN Manifests lesen koennte. Deshalb steckt sie im
+       Abfrageteil der Taskpane-URL (`?mv=`, gesetzt in backend/addin.py) und
+       wird hier gegen `GET /api/addin/version` verglichen.
+
+       NICHTS BEHAUPTEN, WAS WIR NICHT WISSEN – dieselbe Regel wie beim
+       Trenner "Neue Sitzung" und beim Audit-Filter. Drei Faelle:
+         mv vorhanden und kleiner  → belegt veraltet, Versionen nennen
+         mv fehlt, aber Outlook da → belegt aelter als diese Pruefung, aber
+                                     WELCHE Fassung, wissen wir nicht
+         mv fehlt, kein Outlook    → das ist ein direkter Browseraufruf.
+                                     KEIN Band. */
+    function versionKleiner(a, b) {
+        // Segmentweise NUMERISCH. Ein String-Vergleich haette "1.10" fuer
+        // kleiner als "1.9" gehalten – und der Fehler faellt erst beim
+        // zehnten Manifest auf.
+        var x = String(a || '').split('.'), y = String(b || '').split('.');
+        var n = Math.max(x.length, y.length);
+        for (var i = 0; i < n; i++) {
+            var xi = parseInt(x[i], 10) || 0, yi = parseInt(y[i], 10) || 0;
+            if (xi !== yi) return xi < yi;
+        }
+        return false;
+    }
+    function manifestVersion() {
+        // Der Wert kommt aus der URL, ist also Fremdeingabe. Er wird nicht nur
+        // maskiert, sondern zuerst auf seine FORM geprueft: ein Muellwert in
+        // der Anzeige ist auch keine Information, und "unbekannt" ist die
+        // ehrlichere Auskunft.
+        var m = /[?&]mv=([^&]*)/.exec(location.search || '');
+        var v = m ? decodeURIComponent(m[1]) : '';
+        return /^[0-9]+(\.[0-9]+){0,3}$/.test(v) ? v : '';
+    }
+    /* Zeichnen ist vom Abruf GETRENNT, damit der Sprachwechsel das Band
+       uebersetzen kann, ohne den Server ein zweites Mal zu fragen: der Text
+       wird per innerHTML gesetzt, `applyLang()` erreicht ihn also nicht
+       (gleiche Lage wie beim Bereichskatalog). */
+    function zeichneUpdBand() {
+        var kasten = $('ad-upd');
+        if (!kasten) return;
+        var installiert = manifestVersion();
+        var server = _updServer;
+        var zeigen = server && (installiert ? versionKleiner(installiert, server)
+                                            : _officeDa);
+        if (!zeigen) { kasten.classList.add('hidden'); kasten.innerHTML = ''; return; }
+        var text;
+        if (installiert) {
+            text = T('addin.upd_text',
+                'Installiert ist {alt}, auf dem Server liegt {neu}. Es funktioniert alles weiter – es fehlen nur Änderungen am Menüband und an den Berechtigungen.')
+                .replace(/\{alt\}/g, installiert).replace(/\{neu\}/g, server);
+        } else {
+            text = T('addin.upd_unknown',
+                'Die installierte Fassung meldet ihre Version nicht – sie stammt aus der Zeit vor dieser Prüfung. Auf dem Server liegt {neu}. Es funktioniert alles weiter.')
+                .replace(/\{neu\}/g, server);
+        }
+        kasten.innerHTML =
+            '<div class="ad-upd-head">' + esc(T('addin.upd_head',
+                'Neue Fassung des Add-ins verfügbar')) + '</div>' +
+            '<div class="ad-upd-text">' + esc(text) + ' ' +
+            esc(T('addin.upd_how',
+                'Lade das Manifest herunter und füge es in Outlook erneut hinzu – oder wende dich an deine Administration.')) +
+            '</div>' +
+            // target=_blank: im Aufgabenfenster oeffnet Outlook den Link im
+            // Systembrowser, und dort landet die Datei (der Endpunkt setzt
+            // Content-Disposition). Ein Download im Fenster selbst ist je nach
+            // Client blockiert.
+            '<a class="ad-btn" href="/addin/manifest.xml" target="_blank"' +
+            ' rel="noopener noreferrer">' + esc(T('addin.upd_get',
+                'Manifest herunterladen')) + '</a>';
+        kasten.classList.remove('hidden');
+    }
+    function versionPruefen() {
+        // Ohne mv UND ohne Outlook-Kontext: direkter Aufruf im Browser. Dann
+        // gar nicht fragen – ein Band waere hier schlicht falsch, und genau das
+        // sieht jeder, der die Seite zum Pruefen aufruft.
+        if (!manifestVersion() && !_officeDa) return;
+        // Ohne Authorization-Kopf: der Endpunkt haengt an keiner Anmeldung, und
+        // der Hinweis soll auch VOR der Anmeldung gelten.
+        fetch('/api/addin/version', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                _updServer = (d && d.version) || '';
+                if (_updServer) zeichneUpdBand();
+            })
+            .catch(function () { /* Ein nicht erreichbarer Server ist kein
+                Anlass fuer eine Aussage ueber Versionen. */ });
     }
 
     /* ── Start ────────────────────────────────────────────────────────── */
@@ -511,6 +616,9 @@
             // Der Bereichskatalog kommt uebersetzt vom SERVER – applyLang()
             // erreicht ihn nicht (gleiche Lage wie im SAP-Katalog). Also neu
             // holen und alles neu zeichnen.
+            // Das Band wird per innerHTML gesetzt und von applyLang() nicht
+            // erreicht – ohne diese Zeile bliebe es in der Startsprache stehen.
+            zeichneUpdBand();
             var stand = formularStand();
             ladeStatus().then(function () {
                 zeichneNachricht();
@@ -1486,7 +1594,13 @@
         }
         // Erst den Outlook-Kontext (mit Zeitgrenze), dann anmelden/starten:
         // die Nachricht steht damit sofort da, statt nachzuflackern.
-        officeErmitteln().then(start);
+        officeErmitteln().then(function () {
+            start();
+            // NACH officeErmitteln, weil die Pruefung `_officeDa` braucht;
+            // unabhaengig von `start()`, weil sie ohne Anmeldung auskommt und
+            // auch auf dem Anmeldebildschirm gelten soll.
+            versionPruefen();
+        });
     }
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', los);

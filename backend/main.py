@@ -7812,6 +7812,32 @@ async def addin_manifest(request: Request):
         })
 
 
+@app.get("/api/addin/version")
+async def addin_version():
+    """Manifest-Version, die dieser Server AKTUELL ausliefert.
+
+    Gegenstueck zum Abfrageparameter ``mv`` in der Taskpane-URL: das Fenster
+    vergleicht beides und weist ein veraltetes Manifest aus. Warum es diesen
+    Umweg braucht: Office.js hat keine Schnittstelle, mit der ein Add-in die
+    Version seines eigenen Manifests lesen koennte, und ein Manifest aus Datei
+    oder URL wird von Microsoft **nicht** automatisch aktualisiert – ohne diese
+    Pruefung laeuft eine Installation beliebig lange mit einem alten Manifest,
+    ohne dass es jemandem auffaellt.
+
+    **Bewusst ohne Anmeldung**, gleiche Begruendung wie beim Manifest selbst:
+    der Wert steht in der frei abrufbaren ``/addin/manifest.xml`` ohnehin
+    drin, und der Hinweis soll auch VOR der Anmeldung im Fenster erscheinen –
+    wer an der Anmeldung haengenbleibt, hat womoeglich genau deshalb ein
+    veraltetes Manifest.
+    """
+    from backend import addin
+    return JSONResponse(
+        {"ok": True, "version": addin.ADDIN_VERSION},
+        # Ohne no-store beantwortet der Cache des Fensters die Frage "gibt es
+        # etwas Neues" mit der Antwort von gestern.
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
 @app.post("/api/addin/sso")
 async def addin_sso(request: Request):
     """Kennwortlose Anmeldung des Aufgabenfensters ueber ein Exchange-Token.

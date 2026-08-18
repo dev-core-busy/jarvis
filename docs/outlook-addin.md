@@ -293,13 +293,48 @@ Zeitplan. Die Hinweise in `CLAUDE.md` zum Injektionsschutz gelten unverändert.
 
 ## 7. Aktualisieren
 
-Änderungen am Aufgabenfenster (HTML/JS/CSS) wirken sofort – die Dateien liegen
-auf dem Server, das Add-in lädt sie bei jedem Öffnen.
+### Was sich von selbst aktualisiert
 
-**Ein neues Manifest muss nur ausgerollt werden, wenn sich das Manifest selbst
-ändert** (Knöpfe, Berechtigungen, Anforderungssatz). Dann in
-`backend/addin.py::ADDIN_VERSION` die Zahl erhöhen und die Datei neu verteilen –
-Outlook übernimmt ein geändertes Manifest nur bei höherer Versionsnummer.
+**Aufgabenfenster, Logik, CSS und Symbole** – ohne jedes Zutun. Die Dateien
+liegen auf diesem Server und werden mit `Cache-Control: no-store` ausgeliefert;
+ein Deploy erreicht damit jedes installierte Add-in beim nächsten Öffnen. Das
+ist der Teil, der sich ständig ändert, und `ADDIN_VERSION` muss dafür **nicht**
+erhöht werden.
+
+### Was sich nicht von selbst aktualisiert
+
+**Das Manifest** – also Menüband-Knopf, Berechtigungen, Anforderungssatz und
+die URLs. Microsoft aktualisiert Add-ins automatisch nur, wenn sie aus dem
+Store stammen; bei einer Installation aus **Datei oder URL** passiert nichts.
+Auch `New-App -Url` holt das Manifest **einmalig beim Installieren** – es gibt
+kein `Update-App`, und `Set-App` ändert nur Freigabe und Zustand.
+
+Ändert sich das Manifest also wirklich, sind zwei Schritte nötig:
+
+1. In `backend/addin.py::ADDIN_VERSION` die Zahl erhöhen (Outlook übernimmt ein
+   geändertes Manifest nur bei höherer Versionsnummer).
+2. Die Datei neu verteilen – Weg A oder B aus Abschnitt 4. Bei Weg B (zentral)
+   genügt ein `Remove-App` + `New-App` durch die Administration; bei Weg A muss
+   jeder Benutzer sein Add-in einmal neu hinzufügen.
+
+> **Änderungen an den Berechtigungen** verlangen zusätzlich eine erneute
+> Zustimmung durch die Administration – bis dahin ist das Add-in für die
+> Benutzer gesperrt. Unser Manifest bleibt deshalb bei `ReadItem`.
+
+### Das Fenster sagt selbst, wenn sein Manifest veraltet ist
+
+Die Manifest-Version steht im Abfrageteil der Taskpane-URL
+(`taskpane.html?mv=1.2.0.0`). Das Fenster vergleicht sie beim Start mit
+`GET /api/addin/version` und zeigt bei Abweichung oben ein Band mit
+Download-Knopf. Der Umweg über die URL ist nötig, weil Office.js keine
+Schnittstelle hat, mit der ein Add-in die Version seines eigenen Manifests
+lesen könnte.
+
+Das Band erscheint **nur, wenn die Abweichung belegt ist**: bei kleinerer `mv`
+mit beiden Versionsnummern, bei fehlender `mv` (Manifest von vor dieser
+Prüfung) mit dem ausdrücklichen Hinweis, dass die installierte Fassung ihre
+Version nicht meldet. Ein direkter Aufruf der Seite im Browser – ohne `mv` und
+ohne Outlook-Kontext – zeigt **kein** Band.
 
 Die Add-in-Kennung wird aus der Serveradresse abgeleitet und bleibt dabei
 stabil. Zwei Jarvis-Instanzen am selben Exchange kollidieren nicht.

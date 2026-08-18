@@ -106,6 +106,28 @@ for _i in 1 2 3 4 5 6 7 8 9 10; do
     [ "$_i" = "10" ] && { echo "   ❌ HTTPS nicht erreichbar"; ok=0; }
 done
 
+# Python-Module der Agent-Shell: bei einer Erstinstallation SICHTBAR und
+# synchron erledigen. Der Broker-Bootstrap (Schritt 6c) holt das ohnehin im
+# Hintergrund nach – hier soll der Administrator das Ergebnis aber SEHEN, weil
+# ein neuer Server sonst still ohne openpyxl/pdfplumber laeuft und der Agent
+# Excel- und PDF-Aufgaben erst dann nicht liefern kann, wenn ein Benutzer fragt.
+SANDBOX_PY="$(dirname "$0")/../sandbox_python.sh"
+if [ -f "$SANDBOX_PY" ]; then
+    step "Python-Module der Agent-Shell"
+    if bash "$SANDBOX_PY" --pruefen >/dev/null 2>&1; then
+        echo "   ✅ alle Module vorhanden"
+    else
+        # Ausgabe erst einsammeln, DANN filtern: eine Pipeline liefert den
+        # Exit-Code des letzten Glieds, der Fehlschlag waere unsichtbar.
+        _sbout="$(bash "$SANDBOX_PY" 2>&1)"; _sbrc=$?
+        printf '%s\n' "$_sbout" | tail -n 14 | sed 's/^/   /'
+        # KEIN Abbruch der Migration: der getrennte Betrieb steht auch ohne diese
+        # Module, es fehlen dann nur Excel-/PDF-Faehigkeiten in der Shell.
+        [ "$_sbrc" -eq 0 ] \
+            || echo "   ⚠️  fehlgeschlagen – spaeter 'bash deploy/sandbox_python.sh' nachholen"
+    fi
+fi
+
 echo ""
 if [ "$ok" = "1" ]; then
     echo "✅ Migration abgeschlossen: getrennter Betrieb aktiv."

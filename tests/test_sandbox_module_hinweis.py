@@ -65,6 +65,21 @@ def nur_code(text: str) -> str:
 
 CODE = nur_code(quelle)
 
+
+def abschnitt(text: str, von: str, bis: str) -> str:
+    """Textstueck zwischen zwei Marken - "" wenn eine Marke fehlt.
+
+    NIE .index() direkt: fehlt die Marke, bricht der Test mit ValueError ab und
+    die restlichen Pruefungen laufen nicht. Genau das ist bei einer Gegenprobe
+    passiert - der Lauf sah wie ein Erfolg aus, obwohl die Automatik ausgebaut
+    war. Ein Waechter muss FEHLSCHLAGEN, nicht abbrechen.
+    """
+    i = text.find(von)
+    if i < 0:
+        return ""
+    j = text.find(bis, i + len(von))
+    return text[i:j if j > 0 else len(text)]
+
 print("\n\033[1m1. Erkennung der Fehlermeldung\033[0m")
 echt = ("STDERR:\nTraceback (most recent call last):\n"
         "  File \"/tmp/extract_kim.py\", line 1, in <module>\n"
@@ -141,14 +156,13 @@ pruef("alle Ergebnis-Rueckgaben laufen durch _modul_hinweis",
       f"gefunden: {CODE.count('_modul_hinweis(result.strip())')}")
 pruef("kein Rueckgabepunkt umgeht den Hinweis",
       'return result.strip() or "(Keine Ausgabe)"' not in CODE)
-broker = CODE[CODE.index("_exec_via_broker(self"):]
+broker = abschnitt(CODE, "_exec_via_broker(self", "\nclass ")
 pruef("der Broker-Weg (Sandbox) ist verdrahtet",
       "_modul_hinweis" in broker)
 pruef("_modul_hinweis ist genau einmal definiert",
       CODE.count("def _modul_hinweis") == 1)
 pruef("Fehler in der Hinweis-Logik kippt den Befehl nicht",
-      "except Exception:" in quelle[quelle.index("def _modul_hinweis"):
-                                    quelle.index("class ShellTool")])
+      "except Exception:" in abschnitt(quelle, "def _modul_hinweis", "class ShellTool"))
 
 print("\n\033[1m6. Bereitstellungs-Skript\033[0m")
 pruef("deploy/sandbox_python.sh existiert", SKRIPT.exists())
@@ -200,8 +214,8 @@ print("\n\033[1m8. Prompt-Waechter: keine unhaltbare Zusage\033[0m")
 # Werkzeug zu nehmen - dieselbe Fehlerklasse wie beim alten WA_TASK_PROMPT:
 # eine Zusage, die der Code nicht haelt.
 AGENT_PY = (WURZEL / "backend" / "agent.py").read_text(encoding="utf-8")
-prompt_start = AGENT_PY.index("16. OFFICE-DOKUMENTE")
-PUNKT16 = AGENT_PY[prompt_start:AGENT_PY.index("17. CODE & SKRIPTE")]
+PUNKT16 = abschnitt(AGENT_PY, "16. OFFICE-DOKUMENTE", "17. CODE & SKRIPTE")
+pruef("Prompt-Punkt 16 ist auffindbar", bool(PUNKT16))
 
 pruef("kein absolutes Verbot mehr, ein fehlendes Modul zu benennen",
       "Behaupte NIEMALS, sie seien nicht installiert" not in PUNKT16
@@ -229,6 +243,82 @@ pruef("mindestens eine Zeile nennt office_create_excel OHNE Verbotswort",
       bool(_z_positiv), "Verbot und Aufforderung stehen in derselben Zeile")
 pruef("die office_*-Werkzeuge sind als backend-seitig gekennzeichnet",
       "IM BACKEND" in PUNKT16)
+
+print("\n\033[1m9. Automatik: kein Server bleibt zurueck\033[0m")
+# Der Nutzer hat weitere Jarvis-Server angekuendigt. Ein Skript, das jemand von
+# Hand ausfuehren muss, ist genau die Handarbeit, die DEV und ECHT auseinander
+# laufen liess - deshalb muss die Einrichtung an einem Automatismus haengen.
+ROOTSH = (WURZEL / "start_jarvis_root.sh").read_text(encoding="utf-8")
+SETUP = (WURZEL / "deploy" / "security" / "setup_broker.sh").read_text(encoding="utf-8")
+
+pruef("Root-Bootstrap ruft das Skript (laeuft als root bei jedem Broker-Start)",
+      "sandbox_python.sh" in ROOTSH)
+_block = abschnitt(ROOTSH, "# 6c.", "# 7.")
+pruef("die Automatik laeuft im HINTERGRUND (Broker-Socket wartet nicht)",
+      ") &" in _block)
+pruef("abschaltbar ueber JARVIS_SANDBOX_PY_AUTO",
+      "JARVIS_SANDBOX_PY_AUTO" in ROOTSH)
+pruef("Vorgabe ist AN (nur ein ausdrueckliches 0 schaltet ab)",
+      'JARVIS_SANDBOX_PY_AUTO:-1' in ROOTSH)
+pruef("prueft zuerst und installiert nur bei Bedarf (Start bleibt still)",
+      "--pruefen" in ROOTSH)
+# Ein Fehlschlag MUSS sichtbar sein - sonst laeuft der Server still ohne Module.
+pruef("ein Fehlschlag wird als WARNUNG gemeldet", "WARNUNG" in _block)
+pruef("die Warnung geht nach stderr", ">&2" in _block)
+# Der Fallstrick, in den ich zweimal gelaufen bin.
+pruef("Exit-Code wird NICHT aus einer Pipeline gelesen",
+      "RC=$?" in _block and "| grep" in _block
+      and 'if bash "$SANDBOX_PY" 2>&1 | grep' not in _block)
+pruef("Erstinstallation (setup_broker.sh) erledigt es sichtbar",
+      "sandbox_python.sh" in SETUP)
+pruef("ein Fehlschlag bricht die Broker-Migration NICHT ab",
+      "_sbrc" in SETUP and "exit 1" not in abschnitt(
+          SETUP, "Python-Module der Agent-Shell", "Migration abgeschlossen"))
+
+print("\n\033[1m10. Sichtbarkeit: die Pruefung im Backend\033[0m")
+sys.path.insert(0, str(WURZEL))
+import importlib
+_sbpy = importlib.import_module("backend.sandbox_python")
+
+# nur_code(): der Docstring des Moduls ERKLAERT sys.executable - ein Waechter,
+# der seine eigene Begruendung liest, prueft nichts (fuenfter Fall im Projekt).
+_SBPY_CODE = nur_code((WURZEL / "backend" / "sandbox_python.py").read_text(encoding="utf-8"))
+pruef("prueft /usr/bin/python3, NICHT sys.executable (das ist das venv)",
+      _sbpy.INTERPRETER == "/usr/bin/python3"
+      and "sys.executable" not in _SBPY_CODE)
+# DIE DRIFT-SCHRANKE: zwei Listen an zwei Orten laufen sonst auseinander - genau
+# das Muster, das diesen Vorfall verursacht hat.
+_skript_module = set(re.findall(r'"([A-Za-z0-9_]+):[A-Za-z0-9_.-]+"', skript))
+pruef("Modul-Liste im Backend deckt sich mit der im Skript",
+      set(_sbpy.MODULE) == _skript_module,
+      f"Backend: {sorted(set(_sbpy.MODULE) - _skript_module)} / "
+      f"Skript: {sorted(_skript_module - set(_sbpy.MODULE))}")
+pruef("jedes Modul hat eine Klartext-Erklaerung",
+      all(isinstance(v, str) and len(v) > 5 for v in _sbpy.MODULE.values()))
+
+# "unbekannt" ist NICHT "nichts fehlt" - ein unbekannter Zustand darf nicht als
+# gesund gemeldet werden (dieselbe Regel wie beim Mount-Status und beim
+# Sitzungs-Trenner).
+pruef("nicht ausfuehrbarer Interpreter liefert None, nicht []",
+      _sbpy.fehlende("/gibt/es/nicht") is None)
+pruef("und wird als 'Zustand unbekannt' gemeldet",
+      "unbekannt" in _sbpy.bericht("/gibt/es/nicht"))
+# Gegenprobe mit einem Interpreter, in dem alles vorhanden ist: der eigene.
+_eigen = _sbpy.fehlende(sys.executable)
+pruef("Pruefung liefert eine Liste, wenn der Interpreter laeuft",
+      isinstance(_eigen, list))
+pruef("kein Rauschen im Journal, wenn nichts fehlt",
+      _sbpy.bericht.__doc__ and "Leerer String" in _sbpy.bericht.__doc__)
+
+MAIN = (WURZEL / "backend" / "main.py").read_text(encoding="utf-8")
+pruef("Startup-Hook ist verdrahtet", "async def startup_sandbox_python" in MAIN)
+_hook = abschnitt(MAIN, "async def startup_sandbox_python", "@app.on_event")
+# Der Unterprozess darf den Event-Loop NICHT blockieren - genau daran hing 2026-08-11
+# der 20-Sekunden-Freeze von /api/knowledge/mounts.
+pruef("die Pruefung laeuft in einem Thread (kein Event-Loop-Block)",
+      "asyncio.to_thread" in _hook)
+pruef("ein Fehler bei der Pruefung kippt den Start nicht",
+      "except Exception" in _hook)
 
 print(f"\n{'─'*60}")
 print(f"  \033[1m{ok} bestanden, {fail} fehlgeschlagen\033[0m")

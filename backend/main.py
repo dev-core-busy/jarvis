@@ -8398,11 +8398,12 @@ async def email_reply_preview(request: Request,
     Die Nachricht wird aus dem Postfach des ANGEMELDETEN Benutzers geladen. Die
     Kennung im Rumpf waehlt die Nachricht, **nicht das Postfach**.
 
-    ``regel_id`` ist optional und dient nur als Ton-Vorgabe (der Prompt der
-    eigenen Regel); eine fremde Regel wird ignoriert, nicht abgelehnt – sie
-    beeinflusst hier nur die Formulierung.
+    ``stil`` waehlt einen benannten Antwort-Stil des Postfachs; leer = Standard,
+    ``"-"`` = ausdruecklich ohne Stil. Das frueher hier moegliche ``regel_id``
+    (Prompt einer eigenen Regel als "Ton") ist am 2026-08-18 entfallen – dafuer
+    gibt es die Stile, und zwei Wege zur selben Frage sind nur verwirrend.
     """
-    from backend import mail_client, mail_rules, mail_runner
+    from backend import mail_client, mail_runner
     hinweis = _email_skill_hinweis()
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
@@ -8416,17 +8417,10 @@ async def email_reply_preview(request: Request,
                                                    "(msg_id)."}, status_code=400)
     ordner = str((body or {}).get("ordner") or "").strip()
     hinw = str((body or {}).get("hinweis") or "").strip()[:500]
-    # Gewaehlter Antwort-Stil (Pulldown). Leer = Stil der gewaehlten Regel bzw.
-    # Standardstil; "-" = ausdruecklich ohne Stil.
+    # Gewaehlter Antwort-Stil (Pulldown). Leer = Standardstil, "-" = ohne Stil.
     stil_id = str((body or {}).get("stil") or "").strip()[:32]
-    regel = None
-    rid = str((body or {}).get("regel_id") or "").strip()
-    if rid:
-        r = mail_rules.holen(rid)
-        if r and r.get("owner") == mail_rules.norm_user(user):
-            regel = r
     try:
-        daten = await mail_runner.antwort_vorschlag(user, msg_id, ordner, regel,
+        daten = await mail_runner.antwort_vorschlag(user, msg_id, ordner,
                                                     hinw, stil_id)
     except mail_client.MailFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)

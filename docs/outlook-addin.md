@@ -191,10 +191,17 @@ in einem bearbeitbaren Feld. Gesendet wird erst mit **„Senden"** – oder mit
 **„Als Entwurf"**, wenn die Antwort noch in Outlook durchgesehen werden soll.
 **„Neu formulieren"** verwirft den Vorschlag und fragt erneut.
 
-Optional: ein **Stil** (siehe unten), ein **Hinweis** („freundlich absagen",
-„Termin bestätigen") und der **Ton einer eigenen Regel** – deren Prompt beschreibt
-ja bereits, wie geantwortet werden soll. Alles drei ist freiwillig; der Weg
-funktioniert auch, wenn noch gar keine Regel angelegt ist.
+Optional: ein **Stil** (siehe unten) und ein **Hinweis** für genau diese Antwort
+(„freundlich absagen", „Termin bestätigen"). Beides ist freiwillig; der Weg
+funktioniert auch, wenn noch gar keine Regel angelegt ist. Im leeren Hinweis-Feld
+übernimmt **Tab** den angezeigten Beispieltext, damit man ihn nur noch anpassen
+muss.
+
+> Die frühere Auswahl **„Ton einer Regel übernehmen"** ist am 18.08.2026
+> entfallen. Sie war der Behelf aus der Zeit, als es genau eine Vorgabe je
+> Postfach gab; mit wählbaren Stilen gibt es dafür ein eigenes Feld. Ein
+> Regel-Prompt beschreibt ohnehin eine **Handlung** („verschiebe nach …"), keinen
+> Ton – und zwei Wege zur selben Frage sind nur verwirrend.
 
 ### Stile für Antworten
 

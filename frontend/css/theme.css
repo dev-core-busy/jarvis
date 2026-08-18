@@ -210,3 +210,18 @@ select option:hover {
     font-style: italic;
     white-space: pre-wrap;
 }
+
+/* Hinweis "⇥ Tab übernimmt den Vorschlag" (frontend/js/tabfill.js).
+   Steht in theme.css und NICHT in style.css: die Felder liegen auf sechs
+   Seiten, und style.css laedt nur /settings und /wissen (gleiche Begruendung
+   wie bei `select option`). Dezent und einzeilig – der Hinweis erscheint nur,
+   solange das Feld leer und fokussiert ist. */
+.jv-tabfill-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.72rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+    opacity: 0.85;
+    pointer-events: none;
+}

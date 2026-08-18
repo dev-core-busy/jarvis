@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Short Tracks</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=12">
+    <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
+    <link rel="stylesheet" href="/static/css/avatar.css?v=8">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+        /* ═══════════════════════════════════════════════════════════════
+           Short Tracks (/tracks)
+           ───────────────────────────────────────────────────────────────
+           Titelleiste bewusst identisch zu /email, /sap und /support
+           (.topbar, .topbar-left/-right, .btn-theme, .lang-toggle) – wer
+           zwischen den Bereichen wechselt, findet die Knoepfe am selben Platz.
+
+           Praefix `st-` fuer alles hier (im Projekt frei; `sp-` gehoert SAP,
+           `em-` der E-Mail, `pt-` dem Portal, `ad-` dem Add-in).
+
+           Farben ausschliesslich ueber Theme-Variablen – kein hartes Violett
+           oder Weiss, sonst bricht das Branding und der Hell-Modus.
+           ═══════════════════════════════════════════════════════════════ */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); min-height: 100vh; }
+        .hidden { display: none !important; }
+
+        /* ── Titelleiste ── */
+        .topbar { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 16px; border-bottom: 1px solid var(--border);
+            background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 30; }
+        .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .topbar-right { display: flex; align-items: center; gap: 4px; }
+        .topbar-avatar { width: 32px; height: 32px; border-radius: 50%;
+            background: var(--gradient); display: flex; align-items: center;
+            justify-content: center; font-size: 14px; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+
+        /* Zustands-Pille. `align-self: flex-start` ist Pflicht – in einem
+           senkrechten Flex-Container wuerde sie sonst auf die ganze Breite
+           gezogen und saehe wie ein Eingabefeld aus (Fehler vom 2026-08-11
+           beim Standort-Sync). */
+        .st-pill { display: inline-flex; align-items: center; gap: 6px;
+            align-self: flex-start;
+            padding: 3px 10px; border-radius: 12px; font-size: .74rem; font-weight: 600;
+            background: rgba(var(--fg-rgb), .06); border: 1px solid var(--border);
+            color: var(--text-secondary); white-space: nowrap; }
+        .st-pill.is-ok { color: var(--success);
+            border-color: color-mix(in srgb, var(--success) 45%, transparent);
+            background: color-mix(in srgb, var(--success) 12%, transparent); }
+        .st-pill.is-run { color: var(--accent);
+            border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+            background: color-mix(in srgb, var(--accent) 12%, transparent); }
+        .st-pill.is-bad { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+        .st-pill:empty { display: none; }
+
+        /* Farbe ueber die Theme-Variable, nicht als Festwert: die uebrigen
+           Bereichsseiten tragen hier historisch ein hartes #888899 samt
+           body.light-Ausnahme – mit `--text-muted` folgt der Knopf dem Branding
+           und braucht keine zweite Regel fuer den Hell-Modus. */
+        .btn-theme { background: none; border: none; color: var(--text-muted);
+            padding: 4px 8px; border-radius: 8px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: color .2s, background .2s; }
+        .btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
+        .btn-theme svg { width: 20px; height: 20px; }
+
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), .05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), .1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: .72rem; font-weight: 700; letter-spacing: .04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: var(--font-body);
+            transition: background .15s, color .15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
+
+        /* ── Feld-Erklaerung (ⓘ) ──
+           Aufklappender Text unter dem Feld, kein schwebendes Popup: auf
+           schmalen Fenstern wuerde ein positioniertes Popup abgeschnitten oder
+           verdeckt das Feld. `title`-Attribute scheiden aus (auf Touch
+           unerreichbar). Monochromes Textzeichen statt Emoji (Regel aus
+           .kb-hdr-btn). */
+        .st-info { background: none; border: none; cursor: pointer; padding: 0 0 0 5px;
+            color: var(--text-muted); font-size: .9rem; line-height: 1;
+            font-family: var(--font-body); vertical-align: baseline; }
+        .st-info:hover, .st-info[aria-expanded="true"] { color: var(--accent); }
+        .st-help { display: none; margin-top: 4px; padding: 8px 10px;
+            border-radius: 8px; font-size: .8rem; line-height: 1.5;
+            color: var(--text-secondary); background: var(--bg-secondary);
+            border: 1px solid var(--border); border-left: 3px solid var(--accent); }
+        .st-help.is-open { display: block; }
+        /* Aufzaehlungen im Hilfe-Kasten brauchen eigenen Einzug, sonst stehen
+           die Punkte links AUSSERHALB des Kastens. */
+        .st-help ul { margin: 6px 0 2px; padding-left: 1.15rem; }
+        .st-help li { margin-bottom: 4px; }
+        .st-help b, .st-help strong { color: var(--text-secondary); }
+
+        /* `text-decoration: none`, weil auch <a> diese Klasse tragen kann –
+           ein unterstrichener Knopf sieht aus wie ein Textlink im Knopf. */
+        .st-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+            font-size: .85rem; display: inline-flex; align-items: center; gap: 6px;
+            font-family: var(--font-body); white-space: nowrap; text-decoration: none;
+            flex: 0 0 auto; }
+        .st-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .st-btn:disabled { opacity: .5; cursor: default; }
+        /* `flex: 0 0 auto` ist Pflicht: .btn-primary-artige Knoepfe in einer
+           Flex-Zeile wuerden sich sonst ueber die ganze Breite strecken. */
+        .st-btn-primary { background: var(--gradient); border: none; color: #fff; font-weight: 600; }
+        .st-btn-primary:hover { filter: brightness(1.08); color: #fff; }
+        .st-btn-danger { color: var(--danger);
+            border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+        .st-btn-danger:hover { border-color: var(--danger); color: var(--danger);
+            background: color-mix(in srgb, var(--danger) 10%, transparent); }
+
+        /* ── Inhalt ── */
+        .st-wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+        .st-card { background: var(--bg-glass); border: 1px solid var(--border);
+            border-radius: var(--radius-md); padding: 16px 18px; margin-bottom: 16px; }
+        .st-card h2 { font-size: 1.02rem; font-weight: 600; margin-bottom: 4px; }
+
+        /* Einklappbare Karten – Muster wie `.kb-section` in den Einstellungen.
+           REIHENFOLGE IST PFLICHT: Titel zuerst, Pfeil als zweites Kind. Bei
+           `space-between` schoebe die umgekehrte Reihenfolge den Titel an den
+           rechten Rand (Fehler vom 2026-08-13 im Add-in-Fenster). */
+        .st-card-head { display: flex; align-items: center; justify-content: space-between;
+            gap: 10px; cursor: pointer; user-select: none; }
+        .st-card-head:hover h2 { color: var(--accent); }
+        .st-card-head:focus-visible { outline: 2px solid var(--accent);
+            outline-offset: 3px; border-radius: 6px; }
+        .st-card-head h2 { margin-bottom: 0; }
+        .st-caret { color: var(--text-muted); font-size: .8rem; flex: 0 0 auto;
+            transition: transform .15s; }
+        .st-card.is-zu .st-caret { transform: rotate(-90deg); }
+        .st-card.is-zu .st-card-body { display: none; }
+        .st-card-body { padding-top: 4px; }
+        .st-hint { color: var(--text-muted); font-size: .82rem; line-height: 1.55; }
+        .st-sep { height: 1px; background: var(--border); margin: 14px 0; }
+        .st-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+        /* `.st-row` setzt display:flex und wuerde das `hidden`-Attribut
+           ueberstimmen (Fallstrick vom 2026-08-17 im SAP-Bereich). */
+        .st-row[hidden] { display: none; }
+        .st-status { font-size: .8rem; color: var(--text-muted); }
+
+        /* ── Das Brett: eine Karte je Ablage ── */
+        /* `align-items: start` ist Pflicht: ohne es streckt das Grid jede Karte
+           auf die Hoehe der hoechsten ihrer Zeile – eine Ablage mit langer
+           Auftragsliste zieht dann ihre Nachbarn mit und hinterlaesst grosse
+           Leerflaechen (im Screenshot vom 2026-08-18 gesehen). */
+        .st-board { display: grid; gap: 14px; align-items: start;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+        .st-dump { border: 1px solid var(--border); border-radius: var(--radius-md);
+            background: rgba(var(--fg-rgb), .02); display: flex; flex-direction: column;
+            overflow: hidden; }
+        .st-dump.is-off { opacity: .55; }     /* Deckkraft, keine harte Farbe */
+        .st-dump-head { display: flex; align-items: flex-start; gap: 8px;
+            padding: 12px 14px 8px; }
+        .st-dump-main { flex: 1 1 auto; min-width: 0; }
+        .st-dump-name { font-weight: 600; font-size: .95rem; }
+        .st-dump-desc { font-size: .78rem; color: var(--text-muted); margin-top: 2px;
+            line-height: 1.45; }
+        .st-dump-acts { display: flex; gap: 4px; flex: 0 0 auto; }
+        .st-icon-btn { background: none; border: 1px solid var(--border);
+            color: var(--text-secondary); width: 28px; height: 28px; border-radius: 8px;
+            cursor: pointer; display: inline-flex; align-items: center;
+            justify-content: center; font-size: .85rem; flex: 0 0 auto; }
+        .st-icon-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .st-icon-btn.is-danger:hover { border-color: var(--danger); color: var(--danger);
+            background: color-mix(in srgb, var(--danger) 10%, transparent); }
+
+        /* Marke „für alle" – an Zeichen UND Text erkennbar, nicht nur an der
+           Farbe (Farbe allein ist fuer Farbfehlsichtige keine Information). */
+        .st-badge { display: inline-block; padding: 1px 7px; border-radius: 10px;
+            font-size: .68rem; font-weight: 600; background: rgba(var(--fg-rgb), .08);
+            color: var(--text-secondary); margin-left: 6px; white-space: nowrap; }
+        .st-badge.is-global { background: color-mix(in srgb, var(--accent) 18%, transparent);
+            color: var(--accent); }
+
+        /* Die Ablagefläche selbst. Gestrichelter Rahmen als Einladung; beim
+           Ziehen darüber wird sie deutlich hervorgehoben (Farbe UND Text). */
+        .st-drop { margin: 0 14px 10px; padding: 18px 12px; border-radius: 10px;
+            border: 2px dashed var(--border); text-align: center; cursor: pointer;
+            color: var(--text-muted); font-size: .84rem; line-height: 1.5;
+            transition: border-color .15s, background .15s, color .15s; }
+        .st-drop:hover { border-color: var(--accent); color: var(--text-secondary); }
+        .st-drop.is-over { border-color: var(--accent); color: var(--accent);
+            background: color-mix(in srgb, var(--accent) 10%, transparent); }
+        /* Eine abgeschaltete Ablage nimmt nichts an (der Server weist den Drop
+           mit 404 ab). Die Flaeche darf dann auch nicht zum Versuch einladen –
+           sonst ist der Fehlgriff vorprogrammiert und die Meldung ("nicht
+           gefunden") fuer den Benutzer nicht deutbar. */
+        .st-dump.is-off .st-drop { cursor: default; border-style: solid; }
+        .st-dump.is-off .st-drop:hover { border-color: var(--border);
+            color: var(--text-muted); background: none; }
+        .st-drop-arrow { display: block; font-size: 1.3rem; margin-bottom: 4px; }
+        .st-drop-types { display: block; margin-top: 4px; font-size: .74rem; }
+
+        .st-dump-foot { padding: 0 14px 12px; }
+        .st-note { width: 100%; padding: .45rem .55rem; border-radius: 8px;
+            border: 1px solid var(--border); background: rgba(var(--fg-rgb), .04);
+            color: var(--text-primary); font-family: inherit; font-size: .82rem;
+            resize: vertical; min-height: 2.2rem; }
+        .st-note:focus { outline: none; border-color: var(--accent); }
+
+        /* ── Auftraege in der Karte ── */
+        .st-jobs { border-top: 1px solid var(--border); padding: 8px 14px 4px; }
+        .st-job { padding: 7px 0; border-bottom: 1px solid rgba(var(--fg-rgb), .06);
+            font-size: .82rem; }
+        .st-job:last-child { border-bottom: none; }
+        .st-job-head { display: flex; gap: 8px; align-items: baseline; }
+        .st-job-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+        .st-job-state { flex: 0 0 auto; font-size: .74rem; color: var(--text-muted);
+            white-space: nowrap; }
+        .st-job.is-run .st-job-state { color: var(--accent); }
+        .st-job.is-bad .st-job-state { color: var(--danger); }
+        .st-job-step { font-size: .74rem; color: var(--text-muted); margin-top: 2px; }
+        .st-job-res { color: var(--text-secondary); margin-top: 3px; line-height: 1.5;
+            white-space: pre-wrap; word-break: break-word; }
+        .st-job.is-bad .st-job-res { color: var(--danger); }
+        .st-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
+        .st-chip { display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 9px; border-radius: 12px; font-size: .76rem;
+            border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+            background: color-mix(in srgb, var(--accent) 10%, transparent);
+            color: var(--accent); text-decoration: none; }
+        .st-chip:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+        /* ── Formular (wandert unter die bearbeitete Karte) ──
+           `grid-column: 1 / -1` IST PFLICHT: das Formular ist ein Kind des
+           Karten-Rasters (es wird per insertBefore hinter seine Karte gesetzt)
+           und bekaeme sonst eine Spaltenbreite von ~330 px. Im Screenshot vom
+           2026-08-18 war dadurch die Kurzbeschreibung abgeschnitten, das
+           Pulldown „Mehrere Dateien" unlesbar und die Bereichs-Kaestchen
+           zweispaltig in 330 px gequetscht – dieselbe Klassen-Falle wie
+           `.role-tools` bei den Rollen-Agenten und `.input-group` im
+           Rollen-Formular. */
+        .st-form { grid-column: 1 / -1;
+            border: 1px solid var(--border); border-radius: var(--radius-md);
+            background: rgba(var(--fg-rgb), .02); padding: 14px; margin-bottom: 4px; }
+        .st-grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+        .st-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+        @media (max-width: 760px) { .st-grid, .st-grid-3 { grid-template-columns: 1fr; } }
+        .st-field { display: flex; flex-direction: column; gap: 4px; }
+        .st-field label { font-size: .78rem; font-weight: 600; color: var(--text-secondary); }
+        .st-field input, .st-field select, .st-field textarea {
+            width: 100%; padding: .5rem .6rem; border-radius: 8px;
+            border: 1px solid var(--border); background: rgba(var(--fg-rgb), .04);
+            color: var(--text-primary); font-family: inherit; font-size: .85rem; }
+        .st-field textarea { resize: vertical; min-height: 9rem; line-height: 1.5; }
+        .st-field input:focus, .st-field select:focus, .st-field textarea:focus {
+            outline: none; border-color: var(--accent); }
+        .st-field-full { grid-column: 1 / -1; }
+
+        /* Bereichs-Kaesten: hoechstens ZWEI Spalten. `auto-fill` ergab bei den
+           mehrzeiligen Beschreibungen fuenf gequetschte Spalten (Fehler vom
+           2026-08-13 im E-Mail-Bereich). */
+        .st-areas { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        @media (max-width: 760px) { .st-areas { grid-template-columns: 1fr; } }
+        .st-areas label { display: flex; gap: 8px; align-items: flex-start;
+            padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px;
+            font-size: .8rem; cursor: pointer; }
+        .st-areas label:hover { background: rgba(var(--fg-rgb), .06); }
+        .st-areas input[type="checkbox"] { width: auto; margin-top: 2px; flex: 0 0 auto; }
+        .st-areas label.is-locked { opacity: .6; cursor: default; }
+        .st-area-hint { display: block; color: var(--text-muted); font-size: .74rem;
+            line-height: 1.45; margin-top: 2px; }
+
+        /* ── Protokoll ── */
+        .st-scroll { max-height: 320px; overflow-y: auto; padding-right: 6px;
+            border-bottom: 1px solid var(--border); }
+        .st-log-row { padding: 8px 0; border-bottom: 1px solid rgba(var(--fg-rgb), .06);
+            font-size: .82rem; }
+        .st-log-row:last-child { border-bottom: none; }
+        .st-log-head { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+        .st-log-time { color: var(--text-muted); font-size: .74rem; white-space: nowrap; }
+        .st-log-res { color: var(--text-secondary); margin-top: 3px; line-height: 1.5;
+            white-space: pre-wrap; word-break: break-word; }
+        .st-log-row.is-bad .st-log-res { color: var(--danger); }
+        .st-empty { padding: 22px 14px; text-align: center; color: var(--text-muted);
+            font-size: .86rem; line-height: 1.6; }
+        code { font-size: .82em; padding: 1px 4px; border-radius: 4px;
+            background: rgba(var(--fg-rgb), .08); }
+
+        /* Rueckmeldung nach einem Drop. DECKENDE Flaeche – sie liegt ueber dem
+           Karteninhalt und muss in Hell wie Dunkel lesbar sein (gleiche Lehre
+           wie bei den Panels und der Audit-Kopfzeile). */
+        .st-toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+            z-index: 60; max-width: 90vw; padding: 10px 16px; border-radius: 10px;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            color: var(--text-primary); font-size: .85rem; line-height: 1.5;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .3); pointer-events: none; }
+        .st-toast.is-bad { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+    </style>
+</head>
+<body>
+<script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+
+<div id="st-app" class="hidden">
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-avatar">J</div>
+            <span class="topbar-title"><span class="brand-app-name">Jarvis</span>
+                <span data-i18n="tracks.portal_title">Short Tracks</span></span>
+            <span class="st-pill" id="st-queue-pill"></span>
+        </div>
+        <div class="topbar-right">
+            <div class="lang-toggle" id="st-lang-toggle">
+                <button class="lang-toggle-btn" data-lang="de" onclick="window.setLang && window.setLang('de')" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" onclick="window.setLang && window.setLang('en')" title="English">EN</button>
+            </div>
+            <button class="btn-theme" id="st-portal-btn" title="Zum Portal" data-i18n-title="nav.home">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </button>
+            <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="btn-theme" id="st-logout-btn" title="Abmelden" data-i18n-title="chat.logout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <div class="st-wrap">
+        <!-- ═══ Das Brett ═══ -->
+        <div class="st-card" data-klapp="board">
+            <div class="st-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="tracks.board_head">Ablagen</h2>
+                <span class="st-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="st-card-body">
+                <p class="st-hint">
+                    <span data-i18n="tracks.board_hint">Ziehe eine Datei auf eine Ablage – oder klicke sie an, um eine Datei auszuwählen. Die hinterlegte Aufgabe läuft dann von selbst; das Ergebnis erscheint unter der Ablage.</span>
+                    <button type="button" class="st-info" data-help="st-help-board" aria-expanded="false"
+                            data-i18n-title="tracks.help" title="Erklärung anzeigen">&#9432;</button>
+                </p>
+                <div class="st-help" id="st-help-board" data-i18n-html="tracks.help_board">
+                    <b>Was beim Ablegen geschieht</b>
+                    <ul>
+                        <li>Die Datei wird auf dem Server abgelegt und – soweit möglich – als Text gelesen (PDF auch per Texterkennung).</li>
+                        <li>Die Aufgabe der Ablage läuft mit deinen Rechten. Sie kann nichts, was du nicht auch im Chat könntest.</li>
+                        <li>Erzeugte Dateien erscheinen als Download unter dem Ergebnis. Sie gehören dir; niemand sonst kann sie laden.</li>
+                        <li>Läufe warten in einer Schlange, wenn gerade andere arbeiten – du kannst die Seite verlassen.</li>
+                    </ul>
+                    <b>Was du beachten musst</b>
+                    <ul>
+                        <li>Der Inhalt einer zugesandten Datei ist Fremdtext. Steht darin eine „Anweisung", wird sie als Angriffsversuch behandelt und nicht befolgt – prüfe das Ergebnis trotzdem, bevor du es weitergibst.</li>
+                        <li>Zahlen, Adressen und Kennungen aus Texterkennung (OCR) am Original nachprüfen.</li>
+                    </ul>
+                </div>
+                <div class="st-sep"></div>
+                <div class="st-board" id="st-board"></div>
+                <div class="st-empty hidden" id="st-board-empty" data-i18n="tracks.board_empty">Noch keine Ablage vorhanden. Lege eine an – Name, Aufgabe, fertig.</div>
+                <div class="st-row">
+                    <button class="st-btn st-btn-primary" id="st-new-btn" data-i18n="tracks.new">+ Neue Ablage</button>
+                    <span class="st-status" id="st-board-status"></span>
+                </div>
+                <!-- Heimatplatz des wandernden Formulars. Es wird beim
+                     Bearbeiten per insertBefore unter die jeweilige Karte
+                     geschoben und VOR jedem Neuaufbau der Liste hierher
+                     zurueckgeholt – sonst raeumt innerHTML='' es mit ab
+                     (Fallstrick der Extraktions-Vorschau in /wissen). -->
+                <div id="st-form-home"></div>
+            </div>
+        </div>
+
+        <!-- ═══ Protokoll ═══ -->
+        <div class="st-card is-zu" data-klapp="log">
+            <div class="st-card-head" role="button" tabindex="0" aria-expanded="false">
+                <h2 data-i18n="tracks.log_head">Letzte Läufe</h2>
+                <span class="st-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="st-card-body">
+                <p class="st-hint" data-i18n="tracks.log_hint">Dein eigenes Protokoll – fremde Läufe sind nicht sichtbar. Wie lange die Einträge vorgehalten werden, entscheidet ausschließlich ihr Alter; es gibt keine Mengengrenze.</p>
+                <div class="st-sep"></div>
+                <div id="st-log"></div>
+                <div class="st-row">
+                    <button class="st-btn" id="st-log-reload" data-i18n="tracks.reload">Neu laden</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Verstecktes Eingabefeld fuer den Klick-Weg (Datei auswaehlen statt ziehen) -->
+<input type="file" id="st-file-input" multiple class="hidden">
+
+<script src="/static/js/i18n.js?v=50"></script>
+<script src="/static/js/tabfill.js?v=2"></script>
+<script src="/static/js/theme.js?v=2"></script>
+<script src="/static/js/branding.js?v=24"></script>
+<script src="/static/js/sessions.js?v=6"></script>
+<script src="/static/js/tracks.js?v=1"></script>
+<!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
+     Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der
+     Theme-Knopf oben diese Id tragen. -->
+<script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/clippy/clippy.min.js"></script>
+<script src="/static/js/avatar.js?v=13"></script>
+<script src="/static/js/activity.js?v=2"></script>
+</body>
+</html>

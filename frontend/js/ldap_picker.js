@@ -23,7 +23,9 @@
         'sap-allowed-users':          { kind: 'users',  multi: true, sep: ',',  list: true },
         'sap-allowed-group':          { kind: 'groups', multi: true, sep: '\n', list: true },
         'email-allowed-users':        { kind: 'users',  multi: true, sep: ',',  list: true },
-        'email-allowed-group':        { kind: 'groups', multi: true, sep: '\n', list: true }
+        'email-allowed-group':        { kind: 'groups', multi: true, sep: '\n', list: true },
+        'tracks-allowed-users':       { kind: 'users',  multi: true, sep: ',',  list: true },
+        'tracks-allowed-group':       { kind: 'groups', multi: true, sep: '\n', list: true }
     };
 
     var _cred = { user: '', password: '' };

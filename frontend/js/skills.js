@@ -82,6 +82,7 @@
         jira:              'jira',
         sap:               'sap',
         email:             'email',
+        'short-tracks':    'tracks',
         kundenverwaltung:  'kundenverwaltung',
         support_assistant: 'support',
         knowledge:         'knowledge',
@@ -810,6 +811,7 @@
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
                 if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
                 if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
+                if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit
@@ -921,6 +923,7 @@
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
                 if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
                 if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
+                if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit
@@ -1034,6 +1037,7 @@
                 if (typeof window.updateJiraTabVisibility === 'function') window.updateJiraTabVisibility();
                 if (typeof window.updateSapTabVisibility === 'function') window.updateSapTabVisibility();
                 if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
+                if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit

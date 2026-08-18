@@ -172,6 +172,14 @@ _APP_DENY_REL = (
     # administrativen – Benutzer eintragen und sich anschliessend als dieser
     # anmelden. Das ist die direkteste Rechteerhoehung im ganzen Verzeichnis.
     "data/addin_links.json",
+    # Short Tracks (backend/short_tracks.py): `short_tracks.json` enthaelt die
+    # Prompts ALLER Benutzer samt ihrem Werkzeug-Zuschnitt. SCHREIBEN waere der
+    # Weg, sich einen Dump mit dem Bereich `shell` anzulegen (oder einen fremden
+    # darauf umzustellen) und ihn beim naechsten Ablegen unter der Kennung des
+    # dortigen Benutzers laufen zu lassen – dasselbe Persistenz-Substrat wie
+    # data/instructions und email_rules.json. `short_tracks_log.jsonl` enthaelt
+    # Dateinamen und Ergebnistexte fremder Laeufe.
+    "data/short_tracks.json", "data/short_tracks_log.jsonl",
 )
 
 
@@ -206,7 +214,8 @@ PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/knowledge_sync.json",
                  "data/email_accounts.json", "data/email_rules.json",
                  "data/email_state.json", "data/email_log.jsonl",
-                 "data/addin_links.json", "data/sap_accounts.json")
+                 "data/addin_links.json", "data/sap_accounts.json",
+                 "data/short_tracks.json", "data/short_tracks_log.jsonl")
 PRIVATE_FILE_MODE = 0o640
 
 # Die Schluesseldateien der E-Mail-/SAP-Zugangsdaten sind strenger als 0640: sie
@@ -400,6 +409,10 @@ SHELL_SECRET_PATHS = re.compile(
     # Persoenliche SAP-Zugaenge: sap_accounts.json + .sapkey ergeben zusammen die
     # Klartext-Kennwoerter der SAP-Benutzer.
     r'sap_accounts\.json\b|\.sapkey\b|'
+    # Short Tracks: fremde Dump-Prompts samt Werkzeug-Zuschnitt (beschreibbar
+    # waere das ein Dump mit `shell` unter fremder Kennung) und die
+    # Ergebnistexte fremder Laeufe.
+    r'short_tracks\.json\b|short_tracks_log\.jsonl\b|'
     # data/chats: fremde Chat-Verlaeufe (in der Shell zusaetzlich per 0750 gesperrt)
     r'data/chats\b|'
     r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'

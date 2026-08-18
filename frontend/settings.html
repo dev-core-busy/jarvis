@@ -1521,6 +1521,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <button class="settings-tab-btn" data-settings-tab="jira" id="settings-tab-btn-jira" style="display:none;">Jira</button>
                 <button class="settings-tab-btn" data-settings-tab="sap" id="settings-tab-btn-sap" style="display:none;">SAP</button>
                 <button class="settings-tab-btn" data-settings-tab="email" id="settings-tab-btn-email" style="display:none;" data-i18n="settings.tab.email">E-Mail</button>
+                <button class="settings-tab-btn" data-settings-tab="tracks" id="settings-tab-btn-tracks" style="display:none;" data-i18n="settings.tab.tracks">Short Tracks</button>
                 <button class="settings-tab-btn" data-settings-tab="kundenverwaltung" id="settings-tab-btn-kundenverwaltung" style="display:none;" data-i18n="settings.tab.kundenverwaltung">Kundenverwaltung</button>
                 <button class="settings-tab-btn" data-settings-tab="support" id="settings-tab-btn-support" style="display:none;">Support</button>
                 <button class="settings-tab-btn" data-settings-tab="google" id="settings-tab-btn-google" style="display:none;" data-i18n="settings.tab.google">Google</button>
@@ -3151,6 +3152,77 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 </div>
 
                 <!-- ═══ Tab: Kundenverwaltung ═══ -->
+                <!-- ══ Short Tracks (Admin) ══
+                     Hier stehen die Dinge, die ALLE Benutzer betreffen: Grenzen
+                     und die Freigabe der Werkzeug-Bereiche. Die Ablagen selbst
+                     pflegt jeder im Bereich /tracks – auch der Administrator
+                     (dort sieht er, was er anlegt). Dieser Reiter zeigt
+                     absichtlich KEINE fremden Prompts: er ist zum Einrichten da,
+                     nicht zum Mitlesen (gleiche Entscheidung wie beim
+                     E-Mail-Reiter). -->
+                <div id="settings-tab-tracks" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint" data-i18n-html="tracksadm.intro">Der Bereich <b>Short Tracks</b> stellt jedem Benutzer <b>Ablagen</b> zur Verfügung: Felder mit einer hinterlegten Aufgabe. Wer eine Datei darauf zieht, löst sie aus. <b>Der Lauf trägt immer die Rechte dessen, der ablegt</b> – nie mehr. Die Ablagen selbst werden im Bereich <b>Short Tracks</b> (Kachel im Portal) gepflegt; hier stehen nur die Vorgaben für alle.</p>
+
+                        <div class="kb-section" id="tr-sect-limits">
+                            <div class="kb-section-header kb-collapse-header" id="tr-sect-limits-hdr">
+                                <h3 data-i18n="tracksadm.sect_limits">Grenzen</h3>
+                                <span class="sk-openclaw-toggle" id="tr-sect-limits-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="tr-sect-limits-body">
+                                <div class="form-group">
+                                    <label data-i18n="tracksadm.l_parallel">Gleichzeitige Aufträge (1–8)</label>
+                                    <input type="number" id="tr-l-parallel" min="1" max="8">
+                                    <span class="kb-hint" data-i18n="tracksadm.l_parallel_hint">Alles Weitere wartet sichtbar in einer Schlange. Höhere Werte bremsen Chat und Wissens-Indexierung, weil PDF-Textprüfung und Texterkennung auf demselben Server laufen.</span>
+                                </div>
+                                <div class="form-group">
+                                    <label data-i18n="tracksadm.l_size">Größe je Datei in MB (1–500)</label>
+                                    <input type="number" id="tr-l-size" min="1" max="500">
+                                </div>
+                                <div class="form-group">
+                                    <label data-i18n="tracksadm.l_files">Dateien je Ablage-Vorgang (1–100)</label>
+                                    <input type="number" id="tr-l-files" min="1" max="100">
+                                </div>
+                                <div class="form-group">
+                                    <label data-i18n="tracksadm.l_dumps">Eigene Ablagen je Benutzer (1–100)</label>
+                                    <input type="number" id="tr-l-dumps" min="1" max="100">
+                                    <span class="kb-hint" data-i18n="tracksadm.l_dumps_hint">Notbremse gegen versehentliches Anlegen in Serie. Globale Ablagen sind davon nicht betroffen (Grenze dort: 30).</span>
+                                </div>
+                                <button class="btn-primary" id="tr-save-limits" data-i18n="tracksadm.save_limits">Grenzen speichern</button>
+                                <span class="kb-hint" id="tr-msg-limits"></span>
+                            </div>
+                        </div>
+
+                        <div class="kb-section" id="tr-sect-areas">
+                            <div class="kb-section-header kb-collapse-header" id="tr-sect-areas-hdr">
+                                <h3 data-i18n="tracksadm.sect_areas">Werkzeug-Bereiche freischalten</h3>
+                                <span class="sk-openclaw-toggle" id="tr-sect-areas-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="tr-sect-areas-body">
+                                <p class="kb-hint" data-i18n-html="tracksadm.areas_hint">Ein Benutzer kann je Ablage nur aus den hier freigeschalteten Bereichen wählen. <b>Ohne Freigabe gilt allein „Lesen + Dokumente erzeugen"</b> – das ist die Vorgabe und die engste Einstellung. Der Inhalt einer abgelegten Datei ist Fremdtext: je weiter der Werkzeugkasten, desto größer die Angriffsfläche einer präparierten Datei. <b>„Shell / Python" ist der weiteste Bereich</b> und sollte nur dort freigeschaltet werden, wo Tabellen-Auswertungen wirklich gebraucht werden.</p>
+                                <div id="tr-areas"></div>
+                                <button class="btn-primary" id="tr-save-areas" data-i18n="tracksadm.save_areas">Freigabe speichern</button>
+                                <span class="kb-hint" id="tr-msg-areas"></span>
+                            </div>
+                        </div>
+
+                        <div class="kb-section" id="tr-sect-over">
+                            <div class="kb-section-header kb-collapse-header" id="tr-sect-over-hdr">
+                                <h3 data-i18n="tracksadm.sect_over">Übersicht</h3>
+                                <span class="sk-openclaw-toggle" id="tr-sect-over-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="tr-sect-over-body">
+                                <p class="kb-hint" data-i18n="tracksadm.over_hint">Globale Ablagen und die Anzahl der eigenen Ablagen je Benutzer. Deren Aufgaben-Texte werden hier absichtlich nicht angezeigt.</p>
+                                <div id="tr-over"></div>
+                                <div class="form-group" style="margin-top:12px;">
+                                    <button class="btn-secondary" id="tr-reload" data-i18n="tracksadm.reload" style="width:auto;">Neu laden</button>
+                                    <button class="btn-secondary" id="tr-stop" data-i18n="tracksadm.stop" style="width:auto;">Laufende Aufträge abbrechen</button>
+                                    <span class="kb-hint" id="tr-msg-over"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <div id="settings-tab-kundenverwaltung" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <p class="kb-hint" data-i18n="kv.hint">Anbindung an die Kundenverwaltungs-API (IBS). Die Zugangsdaten schalten die Checkbox „IBS Tickets" in der Support-Suche frei und versorgen die Ticketsuche des Agenten über die Kundenverwaltung (API-Funktion „getMatchingEvents").</p>
@@ -3745,6 +3817,30 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div id="ad-email-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:4px;border:1px solid;"></div>
                                     </div>
                                 </details>
+                                <details class="sec-sub" data-sub="tracks" id="sec-sub-tracks" style="display:none;">
+                                    <summary><span>Short-Tracks-Zugriff</span><span class="sec-sub-hint">– Wer darf Ablagen anlegen und benutzen?</span></summary>
+                                    <div class="sec-sub-body">
+                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf den Bereich <b>Short Tracks</b> (Kachel im Portal): Ablagen anlegen und Dateien darauf ablegen. Wie bei E-Mail und SAP ausdrücklich freizuschalten: leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Wichtig:</b> Freigegebene Benutzer legen ihre Ablagen <b>selbst</b> an; der Lauf ist immer <b>unprivilegiert</b> und kann nichts, was derselbe Benutzer nicht auch im Chat könnte. Welche Werkzeuge eine Ablage benutzen darf, legen Sie im Reiter <b>Short Tracks</b> fest – ohne Freigabe gilt dort allein „Lesen + Dokumente erzeugen".</p>
+
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Erlaubte Benutzer</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
+                                    </label>
+                                    <input type="text" id="tracks-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label>
+                                        <span>Short-Tracks-Gruppe (AD-Gruppe)</span>
+                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
+                                    </label>
+                                    <textarea id="tracks-allowed-group" rows="1" placeholder="z.B. CN=Short-Tracks,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
+                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
+                                    </div>
+                                </div>
+                                    </div>
+                                </details>
 
                                 <!-- ── Unter-Container: Internet-Zugang ── -->
                                 <details class="sec-sub" data-sub="internet">
@@ -3888,8 +3984,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             var _sapG = document.getElementById('sap-allowed-group'); if (_sapG) _sapG.value = d.sap_group || '';
                                             var _mailU = document.getElementById('email-allowed-users'); if (_mailU) _mailU.value = d.email_users || '';
                                             var _mailG = document.getElementById('email-allowed-group'); if (_mailG) _mailG.value = d.email_group || '';
+                                            var _trU = document.getElementById('tracks-allowed-users'); if (_trU) _trU.value = d.tracks_users || '';
+                                            var _trG = document.getElementById('tracks-allowed-group'); if (_trG) _trG.value = d.tracks_group || '';
                                             // Token-Listen (Chips) aller AD-Felder neu aufbauen (nach dem Setzen aller Werte)
-                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','email-allowed-users','email-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
+                                            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
                                             _adUpdateStatus(d);
                                         } catch(e) {}
                                     }
@@ -4070,6 +4168,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                     sap_allowed_group:         (document.getElementById('sap-allowed-group')||{}).value ? document.getElementById('sap-allowed-group').value.trim() : '',
                                                     email_allowed_users:       (document.getElementById('email-allowed-users')||{}).value ? document.getElementById('email-allowed-users').value.trim() : '',
                                                     email_allowed_group:       (document.getElementById('email-allowed-group')||{}).value ? document.getElementById('email-allowed-group').value.trim() : '',
+                                                    tracks_allowed_users:      (document.getElementById('tracks-allowed-users')||{}).value ? document.getElementById('tracks-allowed-users').value.trim() : '',
+                                                    tracks_allowed_group:      (document.getElementById('tracks-allowed-group')||{}).value ? document.getElementById('tracks-allowed-group').value.trim() : '',
                                                 })
                                             });
                                             if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -4394,6 +4494,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/jira.js?v=7"></script>
     <script src="/static/js/sap.js?v=3"></script>
     <script src="/static/js/email.js?v=4"></script>
+    <script src="/static/js/short_tracks_admin.js?v=1"></script>
     <script src="/static/js/kundenverwaltung.js?v=6"></script>
     <script src="/static/js/support_admin.js?v=11"></script>
     <script src="/static/js/telemetry.js?v=9"></script>

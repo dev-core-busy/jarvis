@@ -279,6 +279,14 @@ const _I18N = {
         'addin.run_now':                'Jetzt verarbeiten',
         'addin.run_hint':               'Die Regel wird auf genau dieser Nachricht ausgeführt – die Aktionen sind echt (sie kann also tatsächlich antworten).',
         'addin.run_confirm':            'Diese Nachricht jetzt mit der Regel verarbeiten? Die Aktionen sind echt.',
+        // Band "veraltetes Manifest". Beide Texte tragen Platzhalter, die
+        // GLOBAL ersetzt werden – ein `.replace('{neu}', …)` mit einem String
+        // tauscht nur das erste Vorkommen (Lehre von `sessions.hint`).
+        'addin.upd_head':               'Neue Fassung des Add-ins verfügbar',
+        'addin.upd_text':               'Installiert ist {alt}, auf dem Server liegt {neu}. Es funktioniert alles weiter – es fehlen nur Änderungen am Menüband und an den Berechtigungen.',
+        'addin.upd_unknown':            'Die installierte Fassung meldet ihre Version nicht – sie stammt aus der Zeit vor dieser Prüfung. Auf dem Server liegt {neu}. Es funktioniert alles weiter.',
+        'addin.upd_how':                'Lade das Manifest herunter und füge es in Outlook erneut hinzu – oder wende dich an deine Administration.',
+        'addin.upd_get':                'Manifest herunterladen',
 
         'portal.card_agent_desc':    'Windows-Anwendung für Nicht-Swyx-Systeme: Spracherkennung + Jira-Support-Assistent zum Download.',
         'portal.card_api':           'API-Dokumentation',
@@ -2739,6 +2747,11 @@ const _I18N = {
         'addin.run_now':                'Process now',
         'addin.run_hint':               'The rule runs on exactly this message – the actions are real (it can actually reply).',
         'addin.run_confirm':            'Process this message with the rule now? The actions are real.',
+        'addin.upd_head':               'A newer version of the add-in is available',
+        'addin.upd_text':               'Installed is {alt}, the server has {neu}. Everything keeps working – only changes to the ribbon and to permissions are missing.',
+        'addin.upd_unknown':            'The installed version does not report its number – it predates this check. The server has {neu}. Everything keeps working.',
+        'addin.upd_how':                'Download the manifest and add it to Outlook again – or ask your administrator.',
+        'addin.upd_get':                'Download manifest',
 
         'portal.card_agent_desc':    'Windows application for non-Swyx systems: speech recognition + Jira support assistant for download.',
         'portal.card_api':           'API Documentation',

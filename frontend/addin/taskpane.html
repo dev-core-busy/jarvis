@@ -214,6 +214,27 @@
             background: color-mix(in srgb, var(--danger) 8%, transparent);
             color: var(--text-primary); border-radius: 8px; padding: 8px 10px;
             font-size: 11.5px; line-height: 1.55; }
+        /* ── Band "neue Fassung verfuegbar" ──
+           Steht GANZ OBEN im Dokument, ueber beiden Zustaenden (Anmeldung und
+           Anwendung) – EIN Element statt zweier: zwei Baender waeren zwei
+           Zustaende, die auseinanderlaufen koennen.
+           Akzentfarbe statt --danger: ein veraltetes Manifest ist kein Fehler,
+           es funktioniert alles weiter. Und die Flaeche ist DECKEND
+           (--bg-secondary als Grund), weil das Band ueber dem klebenden Kopf
+           liegt – eine halbtransparente Flaeche liesse den Titel durchscheinen. */
+        .ad-upd { background: var(--bg-secondary); border-bottom: 1px solid
+                color-mix(in srgb, var(--accent) 45%, transparent);
+            box-shadow: inset 3px 0 0 var(--accent);
+            padding: 8px 10px; font-size: 11.5px; line-height: 1.5; }
+        .ad-upd-head { font-weight: 600; color: var(--text-primary);
+            margin-bottom: 3px; }
+        .ad-upd-text { color: var(--text-secondary); }
+        /* Der Download ist ein LINK (der Endpunkt liefert Content-Disposition,
+           es braucht kein JS) – und ein <a> mit Knopf-Klasse ist ohne diese
+           Zeile unterstrichen. Gleiche Lehre wie bei .em-btn in /email. */
+        .ad-upd a.ad-btn { text-decoration: none; display: inline-block;
+            margin-top: 6px; }
+
         code { font-size: .9em; padding: 0 3px; border-radius: 3px;
             background: rgba(var(--fg-rgb), .08); word-break: break-all; }
         a { color: var(--accent); }
@@ -221,6 +242,16 @@
 </head>
 <body>
 <script>try{if(localStorage.getItem('jarvis_theme')==='light')document.body.classList.add('light');}catch(e){}</script>
+
+<!-- ═══ Band: veraltetes Manifest ═══
+     Faengt den EINEN Teil, der sich nicht von selbst aktualisiert. Das
+     Aufgabenfenster samt Logik liegt auf dem Server und ist bei jedem Oeffnen
+     frisch; das MANIFEST dagegen wird von Microsoft bei Installation aus Datei
+     oder URL nie aktualisiert. Ohne diesen Hinweis laeuft eine Installation
+     beliebig lange mit einem alten Menueband, und niemand erfaehrt es.
+     Startet verborgen: `versionPruefen()` in addin.js blendet es nur ein, wenn
+     die Abweichung BELEGT ist – nie auf Vermutung. -->
+<div id="ad-upd" class="ad-upd hidden"></div>
 
 <!-- ═══ Anmeldung ═══ -->
 <div id="ad-login" class="hidden">
@@ -399,7 +430,7 @@
     kam nie zum Zug. `async` blockiert `DOMContentLoaded` nicht.
 -->
 <script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-<script src="/static/js/i18n.js?v=50"></script>
+<script src="/static/js/i18n.js?v=51"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <!-- Branding: setzt Markenfarben, Marken-Namen (.brand-app-name) und das
@@ -407,6 +438,6 @@
      Seiten. `/api/branding` haengt an KEINER Anmeldung, die Marke steht also
      schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=23"></script>
-<script src="/static/addin/addin.js?v=6"></script>
+<script src="/static/addin/addin.js?v=7"></script>
 </body>
 </html>

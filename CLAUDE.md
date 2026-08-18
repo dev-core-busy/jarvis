@@ -2843,6 +2843,77 @@ Code: `backend/addin.py`, Routen `/addin/manifest.xml` + `/addin/taskpane.html`,
    Exchange meldete nur „Das Manifest ist ungültig". Für den Kommentar wird die Adresse
    entschärft, in den **Attributen** steht sie unverändert. Reproduziert und als Test festgehalten.
 
+### Aktualisiert sich das Add-in selbst? Der Code JA, das Manifest NEIN (2026-08-18)
+Frage des Nutzers. Die Antwort ist zweigeteilt, und die Trennlinie muss man kennen:
+- **Aufgabenfenster, Logik, CSS und Symbole aktualisieren sich schon immer von selbst** – die
+  Dateien liegen auf diesem Server, `/addin/taskpane.html` geht mit `Cache-Control: no-store`
+  hinaus, die Unterressourcen tragen Cache-Buster. Ein Deploy erreicht jedes installierte
+  Add-in beim naechsten Oeffnen. **`ADDIN_VERSION` ist dafuer NICHT zu erhoehen.**
+- **Das Manifest aktualisiert Microsoft nicht** – automatische Updates gibt es ausschliesslich
+  fuer Add-ins aus dem Store. Bei Installation aus **Datei oder URL** passiert nichts, auch
+  nicht bei `New-App -Url`: das holt das Manifest **einmalig beim Installieren**, ein
+  `Update-App` existiert nicht, und `Set-App` aendert nur Freigabe und Zustand (an der Quelle
+  belegt, Links in `docs/outlook-addin.md`). Fuer einen Exchange im Haus ist das strukturell
+  nicht vorhanden – es bleibt `Remove-App` + `New-App` durch die Administration bzw. eine
+  Neuinstallation durch den Benutzer.
+- **Der Kommentar an `ADDIN_VERSION` behauptete das Gegenteil** („wer an den
+  Aufgabenfenster-Dateien etwas aendert … muss sie erhoehen"), ebenso Abschnitt 7 der
+  Anleitung. Dieselbe Fehlerklasse wie `WA_TASK_PROMPT`, `--gradient` und der EWS-URL-Hinweis:
+  **eine Zusage, die der Code nicht haelt** – hier mit der Folge, dass man Manifeste ohne
+  jeden Anlass verteilt haette. Beide Stellen berichtigt.
+
+**Gebaut wurde deshalb nur das, was in unserer Hand liegt: das Fenster weist ein veraltetes
+Manifest AUS.** Die Manifest-Version geht als `?mv=` in die Taskpane-URL (`backend/addin.py`),
+das Fenster vergleicht sie mit `GET /api/addin/version` und zeigt oben ein Band mit
+Download-Knopf (`versionPruefen()`/`zeichneUpdBand()` in `addin.js`, `#ad-upd` in
+`taskpane.html`).
+- **Der Umweg ueber die URL ist der einzige Weg:** Office.js hat keine Schnittstelle, mit der
+  ein Add-in die Version seines EIGENEN Manifests lesen koennte.
+- **NICHTS BEHAUPTEN, WAS WIR NICHT WISSEN** – dieselbe Regel wie beim Trenner „Neue Sitzung"
+  und beim Audit-Filter. Drei Faelle: `mv` kleiner → Band mit beiden Nummern · `mv` fehlt, aber
+  Outlook-Kontext da → Band, das ausdruecklich sagt, die installierte Fassung melde ihre
+  Version nicht (das ist der ALTBESTAND, und in einer „gibt es was Neues"-Anzeige genau der
+  interessante Fall) · `mv` fehlt und kein Outlook → **kein Band**, das ist ein Browseraufruf.
+- **`_officeDa` ist NICHT `_office`:** letzteres ist `null`, sobald keine Nachricht markiert
+  ist – wir liefen dann trotzdem in Outlook. Genau diese Unterscheidung traegt den zweiten Fall.
+- **Der Vergleich ist segmentweise NUMERISCH.** Ein String-Vergleich haelt „1.10" fuer kleiner
+  als „1.9" – und der Fehler faellt erst beim zehnten Manifest auf.
+- **`mv` ist Fremdeingabe** und wird auf seine FORM geprueft, nicht nur maskiert: ein Muellwert
+  in der Anzeige ist auch keine Information, „unbekannt" ist die ehrlichere Auskunft.
+- **Zeichnen und Abruf sind GETRENNT** (`zeichneUpdBand()` gegen `versionPruefen()`), damit der
+  Sprachwechsel das Band uebersetzen kann, ohne den Server ein zweites Mal zu fragen – der Text
+  wird per `innerHTML` gesetzt, `applyLang()` erreicht ihn nicht (Lehre vom Bereichskatalog).
+- **`/api/addin/version` haengt an KEINER Anmeldung** (gleiche Begruendung wie beim Manifest:
+  der Wert steht dort ohnehin drin) und liefert `no-store` – sonst beantwortet der Cache die
+  Frage „gibt es etwas Neues" mit der Antwort von gestern. Das Band gilt damit auch VOR der
+  Anmeldung, und genau dort ist es am nuetzlichsten.
+- **Kein Schliessen-Knopf** (bewusst): das Band ist nicht klebend und scrollt weg, verstellt
+  also nichts dauerhaft. Ein × braeuchte einen Merker, und `localStorage` ist im
+  Aufgabenfenster je nach Browsereinstellung gesperrt – der Knopf waere dann scheinbar
+  wirkungslos (derselbe Fall wie beim Token-Rueckfall im Arbeitsspeicher).
+- **Bewusst NICHT gebaut** (Entscheidung des Nutzers): ein PowerShell-Wartungsskript, das die
+  zentrale Bereitstellung per `Get-App`-Versionsvergleich + `Remove-App`/`New-App` selbst
+  nachzieht. Das waere „automatisch fuer alle", liegt aber in der Kundenumgebung. Damit bleibt
+  offen: das Verteilen selbst ist weiter Handarbeit, das Band macht nur den Anlass sichtbar.
+- **`ADDIN_VERSION` auf 1.2.0.0** – hier zwingend, weil sich das Manifest aendert (`?mv=`);
+  ohne die Erhoehung uebernimmt Outlook es nie und der Mechanismus waere tot.
+- **Verifiziert:** 59 Pruefungen (`tests/test_addin_update_ui.js`, jsdom gegen die ECHTEN
+  Dateien – die Weiche wird ueber einen Office-Stub gefahren, damit der Fall „kein
+  Outlook-Kontext" ohne die 4-Sekunden-Grenze pruefbar bleibt) + 192 (`test_outlook_addin.py`),
+  193 (`test_addin_sso.py`), 465 (`test_email_rules.py`), 118 (`test_mail_styles.py`), 120
+  (Endpunkt-Rechte) unveraendert gruen. Gegenproben greifen einzeln: String-Vergleich → 3 FAIL,
+  Band ohne Beleg → 4 FAIL, keine Formpruefung von `mv` → 2 FAIL, `?mv=` aus dem Manifest →
+  1 FAIL. **Manifest von Microsofts eigenem Werkzeug abgenommen** (`npx office-addin-manifest
+  validate` → „The manifest is valid.") – der Abfrageteil in `SourceLocation` ist damit belegt
+  zulaessig, nicht nur vermutet. **Live auf DEV:** Endpunkt ohne Token 200 mit `no-store`, beide
+  Taskpane-URLs im Manifest mit `?mv=1.2.0.0`, XML gueltig, `/settings` und `/email` 200.
+  Optisch in Dunkel UND Hell abgenommen (echtes Markup, echtes CSS, 340 px Fensterbreite).
+- **FALLSTRICK bei der Abnahme, zum vierten Mal:** `pgrep -f`/`pkill -f` trifft die EIGENE
+  Kommandozeile – und weil das Bash-Werkzeug den ganzen Aufruf als eine Zeile uebergibt, gilt
+  das auch fuer ein Muster, das nur in einem Heredoc dieses Aufrufs steht (Exit 144, Shell
+  beendet). Das Suchmuster muss in einer **Datei** stehen, die in einem **spaeteren** Aufruf
+  ausgefuehrt wird. `srv[.]py` hilft nicht, wenn daneben `srv.py 8791` in derselben Zeile steht.
+
 ### Farb-Fallbacks: die Ausnahme, die bleiben muss
 Beim Aufräumen der `var(--x, #hex)`-Fallbacks (Projektregel „nur CSS-Variablen") habe ich sie
 auch im **Konto-gesperrt-Bildschirm** von `chat.html`/`userchat.html` entfernt – falsch, und der

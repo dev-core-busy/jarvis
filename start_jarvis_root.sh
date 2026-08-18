@@ -233,6 +233,48 @@ if [ "$SVC_USER" != "root" ] && id "$SVC_USER" &>/dev/null; then
     fi
 fi
 
+# 6c. Python-Module der Agent-Shell sicherstellen
+#
+# WARUM HIER: `shell_execute` startet /usr/bin/python3 (bei Domain-Benutzern als
+# jarvis_sandbox), NICHT das venv des Backends. Was dort fehlt, kann der Agent
+# nicht nachinstallieren (kein Internet, keine Rechte) und auch das Backend
+# nicht (pip als root ist root-pflichtig). Ohne diesen Schritt bleibt es
+# Handarbeit pro Server – und genau die ist auseinandergelaufen: auf ECHT lagen
+# am 2026-08-18 drei Pakete im System-Python, auf DEV neun, und eine
+# Excel-Anfrage endete deshalb dort in einer CSV-Notloesung, waehrend sie hier
+# gelang. Bei mehreren Servern skaliert nur eine Automatik.
+#
+# Im HINTERGRUND, damit der Broker-Socket nicht wartet: eine Nachinstallation
+# zieht Pakete aus dem Netz und kann Minuten dauern. Das Skript ist idempotent
+# und auf einem eingerichteten Server ein No-op (nur die Pruefung, ~1 s).
+#
+# Abschaltbar mit JARVIS_SANDBOX_PY_AUTO=0 (z.B. auf Servern ohne Netzzugang
+# oder wenn der Paketstand bewusst von Hand gepflegt wird).
+SANDBOX_PY="$JARVIS_DIR/deploy/sandbox_python.sh"
+if [ "${JARVIS_SANDBOX_PY_AUTO:-1}" != "0" ] && [ -f "$SANDBOX_PY" ]; then
+    (
+        if bash "$SANDBOX_PY" --pruefen >/dev/null 2>&1; then
+            :   # alles vorhanden – nichts melden, sonst rauscht jeder Start
+        else
+            echo "[Sandbox-Python] Module fuer die Agent-Shell fehlen – installiere nach..."
+            # Ausgabe erst einsammeln, DANN filtern: eine Pipeline
+            # (`bash … | grep | sed`) liefert den Exit-Code des LETZTEN Glieds,
+            # der Fehlschlag des Skripts waere damit unsichtbar.
+            AUSGABE="$(bash "$SANDBOX_PY" 2>&1)"
+            RC=$?
+            # Nur die Zusammenfassung ins Journal – die pip-Download-Zeilen sind
+            # dutzende Zeilen Rauschen.
+            printf '%s\n' "$AUSGABE" | grep -E '^(  [✓✗]|Installiere|✓|✗|⚠)' \
+                | sed 's/^/[Sandbox-Python] /'
+            if [ "$RC" -eq 0 ]; then
+                echo "[Sandbox-Python] Bereit – alle Module vorhanden."
+            else
+                echo "[Sandbox-Python] WARNUNG: Nachinstallation fehlgeschlagen (rc=$RC; kein Netzzugang?). Der Agent kann dann keine Excel-/PDF-Verarbeitung per Shell leisten – 'bash deploy/sandbox_python.sh' von Hand ausfuehren." >&2
+            fi
+        fi
+    ) &
+fi
+
 # 7. Root-Broker starten (Vordergrund-Prozess dieses Dienstes)
 echo "Starte Root-Broker..."
 export JARVIS_BROKER_GROUP="${JARVIS_BROKER_GROUP:-jarvis}"

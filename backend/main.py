@@ -3399,6 +3399,27 @@ async def startup_harden_data_dirs():
 
 
 @app.on_event("startup")
+async def startup_sandbox_python():
+    """Melden, wenn der Agent-Shell Python-Module fehlen.
+
+    Hergestellt wird der Zustand von ``deploy/sandbox_python.sh`` (Automatik in
+    ``start_jarvis_root.sh``, Schritt 6c). Hier wird nur GEPRUEFT – eine
+    Automatik, die still fehlschlaegt (kein Netzzugang, Paketquelle weg), ist
+    keine. Ohne diese Zeile faellt es erst auf, wenn ein Benutzer nach einer
+    Excel-Tabelle fragt und eine CSV bekommt (Vorfall ECHT 2026-08-18).
+
+    Nur bei einem Problem eine Meldung; im Normalfall bleibt das Journal still.
+    """
+    try:
+        from backend import sandbox_python as _sbpy
+        text = await asyncio.to_thread(_sbpy.bericht)
+        if text:
+            print(text, flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Sandbox-Python] Pruefung uebersprungen: {e}", flush=True)
+
+
+@app.on_event("startup")
 async def startup_info_files_dir():
     """Ablage-Ordner fuer die Portal-Info-Dokumente bereitstellen.
 

@@ -3436,10 +3436,75 @@ endete nach 15 Schritten **ohne jedes Ergebnis** – die letzte Zeile war eine A
   die volle Kette Formular-PDF → `pdfplumber.extract_words()` → korrekte Label/Wert-Zuordnung →
   `openpyxl` → wieder eingelesene .xlsx läuft als `jarvis_sandbox` durch; und ein echter
   Excel-Auftrag nutzt jetzt **`office_create_excel`** (im Audit-Log belegt) statt einer CSV.
-- **Auf ECHT noch NICHT ausgerollt.** Dort sind beide Hälften nötig: der Code (Prompt + Hinweis)
-  **und** `sudo bash deploy/sandbox_python.sh` – letzteres rollt kein Update mit aus, es ist eine
-  Server-Einrichtung. Ohne das Skript bleibt die Zusage des Prompts dort unerfüllt; ohne den Code
-  fehlt der Hinweis, wenn doch einmal ein Modul fehlt.
+- **BEIM AUSROLLEN SIND ES ZWEI HÄLFTEN:** der Code (Prompt + Hinweis) **und** die
+  Server-Einrichtung `sudo bash deploy/sandbox_python.sh`. Letztere rollt **kein Update mit aus**
+  – ohne sie bleibt die Zusage des Prompts unerfüllt, ohne den Code fehlt der Hinweis, wenn doch
+  einmal ein Modul fehlt. Seit der Automatik unten erledigt sich die zweite Hälfte auf einem
+  aktualisierten Server beim nächsten Broker-Start selbst; auf einem Server mit ALTEM Bootstrap
+  ist sie ein Handgriff.
+- **Stand ECHT (2026-08-18):** Code über die Update-Pill ausgerollt (`68f7be1`, md5-gleich) und im
+  laufenden Dienst aktiv; die 6 fehlenden Module wurden dort installiert (openpyxl, pandas,
+  pdfplumber, pypdf, python-docx, matplotlib – numpy unverändert 2.2.4, Pillow 11.1.0 → 12.3.0,
+  venv unberührt bei numpy 2.0.2). Sicherung des Paketstands:
+  `/root/pip-system-vor-sandbox-modulen-20260818-130128.txt`.
+  **Am echten gemeldeten PDF gemessen:** pdfplumber liest alle 54 Seiten mit Koordinaten – die
+  Fähigkeit ist damit da, die **Extraktionsqualität** bleibt aber Modellarbeit (eine naive
+  Label/Wert-Heuristik ordnet dort nur 15 % zu; das Dokument hat zusätzlich eine beschädigte
+  Textebene, siehe Abschnitt oben).
+
+### Konsistenz über mehrere Server: die Automatik (ergänzt 2026-08-18)
+Ein Skript, das jemand von Hand ausführen muss, ist genau die Handarbeit, die DEV und ECHT
+auseinanderlaufen ließ. Mit weiteren Jarvis-Servern skaliert nur ein Automatismus – deshalb
+hängt die Einrichtung an **drei** Stellen, mit unterschiedlicher Aufgabe:
+| Stelle | wann | Aufgabe |
+|---|---|---|
+| `start_jarvis_root.sh` Schritt **6c** | bei JEDEM Start von `jarvis-broker.service` (als root) | prüfen, bei Bedarf **nachinstallieren** – selbstheilend |
+| `deploy/security/setup_broker.sh` | Erstinstallation / Migration | dasselbe **synchron und sichtbar**, damit ein neuer Server nicht still ohne Module läuft |
+| `main.py::startup_sandbox_python` + `backend/sandbox_python.py` | bei jedem Backend-Start | **melden**, wenn trotzdem etwas fehlt |
+- **Warum Schritt 6c und keine Broker-Op:** dort läuft root ohnehin, und eine neue Op verlangt
+  zusätzlich einen Broker-Neustart auf jedem Server (sonst 502 „unbekannte Op"). Dieselbe
+  Begründung wie bei Schritt 6b (chown), der direkt darüber steht.
+- **Im HINTERGRUND (`) &`), und das ist der Kern:** eine Nachinstallation zieht Pakete aus dem
+  Netz und kann Minuten dauern; der Broker-Socket darf darauf nicht warten (CLAUDE.md warnt
+  ohnehin, dass nach einem Broker-Neustart ein zu früher Test in einen 502 läuft). **Live
+  belegt:** Broker `Bereit auf /run/jarvis-broker.sock` um 13:10:**20**, die Nachinstallation
+  begann 13:10:**21**.
+- **Auf einem eingerichteten Server ist alles still** – gemeldet wird nur ein Problem. Eine Zeile
+  bei jedem Start, die immer dasselbe sagt, wird nach zwei Tagen nicht mehr gelesen. Nachgemessen:
+  0 Journal-Zeilen beim sauberen Start.
+- **Abschaltbar mit `JARVIS_SANDBOX_PY_AUTO=0`** (Server ohne Netzzugang, bewusst von Hand
+  gepflegter Paketstand). Vorgabe ist AN.
+- **Die Prüfung im Backend ist NICHT der Fix, sondern die Sichtbarkeit:** eine Automatik, die
+  still fehlschlägt (kein Netz, Paketquelle weg), ist keine. `bericht()` nennt das fehlende Modul
+  UND was dadurch nicht geht („pdfplumber – PDF mit Koordinaten"), plus die Abhilfe.
+  - **`fehlende()` gibt `None` zurück, wenn die Prüfung selbst scheiterte** – ausdrücklich NICHT
+    dasselbe wie „nichts fehlt". Ein unbekannter Zustand darf nicht als gesund gemeldet werden
+    (dieselbe Regel wie beim Mount-Status und beim Trenner „Neue Sitzung").
+  - **`asyncio.to_thread`** ist Pflicht: die Prüfung startet einen Unterprozess, und ein
+    blockierender Aufruf im Event-Loop war am 2026-08-11 ein 20-Sekunden-Freeze für ALLE Benutzer.
+  - Sie prüft `/usr/bin/python3`, **nie `sys.executable`** – das wäre das venv, also die falsche
+    Welt. Ein Test hält das fest (und liest dafür nur den Code, nicht den Docstring, der
+    `sys.executable` erklärt).
+- **DIE DRIFT-SCHRANKE:** die Modul-Liste steht an zwei Orten (Skript + `sandbox_python.MODULE`).
+  Ein Test vergleicht sie und schlägt fehl, sobald sie auseinanderlaufen – sonst entsteht genau
+  die Lücke, die diesen Vorfall verursacht hat, eine Ebene höher.
+- **ZWEIMAL derselbe Bash-Fehler, beide gefunden:** `if bash skript | grep | sed; then` prüft den
+  Exit-Code von **`sed`**, nicht des Skripts – der Fehlschlag-Zweig hätte nie gegriffen. Jetzt
+  wird die Ausgabe erst in eine Variable eingesammelt (`AUSGABE="$(…)"; RC=$?`) und danach
+  gefiltert. Ein Test verbietet die Pipeline-Form.
+- **FALLSTRICK, der einen Test WERTLOS machte (fünfter Fall im Projekt):** die Gegenprobe „Schritt
+  6c ausbauen" brach mit `ValueError: substring not found` ab, weil der Test seinen Abschnitt per
+  `ROOTSH.index("6c.")` schnitt – die restlichen Prüfungen liefen gar nicht und der Lauf sah wie
+  ein Erfolg aus (1 statt 8 Fehlschlägen). Jetzt schneidet der Helfer `abschnitt(text, von, bis)`
+  und gibt `""` zurück, wenn eine Marke fehlt. **Ein Wächter muss FEHLSCHLAGEN, nicht abbrechen** –
+  nie `.index()` in einer Prüfung.
+- **Verifiziert:** 75 Prüfungen; Gegenproben greifen einzeln (Automatik ausgebaut → **8** FAIL,
+  Hook entfernt → 3, Listen-Drift → 1, `to_thread` entfernt → 1, Interpreter auf `sys.executable`
+  → 1). **Live auf DEV selbstheilend nachgewiesen:** `pdfplumber` entfernt → Broker-Neustart →
+  automatisch nachinstalliert (Journal-Spur), Modul wieder importierbar, zweiter Start still;
+  `pypdf` entfernt + nur Backend neu gestartet → Klartext-Warnung im Journal mit Modulname und
+  Abhilfe; danach über die Automatik repariert, Dienste aktiv, `/settings` HTTP 200.
+
 
 ## Info-Dokumente im Portal (`frontend_info_files/`, seit 2026-07-29)
 - **Was es ist:** Ein Ablage-Ordner neben dem Backend (`/opt/jarvis/frontend_info_files`,

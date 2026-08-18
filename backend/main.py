@@ -224,6 +224,17 @@ async def vnc_websocket_proxy(websocket: WebSocket):
     if _user_must_change(_vnc_user):
         await websocket.close(code=4003, reason="Kennwort muss zuerst geaendert werden")
         return
+    # NUR Administratoren und der lokale Desktop-Benutzer (Vorgabe 2026-08-18).
+    #
+    # Vorher genuegte IRGENDEIN gueltiges Token: der Knopf im Portal war zwar an
+    # `is_admin` gebunden, aber das ist Sichtbarkeit, keine Berechtigung – die
+    # URL funktionierte fuer jeden angemeldeten Benutzer. Genau das Muster "die
+    # Oberflaeche war die einzige Schranke" aus der Endpunkt-Durchsicht vom
+    # 2026-08-04. Und wer hier durchkommt, hat Maus und Tastatur auf dem
+    # Desktop – nicht nur Lesezugriff.
+    if not (_vnc_user in ALLOWED_USERS or _is_admin_user(_vnc_user)):
+        await websocket.close(code=4004, reason="Nur fuer Administratoren")
+        return
 
     # Subprotocol nur setzen wenn Client es anbietet (noVNC kann "binary" senden oder nicht)
     requested = websocket.headers.get("sec-websocket-protocol", "")
@@ -629,6 +640,10 @@ def _anhang_erinnerung(sitzung: str) -> str:
 
 # Erlaubte Linux-Benutzer für Web-Login
 ALLOWED_USERS = {"jarvis"}
+# Dem lokalen Desktop (X11/LightDM/VNC) gehoert genau EIN Konto. Alles, was
+# den Desktop betrifft, laeuft ueber diesen Benutzer – Administratoren sehen
+# und steuern SEINE Sitzung, sie bekommen keine eigene.
+DESKTOP_USER = "jarvis"
 
 # ─── CPU-Polling (zentralisiert, 1x pro 2s statt pro Client) ─────────
 _cached_cpu_percent: float = 0.0
@@ -2821,9 +2836,24 @@ async def login(request: Request):
         except Exception as e:  # noqa: BLE001
             print("[Add-in] Verknuepfung nicht moeglich: %s" % e, flush=True)
 
-    # Desktop-Session im Hintergrund wechseln (nur im Nicht-Docker-Modus)
-    if not _DOCKER_MODE:
-        asyncio.get_event_loop().run_in_executor(None, switch_desktop_session, username)
+    # Desktop-Session im Hintergrund wechseln (nur im Nicht-Docker-Modus).
+    #
+    # VORGABE 2026-08-18: am lokalen Desktop arbeiten NUR der lokale Benutzer
+    # `jarvis` und – ueber genau dessen Sitzung – die Administratoren.
+    #
+    # Bis dahin lief der Wechsel bei JEDER Anmeldung und mit dem ROHEN
+    # Login-Namen. Auf ECHT hiess das (157 Aufrufe seit dem 13.07.): 61-mal
+    # "Ungueltiger Benutzername" fuer `nexus\…` (wirkungslos, nur Protokoll)
+    # und 25-mal ein Autologin auf einen Domaenen-Kurznamen, den es lokal gar
+    # nicht gibt – jedes Mal x11vnc gekillt und LightDM neu gestartet, also den
+    # laufenden Desktop weggeworfen. Ein Login darf den Desktop anderer nicht
+    # abraeumen.
+    #
+    # Das ZIEL ist deshalb fest `DESKTOP_USER`, nie der angemeldete Name: der
+    # Administrator bekommt die Sitzung, die es wirklich gibt.
+    if not _DOCKER_MODE and (username in ALLOWED_USERS or _is_admin_user(username)):
+        asyncio.get_event_loop().run_in_executor(None, switch_desktop_session,
+                                                 DESKTOP_USER)
     return JSONResponse({"success": True, "token": token, "username": username,
                          "must_change_password": must_change,
                          "is_admin": _is_admin_user(username)})

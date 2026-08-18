@@ -102,6 +102,20 @@ for pfad in (ma.KONTEN_DATEI, ma.SCHLUESSEL_DATEI, mr.REGEL_DATEI):
 U = "styleuser"
 
 
+def _js_code(text: str) -> str:
+    """JS-Ausschnitt ohne Kommentare.
+
+    NOETIG, NICHT KOSMETIK: die Pruefung "kein 'Standard - <Name>' mehr" schlug
+    an dem KOMMENTAR an, der genau diese frueher vorhandene Doppelung erklaert.
+    Ein Waechter, der seine eigene Begruendung liest, prueft nichts – fuenfter
+    Fall dieser Art im Projekt (Prompt-Waechter 2026-08-10, Ordner-Marke
+    2026-08-11, _role_tools und regel_id 2026-08-17/18).
+    """
+    ohne_block = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return "\n".join(z for z in ohne_block.splitlines()
+                     if not z.lstrip().startswith("//"))
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 section("1. Migration: aus der einen Vorgabe wird der Standard-Stil")
 # ═══════════════════════════════════════════════════════════════════════════
@@ -416,6 +430,16 @@ check("stil_hinweis" in ADDIN,
 for js, wo in ((PORTAL, "/email"), (ADDIN, "Add-in")):
     roh = re.findall(r"\+\s*(?:e|std)\.name\b", js)
     check(not roh, "%s: der Stilname geht durch esc() (%s)" % (wo, roh))
+    # Der Standard steht als ERSTE Option mit dem Wert "" und einem `*` – nicht
+    # mit seiner Kennung. Nur so bleibt "nichts ausdruecklich gewaehlt" moeglich,
+    # und nur dann greift in einer Regel ein im Prompt genannter Stil.
+    _so = _js_code(js.split("function stilOptionen(", 1)[1].split("\n    }", 1)[0])
+    check("esc(std.name) + ' *'" in _so,
+          "%s: der Standard traegt ein Sternchen statt der Doppelung" % wo)
+    check("value=\"\"" in _so and "return !e.standard" in _so,
+          "%s: der Standard steht genau EINMAL, mit dem Wert \"\"" % wo)
+    check("Standard \u2013" not in _so and "'Standard'" not in _so,
+          "%s: kein 'Standard - <Name>' mehr (war bei einem Stil 'Standard' doppelt)" % wo)
 check("em-stile-list" in EMHTML and "em-stil-edit" in EMHTML,
       "/email hat Liste und Formular im Markup")
 check("ad-stile" in TP and "ad-stil-edit" in TP, "das Add-in ebenso")
@@ -425,7 +449,7 @@ for k in ("mail.styles_head", "mail.styles_hint", "mail.help_styles",
           "mail.style_new", "mail.style_create", "mail.style_name",
           "mail.style_text", "mail.style_is_default", "mail.style_default",
           "mail.style_make_default", "mail.style_del_confirm",
-          "mail.style_opt_default", "mail.style_opt_off", "mail.style_pick",
+          "mail.style_opt_off", "mail.style_pick",
           "mail.f_style", "mail.f_style_hint", "mail.f_style_hint_short",
           "mail.styles_none", "mail.style_saved", "mail.style_deleted",
           "mail.style_empty", "mail.style_used", "mail.styles_hint_short",

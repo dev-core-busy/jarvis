@@ -1231,6 +1231,12 @@ abschnitt('6. Stile fuer Antworten (mehrere benannte Vorgaben)');
     await warte(90);
     pruefe(w.document.querySelector('#em-stile-list .em-empty') !== null,
         'ohne Stile steht ein Hinweis da');
+    const dd = w.document;
+    dd.querySelector('.em-rule-card [data-act="edit"]').click();
+    const s0 = dd.getElementById('em-f-stil');
+    pruefe(!!s0 && s0.options.length === 1 && s0.options[0].value === '',
+        'ohne Stile hat das Pulldown genau einen Eintrag (kein sinnloses "ohne Stil")',
+        s0 && Array.prototype.map.call(s0.options, o => o.value).join('|'));
     w.close();
 }
 
@@ -1261,19 +1267,36 @@ abschnitt('6. Stile fuer Antworten (mehrere benannte Vorgaben)');
     const sel = d.getElementById('em-f-stil');
     pruefe(!!sel, 'das Regel-Formular hat ein Stil-Pulldown');
     const werte = Array.prototype.map.call(sel.options, o => o.value);
-    pruefe(werte[0] === '' && werte.indexOf('s1') > 0 && werte.indexOf('s2') > 0 &&
+    // Der Standard (s1) steht als ERSTE Option mit dem Wert "" – NICHT mit
+    // seiner Kennung. Nur so bleibt "nichts ausdruecklich gewaehlt" moeglich,
+    // und nur dann greift in einer Regel ein im Prompt genannter Stil.
+    pruefe(werte[0] === '' && werte.indexOf('s1') < 0 && werte.indexOf('s2') > 0 &&
         werte[werte.length - 1] === '-',
-        'Optionen: Standard, jeder Stil, und ausdruecklich "ohne Stil"', werte.join('|'));
-    pruefe(sel.options[0].textContent.indexOf('Förmlich') > -1,
-        'die Standard-Option nennt den Namen des Standardstils');
+        'Optionen: Standard (Wert ""), die uebrigen Stile, "ohne Stil"', werte.join('|'));
+    pruefe(sel.options[0].textContent === 'Förmlich *',
+        'der Standard traegt seinen Namen und ein Sternchen (kein "Standard – Standard")',
+        sel.options[0].textContent);
     pruefe(sel.innerHTML.indexOf('<img src=x') < 0, 'auch im Pulldown maskiert');
     pruefe(sel.value === 's2', 'die gespeicherte Wahl ist vorbelegt');
-    sel.value = 's1';
-    const vorher = rufe.length;
+
+    // Zurueck auf den Standard = "nichts gewaehlt" (leerer Wert).
+    sel.value = '';
+    let vorher = rufe.length;
     d.getElementById('em-f-save').click();
     await warte(60);
-    const put = rufe.slice(vorher).filter(r => r.methode === 'PUT')[0];
-    pruefe(!!put && put.body.stil === 's1', 'die Wahl wird mitgespeichert');
+    let put = rufe.slice(vorher).filter(r => r.methode === 'PUT')[0];
+    pruefe(!!put && put.body.stil === '',
+        'die Standard-Option speichert "" (damit die Prompt-Nennung weiter greift)',
+        JSON.stringify(put && put.body.stil));
+
+    // Und eine ausdrueckliche Wahl wird als Kennung gespeichert.
+    d.querySelector('.em-rule-card[data-rid="r1"] [data-act="edit"]').click();
+    d.getElementById('em-f-stil').value = 's2';
+    vorher = rufe.length;
+    d.getElementById('em-f-save').click();
+    await warte(60);
+    put = rufe.slice(vorher).filter(r => r.methode === 'PUT')[0];
+    pruefe(!!put && put.body.stil === 's2', 'eine ausdrueckliche Wahl wird mitgespeichert');
     w.close();
 }
 

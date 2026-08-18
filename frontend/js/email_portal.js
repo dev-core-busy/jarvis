@@ -480,18 +480,31 @@
 
     function stilOptionen(gewaehlt) {
         var std = _stile.filter(function (e) { return e.standard; })[0];
-        var h = '<option value="">' + (std
-            ? esc(T('mail.style_opt_default', 'Standard')) + ' \u2013 ' + esc(std.name)
+        // DER STANDARD STEHT ALS ERSTER EINTRAG – mit `*` und mit dem WERT "".
+        //
+        // Das ist keine Kosmetik: "" heisst "nichts ausdruecklich gewaehlt", und
+        // nur dann greift in einer Regel ein im Prompt genannter Stil. Wuerde
+        // hier die KENNUNG des Standardstils stehen, waere das Feld immer
+        // gesetzt und die sprachliche Nennung damit tot.
+        //
+        // Frueher stand an dieser Stelle "Standard – <Name>"; bei einem Stil
+        // namens "Standard" kam "Standard – Standard" heraus (gemeldet
+        // 2026-08-18). Der Name allein plus `*` sagt dasselbe kuerzer.
+        var h = '<option value=""' + (gewaehlt ? '' : ' selected') + '>' + (std
+            ? esc(std.name) + ' *'
             : esc(T('mail.style_opt_none', 'kein Stil'))) + '</option>';
-        h += _stile.map(function (e) {
+        // Der Standard wird NICHT zusaetzlich mit eigener Kennung gelistet – er
+        // waere sonst zweimal in der Liste, und genau das war das Problem.
+        h += _stile.filter(function (e) { return !e.standard; }).map(function (e) {
             return '<option value="' + esc(e.id) + '"' +
                 (gewaehlt === e.id ? ' selected' : '') + '>' + esc(e.name) + '</option>';
         }).join('');
-        // "-" ist die ausdrueckliche Wahl "ohne Stil" - unterscheidbar von
-        // "nichts gewaehlt" (leer), wo Standard bzw. der im Prompt genannte
-        // Stil greift.
-        h += '<option value="-"' + (gewaehlt === '-' ? ' selected' : '') + '>' +
-            esc(T('mail.style_opt_off', '– ohne Stil –')) + '</option>';
+        // "-" ist die ausdrueckliche Wahl "ohne Stil" – unterscheidbar von
+        // "nichts gewaehlt" (leer). Ohne Stile waere sie sinnlos.
+        if (_stile.length) {
+            h += '<option value="-"' + (gewaehlt === '-' ? ' selected' : '') + '>' +
+                esc(T('mail.style_opt_off', '– ohne Stil –')) + '</option>';
+        }
         return h;
     }
 

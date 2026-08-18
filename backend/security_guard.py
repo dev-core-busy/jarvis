@@ -66,6 +66,44 @@ _PATTERN_DEFS = [
      "prompt-injection-override"),
     (r"\bSTOP\b.{0,15}\b(?:you\s+are|your\s+new|now\s+you)\b|^\s*system\s*[:>]\s*",
      "role-injection"),
+
+    # ── DEUTSCHE GEGENSTUECKE ───────────────────────────────────────────────
+    # GEMESSEN AM 2026-08-18: die Liste war rein englisch. Auf einem
+    # deutschsprachigen System blieb damit JEDER deutsche Versuch unsichtbar –
+    # in ALLEN Kanaelen (Chat, WhatsApp, E-Mail-Regeln, Support, Short Tracks).
+    # Nachgewiesen mit "IGNORIERE ALLE VORHERIGEN ANWEISUNGEN …": heuristic_match
+    # gab None zurueck, das Vorfallsprotokoll blieb leer, obwohl der Angriff im
+    # Ergebnistext des Modells ausdruecklich benannt wurde.
+    #
+    # Bewusst NUR die woertlichen Gegenstuecke der Muster oben – keine neuen
+    # Musterklassen. Grund: im reinen Heuristik-Modus (ohne LLM-Bestaetigung)
+    # sperrt ein Treffer Konten, und ein zu breites deutsches Muster wuerde
+    # harmlose Saetze treffen ("ignoriere die Warnung im Log").
+    (r"(?:ignorier|ignoriere|vergiss|missachte|verwerfe)\w*\s+(?:alle|jede|sämtliche|saemtliche|deine|die|alles)\s*"
+     r"(?:vorherigen?|vorigen?|bisherigen?|obigen?|frühere[nr]?|fruehere[nr]?)?\s*"
+     r"(?:anweisungen?|instruktionen?|regeln?|vorgaben?|richtlinien?)",
+     "ignoriere-anweisungen"),
+    (r"(?:neue|geänderte|geaenderte|aktualisierte|vorrangige|zusätzliche|zusaetzliche)\s+"
+     r"(?:anweisung(?:en)?|regel(?:n)?|aufgabe(?:n)?|system-?prompt)\s*:",
+     "anweisung-ueberschreiben"),
+    (r"(?:zeige|nenne|gib|verrate|drucke|wiederhole)\w*\s+(?:mir\s+)?"
+     r"(?:den|dem|die|das|deinen?|deine[nr]?)\s+"
+     r"(?:system-?prompt|systemprompt|(?:ursprünglichen?|urspruenglichen?|internen?)\s+"
+     r"(?:anweisungen|instruktionen|prompt))",
+     "system-prompt-verraten"),
+    (r"(?:du\s+bist\s+(?:jetzt|ab\s+jetzt|nun))\s+(?:ein[e]?\s+)?"
+     r"(?:uneingeschränkte|uneingeschraenkte|ungefilterte|unzensierte|amoralische)",
+     "unrestricted-persona-de"),
+    (r"(?:umgehe|deaktiviere|schalte\s+ab|hebe\s+auf|übergehe|uebergehe)\s+"
+     r"(?:alle\s+|deine\s+|die\s+)?(?:sicherheits\w*|schutz\w*|filter\w*|sperren?|beschränkungen?|beschraenkungen?)",
+     "bypass-safety-de"),
+    # BEWUSST NICHT ERGAENZT: ein deutsches Gegenstueck zu "without-restrictions"
+    # ("ohne Regeln", "ohne Beschraenkungen"). Gemessen am 2026-08-18: es traf
+    # "Wir arbeiten ohne Regeln der alten Fassung weiter" und "Der Vertrag gilt
+    # ohne Beschraenkungen der Haftung" – im deutschen Geschaeftsalltag
+    # alltaegliche Saetze. Im reinen Heuristik-Modus haette das Konten gesperrt,
+    # und ein Fehlalarm mit Kontosperre ist schlimmer als eine Luecke in der
+    # Sichtbarkeit (Lehre vom 2026-08-05, `2>/dev/null` sperrte vier Konten).
 ]
 _PATTERNS = [(re.compile(rx, re.IGNORECASE | re.DOTALL), name) for rx, name in _PATTERN_DEFS]
 
@@ -446,14 +484,44 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
     return {"blocked": blocked_now, "count": len(allv.get(key, []))}
 
 
-def list_recent_violations(limit: int = 100) -> list:
-    """Letzte Richtlinien-Verstoesse (benutzeruebergreifend, neueste zuerst)."""
+def list_recent_violations(limit: int = 100, mit_logonly: bool = True) -> list:
+    """Letzte Richtlinien-Verstoesse (benutzeruebergreifend, neueste zuerst).
+
+    ``mit_logonly`` nimmt die NUR PROTOKOLLIERTEN Vorfaelle mit auf – die von
+    ``inspect(..., block=False)`` erzeugten Eintraege aus Kanaelen, in denen der
+    Text von einem Fremden stammt (E-Mail-Regeln, Short Tracks). Sie zaehlen
+    NICHT zur Auto-Sperre (sie liegen in einem eigenen Zweig der Zustandsdatei
+    und werden hier nur zur Anzeige zusammengefuehrt), tragen aber ``soft: True``
+    – dieselbe Kennzeichnung wie weiche Richtlinien-Verstoesse.
+
+    WARUM DAS NOETIG WAR: bis 2026-08-18 gab dieser Aufruf ausschliesslich
+    ``violations`` heraus. Der ``block=False``-Zweig von ``inspect`` verspricht
+    im Docstring aber ausdruecklich, dass "der Eintrag in der Oberflaeche
+    sichtbar bleibt" – und genau das war er nicht. Gemessen an den
+    Injektionsproben von Short Tracks: zwei Vorfaelle in ``logonly``, null in der
+    Admin-Liste. Eine Zusage, die der Code nicht haelt, ist im Zweifel
+    gefaehrlicher als eine fehlende Funktion: niemand sieht, dass ein Postfach
+    oder eine Ablage beschossen wird.
+    """
     with _lock:
-        allv = _load().get("violations", {})
+        state = _load()
+        allv = state.get("violations", {})
+        logonly = list(state.get("logonly") or []) if mit_logonly else []
     flat = []
     for user, entries in allv.items():
         for e in entries:
             flat.append({"user": user, **e})
+    for e in logonly:
+        # In dieselbe Form bringen, die die Oberflaeche rendert (ts/user/channel/
+        # pattern/detail). `snippet` ist der beanstandete Fremdtext.
+        flat.append({
+            "user": e.get("user") or "?", "ts": e.get("ts", 0),
+            "channel": e.get("channel") or "", "kind": "injektion-erkannt",
+            "pattern": e.get("pattern") or e.get("method") or "",
+            "detail": (e.get("snippet") or "")[:_DETAIL_MAX],
+            "soft": True, "soft_reason": "nur protokolliert – der Text stammt von "
+                                         "einem Fremden, dieser Eintrag sperrt nichts",
+        })
     flat.sort(key=lambda x: x.get("ts", 0), reverse=True)
     return flat[:limit]
 

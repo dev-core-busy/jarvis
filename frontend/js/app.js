@@ -599,6 +599,20 @@
         }
         window.initEmailCollapse = _initEmailCollapse;
 
+        // ── Short-Tracks-Tab Collapse ──────────────────────────────────────
+        // Ueber _collapseInit und nicht mit eigener Klapp-Logik im Modul: die
+        // Funktion merkt sich den Auf-/Zu-Zustand je Container im localStorage
+        // und nimmt Klicks auf Knoepfe/Felder in der Kopfzeile aus. Eine zweite
+        // Umsetzung waere Drift.
+        function _initTracksCollapse() {
+            _collapseInit([
+                { hdr: 'tr-sect-limits-hdr', body: 'tr-sect-limits-body', tog: 'tr-sect-limits-tog' },
+                { hdr: 'tr-sect-areas-hdr',  body: 'tr-sect-areas-body',  tog: 'tr-sect-areas-tog'  },
+                { hdr: 'tr-sect-over-hdr',   body: 'tr-sect-over-body',   tog: 'tr-sect-over-tog'   },
+            ]);
+        }
+        window.initTracksCollapse = _initTracksCollapse;
+
         // ── Vision-Tab Collapse ────────────────────────────────────────────
         function _initVisionCollapse() {
             _collapseInit([
@@ -633,7 +647,8 @@
                                'agent_orchestrator', 'agent_autonomy_kit', 'avatar'];
         const tabsSkillCfg = SKILLCFG_TABS.map(n => document.getElementById('settings-tab-' + n));
         const tabEmail   = document.getElementById('settings-tab-email');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabEmail, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
+        const tabTracks  = document.getElementById('settings-tab-tracks');
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabEmail, tabTracks, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -726,6 +741,10 @@
                     tabEmail.style.display = '';
                     tabEmail.classList.add('active');
                     if (window.EmailAdmin) window.EmailAdmin.onShow();
+                } else if (target === 'tracks' && tabTracks) {
+                    tabTracks.style.display = '';
+                    tabTracks.classList.add('active');
+                    if (window.TracksAdmin) window.TracksAdmin.onShow();
                 } else if (target === 'kundenverwaltung' && tabKundenverwaltung) {
                     tabKundenverwaltung.style.display = '';
                     tabKundenverwaltung.classList.add('active');
@@ -938,6 +957,25 @@
             }
         }
 
+        // ── Short Tracks: Berechtigungsblock nur bei aktivem Skill ──
+        // Der REITER wird von skillcfg.js::updateTabs() geschaltet (er steht dort
+        // in TAB_BUTTONS). Hier geht es nur um den Block in Sicherheit →
+        // Berechtigungen: ohne aktiven Skill waere die Freigabe eine Freigabe fuer
+        // nichts – dieselbe Begruendung wie bei sec-sub-email und sec-sub-sap.
+        window.updateTracksSecVisibility = async function updateTracksSecVisibility() {
+            const box = document.getElementById('sec-sub-tracks');
+            if (!box) return;
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'short-tracks')
+                    : null;
+                box.style.display = (sp && sp.enabled) ? '' : 'none';
+            } catch (e) {
+                // Fehler ignorieren – der Block bleibt versteckt
+            }
+        };
+
         // ── E-Mail-Tab: nur sichtbar wenn 'email'-Skill aktiviert ──
         // Gleiches Muster wie beim SAP-Reiter, inklusive des Berechtigungsblocks
         // in Sicherheit → Berechtigungen: ohne aktiven Skill waere die Freigabe
@@ -1118,6 +1156,7 @@
             await updateJiraTabVisibility();
             await updateSapTabVisibility();
             await updateEmailTabVisibility();
+            await updateTracksSecVisibility();
             await updateKundenverwaltungTabVisibility();
             await updateSupportTabVisibility();
             await updateReminderSectionVisibility();

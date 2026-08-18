@@ -48,6 +48,10 @@
         agent_orchestrator: 'settings-tab-btn-orchestrator',
         agent_autonomy_kit: 'settings-tab-btn-autonomy',
         avatar:             'settings-tab-btn-avatar',
+        // Wie agent_orchestrator: hier, aber NICHT in TARGETS – der Reiter zeigt
+        // eine handgebaute Oberflaeche (short_tracks_admin.js), kein
+        // manifest-generiertes Formular.
+        'short-tracks':     'settings-tab-btn-tracks',
     };
 
     const SVG_EYE_OPEN   = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';

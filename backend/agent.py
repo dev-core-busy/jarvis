@@ -2904,6 +2904,22 @@ KRITISCH – Autonomie-Regeln:
                     f"der Rolle '{self._role_id}'. Verfuegbar: "
                     f"{', '.join(sorted(_allow)) or '(keine)'}.")
 
+        # ── Beobachter fuer Laeufe OHNE WebSocket ──
+        # ``_run_headless`` sendet keine Statusmeldungen; ein Aufrufer, der einen
+        # Fortschritt anzeigen will (Short Tracks: "liest PDF", "erzeugt Excel"),
+        # hat sonst keinen Anhaltspunkt und muesste "laeuft" behaupten, ohne
+        # etwas zu wissen. Der Hook ist ein reiner BEOBACHTER: er darf das
+        # Verhalten nicht beeinflussen, deshalb wird jede Ausnahme darin
+        # verschluckt – ein kaputter Fortschrittsbalken darf keinen Auftrag
+        # abbrechen.
+        _hook = getattr(self, "_schritt_hook", None)
+        if _hook is not None:
+            try:
+                _hook(name, args)
+            except Exception as _he:  # noqa: BLE001
+                print(f"[AGENT {self.agent_id}] Schritt-Hook fehlgeschlagen: {_he}",
+                      flush=True)
+
         span = tracer.start_span(name, kind="tool", parent_id=self.agent_id)
         span.attributes["tool.name"] = name
         span.attributes["agent.id"] = self.agent_id

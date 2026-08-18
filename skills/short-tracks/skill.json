@@ -1,0 +1,46 @@
+{
+    "name": "Short Tracks",
+    "description": "Kurzwege fuer wiederkehrende Dokumentarbeit: benannte Ablagen (Dumps) im Bereich /tracks, denen ein Prompt zugeordnet ist. Wer eine Datei oder eine URL darauf ablegt, loest diesen Prompt aus – ohne ihn erneut zu formulieren. Ein Administrator legt Ablagen fuer alle an, jeder Benutzer zusaetzlich eigene.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": [],
+    "category": "produktivitaet",
+    "icon": "inbox",
+    "system": false,
+    "enabled": false,
+    "dependencies": [],
+    "data_dirs": [],
+    "config_schema": {
+        "gleichzeitig": {
+            "type": "number",
+            "label": "Gleichzeitige Auftraege",
+            "description": "Wie viele abgelegte Dateien serverweit gleichzeitig verarbeitet werden. Alles Weitere wartet sichtbar in der Warteschlange. Hoehere Werte bremsen Chat und Wissens-Indexierung, weil PDF-Textpruefung und OCR auf demselben Server laufen. Erlaubt 1 bis 8.",
+            "default": 2
+        },
+        "max_datei_mb": {
+            "type": "number",
+            "label": "Groesse je Datei (MB)",
+            "description": "Groessere Dateien werden beim Ablegen mit Klartext abgewiesen, ohne einen Lauf zu starten. Erlaubt 1 bis 500.",
+            "default": 50
+        },
+        "max_dateien": {
+            "type": "number",
+            "label": "Dateien je Ablage-Vorgang",
+            "description": "Wie viele Dateien in EINEM Drop angenommen werden. Erlaubt 1 bis 100.",
+            "default": 20
+        },
+        "max_dumps": {
+            "type": "number",
+            "label": "Eigene Ablagen je Benutzer",
+            "description": "Notbremse gegen versehentliches Anlegen in Serie. Globale Ablagen sind davon nicht betroffen (Grenze dort: 30). Erlaubt 1 bis 100.",
+            "default": 10
+        }
+    },
+    "knowledge_docs": [],
+    "permissions": [],
+    "help": {
+        "details": "Eine Ablage (\"Dump\") ist ein Feld im Bereich /tracks mit einem gespeicherten Prompt: \"Rechnung pruefen\", \"Protokoll zusammenfassen\", \"Tabelle auswerten\". Wer eine Datei oder eine URL darauf zieht, loest den Prompt aus. Das Ergebnis erscheint auf der Karte; erzeugte Dateien (Word, Excel, PowerPoint, PDF, Diagramm) werden als Download angeboten.\n\nRECHTELAGE: Der Lauf traegt IMMER den Benutzer, der abgelegt hat, und ist IMMER unprivilegiert. Es gibt hierueber keinen Weg zu Systemrechten – auch nicht fuer einen Administrator, der die Ablage angelegt hat. Die Werkzeuge einer Ablage sind eine Whitelist aus Bereichen, die unter Einstellungen → Short Tracks freigeschaltet werden; ohne Freigabe gilt nur \"Lesen + Dokumente erzeugen\".\n\nSICHERHEIT: Der Dateiinhalt ist Fremdeingabe. Er wird im Auftrag als Sachverhalt abgegrenzt (Echtheitskennung je Lauf, entschaerfte Abschnittsmarken), und Injektionsmuster werden im Sicherheits-Protokoll vermerkt, ohne ein Konto zu sperren – der Inhalt kommt womoeglich von einem Fremden. Die harte Grenze ist der Werkzeug-Zuschnitt: bei \"Lesen + Dokumente erzeugen\" kann eine praeparierte Datei hoechstens den Antworttext verfaelschen. Der Bereich \"Shell / Python\" ist deutlich weiter und deshalb nicht per Vorgabe freigeschaltet.\n\nDer Bereich /tracks steht jedem angemeldeten Benutzer offen. Eine eigene Freigabeliste gibt es bewusst nicht: ein Dump kann nichts, was derselbe Benutzer nicht auch im Chat tippen koennte. Die vorhandenen Gates (SAP, Internet) wirken weiter ueber den Benutzer.",
+        "tools": []
+    }
+}

@@ -83,7 +83,8 @@ def run_all() -> dict:
     for name, fn in (("conv_log", _prune_conv_log),
                      ("telemetry_errors", _prune_telemetry_errors),
                      ("audit_log", _prune_audit_log),
-                     ("email_log", _prune_email_log)):
+                     ("email_log", _prune_email_log),
+                     ("short_tracks_log", _prune_short_tracks_log)):
         try:
             removed[name] = int(fn(cut) or 0)
         except Exception as e:  # noqa: BLE001
@@ -142,3 +143,15 @@ def _prune_email_log(cut: float) -> int:
     """
     from backend import mail_rules
     return mail_rules.protokoll_kuerzen(cut)
+
+
+def _prune_short_tracks_log(cut: float) -> int:
+    """Protokoll der Short Tracks (data/short_tracks_log.jsonl).
+
+    Gleiche Begruendung wie beim E-Mail-Protokoll: derselbe Diagnosespeicher-Typ,
+    dieselbe Frist, und AUSDRUECKLICH keine Stueckzahl- oder Groessengrenze – wer
+    nach einem missglueckten Lauf nachsehen will, braucht genau die Eintraege,
+    die eine Mengengrenze verdraengt haette.
+    """
+    from backend import short_tracks
+    return short_tracks.protokoll_kuerzen(cut)

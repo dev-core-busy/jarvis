@@ -1220,6 +1220,50 @@ async def require_email_access(request: Request, user: str = Depends(require_aut
                "E-Mail-Zugriff; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
+def _user_may_use_tracks(user: str) -> bool:
+    """Prädikat: Darf der Benutzer den Bereich Short Tracks (/tracks) nutzen?
+
+    Zuschnitt bewusst 1:1 wie ``_user_may_use_email``/``_user_may_use_sap``:
+    - Erlaubt sind AUSSCHLIESSLICH Benutzer in ``tracks_allowed_users`` oder
+      Mitglieder von ``tracks_allowed_group``.
+    - Ist WEDER Liste NOCH Gruppe gesetzt, darf NIEMAND – ausdrücklich auch
+      keine lokalen Administratoren ("leer = niemand", Regel seit 2026-07-29).
+    - KEIN Admin-Bypass.
+
+    **Entscheidung des Nutzers vom 2026-08-18.** Beim Bau war der Bereich
+    absichtlich für jeden angemeldeten Benutzer offen, mit der Begründung: eine
+    Ablage kann nichts, was derselbe Benutzer nicht auch in /chat tippen könnte.
+    Das bleibt sachlich richtig – aber eine Ablage ist ein *gespeicherter* Prompt,
+    der ohne Zutun eines Administrators entsteht und später Läufe auslöst. Wer
+    das steuern will, braucht dafür eine Freigabe wie bei E-Mail und SAP, und
+    zwar an derselben Stelle. Die Werkzeug-Gates (SAP, Internet) wirken
+    zusätzlich weiter über den Actor.
+    """
+    u = (user or "").strip()
+    if not u:
+        return False
+    users_raw = config.get_setting("tracks_allowed_users", "").strip()
+    grp = config.get_setting("tracks_allowed_group", "").strip()
+    if not users_raw and not grp:
+        return False
+    plain = _norm_login(u)
+    if users_raw and plain in {_norm_login(x) for x in users_raw.split(",") if x.strip()}:
+        return True
+    if grp and _member_of_any_group(_user_group_dns_cache.get(plain, []), grp):
+        return True
+    return False
+
+
+async def require_tracks_access(request: Request, user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: Prüft die Short-Tracks-Berechtigung (→ /api/tracks/*)."""
+    if _user_may_use_tracks(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein Zugriff auf Short Tracks – nicht in der Benutzerliste/-Gruppe "
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
+               "Short-Tracks-Zugriff; ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
 def _is_kb_group_editor(user: str, group: dict) -> bool:
     """True, wenn der Benutzer als *gruppenspezifischer* Editor hinterlegt ist.
 
@@ -4131,6 +4175,13 @@ async def get_me(user: str = Depends(require_auth)):
             # darf nicht auf eine 404-Seite fuehren. Die Datenendpunkte
             # /api/email/* pruefen weiterhin nur die Freigabe.
             "email": _user_may_use_email(user) and _skill_active("email"),
+            # Gleiche Logik wie bei sap/email: Freigabe UND aktiver Skill – eine
+            # Kachel, die auf eine 404-Seite oder in einen 403 fuehrt, ist
+            # schlimmer als keine Kachel. Die Datenendpunkte /api/tracks/*
+            # pruefen weiterhin nur die Freigabe (require_tracks_access), damit
+            # der Einstellungs-Reiter unabhaengig vom Skill-Zustand bedienbar
+            # bleibt.
+            "tracks": _user_may_use_tracks(user) and _skill_active("short-tracks"),
             "internet": _user_has_internet_access(user),
         },
         "license_banner": banner,
@@ -4999,6 +5050,10 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("email_allowed_users", body["email_allowed_users"])
     if "email_allowed_group" in body:
         config.save_setting("email_allowed_group", body["email_allowed_group"])
+    if "tracks_allowed_users" in body:
+        config.save_setting("tracks_allowed_users", body["tracks_allowed_users"])
+    if "tracks_allowed_group" in body:
+        config.save_setting("tracks_allowed_group", body["tracks_allowed_group"])
     if "ad_bind_user" in body:
         _bu = (body["ad_bind_user"] or "").strip()
         config.save_setting("ad_bind_user", _bu)
@@ -5148,6 +5203,8 @@ async def get_ad_status(user: str = Depends(require_local_auth)):
         ),
         "email_users": config.get_setting("email_allowed_users", ""),
         "email_group": config.get_setting("email_allowed_group", ""),
+        "tracks_users": config.get_setting("tracks_allowed_users", ""),
+        "tracks_group": config.get_setting("tracks_allowed_group", ""),
         # Beide Felder sind ODER-verknuepft (jeder Weg genuegt allein), deshalb
         # gibt es den Modus `users_group` – ein Modus, der einen der beiden Werte
         # verschweigt, ist genau die Anzeige, die den Login-Fehler vom
@@ -8720,6 +8777,469 @@ async def email_admin_areas(request: Request, user: str = Depends(require_local_
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True, "bereiche": gewaehlt})
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Short Tracks (/tracks) – Ablagen ("Dumps") mit gespeichertem Prompt
+# ═══════════════════════════════════════════════════════════════════════════
+# Ein Dump ist ein Ablagefeld mit einem Prompt. Wer eine Datei oder eine URL
+# darauf legt, loest ihn aus. Die Rechtelage in einem Satz: der Lauf traegt den
+# Benutzer, der abgelegt hat, und ist IMMER unprivilegiert
+# (``short_tracks_runner._actor_fuer``) – deshalb darf ein Benutzer eigene Dumps
+# anlegen, obwohl ein gespeicherter Prompt sonst Admin-Sache ist.
+#
+# ZUGANG: ``require_auth``, also jeder angemeldete Benutzer – bewusst OHNE eigene
+# Freigabeliste (anders als /email und /sap). Ein Dump kann nichts, was derselbe
+# Benutzer nicht auch in /chat tippen koennte; die vorhandenen Gates (Internet,
+# SAP, Wissens-Editor) wirken weiter ueber den Actor. Eine zweite Liste waere
+# eine Schranke vor einer offenen Tuer.
+#
+# Nur die ``/api/tracks/admin/*``-Endpunkte sind ``require_local_auth``: dort
+# werden Grenzen und Werkzeug-Freigaben gesetzt, und das ist eine Entscheidung
+# ueber ALLE Benutzer.
+
+def _tracks_hinweis():
+    """None, wenn der Bereich benutzbar ist – sonst ein Fehler-Rumpf (HTTP 400).
+
+    Der Skill ist per Vorgabe aus. Ein Klartext-Hinweis ist hier wichtiger als
+    ein 404: der Benutzer sieht die Seite (die Kachel haengt am Skill-Zustand),
+    und "nichts passiert" waere die schlechteste Antwort.
+    """
+    if not _skill_active("short-tracks"):
+        return {"ok": False, "error": "Der Skill „Short Tracks\" ist nicht aktiv "
+                                      "(Einstellungen → Skills)."}
+    return None
+
+
+@app.get("/tracks", response_class=HTMLResponse)
+async def tracks_page():
+    """Bereich Short Tracks ausliefern – nur wenn der Skill aktiv ist.
+
+    Die Berechtigung wird hier NICHT geprueft: eine normale Navigation traegt
+    keinen Authorization-Header (der Token liegt im localStorage). Unkritisch,
+    weil die Seite eine leere Huelle ist – jeder Datenabruf haengt an
+    ``require_auth`` und filtert zusaetzlich auf den angemeldeten Benutzer.
+    """
+    if not _skill_active("short-tracks"):
+        return HTMLResponse("<h1>404 – Short Tracks ist nicht aktiv</h1>", status_code=404)
+    f = FRONTEND_DIR / "tracks.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
+    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/api/tracks/status")
+async def tracks_status(lang: str = "de", user: str = Depends(require_tracks_access)):
+    """Zustand des Bereichs: sichtbare Dumps, Bereichskatalog, Grenzen.
+
+    ``lang`` uebersetzt den BEREICHSKATALOG. Er kommt vom Server (Name und
+    Hinweis stehen neben der Werkzeugliste, damit beides nicht auseinanderlaeuft
+    – gleiche Begruendung wie beim SAP-Analysekatalog und den E-Mail-Bereichen),
+    und ``applyLang()`` erreicht ihn deshalb nicht: die Oberflaeche holt ihn bei
+    ``jarvis-lang-changed`` neu.
+    """
+    from backend import short_tracks as _st
+    ist_admin = _is_admin_user(user)
+    return JSONResponse({
+        "ok": True,
+        "skill_aktiv": _skill_active("short-tracks"),
+        "ist_admin": ist_admin,
+        "internet": _user_has_internet_access(user),
+        "dumps": _st.sichtbar_fuer(user, ist_admin),
+        "bereiche": _st.bereiche_katalog(lang),
+        "grenzen": {
+            "gleichzeitig": _st.gleichzeitig(),
+            "max_datei_mb": _st.max_datei_bytes() // (1024 * 1024),
+            "max_dateien": _st.max_dateien_je_drop(),
+            "max_dumps": _st.max_dumps_je_benutzer(),
+            "max_dumps_global": _st.MAX_DUMPS_GLOBAL,
+            "prompt_max": _st.PROMPT_MAX,
+            "hinweis_max": _st.HINWEIS_MAX,
+            "name_max": _st.NAME_MAX,
+            "beschreibung_max": _st.BESCHREIBUNG_MAX,
+        },
+    })
+
+
+@app.post("/api/tracks/dumps")
+async def tracks_dump_create(request: Request, user: str = Depends(require_tracks_access)):
+    """Neue Ablage. ``global: true`` darf nur ein Administrator setzen.
+
+    Der Besitzer kommt aus der Anmeldung, NIE aus dem Rumpf – sonst waere
+    ``{"owner": "chef"}`` der Weg, jemandem einen Dump unterzuschieben.
+    """
+    from backend import short_tracks as _st
+    hinweis = _tracks_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        d = await asyncio.to_thread(_st.anlegen, user, body or {}, _is_admin_user(user))
+    except _st.DumpFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "dump": d})
+
+
+@app.put("/api/tracks/dumps/{dump_id}")
+async def tracks_dump_update(dump_id: str, request: Request,
+                             user: str = Depends(require_tracks_access)):
+    """Ablage aendern. ``id``, ``owner`` und ``global`` sind unveraenderlich."""
+    from backend import short_tracks as _st
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        d = await asyncio.to_thread(_st.aendern, dump_id, body or {}, user,
+                                    _is_admin_user(user))
+    except _st.DumpFehler as e:
+        # "nicht gefunden" ist auch die Antwort auf eine FREMDE Ablage – kein
+        # Existenz-Orakel (gleiche Regel wie bei cron_delete).
+        code = 404 if "nicht gefunden" in str(e).lower() else 400
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=code)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "dump": d})
+
+
+@app.delete("/api/tracks/dumps/{dump_id}")
+async def tracks_dump_delete(dump_id: str, user: str = Depends(require_tracks_access)):
+    """Eigene Ablage loeschen (globale nur als Administrator)."""
+    from backend import short_tracks as _st
+    weg = await asyncio.to_thread(_st.loeschen, dump_id, user, _is_admin_user(user))
+    if not weg:
+        return JSONResponse({"ok": False, "error": "Ablage nicht gefunden."},
+                            status_code=404)
+    return JSONResponse({"ok": True})
+
+
+# ── Ablegen ────────────────────────────────────────────────────────────────
+
+_TRACKS_LESE_BLOCK = 1024 * 1024
+
+
+async def _tracks_lesen_mit_grenze(datei, grenze: int) -> bytes | None:
+    """Liest einen Upload blockweise und bricht ueber der Grenze ab.
+
+    ``await datei.read()`` waere bequemer, wuerde aber JEDE Groesse in den
+    Arbeitsspeicher holen – bei 20 abgelegten Dateien ein Weg, den Dienst mit
+    einem einzigen Aufruf lahmzulegen. Rueckgabe ``None`` = zu gross.
+    """
+    stuecke, gesamt = [], 0
+    while True:
+        block = await datei.read(_TRACKS_LESE_BLOCK)
+        if not block:
+            break
+        gesamt += len(block)
+        if gesamt > grenze:
+            return None
+        stuecke.append(block)
+    return b"".join(stuecke)
+
+
+@app.post("/api/tracks/drop")
+async def tracks_drop(dump_id: str = Form(...), hinweis: str = Form(""),
+                      files: list[UploadFile] = File(...),
+                      user: str = Depends(require_tracks_access)):
+    """Dateien auf eine Ablage legen und die Auftraege einreihen.
+
+    Geprueft wird ALLES vor dem ersten Lauf – Groesse, Ausfuehrbarkeit und der
+    Dateityp-Filter der Ablage. Ein Fehlgriff kostet sonst Minuten Rechenzeit und
+    liefert Unsinn, den jemand als Ergebnis liest.
+
+    Eine abgewiesene Datei laesst die uebrigen laufen: bei zehn abgelegten
+    Dateien waere "alles oder nichts" die aergerlichste Variante. Die
+    abgewiesenen stehen mit Grund in der Antwort.
+    """
+    from backend import short_tracks as _st, short_tracks_runner as _str
+    hw = _tracks_hinweis()
+    if hw:
+        return JSONResponse(hw, status_code=400)
+    dump = _st.holen(dump_id)
+    if not dump or not _st.darf_benutzen(dump, user):
+        # Auch fuer eine abgeschaltete oder fremde private Ablage: 404.
+        return JSONResponse({"ok": False, "error": "Ablage nicht gefunden."},
+                            status_code=404)
+    if len(files or []) > _st.max_dateien_je_drop():
+        return JSONResponse({"ok": False, "error":
+                             "Es sind hoechstens %d Dateien je Vorgang moeglich."
+                             % _st.max_dateien_je_drop()}, status_code=400)
+
+    grenze = _st.max_datei_bytes()
+    teile, abgewiesen = [], []
+    for f in (files or []):
+        name = os.path.basename(f.filename or "datei")
+        ok, grund = _st.typ_erlaubt(dump, name)
+        if not ok:
+            abgewiesen.append({"name": name, "grund": grund})
+            continue
+        daten = await _tracks_lesen_mit_grenze(f, grenze)
+        if daten is None:
+            abgewiesen.append({"name": name, "grund":
+                               "Die Datei ist groesser als %d MB."
+                               % (grenze // (1024 * 1024))})
+            continue
+        if not daten:
+            abgewiesen.append({"name": name, "grund": "Die Datei ist leer."})
+            continue
+        # Ein umbenanntes Programm kann jeden MIME-Typ behaupten – deshalb
+        # dieselbe Magie-Byte-Pruefung wie bei Chat-Anhaengen.
+        endung = os.path.splitext(name)[1].lower().lstrip(".")
+        grund = _anhang_ausfuehrbar(endung, f.content_type or "", daten)
+        if grund:
+            abgewiesen.append({"name": name, "grund": grund})
+            continue
+        ziel = await asyncio.to_thread(_str.datei_ablegen, daten, name, user)
+        if ziel is None:
+            abgewiesen.append({"name": name, "grund":
+                               "Die Datei konnte auf dem Server nicht abgelegt werden."})
+            continue
+        text, thinweis = await asyncio.to_thread(_str.inhalt_lesen, ziel)
+        teile.append({"name": name, "art": "datei", "text": text,
+                      "hinweis": thinweis, "pfad": ziel.as_posix(),
+                      "ablage": ziel.name})
+
+    if not teile:
+        return JSONResponse({"ok": False, "abgewiesen": abgewiesen,
+                             "error": "Keine Datei konnte uebernommen werden."},
+                            status_code=400)
+    jobs = await _str.einreihen(dump, user, teile,
+                               (hinweis or "")[:_st.HINWEIS_MAX])
+    return JSONResponse({"ok": True, "jobs": jobs, "abgewiesen": abgewiesen})
+
+
+@app.post("/api/tracks/drop_url")
+async def tracks_drop_url(request: Request, user: str = Depends(require_tracks_access)):
+    """Eine URL auf eine Ablage legen: der Server holt die Seite als Text.
+
+    **Internet-Freigabe ist Pflicht.** Der Abruf geschieht auf dem Server – ohne
+    diese Pruefung waere der Endpunkt der Weg, mit dem ein Benutzer OHNE
+    Internet-Freigabe doch externe Inhalte holt (die Werkzeug-Sperre
+    ``_INTERNET_TOOLS`` greift nur fuer Werkzeuge des Agenten).
+
+    Die SSRF-Schranke sitzt in ``short_tracks_runner._ziel_erlaubt``: interne
+    Adressen werden abgewiesen, und Weiterleitungen werden einzeln geprueft.
+    """
+    from backend import short_tracks as _st, short_tracks_runner as _str
+    hw = _tracks_hinweis()
+    if hw:
+        return JSONResponse(hw, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    dump = _st.holen(str(body.get("dump_id") or ""))
+    if not dump or not _st.darf_benutzen(dump, user):
+        return JSONResponse({"ok": False, "error": "Ablage nicht gefunden."},
+                            status_code=404)
+    if not _user_has_internet_access(user):
+        return JSONResponse({"ok": False, "error":
+                             "Adressen aus dem Internet sind fuer deinen Benutzer "
+                             "nicht freigeschaltet (Einstellungen → Sicherheit → "
+                             "Berechtigungen → Internet-Zugriff)."}, status_code=403)
+    url = str(body.get("url") or "").strip()
+    if not url:
+        return JSONResponse({"ok": False, "error": "Keine Adresse angegeben."},
+                            status_code=400)
+    try:
+        titel, text, ziel = await _str.url_holen(url)
+    except _str.UrlFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Die Seite konnte nicht geholt "
+                                                   "werden: %s" % e}, status_code=400)
+    if not (text or "").strip():
+        return JSONResponse({"ok": False, "error":
+                             "Von dieser Seite liess sich kein Text gewinnen."},
+                            status_code=400)
+    teile = [{"name": (titel or ziel)[:120], "art": "url",
+              "text": _str._kuerzen(text, _str.TEXT_MAX), "hinweis": "",
+              "url": ziel}]
+    jobs = await _str.einreihen(dump, user, teile,
+                               str(body.get("hinweis") or "")[:_st.HINWEIS_MAX])
+    return JSONResponse({"ok": True, "jobs": jobs, "abgewiesen": []})
+
+
+# ── Auftraege ──────────────────────────────────────────────────────────────
+
+@app.get("/api/tracks/jobs")
+async def tracks_jobs(user: str = Depends(require_tracks_access)):
+    """Eigene Auftraege (Live-Anzeige). Fremde sind nicht sichtbar.
+
+    Ausdruecklich auch fuer Administratoren nicht: der Ergebnistext kann den
+    vollen Inhalt eines fremden Dokuments enthalten.
+    """
+    from backend import short_tracks_runner as _str
+    return JSONResponse({"ok": True, "jobs": _str.jobs_fuer(user),
+                         "zaehler": _str.offene_anzahl(user)})
+
+
+@app.get("/api/tracks/count")
+async def tracks_count(user: str = Depends(require_tracks_access)):
+    """Zaehler fuer die Portal-Kachel: fertige, noch nicht angesehene Laeufe.
+
+    Eigener, winziger Endpunkt, weil das Portal ihn regelmaessig abruft – die
+    vollstaendige Auftragsliste mit Ergebnistexten dafuer zu holen waere die
+    teuerste Variante.
+    """
+    from backend import short_tracks_runner as _str
+    if not _skill_active("short-tracks"):
+        return JSONResponse({"ok": True, "neu": 0, "aktiv": 0})
+    z = _str.offene_anzahl(user)
+    return JSONResponse({"ok": True, "neu": z["neu"], "aktiv": z["aktiv"]})
+
+
+@app.post("/api/tracks/jobs/seen")
+async def tracks_jobs_seen(user: str = Depends(require_tracks_access)):
+    """Fertige Auftraege als angesehen markieren (loescht den Kachel-Zaehler)."""
+    from backend import short_tracks_runner as _str
+    return JSONResponse({"ok": True, "anzahl": _str.als_gesehen(user)})
+
+
+@app.delete("/api/tracks/jobs/{job_id}")
+async def tracks_job_delete(job_id: str, user: str = Depends(require_tracks_access)):
+    """Einen abgeschlossenen eigenen Auftrag aus der Anzeige nehmen.
+
+    Ein laufender wird NICHT entfernt – das waere ein Abbruch, den niemand
+    gemeint hat. Der Protokolleintrag bleibt in jedem Fall erhalten.
+    """
+    from backend import short_tracks_runner as _str
+    if not _str.job_entfernen(job_id, user):
+        return JSONResponse({"ok": False, "error": "Auftrag nicht gefunden oder noch "
+                                                   "nicht abgeschlossen."},
+                            status_code=404)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/tracks/log")
+async def tracks_log(dump_id: str = "", limit: int = 50,
+                     user: str = Depends(require_tracks_access)):
+    """Eigenes Protokoll (neueste zuerst). Fremde Eintraege sind nicht sichtbar."""
+    from backend import short_tracks as _st
+    try:
+        limit = max(1, min(int(limit), 200))
+    except (TypeError, ValueError):
+        limit = 50
+    eintraege = await asyncio.to_thread(_st.protokoll_lesen, user, dump_id, limit)
+    return JSONResponse({"ok": True, "eintraege": eintraege})
+
+
+# ── Verwaltung (Administrator) ──────────────────────────────────────────────
+
+@app.get("/api/tracks/admin/overview")
+async def tracks_admin_overview(lang: str = "de", user: str = Depends(require_local_auth)):
+    """Uebersicht fuer den Einstellungs-Reiter.
+
+    Zeigt Grenzen, Bereichs-Freigabe, globale Ablagen und – nur als ZAHLEN – wer
+    wie viele eigene Ablagen hat. Bewusst ohne fremde Prompts: der Reiter ist zum
+    Einrichten da, nicht zum Mitlesen (gleiche Entscheidung wie beim
+    E-Mail-Reiter).
+    """
+    from backend import short_tracks as _st, short_tracks_runner as _str
+    global_dumps = [d for d in _st._alle() if d.get("global")]
+    return JSONResponse({
+        "ok": True,
+        "skill_aktiv": _skill_active("short-tracks"),
+        "bereiche": _st.bereiche_katalog(lang),
+        "grenzen": {
+            "gleichzeitig": _st.gleichzeitig(),
+            "max_datei_mb": _st.max_datei_bytes() // (1024 * 1024),
+            "max_dateien": _st.max_dateien_je_drop(),
+            "max_dumps": _st.max_dumps_je_benutzer(),
+        },
+        "global": [{"id": d["id"], "name": d["name"], "enabled": d.get("enabled"),
+                    "bereiche": d.get("bereiche"), "laeufe": d.get("laeufe", 0)}
+                   for d in global_dumps],
+        "benutzer": _st.anzahl_je_benutzer(),
+        "laufend": len(_str._laufend), "wartend": len(_str._reihe),
+    })
+
+
+@app.post("/api/tracks/admin/areas")
+async def tracks_admin_areas(request: Request, user: str = Depends(require_local_auth)):
+    """Freigegebene Werkzeug-Bereiche setzen.
+
+    Sendet AUSSCHLIESSLICH ``bereiche`` an die Skill-Config: der Server merged
+    (``update_skill_config``), und ein Knopf, der den ganzen Formularstand
+    mitschickt, ueberschriebe die Grenzen des anderen Knopfes (dieselbe Trennung
+    wie bei den E-Mail-Bereichen und den SAP-Sichtbarkeiten).
+    """
+    from backend import short_tracks as _st
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    roh = body.get("bereiche")
+    if isinstance(roh, str):
+        roh = [t.strip() for t in roh.split(",")]
+    # Unbekannte Kennungen werden VERWORFEN, nicht geraten – sonst bliebe die
+    # Kennung eines entfernten Bereichs dauerhaft in der Konfiguration stehen.
+    gewaehlt = [b for b in (roh or []) if b in _st.BEREICHE]
+    if _st.PFLICHT_BEREICH not in gewaehlt:
+        gewaehlt.insert(0, _st.PFLICHT_BEREICH)
+    gewaehlt = [b for b in _st.BEREICHE if b in gewaehlt]
+    try:
+        sm = _get_skill_manager()
+        sm.update_skill_config("short-tracks", {"bereiche": ",".join(gewaehlt)})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "bereiche": gewaehlt})
+
+
+@app.post("/api/tracks/admin/limits")
+async def tracks_admin_limits(request: Request, user: str = Depends(require_local_auth)):
+    """Grenzen setzen (gleichzeitige Auftraege, Groesse, Anzahl).
+
+    Sendet ausschliesslich die Zahlenfelder – nie ``bereiche`` (siehe oben).
+    Begrenzt wird zusaetzlich beim LESEN (``short_tracks._cfg_int``), damit auch
+    eine handgeschriebene settings.json nichts kaputt machen kann.
+    """
+    from backend import short_tracks as _st
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    grenzen = {
+        "gleichzeitig": (1, 8, _st.GLEICHZEITIG_VORGABE),
+        "max_datei_mb": (1, 500, _st.MAX_DATEI_MB_VORGABE),
+        "max_dateien": (1, 100, _st.MAX_DATEIEN_JE_DROP_VORGABE),
+        "max_dumps": (1, 100, _st.MAX_DUMPS_JE_BENUTZER),
+    }
+    neu = {}
+    for feld, (unten, oben, vorgabe) in grenzen.items():
+        if feld not in (body or {}):
+            continue
+        try:
+            n = int(str(body[feld]).strip() or vorgabe)
+        except (TypeError, ValueError):
+            return JSONResponse({"ok": False, "error":
+                                 "'%s' muss eine Zahl sein." % feld}, status_code=400)
+        if n < unten or n > oben:
+            return JSONResponse({"ok": False, "error":
+                                 "'%s' muss zwischen %d und %d liegen."
+                                 % (feld, unten, oben)}, status_code=400)
+        neu[feld] = n
+    if not neu:
+        return JSONResponse({"ok": False, "error": "Keine Grenze angegeben."},
+                            status_code=400)
+    try:
+        sm = _get_skill_manager()
+        sm.update_skill_config("short-tracks", neu)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "grenzen": neu})
+
+
+@app.post("/api/tracks/admin/stop")
+async def tracks_admin_stop(user: str = Depends(require_local_auth)):
+    """Nothalt: laufende Auftraege abbrechen (die Warteschlange bleibt)."""
+    from backend import short_tracks_runner as _str
+    return JSONResponse({"ok": True, "abgebrochen": _str.stop_alle()})
 
 # ─── Jira (Reiter: Ticketsuche) ──────────────────────────────────────
 

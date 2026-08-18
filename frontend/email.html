@@ -168,15 +168,15 @@
            (Muster .role-card aus den Rollen-Agenten). Wenn zwei Elemente wie
            eines aussehen sollen, gehoert eines INS andere – sonst bleibt ein
            Spalt sichtbar, egal wie die Radien gesetzt sind. */
-        .em-rule-card { border: 1px solid var(--border); border-radius: var(--radius-md);
+        .em-rule-card, .em-stil-card { border: 1px solid var(--border); border-radius: var(--radius-md);
             background: rgba(var(--fg-rgb), .02); margin-bottom: 10px; overflow: hidden; }
-        .em-rule-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
-        .em-rule-main { flex: 1 1 auto; min-width: 0; }
-        .em-rule-name { font-weight: 600; font-size: .92rem; }
-        .em-rule-meta { font-size: .76rem; color: var(--text-muted); margin-top: 2px;
+        .em-rule-row, .em-stil-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
+        .em-rule-main, .em-stil-main { flex: 1 1 auto; min-width: 0; }
+        .em-rule-name, .em-stil-name { font-weight: 600; font-size: .92rem; }
+        .em-rule-meta, .em-stil-meta { font-size: .76rem; color: var(--text-muted); margin-top: 2px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .em-rule-card.is-off { opacity: .55; }   /* Deckkraft, keine harte Farbe */
-        .em-rule-acts { display: flex; gap: 4px; flex: 0 0 auto; }
+        .em-rule-acts, .em-stil-acts { display: flex; gap: 4px; flex: 0 0 auto; }
         .em-icon-btn { background: none; border: 1px solid var(--border);
             color: var(--text-secondary); width: 30px; height: 30px; border-radius: 8px;
             cursor: pointer; display: inline-flex; align-items: center;
@@ -197,6 +197,16 @@
         .em-tools label:hover { background: rgba(var(--fg-rgb), .06); }
         .em-tools input[type="checkbox"] { width: auto; margin-top: 2px; flex: 0 0 auto; }
         .em-tools label.is-locked { opacity: .6; cursor: default; }
+
+        /* Der Standard-Stil ist an Zeichen UND Text erkennbar, nicht nur an
+           der Farbe (Farbe allein ist fuer Farbfehlsichtige keine Aussage). */
+        .em-stil-card.is-std { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+        .em-stil-badge { display: inline-block; margin-left: 6px; padding: 1px 7px;
+            border-radius: 10px; font-size: .7rem; font-weight: 600;
+            background: color-mix(in srgb, var(--accent) 18%, transparent);
+            color: var(--accent); }
+        .em-stil-edit { padding: 0 14px 14px; border-top: 1px solid var(--border); }
+        .em-sub-head { font-size: .92rem; font-weight: 600; margin: 0 0 4px; }
 
         .em-scroll { max-height: 320px; overflow-y: auto; padding-right: 6px;
             border-bottom: 1px solid var(--border); }
@@ -297,13 +307,6 @@
                 </div>
                 <div class="em-help" id="em-help-folders" data-i18n="mail.help_folders">Nur ausfüllen, wenn deine Ordner anders heißen als üblich. Bleibt ein Feld leer, benutzt Jarvis den Standardordner deines Postfachs.</div>
                 <div class="em-field" style="margin-top:12px;">
-                    <label><span data-i18n="mail.acct_guide">Stil und Signatur für Antworten (optional)</span> <button type="button" class="em-info" data-help="em-help-guide" aria-expanded="false"
-                            data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
-                    <textarea id="em-vorgabe" rows="4" placeholder="z. B. Signatur, Anrede-Form, was nie zugesagt werden darf" data-i18n-placeholder="mail.acct_guide_ph"></textarea>
-                    <span class="em-hint" data-i18n="mail.acct_guide_hint">Gilt für vorgeschlagene Antworten UND für alle deine Regeln. Bei Widerspruch geht die Regel vor.</span>
-                    <div class="em-help" id="em-help-guide" data-i18n="mail.help_guide">Gilt für jede Antwort, die für dich formuliert wird.</div>
-                </div>
-                <div class="em-field" style="margin-top:12px;">
                     <label><input type="checkbox" id="em-aktiv" style="width:auto;margin-right:8px;">
                         <span data-i18n="mail.acct_active">Postfach aktiv (Regeln dürfen darauf arbeiten)</span> <button type="button" class="em-info" data-help="em-help-active" aria-expanded="false"
                             data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
@@ -316,6 +319,19 @@
                     <span class="em-status" id="em-acct-status"></span>
                 </div>
                 <div id="em-acct-result" style="margin-top:10px;"></div>
+
+                <div class="em-sep"></div>
+                <h3 class="em-sub-head"><span data-i18n="mail.styles_head">Stile für Antworten</span>
+                    <button type="button" class="em-info" data-help="em-help-styles" aria-expanded="false"
+                        data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></h3>
+                <p class="em-hint" data-i18n="mail.styles_hint">Lege so viele Schreibweisen an, wie du brauchst – zum Beispiel „Förmlich", „Locker" oder „Kurz &amp; knapp". Der Stil bestimmt nur, WIE ein Text klingt (Anrede, Ton, Signatur); ob überhaupt geantwortet wird, entscheidet allein deine Regel. Beim Antworten in Outlook wählst du den Stil im Pulldown; eine Regel benutzt den bei ihr eingestellten Stil, sonst den Standard.</p>
+                <div class="em-help" id="em-help-styles" data-i18n="mail.help_styles">Der Standard-Stil (●) gilt überall dort, wo nichts anderes gewählt ist. Du kannst einen Stil auch im Text einer Regel ansprechen, zum Beispiel „Antworte im Stil ‚Förmlich'" – der Name wird aufgelöst, bevor das Sprachmodell läuft. Ist der Stil im Regel-Formular ausgewählt, gewinnt diese Auswahl.</div>
+                <div id="em-stile-list" style="margin-top:10px;"></div>
+                <div class="em-row">
+                    <button class="em-btn" id="em-stil-neu" data-i18n="mail.style_new">Neuer Stil</button>
+                    <span class="em-status" id="em-stil-status"></span>
+                </div>
+                <div id="em-stil-edit" class="hidden"></div>
             </div>
         </div>
 
@@ -394,11 +410,11 @@
     </div>
 </div>
 
-<script src="/static/js/i18n.js?v=45"></script>
+<script src="/static/js/i18n.js?v=46"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=23"></script>
 <script src="/static/js/sessions.js?v=6"></script>
-<script src="/static/js/email_portal.js?v=5"></script>
+<script src="/static/js/email_portal.js?v=6"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der
      Theme-Knopf oben diese Id tragen. -->

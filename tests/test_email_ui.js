@@ -59,11 +59,18 @@ const BEREICHE_EN = [
 ];
 const katalog = (url) => (/[?&]lang=en\b/.test(String(url)) ? BEREICHE_EN : BEREICHE);
 
+// Der Stilname ist FREITEXT des Benutzers – einer der beiden traegt deshalb
+// eine XSS-Nutzlast (er landet in einer Liste und in einem <option>).
+const STILE = [
+    { id: 's1', name: 'Förmlich', text: 'Sie-Form. Mit freundlichen Grüßen', standard: true },
+    { id: 's2', name: '<img src=x onerror=alert(1)>', text: 'Du-Form.', standard: false }
+];
+
 const KONTO = {
     vorhanden: true, adresse: 'a.bender@nexus.int', benutzer: 'NEXUS\\a.bender',
     kanal: '', aktiv: true, passwort_gesetzt: true, ordner_eingang: 'Posteingang',
     ordner_entwuerfe: '', ordner_gesendet: '', letzter_erfolg: 1754990000,
-    letzter_fehler: ''
+    letzter_fehler: '', stile: JSON.parse(JSON.stringify(STILE)), max_stile: 12
 };
 
 const REGELN = [
@@ -110,7 +117,9 @@ function bauePortal(opt) {
                          server: { kanal: 'auto', ews: true, imap: true, smtp: true },
                          kategorie: 'Jarvis', regeln: regeln.length,
                          grenzen: { max_regeln: 50, min_intervall: 1, max_intervall: 1440,
-                                    max_je_lauf: 10, prompt_max: 8000 } });
+                                    max_je_lauf: 10, prompt_max: 8000,
+                                    max_stile: 12, stil_name_max: 60,
+                                    stil_text_max: 2000 } });
         }
         if (pfad === '/api/email/rules' && (o.method || 'GET') === 'GET') {
             return gib({ ok: true, regeln: regeln, bereiche: katalog(url) });
@@ -132,6 +141,25 @@ function bauePortal(opt) {
         }
         if (/\/run$/.test(url)) {
             return gib({ ok: true, bericht: { verarbeitet: 1, aktionen: [{ ergebnis: 'Entwurf gespeichert.' }] } });
+        }
+        if (pfad === '/api/email/styles' && o.method === 'POST') {
+            if (opt.stilFehler) return gib({ ok: false, error: opt.stilFehler }, 400);
+            konto.stile = konto.stile.concat([
+                { id: 'neu', name: body.name, text: body.text, standard: !!body.standard }]);
+            return gib({ ok: true, stile: konto.stile });
+        }
+        if (/\/api\/email\/styles\/[^/]+$/.test(pfad) && o.method === 'PUT') {
+            const id = pfad.split('/').pop();
+            konto.stile = konto.stile.map(e => e.id === id ? Object.assign({}, e, body) : e);
+            if (body.standard) {
+                konto.stile = konto.stile.map(e => Object.assign({}, e, { standard: e.id === id }));
+            }
+            return gib({ ok: true, stile: konto.stile });
+        }
+        if (/\/api\/email\/styles\/[^/]+$/.test(pfad) && o.method === 'DELETE') {
+            const id = pfad.split('/').pop();
+            konto.stile = konto.stile.filter(e => e.id !== id);
+            return gib({ ok: true, stile: konto.stile });
         }
         if (pfad === '/api/email/account' && o.method === 'POST') {
             if (opt.acctFehler) return gib({ ok: false, error: opt.acctFehler }, 400);
@@ -1138,6 +1166,114 @@ abschnitt('7. Einstellungs-Reiter: durchgaengig uebersetzbar');
         'und holt sie bei DE/EN neu');
     pruefe(w.document.getElementById('em-areas').textContent.indexOf('Knowledge base') > -1,
         'danach auf Englisch');
+    w.close();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('6. Stile fuer Antworten (mehrere benannte Vorgaben)');
+{
+    const { w, rufe } = bauePortal();
+    await warte(90);
+    const d = w.document;
+    const karten = d.querySelectorAll('#em-stile-list .em-stil-card');
+    pruefe(karten.length === 2, 'beide Stile stehen in der Liste', String(karten.length));
+    pruefe(d.getElementById('em-stile-list').innerHTML.indexOf('<img src=x') < 0,
+        'der Stilname wird maskiert (er ist Freitext des Benutzers)');
+    pruefe(karten[0].className.indexOf('is-std') > -1 &&
+        karten[0].textContent.indexOf('Standard') > -1,
+        'der Standard ist an Zeichen UND Text erkennbar, nicht nur an der Farbe');
+    pruefe(karten[0].querySelector('[data-act="std"]') === null &&
+        karten[1].querySelector('[data-act="std"]') !== null,
+        'nur der Nicht-Standard bietet "Als Standard setzen" an');
+
+    // Anlegen: der Knopf oeffnet das Formular, Speichern sendet POST.
+    d.getElementById('em-stil-neu').click();
+    pruefe(!!d.getElementById('em-s-name'), 'der Knopf oeffnet das Formular');
+    d.getElementById('em-s-name').value = 'Kurz & knapp';
+    d.getElementById('em-s-text').value = 'Höchstens drei Sätze.';
+    d.getElementById('em-s-std').checked = false;
+    const vorher = rufe.length;
+    d.getElementById('em-s-save').click();
+    await warte(60);
+    const post = rufe.slice(vorher).filter(r => r.methode === 'POST' &&
+        r.url.indexOf('/api/email/styles') === 0)[0];
+    pruefe(!!post && post.body.name === 'Kurz & knapp' &&
+        post.body.text === 'Höchstens drei Sätze.' && post.body.standard === false,
+        'Speichern sendet Name, Text und Standard-Wahl');
+    pruefe(d.querySelectorAll('#em-stile-list .em-stil-card').length === 3,
+        'die Liste zeigt den neuen Stil sofort');
+    pruefe(!d.getElementById('em-s-name'), 'das Formular ist danach zu');
+
+    // Standard umsetzen: NUR das eine Feld senden - ein Merge mit dem
+    // Formularstand wuerde sonst offene Eingaben festschreiben.
+    const v2 = rufe.length;
+    d.querySelector('.em-stil-card[data-stil="s2"] [data-act="std"]').click();
+    await warte(60);
+    const put = rufe.slice(v2).filter(r => r.methode === 'PUT')[0];
+    pruefe(!!put && put.url.indexOf('/api/email/styles/s2') === 0 &&
+        Object.keys(put.body).join() === 'standard' && put.body.standard === true,
+        'der Standard-Knopf sendet ausschliesslich {standard:true}');
+
+    // Loeschen fragt nach - und nennt die Folge fuer die Regeln.
+    const v3 = rufe.length;
+    d.querySelector('.em-stil-card[data-stil="s1"] [data-act="del"]').click();
+    await warte(60);
+    const del = rufe.slice(v3).filter(r => r.methode === 'DELETE')[0];
+    pruefe(!!del && del.url.indexOf('/api/email/styles/s1') === 0,
+        'Loeschen geht an den eigenen Endpunkt');
+    w.close();
+}
+
+{
+    // Ohne Stile: ein Hinweis statt einer leeren Flaeche.
+    const konto = Object.assign({}, KONTO, { stile: [] });
+    const { w } = bauePortal({ konto: konto });
+    await warte(90);
+    pruefe(w.document.querySelector('#em-stile-list .em-empty') !== null,
+        'ohne Stile steht ein Hinweis da');
+    w.close();
+}
+
+{
+    // DIE TRENNUNG: der Postfach-Knopf darf die Stile nicht anfassen.
+    const { w, rufe } = bauePortal();
+    await warte(90);
+    const d = w.document;
+    const vorher = rufe.length;
+    d.getElementById('em-save-acct').click();
+    await warte(60);
+    const post = rufe.slice(vorher).filter(r => r.methode === 'POST' &&
+        r.url.indexOf('/api/email/account') === 0)[0];
+    pruefe(!!post && !('antwort_vorgabe' in post.body) && !('stile' in post.body),
+        'Postfach speichern sendet weder das alte Feld noch die Stilliste',
+        JSON.stringify(post && post.body));
+    w.close();
+}
+
+{
+    // Regel-Formular: Auswahlfeld, Vorbelegung, Mitsenden.
+    const regeln = JSON.parse(JSON.stringify(REGELN));
+    regeln[0].stil = 's2';
+    const { w, rufe } = bauePortal({ regeln: regeln });
+    await warte(90);
+    const d = w.document;
+    d.querySelector('.em-rule-card[data-rid="r1"] [data-act="edit"]').click();
+    const sel = d.getElementById('em-f-stil');
+    pruefe(!!sel, 'das Regel-Formular hat ein Stil-Pulldown');
+    const werte = Array.prototype.map.call(sel.options, o => o.value);
+    pruefe(werte[0] === '' && werte.indexOf('s1') > 0 && werte.indexOf('s2') > 0 &&
+        werte[werte.length - 1] === '-',
+        'Optionen: Standard, jeder Stil, und ausdruecklich "ohne Stil"', werte.join('|'));
+    pruefe(sel.options[0].textContent.indexOf('Förmlich') > -1,
+        'die Standard-Option nennt den Namen des Standardstils');
+    pruefe(sel.innerHTML.indexOf('<img src=x') < 0, 'auch im Pulldown maskiert');
+    pruefe(sel.value === 's2', 'die gespeicherte Wahl ist vorbelegt');
+    sel.value = 's1';
+    const vorher = rufe.length;
+    d.getElementById('em-f-save').click();
+    await warte(60);
+    const put = rufe.slice(vorher).filter(r => r.methode === 'PUT')[0];
+    pruefe(!!put && put.body.stil === 's1', 'die Wahl wird mitgespeichert');
     w.close();
 }
 

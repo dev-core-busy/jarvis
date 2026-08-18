@@ -469,45 +469,87 @@ EMAILHTML2 = (ROOT / "frontend" / "email.html").read_text(encoding="utf-8")
 PORTALJS2 = (ROOT / "frontend" / "js" / "email_portal.js").read_text(encoding="utf-8")
 TASKPANE2 = (ROOT / "frontend" / "addin" / "taskpane.html").read_text(encoding="utf-8")
 
-pruefe('"antwort_vorgabe"' in ACC.split("AENDERBAR = (", 1)[1].split(")", 1)[0],
-       "das Feld steht in der Whitelist AENDERBAR (sonst wird es still verworfen)")
-pruefe("VORGABE_MAX" in ACC, "die Laenge ist gedeckelt (der Text geht in JEDEN Auftrag)")
-pruefe("def antwort_vorgabe(" in ACC, "eigene Lesefunktion vorhanden")
+_AENDERBAR = ACC.split("AENDERBAR = (", 1)[1].split(")", 1)[0]
+pruefe('"antwort_vorgabe"' in _AENDERBAR,
+       "das alte Einzelfeld steht weiter in AENDERBAR (ein im Browser "
+       "zwischengespeichertes Add-in sendet es noch)")
+# ABER: die Stilliste darf NICHT ueber das Postfach-Formular laufen. Sonst
+# schriebe ein Klick auf "Postfach speichern" die Liste mit dem Formularstand –
+# dieselbe Vermischung wie bei den SAP-Sichtbarkeiten.
+pruefe('"stile"' not in _AENDERBAR,
+       "die Stilliste steht NICHT in AENDERBAR (eigene Endpunkte)")
+pruefe("VORGABE_MAX" in ACC and "MAX_STILE" in ACC and "STIL_NAME_MAX" in ACC,
+       "Text, Anzahl und Name sind gedeckelt (der Text geht in JEDEN Auftrag)")
+for fn in ("def stile(", "def stil_anlegen(", "def stil_aendern(",
+           "def stil_loeschen(", "def stil_fuer(", "def stil_aus_prompt(",
+           "def antwort_vorgabe("):
+    pruefe(fn in ACC, "vorhanden: %s…)" % fn)
+# Ein leerer Wert aus einem alten Client darf die Stiltexte NICHT loeschen.
+_sp = ACC.split("def speichern(", 1)[1].split("\ndef ", 1)[0]
+pruefe("if _alt:" in _sp,
+       "ein LEERES antwort_vorgabe aus einem alten Client loescht nichts")
 # Bewusst NICHT in MailKonto: dort stehen Verbindungsdaten fuer MailClient.
 # MailKonto steht in mail_client.py, NICHT in mail_accounts.py. Die erste
 # Fassung dieser Pruefung las die falsche Datei, fand die Klasse nicht und war
-# damit trivial wahr – zweite leere Pruefung an einem Tag. Bei "X darf in Y
-# nicht vorkommen" immer belegen, dass Y ueberhaupt gefunden wurde.
+# damit trivial wahr. Bei "X darf in Y nicht vorkommen" immer belegen, dass Y
+# ueberhaupt gefunden wurde.
 CLIENT = (ROOT / "backend" / "mail_client.py").read_text(encoding="utf-8")
 pruefe("class MailKonto" in CLIENT, "MailKonto gefunden (sonst prueft das Folgende nichts)")
 _mk = CLIENT.split("class MailKonto", 1)[1].split("\n\n\n", 1)[0]
 pruefe(len(_mk) > 200, "der Klassenrumpf ist plausibel gross (%d Zeichen)" % len(_mk))
-pruefe("antwort_vorgabe" not in _mk,
+pruefe("antwort_vorgabe" not in _mk and "stile" not in _mk,
        "die Vorgabe steckt NICHT im Verbindungsobjekt MailKonto")
-pruefe('"antwort_vorgabe": k.get' in ACC,
-       "konto_info liefert sie zurueck (die Oberflaeche muss sie anzeigen koennen)")
+pruefe('"stile": _stile_von(k)' in ACC,
+       "konto_info liefert die Liste zurueck (die Oberflaeche muss sie anzeigen)")
 
-# Reihenfolge: Vorgabe VOR der Regel – bei Widerspruch soll die Regel gewinnen.
+# REIHENFOLGE: Regel → Fremdtext → Stilvorgabe. Umgedreht am 2026-08-17 nach dem
+# Vorfall, bei dem die Vorgabe ("immer auf bayrisch antworten") die
+# Absender-Bedingung der Regel ueberstimmt hat. Gemessen an den echten Marken,
+# nicht am Fliesstext des Vorspanns – der nennt die Abschnitte ebenfalls.
 _au = RUNNER.split("def _auftrag(", 1)[1].split("\n\n\n", 1)[0]
-pruefe("antwort_vorgabe" in _au, "der Regel-Lauf zieht die Vorgabe heran")
-pruefe(_au.index("STAENDIGE VORGABE") < _au.index("ANWEISUNG DES POSTFACH-INHABERS (die Regel)"),
-       "Vorgabe steht VOR der Regel (vom Allgemeinen zum Speziellen)")
+pruefe("stil_fuer(" in _au, "der Regel-Lauf loest den Stil auf (Feld > Prompt > Standard)")
+_mk_au = [m.group(1).strip() for m in
+          re.finditer(r"=====\s*\[%s\]\s*([A-Z][^=]*?)\s*=====", _au)]
+_i_regel = [i for i, m in enumerate(_mk_au) if m.startswith("ANWEISUNG")]
+_i_stil = [i for i, m in enumerate(_mk_au) if m.startswith("STILVORGABE")]
+pruefe(bool(_i_regel) and bool(_i_stil) and _i_regel[0] < _i_stil[0],
+       "die Regel steht VOR der Stilvorgabe (Vorfall 2026-08-17)")
 _vs2 = RUNNER.split("async def antwort_vorschlag", 1)[1].split("\nasync def ", 1)[0]
-pruefe("antwort_vorgabe" in _vs2, "der Vorschlag zieht die Vorgabe ebenfalls heran")
-pruefe(_vs2.index("STAENDIGE VORGABE") < _vs2.index("WUNSCH DES POSTFACH-INHABERS"),
-       "auch hier: Vorgabe vor Regel-Ton und Hinweis")
-# Die Vorgabe traegt die Echtheitskennung – sie IST eine Anweisung des Inhabers
+pruefe("stil_fuer(" in _vs2, "der Vorschlag loest den Stil ebenfalls auf")
+pruefe(_vs2.index("STILVORGABE") < _vs2.index("WUNSCH DES POSTFACH-INHABERS"),
+       "beim Vorschlag: Stil vor Wunsch und Hinweis (Spaeteres praezisiert)")
+# Die Vorgabe traegt die Echtheitskennung – sie IST eine Angabe des Inhabers
 # und darf nicht wie Fremdtext aussehen.
-pruefe("[%s] STAENDIGE VORGABE" in _au and "[%s] STAENDIGE VORGABE" in _vs2,
-       "die Vorgabe steht in einem Abschnitt MIT Echtheitskennung")
+pruefe("[%s] STILVORGABE" in _au and "[%s] STILVORGABE" in _vs2,
+       "die Stilvorgabe steht in einem Abschnitt MIT Echtheitskennung")
+# Der NAME darf die Marke nicht zerlegen (er kommt aus einem Freitextfeld).
+pruefe("_markensicher(" in _au or "_markensicher(" in RUNNER,
+       "der Stilname wird fuer die Abschnittszeile entschaerft")
 
-# Oberflaeche: beide Wege, wie vom Nutzer entschieden.
-pruefe('id="em-vorgabe"' in EMAILHTML2, "/email hat das Feld")
-pruefe("antwort_vorgabe" in PORTALJS2 and PORTALJS2.count("em-vorgabe") == 2,
-       "/email laedt UND speichert es")
-pruefe('id="ad-vorgabe"' in TASKPANE2, "das Add-in hat das Feld")
-pruefe(ADDINJS.count("ad-vorgabe") == 2, "das Add-in laedt UND speichert es")
-for k in ("mail.acct_guide", "mail.acct_guide_ph", "mail.acct_guide_hint"):
+# Oberflaeche: Verwaltung in BEIDEN Masken (Vorgabe des Nutzers), Auswahl im
+# Regel-Formular und in der Antwort-Vorschau des Add-ins.
+pruefe('id="em-stile-list"' in EMAILHTML2 and 'id="em-stil-edit"' in EMAILHTML2,
+       "/email hat Liste und Formular")
+pruefe('id="ad-stile"' in TASKPANE2 and 'id="ad-stil-edit"' in TASKPANE2,
+       "das Add-in ebenso")
+pruefe('id="em-vorgabe"' not in EMAILHTML2 and 'id="ad-vorgabe"' not in TASKPANE2,
+       "das alte Einzelfeld ist aus beiden Masken verschwunden")
+for js, wo in ((PORTALJS2, "/email"), (ADDINJS, "Add-in")):
+    pruefe("/api/email/styles" in js, "%s spricht die Stil-Endpunkte an" % wo)
+    pruefe("stilOptionen(" in js, "%s baut das Auswahlfeld" % wo)
+# NUR CODE pruefen: im Rumpf steht ein Kommentar, der das Feld beim Namen nennt
+# und begruendet, warum es dort nicht mehr steht – ein Waechter, der seine
+# eigene Erklaerung liest, prueft nichts (dritter Fall dieser Art im Projekt).
+_sk = PORTALJS2.split("function speichereKonto", 1)[1].split("\n    function ", 1)[0]
+_sk_code = "\n".join(z for z in _sk.splitlines() if not z.lstrip().startswith("//"))
+pruefe("antwort_vorgabe" not in _sk_code,
+       "/email sendet das alte Feld NICHT mehr mit (es wuerde den Stil ueberschreiben)")
+pruefe("ad-reply-stil" in ADDINJS, "die Antwort-Vorschau hat ein Stil-Pulldown")
+pruefe("stil: (($('ad-reply-stil')" in ADDINJS or "stil:" in ADDINJS,
+       "die Wahl geht an /api/email/reply/preview")
+for k in ("mail.styles_head", "mail.style_new", "mail.style_name",
+          "mail.style_is_default", "mail.f_style", "mail.style_opt_off",
+          "mail.acct_guide_ph", "mail.acct_guide_hint"):
     pruefe(I18N.count("'%s'" % k) == 2, "%s in DE und EN" % k)
 
 # ── Der Vorspann muss den AUFBAU beschreiben, den der Auftrag hat ──
@@ -519,8 +561,8 @@ for k in ("mail.acct_guide", "mail.acct_guide_ph", "mail.acct_guide_hint"):
 # alten WA_TASK_PROMPT: ein Prompt, der etwas anderes beschreibt als der Code tut.
 for _name in ("_VORSPANN = ", "_VORSCHLAG_VORSPANN = "):
     _txt = RUNNER.split(_name, 1)[1].split('"""', 2)[1]
-    pruefe("STAENDIGE VORGABE" in _txt,
-           "%s nennt den Vorgabe-Abschnitt" % _name.strip(" ="))
+    pruefe("STILVORGABE" in _txt,
+           "%s nennt den Stil-Abschnitt" % _name.strip(" ="))
 pruefe("NUR EINE Regel" not in RUNNER,
        "die Aussage 'es gibt NUR EINE Regel' ist weg – es sind jetzt zwei Abschnitte")
 
@@ -531,11 +573,11 @@ _marken = re.findall(r'=====\s*\[%s\]\s*([A-Z][A-Z ()a-z-]+?)\s*=====',
                      RUNNER.split("def _auftrag(", 1)[1].split("\n\n\n", 1)[0])
 pruefe(len(_marken) >= 3, "Abschnittsmarken im Auftrag gefunden (%s)" % _marken)
 # Vergleich in Kleinbuchstaben: die MARKE steht in Grossbuchstaben, der
-# Fliesstext des Vorspanns nicht ("die STAENDIGE VORGABE des Postfach-Inhabers").
+# Fliesstext des Vorspanns nicht ("die STILVORGABE des Postfach-Inhabers").
 # Schlussmarken ("ENDE …") sind ausgenommen – sie schliessen einen Abschnitt,
 # den der Vorspann bereits erklaert hat.
 # WHITESPACE NORMALISIEREN: der Vorspann ist auf 79 Zeichen umbrochen, die
-# gesuchte Wendung steht deshalb als "STAENDIGE VORGABE des\n  Postfach-Inhabers".
+# gesuchte Wendung steht deshalb als "STILVORGABE des\n  Postfach-Inhabers".
 # Ein roher Teilstring-Vergleich findet das nie (derselbe Fallstrick wie bei den
 # zweizeiligen Aufrufen im Transkriptions-Test).
 _vorspann = " ".join(RUNNER.split("_VORSPANN = ", 1)[1]
@@ -621,7 +663,7 @@ for js, name in ((EMJS, "email_portal.js"), (ADDINJS, "addin.js")):
            "%s: der ⓘ-Handler unterdrueckt die Label-Aktivierung" % name)
 
 for k in ("mail.help", "mail.help_login", "mail.help_channel", "mail.help_folders",
-          "mail.help_guide", "mail.help_active"):
+          "mail.help_styles", "mail.help_active"):
     pruefe(I18N.count("'%s'" % k) == 2, "%s in DE und EN" % k)
 
 # ═══ Ergebnis ═══════════════════════════════════════════════════════════════

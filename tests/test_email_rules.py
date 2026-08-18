@@ -1529,13 +1529,19 @@ class _M15:
     text = "Bitte einrichten."; anhaenge = []
 
 
-_alt_vorgabe = ma.antwort_vorgabe
-ma.antwort_vorgabe = lambda u: "immer auf bayrisch und in Reimform antworten"
+# Seit 2026-08-18 gibt es MEHRERE benannte Stile; der Auftrag zieht den
+# aufgeloesten Stil ueber ``stil_fuer`` heran (Feld der Regel > Nennung im
+# Prompt > Standardstil). Gestubbt wird deshalb diese Funktion.
+_alt_vorgabe = ma.stil_fuer
+ma.stil_fuer = lambda u, sid="", pr="": {
+    "id": "s1", "name": "Bayrisch",
+    "text": "immer auf bayrisch und in Reimform antworten",
+    "quelle": "standard", "hinweis": ""}
 try:
     _auf = mrun._auftrag({"owner": "x", "prompt": "wenn von mr.x@gmail.com kommt, antworten",
                           "ordner": "INBOX"}, _M15(), "x@firma.de")
 finally:
-    ma.antwort_vorgabe = _alt_vorgabe
+    ma.stil_fuer = _alt_vorgabe
 _marken = [m.group(1).strip() for m in
            re.finditer(r"===== \[[0-9A-F]{8}\] ([^=]+)=====", _auf)]
 _pos = {n.split(" (")[0]: i for i, n in enumerate(_marken)}

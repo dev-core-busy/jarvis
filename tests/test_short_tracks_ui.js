@@ -639,6 +639,102 @@ abschnitt('4. Formular: wandern, Umschalter, Speichern');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('4b. Maximieren');
+/* ═══════════════════════════════════════════════════════════════════════ */
+{
+    const { w } = baue({});
+    await warte(60);
+    const brett = [...w.document.querySelectorAll('.st-card[data-klapp]')]
+        .filter(c => c.getAttribute('data-klapp') === 'board')[0];
+    const log = [...w.document.querySelectorAll('.st-card[data-klapp]')]
+        .filter(c => c.getAttribute('data-klapp') === 'log')[0];
+    const knopf = brett.querySelector('[data-act="max"]');
+    pruefe(knopf !== null, 'die Ablagen-Karte hat einen Maximieren-Knopf');
+    // DIESELBEN ZEICHEN wie der Vollbild-Knopf der Einstellungen – aus DEREN
+    // Quelle gelesen, nicht abgetippt: eine zweite Fassung liefe beim naechsten
+    // Wechsel auseinander (Vorgabe des Nutzers 2026-08-18).
+    const symMax = (SET_HTML.match(/id="btn-maximize-settings"[^>]*>(.)</) || [])[1];
+    const EXPAND = fs.readFileSync(path.join(ROOT, 'frontend/js/modal_expand.js'), 'utf8');
+    // `u`-Flag ist Pflicht: 🗗 (U+1F5D7) ist ein Surrogatpaar, ohne das Flag
+    // matcht `.` nur die halbe Einheit und der Vergleich schlaegt fehl.
+    const symMin = (EXPAND.match(/on \? '(.)' : '(.)'/u) || [])[1];
+    pruefe(symMax === '\u26f6', 'die Einstellungen nutzen U+26F6 (⛶)', symMax);
+    pruefe(knopf.textContent.trim() === symMax,
+        'der Knopf hier zeigt dasselbe Zeichen', knopf.textContent.trim());
+    pruefe(knopf.getAttribute('aria-pressed') === 'false', 'er startet auf "nicht gedrückt"');
+    pruefe(brett.querySelector('.st-head-acts') !== null,
+        'Knopf und Klapp-Pfeil stehen in einem gemeinsamen Behälter');
+    // REIHENFOLGE: der Titel bleibt VORNE (space-between) – sonst rutscht er
+    // an den rechten Rand (Fehler vom 2026-08-13 im Add-in).
+    pruefe(brett.querySelector('.st-card-head').firstElementChild.tagName === 'H2',
+        'der Titel ist weiter das erste Kind der Kopfzeile');
+
+    knopf.click();
+    await warte(20);
+    pruefe(brett.classList.contains('is-max'), 'ein Klick maximiert die Karte');
+    pruefe(w.document.body.classList.contains('st-maxed'),
+        'und sperrt das Scrollen der Seite dahinter');
+    pruefe(knopf.getAttribute('aria-pressed') === 'true', 'aria-pressed folgt dem Zustand');
+    pruefe(/Verkleinern|Restore/.test(knopf.title),
+        'der Titel des Knopfes wechselt mit (kein unveränderlicher Text)');
+    pruefe(knopf.textContent.trim() === symMin,
+        'im maximierten Zustand dasselbe Zeichen wie modal_expand.js', knopf.textContent.trim());
+    pruefe(knopf.classList.contains('active'),
+        'und der Knopf traegt `active` – wie .btn-maximize-settings.active');
+    pruefe(knopf.getAttribute('data-i18n-title') === 'tracks.minimize',
+        'und der i18n-Schlüssel ebenfalls');
+    // Der Klick darf die Karte NICHT zuklappen (der Knopf sitzt in der Kopfzeile)
+    pruefe(!brett.classList.contains('is-zu'),
+        'der Klick auf den Knopf klappt die Karte nicht zu');
+    pruefe(w.document.documentElement.style.getPropertyValue('--st-top') !== null,
+        'der Abstand zur Titelleiste wird gesetzt (gemessen, nicht geraten)');
+
+    knopf.click();
+    await warte(20);
+    pruefe(!brett.classList.contains('is-max'), 'ein zweiter Klick verkleinert wieder');
+    pruefe(!w.document.body.classList.contains('st-maxed'), 'die Seite scrollt wieder');
+
+    // Escape verkleinert
+    knopf.click();
+    await warte(20);
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await warte(20);
+    pruefe(!brett.classList.contains('is-max'), 'Escape verkleinert');
+
+    // Eine ZUGEKLAPPTE Karte wird beim Maximieren aufgeklappt – sonst
+    // maximiert man eine leere Fläche.
+    pruefe(log.classList.contains('is-zu'), 'das Protokoll ist zugeklappt');
+    log.querySelector('[data-act="max"]').click();
+    await warte(60);
+    pruefe(log.classList.contains('is-max') && !log.classList.contains('is-zu'),
+        'Maximieren klappt eine zugeklappte Karte auf');
+
+    // Zwei maximierte Karten gleichzeitig gäbe einen Zustand, den niemand
+    // auflösen kann.
+    knopf.click();
+    await warte(20);
+    pruefe(brett.classList.contains('is-max') && !log.classList.contains('is-max'),
+        'es ist immer höchstens EINE Karte maximiert');
+    await schliesse(w);
+}
+{
+    // Sprachwechsel: der Knopf-Titel wird per JS gesetzt und muss mitgehen
+    const { w } = baue({});
+    await warte(60);
+    const brett = [...w.document.querySelectorAll('.st-card[data-klapp]')]
+        .filter(c => c.getAttribute('data-klapp') === 'board')[0];
+    brett.querySelector('[data-act="max"]').click();
+    await warte(20);
+    w.setLang('en');
+    await warte(60);
+    pruefe(/Restore/.test(brett.querySelector('[data-act="max"]').title),
+        'der Titel folgt dem Sprachwechsel (auch im maximierten Zustand)');
+    w.setLang('de');
+    await warte(40);
+    await schliesse(w);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
 abschnitt('5. Protokoll');
 /* ═══════════════════════════════════════════════════════════════════════ */
 {
@@ -806,6 +902,106 @@ abschnitt('7. Einstellungs-Reiter: zwei Knoepfe = zwei Teilmengen');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('7b. Der gemeldete Fehler: im Reiter liess sich kein Haken setzen');
+/* ═══════════════════════════════════════════════════════════════════════ */
+{
+    /* GEMELDET am 2026-08-18. Ursache war eine ENDLOSSCHLEIFE: `zeichne()` ruft
+       `applyLang()`, und `applyLang()` feuert `jarvis-lang-changed` – der
+       Lang-Zuhoerer lud daraufhin neu, baute die Kaestchen neu auf und verwarf
+       den gerade gesetzten Haken. Gemessen: >40 Abrufe in 250 ms.
+
+       EIGENES, FRISCHES DOM: im Block oben laufen vorher Speicher-Tests, die
+       legitim neu laden – die Abrufe dort zu zaehlen misst etwas anderes (der
+       erste Anlauf dieser Pruefung sah 4 statt 1 und meldete einen Fehler, den
+       es nicht gab). Nur das Panel-Markup, keine fremden Timer. */
+    const html = SET_HTML.slice(SET_HTML.indexOf('<div id="settings-tab-tracks"'));
+    const ende = html.indexOf('<div id="settings-tab-kundenverwaltung"');
+    const dom = new JSDOM('<!DOCTYPE html><html><body>' +
+        html.slice(0, ende > 0 ? ende : 4000).replace('style="display:none;"', '') +
+        '</body></html>', { url: 'https://x/settings', runScripts: 'outside-only' });
+    const w = dom.window;
+    w.localStorage.setItem('jarvis_token', 'T');
+    let n = 0;
+    w.fetch = (url) => {
+        if (String(url).split('?')[0] === '/api/tracks/admin/overview') n++;
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({
+            ok: true, skill_aktiv: true, bereiche: BEREICHE,
+            grenzen: { gleichzeitig: 2, max_datei_mb: 50, max_dateien: 20, max_dumps: 10 },
+            global: [], benutzer: [], laufend: 0, wartend: 0 }) });
+    };
+    w.eval(I18N);
+    w.eval(ADMIN_JS);
+    w.TracksAdmin.onShow();
+    // DAS ZEITFENSTER, um das es geht: waehrend der Abruf noch laeuft, feuert
+    // irgendwo ein `applyLang()`. Sieht der Lang-Zuhoerer dann ein leeres
+    // `_lang`, haelt er das fuer einen Sprachwechsel und laedt ein zweites Mal
+    // (gemessen am 2026-08-18). Deshalb setzt `laden()` die Sprache SOFORT.
+    w.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'de' } }));
+    // Und ein zweites onShow im selben Moment (Reiter-Doppelklick) darf den
+    // laufenden Abruf nicht verdoppeln.
+    w.TracksAdmin.onShow();
+    await warte(150);
+    pruefe(n === 1, 'onShow ruft die Uebersicht GENAU EINMAL ab – auch bei einem '
+        + 'Lang-Ereignis und einem zweiten onShow waehrend des Abrufs', String(n));
+    const shell = w.document.querySelector('#tr-areas input[data-area="shell"]');
+    pruefe(shell !== null && !shell.disabled, 'das Kaestchen ist bedienbar');
+    shell.click();
+    pruefe(shell.checked === true, 'ein Haken laesst sich setzen');
+    await warte(150);
+    const shell2 = w.document.querySelector('#tr-areas input[data-area="shell"]');
+    pruefe(shell2 === shell, 'die Kaestchen werden NICHT neu aufgebaut');
+    pruefe(shell2.checked === true, 'UND DER HAKEN BLEIBT GESETZT (der gemeldete Fehler)');
+    pruefe(n === 1, 'auch danach nur ein Abruf', String(n));
+    shell.click();
+    pruefe(shell.checked === false, 'und er laesst sich wieder abwaehlen');
+    // Ein Ereignis OHNE Sprachwechsel darf nichts laden …
+    w.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'de' } }));
+    await warte(80);
+    pruefe(n === 1, 'ein Lang-Ereignis ohne Sprachwechsel laedt nicht', String(n));
+    // … ein echter Sprachwechsel schon.
+    w._lang = 'en';
+    w.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'en' } }));
+    await warte(120);
+    pruefe(n === 2, 'ein ECHTER Sprachwechsel laedt genau einmal nach', String(n));
+    w.close();
+}
+{
+    /* DER FALL, den allein die fruehe `_lang`-Zuweisung abdeckt: der Abruf
+       SCHEITERT (z.B. 403, weil der Skill gerade abgeschaltet wurde). Dann laeuft
+       `zeichne()` nie – wuerde die Sprache erst dort gemerkt, bliebe sie leer, und
+       jedes weitere `applyLang()` (die feuern staendig) waere fuer den Zuhoerer ein
+       "Sprachwechsel": ein Karussell aus Fehlversuchen. Die `_laeuft`-Sperre hilft
+       hier nicht, sie ist nach dem Fehlschlag wieder offen. */
+    const html = SET_HTML.slice(SET_HTML.indexOf('<div id="settings-tab-tracks"'));
+    const ende = html.indexOf('<div id="settings-tab-kundenverwaltung"');
+    const dom = new JSDOM('<!DOCTYPE html><html><body>' +
+        html.slice(0, ende > 0 ? ende : 4000).replace('style="display:none;"', '') +
+        '</body></html>', { url: 'https://x/settings', runScripts: 'outside-only' });
+    const w = dom.window;
+    w.localStorage.setItem('jarvis_token', 'T');
+    let n = 0;
+    w.fetch = (url) => {
+        if (String(url).split('?')[0] === '/api/tracks/admin/overview') n++;
+        return Promise.resolve({ ok: false, status: 403,
+            json: () => Promise.resolve({ ok: false, error: 'Kein Zugriff' }) });
+    };
+    w.eval(I18N);
+    w.eval(ADMIN_JS);
+    w.TracksAdmin.onShow();
+    await warte(120);
+    pruefe(n === 1, 'ein Fehlschlag ergibt zunaechst einen Abruf', String(n));
+    pruefe(/Kein Zugriff/.test(w.document.getElementById('tr-msg-over').textContent),
+        'und der Grund steht im Klartext da');
+    for (let i = 0; i < 5; i++) {
+        w.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'de' } }));
+    }
+    await warte(150);
+    pruefe(n === 1, 'NACH einem Fehlschlag loesen Lang-Ereignisse keine weiteren '
+        + 'Abrufe aus (kein Karussell)', String(n));
+    w.close();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
 abschnitt('8. Verdrahtung, Portal, i18n, CSS');
 /* ═══════════════════════════════════════════════════════════════════════ */
 {
@@ -896,13 +1092,38 @@ abschnitt('8. Verdrahtung, Portal, i18n, CSS');
     // Bereichs-Kaestchen unlesbar (Screenshot vom 2026-08-18).
     pruefe(/\.st-form\b[^}]*grid-column: 1 \/ -1/.test(css),
         'das Formular geht ueber die volle Breite des Rasters');
+    // Maximieren: unter der Titelleiste, deckende Flaeche, Kopf bleibt stehen
+    pruefe(/\.st-card\.is-max\b[^}]*position: fixed/.test(css),
+        'die maximierte Karte ist fixiert');
+    pruefe(/\.st-card\.is-max\b[^}]*top: var\(--st-top/.test(css),
+        'sie beginnt UNTER der Titelleiste (Abmelden/Theme bleiben erreichbar)');
+    pruefe(/\.st-card\.is-max\b[^}]*background: var\(--bg-primary\)/.test(css),
+        'mit DECKENDER Flaeche – darunter liegt die Seite');
+    pruefe(/\.st-card\.is-max > \.st-card-head[^}]*position: sticky/.test(css),
+        'die Kopfzeile bleibt beim Scrollen stehen (sonst ist der Knopf weg)');
+    pruefe(/\.st-card\.is-max > \.st-card-body[^}]*overflow-y: auto/.test(css),
+        'der Inhalt scrollt innen');
+    pruefe(/body\.st-maxed[^}]*overflow: hidden/.test(css),
+        'die Seite dahinter scrollt nicht mit');
+    // z-index: unter der Titelleiste (30), unter der Rueckmeldung (60)
+    const zMax = (css.match(/\.st-card\.is-max\b[^}]*z-index:\s*(\d+)/) || [])[1];
+    pruefe(zMax && Number(zMax) < 30, 'z-index liegt unter der Titelleiste', String(zMax));
+    pruefe(zMax && Number(zMax) < 60, 'und unter der Rueckmeldung', String(zMax));
     // Klapp-Kopfzeile: Titel ZUERST, Pfeil danach (space-between)
     const kopf = TR_HTML.match(/<div class="st-card-head"[^>]*>([\s\S]*?)<\/div>/)[1];
     pruefe(kopf.indexOf('<h2') < kopf.indexOf('st-caret'),
         'in der Kopfzeile steht der Titel VOR dem Pfeil');
     // Emoji: farbig voreingestellte Zeichen folgen keinem Theme
-    const emoji = (TR_HTML + TR_JS).match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || [];
-    pruefe(emoji.length === 0, 'keine farbig voreingestellten Emoji', String(emoji.slice(0, 5)));
+    // AUSNAHME: ⛶ (U+26F6) und 🗗 (U+1F5D7) sind die Zeichen des vorhandenen
+    // Vollbild-Knopfes (#btn-maximize-settings, modal_expand.js). Konsistenz mit
+    // dem Bestand geht hier vor der Emoji-Regel – ausdrueckliche Vorgabe des
+    // Nutzers. Alles ANDERE bleibt gesperrt.
+    const emoji = ((TR_HTML + TR_JS).match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || [])
+        .filter(c => c !== '\u26f6' && c !== '\u{1F5D7}');
+    pruefe(emoji.length === 0, 'keine farbig voreingestellten Emoji (ausser den Vollbild-Zeichen)',
+        String(emoji.slice(0, 5)));
+    pruefe(/&#9974;/.test(TR_HTML) && /&#128471;/.test(TR_JS),
+        'die Vollbild-Zeichen stehen als HTML-Entity im Quelltext (nicht als rohes Emoji)');
 
     // Alle aufgerufenen Hilfsfunktionen existieren auch. Ein `?.()` auf einen
     // falschen Namen ist ein unsichtbarer Fehler (Vorfall 2026-08-11), ein

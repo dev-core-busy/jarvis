@@ -167,6 +167,79 @@
         });
     }
 
+    /* ── Maximieren ────────────────────────────────────────────────────────
+       Die Karte füllt den Bereich unter der Titelleiste. BEWUSST NICHT
+       GEMERKT (anders als der Auf/Zu-Zustand): ein Vollbild, das beim nächsten
+       Öffnen der Seite noch an ist, sieht wie ein Fehler aus – man sucht die
+       übrigen Karten. Es ist ein Arbeitsmodus für den Moment.
+
+       Der Knopf sitzt IN der Klapp-Kopfzeile; dass ein Klick darauf nicht
+       zugleich die Karte zuklappt, erledigt die vorhandene Ausnahme in
+       klappInit (`closest('button, …')`). */
+    function topAbstandSetzen() {
+        // Die Höhe der Titelleiste MESSEN statt zu raten: sie wächst mit der
+        // Zustands-Pille und mit einer längeren Markenbezeichnung.
+        var bar = document.querySelector('.topbar');
+        var h = bar ? Math.round(bar.getBoundingClientRect().height) : 0;
+        if (h > 0) document.documentElement.style.setProperty('--st-top', h + 'px');
+    }
+
+    function maxSetzen(karte, an) {
+        karte.classList.toggle('is-max', !!an);
+        document.body.classList.toggle('st-maxed', !!an);
+        var b = karte.querySelector('[data-act="max"]');
+        if (b) {
+            // DIESELBEN ZEICHEN wie der Vollbild-Knopf des Einstellungs-Dialogs
+            // (#btn-maximize-settings) und `modal_expand.js`: ⛶ zum Maximieren,
+            // 🗗 zum Verkleinern. Sie sind die Ausnahme von der Emoji-Regel des
+            // Projekts – wer zwischen den Fenstern wechselt, soll dasselbe
+            // Zeichen fuer dieselbe Sache sehen (Vorgabe des Nutzers 2026-08-18).
+            b.innerHTML = an ? '&#128471;' : '&#9974;';
+            b.classList.toggle('active', !!an);
+            b.setAttribute('aria-pressed', an ? 'true' : 'false');
+            var k = an ? 'tracks.minimize' : 'tracks.maximize';
+            b.setAttribute('data-i18n-title', k);
+            b.title = T(k, an ? 'Verkleinern' : 'Maximieren');
+        }
+        if (an) topAbstandSetzen();
+    }
+
+    function maxUmschalten(karte) {
+        var an = !karte.classList.contains('is-max');
+        // Erst alle anderen verkleinern – zwei maximierte Karten übereinander
+        // wären ein Zustand, den niemand auflösen kann.
+        document.querySelectorAll('.st-card.is-max').forEach(function (k) {
+            if (k !== karte) maxSetzen(k, false);
+        });
+        // Eine zugeklappte Karte zu maximieren ergäbe eine leere Fläche.
+        if (an && karte.classList.contains('is-zu')) umschalten(karte);
+        maxSetzen(karte, an);
+        if (an && karte.getAttribute('data-klapp') === 'log') ladeLog();
+    }
+
+    function maxInit() {
+        document.querySelectorAll('.st-card[data-klapp]').forEach(function (karte) {
+            var b = karte.querySelector('[data-act="max"]');
+            if (!b) return;
+            b.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                maxUmschalten(karte);
+            });
+        });
+        // Escape verkleinert – der übliche Weg heraus aus einem Vollbild.
+        document.addEventListener('keydown', function (ev) {
+            if (ev.key !== 'Escape') return;
+            var offen = document.querySelector('.st-card.is-max');
+            if (offen) { ev.preventDefault(); maxSetzen(offen, false); }
+        });
+        // Wird das Fenster schmaler, ändert sich die Höhe der Titelleiste
+        // (Umbruch) – der Abstand muss mitgehen, sonst verdeckt sie den Kopf.
+        window.addEventListener('resize', function () {
+            if (document.querySelector('.st-card.is-max')) topAbstandSetzen();
+        });
+    }
+
     /* ── Feld-Erklaerungen (ⓘ) ──
        EIN delegierter Listener am Dokument statt Bindung je Knopf: so wirkt
        jedes spaeter ergaenzte ⓘ automatisch, auch in nachtraeglich gezeichneten
@@ -792,6 +865,7 @@
     /* ── Start ─────────────────────────────────────────────────────────── */
     function binde() {
         klappInit();
+        maxInit();
         infoInit();
         var b;
         // Eigene Variable je Handler: `var b` wird hier mehrfach zugewiesen, und
@@ -819,6 +893,17 @@
             // also auch dann, wenn sich die Sprache NICHT geaendert hat (etwa
             // nach dem Aufbau des Formulars, das selbst applyLang ruft). Ohne
             // den Vergleich wuerde jeder solche Aufruf das Brett neu zeichnen.
+            // Der Titel des Maximieren-Knopfes wird per JS gesetzt (er wechselt
+            // mit dem Zustand) – applyLang() setzt ihn aus data-i18n-title neu,
+            // aber nur, wenn der Schlüssel zum Zustand passt. Deshalb hier
+            // nachziehen, unabhängig von der Sprachprüfung unten.
+            document.querySelectorAll('.st-card[data-klapp]').forEach(function (k) {
+                var b = k.querySelector('[data-act="max"]');
+                if (!b) return;
+                var an = k.classList.contains('is-max');
+                b.title = T(an ? 'tracks.minimize' : 'tracks.maximize',
+                            an ? 'Verkleinern' : 'Maximieren');
+            });
             if (sprache() === _brettLang) return;
             if (_bereicheLang && _bereicheLang !== sprache()) ladeStatus();
             else zeichneBrett();
@@ -857,7 +942,7 @@
     window.jarvisTracks = {
         ladeStatus: ladeStatus, ladeJobs: ladeJobs, ladeLog: ladeLog,
         formOeffnen: formOeffnen, formSchliessen: formSchliessen,
-        stop: stopTakt,
+        stop: stopTakt, maxUmschalten: maxUmschalten,
         _stand: function () { return { dumps: _dumps, jobs: _jobs, edit: _editId }; }
     };
 })();

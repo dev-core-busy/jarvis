@@ -22,6 +22,8 @@
 
     var _daten = null;
     var _gebunden = false;
+    var _lang = '';           // in welcher Sprache gezeichnet wurde
+    var _laeuft = false;      // ein Abruf ist unterwegs
 
     function $(id) { return document.getElementById(id); }
     function token() { return localStorage.getItem('jarvis_token') || ''; }
@@ -64,16 +66,30 @@
     }
 
     function laden() {
+        // `_lang` wird SCHON HIER gesetzt, nicht erst in `zeichne()`. Sonst
+        // faellt ein `applyLang()` (von irgendwoher) in das Zeitfenster, in dem
+        // der Abruf noch laeuft: der Lang-Zuhoerer sieht dann ein leeres `_lang`,
+        // haelt das fuer einen Sprachwechsel und laedt ein zweites Mal – gemessen
+        // am 2026-08-18 als doppelter Abruf beim Oeffnen des Reiters.
+        _lang = sprache();
+        // Und ein zweiter Abruf waehrend des ersten bringt nichts: die Antwort
+        // ueberschreibt dieselben Felder, kann aber eine gerade gesetzte
+        // Auswahl verwerfen.
+        if (_laeuft) return Promise.resolve();
+        _laeuft = true;
         return hole('/api/tracks/admin/overview?lang=' + sprache()).then(function (d) {
             _daten = d;
             zeichne();
         }).catch(function (e) {
             melde('tr-msg-over', e.message, 'fehler');
+        }).then(function () {
+            _laeuft = false;
         });
     }
 
     function zeichne() {
         if (!_daten) return;
+        _lang = sprache();
         var g = _daten.grenzen || {};
         if ($('tr-l-parallel')) $('tr-l-parallel').value = g.gleichzeitig || 2;
         if ($('tr-l-size')) $('tr-l-size').value = g.max_datei_mb || 50;
@@ -190,6 +206,16 @@
         // diesen Zuhoerer bliebe er in der Sprache, in der die Seite geladen
         // wurde (Lehre vom 2026-08-13).
         window.addEventListener('jarvis-lang-changed', function () {
+            // DER SPRACHVERGLEICH IST PFLICHT, nicht Feinschliff.
+            // GEMELDET am 2026-08-18: im Reiter liess sich kein Haken setzen.
+            // Ursache war eine ENDLOSSCHLEIFE – `zeichne()` ruft `applyLang()`,
+            // und `applyLang()` feuert `jarvis-lang-changed`. Ohne diesen
+            // Vergleich rief das Ereignis wieder `laden()`, der Reiter baute
+            // sich unentwegt neu auf, und jeder gesetzte Haken war im naechsten
+            // Durchlauf weg. Gemessen: >40 Abrufe von /admin/overview in 250 ms.
+            // `email.js` und `sap_portal.js` haben denselben Vergleich – nur
+            // dieses Modul hatte ihn nicht.
+            if (sprache() === _lang) return;
             if ($('settings-tab-tracks') &&
                 $('settings-tab-tracks').style.display !== 'none') laden();
         });

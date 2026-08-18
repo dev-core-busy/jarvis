@@ -113,11 +113,43 @@ def _op_unlock_screen(args, stream):
     return {"ok": True, "rc": 0, "stdout": "Bildschirm entsperrt", "stderr": ""}
 
 
+# Wer darf ueberhaupt Ziel eines Desktop-Session-Wechsels sein?
+#
+# VORGABE DES NUTZERS (2026-08-18): am lokalen Desktop arbeiten AUSSCHLIESSLICH
+# der lokale Benutzer `jarvis` und – ueber genau dessen Sitzung – die
+# Administratoren. Sonst niemand.
+#
+# WARUM DAS HIER STEHT UND NICHT NUR BEIM AUFRUFER: bis heute prueste diese Op
+# nur das ZEICHENMUSTER des Namens. Ein Domaenen-Benutzer, der sich als
+# `sven.sander` (ohne `nexus\`) anmeldete, kam damit durch – und
+# `switch_desktop_session` schrieb diesen Namen in den LightDM-Autologin,
+# obwohl es das Konto lokal gar nicht gibt. Auf ECHT ist das 25-mal passiert:
+# Autologin auf ein nicht existierendes Konto, x11vnc gekillt, LightDM neu
+# gestartet (53 Eintraege im Broker-Journal), danach 40 s vergebliches Warten
+# auf eine Session, die nie entsteht. Der laufende Desktop war jedes Mal weg.
+#
+# Ein Zeichenmuster ist keine Berechtigung. Geprueft wird deshalb beides:
+# Whitelist UND Existenz des lokalen Kontos (fail-closed).
+_DESKTOP_USERS = {"jarvis"}
+
+
 def _op_switch_session(args, stream):
     from backend import desktop_control
     username = str(args.get("username", "")).strip()
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,31}", username):
         return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Benutzername"}
+    if username not in _DESKTOP_USERS:
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": "Der lokale Desktop gehoert '%s'. Ein Session-Wechsel zu "
+                          "'%s' ist nicht vorgesehen." % ("/".join(sorted(_DESKTOP_USERS)),
+                                                          username)}
+    try:
+        import pwd
+        pwd.getpwnam(username)
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": "'%s' ist kein lokales Konto – der Autologin wuerde ins "
+                          "Leere zeigen und den Desktop unbrauchbar machen." % username}
     desktop_control.switch_desktop_session(username)
     return {"ok": True, "rc": 0, "stdout": f"Session-Wechsel zu {username} ausgefuehrt", "stderr": ""}
 

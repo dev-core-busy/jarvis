@@ -61,14 +61,16 @@ fi
 
 echo "Nutze DISPLAY=$DISPLAY mit XAUTHORITY=$XAUTHORITY"
 
-# 2. Jarvis-Ports vor Tailscale ts-input-DROP freischalten (443, 80, 6080)
+# 2. Jarvis-Ports vor Tailscale ts-input-DROP freischalten (443, 80)
+#    6080 ist seit 2026-08-18 NICHT mehr dabei: websockify bindet nur noch
+#    loopback (siehe Schritt 6), eine Freigabe waere eine Tuer ohne Raum.
 # NUR mit iptables sinnvoll: die ts-input-Kette von Tailscale ist iptables-basiert.
 # Auf reinen nft-Systemen (ECHT hat kein /sbin/iptables) gibt es sie nicht – dort
 # regelt `jarvis_fw` aus deploy/security/firewall.sh die Freigabe. Ohne diese
 # Pruefung schrieb das Skript bei JEDEM Start drei "Kommando nicht gefunden"-Zeilen
 # ins Journal und sah damit nach einem Fehler aus, der keiner war.
 if command -v iptables >/dev/null 2>&1; then
-    for PORT in 443 80 6080; do
+    for PORT in 443 80; do
         iptables -C INPUT -p tcp --dport $PORT -j ACCEPT 2>/dev/null || \
             iptables -I INPUT 1 -p tcp --dport $PORT -j ACCEPT
     done
@@ -163,7 +165,19 @@ if ! pgrep -x "x11vnc" > /dev/null; then
     fi
 fi
 
-# 6. websockify-Fallback (Port 6080, optional – VNC laeuft primaer ueber /ws/vnc)
+# 6. websockify-Fallback – NUR LOKAL (127.0.0.1:6080)
+#
+# ⚠ HIER LAG EINE OFFENE TUER (gemessen 2026-08-18, ECHT und DEV): websockify
+# lauschte auf 0.0.0.0:6080, lieferte das noVNC-Verzeichnis ohne jede Anmeldung
+# aus (HTTP 200, sogar mit Directory-Listing) und proxyte auf x11vnc, das mit
+# `-nopw` laeuft. Wer den Host im Netz erreichte, hatte damit Maus und Tastatur
+# auf dem Desktop – ganz ohne Jarvis-Login. Der Weg ueber Port 443
+# (`/novnc` + `/ws/vnc`) verlangt dagegen ein gueltiges Token UND seit dem
+# 2026-08-18 Administrator-Rechte.
+#
+# Dieselbe Klasse wie die x11vnc-Haertung vom 2026-08-11 (`-localhost`): dort
+# wurde 5900 geschlossen, 6080 stand weiter offen und hat den Schutz umgangen.
+# Der Fallback bleibt erhalten (lokale Diagnose), bindet aber nur noch loopback.
 NOVNC_DIR=""
 for dir in /usr/share/novnc /usr/share/noVNC /snap/novnc/current/usr/share/novnc; do
     [ -d "$dir" ] && NOVNC_DIR="$dir" && break
@@ -176,8 +190,8 @@ if [ -n "$NOVNC_DIR" ] && ! pgrep -f "websockify.*6080" > /dev/null; then
         WSOCK_CMD="$(command -v websockify)"
     fi
     if [ -n "$WSOCK_CMD" ]; then
-        "$WSOCK_CMD" --web="$NOVNC_DIR" 6080 localhost:5900 > /var/log/jarvis-websockify.log 2>&1 &
-        echo "websockify Fallback gestartet (Port 6080, kein SSL)"
+        "$WSOCK_CMD" --web="$NOVNC_DIR" 127.0.0.1:6080 localhost:5900 > /var/log/jarvis-websockify.log 2>&1 &
+        echo "websockify Fallback gestartet (127.0.0.1:6080, nur lokal)"
     fi
 fi
 

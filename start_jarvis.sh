@@ -63,10 +63,11 @@ echo "Nutze DISPLAY=$DISPLAY mit XAUTHORITY=$XAUTHORITY"
 if [ "$IS_ROOT" = "1" ]; then
 # ── Root-Startaufgaben (nur Alt-Betrieb; getrennt: start_jarvis_root.sh) ──
 
-# Jarvis-Ports vor Tailscale ts-input-DROP freischalten (443, 80, 6080)
+# Jarvis-Ports vor Tailscale ts-input-DROP freischalten (443, 80)
+# 6080 seit 2026-08-18 nicht mehr: websockify bindet nur loopback.
 # Nur mit iptables – Begruendung siehe start_jarvis_root.sh (nft-only-Systeme).
 if command -v iptables >/dev/null 2>&1; then
-    for PORT in 443 80 6080; do
+    for PORT in 443 80; do
         iptables -C INPUT -p tcp --dport $PORT -j ACCEPT 2>/dev/null || \
             iptables -I INPUT 1 -p tcp --dport $PORT -j ACCEPT
     done
@@ -198,14 +199,14 @@ if [ -n "$NOVNC_DIR" ]; then
     fi
 
     if [ -n "$WSOCK_CMD" ]; then
-        "$WSOCK_CMD" --web="$NOVNC_DIR" 6080 localhost:5900 > /var/log/jarvis-websockify.log 2>&1 &
+        "$WSOCK_CMD" --web="$NOVNC_DIR" 127.0.0.1:6080 localhost:5900 > /var/log/jarvis-websockify.log 2>&1 &
     else
-        ./venv/bin/python -m websockify --web="$NOVNC_DIR" 6080 localhost:5900 > /var/log/jarvis-websockify.log 2>&1 &
+        ./venv/bin/python -m websockify --web="$NOVNC_DIR" 127.0.0.1:6080 localhost:5900 > /var/log/jarvis-websockify.log 2>&1 &
     fi
     WSOCK_PID=$!
     sleep 1
     if kill -0 "$WSOCK_PID" 2>/dev/null; then
-        echo "websockify Fallback gestartet (PID: $WSOCK_PID, Port 6080, kein SSL)"
+        echo "websockify Fallback gestartet (PID: $WSOCK_PID, 127.0.0.1:6080, nur lokal)"
     else
         echo "⚠ websockify konnte nicht gestartet werden – prüfe /var/log/jarvis-websockify.log"
     fi

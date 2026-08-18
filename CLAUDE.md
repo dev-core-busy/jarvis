@@ -5560,6 +5560,64 @@ verdeckte aber echte Fehler im Journal.
   benutzt, erzeugt eine Zeitbombe, die erst beim naechsten Commit auf dasselbe Verzeichnis
   hochgeht. Deploys gehoeren dem Dienstbenutzer (`install -o jarvis -g jarvis …`).
 
+## Desktop-Zugang: Administratoren und der lokale `jarvis` – sonst niemand (2026-08-18)
+**Ausgeloest durch eine Nachfrage des Nutzers** zu einem Eintrag in der Broker-Freigabeliste:
+„Desktop-Session wechseln (LightDM-Autologin + Neustart) · angefordert von system · **155×**".
+Die Spur fuehrte zu drei Loechern, von denen das zweite das schwerste ist.
+
+**1. Der Session-Wechsel lief mit dem ROHEN Login-Namen – mein Fehler.**
+`/api/login` rief `switch_desktop_session(username)` bei JEDER Anmeldung, und die Broker-Op
+prueste nur das **Zeichenmuster** des Namens. Auf ECHT gemessen (157 Aufrufe seit 13.07.):
+- **61×** `nexus\…` → „Ungueltiger Benutzername", wirkungslos, nur Protokollrauschen.
+- **25×** ein Domaenen-KURZNAME (`sven.sander`, `jonas.reichelt`, …). Der passt aufs Muster,
+  ist aber **kein lokales Konto** (`id sven.sander` → gibt es nicht). Folge: Autologin auf ein
+  nicht existierendes Konto, x11vnc gekillt, **LightDM neu gestartet** (53 Eintraege im
+  Broker-Journal), danach 40 s vergebliches Warten auf eine Session, die nie entsteht – der
+  laufende Desktop war jedes Mal weg.
+- **Ein Zeichenmuster ist keine Berechtigung.** Die Op prueft jetzt zusaetzlich eine Whitelist
+  (`_DESKTOP_USERS = {"jarvis"}`) UND die Existenz des lokalen Kontos (`pwd.getpwnam`),
+  fail-closed. Der Login stoesst sie nur noch fuer Administratoren und den lokalen `jarvis` an –
+  und das **Ziel ist fest `DESKTOP_USER`**, nie der angemeldete Name: der Administrator bekommt
+  die Sitzung, die es wirklich gibt.
+
+**2. PORT 6080 WAR EINE OFFENE FERNSTEUERUNG DES DESKTOPS.** websockify lauschte auf
+`0.0.0.0:6080`, lieferte noVNC **ohne jede Anmeldung** aus (HTTP 200, samt Directory-Listing)
+und proxyte auf x11vnc, das mit `-nopw` laeuft. Wer den Host im Netz erreichte, hatte Maus und
+Tastatur auf dem Desktop – ohne Jarvis-Login. Von meinem Arbeitsplatz aus auf **ECHT und DEV**
+nachgewiesen.
+- **Das ist dieselbe Luecke wie am 2026-08-11, nur eine Ebene hoeher:** damals wurde 5900 mit
+  `-localhost` geschlossen – und 6080 stand weiter offen und hat die Haertung umgangen. Im
+  `firewall.sh` stand sogar die Begruendung „6080 – der EINZIGE vorgesehene Weg zum Desktop".
+  Das war falsch: der vorgesehene Weg ist `/novnc` + `/ws/vnc` ueber **443**, mit Token.
+  **Merkregel: wer einen Dienst haertet, muss jeden Proxy davor mithaerten** – ein Weg mit
+  Anmeldung schuetzt nichts, solange derselbe Dienst daneben ohne Anmeldung erreichbar ist.
+- websockify bindet jetzt `127.0.0.1:6080` (beide Startskripte), 6080 ist aus `TCP_OFFEN` und
+  aus der Tailscale-Freischaltung entfernt.
+
+**3. `/ws/vnc` verlangte nur IRGENDEIN gueltiges Token.** Der Desktop-Knopf im Portal haengt an
+`is_admin` – das ist Sichtbarkeit, keine Berechtigung; die URL funktionierte fuer jeden
+angemeldeten Benutzer. Genau das Muster „die Oberflaeche war die einzige Schranke" aus der
+Endpunkt-Durchsicht vom 2026-08-04, und hier mit Maus und Tastatur am Ende. Jetzt zusaetzlich
+`_is_admin_user()` bzw. `ALLOWED_USERS`.
+
+- **Verifiziert:** 26 Pruefungen (`tests/test_desktop_zugang.py`, Quelltext, ohne fastapi).
+  Gegenproben greifen einzeln: Admin-Pruefung raus → 2 FAIL, websockify auf `0.0.0.0` → 1 FAIL,
+  Whitelist raus → 3 FAIL.
+  **Live auf DEV nach Deploy (Broker-Neustart noetig – er hat eine eigene Kopie von
+  `backend/broker/*`):** 6080 von aussen **nicht erreichbar**, 5900 zu, `/novnc` ueber 443
+  weiterhin 200, `/ws/vnc` ohne und mit Muell-Token 403 – und mit **echten** Token:
+  `jarvis` (Admin) verbunden, `nexus\michael.schaaf` und `nexus\sven.sander` (gueltiges Token,
+  kein Admin) **403**.
+- **FALLSTRICK im eigenen Waechter:** der erste Anlauf schnitt den `/ws/vnc`-Handler „von
+  `@app.websocket` bis zum naechsten `@app.`" – das waren **446 Zeilen** und enthielt die
+  Definition `ALLOWED_USERS = {"jarvis"}`. Die Pruefung war damit trivial wahr und blieb in der
+  Gegenprobe gruen, obwohl die Rechtepruefung ausgebaut war. Der Rumpf wird jetzt per `ast`
+  geschnitten. **Ein Waechter, der zu weit schneidet, misst fremden Code.**
+- **AUF ECHT NOCH NICHT AUSGEROLLT** – dort ist 6080 zum Zeitpunkt dieser Zeile weiter offen.
+  Beim Ausrollen: Dateien deployen, dann `systemctl restart jarvis-broker.service` (bindet
+  websockify neu) und `jarvis.service`; die Firewall-Datei wirkt erst beim naechsten Lauf von
+  `deploy/security/firewall.sh`, die Bindung auf loopback genuegt aber allein.
+
 ## Erreichbare Ports und Paketfilter (2026-08-11)
 Gemessen (nicht aus dieser Doku abgelesen) von einem Rechner im Firmennetz. **Ueber
 Internet-Erreichbarkeit sagt das nichts** – die haengt an Firewall/NAT vor den Hosts.

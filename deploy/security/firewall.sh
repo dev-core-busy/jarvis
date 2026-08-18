@@ -29,9 +29,18 @@ set -uo pipefail
 TCP_OFFEN=(
     22      # SSH – Administration. OHNE DIESE ZEILE SPERRT SICH DAS SKRIPT AUS.
     80      # HTTP, leitet auf HTTPS um
-    443     # Jarvis (FastAPI)
-    6080    # noVNC/websockify – der EINZIGE vorgesehene Weg zum Desktop
+    443     # Jarvis (FastAPI) – hierueber laeuft auch der Desktop:
+            #   /novnc (Oberflaeche) + /ws/vnc (Datenstrom), beides mit Token
+            #   und seit 2026-08-18 nur fuer Administratoren.
 )
+# 6080 IST HIER BEWUSST NICHT MEHR DRIN (gemessen und entfernt 2026-08-18).
+# Der Kommentar an dieser Stelle lautete "der EINZIGE vorgesehene Weg zum
+# Desktop" – das war falsch und teuer: websockify lauschte auf 0.0.0.0:6080,
+# lieferte noVNC OHNE JEDE ANMELDUNG aus (HTTP 200 samt Directory-Listing) und
+# proxyte auf x11vnc, das mit `-nopw` laeuft. Wer den Host im Netz erreichte,
+# hatte Maus und Tastatur auf dem Desktop – die x11vnc-Haertung vom 2026-08-11
+# (`-localhost` auf 5900) war damit umgangen. websockify bindet jetzt nur noch
+# 127.0.0.1 (start_jarvis*.sh), der Port braucht also gar keine Freigabe mehr.
 # xrdp (3389) wird nur freigegeben, wenn der Dienst auf DIESEM Host laeuft. Auf
 # DEV ist er aktiv und wird benutzt, auf ECHT gibt es ihn nicht – eine feste
 # Freigabe waere dort ein offener Port fuer nichts.

@@ -5560,6 +5560,68 @@ verdeckte aber echte Fehler im Journal.
   benutzt, erzeugt eine Zeitbombe, die erst beim naechsten Commit auf dasselbe Verzeichnis
   hochgeht. Deploys gehoeren dem Dienstbenutzer (`install -o jarvis -g jarvis …`).
 
+### Sicherheits-Erklärung für Bediener (ⓘ, 2026-08-18)
+Auf die Frage „gibt es einen Hinweis, was gegen Prompt-Injection getan wird und was der Bediener
+beachten muss?" – **es gab Hinweise, aber verstreut und im Add-in gar keine.** Vorhanden waren:
+der „Wichtig"-Absatz über den Regeln in `/email`, zwei Absätze im Handbuch (Benutzer- und
+Admin-Teil) und der Kasten in `docs/outlook-addin.md`. Nicht vorhanden: *was das System
+konkret tut* (Echtheitskennung, entschärfte Markenzeilen, Werkzeug-Zuschnitt vor der
+Ausführung, Protokollierung als Vorfall) und das **benannte Restrisiko** (eine Regel mit
+Sendewerkzeugen kann an beliebige Adressen schreiben).
+- Jetzt ein ⓘ am „Wichtig"-Absatz in `/email` **und** im Regeln-Reiter des Add-ins, beide auf
+  denselben Schlüssel `mail.help_security` (DE+EN). Zwei Teile: **„Was du selbst tun musst"**
+  (Absender ins FELD, Werkzeuge eng, Protokoll ansehen, Versand-Risiko kennen) und **„Was das
+  System dagegen tut"** (sechs Punkte). Der Schluss benennt die Grenze ausdrücklich: die
+  Maßnahmen wirken auf der Sprachebene und sind keine Garantie – die harte Grenze ist der
+  Werkzeug-Zuschnitt.
+- **`data-i18n-html`, nicht `data-i18n`** – der Text ist eine Liste; `applyLang()` würde bei
+  `data-i18n` den textContent setzen und die Auszeichnung beim ersten Sprachwechsel zerstören.
+- **Nur der Screenshot zeigte es:** die `<ul>` ragte links aus dem Kasten heraus – die
+  `.em-help`/`.ad-help`-Kästen hatten bis dahin nur Fließtext, also keinen Listen-Einzug.
+- **Handbuch (Confluence 315077818) auf Version 16 gehoben:** Stile statt Einzel-Vorgabe (drei
+  Auswahlwege, Vorrang, `*` für den Standard), Tab-Übernahme im Add-in-Kapitel, „Ton einer Regel"
+  entfernt, und der Sicherheitskasten verweist jetzt auf den ⓘ und nennt die vier Kernpunkte.
+  Vorgehen wie vorgeschrieben: Live-Seite geholt, md5 **vor** dem PUT gegengeprüft (die lokale
+  Kopie war diesmal identisch, Version 15), danach zurückgelesen und byte-gleich verglichen.
+
+## Branding-Aliase: `--purple` & Co. mussten auf `body` (2026-08-18)
+Der letzte offene Punkt aus `open-todos`. **Gemessen, nicht vermutet** – im Browser mit der
+Markenfarbe `#b80f2e` als Inline-Style auf `<body>` (genau das tut `branding.js`):
+
+| | vorher | nachher |
+|---|---|---|
+| `--accent` | `#b80f2e` ✔ | `#b80f2e` |
+| `--purple` | **`#9B59B6`** ✗ | `#b80f2e` |
+| `--purple-light` / `--purple-dark` | **`#BB86FC` / `#6A0DAD`** ✗ | Markenton |
+| `--bubble-user` | **`rgba(155,89,182,.45)`** ✗ | `rgba(184,15,46,.45)` |
+| `--shadow-glow` | **`rgba(155,89,182,.4)`** ✗ | `rgba(184,15,46,.4)` |
+
+- **Die Ursache ist dieselbe wie bei `--gradient` (2026-08-17):** eine Custom Property wird auf
+  dem Element BERECHNET, auf dem sie deklariert ist. Die Aliase standen in `:root` (= `<html>`),
+  die Marke setzt `branding.js` eine Ebene tiefer auf `<body>` – also lasen sie den
+  Jarvis-Standard. Der Kommentar an der Deklaration versprach das Gegenteil („so greifen
+  Branding + Dark/Light einheitlich"). **Fehlerklasse „eine Zusage, die der Code nicht hält".**
+- **Es waren nicht nur die drei `--purple`-Aliase**, die in der Todo-Notiz standen: ein Scan
+  über ALLE `:root`-Blöcke nach „Wert referenziert eine Branding-Variable" fand **sieben**
+  Stellen – dazu `--bubble-user` (die eigene Chat-Blase!) und `--shadow-glow` in zwei Dateien.
+  Wer nur den gemeldeten Namen sucht, findet die Hälfte.
+- **Dark/Light ist hier unkritisch** – nachgesehen, nicht angenommen: `body.light` fasst die
+  `--accent`-Familie nicht an, die Aliase können also gefahrlos eine Ebene tiefer aufgelöst
+  werden. (Für `bg`/`surface`/`text` gilt das NICHT – deshalb bleiben die chat-eigenen
+  Basiswerte wie sie sind; ein Alias darauf würde `body.light` ignorieren.)
+- **Ohne Branding kommt exakt dasselbe heraus wie vorher** (gegengeprüft: alle sechs Werte
+  bit-gleich zum Altstand) – der Fix ist für ungebrandete Installationen wirkungslos.
+- **`wissen.html` war kein Fehler:** dort steht `var(--purple, var(--accent))`, und weil die
+  Seite `chat.css` gar nicht lädt, greift der Fallback. Unangetastet gelassen.
+- **Der Wächter ist die eigentliche Lehre** (`tests/test_branding_aliase.py`, 24 Prüfungen):
+  er liest die Branding-Variablen **aus `branding.js`** (eine abgetippte Zweitliste liefe beim
+  nächsten Feld auseinander) und verlangt für JEDE `:root`-Deklaration, die eine davon
+  referenziert, dieselbe Deklaration auf `body` – mit **identischer Formel**. Damit fällt der
+  nächste Alias beim Anlegen auf, nicht erst auf einem Kundensystem. Gegenprobe: `body`-Block
+  aus chat.css entfernt → 8 FAIL.
+- Betroffen waren `/chat` und `/userchat` (chat.css, 30 Nutzungsstellen) sowie `/wissen` und
+  `/settings` (style.css, `--shadow-glow`). Cache-Buster auf 11 Seiten erhöht.
+
 ## Desktop-Zugang: Administratoren und der lokale `jarvis` – sonst niemand (2026-08-18)
 **Ausgeloest durch eine Nachfrage des Nutzers** zu einem Eintrag in der Broker-Freigabeliste:
 „Desktop-Session wechseln (LightDM-Autologin + Neustart) · angefordert von system · **155×**".

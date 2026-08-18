@@ -1301,6 +1301,41 @@ abschnitt('6. Stile fuer Antworten (mehrere benannte Vorgaben)');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('7. Sicherheits-Erklaerung (was der Bediener tun muss)');
+{
+    const { w } = bauePortal();
+    await warte(90);
+    const d = w.document;
+    const kasten = d.getElementById('em-help-security');
+    const knopf = d.querySelector('[data-help="em-help-security"]');
+    pruefe(!!kasten && !!knopf, 'Knopf und Kasten existieren paarweise');
+    // data-i18n statt data-i18n-html wuerde die Liste beim ersten Sprachlauf
+    // in eine Textwurst verwandeln (applyLang setzt dort textContent).
+    pruefe(kasten.hasAttribute('data-i18n-html'),
+        'der Kasten traegt data-i18n-html (sonst ist die Auszeichnung nach applyLang weg)');
+    pruefe(kasten.parentNode.className.indexOf('em-card-body') > -1,
+        'er liegt im Karten-Koerper, nicht verschachtelt in einem Absatz',
+        kasten.parentNode.className);
+    pruefe(kasten.querySelectorAll('li').length >= 8,
+        'die Erklaerung ist eine Liste mit beiden Teilen (tun / System)',
+        String(kasten.querySelectorAll('li').length));
+    const txt = kasten.textContent;
+    // Die vier Aussagen, auf die es fachlich ankommt.
+    pruefe(txt.indexOf('Nur von diesen Absendern') > -1,
+        'sie nennt das Absender-FELD (nicht das Prompt)');
+    pruefe(/Werkzeug/.test(txt), 'sie nennt den Werkzeug-Zuschnitt');
+    pruefe(/Protokoll/.test(txt), 'sie verweist aufs Protokoll');
+    pruefe(/jede\b/.test(txt) && /Adresse/.test(txt),
+        'sie benennt das Restrisiko (Versand an beliebige Adressen)');
+    // Aufklappen ueber den vorhandenen ⓘ-Mechanismus.
+    knopf.click();
+    pruefe(kasten.classList.contains('is-open'), 'ein Klick klappt ihn auf');
+    knopf.click();
+    pruefe(!kasten.classList.contains('is-open'), 'ein zweiter klappt ihn zu');
+    w.close();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
 console.log('\n' + '='.repeat(62));
 console.log('  ' + ok + ' OK, ' + fail + ' FAIL');
 console.log('='.repeat(62));

@@ -88,6 +88,9 @@ html:not([data-lang="en"]) .i18n-en { display: none !important; }
    Verlauf heraus wie vorher (`--accent` ist dann der geerbte Vorgabewert). */
 body {
     --gradient: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    /* Gleiche Falle, am 2026-08-18 mitgemessen: der Schein blieb violett
+       (`rgba(155, 89, 182, .4)`), obwohl `--accent-glow` auf body rot war. */
+    --shadow-glow: 0 0 30px var(--accent-glow);
 }
 
 /* ─── Hell-Theme: kippt nur die Basis-Variablen, alles andere folgt ─── */

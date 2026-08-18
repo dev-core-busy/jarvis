@@ -12,7 +12,7 @@
        → keine Alias-Aufloesungs-Falle). bg/surface/text bleiben chat-eigen mit
        expliziten Dark/Light-Werten (Alias darauf wuerde auf :root zum Dunkelwert
        aufloesen und body.light ignorieren → schwarzer Hintergrund). */
-    --purple:           var(--accent);
+    --purple:           var(--accent);       /* siehe body-Block unten! */
     --purple-light:     var(--accent-hover);
     --purple-dark:      var(--accent-dark);
     --green:            var(--success);
@@ -38,6 +38,32 @@
 
     --radius-bubble:    18px;
     --radius-input:     24px;
+}
+
+/* ─── DIESELBEN ALIASE NOCH EINMAL AUF <body> ────────────────────────────
+   NICHT redundant, sondern noetig: eine Custom Property wird auf dem Element
+   BERECHNET, auf dem sie deklariert ist – danach wird nur noch der fertige
+   Wert vererbt. `branding.js` setzt die Markenfarbe per Inline-Style auf
+   <body>, also eine Ebene UNTER `:root` (= <html>). Die Aliase oben lesen
+   `var(--accent)` deshalb auf <html> und frieren dort auf Jarvis-Violett ein.
+
+   Im Browser gemessen (2026-08-18, Markenfarbe #b80f2e auf body):
+       --accent       #b80f2e   ✓ Branding wirkt
+       --purple       #9B59B6   ✗ Jarvis-Violett
+       --bubble-user  rgba(155, 89, 182, .45)   ✗ die eigene Chat-Blase!
+   Der Kommentar oben versprach das Gegenteil ("so greifen Branding +
+   Dark/Light einheitlich") – dieselbe Fehlerklasse und dieselbe Loesung wie
+   bei `--gradient` (theme.css). OHNE Branding kommt exakt dasselbe heraus wie
+   vorher, `--accent` ist dann der geerbte Vorgabewert.
+
+   Dark/Light ist hier unkritisch: `body.light` fasst die accent-Familie nicht
+   an (nachgesehen, nicht angenommen) – die Aliase koennen also gefahrlos eine
+   Ebene tiefer aufgeloest werden. */
+body {
+    --purple:           var(--accent);
+    --purple-light:     var(--accent-hover);
+    --purple-dark:      var(--accent-dark);
+    --bubble-user:      rgba(var(--accent-rgb), 0.45);
 }
 
 /* ─── Light Theme ────────────────────────────────────────────── */

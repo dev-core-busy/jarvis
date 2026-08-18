@@ -42,6 +42,13 @@
     --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Alias-Falle wie in theme.css/chat.css: `--accent-glow` setzt branding.js auf
+   <body>, die Deklaration oben steht auf `:root` (= <html>) und rechnet dort
+   – der Schein bliebe Jarvis-Violett. Deshalb hier noch einmal auf <body>. */
+body {
+    --shadow-glow: 0 0 30px var(--accent-glow);
+}
+
 /* ─── Reset & Base ──────────────────────────────────────────────── */
 *,
 *::before,

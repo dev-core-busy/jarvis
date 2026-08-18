@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>E-Mail</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=10">
+    <link rel="stylesheet" href="/static/css/theme.css?v=11">
     <link rel="icon" href="/static/addin/icon-32.png" type="image/png">
     <!--
         ═══════════════════════════════════════════════════════════════════
@@ -125,6 +125,11 @@
             background: var(--bg-secondary); border: 1px solid var(--border);
             border-left: 3px solid var(--accent); }
         .ad-help.is-open { display: block; }
+        /* Aufzaehlungen im Hilfe-Kasten: eigener Einzug, sonst stehen die
+           Punkte links AUSSERHALB des Kastens (im Screenshot gesehen). */
+        .ad-help ul { margin: 6px 0 2px; padding-left: 1.15rem; }
+        .ad-help li { margin-bottom: 4px; }
+        .ad-help b, .ad-help strong { color: var(--text-secondary); }
 
         .ad-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
             padding: 6px 10px; border-radius: 7px; cursor: pointer; font-size: 12px;
@@ -286,7 +291,10 @@
 
         <!-- ── Reiter: Regeln ── -->
         <div class="ad-pane hidden" data-pane="rules">
-            <p class="ad-hint" data-i18n="addin.rules_hint">Jede Regel beobachtet einen Ordner. Trifft eine neue Nachricht ein, entscheidet das Sprachmodell anhand deines Prompts, was zu tun ist.</p>
+            <p class="ad-hint"><span data-i18n="addin.rules_hint">Jede Regel beobachtet einen Ordner. Trifft eine neue Nachricht ein, entscheidet das Sprachmodell anhand deines Prompts, was zu tun ist.</span>
+                <button type="button" class="ad-info" data-help="ad-help-security" aria-expanded="false"
+                        data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></p>
+            <div class="ad-help" id="ad-help-security" data-i18n-html="mail.help_security">Absender-Bedingungen gehören in das Feld „Nur von diesen Absendern“ – nur dieses Feld wird geprüft, bevor ein Sprachmodell die Nachricht sieht. Gib einer Regel nur die Werkzeuge, die sie braucht, und sieh regelmäßig ins Protokoll.</div>
             <button class="ad-btn ad-btn-primary ad-btn-block" id="ad-new-rule"
                     style="margin-top:8px;" data-i18n="mail.rules_new">+ Neue Regel</button>
             <p class="ad-status" id="ad-rules-status" style="margin-top:6px;"></p>
@@ -391,7 +399,7 @@
     kam nie zum Zug. `async` blockiert `DOMContentLoaded` nicht.
 -->
 <script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-<script src="/static/js/i18n.js?v=49"></script>
+<script src="/static/js/i18n.js?v=50"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <!-- Branding: setzt Markenfarben, Marken-Namen (.brand-app-name) und das

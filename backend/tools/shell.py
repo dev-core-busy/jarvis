@@ -56,6 +56,84 @@ def _needs_root(command: str) -> bool:
     return False
 
 
+
+# ---------------------------------------------------------------------------
+# Fehlende Python-Module: Klartext statt blindem Weitersuchen
+#
+# Shell-Befehle des Agenten laufen mit /usr/bin/python3 (bei Domain-Benutzern
+# zusaetzlich als Sandbox-OS-User), NICHT im venv des Backends. Was dort fehlt,
+# meldet Python nur als "ModuleNotFoundError: No module named 'x'" - und das
+# Modell schliesst daraus regelmaessig, die FAEHIGKEIT fehle. Auf ECHT ist so
+# am 2026-08-18 eine Excel-Anfrage in einer CSV-Notloesung geendet, nachdem
+# vier Schritte mit dem Suchen nach openpyxl verbrannt waren.
+#
+# Die Zuordnung nennt deshalb den ERSATZWEG, nicht die Abwesenheit. Sie behauptet
+# bewusst NICHT, welche Module vorhanden sind: das liesse sich hier nur im
+# Backend-Prozess pruefen, und der laeuft im venv - also in einer anderen
+# Python-Welt als der Befehl. Eine solche Auskunft waere im Zweifel falsch.
+_MODUL_ERSATZ = {
+    "openpyxl":   "Fuer Excel-Dateien das Werkzeug office_create_excel benutzen (erzeugt .xlsx und liefert den Download).",
+    "xlsxwriter": "Fuer Excel-Dateien das Werkzeug office_create_excel benutzen.",
+    "xlwt":       "Fuer Excel-Dateien das Werkzeug office_create_excel benutzen.",
+    "docx":       "Fuer Word-Dokumente das Werkzeug office_create_word benutzen.",
+    "pptx":       "Fuer Praesentationen das Werkzeug office_create_powerpoint benutzen (nutzt die Hausvorlage).",
+    "pandas":     "Tabellen mit dem eingebauten Modul csv verarbeiten; die Ausgabe ueber office_create_excel erzeugen.",
+    "numpy":      "Einfache Rechnungen mit den eingebauten Modulen statistics/math loesen.",
+    "matplotlib": "Fuer Diagramme das Werkzeug create_chart benutzen.",
+    "seaborn":    "Fuer Diagramme das Werkzeug create_chart benutzen.",
+    "plotly":     "Fuer Diagramme das Werkzeug create_chart benutzen.",
+    "pdfplumber": "PDF-Text steht bei Anhaengen bereits im Verlauf; sonst 'pdftotext -layout <datei> -' benutzen.",
+    "pypdf":      "PDF-Text steht bei Anhaengen bereits im Verlauf; sonst 'pdftotext -layout <datei> -' benutzen.",
+    "PyPDF2":     "PyPDF2 ist ueberholt. PDF-Text steht bei Anhaengen bereits im Verlauf; sonst 'pdftotext -layout <datei> -' benutzen.",
+    "fitz":       "PDF-Text steht bei Anhaengen bereits im Verlauf; sonst 'pdftotext -layout <datei> -' benutzen.",
+    "PIL":        "Bilder mit den vorhandenen Kommandozeilen-Werkzeugen bearbeiten.",
+    "jira":       "Jira ist ueber die jira_*-Werkzeuge angebunden - kein eigener Python-Client noetig.",
+    "atlassian":  "Jira und Confluence sind ueber die jira_*- und confluence_*-Werkzeuge angebunden.",
+    "requests":   "Netzzugriffe laufen nicht ueber die Shell; die eingebaute urllib genuegt, sofern Internet freigeschaltet ist.",
+    "httpx":      "Netzzugriffe laufen nicht ueber die Shell; die eingebaute urllib genuegt, sofern Internet freigeschaltet ist.",
+}
+
+_MODUL_FEHLT_RE = re.compile(r"No module named ['\"]([A-Za-z0-9_.]+)['\"]")
+
+# Nur der Wurzel-Name zaehlt: "No module named 'docx.oxml'" heisst, dass
+# python-docx fehlt, nicht ein Untermodul.
+def _modul_hinweis(result: str) -> str:
+    """Haengt an eine Ausgabe mit ModuleNotFoundError einen Klartext-Hinweis.
+
+    Ohne diesen Hinweis probiert das Modell weitere Importe, sucht nach
+    Alternativ-Installationen und weicht am Ende auf ein schlechteres Ergebnis
+    aus, statt das vorhandene Werkzeug zu nehmen.
+    """
+    try:
+        if "No module named" not in result:
+            return result
+        namen, gesehen = [], set()
+        for treffer in _MODUL_FEHLT_RE.findall(result):
+            wurzel = treffer.split(".")[0]
+            if wurzel and wurzel not in gesehen:
+                gesehen.add(wurzel)
+                namen.append(wurzel)
+        if not namen:
+            return result
+
+        zeilen = ["", "HINWEIS_AN_NUTZER: Ein Python-Modul fehlt in der Umgebung, "
+                      "in der dieser Befehl laeuft."]
+        for name in namen:
+            rat = _MODUL_ERSATZ.get(name)
+            zeilen.append(f"- {name} ist nicht verfuegbar."
+                          + (f" {rat}" if rat else ""))
+        zeilen.append(
+            "Ein Nachinstallieren ist dir NICHT moeglich (kein pip, kein Internet). "
+            "Nimm den genannten Weg oder die Standardbibliothek und liefere ein "
+            "Ergebnis - such nicht nach weiteren Modulen. Ist ein Modul wirklich "
+            "unverzichtbar, nenne es dem Benutzer: ein Administrator kann es mit "
+            "deploy/sandbox_python.sh nachinstallieren."
+        )
+        return result + "\n".join(zeilen)
+    except Exception:
+        return result
+
+
 class ShellTool(BaseTool):
     """Fuehrt Shell-Befehle auf dem Linux-System aus."""
 
@@ -257,7 +335,7 @@ class ShellTool(BaseTool):
                 if proc.returncode and proc.returncode != 0:
                     result += f"\nExit-Code: {proc.returncode}"
 
-                return result.strip() or "(Keine Ausgabe)"
+                return _modul_hinweis(result.strip()) or "(Keine Ausgabe)"
 
             else:
                 # Klassischer Modus: alles auf einmal
@@ -277,7 +355,7 @@ class ShellTool(BaseTool):
                 if proc.returncode != 0:
                     result += f"\nExit-Code: {proc.returncode}"
 
-                return result.strip() or "(Keine Ausgabe)"
+                return _modul_hinweis(result.strip()) or "(Keine Ausgabe)"
 
         except Exception as e:
             return f"Fehler: {str(e)}"
@@ -327,4 +405,4 @@ class ShellTool(BaseTool):
         rc = res.get("rc")
         if rc:
             result += f"\nExit-Code: {rc}"
-        return result.strip() or "(Keine Ausgabe)"
+        return _modul_hinweis(result.strip()) or "(Keine Ausgabe)"

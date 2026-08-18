@@ -711,7 +711,10 @@
                 'Du hast noch keine aktive Regel. Lege im Reiter „Regeln" eine an.')) + '</div>');
         } else {
             teile.push('<div class="ad-field" style="margin-top:8px;">' +
-                '<label>' + esc(T('addin.choose_rule', 'Mit dieser Regel verarbeiten')) + '</label>' +
+                // Kurz: die Ueberschrift des Abschnitts sagt schon "Mit einer
+                // Regel verarbeiten" – ein Label, das denselben Satz wiederholt,
+                // ist Rauschen (gemeldet 2026-08-18).
+                '<label>' + esc(T('addin.choose_rule', 'Regel')) + '</label>' +
                 '<select id="ad-run-rule">' + aktive.map(function (r) {
                     return '<option value="' + esc(r.id) + '">' + esc(r.name) + '</option>';
                 }).join('') + '</select></div>');
@@ -1350,16 +1353,19 @@
        Regel genannte Stil, "-" = ausdruecklich ohne Stil. */
     function stilOptionen(gewaehlt) {
         var std = _stile.filter(function (e) { return e.standard; })[0];
-        // Der Stilname wird EINZELN maskiert – nicht erst die fertige
-        // Zeichenkette: so ist am Ausdruck selbst zu sehen, dass der Fremdteil
-        // durch esc() geht (und der Waechter in tests/ erkennt es ebenso).
-        var h = '<option value="">' + (std
-            ? esc(T('mail.style_opt_default', 'Standard')) + ' \u2013 ' + esc(std.name)
+        // Der Standard steht als ERSTER Eintrag, mit `*` und mit dem Wert "" –
+        // "" heisst "nichts ausdruecklich gewaehlt", nur so greift in einer
+        // Regel ein im Prompt genannter Stil. Und er wird NICHT zusaetzlich mit
+        // eigener Kennung gelistet: doppelt in der Liste war genau das gemeldete
+        // Problem ("Standard – Standard").
+        var h = '<option value=""' + (gewaehlt ? '' : ' selected') + '>' + (std
+            ? esc(std.name) + ' *'
             : esc(T('mail.style_opt_none', 'kein Stil'))) + '</option>';
-        h += _stile.map(function (e) {
+        h += _stile.filter(function (e) { return !e.standard; }).map(function (e) {
             return '<option value="' + esc(e.id) + '"' +
                 (gewaehlt === e.id ? ' selected' : '') + '>' + esc(e.name) + '</option>';
         }).join('');
+        if (!_stile.length) return h;
         return h + '<option value="-"' + (gewaehlt === '-' ? ' selected' : '') + '>' +
             esc(T('mail.style_opt_off', '– ohne Stil –')) + '</option>';
     }

@@ -3341,6 +3341,106 @@ Code: `backend/tools/knowledge.py` (`pdf_text_verdacht`, `text_guete`, `_ocr_gew
   abgelehnt (Wortquote 79,8 → 74,9).
 - **Auf ECHT noch NICHT ausgerollt.**
 
+## Zwei Python-Welten: die Agent-Shell ist NICHT das venv (Vorfall + Fix 2026-08-18)
+**Der Vorfall:** `nexus\andrea.ladd` bat in /chat darum, 54 Adressen aus einem PDF „in eine
+Exceltabelle" zu extrahieren. Herausgekommen ist eine **CSV mit falsch zugeordneten Feldern**
+(Straße = „Herr M. Al-lthawi, FA für Augenheilkunde", E-Mail = „4-6"), und der zweite Anlauf
+endete nach 15 Schritten **ohne jedes Ergebnis** – die letzte Zeile war eine Ankündigung
+(„Lass mich das Script Schritt für Schritt aufbauen."). Im Protokoll stehen als Ursache:
+`ModuleNotFoundError: No module named 'openpyxl'` · `'pandas'` · `'pdfplumber'`.
+- **URSACHE sind ZWEI Python-Welten auf demselben Server**, und der Agent landet in der ärmeren:
+  | | Interpreter | Inhalt |
+  |---|---|---|
+  | Backend + Skills | `/opt/jarvis/venv/bin/python` | openpyxl, pdfplumber, python-docx, lxml, python-pptx |
+  | `shell_execute` | **`/usr/bin/python3`** (bei Domain-Benutzern zusätzlich als `jarvis_sandbox`) | auf ECHT nur lxml, python-pptx, XlsxWriter, numpy |
+  `shell.py::_code_to_command` schreibt `python3 <tmpdatei>` – hart, ohne venv. Und
+  `skills/manager.py` installiert pip-Pakete mit **`sys.executable`**, also ins venv: was ein
+  Skill deklariert (`openpyxl` steht im Office-Manifest!), kommt im System-Python **nie** an.
+  Der Agent hat auch keinen Weg heraus – `pip install` ist ihm verwehrt (kein Internet, keine
+  Rechte), und das ist richtig so.
+- **DER SYSTEM-PROMPT HAT DEM MODELL DIE UNWAHRHEIT GESAGT – und ihm verboten, sie zu nennen.**
+  Punkt 16 lautete: „Diese Pakete SIND auf dem Server installiert (python-pptx, python-docx,
+  openpyxl) … **Behaupte NIEMALS, sie seien nicht installiert**" und ebenso „matplotlib UND
+  seaborn SIND auf dem Server installiert … Fuer Datenanalyse stehen pandas, numpy und scipy
+  bereit." Auf ECHT war davon fast nichts vorhanden. Damit erklärt sich das Verhalten
+  vollständig: das Modell versuchte openpyxl (weil der Prompt es zusagt), suchte nach einer
+  „anderen Installation", durfte das Fehlen nicht benennen – und wich auf die CSV aus.
+  **Dieselbe Fehlerklasse wie beim alten `WA_TASK_PROMPT`, wie `--gradient` und wie der
+  EWS-URL-Hinweis: eine Zusage, die der Code nicht hält.** Ein Prompt ist Code.
+- **Der Prompt sagt jetzt** „auf einem eingerichteten Server vorhanden" statt „SIND installiert",
+  regelt den Fall ausdrücklich („MELDET EIN BEFEHL DENNOCH `ModuleNotFoundError` … dann gilt der
+  HINWEIS_AN_NUTZER") und verlangt, dem Benutzer das fehlende Modul zu **nennen**, statt eine
+  Notlösung zu liefern. Excel läuft über `office_create_excel` – das Werkzeug arbeitet **im
+  Backend** und ist damit von der Shell-Welt unabhängig.
+- **Selbstkorrektur statt Weitersuchen: `shell.py::_modul_hinweis()`** hängt an jede Ausgabe mit
+  `ModuleNotFoundError` einen Klartext-Hinweis mit dem **Ersatzweg** (openpyxl → `office_create_excel`,
+  matplotlib → `create_chart`, pdfplumber/pypdf → Anhang-Text bzw. `pdftotext -layout`,
+  jira → die `jira_*`-Werkzeuge) plus der Ansage, dass Nachinstallieren unmöglich ist. Ohne ihn
+  verbrannte der Lauf vier Schritte mit Modul-Suche.
+  - **Die Zuordnung behauptet NICHT, welche Module vorhanden sind.** Das ließe sich nur im
+    Backend-Prozess prüfen – und der läuft im venv, also in der anderen Welt. Eine solche
+    Auskunft wäre im Zweifel falsch. Sie nennt deshalb nur den Weg.
+  - **Verdrahtet an ALLEN drei Ergebnis-Rückgaben, auch im Broker-Zweig** (`_exec_via_broker`).
+    Der ist auf ECHT der maßgebliche – Domain-Benutzer laufen als `jarvis_sandbox` über
+    `sandbox_exec`; hinge der Hinweis nur am lokalen Zweig, wäre der Fix dort still unwirksam.
+  - Kein Rat empfiehlt ein weiteres Fremdmodul (das kann genauso fehlen) und keiner `pip install`.
+    Untermodule werden auf die Wurzel zurückgeführt (`docx.oxml` → python-docx fehlt).
+- **`deploy/sandbox_python.sh` stellt den Stack her** (idempotent, `--pruefen` zeigt nur):
+  openpyxl, pandas, pdfplumber, pypdf, python-docx, python-pptx, XlsxWriter, matplotlib, Pillow.
+  - **Die Liste ist GEMESSEN, nicht geraten:** `grep "No module named"` über alle **410**
+    Konversationen auf ECHT – openpyxl 5× · pandas 4× · pypdf 2× · pdfplumber 2× · PyPDF2 1× ·
+    docx 1×. Nur 6 von 410 Konversationen betroffen, aber jede davon ein Totalausfall bei einer
+    Datenaufgabe. **Nicht aufgenommen:** `PyPDF2` (überholt, pypdf ist der Nachfolger) und das
+    Python-Paket `jira` – dafür gibt es die `jira_*`-Werkzeuge, der Import war eine Fehlwahl des
+    Modells, kein Bedarf.
+  - **Es prüft MIT dem Sandbox-Benutzer** (`runuser -u jarvis_sandbox`) und mit dem Interpreter
+    aus dem PATH – nicht aus dem venv-Kontext. Sonst prüft man eine andere Welt als die, in der
+    der Befehl später läuft. Nachprüfung nach der Installation ist Teil des Skripts: pip kann in
+    einen anderen Interpreter installiert haben.
+  - **`--break-system-packages`** ist auf Debian 13 nötig (`EXTERNALLY-MANAGED`) und der auf
+    diesen Servern bereits etablierte Weg – lxml, python-pptx und XlsxWriter liegen genau so in
+    `/usr/local/lib/python3.13/dist-packages`.
+  - **numpy wird beobachtet, nicht angefasst:** es kommt aus apt (ECHT 2.2.4) und erfüllt die
+    Anforderungen von pandas/matplotlib, pip lässt es deshalb in Ruhe (per `--dry-run` vorher
+    nachgewiesen, danach verglichen). Das venv unterliegt weiter `numpy<2.1` und ist eine
+    getrennte Welt. **Nebenwirkung, die man kennen muss:** pdfplumber hebt **Pillow** an (auf DEV
+    11.1.0 → 12.3.0); matplotlib rendert danach nachweislich weiter.
+- **WARUM EIN SKRIPT UND KEINE HANDARBEIT:** genau die Handarbeit ist der Grund für den Drift.
+  Auf DEV lagen openpyxl, pandas, matplotlib, pypdf und Pillow im System-Python, auf ECHT nur
+  drei Pakete – **dieselbe Anfrage gelingt hier und scheitert dort**, und niemand sieht warum.
+  Dasselbe Muster wie beim PDF-Export („bei dir geht PDF, bei mir nicht"). Der offene Punkt
+  „matplotlib/seaborn noch nicht auf ECHT" stand seit dem 2026-07-11 in der Memory.
+- **Kein Dienst-Neustart nötig** – `shell_execute` startet `python3` pro Aufruf neu.
+- **FALLSTRICK, den der Bestandstest gefangen hat:** `tests/test_skill_audit.py` zählt
+  Werkzeug-Nennungen im Prompt **zeilenweise** und wertet eine Zeile mit `kein`/`nicht`/`NIEMALS`
+  als *negative* Nennung. Meine erste Fassung stellte Aufforderung und Verbot in EINE Zeile
+  („… mit office_create_excel erzeugen, nicht per openpyxl zusammenbauen; liefere NIEMALS eine
+  CSV") – damit fiel die positive Nennung weg und der Test brach mit `IndexError` ab. **Eine
+  Zeile = eine Aussage**; das Verbot steht jetzt als eigener Punkt, und ein Wächter hält fest,
+  dass mindestens eine Zeile `office_create_excel` ohne Verbotswort nennt.
+- **Was der Fix NICHT löst:** die 15-Schritt-Grenze. Der zweite Lauf lief in `MAX_STEPS` und
+  hinterließ gar keine Antwort – mit pdfplumber ist die Extraktion jetzt in wenigen Schritten
+  machbar, aber ein Formular-PDF mit 55 Seiten bleibt für ein 35B-Modell eine schwere Aufgabe.
+  Und die **Textqualität** des gemeldeten PDFs ist beschädigt (eigener Abschnitt oben): Zahlen
+  und Adressen daraus gehören am Original geprüft.
+- **Verifiziert:** 54 Prüfungen (`tests/test_sandbox_module_hinweis.py`, ohne fastapi lauffähig –
+  die Funktionen werden per Quelltext geladen, `backend.config` bleibt ungeladen) lokal und auf
+  DEV im echten venv, dazu 50 (`test_skill_audit.py`), 70 (`test_display_names.py`) und 48
+  (`test_empty_answer.py`) unverändert grün. Gegenproben greifen: Verdrahtung ausgebaut → 3 FAIL,
+  Wurzel-Rückführung ausgebaut → 1 FAIL, Modul-Liste beschnitten → 2 FAIL, alter Prompt-Wortlaut
+  zurück → 1 FAIL.
+  **Live auf DEV:** Skript erkennt genau die zwei Lücken (pdfplumber, docx), installiert sie,
+  ist beim zweiten Lauf ein No-op, numpy unverändert (2.2.4), venv unberührt (2.0.2);
+  der Hinweis erscheint im **echten** Agentenlauf über `POST /api/agent/task` **und** über den
+  **Broker-/Sandbox-Weg** (`_sandbox_user=jarvis_sandbox`, also der Weg des Domain-Benutzers);
+  die volle Kette Formular-PDF → `pdfplumber.extract_words()` → korrekte Label/Wert-Zuordnung →
+  `openpyxl` → wieder eingelesene .xlsx läuft als `jarvis_sandbox` durch; und ein echter
+  Excel-Auftrag nutzt jetzt **`office_create_excel`** (im Audit-Log belegt) statt einer CSV.
+- **Auf ECHT noch NICHT ausgerollt.** Dort sind beide Hälften nötig: der Code (Prompt + Hinweis)
+  **und** `sudo bash deploy/sandbox_python.sh` – letzteres rollt kein Update mit aus, es ist eine
+  Server-Einrichtung. Ohne das Skript bleibt die Zusage des Prompts dort unerfüllt; ohne den Code
+  fehlt der Hinweis, wenn doch einmal ein Modul fehlt.
+
 ## Info-Dokumente im Portal (`frontend_info_files/`, seit 2026-07-29)
 - **Was es ist:** Ein Ablage-Ordner neben dem Backend (`/opt/jarvis/frontend_info_files`,
   umstellbar über `JARVIS_INFO_DIR`). Ein Administrator kopiert Dateien hinein (Handbuch,

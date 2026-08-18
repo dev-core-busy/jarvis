@@ -288,6 +288,14 @@
             .catch(function (e) { melde('em-acct-status', e.message, 'fehler'); });
     }
 
+    /* Muster-Stiltext, den TAB in ein leeres Feld uebernimmt. Der PLATZHALTER
+       taugt dafuer nicht – er zaehlt auf, was hineingehoert ("Signatur,
+       Anrede-Form, …") und waere als Feldinhalt Unsinn. */
+    var STIL_MUSTER = 'Antworte in der Sie-Form, sachlich und in h\u00f6chstens f\u00fcnf S\u00e4tzen.\n'
+        + 'Best\u00e4tige zuerst kurz das Anliegen.\n'
+        + 'Sage keine Preise, Rabatte oder Liefertermine zu.\n'
+        + 'Schlie\u00dfe mit:\nMit freundlichen Gr\u00fc\u00dfen\n<Name>\n<Abteilung>';
+
     /* ── Stile fuer Antworten ──────────────────────────────────────────── */
     /* Eigene Endpunkte (/api/email/styles), NICHT das Postfach-Formular: die
        Liste wird Eintrag fuer Eintrag gepflegt, und ein Formular, das sie als
@@ -373,11 +381,13 @@
             + '" placeholder="' + esc(T('mail.style_name_ph', 'z. B. Förmlich')) + '"></div>'
             + '<div class="em-field" style="margin-top:10px;"><label>'
             + T('mail.style_text', 'Stil und Signatur') + '</label>'
-            + '<textarea id="em-s-text" rows="5" maxlength="' + (g.stil_text_max || 2000)
+            + '<textarea id="em-s-text" rows="9" maxlength="' + (g.stil_text_max || 6000)
+            + '" data-tabfill="' + esc(T('mail.style_text_suggest', STIL_MUSTER))
             + '" placeholder="' + esc(T('mail.acct_guide_ph',
                 'z. B. Signatur, Anrede-Form, was nie zugesagt werden darf')) + '"></textarea>'
             + '<span class="em-hint">' + T('mail.acct_guide_hint',
-                'Bestimmt nur den Ton – löst NIE eine Aktion aus.') + '</span></div>'
+                'Bestimmt nur den Ton – löst NIE eine Aktion aus.')
+            + ' <span id="em-s-count"></span></span></div>'
             + '<div class="em-field" style="margin-top:10px;"><label>'
             + '<input type="checkbox" id="em-s-std" style="width:auto;margin-right:8px;">'
             + T('mail.style_is_default', 'Als Standard verwenden, wenn nichts gewählt ist')
@@ -390,10 +400,26 @@
         $('em-s-name').value = e.name || '';
         $('em-s-text').value = e.text || '';
         $('em-s-std').checked = !!e.standard || (!id && !_stile.length);
+        zaehlerBinden($('em-s-text'), $('em-s-count'), (g.stil_text_max || 6000));
         $('em-s-save').addEventListener('click', function () { speichereStil(id); });
         $('em-s-cancel').addEventListener('click', schliesseStilFormular);
         if (karte) karte.appendChild(f); else stilFormularHeim();
         $('em-s-name').focus();
+    }
+
+    /* Zeichenzaehler, der sich erst ab 70%% meldet. Grund: `maxlength` schneidet
+       im Browser STILL ab - wer eine lange Signatur einfuegt, merkt nur, dass
+       das Ende fehlt. Dauerhaft sichtbar waere er dagegen Rauschen. */
+    function zaehlerBinden(feld, anzeige, grenze) {
+        if (!feld || !anzeige) return;
+        var mal = function () {
+            var n = (feld.value || '').length;
+            if (n < grenze * 0.7) { anzeige.textContent = ''; return; }
+            anzeige.textContent = '· ' + n + ' / ' + grenze;
+            anzeige.style.color = (n >= grenze) ? 'var(--danger)' : '';
+        };
+        feld.addEventListener('input', mal);
+        mal();
     }
 
     function speichereStil(id) {
@@ -635,7 +661,7 @@
             + '</div>'
             + '<div class="em-field" style="margin-top:12px;">'
             + '<label>' + T('mail.f_prompt', 'Prompt – was soll mit der Nachricht geschehen?') + '</label>'
-            + '<textarea id="em-f-prompt" maxlength="' + (g.prompt_max || 8000) + '" placeholder="'
+            + '<textarea id="em-f-prompt" data-tabfill maxlength="' + (g.prompt_max || 8000) + '" placeholder="'
             + esc(T('mail.f_prompt_ph',
                 'Beispiel: Prüfe, ob es sich um eine Rechnung handelt. Wenn ja, verschiebe die '
                 + 'Nachricht in den Ordner Buchhaltung und antworte dem Absender mit einer kurzen '

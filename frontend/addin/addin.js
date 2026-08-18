@@ -688,22 +688,13 @@
         } else {
             teile.push('<div class="ad-field" style="margin-top:8px;">' +
                 '<label>' + esc(T('addin.reply_hint_label', 'Hinweis (optional)')) + '</label>' +
-                '<input type="text" id="ad-reply-hint" placeholder="' +
+                '<input type="text" id="ad-reply-hint" data-tabfill placeholder="' +
                 esc(T('addin.reply_hint_ph', 'z. B. freundlich absagen, Termin bestätigen')) +
                 '"></div>');
             if (_stile.length) {
                 teile.push('<div class="ad-field">' +
                     '<label>' + esc(T('mail.style_pick', 'Stil')) + '</label>' +
                     '<select id="ad-reply-stil">' + stilOptionen(_stilWahl) + '</select></div>');
-            }
-            if (aktive.length) {
-                teile.push('<div class="ad-field">' +
-                    '<label>' + esc(T('addin.reply_tone', 'Ton einer Regel übernehmen (optional)')) + '</label>' +
-                    '<select id="ad-reply-rule"><option value="">' +
-                    esc(T('addin.reply_tone_none', '– ohne –')) + '</option>' +
-                    aktive.map(function (r) {
-                        return '<option value="' + esc(r.id) + '">' + esc(r.name) + '</option>';
-                    }).join('') + '</select></div>');
             }
             teile.push('<button class="ad-btn ad-btn-primary ad-btn-block" id="ad-reply-make">' +
                 esc(T('addin.reply_make', 'Antwort vorschlagen')) + '</button>');
@@ -774,7 +765,6 @@
             msg_id: _office.id,
             ordner: '',
             hinweis: (($('ad-reply-hint') || {}).value || '').trim(),
-            regel_id: (($('ad-reply-rule') || {}).value || ''),
             stil: (($('ad-reply-stil') || {}).value || '')
         })
             .then(function (d) {
@@ -1181,6 +1171,13 @@
             .then(function () { _laeuft = false; });
     }
 
+    /* Muster-Stiltext fuer die TAB-Uebernahme (der Platzhalter zaehlt nur auf,
+       was hineingehoert, und waere als Feldinhalt Unsinn). */
+    var STIL_MUSTER = 'Antworte in der Sie-Form, sachlich und in h\u00f6chstens f\u00fcnf S\u00e4tzen.\n'
+        + 'Best\u00e4tige zuerst kurz das Anliegen.\n'
+        + 'Sage keine Preise, Rabatte oder Liefertermine zu.\n'
+        + 'Schlie\u00dfe mit:\nMit freundlichen Gr\u00fc\u00dfen\n<Name>\n<Abteilung>';
+
     /* ── Antwort-Stile ────────────────────────────────────────────────── */
     /* Eigene Endpunkte (/api/email/styles): jeder Knopf hier speichert sofort.
        Der Knopf "Speichern" des Postfachs fasst die Stile NICHT an – zwei
@@ -1262,12 +1259,14 @@
             '" value="' + esc(e.name || '') + '" placeholder="' +
             esc(T('mail.style_name_ph', 'z. B. Förmlich')) + '"></div>' +
             '<div class="ad-field"><label>' + esc(T('mail.style_text', 'Stil und Signatur')) +
-            '</label><textarea id="ad-s-text" maxlength="' + (g.stil_text_max || 2000) +
+            '</label><textarea id="ad-s-text" rows="9" maxlength="' + (g.stil_text_max || 6000) +
+            '" data-tabfill="' + esc(T('mail.style_text_suggest', STIL_MUSTER)) +
             '" placeholder="' + esc(T('mail.acct_guide_ph',
                 'z. B. Signatur, Anrede-Form, was nie zugesagt werden darf')) + '">' +
             esc(e.text || '') + '</textarea>' +
             '<span class="ad-hint">' + esc(T('mail.acct_guide_hint',
-                'Bestimmt nur den Ton – löst NIE eine Aktion aus.')) + '</span></div>' +
+                'Bestimmt nur den Ton – löst NIE eine Aktion aus.')) +
+            ' <span id="ad-s-count"></span></span></div>' +
             '<label class="ad-check"><input type="checkbox" id="ad-s-std"' +
             ((e.standard || (!id && !_stile.length)) ? ' checked' : '') + '><span>' +
             esc(T('mail.style_is_default', 'Als Standard verwenden, wenn nichts gewählt ist')) +
@@ -1277,10 +1276,24 @@
             '</button><button class="ad-btn" id="ad-s-cancel">' +
             esc(T('common.cancel', 'Abbrechen')) + '</button></div>' +
             '<p class="ad-status" id="ad-s-status" style="margin-top:6px;"></p>';
+        zaehlerBinden($('ad-s-text'), $('ad-s-count'), (g.stil_text_max || 6000));
         $('ad-s-save').addEventListener('click', function () { speichereStil(id); });
         $('ad-s-cancel').addEventListener('click', schliesseStilFormular);
         if (karte) karte.appendChild(f); else stilFormularHeim();
         try { f.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e2) { }
+    }
+
+    /* Zeichenzaehler ab 70%% - `maxlength` schneidet sonst still ab. */
+    function zaehlerBinden(feld, anzeige, grenze) {
+        if (!feld || !anzeige) return;
+        var mal = function () {
+            var n = (feld.value || '').length;
+            if (n < grenze * 0.7) { anzeige.textContent = ''; return; }
+            anzeige.textContent = '· ' + n + ' / ' + grenze;
+            anzeige.style.color = (n >= grenze) ? 'var(--danger)' : '';
+        };
+        feld.addEventListener('input', mal);
+        mal();
     }
 
     function speichereStil(id) {

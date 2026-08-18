@@ -9,6 +9,7 @@
  * HTML:  <span data-i18n="key"></span>
  *        <input data-i18n-placeholder="key">
  *        <button data-i18n-title="key">
+ *        <textarea data-i18n-tabfill="key">   (Vorschlag fuer TAB)
  */
 
 const _I18N = {
@@ -132,6 +133,7 @@ const _I18N = {
         'mail.style_create':            'Stil anlegen',
         'mail.style_name':              'Name des Stils',
         'mail.style_name_ph':           'z.\u202fB. F\u00f6rmlich',
+        'mail.style_text_suggest':      'Antworte in der Sie-Form, sachlich und in h\u00f6chstens f\u00fcnf S\u00e4tzen.\nBest\u00e4tige zuerst kurz das Anliegen.\nSage keine Preise, Rabatte oder Liefertermine zu.\nSchlie\u00dfe mit:\nMit freundlichen Gr\u00fc\u00dfen\n<Name>\n<Abteilung>',
         'mail.style_text':              'Stil und Signatur',
         'mail.style_is_default':        'Als Standard verwenden, wenn nichts gew\u00e4hlt ist',
         'mail.style_default':           'Standard',
@@ -246,8 +248,6 @@ const _I18N = {
         'addin.reply_head':             'Antwort vorschlagen',
         'addin.reply_hint_label':       'Hinweis (optional)',
         'addin.reply_hint_ph':          'z.\u202fB. freundlich absagen, Termin best\u00e4tigen',
-        'addin.reply_tone':             'Ton einer Regel \u00fcbernehmen (optional)',
-        'addin.reply_tone_none':        '\u2013 ohne \u2013',
         'addin.reply_make':             'Antwort vorschlagen',
         'addin.reply_safe':             'Es wird nichts gesendet \u2013 du siehst den Text zuerst.',
         'addin.reply_working':          'Formuliere eine Antwort\u2026',
@@ -1503,6 +1503,7 @@ const _I18N = {
 
         // ── Common ────────────────────────────────────────────
         'common.save':          'Speichern',
+        'common.tabfill_hint':  'Tab \u00fcbernimmt den Vorschlag',
         'wissen.nav': 'Wissen',
         'wissen.cpu_load': 'CPU-Auslastung',
         'wissen.delete_file': 'Löschen',
@@ -1890,6 +1891,7 @@ const _I18N = {
         'sap.free_question': '— Freie Frage (keine Vorlage) —',
         'sap.free_question_short': 'Freie Frage',
         'sap.question_ph': 'Zusätzliche Frage oder Einschränkung (optional) – z. B. „nur Buchungskreis 1000, letzte zwei Quartale“',
+        'sap.question_suggest':      'Nur Buchungskreis 1000, letzte zwei Quartale. Nenne die Quelltabelle.',
         'sap.run': 'Analyse starten',
         'sap.result': 'Ergebnis',
         'sap.copy': 'Kopieren',
@@ -2593,6 +2595,7 @@ const _I18N = {
         'mail.style_create':            'Create style',
         'mail.style_name':              'Style name',
         'mail.style_name_ph':           'e.g. Formal',
+        'mail.style_text_suggest':      'Reply formally, factually and in no more than five sentences.\nStart by briefly confirming the request.\nDo not commit to prices, discounts or delivery dates.\nClose with:\nKind regards\n<Name>\n<Department>',
         'mail.style_text':              'Style and signature',
         'mail.style_is_default':        'Use as default when nothing is chosen',
         'mail.style_default':           'default',
@@ -2705,8 +2708,6 @@ const _I18N = {
         'addin.reply_head':             'Suggest a reply',
         'addin.reply_hint_label':       'Note (optional)',
         'addin.reply_hint_ph':          'e.g. decline politely, confirm the appointment',
-        'addin.reply_tone':             'Use the tone of a rule (optional)',
-        'addin.reply_tone_none':        '\u2013 none \u2013',
         'addin.reply_make':             'Suggest a reply',
         'addin.reply_safe':             'Nothing is sent \u2013 you see the text first.',
         'addin.reply_working':          'Drafting a reply\u2026',
@@ -3959,6 +3960,7 @@ const _I18N = {
 
         // ── Common ────────────────────────────────────────────
         'common.save':          'Save',
+        'common.tabfill_hint':  'Tab inserts the suggestion',
         'wissen.nav': 'Knowledge',
         'wissen.delete_file': 'Delete',
         'wissen.delete_confirm': 'Really delete file "{name}"?',
@@ -4343,6 +4345,7 @@ const _I18N = {
         'sap.free_question': '— Free question (no template) —',
         'sap.free_question_short': 'Free question',
         'sap.question_ph': 'Additional question or restriction (optional) – e.g. "company code 1000 only, last two quarters"',
+        'sap.question_suggest':      'Only company code 1000, last two quarters. Name the source table.',
         'sap.run': 'Run analysis',
         'sap.result': 'Result',
         'sap.copy': 'Copy',
@@ -4954,6 +4957,13 @@ window.applyLang = function() {
     // aria-label
     document.querySelectorAll('[data-i18n-aria]').forEach(el => {
         el.setAttribute('aria-label', window.t(el.dataset.i18nAria));
+    });
+    // Vorschlag, den TAB uebernimmt (frontend/js/tabfill.js). Noetig, wo der
+    // Platzhalter eine AUFZAEHLUNG ist ("z. B. Signatur, Anrede-Form, …") und
+    // als Feldinhalt keinen Sinn ergaebe – dann steht der uebernehmbare Text
+    // getrennt daneben und muss ebenfalls uebersetzt werden.
+    document.querySelectorAll('[data-i18n-tabfill]').forEach(el => {
+        el.setAttribute('data-tabfill', window.t(el.dataset.i18nTabfill));
     });
     // HTML-Inhalt (für Elemente mit eingebetteten Tags wie <code>, <strong>)
     document.querySelectorAll('[data-i18n-html]').forEach(el => {

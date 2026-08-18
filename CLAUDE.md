@@ -3133,6 +3133,55 @@ Regel (`mail_rules`), Auflösung in `mail_runner._auftrag` und `antwort_vorschla
 - **Noch NICHT geprüft:** ein echter Lauf gegen ein Postfach (auf DEV ist keiner hinterlegt) –
   also ob das Modell dem gewählten Stil tatsächlich folgt. **Auf ECHT noch nicht ausgerollt.**
 
+#### Nacharbeit am selben Tag: Ton-Feld weg, mehr Platz, Tab-Übernahme
+Drei Rückmeldungen des Nutzers, unmittelbar nach dem Bau der Stile.
+
+**1. „Ton einer Regel übernehmen" ist entfallen** (Pulldown `ad-reply-rule` in der
+Antwort-Vorschau, dazu `regel_id` am Endpunkt und der `regel`-Parameter von
+`antwort_vorschlag`). Es war der Behelf aus der Zeit mit genau EINER Vorgabe je Postfach:
+wer anders klingen wollte, musste den Prompt einer Regel ausleihen. Mit wählbaren Stilen gibt es
+dafür ein eigenes Feld – zwei Wege zur selben Frage sind nur verwirrend, und ein Regel-Prompt
+beschreibt eine **Handlung** („verschiebe nach …"), keinen Ton.
+- **Dabei wurde eine Lücke geschlossen, nicht eine aufgemacht:** `_injektion_pruefen()` lief im
+  Vorschlagsweg nur `if regel:` – also nur, wenn jemand zufällig eine Regel als Ton gewählt
+  hatte, praktisch nie. Jetzt läuft sie **immer** (mit `{"owner": …, "name": "Antwort-Vorschau"}`).
+  Ob ein Postfach beschossen wird, darf nicht davon abhängen, welches Pulldown jemand bedient.
+- Der Wächter, der „eine FREMDE Regel wird nicht übernommen" festschrieb, prüft jetzt die
+  Abwesenheit von `regel_id` – **und liest dafür nur den Code**: mein eigener Docstring nennt das
+  Feld samt Begründung und ließ die Prüfung zuerst durchfallen (vierter Fall dieser Art).
+
+**2. `VORGABE_MAX` von 2000 auf 6000** („kann zu wenig Text aufnehmen"). Eine Signatur mit
+Rechtsform, Registergericht und Pflichtangaben plus Ton- und Tabu-Regeln sprengt 2000 Zeichen
+schnell; 6000 sind grob 1500 Token und neben `PROMPT_MAX` (8000) vertretbar – je Lauf geht nur
+EIN Stil hinein. Textfeld auf 9 Zeilen, dazu ein **Zeichenzähler ab 70 %**: `maxlength` schneidet
+im Browser **still** ab, wer eine lange Signatur einfügt merkt sonst nur, dass das Ende fehlt.
+
+**3. „Vorschlag per Tab übernehmen" (`frontend/js/tabfill.js`)** – Wunsch: die Beispieltexte in
+Feldern wie „Hinweis (optional)" ließen sich nur abtippen.
+- **OPT-IN über `data-tabfill`, niemals global.** Ein Platzhalter ist nicht automatisch ein
+  Vorschlag: `vorname.nachname@firma.de`, ein Beispiel-DN oder „Standardordner" sind
+  **Formvorgaben** – sie zu übernehmen hieße, ein Beispiel zu speichern. Markiert sind deshalb
+  nur Freitext-Anweisungen an ein Modell: Hinweis (Add-in), Regel-Prompt (/email), persönliche
+  Anweisungen (Chat, Support, SAP), Support-System-Prompt, Stiltext, SAP-Zusatzfrage. Ein Test
+  hält fest, dass Adresse, Anmeldename, Ordner und die Filterfelder NICHT markiert sind.
+- **`data-tabfill="…"` mit eigenem Text**, wo der Platzhalter eine AUFZÄHLUNG dessen ist, was
+  hineingehört („z. B. Signatur, Anrede-Form, …") – als Feldinhalt wäre das Unsinn. Dafür gibt es
+  jetzt `data-i18n-tabfill` in `applyLang()`, sonst stünde der Vorschlag in einer Sprache fest.
+- **TAB ist die Fokus-Weiterschaltung – der Eingriff ist eng:** nur bei LEEREM Feld (danach
+  schaltet TAB wieder normal weiter), nie bei Shift+TAB, und der übernommene Text wird
+  **markiert** (Tippen ersetzt ihn, Entf löscht ihn). Wer nur durchtabben wollte, verliert einen
+  Tastendruck, nichts weiter.
+- **Die Übernahme feuert `input`** – Zeichenzähler und Formular-Spiegel hängen daran und wüssten
+  sonst nichts davon.
+- **Ein Feature, das niemand findet, gibt es nicht:** bei Fokus auf einem leeren markierten Feld
+  erscheint darunter „⇥ Tab übernimmt den Vorschlag" (`.jv-tabfill-hint`). Die CSS-Regel steht in
+  **theme.css**, nicht style.css – die Felder liegen auf sechs Seiten, style.css lädt nur
+  /settings und /wissen (gleiche Begründung wie bei `select option`).
+- **Verifiziert:** 41 Prüfungen (`tests/test_tabfill_ui.js`, jsdom gegen die echten Dateien) –
+  Verhalten der Taste, Hinweis-Lebenszyklus, Einbindung auf allen sechs Seiten NACH i18n.js,
+  markierte und ausdrücklich NICHT markierte Felder, i18n DE+EN. Gegenprobe: Opt-in-Prüfung
+  ausgebaut → 2 FAIL.
+
 #### Feld-Erklärungen (ⓘ) im Postfach-Formular
 Gemeldet am selben Tag: *„ein Benutzer kann mit ‚Vorgabe' bei ‚Entwürfe' und ‚Gesendet' genau
 NICHTS anfangen"* – dazu die Frage, ob „(PrePrompt)" und ein Info-Popup helfen.

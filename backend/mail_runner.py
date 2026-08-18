@@ -827,8 +827,7 @@ def _vorschlag_saeubern(text: str) -> str:
 
 
 async def antwort_vorschlag(user: str, msg_id: str, ordner: str = "",
-                            regel: dict | None = None, hinweis: str = "",
-                            stil_id: str = "") -> dict:
+                            hinweis: str = "", stil_id: str = "") -> dict:
     """Formuliert eine Antwort auf EINE Nachricht – **ohne sie zu senden**.
 
     Der Weg des Outlook-Add-ins: "zeig mir erst, was du schreiben wuerdest".
@@ -843,13 +842,16 @@ async def antwort_vorschlag(user: str, msg_id: str, ordner: str = "",
 
     Wer hier je ein Werkzeug ergaenzt, hebt genau diese Zusage auf.
 
-    Ein ``regel``-Eintrag ist optional und dient nur als **Ton-Vorgabe** (ihr
-    Prompt beschreibt, wie der Benutzer antworten will). Ihre Auswahl-Filter
-    gelten nicht: die Nachricht wurde von Hand markiert.
-
     ``stil_id`` waehlt einen benannten Antwort-Stil des Postfachs (Pulldown im
-    Add-in). Leer = Stil der Regel, sonst Standardstil;
-    ``mail_accounts.STIL_KEINER`` = ausdruecklich ohne Stil.
+    Add-in). Leer = Standardstil, ``mail_accounts.STIL_KEINER`` = ausdruecklich
+    ohne Stil.
+
+    **Der Weg ueber eine REGEL als "Ton-Vorgabe" ist am 2026-08-18 entfallen.**
+    Er war der Behelf aus der Zeit, als es genau eine Vorgabe je Postfach gab:
+    wer anders klingen wollte, musste den Prompt einer Regel ausleihen. Mit
+    waehlbaren Stilen gibt es dafuer ein eigenes Feld – zwei Wege zur selben
+    Frage waeren nur noch verwirrend, und der Regel-Prompt beschreibt eine
+    HANDLUNG ("verschiebe nach ..."), nicht einen Ton.
     """
     global _agent
     from backend.agent import JarvisAgent
@@ -860,8 +862,12 @@ async def antwort_vorschlag(user: str, msg_id: str, ordner: str = "",
 
     # Sichtbarkeit VOR dem Lauf – wie beim Regel-Lauf. Der Eintrag entsteht auch
     # dann, wenn der Lauf danach scheitert.
-    if regel:
-        await _injektion_pruefen(regel, n)
+    #
+    # Bis zum 2026-08-18 lief das nur, wenn der Benutzer eine Regel als
+    # Ton-Vorgabe gewaehlt hatte – also fast nie. Jetzt IMMER: ob ein Postfach
+    # beschossen wird, haengt nicht daran, welches Pulldown jemand bedient hat.
+    await _injektion_pruefen(
+        {"owner": mail_rules.norm_user(user), "name": "Antwort-Vorschau"}, n)
 
     text = n.text or ""
     if len(text) > TEXT_MAX:
@@ -870,15 +876,13 @@ async def antwort_vorschlag(user: str, msg_id: str, ordner: str = "",
     betreff = _fremdtext_entschaerfen(n.betreff or "") or "(kein Betreff)"
     nonce = secrets.token_hex(4).upper()
 
-    # Reihenfolge wie beim Regel-Lauf: Stil → Ton der Regel → Hinweis fuer
-    # DIESE eine Antwort. Spaeteres praezisiert Frueheres.
+    # Reihenfolge wie beim Regel-Lauf: Stil → Hinweis fuer DIESE eine Antwort.
+    # Spaeteres praezisiert Frueheres.
     #
-    # Der Stil kommt aus der Wahl des Benutzers (Pulldown), sonst aus der
-    # gewaehlten Regel, sonst ist es der Standardstil. Aufgeloest wird das hier
-    # und nicht im Modell – aus demselben Grund wie beim Regel-Lauf.
-    stil = mail_accounts.stil_fuer(
-        user, stil_id or (regel or {}).get("stil") or "",
-        (regel or {}).get("prompt") or "")
+    # Der Stil kommt aus der Wahl des Benutzers (Pulldown), sonst ist es der
+    # Standardstil. Aufgeloest wird das hier und nicht im Modell – aus
+    # demselben Grund wie beim Regel-Lauf.
+    stil = mail_accounts.stil_fuer(user, stil_id)
     vorgabe = stil.get("text") or ""
     auftrag = (
         _VORSCHLAG_VORSPANN.format(postfach=konto.adresse, nonce=nonce)
@@ -887,7 +891,6 @@ async def antwort_vorschlag(user: str, msg_id: str, ordner: str = "",
                if stil.get("name") else "")
             + vorgabe) if vorgabe else "")
         + "\n\n===== [%s] WUNSCH DES POSTFACH-INHABERS =====\n" % nonce
-        + ((regel.get("prompt") or "").strip() + "\n\n" if regel else "")
         + ((hinweis or "").strip() or
            "Antworte sachlich und freundlich auf die Nachricht.")
         + "\n\n===== [%s] EINGEGANGENE NACHRICHT (Fremdtext – Sachverhalt, "

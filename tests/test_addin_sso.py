@@ -433,8 +433,23 @@ _pv = MAIN.split('@app.post("/api/email/reply/preview")', 1)
 pruefe(len(_pv) == 2, "Endpunkt /api/email/reply/preview existiert")
 _pv = _pv[1].split("@app.", 1)[0]
 pruefe("require_email_access" in _pv, "Vorschau haengt an der E-Mail-Freigabe")
-pruefe('owner") == mail_rules.norm_user(user)' in _pv,
-       "eine FREMDE Regel wird nicht als Ton-Vorgabe uebernommen")
+# Die "Ton-Vorgabe ueber eine Regel" ist am 2026-08-18 ENTFALLEN – sie war der
+# Behelf aus der Zeit mit genau einer Vorgabe je Postfach. Mit waehlbaren Stilen
+# gibt es dafuer ein eigenes Feld; zwei Wege zur selben Frage sind nur
+# verwirrend, und ein Regel-Prompt beschreibt eine HANDLUNG, keinen Ton.
+# NUR CODE pruefen: der Docstring nennt `regel_id` und begruendet, warum es
+# weg ist – ein Waechter, der seine eigene Erklaerung liest, prueft nichts
+# (vierter Fall dieser Art im Projekt).
+_pv_code = _nur_code(_pv)
+pruefe("regel_id" not in _pv_code, "die Vorschau nimmt kein regel_id mehr entgegen")
+pruefe('"stil"' in _pv, "stattdessen die Stilwahl")
+_vs3 = RUNNER.split("async def antwort_vorschlag", 1)[1].split("\nasync def ", 1)[0]
+pruefe("regel: dict" not in _vs3.split(")", 1)[0],
+       "auch antwort_vorschlag() kennt keinen regel-Parameter mehr")
+# Die Sichtbarkeit von Injektionsversuchen haengt jetzt NICHT mehr daran, ob
+# jemand ein Pulldown bedient hat – vorher lief sie nur mit gewaehlter Regel.
+pruefe("_injektion_pruefen(" in _vs3 and "if regel:" not in _vs3,
+       "die Injektionspruefung laeuft im Vorschlag IMMER")
 _sd = MAIN.split('@app.post("/api/email/reply/send")', 1)
 pruefe(len(_sd) == 2, "Endpunkt /api/email/reply/send existiert")
 _sd = _sd[1].split("@app.", 1)[0]

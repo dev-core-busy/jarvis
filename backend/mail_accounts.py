@@ -184,7 +184,13 @@ AENDERBAR = ("adresse", "benutzer", "passwort", "kanal", "aktiv",
 # Deckel fuer den Text EINES Stils. Er geht in JEDEN Auftrag ein, der ihn
 # benutzt (Vorschlag und Regel-Lauf), und kostet dort Kontext – ein Roman waere
 # kein Gewinn, sondern verdraengte die eigentliche Nachricht.
-VORGABE_MAX = 2000
+#
+# 2026-08-18 von 2000 auf 6000 angehoben (Rueckmeldung des Nutzers: "kann zu
+# wenig Text aufnehmen"). Eine echte Signatur mit Rechtsform, Registergericht
+# und Pflichtangaben plus Ton- und Tabu-Regeln sprengt 2000 Zeichen schnell.
+# 6000 sind grob 1500 Token – spuerbar, aber neben TEXT_MAX (Fremdtext) und
+# PROMPT_MAX (8000) vertretbar; nur EIN Stil geht je Lauf hinein.
+VORGABE_MAX = 6000
 
 # Mehrere benannte Stile je Postfach (2026-08-18). Bis dahin gab es genau EINEN
 # Text ("Stil und Signatur fuer Antworten"); wer je nach Empfaenger foermlich

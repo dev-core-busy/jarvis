@@ -3507,6 +3507,69 @@ im Audit-Log); ohne sie beweist ein „gehalten" nichts.
    unangetastet** (sie liest `violations`). Fehlerklasse: „eine Zusage, die der Code nicht
    hält" – zum wiederholten Mal in diesem Projekt.
 
+### Karten maximieren (Nachtrag 2026-08-18)
+Beide Karten (`Ablagen`, `Letzte Läufe`) haben einen Knopf **⤢** in der Kopfzeile. Ein
+vorhandenes Maximieren-Muster gab es im Projekt nicht (`grep` auf „maximier/fullscreen/is-max"
+war leer) – die Umsetzung hält sich an die vorhandenen Regeln:
+- **Die Karte füllt den Bereich UNTER der Titelleiste**, nicht den Bildschirm: Abmelden,
+  Theme- und Sprachumschalter bleiben erreichbar. Die Höhe der Leiste wird **gemessen** und
+  als `--st-top` gesetzt (der CSS-Wert ist nur der Rückfall) und bei `resize` nachgezogen –
+  sie wächst mit der Zustands-Pille und mit einer längeren Markenbezeichnung.
+- `z-index: 25` liegt UNTER der Titelleiste (30) und unter der Rückmeldung (60); die Fläche
+  ist **deckend** (`--bg-primary`), denn darunter liegt die Seite.
+- Die **Kopfzeile bleibt sticky** – sonst ist der Knopf zum Verkleinern weg, sobald man
+  gescrollt hat. `body.st-maxed` sperrt das Scrollen dahinter.
+- **Höchstens EINE Karte ist maximiert** (zwei übereinander wären ein Zustand, den niemand
+  auflöst), eine **zugeklappte Karte wird beim Maximieren aufgeklappt** (sonst maximiert man
+  eine leere Fläche), **Escape verkleinert**.
+- **Der Zustand wird bewusst NICHT gemerkt** – anders als der Auf/Zu-Zustand. Ein Vollbild,
+  das beim nächsten Öffnen noch an ist, sieht wie ein Fehler aus: man sucht die übrigen
+  Karten. Es ist ein Arbeitsmodus für den Moment.
+- Der Knopf sitzt IN der Klapp-Kopfzeile; dass ein Klick nicht zugleich zuklappt, erledigt
+  die vorhandene Ausnahme in `klappInit` (`closest('button, …')`). **Titel und
+  `data-i18n-title` wechseln mit dem Zustand** – ein Umschalter mit unveränderlichem Text
+  sieht beim Zurückschalten wie ein wirkungsloser Klick aus (Lehre vom Broker-Audit-Knopf,
+  2026-08-11); der Sprachwechsel zieht ihn deshalb ausdrücklich nach.
+- **Zeichen: ⛶ / 🗗 – dieselben wie der Vollbild-Knopf der Einstellungen**
+  (`#btn-maximize-settings` in `settings.html`, `modal_expand.js`), dazu die Klasse `active`
+  am gedrückten Knopf wie `.btn-maximize-settings.active`. Vorgabe des Nutzers: wer zwischen
+  den Fenstern wechselt, soll dasselbe Zeichen für dieselbe Sache sehen. Beide liegen im
+  Bereich, den der Emoji-Wächter des Projekts sperrt – **hier ist die Konsistenz mit dem
+  Bestand die Ausnahme**, und der Wächter nimmt genau diese zwei Zeichen aus (alles andere
+  bleibt gesperrt). Der Test liest sie **aus der Quelle** der Einstellungen, statt sie
+  abzutippen; eine zweite Fassung liefe beim nächsten Wechsel auseinander.
+  ⚠ Beim Prüfen von 🗗 (U+1F5D7) braucht ein Regex das **`u`-Flag** – ohne matcht `.` nur
+  die halbe Surrogat-Einheit und der Vergleich schlägt grundlos fehl.
+
+### Vorfall: im Admin-Reiter ließ sich kein Haken setzen (2026-08-18)
+**Gemeldet:** unter *Einstellungen → Short Tracks → Werkzeug-Bereiche* blieb jedes Kästchen
+leer. **Ursache war eine ENDLOSSCHLEIFE, kein CSS-Problem:** `zeichne()` ruft am Ende
+`applyLang()` – und `applyLang()` feuert `jarvis-lang-changed` (das tut es bei JEDEM Aufruf,
+nicht nur bei einem Sprachwechsel). Der Lang-Zuhörer des Moduls lud daraufhin neu, `zeichne()`
+baute die Kästchen neu auf, rief wieder `applyLang()` … Gemessen: **über 40 Abrufe von
+`/api/tracks/admin/overview` in 250 ms**; ein gerade gesetzter Haken war im nächsten Durchlauf
+weg.
+- **`email.js` und `sap_portal.js` haben den Sprachvergleich** (`if (_bereicheLang !== lg)`
+  bzw. `if (_catalog.lang === …) return`) – nur dieses Modul hatte ihn nicht. Kein
+  Bestandsproblem, sondern eine übersehene Zeile: in `tracks.js` hatte ich denselben Fall
+  vorher erkannt und mit `_brettLang` behoben.
+- **Zwei Sicherungen, zwei verschiedene Fälle** (beide nötig, beide einzeln nachgewiesen):
+  `_lang = sprache()` steht **schon in `laden()`**, nicht erst in `zeichne()` – sonst fällt ein
+  `applyLang()` in das Zeitfenster des laufenden Abrufs und der Zuhörer hält das leere `_lang`
+  für einen Sprachwechsel. Und `_laeuft` sperrt parallele Abrufe (Reiter-Doppelklick).
+  **Nur die frühe Zuweisung deckt den Fehlschlag-Fall ab:** endet der Abruf mit 403 (Skill
+  gerade abgeschaltet), läuft `zeichne()` nie – die Sperre ist danach wieder offen, und ohne
+  gemerkte Sprache würde jedes weitere `applyLang()` einen neuen Fehlversuch auslösen.
+- **Der Test lag daneben, obwohl er „grün" war.** Er rief `onShow()` und prüfte sofort danach –
+  die Schleife läuft im Hintergrund weiter, und ein frisch gerendertes DOM sieht korrekt aus.
+  Jetzt prüft ein eigener Abschnitt mit **frischem DOM**: genau EIN Abruf nach `onShow`, Haken
+  setzen, 150 ms warten, **dasselbe Element und der Haken noch gesetzt**. Der erste Anlauf
+  dieser Prüfung zählte die Abrufe im Block der Speicher-Tests mit (die legitim neu laden) und
+  meldete 4 statt 1 – **eine Zählung braucht ein eigenes, sauberes Fenster.**
+- **Merkregel:** `applyLang()` ist kein stiller Aufruf. Wer es in einer Zeichenfunktion
+  benutzt und gleichzeitig auf `jarvis-lang-changed` hört, braucht den Sprachvergleich –
+  sonst baut sich die Ansicht endlos neu auf, und das sieht nach einem toten Eingabefeld aus.
+
 ### Fünf Layout-Fallstricke (alle erst im Screenshot sichtbar, jsdom rechnet kein Layout)
 - **`.st-form` braucht `grid-column: 1 / -1`.** Das Formular ist ein Kind des Karten-Rasters
   (es wird per `insertBefore` hinter seine Karte gesetzt) und bekam sonst eine Spaltenbreite
@@ -3531,7 +3594,7 @@ im Audit-Log); ohne sie beweist ein „gehalten" nichts.
 
 **Verifiziert:** 339 Backend-Prüfungen (`tests/test_short_tracks.py`, ohne fastapi lauffähig –
 `backend.config` ist eine Attrappe, Sandkasten-Wächter mit Exit 2) lokal **und auf DEV im
-echten venv** + 184 UI-Prüfungen in jsdom gegen die echten Dateien
+echten venv** + 227 UI-Prüfungen in jsdom gegen die echten Dateien
 (`tests/test_short_tracks_ui.js`). Bestand unverändert grün: 120 Endpunkt-Rechte, 180
 log_retention, 465 E-Mail, 193 Add-in-SSO, 118 Anwesenheit, 152 Shell-Redirects, 78
 Audit/Kontext, 70 Anzeigenamen, 50 Skill-Audit. **Gegenproben greifen einzeln:** Actor

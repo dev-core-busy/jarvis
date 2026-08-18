@@ -140,6 +140,30 @@
         .st-card.is-zu .st-caret { transform: rotate(-90deg); }
         .st-card.is-zu .st-card-body { display: none; }
         .st-card-body { padding-top: 4px; }
+
+        /* ── Maximieren ──
+           Die Karte füllt den Bereich UNTER der Titelleiste – nicht den ganzen
+           Bildschirm: Abmelden, Theme- und Sprachumschalter bleiben erreichbar.
+           Die Höhe der Leiste wird gemessen und als `--st-top` gesetzt (der
+           Wert hier ist nur der Rückfall, falls das Messen ausfällt).
+           `z-index: 25` liegt UNTER der Titelleiste (30) und unter der
+           Rückmeldung (60) – beide müssen sichtbar bleiben. */
+        .st-card.is-max { position: fixed; left: 0; right: 0; bottom: 0;
+            top: var(--st-top, 53px); z-index: 25; margin: 0;
+            border-radius: 0; border-left: none; border-right: none;
+            background: var(--bg-primary);   /* DECKEND: darunter liegt die Seite */
+            display: flex; flex-direction: column; overflow: hidden; }
+        /* Die Kopfzeile bleibt beim Scrollen stehen – sonst ist der Knopf zum
+           Verkleinern weg, sobald man nach unten gescrollt hat. */
+        .st-card.is-max > .st-card-head { position: sticky; top: 0; z-index: 1;
+            background: var(--bg-primary); padding: 4px 0 10px;
+            border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+        .st-card.is-max > .st-card-body { flex: 1 1 auto; overflow-y: auto;
+            padding-right: 4px; }
+        /* Die Seite dahinter darf nicht mitscrollen. */
+        body.st-maxed { overflow: hidden; }
+        .st-head-acts { display: flex; align-items: center; gap: 6px;
+            flex: 0 0 auto; }
         .st-hint { color: var(--text-muted); font-size: .82rem; line-height: 1.55; }
         .st-sep { height: 1px; background: var(--border); margin: 14px 0; }
         .st-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
@@ -171,6 +195,10 @@
             cursor: pointer; display: inline-flex; align-items: center;
             justify-content: center; font-size: .85rem; flex: 0 0 auto; }
         .st-icon-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        /* Wie `.btn-maximize-settings.active` im Einstellungs-Dialog: der
+           gedrueckte Zustand ist am Knopf selbst zu sehen, nicht nur am Symbol. */
+        .st-icon-btn.active { border-color: var(--accent); color: var(--accent);
+            background: color-mix(in srgb, var(--accent) 12%, transparent); }
         .st-icon-btn.is-danger:hover { border-color: var(--danger); color: var(--danger);
             background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
@@ -332,7 +360,11 @@
         <div class="st-card" data-klapp="board">
             <div class="st-card-head" role="button" tabindex="0" aria-expanded="true">
                 <h2 data-i18n="tracks.board_head">Ablagen</h2>
-                <span class="st-caret" aria-hidden="true">&#9662;</span>
+                <span class="st-head-acts">
+                    <button type="button" class="st-icon-btn" data-act="max" aria-pressed="false"
+                            data-i18n-title="tracks.maximize" title="Maximieren">&#9974;</button>
+                    <span class="st-caret" aria-hidden="true">&#9662;</span>
+                </span>
             </div>
             <div class="st-card-body">
                 <p class="st-hint">
@@ -374,7 +406,11 @@
         <div class="st-card is-zu" data-klapp="log">
             <div class="st-card-head" role="button" tabindex="0" aria-expanded="false">
                 <h2 data-i18n="tracks.log_head">Letzte Läufe</h2>
-                <span class="st-caret" aria-hidden="true">&#9662;</span>
+                <span class="st-head-acts">
+                    <button type="button" class="st-icon-btn" data-act="max" aria-pressed="false"
+                            data-i18n-title="tracks.maximize" title="Maximieren">&#9974;</button>
+                    <span class="st-caret" aria-hidden="true">&#9662;</span>
+                </span>
             </div>
             <div class="st-card-body">
                 <p class="st-hint" data-i18n="tracks.log_hint">Dein eigenes Protokoll – fremde Läufe sind nicht sichtbar. Wie lange die Einträge vorgehalten werden, entscheidet ausschließlich ihr Alter; es gibt keine Mengengrenze.</p>
@@ -391,12 +427,12 @@
 <!-- Verstecktes Eingabefeld fuer den Klick-Weg (Datei auswaehlen statt ziehen) -->
 <input type="file" id="st-file-input" multiple class="hidden">
 
-<script src="/static/js/i18n.js?v=50"></script>
+<script src="/static/js/i18n.js?v=51"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <script src="/static/js/branding.js?v=24"></script>
 <script src="/static/js/sessions.js?v=6"></script>
-<script src="/static/js/tracks.js?v=1"></script>
+<script src="/static/js/tracks.js?v=3"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der
      Theme-Knopf oben diese Id tragen. -->

@@ -49,7 +49,8 @@ import secrets
 import time
 from pathlib import Path
 
-from backend.mail_accounts import STIL_KEINER, norm_user, skill_config
+from backend.mail_accounts import (STIL_AUTO as _STIL_AUTO, STIL_KEINER,
+                                   norm_user, skill_config)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -337,6 +338,17 @@ def _pruefe(felder: dict, bestehend: dict | None = None,
         sid = str(felder.get("stil") or "").strip()[:32]
         if sid and sid != STIL_KEINER and not re.fullmatch(r"[A-Za-z0-9_-]+", sid):
             raise RegelFehler("Ungueltige Stil-Kennung.")
+        # Die automatische Stilwahl gibt es NUR in der Antwort-Vorschau: dort
+        # liest ein Mensch den Vorschlag, bevor er ihn absendet. Eine Regel
+        # feuert ohne Anwesenden – die Form der Antwort haenge dann an einem
+        # Modell, das den Fremdtext des Absenders vor sich hat. Ausdruecklich
+        # ablehnen, statt sich auf die Existenzpruefung darunter zu verlassen:
+        # die greift nicht, wenn der Besitzer noch gar keinen Stil angelegt hat.
+        if sid == _STIL_AUTO:
+            raise RegelFehler(
+                "Die automatische Stilwahl gibt es nur in der Antwort-Vorschau "
+                "des Add-ins, nicht in einer Regel. Waehle hier einen festen "
+                "Stil (oder keinen).")
         if sid and sid != STIL_KEINER and (owner or r.get("owner")):
             # Existenz gegen die Stile des BESITZERS pruefen – ein Verweis ins
             # Leere waere sonst erst Wochen spaeter im Protokoll zu sehen.

@@ -8533,7 +8533,11 @@ async def email_reply_preview(request: Request,
     Kennung im Rumpf waehlt die Nachricht, **nicht das Postfach**.
 
     ``stil`` waehlt einen benannten Antwort-Stil des Postfachs; leer = Standard,
-    ``"-"`` = ausdruecklich ohne Stil. Das frueher hier moegliche ``regel_id``
+    ``"-"`` = ausdruecklich ohne Stil, ``"auto"`` = **das Modell waehlt** aus den
+    hinterlegten Stilen (nur hier, nicht in einer Regel – Begruendung im Block
+    ueber ``mail_runner.antwort_vorschlag``). Das kostet keinen zweiten
+    LLM-Aufruf; welcher Stil gewirkt hat, steht in ``stil``/``stil_quelle`` der
+    Antwort. Das frueher hier moegliche ``regel_id``
     (Prompt einer eigenen Regel als "Ton") ist am 2026-08-18 entfallen – dafuer
     gibt es die Stile, und zwei Wege zur selben Frage sind nur verwirrend.
     """

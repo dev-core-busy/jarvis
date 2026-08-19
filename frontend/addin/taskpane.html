@@ -395,8 +395,8 @@
             <div class="ad-h"><span data-i18n="mail.styles_head">Stile für Antworten</span>
                 <button type="button" class="ad-info" data-help="ad-help-styles" aria-expanded="false"
                     data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></div>
-            <p class="ad-hint" data-i18n="mail.styles_hint_short">Mehrere Schreibweisen – beim Antworten wählst du oben im Reiter „Nachricht“ aus, welche gilt.</p>
-            <div class="ad-help" id="ad-help-styles" data-i18n="mail.help_styles">Der Standard-Stil (●) gilt überall dort, wo nichts anderes gewählt ist. Du kannst einen Stil auch im Text einer Regel beim Namen nennen; ist im Regel-Formular einer ausgewählt, gewinnt diese Auswahl.</div>
+            <p class="ad-hint" data-i18n="mail.styles_hint_short">Mehrere Schreibweisen – beim Antworten wählst du oben im Reiter „Nachricht“ aus, welche gilt, oder lässt die KI selbst wählen.</p>
+            <div class="ad-help" id="ad-help-styles" data-i18n="mail.help_styles">Der Standard-Stil (●) gilt überall dort, wo nichts anderes gewählt ist. Du kannst einen Stil auch im Text einer Regel beim Namen nennen; ist im Regel-Formular einer ausgewählt, gewinnt diese Auswahl. Im Reiter „Nachricht“ gibt es zusätzlich „automatisch wählen (KI)“: dann sucht das Sprachmodell selbst den passenden Stil aus und nennt ihn über dem Vorschlag. In Regeln gibt es das nicht.</div>
             <div id="ad-stile" style="margin-top:8px;"></div>
             <div id="ad-stil-edit" class="hidden"></div>
             <button class="ad-btn ad-btn-block" id="ad-stil-neu" style="margin-top:8px;"
@@ -430,7 +430,7 @@
     kam nie zum Zug. `async` blockiert `DOMContentLoaded` nicht.
 -->
 <script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-<script src="/static/js/i18n.js?v=51"></script>
+<script src="/static/js/i18n.js?v=52"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
 <script src="/static/js/theme.js?v=2"></script>
 <!-- Branding: setzt Markenfarben, Marken-Namen (.brand-app-name) und das
@@ -438,6 +438,6 @@
      Seiten. `/api/branding` haengt an KEINER Anmeldung, die Marke steht also
      schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=23"></script>
-<script src="/static/addin/addin.js?v=7"></script>
+<script src="/static/addin/addin.js?v=8"></script>
 </body>
 </html>

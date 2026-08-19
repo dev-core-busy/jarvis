@@ -3204,6 +3204,86 @@ Regel (`mail_rules`), Auflösung in `mail_runner._auftrag` und `antwort_vorschla
 - **Noch NICHT geprüft:** ein echter Lauf gegen ein Postfach (auf DEV ist keiner hinterlegt) –
   also ob das Modell dem gewählten Stil tatsächlich folgt. **Auf ECHT noch nicht ausgerollt.**
 
+#### Automatische Stilwahl – EIN LLM-Aufruf (2026-08-19)
+Im Stil-Pulldown der Antwort-Vorschau (Outlook-Add-in) steht der Eintrag **„automatisch wählen
+(KI)"**. Dann liegen ALLE Stiltexte im Auftrag, das Modell sucht einen aus und schreibt sofort
+darin; seine Wahl meldet es in einer Kopfzeile `[<Kennung>] STIL: <Name>`, die
+`_auto_stil_lesen()` abtrennt. Code: `mail_accounts.STIL_AUTO`, `mail_runner._stil_katalog` /
+`_AUTO_ANWEISUNG` / `_auto_stil_lesen`, Pulldown in `addin.js::stilOptionen(gewaehlt, mitAuto)`.
+
+- **DIE FRAGE WAR, OB DIE MAIL ZWEIMAL ZUM MODELL MUSS – SIE MUSS NICHT.** Der naheliegende Weg
+  (erst „welcher Stil passt?", dann „schreib die Antwort") schickt Vorspann UND Fremdtext zweimal
+  durch das Modell und wartet zweimal. Beide Schritte brauchen aber **dieselbe Grundlage**, also
+  gehören sie in denselben Auftrag. **Live auf DEV gemessen** (3 Stile, echtes Modell): Auftrag
+  mit Auto **3978** Zeichen gegen **2820** ohne – Aufpreis **1158 Zeichen**, während ein zweiter
+  Aufruf allein für die Wiederholung 2820 gekostet hätte. Der Aufpreis ist genau einmal die Summe
+  der Stiltexte plus ~950 Zeichen Anweisung.
+- **⚠ Hier wird bewusst eine Zusage gelockert.** Sonst gilt im Projekt: die Stilwahl ist
+  DETERMINISTISCH und passiert VOR dem Modell, damit ein „Stil: X" im Fremdtext kein Hebel auf die
+  Form ist. Vertretbar ist die Ausnahme nur, weil ALLES davon zutrifft: **(1)** Opt-in,
+  **(2)** der Vorschlags-Lauf hat KEINE Werkzeuge und niemand versendet, bevor ein Mensch gelesen
+  hat, **(3)** die Wahl wird gegen die hinterlegten Stile VALIDIERT – ein erfundener Name wird
+  verworfen, **(4)** der gewählte Stil wird ANGEZEIGT („Stil: Förmlich (automatisch)"), eine
+  Manipulation fällt also auf. Die Anweisung sagt zusätzlich ausdrücklich, dass ein Stilname IM
+  Fremdtext keine Anweisung ist.
+- **In einer REGEL gibt es den Modus nicht** – sie feuert ohne Anwesenden. Zwei Schichten:
+  `stil_fuer()` löst `STIL_AUTO` zu **kein Stil** auf (fail-closed, damit der Wert nie
+  versehentlich durchschlägt), und `mail_rules._pruefe` lehnt ihn beim Speichern mit Klartext ab.
+  Das Regel-Formular ruft `stilOptionen()` ohne `mitAuto`.
+- **Die Kopfzeile wird IMMER entfernt**, auch bei unbekanntem Namen – sonst stünde „[A1B2] STIL: …"
+  im Postfach des Empfängers. Erkannt wird primär die Zeile MIT Kennung; ohne Kennung nur, wenn der
+  Name wirklich existiert (Modelle vergessen die Kennung, aber „STIL: irgendwas" darf keinen
+  echten Text verschlucken). Gelesen wird NACH `_vorschlag_saeubern` – packt das Modell alles in
+  einen Codeblock, ist die Kopfzeile sonst nicht die erste Zeile.
+- **Nichts behaupten, was man nicht weiß:** nennt das Modell keinen Stil, sagt der Hinweis, dass
+  der Vorschlag keinem davon *nachweislich* folgt – es kann sich trotzdem an einem orientiert
+  haben. Ebenso beim Deckel `AUTO_KATALOG_MAX = 20000`: weggelassene Stile werden **namentlich
+  genannt**, kein stiller Schnitt, und der Standardstil fällt nie heraus.
+- **Der Eintrag erscheint erst ab ZWEI Stilen** – bei einem einzigen wählt „automatisch" immer
+  denselben, der Schalter wäre ohne Wirkung.
+- **Vorspann und Schlusszeile mussten mit.** Beide sagten „AUSSCHLIESSLICH den Text der Antwort" –
+  im Auto-Modus widerspricht das der geforderten Kopfzeile. Dieselbe Fehlerklasse wie
+  `WA_TASK_PROMPT`, `--gradient` und der EWS-URL-Hinweis; der Vorspann erklärt jetzt beide neuen
+  Abschnittsmarken und benennt die Ausnahme.
+- **FALLSTRICK, der die Prüfung fast wertlos gemacht hätte (siebter Fall im Projekt):** der
+  Wächter „Katalog steht im Auftrag" blieb in der Gegenprobe GRÜN – er fand seinen Treffer im
+  **Vorspann**, den ich selbst um genau diese Wörter ergänzt hatte. Geprüft wird jetzt die
+  **Abschnittsmarke mit Kennung**, nicht der Wortlaut. Danach greift die Gegenprobe (2 FAIL).
+- **Zwei Fallstricke im Testaufbau:** der Nonce wird PRO LAUF neu gewürfelt – eine feste
+  Stub-Antwort trägt den falschen und wird zu Recht nicht erkannt (die Antwort muss eine Funktion
+  des Auftrags sein). Und `asyncio.run()` je Fall schließt den Loop, während Agent und HTTP-Client
+  weiterleben → „Event loop is closed" ab dem zweiten Fall; **ein** Loop für alle Fälle.
+- **Live gegen das echte Modell (DEV, Qwen3.6-35B):** förmliche Kundenreklamation → „Foermlich",
+  lockere Kollegenmail → „Locker", je **ein** LLM-Aufruf, Kopfzeile jedes Mal sauber entfernt. Der
+  dritte Fall (englische Anfrage, Stil „English" vorhanden) wählte „Locker" – **antwortete aber
+  auf Englisch**: der Vorspann verlangt ohnehin die Sprache der eingegangenen Nachricht, die
+  Testerwartung war zu streng, nicht der Mechanismus falsch. Gegenprobe ohne Auto-Modus: Standard
+  „Foermlich", 2820 Zeichen.
+- **Gemeldet am selben Tag: „in der Kachel fehlt die Automatik noch."** Die Kachel *Stile für
+  Antworten* (in `/email` UND im Postfach-Reiter des Add-ins – dieselben i18n-Keys) beschrieb, wie
+  Stile wirken, und liess die neue Wahl aus. **Ein Feature, das niemand findet, gibt es nicht.**
+  Ergänzt in `mail.styles_hint`, `mail.styles_hint_short` und `mail.help_styles` (je DE+EN) **und
+  in den HTML-Rückfalltexten** – die sind eigenständig formuliert (im Add-in bewusst kürzer) und
+  bis zum ersten `applyLang()` der sichtbare Text. Die Hilfe nennt auch die Grenze: in Regeln gibt
+  es die Automatik nicht.
+- **FALLSTRICK im Wächter dazu – achter Fall dieser Klasse im Projekt:** in `i18n.js` stehen die
+  Texte ESCAPED (`w\u00e4hlen`). Ein Vergleich gegen ein Literal im Testquelltext prüft NICHTS,
+  denn dort ist `"w\u00e4hlen"` längst zu „wählen" aufgelöst – beide Zweige suchen dasselbe, und
+  die Prüfung blieb grün, obwohl sie die escapte Fassung nie gesehen hat. Der Text wird jetzt vor
+  dem Vergleich entschlüsselt (`encode("latin-1","backslashreplace").decode("unicode_escape")`);
+  die Gegenprobe (Satz aus dem DE-Text entfernt) liefert seither zuverlässig einen FAIL.
+- **Verifiziert:** 174 Prüfungen (`tests/test_mail_styles.py`, Abschnitt 11 – Katalog, Deckel,
+  Parser in fünf Varianten, Ende-zu-Ende mit Stub-Agent samt Aufrufzählung, Kostenvergleich,
+  Prompt-Konsistenz, Regel-Ablehnung, Kachel-Texte in beiden Sprachen und beiden Rückfällen)
+  + 66 (`tests/test_addin_update_ui.js`, Abschnitt 0 führt
+  `stilOptionen` **echt aus** statt den Quelltext zu durchsuchen). Bestand unverändert grün: 465
+  E-Mail, 193 Add-in-SSO, 192 Outlook-Add-in, 120 Endpunkt-Rechte, 269 E-Mail-UI. Gegenproben
+  greifen einzeln: Katalog nicht angehängt → 2 FAIL, Wahl nicht validiert → 7, Regel nimmt „auto" →
+  1, Regel-Formular bietet es an → 1, Kopfzeile nicht abgetrennt → 3. Optisch in Dunkel UND Hell
+  abgenommen (echtes Markup, echtes CSS, 340 px Fensterbreite).
+- **Auf ECHT noch NICHT ausgerollt.**
+
+
 #### Nacharbeit am selben Tag: Ton-Feld weg, mehr Platz, Tab-Übernahme
 Drei Rückmeldungen des Nutzers, unmittelbar nach dem Bau der Stile.
 

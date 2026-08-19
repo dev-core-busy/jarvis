@@ -107,6 +107,41 @@ const sichtbar = (b) => !!b && !b.classList.contains('hidden');
 
 (async function () {
 
+abschnitt('0. Stil-Pulldown: die automatische Wahl wird ECHT ausgefuehrt');
+{
+    // Die Funktion wird aus der echten Datei geschnitten und ausgefuehrt –
+    // eine Quelltext-Suche wuerde nur bestaetigen, dass die Zeile dasteht.
+    const dom0 = new JSDOM('', { runScripts: 'outside-only' });
+    const w0 = dom0.window;
+    const von = ADDINJS.indexOf('function stilOptionen(');
+    const src = ADDINJS.slice(von, von + ADDINJS.slice(von).indexOf('\n    }') + 6);
+    const opt = (stile, gewaehlt, mitAuto) => {
+        w0.eval('var _stile = ' + JSON.stringify(stile) + ';' +
+                'function esc(s){return String(s==null?"":s);}' +
+                'function T(k,f){return f;}' + src);
+        return w0.eval('stilOptionen(' + JSON.stringify(gewaehlt || '') + ',' +
+                       (mitAuto ? 'true' : 'false') + ')');
+    };
+    const drei = [{ id: 'a', name: 'Foermlich', standard: true },
+                  { id: 'b', name: 'Locker', standard: false }];
+    pruefe(/value="auto"/.test(opt(drei, '', true)),
+        'mit mitAuto=true erscheint der Eintrag "auto"');
+    pruefe(!/value="auto"/.test(opt(drei, '', false)),
+        'ohne das Flag NICHT – das Regel-Formular bekommt ihn nie');
+    pruefe(!/value="auto"/.test(opt([drei[0]], '', true)),
+        'bei nur EINEM Stil nicht (er waere ein Schalter ohne Wirkung)');
+    pruefe(!/value="auto"/.test(opt([], '', true)), 'ohne Stile nicht');
+    pruefe(/value="auto"[^>]*selected/.test(opt(drei, 'auto', true)),
+        'eine getroffene Auto-Wahl bleibt beim Neuzeichnen ausgewaehlt');
+    pruefe(!/selected/.test(opt(drei, 'auto', true).split('value="auto"')[0]),
+        'dann ist NICHT zusaetzlich der Standard vorgewaehlt');
+    const h = opt(drei, '', true);
+    pruefe(h.indexOf('value="auto"') > h.indexOf('Foermlich') &&
+           h.indexOf('value="auto"') < h.indexOf('Locker'),
+        'der Eintrag steht direkt hinter dem Standard, vor den uebrigen Stilen');
+    w0.close();
+}
+
 abschnitt('1. Markup und CSS');
 pruefe(/id="ad-upd"[^>]*class="ad-upd hidden"/.test(HTML),
     'Band liegt im Markup und startet verborgen');

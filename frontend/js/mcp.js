@@ -102,7 +102,7 @@
                                 <span>${toggleLabel}</span>
                             </label>
                             <button class="mcp-btn-sm" data-action="reconnect" data-id="${id}" title="${window.t('mcp.reconnect')}">🔄</button>
-                            <button class="mcp-btn-sm mcp-btn-danger" data-action="remove" data-id="${id}" title="${window.t('mcp.remove')}">✕</button>
+                            <button class="mcp-btn-sm mcp-btn-danger" data-action="remove" data-id="${id}" title="${window.t('mcp.remove')}">${JarvisIcons.trash()}</button>
                         </div>
                     </div>
                     <div class="mcp-card-status">${statusText}</div>

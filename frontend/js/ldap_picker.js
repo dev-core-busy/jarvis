@@ -3,7 +3,7 @@
  * - Hängt an alle AD-Felder einen "Durchsuchen"-Button mit Live-Verzeichnis-Suche
  *   (POST /api/ldap/users|groups). Service-Konto oder On-Demand-Passwort (nur Sitzung).
  * - Felder mit list:true (Erlaubte Benutzer / Erlaubte Gruppe) werden als
- *   Chip-Liste dargestellt: Einträge untereinander, je ✕ zum Entfernen, plus
+ *   Chip-Liste dargestellt: Einträge untereinander, je × zum Herausnehmen, plus
  *   manuelles Hinzufügen. Das zugrunde liegende (versteckte) Feld bleibt die
  *   Quelle der Wahrheit (Benutzer: kommagetrennt; Gruppen: zeilengetrennt, da
  *   DNs Kommas enthalten).

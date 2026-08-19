@@ -228,3 +228,27 @@ select option:hover {
     opacity: 0.85;
     pointer-events: none;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Symbole fuer Bedienelemente (frontend/js/icons.js)
+
+   DESIGN-ENTSCHEIDUNG 2026-08-19: Muelleimer = LOESCHEN, × = SCHLIESSEN.
+   Vorher stand fuer beides ein × – teils in derselben Zeile.
+
+   Die Regeln stehen in theme.css und NICHT in style.css: die Symbole
+   erscheinen auf JEDER Seite, style.css laedt aber nur /settings und /wissen
+   (gleiche Begruendung wie bei `select option`, 2026-07-29).
+
+   `1em` + `vertical-align`: das SVG soll genauso gross wirken wie das
+   Text-× daneben – sonst springt die Zeilenhoehe in gemischten Knopfleisten.
+   ═══════════════════════════════════════════════════════════════════════ */
+.jv-ico {
+    width: 1em;
+    height: 1em;
+    display: inline-block;
+    vertical-align: -0.125em;
+    flex-shrink: 0;        /* in Flex-Knopfleisten nicht zusammendruecken lassen */
+}
+/* Der Muelleimer ist filigraner als das Kreuz und wirkt bei gleicher Groesse
+   kleiner – minimal aufziehen, damit beide optisch gleich schwer sind. */
+.jv-ico-trash { width: 1.05em; height: 1.05em; }

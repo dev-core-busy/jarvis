@@ -263,7 +263,7 @@ window.extractorManager = new (class JarvisExtractorManager {
             <div id="ext-review-wrap" class="kb-section" style="display:none;">
                 <div class="kb-section-header">
                     <h3 id="ext-review-title">${window.t('ext.review_title')}</h3>
-                    <button id="ext-review-close" class="kb-btn-secondary">✕</button>
+                    <button id="ext-review-close" class="kb-btn-secondary" title="${window.t ? window.t('common.close') : 'Schließen'}">✕</button>
                 </div>
                 <p class="kb-hint" id="ext-review-source" style="word-break:break-all;margin-bottom:12px;"></p>
 
@@ -965,7 +965,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                         <div class="cron-item-actions">
                             <button class="kb-btn-action ext-review-btn" data-id="${doc.id}" style="padding:3px 10px;font-size:.75rem;">${window.t('ext.check_btn')}</button>
                             <button class="kb-btn-secondary ext-dl-btn"  data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="JSON herunterladen">⬇️</button>
-                            <button class="kb-btn-danger ext-del-btn"    data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;">×</button>
+                            <button class="kb-btn-danger ext-del-btn"    data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="Löschen">${JarvisIcons.trash()}</button>
                         </div>
                     </div>
                     <div class="cron-item-meta">${this._esc(this._sourceLabel(doc))} · ${dt} · ${fct} Fakten · ${qa} Q&amp;A-Paare</div>
@@ -1022,7 +1022,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                         ${(window.KbGroups && doc.file) ? window.KbGroups.buttonHtml(doc.file, (this._grpMap || {})[doc.file]) : ''}
                         <button class="kb-btn-secondary ext-edit-btn" data-id="${doc.id}" style="padding:3px 10px;font-size:.75rem;">✏️ Bearbeiten</button>
                         <button class="kb-btn-secondary ext-dl-btn"   data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="JSON herunterladen">⬇️</button>
-                        <button class="kb-btn-danger ext-del-btn"     data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="Aus Verlauf und Wissens-DB entfernen">×</button>
+                        <button class="kb-btn-danger ext-del-btn"     data-id="${doc.id}" style="padding:3px 8px;font-size:.75rem;" title="Aus Verlauf und Wissens-DB entfernen">${JarvisIcons.trash()}</button>
                     </div>
                 </div>
                 <div class="cron-item-meta">${this._esc(this._sourceLabel(doc))} · Extrahiert: ${dtC} · Genehmigt: ${dtA} · ${fct} Fakten · ${qa} Q&amp;A-Paare</div>
@@ -1170,7 +1170,12 @@ window.extractorManager = new (class JarvisExtractorManager {
         const saveBtn   = document.getElementById('ext-save-btn');
         const rejectBtn = document.getElementById('ext-reject-btn');
         saveBtn.textContent   = isApproved ? window.t('ext.update_btn')    : window.t('ext.save_btn');
-        rejectBtn.textContent = isApproved ? window.t('ext.remove_from_db') : window.t('ext.reject_btn');
+        // Der Knopf wechselt seine Bedeutung: "Aus DB entfernen" LOESCHT,
+        // "Verwerfen" tut das nicht. Das Symbol muss deshalb mitwechseln –
+        // ein Muelleimer an einem Knopf, der nichts loescht, waere genau die
+        // Irrefuehrung, gegen die die Regel gebaut ist.
+        rejectBtn.innerHTML = (isApproved ? JarvisIcons.trash() + ' ' : '')
+            + this._esc(isApproved ? window.t('ext.remove_from_db') : window.t('ext.reject_btn'));
 
         document.getElementById('ext-review-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -1207,7 +1212,7 @@ window.extractorManager = new (class JarvisExtractorManager {
         el.innerHTML = facts.map((f, i) => `
             <div class="ext-fact-row" data-idx="${i}">
                 <input type="text" class="kb-input ext-fact-input" value="${this._esc(f)}" style="flex:1;">
-                <button class="kb-btn-danger ext-fact-del" data-idx="${i}" style="padding:.3rem .6rem;">✕</button>
+                <button class="kb-btn-danger ext-fact-del" data-idx="${i}" style="padding:.3rem .6rem;" title="Löschen">${JarvisIcons.trash()}</button>
             </div>`).join('');
         el.querySelectorAll('.ext-fact-del').forEach(btn => {
             btn.onclick = () => {
@@ -1242,7 +1247,7 @@ window.extractorManager = new (class JarvisExtractorManager {
                         <input type="checkbox" class="ext-qa-check" data-id="${p.id || i}" ${p.approved !== false ? 'checked' : ''}>
                         <span style="font-size:.75rem;color:var(--text-secondary);">${window.t('ext.apply')}</span>
                     </label>
-                    <button class="kb-btn-danger ext-qa-del" data-idx="${i}" style="padding:2px 7px;font-size:.73rem;margin-left:auto;">✕</button>
+                    <button class="kb-btn-danger ext-qa-del" data-idx="${i}" style="padding:2px 7px;font-size:.73rem;margin-left:auto;" title="Löschen">${JarvisIcons.trash()}</button>
                 </div>
                 <div class="ext-qa-fields">
                     <input  type="text" class="kb-input ext-qa-q" data-idx="${i}" placeholder="Frage…"  value="${this._esc(p.q || '')}" style="width:100%;box-sizing:border-box;margin-bottom:5px;">

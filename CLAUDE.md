@@ -890,6 +890,38 @@ in JEDEM /chat einen Fehler 400 – und zwar **einen je Werkzeug** (82 Stück):
   Werkzeugnutzung (`shell_execute` im Audit-Log) – keine Regression, `settings.json` md5-gleich.
 - **Auf ECHT noch NICHT ausgerollt.**
 
+## Werkzeug-Ergebnisse: Deckel je Werkzeug + Kürzung wird ausgewiesen (2026-08-19)
+**Ausgelöst durch eine Rückfrage:** Der Agent meldete im Chat „Das Tool `jira_get_issue`
+beschränkt sich technisch auf die Ausgabe der letzten 3 Kommentare … den vollständigen
+historischen Verlauf kann ich nicht einsehen." Die Aussage stimmte – es war aber **keine Grenze
+von Jira**, sondern `comments[-3:]` plus 400 Zeichen je Kommentar im Skill; die Daten lagen in der
+Antwort bereits vor. Auf Vorgabe des Nutzers gibt `jira_get_issue` jetzt **alle** Kommentare aus,
+je mit Autor, Datum und vollem Text (`KOMMENTAR_MAX = 8000` bleibt als Schutz gegen einen
+einzelnen Riesenkommentar, der den ganzen Verlauf verdrängen würde).
+- **DAS ALLEIN HÄTTE NICHTS GEBRACHT** – und das ist der eigentliche Befund: `agent.py` kappte
+  **jedes** Werkzeug-Ergebnis hart bei `str(result)[:5000]`, und die Kommentare stehen am ENDE der
+  Ausgabe. Live gemessen: dasselbe Ticket liefert **6789 Zeichen mit 18 Kommentaren**; mit dem
+  generischen Deckel kämen beim Modell **5112 Zeichen und nur 13** an. „Alle Kommentare" wäre eine
+  Zusage gewesen, die die nächste Codezeile wieder kassiert – dieselbe Fehlerklasse wie
+  `WA_TASK_PROMPT`, `--gradient` und der EWS-URL-Hinweis.
+- **Ein Werkzeug darf jetzt mehr verlangen:** `_ergebnis_kappen(tool_name, result)` liest das
+  Attribut **`ergebnis_max`** am Werkzeug; ohne Angabe gilt unverändert `_TOOL_ERGEBNIS_MAX = 5000`
+  für alle anderen. `jira_get_issue` setzt 120000. Verdrahtet an **beiden** Stellen (Chat-Weg und
+  `_run_headless`) – eine allein wäre die halbe Reparatur.
+- **Wird gekürzt, steht es im Text** („[… gekuerzt: N von M Zeichen gezeigt. Frage gezielt nach dem
+  fehlenden Teil, statt den Rest zu erraten.]"). Vorher wurde **stillschweigend** abgeschnitten:
+  das Modell hielt die Ausgabe für vollständig und antwortete auf einem Ausschnitt, ohne das sagen
+  zu können. Das betrifft **alle** Werkzeuge, nicht nur Jira.
+- **Was bleibt:** die Grenze ist jetzt das Kontextfenster des Modells. Ein Ticket mit hunderten
+  langen Kommentaren kann einen Lauf an dieser Grenze scheitern lassen – dann greift der
+  vorhandene Klartext-Hinweis für zu kleine Kontextfenster.
+- **Verifiziert:** 20 Prüfungen (`tests/test_jira_kommentare.py`, ohne fastapi lauffähig – die
+  Kapp-Methode wird per Quelltext in eine Attrappe geholt und wirklich ausgeführt). Gegenproben
+  greifen einzeln: `comments[-3:]` zurück → 2 FAIL, `ergebnis_max` entfernt → 1, Kürzung wieder
+  stillschweigend → 1. Bestand grün (31/365/50/155/465). **Live auf DEV an einem echten Ticket**
+  (nur Kennzahlen gemessen, keine Inhalte): 18 von 18 Kommentaren, 6789 Zeichen, ungekürzt beim
+  Modell – mit dem alten Deckel 13 von 18.
+
 ## Profil-Formular: Abbrechen-× oben rechts (2026-07-30)
 `#profile-edit-view` hatte nur den `Abbrechen`-Knopf **am Ende** des Formulars – bei elf Feldern
 liegt der ausserhalb des Sichtfensters, Abbrechen ging also nur nach Scrollen. Jetzt sitzt oben
@@ -3851,6 +3883,69 @@ Test: `tests/test_userchat_skill.py` (50).
   **Als Skill kostet die Funktion einen Skill-Slot** (FREE/BASIC: fünf aktive Skills).
 - **Auf ECHT noch NICHT ausgerollt.**
 
+## SYMBOL-SEMANTIK: Mülleimer = löschen, × = schließen (verbindlich, 2026-08-19)
+**Vorgabe des Nutzers, gilt für ALLE Oberflächen – auch für Skills und alles, was künftig
+dazukommt.** Zentral in `frontend/js/icons.js` + `.jv-ico` in `theme.css`.
+Wächter: `tests/test_icon_semantik.js` (36).
+
+| Symbol | Bedeutung | Beispiele |
+|---|---|---|
+| **Mülleimer** | etwas Gespeichertes wird dauerhaft entfernt | Datei, Wissensordner, Regel, Cron-Auftrag, Profil, Rolle, Chat-Sitzung, Skill deinstallieren, Protokoll leeren, Freigabe widerrufen, Standort entfernen |
+| **×** | schließen / abbrechen – es geht nichts verloren | Panel, Dialog, Vorschau, Formular abbrechen, Lightbox |
+| **× (dritter Fall)** | einen Eintrag aus einer **noch nicht gespeicherten Auswahl** nehmen | AD-Picker-Chips, Anhangs-Vorschau vor dem Senden |
+
+- **Der Anlass:** dasselbe × stand für beides, teils in derselben Zeile derselben Oberfläche
+  (`settings.html` → Telemetrie: „Log löschen ×" direkt neben „Schließen ×"). Wer ein Panel
+  zumachen wollte, konnte damit ein Protokoll löschen. Umgestellt wurden **rund 45 Bedienelemente
+  in 22 Dateien**, dazu vier i18n-Texte, die das Zeichen als Wort führten
+  („✕ Freigabe widerrufen", „× = löschen").
+- **INLINE-SVG, KEIN EMOJI.** 🗑️ wird je nach System **farbig** gerendert, folgt keiner
+  Theme-Variablen und fehlt auf manchen Systemen ganz (dann steht dort ein grauer Kasten – im
+  Projekt zweimal passiert). Das SVG erbt `currentColor`, folgt also Hell/Dunkel **und** der
+  Markenfarbe. Dieselbe Begründung wie bei `.kb-hdr-btn`. Ein Test verbietet den Emoji-Mülleimer
+  an einem Knopf; in **Meldungstexten** (Toasts wie „🗑️ Log gelöscht") bleibt er unangetastet,
+  dort ist er kein Bedienelement.
+- **`.jv-ico` steht in `theme.css`, NICHT in `style.css`** – die Symbole erscheinen auf jeder
+  Seite, style.css lädt aber nur /settings und /wissen (gleiche Lehre wie bei `select option`,
+  2026-07-29). Größe `1em` + `vertical-align`, damit das SVG in einer gemischten Knopfleiste
+  genauso schwer wirkt wie das Text-× daneben.
+- **`icons.js` steht auf JEDER Seite als erstes Skript.** Die Aufrufe stecken in
+  Template-Strings (`${JarvisIcons.trash()}`); ein fehlendes Modul wäre dort ein harter Fehler
+  mitten im Rendern. Der Test prüft Einbindung **und Reihenfolge** auf allen 13 Seiten.
+- **`skills/jarvis-vision/` ist die eine Ausnahme:** eigenständige Flask-Anwendung mit eigenem
+  `static/`, sie kann das zentrale Modul nicht laden und trägt das SVG wörtlich. **Genau deshalb
+  vergleicht der Test beide Pfad-Definitionen** – sonst laufen sie beim nächsten Feinschliff
+  auseinander.
+- **Der dritte Fall war der interessanteste.** Ein Auswahl-Chip löscht nichts (der Anhang ist
+  nicht gesendet, die Freigabeliste nicht gespeichert) – seine Beschriftung sagte aber
+  „Entfernen", und damit sah das × dort wie ein Löschen aus. **Gelöst über den Text, nicht über
+  das Symbol:** `ldap.remove` heißt jetzt „Aus Auswahl nehmen" / „Remove from selection", und die
+  Anhangs-Chips hatten bis dahin **gar keine** Beschriftung. Live gemessen waren das genau sieben
+  Knöpfe in /settings.
+- **Ein Knopf, der seine Bedeutung wechselt, wechselt sein Symbol mit** – im Extraktor heißt
+  derselbe Knopf „Aus DB entfernen" (löscht) oder „Verwerfen" (löscht nicht); der Mülleimer
+  erscheint nur im ersten Fall.
+- **DER TEST PRÜFT DIE REGEL, NICHT EINE LISTE:** jedes Bedienelement, dessen `title`/`aria-label`
+  ein Lösch-Wort trägt, muss den Mülleimer führen – auch eines, das es heute noch nicht gibt.
+  Die Gegenrichtung wird ebenso geprüft (kein Mülleimer an „Schließen"/„Abbrechen"). Eine
+  gepflegte Fundstellen-Liste wäre beim nächsten Feature wieder unvollständig. Ausnahmen sind
+  **einzeln** eingetragen und begründet, es gibt keine Sammelfreigabe.
+- **ZWEI FALLEN IM EIGENEN WÄCHTER, beide beim ersten Lauf zugeschlagen:**
+  1. **`/[×✕✖⨯🗙]/` OHNE `u`-Flag** zerlegt 🗙 (außerhalb der BMP) in Surrogate und matcht dann
+     die **halbe** Einheit `\uD83D` – also jedes beliebige Emoji. Der Test meldete den
+     📂-Verschieben-Knopf als Verstoß. Die Warnung stand seit dem Add-in-Umbau in CLAUDE.md.
+  2. **Der Wächter las seine eigene Begründung:** die Prüfung „kein Emoji im Modul" schlug am
+     Kommentar an, der erklärt, *warum* 🗑️ nicht benutzt wird. Neunter Fall dieser Art –
+     Kommentare vor der Prüfung entfernen.
+- **Verifiziert:** 36 Prüfungen, Gegenproben greifen einzeln (Löschknopf zurück auf × → 1 FAIL,
+  Mülleimer an „Schließen" → 1, icons.js von einer Seite entfernt → 1, Vision-SVG driftet → 1,
+  Emoji-Mülleimer → 1, i18n behauptet wieder „× = löschen" → 2). Alle 20 geänderten JS-Dateien
+  syntaktisch geprüft. **Live auf DEV im echten Chrome** (Token vorgesetzt, CDP): `JarvisIcons`
+  auf /settings und /portal vorhanden, 11 gerenderte Mülleimer, **null** Löschknöpfe mit × außer
+  den sieben Auswahl-Chips (die daraufhin ihre Beschriftung bekamen). Optisch in Dunkel UND Hell
+  abgenommen. Cache-Buster für 40 Skript-Einbindungen und `theme.css` erhöht.
+- **Auf ECHT noch NICHT ausgerollt.**
+
 ### Support-Agent-Kachel versteckt (2026-08-19)
 Die Portal-Kachel *Support-Agent* trägt `hidden` und wird von **keiner** Bedingung wieder
 eingeblendet – ein fester Zustand, kein Feature-Gate (Vorgabe des Nutzers: „bis zum Umbau
@@ -6235,6 +6330,9 @@ Belege: `data/email_log.jsonl` + `data/logs/audit.jsonl` auf ECHT (15 echte Vers
   Änderungen bleiben im Arbeitsbaum liegen. Der DEV-Deploy zum Testen (`scp` nach
   `/opt/jarvis` + `systemctl restart`) ist davon unberührt und läuft ohne Rückfrage.
 - **Sprache:** Code-Kommentare und Commit-Messages auf Deutsch
+- **SYMBOLE: Mülleimer = LÖSCHEN, × = SCHLIESSEN.** Verbindlich (eigener Abschnitt unten).
+  Nie das eine für das andere, und nie ein Emoji: die Symbole kommen aus
+  `frontend/js/icons.js` (`JarvisIcons.trash()` / `.close()` / `.setTrash(el)`).
 - **CSS:** Verwende `var(--text-primary)`, `var(--bg-glass)` etc. aus `:root` – keine hardcoded Farben
 - **Frontend:** Kein Build-System, keine Frameworks – reines Vanilla JS
 - **Secrets:** `.env` Datei, NICHT in Code committen

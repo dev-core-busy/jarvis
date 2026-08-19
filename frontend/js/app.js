@@ -351,7 +351,7 @@
                         </div>
                         <div style="display:flex;gap:6px;">
                             <button class="btn-instr-save" data-name="${f.name}" style="padding:4px 12px;font-size:0.75rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;">${window.t('instructions.save')}</button>
-                            <button class="btn-instr-del" data-name="${f.name}" title="${window.t('instructions.delete')}" aria-label="${window.t('instructions.delete')}" style="width:28px;height:28px;font-size:1rem;line-height:1;background:rgba(var(--danger-rgb),0.15);color:var(--danger);border:1px solid rgba(var(--danger-rgb),0.3);border-radius:var(--radius-sm);cursor:pointer;flex-shrink:0;">×</button>
+                            <button class="btn-instr-del" data-name="${f.name}" title="${window.t('instructions.delete')}" aria-label="${window.t('instructions.delete')}" style="width:28px;height:28px;font-size:1rem;line-height:1;background:rgba(var(--danger-rgb),0.15);color:var(--danger);border:1px solid rgba(var(--danger-rgb),0.3);border-radius:var(--radius-sm);cursor:pointer;flex-shrink:0;">${JarvisIcons.trash()}</button>
                         </div>
                     </div>
                     <div class="instr-card-body" style="display:none;padding:0 14px 14px;">
@@ -1610,7 +1610,7 @@
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                         </button>
                         <button class="btn-icon btn-small btn-delete-profile" data-id="${p.id}" title="${window.t('common.delete')}">
-                            <span style="font-size:1.15rem;line-height:1;">×</span>
+                            ${JarvisIcons.trash()}
                         </button>
                     </div>
                 `;
@@ -2283,7 +2283,7 @@
                         '<button class="btn-icon btn-small ak-show" title="Anzeigen/Verbergen">' + EYE + '</button>' +
                         '<button class="btn-icon btn-small ak-copy" title="Kopieren">' + COPY + '</button>' +
                         '<button class="btn-icon btn-small ak-regen" title="Neu generieren">🔄</button>' +
-                        '<button class="btn-icon btn-small ak-del" title="Löschen">×</button>';
+                        '<button class="btn-icon btn-small ak-del" title="Löschen">' + JarvisIcons.trash() + '</button>';
                     listEl.appendChild(row);
                 });
             }

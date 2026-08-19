@@ -129,6 +129,7 @@ const ANTWORT_FRISCH = {
     window.localStorage.setItem('jarvis_token', 'tok-123');
     window.t = (k) => k;   // i18n neutral: die Vorgabetexte des Moduls greifen
 
+    window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8'));
     window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/agent_roles.js'), 'utf8'));
     check('window.AgentRoles existiert', !!window.AgentRoles);
 
@@ -493,7 +494,7 @@ const ANTWORT_FRISCH = {
     w2.requestAnimationFrame = (cb) => setTimeout(cb, 0);
     w2.confirm = () => true;
     w2.alert = () => {};
-    for (const f of ['frontend/js/i18n.js', 'frontend/js/theme.js',
+    for (const f of ['frontend/js/icons.js', 'frontend/js/i18n.js', 'frontend/js/theme.js',
                      'frontend/js/agent_roles.js', 'frontend/js/app.js']) {
         try { w2.eval(fs.readFileSync(path.join(ROOT, f), 'utf8')); }
         catch (e) { console.log('    (Modul ' + f + ': ' + e.message + ')'); }

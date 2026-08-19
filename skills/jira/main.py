@@ -112,15 +112,29 @@ class JiraSearchTool(_Base):
         return header + "\n".join(lines)
 
 
+# Zeichen je Kommentar. Kein "Deckel" im Sinne einer Auswahl – nur die Grenze,
+# ab der ein einzelner Kommentar (Bilder als base64, eingebettete Mails) den
+# ganzen Verlauf verdraengen wuerde. Der Standard von `html_to_text` ist 4000.
+KOMMENTAR_MAX = 8000
+
+
 class JiraGetIssueTool(_Base):
     @property
     def name(self): return "jira_get_issue"
 
     @property
     def description(self):
-        return ("Ruft EIN Jira-Ticket per Issue-Key ab (z.B. NXCIS-1234). "
+        return ("Ruft EIN Jira-Ticket per Issue-Key ab (z.B. NXCIS-1234) – mit "
+                "Beschreibung und dem VOLLSTAENDIGEN Kommentarverlauf. "
                 "NICHT fuer Kunden-/Organisations-IDs wie 'crm-10550' verwenden – dafuer "
                 "jira_search nutzen (das findet alle Tickets des Kunden).")
+
+    # Der Agent kappt Werkzeug-Ergebnisse per Vorgabe bei 5000 Zeichen. Ein
+    # Ticket mit vollstaendigem Kommentarverlauf ist regelmaessig laenger –
+    # ohne diesen Wert waere "alle Kommentare" eine Zusage, die der Kontext
+    # sofort wieder einkassiert. Die verbleibende Grenze ist das Kontextfenster
+    # des Modells; wird doch gekuerzt, weist der Agent es im Text aus.
+    ergebnis_max = 120000
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
@@ -174,10 +188,20 @@ class JiraGetIssueTool(_Base):
         out.append("\n" + (desc or "(keine Beschreibung)"))
         comments = ((f.get("comment") or {}).get("comments")) or []
         if comments:
-            out.append("\n💬 Kommentare (%d, letzte 3):" % len(comments))
-            for cm in comments[-3:]:
+            # ALLE Kommentare, jeder im vollen Text (Vorgabe des Nutzers
+            # 2026-08-19). Vorher standen hier die letzten 3 mit je 400 Zeichen –
+            # der Agent musste dann melden, dass er den historischen Verlauf
+            # nicht einsehen kann, obwohl die Daten in der Antwort lagen.
+            #
+            # DAMIT DAS ANKOMMT, gehoert `ergebnis_max` unten dazu: der Agent
+            # kappt Werkzeug-Ergebnisse sonst bei 5000 Zeichen, und die
+            # Kommentare stehen am ENDE der Ausgabe – sie fielen als Erstes weg.
+            out.append("\n💬 Kommentare (%d, vollstaendig):" % len(comments))
+            for cm in comments:
                 author = (cm.get("author") or {}).get("displayName", "?")
-                out.append("- %s: %s" % (author, html_to_text(cm.get("body") or "", 400)))
+                wann = (cm.get("created") or "")[:16].replace("T", " ")
+                out.append("- %s%s: %s" % (author, (" (%s)" % wann) if wann else "",
+                                           html_to_text(cm.get("body") or "", KOMMENTAR_MAX)))
         return "\n".join(out)
 
 

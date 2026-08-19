@@ -110,7 +110,7 @@ class JarvisKnowledgeManager {
                 <span class="kb-grp-manage-spacer"></span>
                 <button class="kb-grp-manage-btn kb-grp-perms" title="${T('kbgroups.perms', 'Berechtigungen verwalten')}">🔐</button>
                 <button class="kb-grp-manage-btn kb-grp-rename" title="${T('kbgroups.rename', 'Umbenennen')}">✏️</button>
-                <button class="kb-grp-manage-btn kb-grp-delete" title="${T('kbgroups.delete', 'Löschen')}">×</button>
+                <button class="kb-grp-manage-btn kb-grp-delete" title="${T('kbgroups.delete', 'Löschen')}">${JarvisIcons.trash()}</button>
             </div>`;
         }).join('');
         const ung = KG.ungroupedCount();
@@ -434,7 +434,7 @@ class JarvisKnowledgeManager {
                 <span class="kb-file-icon">${this._fileIcon(p)}</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
                 <button class="kb-btn-view-file kb-grp-tag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.perms') || 'Berechtigungen verwalten'}">🔐</button>
-                <button class="kb-btn-remove kb-grp-del" data-path="${KG.esc(p)}" title="${window.t('knowledge.file_delete_title') || 'Datei löschen'}">✕</button>
+                <button class="kb-btn-remove kb-grp-del" data-path="${KG.esc(p)}" title="${window.t('knowledge.file_delete_title') || 'Datei löschen'}">${JarvisIcons.trash()}</button>
             </div>`).join('') + `</div>`;
         // Wissensgruppen des Eintrags bearbeiten (Popover) – danach Liste auffrischen
         box.querySelectorAll('.kb-grp-tag').forEach(btn => {
@@ -447,7 +447,7 @@ class JarvisKnowledgeManager {
                 });
             };
         });
-        // Einzel-✕ LOESCHT die Datei physisch (mit Bestaetigungsdialog). Die reine
+        // Der Muelleimer LOESCHT die Datei physisch (mit Bestaetigungsdialog). Die reine
         // Gruppenzuordnung loest man weiterhin pro Datei ueber das 🔐-Popover.
         box.querySelectorAll('.kb-grp-del').forEach(btn => {
             btn.onclick = () => this._confirmDeleteKbFile(btn.dataset.path, async () => {
@@ -494,7 +494,7 @@ class JarvisKnowledgeManager {
             box.innerHTML = title + `<div class="kb-files-empty">${T('kbgroups.no_ungrouped', 'Keine ungruppierten Dokumente – alles ist zugeordnet.')}</div>`;
             return;
         }
-        // Ungruppierte Dateien sind keiner Gruppe zugeordnet -> das "✕" LÖSCHT die
+        // Ungruppierte Dateien sind keiner Gruppe zugeordnet -> der Muelleimer LOESCHT die
         // Datei ganz (in der Gruppen-Ansicht entfernt es dagegen nur die Zuordnung).
         const barBulk = `<div class="kb-bulk-bar hidden">
                 <button class="btn-secondary kb-bulk-del" type="button">${window.t('knowledge.bulk_delete') || 'Auswahl löschen'} (<span class="kb-bulk-count">0</span>)</button>
@@ -506,7 +506,7 @@ class JarvisKnowledgeManager {
                 <span class="kb-file-icon">${this._fileIcon(p)}</span>
                 <span class="kb-file-name" title="${KG.esc(p)}">${KG.esc(KG.baseName(p))}</span>
                 <button class="kb-btn-view-file kb-grp-tag" data-path="${KG.esc(p)}" title="${window.t('kbgroups.perms') || 'Berechtigungen verwalten'}">🔐</button>
-                <button class="kb-btn-remove kb-ung-del" data-path="${KG.esc(p)}" title="${T('knowledge.file_delete_title', 'Datei löschen')}">✕</button>
+                <button class="kb-btn-remove kb-ung-del" data-path="${KG.esc(p)}" title="${T('knowledge.file_delete_title', 'Datei löschen')}">${JarvisIcons.trash()}</button>
             </div>`).join('');
         this._setupRowSelection(box, '.kb-grp-file-row', (paths) =>
             this._bulkDeleteFiles(paths, () => { this._renderGroupsOverview(); return this._showUngroupedFiles(); }));
@@ -1151,7 +1151,7 @@ class JarvisKnowledgeManager {
                         <span class="kb-learned-item-date">${dateStr} · ${f.size_kb} KB</span>
                         <div class="kb-learned-item-actions">
                             <button class="kb-btn-sm" onclick="window.knowledgeManager.toggleLearnedEdit('${safeId}', '${f.path.replace(/'/g,"\\'")}')">✏️</button>
-                            <button class="kb-btn-sm kb-btn-del" onclick="window.knowledgeManager.deleteLearnedFile('${f.path.replace(/'/g,"\\'")}')">×</button>
+                            <button class="kb-btn-sm kb-btn-del" onclick="window.knowledgeManager.deleteLearnedFile('${f.path.replace(/'/g,"\\'")}')" title="${T('common.delete','Löschen')}">${JarvisIcons.trash()}</button>
                         </div>
                     </div>
                     <div class="kb-learned-item-editor" id="${safeId}_editor" style="display:none;"></div>
@@ -1325,11 +1325,11 @@ class JarvisKnowledgeManager {
         const actions = isRoot
             ? `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.folder_edit_title', 'Bearbeiten')}"
                     onclick="event.stopPropagation();window.knowledgeManager.editFolder('${sp}')">✏️</button>${addSub}${share}<button class="kb-btn-remove" title="${T('knowledge.folder_remove_title', 'Ordner entfernen')}"
-                    onclick="event.stopPropagation();window.knowledgeManager.removeFolder('${sp}')">✕</button>`
+                    onclick="event.stopPropagation();window.knowledgeManager.removeFolder('${sp}')">${JarvisIcons.trash()}</button>`
             : `<button class="kb-btn-remove kb-btn-rename" title="${T('knowledge.subfolder_rename_title', 'Unterordner umbenennen')}"
                     onclick="event.stopPropagation();window.knowledgeManager.renameSubfolder('${sp}')">✏️</button>${addSub}${share}<button class="kb-btn-remove kb-btn-movesub" title="${T('knowledge.subfolder_move_title', 'Unterordner verschieben')}"
                     onclick="event.stopPropagation();window.knowledgeManager.moveSubfolder('${sp}')">📂</button><button class="kb-btn-remove" title="${T('knowledge.subfolder_remove_title', 'Unterordner löschen')}"
-                    onclick="event.stopPropagation();window.knowledgeManager.deleteSubfolder('${sp}')">✕</button>`;
+                    onclick="event.stopPropagation();window.knowledgeManager.deleteSubfolder('${sp}')">${JarvisIcons.trash()}</button>`;
         return `
             <div class="kb-folder-item${isRoot ? '' : ' kb-subfolder-item'}" data-path="${this._escHtml(path)}">
                 <div class="kb-folder-header">
@@ -1431,7 +1431,7 @@ class JarvisKnowledgeManager {
                     <button class="kb-btn-view-file kb-btn-move-file" title="${window.t('knowledge.file_move_title') || 'In anderen Ordner verschieben'}"
                         onclick="window.knowledgeManager.moveFiles(['${safePath}'], '${dp}')">📂</button>
                     <button class="kb-btn-delete-file" title="${window.t('knowledge.file_delete_title')}"
-                        onclick="window.knowledgeManager.deleteFile('${safePath}', '${dp}')">✕</button>
+                        onclick="window.knowledgeManager.deleteFile('${safePath}', '${dp}')">${JarvisIcons.trash()}</button>
                 </div>`;
     }
 
@@ -2565,7 +2565,7 @@ class JarvisKnowledgeManager {
                     <button class="btn-icon btn-small" title="${window.t('knowledge.share_edit_title')}"
                         onclick="window.knowledgeManager.showEditMount(${i})">✏️</button>
                     <button class="btn-icon btn-small" title="${window.t('knowledge.share_remove_title')}"
-                        onclick="window.knowledgeManager.removeMount(${i})">✕</button>
+                        onclick="window.knowledgeManager.removeMount(${i})">${JarvisIcons.trash()}</button>
                 </div>
                 <div class="kb-mount-edit-form" id="kb-mount-edit-${i}" style="display:none;">
                     <select class="kb-input kb-mount-edit-type">

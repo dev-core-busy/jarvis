@@ -32,6 +32,10 @@ const HTML = fs.readFileSync(path.join(ROOT, 'frontend/chat.html'), 'utf8');
 const I18N = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
 const CHATLIB = fs.readFileSync(path.join(ROOT, 'frontend/js/chatlib.js'), 'utf8');
 const CHAT = fs.readFileSync(path.join(ROOT, 'frontend/js/chat.js'), 'utf8');
+// Symbole (Muelleimer/Kreuz) – im Browser das ERSTE Skript jeder Seite.
+// Module wie chat.js/knowledge.js rufen JarvisIcons.trash() beim Rendern auf;
+// ohne diese Zeile bricht das Zeichnen mit 'JarvisIcons is not defined' ab.
+const ICONS_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
 
 /* Fenster mit Attrappen aufbauen. Wichtig: WebSocket und fetch MUESSEN vor
  * dem eval von chat.js stehen – chat.js verbindet sich beim Start. */
@@ -85,6 +89,7 @@ function fenster() {
     w.alert = function (m) { w.__alert = m; };
 
     w.eval(I18N);
+    w.eval(ICONS_JS);
     w.eval(CHATLIB);
     w.eval(CHAT);
     w.document.dispatchEvent(new w.Event('DOMContentLoaded'));

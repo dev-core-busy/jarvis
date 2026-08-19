@@ -633,6 +633,9 @@
             chip.appendChild(nm);
             const rm = document.createElement('button');
             rm.className = 'attach-chip-remove';
+            // × = aus der Auswahl nehmen. Der Anhang ist noch nicht gesendet,
+            // es wird nichts geloescht (Symbol-Regel: siehe js/icons.js).
+            rm.title = (window.t ? window.t('common.unselect') : 'Aus Auswahl nehmen');
             rm.textContent = '×';
             rm.type = 'button';
             rm.addEventListener('click', () => { _pendingAttachments.splice(idx,1); renderPreviews(); });
@@ -1175,7 +1178,7 @@
                 onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
             });
             items.push({
-                label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: '×', danger: true,
+                label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: JarvisIcons.trash(), danger: true,
                 onClick: () => _selCtl.startSelectionDelete(row),
             });
             return items;
@@ -1191,7 +1194,7 @@
             onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
         });
         items.push({
-            label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: '×', danger: true,
+            label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: JarvisIcons.trash(), danger: true,
             onClick: () => _selCtl.startSelectionDelete(row),
         });
         return items;
@@ -2005,7 +2008,7 @@
             const title = document.createElement('span');
             title.className = 'cs-title'; title.textContent = s.title || window.t('chat.untitled');
             const ren = document.createElement('button'); ren.type = 'button'; ren.className = 'cs-act cs-ren'; ren.textContent = '✎'; ren.title = window.t('chat.rename');
-            const del = document.createElement('button'); del.type = 'button'; del.className = 'cs-act cs-del'; del.textContent = '×'; del.title = window.t('chat.delete');
+            const del = document.createElement('button'); del.type = 'button'; del.className = 'cs-act cs-del'; JarvisIcons.setTrash(del); del.title = window.t('chat.delete');
             item.appendChild(title); item.appendChild(ren); item.appendChild(del);
             item.addEventListener('click', (e) => { if (e.target === ren || e.target === del) return; _switchSession(s.id); });
             ren.addEventListener('click', (e) => { e.stopPropagation(); _renameSession(s); });

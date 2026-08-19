@@ -1037,7 +1037,7 @@
                 '<button class="ad-mini" data-act="edit" title="' +
                 esc(T('common.edit', 'Bearbeiten')) + '">✎</button>' +
                 '<button class="ad-mini is-danger" data-act="del" title="' +
-                esc(T('common.delete', 'Löschen')) + '">✕</button>' +
+                esc(T('common.delete', 'Löschen')) + '">' + JarvisIcons.trash() + '</button>' +
                 '</div></div></div>';
         }).join('');
         box.querySelectorAll('.ad-mini').forEach(function (b) {

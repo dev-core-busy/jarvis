@@ -43,6 +43,10 @@ function check(name, cond, detail) {
 function section(t) { console.log('\n\x1b[1m' + t + '\x1b[0m'); }
 
 const HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+// Symbole (Muelleimer/Kreuz) – im Browser das ERSTE Skript jeder Seite.
+// Module wie chat.js/knowledge.js rufen JarvisIcons.trash() beim Rendern auf;
+// ohne diese Zeile bricht das Zeichnen mit 'JarvisIcons is not defined' ab.
+const ICONS_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 // ── Audit-Eintraege wie auf ECHT: zwei Benutzer, einer davon der gemeldete ──

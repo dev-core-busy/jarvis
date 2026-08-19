@@ -20,7 +20,7 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=11">
+    <link rel="stylesheet" href="/static/css/theme.css?v=12">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=8">
     <link rel="stylesheet" href="/static/css/style.css?v=158">
@@ -1462,7 +1462,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <ul>
                     <li><b>Systemoperationen</b> (Punkt 2, außer shell_root): automatisch <b>erlaubt</b>, als „Systemoperation" markiert und jederzeit per Klick widerrufbar („Ablehnen").</li>
                     <li><b><code>shell_root:&lt;befehl&gt;</code></b>: startet immer als <b>„wartet auf Freigabe"</b> (pending). Der Agent erhält eine klare Meldung, der Befehl wird <b>nicht</b> ausgeführt. Erst nach „Erlauben" durch einen lokalen Administrator ist genau dieser Befehl (exakte Signatur) ausführbar – „Ablehnen" sperrt ihn dauerhaft.</li>
-                    <li>Jeder Eintrag zeigt: Beschreibung, Status, wer ihn angefordert hat, Anzahl/Zeitpunkt der Nutzung, wer entschieden hat. Löschen (×) setzt den Eintrag zurück – er erscheint beim nächsten Auftauchen erneut.</li>
+                    <li>Jeder Eintrag zeigt: Beschreibung, Status, wer ihn angefordert hat, Anzahl/Zeitpunkt der Nutzung, wer entschieden hat. Löschen (Mülleimer) setzt den Eintrag zurück – er erscheint beim nächsten Auftauchen erneut.</li>
                 </ul>
 
                 <h3>4. Ablauf eines Root-Befehls des Agenten</h3>
@@ -2020,7 +2020,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
                                         </button>
                                         <button class="btn-wa-action btn-wa-sm btn-wa-danger" id="btn-wa-logs-clear" data-i18n-title="wa.logs_clear" title="Logs löschen">
-                                            <span style="font-size:1.15rem;line-height:1;">×</span>
+                                            <svg class="jv-ico jv-ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                                         </button>
                                     </div>
                                     <div class="wa-logs-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
@@ -3458,7 +3458,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="kb-folder-icon">🔧</span>
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.tool_stats">Tool-Statistiken</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" onclick="event.stopPropagation()">
-                                    <button id="tele-tool-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_tool_title" title="Tool-Statistiken leeren">×</button>
+                                    <button id="tele-tool-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_tool_title" title="Tool-Statistiken leeren"><svg class="jv-ico jv-ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▼</span>
                             </div>
@@ -3469,7 +3469,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="kb-folder-icon">🧠</span>
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.llm_stats">LLM-Statistiken</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" onclick="event.stopPropagation()">
-                                    <button id="tele-llm-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_llm_title" title="LLM-Statistiken leeren">×</button>
+                                    <button id="tele-llm-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_llm_title" title="LLM-Statistiken leeren"><svg class="jv-ico jv-ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▼</span>
                             </div>
@@ -3487,7 +3487,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <option value="" data-i18n="telemetry.all_ips">Alle IPs</option>
                                     </select>
                                     <button id="conv-log-refresh-btn" class="kb-hdr-btn" style="margin-left:6px;" onclick="event.stopPropagation()" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
-                                    <button id="conv-log-clear-btn" class="kb-hdr-btn is-danger" style="margin-left:4px;" onclick="event.stopPropagation()" data-i18n-title="telemetry.convlog_clear" title="Verlauf löschen">×</button>
+                                    <button id="conv-log-clear-btn" class="kb-hdr-btn is-danger" style="margin-left:4px;" onclick="event.stopPropagation()" data-i18n-title="telemetry.convlog_clear" title="Verlauf löschen"><svg class="jv-ico jv-ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -3498,7 +3498,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="kb-folder-icon">❌</span>
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.error_log">Fehler-Log</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" onclick="event.stopPropagation()">
-                                    <button id="tele-errors-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_errors_title" title="Fehler-Log leeren">×</button>
+                                    <button id="tele-errors-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_errors_title" title="Fehler-Log leeren"><svg class="jv-ico jv-ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -3509,7 +3509,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="kb-folder-icon">📋</span>
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.last_spans">Letzte Spans</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" onclick="event.stopPropagation()">
-                                    <button id="tele-spans-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_spans_title" title="Spans leeren">×</button>
+                                    <button id="tele-spans-clear-btn" class="kb-hdr-btn is-danger" data-i18n-title="telemetry.clear_spans_title" title="Spans leeren"><svg class="jv-ico jv-ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -3537,7 +3537,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.audit_log">Tool-Audit-Log</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" onclick="event.stopPropagation()">
                                     <button id="audit-refresh-btn" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren">⟳</button>
-                                    <button id="audit-clear-btn" class="kb-hdr-btn is-danger" title="Log löschen" data-i18n-title="telemetry.audit_clear">×</button>
+                                    <button id="audit-clear-btn" class="kb-hdr-btn is-danger" title="Log löschen" data-i18n-title="telemetry.audit_clear"><svg class="jv-ico jv-ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
                                 </span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
@@ -4473,23 +4473,24 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     details.sec-sub summary .sec-sub-hint { color: var(--text-muted); font-size: 0.78rem;
         font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
-    <script src="/static/js/i18n.js?v=162"></script>
+    <script src="/static/js/icons.js?v=1"></script>
+    <script src="/static/js/i18n.js?v=163"></script>
 <script src="/static/js/tabfill.js?v=1"></script>
-    <script src="/static/js/cron.js?v=19"></script>
+    <script src="/static/js/cron.js?v=20"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=4"></script>
     <script src="/static/js/kbgroups.js?v=4"></script>
-    <script src="/static/js/skills.js?v=41"></script>
-    <script src="/static/js/chatlib.js?v=3"></script>
+    <script src="/static/js/skills.js?v=42"></script>
+    <script src="/static/js/chatlib.js?v=4"></script>
     <script src="/static/js/skillcfg.js?v=5"></script>
     <script src="/static/js/google.js?v=12"></script>
     <script src="/static/js/whatsapp.js?v=16"></script>
-    <script src="/static/js/knowledge.js?v=93"></script>
+    <script src="/static/js/knowledge.js?v=94"></script>
     <!-- knowledge_sync NACH knowledge.js: die Ordnerliste fragt beim Zeichnen
          window.KnowledgeSync.sharedFolders() fuer den Zustand des 🔗-Symbols. -->
-    <script src="/static/js/knowledge_sync.js?v=3"></script>
-    <script src="/static/js/mcp.js?v=4"></script>
-    <script src="/static/js/vision.js?v=30"></script>
+    <script src="/static/js/knowledge_sync.js?v=4"></script>
+    <script src="/static/js/mcp.js?v=5"></script>
+    <script src="/static/js/vision.js?v=31"></script>
     <script src="/static/js/confluence.js?v=7"></script>
     <script src="/static/js/jira.js?v=7"></script>
     <script src="/static/js/sap.js?v=3"></script>
@@ -4500,13 +4501,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=9"></script>
     <script src="/static/js/branding.js?v=23"></script>
     <script src="/static/js/theme.js?v=2"></script>
-    <script src="/static/js/security_incidents.js?v=28"></script>
+    <script src="/static/js/security_incidents.js?v=29"></script>
     <script src="/static/js/ldap_picker.js?v=9"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=4"></script>
-    <script src="/static/js/agent_roles.js?v=1"></script>
+    <script src="/static/js/agent_roles.js?v=2"></script>
     <script src="/static/js/model_caps.js?v=6"></script>
-    <script src="/static/js/app.js?v=193"></script>
+    <script src="/static/js/app.js?v=194"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

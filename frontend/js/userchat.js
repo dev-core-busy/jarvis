@@ -889,7 +889,7 @@
         }
         if (mine && msg.msg_id) {
             items.push({
-                label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: '×', danger: true,
+                label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: JarvisIcons.trash(), danger: true,
                 onClick: () => _selCtl.startSelectionDelete(row),
             });
         }
@@ -1154,6 +1154,8 @@
             chip.appendChild(nm);
             const rm = document.createElement('button');
             rm.className = 'uc-attach-chip-rm';
+            // × = aus der Auswahl nehmen (noch nicht gesendet, nichts geloescht).
+            rm.title = (window.t ? window.t('common.unselect') : 'Aus Auswahl nehmen');
             rm.textContent = '×';
             rm.type = 'button';
             rm.addEventListener('click', () => { _ucPending.splice(idx, 1); renderUcAttachPreview(); });

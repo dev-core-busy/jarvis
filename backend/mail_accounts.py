@@ -205,12 +205,11 @@ STIL_NAME_MAX = 60
 # (leer = Standardstil bzw. Erkennung aus dem Regel-Prompt).
 STIL_KEINER = "-"
 
-# „Das Modell soll den Stil selbst waehlen." NUR in der Antwort-Vorschau des
-# Add-ins – dort liest ein Mensch den Vorschlag, bevor er ihn absendet, und der
-# Lauf hat keine Werkzeuge. In einer REGEL waere derselbe Wert gefaehrlich:
-# sie feuert ohne Anwesenden, und die Stilwahl haenge dann am Fremdtext.
-# Deshalb loest `stil_fuer` ihn ausdruecklich zu „kein Stil" auf (fail-closed);
-# den Auto-Modus baut allein `mail_runner.antwort_vorschlag`.
+# „Das Modell soll den Stil selbst waehlen." Gilt ueberall, wo ein Stil gewaehlt
+# werden kann – in der Antwort-Vorschau des Add-ins UND in einer Regel
+# (ausdrueckliche Vorgabe des Nutzers, 2026-08-19). `stil_fuer` gibt den Wert
+# als `quelle="auto"` heraus, OHNE Text; den Katalog baut der Aufrufer
+# (`mail_runner`), weil nur er weiss, wie der Auftrag aussieht.
 STIL_AUTO = "auto"
 # Kuerzere Namen werden im Regel-Prompt NICHT gesucht: "AG" oder "Du" treffen
 # in jedem zweiten Satz und wuerden einen Stil erzwingen, den niemand meinte.
@@ -509,7 +508,8 @@ def stil_fuer(user: str, stil_id: str = "", prompt: str = "") -> dict:
     Reihenfolge – die Bedeutung steckt in ihr:
       1. ``stil_id`` ausdruecklich gewaehlt (Pulldown / Regelfeld) → dieser.
          ``STIL_KEINER`` heisst "ausdruecklich ohne Stil", ``STIL_AUTO``
-         "das Modell waehlt" – letzteres liefert HIER keinen Stil (siehe dort).
+         "das Modell waehlt" (dann ``quelle="auto"`` ohne Text – der Aufrufer
+         legt dem Modell die Stile zur Auswahl vor).
       2. gewaehlte Kennung gibt es nicht mehr (Stil geloescht) → Standardstil,
          mit ``hinweis``. Der Lauf laeuft weiter: eine Regel, die wegen einer
          verwaisten Referenz gar nichts tut, ist der schlechtere Ausgang
@@ -532,13 +532,11 @@ def stil_fuer(user: str, stil_id: str = "", prompt: str = "") -> dict:
     if wahl == STIL_KEINER:
         return dict(leer, quelle="keiner")
     if wahl == STIL_AUTO:
-        # Hier gibt es KEINEN Stil. Wer den Auto-Modus umsetzt, muss ihn an
-        # `quelle` erkennen und den Katalog selbst bauen – so kann der Wert
-        # nicht versehentlich in einen Regel-Lauf durchschlagen.
+        # Kein fester Stil – der Aufrufer erkennt das an `quelle` und legt dem
+        # Modell alle Stile zur Auswahl vor.
         return dict(leer, quelle="auto",
-                    hinweis="" if not liste else
-                    "Die automatische Stilwahl gilt nur in der Antwort-Vorschau "
-                    "des Add-ins. Hier wirkt kein Stil.")
+                    hinweis="" if liste else
+                    "Es ist kein Antwort-Stil hinterlegt – es wirkt kein Stil.")
     if wahl:
         for e in liste:
             if e["id"] == wahl:

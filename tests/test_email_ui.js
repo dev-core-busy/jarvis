@@ -1234,9 +1234,14 @@ abschnitt('6. Stile fuer Antworten (mehrere benannte Vorgaben)');
     const dd = w.document;
     dd.querySelector('.em-rule-card [data-act="edit"]').click();
     const s0 = dd.getElementById('em-f-stil');
-    pruefe(!!s0 && s0.options.length === 1 && s0.options[0].value === '',
-        'ohne Stile hat das Pulldown genau einen Eintrag (kein sinnloses "ohne Stil")',
-        s0 && Array.prototype.map.call(s0.options, o => o.value).join('|'));
+    // Ohne hinterlegte Stile: "kein Stil" + die automatische Wahl. Der
+    // Eintrag "– ohne Stil –" waere hier sinnlos und bleibt weg; die
+    // automatische Wahl steht dagegen ueberall zur Verfuegung (Vorgabe des
+    // Nutzers 2026-08-19 – keine erfundenen Bedingungen).
+    const w0 = s0 && Array.prototype.map.call(s0.options, o => o.value);
+    pruefe(!!s0 && s0.options.length === 2 && w0[0] === '' && w0[1] === 'auto',
+        'ohne Stile: "kein Stil" + automatische Wahl, aber kein sinnloses "ohne Stil"',
+        w0 && w0.join('|'));
     w.close();
 }
 

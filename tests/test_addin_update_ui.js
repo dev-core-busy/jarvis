@@ -352,6 +352,86 @@ abschnitt('11. Doku behauptet nicht mehr das Alte');
         'beschreibt den mv-Parameter');
 }
 
+abschnitt('X. Bestaetigung ohne window.confirm');
+{
+    // GEMELDET 2026-08-19: "Regel loeschen" loeschte nichts. In Office-
+    // Aufgabenfenstern ist `confirm()` je nach Host unterdrueckt - es liefert
+    // keinen Wert, und `if (!confirm(...)) return;` bricht wortlos ab.
+    const code = nurCode(ADDINJS);
+    pruefe(!/window\.confirm\s*\(/.test(code), 'KEIN window.confirm mehr im Code');
+    pruefe(!/[^.\w]alert\s*\(/.test(code) && !/window\.prompt/.test(code),
+        'auch kein alert/prompt (im Aufgabenfenster ebenso unzuverlaessig)');
+    pruefe(/function frage\(/.test(code), 'es gibt einen eigenen Dialog `frage`');
+    pruefe(code.indexOf('askBinden()') >= 0 &&
+           code.indexOf('askBinden()') < code.indexOf('function askBinden'),
+        'askBinden wird beim Start gerufen, nicht nur definiert');
+    // Paare EXPLIZIT, nicht ueber eine Namenskonvention: der erste Anlauf
+    // prueste 'starteLauf' – so heisst keine Funktion (sie heisst
+    // `verarbeiteNachricht`), und die zweite Haelfte war zufaellig gruen.
+    [['loescheRegel', 'loescheRegelJetzt'],
+     ['loescheStil', 'loescheStilJetzt'],
+     ['loescheKonto', 'loescheKontoJetzt'],
+     ['verarbeiteNachricht', 'starteLaufJetzt']].forEach(function (paar) {
+        const i = code.indexOf('function ' + paar[0] + '(');
+        pruefe(i >= 0, paar[0] + ': Funktion existiert');
+        pruefe(i >= 0 && /frage\(/.test(code.slice(i, i + 600)),
+            paar[0] + ': Rueckfrage laeuft ueber den eigenen Dialog');
+        pruefe(code.indexOf('function ' + paar[1] + '(') > 0,
+            paar[0] + ': ausfuehrender Teil ' + paar[1] + ' abgetrennt');
+        pruefe(code.indexOf(paar[1] + '(') > 0 &&
+               /then\(function \(ja\)/.test(code.slice(i, i + 600)),
+            paar[0] + ': ausgefuehrt wird erst nach der Antwort');
+    });
+    // KEIN unaufgeloester Platzhalter im Dialogtext. Der Text
+    // `mail.rule_del_confirm` lautet 'Regel „%s" wirklich löschen?' – im Add-in
+    // stand er ohne `.replace`, und im Dialog erschien woertlich „%s".
+    // Aufgefallen erst, als der Dialog ueberhaupt sichtbar wurde.
+    const _iDel = code.indexOf('function loescheRegel(');
+    const _blk = code.slice(_iDel, _iDel + 600);
+    pruefe(/rule_del_confirm/.test(_blk) && /\.replace\('%s'/.test(_blk),
+        'der Platzhalter %s wird durch den Regelnamen ersetzt');
+    ['mail.rule_del_confirm', 'mail.style_del_confirm', 'mail.acct_del_confirm']
+        .forEach(function (k) {
+            const m = new RegExp("'" + k + "':\\s*'([^']*)'").exec(I18N);
+            if (m && /%s/.test(m[1])) {
+                const i2 = code.indexOf(k);
+                pruefe(i2 > 0 && /\.replace\('%s'/.test(code.slice(i2, i2 + 300)),
+                    k + ' traegt %s -> wird im Add-in ersetzt');
+            }
+        });
+    pruefe(/id="ad-ask"/.test(HTML), 'Markup fuer den Dialog vorhanden');
+    pruefe(/\.ad-ask\s*\{[^}]*position:\s*fixed/.test(HTML), 'liegt ueber der Seite');
+    pruefe(/\.ad-ask-box\s*\{[^}]*background:\s*var\(--bg-secondary\)/.test(HTML),
+        'DECKENDE Flaeche - er liegt ueber Karteninhalt');
+    pruefe(/role="alertdialog"/.test(HTML) && /aria-modal="true"/.test(HTML),
+        'als Dialog ausgewiesen');
+    pruefe(/id="ad-ask"[^>]*class="ad-ask hidden"/.test(HTML), 'startet verborgen');
+    for (const k of ['addin.ask_yes', 'addin.ask_no']) {
+        pruefe((I18N.match(new RegExp("'" + k + "'", 'g')) || []).length === 2,
+            'i18n ' + k + ' in DE UND EN');
+    }
+    // Der Dialog muss VOR den Zustaenden liegen - er gilt auch vor der Anmeldung.
+    pruefe(HTML.indexOf('id="ad-ask"') < HTML.indexOf('id="ad-login"'),
+        'steht im Markup vor Anmeldung und Anwendung');
+}
+
+{
+    // Im echten DOM: verborgen beim Start, Knoepfe vorhanden und beschriftet.
+    const u = baue({ token: true, office: 'box' });
+    await warte(60);
+    const d = u.w.document;
+    const box = d.getElementById('ad-ask');
+    pruefe(!!box && box.classList.contains('hidden'), 'im DOM verborgen');
+    const ja = d.getElementById('ad-ask-yes'), nein = d.getElementById('ad-ask-no');
+    pruefe(!!ja && !!nein, 'beide Knoepfe da');
+    // Defensiv: fehlt der Knopf, waere `.textContent` ein TypeError - der Test
+    // wuerde ABBRECHEN statt fehlzuschlagen, und ein Abbruch ist von einem
+    // bestandenen Lauf nicht zu unterscheiden (drittes Mal in dieser Sitzung).
+    pruefe(!!nein && (nein.textContent || '').length > 0,
+        'Abbrechen ist beschriftet (i18n-Rueckfall im Markup)');
+    u.w.close();
+}
+
 console.log('\n' + (fail ? '✗ ' : '✓ ') + ok + ' bestanden, ' + fail + ' fehlgeschlagen');
 process.exit(fail ? 1 : 0);
 })();

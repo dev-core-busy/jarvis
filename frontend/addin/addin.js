@@ -583,6 +583,7 @@
         infoInit();
         if (binde._fertig) return;
         binde._fertig = true;
+        askBinden();
         document.querySelectorAll('.ad-tab').forEach(function (b) {
             b.addEventListener('click', function () { reiter(b.getAttribute('data-tab')); });
         });
@@ -942,10 +943,13 @@
         var rid = ($('ad-run-rule') || {}).value || '';
         if (!rid || !_office || !_office.id) return;
         var regel = _regeln.filter(function (r) { return r.id === rid; })[0] || {};
-        if (!window.confirm(T('addin.run_confirm',
-            'Diese Nachricht jetzt mit der Regel verarbeiten? Die Aktionen sind echt.') +
-            '\n\n' + (regel.name || ''))) return;
+        frage(T('addin.run_confirm',
+                'Diese Nachricht jetzt mit der Regel verarbeiten? Die Aktionen sind echt.') +
+              '\n\n' + (regel.name || ''), T('addin.run_now', 'Jetzt verarbeiten'))
+            .then(function (ja) { if (ja) starteLaufJetzt(rid); });
+    }
 
+    function starteLaufJetzt(rid) {
         _laeuft = true;
         var knopf = $('ad-run-msg');
         knopf.disabled = true;
@@ -1238,8 +1242,17 @@
 
     function loescheRegel(id) {
         var r = _regeln.filter(function (x) { return x.id === id; })[0] || {};
-        if (!window.confirm(T('mail.rule_del_confirm', 'Diese Regel wirklich löschen?') +
-            '\n\n' + (r.name || ''))) return;
+        // `%s` MUSS ersetzt werden – der Text lautet „Regel „%s" wirklich
+        // löschen?". Vorher wurde der Name nur angehaengt; im Dialog stand
+        // dann woertlich „Regel „%s" …". Das ist erst aufgefallen, als der
+        // Dialog ueberhaupt erschien (mit `window.confirm` sah es niemand).
+        frage(T('mail.rule_del_confirm', 'Regel „%s" wirklich löschen?')
+                  .replace('%s', r.name || '?'),
+              T('common.delete', 'Löschen'), true)
+            .then(function (ja) { if (ja) loescheRegelJetzt(id); });
+    }
+
+    function loescheRegelJetzt(id) {
         sende('/api/email/rules/' + encodeURIComponent(id), 'DELETE')
             .then(function () {
                 if (_editId === id) schliesseEditor();
@@ -1448,9 +1461,13 @@
 
     function loescheStil(id) {
         var e = _stile.filter(function (x) { return x.id === id; })[0] || {};
-        if (!window.confirm(T('mail.style_del_confirm',
-            'Diesen Stil wirklich löschen? Regeln, die ihn benutzen, antworten danach im Standard-Stil.')
-            + '\n\n' + (e.name || ''))) return;
+        frage(T('mail.style_del_confirm',
+                'Diesen Stil wirklich löschen? Regeln, die ihn benutzen, antworten danach im Standard-Stil.')
+              + '\n\n' + (e.name || ''), T('common.delete', 'Löschen'), true)
+            .then(function (ja) { if (ja) loescheStilJetzt(id); });
+    }
+
+    function loescheStilJetzt(id) {
         sende('/api/email/styles/' + encodeURIComponent(id), 'DELETE')
             .then(function (a) {
                 _stile = a.stile || [];
@@ -1489,6 +1506,60 @@
         if (!_stile.length) return h;
         return h + '<option value="-"' + (gewaehlt === '-' ? ' selected' : '') + '>' +
             esc(T('mail.style_opt_off', '– ohne Stil –')) + '</option>';
+    }
+
+    /* ── Bestaetigung ─────────────────────────────────────────────────── */
+    /* NIE `window.confirm` im Aufgabenfenster.
+
+       GEMELDET 2026-08-19: Der Klick auf "Regel loeschen" loeschte nichts. In
+       Office-Aufgabenfenstern (WebView2) sind alert/confirm/prompt je nach Host
+       unterdrueckt; `confirm()` liefert dann keinen Wert, und das Muster
+       `if (!window.confirm(...)) return;` bricht WORTLOS ab – der Knopf sieht
+       kaputt aus, obwohl Endpunkt und Bindung in Ordnung sind.
+
+       Rueckgabe ist ein Promise<boolean>. Fehlt das Markup (sollte nie sein),
+       wird mit `true` aufgeloest: der Benutzer hat den Knopf bereits gedrueckt,
+       die Rueckfrage ist Schutz vor dem Fehlgriff – und "tut wortlos nichts"
+       waere genau der gemeldete Fehler. */
+    var _askFertig = null;
+
+    function askSchliessen(antwort) {
+        var box = $('ad-ask');
+        if (box) box.classList.add('hidden');
+        var f = _askFertig;
+        _askFertig = null;
+        if (f) f(!!antwort);
+    }
+
+    function frage(text, jaText, gefahr) {
+        return new Promise(function (fertig) {
+            var box = $('ad-ask'), t = $('ad-ask-text'),
+                ja = $('ad-ask-yes'), nein = $('ad-ask-no');
+            if (!box || !t || !ja || !nein) { fertig(true); return; }
+            // Ein zweiter Aufruf bei offenem Dialog: den ersten sauber abschliessen.
+            if (_askFertig) askSchliessen(false);
+            _askFertig = fertig;
+            t.textContent = String(text || '');
+            ja.textContent = jaText || T('addin.ask_yes', 'Ja');
+            ja.className = 'ad-btn' + (gefahr ? ' ad-btn-danger' : '');
+            box.classList.remove('hidden');
+            // Fokus auf ABBRECHEN – bei einer Loeschfrage ist das der sichere
+            // Vorbelegungswert, und Enter darf nicht versehentlich loeschen.
+            try { nein.focus(); } catch (e) { }
+        });
+    }
+
+    function askBinden() {
+        var ja = $('ad-ask-yes'), nein = $('ad-ask-no'), box = $('ad-ask');
+        if (ja) ja.addEventListener('click', function () { askSchliessen(true); });
+        if (nein) nein.addEventListener('click', function () { askSchliessen(false); });
+        // Klick auf die Flaeche = Abbrechen, Klick IN die Box nicht.
+        if (box) box.addEventListener('click', function (e) {
+            if (e.target === box) askSchliessen(false);
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && _askFertig) { e.preventDefault(); askSchliessen(false); }
+        });
     }
 
     /* ── Reiter: Postfach ─────────────────────────────────────────────── */
@@ -1559,8 +1630,13 @@
     }
 
     function loescheKonto() {
-        if (!window.confirm(T('mail.acct_del_confirm',
-            'Zugangsdaten wirklich entfernen? Deine Regeln bleiben erhalten, laufen aber nicht mehr.'))) return;
+        frage(T('mail.acct_del_confirm',
+                'Zugangsdaten wirklich entfernen? Deine Regeln bleiben erhalten, laufen aber nicht mehr.'),
+              T('common.delete', 'Löschen'), true)
+            .then(function (ja) { if (ja) loescheKontoJetzt(); });
+    }
+
+    function loescheKontoJetzt() {
         sende('/api/email/account', 'DELETE')
             .then(function () {
                 melde('ad-acct-status', T('mail.acct_deleted', 'Zugangsdaten entfernt.'), 'ok');

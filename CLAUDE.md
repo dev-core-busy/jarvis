@@ -3055,6 +3055,39 @@ on-premises sind sie ausdrücklich weiter unterstützt** – also genau unser Fa
    (`ad-login-office`), und der SSO-Grund hat Vorrang: er erklärt, warum dort überhaupt noch
    eine Anmeldung steht.
 
+### Vorfall 2026-08-19: „Regel löschen" tat nichts – `window.confirm` im Aufgabenfenster
+**Gemeldet mit der richtigen Vermutung** („evtl. aufgrund einer nicht angezeigten
+Bestätigungsaufforderung?"). Genau das war es: in Office-Aufgabenfenstern (WebView2) sind
+`alert`/`confirm`/`prompt` je nach Host unterdrückt. `confirm()` liefert dann keinen Wert, und das
+Muster `if (!window.confirm(…)) return;` bricht **wortlos** ab – der Knopf sieht kaputt aus,
+obwohl Bindung und Endpunkt in Ordnung sind.
+- **Betroffen waren VIER Stellen**, nicht nur die gemeldete: Regel löschen, Stil löschen,
+  Zugangsdaten entfernen und „Jetzt verarbeiten". Alle vier laufen jetzt über einen eigenen Dialog
+  `frage(text, jaText, gefahr) → Promise<boolean>` (`#ad-ask` in `taskpane.html`). Jede Aufrufstelle
+  ist in „fragen" und „`…Jetzt()` ausführen" geteilt, weil die Antwort asynchron kommt.
+- **`window.confirm` ist im Add-in ab jetzt verboten** – ein Wächter prüft das, ebenso die
+  Abwesenheit von `alert`/`prompt`. In `/email` (normaler Browser) bleibt `confirm` unangetastet:
+  dort ist es verlässlich, und ein Umbau ohne Anlass wäre Risiko ohne Gewinn.
+- **Fehlt das Dialog-Markup, wird mit `true` aufgelöst** (fail-open). Begründung: der Benutzer hat
+  den Knopf schon gedrückt, die Rückfrage ist Schutz vor dem Fehlgriff – „tut wortlos nichts" wäre
+  genau der gemeldete Fehler. Fokus liegt auf **Abbrechen**, damit Enter nicht löscht; Escape und
+  ein Klick auf die Fläche brechen ab.
+- **Der Screenshot hat einen zweiten, älteren Fehler aufgedeckt:** im Dialog stand wörtlich
+  „Regel „%s" wirklich löschen?". `mail.rule_del_confirm` trägt einen Platzhalter, den `/email`
+  korrekt per `.replace('%s', …)` füllt – das Add-in hängte den Namen nur mit `\n\n` an. Das war
+  schon vorher falsch, **nur unsichtbar, weil der Dialog nie erschien**. Ein Wächter prüft jetzt für
+  jeden `*_del_confirm`-Text mit `%s`, dass die Ersetzung im Add-in stattfindet.
+- **`ADDIN_VERSION` bleibt unverändert:** Aufgabenfenster-Dateien aktualisieren sich von selbst
+  (`no-store` + Cache-Buster); nur ein geändertes Manifest bräuchte eine neue Version.
+- **FALLSTRICK, in dieser Sitzung DREIMAL:** Testzugriffe wie `r[0].url` oder
+  `querySelector(...).click()` **brechen ab**, wenn das Element fehlt – die Gegenprobe liefert dann
+  gar keine Zahl und sieht aus wie ein bestandener Lauf. Erst defensiv (`!!x &&`), dann greifen die
+  Gegenproben: confirm zurück → 3 FAIL, `askBinden()` weg → 1, Markup weg → 6, Fläche nicht
+  deckend → 1, `.replace` weg → 2.
+- **Verifiziert:** 99 Prüfungen (`tests/test_addin_update_ui.js`), Bestand grün (192 / 193 / 465 /
+  181 / 270). Optisch in Dunkel UND Hell abgenommen (340 px): Dialog deckend, Text mit echtem
+  Regelnamen, „Löschen" in Warnfarbe, „Abbrechen" fokussiert.
+
 ### Antwort-Vorschau im Add-in: erst ansehen, dann senden (2026-08-17)
 Wunsch des Nutzers, unmittelbar nachdem die kennwortlose Anmeldung im echten Outlook lief.
 Reiter *Nachricht* → **„Antwort vorschlagen"** → bearbeitbarer Text → **Senden** bzw. **Als

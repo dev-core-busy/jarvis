@@ -161,6 +161,8 @@ QUELLE_ST = (ROOT / "backend" / "short_tracks.py").read_text(encoding="utf-8")
 QUELLE_RUN = (ROOT / "backend" / "short_tracks_runner.py").read_text(encoding="utf-8")
 CODE_RUN = nur_code(QUELLE_RUN)
 CODE_ST = nur_code(QUELLE_ST)
+# agent.py wird nur als QUELLTEXT gelesen (der Import zoege fastapi nach).
+CODE_AGENT = nur_code((ROOT / "backend" / "agent.py").read_text(encoding="utf-8"))
 
 
 def bereiche_frei(*namen):
@@ -613,12 +615,48 @@ check("_deliver_docs" in CODE_RUN,
 # Eingabedatei die mtime-Schranke erfuellt. Ein Chip heisst "hier ist das
 # Ergebnis" – das war eine falsche Aussage.
 lauf_code = abschnitt(CODE_RUN, "async def _lauf(", "def stop_alle")
-check("_deliver_docs(sammler, antwort, schon" in lauf_code,
+check("schon" in lauf_code and "_deliver_docs(sammler" in lauf_code,
       "die Eingabepfade gehen als 'schon geliefert' in _deliver_docs")
 check('t.get("pfad"), t.get("tmp")' in lauf_code,
       "und zwar BEIDE Orte (Ablage und Arbeitskopie)")
 check("resolve()" in lauf_code,
       "aufgeloest – _deliver_docs vergleicht aufgeloeste Pfade")
+
+# ── DER GEMELDETE FEHLER (ECHT, 2026-08-19) ──────────────────────────────
+# "angeblich wurden zwei Ergebnis-Dateien gebaut, aber nicht als Download
+# angeboten." Ursache: `office_create_excel` legt die Datei selbst in
+# data/documents ab und nennt die /api/documents-URL in SEINEM ERGEBNIS – die
+# Endantwort nennt danach nur noch den Klarnamen. Wer `_deliver_docs` nur ueber
+# die Endantwort laufen laesst, sieht die URL nie.
+check("_ergebnis_hook" in lauf_code,
+      "die Werkzeug-ERGEBNISSE werden eingesammelt (dort stehen die URLs)")
+check("for _text in ergebnisse + [antwort]" in lauf_code,
+      "_deliver_docs laeuft ueber Ergebnisse UND Endantwort")
+# NIE `.index()` in einer Pruefung: es WIRFT, statt fehlzuschlagen – der Lauf
+# bricht ab und sieht dann aus wie ein Erfolg (die Gegenprobe zu diesem
+# Abschnitt ist genau darauf hereingefallen).
+_i_hook = lauf_code.find("_ergebnis_hook")
+_i_for = lauf_code.find("for _text in ergebnisse")
+check(_i_hook >= 0 and _i_for > _i_hook,
+      "in dieser Reihenfolge – erst sammeln, dann ausliefern", "%d/%d" % (_i_hook, _i_for))
+check("_ergebnis_hook" in CODE_AGENT,
+      "agent.py ruft den Hook im headless-Lauf")
+_hl = abschnitt(CODE_AGENT, "async def _run_headless", "\n    async def ")
+check("_ergebnis_hook" in _hl, "und zwar IM headless-Lauf, nicht nur im Chat-Weg")
+_i_eh, _i_md = _hl.find("_ergebnis_hook"), _hl.find("_maybe_delegate")
+check(_i_eh >= 0 and _i_md >= 0 and _i_eh > _i_md,
+      "nach _maybe_delegate – result_str ist dort endgueltig", "%d/%d" % (_i_eh, _i_md))
+
+# Der Weg von der URL im Werkzeug-Ergebnis bis zum Chip, an echtem Markdown.
+_url = "/api/documents/" + "c" * 32 + "__Master_Template.xlsx"
+_tool_ergebnis = "Excel-Datei erstellt: [\U0001F4E5 Master_Template.xlsx herunterladen](%s)" % _url
+_endantwort = "Fertig. Zwei Excel-Dateien:\n\n**Master_Template.xlsx** - Leere Master-Tabelle."
+check(run._chips_lesen([_tool_ergebnis]) and
+      run._chips_lesen([_tool_ergebnis])[0]["url"] == _url,
+      "aus dem WERKZEUG-Ergebnis entsteht der Chip")
+check(run._chips_lesen([_endantwort]) == [],
+      "aus der Endantwort allein NICHT – sie nennt nur den Klarnamen "
+      "(genau der gemeldete Fall)")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
